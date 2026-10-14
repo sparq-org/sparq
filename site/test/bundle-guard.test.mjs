@@ -4,12 +4,16 @@
 // config — and assert the analyser flags exactly the right failure. They need no `next build`, so
 // they run in the fast `npm run test:unit` lane (site-e2e); the real `npm run check:bundle` /
 // `postbuild` run the SAME analyser against the actual .next/out artifacts.
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
   analyzeBundle,
   firstLoadFromClientManifest,
+  readFirstLoadSets,
   HEAVY_MODULE_SUFFIXES,
   GUARDED_ROUTES,
 } from "../scripts/check-bundle.mjs";
@@ -170,9 +174,9 @@ test("fzstd is pinned as a heavy module (PRESENCE) and flagged if it leaks into 
   assert.deepEqual(sharedErrors, []);
 });
 
-// Next 16 no longer writes app-build-manifest.json; main() rebuilds the page-entry set from the
-// exported HTML. The root layout's group (app-shell code shared with lazy demos) is excluded,
-// matching the old manifest's `/page` entry; everything after the layout chunk is kept.
+// Next 16 no longer writes app-build-manifest.json; the first-load set comes from each route's
+// .next/server/app/<route>/page_client-reference-manifest.js. Modules that load the root layout
+// (app-shell code shared with lazy demos) are excluded, matching the old manifest's `/page` entry.
 // A client reference manifest in the shape Next 16 writes: each client module's `chunks`
 // alternates chunk ids and file paths.
 function clientManifest(key, modules) {
@@ -223,4 +227,53 @@ test("firstLoadFromClientManifest refuses a manifest with no module loading the 
   );
   assert.match(firstLoadFromClientManifest({}, "/page").error ?? "", /^FIRST-LOAD: /);
   assert.match(firstLoadFromClientManifest(undefined, "/page").error ?? "", /^FIRST-LOAD: /);
+});
+
+test("firstLoadFromClientManifest decodes paths and drops a deployment-id query", () => {
+  const manifest = clientManifest("/benchmarks/[type]/page", [
+    [
+      "static/chunks/heavy-0.js?dpl=abc",
+      "static/chunks/app/benchmarks/%5Btype%5D/page-x.js?dpl=abc",
+    ],
+  ]);
+  assert.deepEqual(firstLoadFromClientManifest(manifest, "/benchmarks/[type]/page"), {
+    chunks: ["static/chunks/heavy-0.js", "static/chunks/app/benchmarks/[type]/page-x.js"],
+    error: null,
+  });
+});
+
+test("readFirstLoadSets reads Next 16's client reference manifests from .next/server/app", () => {
+  const nextDir = mkdtempSync(join(tmpdir(), "bundle-guard-"));
+  try {
+    const write = (rel, key, modules) => {
+      const file = join(nextDir, "server", "app", rel);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(
+        file,
+        `globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});` +
+          `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}]=` +
+          `${JSON.stringify(clientManifest(key, modules)[key])};`,
+      );
+    };
+    // Every module of a page entry carries the same required-chunk list, as Next writes it.
+    const page = ["static/chunks/9568-a.js", "static/chunks/app/page-x.js"];
+    write("page_client-reference-manifest.js", "/page", [page, page, ["static/chunks/app/layout-l.js"]]);
+    write("capabilities/page_client-reference-manifest.js", "/capabilities/page", [
+      ["static/chunks/app/layout-l.js"],
+    ]);
+    const { pages, errors } = readFirstLoadSets(nextDir);
+    assert.deepEqual(pages, { "/page": page });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /^FIRST-LOAD: .*\/capabilities\/page/);
+    // /surface/data-formats has no manifest at all: no set, so analyzeBundle reports the route.
+    const inputs = healthyInputs();
+    inputs.app = { pages };
+    const { errors: analyzed } = analyzeBundle(inputs);
+    assert.ok(
+      analyzed.some((e) => e.startsWith("ISOLATION: no first-load set for guarded route /surface/data-formats")),
+      analyzed.join("\n"),
+    );
+  } finally {
+    rmSync(nextDir, { recursive: true, force: true });
+  }
 });
