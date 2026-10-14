@@ -18,6 +18,13 @@ no holder-to-verifier transport.
   evaluated on the witness while it is written. Programs using other black
   boxes (BLAKE3, SHA-256, AND, XOR, curve operations) or several ACIR
   functions are rejected.
+- `blake3_f2.py N OUTDIR` writes a Boolean SIEVE IR0+ relation over GF(2)
+  that checks N BLAKE3 compressions (private chaining value and block, public
+  output), with XOR as addition, AND as multiplication and 32-bit additions as
+  ripple carries of one AND per bit. It compares QuickSilver over GF(2), where
+  bit operations are native, with the BN254 circuits on the same hash work.
+  `--selftest` checks its reference compression against BLAKE3("");
+  `test_blake3_f2.py` tests the circuit. Run it with `quicksilver_run.py`.
 - `swanky-fbn254.patch` adds the BN254 scalar field to Diet Mac'n'Cheese,
   whose field dispatch does not include it. It applies to swanky at
   `409d1ceb0831e2de11eb8da1b8f961f59a8b5276`, which builds with Rust 1.99.0.
