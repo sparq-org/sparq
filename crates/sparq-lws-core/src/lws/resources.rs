@@ -4798,12 +4798,12 @@ async fn linkset<S: Store + 'static>(
                     Some("a linkset is replaced with application/linkset+json"),
                 );
             }
+            // A writer need not be able to read the linkset, so a 412 carries no tag of it, as
+            // for a PATCH.
             if let Precondition::Failed | Precondition::NotModified =
                 evaluate(&req.headers, Some(&etag), None, false)
             {
-                let mut r = problem(StatusCode::PRECONDITION_FAILED, None);
-                set(r.headers_mut(), header::ETAG, &etag);
-                return r;
+                return problem(StatusCode::PRECONDITION_FAILED, None);
             }
             let document = match read_linkset(&req.body, LINKSET_PUT_SCAN_BUDGET) {
                 Ok(d) => d,
@@ -5824,8 +5824,11 @@ mod tests {
         assert!(e.get("license").is_none());
         assert_eq!(e["describedby"][0]["href"], format!("{BASE}/d.ttl"));
         assert_eq!(e["up"][0]["href"], format!("{BASE}/"));
-        // The old tag no longer matches.
-        assert_eq!(put(tag).await.status(), StatusCode::PRECONDITION_FAILED);
+        // The old tag no longer matches, and the 412 names no tag: a writer need not be able to
+        // read the linkset.
+        let r = put(tag).await;
+        assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED);
+        assert!(r.headers().get("etag").is_none());
     }
 
     /// Review finding (#6809): a linkset PATCH body is capped so that parsing any body of its

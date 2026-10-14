@@ -1,8 +1,12 @@
 {
   "_doc": "Touchstone passes per module that CI must keep (check-floor.py). Raise with the change that earns it.",
-  "_supported_doc": "Each *-when-unsupported test that probes the absence of a feature this server supports, mapped to the pattern its inapplicable reason must match (the precondition that found the feature advertised). It counts toward its module's floor only when inapplicable for that reason; a pass, any other outcome or reason, or its absence fails the check.",
+  "_supported_doc": "Each *-when-unsupported test that probes the absence of a feature this server supports: the precondition, by its label, that finds the feature advertised; the assertion of it that fails, by its description; and the pattern the value that assertion got must match. It counts toward its module's floor only when inapplicable for exactly that reason; a pass, any other outcome or reason, or its absence fails the check.",
   "supported": {
-    "core/linksets#linkset-put-405-when-unsupported": "precondition 'the linkset does not advertise PUT \\(otherwise this test does not apply\\)' does not hold: header Allow matches expected [^\\n]*, got (?:[!#$%&'*+.^_`|~0-9A-Za-z-]+, )*PUT(?:, [!#$%&'*+.^_`|~0-9A-Za-z-]+)*"
+    "core/linksets#linkset-put-405-when-unsupported": {
+      "precondition": "the linkset does not advertise PUT (otherwise this test does not apply)",
+      "assertion": "header Allow matches",
+      "got": "(?:[!#$%&'*+.^_`|~0-9A-Za-z-]+, )*PUT(?:, [!#$%&'*+.^_`|~0-9A-Za-z-]+)*"
+    }
   },
   "passed": {
     "core": 122,

@@ -10,10 +10,11 @@ Raise the floor in the same change that makes more tests pass (more passes than 
 the check too, so a new pass cannot hide a lost one later); never lower it to go green.
 
 floor.json's "supported" maps a `*-when-unsupported` test, which probes the absence of a feature
-this server supports, to the pattern its inapplicable reason must match: Touchstone's report of the
-precondition that found the feature advertised. Such a test counts as a pass only when it is
-inapplicable for that reason. A pass of it, any other outcome or reason, or its absence from the
-run fails the check, since each means the feature was lost or not seen.
+this server supports, to the reason it must be inapplicable for: Touchstone's report that a named
+precondition does not hold because a named assertion of it got a value matching a pattern (the
+feature advertised). Such a test counts as a pass only when it is inapplicable for that reason. A
+pass of it, any other outcome or reason, or its absence from the run fails the check, since each
+means the feature was lost or not seen.
 """
 import glob
 import json
@@ -45,6 +46,17 @@ def unique_keys(pairs):
 def load(path):
     with open(path) as f:
         return json.load(f, object_pairs_hook=unique_keys)
+
+
+def inapplicable_for(reason: str, why: dict) -> bool:
+    """Whether `reason` is Touchstone's (TestExecution.java) for `why`'s precondition failing on
+    its assertion with a value `why["got"]` matches: "precondition '<label>' does not hold:
+    <assertion> expected <expected>, got <actual>"."""
+    head = f"precondition '{why['precondition']}' does not hold: {why['assertion']} expected "
+    if not reason.startswith(head) or ", got " not in reason[len(head):]:
+        return False
+    got = reason[len(head):].rsplit(", got ", 1)[1]
+    return re.fullmatch(why["got"], got) is not None
 
 
 def valid_pattern(pattern: str) -> bool:
@@ -87,13 +99,19 @@ def check(tests, floor_doc: dict) -> tuple:
     supported = floor_doc.get("supported", {})
     if not isinstance(supported, dict):
         supported, bad = {}, bad + ["  floor.json's supported is not an object"]
-    for test_id, pattern in supported.items():
+    for test_id, why in supported.items():
         if not test_id.endswith("-when-unsupported"):
             bad.append(f"  a supported probe must be a *-when-unsupported test: {test_id}")
-        # The pattern pins the precondition by name, so no other reason for being inapplicable
-        # (an earlier step failing, a capability not declared) can stand in for it.
-        elif not (isinstance(pattern, str) and pattern.startswith("precondition '") and valid_pattern(pattern)):
-            bad.append(f"  a supported probe's reason must be a pattern naming its precondition: {test_id}")
+        # The precondition and its assertion are named literally, so no other reason for being
+        # inapplicable (an earlier step failing, another assertion of the precondition, a
+        # capability not declared) can stand in; only the value the assertion got is a pattern.
+        elif not (
+            isinstance(why, dict)
+            and set(why) == {"precondition", "assertion", "got"}
+            and all(isinstance(v, str) and v for v in why.values())
+            and valid_pattern(why["got"])
+        ):
+            bad.append(f"  a supported probe needs a precondition, an assertion and a got pattern: {test_id}")
     if bad:
         return False, bad
     floor = floor_doc["passed"]
@@ -103,7 +121,7 @@ def check(tests, floor_doc: dict) -> tuple:
         m = module(test_id)
         total[m] += 1
         if test_id in supported:
-            held = outcome == "inapplicable" and re.fullmatch(supported[test_id], reason) is not None
+            held = outcome == "inapplicable" and inapplicable_for(reason, supported[test_id])
             passed[m] += held
             if not held:
                 ok = False
@@ -190,9 +208,26 @@ def self_test():
     # Only a *-when-unsupported test may stand in for a pass.
     unsupported_z = {**floor_doc, "supported": {"core/a#z": ".*", **floor_doc["supported"]}}
     assert not check(tests_with(result("core/a#z", "inapplicable", reason="no"), inapp), unsupported_z)[0]
-    # The pattern must pin the precondition by name, and be a pattern.
-    for pattern in (".*", "precondition '(", 3):
-        assert not check(tests_with(z, inapp), {**floor_doc, "supported": {probe: pattern}})[0], pattern
+    # The precondition and assertion are named literally; only what it got is a pattern.
+    why = floor_doc["supported"][probe]
+    for bad_why in (
+        ".*",
+        {**why, "got": "("},
+        {**why, "got": 3},
+        {**why, "precondition": ""},
+        {"precondition": why["precondition"], "got": ".*"},
+        {**why, "extra": "x"},
+    ):
+        assert not check(tests_with(z, inapp), {**floor_doc, "supported": {probe: bad_why}})[0], bad_why
+    # Even a got pattern that takes anything holds only the named precondition and assertion.
+    loose = {**floor_doc, "supported": {probe: {**why, "got": ".*"}}}
+    assert check(tests_with(z, inapp), loose)[0]
+    for reason in (
+        "precondition 'find its linkset' does not hold: " + seen.split(": ", 1)[1],
+        seen.split(": ", 1)[0] + ": status expected 200, got 500",
+        "precondition 'x|.*' does not hold: header Allow matches expected y, got PUT",
+    ):
+        assert not check(tests_with(z, result(probe, "inapplicable", reason=reason)), loose)[0], reason
     assert not check(tests_with(z, inapp), {**floor_doc, "supported": [probe]})[0]
     # Without the probe listed, a module is held to its plain pass count.
     assert not check([result("core/a#x")], {"passed": {"core": 2}})[0]
