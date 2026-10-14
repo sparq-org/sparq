@@ -24,6 +24,13 @@ pub mod filter_signed;
 // no in-circuit blake3). Carries the documented INV-VL downgrade (#769 accepted,
 // CR-G8 / sq-qhy4). Opt-in, NOT externally audited.
 pub mod filter_value;
+// DUAL-LEAF BIT-DOMAIN value-lane FILTER over a committed xsd:boolean -- the
+// dedicated boolean sibling of filter_value_dl_int, which constrains both the
+// witnessed handle and the public bound to {0, 1}. A SEPARATE module (and a
+// separate compiled member) on purpose: the shared integer member legitimately
+// uses the whole u64 domain, and adding constraints to it would change its gate
+// count and its measured evidence. Same INV-VL downgrade; NOT externally audited.
+pub mod filter_value_bool;
 pub mod revoke;
 pub mod issuer;
 // [OPUS-4.8] sq-xqfg (HolderPoP T5): in-circuit holder Proof-of-Possession (B2).

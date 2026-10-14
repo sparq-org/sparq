@@ -1463,6 +1463,36 @@ pub enum CheckError {
     /// `CircuitId.k` bits (no default/pad-to-false). `expected` = k.
     // codex 2221 MEDIUM: attribution must be present + exactly k bits.
     AttributionMalformed { proof: usize, expected: usize, got: usize },
+    /// A value-lane sub-proof's `(member, datatype_const)` pairing was refused —
+    /// a lane constant on a member that is not that lane's (e.g. the `DualLeafV2`
+    /// `xsd:boolean` lane constant on the shared integer member, whose relation
+    /// range-decomposes its handle over the whole `u64` domain instead of
+    /// constraining it to `{0, 1}`), a constant NO shipped lane derives, or a
+    /// `FieldHex` whose text is not the canonical rendering of the element it
+    /// decodes to. Refused here because `datatype_const` is a public input no
+    /// member pins to a lane. The refusal is
+    /// `crate::dispatch::check_lane_member_pairing`'s, raised per sub-proof, and
+    /// `reason` carries its `Display`.
+    #[cfg(feature = "dual-leaf")]
+    LaneMemberMismatch { proof: usize, reason: String },
+    /// A value-lane sub-proof, which this verifier does not accept in a manifest
+    /// at all.
+    ///
+    /// The refusal is UNCONDITIONAL on the sub-proof being a value-lane member —
+    /// it inspects no edge. The reason it is sound to refuse them wholesale is
+    /// that `filter_edge_true`, the only place a sub-proof discharges a query
+    /// FILTER obligation, accepts `ProofInputs::FilterInt` and nothing else, so no
+    /// value-lane member can discharge an obligation here (the value-lane query
+    /// binding is sq-j506). Before this, such a sub-proof was reconstructed and
+    /// verified at stage 3 while discharging nothing, and a relying party reading
+    /// the accepted manifest could take it for a checked FILTER.
+    ///
+    /// BEHAVIOUR CHANGE: a manifest carrying a value-lane sub-proof used to be
+    /// accepted (discharging nothing) and is now refused. When sq-j506 wires the
+    /// value-lane query binding, this refusal is what that work replaces with a
+    /// real edge check.
+    #[cfg(feature = "dual-leaf")]
+    ValueLaneSubProofNotAccepted { proof: usize },
     /// A scan sub-proof's per-graph `commitments` are NOT strictly increasing on
     /// the field representative (plan S2.5): two adjacent commitments
     /// are equal or out of order. `scan_check` step 1b enforces
@@ -2070,6 +2100,20 @@ impl std::fmt::Display for CheckError {
                 f,
                 "scan sub-proof {proof}: attribution must be present and exactly {expected} bits (CircuitId.k), got {got} (audit #8 / codex 2221 MEDIUM: an omitted/short attribution makes the cross-graph under-declaration check vacuous)"
             ),
+            #[cfg(feature = "dual-leaf")]
+            CheckError::LaneMemberMismatch { proof, reason } => write!(
+                f,
+                "sub-proof {proof}: {reason}"
+            ),
+            #[cfg(feature = "dual-leaf")]
+            CheckError::ValueLaneSubProofNotAccepted { proof } => write!(
+                f,
+                "sub-proof {} is a value-lane member, which this verifier does not \
+                 accept: it discharges a query FILTER only through a filter_int edge, \
+                 so a value-lane sub-proof would be verified while discharging nothing \
+                 (the value-lane query binding is sq-j506) — refused",
+                proof
+            ),
             CheckError::ScanCommitmentsNotStrictlyIncreasing { proof, at } => write!(
                 f,
                 "scan sub-proof {proof}: per-graph commitments are not strictly increasing at index {at} (commitments[{at}] <= commitments[{at_prev}]) (plan S2.5 / sq-vxq8: distinct-graph strict ordering — a duplicate or out-of-order commitment is the duplicate-inclusion / COUNT forgery, e.g. the same credential included twice to claim 'I hold >=2 tickets')",
@@ -2462,7 +2506,8 @@ fn derive_id(inputs: &ProofInputs) -> Option<CircuitId> {
         // `FilterValueDl` member. The full CircuitId is what the public-input
         // reconstruction + canonical-vk recompute pin. The fail-closed legality of
         // this member against the recorded COMMITMENT METHOD (it is LEGAL only for
-        // `DualLeafV1` / the `ValueOnlyV1` research dial, never `string-canonical`)
+        // the dual-leaf methods `DualLeafV1` / `DualLeafV2` and the `ValueOnlyV1`
+        // research dial, never `string-canonical`)
         // is the dispatch matrix `crate::dispatch::resolve_circuit` (sq-cfmv) — the
         // host-encoding wiring that gives the verifier the method is sq-j506, gated
         // behind sq-qhy4. Here the derive only confirms the member identity.
@@ -2500,6 +2545,20 @@ fn derive_id(inputs: &ProofInputs) -> Option<CircuitId> {
         #[cfg(feature = "dual-leaf")]
         ProofInputs::FilterValueDlDateTime { .. } => match inputs.circuit_id() {
             CircuitId::FilterValueDlDateTime => Some(CircuitId::FilterValueDlDateTime),
+            _ => None,
+        },
+        // The DUAL-LEAF BIT-DOMAIN xsd:boolean value-lane FILTER. Its own member,
+        // so — like the other value-lane members — the derive only confirms the
+        // declared id IS that member; the full CircuitId is what the public-input
+        // reconstruction + canonical-vk recompute pin. Declaring the integer
+        // member while carrying boolean inputs (or the reverse) therefore cannot
+        // byte-match a real proof, which matters here because the two members
+        // share a public layout but NOT a relation: only this one constrains the
+        // handle and the bound to {0, 1}. The fail-closed `(method × circuit)`
+        // legality is `crate::dispatch`.
+        #[cfg(feature = "dual-leaf")]
+        ProofInputs::FilterValueDlBool { .. } => match inputs.circuit_id() {
+            CircuitId::FilterValueDlBool => Some(CircuitId::FilterValueDlBool),
             _ => None,
         },
         // sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN. The
@@ -2616,6 +2675,26 @@ fn prefilter_manifest_structure_impl(
     revocation_policy: &RevocationPolicy,
     skip_query_binding: bool,
 ) -> Result<Vec<JoinEdge>, CheckError> {
+    // --- Stage 0: the LANE<->MEMBER pairing + the value-lane-sub-proof refusal,
+    // before any other reading of the sub-proofs. A lane constant may only ride
+    // the member that constrains that lane's handle domain; `datatype_const` is a
+    // public input no member pins, so a lane constant on the wrong member, a
+    // constant no shipped lane derives, and a non-canonically spelled `FieldHex`
+    // are all refused here rather than answered under the wrong relation. ---
+    #[cfg(feature = "dual-leaf")]
+    for (i, sp) in manifest.sub_proofs.iter().enumerate() {
+        crate::dispatch::check_lane_member_pairing(&sp.inputs)
+            .map_err(|e| CheckError::LaneMemberMismatch { proof: i, reason: e.to_string() })?;
+        // And a value-lane sub-proof is refused outright, rather than
+        // verified-but-undischarging. No edge is inspected: `filter_edge_true`
+        // accepts a `FilterInt` edge and nothing else, so NO value-lane member can
+        // satisfy a query FILTER obligation in this verifier (sq-j506 is that
+        // wiring). Such a manifest used to be accepted while discharging nothing.
+        if crate::dispatch::value_lane_fields(&sp.inputs).is_some() {
+            return Err(CheckError::ValueLaneSubProofNotAccepted { proof: i });
+        }
+    }
+
     // --- Stage 1a: query-fragment gate + (flat stage-1 only) cross-graph
     // obligations. ---
     let required = if skip_query_binding {
@@ -8085,6 +8164,23 @@ fn reconstruct_public_inputs(
             push_field(&mut out, datatype_const, proof, "datatype_const")?;
             push_uint(&mut out, u64::from(*expected));
         }
+        // filter_value_dl_bool (DUAL-LEAF BIT-DOMAIN xsd:boolean value lane)
+        // public inputs, in `main` declaration order: challenge (pushed above),
+        // operand_enc, op, bound (the boolean hook {0, 1}), datatype_const,
+        // expected. Cross-reference `zk/compose/filter_value_dl_bool/src/main.nr`.
+        // The layout is byte-for-byte the integer member's — deliberately, since
+        // the dedicated member differs from it only in its RELATION (the {0, 1}
+        // constraints on the handle and the bound). Which MEMBER a proof is for is
+        // pinned by the canonical-vk recompute over the declared CircuitId, not by
+        // this vector.
+        #[cfg(feature = "dual-leaf")]
+        ProofInputs::FilterValueDlBool { operand_enc, op, bound, datatype_const, expected, .. } => {
+            push_field(&mut out, operand_enc, proof, "operand_enc")?;
+            push_uint(&mut out, u64::from(op.code()));
+            push_uint(&mut out, *bound);
+            push_field(&mut out, datatype_const, proof, "datatype_const")?;
+            push_uint(&mut out, u64::from(*expected));
+        }
         // sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN
         // public inputs, in the `join_eq` member's `main` declaration order:
         // challenge (pushed above), commit_a, commit_b, join_commitment, slot_a,
@@ -8790,6 +8886,77 @@ mod tests {
         assert!(take_lp(&[0, 0, 0]).is_none()); // < 4-byte prefix
         assert!(take_lp(&[0, 0, 0, 255, 1, 2]).is_none()); // oversized length
         assert!(decode_artifacts(&[0, 0, 0, 1, 9]).is_none()); // pi prefix missing
+    }
+
+    /// The dedicated BIT-DOMAIN boolean member's public-input vector is
+    /// BYTE-IDENTICAL to the shared integer member's for the same field values —
+    /// the layout claim the `FilterValueDlBool` arm above rests on. Which MEMBER a
+    /// proof is for is pinned by the canonical-vk recompute over the declared
+    /// `CircuitId`, not by this vector, so the two arms must not drift apart.
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn filter_value_dl_bool_reconstruction_matches_the_integer_layout() {
+        let enc = fh("0x1a9c000000000000000000000000000000000000000000000000000000000001");
+        let dt = crate::manifest::boolean_lane_const_v2();
+        let challenge = fh("0x2a");
+        let shared = ProofInputs::FilterValueDl {
+            id: CircuitId::FilterValueDl,
+            operand_enc: enc.clone(),
+            op: FilterOp::Ge,
+            bound: 1,
+            datatype_const: dt.clone(),
+            expected: true,
+        };
+        let dedicated = ProofInputs::FilterValueDlBool {
+            id: CircuitId::FilterValueDlBool,
+            operand_enc: enc.clone(),
+            op: FilterOp::Ge,
+            bound: 1,
+            datatype_const: dt.clone(),
+            expected: true,
+        };
+        let a = reconstruct_public_inputs(&shared, &challenge, 0).unwrap();
+        let b = reconstruct_public_inputs(&dedicated, &challenge, 0).unwrap();
+        // challenge + 5 declared fields.
+        assert_eq!(b.len(), 6 * 32);
+        assert_eq!(a, b, "the bool arm must emit the integer lane's byte layout");
+
+        // ...and it is SENSITIVE to each public field it claims to carry: the lane
+        // constant, the bound and the disclosed verdict all move the vector.
+        for moved in [
+            ProofInputs::FilterValueDlBool {
+                id: CircuitId::FilterValueDlBool,
+                operand_enc: enc.clone(),
+                op: FilterOp::Ge,
+                bound: 0,
+                datatype_const: dt.clone(),
+                expected: true,
+            },
+            ProofInputs::FilterValueDlBool {
+                id: CircuitId::FilterValueDlBool,
+                operand_enc: enc.clone(),
+                op: FilterOp::Ge,
+                bound: 1,
+                datatype_const: fh(
+                    "0x0000000000000000000000000000000000000000000000000000000000000009",
+                ),
+                expected: true,
+            },
+            ProofInputs::FilterValueDlBool {
+                id: CircuitId::FilterValueDlBool,
+                operand_enc: enc.clone(),
+                op: FilterOp::Ge,
+                bound: 1,
+                datatype_const: dt.clone(),
+                expected: false,
+            },
+        ] {
+            assert_ne!(
+                b,
+                reconstruct_public_inputs(&moved, &challenge, 0).unwrap(),
+                "every declared public field must move the reconstructed vector"
+            );
+        }
     }
 
     /// Audit #4: the in-memory single-use store records a nonce on first sight

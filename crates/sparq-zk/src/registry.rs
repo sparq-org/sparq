@@ -95,6 +95,14 @@ pub const ZK_SCHEME_POSEIDON2_RDFC10_V1: &str = "https://sparq.dev/ns/zk#poseido
 // sq-zzxt: configurable-commitment scheme IRIs (design
 // `research/zk-configurable-commitment-design.md` §2.1).
 pub const ZK_SCHEME_POSEIDON2_DUALLEAF_V1: &str = "https://sparq.dev/ns/zk#poseidon2-dualleaf-v1";
+/// The `dual-leaf` **v2** commitment scheme id —
+/// [`crate::commit::CommitmentMethod::DualLeafV2`]. The versioned dual-leaf
+/// scheme: value-lane constants derived in BLAKE3's key-derivation mode over
+/// length-framed `(datatype, params)`, an out-of-band no-value sentinel, and a
+/// bit-domain boolean member. This is the dual-leaf method a new issuance
+/// selects; `DualLeafV1` stays recognised and verifiable but is no longer
+/// production-selectable.
+pub const ZK_SCHEME_POSEIDON2_DUALLEAF_V2: &str = "https://sparq.dev/ns/zk#poseidon2-dualleaf-v2";
 /// The `value-only` commitment scheme id (value handle only, lexical hash
 /// dropped) — `CommitmentMethod::ValueOnlyV1`, a
 /// **benchmark / research dial** (§10 default (2)). The IRI const is always
@@ -207,8 +215,20 @@ impl RegistryEntry {
     }
 
     /// Records a [`CommitmentMethod`](crate::commit::CommitmentMethod) on this entry
-    /// by writing its distinct `zk:scheme` IRI into the `scheme` slot (config
-    /// plumbing). Use at ingest/issuance to mark how the graph was committed.
+    /// **as-is**, by writing its distinct `zk:scheme` IRI into the `scheme` slot
+    /// (config plumbing).
+    ///
+    /// The NAME is the boundary: this records whatever method it is handed,
+    /// including one that is no longer selectable for new issuance, so it serves
+    /// DECODING and ALREADY-ISSUED entries — rebuilding an entry for a graph that
+    /// was committed earlier, round-tripping a recorded scheme, and tests. A NEW
+    /// issuance uses [`Self::with_issuance_method`], which refuses a
+    /// non-selectable method. There is no unqualified `with_method` to reach for
+    /// by accident.
+    ///
+    /// "Already issued" is a CALLER ASSERTION. Nothing here reads a signature, a
+    /// timestamp or any other evidence of issuance history, so this name states
+    /// the caller's intent; it does not attest it.
     ///
     /// Note this is **config only**: it does NOT re-commit the graph under a
     /// different leaf shape (that is the audit-gated `sq-j506` host-encoding bead);
@@ -216,9 +236,39 @@ impl RegistryEntry {
     /// rather than the silent hard-wired `string-canonical` default.
     // sq-zzxt.
     #[must_use]
-    pub fn with_method(mut self, method: crate::commit::CommitmentMethod) -> Self {
+    pub fn with_already_issued_method(
+        mut self,
+        method: crate::commit::CommitmentMethod,
+    ) -> Self {
         self.scheme = method.scheme_node();
         self
+    }
+
+    /// Records a [`CommitmentMethod`](crate::commit::CommitmentMethod) for a **new
+    /// issuance**, refusing one that is not selectable.
+    ///
+    /// The issuance-side counterpart of [`Self::with_already_issued_method`]: it runs
+    /// [`CommitmentMethod::checked_for_issuance`](crate::commit::CommitmentMethod::checked_for_issuance)
+    /// first, so a superseded method (`dual-leaf` v1) or a research-only dial
+    /// (`value-only`) is a
+    /// [`MethodNotSelectable`](crate::commit::MethodNotSelectable) error rather
+    /// than a silently recorded scheme. Decoding and verification stay ungated —
+    /// [`Self::method`] still reads a recorded `dual-leaf` v1 entry, and the
+    /// `(method x circuit)` dispatch matrix still admits its lanes — so this
+    /// refusal narrows what sparq ISSUES, never what it can verify.
+    ///
+    /// Honest scope: selectability means "not superseded and not a research dial".
+    /// It asserts NO cryptographic property; the estate is NOT externally audited
+    /// (CR-G8 / sq-qhy4). Nor does it RETIRE anything already recorded: `scheme`
+    /// is a plain field this crate neither freezes nor signs, so an existing
+    /// entry keeps whatever method it holds and any method can still be written
+    /// through [`Self::with_already_issued_method`]. Retiring a method in a
+    /// deployed registry is the operator's choice, not something enforced here.
+    pub fn with_issuance_method(
+        self,
+        method: crate::commit::CommitmentMethod,
+    ) -> Result<Self, crate::commit::MethodNotSelectable> {
+        Ok(self.with_already_issued_method(method.checked_for_issuance()?))
     }
 
     /// Records the **source** W3C Data-Integrity cryptosuite (`zk:sourceCryptosuite`)
@@ -853,14 +903,14 @@ mod tests {
     }
 
     #[test]
-    fn with_method_records_and_round_trips_through_store() {
+    fn with_already_issued_method_records_and_round_trips_through_store() {
         use crate::commit::CommitmentMethod;
         let e = RegistryEntry::new(
             NamedNode::new("https://dmv.example/vc/m-dual").unwrap(),
             Fr::from(7u64),
             salt_from_bytes(&[2u8; 32]),
         )
-        .with_method(CommitmentMethod::DualLeafV1);
+        .with_already_issued_method(CommitmentMethod::DualLeafV1);
         assert_eq!(e.scheme.as_str(), ZK_SCHEME_POSEIDON2_DUALLEAF_V1);
         assert_eq!(e.method(), Some(CommitmentMethod::DualLeafV1));
 
@@ -871,6 +921,55 @@ mod tests {
         let back = read_registry(&g);
         assert_eq!(back.len(), 1);
         assert_eq!(back[0].method(), Some(CommitmentMethod::DualLeafV1));
+    }
+
+    /// The ISSUANCE boundary is checked, not advisory: `with_issuance_method`
+    /// refuses a superseded or research-only method, while `with_already_issued_method` still
+    /// records one for decoding / legacy entries — and an entry so recorded is
+    /// still READ back by `method()`, so verification of an already-issued graph
+    /// is unaffected.
+    #[test]
+    fn with_issuance_method_refuses_a_non_selectable_method() {
+        use crate::commit::CommitmentMethod;
+        let entry = || {
+            RegistryEntry::new(
+                NamedNode::new("https://dmv.example/vc/m-issuance").unwrap(),
+                Fr::from(9u64),
+                salt_from_bytes(&[3u8; 32]),
+            )
+        };
+
+        // Selectable: recorded exactly as `with_already_issued_method` would.
+        let v2 = entry()
+            .with_issuance_method(CommitmentMethod::DualLeafV2)
+            .expect("V2 is selectable for new issuance");
+        assert_eq!(v2.method(), Some(CommitmentMethod::DualLeafV2));
+        assert_eq!(
+            v2.scheme.as_str(),
+            entry().with_already_issued_method(CommitmentMethod::DualLeafV2).scheme.as_str()
+        );
+        assert!(entry()
+            .with_issuance_method(CommitmentMethod::StringCanonicalV1)
+            .is_ok());
+
+        // Superseded: refused, and the error names the IRI it did not write.
+        let err = entry()
+            .with_issuance_method(CommitmentMethod::DualLeafV1)
+            .expect_err("V1 must not be selectable for new issuance");
+        assert_eq!(err.method(), CommitmentMethod::DualLeafV1);
+        assert_eq!(err.scheme_iri(), ZK_SCHEME_POSEIDON2_DUALLEAF_V1);
+
+        // ...but recording V1 as-is still works and still READS BACK, which is
+        // what keeps an already-issued V1 graph verifiable.
+        let legacy = entry().with_already_issued_method(CommitmentMethod::DualLeafV1);
+        assert_eq!(legacy.scheme.as_str(), ZK_SCHEME_POSEIDON2_DUALLEAF_V1);
+        assert_eq!(legacy.method(), Some(CommitmentMethod::DualLeafV1));
+
+        // The research dial is refused too, when it is compiled in at all.
+        #[cfg(feature = "commitment-value-only")]
+        assert!(entry()
+            .with_issuance_method(CommitmentMethod::ValueOnlyV1)
+            .is_err());
     }
 
     #[test]

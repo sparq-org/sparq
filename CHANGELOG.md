@@ -9,6 +9,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-zk:** `dual_leaf_v2` is a second dual-leaf commitment method (`CommitmentMethod::DualLeafV2`,
+  scheme IRI `https://sparq.dev/ns/zk#poseidon2-dualleaf-v2`) behind the OFF-by-default `dual-leaf`
+  feature. It keeps V1's leaf shapes and re-derives the constants: lane constants in BLAKE3's
+  key-derivation mode over the length-framed `(datatype IRI, lane params)` pair, the degenerate fold
+  left in the plain mode, and a `value_none()` re-derived until it falls outside the reachable
+  value-handle band, which `is_in_handle_band` decides and a test asserts — the checkable invariant
+  `research/zk-field-native-encoding.md` §14.1 asks for, discharging that reserved-tag requirement on
+  the HOST side. The in-circuit half stays open: no Noir global or assert names the sentinel, so a
+  member refuses it only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
+  unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
+  §14.1 `LANG_NONE` assumption is not discharged. Both versions carry the same #769-accepted INV-VL
+  downgrade; not externally audited (CR-G8 / sq-qhy4).
+- **sparq-zk-compose:** `filter_value_dl_bool` is the `DualLeafV2` `xsd:boolean` lane's dedicated
+  member — `filter_value_dl_int`'s public layout field-for-field, plus in-circuit constraints that the
+  witnessed `VALUE_HOOK` and the public bound lie in `{0, 1}`, so a handle the integer member's `u64`
+  range decomposition admits is refused by the relation. Wired through `CircuitId::FilterValueDlBool`,
+  `ProofInputs::FilterValueDlBool`, `manifest::boolean_lane_const_v2`,
+  `build::build_filter_value_dl_bool`, `toml::filter_value_dl_bool_prover_toml`, the verifier's
+  public-input reconstruction and the dispatch matrix. The `DualLeafV1` boolean lane keeps sharing the
+  integer member, unchanged. Only the boolean lane has V2 compose helpers so far: the integer,
+  decimal, double, dateTime and date lanes have V2 host encoders but no V2 `manifest`/`build`/`toml`
+  helper, so a V2 proof over those lanes is not buildable from this crate yet. No soundness or
+  privacy claim.
+
+### Changed
+
+- **sparq-zk:** `CommitmentMethod::DualLeafV1` is no longer production-selectable
+  (`is_production_selectable()` is `false` for it), and `secprop::production_method_iris()` yields the
+  V2 scheme IRI in its place. V1 stays recognised, decodable and verifiable for already-issued
+  graphs; the new `CommitmentMethod::checked_for_issuance` and `RegistryEntry::with_issuance_method`
+  refuse it fail-closed when a NEW entry selects a method. **Breaking:**
+  `RegistryEntry::with_method` is renamed `with_already_issued_method` — it still records any
+  method as-is, for decoding and already-issued entries, but the name now says so and there is no
+  unqualified spelling to reach for. Retiring V1 in a registry stays OPTIONAL: `scheme` is a
+  plain recorded field this crate neither freezes nor signs, so an existing entry is unaffected
+  and any method can still be written through `with_already_issued_method`. These host entry points take a `commit::MethodUse`
+  (`NewIssuance` is the default and is refused for a V1 method or constant; `LegacyAlreadyIssued`
+  is the written-down opt-in for re-deriving or re-verifying an already-issued commitment, and is
+  a CALLER ASSERTION — nothing reads a signature, entry or timestamp to confirm it):
+  `dual_leaf::{commit_triples_dual, commit_graph_dual}` (new
+  `DualCommitError::MethodNotSelectable`), `sparq-zk-compose`'s
+  `build::{build_filter_value_dl_boolean, build_filter_value_dl_datetime,
+  build_filter_value_dl_date}` (all three now return `build::BuildValueDlV1Error`, **breaking** for
+  the two temporal builders, which previously returned `DualLeafError` and took no `MethodUse`),
+  every value-lane `toml::filter_value_dl*_prover_toml` (**breaking**: each takes a trailing
+  `MethodUse` and returns `Result<String, DispatchError>`),
+  `dispatch::resolve_circuit_for_use` (new `DispatchError::MethodNotSelectableForIssuance`) and
+  `driver::CircuitProver::prove_in_for_method` (**breaking**: takes `&ProofInputs` in place of
+  `&CircuitId`, so it can check the inputs' lane constant and the rendered TOML, and refuses
+  before any `nargo`/`bb` subprocess). `dispatch::resolve_circuit` itself is unchanged — it is the
+  verification view, so an already-issued graph keeps resolving. Per-term encoders
+  (`dual_leaf::encode_literal`, `dual_leaf_boolean::encode_boolean`,
+  `dual_leaf_datetime::{encode_datetime, encode_date}`, …) are deliberately NOT gated: they
+  produce components, not a commitment, a recorded entry, a rendered `Prover.toml` or a proof.
+- **sparq-zk-compose:** each value-lane `datatype_const` is now bound to its own member by an
+  AFFIRMATIVE allow-list decided on DECODED field elements.
+  `dispatch::check_lane_const_for_member(&CircuitId, &FieldHex, MethodUse)` and
+  `check_lane_member_pairing{,_for_use}` accept a constant on a member iff a shipped lane derives
+  it for that member — V1 integer and V1 boolean on `filter_value_dl_int`, V1/V2 double on
+  `filter_value_dl_f64`, V1/V2 decimal at any encodable scale (`fd ∈ 1..=19`) on
+  `filter_value_dl_decimal`, V1/V2 dateTime and date on `filter_value_dl_datetime`, V2 integer on
+  `filter_value_dl_int`, and the V2 boolean constant on `filter_value_dl_bool` and nothing else —
+  with a V1 constant accepted only under `MethodUse::LegacyAlreadyIssued`. A constant no lane
+  derives is refused on every member (`DispatchError::UnknownLaneConst`), a known constant on
+  another member is `LaneMemberMismatch`, a V1 constant for new issuance is
+  `LegacyLaneConstForIssuance`, and a text that is not the canonical rendering of the element it
+  decodes to is `NonCanonicalFieldHex` (`field_from_hex_str` also accepts uppercase, `0x`-less,
+  short and at-or-above-modulus spellings, which a text comparison would let through).
+  Canonicality is checked over exactly the `FieldHex` public inputs of a VALUE-LANE
+  `ProofInputs` — `datatype_const` at the per-member entry, and `operand_enc` plus
+  `datatype_const` at the `ProofInputs`-level `check_lane_member_pairing{,_for_use}`. No other
+  variant's public inputs and nothing in a rendered `Prover.toml` are checked for canonical
+  spelling. The same function runs at four call sites: the value-lane builders, every
+  value-lane `Prover.toml` renderer, `prove_in_for_method` and stage 0 of
+  `verifier::prefilter_manifest_structure` (`CheckError::LaneMemberMismatch`). The
+  `ProofInputs`-level check additionally requires the VARIANT and the declared `id` to name the
+  same member (`DispatchError::ValueLaneVariantIdMismatch`) — without it a non-value-lane
+  variant declaring a value-lane id, e.g. `FilterInt { id: FilterValueDl }`, carried no
+  `datatype_const` to read and so skipped the pairing entirely while the declared id still chose
+  the circuit. `prove_in_for_method` also refuses a `Prover.toml` that is not in the
+  renderers' flat form (one `key = "alnum"` or `key = true|false` per `\n`-terminated line, bare
+  `a-z_` keys, no repeats; tables, comments, quoted or dotted keys, escapes and `\r` are
+  refused), so no TOML parser reads a different `datatype_const` from the one it compares, or
+  whose `datatype_const` is not the checked inputs' one (`DriverError::ProverTomlLaneMismatch`). The raw
+  `CircuitProver::{prove, prove_in, gen_witness*}` entries stay method- and lane-agnostic, so a
+  caller rendering its own `Prover.toml` is outside this boundary. `datatype_const` is a public
+  input no member pins, which is why the decision lives here. Under
+  `MethodUse::LegacyAlreadyIssued` the method version and the constant version are NOT
+  cross-checked: a V2 method presented with a V1 lane constant, or the reverse, is accepted, so
+  the use flag buys the pairing and the member, not version agreement. This is a host boundary
+  plus one structural pre-filter refusal: the value-lane verifier gates stay closed until the
+  verifier authenticates the method and pins member, lane, scale and bound itself (sq-j506).
+- **sparq-zk-compose:** `verifier::prefilter_manifest_structure` refuses EVERY value-lane
+  sub-proof (`CheckError::ValueLaneSubProofNotAccepted`). The refusal is unconditional on the
+  sub-proof being a value-lane member and inspects no edge; it is sound to refuse them wholesale
+  because `filter_edge_true` discharges a query FILTER only through a `filter_int` edge, so no
+  value-lane member can discharge an obligation in this verifier (that wiring is sq-j506).
+  **Behaviour change:** such a manifest was previously ACCEPTED, with the sub-proof
+  reconstructed and verified while discharging nothing. When sq-j506 wires the value-lane query
+  binding, this refusal is what it replaces with a real edge check.
 - **sparq-reason:** `MaterializedN3Graph::with_limits` builds the incremental N3 graph under
   a `ClosureLimits` (`new` uses the default). The counting path now sizes each builtin's
   argument list and result before building it and charges a round and fact allowance; past
@@ -67,9 +167,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sparq-secprop-vocab` registry, the ODRL profile Turtle and the admissibility ruleset text
   gain the new facts, so anything that pins those outputs byte for byte will see them
   (#6977).
-
-### Changed
-
 - **sparq-reason (N3):** matching a quoted-formula pattern against a quoted-formula value
   now has a step budget for its backtracking over statement pairings. A match that never
   backtracks is not limited; past the budget the formula does not match and the run

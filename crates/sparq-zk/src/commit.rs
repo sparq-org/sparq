@@ -60,12 +60,18 @@ use std::collections::HashMap;
 /// - [`StringCanonicalV1`](Self::StringCanonicalV1): the conservative default and
 ///   back-compat anchor — the only method implemented end-to-end today. The
 ///   in-circuit INV-VL invariant holds for its value-FILTER lane.
-/// - [`DualLeafV1`](Self::DualLeafV1): the value-optimised method for new issuance
-///   (#769). It **REMOVES INV-VL** — value<->lexical agreement rests on trusted-
-///   issuer honesty (machine-enforced -> issuer-honesty downgrade), accepted at
-///   research grade per #769 and registered as an **open external-audit obligation**
-///   (gap CR-G8 / sq-qhy4). The leaf encoding itself is NOT implemented here (config
-///   only; impl is sq-j506).
+/// - [`DualLeafV2`](Self::DualLeafV2): the value-optimised method for NEW issuance
+///   (#769), in its versioned form — framed value-lane constant derivation plus an
+///   out-of-band no-value sentinel. It **REMOVES INV-VL** — value<->lexical
+///   agreement rests on trusted-issuer honesty (machine-enforced -> issuer-honesty
+///   downgrade), accepted at research grade per #769 and registered as an **open
+///   external-audit obligation** (gap CR-G8 / sq-qhy4).
+/// - [`DualLeafV1`](Self::DualLeafV1): the FIRST dual-leaf version, SUPERSEDED by
+///   `DualLeafV2`. Still recognised and verifiable, but no longer selectable for new
+///   issuance: its value-lane constants are plain folds of the datatype bytes and
+///   its no-value sentinel lies inside the reachable value-handle band, so it does
+///   not meet the `research/zk-field-native-encoding.md` §14.1 reserved-tag
+///   requirement. Same INV-VL downgrade as V2.
 /// - `ValueOnlyV1` (feature `commitment-value-only` only): a **benchmark / research
 ///   dial**, never a production default (§10 default (2)). It loses term identity
 ///   entirely (no lexical component). It is **compiled out by default**; the feature
@@ -79,9 +85,24 @@ pub enum CommitmentMethod {
     /// (iii) `dual-leaf` (`zk:poseidon2-dualleaf-v1`): a value handle AND a
     /// lexical-identity hash in one leaf. **REMOVES INV-VL** (value<->lexical
     /// agreement becomes trusted-issuer-honesty, #769 accepted at research grade;
-    /// CR-G8 / sq-qhy4). Config-only here; the leaf encoding is sq-j506 (NOT
-    /// implemented).
+    /// CR-G8 / sq-qhy4). SUPERSEDED by [`Self::DualLeafV2`] for new issuance and
+    /// so no longer production-selectable, but recognised and verifiable. Host
+    /// encoding: `crate::dual_leaf` (the `dual-leaf` feature).
     DualLeafV1,
+    /// (iii-b) `dual-leaf` **v2** (`zk:poseidon2-dualleaf-v2`): the VERSIONED
+    /// dual-leaf scheme — value-lane constants derived in BLAKE3's
+    /// key-derivation mode over length-framed `(datatype, params)`, a no-value
+    /// sentinel asserted outside the reachable value-handle band (the
+    /// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement, on
+    /// the HOST side — no Noir global or assert names that sentinel yet, so the
+    /// in-circuit half of the requirement stays open),
+    /// and a bit-domain boolean member. The dual-leaf method a NEW issuance
+    /// selects ([`Self::is_production_selectable`] is `true` only for this one,
+    /// of the two dual-leaf versions). It carries exactly the same INV-VL
+    /// downgrade as [`Self::DualLeafV1`] — the versioning changes constant
+    /// derivation, not the trust model (#769 accepted at research grade; CR-G8 /
+    /// sq-qhy4). Host encoding: `crate::dual_leaf_v2` (the `dual-leaf` feature).
+    DualLeafV2,
     /// (ii) `value-only` (`zk:poseidon2-valuehook-v1`): a single value-first leaf;
     /// the lexical hash is **dropped**, so term identity is lost entirely. A
     /// **benchmark / research comparison dial only** — never select for real
@@ -107,6 +128,7 @@ impl CommitmentMethod {
                 crate::registry::ZK_SCHEME_POSEIDON2_RDFC10_V1
             }
             CommitmentMethod::DualLeafV1 => crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1,
+            CommitmentMethod::DualLeafV2 => crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2,
             #[cfg(feature = "commitment-value-only")]
             CommitmentMethod::ValueOnlyV1 => crate::registry::ZK_SCHEME_POSEIDON2_VALUEHOOK_V1,
         }
@@ -124,6 +146,7 @@ impl CommitmentMethod {
                 Some(CommitmentMethod::StringCanonicalV1)
             }
             crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1 => Some(CommitmentMethod::DualLeafV1),
+            crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2 => Some(CommitmentMethod::DualLeafV2),
             #[cfg(feature = "commitment-value-only")]
             crate::registry::ZK_SCHEME_POSEIDON2_VALUEHOOK_V1 => {
                 Some(CommitmentMethod::ValueOnlyV1)
@@ -149,9 +172,54 @@ impl CommitmentMethod {
     /// this; it does **not** assert any cryptographic property.
     pub const fn is_production_selectable(self) -> bool {
         match self {
-            CommitmentMethod::StringCanonicalV1 | CommitmentMethod::DualLeafV1 => true,
+            CommitmentMethod::StringCanonicalV1 | CommitmentMethod::DualLeafV2 => true,
+            // `DualLeafV1` is SUPERSEDED by `DualLeafV2`: it stays recognised and
+            // verifiable (an already-issued V1 credential keeps verifying) but is
+            // no longer selectable for NEW issuance, because its value-lane
+            // constants and its in-band no-value sentinel do not meet the
+            // `research/zk-field-native-encoding.md` §14.1 reserved-tag
+            // requirement that V2 discharges.
+            CommitmentMethod::DualLeafV1 => false,
             #[cfg(feature = "commitment-value-only")]
             CommitmentMethod::ValueOnlyV1 => false,
+        }
+    }
+
+    /// The CHECKED new-issuance boundary: `Ok(self)` when
+    /// [`Self::is_production_selectable`] holds, otherwise
+    /// [`MethodNotSelectable`].
+    ///
+    /// `is_production_selectable` only REPORTS the posture, so a caller can ignore
+    /// it; this turns the same rule into a refusal an issuance path cannot skip by
+    /// accident. It gates NEW issuance ONLY: decoding, verification and reading a
+    /// recorded method (`from_scheme_iri`, [`crate::registry::RegistryEntry::method`],
+    /// the `(method x circuit)` dispatch matrix) are deliberately NOT gated, so an
+    /// already-issued `DualLeafV1` or `value-only` graph keeps verifying.
+    ///
+    /// Honest scope, unchanged: passing this check means the method is not a
+    /// research-only dial and not superseded. It asserts NO cryptographic property
+    /// — the estate is NOT externally audited (CR-G8 / sq-qhy4).
+    pub const fn checked_for_issuance(self) -> Result<Self, MethodNotSelectable> {
+        if self.is_production_selectable() {
+            Ok(self)
+        } else {
+            Err(MethodNotSelectable { method: self })
+        }
+    }
+
+    /// The same boundary, parameterised by WHY the method is being selected
+    /// ([`MethodUse`]): `MethodUse::NewIssuance` is
+    /// [`Self::checked_for_issuance`], and `MethodUse::LegacyAlreadyIssued` is
+    /// the EXPLICIT opt-in a caller makes when it re-derives or re-verifies an
+    /// ALREADY-ISSUED commitment under a superseded method, which accepts every
+    /// recognised method.
+    ///
+    /// The point of the parameter is that legacy acceptance has to be WRITTEN
+    /// DOWN at the call site instead of being the silent default.
+    pub const fn checked_for(self, use_: MethodUse) -> Result<Self, MethodNotSelectable> {
+        match use_ {
+            MethodUse::NewIssuance => self.checked_for_issuance(),
+            MethodUse::LegacyAlreadyIssued => Ok(self),
         }
     }
 
@@ -165,12 +233,73 @@ impl CommitmentMethod {
     pub const fn removes_inv_vl(self) -> bool {
         match self {
             CommitmentMethod::StringCanonicalV1 => false,
-            CommitmentMethod::DualLeafV1 => true,
+            CommitmentMethod::DualLeafV1 | CommitmentMethod::DualLeafV2 => true,
             #[cfg(feature = "commitment-value-only")]
             CommitmentMethod::ValueOnlyV1 => true,
         }
     }
 }
+
+/// A [`CommitmentMethod`] that is NOT selectable for new issuance, returned by
+/// [`CommitmentMethod::checked_for_issuance`] and
+/// [`crate::registry::RegistryEntry::with_issuance_method`].
+///
+/// It carries the refused method, so a caller can report the recorded
+/// `zk:scheme` IRI it would have written. A method is refused because it is a
+/// research-only dial (`value-only`) or because it is SUPERSEDED (`dual-leaf`
+/// v1); neither refusal is a statement about the method's audited security.
+/// WHY a caller is selecting a commitment method — the axis
+/// [`CommitmentMethod::checked_for`] gates on.
+///
+/// `NewIssuance` is the DEFAULT: a path that mints a fresh commitment, builds a
+/// fresh proof or records a method on a new registry entry may use only a
+/// production-selectable method. `LegacyAlreadyIssued` is the explicit opt-in for
+/// re-deriving or re-verifying a commitment that was ALREADY ISSUED under a
+/// superseded method, which stays recognised and verifiable.
+///
+/// Neither value asserts a cryptographic property; see
+/// [`CommitmentMethod::is_production_selectable`] for the honest scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MethodUse {
+    /// A fresh commitment, proof or registry entry. Superseded methods and
+    /// research-only dials are REFUSED.
+    #[default]
+    NewIssuance,
+    /// Re-deriving or re-verifying an ALREADY-ISSUED commitment under the method
+    /// it was issued with. Accepts every recognised method, including a
+    /// superseded one.
+    LegacyAlreadyIssued,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MethodNotSelectable {
+    method: CommitmentMethod,
+}
+
+impl MethodNotSelectable {
+    /// The refused method.
+    pub const fn method(&self) -> CommitmentMethod {
+        self.method
+    }
+
+    /// The refused method's `zk:scheme` IRI — what an issuance path would have
+    /// recorded.
+    pub fn scheme_iri(&self) -> &'static str {
+        self.method.scheme_iri()
+    }
+}
+
+impl std::fmt::Display for MethodNotSelectable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "commitment method {} is not selectable for new issuance (superseded or a research-only dial); it stays recognised and verifiable for already-issued graphs",
+            self.method.scheme_iri()
+        )
+    }
+}
+
+impl std::error::Error for MethodNotSelectable {}
 
 impl Default for CommitmentMethod {
     fn default() -> Self {
@@ -376,15 +505,123 @@ mod tests {
 
     #[test]
     fn method_dual_leaf_records_inv_vl_downgrade() {
-        // Honest per-method posture: dual-leaf REMOVES INV-VL (issuer-honesty
-        // downgrade, #769 accepted, CR-G8); string-canonical retains it.
+        // Honest per-method posture: BOTH dual-leaf versions REMOVE INV-VL
+        // (issuer-honesty downgrade, #769 accepted, CR-G8); string-canonical
+        // retains it. The versioning changes constant derivation, not the trust
+        // model.
         assert!(!CommitmentMethod::StringCanonicalV1.removes_inv_vl());
         assert!(CommitmentMethod::DualLeafV1.removes_inv_vl());
-        // dual-leaf is still production-selectable (the #769-accepted method), even
-        // though it carries the downgrade — `is_production_selectable` is NOT an
-        // audit/soundness claim, only "not a research-only dial".
+        assert!(CommitmentMethod::DualLeafV2.removes_inv_vl());
+        // V2 is the production-selectable dual-leaf method, even though it carries
+        // the downgrade — `is_production_selectable` is NOT an audit/soundness
+        // claim, only "not a research-only dial and not superseded".
         assert!(CommitmentMethod::StringCanonicalV1.is_production_selectable());
-        assert!(CommitmentMethod::DualLeafV1.is_production_selectable());
+        assert!(CommitmentMethod::DualLeafV2.is_production_selectable());
+    }
+
+    #[test]
+    fn dual_leaf_v1_is_recognised_but_not_selectable_for_new_issuance() {
+        // V1 is SUPERSEDED: it must stay parseable from its recorded scheme IRI
+        // (so an already-issued V1 credential keeps verifying) while refusing to
+        // be chosen for new issuance.
+        assert!(!CommitmentMethod::DualLeafV1.is_production_selectable());
+        assert_eq!(
+            CommitmentMethod::from_scheme_iri(
+                crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V1
+            ),
+            Some(CommitmentMethod::DualLeafV1),
+            "a recorded V1 scheme must still be recognised, never rejected"
+        );
+        // V2 carries its own distinct scheme IRI.
+        assert_eq!(
+            CommitmentMethod::DualLeafV2.scheme_iri(),
+            "https://sparq.dev/ns/zk#poseidon2-dualleaf-v2"
+        );
+        assert_ne!(
+            CommitmentMethod::DualLeafV1.scheme_iri(),
+            CommitmentMethod::DualLeafV2.scheme_iri()
+        );
+        // And V1's IRI is unchanged, byte for byte.
+        assert_eq!(
+            CommitmentMethod::DualLeafV1.scheme_iri(),
+            "https://sparq.dev/ns/zk#poseidon2-dualleaf-v1"
+        );
+    }
+
+    /// The CHECKED boundary, not merely the advisory report: every
+    /// non-selectable method is an `Err` from `checked_for_issuance`, every
+    /// selectable one round-trips, and the error names the scheme IRI it refused
+    /// to record.
+    #[test]
+    fn checked_for_issuance_refuses_every_non_selectable_method() {
+        let mut selectable = 0;
+        let mut refused = 0;
+        for m in commitment_methods_in_build() {
+            match m.checked_for_issuance() {
+                Ok(got) => {
+                    assert!(m.is_production_selectable(), "{:?} passed the check", m);
+                    assert_eq!(got, m, "the check must pass the method through unchanged");
+                    selectable += 1;
+                }
+                Err(e) => {
+                    assert!(!m.is_production_selectable(), "{:?} was refused", m);
+                    assert_eq!(e.method(), m);
+                    assert_eq!(e.scheme_iri(), m.scheme_iri());
+                    assert!(
+                        e.to_string().contains(m.scheme_iri()),
+                        "the error must name the refused scheme IRI: {}",
+                        e
+                    );
+                    refused += 1;
+                }
+            }
+        }
+        // Both arms are exercised in every feature state: string-canonical and V2
+        // pass, V1 is refused.
+        assert!(selectable >= 2, "expected string-canonical and V2 to pass");
+        assert!(refused >= 1, "expected at least the superseded V1 to be refused");
+        assert!(CommitmentMethod::DualLeafV2.checked_for_issuance().is_ok());
+        assert!(CommitmentMethod::DualLeafV1.checked_for_issuance().is_err());
+        assert!(CommitmentMethod::StringCanonicalV1
+            .checked_for_issuance()
+            .is_ok());
+    }
+
+    /// `checked_for` is the two-use form of that boundary, checked DIRECTLY here:
+    /// `NewIssuance` is exactly `checked_for_issuance` for every method in this
+    /// build, `LegacyAlreadyIssued` accepts every recognised method (so an
+    /// already-issued commitment stays re-derivable), and `NewIssuance` is the
+    /// `Default`, which is what makes forgetting the argument fail closed.
+    #[test]
+    fn checked_for_is_issuance_checked_and_legacy_permissive() {
+        #[allow(unused_mut)]
+        let mut methods = vec![
+            CommitmentMethod::StringCanonicalV1,
+            CommitmentMethod::DualLeafV1,
+            CommitmentMethod::DualLeafV2,
+        ];
+        #[cfg(feature = "commitment-value-only")]
+        methods.push(CommitmentMethod::ValueOnlyV1);
+
+        for m in methods {
+            assert_eq!(
+                m.checked_for(MethodUse::NewIssuance).is_ok(),
+                m.checked_for_issuance().is_ok(),
+                "NewIssuance must be exactly the issuance check for {}",
+                m.scheme_iri()
+            );
+            assert_eq!(
+                m.checked_for(MethodUse::LegacyAlreadyIssued),
+                Ok(m),
+                "the legacy use must accept the recognised method {}",
+                m.scheme_iri()
+            );
+        }
+        // The superseded version is the case that separates the two uses.
+        assert!(CommitmentMethod::DualLeafV1
+            .checked_for(MethodUse::NewIssuance)
+            .is_err());
+        assert_eq!(MethodUse::default(), MethodUse::NewIssuance);
     }
 
     // value-only is the research dial: gated OFF by default. With the feature ON it
@@ -416,7 +653,11 @@ mod tests {
     /// feature-state-aware set the round-trip/distinctness tests sweep).
     fn commitment_methods_in_build() -> Vec<CommitmentMethod> {
         #[allow(unused_mut)]
-        let mut v = vec![CommitmentMethod::StringCanonicalV1, CommitmentMethod::DualLeafV1];
+        let mut v = vec![
+            CommitmentMethod::StringCanonicalV1,
+            CommitmentMethod::DualLeafV1,
+            CommitmentMethod::DualLeafV2,
+        ];
         #[cfg(feature = "commitment-value-only")]
         v.push(CommitmentMethod::ValueOnlyV1);
         v

@@ -82,7 +82,10 @@ pub use sameas::{CanonEntry, CanonError, CanonTable, OWL_SAME_AS};
 pub use n3::{N3Builtin, N3Premise, N3Rule, N3RuleSet, N3Slot, N3SubsetError, MATH_NS};
 // sq-cfmv: the fail-closed (method × circuit) dispatch resolver.
 #[cfg(feature = "dual-leaf")]
-pub use dispatch::{resolve_circuit, resolve_circuit_for_scheme, DispatchError};
+pub use dispatch::{
+    check_lane_member_pairing, resolve_circuit, resolve_circuit_for_scheme,
+    resolve_circuit_for_use, DispatchError,
+};
 // sq-3kd2g.6: the fail-closed wave-1 fragment DISPATCH routing gate.
 // sq-h732x: + `verify_fragment_manifest`, the end-to-end extended-
 // fragment verification entry point (dispatch routing + the shared crypto stage,
