@@ -3107,9 +3107,11 @@ fn unify_all(
 /// branch. The search state is an explicit stack (one entry per matched statement), so
 /// formulae of any width take no stack per statement.
 ///
-/// Each pairing it tries takes a step from `steps`, which first gets `ps.len() *
-/// vs.len()` steps: enough for a search that never backtracks, so only backtracking
-/// spends the budget the caller started with. `None` when the steps run out.
+/// Each pairing it tries takes a step from `steps`. The outermost formula match gets a
+/// free allowance of [`formula_statements`]`(ps) * formula_statements(vs)` steps, which
+/// covers every pairing of a search that never backtracks, nested matches included (it
+/// tries each pair of statements at most once), so only backtracking spends the budget.
+/// `None` when the steps run out.
 fn formula_unify(
     ps: &[[Term; 3]],
     vs: &[[Term; 3]],
@@ -3119,7 +3121,37 @@ fn formula_unify(
     if ps.len() != vs.len() {
         return Some(false);
     }
-    steps.grant(ps.len().saturating_mul(vs.len()));
+    steps.enter_formula(formula_statements(ps).saturating_mul(formula_statements(vs)));
+    let matched = formula_search(ps, vs, b, steps);
+    steps.exit_formula();
+    matched
+}
+
+/// The statements of `ts` and of every formula nested in them.
+fn formula_statements(ts: &[[Term; 3]]) -> usize {
+    let mut n = ts.len();
+    let mut stack: Vec<&Term> = ts.iter().flatten().collect();
+    while let Some(t) = stack.pop() {
+        match t {
+            Term::Formula(rs) => {
+                n = n.saturating_add(rs.len());
+                stack.extend(rs.iter().flatten());
+            }
+            Term::List(ms) => stack.extend(ms),
+            Term::Triple(tr) => stack.extend(tr.iter()),
+            _ => {}
+        }
+    }
+    n
+}
+
+/// The search of [`formula_unify`].
+fn formula_search(
+    ps: &[[Term; 3]],
+    vs: &[[Term; 3]],
+    b: &mut Binding,
+    steps: &mut bounded::StepBudget,
+) -> Option<bool> {
     let mut used = vec![false; vs.len()];
     // `stack[i]`: the binding after matching `ps[..i]`, and the next value statement to
     // try for `ps[i]`.
@@ -3821,14 +3853,17 @@ fn formula_containment<S: std::borrow::Borrow<[Term; 3]>>(
         .collect();
     let mut out = Vec::new();
     let mut steps = bounded::StepBudget::containment();
-    containment_search(&pat, scope, seed.clone(), &mut out, &mut steps, bw);
+    let mut unify = bounded::StepBudget::unification();
+    containment_search(&pat, scope, seed.clone(), &mut out, (&mut steps, &mut unify), bw);
     bw.settle(steps.finish(out))
 }
 
 /// The depth-first search of [`formula_containment`]: every binding under which each
 /// pattern statement matches a scope statement (or virtual list structure), in match
 /// order, pushed to `out`. Each step of the search is one visit of a pattern statement,
-/// taken from `steps`. The search state is an explicit stack (one entry per matched
+/// taken from the first budget of `steps`; the unifications it runs share the second
+/// (a unification budget), and one that runs out spends the first, which stops the
+/// search as a cut. The search state is an explicit stack (one entry per matched
 /// pattern statement), so patterns of any width take no stack per statement. Every
 /// binding the search extends is checked against the term-depth limit
 /// ([`within_depth`]) before it is carried to the next statement, so every binding it
@@ -3840,9 +3875,16 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
     scope: &[S],
     seed: Binding,
     out: &mut Vec<Binding>,
-    steps: &mut bounded::StepBudget,
+    (steps, unify): (&mut bounded::StepBudget, &mut bounded::StepBudget),
     bw: &BwCtx,
 ) {
+    // A unification that ran out of steps: no match, and the search stops as a cut.
+    let unified = |r: Option<bool>, steps: &mut bounded::StepBudget| {
+        r.unwrap_or_else(|| {
+            steps.spend();
+            false
+        })
+    };
     /// The order the pattern statements are matched in, as indices into `pat`: as
     /// written, until a statement is deferred behind the others.
     #[derive(Clone)]
@@ -3932,7 +3974,7 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
                                     bounded::list_tail(&ms, &bw.truncated)
                                 };
                                 let mut nb = b.clone();
-                                if val.is_some_and(|val| unify_term_in(&p[2], &val, &mut nb, steps).unwrap_or(false))
+                                if val.is_some_and(|val| unified(unify_term_in(&p[2], &val, &mut nb, unify), steps))
                                     && within_depth(&nb, bw)
                                 {
                                     let (at, defers_left) = (at + 1, rest);
@@ -3984,7 +4026,7 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
             scan.next += 1;
             let mut nb = v.b.clone();
             // A match that bound nothing new extends nothing to check.
-            if unify_all(&p[..], &st[..], &mut nb, steps).unwrap_or(false)
+            if unified(unify_all(&p[..], &st[..], &mut nb, unify), steps)
                 && (nb.len() == v.b.len() || within_depth(&nb, bw))
             {
                 visit = Some(Visit {
@@ -6952,6 +6994,17 @@ mod tests {
         let negation = "{ ?x log:notIncludes { :m :m :m } } => { :n :n :n } .";
         let (refused, _) = closure_and_cut(&doc(negation), None);
         assert!(refused.is_err(), "{refused:?}");
+
+        // The same match inside a formula-containment search stops that search, as a cut.
+        let containment = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             {{ {{ :d :f {{ {value}:t :r :x }} }} log:includes \
+             {{ :d :f {{ {pattern}:t :r :y }} }} }} => {{ :m :m :m }} ."
+        );
+        let (facts, cut) = closure_and_cut(&containment, None);
+        assert!(!facts.unwrap().iter().any(|t| t[0] == Term::Iri("http://ex/m".into())));
+        assert_eq!(cut, Some("formula containment search exhausted its step budget"));
     }
 
     /// #6953: a match that never backtracks is never refused, however many statements
