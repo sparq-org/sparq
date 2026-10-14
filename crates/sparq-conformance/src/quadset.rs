@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-tonhr.2) QUAD-SET plumbing shared by the W3C line-syntax suites
+//! (sq-tonhr.2) QUAD-SET plumbing shared by the W3C line-syntax suites
 //! (`line_syntax`) and the parser differential harness (`differential`): render parsed
 //! quads to a comparable string form, extract the quad set of a loaded
 //! [`sparq_core::Graph`] dataset, and compare two quad sets for identity under a

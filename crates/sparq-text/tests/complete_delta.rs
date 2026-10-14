@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-lsp7k.9.2: mutation-witnessed incremental completion oracle.
+//! sq-lsp7k.9.2: mutation-witnessed incremental completion oracle.
 
 use oxrdf::{Literal, NamedNode, Term};
 use sparq_core::Graph;

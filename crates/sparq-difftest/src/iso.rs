@@ -1,6 +1,6 @@
 //! Cross-oracle **blank-node isomorphism**: canonical labelling for `CONSTRUCT`/`DESCRIBE` graph
 //! results and for `SELECT` results that project blank nodes. Engine-independent.
-//! [OPUS-5] sq-qcnn.7
+//! sq-qcnn.7
 //!
 //! Blank-node **labels are engine-local and arbitrary** — one oracle's `_:b0` and another's
 //! `_:c14n2` may denote the same node — so a result carrying a blank node cannot be compared by

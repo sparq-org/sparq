@@ -22,7 +22,6 @@
 //! evaluation instant `2026-07-06T00:00:00Z` (`BENCH_EVAL_INSTANT` in `src/oracle.rs`);
 //! the count-condition flip is instant-independent.
 //!
-//! [FABLE-5]
 
 use sparq_acbench::{
     compile_acp, compile_odrl, compile_wac, oracle_acp, oracle_odrl, oracle_wac, AcModel,
@@ -269,7 +268,7 @@ fn odrl_permission_overrides_matching_prohibition() {
 /// check swaps the two decisions and makes this test fail for both ACP and ODRL.
 #[test]
 fn all_except_membership_controls_acp_and_odrl_effects() {
-    // [GPT-5.6] sq-n489k — behavioral oracle coverage for AllExcept membership polarity.
+    // sq-n489k — behavioral oracle coverage for AllExcept membership polarity.
     const EXCLUDED_AGENT: &str = "excluded-agent";
 
     let non_excluded_request = read_request(ALICE, RES);

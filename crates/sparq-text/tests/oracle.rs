@@ -1,4 +1,4 @@
-//! Brute-force inverted-index ORACLE for [`TextIndex`]. [OPUS-4.8]
+//! Brute-force inverted-index ORACLE for [`TextIndex`].
 //!
 //! Over many random documents we assert the index's query answers agree with an
 //! INDEPENDENT brute-force scan of the raw documents — the oracle-vs-index shape
@@ -11,7 +11,7 @@
 //!  * `phrase` — the query's tokens occur at consecutive positions, in order.
 //!  * `phrase_near` — the query's tokens occur IN ORDER within a bounded total
 //!    gap (slop), relevance-scored `1/(1+gap)`; the oracle recomputes the
-//!    smallest in-order gap per document independently. [OPUS-4.8]
+//!    smallest in-order gap per document independently.
 //!
 //! For ranked queries we compare the hit-ID SET (not BM25 scores — the prompt's
 //! "SET, not exact scores" rule); for `phrase` we compare the exact ascending ID
@@ -23,7 +23,7 @@
 
 use oxrdf::Term;
 use rand::rngs::StdRng;
-// [OPUS-4.8] sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
+// sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
 use rand::{RngExt, SeedableRng};
 use sparq_core::dict::Id;
 use sparq_core::Graph;
@@ -160,7 +160,6 @@ fn brute_phrase(corpus: &[(Id, Vec<String>)], query: &str) -> Vec<Id> {
 /// occurrence of token 0, greedily take the earliest later occurrence of each
 /// subsequent token (positions are in document order), and keep the smallest
 /// `(last − first) − (n − 1)`. `None` if the tokens never occur in order.
-/// [OPUS-4.8]
 fn brute_min_gap(tokens: &[String], needle: &[String]) -> Option<u32> {
     if needle.len() == 1 {
         return tokens.contains(&needle[0]).then_some(0);
@@ -193,7 +192,7 @@ fn brute_min_gap(tokens: &[String], needle: &[String]) -> Option<u32> {
 
 /// Brute-force proximity: `(doc id, min gap)` for docs where the query's tokens
 /// occur in order within `slop` total gap. A trailing `*` is plain text (no
-/// prefix marker), as for phrase; empty phrase matches nothing. [OPUS-4.8]
+/// prefix marker), as for phrase; empty phrase matches nothing.
 fn brute_phrase_near(corpus: &[(Id, Vec<String>)], query: &str, slop: u32) -> Vec<(Id, u32)> {
     let needle = sparq_text::tokenize::tokenize(query);
     if needle.is_empty() {
@@ -296,7 +295,7 @@ fn brute_force_oracle_over_random_documents() {
 
             // Proximity/slop: at every slop level the index must agree with the
             // brute-force min-gap oracle on BOTH the id set AND the per-doc gap
-            // (encoded in the score 1/(1+gap)), and rank tightest-first. [OPUS-4.8]
+            // (encoded in the score 1/(1+gap)), and rank tightest-first.
             for slop in [0u32, 1, 2, 4, 8] {
                 let hits = positional.phrase_near(q, slop);
                 let oracle = brute_phrase_near(&corp, q, slop);

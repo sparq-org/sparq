@@ -1,7 +1,7 @@
 //! Integration tests for T22: the `/sparql` EXPLAIN surface (query parameter and
 //! `Accept: text/x-sparq-explain`) and the `/metrics` Prometheus endpoint.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the
@@ -122,7 +122,7 @@ async fn explain_of_malformed_query_is_400_and_explain_false_executes() {
 // The camelCase typed plan tree (the sq-jbqh4 schema contract the GUI plan
 // explorer renders). Feature-gated: the arm exists only under `explain-json`
 // (default-on for the server binary); a lean build answers 406 (tested below).
-// 🤖 SPARQ agent. [FABLE-5]
+// 🤖 SPARQ agent.
 // ---------------------------------------------------------------------------
 
 const EXPLAIN_JSON_CT: &str = "application/x-sparq-explain+json";

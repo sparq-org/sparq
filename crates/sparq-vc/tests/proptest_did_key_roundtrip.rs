@@ -1,4 +1,4 @@
-//! Property tests for Ed25519 `did:key` multibase round trips. [GPT-5.6]
+//! Property tests for Ed25519 `did:key` multibase round trips.
 
 use proptest::prelude::*;
 use sparq_vc::{

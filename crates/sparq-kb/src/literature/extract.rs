@@ -1,7 +1,7 @@
 //! The **record/replay extract trait** — the only LLM-in-the-loop step, isolated so CI
 //! runs on a committed tape and makes ZERO live model calls (§4.7).
 //!
-//! [OPUS-4.8] sq-2489d.5. A cheap-model extractor turns a paper's abstract into candidate
+//! sq-2489d.5. A cheap-model extractor turns a paper's abstract into candidate
 //! `pkg:Finding`s. That is the single non-deterministic, credential-requiring step in the
 //! pipeline; everything around it (connector, grounding, emit, SHACL gate) is
 //! deterministic. By expressing extraction as the [`Extractor`] trait we can:

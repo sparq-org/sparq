@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-vkz7 — differential guard for the ONE-PASS COMPRESSED external build.
+//! sq-vkz7 — differential guard for the ONE-PASS COMPRESSED external build.
 //!
 //! `build_external` writes RAW `[u32;3]` perms; producing the 2.5–2.75×-smaller
 //! `SPQCPRM1` block-compressed perms used to require a SEPARATE `open` + `decode_all` +
@@ -168,9 +168,9 @@ fn one_pass_compressed_spill_build_matches_recompress() {
     std::fs::remove_dir_all(&base).ok();
 }
 
-// ===== [FABLE-5] sq-7d3dj.32.2.7 — SPQCPRM2 format migration cross-version differentials =====
+// ===== sq-7d3dj.32.2.7 — SPQCPRM2 format migration cross-version differentials =====
 
-/// [FABLE-5] sq-7d3dj.32.2.7 — the V2 emit config gate at the STORE level: `save_compressed`
+/// sq-7d3dj.32.2.7 — the V2 emit config gate at the STORE level: `save_compressed`
 /// under `with_emit_format(V2)` must write `SPQCPRM2` perms that AUTO-DETECT on `open` and answer
 /// every query identically to the V1 save and the in-memory load. This is the migration's
 /// end-to-end soundness: a V2-saved store is query-equivalent to a V1-saved store.
@@ -216,7 +216,7 @@ fn v2_saved_store_is_query_equivalent_to_v1() {
     std::fs::remove_dir_all(&base).ok();
 }
 
-/// [FABLE-5] sq-7d3dj.32.2.7 — V1→V2→V1 and V2→V1→V2 cross-version round-trips at the STORE
+/// sq-7d3dj.32.2.7 — V1→V2→V1 and V2→V1→V2 cross-version round-trips at the STORE
 /// level: opening a store in one format and RE-SAVING it in the other must preserve the exact
 /// logical content through every hop. This is the format-conversion soundness a real migration
 /// tool relies on (a V1 store can be rewritten V2 and back with no drift).

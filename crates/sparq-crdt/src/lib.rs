@@ -1,4 +1,4 @@
-//! [FABLE-5] (epic `sq-tag1q`, child `sq-tag1q.7.2`) SPARQL-CRDT **codec +
+//! (epic `sq-tag1q`, child `sq-tag1q.7.2`) SPARQL-CRDT **codec +
 //! journal** layer for sparq: the bounded, versioned canonical delta envelope,
 //! causal summaries, the durable append/recovery journal, snapshots,
 //! missing-interval exchange primitives, and membership-epoch /

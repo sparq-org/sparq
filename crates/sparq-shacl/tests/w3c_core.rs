@@ -28,7 +28,7 @@ const SH: &str = "http://www.w3.org/ns/shacl#";
 
 /// Pass-rate floor: the rate achieved at the pinned suite commit (98/98).
 /// Regressions below this fail the build.
-/// [SONNET-4.6] sq-z1xv8 — the VALUE now lives once in the zero-dependency
+/// sq-z1xv8 — the VALUE now lives once in the zero-dependency
 /// `sparq-conformance-floors` crate, which `sparq-conformance`'s central
 /// `scoreboard::SUITES` reads too, so the enforced floor and the reported floor are
 /// ONE `const` and cannot drift (replacing the old textual re-read of this file).

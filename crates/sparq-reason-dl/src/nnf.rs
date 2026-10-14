@@ -1,6 +1,6 @@
 //! L3 (part 1) — negation normal form + the `sub(O)` subexpression closure.
 //!
-//! 🤖 SPARQ agent [FABLE-5]. Bead sq-pbz04.4.3 (epic sq-pbz04.4, design record
+//! 🤖 SPARQ agent. Bead sq-pbz04.4.3 (epic sq-pbz04.4, design record
 //! `research/owl2-direct-semantics-scoping.md` §3). This module lowers a
 //! [`crate::model::ClassExpression`] into **negation normal form** (NNF) and builds the
 //! finite **subexpression closure** the ALCH tableau (`crate::tableau`) expands over.
@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn nnf_complement_rewrites_every_constructor() {
-        // [SONNET-4.6] issue #2503: the EXPECTED complement is written out per constructor.
+        // issue #2503: the EXPECTED complement is written out per constructor.
         // Comparing against `nnf(&not(c))` instead would be VACUOUS — `nnf` dispatches
         // `ObjectComplementOf(inner)` straight to `nnf_complement(inner)`, so that assertion
         // is literally `x == x` and survives, for instance, mis-rewriting the ∀ dual as

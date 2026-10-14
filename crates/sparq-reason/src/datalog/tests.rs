@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-6tykl.3 — Datalog acceptance suite: parser + stratification-checker
+//! sq-6tykl.3 — Datalog acceptance suite: parser + stratification-checker
 //! unit tests, hand-computed eval fixtures (exact expected sets — a mutation flips
 //! them red), and the DIFFERENTIAL harness against the independent naive oracle
 //! (`super::oracle`) on fixed programs × seed-randomised graphs.
@@ -378,7 +378,7 @@ fn eval_naf_absence_check_across_strata() {
     assert_eq!(got, want);
 }
 
-/// [GPT-5.6] A grouped NOT is one existential conjunction, not a list of
+/// A grouped NOT is one existential conjunction, not a list of
 /// independently-negated atoms: both patterns have matches, but no single `?z`
 /// joins them, so the rule must fire.
 #[test]
@@ -446,7 +446,7 @@ fn eval_count_per_group_and_threshold_filter() {
     assert_eq!(got, want);
 }
 
-/// [GPT-5.6] Legacy COUNT counts distinct full body tuples, whereas DISTINCT
+/// Legacy COUNT counts distinct full body tuples, whereas DISTINCT
 /// projects the selected value before de-duplication.
 #[test]
 fn count_distinct_vs_count() {
@@ -540,7 +540,7 @@ fn variable_predicate_closure() {
     );
 }
 
-/// [GPT-5.6] When a different positive atom consumes the current delta, the
+/// When a different positive atom consumes the current delta, the
 /// variable-predicate sibling must still scan the full, older store.
 #[test]
 fn variable_predicate_joins_store_union_on_later_delta() {
@@ -613,7 +613,7 @@ fn variable_predicate_forces_conservative_strata() {
     assert!(stratify(&d, &class_cycle).is_err());
 }
 
-/// [GPT-5.6] Incremental maintenance must preserve the same top-node dependency:
+/// Incremental maintenance must preserve the same top-node dependency:
 /// an insert under any predicate can affect a variable-predicate body.
 #[test]
 fn variable_predicate_incremental_matches_from_scratch() {
@@ -638,7 +638,7 @@ fn variable_predicate_incremental_matches_from_scratch() {
     assert!(incremental.contains(&[p, seen, b]));
 }
 
-/// [GPT-5.6] A removed asserted fact that a variable-predicate head still derives
+/// A removed asserted fact that a variable-predicate head still derives
 /// must transfer ownership into the stratum instead of disappearing. This is the
 /// `head_any` deletion/re-ownership branch, not the variable-body `read_any` branch.
 #[test]
@@ -806,7 +806,7 @@ fn avg_of_integers_is_decimal() {
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] sq-r2nor — the DECIDED float/double semantics for the numeric
+// sq-r2nor — the DECIDED float/double semantics for the numeric
 // aggregates: the whole XSD numeric tower is in scope (no fail-closed reject),
 // SUM/AVG promote per XPath, and the fold order + NaN/-0.0 rule are pinned so the
 // closure stays a function of the completed lower strata.
@@ -1384,7 +1384,7 @@ fn differential_multi_head_and_global_count() {
     );
 }
 
-/// [GPT-5.6] Independent-oracle arm for grouped NAF. The shared `?y` makes this
+/// Independent-oracle arm for grouped NAF. The shared `?y` makes this
 /// specifically a conjunction join, not two standalone absence checks.
 #[test]
 fn differential_naf_conjunction() {
@@ -1397,7 +1397,7 @@ fn differential_naf_conjunction() {
     );
 }
 
-/// [GPT-5.6] Independent-oracle arm for projected DISTINCT aggregation.
+/// Independent-oracle arm for projected DISTINCT aggregation.
 #[test]
 fn differential_count_distinct() {
     assert_differential(
@@ -1410,7 +1410,7 @@ fn differential_count_distinct() {
     );
 }
 
-/// [GPT-5.6] Independent-oracle arm for variable predicates in both body and
+/// Independent-oracle arm for variable predicates in both body and
 /// head positions.
 #[test]
 fn differential_variable_predicates() {
@@ -2024,7 +2024,7 @@ fn incr_accessors_direct() {
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] sq-xzb9p — differential vs the EXTERNAL Soufflé engine
+// sq-xzb9p — differential vs the EXTERNAL Soufflé engine
 // ---------------------------------------------------------------------------
 // `oracle` is an independent implementation, but it is still OUR reading of the
 // semantics. These fixtures put the same programs through Soufflé — which stratifies

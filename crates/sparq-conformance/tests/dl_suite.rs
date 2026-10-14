@@ -307,7 +307,16 @@ mod gated {
     /// refusing at L1 rather than pinning a wrong definitive verdict. With that refusal the
     /// inconsistency lane's fail count returns to 0 and both rows abstain honestly.
     /// [SONNET-4.6]
-    pub const DL_DIRECT_FLOOR: usize = 227;
+    /// Re-pinned by #4762 (bottom properties decided as empty roles): +2 (227 → 229),
+    /// composition 136 consistency + 19 inconsistency + 72 positive- + 2 negative-entailment.
+    /// `New-Feature-BottomObjectProperty-001` and `New-Feature-BottomDataProperty-001`
+    /// (both `InconsistencyTest`s) move from an L1-refusal abstention to a correct
+    /// `Inconsistent`: `DirectChecker` now rewrites the empty roles into their fixed meaning
+    /// and decides the result on the tableau. `New-Feature-TopObjectProperty-001` stays
+    /// abstained (the top properties remain refused). No previously-answered row moved: the
+    /// rewrite fires only where the unchanged public `extract` refuses, and the fail set is
+    /// unchanged.
+    pub const DL_DIRECT_FLOOR: usize = 229;
 
     /// Abstained (fail-closed OutOfFragment / guard / deferred / budget) row totals,
     /// EXACT-pinned so the tri-state accounting is closed: profile lane, then the four
@@ -363,7 +372,9 @@ mod gated {
     /// bucket and nothing enters it from that change. The L1 built-in-property refusal moves
     /// its 2 rows WITHIN the bucket (guard → out-of-fragment), not into or out of it, which
     /// is why the two deltas are exactly equal and opposite. [SONNET-4.6]
-    pub const DL_DIRECT_ABSTAINED: usize = 427;
+    /// Re-pinned by #4762: −2 (427 → 425) — the two bottom-property inconsistency rows
+    /// graduated into [`DL_DIRECT_FLOOR`] (inconsistency abstained 96 → 94).
+    pub const DL_DIRECT_ABSTAINED: usize = 425;
 
     /// Audited, PINNED divergence rows (module docs — mechanisms M3/M5/M6): every row
     /// where a checker verdict contradicts the export expectation, keyed by the

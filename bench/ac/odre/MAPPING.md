@@ -57,13 +57,13 @@ own pinned constants — the same ones the by-construction oracle assumes.
 | purpose | `Request::for_purpose(GRANTED_PURPOSE)` | left operand declared unsupported → out-of-scope |
 | count | `Request::with(odrl:count, 1)` | left operand declared unsupported → out-of-scope |
 | device/client | `Request::with(odrl:systemDevice, client)` | left operand declared unsupported → out-of-scope |
-| membership | `with_party_membership(agent, collection)` | applied by the harness in `projected` binding |
+| membership | `with_party_memberships(edges)` | applied by the harness in `projected` binding |
 
 **Membership evidence.** `sparq-policy` matches a `odrl:PartyCollection` assignee only
 against membership the request supplies — it never infers it. The harness therefore
-derives membership from the corpus's own group closure (an agent is in group `g` iff its
-IRI is prefixed by `g`, the convention `sparq_acbench::oracle` uses) and supplies the
-identical set to both sides, plus `odrl:All` and, for a non-empty agent,
+reads the generator's exported `group_memberships` map and maps each group to the
+compiled policy's `PartyCollection` IRI. It supplies the identical set to both sides,
+plus `odrl:All` and, for a non-empty agent,
 `odrl:AllAuthenticated`.
 
 **Pinned constants.** `EVAL_INSTANT` and `GRANTED_PURPOSE` duplicate `pub(crate)`

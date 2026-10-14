@@ -77,14 +77,14 @@ pub struct Entry {
     /// The original `geo:wktLiteral` term (the `geo:asWKT` OBJECT) this entry was
     /// parsed from — the exact `Term` a SPARQL geometry variable binds to. The
     /// spatial-pushdown candidate methods return THIS so the engine can map a
-    /// candidate back to a dictionary id by `Term` identity. [OPUS-4.8]
+    /// candidate back to a dictionary id by `Term` identity.
     pub literal: Term,
     /// The build-time dictionary `Id` of [`literal`](Self::literal) in the source
     /// [`Graph`]'s `dict` — the id the engine's scanned geometry column holds for a
     /// row bound to this literal. Populated from the `geo:asWKT` OBJECT id at
     /// extraction (see [`GeoIndex::indexed_ids_for`]); valid only against the SAME
     /// dict the index was built from (the index's private `dict_ptr` freshness
-    /// token). [OPUS-4.8]
+    /// token).
     pub literal_id: Id,
     /// The named graph the entry came from; `None` for the default graph.
     pub graph: Option<Term>,
@@ -142,17 +142,17 @@ pub struct GeoIndex {
     /// different (reloaded) dict can never mislead the engine's id-level check.
     /// `None` means "never fresh" — the id-level fast path is declined and the
     /// engine uses the per-row `is_indexed` fallback ([`apply_delta`](Self::apply_delta)
-    /// sets it to `None` if the graph's dict moved). [OPUS-4.8]
+    /// sets it to `None` if the graph's dict moved).
     dict_ptr: Option<usize>,
     /// The set of live `Entry::literal_id`s — the id-level indexed universe,
     /// maintained in LOCKSTEP with `slots`/`free` (an id enters when its entry is
     /// inserted, leaves when the LAST entry carrying it is dropped). Valid only
-    /// against the dict identified by `dict_ptr`. [OPUS-4.8]
+    /// against the dict identified by `dict_ptr`.
     literal_ids: FxHashSet<Id>,
     /// Reference count per live literal id: several entries (one per owning
     /// feature) can share ONE literal id, so a literal id leaves `literal_ids`
     /// only when its last entry is removed. Keeps `literal_ids` exact under the
-    /// slotted delta maintenance. [OPUS-4.8]
+    /// slotted delta maintenance.
     literal_id_refs: FxHashMap<Id, u32>,
 }
 
@@ -178,7 +178,7 @@ fn extract_graph(graph: &Graph, graph_name: Option<&Term>) -> (Vec<Entry>, usize
     let mut entries: Vec<Entry> = Vec::new();
     let mut skipped = 0usize;
     // Scan both geometry-serialization predicates: geo:asWKT (wktLiteral) and
-    // geo:asGML (gmlLiteral). Both flow through the same dispatch. [OPUS-4.8]
+    // geo:asGML (gmlLiteral). Both flow through the same dispatch.
     for serial_pred in [vocab::AS_WKT, vocab::AS_GML] {
         let pred = NamedNode::new_unchecked(serial_pred);
         let Some(pattern) = graph.pattern(None, Some(&pred), None) else {
@@ -188,7 +188,7 @@ fn extract_graph(graph: &Graph, graph_name: Option<&Term>) -> (Vec<Entry>, usize
         for row in scan.rows.iter() {
             let [s, _, o] = scan.to_spo(row);
             // Only geometry-typed literals (geo:wktLiteral / geo:gmlLiteral);
-            // everything else is skipped. [OPUS-4.8]
+            // everything else is skipped.
             let lit = match graph.dict.term(o) {
                 Term::Literal(l) if crate::is_geometry_datatype(l.datatype().as_str()) => l,
                 _ => {
@@ -212,7 +212,7 @@ fn extract_graph(graph: &Graph, graph_name: Option<&Term>) -> (Vec<Entry>, usize
             let literal = Term::Literal(lit.clone());
             // `o` is the geo:asWKT OBJECT id in THIS graph's dict — the id the
             // engine's scanned geometry column binds for a row on this literal.
-            // Thread it so the pushdown can decide `is_indexed` at the id level. [OPUS-4.8]
+            // Thread it so the pushdown can decide `is_indexed` at the id level.
             let literal_id = o;
             match owners.get(&s) {
                 Some(features) => {
@@ -267,7 +267,7 @@ impl GeoIndex {
             .map(|(i, e)| TreeItem { idx: i as u32, env: geometry_env(&e.geometry) })
             .collect();
         // The id-level indexed universe: one ref per entry, one set membership per
-        // distinct literal id (features sharing a geometry share its literal id). [OPUS-4.8]
+        // distinct literal id (features sharing a geometry share its literal id).
         let mut literal_ids: FxHashSet<Id> = FxHashSet::default();
         let mut literal_id_refs: FxHashMap<Id, u32> = FxHashMap::default();
         for e in &entries {
@@ -279,7 +279,7 @@ impl GeoIndex {
             free: Vec::new(),
             tree: RTree::bulk_load(items),
             skipped,
-            // The freshness token: the source dict's address (opaque; no live borrow). [OPUS-4.8]
+            // The freshness token: the source dict's address (opaque; no live borrow).
             dict_ptr: Some(std::ptr::from_ref(&graph.dict) as usize),
             literal_ids,
             literal_id_refs,
@@ -320,7 +320,7 @@ impl GeoIndex {
     /// materialisation. The FRESHNESS gate is load-bearing: an id set only maps
     /// to the right terms against the dict it was extracted from, so a mismatched
     /// address returns `None` and the engine falls back to resolving each row's
-    /// term (always correct, just slower). [OPUS-4.8]
+    /// term (always correct, just slower).
     pub fn indexed_ids_for(&self, dict_ptr: usize) -> Option<&FxHashSet<Id>> {
         (self.dict_ptr == Some(dict_ptr)).then_some(&self.literal_ids)
     }
@@ -343,7 +343,7 @@ impl GeoIndex {
         // address means the maintained `literal_ids` stay authoritative and the
         // engine's id-level fast path remains sound; a MISMATCH (a different dict
         // was passed) invalidates freshness so the engine falls back to the per-row
-        // check — never a stale id-set. [OPUS-4.8]
+        // check — never a stale id-set.
         let now_ptr = std::ptr::from_ref(&graph.dict) as usize;
         if self.dict_ptr != Some(now_ptr) {
             self.dict_ptr = None;
@@ -357,7 +357,7 @@ impl GeoIndex {
         };
         for [s, p, o] in inserts.iter().chain(deletes) {
             match p {
-                // Both geometry-serialization predicates touch the subject node. [OPUS-4.8]
+                // Both geometry-serialization predicates touch the subject node.
                 Term::NamedNode(p) if p.as_str() == vocab::AS_WKT || p.as_str() == vocab::AS_GML => {
                     push_unique(s)
                 }
@@ -382,7 +382,7 @@ impl GeoIndex {
             if matches {
                 let entry = self.slots[idx as usize].take().expect("checked Some");
                 // Drop this entry's hold on its literal id; the id leaves the
-                // indexed universe only when its LAST entry is removed. [OPUS-4.8]
+                // indexed universe only when its LAST entry is removed.
                 if let Some(refs) = self.literal_id_refs.get_mut(&entry.literal_id) {
                     *refs -= 1;
                     if *refs == 0 {
@@ -420,7 +420,7 @@ impl GeoIndex {
                 }
             }
             // The node's geometry literals, post-delta, over BOTH serialization
-            // predicates (same skip rules as build). [OPUS-4.8]
+            // predicates (same skip rules as build).
             for serial_pred in [vocab::AS_WKT, vocab::AS_GML] {
                 let pred = NamedNode::new_unchecked(serial_pred);
                 let Some(pattern) = graph.pattern(Some(node), Some(&pred), None) else {
@@ -450,7 +450,7 @@ impl GeoIndex {
                             }
                         };
                     let literal = Term::Literal(lit.clone());
-                    // Post-delta OBJECT id in the (same) graph's dict. [OPUS-4.8]
+                    // Post-delta OBJECT id in the (same) graph's dict.
                     let literal_id = o;
                     if owners.is_empty() {
                         self.insert_entry(Entry {
@@ -482,7 +482,7 @@ impl GeoIndex {
     fn insert_entry(&mut self, entry: Entry) {
         let env = geometry_env(&entry.geometry);
         // Keep the id-level indexed universe in lockstep: bump this literal id's
-        // refcount, adding it to the set on its first live entry. [OPUS-4.8]
+        // refcount, adding it to the set on its first live entry.
         *self.literal_id_refs.entry(entry.literal_id).or_insert(0) += 1;
         self.literal_ids.insert(entry.literal_id);
         let idx = match self.free.pop() {
@@ -557,7 +557,7 @@ impl GeoIndex {
         let mut seen: FxHashSet<u32> = FxHashSet::default();
         let mut hits: Vec<(&Term, f64)> = Vec::new();
         for window in &windows {
-            // [OPUS-4.8] rstar 0.13 takes the envelope by value (AABB is Copy); deref the &window.
+            // rstar 0.13 takes the envelope by value (AABB is Copy); deref the &window.
             for item in self.tree.locate_in_envelope_intersecting(*window) {
                 if windows.len() > 1 && !seen.insert(item.idx) {
                     continue;
@@ -579,7 +579,7 @@ impl GeoIndex {
     }
 
     /// Convenience: [`within_distance`](Self::within_distance) from a wktLiteral
-    /// point lexical form. [GPT-5.6] sq-bif.19
+    /// point lexical form. sq-bif.19
     pub fn within_distance_wkt(
         &self,
         center_wkt: &str,
@@ -642,7 +642,7 @@ impl GeoIndex {
         }
         let window = AABB::from_corners([rect.min().x, rect.min().y], [rect.max().x, rect.max().y]);
         self.tree
-            // [OPUS-4.8] rstar 0.13 takes the envelope by value (AABB is Copy).
+            // rstar 0.13 takes the envelope by value (AABB is Copy).
             .locate_in_envelope_intersecting(window)
             .filter_map(|item| {
                 let e = self.slots[item.idx as usize].as_ref().expect("live slot");
@@ -663,7 +663,7 @@ impl GeoIndex {
     // maps them back to dictionary ids by term identity and pre-restricts the binding rows
     // before the exact `geof:` refinement runs — so a candidate set that is a superset of
     // the true matches is necessary and sufficient for correctness (false positives are
-    // removed by the residual FILTER; false negatives would be a bug). [OPUS-4.8]
+    // removed by the residual FILTER; false negatives would be a bug).
 
     /// The distinct geometry LITERALS whose geometry lies within `meters` great-circle
     /// metres of `center` — a candidate superset for `geof:distance(?g, center) <(=) r`.
@@ -675,7 +675,7 @@ impl GeoIndex {
         let mut seen: FxHashSet<u32> = FxHashSet::default();
         let mut out: Vec<Term> = Vec::new();
         for window in &windows {
-            // [OPUS-4.8] rstar 0.13 takes the envelope by value (AABB is Copy); deref the &window.
+            // rstar 0.13 takes the envelope by value (AABB is Copy); deref the &window.
             for item in self.tree.locate_in_envelope_intersecting(*window) {
                 if !seen.insert(item.idx) {
                     continue;
@@ -707,7 +707,7 @@ impl GeoIndex {
         let window = AABB::from_corners([rect.min().x, rect.min().y], [rect.max().x, rect.max().y]);
         let out: Vec<Term> = self
             .tree
-            // [OPUS-4.8] rstar 0.13 takes the envelope by value (AABB is Copy).
+            // rstar 0.13 takes the envelope by value (AABB is Copy).
             .locate_in_envelope_intersecting(window)
             .map(|item| self.slots[item.idx as usize].as_ref().expect("live slot").literal.clone())
             .collect();
@@ -733,7 +733,7 @@ impl GeoIndex {
             return Vec::new();
         }
 
-        // [GPT-5.6] sq-jrdds: prepare the CONSTANT side once per scan. Each
+        // sq-jrdds: prepare the CONSTANT side once per scan. Each
         // candidate still contributes its own geometry graph, but never rebuilds
         // the region's topology graph.
         let prepared_region = PreparedGeometry::from(region.geometry.clone());
@@ -778,7 +778,7 @@ fn dedupe(mut v: Vec<Term>) -> Vec<Term> {
 
 #[cfg(test)]
 mod indexed_ids_tests {
-    // [OPUS-4.8] sq-7jt80 — direct unit tests for the id-level indexed universe
+    // sq-7jt80 — direct unit tests for the id-level indexed universe
     // (`indexed_ids_for`). This set is the id-level equivalent of the per-`Term`
     // `is_indexed` check the spatial pushdown uses; correctness here is
     // ANSWER-SAFETY (a wrong verdict would silently drop or wrongly keep rows).

@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-bif.17: fully-bound zero-match and wildcard fast-path coverage
+//! sq-bif.17: fully-bound zero-match and wildcard fast-path coverage
 //! for the opt-in HDT load filter.
 
 #![cfg(feature = "load-filter")]

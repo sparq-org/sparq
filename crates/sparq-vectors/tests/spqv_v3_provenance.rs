@@ -1,4 +1,4 @@
-// [FABLE-5] (sq-lhcot.1) End-to-end NEGATIVE tests for the `.spqv` v3 embedding-provenance format:
+// (sq-lhcot.1) End-to-end NEGATIVE tests for the `.spqv` v3 embedding-provenance format:
 // a store WRITTEN with a provenance, reopened from the real file, and queried with an INCOMPATIBLE
 // embedder must be REJECTED — one distinct test per compatibility axis (model id, metric,
 // normalization, dimension), plus the v2/v1 fail-closed-by-default legacy path and the reserved-area

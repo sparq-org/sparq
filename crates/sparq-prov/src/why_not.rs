@@ -1,6 +1,6 @@
 //! Bounded missing-answer explanation for a single basic graph pattern.
 //!
-//! [GPT-5.6] sq-lsp7k.17: [`why_not`] substitutes a caller-provided target
+//! sq-lsp7k.17: [`why_not`] substitutes a caller-provided target
 //! binding into every triple pattern and reports exactly the resulting triples
 //! absent from the graph. More general SPARQL algebra is deliberately rejected.
 
@@ -16,7 +16,7 @@ use sparq_core::Graph;
 
 use crate::{prov, PROV, SPARQ_PROV_NS};
 
-// [GPT-5.6] sq-lsp7k: RDF vocabulary for deterministic missing-answer reports.
+// sq-lsp7k: RDF vocabulary for deterministic missing-answer reports.
 const ABSENT: &str = "urn:sparq:prov:absent";
 const POSITION: &str = "urn:sparq:prov:position";
 const TARGET_BINDING: &str = "urn:sparq:prov:targetBinding";
@@ -131,7 +131,7 @@ pub fn why_not(
 /// constructor, report entries can originate only from the bounded, single-BGP
 /// [`why_not`] surface.
 ///
-/// [GPT-5.6] sq-lsp7k
+/// sq-lsp7k
 pub fn why_not_report_ntriples(
     target: &HashMap<Variable, Term>,
     missing: &[MissingPattern],
@@ -147,7 +147,7 @@ pub fn why_not_report_ntriples(
 /// [`why_not_report_ntriples`]. Output is deterministic and retains the BGP
 /// order preserved by [`why_not`].
 ///
-/// [GPT-5.6] sq-lsp7k
+/// sq-lsp7k
 pub fn why_not_report_turtle(
     target: &HashMap<Variable, Term>,
     missing: &[MissingPattern],
@@ -402,7 +402,7 @@ mod tests {
         );
     }
 
-    /// [GPT-5.6] sq-lsp7k: a parsed report exposes exactly the grounded missing
+    /// sq-lsp7k: a parsed report exposes exactly the grounded missing
     /// triples, while a predicate mutation is observably rejected by the oracle.
     #[test]
     fn why_not_report_ntriples_round_trips_exact_grounded_triples() {
@@ -466,7 +466,7 @@ mod tests {
         assert_eq!(absent_subjects.len(), missing.len());
     }
 
-    /// [GPT-5.6] sq-lsp7k: HashMap iteration does not influence bytes, and the
+    /// sq-lsp7k: HashMap iteration does not influence bytes, and the
     /// Turtle surface denotes the exact same report graph as N-Triples.
     #[test]
     fn why_not_report_is_deterministic_and_turtle_round_trips() {
@@ -503,7 +503,7 @@ mod tests {
         assert_eq!(turtle_graph, nt_graph);
     }
 
-    /// [GPT-5.6] sq-lsp7k: a report cannot silently relabel an explanation with
+    /// sq-lsp7k: a report cannot silently relabel an explanation with
     /// a different target binding.
     #[test]
     fn why_not_report_rejects_target_mismatch() {

@@ -7,7 +7,7 @@
 //! PKG-answerable fixture set the **citation-resolution rate is 1.0** (every emitted
 //! citation resolves to a real in-graph Source/anchor), there are **zero fabricated
 //! citations**, and over a no-provenance graph the output is "no source recorded", never
-//! a guess. [OPUS-4.8]
+//! a guess.
 #![cfg(feature = "citations")]
 
 use sparq_core::Graph;

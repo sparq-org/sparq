@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-7d3dj.30.7) End-to-end acceptance for the opt-in `value-join`
+//! (sq-7d3dj.30.7) End-to-end acceptance for the opt-in `value-join`
 //! feature: the SP2Bench q05a star-intersection shape — two pattern components
 //! glued only by `FILTER(?name = ?name2)` — must produce EXACTLY the rows of the
 //! unoptimized evaluation.

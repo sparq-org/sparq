@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-py8h.4 — tests for hidden-key endpoint DISTINCT.
+// sq-py8h.4 — tests for hidden-key endpoint DISTINCT.
 use super::*;
 use crate::shamir::ShamirBackend;
 use std::collections::BTreeSet;

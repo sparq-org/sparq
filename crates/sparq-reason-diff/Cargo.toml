@@ -1,4 +1,4 @@
-# [FABLE-5] sq-xg6uu — OWL 2 RL differential-vs-external-oracle harness.
+# sq-xg6uu — OWL 2 RL differential-vs-external-oracle harness.
 #
 # A READ-ONLY differential test crate: it consumes sparq-reason's PUBLIC
 # `materialize(Profile::OwlRl, ..)` as a library dependency and diffs the closure

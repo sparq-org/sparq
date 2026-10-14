@@ -1,5 +1,5 @@
 //! N2 — dictionary-grounded constraint of generated SPARQL (`sq-9yjp`,
-//! `research/genai-nl-to-sparql.md` §8.1, §6 step 2). [OPUS-4.8]
+//! `research/genai-nl-to-sparql.md` §8.1, §6 step 2).
 //!
 //! Grammar-constrained *decoding* in the strict sense (mask the model's logits at
 //! every step so only grammar-valid tokens are ever emitted) requires **logit
@@ -438,7 +438,7 @@ mod tests {
 
     /// The set of unknown-predicate IRIs reported for `q`, sorted for order-insensitive
     /// comparison. Asserting on this proves the algebra walk actually *descended* into
-    /// the construct under test (an undescended arm would report nothing). [OPUS-4.8]
+    /// the construct under test (an undescended arm would report nothing).
     fn unknown_iris(q: &str) -> Vec<String> {
         let g = graph();
         let mut iris: Vec<String> = unknown_terms(&g, &parse(q))

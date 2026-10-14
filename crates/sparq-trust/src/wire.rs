@@ -23,7 +23,7 @@
 //! `.acl`/`.acr` rule" step (§6.0 pipeline step 4): the same full `reason_n3` the
 //! materialiser uses, which supports `math:greaterThan`.
 //!
-//! [OPUS-4.8] sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC.
+//! sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC.
 
 use crate::admit::{AdmittedFact, StaticAdmittedFact};
 use oxrdf::{NamedNode, NamedOrBlankNode, Term, Triple};

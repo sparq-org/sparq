@@ -173,7 +173,7 @@ struct Overlay {
     /// CACHED perm-sorted projections of `added`, indexed by `perm as usize`
     /// (sq-7d3dj.16). See [`Overlay::added_sorted`].
     added_by_perm: [std::sync::OnceLock<Vec<[Id; 3]>>; 6],
-    /// [GPT-6 Astra] Lazy deletion projections for range counts (#4246). Keep the
+    /// Lazy deletion projections for range counts (#4246). Keep the
     /// hash set above for merge membership; even SPO needs its own sorted projection.
     /// Full use retains up to `BUILT.len()` vectors, each with `deleted.len()`
     /// twelve-byte rows plus capacity slack, alongside that hash set. The sole
@@ -217,7 +217,7 @@ impl Overlay {
         }
     }
 
-    /// [GPT-6 Astra] Drops deleted projections only when the tombstone set changed.
+    /// Drops deleted projections only when the tombstone set changed.
     #[cfg(feature = "overlay-deleted-projections")]
     fn invalidate_deleted(&mut self) {
         for slot in &mut self.deleted_by_perm {
@@ -225,7 +225,7 @@ impl Overlay {
         }
     }
 
-    /// [GPT-6 Astra] Counts deletions using a lazily sorted projection (#4246).
+    /// Counts deletions using a lazily sorted projection (#4246).
     /// The first request costs O(d log d) and one additional vector; later requests
     /// use two binary searches. Clone copies initialized vectors by value, and
     /// apply_delta invalidates only the mutated overlay under exclusive access.
@@ -293,7 +293,7 @@ impl Overlay {
 
     /// How many overlay triples fall in the `[lo, hi]` range of `perm` — the exact
     /// correction to a base range count. The `added` side rides the cached perm-sorted
-    /// projection. [GPT-6 Astra] Deleted triples use the original linear filter by
+    /// projection. Deleted triples use the original linear filter by
     /// default; the experimental feature opts into lazy sorted projections.
     #[cfg(not(feature = "overlay-deleted-projections"))]
     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
@@ -310,7 +310,7 @@ impl Overlay {
         (add, del)
     }
 
-    /// [GPT-6 Astra] Experimental range correction using cached deletion projections.
+    /// Experimental range correction using cached deletion projections.
     #[cfg(feature = "overlay-deleted-projections")]
     fn count_correction(&self, perm: Perm, lo: [Id; 3], hi: [Id; 3]) -> (usize, usize) {
         let add = self.added_rows(perm, lo, hi).len();
@@ -324,7 +324,7 @@ impl Overlay {
 
     fn heap_bytes(&self) -> usize {
         // The cached perm-sorted projections are part of the overlay's footprint; SPO
-        // aliases `added`; [GPT-6 Astra] deleted projections own all requested perms.
+        // aliases `added`; deleted projections own all requested perms.
         let cached: usize = self
             .added_by_perm
             .iter()
@@ -371,7 +371,7 @@ pub struct TripleStore {
 /// lexicographic order). This is the O(n) index-build sort that replaces the
 /// branchy comparison quicksort over the packed permutation tuples — the single
 /// largest ingest self-time bucket (`research/engine-performance-review.md` §1.1,
-/// sq-7d3dj.17). [OPUS-4.8]
+/// sq-7d3dj.17).
 ///
 /// Output equivalence is exact and gated: for any input, the multiset is preserved
 /// and the result is fully sorted, so it is BYTE-IDENTICAL to `sort_unstable()`
@@ -513,7 +513,7 @@ impl TripleStore {
     /// per-scan decode cost. Cardinality stats are computed from the raw perms *before*
     /// encoding (so neither the build nor the planner ever decodes a whole index).
     ///
-    /// [FABLE-5] sq-559dp — encodes through `CompressedPerm::encode_emit`, the SAME one-place
+    /// sq-559dp — encodes through `CompressedPerm::encode_emit`, the SAME one-place
     /// emit-format gate the on-disk save path uses, so `SPARQ_STORE_PROFILE=compressed` can opt
     /// into the `SPQCPRM2` frame-of-reference block stream (`spqcprm2` feature +
     /// `SPARQ_EMIT_FORMAT=v2` / `with_emit_format`) instead of being pinned to V1. The default
@@ -538,7 +538,7 @@ impl TripleStore {
     /// the same plan in order — kept as separate `fn` definitions so the wasm codegen carries
     /// no rayon shape at all.
     ///
-    /// [SONNET-4.6 sq-dzfzq] DERIVED build. One full 12-digit [`radix_sort_rows`] + ONE dedup
+    /// [sq-dzfzq] DERIVED build. One full 12-digit [`radix_sort_rows`] + ONE dedup
     /// produces SPO; every other permutation is then [derived](Self::derive_perm) from an
     /// already-sorted run by a column re-map plus a stable sort on its NEW LEADING COLUMN
     /// alone — at most four byte passes over one column, usually fewer (a predicate column
@@ -597,7 +597,7 @@ impl TripleStore {
     fn build_raw_perms(mut triples: Vec<[Id; 3]>) -> [PermData; 6] {
         radix_sort_rows(&mut triples);
         triples.dedup();
-        // [SONNET-4.6 sq-7d3dj.32.1] Eliminate dedup capacity slack: after dedup the Vec retains
+        // [sq-7d3dj.32.1] Eliminate dedup capacity slack: after dedup the Vec retains
         // its pre-dedup allocation. shrink_to_fit realigns len == capacity so heap_bytes() (which
         // counts capacity()) returns zero slack. The DERIVED perms are exact-sized by
         // construction (an ExactSize map-collect, then a same-length radix double-buffer).
@@ -659,9 +659,9 @@ impl TripleStore {
 
     /// No-threads build of the permutation indexes (wasm / no-rayon path). Deduplicates via
     /// the SPO ordering first (radix — no parallel sort to beat it here), then walks
-    /// [`DERIVE_PLAN`] in order, reusing the deduped array for the SPO slot. [SONNET-4.6
-    /// sq-7d3dj.32.1] shrink_to_fit after dedup so the SPO slot carries zero capacity slack
-    /// (the derived perms are exact by construction). [SONNET-4.6 sq-dzfzq] each derived perm
+    /// [`DERIVE_PLAN`] in order, reusing the deduped array for the SPO slot. [sq-7d3dj.32.1]
+    /// shrink_to_fit after dedup so the SPO slot carries zero capacity slack
+    /// (the derived perms are exact by construction). [sq-dzfzq] each derived perm
     /// now costs one single-column sort instead of a full 12-digit one — on wasm, where there
     /// are no threads to hide the work behind, this is the whole saving.
     /// The wasm bundle byte count changes from the historical value — declared in
@@ -670,7 +670,7 @@ impl TripleStore {
     fn build_raw_perms(mut triples: Vec<[Id; 3]>) -> [PermData; 6] {
         radix_sort_rows(&mut triples);
         triples.dedup();
-        // [SONNET-4.6 sq-7d3dj.32.1] Release the pre-dedup capacity so the SPO slot is
+        // [sq-7d3dj.32.1] Release the pre-dedup capacity so the SPO slot is
         // exact-sized.  heap_bytes() counts capacity(); without this call it would count
         // the full pre-dedup allocation even after duplicates are removed.
         triples.shrink_to_fit();
@@ -727,7 +727,7 @@ impl TripleStore {
             let path = dir.join(format!("perm{i}.bin"));
             if compressed && !rows.is_empty() {
                 // Unbuilt (empty) permutations stay raw-empty so `open` skips them by size.
-                // [FABLE-5] sq-7d3dj.32.2.7: `encode_emit` honours the emit-format config gate —
+                // sq-7d3dj.32.2.7: `encode_emit` honours the emit-format config gate —
                 // `SPQCPRM1` by default, `SPQCPRM2` only when a `spqcprm2` build has opted in.
                 let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
                 crate::compress::CompressedPerm::encode_emit(&rows).write_to(&mut w)?;
@@ -754,7 +754,7 @@ impl TripleStore {
         use std::io::Write;
         let mut w = std::io::BufWriter::new(std::fs::File::create(dir.join("predstats.bin"))?);
         w.write_all(&(self.pred_stats.len() as u64).to_le_bytes())?;
-        // [GPT-6] Hash-map iteration can change after loading/reserving identical stats.
+        // Hash-map iteration can change after loading/reserving identical stats.
         // Canonicalize the shared writer so external builds and re-saves agree bytewise.
         let mut entries: Vec<_> = self.pred_stats.iter().collect();
         entries.sort_unstable_by_key(|&(&p, _)| p);
@@ -788,7 +788,7 @@ impl TripleStore {
             r.read_exact(&mut b).ok()?;
             Some(Id::from_le_bytes(b))
         }
-        // [OPUS-4.8] sq-f5jh: `predstats.bin` is an UNTRUSTED on-disk file (trust boundary
+        // sq-f5jh: `predstats.bin` is an UNTRUSTED on-disk file (trust boundary
         // B5). `n` is a u64 count read straight from it, and `reserve(n)` was unbounded — a
         // single flipped count byte could ask `FxHashMap` to pre-allocate billions of slots
         // (~17 B each) and ABORT the process (uncatchable OOM DoS; under llvm-cov's added
@@ -831,7 +831,7 @@ impl TripleStore {
             // FORMAT AUTO-DETECTION: a block-compressed file (written by `save_compressed`)
             // starts with FILE_MAGIC (`SPQCPRM1`) or, for a `spqcprm2`-emitting build,
             // FILE_MAGIC_V2 (`SPQCPRM2`); anything else is the original raw [u32;3] format.
-            // [FABLE-5] sq-7d3dj.32.2.7: both magics route to `from_mmap`, which re-checks the
+            // sq-7d3dj.32.2.7: both magics route to `from_mmap`, which re-checks the
             // magic and picks the V1/V2 decode reader — a V1 file decodes byte-identically
             // forever. Compressed perms are served lazily — block-wise decode off the mapped file.
             *slot = if map.len() >= 8
@@ -913,7 +913,7 @@ impl TripleStore {
         self.overlay.is_some()
     }
 
-    /// [OPUS-4.8] (sq-5lf) Strong-reference count of the `Arc`-shared base permutation
+    /// (sq-5lf) Strong-reference count of the `Arc`-shared base permutation
     /// indexes — i.e. how many stores currently SHARE this exact base storage. 1 for a
     /// freshly built / just-compacted store; bumps by one for each live
     /// [`fork`](Self::fork) / [`Graph::snapshot`](crate::Graph::snapshot) of it. Used to
@@ -953,7 +953,7 @@ impl TripleStore {
             return;
         }
         let mut ov = self.overlay.take().unwrap_or_default();
-        // [GPT-6 Astra] Added projections retain the existing conservative reset.
+        // Added projections retain the existing conservative reset.
         // Preserve deletion projections across inserts/no-ops: only actual tombstone
         // changes require another sort. No overlay read occurs before publication.
         ov.invalidate_added();
@@ -1095,7 +1095,7 @@ impl TripleStore {
         self.scan_with(pattern, perm, lead)
     }
 
-    /// [OPUS-4.8] (sq-7d3dj.30.4) Scans a SPECIFIC permutation `perm`, for callers that
+    /// (sq-7d3dj.30.4) Scans a SPECIFIC permutation `perm`, for callers that
     /// need a particular SECONDARY column order rather than just a primary sort column
     /// (e.g. the DISTINCT loose skip-scan wants the layout `[..bound.., P, J, ..]` so each
     /// `P`-block is `J`-sorted). Returns `None` when `perm` is not built (e.g. the compact
@@ -1143,7 +1143,7 @@ impl TripleStore {
         // deleted triples are filtered out and the inserted ones merge-interleaved, so
         // the rows keep the permutation's sort order (merge joins stay valid).
         //
-        // ZERO-COPY FAST PATH (sq-7d3dj.3) [OPUS-4.8]: even WITH an overlay, most ranges a small
+        // ZERO-COPY FAST PATH (sq-7d3dj.3): even WITH an overlay, most ranges a small
         // overlay does not touch. `count_correction` tells us exactly how many
         // `added`/`deleted` triples fall in this range; when it is `(0, 0)` the
         // overlay contributes nothing here — no `added` row projects into `[lo, hi]` (so
@@ -1333,7 +1333,7 @@ mod tests {
         }
     }
 
-    /// [SONNET-4.6 sq-dzfzq] The reference build the DERIVED build replaced: every BUILT
+    /// [sq-dzfzq] The reference build the DERIVED build replaced: every BUILT
     /// permutation mapped from the raw input and sorted+deduped INDEPENDENTLY with the full
     /// 12-digit radix (the sq-7d3dj.31 concurrent-N body). Kept test-only as the differential
     /// oracle for `derived_perms_match_radix_all_build` and as the "A" arm of
@@ -1360,7 +1360,7 @@ mod tests {
         }
     }
 
-    /// [SONNET-4.6 sq-dzfzq] The derivability invariant `derive_perm` rests on, checked for the
+    /// [sq-dzfzq] The derivability invariant `derive_perm` rests on, checked for the
     /// plan AS SHIPPED: for every `(src, dst)` pair, deleting `dst`'s LEADING column from
     /// `src`'s column order must leave `dst`'s two trailing columns in that order — that is
     /// exactly the condition under which a stable sort of the re-mapped rows by `dst`'s leading
@@ -1392,7 +1392,7 @@ mod tests {
         assert_eq!(have, want, "the derivation plan must produce exactly the BUILT set");
     }
 
-    /// [SONNET-4.6 sq-dzfzq] RESULT-EQUIVALENCE of the derived build: every BUILT permutation of
+    /// [sq-dzfzq] RESULT-EQUIVALENCE of the derived build: every BUILT permutation of
     /// a derived-built store must be BYTE-IDENTICAL to the independent full-radix sort+dedup of
     /// the same input (`build_raw_perms_radix_all` — the body the derived build replaced).
     /// Complements `from_triples_perms_match_reference_sort` (which compares against
@@ -1451,7 +1451,7 @@ mod tests {
         }
     }
 
-    /// [SONNET-4.6 sq-dzfzq] NON-CANONICAL work-box A/B for the derived permutation build —
+    /// [sq-dzfzq] NON-CANONICAL work-box A/B for the derived permutation build —
     /// the measure-first half of the bead. `#[ignore]`d: it times, so it must never run in the
     /// normal test lane, and its numbers belong to whatever box ran it. Run explicitly:
     ///
@@ -1514,7 +1514,7 @@ mod tests {
         }
     }
 
-    /// [OPUS-4.8] (sq-7d3dj.30.4) `scan_perm` returns the rows for a SPECIFIC built
+    /// (sq-7d3dj.30.4) `scan_perm` returns the rows for a SPECIFIC built
     /// permutation (with the pattern's bound positions as a leading prefix), and `None`
     /// when the permutation is not built or the bound positions are not a prefix.
     #[test]
@@ -1531,7 +1531,7 @@ mod tests {
         // sorted in that permutation's column order. Which predicate-first perm is BUILT
         // differs by index set: the default 6-perm build has PSO; the 3-perm `compact-index`
         // build ({SPO, POS, OSP}) has POS instead — where `scan_perm(Perm::Pso)` correctly
-        // returns `None` because PSO is not built (the documented contract). [OPUS-4.8]
+        // returns `None` because PSO is not built (the documented contract).
         #[cfg(not(any(target_arch = "wasm32", feature = "compact-index")))]
         {
             let scan = store.scan_perm(&[None, None, None], Perm::Pso).expect("PSO is built");
@@ -1570,7 +1570,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8 sq-7d3dj.31] Direct gate on the concurrent-N build's INDEPENDENT per-perm
+    /// [sq-7d3dj.31] Direct gate on the concurrent-N build's INDEPENDENT per-perm
     /// dedup: with the parallel build, SPO is no longer deduped-first-then-mapped — every perm
     /// dedups its own sorted copy. On a heavily-duplicated input (the same handful of triples
     /// repeated thousands of times) each BUILT perm must still hold EXACTLY the distinct set,
@@ -1644,7 +1644,7 @@ mod tests {
         }
     }
 
-    /// [FABLE-5] sq-559dp — the IN-RAM compressed profile honours the SPQCPRM2 emit gate.
+    /// sq-559dp — the IN-RAM compressed profile honours the SPQCPRM2 emit gate.
     /// `from_triples_compressed` now encodes through `CompressedPerm::encode_emit` (the same
     /// one-place gate `save_compressed` uses), so `SPARQ_STORE_PROFILE=compressed` can opt into
     /// the frame-of-reference col2 reset instead of being pinned to V1. Asserts three things:
@@ -1834,7 +1834,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// [GPT-6] Persisted bytes depend on statistics, not hash-map layout or reloads.
+    /// Persisted bytes depend on statistics, not hash-map layout or reloads.
     #[cfg(feature = "mmap")]
     #[test]
     fn pred_stats_serialization_is_canonical_across_map_layouts() {
@@ -2166,7 +2166,7 @@ mod tests {
         );
     }
 
-    /// [SONNET-4.6 sq-7d3dj.32.1] Each built raw-mode permutation Vec must carry zero
+    /// [sq-7d3dj.32.1] Each built raw-mode permutation Vec must carry zero
     /// capacity slack after construction.  heap_bytes() uses capacity(), so any excess
     /// inflates the reported B/triple; shrink_to_fit() (called in both build_raw_perms
     /// bodies) must leave len == capacity.  The input has heavy duplicates so the pre-dedup

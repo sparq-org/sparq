@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-ustq) TextIndex benchmark runner — the G1 TSV-emitting runner for
+//! (sq-ustq) TextIndex benchmark runner — the G1 TSV-emitting runner for
 //! `bench/fts/`, the full-text-search analogue of `sparq-cli bench` / `bench_shacl`.
 //!
 //! Two axes, one binary (design: research/capability-benchmark-program.md §3.4):
@@ -47,7 +47,7 @@
 
 use std::time::Instant;
 
-// [OPUS-4.8] sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
+// sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
 use rand::{rngs::StdRng, RngExt, SeedableRng};
 use sparq_core::Graph;
 use sparq_text::TextIndex;
@@ -93,7 +93,7 @@ fn fixed_queries(n: usize) -> Vec<(String, String)> {
 const QUERIES: usize = 200;
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-ghjc) --json <path> machine-readable results emit
+// (sq-ghjc) --json <path> machine-readable results emit
 // ---------------------------------------------------------------------------
 //
 // Strictly-additive: a trailing `--json <path>` writes the SAME `name/count/us`
@@ -310,7 +310,7 @@ fn main() {
     // The deterministic index-footprint gate (count = integer B/doc; us = advisory build time).
     println!("bytes_per_doc\t{bytes_per_doc}\t{build_us:.1}");
 
-    // [OPUS-4.8] (sq-ghjc) Strictly-additive JSON emit: only when `--json <path>` was
+    // (sq-ghjc) Strictly-additive JSON emit: only when `--json <path>` was
     // given. STDOUT above is the unchanged TSV the bench/fts gate parses.
     if let Some(path) = json_path {
         let doc = results_json(n, seed, iters, &rows, bytes_per_doc, build_us);
@@ -323,7 +323,7 @@ fn main() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-ghjc) --json emit tests
+// (sq-ghjc) --json emit tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {

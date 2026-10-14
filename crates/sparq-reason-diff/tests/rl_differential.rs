@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-xg6uu — the OWL 2 RL differential-vs-external-oracle test (the
+//! sq-xg6uu — the OWL 2 RL differential-vs-external-oracle test (the
 //! bead's ACCEPTANCE test):
 //!
 //! ```text

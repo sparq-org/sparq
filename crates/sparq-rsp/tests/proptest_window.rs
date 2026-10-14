@@ -1,4 +1,4 @@
-//! [GPT-5.6] Property tests for the windowing-soundness invariant.
+//! Property tests for the windowing-soundness invariant.
 
 use std::collections::BTreeMap;
 

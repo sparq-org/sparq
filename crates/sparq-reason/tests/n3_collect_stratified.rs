@@ -3,7 +3,7 @@
 //! Solid access-control pipeline (research/solid-access-control-design.md §1.4 /
 //! §7 item 2, bead sq-jwsp).
 //!
-//! 🤖 SPARQ agent — sq-jwsp [FABLE-5].
+//! 🤖 SPARQ agent — sq-jwsp.
 //!
 //! Semantics pinned here:
 //!   * collectAllIn is findall — duplicates kept, no solutions ⇒ the empty list —

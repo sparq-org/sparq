@@ -48,13 +48,17 @@
 //!   **The completeness guard (why this is recall-safe).** Served characteristic sets are
 //!   routinely **truncated** (the long tail is elided — `sparq-introspect`'s `max_char_sets`),
 //!   and a missing set would make "no set contains both" a lie. The rule therefore fires only
-//!   when the descriptor's **own accounting proves the sets are complete for each predicate
-//!   involved**: because the sets partition subjects, `Σ_{C ∋ p} C.subjects` must equal
-//!   `void:distinctSubjects` of `p`'s predicate partition. Truncation strictly *lowers* that
-//!   sum (an elided set has `subjects > 0` by construction), so the equality fails and the rule
+//!   when the descriptor **declares its served sets complete** via
+//!   [`SourceDescriptor::char_sets_complete`], or its **own accounting proves completeness
+//!   for each predicate involved**: because the sets partition subjects, `Σ_{C ∋ p} C.subjects`
+//!   must equal `void:distinctSubjects` of `p`'s predicate partition. Without a declaration,
+//!   truncation strictly *lowers* that sum (an elided set has `subjects > 0` by construction),
+//!   so the equality fails and the rule
 //!   declines. A predicate whose `distinct_subjects` was not served (`0` = unknown) also
 //!   declines. The guard is **per predicate**, so eliding sets that do not mention `p` leaves
 //!   `p`'s accounting exact — the rule stays available exactly where it is provable.
+//!   The explicit declaration is trusted like [`SourceDescriptor::authorities_complete`];
+//!   falsely declaring a truncated summary complete can drop answers (lose recall).
 //!
 //! * **The declined non-rule — value-overlap / bound-IRI propagation.** A tempting idea is to
 //!   propagate a bound IRI constant across a shared join variable and prune a source whose
@@ -80,11 +84,11 @@
 //! is *proved* unsatisfiable (an empty conjunct ⇒ no answers exist ⇒ marking every candidate
 //! dead loses nothing) — it merely **propagates** an already-recall-safe emptiness verdict
 //! across the conjunction. Rule C2 marks a *pairing* dead only behind the completeness guard
-//! above, i.e. only when the descriptor's own subject accounting **proves** no subject of that
-//! source carries both predicates; every uncertain case (truncated sets, unknown
-//! `distinct_subjects`, an unbound predicate, a non-subject-position join) declines and keeps
-//! the pairing. Rule C2 removes a *(pattern, source) candidate* only in the one case where the
-//! dead pairing leaves it with nowhere to go: when the peer pattern's **only** surviving
+//! above, using either the trusted completeness declaration or the descriptor's own subject
+//! accounting to prove no subject of that source carries both predicates. Without a declaration,
+//! truncated sets or unknown `distinct_subjects` decline and keep the pairing; an unbound
+//! predicate or a non-subject-position join always declines. Rule C2 removes a *(pattern, source)
+//! candidate only when the dead pairing leaves it with nowhere to go: the peer pattern's **only** surviving
 //! candidate is that same source, so every combination through this candidate contains the dead
 //! pairing.
 //!
@@ -550,6 +554,10 @@ fn char_set_has(cs: &CharSet, predicate: &str) -> bool {
 /// complete for `predicate`* — i.e. whether "no set carries `predicate` together with the other
 /// star predicate" is a proof rather than an artefact of a truncated summary.
 ///
+/// An explicit [`SourceDescriptor::char_sets_complete`] declaration is trusted, like
+/// authority completeness: a false declaration can drop answers (lose recall). Without
+/// that opt-in, the accounting inference below is unchanged.
+///
 /// Characteristic sets partition a source's subjects by their **exact** predicate set, so the
 /// subjects carrying `predicate` are exactly `Σ_{C ∋ predicate} C.subjects`; that must equal the
 /// predicate partition's `void:distinctSubjects`. Any elided set carrying `predicate` strictly
@@ -570,6 +578,9 @@ fn char_set_has(cs: &CharSet, predicate: &str) -> bool {
 /// genuine subject partition — that is the source's own declaration — it only rejects the
 /// violations detectable from the descriptor alone (fail-closed, the recall-safe direction).
 fn char_sets_complete_for(desc: &SourceDescriptor, predicate: &str) -> bool {
+    if desc.char_sets_complete() {
+        return true;
+    }
     let Some(part) = desc.predicate(predicate) else {
         return false;
     };
@@ -1333,6 +1344,41 @@ mod tests {
         assert!(out.bgp_satisfiable);
         assert!(out.pruned.is_empty());
         assert!(!out.combination_is_dead(&[0, 0]));
+    }
+
+    /// Only the explicit declaration permits pruning when accounting cannot prove completeness.
+    #[test]
+    fn declared_char_sets_complete_bypasses_unbalanced_or_unknown_accounting() {
+        let bgp = star_bgp();
+        for accounting in [Accounting::Elided(1), Accounting::Unknown] {
+            let incomplete = split_source("http://a/", accounting);
+            assert!(!incomplete.char_sets_complete());
+            let mut builder = SourceDescriptor::builder(incomplete.id().clone())
+                .total_triples(incomplete.total_triples);
+            for p in [SHARES_HOUSE, NAME] {
+                builder = builder.predicate(incomplete.predicate(p).unwrap().clone());
+            }
+            for cs in incomplete.char_sets() {
+                builder = builder.char_set(cs.clone());
+            }
+            let declared = builder.char_sets_complete().build();
+            for (desc, should_prune) in [(incomplete, false), (declared, true)] {
+                let sources = vec![desc, covering_source("http://b/")];
+                let selected = select_private_sources(&bgp, &sources, &[]).unwrap();
+                assert_eq!(selected.per_pattern[0].candidates.len(), 2);
+                assert_eq!(selected.per_pattern[1].candidates.len(), 2);
+
+                let out = prune_source_combinations(&bgp, &sources, &selected).unwrap();
+                assert_eq!(out.dead_pairings.len(), usize::from(should_prune));
+                assert_eq!(out.combination_is_dead(&[0, 0]), should_prune);
+                assert!(!out.combination_is_dead(&[0, 1]));
+                assert!(!out.combination_is_dead(&[1, 0]));
+                assert!(!out.combination_is_dead(&[1, 1]));
+                assert!(out.bgp_satisfiable);
+                assert!(out.pruned.is_empty());
+                assert_eq!(out.per_pattern, selected.per_pattern);
+            }
+        }
     }
 
     /// Recall-safety: a predicate partition that did not serve `void:distinctSubjects` (`0` =

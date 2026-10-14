@@ -11,7 +11,7 @@
 //!
 //! Run: `cargo run -p sparq-introspect --example olympics_introspect --release`
 //!
-//! [OPUS-4.8] (sq-cxji) `--json <path>` writes the SAME measurements STDOUT prints —
+//! (sq-cxji) `--json <path>` writes the SAME measurements STDOUT prints —
 //! the deterministic structural counts (triples, subjects, classes, predicates,
 //! characteristic sets, namespaces, byte sizes) plus the advisory build/serialise
 //! timings — as a stable, DEPENDENCY-FREE JSON document, mirroring the `format!`-JSON
@@ -105,7 +105,7 @@ fn measure(name: &str, path: &std::path::Path) -> DatasetResult {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-cxji) --json <path> machine-readable results emit
+// (sq-cxji) --json <path> machine-readable results emit
 // ---------------------------------------------------------------------------
 
 /// Extracts `--json <path>` (and its value) from argv, returning argv WITHOUT the
@@ -208,7 +208,7 @@ fn main() {
         None => eprintln!("synthetic.nt not found (set SPARQ_SYNTHETIC_NT) — skipping"),
     }
 
-    // [OPUS-4.8] (sq-cxji) Strictly-additive JSON emit: only when `--json <path>` was
+    // (sq-cxji) Strictly-additive JSON emit: only when `--json <path>` was
     // given. STDOUT above is the unchanged human report. An empty `datasets` array
     // (neither dataset present) is still valid JSON, so the file is always written.
     if let Some(path) = json_path {
@@ -222,7 +222,7 @@ fn main() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-cxji) --json emit tests
+// (sq-cxji) --json emit tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {

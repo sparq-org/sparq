@@ -1,4 +1,4 @@
-//! **TLP under SET semantics: the `DISTINCT` partition variant.** [OPUS-5] sq-gum8.12
+//! **TLP under SET semantics: the `DISTINCT` partition variant.** sq-gum8.12
 //!
 //! The shipped [`crate::tlp`] oracle recombines the three partitions with **multiset**
 //! union, which is why its scope preconditions exclude `DISTINCT`/`REDUCED`. That

@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-pntvh.5) Columnar dispatch gate: the `VEC_MIN_BATCH` / `VEC_MORSEL`
+//! (sq-pntvh.5) Columnar dispatch gate: the `VEC_MIN_BATCH` / `VEC_MORSEL`
 //! constants and the I5 probe counters that every M4 seam shares.
 //!
 //! This module is the **single owner** of the decline hierarchy (I1–I5) described in
@@ -134,7 +134,6 @@ pub(crate) fn record_chunk(morsel_rows: usize) {
 
 /// Records `n` rows delegated to the scalar predicate in the hybrid tri-mask FILTER
 /// (sq-y5ew5). Called once per morsel by `columnar_filter` after the tri-mask pass.
-/// [SONNET-4.6]
 #[inline]
 pub(crate) fn record_delegated(n: usize) {
     TL_ROWS_DELEGATED.with(|c| c.set(c.get() + n as u64));
@@ -150,7 +149,7 @@ pub(crate) fn record_decline() {
 mod tests {
     use super::*;
 
-    /// Each public function must compile and work: basic increment + snapshot round-trip. [SONNET-4.6]
+    /// Each public function must compile and work: basic increment + snapshot round-trip.
     #[test]
     fn counters_round_trip() {
         reset_stats();

@@ -1,5 +1,5 @@
-// [OPUS-4.8] sq-evb1: EL+⊥ completion (CR1–CR5) over S(C) and R(r).
-// [FABLE-5] sq-pbz04.2.1: + CR6 (safe nominals).
+// sq-evb1: EL+⊥ completion (CR1–CR5) over S(C) and R(r).
+// sq-pbz04.2.1: + CR6 (safe nominals).
 //
 // The saturator computes the least fixpoint of the Baader–Brandt–Lutz completion rules with
 // bottom (the SAME calculus ELK's core implements, restricted to the recognised fragment):
@@ -16,7 +16,7 @@
 //   CRs3   (X,X) ∈ R(r),  X a NOMINAL {a}  ⇒  ∃r.Self ∈ S(X)                     [sq-8zqwb]
 //   CRs4   ∃r.Self ∈ S(X), r ⊑* s            ⇒  ∃s.Self ∈ S(X)                  [sq-l2o9e]
 //
-// [OPUS-4.8] sq-pbz04.2.6 — the two EL++ self-restriction (`owl:hasSelf` / `ObjectHasSelf`)
+// sq-pbz04.2.6 — the two EL++ self-restriction (`owl:hasSelf` / `ObjectHasSelf`)
 // completion rules. `∃r.Self` (the LOCAL reflexivity concept `{x | (x,x) ∈ r}`) is extracted as
 // a distinguished basic concept atom (`Names::self_concept`), so `X ⊑ ∃r.Self` and `∃r.Self ⊑ D`
 // reduce to ordinary `Normal::Sub` axioms and CR1/CR2/CR4 propagate `∃r.Self` memberships for
@@ -29,7 +29,7 @@
 // `X ⊑ ∃r.Self`) must NEVER trigger CRs2. CRs1 IS sound to add to the ordinary link set because
 // `X ⊑ ∃r.Self ⟹ X ⊑ ∃r.X` (the self-successor is X itself), so the R-invariant holds.
 //
-// [FABLE-5] sq-8zqwb (EL wave-2) — CRs3, the NOMINAL-REFLEXIVITY converse of CRs1: a SAME-NOMINAL
+// sq-8zqwb (EL wave-2) — CRs3, the NOMINAL-REFLEXIVITY converse of CRs1: a SAME-NOMINAL
 // self-link `({a},{a}) ∈ R(r)` (e.g. the internalized assertion `a r a`, asserted OR derived)
 // reads off as `∃r.Self ∈ S({a})`. SOUND because a nominal denotes a singleton: the R-invariant
 // gives `T ⊨ {a} ⊑ ∃r.{a}`, so a^I's r-successor inside `{a^I}` IS a^I itself — `(a^I,a^I) ∈ r^I`,
@@ -51,7 +51,7 @@
 // `par` feature (Phase E4, sq-wy3i6) adds the deterministic bulk-synchronous parallel engine at
 // the tail of this file — same rules, same least fixpoint, identical closure at every thread count.
 //
-// ## Substrate adoption evaluation -- REASONED NON-ADOPTION [SONNET-4.6] sq-pbz04.2.3
+// ## Substrate adoption evaluation -- REASONED NON-ADOPTION sq-pbz04.2.3
 //
 // Bead sq-pbz04.2.3 evaluated whether the CR1-CR5 saturation joins can adopt the shared
 // `sparq_substrate::join` kernels (the `build_table`/`probe_emit`/`hash_probe_serial` and
@@ -115,7 +115,7 @@
 // coupled, with no round boundary to hang a delta on.
 //
 // Conclusion: this module stays on its hand-rolled FxHashMap worklist. There is no
-// profitable behaviour-neutral seam to the substrate kernels for CR1-CR5. [FABLE-5]
+// profitable behaviour-neutral seam to the substrate kernels for CR1-CR5.
 // sq-wy3i6 (the E4 concurrency this note anticipated): the `par` engine batches the
 // frontier into bulk-synchronous ROUNDS, but each rule firing is still a per-membership
 // hash-set probe against mutating S/R state (the apply phase mutates between rounds), so
@@ -222,7 +222,7 @@ fn saturate_inner(
 }
 
 /// Seeds `init` — `S(C) := {C, ⊤}` — for the concept rows `from..to`, queueing both memberships
-/// so the worklist processes them. Split out of [`saturate_inner`] ([SONNET-4.6] sq-clsv6) so the
+/// so the worklist processes them. Split out of [`saturate_inner`] (sq-clsv6) so the
 /// incremental path can seed only the rows a TBox edit newly minted, with IDENTICAL seeding
 /// semantics for old and new rows.
 fn seed_init_rows(
@@ -243,7 +243,7 @@ fn seed_init_rows(
 
 /// The CR1–CR5 (+ CRs1, + CR10/CR11 under `rbox`) worklist drain alternated with the CR6
 /// nominal pass, run to a fixpoint over whatever `sat` / `queue` it is handed. Extracted from
-/// [`saturate_inner`] VERBATIM ([SONNET-4.6] sq-clsv6) so the from-scratch and incremental
+/// [`saturate_inner`] VERBATIM (sq-clsv6) so the from-scratch and incremental
 /// entries execute the SAME rule code — the reason the two agree by construction rather than by
 /// a maintained parallel implementation.
 ///
@@ -259,7 +259,7 @@ fn drain(
     #[cfg(feature = "rbox")] role_box: &RoleBox,
     queue: &mut Vec<(Concept, Concept)>,
 ) {
-    // [OPUS-4.8] sq-pbz04.2.6: O(1) fast-path guard — on a hasSelf-free ontology CRs1 is skipped
+    // sq-pbz04.2.6: O(1) fast-path guard — on a hasSelf-free ontology CRs1 is skipped
     // entirely, so classification is byte-identical (behaviour AND cost) to the pre-CR-Self path.
     let has_self = names.has_self_restrictions();
     loop {
@@ -340,7 +340,7 @@ fn drain(
     }
 }
 
-/// [SONNET-4.6] sq-clsv6 (Phase E5, `incremental`): RESUMES an already-saturated [`Saturation`]
+/// sq-clsv6 (Phase E5, `incremental`): RESUMES an already-saturated [`Saturation`]
 /// after a MONOTONE TBox extension — `axioms` is the full post-edit axiom set and `added` the
 /// newly-extracted delta (so `axioms` is a superset of the pre-edit axiom set). Returns the
 /// number of retained memberships re-queued as the delta frontier (the incremental work measure).
@@ -437,7 +437,7 @@ pub fn resaturate(
     seeded
 }
 
-/// [FABLE-5] sq-pbz04.2.1 — CR6, the safe-nominal completion rule (Baader–Brandt–Lutz,
+/// sq-pbz04.2.1 — CR6, the safe-nominal completion rule (Baader–Brandt–Lutz,
 /// "Pushing the EL Envelope", IJCAI-05):
 ///
 /// ```text
@@ -557,7 +557,7 @@ fn add(set: &mut FxHashSet<Concept>, x: Concept, e: Concept, queue: &mut Vec<(Co
 
 /// Adds the existential link `(x, f) ∈ R(r)` and fires the link-triggered half of CR4/CR5:
 /// for the NEW link, every `D ∈ S(f)` with an axiom `∃r.D ⊑ E` yields `E ∈ S(x)`, and a
-/// pre-existing `⊥ ∈ S(f)` yields `⊥ ∈ S(x)` (CR5). Also fires CRs3 ([FABLE-5] sq-8zqwb): a
+/// pre-existing `⊥ ∈ S(f)` yields `⊥ ∈ S(x)` (CR5). Also fires CRs3 (sq-8zqwb): a
 /// SAME-NOMINAL self-link `({a},{a}) ∈ R(r)` adds `∃r.Self` to `S({a})` — this is the single
 /// chokepoint every link insertion (CR3, CRs1, the `rbox` closure, and the `par` apply phase)
 /// flows through, so asserted, derived, and role-closed self-links all read off. Returns `true`
@@ -582,7 +582,7 @@ fn add_link(
         .or_default()
         .insert(x);
 
-    // CRs3 ([FABLE-5] sq-8zqwb): a same-nominal self-link is LOCAL reflexivity — `({a},{a}) ∈
+    // CRs3 (sq-8zqwb): a same-nominal self-link is LOCAL reflexivity — `({a},{a}) ∈
     // R(r)` puts `∃r.Self` into S({a}). Sound because `{a}` is a singleton (see the module doc);
     // the nominal guard is load-bearing (a general `(X,X)` link from `X ⊑ ∃r.X` must NOT fire).
     // On a hasSelf-free ontology `self_concept_of` is `None` and the branch is dead.
@@ -620,7 +620,7 @@ fn add_link(
 /// super-roles of derived roles also propagate — the standard RBox link-saturation. The worklist
 /// is bounded by the number of distinct `(role, x, f)` triples (each is stored at most once in
 /// `r_succ`), so the fixpoint terminates.
-// [OPUS-4.8] Each argument is a genuinely distinct saturation input (the mutable state, the
+// Each argument is a genuinely distinct saturation input (the mutable state, the
 // seed link `(r, x, f)`, three read-only indices, and the shared queue); bundling them into a
 // context struct here would obscure the CR3/CR10/CR11 seam without simplifying anything, so we
 // take the clippy-documented override for this private RBox helper rather than churn the shape.
@@ -672,7 +672,7 @@ fn add_link_rbox(
     }
 }
 
-/// [SONNET-4.6] sq-l2o9e: adds the reflexive link justified by `X ⊑ ∃r.Self` and preserves
+/// sq-l2o9e: adds the reflexive link justified by `X ⊑ ∃r.Self` and preserves
 /// that stronger local-reflexivity provenance while CR10 lifts it through `r ⊑* s`.
 ///
 /// A generic `(X, X) ∈ R(s)` cannot imply `X ⊑ ∃s.Self`: it may only witness that every member
@@ -706,7 +706,7 @@ pub struct Classification {
     pub subsumers: FxHashMap<Concept, Vec<Concept>>,
     /// Named concepts `c` with `⊥ ∈ S(c)` — i.e. `c ⊑ owl:Nothing` (unsatisfiable).
     pub unsatisfiable: Vec<Concept>,
-    /// [SONNET-4.6] sq-26zuf: whether `⊥ ∈ S(⊤)`, i.e. the ontology derives `⊤ ⊑ ⊥`.
+    /// sq-26zuf: whether `⊥ ∈ S(⊤)`, i.e. the ontology derives `⊤ ⊑ ⊥`.
     pub thing_unsatisfiable: bool,
 }
 
@@ -743,7 +743,7 @@ pub fn classify(sat: &Saturation, names: &Names) -> Classification {
 }
 
 // ---------------------------------------------------------------------------------------------
-// [FABLE-5] sq-wy3i6 (Phase E4): PARALLEL saturation — a deterministic bulk-synchronous
+// sq-wy3i6 (Phase E4): PARALLEL saturation — a deterministic bulk-synchronous
 // parallel (BSP) fixpoint over the SAME completion rules as `saturate_inner`.
 //
 // ## Design (why BSP rounds, not a lock-per-S-set pool)
@@ -792,7 +792,7 @@ pub fn classify(sat: &Saturation, names: &Names) -> Classification {
 // `Saturation`, `AxiomIndex` and `Names` are plain owned maps/vecs (no interior
 // mutability), hence `Sync`; the scoped borrows need no `unsafe` (the crate forbids it).
 
-/// [SONNET-4.6] sq-q0o82 (E4 follow-up): per-phase attribution for one parallel-saturation
+/// sq-q0o82 (E4 follow-up): per-phase attribution for one parallel-saturation
 /// run — the MEASUREMENT the "should the apply phase be parallelised too?" question is
 /// decided on. (`saturate_par`, `add`, `add_link` and `add_link_rbox` below are private-module
 /// items, so they are code spans, never intra-doc links: this type is public through the
@@ -853,7 +853,7 @@ impl ParPhaseStats {
     }
 }
 
-/// [FABLE-5] sq-wy3i6 (E4, `par` + `rbox`): parallel CR1–CR6 + CR10/CR11 saturation. Same
+/// sq-wy3i6 (E4, `par` + `rbox`): parallel CR1–CR6 + CR10/CR11 saturation. Same
 /// least fixpoint as [`saturate`] for every `threads` value — see the module-tail design
 /// note. `threads` is the worker-pool BOUND (small frontiers use fewer workers, never more).
 /// Also returns the [`ParPhaseStats`] compute/apply attribution (sq-q0o82); the saturation
@@ -868,7 +868,7 @@ pub fn saturate_par(
     saturate_par_inner(axioms, names, role_box, threads)
 }
 
-/// [FABLE-5] sq-wy3i6 (E4, `par` without `rbox`): parallel CR1–CR6 saturation (roles compared
+/// sq-wy3i6 (E4, `par` without `rbox`): parallel CR1–CR6 saturation (roles compared
 /// for equality only, exactly like the sequential E1 entry point). Same least fixpoint as
 /// [`saturate`] for every `threads` value — see the module-tail design note. Also returns the
 /// [`ParPhaseStats`] compute/apply attribution (sq-q0o82).
@@ -910,7 +910,7 @@ fn saturate_par_inner(
         }
     }
 
-    // [SONNET-4.6] sq-q0o82: per-phase attribution. The counters below are pure bookkeeping
+    // sq-q0o82: per-phase attribution. The counters below are pure bookkeeping
     // (two `Instant` reads per round, negligible beside a round's rule work) and change
     // neither the frontier order nor the applied conclusions — the closure stays the one
     // `saturate_inner` computes, at every thread count.

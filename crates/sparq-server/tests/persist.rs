@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-7cxr, gh-44) Integration tests for DURABLE PERSISTENCE — the QLever
+//! (sq-7cxr, gh-44) Integration tests for DURABLE PERSISTENCE — the QLever
 //! `--persist-updates` equivalent wired onto the engine's directory-backed `Graph` + WAL.
 //!
 //! The acceptance criterion (gh-44): **a process RESTART preserves ALL updates with NO
@@ -15,7 +15,7 @@
 //! `src/http.rs`). So by the time a 204 returns, the update is already on disk — the restart
 //! merely re-opens it.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the
@@ -91,7 +91,7 @@ impl Server {
     /// Signals graceful shutdown and waits for the serve task to finish, so the `AppState`
     /// (and the writer thread it owns) is dropped — modelling a clean process restart.
     ///
-    /// [OPUS-4.8] (Copilot PR#80) We `expect()` the join result rather than discarding it: if
+    /// (Copilot PR#80) We `expect()` the join result rather than discarding it: if
     /// the serve task PANICKED (e.g. the durable writer thread fail-closed and the panic
     /// propagated, or `axum::serve(...).await.unwrap()` hit a serve error), `task.await` returns
     /// `Err(JoinError)`, and swallowing it would let the test pass while masking a real failure.
@@ -130,7 +130,7 @@ async fn count_rows(cl: &reqwest::Client, base: &str, query: &str) -> usize {
     body["results"]["bindings"].as_array().unwrap().len()
 }
 
-/// [OPUS-4.8] (sq-ycle) The boolean answer to an `ASK` query (the SPARQL JSON `boolean` field).
+/// (sq-ycle) The boolean answer to an `ASK` query (the SPARQL JSON `boolean` field).
 async fn ask(cl: &reqwest::Client, base: &str, query: &str) -> bool {
     let body: serde_json::Value = cl
         .get(format!("{base}/sparql"))
@@ -245,7 +245,7 @@ async fn restart_preserves_all_updates_no_rebuild() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (Copilot PR#80) Non-deterministic update: the durable graph must persist the
+// (Copilot PR#80) Non-deterministic update: the durable graph must persist the
 // EXACT value the in-memory side committed and acked — NOT a re-rolled one.
 // ---------------------------------------------------------------------------
 
@@ -296,7 +296,7 @@ async fn nondeterministic_update_persists_committed_value_not_a_reroll() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-ycle, gh-48) PSS combined multi-op update body: accepted as ONE request
+// (sq-ycle, gh-48) PSS combined multi-op update body: accepted as ONE request
 // AND committed ATOMICALLY (all-or-nothing) on the durable `--persist` path.
 // ---------------------------------------------------------------------------
 
@@ -473,13 +473,13 @@ async fn existing_store_wins_over_seed() {
     );
 
     let _ = tx.send(());
-    // [OPUS-4.8] (Copilot PR#80) Fail the test on a panicked/failed serve task rather than
+    // (Copilot PR#80) Fail the test on a panicked/failed serve task rather than
     // discarding the join result (which would silently mask a server-side failure).
     task.await.expect("server serve task panicked / failed");
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-vpx4) GRACEFUL DEGRADATION on a TRANSIENT durable-write I/O error.
+// (sq-vpx4) GRACEFUL DEGRADATION on a TRANSIENT durable-write I/O error.
 //
 // Before sq-vpx4 a durable-write failure in `ServerApplier::seal` PANICKED the writer
 // thread (fail-closed but server-killing). These tests prove the new contract end-to-end
@@ -601,7 +601,7 @@ async fn persistent_durable_write_error_repeated_503_reads_survive() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-bif.14) MULTI-STEP / SEQUENCED durable-write failure injection.
+// (sq-bif.14) MULTI-STEP / SEQUENCED durable-write failure injection.
 //
 // The two tests above fail a CONTIGUOUS PREFIX of seals (a transient burst that clears, or a
 // permanent jam). They do not exercise the INTERLEAVED path: a writer that recovers, takes more
@@ -747,7 +747,7 @@ async fn sequenced_durable_failures_recover_and_refail_fail_closed() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-x32t, epic sq-toze.33) ADMIN WAL COMPACTION / VACUUM — erasure-completeness.
+// (sq-x32t, epic sq-toze.33) ADMIN WAL COMPACTION / VACUUM — erasure-completeness.
 // ---------------------------------------------------------------------------
 
 /// POSTs to `/admin/compact` (optionally with a Bearer token) and returns the status.

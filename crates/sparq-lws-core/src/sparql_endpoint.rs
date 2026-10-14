@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-r1ei8: WAC-scoped, query-only SPARQL Protocol endpoint.
+// sq-r1ei8: WAC-scoped, query-only SPARQL Protocol endpoint.
 //!
 //! The security boundary is dataset assembly, not query rewriting or result
 //! filtering: a resource enters the engine's graph only after the same planned
@@ -327,7 +327,7 @@ async fn assemble_authorized_dataset<S: Store>(
                 other => other,
             };
             let admitted = matches!(decision, Ok(ReadDecision::Allow(_)));
-            // [SONNET-4.6] sq-elg47: compose the opt-in ODRL gate per candidate graph — a Deny
+            // sq-elg47: compose the opt-in ODRL gate per candidate graph — a Deny
             // excludes the graph from the authorized dataset even under a static WAC grant
             // (deny-overrides); a Permit admits a Read-required graph WAC alone would exclude
             // (permit-extends; never the Control-gated `.acl` auxiliaries). Compiled out entirely

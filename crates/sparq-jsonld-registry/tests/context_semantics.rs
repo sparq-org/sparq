@@ -7,7 +7,7 @@ struct ContextCase {
     expanded: &'static str,
 }
 
-// [GPT-5.6] sq-lpj2j — exercise term/type expansion through every bundled context,
+// sq-lpj2j — exercise term/type expansion through every bundled context,
 // rather than treating successfully parsed vendored bytes as proof of their semantics.
 const CONTEXT_CASES: &[ContextCase] = &[
     ContextCase {

@@ -1,5 +1,5 @@
 //! RDFC-1.0 dataset **set semantics** on the committed `canonicalize_nquads` fuzz
-//! reproducer (sq-40apk, CI run 29152138161). [OPUS-5]
+//! reproducer (sq-40apk, CI run 29152138161).
 //!
 //! An RDF dataset is a SET of quads, so canonicalization collapses a repeated input
 //! line. The fuzz target's round-trip invariant therefore compares DISTINCT quad

@@ -1,9 +1,9 @@
-// [OPUS-4.8] sq-ieqz: rustdoc front page IS the crate-local README
+// sq-ieqz: rustdoc front page IS the crate-local README
 // (`crates/sparq-parse/README.md`), so the doc surface and the README never drift.
 // The README carries the format rationale (multi-member gzip / multi-frame zstd),
 // the no-wasm-dep guard, and the runnable API-sketch doctest below.
 #![doc = include_str!("../README.md")]
-// [OPUS-5] sq-98w7z.2: the gzip-backend verdict lives HERE rather than in the README
+// sq-98w7z.2: the gzip-backend verdict lives HERE rather than in the README
 // because that README is a gate-capped internal stub (`check-readme-template.py`), and
 // the template rule's own guidance is to put verbose detail in rustdoc. Appending a
 // `#![doc]` block keeps it on the same rustdoc front page as the README.
@@ -43,7 +43,7 @@ round-trip runs under the backend it is testing, so it is a self-consistency
 check, **not** an implementation-independent interoperability check. Validating
 the wire against a separate gzip implementation is not yet covered.
 "#]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
@@ -154,7 +154,7 @@ struct Shared {
     cv: Condvar,
 }
 
-// [OPUS-4.8] True when this code is executing inside a rayon worker thread. A
+// True when this code is executing inside a rayon worker thread. A
 // `finish` that blocks on a Condvar for `rayon::spawn` jobs can deadlock here
 // (the worker is stuck waiting for work it could be running), and on a
 // single-thread pool there is no other worker to make progress. Both sinks use
@@ -207,7 +207,7 @@ impl CompressedSink {
     pub fn push(&mut self, chunk: &[u8]) {
         let idx = self.next_in;
         self.next_in += 1;
-        // [OPUS-4.8] Parallel mode falls back to compressing on the calling
+        // Parallel mode falls back to compressing on the calling
         // thread when the rayon pool has a single worker or when we are already
         // running inside a rayon worker: in either case detaching the job and
         // blocking on the Condvar in `finish` could deadlock (the only worker —
@@ -247,7 +247,7 @@ impl CompressedSink {
     pub fn finish(mut self) -> io::Result<Vec<Vec<u8>>> {
         let total = self.next_in;
         let mut out = Vec::with_capacity(total - self.next_out);
-        // [OPUS-4.8] When `finish` is called from inside a rayon worker we must
+        // When `finish` is called from inside a rayon worker we must
         // not park the worker on the Condvar: that worker may be the only one
         // that can run the pending compression jobs, so a plain `cv.wait` would
         // deadlock. Instead, hand control back to rayon (`yield_now`) so this
@@ -411,7 +411,7 @@ impl SingleMemberGzipSink {
             crc.update(chunk);
             deflate_segment(level, chunk, false).map(|seg| (seg, crc))
         };
-        // [OPUS-4.8] Same starvation guard as CompressedSink::push: never detach
+        // Same starvation guard as CompressedSink::push: never detach
         // a job when the rayon pool has one worker or when we are already on a
         // rayon worker, since `finish` would otherwise block waiting for a job
         // that cannot run. Serial compression on the calling thread is safe.
@@ -434,7 +434,7 @@ impl SingleMemberGzipSink {
         piece: io::Result<(Vec<u8>, flate2::Crc)>,
         out: &mut Vec<Vec<u8>>,
     ) -> io::Result<()> {
-        // [OPUS-4.8] Advance the emission cursor BEFORE propagating a compression
+        // Advance the emission cursor BEFORE propagating a compression
         // error. The caller (`try_drain`/`finish`) has already removed this index
         // from the ready map; if we returned `Err` without advancing `next_out`,
         // the cursor would still point at the consumed-and-gone index and a later
@@ -481,7 +481,7 @@ impl SingleMemberGzipSink {
         let shared = Arc::clone(&self.shared);
         let mut out = Vec::with_capacity(total - self.next_out + 1);
         {
-            // [OPUS-4.8] See CompressedSink::finish: yield to rayon (rather than
+            // See CompressedSink::finish: yield to rayon (rather than
             // parking the worker on the Condvar) when called from inside a rayon
             // worker, so this worker can drain its own pending segment jobs and
             // cannot deadlock.
@@ -533,7 +533,7 @@ pub fn gzip_single_member<S: AsRef<[u8]>>(
 /// research note's consumer matrix; for browser-facing gzip use
 /// [`SingleMemberGzipSink`] instead).
 pub fn decode_gzip_concat(data: &[u8]) -> io::Result<Vec<u8>> {
-    // [GPT-5.6] The zero-chunk encoder emits no gzip member.
+    // The zero-chunk encoder emits no gzip member.
     if data.is_empty() {
         return Ok(Vec::new());
     }
@@ -615,7 +615,7 @@ mod tests {
         }
     }
 
-    // [GPT-5.6] sq-ue37p: decoding a zero-chunk gzip stream is the empty identity.
+    // sq-ue37p: decoding a zero-chunk gzip stream is the empty identity.
     #[test]
     fn decode_gzip_concat_accepts_empty_input() {
         assert_eq!(decode_gzip_concat(&[]).unwrap(), Vec::<u8>::new());
@@ -818,7 +818,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] Regression for reviews 1913 & 1921: Mode::Parallel must not
+    // Regression for reviews 1913 & 1921: Mode::Parallel must not
     // deadlock on a single-thread rayon pool. With the old detached-spawn +
     // Condvar `finish`, the lone worker has no one to run the spawned jobs, so
     // `finish` would block forever. We run inside a 1-thread pool with a watchdog
@@ -871,7 +871,7 @@ mod tests {
         watchdog.join().unwrap();
     }
 
-    // [OPUS-4.8] Regression for reviews 1913 & 1921: a `finish` called from
+    // Regression for reviews 1913 & 1921: a `finish` called from
     // *inside* a rayon worker (nested execution) must not park that worker on
     // the Condvar while its own compression jobs are still pending — that is a
     // self-starvation deadlock. The yield-on-pool path must make progress.
@@ -911,7 +911,7 @@ mod tests {
         watchdog.join().unwrap();
     }
 
-    // [OPUS-4.8] Regression for review 1921 (Low): when a member fails to
+    // Regression for review 1921 (Low): when a member fails to
     // compress, SingleMemberGzipSink::take must advance the emission cursor past
     // the consumed-and-removed index so a subsequent drain/finish cannot wait
     // forever for an index that no longer exists in the ready map.
@@ -939,7 +939,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-qcnn.15: DIRECT tests for PreparedDict accessors — kills the
+    // sq-qcnn.15: DIRECT tests for PreparedDict accessors — kills the
     // raw()/level()/decoder() whole-fn mutants that the indirect dictionary test
     // cannot reach.  Assertions compare EXACT returned values, not just is_ok().
     #[test]
@@ -981,7 +981,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-qcnn.15: DIRECT tests for Codec::name — kills String::new() and
+    // sq-qcnn.15: DIRECT tests for Codec::name — kills String::new() and
     // "xyzzy" whole-fn mutants.  Each arm format is pinned to its exact human-readable
     // string (used in bench/report output so the exact format matters).
     #[test]
@@ -1029,7 +1029,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-qcnn.15: DIRECT tests for pushed() on both sinks — kills the
+    // sq-qcnn.15: DIRECT tests for pushed() on both sinks — kills the
     // `pushed -> 0` and `pushed -> 1` whole-fn mutants that the other roundtrip
     // tests never assert on (they care about member/piece counts, not the push
     // counter itself).
@@ -1051,7 +1051,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-qcnn.15: DIRECT test for SingleMemberGzipSink::pushed() —
+    // sq-qcnn.15: DIRECT test for SingleMemberGzipSink::pushed() —
     // kills the `pushed -> 0` and `pushed -> 1` whole-fn mutants.
     #[test]
     fn single_member_gzip_sink_pushed_tracks_count() {
@@ -1068,7 +1068,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-qcnn.15: chunk-boundary correctness — verifies that each
+    // sq-qcnn.15: chunk-boundary correctness — verifies that each
     // compressed member/frame decodes to EXACTLY the corresponding input chunk
     // (not just that the concatenation round-trips).  This kills index-offset
     // and cursor arithmetic mutants that could swap members while preserving the
@@ -1114,7 +1114,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-qcnn.15: truncated / corrupt stream errors are reported, not
+    // sq-qcnn.15: truncated / corrupt stream errors are reported, not
     // silently swallowed — verifies that the decode functions surface io::Error
     // on malformed input rather than returning Ok with garbage.
     #[test]
@@ -1148,7 +1148,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-qcnn.15: byte-equality between parallel and serial for
+    // sq-qcnn.15: byte-equality between parallel and serial for
     // SingleMemberGzipSink — each OUTPUT PIECE must be byte-identical, not just
     // the concatenated wire stream.  Kills piece-order / header-flag mutants.
     #[test]
@@ -1185,7 +1185,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-qcnn.15: verify the GZIP_HEADER constant bytes — the first
+    // sq-qcnn.15: verify the GZIP_HEADER constant bytes — the first
     // piece from SingleMemberGzipSink must start with the RFC 1952 ID bytes
     // 0x1f 0x8b and have the right CM/OS fields.
     #[test]
@@ -1202,7 +1202,7 @@ mod tests {
         assert_eq!(decode_single_member(&wire), b"hello");
     }
 
-    // [OPUS-4.8] sq-qcnn.15: try_drain must return the IMMEDIATELY READY prefix —
+    // sq-qcnn.15: try_drain must return the IMMEDIATELY READY prefix —
     // kills `CompressedSink::try_drain -> Ok(vec![])` (the whole-fn survivor that
     // "works" by deferring everything to finish).  In Serial mode every push
     // immediately inserts into the ready map, so try_drain must hand back that
@@ -1246,7 +1246,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-qcnn.15: train_dictionary must return non-trivial bytes —
+    // sq-qcnn.15: train_dictionary must return non-trivial bytes —
     // kills Ok(vec![]) / Ok(vec![0]) / Ok(vec![1]) mutations by checking both
     // that the output is non-trivial AND that it actually aids compression.
     #[test]

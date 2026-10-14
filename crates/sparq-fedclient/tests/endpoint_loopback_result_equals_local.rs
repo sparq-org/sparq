@@ -51,7 +51,7 @@
 //! Gated on the `fedclient` feature; with the feature off the whole file compiles to nothing,
 //! so the default build (and the `--workspace` byte/wasm ratchets) are unaffected.
 //!
-//! [OPUS-4.8] sq-my8wd.2 — flagged for Fable re-review when available.
+//! sq-my8wd.2 — flagged for Fable re-review when available.
 
 #![cfg(feature = "fedclient")]
 
@@ -81,7 +81,7 @@ use sparq_server::{router, serve, AppState};
 // file (the bead scopes this work to ONE new tests/ integration file, no src changes). The
 // server runs on its own background thread with a dedicated multi-thread tokio runtime;
 // dropping the handle signals a graceful shutdown and joins the thread so the OS port is
-// released between tests. [OPUS-4.8] sq-my8wd.2.
+// released between tests. sq-my8wd.2.
 
 /// A real `sparq-server` SPARQL endpoint bound to an ephemeral loopback port, serving a
 /// fixture [`Graph`].
@@ -135,7 +135,7 @@ impl Loopback {
         // bound `127.0.0.1:0` address, a plain `recv()` would block forever. A few seconds is ample
         // for an in-process ephemeral-port bind; a timeout or a dropped sender both mean the server
         // thread died before binding, so we panic with a clear message (the thread's own panic is
-        // already on stderr) rather than deadlocking. [OPUS-4.8] sq-my8wd.2.
+        // already on stderr) rather than deadlocking. sq-my8wd.2.
         let addr = match addr_rx.recv_timeout(Duration::from_secs(10)) {
             Ok(addr) => addr,
             Err(mpsc::RecvTimeoutError::Timeout) => panic!(
@@ -205,7 +205,7 @@ fn var(s: &str) -> Term {
 
 /// A one-source descriptor declaring each predicate in `preds` so `select_sources` retains
 /// the single source for every pattern. The stats only steer join *order*; result-equivalence
-/// holds for any order. [OPUS-4.8] sq-my8wd.2.
+/// holds for any order. sq-my8wd.2.
 fn descriptor(preds: &[&str]) -> SourceDescriptor {
     let mut b = SourceDescriptor::builder(SourceId::new("loopback")).total_triples(1000);
     for p in preds {
@@ -451,7 +451,7 @@ fn egress_refused_outside_guard_scope_discovery() {
     // require BOTH distinguishing fragments. Non-vacuity is nailed by the CONTROL above: the SAME
     // discovery against the SAME live server SUCCEEDS once the host is allowlisted, so the only
     // thing that turned success into failure here is the egress scope — this is the guard
-    // refusing, not a "server is down" / unrelated-failure artifact. [OPUS-4.8] sq-my8wd.2.
+    // refusing, not a "server is down" / unrelated-failure artifact. sq-my8wd.2.
     assert!(
         err.contains("egress refused") && err.contains("private/internal"),
         "discovery must fail-closed with an EGRESS-DENIAL error specifically (not a generic \

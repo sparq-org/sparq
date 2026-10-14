@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-py8h.5 — tests for the hidden bounded property-path planner guard
+// sq-py8h.5 — tests for the hidden bounded property-path planner guard
 // + cost-model wiring: (a) statically-large unroll rejected, (b) hidden UNBOUNDED
 // path REFUSED via NoBackendSatisfies (not approximated), (c) operator cost emitted
 // through CommCounter and read by the matrix runner.

@@ -11,7 +11,7 @@ use std::path::Path;
 
 const RS: &str = "http://www.w3.org/2001/sw/DataAccess/tests/result-set#";
 
-// [OPUS-4.8] quick-xml 0.40 removed `BytesText::unescape()` / deprecated
+// quick-xml 0.40 removed `BytesText::unescape()` / deprecated
 // `Attribute::unescape_value()`. Both used to decode + resolve the XML
 // predefined entities (`&amp;`/`&lt;`/`&gt;`/`&apos;`/`&quot;` and numeric
 // char-refs) without applying attribute-value whitespace folding. We replicate
@@ -316,7 +316,7 @@ fn parse_srx(path: &Path) -> Result<Expected, String> {
                 }
             }
             Event::Text(t) => {
-                // [OPUS-4.8] 0.40: `decode()` (no EOL normalization, matching the
+                // 0.40: `decode()` (no EOL normalization, matching the
                 // old `unescape`) then resolve predefined entities — see `unescape_utf8`.
                 let decoded = t.decode().map_err(|e| e.to_string())?;
                 let s = quick_xml::escape::unescape(&decoded)

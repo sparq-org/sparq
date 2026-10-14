@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-0z43i, gh #909) The stdio transport round-trip — only compiled
+//! (sq-0z43i, gh #909) The stdio transport round-trip — only compiled
 //! with the `stdio` feature. Drives `sparq_mcp::serve` over an in-memory
 //! reader/writer pair (a real line-delimited JSON-RPC session: two requests and a
 //! notification on stdin), then asserts the writer holds exactly the two responses,
@@ -50,7 +50,7 @@ fn serve_handles_a_line_delimited_session() {
     assert_eq!(payload["triples"], 1);
 }
 
-// [OPUS-5] gh #2497: a JSON-RPC batch survives the line-delimited transport intact — a
+// gh #2497: a JSON-RPC batch survives the line-delimited transport intact — a
 // batch array arrives on ONE line and its array of responses goes back out on ONE line,
 // so nothing about batch receipt depends on re-framing the stream.
 #[test]
@@ -98,7 +98,7 @@ fn serve_carries_a_batch_on_a_single_line_each_way() {
     assert_eq!(single["id"], 3);
 }
 
-// [GPT-5.6] sq-y1ljq: malformed tools/call names are protocol errors, not tool results.
+// sq-y1ljq: malformed tools/call names are protocol errors, not tool results.
 #[test]
 fn serve_rejects_missing_or_non_string_tool_names() {
     let graph = Graph::load_str("<http://ex/a> <http://ex/p> <http://ex/b> .", "ntriples").unwrap();

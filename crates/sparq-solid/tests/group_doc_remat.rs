@@ -1,4 +1,4 @@
-//! [SONNET-4.6] issue #55 — a permitted write to a GROUP DOCUMENT auto-re-materializes.
+//! issue #55 — a permitted write to a GROUP DOCUMENT auto-re-materializes.
 //!
 //! `PodStore::update_as` already re-materializes the auth view after a permitted write to
 //! an `.acl`/`.acr` document, and after any variable-graph or `CLEAR`/`DROP ALL` update.

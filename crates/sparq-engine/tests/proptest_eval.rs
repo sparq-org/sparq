@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-3dyje.3 — Property-based tests for sparq-engine evaluation:
+//! sq-3dyje.3 — Property-based tests for sparq-engine evaluation:
 //! engine ≡ independent naive reference on random graphs × random queries,
 //! join-order permutation invariance, and ORDER BY laws over the real `Value` path.
 //!
@@ -98,14 +98,14 @@
 //!
 //! # Documented generator narrowings (each carries a reason + a follow-up bead)
 //!
-//! * (RESOLVED, generation re-widened — sq-qeltv [FABLE-5]) `is*()` used to be
+//! * (RESOLVED, generation re-widened — sq-qeltv) `is*()` used to be
 //!   restricted to certainly-bound vars and the STRLEN-BIND form used to mask blank
 //!   nodes out of the graph, because the engine leniently returned `false` for
 //!   `isIRI(?unbound)` and an internal label for `STR(bnode)`. Both are TYPE ERRORS
 //!   per SPARQL 1.1 §17.2/§17.4.2 (differential: Oxigraph errors on both) and the
 //!   engine now conforms, so `is*()` ranges over ALL in-scope vars (including
 //!   possibly-unbound OPTIONAL/UNION/BIND vars) and `STR` sees bnodes.
-//! * (RESOLVED, generation re-widened — sq-ilweo [FABLE-5]) `?v + k` used to mask
+//! * (RESOLVED, generation re-widened — sq-ilweo) `?v + k` used to mask
 //!   xsd:double literals out of the generated graph (and strip pattern-const
 //!   doubles) because rendering a computed double would have required replicating
 //!   the engine's float formatter inside the oracle. The oracle now derives the
@@ -114,7 +114,7 @@
 //!   engine uses), with the engine's computed-double rules pinned first by
 //!   `oracle_known_answer_computed_double`. Doubles now flow into every generated
 //!   graph unconditionally.
-//! * (RESOLVED, generation re-widened — sq-ilweo [FABLE-5]) xsd:double NaN used to
+//! * (RESOLVED, generation re-widened — sq-ilweo) xsd:double NaN used to
 //!   be excluded because `<` is not a total order under NaN. The engine's
 //!   documented NaN totalisation (substrate `compare_terms`, Kani-proved under
 //!   sq-wjl8i, comparator-level coverage in

@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-oy1f.23 (epic sq-oy1f) originated the document-level W3C JSON-LD 1.1
+# sq-oy1f.23 (epic sq-oy1f) originated the document-level W3C JSON-LD 1.1
 # pipeline (research/jsonld-1.1-design.md §3). Later beads implemented expansion,
 # flattening, compaction, from-RDF conversion, and framing.
 [package]
@@ -13,7 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 description = "Native, dependency-free W3C JSON-LD 1.1 document pipeline for sparq (Json AST + error registry + processing options + deny-by-default document loader)"
 readme = "README.md"
-# [GPT-5.6] Compaction and framing are implemented, while `to_rdf` and the high-level
+# Compaction and framing are implemented, while `to_rdf` and the high-level
 # `api` facade remain documented placeholders. Publication is required by
 # sparq-engine-serialize's crates.io dependency closure; maturity stays explicit in the API docs.
 
@@ -22,7 +22,7 @@ readme = "README.md"
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
-# [FABLE-5] sq-w42s3 — the W3C JSON-LD 1.1 self-conformance scoreboard runner
+# sq-w42s3 — the W3C JSON-LD 1.1 self-conformance scoreboard runner
 # (per-operation pass-rate row over the pinned fetched suites; see the example's
 # module docs). `test = true` so its hermetic comparator / N-Quads-reader unit
 # tests run under plain `cargo test -p sparq-jsonld` (no suite checkout needed —
@@ -37,6 +37,6 @@ test = true
 [dependencies]
 
 [dev-dependencies]
-# [SONNET-4.6] Issue #3714 — keep the dependency-free runtime resolver pinned to
+# Issue #3714 — keep the dependency-free runtime resolver pinned to
 # oxiri's RFC 3986 behaviour without adding a mandatory/shipping dependency.
 oxiri = "0.2"

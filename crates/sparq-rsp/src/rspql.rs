@@ -1,4 +1,4 @@
-//! [SONNET-4.6] RSP-QL surface-syntax parser (sq-9u1, extended sq-2n1q3.2).
+//! RSP-QL surface-syntax parser (sq-9u1, extended sq-2n1q3.2).
 //!
 //! The crate's public API is *programmatic*: you build a [`WindowSpec`] in Rust
 //! and register plain SPARQL ([`ContinuousQuery`](crate::ContinuousQuery) etc.).
@@ -64,7 +64,7 @@
 //!   `"SLIDING window declaration requires a STEP duration"`.
 //! * **`TUMBLING RANGE r STEP s`** — rejected with a clear error: `TUMBLING`
 //!   implies `step == range`; a contradictory `STEP` clause is not allowed.
-//!   Use `SLIDING RANGE r STEP s` for an explicit sliding step. [SONNET-4.6]
+//!   Use `SLIDING RANGE r STEP s` for an explicit sliding step.
 //! * **Named-window *variables*** (`FROM NAMED WINDOW ?w …`, `WINDOW ?w { … }`)
 //!   — RSP-QL permits a window variable ranging over declared windows; we
 //!   require a concrete window IRI (the common case). A `WINDOW ?w` is rejected
@@ -339,7 +339,6 @@ fn parse_one_window_decl<'a>(
 /// - `SLIDING RANGE r` without `STEP` — `STEP` is required for `SLIDING`.
 /// - `TUMBLING RANGE r STEP s` — `STEP` is contradictory with `TUMBLING`
 ///   (tumbling implies `step == range`); use `SLIDING RANGE r STEP s` instead.
-///   [SONNET-4.6]
 ///
 /// Returns the parsed [`WindowSpec`] and the text after the operator.
 fn parse_window_spec(text: &str) -> Result<(WindowSpec, &str), String> {
@@ -385,7 +384,7 @@ fn parse_window_spec(text: &str) -> Result<(WindowSpec, &str), String> {
 
     // TUMBLING RANGE r — explicit tumbling keyword (step == range).
     // SLIDING RANGE r STEP s — explicit sliding keyword (STEP required).
-    // [SONNET-4.6] Track both flags: explicit_tumbling lets us reject TUMBLING + STEP.
+    // Track both flags: explicit_tumbling lets us reject TUMBLING + STEP.
     let (explicit_tumbling, explicit_sliding, text) =
         if let Some(after) = keyword_prefix(text, "TUMBLING") {
             // TUMBLING: semantically identical to plain RANGE r (step = range).
@@ -405,7 +404,7 @@ fn parse_window_spec(text: &str) -> Result<(WindowSpec, &str), String> {
     let (range, rest) = take_duration(rest.trim_start())?;
     let rest_ws = rest.trim_start();
     let (spec, rest) = if let Some(after_step) = keyword_prefix(rest_ws, "STEP") {
-        // [SONNET-4.6] TUMBLING with an explicit STEP is contradictory: tumbling
+        // TUMBLING with an explicit STEP is contradictory: tumbling
         // means step == range by definition. Reject rather than silently accepting
         // an inconsistent spec.
         if explicit_tumbling {
@@ -425,7 +424,7 @@ fn parse_window_spec(text: &str) -> Result<(WindowSpec, &str), String> {
         // No STEP and not a SLIDING keyword: tumbling (step == range).
         (WindowSpec::time(range, range), rest_ws)
     };
-    // [GPT-5.6] sq-ayn0i: this call is compiled out entirely by default so the
+    // sq-ayn0i: this call is compiled out entirely by default so the
     // established parser's returned spec, residual text, and errors stay exact.
     #[cfg(feature = "window-origin")]
     let (spec, rest) = parse_window_origin_clauses(spec, rest)?;

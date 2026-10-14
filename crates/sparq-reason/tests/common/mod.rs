@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-zgbso.3 — loader-shaped WAC/ACP fixture FACTS for the compiled-rules
+//! sq-zgbso.3 — loader-shaped WAC/ACP fixture FACTS for the compiled-rules
 //! equivalence suite and the `compiled_rules_bench` measurement example.
 //!
 //! Emits the same fact vocabulary `sparq-solid`'s `loader::assemble_input` synthesizes

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-xa15c (#1248 items 1+2) — the **in-process embedding seam**.
+//! sq-xa15c (#1248 items 1+2) — the **in-process embedding seam**.
 //!
 //! A small, documented facade that lets an external host (e.g. `solid-server-rs`,
 //! the PSS agent's experimental Rust Solid server) call the sparq engine

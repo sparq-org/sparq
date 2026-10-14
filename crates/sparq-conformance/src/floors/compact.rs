@@ -1,7 +1,7 @@
-//! [FABLE-5] sq-oy1f.40 — the W3C JSON-LD 1.1 `compact` lane ratchet floor
+//! sq-oy1f.40 — the W3C JSON-LD 1.1 `compact` lane ratchet floor
 //! (relocated from `tests/jsonld_suite.rs` to this lib-side single source).
 
-/// [FABLE-5] sq-oy1f.27 — `compact` pass floor, RE-PINNED for the ORACLE
+/// sq-oy1f.27 — `compact` pass floor, RE-PINNED for the ORACLE
 /// CORRECTION to the native document-level Compaction Algorithm
 /// (`sparq_jsonld::compact::compact()`), compared against the suite's
 /// NORMATIVE EXPECTED document via `json_ld_equal` — the same oracle shape as
@@ -54,7 +54,7 @@
 ///   and compaction is unverified; the negative ratchet lanes are bead
 ///   sq-oy1f.31. SKIP (honest), never a counted pass.
 ///
-/// ## [OPUS-5] sq-gzsky — the NEGATIVE lane lands; 228 → 243 (skips 18 → 1)
+/// ## sq-gzsky — the NEGATIVE lane lands; 228 → 243 (skips 18 → 1)
 ///
 /// The 17-case negative skip bucket above is closed (lever sq-oy1f.31 in
 /// `research/gap-jsonld-conformance-2026-07.md` §6). The runner RUNS every

@@ -14,4 +14,4 @@ These pages record where each default-off proposal feature's API lives:
 - [Observation](observe.md)
 - [Typed focus](typed_focus.md)
 
-<!-- [SONNET-4.6] sq-1rg2q.1 -->
+<!-- sq-1rg2q.1 -->

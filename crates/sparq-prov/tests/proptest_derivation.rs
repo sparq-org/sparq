@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-hggpo: property tests for derivation PROV-O structure.
+// sq-hggpo: property tests for derivation PROV-O structure.
 
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -81,7 +81,7 @@ fn distinct(mut values: Vec<u8>) -> Vec<u8> {
     values
 }
 
-// [GPT-5.6] sq-ddy14: check generation multiplicity on the raw triple vector so a
+// sq-ddy14: check generation multiplicity on the raw triple vector so a
 // duplicate emission cannot be hidden by RDF graph/set normalization.
 fn assert_entity_generation_invariant(graph: &[Triple]) -> Result<(), String> {
     let entity_type = Term::NamedNode(NamedNode::new_unchecked(format!("{PROV}Entity")));
@@ -251,7 +251,7 @@ proptest! {
 }
 
 /// Mutation witness: appending the same edge must fail even though an `>= 1`
-/// existence check would still pass. [GPT-5.6] sq-ddy14
+/// existence check would still pass. sq-ddy14
 #[test]
 fn duplicate_generation_edge_violates_exact_multiplicity() {
     let graph = input_graph(&[1]);

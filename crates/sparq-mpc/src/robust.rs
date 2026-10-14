@@ -1,6 +1,7 @@
 // [OPUS-4.8] sq-m34i (MPC WI-1): Reed-Solomon consistency-checked + robust
-// (Berlekamp-Welch) reconstruction over Fp. Closes malicious-security gap (D)
-// at the Shamir layer for the honest-majority abort/robust regime. Written while
+// (Berlekamp-Welch) reconstruction over Fp. Addresses malicious-security gap (D)
+// for share OPENS at the Shamir layer (honest-majority abort/robust regime);
+// it does not make the protocols above it malicious-secure. Written while
 // Fable unavailable — re-review on return.
 //! Reed–Solomon error-detection / error-correction for Shamir reconstruction.
 //!

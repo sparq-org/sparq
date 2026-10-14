@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-7d3dj.30.1) End-to-end acceptance tests for the opt-in
+//! (sq-7d3dj.30.1) End-to-end acceptance tests for the opt-in
 //! `algebra-rewrite` pre-execution pass — the SP2Bench complex-shape fix
 //! (design record `research/sp2bench-complex-shape-deficit.md` §2.1 / §2.5 / §4).
 //!

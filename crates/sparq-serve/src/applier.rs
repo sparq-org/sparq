@@ -138,10 +138,10 @@ impl ApplyUpdates for GraphApplier {
 ///
 /// `GraphApplier::apply` calls [`sparq_engine::update_in_place`], which parses the update's
 /// full text FRESH every time — measured ~13.5 µs of a ~21.2 µs total per-update cost
-/// (~63%) on a representative claim template, because [`PreparedUpdate::bind`] (a
+/// (~63%) on a representative claim template, because [`PreparedUpdate::bind`](sparq_engine::PreparedUpdate::bind) (a
 /// structural placeholder substitution over the already-parsed algebra, never string
 /// concatenation) costs under 1 µs by comparison. A caller parses its template ONCE (e.g.
-/// [`PreparedUpdate::parse`] at startup or on first use), binds a fresh value per
+/// [`PreparedUpdate::parse`](sparq_engine::PreparedUpdate::parse) at startup or on first use), binds a fresh value per
 /// submission, and submits the bound [`PreparedUpdate`](sparq_engine::PreparedUpdate) —
 /// this applier then pays only bind + eval + apply, roughly half the raw-text cost.
 ///

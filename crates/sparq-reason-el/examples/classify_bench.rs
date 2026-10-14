@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-evb1: EL classification micro-benchmark — a self-asserting, deterministic
+//! sq-evb1: EL classification micro-benchmark — a self-asserting, deterministic
 //! workload for the OWL 2 EL consequence-based classifier. Run:
 //!
 //!     cargo run -p sparq-reason-el --example classify_bench --release [DEPTH]

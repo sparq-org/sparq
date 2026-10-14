@@ -1,9 +1,9 @@
-// [OPUS-4.8] sq-jxl0: single-source the crate overview from README.md so crates.io
+// sq-jxl0: single-source the crate overview from README.md so crates.io
 // (package.readme) and the docs.rs front page render identical content. The README's
 // rust fences are API-map sketches marked `ignore` (they reference an external graph and
 // the sibling `sparq-vectors` crate, which is not a dependency of `sparq-sim`).
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use oxrdf::{NamedNode, Term};
 use rustc_hash::FxHashMap;
@@ -30,7 +30,7 @@ pub enum SignatureMode {
 
 /// T-box expansion data for the `tbox` feature: the transitive closure of
 /// `rdfs:subClassOf` and `rdfs:subPropertyOf` extracted from the graph itself,
-/// plus the id of `rdf:type`. Built once in [`Sim::with_config`]. [SONNET-4.6] sq-181
+/// plus the id of `rdf:type`. Built once in [`Sim::with_config`]. sq-181
 #[cfg(feature = "tbox")]
 struct TboxExpander {
     /// ID of `rdf:type` in this graph; `NO_ID` when absent (no type expansions).
@@ -41,17 +41,17 @@ struct TboxExpander {
     subprop_up: FxHashMap<Id, Vec<Id>>,
     /// `class → all transitive subclasses` — the reverse closure, needed for SOUND
     /// candidate generation: entities entail an inferred `(rdf:type, C)` element via
-    /// triples typing them with any subclass of C. [FABLE-5]
+    /// triples typing them with any subclass of C.
     subclass_down: FxHashMap<Id, Vec<Id>>,
     /// `property → all transitive subproperties` — the reverse closure, needed for
     /// SOUND candidate generation: entities entail an inferred `(dir, P, N)` element
-    /// via triples under any subproperty of P. [FABLE-5]
+    /// via triples under any subproperty of P.
     subprop_down: FxHashMap<Id, Vec<Id>>,
 }
 
 /// Sorted IRI local-name index for the lexical fallback tier (`lexical` feature).
 /// Holds `(local_name, id)` pairs sorted ascending by local name, covering IRI
-/// entities only. Built once in [`Sim::with_config`]. [SONNET-4.6] sq-181
+/// entities only. Built once in [`Sim::with_config`]. sq-181
 #[cfg(feature = "lexical")]
 struct LexicalIndex {
     sorted: Vec<(Box<str>, Id)>,
@@ -130,11 +130,11 @@ const MULTI_HOP_ATTENUATION: f64 = 0.5;
 
 /// Fixed weight attenuation for T-box-inferred signature elements. An element derived
 /// one step up the rdfs:subClassOf / rdfs:subPropertyOf hierarchy contributes at
-/// `original_weight × TBOX_ATTENUATION`. [SONNET-4.6] sq-181
+/// `original_weight × TBOX_ATTENUATION`. sq-181
 #[cfg(feature = "tbox")]
 const TBOX_ATTENUATION: f64 = 0.5;
 
-/// Standard RDF/RDFS vocabulary IRI strings used by the `tbox` feature. [SONNET-4.6] sq-181
+/// Standard RDF/RDFS vocabulary IRI strings used by the `tbox` feature. sq-181
 #[cfg(feature = "tbox")]
 const RDF_TYPE_IRI: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 #[cfg(feature = "tbox")]
@@ -459,7 +459,7 @@ impl<'g> Sim<'g> {
             // down-closure every concrete pattern is scanned, deduping candidates
             // across scans so each receives this element's weight exactly once.
             // The hub cap applies per concrete pattern (same documented
-            // approximation as the direct path). [FABLE-5]
+            // approximation as the direct path).
             #[cfg(feature = "tbox")]
             if let Some(tbox) = &self.tbox {
                 let sub_preds: &[Id] =
@@ -539,7 +539,7 @@ impl<'g> Sim<'g> {
         // fallbacks, fill remaining slots from the sorted IRI local-name index using
         // trigram-Jaccard similarity. Only fires for `most_similar` (exclude.is_some()).
         // `lexical_idx.is_some()` is equivalent to `cfg.lexical_fallback` at build time.
-        // [SONNET-4.6] sq-181
+        // sq-181
         #[cfg(feature = "lexical")]
         if self.lexical_idx.is_some() && exclude.is_some() && scored.len() < k {
             self.fill_lexical_fallback(k, exclude, &mut scored);
@@ -673,7 +673,7 @@ impl<'g> Sim<'g> {
     /// prefix (`xalice` shares `ali`/`lic`/`ice` with `alice`), so a prefix-bounded scan
     /// would silently narrow the documented metric; the O(index) cost only arises when the
     /// structural and profile tiers have already starved. Only fires when
-    /// `exclude = Some(query_id)`. [SONNET-4.6] sq-181
+    /// `exclude = Some(query_id)`. sq-181
     #[cfg(feature = "lexical")]
     fn fill_lexical_fallback(
         &self,
@@ -711,7 +711,7 @@ impl<'g> Sim<'g> {
     }
 }
 
-/// T-box-aware signature expansion methods (`tbox` feature). [SONNET-4.6] sq-181
+/// T-box-aware signature expansion methods (`tbox` feature). sq-181
 #[cfg(feature = "tbox")]
 impl<'g> Sim<'g> {
     /// Expand `sig` with elements inferred from the T-box hierarchy:
@@ -719,7 +719,7 @@ impl<'g> Sim<'g> {
     /// - `(dir, P, N)` → add `(dir, Pi, N)` for each transitive superproperty Pi of P.
     ///
     /// Inferred elements receive `original_weight × TBOX_ATTENUATION`. When an inferred
-    /// element duplicates a direct element the direct weight (higher) wins. [SONNET-4.6] sq-181
+    /// element duplicates a direct element the direct weight (higher) wins. sq-181
     fn tbox_expand_signature(&self, sig: Signature, keep_neighbor: bool) -> Signature {
         let Some(tbox) = &self.tbox else { return sig; };
 
@@ -796,7 +796,7 @@ impl<'g> Sim<'g> {
 
 /// Build the `TboxExpander` for a graph: scan for `rdfs:subClassOf` /
 /// `rdfs:subPropertyOf` triples, compute their transitive closures, and record
-/// the `rdf:type` id. [SONNET-4.6] sq-181
+/// the `rdf:type` id. sq-181
 #[cfg(feature = "tbox")]
 fn build_tbox_expander(graph: &Graph) -> TboxExpander {
     let rdf_type = graph
@@ -835,7 +835,7 @@ fn build_tbox_expander(graph: &Graph) -> TboxExpander {
 }
 
 /// Reverse a `node → direct successors` edge map (`successor → direct predecessors`),
-/// so the same closure walk produces the DOWN closures. [FABLE-5]
+/// so the same closure walk produces the DOWN closures.
 #[cfg(feature = "tbox")]
 fn tbox_invert(direct: &FxHashMap<Id, Vec<Id>>) -> FxHashMap<Id, Vec<Id>> {
     let mut inverted: FxHashMap<Id, Vec<Id>> = FxHashMap::default();
@@ -848,7 +848,7 @@ fn tbox_invert(direct: &FxHashMap<Id, Vec<Id>>) -> FxHashMap<Id, Vec<Id>> {
 }
 
 /// BFS transitive closure: `node → all reachable successors` in a directed graph
-/// given as `node → direct successors`. [SONNET-4.6] sq-181
+/// given as `node → direct successors`. sq-181
 #[cfg(feature = "tbox")]
 fn tbox_transitive_closure(
     direct: &FxHashMap<Id, Vec<Id>>,
@@ -874,7 +874,7 @@ fn tbox_transitive_closure(
 // ---- Lexical-tier helpers (`lexical` feature) -------------------------------------
 
 /// Build the sorted `(local_name, id)` lexical index for all IRI entities in
-/// `graph`. [SONNET-4.6] sq-181
+/// `graph`. sq-181
 #[cfg(feature = "lexical")]
 fn build_lexical_index(graph: &Graph) -> LexicalIndex {
     let mut entries: Vec<(Box<str>, Id)> = graph
@@ -894,7 +894,7 @@ fn build_lexical_index(graph: &Graph) -> LexicalIndex {
 
 /// Extract the lexical sort key for a term: the IRI local name (suffix) for IRI
 /// terms, or the literal value string for literals. `None` for blank nodes, triple
-/// terms, or empty keys. [SONNET-4.6] sq-181
+/// terms, or empty keys. sq-181
 #[cfg(feature = "lexical")]
 fn lexical_key_of(parts: &dict::TermParts<'_>) -> Option<String> {
     match parts {
@@ -909,7 +909,7 @@ fn lexical_key_of(parts: &dict::TermParts<'_>) -> Option<String> {
 /// with trigrams built over `char`s — a multi-byte character occupies ONE trigram
 /// position, never split across its UTF-8 bytes. Falls back to a longest-common-prefix
 /// ratio over characters for strings shorter than 3 characters. Returns `1.0` for two
-/// identical empty strings. [SONNET-4.6] sq-181 · char-trigram fix [FABLE-5]
+/// identical empty strings. sq-181 · char-trigram fix
 #[cfg(feature = "lexical")]
 fn trigram_jaccard(a: &str, b: &str) -> f64 {
     if a.is_empty() && b.is_empty() {
@@ -971,7 +971,7 @@ pub fn overlap_coefficient(a: &Signature, b: &Signature) -> f64 {
     }
 }
 
-// [GPT-5.6] sq-da2bz: share the canonical sorted merge across signature metrics.
+// sq-da2bz: share the canonical sorted merge across signature metrics.
 fn weighted_intersection(a: &Signature, b: &Signature) -> f64 {
     let mut inter = 0.0;
     let (mut i, mut j) = (0, 0);
@@ -993,7 +993,7 @@ fn weighted_intersection(a: &Signature, b: &Signature) -> f64 {
 /// [`Sim::explain_similarity`]: whether the entity participates in the shared element as
 /// the triple's subject (`Out`) or object (`In`) — the same in/out split
 /// [`SignatureMode`] signatures record (direction is part of the element: "directs
-/// films" and "is directed by" are different roles). [FABLE-5]
+/// films" and "is directed by" are different roles).
 #[cfg(feature = "explain")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Direction {
@@ -1005,7 +1005,7 @@ pub enum Direction {
 
 /// One signature element two entities have in COMMON — the decoded reason behind a
 /// [`Sim::similarity`] / [`Sim::most_similar`] score, returned by
-/// [`Sim::explain_similarity`]. [FABLE-5]
+/// [`Sim::explain_similarity`].
 #[cfg(feature = "explain")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct SharedElement {
@@ -1074,7 +1074,7 @@ impl Sim<'_> {
 }
 
 // ---------------------------------------------------------------------------
-// [FABLE-5] sq-lgw: opt-in `sketch` feature — MinHash/LSH signature sketches, the
+// sq-lgw: opt-in `sketch` feature — MinHash/LSH signature sketches, the
 // Phase-4 escape hatch for graphs dense enough that `most_similar`'s per-query,
 // per-element range-scan candidate generation hits its scaling wall
 // (research/genai-design.md §6). Candidate generation becomes LSH bucket lookups
@@ -1609,7 +1609,7 @@ mod tests {
         assert_eq!(by_sig[1].0.to_string(), "<http://ex.org/twin>");
     }
 
-    // [SONNET-4.6] Exercise both the primary and profile-fallback candidate budgets.
+    // Exercise both the primary and profile-fallback candidate budgets.
     #[test]
     fn huge_k_does_not_overflow_non_sketch_candidate_budgets() {
         let g = graph(":a :plays :chess . :b :plays :tennis .");
@@ -1792,7 +1792,7 @@ mod tests {
         wins / (pos.len() as f64 * neg.len() as f64)
     }
 
-    // [FABLE-5] sq-lsp7k: the `explain` feature's explanation-surface tests.
+    // sq-lsp7k: the `explain` feature's explanation-surface tests.
 
     /// Re-encode a decoded [`SharedElement`] to the private signature tuple, for
     /// membership checks against `Signature::elems`.
@@ -1996,7 +1996,7 @@ mod tests {
 
     /// T-box-aware signature of `:alice rdf:type :Professor`; `:Professor rdfs:subClassOf :Person`
     /// must include the inferred `(OUT, rdf:type, :Person)` element at 0.5× the direct weight.
-    /// [SONNET-4.6] sq-181
+    /// sq-181
     #[cfg(feature = "tbox")]
     #[test]
     fn tbox_signature_expands_supertype() {
@@ -2031,7 +2031,7 @@ mod tests {
 
     /// Without T-box, alice (Professor) and bob (Person) share no structural element.
     /// With T-box, alice's inferred `(OUT, rdf:type, :Person)` matches bob's direct
-    /// `(OUT, rdf:type, :Person)` — non-zero similarity. [SONNET-4.6] sq-181
+    /// `(OUT, rdf:type, :Person)` — non-zero similarity. sq-181
     #[cfg(feature = "tbox")]
     #[test]
     fn tbox_awareness_creates_cross_subclass_similarity() {
@@ -2060,7 +2060,7 @@ mod tests {
     }
 
     /// T-box with no subClassOf / subPropertyOf triples is a no-op — signatures are
-    /// identical to the plain (tbox_aware = false) mode. [SONNET-4.6] sq-181
+    /// identical to the plain (tbox_aware = false) mode. sq-181
     #[cfg(feature = "tbox")]
     #[test]
     fn tbox_noop_when_no_hierarchy() {
@@ -2083,7 +2083,7 @@ mod tests {
     /// T-box-inferred `(OUT, :p, :n)` element (`:p1`, `:p2` ⊑ `:p`); no triple uses
     /// `:p` directly, so candidate generation must scan the subproperty down-closure
     /// of the inferred element — a direct-pattern scan finds nothing. All fallback
-    /// tiers are disabled so the test cannot pass vacuously. [FABLE-5]
+    /// tiers are disabled so the test cannot pass vacuously.
     #[cfg(feature = "tbox")]
     #[test]
     fn tbox_most_similar_finds_sibling_subproperty_entities() {
@@ -2120,7 +2120,7 @@ mod tests {
     // ---- lexical feature tests ----------------------------------------------------
 
     /// `trigram_jaccard` sanity: identical strings → 1, disjoint → 0, partial → (0,1).
-    /// [SONNET-4.6] sq-181
+    /// sq-181
     #[cfg(feature = "lexical")]
     #[test]
     fn trigram_jaccard_basic() {
@@ -2138,7 +2138,7 @@ mod tests {
     /// `trigram_jaccard` operates on CHARACTER trigrams, not UTF-8 bytes: a
     /// multi-byte character is one trigram position, and the short-string gate
     /// counts characters. Every expected value here differs from what byte-window
-    /// trigrams would produce. [FABLE-5]
+    /// trigrams would produce.
     #[cfg(feature = "lexical")]
     #[test]
     fn trigram_jaccard_uses_character_trigrams() {
@@ -2153,7 +2153,7 @@ mod tests {
     }
 
     /// Lexical fallback finds entities with similar IRI local names even when
-    /// structural (and profile) candidate generation yields nothing. [SONNET-4.6] sq-181
+    /// structural (and profile) candidate generation yields nothing. sq-181
     #[cfg(feature = "lexical")]
     #[test]
     fn lexical_fallback_finds_similar_local_names() {
@@ -2198,7 +2198,7 @@ mod tests {
         assert!(!names.contains(&"<http://ex.org/alice_smith>".to_string()), "self must be excluded");
     }
 
-    /// `lexical_fallback` ranks BELOW structural exact results. [SONNET-4.6] sq-181
+    /// `lexical_fallback` ranks BELOW structural exact results. sq-181
     #[cfg(feature = "lexical")]
     #[test]
     fn lexical_fallback_ranks_below_structural_results() {
@@ -2221,7 +2221,7 @@ mod tests {
     /// Trigram overlap does not require a shared prefix: `xalice` shares the
     /// `ali`/`lic`/`ice` trigrams with `alice` despite a different first byte, so the
     /// lexical tier must return it (a prefix-bounded candidate scan would miss it).
-    /// [SONNET-4.6] sq-181
+    /// sq-181
     #[cfg(feature = "lexical")]
     #[test]
     fn lexical_fallback_matches_across_different_prefixes() {
@@ -2254,7 +2254,7 @@ mod tests {
 
     /// The lexical tier must not panic on non-ASCII local names. In `abécédaire`,
     /// byte offset 3 falls inside the two-byte `é`, so any byte-offset string slice
-    /// of the query key would panic. [SONNET-4.6] sq-181
+    /// of the query key would panic. sq-181
     #[cfg(feature = "lexical")]
     #[test]
     fn lexical_fallback_handles_multibyte_local_names() {

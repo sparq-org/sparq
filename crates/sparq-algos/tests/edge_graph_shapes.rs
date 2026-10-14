@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-bif.29: pin the default-feature graph-shape seams through the public API.
+// sq-bif.29: pin the default-feature graph-shape seams through the public API.
 
 use sparq_algos::{
     degree_centrality, degree_centrality_normalized, label_propagation, num_communities, pagerank,

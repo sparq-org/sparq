@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-3ui0, gh-45) End-to-end persistence test for NAMED graphs: a dataset
+//! (sq-3ui0, gh-45) End-to-end persistence test for NAMED graphs: a dataset
 //! with several named graphs is queried with `GRAPH ?g { ... }`, then SAVED and REOPENED
 //! (memory-mapped, the out-of-core path), and the SAME query must return byte-identical
 //! rows. Before the fix, `Graph::open` dropped `named` entirely, so every `GRAPH`-scoped

@@ -17,6 +17,11 @@ sparq's ZK estate is research-grade and **externally UNAUDITED** (`sq-qhy4`) —
 default assurance is `secx:Claimed` and `secx:Proven` is barred on a positive
 property while that gate is open.
 
+The two MPC trust-model axes `secx:AdversaryModel` and `secx:CorruptionThreshold` are
+ordered dimensions that REUSE the existing `secx:SemiHonest` / `secx:HonestMajority`
+assumption individuals as levels, so an assumption annotation becomes dischargeable by
+the shared reasoner (issue #6186) instead of inert.
+
 See `src/lib.rs`, `ontologies/PROVENANCE.md`, and design record
 `research/security-properties-ontology-design.md` §4.1.
 

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-xa15c (#1248 items 1+2) — REGRESSION TEST for the in-process
+//! sq-xa15c (#1248 items 1+2) — REGRESSION TEST for the in-process
 //! embedding seam.
 //!
 //! Proves that the extracted, runtime-agnostic [`GenerationRing`] core

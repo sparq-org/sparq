@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-t5bne (epic sq-pbz04): the HAND-CHECKED DL-Lite oracle for the OWL 2 QL
+// sq-t5bne (epic sq-pbz04): the HAND-CHECKED DL-Lite oracle for the OWL 2 QL
 // PerfectRef rewriter.
 //
 // No Rust PerfectRef implementation exists to differentially diff against (the ecosystem is

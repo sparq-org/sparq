@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.40 — the W3C JSON-LD 1.1 `toRdf` lane runner (split out of the
+//! sq-oy1f.40 — the W3C JSON-LD 1.1 `toRdf` lane runner (split out of the
 //! former monolithic `tests/jsonld_suite.rs`; behaviour byte-identical).
 //!
 //! **toRdf** (JSON-LD → RDF): each `jld:ToRDFTest` input is driven through the REAL
@@ -35,7 +35,7 @@ pub fn run_tordf(root: &Path) -> Score {
             }
         };
         let base = doc_base(e);
-        // [OPUS-4.8] drive the REAL ingest path: load through sparq-core /
+        // drive the REAL ingest path: load through sparq-core /
         // oxjsonld, then read the parsed quads back out for comparison.
         let parsed = parse_jsonld_dataset(&text, &base);
         if e.is_negative {

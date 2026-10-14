@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-5ruwm: mutation-witnessed boot wiring for the opt-in periodic reconciler.
+// sq-5ruwm: mutation-witnessed boot wiring for the opt-in periodic reconciler.
 
 #[path = "../src/reconcile_runtime.rs"]
 mod reconcile_runtime;

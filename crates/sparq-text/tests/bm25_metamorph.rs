@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-8ncxj — seeded metamorphic laws for the pure BM25 index.
+//! sq-8ncxj — seeded metamorphic laws for the pure BM25 index.
 
 use oxrdf::Term;
 use rand::rngs::StdRng;

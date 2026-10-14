@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-bif.14) FEATURE-COMPOSITION test: the OPT-IN `audit-log` (flat `tracing`
+//! (sq-bif.14) FEATURE-COMPOSITION test: the OPT-IN `audit-log` (flat `tracing`
 //! event under target `sparq_server::audit`) and `access-audit` (richer JSON-Lines structured
 //! sink) features enabled TOGETHER and turned on at runtime on the SAME server.
 //!

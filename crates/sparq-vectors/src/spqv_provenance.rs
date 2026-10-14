@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-lhcot.1) **Embedding provenance** for the `.spqv` v3 store: the identity of the
+//! (sq-lhcot.1) **Embedding provenance** for the `.spqv` v3 store: the identity of the
 //! embedding pipeline a store was built with — model identifier, model/content version, similarity
 //! **metric**, vector **normalization**, **dimension**, and **verbalization regime** — plus a
 //! **mandatory compatibility check** so a query issued with an incompatible embedder is REJECTED
@@ -154,7 +154,7 @@ impl fmt::Display for Normalization {
     }
 }
 
-/// [FABLE-5] (sq-lhcot.1) The embedding provenance recorded in a `.spqv` v3 header: the identity of
+/// (sq-lhcot.1) The embedding provenance recorded in a `.spqv` v3 header: the identity of
 /// the embedding pipeline the store was built with, used for the mandatory compatibility check. See
 /// the module docs for the axes and the KERN-boundary reserved area.
 ///
@@ -162,7 +162,7 @@ impl fmt::Display for Normalization {
 /// [`metric`](Self::metric) / [`normalization`](Self::normalization) are typed enums. `dim` is NOT
 /// stored here (it is already the store's header dimension and checked there); the compatibility
 /// check folds the store dimension in.
-// [FABLE-5] Intentionally NOT `Default`: the metric and normalization are load-bearing compatibility
+// Intentionally NOT `Default`: the metric and normalization are load-bearing compatibility
 // axes, and a default (e.g. cosine/L2) would silently privilege one embedding convention — a
 // foot-gun for the mandatory-rejection contract. Callers specify them explicitly via `new`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -182,7 +182,7 @@ pub struct EmbeddingProvenance {
     /// The verbalization regime name (e.g. `"label-only"`, `"entity-verbalized"`). Opaque; the
     /// regime that turned an entity into the embedded text. Empty ⇒ unspecified.
     pub verbalization: String,
-    /// [FABLE-5] KERN BOUNDARY: a versioned, **opaque** reserved area for **extension fields:
+    /// KERN BOUNDARY: a versioned, **opaque** reserved area for **extension fields:
     /// reserved pending a cross-implementation profile (#1746)**. NO fields are defined here — no
     /// encoder-version-hash, no codebook-hash, no `D` annotation. It round-trips byte-for-byte and,
     /// by default, is empty. It does NOT participate in [`compatible_with`](Self::compatible_with).
@@ -192,12 +192,12 @@ pub struct EmbeddingProvenance {
 /// The format version of the serialized [`EmbeddingProvenance`] block. Bumped only if the DEFINED
 /// axis layout changes; the opaque [`reserved`](EmbeddingProvenance::reserved) area exists precisely
 /// so a future extension field does NOT need a block-format bump (it is written into the reserved
-/// bytes). [FABLE-5]
+/// bytes).
 pub const PROVENANCE_BLOCK_VERSION: u16 = 1;
 
 /// The maximum length of any single serialized provenance block, as a defence against a corrupt
 /// header claiming an absurd length. 64 KiB is far above any real provenance (a few short strings +
-/// an empty reserved area) yet bounds the allocation. [FABLE-5]
+/// an empty reserved area) yet bounds the allocation.
 pub const MAX_PROVENANCE_BLOCK_LEN: usize = 64 * 1024;
 
 impl EmbeddingProvenance {
@@ -279,7 +279,7 @@ impl EmbeddingProvenance {
         }
     }
 
-    /// [SONNET-4.6] (sq-tb9p0) **Expresses this provenance record as RDF** (spec assertion
+    /// (sq-tb9p0) **Expresses this provenance record as RDF** (spec assertion
     /// VG-PROV-5 of `site/specs/sparql-vector-genai.typ`): triples about `store` — the IRI the
     /// caller uses to name the vector store/index — in the [`crate::prov_vocab`] (`spqvp:`)
     /// vocabulary, so a dataset can describe its vector indexes. Emitted unconditionally:
@@ -342,7 +342,7 @@ impl EmbeddingProvenance {
         write_str(&mut out, &self.model_version);
         write_str(&mut out, &self.content_version);
         write_str(&mut out, &self.verbalization);
-        // The opaque reserved (KERN) area — a length-prefixed blob, no defined fields. [FABLE-5]
+        // The opaque reserved (KERN) area — a length-prefixed blob, no defined fields.
         write_bytes(&mut out, &self.reserved);
         out
     }
@@ -419,7 +419,7 @@ fn write_bytes(out: &mut Vec<u8>, b: &[u8]) {
 }
 
 /// A bounds-checked forward reader over the provenance block. Every read validates the length before
-/// slicing, so a malformed block is a descriptive `Err`, never an out-of-bounds panic. [FABLE-5]
+/// slicing, so a malformed block is a descriptive `Err`, never an out-of-bounds panic.
 struct Reader<'a> {
     bytes: &'a [u8],
     pos: usize,
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn round_trips_with_reserved_extension_bytes() {
-        // [FABLE-5] KERN boundary: the opaque reserved area round-trips byte-for-byte even though no
+        // KERN boundary: the opaque reserved area round-trips byte-for-byte even though no
         // field is defined over it (a future implementation's bytes survive a read/write here).
         let mut p = full();
         p.reserved = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01];
@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn reserved_area_does_not_affect_compatibility() {
-        // [FABLE-5] KERN boundary: compatibility is decided ONLY over the defined axes. Two
+        // KERN boundary: compatibility is decided ONLY over the defined axes. Two
         // provenances that agree on every axis but differ in the opaque reserved area are compatible.
         let a = full();
         let mut b = full();
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn to_rdf_expresses_the_record_and_omits_absent_axes() {
-        // [SONNET-4.6] (sq-tb9p0) VG-PROV-5: the full record (all axes set) emits every term; an
+        // (sq-tb9p0) VG-PROV-5: the full record (all axes set) emits every term; an
         // absent string axis is OMITTED, never asserted as an empty-string literal.
         use oxrdf::NamedNodeRef;
         let subject = NamedNodeRef::new("http://ex/store").unwrap();

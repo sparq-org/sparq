@@ -494,14 +494,26 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         Ok(format!("{prefix}-{hex}"))
     }
 
-    /// A trivial, deterministic ETag for the slice. M2: derive it from the SPARQ index state so it
-    /// participates in the conditional-request CAS (If-None-Match/If-Match).
-    fn etag_for(body: &Bytes) -> String {
-        format!("\"{}-{}\"", body.len(), fnv1a(body))
+    /// A deterministic strong ETag for a stored representation: its byte length and an FNV-1a hash
+    /// over the media type, a `0xFF` separator (never part of a header value) and the bytes.
+    ///
+    /// The media type is part of the representation (RFC 9110 §8.8.3), so re-storing the same bytes
+    /// under a different `Content-Type` must change the validator: otherwise a cache or an `If-Match`
+    /// holder of the old tag would treat the relabelled resource as unchanged. M2: derive it from the
+    /// SPARQ index state so it participates in the conditional-request CAS (If-None-Match/If-Match).
+    fn etag_for(content_type: &str, body: &Bytes) -> String {
+        let hash = fnv1a_chain(
+            content_type
+                .as_bytes()
+                .iter()
+                .chain(std::iter::once(&0xFF))
+                .chain(body.iter()),
+        );
+        format!("\"{}-{}\"", body.len(), hash)
     }
 }
 
-// [GPT-5.6] The concrete wasm/dev-store pair exposes one combined limits and usage view without
+// The concrete wasm/dev-store pair exposes one combined limits and usage view without
 // widening the production backend traits, whose remote stores have backend-specific quota models.
 impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
     /// Build a bounded in-memory store with the same limits enforced at both storage seams.
@@ -593,7 +605,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // Minting FAILS CLOSED if the OS RNG is unavailable (rather than minting a weak, possibly-colliding
         // key) — the write errors instead, so the no-two-writes-share-a-key invariant holds even then.
         let blob_key = Self::mint_blob_key(iri)?;
-        let etag = Self::etag_for(&body);
+        let etag = Self::etag_for(content_type, &body);
         self.blob.put(&blob_key, body).await.map_err(|e| match e {
             BlobError::QuotaExceeded => ServerError::InsufficientStorage,
             other => ServerError::Storage(format!("{other}")),
@@ -645,7 +657,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // CLOSED on an unavailable OS RNG (the create errors rather than minting a weak, possibly-colliding
         // key), so the no-shared-key invariant holds even then.
         let blob_key = Self::mint_blob_key(child)?;
-        let etag = Self::etag_for(&body);
+        let etag = Self::etag_for(content_type, &body);
         self.blob.put(&blob_key, body).await.map_err(|e| match e {
             BlobError::QuotaExceeded => ServerError::InsufficientStorage,
             other => ServerError::Storage(format!("{other}")),
@@ -894,7 +906,7 @@ fn validated_children(raw: Vec<String>) -> Vec<ValidatedChildIri> {
 }
 
 /// A tiny FNV-1a hash used only for the placeholder ETag (NOT a cryptographic digest).
-fn fnv1a(bytes: &[u8]) -> u64 {
+fn fnv1a_chain<'a>(bytes: impl Iterator<Item = &'a u8>) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
         hash ^= b as u64;

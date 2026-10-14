@@ -20,7 +20,7 @@ const DATA: &str = r#"
     ex:lyon   ex:loc "POINT(4.8357 45.7640)"^^geo:wktLiteral .
 "#;
 
-/// [SONNET-4.6] sq-6ep — a GeoSPARQL-VOCABULARY fixture (`geo:Feature` /
+/// sq-6ep — a GeoSPARQL-VOCABULARY fixture (`geo:Feature` /
 /// `geo:hasGeometry` / `geo:asWKT`), as opposed to [`DATA`], which hangs WKT
 /// literals off a plain `ex:loc` predicate. Used by the protocol-level probe the
 /// OGC R1 row cites.
@@ -128,7 +128,7 @@ async fn update_where_with_geof_filter() {
     assert!(!body.contains("http://ex/lyon"), "got: {body}");
 }
 
-/// [SONNET-4.6] sq-6ep — the SPARQL-PROTOCOL half of OGC GeoSPARQL R1 ("support
+/// sq-6ep — the SPARQL-PROTOCOL half of OGC GeoSPARQL R1 ("support
 /// SPARQL Query + Protocol + the `geo:` ontology vocabulary"): a `geo:Feature` /
 /// `geo:hasGeometry` / `geo:asWKT` graph pattern answered over real HTTP by the
 /// `/sparql` endpoint.

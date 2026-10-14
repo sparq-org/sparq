@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument list and result before building it and charges a round and fact allowance; past
   a limit the graph rebuilds through the batch engine, which refuses with
   `"n3: forward closure limit exceeded …"`, so the graph fails closed instead of growing a
-  term every round. (#6854)
+  term every round. (#6937)
 - **sparq-reason:** `ClosureLimits::max_join_rows` is an opt-in allowance for the
   transient work of one round of an N3 forward closure: the binding rows its premise joins
   produce and the times its rules fire, counted together. The default is unbounded, so
@@ -25,7 +25,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that multiply with each unconstrained premise pattern. `ClosureLimits` is
   `#[non_exhaustive]`, so the new field is additive. The `compiled-rules` evaluator's
   first round of each stratum is now naive, as the text engine's is, instead of seeding
-  each join position with the whole store. (#6938)
+  each join position with the whole store. (#6951)
+
+- **sparq-core:** `net::is_forbidden_ip` is the one outbound-address classifier behind the
+  SSRF guards of SERVICE, sparq-fedclient and the LWS federation client, which re-export it
+  under the names they had; its answers are unchanged (#6927).
+  `Graph::is_directory_backed()` reports whether a graph or any named graph under it is
+  opened from a directory; it is always `false` without the `mmap` feature (#6944).
+- **sparq-solid:** an ODRL permission attached to a pod document now grants Read per request
+  through `sparq_policy::decide`, for a target that exists and has a full static decision;
+  attached permissions never grant Append, Write or Control, and a prohibition still vetoes
+  (#6941).
+- **Security-property vocabulary:** two ordered dimensions, `secx:AdversaryModel`
+  (Malicious ⊐ Covert ⊐ SemiHonest) and `secx:CorruptionThreshold` (DishonestMajority ⊐
+  HonestMajority ⊐ SuperHonestMajority), with ODRL leftOperands
+  `secx:requiresAdversaryModel` / `secx:requiresCorruptionThreshold` and their order chains
+  in the admissibility ruleset. sparq-mpc ships a per-protocol annotation graph behind the
+  default-off `secprop-annotations` feature. The change is additive, but the serialised
+  `sparq-secprop-vocab` registry, the ODRL profile Turtle and the admissibility ruleset text
+  gain the new facts, so anything that pins those outputs byte for byte will see them
+  (#6977).
 
 ### Changed
 
@@ -33,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a negation or aggregation evaluated after the refusal ("refused a negation or aggregation
   … over an incomplete set"); it fails with the refusal itself, which names the limit
   (for example `… over max_term_bytes (…)`). Both are refusals: only the error text
-  changes. (#6938)
+  changes. (#6951)
 - **sparq-reason (N3):** formula-level `@forAll` declarations keep their own scope,
   including nested and sibling quoted formulas. Naive, compiled and incremental engines
   reject `@forAll` in a rule's own premise or a scoped body pattern with a specific error;
@@ -45,20 +64,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Quoted formula terms retain identity matching, conclusion universals keep their own
   scope, and closure-introduced universals are restored in the result formula.
   Document-level `@forAll` is unchanged. Exact writers place each formula-level
-  declaration inside its formula. (#6754)
+  declaration inside its formula. (#6851)
 - **Breaking (sparq-reason, `compiled-rules` feature):** `n3::compiled::eval` and
   `BoundRuleSet::eval` now return `Result<Vec<[Id; 3]>, String>` and run under the default
   `ClosureLimits`; new `n3::compiled::eval_with_limits` and `BoundRuleSet::eval_with_limits`
   take a `ClosureLimits`. A compiled closure past its round, fact or term-size allowance
   returns `Err("n3: forward closure limit exceeded …")` instead of running until memory
-  runs out. (#6855)
+  runs out. (#6934)
 - **Breaking (sparq-reason):** `ClosureLimits` has a new field, `max_term_bytes` (default
   16 MiB), and is now `#[non_exhaustive]`, so it can no longer be built with a struct literal
   outside the crate. Start from the default and set fields:
   `let mut l = ClosureLimits::default(); l.max_term_bytes = 1 << 20;`. A forward N3 closure
   whose rules would build a term past the limit (a string or list that doubles each round)
   now returns `Err("n3: forward closure limit exceeded …")` instead of aborting on a failed
-  allocation. (#6771)
+  allocation. (#6833)
+- **Breaking (sparq-fedclient):** pushed-down `VALUES` cells, `ORDER BY` keys and filter
+  conjuncts are typed and checked instead of inserted as text. `render_values_block` takes
+  `&[Vec<Term>]` and returns `Result<String, RenderError>`, rendering each cell with the
+  strict term renderer; `RenderError` has a new `Values` variant; `push_group` takes
+  `&[OrderKey]` (`OrderKey::asc("x")`, `OrderKey::desc("x")`) and returns `None` for an
+  invalid key. A filter conjunct is pushed only when its text parses as exactly one SPARQL
+  expression over its declared variables, with no `EXISTS` and no `\u`/`\U` escape;
+  otherwise it is evaluated locally. A group with any local conjunct projects all its
+  variables and is sent without its `LIMIT`, so local evaluation sees every row it needs.
+  (#6949)
+- **sparq-reason (N3):** the blank nodes of a document parsed at run time
+  (`log:parsedAsN3`, `log:semantics`) are standardized apart as `__rp{k}_{key}_<label>`,
+  where the key is derived from the document's text and base with SHA-256. Before, every
+  such document's `_:a` was one node, shared with the rules document's `_:a`. The label is
+  the same on every build, in a materialization and in `why()`, and for a
+  `MaterializedN3Graph`'s whole life; re-reasoning exported output is a fixed point. A
+  text that spells a graph's caller prefix (`__bs{k}_`) is no longer refused. A run or graph
+  keeps at most 100,000 distinct runtime documents; one more fails the run. Documents with
+  no runtime parse evaluate as before. (#6867)
+- **sparq-solid:** a multi-operation update that includes a `DELETE`/`INSERT … WHERE` with a
+  `GRAPH ?var` target now runs, all-or-nothing, on a store with no directory behind it: each
+  operation is authorized against what it writes, and one unwritable target refuses the
+  whole request. A directory-backed store still refuses such a request, and its error names
+  the reason. `CLEAR NAMED`/`DROP NAMED` now also needs Write on graphs that earlier
+  operations of the same request wrote or created. (#6944)
+- **SERVICE:** both results readers build terms with one shared literal and triple-term
+  builder. An SRX triple term missing its subject or predicate reports `triple term without
+  subject` / `predicate`, as SRJ does, and an invalid one is printed with `Display`. A
+  `<binding>` whose `<variable>` is declared only after the results have started is
+  ignored. (#6905)
+- **Dependencies:** sparq-fedclient drops its unused direct `serde` dependency and
+  serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
+
+### Fixed
+
+- **sparq-policy:** `contains` and `detect_conflicts` now prove containment and certain
+  overlap through `odrl:and` / `odrl:or` / `odrl:xone` compound constraints where the
+  runtime semantics decide it, instead of always answering `Unknown` / `Possible`; they
+  still never report `Contains` or `Certain` a compound cannot prove (#6985).
+- **sparq-solid:** blank nodes in ACL/ACR documents are skolemized on the document's IRI
+  instead of its position, so writing or deleting one document no longer renumbers another
+  document's skolem IRIs and clears the authorization cache (#6960).
+- **sparq-reason (N3):** `ClosureLimits::max_term_bytes` now also covers numeric builtin
+  results, forward and reverse, which are sized from their value before the literal is
+  rendered (#6929), and the parse behind `log:parsedAsN3` and `log:semantics`, which is
+  charged as it builds terms, so a short source whose prefixes or copied terms expand is
+  refused before the expanded formula is built (#6894). The document's own parse stays
+  uncharged.
+- **sparq-engine:** a `SELECT` whose deadline passes or that is cancelled while its result
+  terms are materialised returns the budget error instead of a complete, late result. This
+  covers `query`, `query_with_budget`, the `WHERE` step of `CONSTRUCT`/`DESCRIBE` and
+  `EXPLAIN ANALYZE`. (#6946)
+- **SERVICE (results XML):** elements and attributes are matched by namespace as well as
+  local name, so an element in another namespace or with an undeclared prefix is ignored and
+  can no longer stand in for a result, binding or term, or cut a literal short (#6932);
+  `its:dir` sets a literal's direction only when `its` is declared as the ITS namespace
+  (#6935); triple terms nested more than 61 deep are refused, the depth SRJ admits (#6916).
+- **sparq-zk:** `ZkDataset::query_traced` refuses a query with a `FROM` or `FROM NAMED`
+  clause, with the verifier's reason, instead of returning an empty trace. (#6950)
+- **sparq-solid:** a graph named by a bare `scheme://` (for example `<https://>`) is no
+  longer seeded as the container of every pod root, so its `.acl`/`.acr` no longer take part
+  in their inheritance. (#6939)
+- **LWS:** extension link relations compare case-insensitively wherever they are stored,
+  matched or searched, as RFC 8288 requires (#6899); the storage owner is notified of a
+  Delete whose prior state cannot be read, and every other non-open subscriber is still
+  refused (#6912); a listing has no `Last-Modified` when the container's or any member's
+  time is unknown, a member of unknown time lists no `modified`, and a linkset's `self`
+  entry omits `modified` instead of dating it the epoch (#6919, #6924); while a journaled
+  change is being put back, requests and subscription topic checks are decided on the
+  resource as it was before the change, so a caller only the change would admit gets `403`
+  at once instead of `503` (#6925).
 
 ## [0.1.6] - 2026-10-13
 

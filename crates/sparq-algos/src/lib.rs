@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-mqvm: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-mqvm: crate has zero `unsafe`
 
 pub mod centrality;
 #[cfg(feature = "centrality-extended")]
@@ -57,7 +57,7 @@ mod tests {
         assert!(!ng.is_empty());
     }
 
-    /// [OPUS-4.8] sq-lqty mutation-kill: an EMPTY graph must report `is_empty() == true` and
+    /// sq-lqty mutation-kill: an EMPTY graph must report `is_empty() == true` and
     /// `len() == 0`. The existing tests only ever assert `!is_empty()` on populated graphs,
     /// so the `is_empty -> false` constant-replacement mutant (graph.rs:125) survived. This
     /// pins the empty side.
@@ -87,7 +87,7 @@ mod tests {
         assert_eq!(all.edge_count(), 2);
     }
 
-    /// [GPT-5.6] sq-lsp7k.20: a data-only subject is still an entity node in the default
+    /// sq-lsp7k.20: a data-only subject is still an entity node in the default
     /// projection. This makes a genuinely isolated node representable without a self-loop.
     #[test]
     fn data_only_subject_is_an_isolated_entity_node() {
@@ -171,7 +171,7 @@ mod tests {
         ng.index_of(g.id_of(&iri(name)).unwrap()).unwrap()
     }
 
-    /// [OPUS-4.8] sq-lqty mutation-kill: pins the EXACT converged PageRank on a graph with a
+    /// sq-lqty mutation-kill: pins the EXACT converged PageRank on a graph with a
     /// node of out-degree 2 (`a → b`, `a → c`, `b → a`). Loose ordering/sum checks let the
     /// per-in-edge contribution `rank[src] / outdeg` be corrupted without notice; the exact
     /// stationary values do not. This kills the `/`→`*` and `/`→`%` mutants on pagerank.rs:76
@@ -204,7 +204,7 @@ mod tests {
         assert!((sum - 1.0).abs() < 1e-9, "sum {sum}");
     }
 
-    /// [OPUS-4.8] sq-lqty mutation-kill: makes the convergence *break point* observable so
+    /// sq-lqty mutation-kill: makes the convergence *break point* observable so
     /// the L1-delta accumulation (pagerank.rs:84 `delta += (next - r).abs()`) and the
     /// `delta < tolerance` early-stop (pagerank.rs:87) cannot be silently broken into a
     /// never-break loop. A loose tolerance breaks the power method *before* it has fully
@@ -283,7 +283,7 @@ mod tests {
         assert!((nrm[c] - 1.0).abs() < 1e-12);
     }
 
-    /// [OPUS-4.8] sq-lqty mutation-kill: exercises the `n < 2` small-graph guard in
+    /// sq-lqty mutation-kill: exercises the `n < 2` small-graph guard in
     /// [`degree_centrality_normalized`] (centrality.rs:42) from BOTH sides, which the
     /// existing `n == 3` test never does. A single-node graph (`n == 1`) must return
     /// `[0.0]`: the guard short-circuits before the `d / (n - 1)` divide. The `<`→`==`
@@ -306,7 +306,7 @@ mod tests {
         assert!(!nrm[0].is_nan(), "guard fell through to a 0/0 divide");
     }
 
-    /// [OPUS-4.8] sq-lqty mutation-kill: a two-node graph (`n == 2`) must NOT take the
+    /// sq-lqty mutation-kill: a two-node graph (`n == 2`) must NOT take the
     /// small-graph guard — it normalises by `n - 1 = 1`, so the in-degree-1 node scores
     /// exactly `1.0`. The `<`→`<=` mutant (centrality.rs:42) makes the guard `n <= 2`, which
     /// fires at `n == 2` and wrongly returns all zeros; this asserts a non-zero score, so it
@@ -391,7 +391,7 @@ mod tests {
         assert!(label_propagation(&ng, LabelPropConfig::default()).is_empty());
     }
 
-    /// [OPUS-4.8] sq-lqty mutation-kill: pins the EXACT label-propagation partition of a
+    /// sq-lqty mutation-kill: pins the EXACT label-propagation partition of a
     /// directed graph where the neighbour tallies in both directions are load-bearing.
     /// `a → c`, `b → c`, `c → d`, `c → e`, `d ⇄ e`: LP settles into two communities,
     /// `{a, b, c}` and `{d, e}`. The neighbour-count increments
@@ -438,7 +438,7 @@ mod tests {
         assert_ne!(comm[a], comm[d]);
     }
 
-    /// [OPUS-4.8] sq-lqty mutation-kill: drives label-propagation to a NON-singleton fixed
+    /// sq-lqty mutation-kill: drives label-propagation to a NON-singleton fixed
     /// point that takes more than one sweep to reach, so the update predicate
     /// (community.rs:147 `best != label[i]`) and the stop condition
     /// (community.rs:152 `if !changed`) are both exercised by their effect on the final
@@ -481,7 +481,7 @@ mod tests {
         assert_eq!(ng.dict_id(a), a_id);
     }
 
-    /// [OPUS-4.8] sq-lqty determinism regression: `NodeGraph` must assign node indices in
+    /// sq-lqty determinism regression: `NodeGraph` must assign node indices in
     /// CANONICAL ascending-term order, independent of the dictionary-id order (which the
     /// parallel sharded loader assigns thread-count-dependently). This is the invariant that
     /// makes the order-sensitive `label_propagation` partition reproducible across hosts; the

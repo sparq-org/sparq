@@ -1,5 +1,5 @@
 //! sparq-shacl-wasm: the sparq **SHACL** validator compiled to WebAssembly — the
-//! tier-b "W-shacl" bundle ([OPUS-4.8] sq-lfmf).
+//! tier-b "W-shacl" bundle (sq-lfmf).
 //!
 //! This is a SEPARATE, lazy-loaded bundle from the lean `sparq-wasm` triplestore bundle.
 //! It exposes SHACL Core + SHACL-SPARQL (`sh:sparql`, W3C SHACL §5.2) validation of a data
@@ -36,13 +36,13 @@
 //! OFF by default so the showcase artifact (and its deterministic bundle-bytes record)
 //! is unchanged; see the `stateful` module and `research/shacl-wasm-stateful-2026-07.md`
 //! (the sq-01xlp measurement + decision).
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-lfmf: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-lfmf: crate has zero `unsafe`
 
 use sparq_core::Graph;
 use sparq_shacl::ValidationReport;
 use wasm_bindgen::prelude::*;
 
-// [FABLE-5] sq-01xlp: the opt-in pre-parsed/stateful validation handle. Behind the
+// sq-01xlp: the opt-in pre-parsed/stateful validation handle. Behind the
 // non-default `stateful` feature so the default showcase bundle carries zero extra
 // surface; CI builds + tests the bundle in both feature states.
 #[cfg(feature = "stateful")]

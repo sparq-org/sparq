@@ -46,6 +46,165 @@ const ADULT_TBOX: &str = r#"
       rdfs:subClassOf :Adult .
 "#;
 
+#[test]
+fn npa_data_only_source_derived_positive_is_inconsistent() {
+    // Every individual is in owl:Thing, including a source mentioned only in an NPA.
+    // Thing ⊑ ∃p.{5} therefore entails p(a, 5) without any separate assertion about a.
+    let (dict, triples) = parse(&format!(
+        "{PRE}
+         owl:Thing rdfs:subClassOf [ owl:onProperty :p ; owl:hasValue 5 ] .
+         [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+           owl:assertionProperty :p ; owl:targetValue 5 ] ."
+    ));
+    let r = realize(&dict, &triples);
+    assert!(r.is_inconsistent());
+    assert!(r.type_assertions().is_empty());
+}
+
+#[test]
+fn npa_data_invalid_property_does_not_register_source() {
+    // A malformed NPA must not introduce a, even though Thing ⊑ C types every individual.
+    for property in [r#""invalid""#, "_:property", "owl:Thing"] {
+        let (dict, triples) = parse(&format!(
+            "{PRE}
+             owl:Thing rdfs:subClassOf :C .
+             [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+               owl:assertionProperty {property} ; owl:targetValue 5 ] ."
+        ));
+        let r = realize(&dict, &triples);
+        assert!(!r.is_inconsistent(), "invalid property: {property}");
+        assert!(
+            r.type_assertions()
+                .iter()
+                .all(|&(source, _)| source != iri(&dict, "a")),
+            "a malformed NPA must not realize its source: {property}"
+        );
+        assert_eq!(
+            r.report().skipped_assertions,
+            1,
+            "invalid property: {property}"
+        );
+    }
+}
+
+#[test]
+fn npa_data_only_source_without_derived_positive_is_consistent() {
+    // A can be empty, so A ⊑ ∃p.{5} does not force p(a, 5) for this NPA-only source.
+    let (dict, triples) = parse(&format!(
+        "{PRE}
+         :A rdfs:subClassOf [ owl:onProperty :p ; owl:hasValue 5 ] .
+         [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+           owl:assertionProperty :p ; owl:targetValue 5 ] ."
+    ));
+    assert!(!realize(&dict, &triples).is_inconsistent());
+}
+
+#[test]
+fn npa_data_derived_point_is_inconsistent() {
+    // No positive data triple is asserted: a : A and A ⊑ ∃p.{5} entail p(a, 5).
+    for filler in [
+        "owl:hasValue 5",
+        "owl:someValuesFrom [ owl:oneOf ( 5 ) ]",
+        "owl:someValuesFrom :Point",
+        "owl:someValuesFrom [ owl:onDatatype xsd:integer ; owl:withRestrictions
+          ( [ xsd:minInclusive 5 ] [ xsd:maxInclusive 5 ] ) ]",
+    ] {
+        let (dict, triples) = parse(&format!(
+            "{PRE}
+             :Point a rdfs:Datatype ; owl:equivalentClass [ owl:oneOf ( 5 ) ] .
+             :A rdfs:subClassOf [ owl:onProperty :p ; {filler} ] .
+             :a a :A .
+             [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+               owl:assertionProperty :p ; owl:targetValue 5 ] ."
+        ));
+        let r = realize(&dict, &triples);
+        assert!(
+            r.is_inconsistent(),
+            "derived point from {filler} contradicts the NPA"
+        );
+        assert!(r.type_assertions().is_empty());
+    }
+}
+
+#[test]
+fn npa_data_numeric_value_equality_is_inconsistent() {
+    for (positive, negative) in [("5", "5.0"), ("5.0", "5"), ("5.50", "5.5")] {
+        for derived in [false, true] {
+            let positive_axiom = if derived {
+                format!(":a a :A . :A rdfs:subClassOf [ owl:onProperty :p ; owl:hasValue {positive} ] .")
+            } else {
+                format!(":a :p {positive} .")
+            };
+            let (dict, triples) = parse(&format!(
+                "{PRE}{positive_axiom}
+                 [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+                   owl:assertionProperty :p ; owl:targetValue {negative} ] ."
+            ));
+            assert!(
+                realize(&dict, &triples).is_inconsistent(),
+                "{positive} and {negative} share a point (derived={derived})"
+            );
+        }
+    }
+}
+
+#[test]
+fn npa_data_non_numeric_literals_keep_term_identity() {
+    for (positive, negative, clashes) in [
+        (r#""05""#, r#""5""#, false),
+        (r#""5""#, r#""5""#, true),
+        (r#""5"@en"#, r#""5"@fr"#, false),
+        (r#""5""#, "5", false),
+    ] {
+        let (dict, triples) = parse(&format!(
+            "{PRE} :a :p {positive} .
+             [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+               owl:assertionProperty :p ; owl:targetValue {negative} ] ."
+        ));
+        assert_eq!(
+            realize(&dict, &triples).is_inconsistent(),
+            clashes,
+            "non-numeric literals match only identical terms: {positive}, {negative}"
+        );
+    }
+}
+
+#[test]
+fn npa_data_requires_the_positive_for_this_source_property_and_value() {
+    // A minted point alone is insufficient, as is a positive for a different tuple.
+    for positive in [
+        ":A rdfs:subClassOf [ owl:onProperty :p ; owl:hasValue 5 ] .",
+        ":b :p 5 .",
+        ":a :q 5 .",
+        ":a :p 6 . :b :p 5 .",
+    ] {
+        let (dict, triples) = parse(&format!(
+            "{PRE}{positive}
+             [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+               owl:assertionProperty :p ; owl:targetValue 5.0 ] ."
+        ));
+        assert!(
+            !realize(&dict, &triples).is_inconsistent(),
+            "a model with no p(a, 5) exists: {positive}"
+        );
+    }
+}
+
+#[test]
+fn npa_data_wider_range_does_not_entail_a_particular_value() {
+    // The existential can be witnessed by 6. The unrelated b p 5 mints {5}, so checking
+    // range containment in the wrong direction would fabricate a clash for a.
+    let (dict, triples) = parse(&format!(
+        "{PRE} :a a :A . :b :p 5 .
+         :A rdfs:subClassOf [ owl:onProperty :p ; owl:someValuesFrom
+           [ owl:onDatatype xsd:integer ; owl:withRestrictions
+             ( [ xsd:minInclusive 5 ] [ xsd:maxInclusive 6 ] ) ] ] .
+         [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+           owl:assertionProperty :p ; owl:targetValue 5 ] ."
+    ));
+    assert!(!realize(&dict, &triples).is_inconsistent());
+}
+
 // --- The bead's acceptance fixture: `a q 5` ⇒ `{a} ⊑ ∃q.{5}`, read off as a typing. ---------
 #[test]
 fn data_property_assertion_types_through_a_faceted_range() {

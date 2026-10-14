@@ -47,7 +47,7 @@
 //!
 //! ## Retrieval-capability ordering hint (advisory only)
 //!
-//! [FABLE-5] sq-3uijg. A source's declared
+//! sq-3uijg. A source's declared
 //! [`RetrievalCapability`](crate::RetrievalCapability) is consumed here as a
 //! **STATIC ordering hint** over each pattern's retained candidates: sources declaring a
 //! `sret:cardinalityHint` order first, ascending by hint (the source expecting the
@@ -62,7 +62,7 @@
 //! endpoint flags are deliberately not consulted — they describe retrieval operators,
 //! not BGP answering.
 //!
-//! [OPUS-4.8] sq-a35t.
+//! sq-a35t.
 
 use crate::descriptor::SourceDescriptor;
 use crate::pattern::{Bgp, Term, TriplePattern};
@@ -87,7 +87,7 @@ pub struct PatternSources {
     /// `sret:cardinalityHint` ascending, undeclared last), tie-broken by ascending
     /// source index — plain ascending index order when no source declares a hint.
     /// The ordering is ADVISORY ONLY: the retained SET never depends on the hint
-    /// (see the module docs). [FABLE-5] sq-3uijg.
+    /// (see the module docs). sq-3uijg.
     pub candidates: Vec<SourceCandidate>,
 }
 
@@ -116,7 +116,7 @@ impl PatternSources {
 /// undeclared last), then by source index — which is the plain historical ascending
 /// index order whenever no source declares a hint. The rank is ADVISORY ONLY: it is
 /// applied strictly after the prune decision, so it can reorder candidates but never
-/// change the retained SET (see the module docs). [FABLE-5] sq-3uijg.
+/// change the retained SET (see the module docs). sq-3uijg.
 pub fn select_sources(bgp: &Bgp, sources: &[SourceDescriptor]) -> Vec<PatternSources> {
     bgp.patterns
         .iter()
@@ -146,7 +146,7 @@ pub fn select_sources(bgp: &Bgp, sources: &[SourceDescriptor]) -> Vec<PatternSou
 /// sorts before every undeclared one) then the `sret:cardinalityHint` ascending, with
 /// the historical ascending-index order among unhinted sources preserved via the
 /// source-index tie-break. Read only after the prune decision — never affects the
-/// retained-source set (the answer-safety invariant). [FABLE-5] sq-3uijg.
+/// retained-source set (the answer-safety invariant). sq-3uijg.
 fn retrieval_rank(src: &SourceDescriptor) -> (bool, u64) {
     let hint = src.retrieval().and_then(|r| r.cardinality_hint);
     (hint.is_none(), hint.unwrap_or_default())
@@ -415,7 +415,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [OPUS-4.8] sq-bif.3 — correctness suite: previously-uncovered selection branches
+    // sq-bif.3 — correctness suite: previously-uncovered selection branches
     // (object-authority prune, the full CostFed cardinality matrix incl. both-bound and
     // the unknown-distinct-objects fallback, the literal/non-IRI prune paths, multi-source
     // union + ordering, and the PatternSources accessors). Drives the REAL `select_sources`
@@ -524,7 +524,7 @@ mod tests {
         assert_eq!(est, 1.0, "triples.max(1)/(1*1) = 1 for an all-zero partition");
     }
 
-    // [GPT-5.6] sq-2b7h7: sweep the estimator's finite, non-negative postcondition
+    // sq-2b7h7: sweep the estimator's finite, non-negative postcondition
     // across every binding branch and both early returns. The zero-count probe makes
     // the denominator guards observable; the high-distinct-count source exercises a
     // both-bound estimate far below one without allowing it to become negative.
@@ -700,7 +700,7 @@ mod tests {
     }
 
     // ============================================================================
-    // [FABLE-5] sq-3uijg — the RetrievalCapability STATIC ordering hint. Advisory
+    // sq-3uijg — the RetrievalCapability STATIC ordering hint. Advisory
     // ONLY: it may reorder each pattern's candidates but can NEVER change the
     // retained-source SET or any cardinality estimate (the inherited answer-safety
     // invariant from sq-222my, proven by the differential test below).

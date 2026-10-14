@@ -1,6 +1,6 @@
 //! Context Processing Algorithm + Create Term Definition (JSON-LD 1.1 API §4).
 //!
-//! [OPUS-4.8] (sq-oy1f.24) Folds a chain of local/remote `@context` definitions into an
+//! (sq-oy1f.24) Folds a chain of local/remote `@context` definitions into an
 //! [`ActiveContext`], handling keyword aliases, `@protected` term protection,
 //! `@propagate`, `@import`, `@version`, and the `@vocab`/`@base`/`@language`/`@direction`
 //! defaults. Remote contexts (`@context` strings and `@import`) are dereferenced **only**
@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::iri::{expand_iri_in_context, is_absolute_iri, is_blank_node, resolve_iri};
 use super::{has_keyword_form, is_keyword, ActiveContext, Direction, Override, TermDefinition};
+use crate::cache::Lru;
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::json::Json;
 use crate::loader::DocumentLoader;
@@ -52,17 +53,17 @@ impl ActiveContext {
         options: &JsonLdOptions,
     ) -> Result<ActiveContext, JsonLdError> {
         // A self-contained context processed over a fresh active context always yields the
-        // same result, so the last one is reused: framing processes the frame's context
+        // same result, so recent ones are reused: framing processes the frame's context
         // for expansion and again for compaction.
         let cacheable = self.is_initial() && crate::compact::self_contained(local_context);
-        let key = |e: &LastProcessed| {
+        let key = |e: &ProcessedContext| {
             e.base == self.base_iri
                 && e.base_url.as_deref() == base_url
                 && e.mode == options.processing_mode
                 && e.local == *local_context
         };
         if cacheable {
-            if let Some(hit) = LAST_PROCESSED.with(|last| last.borrow().as_ref().filter(|e| key(e)).map(|e| e.result.clone())) {
+            if let Some(hit) = PROCESSED_CACHE.with(|cache| cache.borrow_mut().get(key).map(|e| e.result.clone())) {
                 return Ok(hit);
             }
         }
@@ -75,8 +76,8 @@ impl ActiveContext {
         };
         let result = super::budget::with_budget(|| process_inner(self, local_context, false, true, &mut env))?;
         if cacheable {
-            LAST_PROCESSED.with(|last| {
-                *last.borrow_mut() = Some(LastProcessed {
+            PROCESSED_CACHE.with(|cache| {
+                cache.borrow_mut().insert(ProcessedContext {
                     base: self.base_iri.clone(),
                     base_url: base_url.map(str::to_string),
                     mode: options.processing_mode,
@@ -108,7 +109,7 @@ impl ActiveContext {
     /// pre-checked syntactically at Create Term Definition time, so applying it here still
     /// runs the full validating Context Processing pass.
     ///
-    /// [OPUS-4.8] (sq-oy1f.25)
+    /// (sq-oy1f.25)
     pub(crate) fn process_scoped(
         &self,
         local_context: &Json,
@@ -129,9 +130,9 @@ impl ActiveContext {
     }
 }
 
-/// The last self-contained context processed over a fresh active context on this thread
+/// A self-contained context processed over a fresh active context on this thread
 /// ([`ActiveContext::process`]).
-struct LastProcessed {
+struct ProcessedContext {
     base: Option<String>,
     base_url: Option<String>,
     mode: ProcessingMode,
@@ -140,7 +141,7 @@ struct LastProcessed {
 }
 
 thread_local! {
-    static LAST_PROCESSED: std::cell::RefCell<Option<LastProcessed>> = const { std::cell::RefCell::new(None) };
+    static PROCESSED_CACHE: std::cell::RefCell<Lru<ProcessedContext>> = const { std::cell::RefCell::new(Lru::new()) };
 }
 
 /// The recursive core of Context Processing (§4.1.2). `override_protected` disables the
@@ -181,7 +182,7 @@ pub(crate) fn process_inner(
     // step 5: fold each context in turn.
     for context in &contexts {
         // 5.1: a null context resets the active context.
-        if is_null(context) {
+        if context.is_null() {
             if !override_protected && result.has_protected_terms() {
                 return Err(JsonLdError::new(E::InvalidContextNullification));
             }
@@ -288,7 +289,7 @@ pub(crate) fn process_inner(
         // 5.7: @base — only for a directly-embedded (non-remote) context.
         if env.remote_contexts.is_empty() {
             if let Some(b) = context.get("@base") {
-                if is_null(b) {
+                if b.is_null() {
                     result.base_iri = None;
                 } else if let Json::Str(s) = b {
                     if is_absolute_iri(s) {
@@ -306,10 +307,10 @@ pub(crate) fn process_inner(
 
         // 5.8: @vocab.
         if let Some(v) = context.get("@vocab") {
-            if is_null(v) {
+            if v.is_null() {
                 result.vocabulary_mapping = None;
             } else if let Json::Str(s) = v {
-                // [OPUS-5] sq-gzsky — §4.1.2 step 5.8 tests the RAW value: "if value is
+                // sq-gzsky — §4.1.2 step 5.8 tests the RAW value: "if value is
                 // neither an IRI nor a blank node identifier, an invalid vocab mapping
                 // error". A RELATIVE reference (including the empty string) resolved
                 // against `@base` / the current `@vocab` is the JSON-LD 1.1 relaxation
@@ -334,7 +335,7 @@ pub(crate) fn process_inner(
 
         // 5.9: @language.
         if let Some(v) = context.get("@language") {
-            if is_null(v) {
+            if v.is_null() {
                 result.default_language = None;
             } else if let Json::Str(s) = v {
                 result.default_language = Some(s.clone());
@@ -348,7 +349,7 @@ pub(crate) fn process_inner(
             if env.mode == ProcessingMode::JsonLd10 {
                 return Err(JsonLdError::new(E::InvalidContextEntry));
             }
-            if is_null(v) {
+            if v.is_null() {
                 result.default_base_direction = None;
             } else if let Json::Str(s) = v {
                 result.default_base_direction =
@@ -447,7 +448,7 @@ pub(crate) fn create_term_definition(
     defined.insert(term.to_string(), false);
 
     // step 3: the raw value for this term (a missing key defaults to null).
-    let raw = local.get(term).cloned().unwrap_or_else(json_null);
+    let raw = local.get(term).cloned().unwrap_or_else(Json::null);
 
     // steps 4/5: keyword handling.
     if term == "@type" {
@@ -486,7 +487,7 @@ pub(crate) fn create_term_definition(
             true,
         ),
         Json::Obj(_) => (raw.clone(), false),
-        j if is_null(j) => (Json::Obj(vec![("@id".to_string(), json_null())]), false),
+        j if j.is_null() => (Json::Obj(vec![("@id".to_string(), Json::null())]), false),
         _ => return Err(JsonLdError::new(E::InvalidTermDefinition)),
     };
 
@@ -535,7 +536,7 @@ pub(crate) fn create_term_definition(
         None => false,
     };
     if let Some(idj) = id_entry.filter(|_| id_differs) {
-        if is_null(&idj) {
+        if idj.is_null() {
             // @id: null — a retained definition with a null IRI mapping (falls through to
             // the common tail so container/index/etc. still apply, then is stored).
             def.iri = None;
@@ -563,7 +564,7 @@ pub(crate) fn create_term_definition(
             // in 1.1 to disallow inconsistent compact-IRI redefinitions.  In JSON-LD 1.0
             // mode the check is skipped (W3C expand/0026 maps rdf:type→@type and
             // expand/0071 remaps v:term→v:somethingElse — both VALID in 1.0).
-            // [OPUS-5] sq-gzsky — the check is NOT skipped when the IRI mapping is a
+            // sq-gzsky — the check is NOT skipped when the IRI mapping is a
             // keyword. That the round-trip predicate cannot hold for a keyword is exactly
             // what §4.2.2 step 14.3.3 is FOR in 1.1: an IRI-shaped term may not be
             // remapped onto a keyword. W3C expand/er43 (`rdf:type` → `@type`, 1.1) pins the
@@ -572,7 +573,7 @@ pub(crate) fn create_term_definition(
             // actually draws (the check is absent from the JSON-LD 1.0 algorithm — it was
             // added in 1.1 to disallow inconsistent compact-IRI redefinitions; expand/0071
             // remaps `v:term`→`v:somethingElse`, also VALID in 1.0).
-            // [FABLE-5] (sq-oy1f.27) The round-trip check applies to a term containing
+            // (sq-oy1f.27) The round-trip check applies to a term containing
             // a colon "anywhere but as the first or last character" (§4.2.2 step
             // 14.3.3) — a term ENDING in a colon (the `"prefix:"` declaration form,
             // W3C compact/p003-p004) is a regular term, not a compact-IRI form.
@@ -692,11 +693,11 @@ fn create_reverse_definition(
     if let Some(c) = value.get("@container") {
         def.container = match c {
             Json::Str(s) if s == "@set" || s == "@index" => vec![s.clone()],
-            j if is_null(j) => vec![],
+            j if j.is_null() => vec![],
             _ => return Err(JsonLdError::new(E::InvalidReverseProperty)),
         };
     }
-    // [SONNET-4.6] sq-oy1f.45 — §4.2.2 step 18: `@index` applies to `@container @index`
+    // sq-oy1f.45 — §4.2.2 step 18: `@index` applies to `@container @index`
     // terms including reverse properties (W3C expand/0131: a `@reverse` + `@container @index`
     // + `@index "predicate"` combination).  The non-reverse path processes `@index` inside
     // `finish_definition`, but `create_reverse_definition` returns early before reaching
@@ -786,7 +787,7 @@ fn finish_definition(
     let has_type = value.get("@type").is_some();
     if let Some(l) = value.get("@language") {
         if !has_type {
-            def.language = if is_null(l) {
+            def.language = if l.is_null() {
                 Override::Null
             } else if let Json::Str(s) = l {
                 Override::Set(s.clone())
@@ -797,7 +798,7 @@ fn finish_definition(
     }
     if let Some(d) = value.get("@direction") {
         if !has_type {
-            def.direction = if is_null(d) {
+            def.direction = if d.is_null() {
                 Override::Null
             } else if let Json::Str(s) = d {
                 Override::Set(Direction::parse(s).ok_or_else(|| JsonLdError::new(E::InvalidBaseDirection))?)
@@ -815,7 +816,7 @@ fn finish_definition(
         let Json::Str(ns) = n else {
             return Err(JsonLdError::new(E::InvalidNestValue));
         };
-        // [OPUS-4.8] (sq-oy1f.24) Per JSON-LD 1.1 Create Term Definition, an `@nest` value
+        // (sq-oy1f.24) Per JSON-LD 1.1 Create Term Definition, an `@nest` value
         // must not be a keyword *or have keyword form* other than `@nest` itself — a token
         // like `@bogus` (keyword-form but unrecognised) is still an invalid @nest value.
         if ns != "@nest" && has_keyword_form(ns) {
@@ -899,7 +900,7 @@ fn normalize_container(c: &Json) -> Option<Vec<String>> {
 /// `@list`/`@set`/`@index`.
 ///
 /// `raw_is_string` reports whether the `@container` entry was written as a bare string
-/// rather than an array. [OPUS-5] sq-gzsky — §4.2.2 step 21.2 rejects a container value
+/// rather than an array. sq-gzsky — §4.2.2 step 21.2 rejects a container value
 /// that "is @graph, @id, or @type, **or is otherwise not a string**" in `json-ld-1.0`
 /// processing mode, so `"@container": ["@set"]` is an `invalid container mapping` in 1.0
 /// even though the single member `@set` is itself 1.0-legal (W3C expand/es01,
@@ -945,21 +946,95 @@ fn ends_with_gen_delim(s: &str) -> bool {
     s.ends_with([':', '/', '?', '#', '[', ']', '@'])
 }
 
-/// The `Json` representation of a JSON `null`.
-fn json_null() -> Json {
-    Json::Raw("null".to_string())
-}
-
-/// True iff `j` is a JSON `null`.
-fn is_null(j: &Json) -> bool {
-    matches!(j, Json::Raw(r) if r == "null")
-}
-
 /// Interprets a JSON boolean scalar, or `None` for any non-boolean value.
 fn as_bool(j: &Json) -> Option<bool> {
     match j {
         Json::Raw(r) if r == "true" => Some(true),
         Json::Raw(r) if r == "false" => Some(false),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use crate::NoopLoader;
+    use std::sync::Arc;
+
+    fn parse(s: &str) -> Json {
+        Json::parse(s).unwrap()
+    }
+
+    #[test]
+    fn processed_cache_reuses_alternating_contexts_and_evicts() {
+        PROCESSED_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let contexts: Vec<_> = (0..9).map(|i| parse(&format!(r#"{{"p":"http://ex/{i}"}}"#))).collect();
+        let process = |c: &Json| ActiveContext::new(None).process(c, None, &NoopLoader, &JsonLdOptions::default()).unwrap();
+        let a = process(&contexts[0]);
+        let b = process(&contexts[1]);
+        assert!(Arc::ptr_eq(&a.term_definitions, &process(&contexts[0]).term_definitions));
+        assert!(Arc::ptr_eq(&b.term_definitions, &process(&contexts[1]).term_definitions));
+        assert_eq!(PROCESSED_CACHE.with(|cache| cache.borrow().hits), 2);
+        for c in &contexts[2..8] {
+            process(c);
+        }
+        process(&contexts[0]); // Promote the oldest; the second must now be evicted.
+        process(&contexts[8]);
+        assert!(Arc::ptr_eq(&a.term_definitions, &process(&contexts[0]).term_definitions));
+        assert!(!Arc::ptr_eq(&b.term_definitions, &process(&contexts[1]).term_definitions));
+    }
+
+    #[test]
+    fn processed_cache_separates_both_bases_and_processing_mode() {
+        PROCESSED_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let local = parse(r#"{"p":{"@id":"http://ex/p","@context":{"q":"http://ex/q"}}}"#);
+        let process = |base, url, mode| {
+            ActiveContext::new(base).process(&local, url, &NoopLoader, &JsonLdOptions {
+                processing_mode: mode, ..JsonLdOptions::default()
+            }).unwrap()
+        };
+        let variants = [
+            (Some("http://ex/a/"), Some("http://ex/context-a"), ProcessingMode::JsonLd11),
+            (Some("http://ex/b/"), Some("http://ex/context-a"), ProcessingMode::JsonLd11),
+            (Some("http://ex/a/"), Some("http://ex/context-b"), ProcessingMode::JsonLd11),
+        ];
+        let results: Vec<_> = variants.iter().map(|&(base, url, mode)| process(base, url, mode)).collect();
+        assert_eq!(results[0].base_iri(), Some("http://ex/a/"));
+        assert_eq!(results[1].base_iri(), Some("http://ex/b/"));
+        assert_eq!(results[2].term_definition("p").unwrap().base_url.as_deref(), Some("http://ex/context-b"));
+        assert_eq!(PROCESSED_CACHE.with(|cache| cache.borrow().hits), 0);
+        for (&(base, url, mode), expected) in variants.iter().zip(&results) {
+            assert!(Arc::ptr_eq(&expected.term_definitions, &process(base, url, mode).term_definitions));
+        }
+        // A cached 1.1-only context must still be rejected in 1.0 mode.
+        let local = parse(r#"{"@version":1.1,"p":"http://ex/p"}"#);
+        let initial = ActiveContext::new(None);
+        initial.process(&local, None, &NoopLoader, &JsonLdOptions::default()).unwrap();
+        let opts = JsonLdOptions { processing_mode: ProcessingMode::JsonLd10, ..JsonLdOptions::default() };
+        assert_eq!(initial.process(&local, None, &NoopLoader, &opts).unwrap_err().code(), E::ProcessingModeConflict);
+    }
+
+    #[test]
+    fn processed_cache_bypasses_non_initial_and_loader_dependent_contexts() {
+        PROCESSED_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let initial = ActiveContext::new(None);
+        let opts = JsonLdOptions::default();
+        let local = parse(r#"{"p":"http://ex/p"}"#);
+        initial.process(&local, None, &NoopLoader, &opts).unwrap();
+        let other = initial.process(&parse(r#"{"q":"http://ex/q"}"#), None, &NoopLoader, &opts).unwrap();
+        let combined = other.process(&local, None, &NoopLoader, &opts).unwrap();
+        assert!(combined.term_definition("q").is_some());
+        assert_eq!(PROCESSED_CACHE.with(|cache| cache.borrow().hits), 0);
+        for local in [
+            parse(r#""http://ex/context""#),
+            parse(r#"{"@import":"http://ex/context"}"#),
+            parse(r#"{"p":{"@id":"http://ex/p","@context":"http://ex/context"}}"#),
+        ] {
+            assert!(!crate::compact::self_contained(&local));
+            // Scoped contexts may defer dereferencing until use, but none may hit here.
+            let _ = initial.process(&local, None, &NoopLoader, &opts);
+            let _ = initial.process(&local, None, &NoopLoader, &opts);
+        }
+        assert_eq!(PROCESSED_CACHE.with(|cache| cache.borrow().hits), 0);
     }
 }

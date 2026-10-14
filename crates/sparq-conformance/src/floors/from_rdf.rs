@@ -1,10 +1,10 @@
-//! [FABLE-5] sq-oy1f.40 — the W3C JSON-LD 1.1 `fromRdf` lane ratchet floor
+//! sq-oy1f.40 — the W3C JSON-LD 1.1 `fromRdf` lane ratchet floor
 //! (relocated from `tests/jsonld_suite.rs` to this lib-side single source).
 
 /// fromRdf (RDF → JSON-LD via the NATIVE `sparq_jsonld::from_rdf`, JSON-LD API
 /// §8.1) pass floor. RATCHET: may only RISE.
 ///
-/// [FABLE-5] sq-oy1f.28 ORACLE-STRENGTHENING RE-PIN, side by side:
+/// sq-oy1f.28 ORACLE-STRENGTHENING RE-PIN, side by side:
 /// * OLD oracle (engine-writer self-reparse round-trip only): **51/53**
 ///   (0 skips; the 2 failures were cross-graph shared list cells, fromRdf/0020
 ///   and /0021, which the writer's `@list` collapsing renamed; the 2

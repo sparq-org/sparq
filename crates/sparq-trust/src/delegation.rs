@@ -127,7 +127,7 @@
 //! feature or a security guarantee. It does not provide a DID resolver, anonymity, deep
 //! incremental revocation, or an external-audited crypto path.
 //!
-//! [OPUS-4.8] sq-l5og: delegation invocation-binding gate (issue #940, epic sq-pfae P5).
+//! sq-l5og: delegation invocation-binding gate (issue #940, epic sq-pfae P5).
 //! Written while Fable unavailable — flag for re-review when Fable returns.
 //! 🤖 SPARQ agent — trust-graph delegation invocation binding.
 

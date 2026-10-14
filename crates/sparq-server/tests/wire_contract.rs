@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-fdurb, gh-1416) **Served-surface snapshot suite for the v1 HTTP wire
+//! (sq-fdurb, gh-1416) **Served-surface snapshot suite for the v1 HTTP wire
 //! contract** — `docs/http-wire-contract.md`.
 //!
 //! Pins the wire surface an HTTP-only consumer (the PSS ask, #1416) relies on, AS DOCUMENTED:

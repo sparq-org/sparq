@@ -1,7 +1,7 @@
 use sparq_jsonld::{DocumentLoader, Json};
 use sparq_jsonld_registry::RegistryLoader;
 
-// [GPT-5.6] sq-bif.27 — enumerate the public registry contract so additions do not
+// sq-bif.27 — enumerate the public registry contract so additions do not
 // accidentally replace coverage for one of the four currently vendored contexts.
 const REGISTERED_IRIS: &[&str] = &[
     "https://schema.org/docs/jsonldcontext.jsonld",
@@ -26,7 +26,7 @@ fn get_returns_parseable_json_for_every_registered_iri() {
 
 #[test]
 fn get_requires_exact_iri_equality() {
-    // [GPT-5.6] sq-bif.27 — near matches must remain unresolved so the offline
+    // sq-bif.27 — near matches must remain unresolved so the offline
     // registry cannot silently widen its allowlist.
     for iri in [
         "https://schema.org/docs/jsonldcontext.jsonld/",

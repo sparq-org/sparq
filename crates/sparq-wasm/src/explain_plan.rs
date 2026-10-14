@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-ixc3.19: the `Store::explainPlanJson` / `Store::explainPlanAnalyzeJson`
+//! sq-ixc3.19: the `Store::explainPlanJson` / `Store::explainPlanAnalyzeJson`
 //! STRUCTURED-explain bindings.
 //!
 //! Exposes `sparq-engine`'s existing typed query-plan tree

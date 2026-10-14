@@ -1,4 +1,4 @@
-//! [GPT-5.6] (`sq-bif.26`) Minimal-input integration pins for deterministic JSON-LD
+//! (`sq-bif.26`) Minimal-input integration pins for deterministic JSON-LD
 //! parsing, expansion, compaction, and deny-by-default document loading.
 
 use sparq_jsonld::compact::compact_expanded;

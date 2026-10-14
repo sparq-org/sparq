@@ -16,7 +16,7 @@
 //!
 //! Gated on `fedclient-adaptive`; the default build compiles this file to nothing.
 //!
-//! [FABLE-5] sq-xw8zz.
+//! sq-xw8zz.
 
 #![cfg(feature = "fedclient-adaptive")]
 
@@ -36,7 +36,7 @@ use std::time::Duration;
 
 /// A transport that answers a sub-query by evaluating it against ONE local engine `Graph` —
 /// a faithful stand-in for a conformant SPARQL endpoint over that graph's fragment of the
-/// federation (the `sq-7yf0`/`sq-my8wd` harness). [FABLE-5] sq-xw8zz.
+/// federation (the `sq-7yf0`/`sq-my8wd` harness). sq-xw8zz.
 struct EngineTransport {
     graph: Arc<Graph>,
 }
@@ -49,7 +49,7 @@ impl Transport for EngineTransport {
 }
 
 /// [`EngineTransport`] plus a fixed pre-answer sleep — gives one arm a REAL, measurable
-/// wall-clock latency so the per-arm observations are provably distinct. [FABLE-5] sq-xw8zz.
+/// wall-clock latency so the per-arm observations are provably distinct. sq-xw8zz.
 struct SleepTransport {
     inner: EngineTransport,
     delay: Duration,
@@ -72,7 +72,7 @@ fn var(s: &str) -> Term {
 /// A per-source descriptor declaring `preds` so `select_sources` retains the source for
 /// every pattern it covers; identical coverage across sources ⇒ every leaf is a genuine
 /// multi-arm union leaf. The estimates are deliberately far from the observed handful of
-/// rows so the re-planner has real divergence to consider. [FABLE-5] sq-xw8zz.
+/// rows so the re-planner has real divergence to consider. sq-xw8zz.
 fn descriptor(id: &str, preds: &[&str]) -> SourceDescriptor {
     let mut b = SourceDescriptor::builder(SourceId::new(id)).total_triples(1000);
     for p in preds {

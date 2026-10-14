@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-tg6b — the PARTY child binary for the MPC network tier (Tier 2/3).
+// sq-tg6b — the PARTY child binary for the MPC network tier (Tier 2/3).
 // One invocation = one MPC compute party, its OWN OS process. It connects to the
 // coordinator's loopback address, runs the protocol step(s) the coordinator
 // drives, and exits on `Done`. It holds ONLY its own share-points — never the

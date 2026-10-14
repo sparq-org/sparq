@@ -1,5 +1,5 @@
 //! Prompt/data-injection + budget containment for the live loop (`sq-j1wv`; threat
-//! model in `research/nlq-threat-model.md`). [SONNET-4.6]
+//! model in `research/nlq-threat-model.md`).
 //!
 //! These tests pin the two layers separately:
 //!

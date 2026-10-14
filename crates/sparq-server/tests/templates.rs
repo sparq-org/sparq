@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-lsp7k.10: e2e integration tests for the OPT-IN named-parameterized-template
+//! sq-lsp7k.10: e2e integration tests for the OPT-IN named-parameterized-template
 //! REST surface (`/templates`).
 //!
 //! These tests run ONLY with the `templates` cargo feature (the whole file is gated). They

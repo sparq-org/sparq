@@ -53,7 +53,7 @@ const TEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// beyond-RL extension — worse than an honest divergence; the owl.rs
 /// soundness guards pin the non-derivations (sq-350ms), and
 /// research/inference-completeness-audit.md §2b carries the audit record.
-/// Reported distinctly (counts as pass+divergence), never silently. [FABLE-5]
+/// Reported distinctly (counts as pass+divergence), never silently.
 const DOCUMENTED_DIVERGENCES: &[(&str, &str)] = &[
     (
         "chain2trans1",
@@ -512,7 +512,7 @@ fn fix_doctype_quotes(text: &str) -> String {
 mod tests {
     use super::DOCUMENTED_DIVERGENCES;
 
-    /// [FABLE-5] sq-pbz04.1.3 — the per-divergence disposition pass. Every
+    /// sq-pbz04.1.3 — the per-divergence disposition pass. Every
     /// documented divergence must carry an explicit PERMANENT disposition
     /// grounded in the OWL 2 Profiles REC (a named rule from the §4.3 tables,
     /// the §4.2 grammar exclusion, or theorem PR1's assertion-only completeness

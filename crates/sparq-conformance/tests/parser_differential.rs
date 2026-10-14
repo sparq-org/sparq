@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-tonhr.2, epic sq-tonhr) The candidate-vs-incumbent parser DIFFERENTIAL
+//! (sq-tonhr.2, epic sq-tonhr) The candidate-vs-incumbent parser DIFFERENTIAL
 //! gate for N-Triples / N-Quads / TriG, plus the MUTATION proof that the harness is
 //! non-vacuous. Three layers:
 //!

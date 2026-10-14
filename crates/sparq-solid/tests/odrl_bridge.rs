@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-h3uk — the ODRL→AUTH_GRAPH bridge: a definite ODRL Permit
+//! sq-h3uk — the ODRL→AUTH_GRAPH bridge: a definite ODRL Permit
 //! materializes the equivalent WAC/ACP grant into `<urn:sparq:auth>` so the EXISTING
 //! graph-level enforcement honours it; a Deny / ambiguous / unmapped eval
 //! materializes NOTHING (fail-closed); the action→mode mapping is correct; and a
@@ -116,7 +116,7 @@ fn round_trip_through_enforcement() {
     assert!(store.accessible(&Session::default(), Mode::Read).is_empty());
 
     // End-to-end: alice's authorized query returns the content; others see nothing.
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
+    // sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
     // for this single-triple probe as the old union-always bare pattern).
     let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
     assert_eq!(store.query_as(&alice, Mode::Read, sel).unwrap().rows.len(), 1);
@@ -218,7 +218,7 @@ fn unmapped_action_materializes_nothing() {
 
 // ---------------------------------------------------------------------------
 // 6a. SPARQL-query action contract: query uses `odrl:read`, never `odrl:use`.
-//     [SONNET-4.6] sq-lrtc3.2.
+//     sq-lrtc3.2.
 // ---------------------------------------------------------------------------
 #[test]
 fn sparql_query_requires_concrete_read_action() {
@@ -322,7 +322,7 @@ fn bridge_preserves_existing_wac_grants() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-w693 — Prohibition → explicit auth:deny<Mode> (deny-overrides).
+// sq-w693 — Prohibition → explicit auth:deny<Mode> (deny-overrides).
 // ===========================================================================
 
 /// alice is PROHIBITED from writing n1 (a bare matching prohibition, no constraints).
@@ -540,7 +540,7 @@ fn permit_only_regression_via_policy() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-hiz4 — conditional grants: a FAITHFULLY-mappable constraint
+// sq-hiz4 — conditional grants: a FAITHFULLY-mappable constraint
 // (recipient/assignee → agent matcher) persists as an `auth:ConditionalGrant`
 // and is RE-CHECKED per session; an UNmappable constraint stays one-shot.
 // ===========================================================================
@@ -625,7 +625,7 @@ fn purpose_constraint_is_never_stored() {
 // 17a. MIXED constraints with a STRICT dateTime bound (`lt`) fail SAFE: the strict
 //     bound has no inclusive auth:notBefore/notAfter analogue, so the WHOLE rule stays
 //     one-shot (frozen) and a persisted recipient-only condition that LOST the bound is
-//     never emitted (over-grant). [OPUS-4.8] sq-0q7n — strict bounds stay Unmappable.
+//     never emitted (over-grant). sq-0q7n — strict bounds stay Unmappable.
 #[test]
 fn mixed_mappable_and_strict_datetime_stays_one_shot() {
     let pol = parse_policy_str(
@@ -684,7 +684,7 @@ fn prohibition_overrides_conditional_path() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-dpk4 — refresh / REVOCATION of bridged ODRL grants when the
+// sq-dpk4 — refresh / REVOCATION of bridged ODRL grants when the
 // underlying ODRL policy changes. SECURITY-SENSITIVE: a withdrawn permission, a
 // lapsed time window, or a re-evaluation that now Denies must LOSE access; a static
 // WAC/ACP grant must NEVER be dropped; a still-valid bridged grant must survive.
@@ -735,7 +735,7 @@ fn withdrawn_permission_loses_access_after_refresh() {
         store.accessible(&alice, Mode::Read).iter().any(|g| g.as_str() == N1),
         "bridged grant is live before withdrawal",
     );
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
+    // sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
     // for this single-triple probe as the old union-always bare pattern).
     let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
     assert_eq!(store.query_as(&alice, Mode::Read, sel).unwrap().rows.len(), 1);
@@ -987,7 +987,7 @@ fn a_windowed_grant_is_never_stored() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-2pcf — DENY RETRACTION on prohibition withdrawal. The symmetric
+// sq-2pcf — DENY RETRACTION on prohibition withdrawal. The symmetric
 // dual of sq-dpk4's grant retraction, but with the OPPOSITE fail-closed bias: a
 // materialized `auth:deny*` is retracted (access restored) ONLY when the underlying
 // ODRL Prohibition is DEFINITELY withdrawn / lapsed — on an *ambiguous* re-eval the
@@ -1287,7 +1287,7 @@ fn policy_refresh_deny_overrides_composition() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-q56r — faithful odrl:purpose enforcement THROUGH THE REAL
+// sq-q56r — faithful odrl:purpose enforcement THROUGH THE REAL
 // enforcement path (PodStore::accessible / query_as). A purpose-gated permission is
 // never stored (the stored allow has no purpose, so it would outlive the request);
 // a mismatch or MISSING purpose grants nothing; the prohibition dual carves out only on
@@ -1324,7 +1324,7 @@ fn reads_n1(store: &mut PodStore, agent: &str) -> bool {
 #[test]
 fn purpose_match_is_never_stored() {
     let pol = purpose_read_policy();
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
+    // sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
     // for this single-triple probe as the old union-always bare pattern).
     let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
     let alice = Session { agent: Some(ALICE), client: None, issuer: None, now: None };
@@ -1361,7 +1361,7 @@ fn missing_purpose_fails_closed_through_enforcement() {
     let out = store.materialize_odrl_permission(&purpose_read_policy(), &no_purpose);
     assert!(!out.granted, "missing purpose must NOT grant: {out:?}");
     assert!(!reads_n1(&mut store, ALICE), "no access when purpose is unstated");
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
+    // sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
     // for this single-triple probe as the old union-always bare pattern).
     let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
     let alice = Session { agent: Some(ALICE), client: None, issuer: None, now: None };
@@ -1448,7 +1448,7 @@ fn purpose_prohibition_dual_through_enforcement() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-5037 — `odrl:recipient neq X` / "everyone-except-X" → an ACP
+// sq-5037 — `odrl:recipient neq X` / "everyone-except-X" → an ACP
 // `noneOf` exception: the grant head is auth:Authenticated with an auth:exceptMatcher
 // carving out X. RE-CHECKED per session: every identified agent reads EXCEPT X.
 // Anonymous is denied, since an exclusion cannot be checked without an identity.
@@ -1554,7 +1554,7 @@ fn recipient_neq_reserved_encoded_does_not_widen_to_public() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-gx2q — REFRESH of a noneOf conditional grant when the EXCLUSION SET
+// sq-gx2q — REFRESH of a noneOf conditional grant when the EXCLUSION SET
 // CHANGES (sq-5037 follow-up, sq-dpk4 interaction). A `recipient neq X` permission
 // bridges to a public ConditionalGrant carrying a `noneOf` exceptMatcher that carves
 // out X (everyone-except-X). When the ODRL policy later swaps the excluded party (X→Y),
@@ -1566,7 +1566,7 @@ fn recipient_neq_reserved_encoded_does_not_widen_to_public() {
 
 /// "everyone EXCEPT `<excluded>` may read n1" — a `recipient neq <excluded>` permission
 /// (the noneOf "everyone-except-X" shape). Parameterised so the exclusion set can be
-/// swapped between refreshes. [OPUS-4.8] sq-gx2q.
+/// swapped between refreshes. sq-gx2q.
 fn recipient_neq_policy_excluding(excluded: &str) -> sparq_policy::ValidatedPolicy {
     parse_policy_str(
         &format!(
@@ -1586,7 +1586,7 @@ fn recipient_neq_policy_excluding(excluded: &str) -> sparq_policy::ValidatedPoli
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-5037 follow-up — COMBINED recipient `eq A AND neq B` in ONE rule
+// sq-5037 follow-up — COMBINED recipient `eq A AND neq B` in ONE rule
 // through the BRIDGE. The bridge emits `agents=[A]` (positive head) + `except=[B]`
 // (a noneOf exceptMatcher) — both on the SAME ConditionalGrant. Structurally emitted
 // by sq-5037 but untested at the bridge level (the per-head exception path).
@@ -1611,7 +1611,7 @@ fn recipient_eq_and_neq_policy() -> sparq_policy::ValidatedPolicy {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-4r70 — CONSTRAINT-CONDITIONAL DENY: an ACP-style deny that is
+// sq-4r70 — CONSTRAINT-CONDITIONAL DENY: an ACP-style deny that is
 // conditional on a recipient/assignee constraint (the dual of the conditional grant).
 // Materialized as a re-checked `auth:ConditionalGrant` with `auth:effect auth:Deny`,
 // composing with deny-overrides. The deny appears/retracts as the condition flips.
@@ -1711,7 +1711,7 @@ fn conditional_deny_overrides_allow_for_carved_party() {
     assert!(!reads(&mut store, CAROL), "DENY-OVERRIDES: carol loses access");
     assert!(!reads(&mut store, BOB), "bob is over-denied until #6743");
     // End-to-end query_as: carol sees nothing, bob sees the content.
-    // [OPUS-4.8] sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
+    // sq-gq28y: explicit GRAPH ?g (empty-default spec flip — identical row count
     // for this single-triple probe as the old union-always bare pattern).
     let sel = "SELECT ?t WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }";
     let carol = Session { agent: Some(CAROL), client: None, issuer: None, now: None };
@@ -1836,7 +1836,7 @@ fn conditional_deny_mixed_constraint_falls_back_one_shot() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-ihqbl — the bridge LOUDLY REFUSES a policy whose declared
+// sq-ihqbl — the bridge LOUDLY REFUSES a policy whose declared
 // `odrl:conflict` strategy it cannot faithfully honour (fail-closed), rather than
 // silently processing it as deny-overrides. The bridge implements exactly one strategy
 // (`odrl:prohibit`); `odrl:perm`, `odrl:invalid`-with-conflict, and any unknown strategy
@@ -1959,7 +1959,7 @@ fn unset_conflict_is_not_refused() {
 }
 
 // ===========================================================================
-// [FABLE-5] sq-5fkpp — faithful `odrl:isAnyOf` / `odrl:isNoneOf` mapping.
+// sq-5fkpp — faithful `odrl:isAnyOf` / `odrl:isNoneOf` mapping.
 // `recipient isAnyOf <set>` → one re-checked agent head per member (exactly the
 // `isPartOf` shape — the evaluator matches both operators as the same flat lexical
 // set, sq-uaz85); `recipient isNoneOf <set>` → one ACP noneOf exceptMatcher per
@@ -2216,7 +2216,7 @@ fn isanyof_prohibition_conditional_denies_the_target() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-9n1q4 — a BARE odrl:assignee (the rule PROPERTY, not an
+// sq-9n1q4 — a BARE odrl:assignee (the rule PROPERTY, not an
 // odrl:assignee CONSTRAINT block) with ZERO constraints must NOT widen to
 // auth:Public through the conditional entry points. Regression guard for the
 // access-control WIDENING bug: `condition_agents` used to ignore `rule.assignee`
@@ -2273,7 +2273,7 @@ fn bare_assignee_prohibition_conditional_denies_the_target() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-izzak — a rule whose ONLY restriction is a COMPOUND
+// sq-izzak — a rule whose ONLY restriction is a COMPOUND
 // `odrl:LogicalConstraint` (`odrl:and`/`odrl:or`/`odrl:xone`) with ZERO atomic
 // constraints must NOT widen to auth:Public through the conditional entry
 // points. Regression guard for the access-control WIDENING bug:
@@ -2412,7 +2412,7 @@ fn compound_only_prohibition_conditional_denies_the_target() {
 }
 
 // ===========================================================================
-// [FABLE-5] sq-37f1a — an EMPTY static closure must stay MATERIALIZED under the
+// sq-37f1a — an EMPTY static closure must stay MATERIALIZED under the
 // bridge feature. The static materializer installs `<urn:sparq:auth>` even when the
 // closure grants nothing (presence == the "materialized" marker; empty-but-present
 // == a definitive Resolved deny). The post-materialize ledger reconcile
@@ -2509,7 +2509,7 @@ fn bridged_only_retraction_returns_to_unloaded() {
 }
 
 // ===========================================================================
-// [SONNET-4.6] sq-rf9uv — PartyCollection-AWARE conditional heads. The evaluator
+// sq-rf9uv — PartyCollection-AWARE conditional heads. The evaluator
 // matches a collection-valued `odrl:assignee`/`odrl:recipient` by identity-OR-membership,
 // but an ACP `auth:agent` head matches by IDENTITY alone (a session carries no membership
 // evidence). So the persisted head must be expanded to the members the request evidenced

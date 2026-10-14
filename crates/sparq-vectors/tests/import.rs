@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-xsq9) Bulk-import round-trip + fail-closed tests for `VectorStore::import_npy` /
+//! (sq-xsq9) Bulk-import round-trip + fail-closed tests for `VectorStore::import_npy` /
 //! `import_numeric_dump`: write a small external matrix of KNOWN vectors, import it keyed by dict id,
 //! reopen the `.spqv`, and assert `get`/`nearest_term_exact` return exactly those vectors; then assert
 //! dimension/row/dtype/order/length mismatches and a malformed/oversized `.npy` header all fail closed
@@ -288,7 +288,7 @@ fn dump_wrong_length_fails_closed() {
     .is_err());
 }
 
-/// [OPUS-4.8] sq-3jc8 — an absurd `dim` whose per-row byte size (`dim * 4`) overflows `usize` must be
+/// sq-3jc8 — an absurd `dim` whose per-row byte size (`dim * 4`) overflows `usize` must be
 /// rejected with a clean error BEFORE any allocation — never overflow/panic in debug or attempt a huge
 /// `Vec<u8>`. With zero rows the `rows*dim*4` expected-length check is `0` (a 0-byte file passes it), so
 /// the per-row `dim*4` checked-multiply guard is the one that has to catch it.
@@ -398,7 +398,7 @@ fn npy_duplicate_id_fails_closed() {
 
 // ----------------------------------------------------------- streaming (sq-3jc8)
 //
-// [OPUS-4.8] (sq-3jc8) The import path is now streaming: it parses only the `.npy` header prefix, then
+// (sq-3jc8) The import path is now streaming: it parses only the `.npy` header prefix, then
 // reads + feeds the body row-by-row through `StreamingWriter` — peak heap is O(dim + index), not 2× the
 // matrix. These tests pin (a) EQUIVALENCE — the streamed `.spqv` is byte-identical to a buffered
 // `VectorStore::create`+`put`+`finalize` build of the same vectors; (b) multi-chunk correctness (n large

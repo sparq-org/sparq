@@ -45,7 +45,7 @@ pub struct QueryAction {
     /// The `sd:entailmentRegime` IRIs of the action (e.g. `ent:RDFS`), when
     /// present — consumed by the entailment-regime runner in `inference`.
     pub entailment_regimes: Vec<String>,
-    /// [OPUS-4.8] sq-kuvu3 (epic sq-pbz04) — the `sd:EntailmentProfile` IRIs of
+    /// sq-kuvu3 (epic sq-pbz04) — the `sd:EntailmentProfile` IRIs of
     /// the action (e.g. `pr:QL`), when present. A test lists every OWL 2 profile
     /// its expected answers are sanctioned under; the EXPERIMENTAL OWL 2 QL
     /// query-rewriting arm (`inference::sparql_entail`, behind the opt-in
@@ -266,7 +266,7 @@ fn parse_query_action(g: &MiniGraph, action: &NamedOrBlankNode, action_term: &Te
             _ => {}
         }
     }
-    // [OPUS-4.8] sq-kuvu3 — `sd:EntailmentProfile` (the OWL 2 profile set a
+    // sq-kuvu3 — `sd:EntailmentProfile` (the OWL 2 profile set a
     // test's expected answers are sanctioned under: `pr:DL`/`pr:EL`/`pr:QL`/
     // `pr:RL`/`pr:Full`). Same single-IRI-or-list shape as the regimes above.
     for p in g.objects(

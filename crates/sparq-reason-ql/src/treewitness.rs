@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-g19x0 (epic sq-pbz04): TREE-WITNESS bounded-ABox closure — the standard DL-Lite
+// sq-g19x0 (epic sq-pbz04): TREE-WITNESS bounded-ABox closure — the standard DL-Lite
 // tree-witness rewriting (Kontchakov, Rodríguez-Muro, Zakharyaschev, ISWC 2013) that handles
 // existential WITNESSES without an unbounded forward chase.
 //
@@ -144,12 +144,12 @@ fn tree_witnesses(cq: &Cq, tbox: &TBox) -> Vec<TreeWitness> {
 /// Whether `t` is an existential interior term: an `Unbound`, or a `Var` that is neither
 /// distinguished (answer) nor shared (occurring in ≥2 atom positions). Mirrors the PerfectRef
 /// `_`-eligibility used by the applicability condition — the soundness keystone for folding.
-/// [SONNET-4.6] sq-pbz04.3.1: `Literal` added — literals are rigid constants, never existential.
+/// sq-pbz04.3.1: `Literal` added — literals are rigid constants, never existential.
 fn is_existential(cq: &Cq, t: &Term) -> bool {
     match t {
         Term::Unbound(_) => true,
         Term::Const(_) => false,
-        // B2: a literal constant is never an existential interior term. [SONNET-4.6]
+        // B2: a literal constant is never an existential interior term.
         Term::Lit(..) => false,
         Term::Var(name) => {
             if cq.answer.iter().any(|a| a == name) {

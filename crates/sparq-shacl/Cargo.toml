@@ -17,7 +17,7 @@ readme = "README.md"
 # the wasm graph ONLY by `sparq-wasm`'s non-default `shacl` feature (sq-yqi1, #162),
 # in which case the wasm32 dep rows below keep the bundle lean (no rayon/regex/digest).
 
-# [OPUS-4.8] sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
+# sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
 # front page and every feature-gated item (e.g. `shacl-af`) render on docs.rs.
 [package.metadata.docs.rs]
 all-features = true
@@ -38,7 +38,7 @@ rustc-hash.workspace = true
 # native-only crates).
 regex = "1"
 
-# [OPUS-4.8] sq-yqi1 (#162): SHACL-SPARQL (sh:sparql, W3C SHACL §5.2) routes its
+# sq-yqi1 (#162): SHACL-SPARQL (sh:sparql, W3C SHACL §5.2) routes its
 # sh:select/sh:ask query and SHACL-AF rules through the SPARQL engine. On NATIVE the
 # engine keeps its defaults (parallel/regex/digest). On wasm32 — the only build that
 # enters the browser bundle, via `sparq-wasm`'s opt-in `shacl` feature — defaults are
@@ -52,14 +52,14 @@ sparq-engine = { path = "../sparq-engine", version = "0.1.6", default-features =
 
 [features]
 default = []
-# [OPUS-4.8] sq-d1dw: SHACL Advanced Features (SHACL-AF) rules — `sh:rule`
+# sq-d1dw: SHACL Advanced Features (SHACL-AF) rules — `sh:rule`
 # (sh:TripleRule + sh:SPARQLRule). OPT-IN: the base SHACL Core + SHACL-SPARQL
 # validation path is entirely unaffected when this is off (no extra shape parsing,
 # no rule code compiled in). Reuses the same `sparq-engine` SPARQL machinery the
 # `sh:sparql` path already depends on (CONSTRUCT for sh:SPARQLRule, ASK for
 # sh:condition gating). See `skills/shacl-validation/SKILL.md` and the crate README.
 shacl-af = []
-# [OPUS-4.8] sq-v0b8 (#796): SHACL Compact Syntax (SCS) PARSER — text → SHACL
+# sq-v0b8 (#796): SHACL Compact Syntax (SCS) PARSER — text → SHACL
 # shapes triples (the parse direction of the SCS surface; the display direction
 # ships client-side in the site). OPT-IN: a hand-rolled lexer + recursive-descent
 # parser over `oxrdf` term construction the crate already pulls in, so this adds
@@ -67,7 +67,7 @@ shacl-af = []
 # bundles) carry no parser code when off. See the crate README and
 # `skills/shacl-validation/SKILL.md`.
 scs = []
-# [FABLE-5] sq-uz0 (#3405): sh:shapesGraph / owl:imports shapes-graph ASSEMBLY
+# sq-uz0 (#3405): sh:shapesGraph / owl:imports shapes-graph ASSEMBLY
 # (W3C SHACL §§3.1/3.3 (shapes-graph)) — discovers the data graph's `sh:shapesGraph` references and
 # unions them with their transitive, cycle-guarded `owl:imports` closure via a
 # caller-supplied IRI → Graph loader (the engine itself never dereferences the
@@ -77,14 +77,14 @@ scs = []
 imports = []
 
 [dev-dependencies]
-# [SONNET-4.6] sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
+# sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
 # `publish = false`): the conformance ratchet floor this crate's test runner enforces is
 # the SAME `const` sparq-conformance's central scoreboard reports, so the two cannot
 # drift, and the dep edge puts this crate in the floors crate's reverse-dependency
 # closure (which is what makes CI test-selection sound for the floor — it replaces the
 # guard test's old runtime read of this file's source).
 sparq-conformance-floors = { path = "../sparq-conformance-floors" }
-# [OPUS-4.8] sq-55c1: the differential-fuzz harness (tests/diff_fuzz.rs) talks to
+# sq-55c1: the differential-fuzz harness (tests/diff_fuzz.rs) talks to
 # the pluggable reference-engine adapter over JSON (request out, normalised report
 # in). serde derive on the report structs; serde_json for (de)serialisation — the
 # same `serde_json = "1"` direct-dep convention sparq-bench / sparq-conformance use.

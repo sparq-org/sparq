@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-tonhr.6 drift check — pure-Rust, no Node in the loop:
+//! sq-tonhr.6 drift check — pure-Rust, no Node in the loop:
 //!
 //! * the vendored grammar's SHA-256 must equal the pin recorded by
 //!   `scripts/regen-shuttle-parsers.sh` at generation time, so editing

@@ -1,5 +1,5 @@
 //! **NoREC re-derived for SPARQL: the non-optimizable-rewrite cardinality oracle.**
-//! [FABLE-5] sq-gum8.6
+//! sq-gum8.6
 //!
 //! NoREC for SQL (Rigger & Su, ESEC/FSE 2020) rewrites `SELECT * FROM t WHERE p` into a
 //! form that evaluates `p` **per row in the projection**, where the optimizer cannot use

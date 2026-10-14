@@ -1,4 +1,4 @@
-//! Stateful `odrl:count` constraint enforcement. [OPUS-4.8] sq-zi5w.
+//! Stateful `odrl:count` constraint enforcement. sq-zi5w.
 //!
 //! `odrl:count` limits the **number of times** a permission may be exercised (the
 //! ODRL [count left-operand](https://www.w3.org/TR/odrl-vocab/#term-count) — e.g.
@@ -58,7 +58,7 @@ use std::sync::Mutex;
 /// A stable identity for a single counted permission-exercise budget. Two requests
 /// that should share a usage counter (the same party exercising the same permission on
 /// the same target) map to the **same** key; requests that should be counted
-/// independently map to **different** keys. [OPUS-4.8] sq-zi5w.
+/// independently map to **different** keys. sq-zi5w.
 ///
 /// The key is `(rule_id, party, target)`:
 /// - `rule_id` — *which* count-constrained rule's budget (a policy may carry several).
@@ -96,7 +96,7 @@ impl CountKey {
 /// An injectable usage-counter store: the persistence seam for stateful `odrl:count`
 /// enforcement. The engine core keeps only the in-memory default
 /// ([`InMemoryCounterStore`]); the real persistence (Redis, SQL, a Solid pod resource)
-/// is the operator's concern. [OPUS-4.8] sq-zi5w.
+/// is the operator's concern. sq-zi5w.
 ///
 /// # The atomicity contract (load-bearing — read this)
 ///
@@ -133,7 +133,7 @@ pub trait UsageCounterStore {
     fn consumed(&self, key: &CountKey) -> Option<u64>;
 }
 
-/// The outcome of an atomic [`UsageCounterStore::try_consume`]. [OPUS-4.8] sq-zi5w.
+/// The outcome of an atomic [`UsageCounterStore::try_consume`]. sq-zi5w.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConsumeResult {
     /// One unit was consumed; the budget had room. Carries the new consumed count
@@ -147,7 +147,7 @@ pub enum ConsumeResult {
 }
 
 /// The default in-memory [`UsageCounterStore`]: a `Mutex<HashMap<CountKey, u64>>`.
-/// [OPUS-4.8] sq-zi5w.
+/// sq-zi5w.
 ///
 /// `try_consume` performs the whole compare-and-increment **under one lock**, so it is
 /// atomic with respect to other threads sharing this store — the in-process TOCTOU race
@@ -194,7 +194,7 @@ impl UsageCounterStore for InMemoryCounterStore {
 
 /// The three-valued verdict of a rule's `odrl:count` limit(s) against the usage state —
 /// the count analogue of [`crate::PurposeMatch`], reporting exactly what
-/// [`evaluate_and_exercise`] would act on WITHOUT consuming a unit. [OPUS-4.8] sq-zi5w.
+/// [`evaluate_and_exercise`] would act on WITHOUT consuming a unit. sq-zi5w.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CountStatus {
     /// The rule has no `odrl:count` constraint — count places no restriction on it.
@@ -214,7 +214,7 @@ pub enum CountStatus {
 
 /// Report how `rule`'s `odrl:count` limit stands against `store` for `request`, WITHOUT
 /// consuming a unit — the auditable, side-effect-free surface of count enforcement (the
-/// count dual of [`crate::purpose_status`]). [OPUS-4.8] sq-zi5w.
+/// count dual of [`crate::purpose_status`]). sq-zi5w.
 ///
 /// This does NOT gate an exercise (that is [`evaluate_and_exercise`]'s atomic job, which
 /// *consumes*). It answers "would the next exercise have count budget?" for inspection.
@@ -250,7 +250,7 @@ pub fn count_status(rule: &Rule, request: &Request, store: &dyn UsageCounterStor
 }
 
 /// The result of [`evaluate_and_exercise`]: the base ODRL [`Decision`] plus, when a
-/// count limit applied, what the counter store did. [OPUS-4.8] sq-zi5w. Only
+/// count limit applied, what the counter store did. sq-zi5w. Only
 /// [`evaluate_and_exercise`] builds one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -280,7 +280,7 @@ impl ExerciseDecision {
 
 /// Evaluate `policy` against `request` and, on a grant, **atomically consume** one unit
 /// of any applicable `odrl:count` budget from `store` — the stateful enforcement entry
-/// point. [OPUS-4.8] sq-zi5w.
+/// point. sq-zi5w.
 ///
 /// Semantics, wired through the **real** [`evaluate`] decision (no parallel evaluator):
 ///
@@ -465,7 +465,7 @@ fn rule_has_count_constraint(rule: &Rule) -> bool {
 /// The ONE effective usage-counter limit for `rule`: the **minimum** over every
 /// ceiling-shaped `odrl:count` constraint, because all of them bind the same counter
 /// (the [`CountKey`] is per rule/party/target, not per-constraint), so several count
-/// constraints are several bounds on one budget and the tightest governs. [OPUS-4.8]
+/// constraints are several bounds on one budget and the tightest governs.
 /// sq-ea27.
 ///
 /// Returns `None` when the rule yields no enforceable count ceiling. Callers distinguish

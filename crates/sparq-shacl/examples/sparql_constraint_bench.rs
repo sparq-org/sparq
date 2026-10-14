@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-pymgf, epic sq-hmd7l) SPARQL-constraint SLICE sub-panel runner —
+//! (sq-pymgf, epic sq-hmd7l) SPARQL-constraint SLICE sub-panel runner —
 //! validates ONLY the `sh:sparql`-heavy shape set
 //! (`bench/shacl/shapes-sparql/sparql_heavy.ttl`) over the deterministic LUBM(1)
 //! ABox and reports the slice PER SHAPE, so the SHACL-SPARQL evaluation path

@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-pbz04.4.5 (epic sq-pbz04.4) — the OWL 2 **Direct-Semantics arm** of the
+//! sq-pbz04.4.5 (epic sq-pbz04.4) — the OWL 2 **Direct-Semantics arm** of the
 //! OWL WG test-repository export (`tests/w3c/owl2/all.rdf`), behind the opt-in
 //! `dl-direct` feature. 🤖 SPARQ agent.
 //!
@@ -159,7 +159,7 @@ pub struct DlReport {
     /// `expect_in = false`: a `NotIn`/`Unknown` verdict is a Pass/abstention, an `In` is a
     /// Fail (the checker could not refute the full-profile membership). Separated from
     /// [`DlReport::profile`] so the positive lane's pin never moves when the negative lane
-    /// grows. [FABLE-5] sq-pbz04.4.16
+    /// grows. sq-pbz04.4.16
     pub profile_negative: LaneTally,
     /// Reasoning lane, per declared check kind.
     pub consistency: LaneTally,
@@ -228,7 +228,7 @@ impl DlReport {
         // The explicit-negative profile lane (owl:NegativePropertyAssertion on test:profile).
         // A `fail` HERE is an honest MEASURED gap — L2's In is axiom-grammar membership over
         // the ALCH shadow and cannot always refute full-profile membership — NOT a soundness
-        // bug; it is pinned as a gap floor, never asserted to zero. [FABLE-5] sq-pbz04.4.16
+        // bug; it is pinned as a gap floor, never asserted to zero. sq-pbz04.4.16
         let neg_total = self.profile_negative.total();
         let neg_in_gap = self.profile_negative.fails.len();
         let _ = writeln!(
@@ -380,7 +380,7 @@ fn reason_kind(reason: &UnknownReason) -> String {
         UnknownReason::ElUnappliedAxioms(_) => "EL unapplied axiom kinds",
         UnknownReason::ElTopGuard => "EL top guard",
         UnknownReason::QlConsistencyPending => "QL consistency pending (sq-pbz04.3.4)",
-        // [FABLE-5] sq-fj8lj: the graduated QL branch (dl-direct enables
+        // sq-fj8lj: the graduated QL branch (dl-direct enables
         // `sparq-reason-dl/dispatch_ql`) abstains with the QL crate's own capture
         // accounting; `QlConsistencyPending` above is unreachable in this build but the
         // variant (and its tri-state mapping test) is kept.
@@ -404,7 +404,7 @@ struct Case {
     positive_profiles: Vec<String>,
     /// EL/QL/RL profiles the export EXPLICITLY negates for this case via a top-level
     /// `owl:NegativePropertyAssertion(case, test:profile, profile)` — the negative lane's
-    /// expectations (checked with `expect_in = false`). [FABLE-5] sq-pbz04.4.16
+    /// expectations (checked with `expect_in = false`). sq-pbz04.4.16
     negative_profiles: Vec<String>,
     premise: Option<String>,
     input: Option<String>,
@@ -415,7 +415,7 @@ struct Case {
 
 /// Parse the export text (`tests/w3c/owl2/all.rdf`) into the manifest graph — shared by
 /// [`run_direct_arm`] and [`run_render_roundtrip_arm`] so both arms select from the SAME
-/// pinned snapshot. [FABLE-5] sq-pbz04.4.17 (extracted verbatim from `run_direct_arm`).
+/// pinned snapshot. sq-pbz04.4.17 (extracted verbatim from `run_direct_arm`).
 fn parse_export(export_text: &str) -> Result<MiniGraph, String> {
     let fixed = fix_doctype_quotes(export_text);
     let parser = oxrdfxml::RdfXmlParser::new()
@@ -430,7 +430,7 @@ fn parse_export(export_text: &str) -> Result<MiniGraph, String> {
 
 /// Which `test:semantics` sanction selects a case. Every REASONING / PROFILE lane is
 /// [`Self::Direct`] and stays so; only the purely-syntactic render round-trip arm also
-/// runs the [`Self::RdfBasedOnly`] slice (sq-pbz04.4.18). [SONNET-4.6]
+/// runs the [`Self::RdfBasedOnly`] slice (sq-pbz04.4.18).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SemanticsArm {
     /// `test:semantics test:DIRECT` present — the selection every lane of this module
@@ -446,9 +446,9 @@ enum SemanticsArm {
 /// Select test cases from the manifest graph for one [`SemanticsArm`] — the shared
 /// selection every arm uses (matching semantics, not `test:Rejected`, carrying at least
 /// one check kind or a `ProfileIdentificationTest` typing). Returns the selected cases
-/// plus the count of `Rejected`-status cases dropped WITHIN that arm. [FABLE-5]
+/// plus the count of `Rejected`-status cases dropped WITHIN that arm.
 /// sq-pbz04.4.17 (extracted verbatim from `run_direct_arm` so the round-trip arm cannot
-/// drift from the L5 selection); parameterised by arm in sq-pbz04.4.18 [SONNET-4.6].
+/// drift from the L5 selection); parameterised by arm in sq-pbz04.4.18.
 fn collect_cases_for(g: &MiniGraph, arm: SemanticsArm) -> (Vec<Case>, usize) {
     // Pre-scan the top-level `owl:NegativePropertyAssertion` nodes for the EXPLICIT-NEGATIVE
     // profile lane (sq-pbz04.4.16). A manifest-level profile negation is an NPA whose
@@ -578,7 +578,7 @@ pub fn run_direct_arm(export_text: &str) -> Result<DlReport, String> {
 // -----------------------------------------------------------------------------------------
 
 /// Which corpus slice a [`RenderRoundTripReport`] measures — the two slices are DISJOINT,
-/// so their document counts and floors add without double-counting. [SONNET-4.6]
+/// so their document counts and floors add without double-counting.
 /// sq-pbz04.4.18
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RoundTripArm {
@@ -620,7 +620,7 @@ impl RoundTripArm {
 /// faithful inverse of the reverse mapping ON the fragment L1 actually accepts. This is
 /// exactly why the RDF-BASED-only slice is admissible here while it is NOT admissible in
 /// any reasoning lane: round-tripping a document makes no claim about which semantics
-/// sanctions it. [FABLE-5] 🤖 SPARQ agent.
+/// sanctions it. 🤖 SPARQ agent.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RenderRoundTripReport {
     /// Which corpus slice this report measures.
@@ -731,7 +731,7 @@ pub fn run_render_roundtrip_arm(export_text: &str) -> Result<RenderRoundTripRepo
 /// Returns `Err` only on an export-level failure (the RDF/XML export itself failed to
 /// parse) — per-document problems are accounted in the report, never dropped.
 ///
-/// [SONNET-4.6] sq-pbz04.4.18
+/// sq-pbz04.4.18
 pub fn run_render_roundtrip_rdf_based_arm(
     export_text: &str,
 ) -> Result<RenderRoundTripReport, String> {
@@ -743,7 +743,7 @@ pub fn run_render_roundtrip_rdf_based_arm(
 }
 
 /// Shared body of both round-trip arms — identical per-document logic, only the case
-/// selection and the violation-key segment differ. [SONNET-4.6] sq-pbz04.4.18
+/// selection and the violation-key segment differ. sq-pbz04.4.18
 fn run_render_roundtrip_for(
     export_text: &str,
     semantics: SemanticsArm,
@@ -840,7 +840,7 @@ fn roundtrip_mismatch_diagnostic(
 
 /// Collect the manifest-level EXPLICIT-NEGATIVE profile assertions
 /// (`owl:NegativePropertyAssertion(case, test:profile, {EL|QL|RL})`) keyed by the source
-/// (case) IRI. [FABLE-5] sq-pbz04.4.16
+/// (case) IRI. sq-pbz04.4.16
 ///
 /// Only a top-level NPA whose `assertionProperty` is `test:profile` and whose
 /// `targetIndividual` is one of the three tractable profiles is collected — every other NPA

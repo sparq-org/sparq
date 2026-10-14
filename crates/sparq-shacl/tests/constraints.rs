@@ -1,4 +1,4 @@
-//! [OPUS-4.8] Constraint-component coverage (sq-qap0) for the branches the
+//! Constraint-component coverage (sq-qap0) for the branches the
 //! audit flagged in `eval.rs` (~58% covered). The crate's own (non-W3C) tests
 //! exercised only datatype / nodeKind / minInclusive / class; the W3C suite
 //! self-skips without fixtures, so these give the constraint pipeline durable,
@@ -258,7 +258,7 @@ fn pattern_with_flags() {
     assert_eq!(flagged_values(&r), vec!["\"zab\"".to_string()]);
 }
 
-/// [FABLE-5] (sq-8ro) XPath F&O `q` flag: literal-pattern mode — every pattern
+/// (sq-8ro) XPath F&O `q` flag: literal-pattern mode — every pattern
 /// character (here `.` and `+`) matches literally, so `"a.b+"` conforms while the
 /// would-be regex match `"axbb"` violates.
 #[test]
@@ -273,7 +273,7 @@ fn pattern_q_flag_is_literal_mode() {
     assert_eq!(flagged_values(&r), vec!["\"axbb\"".to_string()]);
 }
 
-/// [FABLE-5] (sq-8ro) Per XPath F&O only `i` keeps its effect alongside `q`:
+/// (sq-8ro) Per XPath F&O only `i` keeps its effect alongside `q`:
 /// `"qi"` matches the literal pattern case-insensitively.
 #[test]
 fn pattern_q_flag_combines_with_i() {
@@ -286,7 +286,7 @@ fn pattern_q_flag_combines_with_i() {
     assert_eq!(flagged_values(&r), vec!["\"AxB\"".to_string()]);
 }
 
-/// [FABLE-5] (sq-8ro) XPath/XSD `\i` (XML NameStartChar) and `\c` (XML NameChar)
+/// (sq-8ro) XPath/XSD `\i` (XML NameStartChar) and `\c` (XML NameChar)
 /// multi-character escapes, which the Rust `regex` crate does not know: an
 /// XML-name-shaped pattern `^\i\c*$` accepts `abc` / `_a:b-c.1` / `édition`
 /// (NameStartChar covers #xC0–#xD6) and rejects a digit-initial or
@@ -308,7 +308,7 @@ fn pattern_xpath_name_char_classes() {
     assert_eq!(count_component(&bad, "PatternConstraintComponent"), 2);
 }
 
-/// [FABLE-5] (sq-8ro) The complements `\I` / `\C`, and `\c` INSIDE a character
+/// (sq-8ro) The complements `\I` / `\C`, and `\c` INSIDE a character
 /// class (where it must expand to a nested class, not a bracketed group).
 #[test]
 fn pattern_xpath_name_class_complements_and_in_class() {
@@ -657,7 +657,7 @@ fn deactivated_shape_is_skipped() {
     );
 }
 
-// ---- [OPUS-4.8] (sq-vg3y) SHACL-1.2 core/node forms ----
+// ---- (sq-vg3y) SHACL-1.2 core/node forms ----
 
 // ---- sh:datatype disjunctive (list) form ----
 
@@ -762,7 +762,7 @@ fn member_shape_checks_each_list_member() {
     assert_eq!(count_component(&r, "MemberShapeConstraintComponent"), 2);
 }
 
-// [OPUS-4.8] (sq-f8gu) sh:memberShape emits one sh:detail sub-result per
+// (sq-f8gu) sh:memberShape emits one sh:detail sub-result per
 // NON-CONFORMING member: the actual validation results of validating that member
 // against the member shape. A non-list value node carries NO details (there are
 // no members to validate against the shape).
@@ -862,7 +862,7 @@ fn unique_members_flags_duplicate_and_nonlist() {
     assert_eq!(count_component(&r, "UniqueMembersConstraintComponent"), 2);
 }
 
-// [OPUS-4.8] (sq-f8gu) sh:uniqueMembers emits one sh:detail sub-result per
+// (sq-f8gu) sh:uniqueMembers emits one sh:detail sub-result per
 // DUPLICATED member (each duplicated value reported once via sh:value), and a
 // non-list value node carries no details.
 #[test]
@@ -1022,7 +1022,7 @@ fn unique_values_for_no_values_conforms() {
     assert!(r.conforms, "{}", r.to_text());
 }
 
-// ---- [OPUS-4.8] (sq-bif.10) genuinely-dark eval.rs dispatch branches ----
+// ---- (sq-bif.10) genuinely-dark eval.rs dispatch branches ----
 //
 // The sq-qap0 datatype/pattern tests exercised only WELL-FORMED literals and a
 // VALID regex. These pin the still-dark conjuncts: the `&& well_formed(l)` FALSE
@@ -1088,7 +1088,7 @@ fn datatype_rejects_out_of_range_bounded_integer() {
     );
 }
 
-/// [OPUS-4.8] (sq-lz99x) An uncompilable `sh:pattern` (a regex that fails to
+/// (sq-lz99x) An uncompilable `sh:pattern` (a regex that fails to
 /// compile) yields NO regex, so the `Component::Pattern` `regex_for(..) == None`
 /// branch SKIPS the constraint (the crate's lenient ill-formed-shape policy) and
 /// records a diagnostic — it does NOT fail-closed by flagging every value. The
@@ -1126,7 +1126,7 @@ fn pattern_with_invalid_regex_is_skipped_with_diagnostic() {
     assert!(r.to_text().contains("diagnostic"), "{}", r.to_text());
 }
 
-/// [OPUS-4.8] (sq-lz99x) The bead's exact repro: a negative-lookahead pattern
+/// (sq-lz99x) The bead's exact repro: a negative-lookahead pattern
 /// `^(?!(TODO|TBD)).*` with `sh:flags "i"`. The Rust `regex` crate (like the XML
 /// Schema regex flavour the SHACL spec ties `sh:pattern` to) has NO lookahead, so
 /// the pattern does not compile. Pre-fix this flagged EVERY conformant string as a
@@ -1154,7 +1154,7 @@ fn pattern_lookahead_is_skipped_not_fail_closed() {
     assert!(m.to_lowercase().contains("look"), "{m}");
 }
 
-/// [OPUS-4.8] (sq-lz99x) A WELL-FORMED `sh:pattern` is unaffected by the
+/// (sq-lz99x) A WELL-FORMED `sh:pattern` is unaffected by the
 /// skip-on-uncompilable change: real violations are still reported and no spurious
 /// diagnostic is recorded.
 #[test]
@@ -1170,7 +1170,7 @@ fn pattern_valid_still_reports_violations_and_no_diagnostic() {
     assert!(r.diagnostics.is_empty(), "{}", r.to_text());
 }
 
-/// [OPUS-4.8] (sq-lz99x) A diagnostic is recorded ONCE per (shape, pattern), not
+/// (sq-lz99x) A diagnostic is recorded ONCE per (shape, pattern), not
 /// once per focus node or value — so a shape with many targets does not flood the
 /// report.
 #[test]
@@ -1196,7 +1196,7 @@ fn pattern_skip_diagnostic_is_deduplicated() {
 }
 
 // ----------------------------------------------------------------------------
-// [OPUS-4.8] (sq-pb0wm, epic sq-waf9o) Per-constraint-statement RDF-1.2
+// (sq-pb0wm, epic sq-waf9o) Per-constraint-statement RDF-1.2
 // reified-annotation overrides (SHACL 1.2 Core). A `{| … |}` annotation on ONE
 // constraint statement `(<shape> P O)` overrides JUST that occurrence:
 //   * `{| sh:deactivated true |}` suppresses only that constraint (the shape's
@@ -1374,7 +1374,7 @@ fn per_statement_severity_is_occurrence_scoped() {
     );
 }
 
-/// [SONNET-4.6] (sq-7os4t) The two qualified-count parameters are distinct
+/// (sq-7os4t) The two qualified-count parameters are distinct
 /// causing statements even though the parser combines them into one component.
 /// Their annotations must therefore be selected independently for each result.
 #[test]
@@ -1418,7 +1418,7 @@ fn per_statement_overrides_apply_to_qualified_count_causing_statement() {
 }
 
 // ----------------------------------------------------------------------------
-// [FABLE-5] (sq-1jemy) Per-statement overrides on RECURSING components. A
+// (sq-1jemy) Per-statement overrides on RECURSING components. A
 // `{| sh:message … |}` / `{| sh:severity … |}` on a shape-referencing constraint
 // statement (`sh:node` / `sh:not`) governs the COMPOSITE component's OWN result
 // (the SHACL-1.2 severity precedence keys on the reifier of "the triples

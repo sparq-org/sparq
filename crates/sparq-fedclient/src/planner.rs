@@ -36,7 +36,7 @@
 //! `StreamJoin` feeder are Phase 5. The resolver and lowering are the real, tested seam
 //! those phases build on.
 //
-// [OPUS-4.8] sq-j27p (epic sq-dnko): Phase-3 planner bridge — index→adapter resolution +
+// sq-j27p (epic sq-dnko): Phase-3 planner bridge — index→adapter resolution +
 // per-leaf lowering. Flagged for Fable re-review when available.
 
 use crate::source::{FederatedSource, FragPattern, FragTerm, PatternTerm, SubQuery};
@@ -52,7 +52,7 @@ use sparq_fedplan::{select_sources, PatternSources, SourceCandidate, SourceDescr
 /// The slice passed to [`select_sources_with_pattern_probes`] establishes source indices:
 /// item `i` here is source `i` in the returned [`PatternSources`]. A missing descriptor means
 /// capability/cardinality is unknown, never empty; the source starts with the configured
-/// uniform fallback and is removed only by a definitive ASK `false`. [GPT-5.6] sq-fx5id.
+/// uniform fallback and is removed only by a definitive ASK `false`. sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 #[derive(Debug, Clone, Copy)]
 pub struct ProbeSource<'a> {
@@ -73,7 +73,7 @@ pub struct ProbeSource<'a> {
 ///   budget exhaustion.
 ///
 /// This function changes source ranking/join order, never the set of answer-producing sources
-/// unless the endpoint itself definitively reported no match. [GPT-5.6] sq-fx5id.
+/// unless the endpoint itself definitively reported no match. sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 pub fn select_sources_with_pattern_probes(
     bgp: &Bgp,
@@ -142,7 +142,7 @@ fn descriptor_has_cardinality(tp: &TriplePattern, descriptor: &SourceDescriptor)
 /// An error from resolving a plan index — the plan referenced an out-of-range
 /// pattern/source for the BGP / adapter slice this resolver carries. These are
 /// *programmer* errors (a plan and a resolver built from different inputs), surfaced
-/// rather than panicked so the interpreter can fail closed. [OPUS-4.8] sq-j27p.
+/// rather than panicked so the interpreter can fail closed. sq-j27p.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveError {
     /// A plan pattern index is out of range for the BGP this resolver carries.
@@ -189,7 +189,7 @@ impl std::error::Error for ResolveError {}
 ///
 /// `SourceResolver` borrows the BGP and the adapters (it never owns transports), so a
 /// caller can build one per query without cloning the heterogeneous source set.
-/// [OPUS-4.8] sq-j27p.
+/// sq-j27p.
 pub struct SourceResolver<'a> {
     bgp: &'a Bgp,
     adapters: &'a [&'a dyn FederatedSource],
@@ -250,7 +250,7 @@ impl<'a> SourceResolver<'a> {
 /// This is the deliberately-simple Phase-3 lowering — one self-contained single-pattern
 /// SELECT per leaf. Capability-aware sub-query *construction* (only join+output vars,
 /// pushable FILTERs, VALUES bind-join blocks, ORDER/LIMIT) is Phase 4's `pushdown` module;
-/// `lower_leaf` is the seam it narrows. [OPUS-4.8] sq-j27p.
+/// `lower_leaf` is the seam it narrows. sq-j27p.
 pub fn lower_leaf(tp: &TriplePattern) -> Result<SubQuery, RenderError> {
     debug_assert!(
         !matches!(tp.subject, Term::Literal(_)),
@@ -276,7 +276,7 @@ pub fn lower_leaf(tp: &TriplePattern) -> Result<SubQuery, RenderError> {
 
 /// Render one triple pattern's body without the surrounding query form. Shared by normal leaf
 /// lowering and the opt-in pattern probe so the two paths cannot disagree about term escaping.
-/// [GPT-5.6] sq-fx5id.
+/// sq-fx5id.
 pub(crate) fn render_pattern_clause(tp: &TriplePattern) -> Result<String, RenderError> {
     Ok(format!(
         "{} {} {}",
@@ -288,7 +288,7 @@ pub(crate) fn render_pattern_clause(tp: &TriplePattern) -> Result<String, Render
 
 /// The variables a pattern produces, de-duplicated in position order (subject, predicate,
 /// object). Mirrors `TriplePattern::vars` but returns owned names (the [`SubQuery::project`]
-/// hint the interpreter binds rows against). [OPUS-4.8] sq-j27p.
+/// hint the interpreter binds rows against). sq-j27p.
 pub fn pattern_vars(tp: &TriplePattern) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for t in [&tp.subject, &tp.predicate, &tp.object] {
@@ -315,7 +315,7 @@ pub fn pattern_vars(tp: &TriplePattern) -> Vec<String> {
 ///
 /// This is the fragment-source twin of [`lower_leaf`] (which produces a SPARQL `SubQuery` for an
 /// [`Endpoint`](crate::source::Endpoint)); the interpreter dispatches on the source's interface
-/// to pick which lowering to use. [OPUS-4.8] sq-yzca.
+/// to pick which lowering to use. sq-yzca.
 pub fn lower_leaf_fragment(tp: &TriplePattern) -> FragPattern {
     FragPattern::new(
         term_to_pattern_term(&tp.subject),
@@ -324,7 +324,7 @@ pub fn lower_leaf_fragment(tp: &TriplePattern) -> FragPattern {
     )
 }
 
-/// Map one fedplan [`Term`] position to a [`PatternTerm`] for a [`FragPattern`]. [OPUS-4.8].
+/// Map one fedplan [`Term`] position to a [`PatternTerm`] for a [`FragPattern`].
 fn term_to_pattern_term(t: &Term) -> PatternTerm {
     match t {
         Term::Var(v) => PatternTerm::Var(v.0.clone()),
@@ -525,7 +525,7 @@ mod tests {
     }
 
     /// A transport double that returns an empty SRJ — used only to build a concrete
-    /// `Endpoint` adapter for resolver tests (no network). [OPUS-4.8] sq-j27p.
+    /// `Endpoint` adapter for resolver tests (no network). sq-j27p.
     struct NullTransport;
     impl Transport for NullTransport {
         fn fetch(&self, _e: &str, _q: &str) -> Result<String, String> {
@@ -657,7 +657,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-qcnn.22: Additional direct unit tests for coverage ratchet
+    // sq-qcnn.22: Additional direct unit tests for coverage ratchet
     #[test]
     fn pattern_vars_all_distinct() {
         // All three positions hold distinct variables.
@@ -712,7 +712,7 @@ mod tests {
     fn lower_leaf_literal_in_subject() {
         // A literal in subject position is invalid in RDF/SPARQL 1.1; lower_leaf debug-asserts
         // this never happens. sparq-fedplan must never produce such a pattern — this test
-        // documents the rejection path. [OPUS-4.8] sq-qcnn.22
+        // documents the rejection path. sq-qcnn.22
         let _ = lower_leaf(&TriplePattern::new(
             Term::Literal("hello".to_string()),
             iri("http://ex/prop"),

@@ -10,7 +10,7 @@ use proptest::test_runner::RngSeed;
 use sparq_arrow::{from_parquet_bytes, to_parquet_bytes};
 use sparq_engine::QueryResult;
 
-// [GPT-5.6] These constructors are independent of the Parquet implementation and cover
+// These constructors are independent of the Parquet implementation and cover
 // every supported RDF-term arm, including directional literals and triple terms.
 fn ground_term() -> impl Strategy<Value = Term> {
     let lexical = "[a-zA-Z0-9 _-]{0,24}";

@@ -97,9 +97,12 @@ fn object_ids_are_random_not_content_derived() {
     let a = seal_object_with(&k, &c, &object, &plaintext, tiny()).unwrap();
     let b = seal_object_with(&k, &c, &object, &plaintext, tiny()).unwrap();
 
+    assert_eq!(a.open(&k, &c, ObjectLimits::default()).unwrap(), plaintext);
+    assert_eq!(b.open(&k, &c, ObjectLimits::default()).unwrap(), plaintext);
     assert_eq!(a.block_count(), b.block_count());
     for (x, y) in a.blocks.iter().zip(b.blocks.iter()) {
         assert_ne!(x.block_id, y.block_id, "block ids must be freshly random");
+        assert_ne!(x.nonce, y.nonce, "nonces must be freshly random");
         assert_ne!(x.ciphertext, y.ciphertext, "sealing must be randomized");
     }
     assert_ne!(a.merkle_root().unwrap(), b.merkle_root().unwrap());

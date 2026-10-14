@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-zgbso.3 (epic sq-zgbso, issue #1582) — **id-level compiled-rule
+//! sq-zgbso.3 (epic sq-zgbso, issue #1582) — **id-level compiled-rule
 //! evaluation** for the scoped N3 subset the Solid access-control rules use, behind the
 //! opt-in `compiled-rules` feature.
 //!
