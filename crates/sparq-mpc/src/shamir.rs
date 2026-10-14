@@ -1251,7 +1251,7 @@ pub(crate) fn mac_check_challenges(
 }
 
 /// Evaluate a polynomial (coeffs low-to-high) at `x` by Horner's method.
-fn eval_poly(coeffs: &[Fp], x: Fp) -> Fp {
+pub(crate) fn eval_poly(coeffs: &[Fp], x: Fp) -> Fp {
     let mut acc = Fp::zero();
     for &c in coeffs.iter().rev() {
         acc = acc.mul(x).add(c);
@@ -1267,7 +1267,7 @@ fn eval_poly(coeffs: &[Fp], x: Fp) -> Fp {
 /// factored out so [`ShamirDealer::degree_reduce`] can reuse it as a FIXED public
 /// linear map (sq-dvuc). The points must be distinct and nonzero; the caller
 /// guarantees this (party indices are `1..=n`). RNG-free / public. `[OPUS-4.8]`
-fn lagrange_zero_weights(xs: &[u64]) -> Vec<Fp> {
+pub(crate) fn lagrange_zero_weights(xs: &[u64]) -> Vec<Fp> {
     xs.iter()
         .enumerate()
         .map(|(i, &xi_raw)| {

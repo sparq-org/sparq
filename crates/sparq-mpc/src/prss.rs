@@ -107,6 +107,36 @@
 //! that does not carry over to a real federation, and it is why
 //! `shared_nonzero_mask` stays semi-honest-only here.
 //!
+//! ## The dealer-less SHUFFLE on these seeds (`oblivious_shuffle`)
+//!
+//! The seam's [`DistributedRandomness::oblivious_shuffle`] is the one method here
+//! that permutes a secret-shared column rather than generating a value, and this
+//! module implements it dealer-lessly as a **composed resharing shuffle**: one
+//! round per maximal unqualified set `A`, in which the group `S_A = parties \ A`
+//! derives `pi_A` from the seed `k_A` (domain-separated PRF stream, unbiased
+//! Fisher-Yates), converts each element to an additive sharing among its `t+1`
+//! lowest members via the public Lagrange-at-0 weights, permutes those additive
+//! shares by `pi_A`, and reshares them as fresh degree-`t` sharings whose masking
+//! randomness comes from each member's **own private key** — not from a
+//! replicated seed. The composed permutation is `pi = pi_{A_k} ∘ … ∘ pi_{A_1}`.
+//!
+//! - **Semi-honest, honest-majority (`n >= 2t+1`), at most `t` corrupted.** For
+//!   the real corrupt set `C`, extend it to a `t`-subset `A ⊇ C`; `k_A` is held by
+//!   exactly the parties outside `A`, so no party in `C` can evaluate it, `pi_A`
+//!   is uniform and hidden from the adversary, and the composed `pi` is uniform
+//!   from its view. Public coins never choose the permutation and `pi` is never
+//!   opened. Computational, as everything else here (it rests on the PRF).
+//! - **NOT malicious-secure.** Nothing verifies that a group actually applied a
+//!   permutation; a deviating member can corrupt or reorder outputs undetected.
+//!   The consumer-side shape check is a SHAPE check only.
+//! - **Cost:** `C(n, t)` rounds of resharing — the same combinatorial blow-up as
+//!   the seed count, fine for the small `n` this module targets and a further
+//!   reason it is a small-`n` tool.
+//! - A **per-party private key** is part of the simulated setup for this. A real
+//!   party generates it locally from its own entropy (there is nothing to
+//!   distribute); it is drawn here only because this process plays all `n`
+//!   parties.
+//!
 //! ## Small-`n` only — the seed-count guard (fails closed)
 //!
 //! The setup cost is `C(n, t)` seeds, which blows up combinatorially: `n = 4` → 4
@@ -118,11 +148,11 @@
 
 use crate::chacha::ChaCha20Csprng;
 use crate::field::Fp;
-use crate::partial::MpcError;
 use crate::oblivious::{SecretColumn, ShuffleCost};
+use crate::partial::MpcError;
 use crate::randomness::{DistributedRandomness, RandomnessModel};
 use crate::rng::MpcRng;
-use crate::shamir::Share;
+use crate::shamir::{eval_poly, lagrange_zero_weights, Share};
 use sha2::{Digest, Sha512};
 use zeroize::{Zeroize, Zeroizing};
 
@@ -130,6 +160,15 @@ use zeroize::{Zeroize, Zeroizing};
 /// PRF change is a distinct, non-colliding derivation rather than a silent
 /// re-interpretation of the same seeds.
 const PRF_DOMAIN: &[u8] = b"sparq-mpc/prss/v1/prf";
+
+/// Domain-separation tag for the shuffle's **permutation** stream, derived from a
+/// replicated seed `k_A`. Disjoint from [`PRF_DOMAIN`], so the same `(k_A, ctr)`
+/// never yields both a mask summand and a permutation.
+const PRF_SHUFFLE_PERM_DOMAIN: &[u8] = b"sparq-mpc/prss/v1/shuffle-perm";
+
+/// Domain-separation tag for a party's **own** resharing randomness inside the
+/// shuffle, derived from that party's private key (never a replicated seed).
+const PRF_SHUFFLE_RESHARE_DOMAIN: &[u8] = b"sparq-mpc/prss/v1/shuffle-reshare";
 
 /// The maximum number of replicated seeds (`C(n, t)`) a [`PrssRandomness`] setup
 /// will build before refusing fail-closed.
@@ -177,6 +216,25 @@ pub struct PrssRandomness {
     t: usize,
     /// One entry per maximal unqualified set, in lexicographic order of `set`.
     seeds: Vec<PrssSeed>,
+    /// Party `i`'s **own private** PRF key, at index `i − 1` — held by that party
+    /// ALONE, never replicated to anyone. Indexed by party point, so
+    /// `private_keys[i − 1]` is party `i`'s.
+    ///
+    /// This is a different kind of key material from [`Self::seeds`]: a
+    /// replicated seed is shared with a group, and every one of them is unknown to
+    /// exactly one maximal unqualified set — whereas a party's private key is
+    /// unknown to *everyone else*. The resharing shuffle
+    /// ([`PrssRandomness::resharing_shuffle`]) needs the latter: its fresh
+    /// resharing randomness must not come from a seed the corrupt set holds, or
+    /// the adversary could recompute the honest parties' resharing polynomials.
+    ///
+    /// **Simulation note.** A real party generates this itself, locally, from its
+    /// own OS entropy — there is nothing to distribute, so unlike the replicated
+    /// seeds this needs no setup protocol. It is drawn here from the setup RNG only
+    /// because this in-process simulation plays all `n` parties, and the whole
+    /// process therefore holds every party's private key (the same in-process
+    /// caveat as the seeds — see the module docs).
+    private_keys: Vec<Zeroizing<[u8; 32]>>,
     /// The PRF input for the NEXT generated element. Strictly monotone: a reused
     /// counter would reproduce a previously-issued mask, so it is never rewound
     /// and never wrapped (see [`Self::next_counter`]).
@@ -276,10 +334,24 @@ impl PrssRandomness {
             })
             .collect();
 
+        // Each party's OWN private key — in a deployment generated locally by that
+        // party and never distributed; drawn here because the simulation plays
+        // every party.
+        let private_keys = (0..n)
+            .map(|_| {
+                let mut key = Zeroizing::new([0u8; 32]);
+                for chunk in key.chunks_exact_mut(8) {
+                    chunk.copy_from_slice(&setup_rng.next_u64().to_le_bytes());
+                }
+                key
+            })
+            .collect();
+
         Ok(PrssRandomness {
             n,
             t,
             seeds,
+            private_keys,
             counter: 0,
         })
     }
@@ -421,6 +493,213 @@ impl PrssRandomness {
     fn sharing_at(&self, ctr: u64) -> (Fp, Vec<Share>) {
         (self.central_value_at(ctr), self.shares_at(ctr))
     }
+
+    /// The **composed resharing shuffle** behind
+    /// [`DistributedRandomness::oblivious_shuffle`] — see that impl's docs for the
+    /// construction, the security model and the cost.
+    ///
+    /// # Errors
+    ///
+    /// [`MpcError::Protocol`] if `col` is not the layout this construction can
+    /// interpret: every entry must have the same width, that width must be a
+    /// multiple of `n`, and each `n`-wide group must sit on the canonical points
+    /// `x = 1..=n` in order. Unlike a switch-network shuffle — which only swaps
+    /// whole entries and so never reads a share — this one converts each *element*
+    /// of an entry between sharings, so it must know where each party's share of
+    /// each element is. A column it cannot parse is refused rather than
+    /// re-interpreted.
+    fn resharing_shuffle(
+        &mut self,
+        col: SecretColumn,
+    ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+        let m = col.len();
+        let width = col.first().map(|e| e.len()).unwrap_or(0);
+        for (j, entry) in col.iter().enumerate() {
+            if entry.len() != width {
+                return Err(MpcError::Protocol(format!(
+                    "PRSS resharing shuffle: entry {j} is {} shares wide but entry 0 is {} —                      every entry must have the same width",
+                    entry.len(),
+                    width
+                )));
+            }
+            for (idx, sh) in entry.iter().enumerate() {
+                let expected = (idx % self.n) as u64 + 1;
+                if sh.x != expected {
+                    return Err(MpcError::Protocol(format!(
+                        "PRSS resharing shuffle: entry {j} share {idx} is on x = {} (expected                          {expected}); an entry must be whole {}-party sharings on x = 1..={},                          in order",
+                        sh.x, self.n, self.n
+                    )));
+                }
+            }
+        }
+        if !width.is_multiple_of(self.n) {
+            return Err(MpcError::Protocol(format!(
+                "PRSS resharing shuffle: entry width {width} is not a multiple of n = {};                  an entry must be a whole number of {}-party sharings",
+                self.n, self.n
+            )));
+        }
+        // Nothing to permute: no resharing round runs, so none is charged.
+        if m <= 1 {
+            return Ok((
+                col,
+                ShuffleCost {
+                    items: m,
+                    switches: 0,
+                    depth_rounds: 0,
+                },
+            ));
+        }
+        let elements = width / self.n;
+        let rounds = self.seeds.len();
+        let mut cur = col;
+        for a in 0..rounds {
+            cur = self.resharing_round(a, m, elements, &cur)?;
+        }
+        Ok((
+            cur,
+            ShuffleCost {
+                items: m,
+                // No switch network is routed: this construction permutes by
+                // resharing, not by conditional swaps.
+                switches: 0,
+                // One resharing round per maximal unqualified set.
+                depth_rounds: rounds,
+            },
+        ))
+    }
+
+    /// One resharing round: the group `S_A = parties \ A` permutes the column by
+    /// `pi_A`, derived from the seed `k_A` that **no party in `A`** holds.
+    ///
+    /// The `t+1` lowest-numbered members of `S_A` (`n − t >= t + 1` under honest
+    /// majority, so they exist) convert each element's degree-`t` sharing to an
+    /// additive sharing via the public Lagrange-at-0 weights for their own points,
+    /// permute their additive shares by `pi_A`, and each reshares its additive
+    /// share as a fresh degree-`t` Shamir sharing to all `n` parties from its OWN
+    /// private randomness. Summing the `t+1` resharings componentwise gives the new
+    /// degree-`t` sharing of the permuted element.
+    fn resharing_round(
+        &mut self,
+        a: usize,
+        m: usize,
+        elements: usize,
+        col: &SecretColumn,
+    ) -> Result<SecretColumn, MpcError> {
+        // The permutation comes from `k_A` alone — every party in `A` is missing
+        // that key, so `pi_A` is pseudorandom and hidden from all of them.
+        let perm_ctr = self.next_counter()?;
+        let perm = {
+            let mut stream = prf_stream(PRF_SHUFFLE_PERM_DOMAIN, &self.seeds[a].key, perm_ctr);
+            fisher_yates(&mut stream, m)?
+        };
+
+        // S_A, then its t+1 lowest members as the recombination set, with the
+        // PUBLIC Lagrange-at-0 weights for exactly those points.
+        let group: Vec<u64> = (1..=self.n as u64)
+            .filter(|p| !self.seeds[a].set.contains(p))
+            .collect();
+        debug_assert!(group.len() > self.t, "honest majority gives n - t >= t + 1");
+        let recomb = &group[..self.t + 1];
+        let lambdas = lagrange_zero_weights(recomb);
+
+        let mut out: SecretColumn = (0..m)
+            .map(|_| {
+                (0..elements * self.n)
+                    .map(|idx| Share {
+                        x: (idx % self.n) as u64 + 1,
+                        y: Fp::zero(),
+                    })
+                    .collect()
+            })
+            .collect();
+
+        for (j, entry) in col.iter().enumerate() {
+            // Each member of `recomb` holds its additive share of entry `j` and
+            // places it at `pi_A(j)`; resharing from there is the same thing as
+            // permuting first and resharing in place.
+            let dest = perm[j];
+            for e in 0..elements {
+                let base = e * self.n;
+                // One counter per reshared element: every member of `recomb` draws
+                // at this counter under its OWN key, so their polynomials are
+                // independent of each other and of every other element.
+                let ctr = self.next_counter()?;
+                for (ri, &party) in recomb.iter().enumerate() {
+                    let additive = lambdas[ri].mul(entry[base + party as usize - 1].y);
+                    let sub = self.reshare_from_private_randomness(party, ctr, additive);
+                    for (p, y) in sub.into_iter().enumerate() {
+                        out[dest][base + p].y = out[dest][base + p].y.add(y);
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Party `party`'s fresh degree-`t` Shamir sharing of `value`, as the `n`
+    /// `y`-values on the canonical points, with the masking coefficients drawn
+    /// from THAT PARTY'S OWN private key ([`Self::private_keys`]) — never from a
+    /// replicated seed, which the corrupt set may hold.
+    fn reshare_from_private_randomness(&self, party: u64, ctr: u64, value: Fp) -> Vec<Fp> {
+        let mut stream = prf_stream(
+            PRF_SHUFFLE_RESHARE_DOMAIN,
+            &self.private_keys[party as usize - 1],
+            ctr,
+        );
+        let mut coeffs = Vec::with_capacity(self.t + 1);
+        coeffs.push(value);
+        for _ in 0..self.t {
+            coeffs.push(stream.next_fp());
+        }
+        (1..=self.n as u64)
+            .map(|x| eval_poly(&coeffs, Fp::new(x)))
+            .collect()
+    }
+}
+
+/// An **unbiased** uniform permutation of `0..n` by Fisher-Yates over `stream`,
+/// each index chosen uniformly from the remaining range by
+/// [`uniform_below_stream`]'s rejection sampling (no modulo bias).
+///
+/// Fails closed for `n` above the field modulus `P`, which the rejection sampler
+/// cannot serve unbiasedly — unreachable for a real column, guarded anyway.
+fn fisher_yates(stream: &mut PrfStream, n: usize) -> Result<Vec<usize>, MpcError> {
+    let p = crate::field::P;
+    if n as u128 > p as u128 {
+        return Err(MpcError::Protocol(format!(
+            "PRSS resharing shuffle: column length {n} exceeds field modulus P = {p};              cannot sample an unbiased permutation"
+        )));
+    }
+    let mut perm: Vec<usize> = (0..n).collect();
+    for i in (1..n).rev() {
+        let j = uniform_below_stream(stream, (i + 1) as u64)? as usize;
+        perm.swap(i, j);
+    }
+    Ok(perm)
+}
+
+/// A uniform integer in `[0, bound)` from `stream`, rejection-sampled so the
+/// modular reduction is unbiased. Requires `1 <= bound <= P`: the sampler draws
+/// uniform field elements in `[0, P)`, so a larger `bound` would make the
+/// rejection limit `0` and the loop would never terminate — it is refused instead.
+fn uniform_below_stream(stream: &mut PrfStream, bound: u64) -> Result<u64, MpcError> {
+    let p = crate::field::P;
+    if bound == 0 || bound > p {
+        return Err(MpcError::Protocol(format!(
+            "PRSS resharing shuffle: bound {bound} is not in 1..={p}; cannot \
+             rejection-sample without bias"
+        )));
+    }
+    if bound == 1 {
+        return Ok(0);
+    }
+    let limit = p - (p % bound);
+    loop {
+        let v = stream.next_fp().value();
+        if v < limit {
+            return Ok(v % bound);
+        }
+    }
 }
 
 /// One entry of a [`PartyView`]: a key the party **holds**, with the public
@@ -503,22 +782,32 @@ fn unqualified_poly_at(set: &[u64], z: Fp) -> Fp {
     acc
 }
 
-/// `PRF(key, ctr)` as a uniform field element.
-///
-/// A domain-separated SHA-512 **key derivation** — `SHA-512(DOMAIN ‖ k_A ‖ ctr)`,
-/// all inputs fixed-length so no two distinct `(k_A, ctr)` pairs share a preimage
-/// — keys a fresh ChaCha20 stream ([`crate::chacha`], the same vetted generator
-/// the masking CSPRNG uses), from which one field element is drawn by the
-/// rejection sampler in [`MpcRng::next_fp`] (uniform over `F_p`, no modulo bias).
-///
-/// Deriving a fresh stream per `(seed, counter)` — rather than seeking a single
-/// per-seed stream — keeps every counter's output independent by construction,
-/// so a rejection-sampling redraw can never bleed into the next counter's value.
-/// The derived key is never exposed, and both it and the digest are scrubbed
-/// before this returns.
+/// `PRF(key, ctr)` as a uniform field element — one element off the
+/// [`PRF_DOMAIN`] stream, uniform over `F_p` with no modulo bias (the rejection
+/// sampler in [`MpcRng::next_fp`]). See [`prf_stream`] for the derivation.
 fn prf_fp(key: &[u8; 32], ctr: u64) -> Fp {
+    prf_stream(PRF_DOMAIN, key, ctr).next_fp()
+}
+
+/// The keystream `PRF(domain, key, ctr)` — the shared mechanism behind
+/// [`prf_fp`] and the shuffle's two derivations.
+///
+/// A domain-separated SHA-512 **key derivation** — `SHA-512(domain ‖ key ‖ ctr)`,
+/// with `key` and `ctr` fixed-length so no two distinct `(key, ctr)` pairs share
+/// a preimage — keys a fresh ChaCha20 stream ([`crate::chacha`], the same vetted
+/// generator the masking CSPRNG uses), from which uniform field elements are
+/// drawn by [`MpcRng::next_fp`]'s rejection sampler (uniform over `F_p`, no
+/// modulo bias).
+///
+/// `domain` separates the uses, so the same `(key, ctr)` never produces both a
+/// mask summand and a permutation. Deriving a fresh stream per `(domain, key,
+/// ctr)` keeps every counter's output independent by construction, so a
+/// rejection-sampling redraw can never bleed into the next counter's value. The
+/// derived key is never exposed, and both it and the digest are scrubbed before
+/// this returns.
+fn prf_stream(domain: &[u8], key: &[u8; 32], ctr: u64) -> PrfStream {
     let mut hasher = Sha512::new();
-    hasher.update(PRF_DOMAIN);
+    hasher.update(domain);
     hasher.update(key);
     hasher.update(ctr.to_le_bytes());
     let mut digest = hasher.finalize();
@@ -528,10 +817,9 @@ fn prf_fp(key: &[u8; 32], ctr: u64) -> Fp {
     // The digest is derived secret material; scrub the buffer we own.
     digest[..].zeroize();
 
-    let mut stream = PrfStream {
+    PrfStream {
         inner: ChaCha20Csprng::from_seed(*stream_key),
-    };
-    stream.next_fp()
+    }
 }
 
 /// One PRF invocation's keystream, wrapped so the crate's uniform rejection
@@ -662,21 +950,81 @@ impl DistributedRandomness for PrssRandomness {
         ))
     }
 
-    /// **Honestly refused for now.** A dealer-less shuffle cannot sample the
-    /// permutation centrally the way the single-dealer simulation does, and
-    /// faking it with a public or locally-sampled permutation would hand the
-    /// adversary exactly the ordering the shuffle exists to hide. The
-    /// composed-resharing construction on the replicated seeds is a follow-on;
-    /// until it lands this returns [`MpcError::NotYetImplemented`].
+    /// A **dealer-less composed resharing shuffle** — the one thing in this module
+    /// that permutes rather than generates, and the only `DistributedRandomness`
+    /// method here that needs no central sampler.
+    ///
+    /// ## The construction
+    ///
+    /// For every maximal unqualified set `A` — the `t`-subsets of the party
+    /// points, in the same canonical lexicographic order as the seeds themselves —
+    /// one resharing round runs:
+    ///
+    /// 1. The group `S_A = parties \ A` derives a permutation `pi_A` of the
+    ///    column's positions from the seed `k_A` — a domain-separated PRF stream
+    ///    (`PRF_SHUFFLE_PERM_DOMAIN`), consumed by Fisher-Yates with rejection
+    ///    sampling, so `pi_A` is uniform over all `m!` permutations and unbiased.
+    /// 2. The `t+1` lowest-numbered members of `S_A` (honest majority gives
+    ///    `|S_A| = n − t >= t + 1`) convert each element's degree-`t` sharing to an
+    ///    **additive** sharing among themselves, by the public Lagrange-at-0
+    ///    weights for their own `t+1` points.
+    /// 3. Each of them permutes its additive shares by `pi_A`.
+    /// 4. Each **reshares** its permuted additive share as a fresh degree-`t`
+    ///    Shamir sharing to all `n` parties, with masking coefficients drawn from
+    ///    **its own private key** (`private_keys`) — never from a
+    ///    replicated seed, which the corrupt set may hold.
+    /// 5. The `t+1` resharings are summed componentwise, giving the new degree-`t`
+    ///    sharing of the permuted element.
+    ///
+    /// The composed permutation is `pi = pi_{A_k} ∘ … ∘ pi_{A_1}` (round `A_1`
+    /// first).
+    ///
+    /// ## Security model (read this before relying on it)
+    ///
+    /// **Semi-honest, honest majority (`n >= 2t+1`), at most `t` corrupted.** For
+    /// the actual corrupt set `C` with `|C| <= t`, extend `C` to a maximal
+    /// unqualified set `A ⊇ C`. By the replicated-seed rule `k_A` is held by
+    /// exactly the parties *outside* `A`, so **no party in `A` — and therefore no
+    /// party in `C` — can evaluate `k_A`'s PRF**. Hence `pi_A` is pseudorandom and
+    /// uniform from the adversary's view, and the composed `pi` is uniform from
+    /// that view too (composing a uniform, view-independent permutation with
+    /// anything the adversary may know leaves the result uniform). Public coins are
+    /// never used to choose the permutation; nothing about `pi` is ever opened.
+    /// Like the rest of this module the argument is **computational** (it rests on
+    /// the PRF), one step down from the information-theoretic Shamir core.
+    ///
+    /// **NOT malicious-secure.** Nothing verifies that a group applied a
+    /// permutation at all: a deviating member can reshare a value it did not hold,
+    /// or place an additive share at the wrong position, and corrupt or reorder the
+    /// outputs undetected. The `checked_oblivious_shuffle` shape check on the
+    /// consumer side is a SHAPE check only. Verified shuffling needs a proof of
+    /// permutation (or IT-MAC-authenticated resharing) and is not built here.
+    ///
+    /// **Still not deployable.** [`RandomnessModel::Prss`] remains
+    /// `deployable() == false`: the replicated-seed SETUP is a simulated one-time
+    /// trusted setup, the whole simulation runs in one process and therefore holds
+    /// every seed and every private key, and the crate is externally unaudited
+    /// (`sq-qhy4` pending).
+    ///
+    /// ## Cost
+    ///
+    /// `C(n, t)` resharing rounds — one per maximal unqualified set — reported as
+    /// [`ShuffleCost::depth_rounds`]. Each round reshares every element of every
+    /// entry from `t+1` parties, so the work is `C(n, t) · m · elements · (t+1)`
+    /// resharings. No switch network is routed, so
+    /// [`ShuffleCost::switches`] is `0`. That round count is the same
+    /// combinatorial blow-up as the seed count, which is why this module is a
+    /// SMALL-`n` tool and why [`MAX_PRSS_SEEDS`] caps the setup at all.
+    ///
+    /// # Errors
+    ///
+    /// [`MpcError::Protocol`] if the column is not whole `n`-party sharings on the
+    /// canonical points — see `resharing_shuffle`.
     fn oblivious_shuffle(
         &mut self,
-        _col: SecretColumn,
+        col: SecretColumn,
     ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
-        Err(MpcError::not_yet(
-            "dealer-less oblivious shuffle on PRSS (the permutation must come from \
-             randomness no <= t parties hold, not from a central sampler)",
-            "sq-yyro follow-on: research/mpc-distributed-randomness-design.md §2.1",
-        ))
+        self.resharing_shuffle(col)
     }
 }
 
@@ -1085,6 +1433,335 @@ mod tests {
         let mut source = prss(5);
         assert!(matches!(
             source.vss_own_input(Fp::new(4085)),
+            Err(MpcError::NotYetImplemented { .. })
+        ));
+    }
+
+    // ---- The dealer-less composed resharing shuffle (#6117 step 5) ----
+
+    /// Build a column of `m` entries, each packing `elements` secret values as
+    /// consecutive whole `n`-party degree-`t` sharings — the layout
+    /// `crate::oblivious_join` packs and the only one the resharing shuffle can
+    /// interpret.
+    fn shared_column(
+        backend: &ShamirBackend,
+        rows: &[Vec<u64>],
+    ) -> crate::oblivious::SecretColumn {
+        let mut dealer = backend.dealer();
+        rows.iter()
+            .map(|row| {
+                let mut entry = Vec::new();
+                for v in row {
+                    entry.extend(dealer.share(Fp::new(*v)));
+                }
+                entry
+            })
+            .collect()
+    }
+
+    /// Reconstruct a column back to its cleartext rows. `ShamirBackend::reconstruct`
+    /// is the RS-checked/robust open, so this ALSO verifies that every output entry
+    /// is a consistent degree-`t` sharing — a round that produced a wrong-degree or
+    /// inconsistent sharing fails here rather than returning a plausible number.
+    fn open_column(
+        backend: &ShamirBackend,
+        col: &crate::oblivious::SecretColumn,
+        elements: usize,
+    ) -> Vec<Vec<u64>> {
+        let n = backend.parties();
+        col.iter()
+            .map(|entry| {
+                (0..elements)
+                    .map(|e| {
+                        backend
+                            .reconstruct(&entry[e * n..(e + 1) * n])
+                            .expect("each element must open as a consistent degree-t sharing")
+                            .value()
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn sorted(mut rows: Vec<Vec<u64>>) -> Vec<Vec<u64>> {
+        rows.sort();
+        rows
+    }
+
+    /// The load-bearing correctness invariant: the shuffled column reconstructs to
+    /// a PERMUTATION of the input multiset — no value altered, dropped or
+    /// duplicated by the `C(n, t)` rounds of Lagrange conversion + resharing.
+    /// Checked over several setup seeds and both honest-majority shapes the design
+    /// record names, `(n, t) = (3, 1)` and `(5, 2)`.
+    #[test]
+    fn the_resharing_shuffle_output_is_a_permutation_of_the_input_multiset() {
+        for n in [3usize, 5] {
+            let backend = ShamirBackend::new_seeded(n, 0xA11CE).unwrap();
+            let rows: Vec<Vec<u64>> = (0..6).map(|k| vec![100 + k, 900 - k]).collect();
+            for seed in [1u64, 2, 3, 0xFEED, 0xC0FFEE] {
+                let mut source = PrssRandomness::with_seeded_setup(n, seed).unwrap();
+                assert_eq!(source.threshold(), (n - 1) / 2);
+                let col = shared_column(&backend, &rows);
+                let (shuffled, cost) = source.oblivious_shuffle(col).unwrap();
+                assert_eq!(shuffled.len(), rows.len());
+                assert_eq!(cost.items, rows.len());
+                // No switch network is routed; the cost is the resharing rounds,
+                // one per maximal unqualified set.
+                assert_eq!(cost.switches, 0);
+                assert_eq!(cost.depth_rounds, source.seed_count());
+                assert_eq!(
+                    sorted(open_column(&backend, &shuffled, 2)),
+                    sorted(rows.clone()),
+                    "n = {n}, seed = {seed}"
+                );
+            }
+        }
+    }
+
+    /// A packed entry must stay together: the elements of one entry are permuted
+    /// as a UNIT, never independently. Each row carries the binding
+    /// `second == first * 1000 + 7`, which every output row must still satisfy —
+    /// a per-element permutation would scramble the pairs and break it.
+    #[test]
+    fn a_packed_entry_keeps_its_element_to_element_binding() {
+        for n in [3usize, 5] {
+            let backend = ShamirBackend::new_seeded(n, 0xB0B).unwrap();
+            let rows: Vec<Vec<u64>> = (1..=5u64)
+                .map(|k| vec![k, k * 1000 + 7, k * 1_000_000 + 11])
+                .collect();
+            for seed in [7u64, 8, 9] {
+                let mut source = PrssRandomness::with_seeded_setup(n, seed).unwrap();
+                let (shuffled, _) = source
+                    .oblivious_shuffle(shared_column(&backend, &rows))
+                    .unwrap();
+                for row in open_column(&backend, &shuffled, 3) {
+                    assert_eq!(row[1], row[0] * 1000 + 7, "n = {n}, seed = {seed}: {row:?}");
+                    assert_eq!(
+                        row[2],
+                        row[0] * 1_000_000 + 11,
+                        "n = {n}, seed = {seed}: {row:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The shuffle must actually REORDER: over many setup seeds a small column
+    /// must come out in more than one order. A construction that returned the
+    /// input (or applied one fixed permutation) would hide nothing.
+    #[test]
+    fn the_resharing_shuffle_does_not_produce_one_fixed_order() {
+        let n = 5;
+        let backend = ShamirBackend::new_seeded(n, 0x0D1).unwrap();
+        let rows: Vec<Vec<u64>> = (0..4).map(|k| vec![10 + k]).collect();
+        let mut orders: BTreeSet<Vec<Vec<u64>>> = BTreeSet::new();
+        for seed in 0..24u64 {
+            let mut source = PrssRandomness::with_seeded_setup(n, seed).unwrap();
+            let (shuffled, _) = source
+                .oblivious_shuffle(shared_column(&backend, &rows))
+                .unwrap();
+            orders.insert(open_column(&backend, &shuffled, 1));
+        }
+        assert!(
+            orders.len() > 1,
+            "24 setups produced one single order: {orders:?}"
+        );
+    }
+
+    /// Two successive shuffles from the SAME source must not reuse a permutation:
+    /// each round draws a fresh counter, so the second shuffle is independent of
+    /// the first.
+    #[test]
+    fn successive_shuffles_from_one_source_do_not_repeat_the_permutation() {
+        let n = 5;
+        let backend = ShamirBackend::new_seeded(n, 0x0D2).unwrap();
+        let rows: Vec<Vec<u64>> = (0..8).map(|k| vec![20 + k]).collect();
+        let mut distinct: BTreeSet<Vec<Vec<u64>>> = BTreeSet::new();
+        for seed in 0..6u64 {
+            let mut source = PrssRandomness::with_seeded_setup(n, seed).unwrap();
+            for _ in 0..2 {
+                let (shuffled, _) = source
+                    .oblivious_shuffle(shared_column(&backend, &rows))
+                    .unwrap();
+                distinct.insert(open_column(&backend, &shuffled, 1));
+            }
+        }
+        assert!(distinct.len() > 1, "every shuffle produced the same order");
+    }
+
+    /// **The security property, exercised.** Give the adversary every seed it
+    /// actually holds and vary ONLY the seeds it does not: `pi` must still move.
+    ///
+    /// The corrupt set `C` holds `k_B` exactly when some member of `C` is outside
+    /// `B` — i.e. for every `B` that does NOT contain `C`. The seeds it cannot
+    /// evaluate are precisely those `A ⊇ C`. So we build variants that agree on
+    /// every `B ⊉ C` (the adversary's whole seed view) and on every party's
+    /// private key, and differ only on the `A ⊇ C` seeds. The output ORDER over
+    /// those variants is not constant, so the adversary's knowledge does not fix
+    /// `pi`: it depends on the `r_A` for some `A ⊇ C`.
+    #[test]
+    fn the_corrupt_sets_own_seeds_do_not_fix_the_permutation() {
+        let n = 5;
+        let t = 2;
+        // A corrupt set of the maximum tolerated size.
+        let corrupt: Vec<u64> = vec![2, 4];
+        assert_eq!(corrupt.len(), t);
+        let backend = ShamirBackend::new_seeded(n, 0x0D3).unwrap();
+        let rows: Vec<Vec<u64>> = (0..5).map(|k| vec![30 + k]).collect();
+
+        // The adversary's fixed view: one reference setup supplies every seed it
+        // holds, plus every party's private key.
+        let reference = PrssRandomness::with_seeded_setup(n, 0xADDE45).unwrap();
+        let mut orders: BTreeSet<Vec<Vec<u64>>> = BTreeSet::new();
+        let mut varied_any = false;
+        for seed in 0..16u64 {
+            let mut source = PrssRandomness::with_seeded_setup(n, seed).unwrap();
+            assert_eq!(source.threshold(), t);
+            for (i, seed_entry) in source.seeds.iter_mut().enumerate() {
+                let known_to_corrupt = corrupt.iter().any(|c| !seed_entry.set.contains(c));
+                if known_to_corrupt {
+                    // Pin it to the adversary's view.
+                    seed_entry.key = reference.seeds[i].key.clone();
+                } else {
+                    varied_any = true;
+                }
+            }
+            // The honest parties' own resharing randomness is held fixed too, so
+            // any change in the ORDER can only come from a `pi_A` with `A ⊇ C`.
+            source.private_keys = reference.private_keys.clone();
+            let (shuffled, _) = source
+                .oblivious_shuffle(shared_column(&backend, &rows))
+                .unwrap();
+            orders.insert(open_column(&backend, &shuffled, 1));
+        }
+        assert!(
+            varied_any,
+            "the test must actually vary a seed the corrupt set cannot evaluate"
+        );
+        assert!(
+            orders.len() > 1,
+            "pi was fixed by the corrupt set's own view: {orders:?}"
+        );
+    }
+
+    /// The shuffle reads individual shares (unlike a switch network, which only
+    /// swaps whole entries), so a column it cannot parse as whole `n`-party
+    /// sharings on the canonical points is REFUSED rather than re-interpreted.
+    #[test]
+    fn a_column_that_is_not_whole_canonical_sharings_is_refused() {
+        let n = 5;
+        let backend = ShamirBackend::new_seeded(n, 0x0D4).unwrap();
+        let rows: Vec<Vec<u64>> = (0..4).map(|k| vec![40 + k, 50 + k]).collect();
+
+        // Ragged widths.
+        let mut ragged = shared_column(&backend, &rows);
+        ragged[1].pop();
+        let mut source = PrssRandomness::with_seeded_setup(n, 1).unwrap();
+        assert!(matches!(
+            source.oblivious_shuffle(ragged),
+            Err(MpcError::Protocol(_))
+        ));
+
+        // A width that is not a multiple of n (every entry equally short).
+        let mut short = shared_column(&backend, &rows);
+        for entry in short.iter_mut() {
+            entry.truncate(n + 1);
+        }
+        let mut source = PrssRandomness::with_seeded_setup(n, 1).unwrap();
+        assert!(matches!(
+            source.oblivious_shuffle(short),
+            Err(MpcError::Protocol(_))
+        ));
+
+        // Right width, wrong points: a permuted sharing would be read as a
+        // different party's share of each element.
+        let mut mispointed = shared_column(&backend, &rows);
+        mispointed[0].swap(0, 1);
+        let mut source = PrssRandomness::with_seeded_setup(n, 1).unwrap();
+        assert!(matches!(
+            source.oblivious_shuffle(mispointed),
+            Err(MpcError::Protocol(_))
+        ));
+    }
+
+    /// The resharing randomness must come from each member's OWN private key, not
+    /// from a replicated seed the corrupt set may hold. Two setups with IDENTICAL
+    /// seeds but different private keys therefore apply the SAME permutation (`pi`
+    /// is derived from the seeds alone) while producing DIFFERENT share values —
+    /// which is exactly the split the security argument relies on.
+    #[test]
+    fn the_resharing_randomness_comes_from_each_partys_own_private_key() {
+        let n = 5;
+        let backend = ShamirBackend::new_seeded(n, 0x0D6).unwrap();
+        let rows: Vec<Vec<u64>> = (0..6).map(|k| vec![60 + k]).collect();
+        let mut a = PrssRandomness::with_seeded_setup(n, 11).unwrap();
+        let mut b = PrssRandomness::with_seeded_setup(n, 12).unwrap();
+        // Same replicated seeds, different private keys.
+        b.seeds
+            .iter_mut()
+            .zip(&a.seeds)
+            .for_each(|(dst, src)| dst.key = src.key.clone());
+        assert!(
+            b.private_keys != a.private_keys,
+            "the two setups must differ in their private keys"
+        );
+        let (sa, _) = a.oblivious_shuffle(shared_column(&backend, &rows)).unwrap();
+        let (sb, _) = b.oblivious_shuffle(shared_column(&backend, &rows)).unwrap();
+        // Same permutation: the opened rows come out in the same ORDER.
+        assert_eq!(
+            open_column(&backend, &sa, 1),
+            open_column(&backend, &sb, 1),
+            "pi must be derived from the replicated seeds alone"
+        );
+        // Different masking: the raw shares are not the same.
+        let ys = |col: &crate::oblivious::SecretColumn| -> Vec<u64> {
+            col.iter().flatten().map(|sh| sh.y.value()).collect()
+        };
+        assert_ne!(
+            ys(&sa),
+            ys(&sb),
+            "the resharing polynomials must come from the per-party private keys"
+        );
+    }
+
+    /// Degenerate columns: nothing to permute, so no resharing round runs and none
+    /// is charged.
+    #[test]
+    fn empty_and_singleton_columns_pass_through_uncharged() {
+        let n = 5;
+        let backend = ShamirBackend::new_seeded(n, 0x0D5).unwrap();
+        let mut source = PrssRandomness::with_seeded_setup(n, 1).unwrap();
+        let (out, cost) = source.oblivious_shuffle(Vec::new()).unwrap();
+        assert!(out.is_empty());
+        assert_eq!((cost.items, cost.switches, cost.depth_rounds), (0, 0, 0));
+
+        let col = shared_column(&backend, &[vec![77]]);
+        let (out, cost) = source.oblivious_shuffle(col).unwrap();
+        assert_eq!(open_column(&backend, &out, 1), vec![vec![77]]);
+        assert_eq!((cost.items, cost.switches, cost.depth_rounds), (1, 0, 0));
+    }
+
+    /// The oblivious output stage needs a holder's own input shared
+    /// (`vss_own_input`), which PRSS refuses — so composing the shuffle into the
+    /// full stage must FAIL CLOSED with that `NotYetImplemented`, never panic and
+    /// never silently produce an output. The shuffle itself is exercised directly
+    /// by the tests above.
+    #[test]
+    fn the_full_output_stage_on_prss_still_fails_closed_not_panics() {
+        let backend = ShamirBackend::new(5).unwrap();
+        let mut source = PrssRandomness::with_simulated_setup(5).unwrap();
+        let candidates = [crate::oblivious_join::Candidate {
+            payload: vec![None],
+            matched: crate::oblivious_join::MatchBit::Public(true),
+        }];
+        assert!(matches!(
+            crate::oblivious_join::oblivious_set_output_through(
+                &mut source,
+                &backend,
+                &candidates,
+                1,
+                2
+            ),
             Err(MpcError::NotYetImplemented { .. })
         ));
     }
