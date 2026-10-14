@@ -961,6 +961,64 @@ pub fn commitment_message_with_status(commitment: &Fr, salt: &Fr, status_ref: &F
     ])
 }
 
+/// Hash a commitment-method `zk:scheme` IRI to a field element
+/// (domain-separated), so a registry entry's signature can carry the method the
+/// graph was committed under. Built exactly like [`status_list_id_to_field`] —
+/// length-prefixed, 31-byte chunks through the sponge — under its own domain
+/// tag (`ZKSIG_SI`), so a scheme digest is never interchangeable with a
+/// status-list digest of the same bytes.
+pub fn scheme_iri_to_field(scheme_iri: &str) -> Fr {
+    const SIG_DOMAIN_SCHEME_IRI: u64 = 0x5a4b_5349_475f_5349; // "ZKSIG_SI"
+    let bytes = scheme_iri.as_bytes();
+    let mut acc: Vec<Fr> = Vec::with_capacity(2 + bytes.len() / 31 + 1);
+    acc.push(Fr::from(SIG_DOMAIN_SCHEME_IRI));
+    acc.push(Fr::from(bytes.len() as u64));
+    for chunk in bytes.chunks(31) {
+        acc.push(Fr::from_be_bytes_mod_order(chunk));
+    }
+    poseidon2::hash(&acc)
+}
+
+/// The signed message for a registry entry committed under a method OTHER than
+/// the default `string-canonical` one: [`commitment_message_with_salt`]'s
+/// `(C(G), salt_G)` plus the method's [`scheme_iri_to_field`] digest, under a
+/// distinct domain tag (`ZKSIG_M2`).
+///
+/// A `string-canonical` entry keeps signing [`commitment_message_with_salt`]
+/// unchanged; its domain tag (`ZKSIG_C2`) is what records that method. Because
+/// the two tags differ, an entry signed under one method does not verify under
+/// any other, in either direction (`crate::registry::RegistryEntry`).
+pub fn commitment_message_with_scheme(commitment: &Fr, salt: &Fr, scheme_digest: &Fr) -> Fr {
+    const SIG_DOMAIN_COMMITMENT_SALT_SCHEME: u64 = 0x5a4b_5349_475f_4d32; // "ZKSIG_M2"
+    poseidon2::hash(&[
+        Fr::from(SIG_DOMAIN_COMMITMENT_SALT_SCHEME),
+        *commitment,
+        *salt,
+        *scheme_digest,
+    ])
+}
+
+/// The status-bound counterpart of [`commitment_message_with_scheme`]:
+/// [`commitment_message_with_status`]'s `(C(G), salt_G, status_ref)` plus the
+/// method's [`scheme_iri_to_field`] digest, under its own domain tag
+/// (`ZKSIG_M3`). A `string-canonical` entry keeps signing
+/// [`commitment_message_with_status`] unchanged.
+pub fn commitment_message_with_status_and_scheme(
+    commitment: &Fr,
+    salt: &Fr,
+    status_ref: &Fr,
+    scheme_digest: &Fr,
+) -> Fr {
+    const SIG_DOMAIN_COMMITMENT_STATUS_SCHEME: u64 = 0x5a4b_5349_475f_4d33; // "ZKSIG_M3"
+    poseidon2::hash(&[
+        Fr::from(SIG_DOMAIN_COMMITMENT_STATUS_SCHEME),
+        *commitment,
+        *salt,
+        *status_ref,
+        *scheme_digest,
+    ])
+}
+
 /// A holder key that cannot be digested into a binding (sq-y464, HolderPoP T1).
 /// Fails closed — mirrors the [`verify`] / [`public_key_from_hex`] discipline that
 /// the curve identity is never an admissible key.
