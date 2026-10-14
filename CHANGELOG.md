@@ -49,8 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **sparq-engine / sparq-fedclient:** SERVICE and federation requests no longer use proxy
-  environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`), so the address the egress
-  resolver vets is always the address that is dialled.
+  environment variables (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`) and have no proxy support,
+  so the address the egress resolver vets is always the address that is dialled.
 - **sparq-reason (N3):** a run already refused by a `ClosureLimits` limit no longer reports
   a negation or aggregation evaluated after the refusal ("refused a negation or aggregation
   … over an incomplete set"); it fails with the refusal itself, which names the limit
