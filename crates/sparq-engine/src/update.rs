@@ -1074,8 +1074,9 @@ pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), 
 /// Why [`apply_effects_checked`] failed, and whether it changed `graph` first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplyError {
-    /// `false` when the commit point refused the effects and `graph` is untouched; `true`
-    /// when a failure came after it, with part of the effects possibly applied in memory.
+    /// `false` when the commit point refused the effects: nothing is applied in memory, and
+    /// the journal is cut back to where it was (best effort); `true` when a failure came
+    /// after it, with part of the effects possibly applied in memory.
     pub applied: bool,
     /// The failure.
     pub message: String,

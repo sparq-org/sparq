@@ -4344,8 +4344,17 @@ impl TxnJournal {
         let crc = Wal::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
-        self.file.write_all(&buf)?;
-        self.file.sync_data()
+        // A refused commit leaves no frame behind for a later replay to apply: cut the journal
+        // back to where it was (best effort; replay still discards a torn tail).
+        let start = self.file.metadata()?.len();
+        let written = self
+            .file
+            .write_all(&buf)
+            .and_then(|()| self.file.sync_data());
+        if written.is_err() && self.file.set_len(start).is_ok() {
+            let _ = self.file.sync_data();
+        }
+        written
     }
 
     /// Empties the journal (after its frame has been materialised into the per-graph state).

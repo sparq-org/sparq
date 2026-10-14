@@ -6,11 +6,12 @@
 //! effect counts. A resource that existed before the change and does not after it (a
 //! document whose graph is removed, a container left with no graph below it) loses its
 //! creator and owner; one that exists after it and did not before gets the acting agent as
-//! its creator, when there is one (a SPARQL update records none). A resource that exists
+//! its creator, when there is one (a SPARQL update records none) and the resource has no
+//! access-control document stored from an earlier life. A resource that exists
 //! before and after keeps both, whatever happens in between. The result is staged with the
 //! change and installed only once the change commits.
 
-use crate::loader::{validate_principal_iri, ResourceGraphs};
+use crate::loader::{validate_principal_iri, ResourceGraphs, ACL_SUFFIX, ACR_SUFFIX};
 use crate::AccessProvenance;
 use oxrdf::Term;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -115,7 +116,22 @@ pub(crate) fn provenance_after(
     if events.is_empty() {
         return None;
     }
-    replay(ResourceGraphs::of(before), events, provenance, creator)
+    let controlled = |r: &str| {
+        let stored = |name: String| {
+            before
+                .named
+                .iter()
+                .any(|(n, _)| matches!(n, Term::NamedNode(n) if n.as_str() == name))
+        };
+        stored(format!("{r}{ACL_SUFFIX}")) || stored(format!("{r}{ACR_SUFFIX}"))
+    };
+    replay(
+        ResourceGraphs::of(before),
+        events,
+        provenance,
+        creator,
+        controlled,
+    )
 }
 
 /// [`provenance_after`] from the names of the graphs stored before the events.
@@ -128,11 +144,15 @@ pub(crate) fn provenance_after_names(
     if events.is_empty() {
         return None;
     }
+    let controlled = |r: &str| {
+        before.contains(&format!("{r}{ACL_SUFFIX}")) || before.contains(&format!("{r}{ACR_SUFFIX}"))
+    };
     replay(
         ResourceGraphs::from_names(before.iter().map(String::as_str)),
         events,
         provenance,
         creator,
+        controlled,
     )
 }
 
@@ -141,6 +161,7 @@ fn replay(
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
+    controlled: impl Fn(&str) -> bool,
 ) -> Option<AccessProvenance> {
     // Each resource the change touches, with whether it was one before the change (the first
     // time the change touches it says which). Only the net effect counts: a resource that
@@ -165,7 +186,9 @@ fn replay(
     for (r, was) in &touched {
         match (*was, graphs.holds(r)) {
             (true, false) if provenance.knows(r) => ended.push(r),
-            (false, true) if creator.is_some() => began.push(r),
+            // A resource whose access-control document outlived an earlier life keeps that
+            // document's rules: whoever brings it back is not their creator.
+            (false, true) if creator.is_some() && !controlled(r) => began.push(r),
             _ => {}
         }
     }
@@ -241,6 +264,29 @@ mod tests {
             GraphEvent::Added("https://pod.ex/a/x"),
         ];
         assert!(provenance_after(&before, &events, &prov, Some(BOB)).is_none());
+    }
+
+    #[test]
+    fn a_resource_brought_back_under_its_surviving_access_control_document_gets_no_creator() {
+        let before = store(&["https://pod.ex/a/.acr", "https://pod.ex/b/x.acl"]);
+        let events = [
+            GraphEvent::Added("https://pod.ex/a/y"),
+            GraphEvent::Added("https://pod.ex/b/x"),
+        ];
+        let after = provenance_after(&before, &events, &AccessProvenance::new(), Some(BOB))
+            .expect("a change");
+        assert_eq!(after.creator("https://pod.ex/a/y"), Some(BOB), "new");
+        assert_eq!(
+            after.creator("https://pod.ex/a/"),
+            None,
+            "/a/.acr outlived /a/"
+        );
+        assert_eq!(
+            after.creator("https://pod.ex/b/x"),
+            None,
+            "x.acl outlived x"
+        );
+        assert_eq!(after.creator("https://pod.ex/b/"), Some(BOB), "new");
     }
 
     #[test]

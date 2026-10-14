@@ -2084,3 +2084,76 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
         "/e/ still keeps its creator"
     );
 }
+
+/// A writer who empties a container whose access-control resource outlives it, and then
+/// writes into it again, is not the container's creator: the surviving rules keep
+/// governing it, and their `acp:CreatorAgent` grants go to nobody.
+#[test]
+fn acp_a_container_brought_back_under_its_surviving_rules_has_no_new_creator() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    const ALICE: &str = "https://alice.ex/card#me";
+    const BOB: &str = "https://bob.ex/card#me";
+    let acr = "https://pod.ex/a/.acr";
+    let nq = format!(
+        "<https://pod.ex/a/x#it> <https://ex.dev/ns#k> \"x\" <https://pod.ex/a/x> .
+<{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .
+<{acr}> <{ACP}memberAccessControl> <{acr}#c> <{acr}> .
+<{acr}#c> <{ACP}apply> <{acr}#owner> <{acr}> .
+<{acr}#owner> <{ACP}allow> <{ACL}Control> <{acr}> .
+<{acr}#owner> <{ACP}anyOf> <{acr}#mo> <{acr}> .
+<{acr}#mo> <{ACP}agent> <{ACP}CreatorAgent> <{acr}> .
+<{acr}#c> <{ACP}apply> <{acr}#bob> <{acr}> .
+<{acr}#bob> <{ACP}allow> <{ACL}Read> <{acr}> .
+<{acr}#bob> <{ACP}allow> <{ACL}Write> <{acr}> .
+<{acr}#bob> <{ACP}anyOf> <{acr}#mb> <{acr}> .
+<{acr}#mb> <{ACP}agent> <{BOB}> <{acr}> .
+"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("fixture parses"));
+    let mut trusted = sparq_solid::AccessProvenance::new();
+    trusted.set_creator("https://pod.ex/a/", ALICE);
+    trusted.set_creator("https://pod.ex/a/x", ALICE);
+    store.materialize_acp_with(&trusted).expect("materializes");
+    let config = SolidServerConfig {
+        agent: Some(BOB.to_string()),
+        acp: true,
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
+    let bob = sparq_solid::Session {
+        agent: Some(BOB),
+        client: None,
+        issuer: None,
+        now: None,
+    };
+    assert!(
+        !s.store()
+            .decide(&bob, "https://pod.ex/a/", sparq_solid::Mode::Control)
+            .allow,
+        "control: bob has no Control on /a/"
+    );
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_delete",
+        json!({"url": "https://pod.ex/a/x"}),
+    );
+    assert!(!is_err, "bob deletes /a/x: {text}");
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({"url": "https://pod.ex/a/y", "content": "<https://pod.ex/a/y#it> <https://ex.dev/ns#k> \"y\" .", "content_type": "text/turtle"}),
+    );
+    assert!(!is_err, "bob writes /a/y: {text}");
+    assert_eq!(
+        s.store().acp_provenance().creator("https://pod.ex/a/"),
+        None
+    );
+    assert!(
+        !s.store()
+            .decide(&bob, "https://pod.ex/a/", sparq_solid::Mode::Control)
+            .allow,
+        "bob gains no Control on /a/"
+    );
+}
