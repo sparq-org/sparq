@@ -238,3 +238,73 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
     assert!(err.contains("not admitted"), "{err}");
     assert!(controls(&store), "nothing changed");
 }
+
+/// The same check refuses nothing it need not: a reference to a sound access-control
+/// resource, the repair of a rejected one that references one rejected only through it,
+/// and, in a WAC store, any `.acr` (which the WAC view does not read).
+#[test]
+fn an_acr_may_take_up_a_sound_policy_and_be_repaired() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let (r, e) = ("https://pod.ex/r", "https://pod.ex/e");
+    let (racr, eacr) = (format!("{r}.acr"), format!("{e}.acr"));
+    let body = |extra: &str| {
+        format!(
+            "<{racr}> <{ACP}accessControl> <{racr}#c> .\n\
+             <{racr}#c> <{ACP}apply> <{racr}#p> .\n\
+             <{racr}#p> <{ACP}allow> <{ACL}Read> .\n\
+             <{racr}#p> <{ACP}anyOf> <{racr}#m> .\n\
+             <{racr}#m> <{ACP}agent> <{ADMIN}> .\n{extra}"
+        )
+    };
+    let quads = |doc: &str, nt: &str| -> String {
+        nt.lines()
+            .map(|l| format!("{} <{doc}> .\n", l.trim_end_matches(" .")))
+            .collect()
+    };
+    let e_doc = format!(
+        "<{eacr}> <{ACP}accessControl> <{eacr}#c> .\n\
+         <{eacr}#c> <{ACP}apply> <{eacr}#p> .\n\
+         <{eacr}#p> <{ACP}allow> <{ACL}Read> .\n\
+         <{eacr}#p> <{ACP}anyOf> <{racr}#m> .\n"
+    );
+    let data = format!(
+        "<{r}#it> <https://ex.dev/ns#k> \"v\" <{r}> .\n<{e}#it> <https://ex.dev/ns#k> \"v\" <{e}> .\n"
+    );
+    let link = format!("<{racr}#c> <{ACP}apply> <{eacr}#p> .\n");
+    // A reference to a sound access-control resource is accepted.
+    let nq = format!("{data}{}{}", quads(&racr, &body("")), quads(&eacr, &e_doc));
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    store.materialize_acp().expect("materializes");
+    store
+        .put_acl_acp(&racr, &body(&link), "ntriples")
+        .expect("a sound reference is accepted");
+    // A rejected r.acr (and e.acr, rejected only through it) is repaired in one write.
+    let stray = format!("<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{racr}> .\n");
+    let nq = format!(
+        "{data}{}{stray}{}",
+        quads(&racr, &body("")),
+        quads(&eacr, &e_doc)
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    store.materialize_acp().expect("materializes");
+    store
+        .put_acl_acp(&racr, &body(&link), "ntriples")
+        .expect("the repair is accepted");
+    assert!(
+        store.decide(&sess(ADMIN), r, Mode::Read).allow,
+        "r is governed again"
+    );
+    // A WAC store does not read .acr documents.
+    let bad = "https://pod.ex/bad.acr";
+    let nq = format!("{data}<{bad}#p> <{ACP}allow> <{ACL}Read> <{bad}> .\n<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{bad}> .\n");
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    store.materialize_wac().expect("materializes");
+    store
+        .put_acl(
+            &racr,
+            &body(&format!("<{racr}#c> <{ACP}apply> <{bad}#p> .\n")),
+            "ntriples",
+        )
+        .expect("no ACP check in a WAC store");
+}

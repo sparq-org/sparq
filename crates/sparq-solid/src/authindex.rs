@@ -302,19 +302,21 @@ impl Withheld {
     /// access-control document counts as the resource it controls.
     fn holds(&self, graph: &str) -> bool {
         // An access-control document is governed through the resource it controls (Control
-        // on that resource reads and writes it).
-        let graph = graph
+        // on that resource reads and writes it); under ACP it is also a resource of its own,
+        // governed by its own access-control resource.
+        let governed = graph
             .strip_suffix(crate::loader::ACL_SUFFIX)
             .or_else(|| graph.strip_suffix(crate::loader::ACR_SUFFIX))
             .unwrap_or(graph);
-        if !self.acp.is_empty()
-            && (self.acp.contains(graph)
-                || graph
-                    .match_indices('/')
-                    .any(|(i, _)| self.acp.contains(&graph[..=i])))
-        {
+        let blocked = |g: &str| {
+            self.acp.contains(g)
+                || g.match_indices('/')
+                    .any(|(i, _)| self.acp.contains(&g[..=i]))
+        };
+        if !self.acp.is_empty() && (blocked(graph) || blocked(governed)) {
             return true;
         }
+        let graph = governed;
         if self.rejected_acl.is_empty() {
             return false;
         }

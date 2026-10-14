@@ -173,44 +173,86 @@ fn refuse_inadmissible(doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
     }
 }
 
-/// [`refuse_inadmissible`], and for an access-control resource also a statement that uses,
-/// as an access control, a policy or a matcher, a node of another access-control resource
-/// `graph` already rejects: the loader would reject this one with it.
-pub(crate) fn refuse_inadmissible_in(
-    graph: &Graph,
-    doc: &str,
-    added: &[[Term; 3]],
-) -> Result<(), String> {
-    refuse_inadmissible(doc, added)?;
-    let depends = |t: &&[Term; 3]| {
-        matches!((&t[1], &t[2]), (Term::NamedNode(p), Term::NamedNode(o))
-            if ACP_DEPENDENCY_PREDICATES.contains(&p.as_str()) && group_doc_of(o.as_str()) != doc)
-    };
-    if !doc.ends_with(ACR_SUFFIX) || !added.iter().any(|t| depends(&t)) {
-        return Ok(());
+/// The check of what one write adds to access-control documents: [`refuse_inadmissible`],
+/// and, in an ACP store, a statement that uses (as an access control, a policy or a matcher)
+/// a node of another access-control resource the loader rejects, which would reject the
+/// written one with it. The rejected set is computed at most once per write.
+pub(crate) struct ControlWrites<'g> {
+    graph: &'g Graph,
+    acp: bool,
+    rejected: std::cell::OnceCell<FxHashSet<&'g str>>,
+}
+
+impl<'g> ControlWrites<'g> {
+    /// The check for a write to `graph` (the store before it) whose view is ACP when `acp`.
+    pub(crate) fn new(graph: &'g Graph, acp: bool) -> Self {
+        ControlWrites {
+            graph,
+            acp,
+            rejected: std::cell::OnceCell::new(),
+        }
     }
-    let control: Vec<(&str, Vec<[Term; 3]>)> = graph
-        .named
-        .iter()
-        .filter_map(|(n, g)| {
-            graph_iri(n)
-                .filter(|iri| iri.ends_with(ACR_SUFFIX))
-                .map(|iri| (iri, graph_triples(g)))
-        })
-        .collect();
-    let rejected = rejected_documents(&control, System::Acp);
-    let uses_rejected = |t: &&[Term; 3]| {
-        depends(t)
-            && matches!(&t[2], Term::NamedNode(o) if rejected.contains(group_doc_of(o.as_str())))
-    };
-    match added.iter().find(uses_rejected) {
-        None => Ok(()),
-        Some(t) => Err(format!(
-            "the access-control document <{doc}> may not state `{} {} {}`: it uses a node of an \
-             access-control document that is not admitted; nothing was changed",
-            t[0], t[1], t[2]
-        )),
+
+    /// The control graphs the ACP loader reads from the store, but `except`.
+    fn control_graphs(&self, except: Option<&str>) -> Vec<(&'g str, Vec<[Term; 3]>)> {
+        self.graph
+            .named
+            .iter()
+            .filter_map(|(n, g)| {
+                graph_iri(n)
+                    .filter(|iri| Some(*iri) != except && reads_as_control(iri, ACR_SUFFIX))
+                    .map(|iri| (iri, graph_triples(g)))
+            })
+            .collect()
     }
+
+    /// Refuse `added` to the access-control document `doc`, naming the first statement it
+    /// may not make.
+    pub(crate) fn check(&self, doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
+        refuse_inadmissible(doc, added)?;
+        let depends = |t: &[Term; 3]| {
+            matches!((&t[1], &t[2]), (Term::NamedNode(p), Term::NamedNode(o))
+                if ACP_DEPENDENCY_PREDICATES.contains(&p.as_str())
+                    && group_doc_of(o.as_str()) != doc)
+        };
+        if !self.acp || !reads_as_control(doc, ACR_SUFFIX) || !added.iter().any(&depends) {
+            return Ok(());
+        }
+        let rejected = self
+            .rejected
+            .get_or_init(|| rejected_documents(&self.control_graphs(None), System::Acp));
+        // A document the store rejects now may be under repair: what it would depend on is
+        // judged without it.
+        let without_doc;
+        let rejected = if rejected.contains(doc) {
+            without_doc = rejected_documents(&self.control_graphs(Some(doc)), System::Acp);
+            &without_doc
+        } else {
+            rejected
+        };
+        let uses_rejected = |t: &&[Term; 3]| {
+            depends(t)
+                && matches!(&t[2], Term::NamedNode(o) if rejected.contains(group_doc_of(o.as_str())))
+        };
+        match added.iter().find(uses_rejected) {
+            None => Ok(()),
+            Some(t) => Err(format!(
+                "the access-control document <{doc}> may not state `{} {} {}`: it uses a node \
+                 of an access-control document that is not admitted; nothing was changed",
+                t[0], t[1], t[2]
+            )),
+        }
+    }
+}
+
+/// Whether the loader reads the stored graph `iri` as a control document with `suffix`:
+/// outside the reserved and skolem spaces, and governing a resource below an authority.
+fn reads_as_control(iri: &str, suffix: &str) -> bool {
+    !iri.starts_with(RESERVED_PREFIX)
+        && !iri.starts_with(SKOLEM_PREFIX)
+        && iri
+            .strip_suffix(suffix)
+            .is_some_and(|r| !is_authority_less(r))
 }
 
 /// Whether `t` names, as an agent, group member, origin, client or issuer, a principal the

@@ -1366,3 +1366,44 @@ fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
         }
     }
 }
+
+/// Under ACP an access-control resource is a resource of its own: when the one that governs
+/// it is rejected, no bridged grant applies to it either.
+#[test]
+fn a_rejected_acr_of_an_acr_withholds_bridged_grants_on_it() {
+    let acp = "http://www.w3.org/ns/solid/acp#";
+    let acl = "http://www.w3.org/ns/auth/acl#";
+    let acr = format!("{N2}.acr");
+    let meta = format!("{acr}.acr");
+    let pod = format!(
+        "<{N2}#it> <https://ex.dev/ns#title> \"private\" <{N2}> .\n\
+         <{acr}> <{acp}accessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#p> <{acr}> .\n\
+         <{acr}#p> <{acp}allow> <{acl}Read> <{acr}> .\n\
+         <{acr}#p> <{acp}anyOf> <{acr}#m> <{acr}> .\n\
+         <{acr}#m> <{acp}agent> <{ALICE}> <{acr}> .\n\
+         <{meta}> <{acp}accessControl> <{meta}#c> <{meta}> .\n\
+         <{meta}#c> <{acp}apply> <{meta}#p> <{meta}> .\n\
+         <{meta}#p> <{acp}allow> <{acl}Read> <{meta}> .\n\
+         <{meta}#p> <{acp}anyOf> <{meta}#m> <{meta}> .\n\
+         <{meta}#m> <{acp}agent> <{ALICE}> <{meta}> .\n"
+    );
+    let stray = format!("<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{meta}> .\n");
+    let dave = session(Some(UNSEEN), None);
+    let pol = policy("permission", "read", "", Some(UNSEEN), Some(&acr)).expect("policy");
+    for (nq, usable) in [(pod.clone(), true), (format!("{pod}{stray}"), false)] {
+        let label = if usable { "usable" } else { "rejected" };
+        let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("pod loads"));
+        s.materialize_acp().expect("acp");
+        let bridged = Request::new(format!("{ODRL}read")).on(&acr).by(UNSEEN);
+        assert!(
+            s.materialize_odrl_permission(&pol, &bridged).granted,
+            "{label}: bridged"
+        );
+        assert_eq!(
+            s.decide(&dave, &acr, Mode::Read).allow,
+            usable,
+            "{label}: the bridged grant on n2's access-control resource"
+        );
+    }
+}

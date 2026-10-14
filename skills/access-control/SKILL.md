@@ -113,9 +113,11 @@ Materialize the authorization view from the access-control documents, then enfor
   only its own nodes (subject a blank node or an IRI in the document), name no minted
   `urn:skolem:`/`urn:sparq:` IRI anywhere, name no reserved principal (`auth:`/`solidx:`, or
   an IRI containing `&client=`) as agent, member, origin, client or issuer, and use no
-  `auth:`/`solidx:` predicate or class. `put_acl*` and `update_as*` refuse a write that would
-  add such a triple (nothing changes); a stored document holding one is rejected whole by
-  the loader, and the resources it governs (ACP: the resource and everything below it; WAC:
+  `auth:`/`solidx:` predicate or class. Under ACP, an `.acr` that uses (as an access
+  control, policy or matcher) a node of a rejected `.acr` is rejected with it. `put_acl*` and
+  `update_as*` refuse a write that would add such a triple, naming it (nothing changes; a
+  writer of one `.acr` can so learn whether another is rejected); a stored document holding
+  one is rejected whole by the loader, and the resources it governs (ACP: the resource and everything below it; WAC:
   everything the rejected ACL governs, stored or not) get no grant from any source, static,
   attached, bridged or trust. So a writer who embeds `<r> solidx:creator <self>` in a
   content document OR in the `.acr` they control cannot self-grant (this also blocks forged

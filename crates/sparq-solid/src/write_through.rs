@@ -41,7 +41,8 @@
 //!
 //! Every error path leaves the PRIOR (already-validated) authorization in force, never a
 //! wider one: a rejected content parse, a document stating a triple it may not (one about a
-//! node outside it, a minted name, a reserved principal or view vocabulary), or a non-control
+//! node outside it, a minted name, a reserved principal or view vocabulary, or, under ACP,
+//! one that uses a node of an access-control resource the loader rejects), or a non-control
 //! target IRI all return `Err` with the previous auth view intact. A successful `delete_acl`
 //! REMOVES grants (it can only narrow access — the deleted rules no longer grant anything),
 //! and a successful `put_acl` replaces the old rules wholesale with the new ones.
@@ -245,11 +246,8 @@ impl PodStore {
                 acl_iri, format, e
             )
         })?;
-        crate::loader::refuse_inadmissible_in(
-            &self.graph,
-            acl_iri,
-            &crate::loader::graph_triples(&new_graph),
-        )
+        crate::loader::ControlWrites::new(&self.graph, acp)
+            .check(acl_iri, &crate::loader::graph_triples(&new_graph))
             .map_err(|e| format!("put_acl denied: {e}"))?;
         let new_len = graph_len(&new_graph);
 
