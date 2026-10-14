@@ -16,9 +16,9 @@ use super::access::{format_rfc3339, parse_rfc3339, Action};
 use super::notify::Event;
 use super::{
     add_link, encode_meta, is_uri, jose, json_response, meta_key, method_not_allowed, parse_links,
-    problem, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT, GRANTS_PATH,
-    JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS, META_SUFFIX,
-    REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
+    problem, relation_key, set, Agent, LwsRequest, LwsState, ResourceMeta, AS_CONTEXT, CID_CONTEXT,
+    GRANTS_PATH, JSON, JSON_PATCH, LD_JSON, LINKSET_JSON, LWS_CID, LWS_CONTEXT, LWS_JSON, LWS_NS,
+    META_SUFFIX, REQUESTS_PATH, SUBSCRIPTIONS_PATH, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::error::ServerError;
 use crate::store::Store;
@@ -190,7 +190,9 @@ async fn recheck<S: Store + 'static>(
 /// Only once the request is authorized does it learn that `uri` is set aside, or that new
 /// changes wait while set-aside ones are put back ([`set_aside`]): a caller that may not act on
 /// the resource gets the same `401`/`403`/`404` whatever its state. A set-aside resource is
-/// [`authorized_aside`].
+/// [`authorized_aside`], and one a journaled change is in flight to (see
+/// [`InFlight`](super::InFlight)) is decided the same way, on what it was before the change
+/// began, since what is stored may be the change part way or being put back.
 async fn authorize_unlocked<S: Store + 'static>(
     state: &LwsState<S>,
     action: Action,
@@ -198,19 +200,70 @@ async fn authorize_unlocked<S: Store + 'static>(
     agent: &Agent,
     method: &Method,
 ) -> Option<Response> {
-    if !state.visible(uri) {
-        return Some(authorized_aside(state, action, uri, agent).await);
+    stably(state, uri, || async {
+        if !state.visible(uri) {
+            return Some(authorized_aside(state, action, uri, agent).await);
+        }
+        if state.locks.changing(uri) {
+            return in_flight(state, action, uri, agent, method).await;
+        }
+        match state.store.exists(uri).await {
+            Ok(true) => recheck(state, action, uri, agent)
+                .await
+                .err()
+                .or_else(|| full(state, method)),
+            Ok(false) if state.needs_auth(agent) => Some(state.challenge(None)),
+            Ok(false) => Some(problem(StatusCode::NOT_FOUND, None)),
+            Err(e) => Some(store_error(e)),
+        }
+    })
+    .await
+    .unwrap_or_else(|| Some(state.deny(agent)))
+}
+
+/// How many times a check without the lock is made again while changes to its resource itself
+/// keep beginning or ending during it, before it refuses.
+const STABLE_ATTEMPTS: usize = 8;
+
+/// Run `check`, a decision about `uri` made without its lock, until no change to `uri` began or
+/// ended, and it was not set aside or shown again, while it ran ([`IriLocks::generation`]): what
+/// it read may otherwise be a change part way, or being put back, even one over by the time it
+/// is done (a reply that came back late). `None` when that never held in [`STABLE_ATTEMPTS`]
+/// tries; the caller then refuses, revealing nothing.
+pub(crate) async fn stably<S, T, F, Fut>(state: &LwsState<S>, uri: &str, mut check: F) -> Option<T>
+where
+    S: Store + 'static,
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = T>,
+{
+    let watch = state.locks.watch(uri);
+    for _ in 0..STABLE_ATTEMPTS {
+        let before = state.locks.generation(&watch);
+        let decided = check().await;
+        if state.locks.generation(&watch) == before {
+            return Some(decided);
+        }
     }
-    match state.store.exists(uri).await {
-        Ok(true) => {}
-        Ok(false) if state.needs_auth(agent) => return Some(state.challenge(None)),
-        Ok(false) => return Some(problem(StatusCode::NOT_FOUND, None)),
-        Err(e) => return Some(store_error(e)),
+    None
+}
+
+/// [`authorize_unlocked`] for a resource a journaled change is in flight to: what is stored may
+/// be the change part way, or being put back, so the caller is decided on what the resource was
+/// before it began, and only one it allowed waits for the lock (the check that counts is made
+/// again under it).
+async fn in_flight<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+    method: &Method,
+) -> Option<Response> {
+    match super::access::aside(state, action, uri, agent).await {
+        Ok(super::access::Aside::Allowed) => full(state, method),
+        Ok(super::access::Aside::Missing) if state.needs_auth(agent) => Some(state.challenge(None)),
+        Ok(super::access::Aside::Missing) => Some(problem(StatusCode::NOT_FOUND, None)),
+        Ok(super::access::Aside::Denied) | Err(_) => Some(state.deny(agent)),
     }
-    if let Err(refused) = recheck(state, action, uri, agent).await {
-        return Some(refused);
-    }
-    full(state, method)
 }
 
 /// The answer to a request for `uri` while it is set aside: `503` (with a `Retry-After`) to a
@@ -1142,14 +1195,15 @@ async fn members<S: Store + 'static>(
         if child.ends_with('/') {
             item.insert("type".into(), Value::String("Container".into()));
             let cmeta = state.resource_meta(&child).await?;
-            let modified = cmeta
-                .modified_ms
-                .or(meta.last_modified.map(epoch_ms))
-                .unwrap_or_default();
-            item.insert(
-                "modified".into(),
-                Value::String(format_rfc3339(to_secs(modified) as i64)),
-            );
+            // A time that is not known is not listed (it SHOULD be present, not must), rather
+            // than listed as the epoch: the listing's own date rests on its members' (see
+            // [`listing`]).
+            if let Some(modified) = cmeta.modified_ms.or(meta.last_modified.map(epoch_ms)) {
+                item.insert(
+                    "modified".into(),
+                    Value::String(format_rfc3339(to_secs(modified) as i64)),
+                );
+            }
             item.insert("etag".into(), Value::String(quoted(&meta.etag)));
         } else {
             item.insert("type".into(), Value::String("DataResource".into()));
@@ -1157,11 +1211,12 @@ async fn members<S: Store + 'static>(
             // and modified SHOULD be. The size is measured only for the members a page shows
             // (see [`with_sizes`]): every member's content is not read to serve one page.
             item.insert("format".into(), Value::String(meta.content_type.clone()));
-            let modified = meta.last_modified.map(epoch_ms).unwrap_or_default();
-            item.insert(
-                "modified".into(),
-                Value::String(format_rfc3339(to_secs(modified) as i64)),
-            );
+            if let Some(modified) = meta.last_modified.map(epoch_ms) {
+                item.insert(
+                    "modified".into(),
+                    Value::String(format_rfc3339(to_secs(modified) as i64)),
+                );
+            }
             item.insert("etag".into(), Value::String(quoted(&meta.etag)));
         }
         out.push((Value::Object(item), meta));
@@ -1255,21 +1310,22 @@ async fn listing<S: Store + 'static>(
     // The listing changed no earlier than any member it lists did, so its Last-Modified is the
     // latest of the container's own and every listed member's: an If-Modified-Since never meets a
     // 304 for a listing whose members moved on since. A container whose own time could not be
-    // moved on after a change to it has none, until it is.
-    let modified = (!untouched).then(|| {
-        all.iter()
-            .filter_map(|(m, _)| m["modified"].as_str().and_then(parse_rfc3339))
-            .filter_map(|t| u64::try_from(t).ok())
-            .fold(
-                to_secs(
-                    cmeta
-                        .modified_ms
-                        .or(meta.last_modified.map(epoch_ms))
-                        .unwrap_or_default(),
-                ),
-                u64::max,
-            )
-    });
+    // moved on after a change to it has none, until it is; nor has one whose own time, or a
+    // member's, is not known, since either could have changed at any time.
+    let times: Option<Vec<u64>> = all
+        .iter()
+        .map(|(m, _)| {
+            m["modified"]
+                .as_str()
+                .and_then(parse_rfc3339)
+                .and_then(|t| u64::try_from(t).ok())
+        })
+        .collect();
+    let own = cmeta.modified_ms.or(meta.last_modified.map(epoch_ms));
+    let modified = (!untouched)
+        .then_some(())
+        .zip(own.zip(times))
+        .map(|((), (own, times))| times.into_iter().fold(to_secs(own), u64::max));
     // Each page is its own representation, so a later page has its own entity tag.
     let etag = if page == 1 {
         format!("\"{tag}\"")
@@ -1415,12 +1471,28 @@ fn sanitize_slug(slug: Option<&str>) -> Option<String> {
 /// User-managed links by relation.
 type Links = std::collections::BTreeMap<String, Vec<String>>;
 
-/// A relation's key: an extension relation (a URI) as it is, a registered one lower-cased.
+/// A relation as it is stored: an extension relation (a URI) as it was first spelled, a registered
+/// one lower-cased. Relations are compared by [`relation_key`], so a second spelling of a stored
+/// relation joins it (see [`Spellings`]).
 fn rel_key(r: &str) -> String {
     if r.contains(':') {
         r.to_string()
     } else {
         r.to_ascii_lowercase()
+    }
+}
+
+/// The spelling each relation is stored under, by its [`relation_key`]: the first one met.
+#[derive(Default)]
+struct Spellings(std::collections::HashMap<String, String>);
+
+impl Spellings {
+    /// The key `r` is stored under: the spelling of the first relation compared equal to it.
+    fn of(&mut self, r: &str) -> String {
+        self.0
+            .entry(relation_key(r))
+            .or_insert_with(|| rel_key(r))
+            .clone()
     }
 }
 
@@ -1435,6 +1507,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
     let mut seen = std::collections::HashSet::new();
     let mut bytes = 0usize;
     let mut targets = 0usize;
+    let mut spellings = Spellings::default();
     for link in parse_links(&req.header_all(header::LINK)) {
         let Some(rel) = link.param("rel") else {
             continue;
@@ -1457,7 +1530,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
             ));
         }
         for r in rel.split_whitespace() {
-            let key = rel_key(r);
+            let key = spellings.of(r);
             if key == "type" {
                 if !target.starts_with(LWS_NS)
                     && is_uri(&target)
@@ -1465,7 +1538,7 @@ fn link_declared(req: &LwsRequest, uri: &str) -> Result<(Vec<String>, Links), Re
                 {
                     types.push(target.clone());
                 }
-            } else if !STRUCTURAL_RELATIONS.contains(&key.as_str())
+            } else if !STRUCTURAL_RELATIONS.contains(&relation_key(&key).as_str())
                 && seen.insert((key.clone(), resolved.clone()))
             {
                 // Held to the caps a linkset PATCH holds its result to, so the linkset these
@@ -1736,7 +1809,7 @@ async fn create<S: Store + 'static>(
                     // member or its metadata in between; what is left then is set aside with
                     // the locks (see [`LwsState::set_aside`](super::LwsState::set_aside)).
                     let mut undo = Vec::new();
-                    if matches!(e, ServerError::Storage(_)) {
+                    if matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. }) {
                         undo.push(super::Undo::Remove {
                             iri: child.clone(),
                             parent: parent.clone(),
@@ -1884,6 +1957,14 @@ pub struct IriLocks {
     /// What each IRI set aside was before the stuck change to it began (see
     /// [`Prior`](super::Prior)), kept while it is set aside.
     priors: std::sync::Mutex<std::collections::HashMap<String, super::Prior>>,
+    /// The IRIs a journaled change is to while it is in flight ([`InFlight`](super::InFlight)),
+    /// each with how many such changes are to it and what it was before the first began.
+    in_flight: std::sync::Mutex<std::collections::HashMap<String, (usize, super::Prior)>>,
+    /// The IRIs a check without the lock is being made about ([`IriLocks::watch`]), each with
+    /// how many such checks there are and a count moved on whenever a change to it is published
+    /// or lands, or it is set aside or shown again ([`IriLocks::generation`]). Only watched IRIs
+    /// are counted, so the map is as large as the checks in flight.
+    watched: std::sync::Mutex<std::collections::HashMap<String, (usize, u64)>>,
     /// Woken whenever an IRI is set aside, so a wait for its lock gives up.
     hid: tokio::sync::Notify,
     /// How many times anything was set aside: a walk over many resources reads it before and
@@ -1901,6 +1982,26 @@ struct LockMap {
 
 /// The size of [`LockMap`] below which it is never swept.
 const LOCK_SWEEP_FLOOR: usize = 1024;
+
+/// A watch of one IRI ([`IriLocks::watch`]), ended when dropped.
+pub(crate) struct Watch<'a> {
+    locks: &'a IriLocks,
+    iri: &'a str,
+}
+
+impl Drop for Watch<'_> {
+    fn drop(&mut self) {
+        let mut watched = self.locks.watched.lock().unwrap_or_else(|e| e.into_inner());
+        if let std::collections::hash_map::Entry::Occupied(mut e) =
+            watched.entry(self.iri.to_string())
+        {
+            e.get_mut().0 -= 1;
+            if e.get().0 == 0 {
+                e.remove();
+            }
+        }
+    }
+}
 
 impl IriLocks {
     /// Wait for and take the lock of `iri`. A writer that holds several locks takes them longest
@@ -1958,12 +2059,92 @@ impl IriLocks {
     /// says (see [`Prior`](super::Prior)); the default (what is stored now) when it says
     /// nothing, or when `iri` is not set aside.
     pub(crate) fn prior(&self, iri: &str) -> super::Prior {
-        self.priors
+        let mut prior = self
+            .priors
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(iri)
             .cloned()
-            .unwrap_or_default()
+            .unwrap_or_default();
+        if let Some((_, before)) = self
+            .in_flight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(iri)
+        {
+            prior.or(before.clone());
+        }
+        prior
+    }
+
+    /// Count the changes to `iri` until the watch is dropped ([`IriLocks::generation`]).
+    pub(crate) fn watch<'a>(&'a self, iri: &'a str) -> Watch<'a> {
+        self.watched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(iri.to_string())
+            .or_default()
+            .0 += 1;
+        Watch { locks: self, iri }
+    }
+
+    /// A count, for an IRI being watched, that has moved on since an earlier reading if, in
+    /// between, a change to it was published or landed, or it was set aside or shown again: a
+    /// check made without the lock reads it before and after what it reads, and the same count
+    /// both times means that what it read was neither a change part way nor one being put back.
+    pub(crate) fn generation(&self, watch: &Watch<'_>) -> u64 {
+        self.watched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(watch.iri)
+            .map_or(0, |(_, generation)| *generation)
+    }
+
+    fn moved(&self, iri: &str) {
+        if let Some((_, generation)) = self
+            .watched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(iri)
+        {
+            *generation += 1;
+        }
+    }
+
+    /// Whether a journaled change to `iri` is in flight (see [`InFlight`](super::InFlight)):
+    /// what is stored for it may be part of the change, or of putting it back.
+    pub(crate) fn changing(&self, iri: &str) -> bool {
+        self.in_flight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(iri)
+    }
+
+    /// Publish the IRIs of `priors` as in flight (once more each), with what each was before
+    /// the change; for one already in flight, what was published first stays first.
+    pub(crate) fn changing_from(&self, priors: std::collections::HashMap<String, super::Prior>) {
+        let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        for (iri, prior) in priors {
+            self.moved(&iri);
+            let entry = in_flight.entry(iri).or_default();
+            entry.0 += 1;
+            entry.1.or(prior);
+        }
+    }
+
+    /// Undo one [`IriLocks::changing_from`] of `iris`.
+    pub(crate) fn landed(&self, iris: &[String]) {
+        let mut in_flight = self.in_flight.lock().unwrap_or_else(|e| e.into_inner());
+        for iri in iris {
+            self.moved(iri);
+            if let std::collections::hash_map::Entry::Occupied(mut e) = in_flight.entry(iri.clone())
+            {
+                e.get_mut().0 -= 1;
+                if e.get().0 == 0 {
+                    e.remove();
+                }
+            }
+        }
     }
 
     /// Set `iris` aside (once more each), with what they were before the change (`priors`; for
@@ -1978,6 +2159,7 @@ impl IriLocks {
             let mut hidden = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
             let mut kept = self.priors.lock().unwrap_or_else(|e| e.into_inner());
             for iri in iris {
+                self.moved(iri);
                 *hidden.entry(iri.clone()).or_default() += 1;
                 // What an earlier change left untouched, a later one found as it was.
                 if let Some(prior) = priors.remove(iri) {
@@ -1995,6 +2177,7 @@ impl IriLocks {
     pub(crate) fn show(&self, iris: &[String]) {
         let mut hidden = self.hidden.lock().unwrap_or_else(|e| e.into_inner());
         for iri in iris {
+            self.moved(iri);
             if let std::collections::hash_map::Entry::Occupied(mut e) = hidden.entry(iri.clone()) {
                 *e.get_mut() -= 1;
                 if *e.get() == 0 {
@@ -2112,7 +2295,7 @@ where
                     // write cannot then hide it from a subscriber who may read the result.
                     let pending = match &event {
                         Some(event) => state.notify.prepare(&state, event).await,
-                        None => Vec::new(),
+                        None => Default::default(),
                     };
                     match container {
                         Some(container) => touch_after(&state, locks, &container).await,
@@ -2171,7 +2354,11 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
     let parent = parent_of(uri, &state.cfg.storage());
     let landed = |outcome: &Result<crate::store::sparq::ResourceMeta, ServerError>,
                   undone: bool| {
-        !undone && matches!(outcome, Ok(_) | Err(ServerError::Storage(_)))
+        !undone
+            && matches!(
+                outcome,
+                Ok(_) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
+            )
     };
     // Subscribers hear of a write that succeeded ("Update — an existing resource's content or
     // metadata was modified"); none of one that may not have happened.
@@ -3465,24 +3652,6 @@ async fn delete<S: Store + 'static>(
             return r;
         }
     }
-    // Who hears of each removal is decided before the resources go, while who may read each can
-    // still be decided; the notifications go out only once the whole removal happened. A recursive
-    // delete removes every descendant, and each removal is a Delete of its own.
-    let mut notices = Vec::with_capacity(doomed.len());
-    // They share the delivery queue's bound: what is prepared past it would be dropped when
-    // sent, and is not held while the removals run.
-    let mut room = state.cfg.delivery.queue;
-    for (gone, origin) in doomed.iter().cloned() {
-        let event = Event {
-            kind: "Delete",
-            is_container: gone.ends_with('/'),
-            uri: gone,
-            relation: origin.map(|p| ("origin", p)),
-        };
-        let pending = state.notify.prepare_at_most(state, &event, room).await;
-        room = room.saturating_sub(pending.len());
-        notices.push(pending);
-    }
     // The removals, the notifications of those that happened and the touch of the container run
     // in a task that holds the subtree's locks, and the listing lock, until the removals are
     // over (see [`hold_locks`]). A removal that was put back changed nothing; what could not be
@@ -3490,7 +3659,32 @@ async fn delete<S: Store + 'static>(
     let removal = {
         let state = state.clone();
         async move {
-            let (removed, outcome, left) = remove(&state, &doomed).await;
+            // A subtree too large to remove atomically is refused before anything is removed,
+            // and before anyone's notifications are prepared: an oversized delete does none of
+            // that work.
+            let mut journal = state.journal();
+            if let Err(e) = stage_removal(&mut journal, &doomed).await {
+                return ((Vec::new(), Err(e)), None);
+            }
+            // Who hears of each removal is decided before the resources go, while who may read
+            // each can still be decided; the notifications go out only once the whole removal
+            // happened. A recursive delete removes every descendant, and each removal is a
+            // Delete of its own. They share the delivery queue's bound: what is prepared past it
+            // would be dropped when sent, and is not held while the removals run.
+            let mut notices = Vec::with_capacity(doomed.len());
+            let mut room = state.cfg.delivery.queue;
+            for (gone, origin) in doomed.iter().cloned() {
+                let event = Event {
+                    kind: "Delete",
+                    is_container: gone.ends_with('/'),
+                    uri: gone,
+                    relation: origin.map(|p| ("origin", p)),
+                };
+                let prepared = state.notify.prepare_at_most(&state, &event, room).await;
+                room = room.saturating_sub(prepared.len());
+                notices.push(prepared);
+            }
+            let (removed, outcome, left) = remove_staged(journal, &doomed).await;
             // Only a delete that happened whole is announced. One that failed was put back, or
             // what could not be is set aside, so nothing it touched is announced as gone.
             if outcome.is_ok() {
@@ -3584,13 +3778,9 @@ async fn lock_subtree<S: Store + 'static>(
     )))
 }
 
-/// Remove the resources of a locked [`subtree`], members before their containers, each before its
-/// metadata (which says who may act on it, so it goes only once the resource has), through one
-/// [`Journal`](super::Journal): the delete is whole or not at all. At the first failure every
-/// removal before it is put back (see [`Journal::rollback`](super::Journal::rollback)), with
-/// the subtree's locks held. Returns which of `doomed` are gone (all of them, or none), the
-/// outcome, and what could not be put back (when something could not, every one of `doomed`
-/// counts as gone). A subtree too large to put back is refused (409) before anything is removed.
+/// [`stage_removal`] then [`remove_staged`], in a journal of their own. (A DELETE takes the two
+/// steps itself, preparing its notifications in between.)
+#[cfg(test)]
 async fn remove<S: Store + 'static>(
     state: &LwsState<S>,
     doomed: &[(String, Option<String>)],
@@ -3603,6 +3793,7 @@ async fn remove<S: Store + 'static>(
 }
 
 /// [`remove`], recorded in `journal`.
+#[cfg(test)]
 async fn remove_in<S: Store + 'static>(
     mut journal: super::Journal<'_, S>,
     doomed: &[(String, Option<String>)],
@@ -3611,17 +3802,40 @@ async fn remove_in<S: Store + 'static>(
     Result<(), ServerError>,
     Option<super::Unsettled>,
 ) {
-    // Everything the removal could need to put back is read first: a subtree too large to
-    // remove atomically is refused before any of it is removed.
-    for (node, parent) in doomed {
-        let staged = match journal.stage_member(node, parent.as_deref()).await {
-            Ok(()) => journal.stage(&meta_key(node)).await,
-            Err(e) => Err(e),
-        };
-        if let Err(e) = staged {
-            return (Vec::new(), Err(e), None);
-        }
+    if let Err(e) = stage_removal(&mut journal, doomed).await {
+        return (Vec::new(), Err(e), None);
     }
+    remove_staged(journal, doomed).await
+}
+
+/// Read into `journal` everything removing `doomed` could need to put back: a subtree too large
+/// to remove atomically is refused (409) before any of it is removed.
+async fn stage_removal<S: Store + 'static>(
+    journal: &mut super::Journal<'_, S>,
+    doomed: &[(String, Option<String>)],
+) -> Result<(), ServerError> {
+    for (node, parent) in doomed {
+        journal.stage_member(node, parent.as_deref()).await?;
+        journal.stage(&meta_key(node)).await?;
+    }
+    Ok(())
+}
+
+/// Remove the resources of a locked [`subtree`], staged in `journal` by [`stage_removal`],
+/// members before their containers, each before its metadata (which says who may act on it, so
+/// it goes only once the resource has): the delete is whole or not at all. At the first failure
+/// every removal before it is put back (see [`Journal::rollback`](super::Journal::rollback)),
+/// with the subtree's locks held. Returns which of `doomed` are gone (all of them, or none), the
+/// outcome, and what could not be put back (when something could not, every one of `doomed`
+/// counts as gone).
+async fn remove_staged<S: Store + 'static>(
+    mut journal: super::Journal<'_, S>,
+    doomed: &[(String, Option<String>)],
+) -> (
+    Vec<String>,
+    Result<(), ServerError>,
+    Option<super::Unsettled>,
+) {
     let mut failed = None;
     for (node, parent) in doomed {
         // The record and its parent's membership edge go in one step, data resources included:
@@ -3948,7 +4162,9 @@ fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
         .filter_map(|mut e| {
             if anchored_at(&e, uri) {
                 let o = e.as_object_mut()?;
-                o.retain(|k, _| k == "anchor" || !SERVER_MANAGED.contains(&rel_key(k).as_str()));
+                o.retain(|k, _| {
+                    k == "anchor" || !SERVER_MANAGED.contains(&relation_key(k).as_str())
+                });
                 // An entry left with nothing but its anchor says nothing.
                 if o.len() <= 1 {
                     return None;
@@ -3957,7 +4173,56 @@ fn user_linkset(doc: &Resolved, uri: &str) -> Resolved {
             Some(e)
         })
         .collect();
-    Resolved(json!({"linkset": kept}))
+    Resolved(json!({"linkset": joined_relations(kept)}))
+}
+
+/// `entries` with each relation of an anchor under one spelling, the first met: relations are
+/// compared by [`relation_key`], so two spellings of one relation are one relation, stored and
+/// served as one. Within an entry their targets are joined (each target once, attributes and
+/// all, in the order met); across entries, a later one is renamed to the first spelling.
+fn joined_relations(entries: Vec<Value>) -> Vec<Value> {
+    let mut spellings: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, String>,
+    > = Default::default();
+    entries
+        .into_iter()
+        .map(|e| {
+            let Value::Object(fields) = e else {
+                return e;
+            };
+            let anchor = fields
+                .get("anchor")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            let spellings = spellings.entry(anchor).or_default();
+            let mut out = Map::new();
+            for (k, v) in fields {
+                if k == "anchor" {
+                    out.insert(k, v);
+                    continue;
+                }
+                let key = spellings
+                    .entry(relation_key(&k))
+                    .or_insert_with(|| k.clone())
+                    .clone();
+                match (out.get_mut(&key), v) {
+                    (Some(Value::Array(have)), Value::Array(more)) => {
+                        for t in more {
+                            if !have.contains(&t) {
+                                have.push(t);
+                            }
+                        }
+                    }
+                    (_, v) => {
+                        out.insert(key, v);
+                    }
+                }
+            }
+            Value::Object(out)
+        })
+        .collect()
 }
 
 /// The user-managed links a linkset document holds about `uri`, by relation: what the type
@@ -3969,6 +4234,7 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
     let mut links = Links::new();
     let mut seen: std::collections::HashMap<String, std::collections::HashSet<&str>> =
         Default::default();
+    let mut spellings = Spellings::default();
     for entry in doc
         .0
         .get("linkset")
@@ -3978,10 +4244,10 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
         .filter(|e| anchored_at(e, uri))
     {
         for (rel, targets) in entry.as_object().into_iter().flatten() {
-            let key = rel_key(rel);
-            if rel == "anchor" || STRUCTURAL_RELATIONS.contains(&key.as_str()) {
+            if rel == "anchor" || STRUCTURAL_RELATIONS.contains(&relation_key(rel).as_str()) {
                 continue;
             }
+            let key = spellings.of(rel);
             let seen = seen.entry(key.clone()).or_default();
             let out = links.entry(key).or_default();
             for href in targets
@@ -4005,7 +4271,9 @@ fn links_of(doc: &Resolved, uri: &str) -> Links {
 struct Representation<'a> {
     format: &'a str,
     size: String,
-    modified: String,
+    /// `None` when the store keeps no time for it: the linkset then states none, rather than a
+    /// made-up one.
+    modified: Option<String>,
 }
 
 impl<'a> Representation<'a> {
@@ -4018,7 +4286,7 @@ impl<'a> Representation<'a> {
         Self {
             format,
             size: u64::MAX.to_string(),
-            modified: format_rfc3339(to_secs(u64::MAX) as i64),
+            modified: Some(format_rfc3339(to_secs(u64::MAX) as i64)),
         }
     }
 }
@@ -4039,11 +4307,12 @@ async fn linkset_document<S: Store + 'static>(
     let representation = match &stored {
         Some(stored) => {
             let size = state.store.read_at(uri, stored).await?.len();
-            let modified = stored.last_modified.map(epoch_ms).unwrap_or_default();
             Some(Representation {
                 format: &stored.content_type,
                 size: size.to_string(),
-                modified: format_rfc3339(to_secs(modified) as i64),
+                modified: stored
+                    .last_modified
+                    .map(|t| format_rfc3339(to_secs(epoch_ms(t)) as i64)),
             })
         }
         None => None,
@@ -4078,15 +4347,11 @@ fn served_linkset(
     types.extend(meta.types.iter().map(|t| json!({"href": t})));
     server.insert("type".into(), Value::Array(types));
     if let Some(r) = representation {
-        server.insert(
-            "self".into(),
-            json!([{
-                "href": uri,
-                "format": [r.format],
-                "size": [r.size],
-                "modified": [r.modified],
-            }]),
-        );
+        let mut entry = json!({"href": uri, "format": [r.format], "size": [r.size]});
+        if let Some(modified) = r.modified {
+            entry["modified"] = json!([modified]);
+        }
+        server.insert("self".into(), json!([entry]));
     }
     let user = meta
         .linkset
@@ -4384,7 +4649,10 @@ async fn linkset<S: Store + 'static>(
             let parent = parent_of(uri, &state.cfg.storage());
             let event = updated(uri);
             let after = move |w: &Result<(), ServerError>| {
-                let landed = matches!(w, Ok(()) | Err(ServerError::Storage(_)));
+                let landed = matches!(
+                    w,
+                    Ok(()) | Err(ServerError::Storage(_)) | Err(ServerError::Unsettled { .. })
+                );
                 (parent.filter(|_| landed), w.is_ok().then_some(event))
             };
             let locks = (guard, listing.take());
@@ -4656,6 +4924,27 @@ mod tests {
 
     /// Review finding (#6839): an extension relation is kept as it was spelled, as the type
     /// index's search keys it (`index::relation_key`), so a search by that spelling finds it.
+    /// Issue #6863: a linkset naming one extension relation in two spellings keys one relation,
+    /// under the first spelling, and a structural relation in any case is not user-managed.
+    #[test]
+    fn a_linkset_keys_a_relation_once_in_any_case() {
+        let uri = "https://s/r";
+        let doc = Resolved(json!({"linkset": [
+            {"anchor": uri, "https://E.example/Rel": [{"href": "https://t/x"}]},
+            {"anchor": uri, "https://e.example/REL": [{"href": "https://t/y"}, {"href": "https://t/x"}],
+             "UP": [{"href": "https://s/"}], "Author": [{"href": "https://a/me"}]},
+        ]}));
+        let links = links_of(&doc, uri);
+        assert_eq!(
+            links.keys().collect::<Vec<_>>(),
+            ["author", "https://E.example/Rel"]
+        );
+        assert_eq!(
+            links["https://E.example/Rel"],
+            ["https://t/x", "https://t/y"]
+        );
+    }
+
     #[tokio::test]
     async fn an_extension_relation_is_kept_as_spelled() {
         let st = state().await;
@@ -5291,6 +5580,81 @@ mod tests {
             vec!["https://ex.org/schema".to_string()]
         );
         assert!(m.types.is_empty());
+    }
+
+    /// Review of #6899: a linkset PATCH naming one relation in two spellings joined them only in
+    /// the links the index matches; the stored linkset kept both, and was served split. It is
+    /// stored and served as one relation, under the first spelling, its targets whole.
+    #[tokio::test]
+    async fn linkset_patch_joins_spellings_of_a_relation() {
+        let st = state().await;
+        let uri = post(&st, "j.txt", "text/plain", "x", &[]).await;
+        let meta = format!("{}{META_SUFFIX}", path_of(&uri));
+        let patch = json!({"linkset": [
+            {"anchor": uri, "https://e.example/REL": [{"href": "https://t.example/y", "title": "Y"}],
+             "https://E.example/Rel": [{"href": "https://t.example/x"}]},
+            {"anchor": uri, "HTTPS://E.EXAMPLE/REL": [{"href": "https://t.example/z"}, {"href": "https://t.example/x"}]},
+        ]});
+        let r = call(
+            &st,
+            "PATCH",
+            &meta,
+            &[("content-type", JSON_PATCH)],
+            &replace_linkset(&patch),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let stored = st.resource_meta(&uri).await.unwrap();
+        for doc in [&doc, stored.linkset.as_ref().unwrap()] {
+            let mut targets = Vec::new();
+            for e in doc["linkset"].as_array().unwrap() {
+                if e["anchor"] != uri.as_str() {
+                    continue;
+                }
+                for (k, v) in e.as_object().unwrap() {
+                    if relation_key(k) == "https://e.example/rel" {
+                        assert_eq!(k, "https://E.example/Rel", "{doc}");
+                        targets.extend(v.as_array().unwrap().iter().cloned());
+                    }
+                }
+            }
+            assert_eq!(
+                targets,
+                [
+                    json!({"href": "https://t.example/x"}),
+                    json!({"href": "https://t.example/y", "title": "Y"}),
+                    json!({"href": "https://t.example/z"}),
+                    json!({"href": "https://t.example/x"}),
+                ],
+                "{doc}"
+            );
+        }
+        assert_eq!(
+            stored.links.keys().collect::<Vec<_>>(),
+            ["https://E.example/Rel"]
+        );
+        assert_eq!(
+            stored.links["https://E.example/Rel"],
+            [
+                "https://t.example/x",
+                "https://t.example/y",
+                "https://t.example/z"
+            ]
+        );
+        // A linkset stored split before spellings were joined is served joined.
+        let mut split = stored.clone();
+        split.linkset = Some(json!({"linkset": [{"anchor": uri,
+            "https://e.example/REL": [{"href": "https://t.example/y"}],
+            "https://E.example/Rel": [{"href": "https://t.example/x"}]}]}));
+        st.put_resource_meta(&uri, &split).await.unwrap();
+        let doc = json_of(call(&st, "GET", &meta, &[], "").await).await;
+        let e = &doc["linkset"][0];
+        assert_eq!(
+            e["https://E.example/Rel"],
+            json!([{"href": "https://t.example/x"}, {"href": "https://t.example/y"}])
+        );
+        assert!(e.get("https://e.example/REL").is_none(), "{doc}");
     }
 
     #[test]
@@ -7600,6 +7964,129 @@ mod tests {
         }
     }
 
+    /// Issue #6768: a plain write or a create commits before its container is touched, and the
+    /// marker that suppresses the container's date until then is in memory only. A stop between
+    /// the two leaves the stored date from before the change; the listing's Last-Modified is the
+    /// latest of the container's and every listed member's own, so an If-Modified-Since from
+    /// before the change still never meets a 304. The store changes are made here directly, as
+    /// a process that stopped before its touch left them, on a server that never saw them.
+    #[tokio::test]
+    async fn a_change_whose_touch_was_lost_still_moves_the_listing_date() {
+        use super::super::test_store::{body_json, request as req, state};
+        let (st, store) = state(100).await;
+        let anyone = Agent::anonymous();
+        let root = st.cfg.storage();
+        let listing = [("accept", "application/lws+json")];
+        let r = handle(
+            &st,
+            &req(
+                Method::POST,
+                "/",
+                &[("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            ),
+            &anyone,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let since = |r: &Response| {
+            r.headers()[header::LAST_MODIFIED]
+                .to_str()
+                .unwrap()
+                .to_string()
+        };
+        let was = since(&handle(&st, &req(Method::GET, "/", &listing, ""), &anyone).await);
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        // A create committed, its touch lost.
+        st.store
+            .create_in_container(&root, &format!("{root}b"), "y".into(), "text/plain")
+            .await
+            .unwrap();
+        assert!(!st.is_untouched(&root) && !st.in_flight(&root));
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", was.as_str()),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let now = since(&r);
+        assert_ne!(now, was);
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        // A plain write committed, its touch lost.
+        st.store
+            .write(&format!("{root}a"), "longer".into(), "text/plain")
+            .await
+            .unwrap();
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", now.as_str()),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert_ne!(since(&r), now);
+        // Review of #6919: a member whose time is not known could have changed at any time, so
+        // the listing then has no date (and lists no time for it, rather than the epoch).
+        *store.timeless.lock().unwrap() = Some(format!("{root}b"));
+        let r = handle(&st, &req(Method::GET, "/", &listing, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+        let doc = body_json(r).await;
+        let b = doc["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == format!("{root}b"))
+            .unwrap();
+        assert!(b.get("modified").is_none(), "{b}");
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+    }
+
+    /// A time the store does not keep is not stated as the epoch: a container whose own time is
+    /// unknown has no listing date (an epoch date would make any If-Modified-Since a 304), and a
+    /// data resource whose time is unknown has no `modified` in its linkset.
+    #[tokio::test]
+    async fn an_unknown_time_is_not_dated_the_epoch() {
+        use super::super::test_store::{body_json, request as req, state};
+        let (st, store) = state(100).await;
+        let anyone = Agent::anonymous();
+        let root = st.cfg.storage();
+        let r = handle(
+            &st,
+            &req(
+                Method::POST,
+                "/",
+                &[("slug", "a"), ("content-type", "text/plain")],
+                "x",
+            ),
+            &anyone,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let ims = [
+            ("accept", "application/lws+json"),
+            ("if-modified-since", "Sun, 01 Jan 2023 00:00:00 GMT"),
+        ];
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert!(r.headers().contains_key(header::LAST_MODIFIED));
+        let mut root_meta = st.resource_meta(&root).await.unwrap();
+        root_meta.modified_ms = None;
+        st.put_resource_meta(&root, &root_meta).await.unwrap();
+        *store.timeless.lock().unwrap() = Some(root.clone());
+        let r = handle(&st, &req(Method::GET, "/", &ims, ""), &anyone).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        assert!(!r.headers().contains_key(header::LAST_MODIFIED));
+
+        let linkset = format!("/a{META_SUFFIX}");
+        let doc = body_json(handle(&st, &req(Method::GET, &linkset, &[], ""), &anyone).await).await;
+        assert!(doc["linkset"][0]["self"][0]["modified"][0].is_string());
+        *store.timeless.lock().unwrap() = Some(format!("{root}a"));
+        let doc = body_json(handle(&st, &req(Method::GET, &linkset, &[], ""), &anyone).await).await;
+        let entry = &doc["linkset"][0]["self"][0];
+        assert_eq!(entry["size"][0], "1");
+        assert!(entry.get("modified").is_none(), "{entry}");
+    }
+
     /// Review finding: a container whose own time could not be moved on after a member was
     /// deleted kept its old Last-Modified, and every time in its listing could be older still,
     /// so an If-Modified-Since from before the delete met a 304. Until a touch lands the
@@ -7799,8 +8286,8 @@ mod tests {
             body: Bytes::from("x"),
             meta: b_meta,
         };
-        st.set_aside(Unsettled(vec![undo_a]), ());
-        st.set_aside(Unsettled(vec![undo_b]), ());
+        st.set_aside(Unsettled::new(vec![undo_a]), ());
+        st.set_aside(Unsettled::new(vec![undo_b]), ());
         let call = |m: Method, p: &'static str| {
             let st = st.clone();
             let h = [("content-type", "text/plain"), ("slug", "d")];
@@ -8273,7 +8760,7 @@ mod tests {
             key: x.clone(),
             prior: None,
         };
-        st.set_aside(Unsettled(vec![undo]), held);
+        st.set_aside(Unsettled::new(vec![undo]), held);
         for task in waiting {
             let (m, status) = tokio::time::timeout(Duration::from_secs(1), task)
                 .await
@@ -8310,6 +8797,62 @@ mod tests {
         for (node, _) in &doomed {
             assert!(st.store.exists(node).await.unwrap());
         }
+    }
+
+    /// Codex review of #6841: a recursive delete prepared every descendant's notifications (an
+    /// authorization check per subscription for each) before it found out the subtree was too
+    /// large to remove atomically. The size is settled first: an oversized delete prepares
+    /// nothing.
+    #[tokio::test]
+    async fn a_delete_too_large_to_undo_prepares_no_notification() {
+        use super::super::test_store::{request as req, FlakyStore};
+        use std::sync::atomic::Ordering;
+        let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        // A store with room for more than the delete's journal may hold.
+        let roomy = crate::store::InMemoryStoreLimits::new(256 << 20, 4096);
+        let st = LwsState::new(FlakyStore::with_limits(roomy), cfg)
+            .await
+            .unwrap();
+        let root = st.cfg.storage();
+        let r = handle(
+            &st,
+            &req(
+                Method::POST,
+                "/",
+                &[("slug", "d"), ("link", CONTAINER_LINK)],
+                "",
+            ),
+            &Agent::anonymous(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let d = format!("{root}d/");
+        // Three members, together past what the delete's journal may hold to put back.
+        let big = Bytes::from(vec![b'x'; 24 << 20]);
+        for slug in ["a", "b", "c"] {
+            st.store
+                .create_in_container(&d, &format!("{d}{slug}"), big.clone(), "text/plain")
+                .await
+                .unwrap();
+        }
+        st.notify
+            .subscribe_root_for_test(&root, "http://127.0.0.1:9/inbox");
+        let delete = |path: &str, h: &[(&str, &str)]| {
+            let r = req(Method::DELETE, path, h, "");
+            let st = st.clone();
+            async move { handle(&st, &r, &Agent::anonymous()).await }
+        };
+        let r = delete("/d/", &[("depth", "infinity")]).await;
+        assert_eq!(r.status(), StatusCode::CONFLICT);
+        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 0);
+        for slug in ["a", "b", "c"] {
+            assert!(st.store.exists(&format!("{d}{slug}")).await.unwrap());
+        }
+        // One member alone fits, and its delete is prepared.
+        let r = delete("/d/a", &[]).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 1);
     }
 
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
@@ -8452,7 +8995,8 @@ mod tests {
         let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         cfg.allow_insecure_fetch = true;
-        // No room in the delivery queue: every notification made is counted as dropped.
+        // No room in the delivery queue: every subscription that hears of a change is counted as
+        // not prepared.
         cfg.delivery = super::super::notify::DeliveryLimits {
             queue: 0,
             workers: 1,
@@ -8477,13 +9021,13 @@ mod tests {
         assert!(cancelled.is_err());
         gate.add_permits(1);
         for _ in 0..200 {
-            if st.notify.dropped() > 0 {
+            if st.notify.unprepared() > 0 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(st.store.exists(&format!("{root}x")).await.unwrap());
-        assert_eq!(st.notify.dropped(), 1, "the Create was never announced");
+        assert_eq!(st.notify.unprepared(), 1, "the Create was never announced");
         assert_ne!(st.resource_meta(&root).await.unwrap().version, version);
     }
 
@@ -9908,7 +10452,7 @@ mod tests {
         st.put_resource_meta(&a, &new).await.unwrap();
         *store.fail_restore_of.lock().unwrap() = Some(a.clone());
         st.set_aside(
-            Unsettled(vec![
+            Unsettled::new(vec![
                 Undo::Restore {
                     key: a.clone(),
                     prior: Some((old_content.body, old_content.meta)),
@@ -9947,7 +10491,7 @@ mod tests {
         // change says of it is all the decision reads.)
         *store.fail_exists_of.lock().unwrap() = Some(b.clone());
         st.set_aside(
-            Unsettled(vec![Undo::Recreate {
+            Unsettled::new(vec![Undo::Recreate {
                 iri: b.clone(),
                 parent: Some(st.cfg.storage()),
                 body: old_b.body,
@@ -9971,6 +10515,250 @@ mod tests {
         assert_eq!(get("/b", OWNER).await, unavailable);
         *store.fail_read_of.lock().unwrap() = None;
         *store.fail_exists_of.lock().unwrap() = None;
+    }
+
+    /// Issue #6883: while a failed change is put back under its locks, before it is set aside,
+    /// what is stored may be the change's own new metadata (its last write landed, its reply
+    /// lost). A caller whose access only that metadata grants was let through to wait on the
+    /// lock, then told to retry once the change was set aside. It is decided, from the change's
+    /// first step until it is done or set aside, on what the resource was before it began: the
+    /// grantee the change would add is refused at once, and one it would remove waits.
+    #[tokio::test]
+    async fn a_change_being_put_back_is_decided_by_what_it_was_before() {
+        use super::super::meta_key;
+        use super::super::test_store::{agent, closed_state, data, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let owner = agent(OWNER);
+        let a = data(&st, "a").await;
+        let (public, private) = ("https://e.example/Public", "https://e.example/Private");
+        let mut meta = st.resource_meta(&a).await.unwrap();
+        meta.types = vec![public.to_string()];
+        meta.declared_types = Some(vec![public.to_string()]);
+        st.put_resource_meta(&a, &meta).await.unwrap();
+        for (who, t) in [
+            ("https://old.example/#me", public),
+            ("https://new.example/#me", private),
+        ] {
+            let body = json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": ["AccessGrant"],
+                "storage": st.cfg.storage(),
+                "access": [{"type": ["AccessPolicy"], "action": ["read"], "assignee": who,
+                    "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": t}]}],
+            });
+            let r = super::super::access::handle(
+                &st,
+                &req(
+                    Method::POST,
+                    GRANTS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body.to_string(),
+                ),
+                &owner,
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let get = |who: &str| {
+            let (st, who) = (st.clone(), agent(who));
+            async move {
+                handle(&st, &req(Method::GET, "/a", &[], ""), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert_eq!(get("https://old.example/#me").await, StatusCode::OK);
+        assert_eq!(get("https://new.example/#me").await, StatusCode::FORBIDDEN);
+        // A PUT to the private type: its last write (the new metadata) lands and reports a lost
+        // reply, and putting the metadata back keeps failing.
+        let key = meta_key(&a);
+        *store.lose_nth_write_of.lock().unwrap() = Some((key.clone(), 2));
+        *store.fail_restore_of.lock().unwrap() = Some(key.clone());
+        let restores = store.restores.load(std::sync::atomic::Ordering::SeqCst);
+        let put = {
+            let (st, owner) = (st.clone(), owner.clone());
+            let link = format!("<{private}>; rel=\"type\"");
+            tokio::spawn(async move {
+                let h = [("content-type", "text/plain"), ("link", link.as_str())];
+                handle(&st, &req(Method::PUT, "/a", &h, "new"), &owner)
+                    .await
+                    .status()
+            })
+        };
+        while store.restores.load(std::sync::atomic::Ordering::SeqCst) == restores {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // Putting it back is being retried, under the PUT's locks: the private type is stored.
+        assert!(st.visible(&a));
+        assert!(st.locks.changing(&a));
+        assert_eq!(st.resource_meta(&a).await.unwrap().types, vec![private]);
+        // Refused at once: were it let through to wait on the lock, it would be answered only
+        // once the change is set aside, with a 503.
+        assert_eq!(get("https://new.example/#me").await, StatusCode::FORBIDDEN);
+        // The grantee of the type it had waits for the lock, and is told to retry once the change
+        // is set aside.
+        assert_eq!(
+            get("https://old.example/#me").await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert!(!st.visible(&a));
+        assert_ne!(put.await.unwrap(), StatusCode::OK);
+        assert_eq!(get("https://new.example/#me").await, StatusCode::FORBIDDEN);
+        // Once it is put back, nothing of it is in flight and the stored state decides again.
+        *store.fail_restore_of.lock().unwrap() = None;
+        while !st.visible(&a) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!st.locks.changing(&a));
+        assert_eq!(get("https://old.example/#me").await, StatusCode::OK);
+        assert_eq!(get("https://new.example/#me").await, StatusCode::FORBIDDEN);
+        // A change that lands leaves nothing in flight either.
+        let link = format!("<{private}>; rel=\"type\"");
+        let h = [("content-type", "text/plain"), ("link", link.as_str())];
+        let r = handle(&st, &req(Method::PUT, "/a", &h, "new"), &owner).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert!(!st.locks.changing(&a));
+        assert_eq!(get("https://new.example/#me").await, StatusCode::OK);
+    }
+
+    /// Review of #6925: a change can begin while a request reads what is stored without the
+    /// lock, so what it read may be the change's own. Whether a change is in flight is checked
+    /// again once the reads are over: the caller is then decided on what the resource was
+    /// before the change, and the grantee the change would add is refused at once.
+    #[tokio::test]
+    async fn a_change_that_begins_during_a_check_decides_it() {
+        use super::super::meta_key;
+        use super::super::test_store::{agent, closed_state, data, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let owner = agent(OWNER);
+        let a = data(&st, "a").await;
+        let private = "https://e.example/Private";
+        let body = json!({
+            "@context": ["https://www.w3.org/ns/lws/v1"],
+            "type": ["AccessGrant"],
+            "storage": st.cfg.storage(),
+            "access": [{"type": ["AccessPolicy"], "action": ["read"],
+                "assignee": "https://new.example/#me",
+                "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": private}]}],
+        });
+        let r = super::super::access::handle(
+            &st,
+            &req(
+                Method::POST,
+                GRANTS_PATH,
+                &[("content-type", LWS_JSON)],
+                &body.to_string(),
+            ),
+            &owner,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // What the change will have written by the time the request reads it: the private type.
+        let before = st.resource_meta(&a).await.unwrap();
+        let mut new = before.clone();
+        new.types = vec![private.to_string()];
+        st.put_resource_meta(&a, &new).await.unwrap();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_read_reply_of.lock().unwrap() = Some((meta_key(&a), gate.clone()));
+        let get = {
+            let (st, who) = (st.clone(), agent("https://new.example/#me"));
+            tokio::spawn(async move {
+                let r = req(Method::GET, "/a", &[], "");
+                tokio::time::timeout(Duration::from_millis(500), handle(&st, &r, &who))
+                    .await
+                    .ok()
+                    .map(|r| r.status())
+            })
+        };
+        // The request has read the metadata, and nothing was in flight when it began.
+        while store.hold_next_read_reply_of.lock().unwrap().is_some() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // The change begins: it holds the lock and publishes what the resource was before it.
+        let held = st.locks.lock(&a).await.unwrap();
+        let prior = super::super::Prior {
+            meta: Some(before),
+            ..Default::default()
+        };
+        st.locks
+            .changing_from([(a.clone(), prior)].into_iter().collect());
+        gate.add_permits(1);
+        assert_eq!(get.await.unwrap(), Some(StatusCode::FORBIDDEN));
+        st.locks.landed(std::slice::from_ref(&a));
+        drop(held);
+    }
+
+    /// Review of #6925: a lock-free check can read a change's state part way (here its
+    /// `pending` metadata, which refuses every grant) and have the reply come back only once the
+    /// change is over and nothing is in flight. The check is made again whenever a change began
+    /// or ended while it ran, so a caller the resource allows before and after is let through.
+    #[tokio::test]
+    async fn a_change_over_by_the_end_of_a_check_has_it_made_again() {
+        use super::super::meta_key;
+        use super::super::test_store::{agent, closed_state, data, grant_read, request as req};
+        let (st, store) = closed_state(100).await;
+        let a = data(&st, "a").await;
+        grant_read(&st, "https://reader.example/#me", &[&a]).await;
+        let before = st.resource_meta(&a).await.unwrap();
+        let mut part_way = before.clone();
+        part_way.pending = true;
+        st.put_resource_meta(&a, &part_way).await.unwrap();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_read_reply_of.lock().unwrap() = Some((meta_key(&a), gate.clone()));
+        let get = {
+            let (st, who) = (st.clone(), agent("https://reader.example/#me"));
+            tokio::spawn(async move {
+                let r = req(Method::GET, "/a", &[], "");
+                tokio::time::timeout(Duration::from_millis(500), handle(&st, &r, &who))
+                    .await
+                    .ok()
+                    .map(|r| r.status())
+            })
+        };
+        while store.hold_next_read_reply_of.lock().unwrap().is_some() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // The change, published, puts the metadata back and lands, all before the reply.
+        let prior = super::super::Prior {
+            meta: Some(before.clone()),
+            ..Default::default()
+        };
+        st.locks
+            .changing_from([(a.clone(), prior)].into_iter().collect());
+        st.put_resource_meta(&a, &before).await.unwrap();
+        st.locks.landed(std::slice::from_ref(&a));
+        gate.add_permits(1);
+        assert_eq!(get.await.unwrap(), Some(StatusCode::OK));
+    }
+
+    /// Review of #6925: a lock-free check is made again only when its own resource changed while
+    /// it ran, never for a change to any other, so no amount of unrelated writing makes it
+    /// refuse.
+    #[test]
+    fn only_a_change_to_the_resource_checked_moves_its_generation() {
+        let locks = IriLocks::default();
+        let (a, others) = (
+            "https://h.example/a",
+            ["https://h.example/b", "https://h.example/c/"],
+        );
+        let watch = locks.watch(a);
+        let before = locks.generation(&watch);
+        for i in 0..1000 {
+            let other = format!("{}{i}", others[i % 2]);
+            locks.changing_from([(other.clone(), Default::default())].into_iter().collect());
+            locks.landed(std::slice::from_ref(&other));
+            locks.hide(std::slice::from_ref(&other), Default::default());
+            locks.show(std::slice::from_ref(&other));
+        }
+        assert_eq!(locks.generation(&watch), before);
+        locks.changing_from([(a.to_string(), Default::default())].into_iter().collect());
+        let published = locks.generation(&watch);
+        assert_ne!(published, before);
+        locks.landed(&[a.to_string()]);
+        assert_ne!(locks.generation(&watch), published);
+        drop(watch);
+        // Nothing is kept for a resource once no check watches it.
+        assert!(locks.watched.lock().unwrap().is_empty());
     }
 
     /// Issue #6814: a set-aside resource that was not there before the stuck change (a create

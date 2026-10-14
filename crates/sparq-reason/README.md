@@ -52,7 +52,7 @@ let g = Graph::from_parts(dict, triples);
   EYE-specific edges (quotient scale/type rule, divisor-sign remainder, integer-quotient,
   exponentiation, floor/ceiling rendering, `i128` tier) stay in a thin adapter — closures
   byte-identical (`sq-pbz04.5.1`). `reason_n3_pass_all` = EYE `--pass-all`/`-ground` (closure **plus rules**, `sq-xqchl.2`);
-  `reason_n3_query` = `--query` (`sq-xqchl.1`): a query rule evaluated over the closure by the chainer's OWN matcher — builtins/formulae/lists work there too.
+  `reason_n3_query` = `--query` (`sq-xqchl.1`): a query rule evaluated over the closure by the chainer's OWN matcher — builtins/formulae/lists work there too. Every forward closure is bounded by `ClosureLimits` (GH #6771); what is sized and what is not: [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md).
 - **RIF-Core** (opt-in `rif-core`) — W3C RIF **Core** dialect (monotone Horn subset of
   RIF-BLD/PRD) as `rif::Document` over the N3 chainer. Atoms: frame/membership/subclass
   plus numeric/string/list builtins. **Range-restriction safety enforced** (unsafe rules

@@ -67,7 +67,7 @@
 
 use crate::source::pct_encode;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::ureq_egress::{Client, EgressFilterResolver};
+use crate::ureq_egress::{Client, GuardedHttp};
 use sparq_fedplan::{SourceDescriptor, SourceId};
 
 // ─── Vocabulary IRIs (must match sparq-server/src/descriptors.rs exactly) ────────────
@@ -633,7 +633,10 @@ impl<'a> PatternProbeSession<'a> {
         endpoint: &str,
         pattern: &sparq_fedplan::TriplePattern,
     ) -> PatternProbeOutcome {
-        let clause = crate::planner::render_pattern_clause(pattern);
+        // A pattern that cannot be written as SPARQL is never probed; the source is kept.
+        let Ok(clause) = crate::planner::render_pattern_clause(pattern) else {
+            return PatternProbeOutcome::Unknown;
+        };
         let key = format!("{}\0{}", endpoint, clause);
         if let Some(outcome) = self.cache.get(&key).copied() {
             self.stats.cache_hits += 1;
@@ -693,10 +696,24 @@ impl<'a> PatternProbeSession<'a> {
     }
 }
 
-#[cfg(feature = "pattern_probe")]
+/// The GET form of `query` against `endpoint`. The endpoint's own query parameters are kept,
+/// except any existing `query` (the SPARQL Protocol takes exactly one); empty parameters are
+/// dropped, and a fragment is removed because it is never sent to the server.
 fn probe_url(endpoint: &str, query: &str) -> String {
-    let separator = if endpoint.contains('?') { '&' } else { '?' };
-    format!("{endpoint}{separator}query={}", pct_encode(query))
+    let base = endpoint.split_once('#').map_or(endpoint, |(base, _)| base);
+    let (path, params) = base.split_once('?').unwrap_or((base, ""));
+    let mut url = format!("{path}?");
+    for param in params.split('&') {
+        // Match the name as a server decodes it (`%71uery` is `query`); keep the text verbatim.
+        let name = param.split_once('=').map_or(param, |(name, _)| name);
+        if !param.is_empty() && percent_encoding::percent_decode_str(name).ne("query".bytes()) {
+            url.push_str(param);
+            url.push('&');
+        }
+    }
+    url.push_str("query=");
+    url.push_str(&pct_encode(query));
+    url
 }
 
 /// An in-memory fetcher mapping exact URLs → response bodies. Any URL not in the map yields a
@@ -738,10 +755,9 @@ pub use sparq_engine::is_forbidden_ip;
 /// TLS stack ever enters the wasm bundle.
 #[cfg(not(target_arch = "wasm32"))]
 pub struct HttpFetcher {
-    timeout: std::time::Duration,
-    /// Hosts (bare authority, lower-cased) exempt from the SSRF filter — for a trusted
-    /// internal federation endpoint that resolves privately.
-    allow_private: std::sync::Arc<std::collections::HashSet<String>>,
+    /// The timeout and the hosts (bare authority, lower-cased) exempt from the SSRF filter —
+    /// for a trusted internal federation endpoint that resolves privately.
+    http: GuardedHttp,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -757,14 +773,13 @@ impl HttpFetcher {
     /// discovery) and the strict default-deny SSRF policy (no private host allowed).
     pub fn new() -> HttpFetcher {
         HttpFetcher {
-            timeout: std::time::Duration::from_secs(15),
-            allow_private: std::sync::Arc::new(std::collections::HashSet::new()),
+            http: GuardedHttp::new(Client::Discovery, std::collections::HashSet::new()),
         }
     }
 
     /// Sets the per-request timeout.
     pub fn with_timeout(mut self, timeout: std::time::Duration) -> HttpFetcher {
-        self.timeout = timeout;
+        self.http.timeout = timeout;
         self
     }
 
@@ -772,7 +787,8 @@ impl HttpFetcher {
     /// filter — its resolved addresses are dialled even when private. Use ONLY for a
     /// deliberately-trusted internal endpoint.
     pub fn allow_private_host(mut self, host: impl Into<String>) -> HttpFetcher {
-        std::sync::Arc::make_mut(&mut self.allow_private).insert(host.into().to_ascii_lowercase());
+        std::sync::Arc::make_mut(&mut self.http.allow_private)
+            .insert(host.into().to_ascii_lowercase());
         self
     }
 }
@@ -780,36 +796,10 @@ impl HttpFetcher {
 #[cfg(not(target_arch = "wasm32"))]
 impl Fetcher for HttpFetcher {
     fn get(&self, url: &str, accept: &str) -> Result<String, String> {
-        // [OPUS-4.8] sq-g2xs: ureq-3 `Agent::with_parts` + the default-deny SSRF resolver — ureq
-        // dials only the addresses the resolver returns (the vetted IP is the dialled IP).
-        let agent = crate::ureq_egress::agent(
-            self.timeout,
-            EgressFilterResolver {
-                allow_private: std::sync::Arc::clone(&self.allow_private),
-                client: Client::Discovery,
-            },
-        );
-        match agent.get(url).header("Accept", accept).call() {
-            // ureq-3 caps `read_to_string` at 10 MiB by default; raise it to match the other
-            // transports (a finite cap still bounds memory).
-            Ok(mut r) => r
-                .body_mut()
-                .with_config()
-                .limit(DISCOVERY_MAX_BODY_BYTES)
-                .read_to_string()
-                .map_err(|e| format!("discovery: reading response from {url}: {e}")),
-            Err(ureq::Error::StatusCode(code)) => {
-                Err(format!("discovery: {url} returned HTTP {code}"))
-            }
-            Err(e) => Err(format!("discovery: request to {url} failed: {e}")),
-        }
+        let response = self.http.agent().get(url).header("Accept", accept).call();
+        self.http.read_body(response, url, false)
     }
 }
-
-/// Max bytes read from a discovery (VoID/SD) response body. ureq-3's default `read_to_string`
-/// cap is 10 MiB; raised to a generous-but-finite bound (memory stays bounded). [OPUS-4.8] sq-g2xs.
-#[cfg(not(target_arch = "wasm32"))]
-const DISCOVERY_MAX_BODY_BYTES: u64 = 256 * 1024 * 1024;
 
 // ─── Orchestration: discover() ────────────────────────────────────────────────────────
 
@@ -927,7 +917,7 @@ pub fn discover(endpoint: &str, fetcher: &dyn Fetcher) -> Result<Discovery, Stri
 /// [`Fetcher`] can express. Returns the boolean answer, or an error if the endpoint is
 /// unreachable or returns a non-ASK body.
 fn ask_probe(endpoint: &str, fetcher: &dyn Fetcher) -> Result<bool, String> {
-    let url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
+    let url = probe_url(endpoint, ASK_PROBE);
     let body = fetcher
         .get(&url, "application/sparql-results+json")
         .map_err(|e| format!("discovery: ASK probe to {endpoint} failed: {e}"))?;
@@ -975,6 +965,8 @@ fn parse_ask_boolean(body: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(not(target_arch = "wasm32"))]
+    use crate::ureq_egress::EgressFilterResolver;
 
     /// A served-shape Service Description (the exact N-Triples
     /// `sparq-server/src/descriptors.rs::sd_ntriples` writes for a read-only, federation-
@@ -1327,6 +1319,42 @@ _:c1 <http://rdfs.org/ns/void#entities> "100"^^<http://www.w3.org/2001/XMLSchema
         let ask_url = format!("{endpoint}?query={}", pct_encode(ASK_PROBE));
         let fetcher = MapFetcher::new().with(ask_url, r#"{ "boolean": false }"#);
         let d = discover(endpoint, &fetcher).expect("a false ASK still proves reachability");
+        assert_eq!(d.provenance, Provenance::AskProbe);
+    }
+
+    #[test]
+    fn probe_url_keeps_one_query_parameter_in_the_query_string() {
+        // (endpoint suffix after `http://e/s`, the probe URL before its `query=` parameter)
+        for (suffix, kept) in [
+            ("", "?"),
+            ("?g=x", "?g=x&"),
+            ("?g=x#top", "?g=x&"),
+            ("#top", "?"),
+            ("?query=old&g=x", "?g=x&"),
+            ("?query&g=x", "?g=x&"),
+            ("?queryx=1", "?queryx=1&"),
+            ("?", "?"),
+            ("?g=x&", "?g=x&"),
+            ("?%71uery=ASK%7B%7D&g=x", "?g=x&"),
+            ("?%71uery", "?"),
+            ("?Query=1&qu+ery=2", "?Query=1&qu+ery=2&"),
+        ] {
+            let expected = format!("http://e/s{kept}query={}", pct_encode(ASK_PROBE));
+            assert_eq!(
+                probe_url(&format!("http://e/s{suffix}"), ASK_PROBE),
+                expected,
+                "{suffix}"
+            );
+        }
+    }
+
+    #[test]
+    fn ask_probe_appends_to_an_existing_query_string() {
+        // An endpoint URL that already carries a query string gets `&query=`, not a second `?`.
+        let endpoint = "http://keyed/sparql?default-graph-uri=urn%3Ag";
+        let ask_url = format!("{endpoint}&query={}", pct_encode(ASK_PROBE));
+        let fetcher = MapFetcher::new().with(ask_url, r#"{ "boolean": true }"#);
+        let d = discover(endpoint, &fetcher).expect("the probe reaches the keyed endpoint");
         assert_eq!(d.provenance, Provenance::AskProbe);
     }
 

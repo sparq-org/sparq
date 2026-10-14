@@ -54,7 +54,7 @@ below; suite pins from `scripts/fetch-conformance.sh` (`w3c/rdf-tests`
 | Suite | sparq floor (CI-enforced) | Denominator at the pin | Source const |
 |---|---|---|---|
 | W3C SPARQL 1.0/1.1/1.2 query+update+syntax | 1229 (1225 pass + 4 documented divergences, 0 fail, 0 skip) | 1229/1229 of the full harness scope | `ci.yml` `RATCHET=1229`; `FINDINGS.md` round 5 |
-| Inference (rdf-mt / OWL 2 RL / N3 / sparql11-entailment / rdf-turtle) | 1967 (1950 pass + 17 documented divergences, 0 fail) | 100% of run scope: rdf-mt 48/48, OWL 2 RL 78+13 div, N3 1464+4 div, sparql11/entailment 47, rdf-turtle 313 (out-of-scope buckets excluded + reported) | `ci.yml` `RATCHET=1967` (2026-06 snapshot in the job header) |
+| Inference (rdf-mt / OWL 2 RL / N3 / sparql11-entailment / rdf-turtle) | 1967 (1949 pass + 18 documented divergences, 0 fail) | 100% of run scope: rdf-mt 48/48, OWL 2 RL 78+13 div, N3 1463+5 div, sparql11/entailment 47, rdf-turtle 313 (out-of-scope buckets excluded + reported) | `ci.yml` `RATCHET=1967` (2026-06 snapshot in the job header) |
 | W3C SHACL core | 98 pass | 98/98 `sht:Validate` cases at the pin | `w3c_core.rs` `BASELINE_PASS = 98` |
 | W3C SHACL-SPARQL (node+property) | 5 pass | 5/5 in the node+property sub-suites | `w3c_sparql.rs` `SHACL_SPARQL_FLOOR = 5` |
 | W3C JSON-LD 1.1 toRdf | 413 pass | of 467 manifest entries | `floors/to_rdf.rs` `FLOOR = 413` |

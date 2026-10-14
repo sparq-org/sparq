@@ -133,3 +133,494 @@ fn fallback_base_blank_node_keeps_its_label() {
         set(vec![asserted, [b, iri("q"), int("3")]])
     );
 }
+
+// ---- GH #6775: base blank nodes never alias the rules document's blank nodes ----------
+//
+// The parser labels the document's anonymous `[]` nodes `_b1`, `_b2`, … and keeps a
+// written `_:x` as `x`. A caller's base `Term::Blank("_b1")` / `Term::Blank("x")` is a
+// different node: on both maintenance paths the two must never merge, and the graph shows
+// its own blanks in the reserved `N3_GRAPH_BLANK` space so the output never conflates them.
+
+use sparq_reason::N3_GRAPH_BLANK;
+
+fn blank(l: &str) -> Term {
+    Term::Blank(l.into())
+}
+
+/// A rules-document blank as the graph shows it.
+fn doc_blank(l: &str) -> Term {
+    Term::Blank(format!("{N3_GRAPH_BLANK}{l}"))
+}
+
+/// Every fact `closure()` returns is `contains`ed, and no two returned facts are equal.
+fn assert_closure_consistent(g: &MaterializedN3Graph) {
+    let closure = g.closure();
+    assert_eq!(
+        set(closure.clone()).len(),
+        closure.len(),
+        "duplicate facts: {closure:?}"
+    );
+    for t in &closure {
+        assert!(
+            g.contains(t),
+            "closure() returned a fact contains() denies: {t:?}"
+        );
+    }
+}
+
+/// Rules with document blanks `_b1`, `_b2` (from `[]`) and `x` (from `_:x`) in facts.
+/// `{ ?s :p ?o . ?s :r ?o } => { ?s :both ?o }` fires only if a document blank and a base
+/// blank were the same node. With `fallback`, an unsupported builtin forces the batch
+/// engine.
+fn blank_rules(fallback: bool) -> String {
+    let force = if fallback {
+        "{ ?s <http://ex/z> ?v . (1 2) math:sum ?n } => { ?s <http://ex/zz> ?n } .\n"
+    } else {
+        ""
+    };
+    format!(
+        "@prefix math: <http://www.w3.org/2000/10/swap/math#> .\n\
+         [] <http://ex/p> <http://ex/o1> .\n\
+         [] <http://ex/p> <http://ex/o2> .\n\
+         _:x <http://ex/p> <http://ex/o3> .\n\
+         {{ ?s <http://ex/p> ?o . ?s <http://ex/r> ?o }} => {{ ?s <http://ex/both> ?o }} .\n\
+         {{ ?s <http://ex/r> ?o }} => {{ ?s <http://ex/seen> ?o }} .\n\
+         {force}"
+    )
+}
+
+fn doc_facts() -> Vec<[Term; 3]> {
+    vec![
+        [doc_blank("_b1"), iri("p"), iri("o1")],
+        [doc_blank("_b2"), iri("p"), iri("o2")],
+        [doc_blank("x"), iri("p"), iri("o3")],
+    ]
+}
+
+fn base_blank_facts() -> Vec<[Term; 3]> {
+    vec![
+        [blank("_b1"), iri("r"), iri("o1")],
+        [blank("_b2"), iri("r"), iri("o2")],
+        [blank("x"), iri("r"), iri("o3")],
+    ]
+}
+
+/// The closure over the document facts plus `base`: each base fact and its `:seen` copy,
+/// with the caller's labels, and no `:both` (which would need a merge).
+fn expected_with(base: &[[Term; 3]]) -> FxHashSet<[Term; 3]> {
+    let mut e = set(doc_facts());
+    for [s, _, o] in base {
+        e.insert([s.clone(), iri("r"), o.clone()]);
+        e.insert([s.clone(), iri("seen"), o.clone()]);
+    }
+    e
+}
+
+fn assert_base_blanks_stay_apart(fallback: bool) {
+    let mode = if fallback {
+        N3Mode::Fallback
+    } else {
+        N3Mode::Counting
+    };
+    let base = base_blank_facts();
+    let g = MaterializedN3Graph::new(&blank_rules(fallback), &base).expect("parse");
+    assert_eq!(g.mode(), mode, "{:?}", g.fallback_reason());
+    let closure = set(g.closure());
+    assert!(
+        !closure.iter().any(|t| t[1] == iri("both")),
+        "a base blank merged with a document blank: {closure:?}"
+    );
+    assert_eq!(closure, expected_with(&base));
+    assert_eq!(g.len(), closure.len());
+    assert_closure_consistent(&g);
+    for t in &base {
+        assert!(g.contains(t), "asserted base blank triple lost: {t:?}");
+        assert!(g.contains(&[t[0].clone(), iri("seen"), t[2].clone()]));
+    }
+    // The document's `_:x` and the caller's `x` are two terms in the output.
+    assert!(g.contains(&[doc_blank("x"), iri("p"), iri("o3")]));
+    assert!(!g.contains(&[blank("x"), iri("p"), iri("o3")]));
+    assert!(!g.contains(&[doc_blank("x"), iri("r"), iri("o3")]));
+}
+
+#[test]
+fn fallback_base_blanks_do_not_alias_document_blanks() {
+    assert_base_blanks_stay_apart(true);
+}
+
+#[test]
+fn counting_base_blanks_do_not_alias_document_blanks() {
+    assert_base_blanks_stay_apart(false);
+}
+
+fn assert_base_blank_mutations(fallback: bool) {
+    let mode = if fallback {
+        N3Mode::Fallback
+    } else {
+        N3Mode::Counting
+    };
+    let mut g = MaterializedN3Graph::new(&blank_rules(fallback), &[]).expect("parse");
+    assert_eq!(g.mode(), mode, "{:?}", g.fallback_reason());
+    assert_eq!(set(g.closure()), expected_with(&[]));
+    assert_closure_consistent(&g);
+    let base = base_blank_facts();
+    assert_eq!(g.insert(&base), base.len());
+    assert_eq!(g.mode(), mode);
+    assert_eq!(set(g.closure()), expected_with(&base));
+    assert_closure_consistent(&g);
+    for t in &base {
+        assert!(g.contains(t), "inserted base blank triple lost: {t:?}");
+    }
+    // Re-inserting is a no-op: the caller's label maps to the same node every time.
+    assert_eq!(g.insert(&base), 0);
+    assert_eq!(g.delete(&base[..1]), 1);
+    assert!(!g.contains(&base[0]));
+    assert_eq!(set(g.closure()), expected_with(&base[1..]));
+    assert_closure_consistent(&g);
+    // The caller's `_b1` is not the document's: the document's `[]` fact stays.
+    assert_eq!(g.delete(&[[blank("_b1"), iri("p"), iri("o1")]]), 0);
+    assert_eq!(set(g.closure()), expected_with(&base[1..]));
+    assert_eq!(g.delete(&base[1..]), 2);
+    assert_eq!(set(g.closure()), expected_with(&[]));
+    assert_closure_consistent(&g);
+    // A label in the reserved space names the graph's own node, as `closure()` shows it.
+    assert!(g.contains(&doc_facts()[0]));
+}
+
+#[test]
+fn fallback_base_blank_insert_delete_round_trip() {
+    assert_base_blank_mutations(true);
+}
+
+#[test]
+fn counting_base_blank_insert_delete_round_trip() {
+    assert_base_blank_mutations(false);
+}
+
+#[test]
+fn reserved_label_naming_no_node_is_refused() {
+    // `outward` never shows a caller's own node in the reserved space, so a base label
+    // that would name one there is an error, and is ignored by insert/contains.
+    let bad = [
+        blank(&format!("{N3_GRAPH_BLANK}__bs0_x")),
+        iri("r"),
+        iri("o1"),
+    ];
+    assert!(MaterializedN3Graph::new(&blank_rules(false), std::slice::from_ref(&bad)).is_err());
+    let mut g = MaterializedN3Graph::new(&blank_rules(false), &[]).expect("parse");
+    assert_eq!(g.insert(std::slice::from_ref(&bad)), 0);
+    assert!(!g.contains(&bad));
+}
+
+/// A document parsed at run time (`log:parsedAsN3`) has blanks of its own: a text that
+/// spells a caller's label, or the graph's internal namespace for it, never aliases the
+/// caller's node.
+#[test]
+fn runtime_parsed_blanks_do_not_alias_caller_blanks() {
+    for text in ["_:x", "_:__bs0_x", "_:__bs1_x", "_:__bsmith"] {
+        let rules = format!(
+            "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             {{ \"{text} <http://ex/r> <http://ex/o9> .\" log:parsedAsN3 ?f . \
+                ?f log:includes {{ ?s <http://ex/r> <http://ex/o9> }} }} \
+             => {{ ?s <http://ex/fromtext> <http://ex/o9> }} .\n\
+             {{ ?s <http://ex/fromtext> ?o . ?s <http://ex/r> ?o }} => {{ ?s <http://ex/both> ?o }} ."
+        );
+        let mine = [blank("x"), iri("r"), iri("o9")];
+        let g = MaterializedN3Graph::new(&rules, std::slice::from_ref(&mine)).expect("parse");
+        assert_eq!(g.mode(), N3Mode::Fallback, "{:?}", g.fallback_reason());
+        let closure = g.closure();
+        assert_closure_consistent(&g);
+        let from_text: Vec<_> = closure.iter().filter(|t| t[1] == iri("fromtext")).collect();
+        assert_eq!(from_text.len(), 1, "{text}: {closure:?}");
+        let Term::Blank(l) = &from_text[0][0] else {
+            panic!("{text}: {closure:?}")
+        };
+        assert!(
+            l.starts_with(N3_GRAPH_BLANK),
+            "{text}: runtime blank shown as {l:?}"
+        );
+        assert!(
+            !g.contains(&[blank("x"), iri("fromtext"), iri("o9")]),
+            "{text}: {closure:?}"
+        );
+        assert!(
+            !closure.iter().any(|t| t[1] == iri("both")),
+            "{text}: {closure:?}"
+        );
+        assert!(g.contains(&mine));
+    }
+}
+
+#[cfg(feature = "explain")]
+#[test]
+fn why_shows_the_callers_blank_labels() {
+    for fallback in [false, true] {
+        let base = base_blank_facts();
+        let g = MaterializedN3Graph::new(&blank_rules(fallback), &base).expect("parse");
+        let seen = [blank("_b1"), iri("seen"), iri("o1")];
+        let tree = g.why(&seen).expect("derived fact explains");
+        let root = &tree.nodes()[tree.root() as usize];
+        assert_eq!(root.conclusion[0], "_:_b1", "fallback={fallback}");
+        assert_eq!(root.premises.len(), 1);
+        let leaf = &tree.nodes()[root.premises[0] as usize];
+        assert_eq!(leaf.rule, "asserted");
+        assert_eq!(leaf.conclusion[0], "_:_b1", "fallback={fallback}");
+        let asserted = g.why(&base[0]).expect("asserted fact explains");
+        assert_eq!(asserted.nodes()[0].conclusion[0], "_:_b1");
+        assert!(g.why(&[blank("_b1"), iri("both"), iri("o1")]).is_none());
+        // The document's `_:x` and the caller's `x`: two facts, two identity keys.
+        let mine = g.why(&base[2]).expect("caller x explains");
+        let theirs = g.why(&doc_facts()[2]).expect("document x explains");
+        assert_ne!(
+            mine.nodes()[0].key,
+            theirs.nodes()[0].key,
+            "fallback={fallback}"
+        );
+        assert_ne!(mine.nodes()[0].key[0], theirs.nodes()[0].key[0]);
+        assert_eq!(theirs.nodes()[0].rule, "asserted");
+    }
+}
+
+// ---- PR #6779 review round 2 --------------------------------------------------------
+
+/// Finding 1: a query's own runtime parse draws its blank labels from the same
+/// initialized allocator as the data closure, so a parsed `_:x` never aliases a data
+/// blank whatever the data document spells (here the label an empty allocator prefix
+/// would give it).
+#[test]
+fn query_runtime_parse_does_not_alias_data_blanks() {
+    let query = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                 { \"_:x <http://ex/p> <http://ex/o> .\" log:parsedAsN3 ?f . \
+                   ?f log:includes { ?s <http://ex/p> <http://ex/o> } . \
+                   ?s <http://ex/p> <http://ex/o> } \
+                 => { ?s <http://ex/hit> <http://ex/o> } .";
+    // Labels a runtime parse could be given by an uninitialized or by an initialized
+    // allocator; none of them may be the parsed document's node.
+    for data_label in ["0_x", "__rp0_0_x", "x"] {
+        let data = format!("_:{data_label} <http://ex/p> <http://ex/o> .");
+        let answers = sparq_reason::reason_n3_query_terms(&data, query).expect("query runs");
+        assert!(
+            answers.is_empty(),
+            "data `_:{data_label}` matched a blank of the query's parsed text: {answers:?}"
+        );
+    }
+}
+
+/// Finding 2: the label of a runtime-parsed document's blank depends on the document,
+/// not on the order the run met it in. Materialization and `why()`'s re-derivation hand
+/// the base over in different orders; each derived node's proof must still be about that
+/// node's own text fact.
+#[cfg(feature = "explain")]
+#[test]
+fn why_attaches_runtime_parsed_blanks_to_their_own_document() {
+    let rules = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                 { ?d <http://ex/text> ?t . ?t log:parsedAsN3 ?f . \
+                   ?f log:includes { ?x <http://ex/p> <http://ex/o> } } \
+                 => { ?x <http://ex/derived> ?d } .";
+    let docs: Vec<String> = (0..12).map(|i| format!("d{i}")).collect();
+    let base: Vec<[Term; 3]> = docs
+        .iter()
+        .map(|d| {
+            let text = format!(
+                "_:x <http://ex/p> <http://ex/o> . <http://ex/k> <http://ex/v> <http://ex/{d}> ."
+            );
+            [
+                iri(d),
+                iri("text"),
+                Term::Lit(text, "http://www.w3.org/2001/XMLSchema#string".into(), None),
+            ]
+        })
+        .collect();
+    let g = MaterializedN3Graph::new(rules, &base).expect("parse");
+    assert_eq!(g.mode(), N3Mode::Fallback, "{:?}", g.fallback_reason());
+    let derived: Vec<_> = g
+        .closure()
+        .into_iter()
+        .filter(|t| t[1] == iri("derived"))
+        .collect();
+    assert_eq!(derived.len(), docs.len(), "{derived:?}");
+    let subjects: FxHashSet<_> = derived.iter().map(|t| t[0].clone()).collect();
+    assert_eq!(
+        subjects.len(),
+        docs.len(),
+        "two documents share a blank: {derived:?}"
+    );
+    assert_closure_consistent(&g);
+    for t in &derived {
+        let tree = g
+            .why(t)
+            .unwrap_or_else(|| panic!("no proof for the closure fact {t:?}"));
+        let root = &tree.nodes()[tree.root() as usize];
+        assert_eq!(root.rule, "n3-rule-0", "{t:?}");
+        let Term::Iri(d) = &t[2] else { panic!("{t:?}") };
+        let leaves: Vec<_> = root
+            .premises
+            .iter()
+            .map(|&i| &tree.nodes()[i as usize])
+            .collect();
+        assert!(
+            leaves
+                .iter()
+                .any(|n| n.rule == "asserted" && n.conclusion[0] == format!("<{d}>")),
+            "the proof of {t:?} is not about its own text fact: {leaves:?}"
+        );
+    }
+}
+
+// ---- PR #6779 review round 3: runtime-document identity ---------------------------
+
+const PARSE_RULES: &str = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+     { ?d <http://ex/text> ?t . ?t log:parsedAsN3 ?f . \
+       ?f log:includes { ?x <http://ex/p> <http://ex/o> } } \
+     => { ?x <http://ex/derived> ?d } .\n\
+     { ?x <http://ex/derived> ?d . ?x <http://ex/tag> ?v } => { ?x <http://ex/tagged> ?v } .";
+
+fn text_fact(d: &str, text: &str) -> [Term; 3] {
+    [
+        iri(d),
+        iri("text"),
+        Term::Lit(
+            text.into(),
+            "http://www.w3.org/2001/XMLSchema#string".into(),
+            None,
+        ),
+    ]
+}
+
+/// The one `:derived` fact of `g`'s closure.
+fn derived_fact(g: &MaterializedN3Graph) -> [Term; 3] {
+    let d: Vec<_> = g
+        .closure()
+        .into_iter()
+        .filter(|t| t[1] == iri("derived"))
+        .collect();
+    assert_eq!(d.len(), 1, "{:?}", g.closure());
+    d[0].clone()
+}
+
+/// Round 3, finding 1: a caller that annotates a runtime-parsed blank through the label
+/// `closure()` returned keeps addressing the same node. The insert does not move the
+/// runtime document's labels, so the derived fact survives with the same subject and the
+/// annotation joins it; deleting the annotation leaves the derived fact in place.
+#[test]
+fn annotating_a_runtime_parsed_blank_keeps_its_identity() {
+    let base = [text_fact("d", "_:x <http://ex/p> <http://ex/o> .")];
+    let mut g = MaterializedN3Graph::new(PARSE_RULES, &base).expect("parse");
+    assert_eq!(g.mode(), N3Mode::Fallback, "{:?}", g.fallback_reason());
+    let derived = derived_fact(&g);
+    let b = derived[0].clone();
+    let tag = [b.clone(), iri("tag"), iri("v")];
+    assert_eq!(g.insert(std::slice::from_ref(&tag)), 1);
+    assert_closure_consistent(&g);
+    assert!(
+        g.contains(&derived),
+        "the insert moved the node: {:?}",
+        g.closure()
+    );
+    assert!(g.contains(&tag));
+    assert!(
+        g.contains(&[b.clone(), iri("tagged"), iri("v")]),
+        "the annotation does not join its node: {:?}",
+        g.closure()
+    );
+    assert_eq!(g.delete(std::slice::from_ref(&tag)), 1);
+    assert_eq!(derived_fact(&g), derived);
+    assert!(!g.contains(&[b, iri("tagged"), iri("v")]));
+    assert_closure_consistent(&g);
+}
+
+/// Round 3, finding 2: a runtime-parsed blank's label is specified, not build-dependent:
+/// its key is the golden SHA-256 key of its text under the document base `""`.
+#[test]
+fn runtime_parsed_blank_label_is_specified() {
+    let base = [text_fact("d", "_:x <http://ex/p> <http://ex/o> .")];
+    let g = MaterializedN3Graph::new(PARSE_RULES, &base).expect("parse");
+    assert_eq!(
+        derived_fact(&g)[0],
+        doc_blank("__rp0_36e2d3c73471b49f_x"),
+        "{:?}",
+        g.closure()
+    );
+}
+
+/// A batch run parses a text spelling `_:__bs0_x` (its blank is standardized apart, so
+/// nothing needs refusing), as on main.
+#[test]
+fn batch_runtime_parse_of_a_bs_label_is_not_refused() {
+    let src = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+               { \"_:__bs0_x <urn:p> <urn:o> .\" log:parsedAsN3 ?f } \
+               => { <urn:s> <urn:parsed> true } .";
+    let closure = sparq_reason::reason_n3_terms(src, None).expect("reason");
+    let marker = [
+        Term::Iri("urn:s".into()),
+        Term::Iri("urn:parsed".into()),
+        Term::Lit(
+            "true".into(),
+            "http://www.w3.org/2001/XMLSchema#boolean".into(),
+            None,
+        ),
+    ];
+    assert!(
+        closure.facts.contains(&marker),
+        "the parse was refused: {:?}",
+        closure.facts
+    );
+}
+
+/// Review round 7: `why_document_with` explains the graph's closure. A runtime text
+/// spelling the graph's caller prefix (`_:__bs0_x`) cannot name the caller's `x`, so the
+/// join the graph does not derive has no proof in the document view.
+#[cfg(feature = "explain")]
+#[test]
+fn why_document_with_explains_the_graphs_closure() {
+    let rules = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+         { \"_:__bs0_x <http://ex/r> <http://ex/o9> .\" log:parsedAsN3 ?f . \
+            ?f log:includes { ?s <http://ex/r> <http://ex/o9> } } \
+         => { ?s <http://ex/fromtext> <http://ex/o9> } .\n\
+         { ?s <http://ex/fromtext> ?o . ?s <http://ex/r> ?o } => { ?s <http://ex/both> ?o } .";
+    let mine = [blank("x"), iri("r"), iri("o9")];
+    let g = MaterializedN3Graph::new(rules, std::slice::from_ref(&mine)).expect("parse");
+    // The caller's `x` in the document view is the graph's internal `__bs0_x`.
+    let opts = sparq_reason::ExplainOpts::default();
+    let asserted = g
+        .why_document_with(&[blank("__bs0_x"), iri("r"), iri("o9")], opts)
+        .expect("caller fact explains");
+    assert_eq!(asserted.nodes()[0].rule, "asserted");
+    for p in ["fromtext", "both"] {
+        let f = [blank("__bs0_x"), iri(p), iri("o9")];
+        assert!(!g.contains(&[blank("x"), iri(p), iri("o9")]));
+        assert!(
+            g.why_document_with(&f, opts).is_none(),
+            "{p}: runtime text named the caller's blank"
+        );
+    }
+}
+
+/// Review round 7: `why_n3_document` explains nothing, asserted facts included, for a
+/// document whose batch evaluation (`reason_n3`) fails, here an unstratifiable
+/// negation cycle.
+#[cfg(feature = "explain")]
+#[test]
+fn why_n3_document_refuses_asserted_facts_of_a_rejected_document() {
+    let src = "@prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+               <urn:s> <urn:p> <urn:o> .\n\
+               { ?scope log:notIncludes { <urn:s> <urn:q> true } } => { <urn:s> <urn:q> true } .";
+    assert!(
+        sparq_reason::reason_n3_terms(src, None).is_err(),
+        "the batch evaluation rejects the document"
+    );
+    let fact = [
+        Term::Iri("urn:s".into()),
+        Term::Iri("urn:p".into()),
+        Term::Iri("urn:o".into()),
+    ];
+    let proof = sparq_reason::why_n3_document(src, &fact, sparq_reason::ExplainOpts::default())
+        .expect("parses");
+    assert!(proof.is_none(), "asserted fact explained: {proof:?}");
+    // A stratifiable document still explains its asserted fact.
+    let ok = "<urn:s> <urn:p> <urn:o> .";
+    let proof = sparq_reason::why_n3_document(ok, &fact, sparq_reason::ExplainOpts::default())
+        .expect("parses")
+        .expect("asserted fact explains");
+    assert_eq!(proof.nodes()[0].rule, "asserted");
+}

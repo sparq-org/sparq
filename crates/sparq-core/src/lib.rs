@@ -3,9 +3,11 @@
 // block. Mechanically enforces the per-site argument the unsafe-register documents.
 #![warn(clippy::undocumented_unsafe_blocks)]
 
+pub mod baseenc;
 pub mod civil;
 pub mod compress;
 pub mod dict;
+pub mod hex;
 #[cfg(feature = "dict-spill")]
 pub mod dictspill;
 // [SONNET-4.6] sq-96hp1 (survey §A2 / research/data-structures.md §B1): the OPT-IN Elias-Fano
@@ -23,6 +25,8 @@ pub mod extsort;
 // N-Triples / N-Quads loader validates each IRI through it (fast path, oxiri-equivalent).
 #[cfg(feature = "iri-fast")]
 pub mod iri;
+pub mod json;
+pub mod net;
 mod nt;
 pub mod percent;
 // [OPUS-4.8] sq-jocpn: the opt-in native byte-level Turtle parser. OFF by default (it names
@@ -3672,6 +3676,17 @@ impl Graph {
         fresh: Graph,
     ) -> std::io::Result<Graph> {
         swap_dir_to_new_base(dir, |new_dir| fresh.save(new_dir))
+    }
+
+    /// Whether this graph, or any named graph under it, is backed by a directory (opened with
+    /// [`open`](Self::open)), so updates to it are written through to disk. Always `false`
+    /// without the `mmap` feature.
+    pub fn is_directory_backed(&self) -> bool {
+        #[cfg(feature = "mmap")]
+        if self.wal.is_some() || self.txn.is_some() {
+            return true;
+        }
+        self.named.iter().any(|(_, sub)| sub.is_directory_backed())
     }
 
     /// [OPUS-4.8] (sq-ft7u) The directory this graph is durably backed by (its `--persist` dir),
@@ -10411,6 +10426,25 @@ mod tests {
         static CTR: AtomicU64 = AtomicU64::new(0);
         let n = CTR.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!("sparq_txn_{tag}_{}_{n}", std::process::id()))
+    }
+
+    /// A graph is directory-backed when it, or any named graph under it, was opened from a
+    /// directory: an in-memory graph holding such a named graph counts too.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn directory_backing_covers_named_graphs() {
+        let dir = txn_tmp_dir("backed");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "ntriples")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::load_str("", "ntriples").unwrap();
+        assert!(!g.is_directory_backed());
+        assert!(Graph::open(&dir).unwrap().is_directory_backed());
+        g.named.push((named("child"), Graph::open(&dir).unwrap()));
+        assert!(g.is_directory_backed(), "a durable named graph makes the dataset durable");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// [OPUS-4.8] (sq-ycle) The named-graph term used by the journal tests.

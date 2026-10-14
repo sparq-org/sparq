@@ -72,11 +72,20 @@ graphs (so `GRAPH <g> {…}` / `GRAPH ?g {…}` work), use `Graph::load_dataset(
 The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_, String>` (parse + eval errors are
 `String`). The result types:
 
+- `sparq_core::baseenc::{base58btc_encode, base58btc_encode_into, base58btc_decode, base64url_encode,
+  base64url_encode_into, base64url_decode}` are the shared multibase `z` / `u` body codecs; both
+  decoders return `Result<Vec<u8>, DecodeError>` and base64url accepts only the one canonical
+  unpadded text per byte string.
 - `sparq_core::percent::{decode, encode}` are the shared percent-encoding helpers: lenient
   `decode(s, plus_as_space)` (malformed escapes kept verbatim, UTF-8 read lossily) and `encode`
   (everything outside the RFC 3986 unreserved set becomes uppercase `%XX`).
 - `sparq_core::strdist::edit_distance(&str, &str) -> usize` computes character-based
   Levenshtein distance for vocabulary and dictionary suggestion ranking.
+- `sparq_core::hex::{encode, encode_into, decode}` are the shared base16 helpers (lowercase
+  `encode`, either case via `encode_into`, case-insensitive `decode` returning `None` on bad input).
+- `sparq_core::json::escape_into(&mut String, &str)` appends JSON string escaping (no quotes) and
+  `sparq_core::json::push_string(&mut String, &str)` appends a quoted JSON string literal; every
+  hand-written JSON serialiser in the workspace (results, reports, explain, change streams) uses them.
 - `sparq_core::civil::{days_from_civil, civil_from_days, format_utc}` convert proleptic-Gregorian
   dates to and from days since 1970-01-01 and format epoch seconds as a UTC `xsd:dateTime`
   (`YYYY-MM-DDTHH:MM:SSZ`), dependency-free.
@@ -743,7 +752,9 @@ SPARQL Update `USING` identity behavior.
   crates.io dependency closure; not a supported front door; sq-6vshe.4, seam A2 of the facade split) and re-exported through the facade — the
   `service` feature name and the `sparq_engine::with_service_egress_allow` / `…egress_policy` /
   `…SERVICE_EGRESS_REFUSED_MARKER` / `…allowlist_entry_permits` paths below are unchanged and remain
-  the supported surface.
+  the supported surface. The XML results reader matches elements by namespace as well as name: an
+  element in another namespace (or with an undeclared prefix) is ignored, and a response with no
+  `xmlns` at all is still read as results XML.
   When enabled, outbound `SERVICE` fetches go through a **default-deny SSRF egress filter**:
   an endpoint that resolves to a loopback / RFC1918 / link-local (incl. the `169.254.169.254`
   cloud-metadata IP) / unique-local / unspecified address is refused (checked on the *resolved* IP,

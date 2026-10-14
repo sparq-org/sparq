@@ -1627,12 +1627,12 @@ fn value_compact(cur: &Ctx, active_property: Option<&str>, value: &Json, index_k
 /// creating) an array per `as_array`, and flattening array values element-wise.
 fn add_value(obj: &mut Json, key: &str, value: Json, as_array: bool) {
     if as_array {
-        match obj.get(key) {
+        match obj.get_mut(key) {
             None => obj.set(key, Json::Arr(Vec::new())),
             Some(Json::Arr(_)) => {}
             Some(existing) => {
-                let e = existing.clone();
-                obj.set(key, Json::Arr(vec![e]));
+                let e = std::mem::replace(existing, Json::Arr(Vec::new()));
+                *existing = Json::Arr(vec![e]);
             }
         }
     }
@@ -1642,16 +1642,12 @@ fn add_value(obj: &mut Json, key: &str, value: Json, as_array: bool) {
         }
         return;
     }
-    match obj.get(key) {
+    match obj.get_mut(key) {
         None => obj.set(key, value),
-        Some(Json::Arr(_)) => {
-            if let Some(Json::Arr(items)) = obj_get_mut(obj, key) {
-                items.push(value);
-            }
-        }
+        Some(Json::Arr(items)) => items.push(value),
         Some(existing) => {
-            let e = existing.clone();
-            obj.set(key, Json::Arr(vec![e, value]));
+            let e = std::mem::replace(existing, Json::Arr(Vec::new()));
+            *existing = Json::Arr(vec![e, value]);
         }
     }
 }
@@ -1679,15 +1675,7 @@ fn nest_target<'a>(
     if result.get(&nest_term).is_none() {
         result.set(&nest_term, Json::obj());
     }
-    Ok(obj_get_mut(result, &nest_term).expect("nest entry just ensured"))
-}
-
-/// Mutable member lookup on a JSON object (companion of [`Json::get`]).
-fn obj_get_mut<'a>(obj: &'a mut Json, key: &str) -> Option<&'a mut Json> {
-    match obj {
-        Json::Obj(members) => members.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v),
-        _ => None,
-    }
+    Ok(result.get_mut(&nest_term).expect("nest entry just ensured"))
 }
 
 /// Removes and returns the `key` member of a JSON object, if present.
@@ -1720,7 +1708,7 @@ fn get_or_create_map<'a>(parent: &'a mut Json, key: &str) -> &'a mut Json {
     if parent.get(key).is_none() {
         parent.set(key, Json::obj());
     }
-    obj_get_mut(parent, key).expect("entry just ensured")
+    parent.get_mut(key).expect("entry just ensured")
 }
 
 /// The container mapping of `term` in `active`, or an empty slice.

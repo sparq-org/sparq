@@ -14,8 +14,12 @@
 //! Every limit constant lives here and is private. `tests/n3_bounded_discipline.rs`
 //! fails if a limit or a raw `Regex::new` appears in another N3 evaluator source.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 use std::rc::Rc;
+
+use super::model::Term;
 
 /// Backward (`<=`) proof search depth, counted in rule applications. It bounds runaway
 /// recursion (e.g. a rule whose premise re-poses its own goal); a search it stops is a cut.
@@ -46,6 +50,14 @@ impl<T> Bounded<T> {
             cut: Some(why),
         }
     }
+
+    /// The same step, its value mapped by `f` (the cut, if any, kept).
+    pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> Bounded<U> {
+        Bounded {
+            value: f(self.value),
+            cut: self.cut,
+        }
+    }
 }
 
 /// Where [`settle`] records a cut.
@@ -57,7 +69,10 @@ pub(crate) trait Sink {
 /// of one logical evaluation (nested closures, an explicit-strata pipeline, a query and
 /// the closure it projects over) records into the SAME handle, and it is never reset.
 /// The record also carries the run's [`ClosureLimits`], so every forward closure of the
-/// run (nested ones included) gets the allowance its entry point was given.
+/// run (nested ones included) gets the allowance its entry point was given, the run's
+/// stack allowance ([`RUN_STACK`]), so one allowance is shared by every level, and the
+/// run's refusal: the error of the first term refused for its size ([`derived_term`]),
+/// which fails every closure of the run that sees it.
 ///
 /// The fields are private and there is no `Default`: the only ways to make a fresh record
 /// are [`Truncation::top_level`] and [`Truncation::top_level_with`], which a top-level
@@ -66,12 +81,18 @@ pub(crate) trait Sink {
 #[derive(Clone)]
 pub(crate) struct Truncation {
     cut: Rc<Cell<Option<&'static str>>>,
+    refusal: Rc<RefCell<Option<String>>>,
     limits: ClosureLimits,
+    /// Units of the run's stack allowance held by steps in progress ([`RUN_STACK`]).
+    stack: Rc<Cell<usize>>,
+    /// How deep a term the run keeps ([`generated`]): [`TERM_DEPTH`], or the deepest term
+    /// it was given ([`given_terms`]).
+    term_depth: Rc<Cell<usize>>,
 }
 
 impl Truncation {
-    /// The cut record of a new TOP-LEVEL run under the default [`ClosureLimits`]. A nested
-    /// run must reuse its parent's.
+    /// The cut record of a new TOP-LEVEL run under the default [`ClosureLimits`]. A
+    /// nested run must reuse its parent's.
     pub(crate) fn top_level() -> Truncation {
         Truncation::top_level_with(ClosureLimits::default())
     }
@@ -80,13 +101,28 @@ impl Truncation {
     pub(crate) fn top_level_with(limits: ClosureLimits) -> Truncation {
         Truncation {
             cut: Rc::default(),
+            refusal: Rc::default(),
             limits,
+            stack: Rc::default(),
+            term_depth: Rc::new(Cell::new(TERM_DEPTH)),
         }
     }
 
     /// The first cut the run recorded, if any.
     pub(crate) fn get(&self) -> Option<&'static str> {
         self.cut.get()
+    }
+
+    /// The error of the first term the run refused for its size, if any: every closure of
+    /// the run that ends after it fails with it.
+    pub(crate) fn refusal(&self) -> Option<String> {
+        self.refusal.borrow().clone()
+    }
+
+    /// Refuse the run with `error` (the first refusal is kept) and record the cut.
+    fn refuse(&self, error: impl FnOnce() -> String) {
+        self.refusal.borrow_mut().get_or_insert_with(error);
+        self.record(CLOSURE_CUT);
     }
 }
 
@@ -119,14 +155,24 @@ pub(crate) const fn backward_depth() -> usize {
     BW_DEPTH
 }
 
-/// One more backward rule application at `depth` remaining. `Some(depth - 1)` when the
-/// budget allows it; `None` when it is spent, which is a cut if a backward rule could
-/// still have matched the goal (`could_match`).
-pub(crate) fn backward_step(depth: usize, could_match: bool) -> Bounded<Option<usize>> {
-    match depth.checked_sub(1) {
-        Some(d) => Bounded::complete(Some(d)),
+/// One more backward rule application at `depth` remaining in the run `run`:
+/// `Some(depth - 1)` and one unit of the run's stack allowance ([`RUN_STACK`], held until
+/// the step's frames are dropped) when both allow it; `None` when either is spent, which
+/// is a cut if a backward rule could still have matched the goal (`could_match`).
+pub(crate) fn backward_step(
+    run: &Truncation,
+    depth: usize,
+    could_match: bool,
+) -> Bounded<Option<(usize, StackFrames)>> {
+    let step = depth.checked_sub(1).map(|d| (d, take_stack(run, 1)));
+    match step {
+        Some((d, Some(frames))) => Bounded::complete(Some((d, frames))),
         None if could_match => Bounded::cut(None, "backward proof search reached its depth limit"),
-        None => Bounded::complete(None),
+        Some(_) if could_match => Bounded::cut(
+            None,
+            "backward proof search reached the run's stack allowance",
+        ),
+        _ => Bounded::complete(None),
     }
 }
 
@@ -243,43 +289,517 @@ const CLOSURE_ROUNDS: usize = 1_000_000;
 /// Default [`ClosureLimits::max_facts`]: facts one forward closure may hold, asserted and
 /// derived together.
 const CLOSURE_FACTS: usize = 50_000_000;
+/// Default [`ClosureLimits::max_term_bytes`]: 16 MiB, far past any literal or list a
+/// rule set builds on purpose, and small enough that a term which doubles each round
+/// (GH #6771) is refused while the closure's copies of it still fit in memory.
+const CLOSURE_TERM_BYTES: usize = 16 << 20;
+/// Default [`ClosureLimits::max_join_rows`] (GH #6938): unbounded, so a closure accepted
+/// before the allowance existed is still accepted. A caller opts in by setting a limit.
+const CLOSURE_JOIN_ROWS: usize = usize::MAX;
 
 /// Why a forward closure was stopped by its [`ClosureLimits`].
 const CLOSURE_CUT: &str = "forward closure limit exceeded";
 
-/// The iteration allowance of one N3 forward closure: how many rounds it may run and how
-/// many facts it may hold before it is refused.
+/// The allowance of one N3 forward closure: how many rounds it may run, how many facts it
+/// may hold, how large a term a functional builtin may derive, and how many binding rows
+/// and rule firings one round may produce, before it is refused.
 ///
 /// A rule set that never reaches a fixpoint (each round derives a new, syntactically
-/// distinct fact) would otherwise run forever. When either allowance is spent the closure
-/// fails with an `Err` naming the limit (`"forward closure limit exceeded"`) and records
-/// it as a cut, so no entry point returns the truncated closure as a result. Each forward
-/// closure gets the allowance afresh: a nested `log:conclusion` closure of a run gets the
-/// same limits as the run, not a share of them.
+/// distinct fact) would otherwise run forever, and one whose derived terms grow (a string
+/// that doubles each round, GH #6771) would exhaust memory within a few dozen rounds and
+/// facts. When any allowance is spent the closure fails with an `Err` naming the limit
+/// (`"forward closure limit exceeded"`) and records it as a cut, so no entry point returns
+/// the truncated closure as a result. Each forward closure gets the allowance afresh: a
+/// nested `log:conclusion` closure of a run gets the same limits as the run, not a share
+/// of them.
 ///
-/// This is an ITERATION bound, not a memory bound: a few rounds over terms that grow (a
-/// string that doubles each round) can still exhaust memory well inside both allowances
-/// (GH #6771).
+/// `max_term_bytes` (GH #6771) bounds each term the text engine would build. These are
+/// sized from borrowed inputs before they are built: every non-numeric builtin result (a
+/// functional builtin's, `log:uri` either way, `log:dtlit` reversed, the member or pair a
+/// list generator binds, the tail a virtual `rdf:rest` binds, the literal `log:content`
+/// returns), a functional builtin's argument list, any term substituted under a rule's
+/// bindings (a conclusion, a premise pattern, a scope or collection template, a
+/// backward-rule projection), the list `log:collectAllIn` collects, and the formula
+/// `log:conclusion` returns. The formula `log:parsedAsN3` / `log:semantics` parses is
+/// charged by its parser before each allocation it keeps (every string, term node and
+/// copy, directives included), and sized again once the parse returns it. A numeric
+/// result (forward or reverse, a count or a date part) is sized from its computed value
+/// (digit count, scale, sign, exponent) before its literal is rendered (GH #6901), and
+/// `string:concatenation` sizes its numeric pieces the same way. The size is
+/// approximate: string bytes plus a fixed cost per node. Binding a variable to a term
+/// that already exists (premise matching, `log:includes`) copies that term; it builds
+/// nothing new and is not sized again.
 ///
-/// Pass one to [`reason_n3_with_limits`](crate::n3::reason_n3_with_limits) or
-/// [`reason_n3_terms_with_limits`](crate::n3::reason_n3_terms_with_limits); every other
-/// N3 entry point uses [`ClosureLimits::default`].
+/// Substitution is sized because the raw substitution functions are private to this
+/// module; the guard test `substitution_goes_through_the_bounded_module` is a lexical
+/// tripwire for a crate-internal copy, not the guarantee.
+///
+/// `max_join_rows` (GH #6938) bounds the transient work of one round: the binding rows its
+/// premise joins produce and the times its rules fire. Without it their number grows with
+/// the product of the pattern matches (a premise of k unconstrained patterns over n facts
+/// makes n^k rows) even when the distinct facts fit. The default is unbounded
+/// (`usize::MAX`), so no closure accepted without the allowance is refused by default; set
+/// a limit to opt in. Each round of a closure gets the allowance afresh, and every engine
+/// charges the same two things:
+/// * a **row** for each binding row a premise step that can multiply rows produces: a
+///   join atom (each stored fact it matches, each backward proof of it, and the delta
+///   facts a semi-naive round seeds it with), a list generator (`list:member`, `list:in`,
+///   `list:iterate`), and each match a formula-scope search finds (`log:includes`,
+///   `log:notIncludes`, `log:collectAllIn` and `log:forAllIn` over a written formula). A
+///   step that keeps at most one row per input row (a filter, a functional builtin, the
+///   outcome of a negation or an aggregation) cannot multiply them and is not charged. The
+///   rows a store-scoped clause (`log:includes`, `log:notIncludes`, `log:collectAllIn`,
+///   `log:forAllIn` over the store) or a backward rule's premise produces are charged the
+///   same way, to the round that evaluates them;
+/// * a **firing** for each conclusion triple a complete premise binding instantiates, and
+///   for each conclusion the transitivity fast path instantiates, whether or not the fact
+///   is new.
+///
+/// The text engine and the counting engine charge each row as it is produced, before it
+/// is stored (a backward proof as it is projected onto its goal, a formula-scope match as
+/// the search finds it), so a round never holds more charged rows than the allowance. The compiled
+/// evaluator's hash join checks the allowance once per candidate fact it probes, so a
+/// join stops at most one candidate's matches past it. Every engine charges a rule's
+/// firings in one batch, once its premise is evaluated and before any conclusion is
+/// instantiated. A round that would pass the allowance is refused like any other limit: a
+/// cut, and the run's error naming `max_join_rows`. An N3 query
+/// ([`reason_n3_query_terms`](crate::n3::reason_n3_query_terms)) charges the rows of its
+/// premises over the closure as one more round (its answers are deduplicated as they are
+/// built, so its firings are not charged).
+///
+/// What it does not bound:
+/// * the closure's total memory: many distinct terms just under the limit are bounded
+///   only by `max_facts`, and the rows of one round only by `max_join_rows`, which is
+///   unbounded unless set;
+/// * the steps of a formula-scope search beyond the matches it finds: each search is
+///   bounded by its own step budget (`CONTAINMENT_BUDGET`, through
+///   `StepBudget::containment`), and a search it stops is a cut;
+/// * the backtracking of formula unification (a `{ … }` pattern matched against a
+///   `{ … }` value, `formula_unify` in the text engine): it returns at most one binding
+///   and holds one binding per pattern statement, so it adds no rows; its backtracking is
+///   not charged to a step budget (tracked in GH #6953);
+/// * the document's own parse, which is not charged: its memory is bounded by its input
+///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
+///   holds only a scratch copy of one token, or an error message quoting one, at a time
+///   (each bounded by the length of the source token), the spare capacity of its strings,
+///   vectors and maps, its fixed-size state, and the text it parses;
+/// * the text a resolver supplies (`log:content`, `log:semantics`), which the caller
+///   allocates before it is sized (the literal or formula built from it is refused).
+///
+/// The incremental counting engine behind `MaterializedN3Graph` (GH #6854) takes the
+/// same allowance (`MaterializedN3Graph::with_limits`; `new` uses the default). Its
+/// builtins substitute their subject and object through `bounded::substitute` and size each
+/// result with the text engine's own checkpoint before building it; its conclusions are
+/// variables, IRIs and literals, so they build no new term. Each propagation is charged
+/// one round per wave (and per round of a recursive layer's local fixpoint) against the
+/// round allowance; each new distinct fact is checked against the fact allowance as it is
+/// collected, and the closure after each wave, so no published closure holds more than
+/// `max_facts` facts. Past any limit the graph rebuilds through the batch engine
+/// under the same limits, so it holds the batch engine's closure or fails closed with its
+/// error. Its rounds are not the batch engine's schedule, so under equal round or fact
+/// limits it can hold a closure a from-scratch batch run near the boundary refuses. It
+/// charges `max_join_rows` per wave (and per local round of a layer): each row a plain
+/// atom, its seed or a negation guard produces, and each firing. A wave over a small delta
+/// charges far less than a batch round over every fact, so the graph never refuses a
+/// closure the batch engine accepts (a refusal rebuilds through it), but it keeps a
+/// mutation whose wave fits even when a from-scratch batch round would not.
+///
+/// The opt-in `compiled-rules` evaluator (`n3::compiled`, GH #6855) takes the same
+/// allowance (`eval_with_limits`; `eval` uses the default) and refuses with the same
+/// error: each builtin result, and each argument list a builtin is evaluated over, is
+/// sized the way the text engine sizes it before it is built, and its conclusions build
+/// no new term (they copy ids the premise bound). It charges `max_join_rows` for each row
+/// its hash join emits (before the join's repeated-variable check) and each firing, and
+/// its first round of a stratum is naive, as the text engine's is. Its fixpoint schedule
+/// differs (no closing naive check round, no transitivity fast path, no quoted-triple
+/// substitution checkpoints, and a semi-naive round seeds a pattern from the delta in
+/// place rather than first), so under equal limits the two engines can accept or refuse
+/// differently near a boundary.
+///
+/// One over-refusal is deliberate: a builtin's argument list is a term it builds, so
+/// `log:conjunction` over many copies of one large formula is refused when the copies
+/// together pass the limit, even if the merged result would fit.
+///
+/// The struct is `#[non_exhaustive]`: outside this crate, start from
+/// [`ClosureLimits::default`] and set the fields to change
+/// (`let mut l = ClosureLimits::default(); l.max_term_bytes = 1 << 20;`).
+///
+/// Pass one to [`reason_n3_with_limits`](crate::n3::reason_n3_with_limits),
+/// [`reason_n3_terms_with_limits`](crate::n3::reason_n3_terms_with_limits) or
+/// [`MaterializedN3Graph::with_limits`](crate::MaterializedN3Graph::with_limits); every
+/// other N3 entry point uses [`ClosureLimits::default`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ClosureLimits {
     /// Rounds one forward closure may run (summed over its strata). Default 1,000,000.
     pub max_rounds: usize,
     /// Facts one forward closure may hold, asserted and derived together. Default
     /// 50,000,000.
     pub max_facts: usize,
+    /// Approximate bytes of one term the closure may derive (a builtin's argument list or
+    /// result, a parsed or concluded formula, a conclusion's compound term): its strings
+    /// plus a fixed cost per node, counted through nested lists, formulas and quoted
+    /// triples. The terms it covers are checked before they are built (see the type's
+    /// docs). Default 16 MiB.
+    pub max_term_bytes: usize,
+    /// Binding rows and rule firings one round of the closure may produce, counted
+    /// together: each row a join atom, list generator or `log:includes` produces, and each
+    /// conclusion triple a rule instantiates (see the type's docs for exactly what is
+    /// charged and when). Default unbounded (`usize::MAX`): set a limit to opt in.
+    pub max_join_rows: usize,
 }
 
 impl Default for ClosureLimits {
-    /// 1,000,000 rounds and 50,000,000 facts.
+    /// 1,000,000 rounds, 50,000,000 facts, 16 MiB per derived term and unbounded join rows
+    /// per round.
     fn default() -> Self {
         ClosureLimits {
             max_rounds: CLOSURE_ROUNDS,
             max_facts: CLOSURE_FACTS,
+            max_term_bytes: CLOSURE_TERM_BYTES,
+            max_join_rows: CLOSURE_JOIN_ROWS,
         }
+    }
+}
+
+/// The join-work allowance of one round of a forward closure
+/// ([`ClosureLimits::max_join_rows`], GH #6938): the binding rows and rule firings the
+/// round may still produce. Each closure makes its own (a nested closure gets the
+/// allowance afresh, as with its rounds) and calls [`JoinWork::round`] at the start of
+/// each round; every row and firing is [charged](JoinWork::charge) before it is stored.
+///
+/// Spent, it refuses the run (the cut and the run's error, as [`derived_term`] does) and
+/// stays spent: later rounds of the same closure produce nothing, so the closure reaches
+/// its end quickly and fails with the refusal.
+///
+/// `usize::MAX`, the default, is the unbounded sentinel: no accounting at all, and every
+/// charge succeeds, so the default can never refuse. A set limit is checked exactly.
+pub(crate) struct JoinWork {
+    left: Cell<usize>,
+    limit: usize,
+    spent: Cell<bool>,
+    /// The limit is the unbounded sentinel: charges are not counted.
+    unbounded: bool,
+}
+
+impl JoinWork {
+    /// The allowance of one round of a closure of the run `run`.
+    pub(crate) fn forward(run: &Truncation) -> JoinWork {
+        let limit = run.limits.max_join_rows;
+        JoinWork {
+            left: Cell::new(limit),
+            limit,
+            spent: Cell::new(false),
+            unbounded: limit == usize::MAX,
+        }
+    }
+
+    /// A new round: the full allowance again, unless it was spent.
+    pub(crate) fn round(&self) {
+        if !self.spent.get() {
+            self.left.set(self.limit);
+        }
+    }
+
+    /// The join kernel's view of the rows the round may still produce.
+    #[cfg(feature = "compiled-rules")]
+    pub(crate) fn kernel_view(&self) -> RowsLeft {
+        // Unbounded: `rows > usize::MAX` never holds, so the kernel never stops.
+        RowsLeft(if self.unbounded { usize::MAX } else { self.left.get() })
+    }
+
+    /// Charge `n` rows or firings about to be stored: `true` when the round's allowance
+    /// covers them. Otherwise the run is refused (recorded on `run`) and nothing may be
+    /// stored. Under the unbounded default it always succeeds and counts nothing.
+    #[inline]
+    pub(crate) fn charge(&self, n: usize, run: &Truncation) -> bool {
+        if self.unbounded {
+            return true;
+        }
+        match self.left.get().checked_sub(n) {
+            Some(left) => {
+                self.left.set(left);
+                true
+            }
+            None => {
+                self.exceeded(run);
+                false
+            }
+        }
+    }
+
+    #[cold]
+    fn exceeded(&self, run: &Truncation) {
+        self.left.set(0);
+        self.spent.set(true);
+        let limit = self.limit;
+        run.refuse(|| {
+            format!(
+                "n3: {CLOSURE_CUT}: one round's premise joins and rule firings would \
+                 produce more than max_join_rows ({limit}) binding rows: the rules join \
+                 patterns whose matches multiply (raise ClosureLimits::max_join_rows to \
+                 allow more)"
+            )
+        });
+    }
+}
+
+/// The fixed cost [`term_bytes`] charges each node of a term.
+pub(crate) const TERM_NODE_BYTES: usize = std::mem::size_of::<Term>();
+
+/// The approximate size of `t` that [`ClosureLimits::max_term_bytes`] bounds: the bytes
+/// of its strings plus [`TERM_NODE_BYTES`] per node, through nested lists, formulas and
+/// quoted triples (walked with an explicit stack, so a deep term cannot overflow it).
+pub(crate) fn term_bytes(t: &Term) -> usize {
+    let flat = |t: &Term| match t {
+        Term::Iri(s) | Term::Blank(s) | Term::Var(s) => Some(s.len()),
+        Term::Lit(v, dt, lang) => Some(v.len() + dt.len() + lang.as_ref().map_or(0, String::len)),
+        Term::Formula(_) | Term::List(_) | Term::Triple(_) => None,
+    };
+    if let Some(n) = flat(t) {
+        return n.saturating_add(TERM_NODE_BYTES);
+    }
+    let mut total = 0usize;
+    let mut stack = vec![t];
+    while let Some(t) = stack.pop() {
+        total = total.saturating_add(TERM_NODE_BYTES);
+        match t {
+            Term::Formula(ts) => stack.extend(ts.iter().flatten()),
+            Term::List(ms) => stack.extend(ms),
+            Term::Triple(b) => stack.extend(b.iter()),
+            leaf => total = total.saturating_add(flat(leaf).unwrap_or(0)),
+        }
+    }
+    total
+}
+
+/// The compiled evaluator's join kernel's view of a round's [`JoinWork`]: the rows it may
+/// still emit. Past them the kernel stops at its next candidate, and the evaluator's
+/// charge of the rows it emitted refuses the run.
+#[cfg(feature = "compiled-rules")]
+pub(crate) struct RowsLeft(usize);
+
+#[cfg(feature = "compiled-rules")]
+impl sparq_substrate::join::Budget for RowsLeft {
+    #[inline]
+    fn exhausted(&self, rows: usize) -> bool {
+        rows > self.0
+    }
+}
+
+/// The [`term_bytes`] of an `xsd:string` literal whose lexical form has `lex` bytes.
+pub(crate) fn string_term_bytes(lex: usize) -> usize {
+    const XSD_STRING_LEN: usize = "http://www.w3.org/2001/XMLSchema#string".len();
+    lex.saturating_add(XSD_STRING_LEN + TERM_NODE_BYTES)
+}
+
+/// The ONE checkpoint the terms the text engine sizes pass before they are built
+/// (GH #6771, GH #6901). `bound` is an upper bound on the term's [`term_bytes`], computed
+/// from borrowed inputs (or a computed numeric value) without building anything; `exact` is its exact size, computed (again
+/// without building it) only when `bound` is over the limit, so a loose bound never
+/// refuses a term that fits.
+///
+/// Past the run's [`ClosureLimits::max_term_bytes`] the term is refused (`true`): a cut,
+/// and the run's refusal ([`Truncation::refusal`]), which fails every closure of the run,
+/// so no entry point returns the closure without the term as a result.
+pub(crate) fn derived_term(
+    run: &Truncation,
+    what: &dyn std::fmt::Display,
+    bound: usize,
+    exact: impl FnOnce() -> usize,
+) -> Bounded<bool> {
+    let limit = run.limits.max_term_bytes;
+    if bound <= limit {
+        return Bounded::complete(false);
+    }
+    let size = exact();
+    if size <= limit {
+        return Bounded::complete(false);
+    }
+    run.refuse(|| {
+        format!(
+            "n3: {CLOSURE_CUT}: {what} would be a term of about {size} bytes, over \
+             max_term_bytes ({limit}): the rules build ever larger terms (raise \
+             ClosureLimits::max_term_bytes to allow more)"
+        )
+    });
+    Bounded::cut(true, CLOSURE_CUT)
+}
+
+/// The [`term_bytes`] of `t` with `b`'s bindings substituted, as [`substitute`] (or, with
+/// `deep`, [`substitute_deep`], through quoted formulae) would build it, read from the
+/// borrowed terms without building anything.
+pub(crate) fn resolved_bytes<S: BuildHasher>(t: &Term, b: &HashMap<String, Term, S>, deep: bool) -> usize {
+    let all = |ts: &mut dyn Iterator<Item = &Term>| {
+        ts.fold(TERM_NODE_BYTES, |n, m| n.saturating_add(resolved_bytes(m, b, deep)))
+    };
+    match t {
+        Term::Var(v) => term_bytes(b.get(v).unwrap_or(t)),
+        Term::List(ms) => all(&mut ms.iter()),
+        Term::Triple(tr) => all(&mut tr.iter()),
+        Term::Formula(ts) if deep => all(&mut ts.iter().flatten()),
+        _ => term_bytes(t),
+    }
+}
+
+/// What a substitution refusal names.
+/// What a virtual `rdf:rest` builds, for the refusal message.
+struct ListTail;
+
+impl std::fmt::Display for ListTail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the rest of a list (rdf:rest)")
+    }
+}
+
+/// The list after `ms`'s first member, as a virtual `rdf:rest` of a list value binds it:
+/// sized from the borrowed members before it is built, and `None` (with the refusal
+/// recorded on `run`) past the limit. `ms` must not be empty.
+pub(crate) fn list_tail(ms: &[Term], run: &Truncation) -> Option<Term> {
+    let rest = &ms[1..];
+    let bytes = rest.iter().map(term_bytes).fold(TERM_NODE_BYTES, usize::saturating_add);
+    if settle(run, derived_term(run, &ListTail, bytes, || bytes)) {
+        return None;
+    }
+    Some(Term::List(rest.to_vec()))
+}
+
+struct Substituted;
+
+impl std::fmt::Display for Substituted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("a term built under a rule's bindings")
+    }
+}
+
+/// THE substitution of the text engine: `t` with `b`'s bound variables substituted
+/// (recursing into lists and quoted triples; a quoted formula is a value, kept as is).
+/// The incremental counting engine substitutes a builtin's subject and object through it
+/// too (GH #6854), so both engines size the same terms.
+/// A compound `t` can name a bound term many times, so it is sized from the borrowed
+/// terms first ([`resolved_bytes`]) and refused past the run's term-size limit
+/// ([`derived_term`]): `None`, with the cut and the run's refusal recorded. A variable or
+/// atom is one copy of an existing term and is not sized. `tests/n3_bounded_discipline.rs`
+/// fails if an N3 evaluator substitutes any other way.
+#[inline]
+pub(crate) fn substitute<S: BuildHasher>(
+    t: &Term,
+    b: &HashMap<String, Term, S>,
+    run: &Truncation,
+) -> Option<Term> {
+    match t {
+        Term::List(_) | Term::Triple(_) if compound_refused(t, b, run, false) => None,
+        _ => Some(apply(t, b)),
+    }
+}
+
+/// [`substitute`], also substituting inside quoted formulae (a conclusion's
+/// instantiation): a variable left inside a formula after substitution is the formula's
+/// own.
+#[inline]
+pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) -> Option<Term> {
+    match t {
+        Term::List(_) | Term::Triple(_) | Term::Formula(_) if compound_refused(t, b, run, true) => {
+            None
+        }
+        _ => Some(apply_deep(t, b)),
+    }
+}
+
+/// Whether compound `t`, substituted under `b`, is past the run's term-size limit
+/// (sized from the borrowed terms; the cut and the run's refusal are recorded). Kept out
+/// of line: a variable or atom, the common case, never reaches it.
+#[inline(never)]
+fn compound_refused<S: BuildHasher>(
+    t: &Term,
+    b: &HashMap<String, Term, S>,
+    run: &Truncation,
+    deep: bool,
+) -> bool {
+    substituted_refused(run, resolved_bytes(t, b, deep))
+}
+
+/// Whether a term built under a rule's bindings, of `bytes` ([`term_bytes`], computed
+/// without building it), is past the run's term-size limit: the cut and the run's refusal
+/// are recorded. The compiled evaluator sizes a builtin's argument list through it, as
+/// [`substitute`] sizes the list the text engine builds.
+pub(crate) fn substituted_refused(run: &Truncation, bytes: usize) -> bool {
+    settle(run, derived_term(run, &Substituted, bytes, || bytes))
+}
+
+/// The [`term_bytes`] of dictionary term `id`, as the text engine's term for it would
+/// count, read from the dictionary's borrowed records without building the term (an
+/// inline integer is counted from its digits; a triple term walks its components with an
+/// explicit stack).
+#[cfg(feature = "compiled-rules")]
+pub(crate) fn dict_term_bytes(dict: &sparq_core::dict::Dict, id: sparq_core::dict::Id) -> usize {
+    use sparq_core::dict::{is_inline, TermParts, INLINE_BASE};
+    const XSD_INTEGER_LEN: usize = "http://www.w3.org/2001/XMLSchema#integer".len();
+    // One node's own bytes, or its components when it is a triple term.
+    let node = |id| {
+        if is_inline(id) {
+            return Ok(super::digit_count(u128::from(id - INLINE_BASE)) + XSD_INTEGER_LEN);
+        }
+        Ok(match dict.term_parts(id) {
+            TermParts::Iri { prefix, suffix } => prefix.len().saturating_add(suffix.len()),
+            TermParts::Lit { value, datatype, lang } => value
+                .len()
+                .saturating_add(datatype.len())
+                .saturating_add(lang.map_or(0, str::len)),
+            TermParts::Blank(b) => b.len(),
+            TermParts::Triple(ids) => return Err(ids),
+        })
+    };
+    let ids = match node(id) {
+        Ok(n) => return n.saturating_add(TERM_NODE_BYTES),
+        Err(ids) => ids,
+    };
+    let mut total = TERM_NODE_BYTES;
+    let mut stack = ids.to_vec();
+    while let Some(id) = stack.pop() {
+        total = total.saturating_add(TERM_NODE_BYTES);
+        match node(id) {
+            Ok(n) => total = total.saturating_add(n),
+            Err(ids) => stack.extend(ids),
+        }
+    }
+    total
+}
+
+/// Substitute bound variables in `t` (recursing into list members and quoted triples);
+/// returns the term (possibly still containing free vars). Private: callers go through
+/// [`substitute`].
+fn apply<S: BuildHasher>(t: &Term, b: &HashMap<String, Term, S>) -> Term {
+    match t {
+        Term::Var(v) => b.get(v).cloned().unwrap_or_else(|| t.clone()),
+        Term::List(ms) => Term::List(ms.iter().map(|m| apply(m, b)).collect()),
+        Term::Triple(tr) => {
+            Term::Triple(Box::new([apply(&tr[0], b), apply(&tr[1], b), apply(&tr[2], b)]))
+        }
+        _ => t.clone(),
+    }
+}
+
+/// [`apply`] through quoted formulae too. Private: callers go through
+/// [`substitute_deep`].
+fn apply_deep(t: &Term, b: &super::Binding) -> Term {
+    match t {
+        Term::Var(v) => match b.get(v) {
+            Some(val) => val.clone(),
+            None => t.clone(),
+        },
+        Term::List(ms) => Term::List(ms.iter().map(|m| apply_deep(m, b)).collect()),
+        Term::Formula(ts) => Term::Formula(
+            ts.iter()
+                .map(|r| [apply_deep(&r[0], b), apply_deep(&r[1], b), apply_deep(&r[2], b)])
+                .collect(),
+        ),
+        Term::Triple(tr) => Term::Triple(Box::new([
+            apply_deep(&tr[0], b),
+            apply_deep(&tr[1], b),
+            apply_deep(&tr[2], b),
+        ])),
+        _ => t.clone(),
     }
 }
 
@@ -300,6 +820,7 @@ impl ClosureRounds {
             |(max_rounds, max_facts)| ClosureLimits {
                 max_rounds,
                 max_facts,
+                ..run.limits
             },
         );
         #[cfg(not(test))]
@@ -320,15 +841,84 @@ impl ClosureRounds {
                 self.left = left;
                 Ok(())
             }
-            _ => {
-                cuts.record(CLOSURE_CUT);
-                Err(format!(
-                    "n3: {CLOSURE_CUT} ({} rounds, {} facts) before reaching a fixpoint: \
-                     the rules keep deriving new facts (raise ClosureLimits to allow more)",
-                    self.limits.max_rounds, self.limits.max_facts
-                ))
-            }
+            _ => Err(self.exceeded(cuts)),
         }
+    }
+
+    /// The fact allowance alone, without spending a round: `Err` (the cut recorded on
+    /// `cuts`) when a closure holding `facts` facts is past it. The incremental counting
+    /// engine checks each new fact against it as it is collected, so no wave holds more
+    /// distinct facts than the allowance before it is refused.
+    pub(crate) fn hold(&self, facts: usize, cuts: &impl Sink) -> Result<(), String> {
+        if facts <= self.limits.max_facts {
+            return Ok(());
+        }
+        Err(self.exceeded(cuts))
+    }
+
+    /// The error of a closure past its allowance, the cut recorded on `cuts`.
+    fn exceeded(&self, cuts: &impl Sink) -> String {
+        cuts.record(CLOSURE_CUT);
+        format!(
+            "n3: {CLOSURE_CUT} ({} rounds, {} facts) before reaching a fixpoint: \
+             the rules keep deriving new facts (raise ClosureLimits to allow more)",
+            self.limits.max_rounds, self.limits.max_facts
+        )
+    }
+}
+
+/// Default [`runtime_docs`]: distinct documents (by text and base) one runtime-document
+/// table may take.
+const RUNTIME_DOCS: usize = 100_000;
+
+/// Why a run was stopped by [`runtime_docs`].
+const RUNTIME_DOCS_CUT: &str = "runtime-document limit exceeded";
+
+/// Distinct documents (by text and base) one runtime-document table may take: a run's
+/// own table, or a `MaterializedN3Graph`'s, which lives as long as the graph. The table
+/// keeps a constant-size entry per document (its SHA-256 digest and label prefix, never
+/// its text), so this bounds its memory; one more document fails the run
+/// ([`runtime_docs_exceeded`]).
+pub(crate) fn runtime_docs() -> usize {
+    #[cfg(test)]
+    if let Some(n) = RUNTIME_DOCS_OVERRIDE.with(Cell::get) {
+        return n;
+    }
+    RUNTIME_DOCS
+}
+
+/// The error of a run whose runtime-document table is full, the cut recorded on `cuts`.
+pub(crate) fn runtime_docs_exceeded(cuts: &impl Sink) -> String {
+    cuts.record(RUNTIME_DOCS_CUT);
+    format!(
+        "n3: {RUNTIME_DOCS_CUT}: a run (or a MaterializedN3Graph over its life) parses at \
+         most {} distinct documents at run time",
+        runtime_docs()
+    )
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// A lowered [`runtime_docs`] for tables made on this thread.
+    static RUNTIME_DOCS_OVERRIDE: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// Lowers [`runtime_docs`] on this thread until dropped.
+#[cfg(test)]
+pub(crate) struct RuntimeDocsOverride;
+
+#[cfg(test)]
+impl RuntimeDocsOverride {
+    pub(crate) fn set(n: usize) -> RuntimeDocsOverride {
+        RUNTIME_DOCS_OVERRIDE.with(|c| c.set(Some(n)));
+        RuntimeDocsOverride
+    }
+}
+
+#[cfg(test)]
+impl Drop for RuntimeDocsOverride {
+    fn drop(&mut self) {
+        RUNTIME_DOCS_OVERRIDE.with(|c| c.set(None));
     }
 }
 
@@ -342,6 +932,166 @@ impl ClosureRounds {
 /// than the parser. Pinned on a 2 MiB thread for every production, parsing and
 /// reasoning, by the `parse_surface_tests` and `n3::tests` small-stack tests (#6732).
 const PARSE_DEPTH: usize = 64;
+
+/// Nesting (list, formula and quoted-triple levels) a term built during evaluation may
+/// reach. A rule can wrap a term in one more level each round (`{ :s :p ?x } => { :s :p
+/// (?x) }`), and a chain of premise atoms can within one firing, so without a limit a
+/// shallow document builds terms deep enough that substitution, matching, hashing and
+/// dropping them exhaust the stack. A term evaluation builds past this is dropped as a
+/// cut ([`generated`]); everything evaluation keeps is at most this deep, and what it
+/// builds before the check is at most this plus the nesting of the rule text. A run
+/// handed deeper terms directly (as terms, not text: [`given_terms`]) keeps terms as
+/// deep as those, and no deeper. Twice [`PARSE_DEPTH`], so a parsed document
+/// (`log:semantics`, `log:parsedAsN3`) quoted as a formula value, and rules over it,
+/// stay inside. Pinned on a 2 MiB thread by the `n3::tests` small-stack tests (#6732).
+const TERM_DEPTH: usize = 2 * PARSE_DEPTH;
+
+/// Why a generated term was dropped.
+const TERM_DEPTH_CUT: &str = "a term built during evaluation passed the term-depth limit";
+
+/// Whether `t` nests at most `room` levels deep. It recurses at most `room + 1` levels,
+/// however deep `t` is.
+fn fits(t: &super::Term, room: usize) -> bool {
+    use super::Term;
+    match t {
+        Term::List(ms) => room > 0 && ms.iter().all(|m| fits(m, room - 1)),
+        Term::Formula(ts) => room > 0 && ts.iter().flatten().all(|m| fits(m, room - 1)),
+        Term::Triple(tr) => room > 0 && tr.iter().all(|m| fits(m, room - 1)),
+        Term::Iri(_) | Term::Lit(..) | Term::Blank(_) | Term::Var(_) => true,
+    }
+}
+
+/// The nesting of `t` (0 for an IRI, literal, blank node or variable; one more for each
+/// list, formula or quoted triple around it, an empty one included), walked with an
+/// explicit stack, so it takes no stack per level. It agrees with [`fits`]: `fits(t,
+/// room)` holds exactly when `depth(t) <= room`.
+fn depth(t: &super::Term) -> usize {
+    use super::Term;
+    let mut deepest = 0;
+    // Each entry: a term, and how many containers enclose it.
+    let mut stack: Vec<(&Term, usize)> = vec![(t, 0)];
+    while let Some((t, d)) = stack.pop() {
+        let below = d + 1;
+        match t {
+            Term::List(ms) => stack.extend(ms.iter().map(|m| (m, below))),
+            Term::Formula(ts) => stack.extend(ts.iter().flatten().map(|m| (m, below))),
+            Term::Triple(tr) => stack.extend(tr.iter().map(|m| (m, below))),
+            Term::Iri(_) | Term::Lit(..) | Term::Blank(_) | Term::Var(_) => continue,
+        }
+        deepest = deepest.max(below);
+    }
+    deepest
+}
+
+/// The terms a TOP-LEVEL run was handed (its facts and rules). Parsed text is within
+/// [`PARSE_DEPTH`], but a caller can hand a run terms built in code (the incremental
+/// graph's base facts): a rule that copies one builds nothing deeper than its input, so
+/// the run's term allowance ([`generated`]) is raised to the deepest of them. Rules still
+/// cannot build past it.
+pub(crate) fn given_terms<'a>(run: &Truncation, terms: impl IntoIterator<Item = &'a super::Term>) {
+    let room = run.term_depth.get();
+    // Only a term that does not fit already is measured.
+    let deepest = terms
+        .into_iter()
+        .filter(|t| !fits(t, room))
+        .map(depth)
+        .max()
+        .unwrap_or(0);
+    if deepest > run.term_depth.get() {
+        run.term_depth.set(deepest);
+    }
+}
+
+/// Terms evaluation built (a conclusion, the values of a binding) in the run `run`:
+/// `true` when every one is within the run's term allowance ([`TERM_DEPTH`], or the
+/// deepest term the run was given); otherwise `false` and a cut, and the caller drops
+/// them.
+pub(crate) fn generated<'a>(
+    run: &Truncation,
+    terms: impl IntoIterator<Item = &'a super::Term>,
+) -> Bounded<bool> {
+    let room = run.term_depth.get();
+    if terms.into_iter().all(|t| fits(t, room)) {
+        Bounded::complete(true)
+    } else {
+        Bounded::cut(false, TERM_DEPTH_CUT)
+    }
+}
+
+/// Stack one run's recursive evaluation may hold at once, in units of one backward
+/// (`<=`) proof step (the heaviest recursion per level). A backward proof step and a
+/// scoped operator's inner clause matched against the store ([`nested_step`]) each hold
+/// one unit while they run, and a nested forward closure ([`CLOSURE_FRAMES`]) holds its
+/// units while it runs. Every nested closure of the run draws on the same allowance, so
+/// a chain of distinct documents (`log:semantics` then `log:conclusion`, each closing the
+/// next) cannot reset it, and neither can a fresh backward search inside one. It
+/// is sized for the smallest stack the engine supports (a 2 MiB thread in a debug build),
+/// leaving room for a parse up to [`PARSE_DEPTH`] deep and the term walkers at the
+/// innermost level. It admits a top-level backward search of [`BW_DEPTH`] steps with room
+/// to spare, so it binds only nested evaluation. Pinned on a 2 MiB thread by the
+/// `n3::tests` small-stack tests (#6732).
+const RUN_STACK: usize = 128;
+/// The units of [`RUN_STACK`] one nested forward closure holds: its closure's own frames
+/// and the builtin evaluation that entered it.
+const CLOSURE_FRAMES: usize = 8;
+
+/// Why a nested closure was refused.
+const CLOSURE_NESTING_CUT: &str = "nested closures passed the run's stack allowance";
+
+/// Units of the run's stack allowance ([`RUN_STACK`]) held by a step in progress; dropping
+/// it gives them back.
+pub(crate) struct StackFrames {
+    held: Rc<Cell<usize>>,
+    units: usize,
+}
+
+impl Drop for StackFrames {
+    fn drop(&mut self) {
+        self.held.set(self.held.get().saturating_sub(self.units));
+    }
+}
+
+/// Take `units` of the run's stack allowance, or `None` when that would pass it.
+fn take_stack(run: &Truncation, units: usize) -> Option<StackFrames> {
+    let held = run.stack.get() + units;
+    (held <= RUN_STACK).then(|| {
+        run.stack.set(held);
+        StackFrames {
+            held: Rc::clone(&run.stack),
+            units,
+        }
+    })
+}
+
+/// One more nested premise evaluation of the run `run` (the inner clause of
+/// `log:notIncludes`, `log:collectAllIn`, `log:forAllIn` or a store-scoped
+/// `log:includes`, matched against the store), holding one unit of the run's stack
+/// allowance until dropped. `None` when it is spent, which is a cut: the clause is not
+/// evaluated, so a negation or aggregation over it is then refused.
+pub(crate) fn nested_step(run: &Truncation) -> Bounded<Option<StackFrames>> {
+    match take_stack(run, 1) {
+        Some(frames) => Bounded::complete(Some(frames)),
+        None => Bounded::cut(
+            None,
+            "a scoped clause nested past the run's stack allowance",
+        ),
+    }
+}
+
+/// One more nested forward closure of the run `run` (`log:conclusion`,
+/// `log:supports`), holding its units of the run's stack allowance until dropped. Past
+/// the allowance the closure cannot be computed: the cut is recorded on `run` and the
+/// closure fails with an error, which refuses the enclosing run.
+pub(crate) fn enter_closure(run: &Truncation) -> Result<StackFrames, String> {
+    take_stack(run, CLOSURE_FRAMES).ok_or_else(|| {
+        run.record(CLOSURE_NESTING_CUT);
+        format!(
+            "n3: {CLOSURE_NESTING_CUT}: log:conclusion / log:supports closures nested too \
+             deep (each nested closure, and each backward proof step, holds part of a \
+             stack allowance of {RUN_STACK} units)"
+        )
+    })
+}
 
 /// A limit was hit. Only this module can make one (its fields are private), and the
 /// only way to use it during evaluation is [`parse_n3`], which records it as a cut.
@@ -362,6 +1112,12 @@ impl LimitError {
 #[cfg(test)]
 pub(crate) const fn parse_depth() -> usize {
     PARSE_DEPTH
+}
+
+/// The deepest term evaluation keeps.
+#[cfg(test)]
+pub(crate) const fn term_depth() -> usize {
+    TERM_DEPTH
 }
 
 /// The parser entering nesting level `depth`: an error past [`PARSE_DEPTH`].
@@ -404,6 +1160,50 @@ pub(crate) fn parse_n3_with_extra(
         Err(ParseFailure::Resource(e)) => Bounded::cut(Err(e.message), e.why),
     };
     settle(cuts, parsed)
+}
+
+/// Why a builtin's parse was stopped by [`ClosureLimits::max_term_bytes`].
+const PARSE_TERM_CUT: &str = "forward closure limit exceeded (a parsed formula)";
+
+/// Charge `bytes` to a charged parse's allowance with `left` bytes left: what is left
+/// after it, or the limit error once the parse would pass it.
+pub(crate) fn charge_parse(left: usize, bytes: usize) -> Result<usize, LimitError> {
+    left.checked_sub(bytes).ok_or_else(|| LimitError {
+        why: PARSE_TERM_CUT,
+        message: format!(
+            "n3: {CLOSURE_CUT}: a parsed formula would take more than max_term_bytes \
+             (raise ClosureLimits::max_term_bytes to allow more)"
+        ),
+    })
+}
+
+/// Parse N3 `src` into a term a builtin derives (`log:parsedAsN3`, `log:semantics`) under
+/// the run's [`ClosureLimits::max_term_bytes`]: the parser charges every byte it keeps
+/// before allocating it (each string, term node and copy; `parse_quoted_charged_checked`,
+/// which reads the document's own `@forAll` as the formula's), so a
+/// small source whose prefixes, base or shared formulas expand into a huge formula is
+/// refused while it is parsed. On that refusal the run is refused
+/// (a cut, and an error every closure of the run fails with). `None` for that and for any
+/// other failure: a syntax error, or the nesting limit (itself recorded as a cut).
+pub(crate) fn parse_n3_term(
+    src: &str,
+    base: &str,
+    run: &Truncation,
+    cuts: &impl Sink,
+) -> Option<super::parser::Parsed> {
+    use super::parser::{parse_quoted_charged_checked, ParseFailure};
+    let allowance = Some(run.limits.max_term_bytes);
+    match parse_quoted_charged_checked(src, base, allowance) {
+        Ok(p) => Some(p),
+        Err(ParseFailure::Syntax(_)) => None,
+        Err(ParseFailure::Resource(e)) => {
+            cuts.record(e.why);
+            if e.why == PARSE_TERM_CUT {
+                run.refuse(|| e.message);
+            }
+            None
+        }
+    }
 }
 
 /// A document a builtin asked the resolver for (`log:semantics`, `log:content`). No
@@ -531,6 +1331,28 @@ pub(crate) fn int_of_f64(n: f64) -> Bounded<Option<i64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_unbounded_join_work_never_refuses() {
+        let run = Truncation::top_level();
+        let work = JoinWork::forward(&run);
+        assert!(work.charge(usize::MAX, &run));
+        assert!(work.charge(usize::MAX, &run));
+        assert!(work.charge(usize::MAX.saturating_mul(3), &run));
+        work.round();
+        assert!(work.charge(usize::MAX, &run));
+        assert_eq!(run.refusal(), None);
+        assert_eq!(run.get(), None);
+        // A set limit is checked exactly.
+        let run = Truncation::top_level_with(ClosureLimits {
+            max_join_rows: 2,
+            ..ClosureLimits::default()
+        });
+        let work = JoinWork::forward(&run);
+        assert!(work.charge(2, &run));
+        assert!(!work.charge(1, &run));
+        assert!(run.refusal().is_some_and(|e| e.contains("max_join_rows (2)")));
+    }
 
     thread_local! {
         /// A test's `(rounds, facts)` closure allowance in place of the defaults.
@@ -670,7 +1492,9 @@ mod tests {
             ClosureLimits::default(),
             ClosureLimits {
                 max_rounds: 1_000_000,
-                max_facts: 50_000_000
+                max_facts: 50_000_000,
+                max_term_bytes: 16 << 20,
+                max_join_rows: usize::MAX,
             }
         );
         let sink = Cell::new(false);
@@ -683,6 +1507,7 @@ mod tests {
         let small = ClosureLimits {
             max_rounds: 2,
             max_facts: 10,
+            ..ClosureLimits::default()
         };
         let sink = Truncation::top_level_with(small);
         let mut allowance = ClosureRounds::forward(&sink);
@@ -825,11 +1650,90 @@ mod tests {
         );
     }
 
+    /// GH #6771: each round doubles a literal, so the closure holds a few dozen facts
+    /// after a few dozen rounds when the term outgrows memory.
+    const STRING_DOUBLING: &str = "@prefix : <http://ex/>.\n\
+         @prefix string: <http://www.w3.org/2000/10/swap/string#>.\n\
+         :a :p \"x\".\n\
+         { :a :p ?s. (?s ?s) string:concatenation ?t } => { :a :p ?t }.\n";
+
+    #[test]
+    fn a_growing_term_is_refused_with_a_cut() {
+        // The default limits: refused, with the cut recorded, long before memory runs out.
+        let (r, cut) = close_under(STRING_DOUBLING, ClosureLimits::default());
+        assert_closure_limit("string doubling", r);
+        assert_eq!(cut, Some(CLOSURE_CUT));
+        // The largest term derived is the last doubling at or under the limit: under a
+        // limit of 4096 bytes that is a 2048-character string (its successor would take
+        // 4096 bytes of text plus the literal's datatype and node).
+        let small = ClosureLimits {
+            max_term_bytes: 4096,
+            ..ClosureLimits::default()
+        };
+        let run = Truncation::top_level_with(small);
+        let e = crate::n3::reason_n3_terms_in(
+            STRING_DOUBLING,
+            None,
+            None,
+            crate::n3::NegationCycles::Reject,
+            &run,
+        )
+        .map(|c| c.facts.len())
+        .expect_err("refused");
+        assert!(e.contains("max_term_bytes (4096)"), "{e}");
+        assert_eq!(run.get(), Some(CLOSURE_CUT));
+    }
+
+    #[test]
+    fn the_term_checkpoint_refuses_only_past_the_limit() {
+        let limits = ClosureLimits {
+            max_term_bytes: 100,
+            ..ClosureLimits::default()
+        };
+        let run = Truncation::top_level_with(limits);
+        let never = || -> usize { panic!("the exact size is computed only past the bound") };
+        assert_eq!(cut_of(derived_term(&run, &"f", 100, never)), (false, false));
+        // A loose bound over the limit, an exact size under it: allowed.
+        assert_eq!(cut_of(derived_term(&run, &"f", 101, || 100)), (false, false));
+        assert!(run.refusal().is_none());
+        assert_eq!(cut_of(derived_term(&run, &"f", 101, || 101)), (true, true));
+        assert!(run.refusal().is_some_and(|e| e.contains(CLOSURE_CUT)));
+
+        let s = Term::Lit("abc".into(), "http://www.w3.org/2001/XMLSchema#string".into(), None);
+        assert_eq!(term_bytes(&s), string_term_bytes(3));
+        let list = Term::List(vec![s.clone(), Term::List(vec![s.clone()])]);
+        assert_eq!(term_bytes(&list), 2 * TERM_NODE_BYTES + 2 * term_bytes(&s));
+        let formula = Term::Formula(vec![[s.clone(), s.clone(), s.clone()]]);
+        assert_eq!(term_bytes(&formula), TERM_NODE_BYTES + 3 * term_bytes(&s));
+        // A deep term is walked without recursion.
+        let mut deep = Term::List(vec![]);
+        for _ in 0..200_000 {
+            deep = Term::List(vec![deep]);
+        }
+        assert_eq!(term_bytes(&deep), 200_001 * TERM_NODE_BYTES);
+        // Dropping it would recurse; leak it instead.
+        std::mem::forget(deep);
+    }
+
     #[test]
     fn each_limit_reports_a_cut_and_keeps_its_value() {
-        assert_eq!(cut_of(backward_step(3, true)), (Some(2), false));
-        assert_eq!(cut_of(backward_step(0, true)), (None, true));
-        assert_eq!(cut_of(backward_step(0, false)), (None, false));
+        let run = Truncation::top_level();
+        let step = |depth, could_match| {
+            let (s, cut) = cut_of(backward_step(&run, depth, could_match));
+            (s.map(|(d, _)| d), cut)
+        };
+        assert_eq!(step(3, true), (Some(2), false));
+        assert_eq!(step(0, true), (None, true));
+        assert_eq!(step(0, false), (None, false));
+        // The run's stack allowance: held while a step runs, given back when it ends.
+        let held: Vec<_> = (0..RUN_STACK).map(|_| take_stack(&run, 1)).collect();
+        assert!(held.iter().all(Option::is_some));
+        assert_eq!(step(3, true), (None, true));
+        assert_eq!(step(3, false), (None, false));
+        assert!(enter_closure(&run).is_err());
+        drop(held);
+        assert_eq!(step(3, true), (Some(2), false));
+        assert!(enter_closure(&run).is_ok());
 
         let mut b = StepBudget::containment();
         while b.take() {}
@@ -912,5 +1816,38 @@ mod tests {
         assert_eq!(cut_of(whole_i64_of_f64(f64::NAN)), (None, false));
         assert_eq!(cut_of(dropped_fraction("000")), ((), false));
         assert_eq!(cut_of(dropped_fraction("5")), ((), true));
+    }
+
+    /// #6732: `depth` counts every list, formula and quoted triple as a level, an empty
+    /// one included, so it agrees with `fits`.
+    #[test]
+    fn depth_counts_empty_containers_as_fits_does() {
+        use super::super::Term;
+        let atom = Term::Iri("http://ex/a".into());
+        let empties = [
+            atom.clone(),
+            Term::List(Vec::new()),
+            Term::Formula(Vec::new()),
+            Term::Triple(Box::new([atom.clone(), atom.clone(), atom])),
+        ];
+        for innermost in empties {
+            let mut t = innermost;
+            for wraps in 0..4 {
+                let d = depth(&t);
+                assert!(fits(&t, d), "{t:?} fits its depth");
+                assert!(d == 0 || !fits(&t, d - 1), "{t:?} needs its depth");
+                if wraps % 2 == 0 {
+                    t = Term::List(vec![t]);
+                } else {
+                    t = Term::Formula(vec![[
+                        Term::Iri("http://ex/s".into()),
+                        Term::Iri("http://ex/p".into()),
+                        t,
+                    ]]);
+                }
+            }
+        }
+        assert_eq!(depth(&Term::List(vec![Term::List(Vec::new())])), 2);
+        assert_eq!(depth(&Term::Formula(Vec::new())), 1);
     }
 }

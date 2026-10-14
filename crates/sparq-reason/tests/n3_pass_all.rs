@@ -268,14 +268,16 @@ fn a_for_all_universal_gets_one_name_across_facts_and_rules() {
 }
 
 /// GH #6701 review round 4 (1): a formula re-created from TEXT by `log:parsedAsN3` holds
-/// the parser's own `__ua.<iri>` universal. The pass-all output must hold that same term,
-/// or re-reasoning flips `log:notEqualTo` and derives `:bad`.
+/// the parsed formula's own universal (`__uf.0.<iri>`, GH #6851 review), the same term as
+/// the inline `{ @forAll :x. … }`. The pass-all output must hold that same term, or
+/// re-reasoning flips `log:notEqualTo` and derives `:bad`.
 #[test]
 fn a_universal_compares_equal_to_one_parsed_from_a_literal_after_a_round_trip() {
     let src = r#"@prefix : <http://ex/>.
 @prefix log: <http://www.w3.org/2000/10/swap/log#>.
 @forAll :x.
-:a :p { :x :q :z }.
+:a :p { @forAll :x. :x :q :z }.
+:b :p { :x :q :z }.
 {
   :a :p ?f.
   "@prefix : <http://ex/>. @forAll :x. :x :q :z." log:parsedAsN3 ?g.
@@ -325,4 +327,47 @@ fn a_freshened_universal_keeps_its_formula_inequality() {
 #[test]
 fn a_parse_error_propagates() {
     assert!(reason_n3_pass_all("{ ?x a :Human } =>", RuleVars::N3).is_err());
+}
+
+/// A rule that parses a text at run time and concludes a fact about its blank.
+const RUNTIME_PARSE: &str = r#"@prefix log: <http://www.w3.org/2000/10/swap/log#>.
+{ "_:x <http://ex/p> <http://ex/o> ." log:parsedAsN3 ?f . ?f log:includes { ?s <http://ex/p> <http://ex/o> } }
+  => { ?s <http://ex/derived> <http://ex/o> }.
+{ "_:x <http://ex/p> <http://ex/o> ." log:parsedAsN3 ?f . ?f log:includes { ?s <http://ex/p> <http://ex/o> } .
+  ?s <http://ex/note> ?n } => { ?s <http://ex/joined> ?n }.
+"#;
+
+/// The subjects of `pred` in the batch closure of `doc`.
+fn subjects(doc: &str, pred: &str) -> Vec<Term> {
+    let c = reason_n3_terms(doc, None).expect("reasons");
+    let p = Term::Iri(pred.to_string());
+    let mut s: Vec<Term> = c.facts.iter().filter(|t| t[1] == p).map(|t| t[0].clone()).collect();
+    s.sort_by_key(|t| format!("{t:?}"));
+    s.dedup();
+    s
+}
+
+/// A runtime-parsed document's blank, exported by `reason_n3_pass_all`, is the same node
+/// when the output is reasoned again: the exported label does not move the runtime prefix,
+/// so the second pass adds nothing.
+#[test]
+fn re_reasoning_an_exported_runtime_blank_is_a_fixed_point() {
+    let once = reason_n3_pass_all(RUNTIME_PARSE, RuleVars::N3).expect("pass-all");
+    let derived = subjects(&once, "http://ex/derived");
+    assert_eq!(derived.len(), 1, "{once}");
+    let Term::Blank(l) = &derived[0] else { panic!("{once}") };
+    assert!(l.starts_with("__rp0_"), "{l}");
+    let twice = reason_n3_pass_all(&once, RuleVars::N3).expect("pass-all");
+    assert_eq!(twice, once, "the second pass added facts");
+}
+
+/// An annotation written on the exported runtime blank joins the node the rule reparses.
+#[test]
+fn an_annotation_on_an_exported_runtime_blank_joins_the_reparsed_node() {
+    let once = reason_n3_pass_all(RUNTIME_PARSE, RuleVars::N3).expect("pass-all");
+    let derived = subjects(&once, "http://ex/derived");
+    let Term::Blank(l) = &derived[0] else { panic!("{once}") };
+    let annotated = format!("{once}\n_:{l} <http://ex/note> \"n\" .\n");
+    assert_eq!(subjects(&annotated, "http://ex/joined"), derived, "{annotated}");
+    assert_eq!(subjects(&annotated, "http://ex/derived"), derived, "{annotated}");
 }

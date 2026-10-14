@@ -48,12 +48,10 @@ fedclient = [
     # already in the tree (sparq-engine's `service` transport pulls the same crate), and is
     # native-only — the discovery module `#[cfg]`-excludes it from the wasm build.
     "dep:ureq",
-    # [OPUS-4.8] sq-j27p: serde_json parses the SPARQL-Results-JSON the Phase-2 adapter's
-    # `execute` returns, in the Phase-3 materialised interpreter's SRJ parser. Already in the
-    # tree — `fedclient` enables `sparq-engine/service`, which pulls the SAME serde_json — so
-    # this adds NO new crate to the resolved dependency graph.
+    # serde_json reads the endpoint list in a discovery response. Already in the tree —
+    # `fedclient` enables `sparq-engine/service`, which pulls the SAME serde_json — so this
+    # adds NO new crate to the resolved dependency graph.
     "dep:serde_json",
-    "dep:serde",
     # #3712: the one RFC 3986 query-value encoder (source::pct_encode). Already in the tree
     # via ureq, so no new crate on a fedclient build.
     "dep:percent-encoding",
@@ -85,15 +83,11 @@ spargebra = { workspace = true, optional = true }
 # documents, and the small hash maps the SD parser builds. Both already in the workspace.
 oxttl = { workspace = true, optional = true }
 rustc-hash = { workspace = true, optional = true }
-# [OPUS-4.8] sq-j27p: SPARQL-Results-JSON parsing in the Phase-3 interpreter. serde_json is
-# already resolved via `sparq-engine/service` (enabled by `fedclient`), so the default build
-# is unaffected and the `fedclient` tree gains no new crate. Version pinned to match.
-serde_json = { version = "1", features = ["raw_value"], optional = true }
+# The discovery client's endpoint-list parse. serde_json is already resolved via
+# `sparq-engine/service` (enabled by `fedclient`), so the default build is unaffected and the
+# `fedclient` tree gains no new crate. Version pinned to match.
+serde_json = { version = "1", optional = true }
 percent-encoding = { workspace = true, optional = true }
-# [GPT-5.6] sq-1rtc2: borrowed SRJ envelopes avoid a full serde_json::Value DOM. serde is
-# already in the feature's resolved graph through serde_json; this only makes that existing
-# dependency directly usable when `fedclient` is enabled.
-serde = { version = "1", features = ["derive"], optional = true }
 # [OPUS-4.8] sq-nfxl: the discovery client's blocking HTTP GET (SSRF-guarded). Native-only;
 # the discovery module gates it out of wasm. Mirrors sparq-engine's `service` ureq config so
 # the resolved dependency is the SAME crate/version (no new tree growth on a default build).

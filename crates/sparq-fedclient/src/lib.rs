@@ -137,11 +137,8 @@ feature).
 // link a hard `cargo doc` error in EITHER feature state.
 #![deny(rustdoc::broken_intra_doc_links)]
 // [OPUS-4.8] sq-s1uy: crate has zero `unsafe`.
-// When `fedclient` is off the crate is intentionally empty. With it on, not every landed item
-// is yet wired into an end-to-end public entry point, so silence the expected dead-code/
-// unused-import lints until the remaining (§7 re-planning) phase consumes them.
+// When `fedclient` is off the crate is intentionally empty, so its items are unused.
 #![cfg_attr(not(feature = "fedclient"), allow(dead_code, unused_imports))]
-#![cfg_attr(feature = "fedclient", allow(dead_code, unused_imports))]
 
 // ─── Public module layout (design §4) ──────────────────────────────────────────────
 // Every module (source, discovery, planner, pushdown, operators, stream) now carries real
@@ -243,7 +240,7 @@ pub mod pushdown;
 #[cfg(feature = "fedclient")]
 pub use pushdown::{
     bind_block_size, common_variable_check, exclusive_groups, group_vars, push_group,
-    render_values_block, ExclusiveGroup, Filter, PushedGroup, DEFAULT_BIND_BLOCK,
+    render_values_block, ExclusiveGroup, Filter, OrderKey, PushedGroup, DEFAULT_BIND_BLOCK,
 };
 
 /// §4.4 — **physical federation operators**: interpret a `JoinTree` into operators —

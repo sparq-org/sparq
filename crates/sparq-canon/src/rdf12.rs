@@ -1209,12 +1209,7 @@ fn serialize_quad_line(quad: &Quad) -> String {
 /// the spec default; SHA-384 (`canonicalize_rdf12_with::<Sha384>`) the parity
 /// target.
 fn hash_hex<D: Digest>(data: &[u8]) -> String {
-    let digest = D::digest(data);
-    let mut s = String::with_capacity(digest.len() * 2);
-    for byte in digest.iter() {
-        s.push_str(&format!("{:02x}", byte));
-    }
-    s
+    sparq_core::hex::encode(&D::digest(data))
 }
 
 /// Lazy enumeration of every ordering of the indices `0..n` (RDFC-1.0 §4.8

@@ -512,6 +512,12 @@ mod wasm_store {
             Ok(outcome)
         }
 
+        async fn fence(&self, fence: &sparq_lws_core::store::Fence) -> ServerResult<()> {
+            // The stores this build wraps never report a write unsettled; forwarded so that one
+            // that did could still be settled (its outcome is then read back like any other).
+            self.inner.fence(fence).await
+        }
+
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
             self.inner.list_children(container).await
         }
