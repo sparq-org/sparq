@@ -179,7 +179,8 @@ Until one of those lands, case (C) stays open and **stays in the dependency clos
 
 **Update (October 2026).** The loader now applies a simpler rule than either shape: a
 control or group document's triple is kept only when its subject is a blank node or an
-IRI within that document (`loader.rs` `speaks_for`). A foreign document can therefore no
+IRI within that document, and no triple may name a minted `urn:skolem:` IRI
+(`loader.rs` `admits`). A foreign document can therefore no
 longer add properties to `<o.ex/.acl#a1>`, so (C) cannot arise and §7 (7) holds by
 construction. References across documents are objects and are unaffected, so (A) and (B)
 stand as described.

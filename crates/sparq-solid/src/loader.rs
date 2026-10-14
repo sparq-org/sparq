@@ -105,6 +105,22 @@ const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 /// `graph_iri` itself. It can still reference any IRI as an object, which is how an ACR
 /// applies a policy defined in another document or an ACL names a group, but statements
 /// about a node defined elsewhere come only from that node's own document.
+/// The IRI prefix [`skolemize`] mints for document blank nodes. Loaded data may not
+/// supply it: a document naming such an IRI would denote another document's blank node.
+const SKOLEM_PREFIX: &str = "urn:skolem:";
+
+fn names_skolem_iri(t: &[Term; 3]) -> bool {
+    t.iter()
+        .any(|x| matches!(x, Term::NamedNode(n) if n.as_str().starts_with(SKOLEM_PREFIX)))
+}
+
+/// Whether document `graph_iri` may state triple `t`: kept only when it describes
+/// one of the document's own nodes (a blank node, or an IRI in the document) and names
+/// no minted skolem IRI.
+fn admits(t: &[Term; 3], graph_iri: &str) -> bool {
+    !is_reserved_derivation_predicate(t) && !names_skolem_iri(t) && speaks_for(t, graph_iri)
+}
+
 fn speaks_for(t: &[Term; 3], graph_iri: &str) -> bool {
     match &t[0] {
         Term::BlankNode(_) => true,
@@ -172,7 +188,7 @@ fn graph_iri(name: &Term) -> Option<&str> {
 fn skolemize(t: &Term, graph_iri: &str) -> Term {
     match t {
         Term::BlankNode(b) => named(&format!(
-            "urn:skolem:graph:{}:{}",
+            "{SKOLEM_PREFIX}graph:{}:{}",
             encode_for_uri(graph_iri),
             encode_for_uri(b.as_str())
         )),
@@ -283,7 +299,7 @@ pub(crate) fn assemble_facts(
             // sq-3jtd.5: hard-reject any forged derivation-internal fact
             // (`solidx:creator|owner|appliesToResource|…`) smuggled into the control
             // document — only the loader/rules may produce `solidx:` facts.
-            if is_reserved_derivation_predicate(&t) || !speaks_for(&t, iri) {
+            if !admits(&t, iri) {
                 continue;
             }
             let s = skolemize(&t[0], iri);
@@ -306,7 +322,7 @@ pub(crate) fn assemble_facts(
             for t in graph_triples(sub) {
                 // sq-3jtd.5: same derivation-internal guard for group
                 // documents — a forged `solidx:` fact here would feed the reasoner too.
-                if is_reserved_derivation_predicate(&t) || !speaks_for(&t, iri) {
+                if !admits(&t, iri) {
                     continue;
                 }
                 out.push([
@@ -794,7 +810,10 @@ mod tests {
         let target = "https://pod.ex/secret";
         let auth = |local: &str| format!("<{AUTH_NS}{local}>");
         let rdf_type = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
-        let docs = [(System::Wac, "https://other.ex/.acl"), (System::Acp, "https://other.ex/.acr")];
+        let docs = [
+            (System::Wac, "https://other.ex/.acl"),
+            (System::Acp, "https://other.ex/.acr"),
+        ];
         for (system, doc) in docs {
             let nq = format!(
                 "<https://pod.ex/secret#it> <https://ex.dev/ns#title> \"t\" <{target}> .\n\
@@ -814,10 +833,7 @@ mod tests {
             let facts = assemble_facts(&graph, system, &prov, &creds).unwrap();
             let in_view =
                 |x: &Term| matches!(x, Term::NamedNode(n) if n.as_str().starts_with(AUTH_NS));
-            let leaked: Vec<_> = facts
-                .iter()
-                .filter(|t| t.iter().any(in_view))
-                .collect();
+            let leaked: Vec<_> = facts.iter().filter(|t| t.iter().any(in_view)).collect();
             assert!(leaked.is_empty(), "{leaked:?}");
 
             let mut store = PodStore::new(graph);
@@ -825,7 +841,12 @@ mod tests {
                 System::Wac => store.materialize_wac().unwrap(),
                 System::Acp => store.materialize_acp().unwrap(),
             };
-            let session = Session { agent: Some(other), client: None, issuer: None, now: None };
+            let session = Session {
+                agent: Some(other),
+                client: None,
+                issuer: None,
+                now: None,
+            };
             for mode in [Mode::Read, Mode::Write] {
                 assert!(store.accessible(&session, mode).is_empty(), "{mode:?}");
             }
@@ -833,46 +854,57 @@ mod tests {
     }
 
     /// A document's statements about a node defined in another document are dropped;
-    /// references to nodes elsewhere still work. Each case: the other agent gets no access
-    /// to `pod.ex/secret`, while the cross-document reference grants carol.
+    /// references to nodes elsewhere still work. Each case adds one statement to a
+    /// document (`doc`), through the initial load, an authoritative control-document
+    /// replace and a session update the session is authorized to make. The agent behind
+    /// the statement never gains access to `pod.ex/secret`, while the legitimate
+    /// cross-document reference keeps granting carol.
     #[test]
     fn documents_describe_only_their_own_nodes() {
         const ACL: &str = "http://www.w3.org/ns/auth/acl#";
         const ACP: &str = "http://www.w3.org/ns/solid/acp#";
         const VCARD: &str = "http://www.w3.org/2006/vcard/ns#";
         use super::RDF_TYPE;
-        let (alice, other, carol) =
-            ("https://alice.ex/me", "https://other.ex/card#me", "https://carol.ex/me");
+        let (alice, carol) = ("https://alice.ex/me", "https://carol.ex/me");
         let secret = "https://pod.ex/secret";
+        let (oacl, oacr, grp, ogrp) = (
+            "https://other.ex/doc.acl",
+            "https://other.ex/doc.acr",
+            "https://pod.ex/groups",
+            "https://other.ex/grp",
+        );
+        // The other agent's WebID lives in the document it edits, so a statement with
+        // that subject is about one of the document's own nodes.
+        let (wother, aother) = (format!("{oacl}#me"), format!("{oacr}#me"));
         let data = format!(
             "<{secret}#it> <https://ex.dev/ns#t> \"t\" <{secret}> .\n\
              <https://other.ex/doc#it> <https://ex.dev/ns#t> \"t\" <https://other.ex/doc> .\n"
         );
-        let (oacl, oacr, grp) = (
-            "https://other.ex/doc.acl",
-            "https://other.ex/doc.acr",
-            "https://pod.ex/groups",
-        );
         let wac = format!(
             "{data}\
              <{secret}.acl#owner> <{RDF_TYPE}> <{ACL}Authorization> <{secret}.acl> .\n\
-             <{secret}.acl#team> <{RDF_TYPE}> <{ACL}Authorization> <{secret}.acl> .\n\
-             <{oacl}#a> <{RDF_TYPE}> <{ACL}Authorization> <{oacl}> .\n\
              <{secret}.acl#owner> <{ACL}accessTo> <{secret}> <{secret}.acl> .\n\
              <{secret}.acl#owner> <{ACL}agent> <{alice}> <{secret}.acl> .\n\
              <{secret}.acl#owner> <{ACL}mode> <{ACL}Read> <{secret}.acl> .\n\
+             <{secret}.acl#team> <{RDF_TYPE}> <{ACL}Authorization> <{secret}.acl> .\n\
              <{secret}.acl#team> <{ACL}accessTo> <{secret}> <{secret}.acl> .\n\
              <{secret}.acl#team> <{ACL}agentGroup> <{grp}#team> <{secret}.acl> .\n\
              <{secret}.acl#team> <{ACL}mode> <{ACL}Read> <{secret}.acl> .\n\
              <{grp}#team> <{VCARD}hasMember> <{carol}> <{grp}> .\n\
+             <{oacl}#a> <{RDF_TYPE}> <{ACL}Authorization> <{oacl}> .\n\
              <{oacl}#a> <{ACL}accessTo> <https://other.ex/doc> <{oacl}> .\n\
-             <{oacl}#a> <{ACL}agentGroup> <https://other.ex/grp#g> <{oacl}> .\n"
+             <{oacl}#a> <{ACL}agent> <{wother}> <{oacl}> .\n\
+             <{oacl}#a> <{ACL}mode> <{ACL}Control> <{oacl}> .\n\
+             <{oacl}#a> <{ACL}agentGroup> <{ogrp}#g> <{oacl}> .\n\
+             <{ogrp}#g> <{VCARD}hasMember> <{wother}> <{ogrp}> .\n\
+             <https://other.ex/.acl#o> <{RDF_TYPE}> <{ACL}Authorization> <https://other.ex/.acl> .\n\
+             <https://other.ex/.acl#o> <{ACL}accessTo> <https://other.ex/> <https://other.ex/.acl> .\n\
+             <https://other.ex/.acl#o> <{ACL}default> <https://other.ex/> <https://other.ex/.acl> .\n\
+             <https://other.ex/.acl#o> <{ACL}agent> <{wother}> <https://other.ex/.acl> .\n\
+             <https://other.ex/.acl#o> <{ACL}mode> <{ACL}Write> <https://other.ex/.acl> .\n"
         );
-        let agent_in_foreign_authorization =
-            format!("<{secret}.acl#owner> <{ACL}agent> <{other}> <{oacl}> .\n");
-        let member_in_foreign_group =
-            format!("<{grp}#team> <{VCARD}hasMember> <{other}> <https://other.ex/grp> .\n");
         let shared = "https://shared.ex/p.acr";
+        let meta = format!("{oacr}.acr");
         let acp = format!(
             "{data}\
              <{secret}.acr> <{ACP}accessControl> <{secret}.acr#c> <{secret}.acr> .\n\
@@ -883,30 +915,193 @@ mod tests {
              <{oacr}#c> <{ACP}apply> <{oacr}#p> <{oacr}> .\n\
              <{oacr}#p> <{ACP}allow> <{ACL}Read> <{oacr}> .\n\
              <{oacr}#p> <{ACP}anyOf> <{oacr}#m> <{oacr}> .\n\
-             <{oacr}#m> <{ACP}agent> <{other}> <{oacr}> .\n"
+             <{oacr}#m> <{ACP}agent> <{aother}> <{oacr}> .\n\
+             <{meta}> <{ACP}accessControl> <{meta}#c> <{meta}> .\n\
+             <{meta}#c> <{ACP}apply> <{meta}#p> <{meta}> .\n\
+             <{meta}#p> <{ACP}allow> <{ACL}Write> <{meta}> .\n\
+             <{meta}#p> <{ACP}anyOf> <{meta}#m> <{meta}> .\n\
+             <{meta}#m> <{ACP}agent> <{aother}> <{meta}> .\n"
         );
-        let control_on_foreign_resource =
-            format!("<{secret}.acr> <{ACP}accessControl> <{oacr}#c> <{oacr}> .\n");
-        let agent_in_foreign_matcher = format!("<{shared}#m> <{ACP}agent> <{other}> <{oacr}> .\n");
+        let auth_read = format!("{AUTH_NS}read");
+        // (system, base, other agent, document, added triple)
         let cases = [
-            (System::Wac, &wac, agent_in_foreign_authorization),
-            (System::Wac, &wac, member_in_foreign_group),
-            (System::Acp, &acp, control_on_foreign_resource),
-            (System::Acp, &acp, agent_in_foreign_matcher),
+            (
+                System::Wac,
+                &wac,
+                &wother,
+                oacl,
+                format!("<{wother}> <{auth_read}> <{secret}>"),
+            ),
+            (
+                System::Acp,
+                &acp,
+                &aother,
+                oacr,
+                format!("<{aother}> <{auth_read}> <{secret}>"),
+            ),
+            (
+                System::Wac,
+                &wac,
+                &wother,
+                oacl,
+                format!("<{secret}.acl#owner> <{ACL}agent> <{wother}>"),
+            ),
+            (
+                System::Wac,
+                &wac,
+                &wother,
+                ogrp,
+                format!("<{grp}#team> <{VCARD}hasMember> <{wother}>"),
+            ),
+            (
+                System::Acp,
+                &acp,
+                &aother,
+                oacr,
+                format!("<{secret}.acr> <{ACP}accessControl> <{oacr}#c>"),
+            ),
+            (
+                System::Acp,
+                &acp,
+                &aother,
+                oacr,
+                format!("<{shared}#m> <{ACP}agent> <{aother}>"),
+            ),
         ];
-        for (system, base, foreign) in cases {
-            let nq = format!("{base}{foreign}");
-            let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
-            match system {
-                System::Wac => store.materialize_wac().unwrap(),
-                System::Acp => store.materialize_acp().unwrap(),
-            };
+        let check = |store: &PodStore, system: System, other: &str, how: &str| {
             let can_read = |agent: &str| {
-                let s = Session { agent: Some(agent), client: None, issuer: None, now: None };
-                store.accessible(&s, Mode::Read).iter().any(|r| r.as_str() == secret)
+                let s = Session {
+                    agent: Some(agent),
+                    client: None,
+                    issuer: None,
+                    now: None,
+                };
+                store
+                    .accessible(&s, Mode::Read)
+                    .iter()
+                    .any(|r| r.as_str() == secret)
             };
-            assert!(!can_read(other), "{system:?}: {foreign} granted access");
-            assert!(can_read(carol), "{system:?}: a cross-document reference stopped working");
+            assert!(
+                !can_read(other),
+                "{system:?} {how}: the added statement granted access"
+            );
+            assert!(
+                can_read(carol),
+                "{system:?} {how}: a cross-document reference stopped working"
+            );
+        };
+        for (system, base, other, doc, triple) in cases {
+            let acp = system == System::Acp;
+            let fresh = || {
+                let mut store = PodStore::new(Graph::load_dataset(base, "nquads").unwrap());
+                if acp {
+                    store.materialize_acp()
+                } else {
+                    store.materialize_wac()
+                }
+                .unwrap();
+                store
+            };
+
+            let nq = format!("{base}{triple} <{doc}> .\n");
+            let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
+            if acp {
+                store.materialize_acp()
+            } else {
+                store.materialize_wac()
+            }
+            .unwrap();
+            check(&store, system, other, &format!("load {triple}"));
+
+            if doc.ends_with(".acl") || doc.ends_with(".acr") {
+                let suffix = format!(" <{doc}> .");
+                let mut body: String = base
+                    .lines()
+                    .filter_map(|l| l.strip_suffix(suffix.as_str()))
+                    .map(|l| format!("{l} .\n"))
+                    .collect();
+                body.push_str(&format!("{triple} .\n"));
+                let mut store = fresh();
+                if acp {
+                    store.put_acl_acp(doc, &body, "ntriples")
+                } else {
+                    store.put_acl(doc, &body, "ntriples")
+                }
+                .unwrap();
+                check(&store, system, other, &format!("put {triple}"));
+            }
+
+            let mut store = fresh();
+            let session = Session {
+                agent: Some(other),
+                client: None,
+                issuer: None,
+                now: None,
+            };
+            let insert = format!("INSERT DATA {{ GRAPH <{doc}> {{ {triple} }} }}");
+            if acp {
+                store.update_as_acp(&session, &insert)
+            } else {
+                store.update_as(&session, &insert)
+            }
+            .unwrap_or_else(|e| panic!("{system:?}: the update is authorized: {e}"));
+            check(&store, system, other, &format!("update {triple}"));
         }
+    }
+
+    /// Loaded data cannot name the IRI a document's blank node is skolemized to: a group
+    /// document stored under that IRI adds no agent to the blank-node authorization.
+    #[test]
+    fn documents_cannot_name_skolemized_nodes() {
+        const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+        use super::RDF_TYPE;
+        let (alice, other) = ("https://alice.ex/me", "https://other.ex/card#me");
+        let (secret, acl) = ("https://pod.ex/secret", "https://pod.ex/secret.acl");
+        let base = format!(
+            "<{secret}#it> <https://ex.dev/ns#t> \"t\" <{secret}> .\n\
+             _:b <{RDF_TYPE}> <{ACL}Authorization> <{acl}> .\n\
+             _:b <{ACL}accessTo> <{secret}> <{acl}> .\n\
+             _:b <{ACL}agent> <{alice}> <{acl}> .\n\
+             _:b <{ACL}mode> <{ACL}Read> <{acl}> .\n"
+        );
+        let graph = Graph::load_dataset(&base, "nquads").unwrap();
+        let blank = graph
+            .named
+            .iter()
+            .filter(|(name, _)| matches!(name, Term::NamedNode(n) if n.as_str() == acl))
+            .flat_map(|(_, sub)| graph_triples(sub))
+            .find_map(|t| matches!(t[0], Term::BlankNode(_)).then(|| t[0].clone()))
+            .expect("the authorization is a blank node");
+        let Term::NamedNode(minted) = skolemize(&blank, acl) else {
+            unreachable!()
+        };
+        let minted = minted.as_str();
+        let nq = format!(
+            "{base}\
+             <https://other.ex/doc.acl#a> <{ACL}agentGroup> <{minted}> <https://other.ex/doc.acl> .\n\
+             <{minted}> <{ACL}agent> <{other}> <{minted}> .\n"
+        );
+        let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
+        store.materialize_wac().unwrap();
+        let can_read = |agent: &str| {
+            let s = Session {
+                agent: Some(agent),
+                client: None,
+                issuer: None,
+                now: None,
+            };
+            store
+                .accessible(&s, Mode::Read)
+                .iter()
+                .any(|r| r.as_str() == secret)
+        };
+        assert!(
+            !can_read(other),
+            "a stored skolem IRI extended the blank-node authorization"
+        );
+        assert!(
+            can_read(alice),
+            "the blank-node authorization itself still applies"
+        );
     }
 }

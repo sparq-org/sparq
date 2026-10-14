@@ -1748,3 +1748,53 @@ fn resources_requests_reject_a_missing_uri_parameter() {
         assert!(resp["error"]["message"].as_str().unwrap().contains(method));
     }
 }
+
+/// An `.acl` written through `resource_put` speaks only for its own nodes: a statement
+/// in it about the root ACL's authorization grants nothing, while the document's own
+/// authorization takes effect.
+#[test]
+fn acl_put_cannot_extend_another_documents_authorization() {
+    const MALLORY: &str = "https://mallory.ex/card#me";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let control = format!(
+        "{POD_NQ}\
+<https://pod.ex/m/x#it> <https://ex.dev/ns#title> \"m\" <https://pod.ex/m/x> .
+<https://pod.ex/.acl#m> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ACL}Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#m> <{ACL}default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#m> <{ACL}agent> <{MALLORY}> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#m> <{ACL}mode> <{ACL}Control> <https://pod.ex/.acl> .
+"
+    );
+    let config = SolidServerConfig {
+        agent: Some(MALLORY.to_string()),
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    let store = PodStore::new(Graph::load_dataset(&control, "nquads").expect("fixture parses"));
+    let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
+    let body = format!(
+        "<https://pod.ex/m/.acl#own> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ACL}Authorization> .
+<https://pod.ex/m/.acl#own> <{ACL}default> <https://pod.ex/m/> .
+<https://pod.ex/m/.acl#own> <{ACL}agent> <{MALLORY}> .
+<https://pod.ex/m/.acl#own> <{ACL}mode> <{ACL}Read> .
+<https://pod.ex/.acl#owner> <{ACL}agent> <{MALLORY}> .
+"
+    );
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({"url": "https://pod.ex/m/.acl", "content": body, "content_type": "application/n-triples"}),
+    );
+    assert!(!is_err, "mallory holds Control by default: {text}");
+    let (text, is_err) = tool(&mut s, "resource_get", json!({"url": "https://pod.ex/m/x"}));
+    assert!(!is_err, "the document's own authorization applies: {text}");
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_get",
+        json!({"url": "https://pod.ex/notes/n1"}),
+    );
+    assert!(
+        is_err,
+        "a statement about the root authorization granted access: {text}"
+    );
+}

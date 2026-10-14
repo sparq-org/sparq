@@ -1788,6 +1788,9 @@ impl PodStore {
     /// FIRST if you also want the static WAC/ACP grants present; the bridge adds to
     /// whatever auth view currently exists (or creates a fresh one holding just the
     /// bridged grant).
+    ///
+    /// As with [`PodStore::attach_odrl_policy`], `policy` and `request` are trusted input
+    /// from the embedding application; no pod content reaches this bridge.
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_permission(
         &mut self,
@@ -2102,6 +2105,10 @@ impl PodStore {
     /// authoritative and does not explicitly deny it, and refuses a mode some attached
     /// prohibition applies to. See [`odrl_enforce`] for the action-to-mode mapping and the graphs it
     /// never touches.
+    ///
+    /// The policy is trusted input from the embedding application, like the
+    /// [`AccessProvenance`] and [`VerifiedCredentials`] channels: nothing a session writes
+    /// into the pod is ever attached, so pass only policies the application itself vetted.
     ///
     /// # Errors
     ///

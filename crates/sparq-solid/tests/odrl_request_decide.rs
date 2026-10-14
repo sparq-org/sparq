@@ -1208,3 +1208,37 @@ fn read_prohibitions_reach_update_conditions() {
     assert!(copied.contains("hello"), "readable data is copied: {copied}");
     assert!(!copied.contains("private"), "prohibited data leaked: {copied}");
 }
+
+/// Policies come only from the embedding application through
+/// [`PodStore::attach_odrl_policy`]: an ODRL policy a session writes into pod documents
+/// it controls, including its own access-control document, grants nothing, while the
+/// same policy attached by the application does.
+#[test]
+fn policies_in_pod_data_are_never_attached() {
+    let bob_acl = "\
+<https://pod.ex/bob/x#it> <https://ex.dev/ns#title> \"bob\" <https://pod.ex/bob/x> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/bob/> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/bob/> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#agent> <https://bob.ex/card#me> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Write> <https://pod.ex/bob/.acl> .
+<https://pod.ex/bob/.acl#b> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Control> <https://pod.ex/bob/.acl> .
+";
+    let mut s = bare_store_with(bob_acl);
+    let bob = session(Some(BOB), None);
+    for doc in ["https://pod.ex/bob/x", "https://pod.ex/bob/.acl"] {
+        let ins = format!(
+            "INSERT DATA {{ GRAPH <{doc}> {{ \
+             <{doc}#p> a <{ODRL}Set> ; <{ODRL}permission> <{doc}#r> . \
+             <{doc}#r> <{ODRL}action> <{ODRL}read> ; <{ODRL}target> <{N2}> ; \
+             <{ODRL}assignee> <{BOB}> }} }}"
+        );
+        s.update_as(&bob, &ins)
+            .unwrap_or_else(|e| panic!("bob may write {doc}: {e}"));
+    }
+    assert!(!reads(&s, &bob, N2), "a stored policy granted access");
+    s.attach_odrl_policy(policy("permission", "read", "", Some(BOB), Some(N2)).expect("policy"))
+        .expect("attach");
+    assert!(reads(&s, &bob, N2), "the attached policy grants access");
+}
