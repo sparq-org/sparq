@@ -11653,5 +11653,60 @@ mod tests {
         for key in [format!("{doc}.meta.meta"), format!("{doc}.meta.meta.meta")] {
             assert!(st.store.meta(&key).await.unwrap().is_none(), "{key}");
         }
+        // Once the resource is deleted, nothing of it is left there either.
+        let delete = req(Method::DELETE, "/doc.txt", &[], "");
+        let r = handle(&st, &delete, &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert_eq!(
+            status(Method::GET, "/doc.txt.meta.meta", agent(OWNER)).await,
+            StatusCode::NOT_FOUND
+        );
+        assert!(st.store.meta(&record).await.unwrap().is_none());
+    }
+
+    /// The same for a create that is set aside (it landed, reported a failure, and could not be
+    /// taken back): its linkset's record answers as one where nothing was ever created.
+    #[tokio::test]
+    async fn a_linksets_record_is_no_resource_while_a_create_is_set_aside() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let carol = "https://carol.example/#me";
+        let json_only = json!([{"leftOperand": "format", "operator": "eq", "rightOperand": JSON}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": carol,
+                "constraint": json_only}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("carol", grant);
+        let uri = st.cfg.absolute("/new.txt");
+        store
+            .fail_after_create
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        let h = [("slug", "new.txt"), ("content-type", "text/plain")];
+        let r = create(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER), &root).await;
+        store
+            .fail_after_create
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri), "the create is set aside");
+        let status = |method: Method, path: String, who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("content-type", JSON_PATCH)];
+                handle(&st, &req(method, &path, &h, "[]"), &who)
+                    .await
+                    .status()
+            }
+        };
+        for who in [agent(OWNER), agent(carol), Agent::anonymous()] {
+            for method in [Method::GET, Method::PATCH] {
+                let created = status(method.clone(), "/new.txt.meta.meta".into(), who.clone());
+                let never = status(method.clone(), "/never.txt.meta.meta".into(), who.clone());
+                assert_eq!(created.await, never.await, "{method} {:?}", who.subject);
+            }
+        }
     }
 }
