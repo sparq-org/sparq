@@ -5135,6 +5135,57 @@ mod tests {
         "<https://pod.example/alice/doc#me> <http://xmlns.com/foaf/0.1/name> \"X\" .";
 
     #[tokio::test]
+    async fn relabelling_the_same_bytes_changes_the_etag() {
+        // The Content-Type is part of the representation: re-storing identical bytes under another
+        // media type must mint a new validator, so the old tag no longer passes If-Match and a
+        // conditional GET holding it is not a 304.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let turtle_tag =
+            etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        let mut plain = HeaderMap::new();
+        plain.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+        put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/doc".parse().unwrap(),
+            plain.clone(),
+            AxBytes::from(COND_DOC),
+        )
+        .await
+        .expect("relabel as text/plain");
+        let plain_read = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+        assert_eq!(
+            plain_read.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/plain"
+        );
+        let plain_tag = etag_of(&plain_read);
+        assert_ne!(plain_tag, turtle_tag);
+
+        let mut cond = HeaderMap::new();
+        cond.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_str(&turtle_tag).unwrap(),
+        );
+        let resp = get_with(&state, owner_token(), "/alice/doc", cond).await;
+        assert_eq!(resp.status(), StatusCode::OK, "the Turtle tag must not 304");
+
+        plain.insert(
+            header::IF_MATCH,
+            HeaderValue::from_str(&turtle_tag).unwrap(),
+        );
+        let stale = put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/doc".parse().unwrap(),
+            plain,
+            AxBytes::from(COND_DOC),
+        )
+        .await
+        .unwrap_or_else(IntoResponse::into_response);
+        assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+    }
+
+    #[tokio::test]
     async fn get_stored_tag_with_accept_jsonld_is_200_not_304() {
         // (a) An ETag identifies a REPRESENTATION: a client holding the stored-Turtle tag that asks
         // for JSON-LD does NOT hold that representation — it must get a fresh 200, never a 304.
