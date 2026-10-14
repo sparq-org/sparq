@@ -131,8 +131,10 @@ class ExactEvaluatorSelection(unittest.TestCase):
         self.assertEqual(trigger_paths(workflow, "merge_group"), [])
 
     def test_pull_request_inputs_are_a_zk_only_subset(self):
-        self.assertLessEqual(selector.PR_FILES, selector.EXACT_FILES)
         self.assertLessEqual(set(selector.PR_PREFIXES), set(selector.EXACT_PREFIXES))
+        for path in selector.PR_FILES:
+            self.assertTrue(selector.relevant_path(path), path)
+            self.assertTrue((ROOT / path).is_file(), path)
         for path in ("crates/sparq-engine/src/exec.rs", "crates/sparq-core/Cargo.toml",
                      "Cargo.lock", "Cargo.toml"):
             self.assertFalse(path.startswith(selector.PR_PREFIXES) or path in selector.PR_FILES,
