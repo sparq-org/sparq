@@ -1428,3 +1428,54 @@ fn unloaded_imports_leave_declarations_open() {
     );
     assert_eq!(check_dl(&d, &o).verdict(), Some(false));
 }
+
+// ===================== fifth review round =====================
+
+#[test]
+fn rdf_property_with_characteristic_companions_is_read() {
+    let (d, _, o) = ok(":p a rdf:Property, owl:TransitiveProperty . :a :p :b .");
+    assert!(logical(&o).contains(&Axiom::TransitiveObjectProperty(OP::Named(ex(&d, "p")))));
+    ok(":p a rdf:Property, owl:InverseFunctionalProperty . :a :p :b .");
+    // FunctionalProperty alone does not settle the kind; a declaration does.
+    ok(":p a rdf:Property, owl:FunctionalProperty, owl:DatatypeProperty . :a :p \"x\" .");
+}
+
+#[test]
+fn imports_leave_only_repairable_datatype_errors_open() {
+    let imports = "<http://ex/o> a owl:Ontology ; owl:imports <http://ex/other> .";
+    let verdict_with = |body: &str| verdict(&format!("{imports} {body}"));
+    // A cyclic local definition stays a violation whatever the import holds.
+    assert_eq!(
+        verdict_with(":dt a rdfs:Datatype ; owl:equivalentClass [ a rdfs:Datatype ; owl:datatypeComplementOf :dt ] ."),
+        Some(false)
+    );
+    // Two local definitions stay a violation.
+    assert_eq!(
+        verdict_with(":dt a rdfs:Datatype ; owl:equivalentClass xsd:integer, xsd:string ."),
+        Some(false)
+    );
+    // A literal of a datatype outside the map, and a reserved unknown datatype, stay too.
+    assert_eq!(
+        verdict_with(&format!("{DECLS} :a :d \"x\"^^:dt .")),
+        Some(false)
+    );
+    assert_eq!(
+        verdict_with(&format!("{DECLS} :d rdfs:range xsd:date .")),
+        Some(false)
+    );
+    // A datatype the import may define leaves the verdict open.
+    assert_eq!(verdict_with(&format!("{DECLS} :d rdfs:range :dt .")), None);
+    assert_eq!(verdict_with(":dt a rdfs:Datatype ."), None);
+}
+
+#[test]
+fn non_xml_characters_are_ill_typed() {
+    for lit in [
+        "\"a\\u0000b\"^^xsd:string",
+        "\"\\u0000\"",
+        "\"x\\u0008\"@en",
+    ] {
+        let v = violations(&with_decls(&format!(":a :d {lit} .")));
+        assert_eq!(v, vec![ViolationKind::IllTypedLiteral], "{lit}");
+    }
+}

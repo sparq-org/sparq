@@ -155,17 +155,21 @@ pub fn check_dl(dict: &Dict, onto: &Ontology) -> DlProfileReport {
         );
         // An unloaded import may declare the entities, define the datatypes and settle the
         // property kinds these violations are about, so they are not definite.
-        let (open, kept): (Vec<Violation>, Vec<Violation>) =
-            std::mem::take(&mut c.out).into_iter().partition(|v| {
-                matches!(
-                    v.kind,
-                    ViolationKind::Undeclared
-                        | ViolationKind::UnknownDatatype
-                        | ViolationKind::InvalidDatatypeDefinition
-                        | ViolationKind::ExtractionNote
-                )
-            });
-        c.out = kept;
+        // Missing declarations and missing definitions are repairable; local errors (a
+        // cyclic, repeated or built-in definition, a literal of an unknown datatype) are not.
+        let repairable = std::mem::take(&mut c.repairable);
+        let mut open = Vec::new();
+        for (i, v) in std::mem::take(&mut c.out).into_iter().enumerate() {
+            let missing = matches!(
+                v.kind,
+                ViolationKind::Undeclared | ViolationKind::ExtractionNote
+            );
+            if missing || repairable.contains(&i) {
+                open.push(v);
+            } else {
+                c.out.push(v);
+            }
+        }
         for v in open {
             c.unchecked("declarations an unloaded import may supply", &v.source);
         }
@@ -195,6 +199,9 @@ struct Checker<'a> {
     onto: &'a Ontology,
     v: Vocab,
     out: Vec<Violation>,
+    /// Indices into `out` of violations an unloaded import could repair (a missing
+    /// declaration or datatype definition the import might supply).
+    repairable: FxHashSet<usize>,
     unchecked: Vec<Unchecked>,
 }
 
@@ -208,6 +215,7 @@ impl<'a> Checker<'a> {
             onto,
             v: Vocab::intern(dict),
             out: Vec::new(),
+            repairable: FxHashSet::default(),
             unchecked: Vec::new(),
         }
     }
@@ -860,7 +868,8 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
-        let mut found: Vec<(ViolationKind, String, Vec<usize>)> = Vec::new();
+        // The flag marks a violation an unloaded import could repair.
+        let mut found: Vec<(ViolationKind, String, Vec<usize>, bool)> = Vec::new();
         let mut not_checked: Vec<(&'static str, Vec<usize>)> = Vec::new();
         let xml_literal = format!("{RDF}XMLLiteral");
         // Every literal of the ontology, with the triples it came from.
@@ -896,6 +905,7 @@ impl<'a> Checker<'a> {
                         l.datatype
                     ),
                     source.to_vec(),
+                    false,
                 )),
                 // §5.7 / §9.4: only datatype-map datatypes have lexical forms; a declared or
                 // defined datatype has an empty lexical space.
@@ -906,6 +916,7 @@ impl<'a> Checker<'a> {
                         l.datatype
                     ),
                     source.to_vec(),
+                    false,
                 )),
             }
         }
@@ -916,12 +927,15 @@ impl<'a> Checker<'a> {
                     let iri = iri_of(self.dict, *id).unwrap_or_default();
                     let defined = definitions.get(id).is_some_and(|d| d.len() == 1);
                     if !datatypes::is_datatype_map_iri(&iri) && !defined {
+                        // An import may define a non-reserved datatype no local axiom defines.
+                        let repairable = !definitions.contains_key(id) && !self.is_reserved(*id);
                         found.push((
                             ViolationKind::UnknownDatatype,
                             format!(
                                 "{iri} is neither in the OWL 2 datatype map nor defined by exactly one DatatypeDefinition"
                             ),
                             rec.source.clone(),
+                            repairable,
                         ));
                     }
                 }
@@ -948,7 +962,12 @@ impl<'a> Checker<'a> {
                             },
                         };
                         if let Some(msg) = problem {
-                            found.push((ViolationKind::InvalidFacet, msg, rec.source.clone()));
+                            found.push((
+                                ViolationKind::InvalidFacet,
+                                msg,
+                                rec.source.clone(),
+                                false,
+                            ));
                         }
                     }
                 }
@@ -976,6 +995,7 @@ impl<'a> Checker<'a> {
                         "{iri} is neither in the OWL 2 datatype map nor defined by exactly one DatatypeDefinition"
                     ),
                     src,
+                    !self.is_reserved(id),
                 ));
             }
         }
@@ -990,18 +1010,21 @@ impl<'a> Checker<'a> {
                     ViolationKind::InvalidDatatypeDefinition,
                     format!("{iri} is a built-in datatype and cannot be redefined"),
                     src,
+                    false,
                 ));
             } else if definitions[id].len() > 1 {
                 found.push((
                     ViolationKind::InvalidDatatypeDefinition,
                     format!("{iri} has more than one DatatypeDefinition"),
                     src,
+                    false,
                 ));
             } else if !declared_dt.contains(id) {
                 found.push((
                     ViolationKind::InvalidDatatypeDefinition,
                     format!("{iri} is defined but not declared as a datatype"),
                     src,
+                    true,
                 ));
             }
         }
@@ -1034,10 +1057,14 @@ impl<'a> Checker<'a> {
                     ViolationKind::InvalidDatatypeDefinition,
                     format!("the definition of {} is cyclic", self.name(start)),
                     src,
+                    false,
                 ));
             }
         }
-        for (k, m, s) in found {
+        for (k, m, s, repairable) in found {
+            if repairable {
+                self.repairable.insert(self.out.len());
+            }
             self.report(k, m, &s);
         }
         for (rule, s) in not_checked {
