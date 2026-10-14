@@ -30,6 +30,21 @@ export {
   type QueryForm,
 } from './sparql.js';
 export { init } from './wasm.js';
+// #7031 — OWL 2 DL reasoning; its wasm bundle (wasm-dl/) loads lazily on the first call.
+export {
+  checkOwlDl,
+  type OwlDlResult,
+  type OwlDlOptions,
+  type OwlDlBudget,
+  type OwlDlReason,
+  type OwlDlProfile,
+  type OwlDlViolation,
+  type OwlDlViolationKind,
+  type OwlDlUnchecked,
+  type OwlDlUnknownKind,
+  type OwlDlRefusalKind,
+  type OwlDlTriple,
+} from './owl-dl.js';
 export { decompress, decompressToString, sniffCodec, type CompressionCodec } from './decompress.js';
 export {
   SparqDictionaryClient,

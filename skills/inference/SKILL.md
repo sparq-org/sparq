@@ -746,6 +746,10 @@ violation gives `Unknown(NotInDl)`, an exhausted step budget gives
 `Unknown(ResourceBudget)`, and unloaded imports turn `Consistent` into
 `Unknown(ImportsNotLoaded)` with no classification. It never guesses a verdict. Its answers are checked against
 HermiT on a seeded corpus (`tests/owl2dl_reasoner.rs`).
+From JavaScript the same pipeline (parse, `extract`, `check`) is `checkOwlDl(tbox, abox?,
+options?)` in `@sparq-org/sparq`, backed by the separate, lazily-loaded `crates/sparq-dl-wasm`
+bundle; it returns the report as JSON with the offending triples as N-Triples lines — see
+[`../javascript-wasm/references/owl-dl.md`](../javascript-wasm/references/owl-dl.md).
 
 ## Common recipes
 

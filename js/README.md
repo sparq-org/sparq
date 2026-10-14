@@ -43,13 +43,16 @@ browser. (The wasm bundle bytes are tracked per-commit on the perf dashboard,
   interface** (the set algebra `union`/`intersection`/`difference`/… on top of
   `DatasetCore`), with the binary set ops **interoperating with foreign RDF/JS
   datasets** (N3.js, `@rdfjs/dataset`), not just our own.
+- OWL 2 DL reasoning: `checkOwlDl(tbox, abox?)` — consistency, the OWL 2 DL
+  profile check, unsatisfiable classes and inferred subsumptions, from a
+  **separate** wasm bundle that is loaded only on the first call.
 
 ## Install / build
 
 The package ships the wasm artifact; from a source checkout build it first:
 
 ```sh
-npm run build   # wasm-pack build ../crates/sparq-wasm (--features shacl) + tsc
+npm run build   # wasm-pack build ../crates/sparq-wasm (web + nodejs) and ../crates/sparq-dl-wasm, then tsc
 npm test        # node --test against the built dist/
 ```
 
@@ -325,6 +328,34 @@ If you only need the low-level engine handle, the wasm-pack `--target web` glue
 is itself a real ESM module — `import init, { Store } from ".../wasm/sparq_wasm.js";
 await init();` — but `Dataset` (and `SparqStore`) is the ergonomic, memoised-init
 entry to prefer in an app.
+
+### OWL 2 DL reasoning: `checkOwlDl`
+
+```js
+import { checkOwlDl } from '@sparq-org/sparq';
+
+const r = await checkOwlDl(tboxTurtle, aboxTurtle); // options: { format, budget: { maxSteps, maxNodes } }
+r.consistent;          // true | false | 'unknown'
+r.reason;              // null, or { kind: 'OutOfFragment' | 'NotInDl' | 'ResourceBudget' | …, triples: [...] }
+r.profile.dl;          // OWL 2 DL profile: true | false | 'unknown', with violations[] + unchecked[]
+r.unsatisfiable;       // named classes, sorted
+r.inferredSubClassOf;  // [[sub, super], …] entailed but not asserted, sorted
+r.classification;      // 'complete' | { unknown: … } | null (not consistent)
+```
+
+The TBox and ABox are merged into one graph. The reasoner lives in its own wasm
+bundle (`wasm-dl/`, from `crates/sparq-dl-wasm`) which `checkOwlDl` imports
+dynamically on its first call, so importing `@sparq-org/sparq` never loads it.
+`store.checkOwlDl(abox?, { budget })` uses a store's default graph as the TBox.
+
+Answers are three-valued and never guessed. The decided fragment is ALCHIQ
+with `hasSelf`, transitive roles and `R∘R ⊑ R` (inverses, qualified cardinality,
+the role characteristics and the ABox included); **data properties, datatypes
+and nominals currently answer `consistent: 'unknown'` with reason
+`OutOfFragment`** and the offending input triples (as N-Triples lines). A graph
+the OWL 2 RDF mapping cannot read also resolves `'unknown'` (reason `Malformed`,
+`Unsupported`, …); only a parse error rejects. Full result shape:
+[`skills/javascript-wasm/references/owl-dl.md`](../skills/javascript-wasm/references/owl-dl.md).
 
 ### Talking to a sparq server: dictionary-fetch protocol
 

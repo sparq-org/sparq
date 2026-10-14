@@ -7,6 +7,7 @@
 import type * as RDF from '@rdfjs/types';
 import { Bindings } from './bindings.js';
 import { decompressToString, type CompressionCodec } from './decompress.js';
+import { checkOwlDl, type OwlDlOptions, type OwlDlResult } from './owl-dl.js';
 import {
   detectQueryForm,
   parseNTriples,
@@ -537,6 +538,19 @@ export class SparqStore implements RDF.StringSparqlQueryable<RDF.BindingsResultS
    */
   dump(format: SerializeFormat | string = 'turtle', options: SerializeOptions = {}): string {
     return this.serialize(format, options);
+  }
+
+  /**
+   * OWL 2 DL check of the store's **default graph** as the TBox, plus an optional `abox`
+   * document (Turtle or N-Triples): consistency, the OWL 2 DL profile check, unsatisfiable
+   * classes and inferred subsumptions. A convenience over the free {@link checkOwlDl} — the
+   * default graph is serialised to Turtle and both documents are parsed as Turtle (N-Triples
+   * is a subset). Named graphs are not included. Lazily loads the separate DL wasm bundle on
+   * first use.
+   */
+  checkOwlDl(abox?: string, options: Omit<OwlDlOptions, 'format'> = {}): Promise<OwlDlResult> {
+    const tbox = this.serialize('turtle', { pretty: false });
+    return checkOwlDl(tbox, abox, { budget: options.budget, format: 'turtle' });
   }
 
   /**
