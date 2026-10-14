@@ -3967,7 +3967,8 @@ pub const LINKSET_PUT_BODY: usize = LINKSET_SERVED_BYTES;
 pub const LINKSET_PUT_PARSE_AMPLIFICATION: usize = 4;
 
 /// What a linkset PUT's scan may charge a body before it is refused: what parsing it may then
-/// allocate stays within [`LINKSET_COST_BUDGET`] ([`LINKSET_PUT_PARSE_AMPLIFICATION`]).
+/// allocate, beyond the body itself, stays within [`LINKSET_COST_BUDGET`]
+/// ([`LINKSET_PUT_PARSE_AMPLIFICATION`]).
 pub const LINKSET_PUT_SCAN_BUDGET: usize = LINKSET_COST_BUDGET / LINKSET_PUT_PARSE_AMPLIFICATION;
 
 /// Why [`read_linkset`] did not read a body.
@@ -4777,7 +4778,7 @@ async fn linkset<S: Store + 'static>(
             // A whole linkset replaces the user-managed one (lws10-core 9.3.2), in one write. The
             // body is held to what the metadata may hold, and read only once a scan that keeps
             // nothing has charged it what parsing it allocates ([`read_linkset`]), so a body of
-            // any shape costs at most [`LINKSET_COST_BUDGET`].
+            // any shape costs at most [`LINKSET_COST_BUDGET`] beyond the body itself.
             // A partial PUT (RFC 9110 section 14.5) is refused here as for any resource: taken as
             // a whole linkset, it would replace the linkset with the part.
             if req.headers.contains_key(header::CONTENT_RANGE) {
@@ -4800,9 +4801,7 @@ async fn linkset<S: Store + 'static>(
             }
             // A writer need not be able to read the linkset, so a 412 carries no tag of it, as
             // for a PATCH.
-            if let Precondition::Failed | Precondition::NotModified =
-                evaluate(&req.headers, Some(&etag), None, false)
-            {
+            if let Precondition::Failed = evaluate(&req.headers, Some(&etag), None, false) {
                 return problem(StatusCode::PRECONDITION_FAILED, None);
             }
             let document = match read_linkset(&req.body, LINKSET_PUT_SCAN_BUDGET) {

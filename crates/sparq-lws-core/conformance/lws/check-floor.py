@@ -50,13 +50,13 @@ def load(path):
 
 def inapplicable_for(reason: str, why: dict) -> bool:
     """Whether `reason` is Touchstone's (TestExecution.java) for `why`'s precondition failing on
-    its assertion with a value `why["got"]` matches: "precondition '<label>' does not hold:
-    <assertion> expected <expected>, got <actual>"."""
-    head = f"precondition '{why['precondition']}' does not hold: {why['assertion']} expected "
-    if not reason.startswith(head) or ", got " not in reason[len(head):]:
-        return False
-    got = reason[len(head):].rsplit(", got ", 1)[1]
-    return re.fullmatch(why["got"], got) is not None
+    its assertion, which expected what `why` names, with a value `why["got"]` matches:
+    "precondition '<label>' does not hold: <assertion> expected <expected>, got <actual>"."""
+    head = (
+        f"precondition '{why['precondition']}' does not hold: "
+        f"{why['assertion']} expected {why['expected']}, got "
+    )
+    return reason.startswith(head) and re.fullmatch(why["got"], reason[len(head):]) is not None
 
 
 def valid_pattern(pattern: str) -> bool:
@@ -107,7 +107,7 @@ def check(tests, floor_doc: dict) -> tuple:
         # capability not declared) can stand in; only the value the assertion got is a pattern.
         elif not (
             isinstance(why, dict)
-            and set(why) == {"precondition", "assertion", "got"}
+            and set(why) == {"precondition", "assertion", "expected", "got"}
             and all(isinstance(v, str) and v for v in why.values())
             and valid_pattern(why["got"])
         ):
@@ -175,6 +175,7 @@ def self_test():
         seen.replace("PUT, PATCH", "PATCH, X-PUT"),
         seen.replace("PUT, PATCH", "PATCH") + "\n  exchange: PUT -> 405",
         seen + " (PUT refused)",
+        seen.replace("got GET, HEAD, PUT, PATCH", "got X, got PUT"),
         "precondition 'find its linkset' does not hold: " + seen.split(": ", 1)[1],
     ):
         assert not check(tests_with(z, result(probe, "inapplicable", reason=reason)), floor_doc)[0], reason
@@ -225,6 +226,7 @@ def self_test():
     for reason in (
         "precondition 'find its linkset' does not hold: " + seen.split(": ", 1)[1],
         seen.split(": ", 1)[0] + ": status expected 200, got 500",
+        seen.replace("(?!.*\\bPUT\\b)", "(?!.*\\bPATCH\\b)"),
         "precondition 'x|.*' does not hold: header Allow matches expected y, got PUT",
     ):
         assert not check(tests_with(z, result(probe, "inapplicable", reason=reason)), loose)[0], reason

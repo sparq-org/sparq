@@ -315,10 +315,9 @@ What the server exposes, all discoverable from the storage description
   `412`, another content type on a `PUT` `415`). A linkset `PUT` replaces every user-managed link
   in one write and is checked as a `PATCH` result is (its `204` carries no `ETag`, since what is
   stored is the document resolved and with the server-managed links; a `GET` reads the tag); its body is at most what the metadata may
-  hold, 256 KiB (`413` past it, unread), and before it is parsed a scan that keeps nothing
-  charges it as the patch is charged and refuses it (`413`) past 512 KiB, so parsing it (the same
-  reader again, keeping what it reads), which
-  holds at most a measured, doubled four times that charge, stays within 2 MiB; a number in it
+  hold (`413` past it, unread), and before it is parsed a scan that keeps nothing charges it as
+  the patch is charged and refuses it (`413`) past what keeps parsing it (the same reader again,
+  keeping what it reads) within the linkset cost budget beyond the body itself; a number in it
   gets `422`, text that is not JSON (or nests past what the parser reads) `400`, a partial `PUT` (`Content-Range`) `400`. A linkset `PATCH` or `PUT` changes only user-managed links: the
   server-managed `up`, `type`, `self` and `linkset` relations of the resource keep the server's
   values, and a result that is not a linkset document gets `422`. Its relative `anchor` and
