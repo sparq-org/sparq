@@ -485,12 +485,16 @@ pub fn lang_const(language: &str) -> Fr {
 /// joined here — joining them is a follow-on, because it narrows what a
 /// DualLeafV1 graph may CONTAIN (e.g. the XSD-legal but non-canonical
 /// `"1"^^xsd:boolean` becomes uncommittable) and re-bases those leaves. Until
-/// they join, those literals take the degenerate string lane, and the §3.2
-/// no-collision property still holds by construction:
-/// - `xsd:boolean`'s real hooks are `{0, 1}` and [`VALUE_NONE`] is neither;
-/// - the `xsd:dateTime`/`xsd:date` lanes fold their epoch SCALE into their
-///   `DATATYPE_CONST` (`blake3("<iri>@epochscale=3")`), which is not the bare
-///   `blake3(iri)` the degenerate folds — so the consts are disjoint outright.
+/// they join, those literals take the degenerate string lane. Each of those lanes
+/// folds a tagged `DATATYPE_CONST` that is not the bare `blake3(iri)` the
+/// degenerate component folds, so the consts are disjoint outright and a
+/// string-lane leaf cannot be opened on a value lane whatever hook the lane's
+/// member accepts:
+/// - `xsd:boolean`: `blake3("<iri>@domain=bit")`
+///   (`dual_leaf_boolean::boolean_datatype_const`);
+/// - `xsd:dateTime`/`xsd:date`: `blake3("<iri>@epochscale=3")`.
+///
+/// Any further lane left on the string lane needs the same tagged constant.
 pub fn is_hookable_datatype(datatype_iri: &str) -> bool {
     matches!(datatype_iri, XSD_INTEGER | XSD_DECIMAL | XSD_DOUBLE)
 }
@@ -1193,21 +1197,24 @@ mod tests {
     #[test]
     fn unrouted_lane_hooks_cannot_collide_the_degenerate_component() {
         // The §3.2 no-collision obligation for the lanes NOT yet routed (the
-        // documented seam). `xsd:boolean` shares the bare `blake3(IRI)`
-        // DATATYPE_CONST with its degenerate form, so distinctness there rests on
-        // VALUE_NONE differing from both boolean hooks {0, 1}. The dateTime/date
-        // lanes fold their epoch scale into the const, so the consts are disjoint
-        // outright and the hook value is irrelevant.
-        assert_ne!(VALUE_NONE, 0);
-        assert_ne!(VALUE_NONE, 1);
+        // documented seam). Every such lane folds a tagged DATATYPE_CONST that is
+        // not the bare `blake3(IRI)` its degenerate form folds, so the consts are
+        // disjoint outright and no hook value, VALUE_NONE included, can bridge
+        // them. The value-lane members range-check hooks to u64, so a shared const
+        // would let a degenerate leaf open with hook VALUE_NONE.
         let boolean_iri = crate::dual_leaf_boolean::XSD_BOOLEAN;
         assert!(!is_hookable_datatype(boolean_iri));
+        let boolean_const = crate::dual_leaf_boolean::boolean_datatype_const();
+        assert_ne!(boolean_const, datatype_const(boolean_iri));
         for lexical in ["true", "false"] {
             let lit = Literal::new_typed_literal(lexical, NamedNode::new(boolean_iri).unwrap());
             let real = crate::dual_leaf_boolean::encode_boolean(&lit).unwrap();
-            assert_eq!(real.datatype_const, datatype_const(boolean_iri));
+            assert_eq!(real.datatype_const, boolean_const);
             assert_ne!(real.value_component(), degenerate_value_component(boolean_iri, None));
         }
+        let none_on_boolean_lane =
+            poseidon2::hash(&[Fr::from(VALUE_NONE), boolean_const, Fr::from(LANG_NONE)]);
+        assert_ne!(none_on_boolean_lane, degenerate_value_component(boolean_iri, None));
         for (iri, real_const) in [
             (
                 crate::dual_leaf_datetime::XSD_DATE_TIME,
