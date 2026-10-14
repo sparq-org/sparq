@@ -2399,29 +2399,23 @@ async fn mint_child_iri<S: Store>(
     generate_unique(store, base, stem, as_container).await
 }
 
-/// Generate a unique child IRI under `base`, optionally seeded by `stem`. Deterministic-but-unique:
-/// a monotonic counter + the stem, retried until the index reports it free. A container child gets a
-/// trailing slash.
+/// Generate a unique child IRI under `base`, optionally seeded by `stem`: the stem and a random
+/// suffix, retried until the index reports it free. Nothing in the name follows from what else was
+/// minted, here or in any other container, or when. A container child gets a trailing slash.
 async fn generate_unique<S: Store>(
     store: &S,
     base: &str,
     stem: Option<&str>,
     as_container: bool,
 ) -> Result<String, ServerError> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::UNIX_EPOCH;
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
     let prefix = stem.unwrap_or("resource");
     let suffix = if as_container { "/" } else { "" };
-    // Seed with a coarse timestamp so names are unique across process restarts too.
-    let seed = crate::clock::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    for attempt in 0..64u64 {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let candidate = format!("{base}/{prefix}-{seed:x}-{n:x}-{attempt:x}{suffix}");
+    for _ in 0..64 {
+        let mut random = [0u8; 12];
+        getrandom::getrandom(&mut random)
+            .map_err(|e| ServerError::Storage(format!("OS RNG unavailable: {e}")))?;
+        let id: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let candidate = format!("{base}/{prefix}-{id}{suffix}");
         if !store.exists(&candidate).await? {
             return Ok(candidate);
         }

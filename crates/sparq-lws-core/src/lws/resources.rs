@@ -3581,8 +3581,11 @@ async fn delete<S: Store + 'static>(
         Ok(m) => m,
         Err(r) => return r,
     };
-    // A data resource's date is compared only when it has one; a container's listing may have
-    // one.
+    // The delete is authorized, now that its lock is held, before anything about the target (its
+    // validators, its members) answers it.
+    if let Err(r) = recheck(state, Action::Delete, uri, agent).await {
+        return r;
+    }
     if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
         return r;
     }
@@ -3621,9 +3624,8 @@ async fn delete<S: Store + 'static>(
         }
     }
     // Delete on the container is not Delete on what is in it: a recursive delete removes nothing
-    // unless the agent may delete every descendant. `uri` itself is checked again too, now that
-    // its lock is held.
-    for (node, _) in &doomed {
+    // unless the agent may delete every descendant.
+    for (node, _) in doomed.iter().filter(|(node, _)| node != uri) {
         if let Err(r) = recheck(state, Action::Delete, node, agent).await {
             return r;
         }
