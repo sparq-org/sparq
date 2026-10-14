@@ -134,13 +134,16 @@ pub fn load_reader_parallel<R: std::io::Read + Send>(reader: R, format: &str) ->
 
 // sq-7d3dj.18 — the byte-level N-Triples/N-Quads fast path does NOT validate IRIs against
 // RFC-3987 by default (the serial oxttl path DOES). It does enforce the N-Triples grammar
-// (#2716): IRIREF characters, UCHAR-only IRI escapes, an absolute scheme, BLANK_NODE_LABEL
+// (#2716): IRIREF characters (a `\u`/`\U` escape is re-checked after decoding, so an
+// escaped space, `<`, `>` or other forbidden character is a parse error in every IRI
+// position), UCHAR-only IRI escapes, an absolute scheme, BLANK_NODE_LABEL
 // (full PN_CHARS ranges; a label may abut the next term, `_:s<p>`), string ECHAR/UCHAR and
 // no raw line breaks, LANGTAG (direction ltr/rtl), IRI-only predicates and no literal
 // subjects, one statement per line (no line break inside a statement; only WS and a comment
 // after its `.`), and it accepts RDF 1.2 `VERSION "..."` directives. The
 // OPT-IN `iri-fast` feature on `sparq-core` (OFF by default) turns that validation on for the
-// byte parser via a prefix-memoized fast path IN FRONT of `oxiri` — a last-N validated
+// byte parser — subject, predicate, object, datatype and graph IRIs alike — via a
+// prefix-memoized fast path IN FRONT of `oxiri` — a last-N validated
 // `scheme://authority/` memo + a one-pass ASCII `iunreserved`/sub-delims suffix scan, falling
 // back to the full `oxiri` automaton on any non-ASCII / `%`-escape / `#` / delimiter anomaly.
 // It accepts EXACTLY what `oxiri::Iri::parse` accepts (an absolute IRI) — a MANDATORY
