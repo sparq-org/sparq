@@ -1515,8 +1515,22 @@ fn tc_pairs(pairs: &FxHashSet<(Id, Id)>) -> FxHashSet<(Id, Id)> {
 // The closure always equals a from-scratch engine run on (rules ∪ current base) — the
 // differential property test (tests/incremental_n3_prop.rs) asserts exactly that after
 // every random edit batch, for counting, layered-recursive, guarded, and fallback profiles.
+//
+// * **Closure limits** (GH #6854): the graph's `ClosureLimits` (`with_limits`) bound the
+//   counting path too. Each builtin substitutes through `bounded::substitute` and sizes
+//   its result with the text engine's checkpoint before building it (conclusions are
+//   simple terms and build nothing new); each propagation wave, and each round of a
+//   layer's local fixpoint, is one round of a `ClosureRounds` allowance. A term refused
+//   for its size, or a spent allowance, reaches the cut checkpoint as
+//   `FullRebuild::Refused`, and the graph rebuilds through the batch engine under the same
+//   limits (which refuses, failing the graph closed, or — near a round, fact or join-row
+//   boundary, where the two schedules differ — returns its closure). Each wave and layer
+//   round also gets a `JoinWork` allowance (`max_join_rows`, GH #6938) that `n3_fire` and
+//   the guard check charge per binding row and per firing. tests/
+//   incremental_n3_closure_limits.rs checks the two agree at every term-size limit it
+//   sweeps, through construction, insert and delete.
 
-use crate::n3::{parser as n3p, Term as N3Term};
+use crate::n3::{bounded, parser as n3p, Term as N3Term};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -1539,6 +1553,9 @@ pub enum N3Mode {
 }
 
 type NB = FxHashMap<String, N3Term>;
+
+/// A layer recomputation's (added, removed) diff of its derived facts.
+type LayerDiff = (Vec<[N3Term; 3]>, Vec<[N3Term; 3]>);
 
 /// Facts + the lookup indexes premise joins need ((pred,subj)→objects, (pred,obj)→subjects,
 /// pred→facts). The Term-level sibling of the engine's private `FactIndex`.
@@ -1660,8 +1677,9 @@ struct N3Compiled {
 /// A rules document that negates through a dependency cycle is refused by
 /// [`new`](Self::new). When base data makes the batch engine refuse the document later
 /// (a negation cycle inside a nested `log:conclusion` / `log:supports` closure over base
-/// formulas), the closure fails closed to the base facts alone and
-/// [`stratification_warning`](Self::stratification_warning) says why.
+/// formulas, or a closure past its [`ClosureLimits`](crate::n3::ClosureLimits), see
+/// [`with_limits`](Self::with_limits)), the closure fails closed to the base facts alone
+/// and [`stratification_warning`](Self::stratification_warning) says why.
 pub struct MaterializedN3Graph {
     rules_src: String,
     compiled: Option<Rc<N3Compiled>>,
@@ -1677,8 +1695,8 @@ pub struct MaterializedN3Graph {
     /// `None ⇔ counting active` contract exact for this cause. See review 1868.
     data_rule_fallback: Option<String>,
     /// NON-sticky fallback cause: the last counting run recorded a cut and the rules
-    /// negate, so the checkpoint ([`cut_gate`]) handed the rebuild to the checked engine.
-    /// Recomputed every `rematerialize`.
+    /// negate, or passed a closure limit, so the checkpoint ([`cut_gate`]) handed the
+    /// rebuild to the checked engine. Recomputed every `rematerialize`.
     cut_fallback: Option<String>,
     base: FxHashSet<[N3Term; 3]>,
     mode: N3Mode,
@@ -1708,6 +1726,8 @@ pub struct MaterializedN3Graph {
     /// runtime-parsed blank keeps its label (and the caller its handle on it) across
     /// mutations: an inserted fact naming that blank never moves the table's prefix.
     runtime_docs: crate::n3::RuntimeDocs,
+    /// The closure allowance every run of the graph gets ([`Self::with_limits`]).
+    limits: crate::n3::ClosureLimits,
 }
 
 /// The reserved label space in which [`MaterializedN3Graph`] shows the blank nodes that
@@ -1779,6 +1799,8 @@ struct N3Cx<'a> {
     /// The graph's cut record ([`crate::n3::bounded::Truncation`]). Kept apart from
     /// `unsupported`: a cut changes no result, so it never switches the evaluation path.
     cuts: &'a crate::n3::bounded::Truncation,
+    /// The round's join-work allowance ([`bounded::JoinWork`]), refused on `cuts`.
+    work: &'a bounded::JoinWork,
 }
 
 impl N3Cx<'_> {
@@ -1847,14 +1869,18 @@ fn n3_unify_atom(pat: &[N3Term; 3], fact: &[N3Term; 3], b: &NB) -> Option<NB> {
 
 /// Does the guard's inner conjunction match anywhere in the guard scope (under `b`; inner
 /// free variables are wildcards, bindings never leak — the engine's notIncludes semantics)?
-fn n3_guard_matches(inner: &[[N3Term; 3]], idx: &N3Index, b: &NB) -> bool {
+fn n3_guard_matches(inner: &[[N3Term; 3]], cx: &N3Cx, b: &NB) -> bool {
     let mut binds = vec![b.clone()];
     for pat in inner {
         let mut next = Vec::new();
         for bb in &binds {
             let (s, o) = (n3_apply(&pat[0], bb), n3_apply(&pat[2], bb));
-            for f in idx.candidates(&s, &pat[1], &o) {
+            for f in cx.guards.candidates(&s, &pat[1], &o) {
                 if let Some(nb) = n3_unify_atom(pat, &f, bb) {
+                    // A spent allowance refuses the run; the guard's answer is then moot.
+                    if !cx.work.charge(1, cx.cuts) {
+                        return false;
+                    }
                     next.push(nb);
                 }
             }
@@ -1873,27 +1899,42 @@ fn n3_guard_matches(inner: &[[N3Term; 3]], idx: &N3Index, b: &NB) -> bool {
 /// whitelist covers; anything outside (numeric-literal concatenation beyond integers,
 /// rdf:first/rest data lists as functional subjects) flags `unsupported` — the caller falls
 /// back to the batch engine, which handles them all.
+///
+/// Every term it builds passes the text engine's term-size checkpoint first (GH #6854): the
+/// subject and object are substituted through [`bounded::substitute`], which sizes a list
+/// (a builtin's argument list) from the borrowed terms before building it, and each result
+/// is sized from its borrowed inputs ([`crate::n3::counted_result_refused`],
+/// [`crate::n3::uri_refused`]). A term past `run`'s `max_term_bytes` is not built: the
+/// premise fails for this binding and the refusal is recorded on `run`, which the cut
+/// checkpoint reads ([`cut_gate::checkpoint`]) and hands to the checked engine.
 fn eval_n3_builtin(
     op: N3Builtin,
     s: &N3Term,
     o: &N3Term,
     b: &NB,
     unsupported: &Cell<bool>,
-    cuts: &crate::n3::bounded::Truncation,
+    run: &bounded::Truncation,
 ) -> Option<NB> {
-    let sv = n3_apply(s, b);
+    use crate::n3::{counted_result_refused, uri_refused, CountedFunc};
+    let sv = bounded::substitute(s, b, run)?;
     match op {
-        N3Builtin::LogEq => (sv == n3_apply(o, b)).then(|| b.clone()),
-        N3Builtin::LogNe => (sv != n3_apply(o, b)).then(|| b.clone()),
+        N3Builtin::LogEq => (sv == bounded::substitute(o, b, run)?).then(|| b.clone()),
+        N3Builtin::LogNe => (sv != bounded::substitute(o, b, run)?).then(|| b.clone()),
         N3Builtin::LogUri => {
-            let ov = n3_apply(o, b);
+            let ov = bounded::substitute(o, b, run)?;
             let mut nb = b.clone();
             match (&sv, &ov) {
                 (N3Term::Iri(i), _) => {
+                    if uri_refused(run, run, i, true) {
+                        return None;
+                    }
                     let lit = N3Term::Lit(i.clone(), N3_XSD_STRING.into(), None);
                     n3_unify(o, &lit, &mut nb).then_some(nb)
                 }
                 (N3Term::Var(_), N3Term::Lit(v, _, _)) => {
+                    if uri_refused(run, run, v, false) {
+                        return None;
+                    }
                     n3_unify(s, &N3Term::Iri(v.clone()), &mut nb).then_some(nb)
                 }
                 _ => None,
@@ -1907,6 +1948,9 @@ fn eval_n3_builtin(
                 }
                 return None;
             };
+            if counted_result_refused(run, CountedFunc::Concat, ms) {
+                return None;
+            }
             let mut out = String::new();
             for m in ms {
                 match m {
@@ -1955,9 +1999,12 @@ fn eval_n3_builtin(
             let (N3Term::Lit(text, _, _), N3Term::Lit(pat, _, _)) = (&ms[0], &ms[1]) else {
                 return None;
             };
+            if counted_result_refused(run, CountedFunc::Scrape, ms) {
+                return None;
+            }
             // A pattern the regex engine refuses is no match, as on the checked engine; the
             // cut is recorded on the graph's record and does not change the path.
-            let re = crate::n3::bounded::settle(cuts, crate::n3::bounded::regex(pat))?;
+            let re = bounded::settle(run, bounded::regex(pat))?;
             let cap = re.captures(text)?.get(1)?.as_str().to_string();
             let lit = N3Term::Lit(cap, N3_XSD_STRING.into(), None);
             let mut nb = b.clone();
@@ -1970,6 +2017,9 @@ fn eval_n3_builtin(
                 return None;
             }
             let N3Term::Lit(v, _, _) = &sv else { return None };
+            if counted_result_refused(run, CountedFunc::EncodeForUri, std::slice::from_ref(&sv)) {
+                return None;
+            }
             let lit = N3Term::Lit(crate::n3::encode_for_uri(v), N3_XSD_STRING.into(), None);
             let mut nb = b.clone();
             n3_unify(o, &lit, &mut nb).then_some(nb)
@@ -1999,6 +2049,9 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
                 let mut next = Vec::new();
                 for b in &binds {
                     if let Some(nb) = n3_unify_atom(pat, f, b) {
+                        if !cx.work.charge(1, cx.cuts) {
+                            return Vec::new();
+                        }
                         next.push(nb);
                     }
                 }
@@ -2068,6 +2121,10 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
                     let (s, o) = (n3_apply(&pat[0], b), n3_apply(&pat[2], b));
                     for f in cx.atom_candidates(&s, &pat[1], &o, phase) {
                         if let Some(nb) = n3_unify_atom(pat, &f, b) {
+                            // Each row is charged before it is kept, as the text engine does.
+                            if !cx.work.charge(1, cx.cuts) {
+                                return Vec::new();
+                            }
                             next.push(nb);
                         }
                     }
@@ -2086,9 +2143,13 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
                 n3_term_vars(o, &mut bound);
             }
             N3Atom::Guard { inner } => {
-                binds.retain(|b| !n3_guard_matches(inner, cx.guards, b));
+                binds.retain(|b| !n3_guard_matches(inner, cx, b));
             }
         }
+    }
+    // The firings [`n3_emit`] instantiates, charged before any is built.
+    if !cx.work.charge(binds.len().saturating_mul(rule.conclusions.len()), cx.cuts) {
+        return Vec::new();
     }
     binds
 }
@@ -2482,6 +2543,11 @@ pub(crate) fn n3_sccs(n: usize, edges: &FxHashMap<usize, FxHashSet<usize>>) -> V
 /// end in exactly the state a batch run over the current facts would produce. So no
 /// counting result may stand while its run carries a cut and the rules negate.
 ///
+/// A closure limit (GH #6854) is stricter: a term the run refused for its size was not
+/// built, so the counting result is missing derivations whatever the rules are. No
+/// counting result may stand once its run records a refusal; the checked engine then
+/// decides the closure under the same limits (and refuses it, failing the graph closed).
+///
 /// [`CountingOk`] has a private constructor: only [`checkpoint`] makes one. Every
 /// counting step takes one, and `propagate` returns its result only through
 /// [`checkpoint`], so no counting path can publish a closure the checkpoint did not pass.
@@ -2496,6 +2562,10 @@ mod cut_gate {
     pub(super) enum FullRebuild {
         /// A search was cut short. The batch engine decides a negation over it.
         Cut(&'static str),
+        /// The run passed a closure limit: a term past `max_term_bytes` was refused, or
+        /// a propagation ran past its round or fact allowance. The checked engine decides
+        /// the closure under the same limits.
+        Refused(String),
         /// The delta cannot be settled incrementally: evaluation met data outside the
         /// builtin-parity whitelist, a layer diff had the opposite sign, or the mutation
         /// itself requires a rebuild.
@@ -2519,6 +2589,9 @@ mod cut_gate {
         negates: bool,
         op: Op,
     ) -> Result<CountingOk, FullRebuild> {
+        if let Some(refused) = cuts.refusal() {
+            return Err(FullRebuild::Refused(refused));
+        }
         match cuts.get() {
             Some(why) if negates || op == Op::Shrink => Err(FullRebuild::Cut(why)),
             _ => Ok(CountingOk(())),
@@ -2537,10 +2610,64 @@ impl MaterializedN3Graph {
     /// [`N3Mode::Counting`] and ABox mutations are incremental; otherwise it runs in
     /// [`N3Mode::Fallback`] (every mutation re-runs the batch engine — always correct).
     ///
-    /// Errors only on rules-document parse failure.
+    /// Runs under the default [`ClosureLimits`](crate::n3::ClosureLimits); see
+    /// [`with_limits`](Self::with_limits).
+    ///
+    /// # Errors
+    ///
+    /// On a rules-document parse failure, unsupported `@forAll` quantifiers in a rule
+    /// premise or scoped body pattern, a document the batch engine refuses to stratify,
+    /// or a closure past its [`ClosureLimits`](crate::n3::ClosureLimits) (see
+    /// [`with_limits`](Self::with_limits)).
     pub fn new(rules_src: &str, base_facts: &[[N3Term; 3]]) -> Result<Self, String> {
-        let cuts = crate::n3::bounded::Truncation::top_level();
+        Self::with_limits(rules_src, base_facts, crate::n3::ClosureLimits::default())
+    }
+
+    /// [`new`](Self::new) under `limits`: the round, fact and term-size allowance of the
+    /// text engine's forward closure ([`ClosureLimits`](crate::n3::ClosureLimits)), kept
+    /// for the graph's life and applied to every rebuild and mutation (GH #6854).
+    ///
+    /// The counting path sizes each term it would build (a builtin's argument list and
+    /// result) with the text engine's checkpoint before building it, and charges each
+    /// propagation one round per wave against the round allowance. Each new distinct fact
+    /// is checked against the fact allowance as it is collected, and the closure after each
+    /// wave (the last included), so a closure of exactly `max_facts` facts is accepted and
+    /// none larger is published. When the counting path passes a limit, the graph
+    /// rebuilds through the checked batch engine
+    /// under the same limits, so it ends in the state a batch run over the current facts
+    /// gives. When that run refuses the closure, the graph fails closed: its closure is
+    /// the base alone and [`stratification_warning`](Self::stratification_warning) holds
+    /// the `"forward closure limit exceeded"` error. That is an `Err` here; after an
+    /// [`insert`](Self::insert), the graph stays in that state until a mutation brings it
+    /// back within the limits.
+    ///
+    /// The term-size checkpoints are the text engine's, but the counting path does not
+    /// run the batch engine's fixpoint schedule (its rounds are propagation waves of one
+    /// delta, and a recursive layer's local fixpoint charges the same allowance), so
+    /// under equal round or fact limits the graph can hold a closure that a from-scratch
+    /// batch run near the boundary would refuse.
+    ///
+    /// The counting path charges `max_join_rows` (GH #6938) as the batch engine does:
+    /// each binding row a plain atom, seed or guard clause produces, before it is stored,
+    /// and each conclusion a rule fires, once its premise is evaluated. Each wave, and each
+    /// round of a layer's local fixpoint, gets the allowance afresh. Its waves are not the
+    /// batch engine's rounds, so the two charge different amounts for the same facts.
+    /// Past the allowance the graph rebuilds through the batch engine, so the graph never
+    /// refuses a closure that the batch engine accepts. A mutation whose wave fits is
+    /// kept even when a from-scratch batch round over the new facts would pass the
+    /// allowance.
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](Self::new).
+    pub fn with_limits(
+        rules_src: &str,
+        base_facts: &[[N3Term; 3]],
+        limits: crate::n3::ClosureLimits,
+    ) -> Result<Self, String> {
+        let cuts = bounded::Truncation::top_level_with(limits);
         let parsed = crate::n3::bounded::parse_n3(rules_src, "", &cuts)?;
+        crate::n3::validate_rule_quantifiers(&parsed)?;
         let base_ns = crate::n3::fresh_base_blank_prefix(&parsed);
         let runtime_docs = crate::n3::RuntimeDocs::for_sources(&[&parsed]);
         let (compiled, disqualified) = match n3_compile(&parsed) {
@@ -2567,6 +2694,7 @@ impl MaterializedN3Graph {
             cuts: cuts.clone(),
             base_ns,
             runtime_docs,
+            limits,
         };
         let mut caller = Vec::with_capacity(base_facts.len());
         for f in base_facts {
@@ -2580,7 +2708,7 @@ impl MaterializedN3Graph {
         }
         g.base.extend(caller);
         // The rules parse's record is the counting run's; the checked run re-parses.
-        g.rematerialize(cuts, crate::n3::bounded::Truncation::top_level());
+        g.rematerialize(cuts, bounded::Truncation::top_level_with(limits));
         g.rebuilds = 0;
         if let Some(w) = g.strat_warning.take() {
             return Err(format!("{w} The rules document is rejected."));
@@ -2720,6 +2848,12 @@ impl MaterializedN3Graph {
                          checked engine decides the negation"
                     ));
                 }
+                Err(FullRebuild::Refused(why)) => {
+                    self.cut_fallback = Some(format!(
+                        "the counting run spent its ClosureLimits allowance ({why}); the checked engine \
+                         decides the closure under the same limits"
+                    ));
+                }
                 // Runtime disqualification (unsupported data) — fall through to the engine.
                 Err(FullRebuild::Diverged) => {}
             }
@@ -2763,25 +2897,34 @@ impl MaterializedN3Graph {
         pending: Vec<[N3Term; 3]>,
         inserting: bool,
     ) -> Result<CountingOk, FullRebuild> {
-        if !self.propagate_rounds(&ok, pending, inserting) {
-            return Err(FullRebuild::Diverged);
+        // A limit passed mid-propagation is reported by the checkpoint below, which reads
+        // the run's refusal first.
+        match self.propagate_rounds(&ok, pending, inserting) {
+            Ok(true) => {}
+            Ok(false) => return Err(FullRebuild::Diverged),
+            Err(why) => return Err(FullRebuild::Refused(why)),
         }
         self.gate(if inserting { Op::Grow } else { Op::Shrink })
     }
 
-    /// The rounds of [`propagate`](Self::propagate). Returns false if evaluation met
-    /// unsupported data or an opposite-sign layer diff.
+    /// The rounds of [`propagate`](Self::propagate). Returns `Ok(false)` if evaluation met
+    /// unsupported data or an opposite-sign layer diff, and `Err` when the propagation ran
+    /// past its round or fact allowance or a term was refused for its size (GH #6854).
+    /// Each wave of the delta, and each round of a recursive layer's local fixpoint, is one
+    /// round of the propagation's [`bounded::ClosureRounds`].
     fn propagate_rounds(
         &mut self,
         ok: &CountingOk,
         mut pending: Vec<[N3Term; 3]>,
         inserting: bool,
-    ) -> bool {
+    ) -> Result<bool, String> {
         let Some(compiled) = self.compiled.clone() else {
-            return false;
+            return Ok(false);
         };
         let unsupported = Cell::new(false);
         let cuts = self.cuts.clone();
+        let mut rounds = bounded::ClosureRounds::forward(&cuts);
+        let work = bounded::JoinWork::forward(&cuts);
         while !pending.is_empty() {
             let mut pend_set: FxHashSet<[N3Term; 3]> = pending.iter().cloned().collect();
             for f in &pending {
@@ -2791,6 +2934,10 @@ impl MaterializedN3Graph {
                     self.index.remove(f);
                 }
             }
+            // Charged with the wave in the index, so the closure a propagation publishes
+            // (its last wave included) never holds more than the fact allowance.
+            rounds.round(self.index.all.len(), &cuts)?;
+            work.round();
             let mut next: Vec<[N3Term; 3]> = Vec::new();
             let mut queued: FxHashSet<[N3Term; 3]> = FxHashSet::default();
             // 1. Recursive layers (dependency order), recomputed when touched. This runs
@@ -2807,11 +2954,12 @@ impl MaterializedN3Graph {
                 if !pending.iter().any(relevant) {
                     continue;
                 }
-                let (added, removed) = self.recompute_layer(ok, &compiled, li, &unsupported);
+                let (added, removed) =
+                    self.recompute_layer(ok, &compiled, li, &unsupported, &mut rounds)?;
                 if unsupported.get() {
                     self.data_fallback =
                         Some("evaluation met data outside the builtin-parity whitelist".into());
-                    return false;
+                    return Ok(false);
                 }
                 // Monotone rules + fixed guards ⇒ diffs normally share the round's sign. The
                 // exception is a base↔layer OWNERSHIP TRANSFER: a fact that is both asserted
@@ -2833,11 +2981,12 @@ impl MaterializedN3Graph {
                                 || self.in_any_layer(f))
                     });
                     if !handed_off {
-                        return false;
+                        return Ok(false);
                     }
                     for f in added {
                         if !self.index.contains(&f) && queued.insert(f.clone()) {
                             next.push(f);
+                            rounds.hold(self.index.all.len().saturating_add(next.len()), &cuts)?;
                         }
                     }
                 } else {
@@ -2845,7 +2994,7 @@ impl MaterializedN3Graph {
                     // copy it was charged to; it never left the closure, so put it back and
                     // drop it from the round's delta — nothing downstream of it changed.
                     if !added.iter().all(|f| pend_set.contains(f)) {
-                        return false;
+                        return Ok(false);
                     }
                     for f in &added {
                         self.index.insert(f.clone());
@@ -2875,6 +3024,7 @@ impl MaterializedN3Graph {
                     delta: Some((&pend_set, inserting)),
                     unsupported: &unsupported,
                     cuts: &cuts,
+                    work: &work,
                 };
                 for rule in &compiled.counted {
                     for atom in &rule.atoms {
@@ -2893,7 +3043,12 @@ impl MaterializedN3Graph {
             if unsupported.get() {
                 self.data_fallback =
                     Some("evaluation met data outside the builtin-parity whitelist".into());
-                return false;
+                return Ok(false);
+            }
+            // A term refused for its size was not built: the wave is incomplete, so stop
+            // before counting it (the checkpoint hands the closure to the checked engine).
+            if let Some(refused) = cuts.refusal() {
+                return Err(refused);
             }
             if inserting {
                 for g in emissions {
@@ -2905,6 +3060,8 @@ impl MaterializedN3Graph {
                         && queued.insert(g.clone())
                     {
                         next.push(g);
+                        // Each new distinct fact is checked as it is collected.
+                        rounds.hold(self.index.all.len().saturating_add(next.len()), &cuts)?;
                     }
                 }
             } else {
@@ -2927,18 +3084,22 @@ impl MaterializedN3Graph {
             }
             pending = next;
         }
-        true
+        Ok(true)
     }
 
     /// Re-run layer `li`'s local fixpoint over the current closure's relevant-predicate
     /// extents; returns the (added, removed) diff of the layer's derived contribution.
+    /// Each round of the local fixpoint is charged to the propagation's `rounds`, with the
+    /// closure's facts plus the layer's new ones; `Err` past that allowance or when a term
+    /// was refused for its size (the layer is then left as it was).
     fn recompute_layer(
         &mut self,
         _ok: &CountingOk,
         compiled: &N3Compiled,
         li: usize,
         unsupported: &Cell<bool>,
-    ) -> (Vec<[N3Term; 3]>, Vec<[N3Term; 3]>) {
+        rounds: &mut bounded::ClosureRounds,
+    ) -> Result<LayerDiff, String> {
         let def = &compiled.layers[li];
         let cuts = self.cuts.clone();
         // Seed: relevant facts of the closure, minus the layer's own (possibly stale)
@@ -2962,7 +3123,14 @@ impl MaterializedN3Graph {
             local.insert(f.clone());
         }
         let mut pending = seed;
+        // Facts the local fixpoint holds that the closure does not (yet): with the
+        // closure's own, what the closure would hold.
+        let mut grown = 0usize;
+        // Each local round's own join-work allowance, apart from the enclosing wave's.
+        let work = bounded::JoinWork::forward(&cuts);
         while !pending.is_empty() {
+            rounds.round(self.index.all.len().saturating_add(grown), &cuts)?;
+            work.round();
             let mut emissions = Vec::new();
             {
                 let cx = N3Cx {
@@ -2971,6 +3139,7 @@ impl MaterializedN3Graph {
                     delta: None,
                     unsupported,
                     cuts: &cuts,
+                    work: &work,
                 };
                 for rule in &def.rules {
                     for atom in &rule.atoms {
@@ -2987,11 +3156,18 @@ impl MaterializedN3Graph {
                 }
             }
             if unsupported.get() {
-                return (Vec::new(), Vec::new());
+                return Ok((Vec::new(), Vec::new()));
+            }
+            if let Some(refused) = cuts.refusal() {
+                return Err(refused);
             }
             let mut fresh = Vec::new();
             for g in emissions {
                 if local.insert(g.clone()) {
+                    if !self.index.contains(&g) {
+                        grown += 1;
+                        rounds.hold(self.index.all.len().saturating_add(grown), &cuts)?;
+                    }
                     fresh.push(g);
                 }
             }
@@ -3004,7 +3180,7 @@ impl MaterializedN3Graph {
         let removed: Vec<[N3Term; 3]> =
             self.layer_derived[li].difference(&new_derived).cloned().collect();
         self.layer_derived[li] = new_derived;
-        (added, removed)
+        Ok((added, removed))
     }
 
     /// Insert base facts (set semantics; non-ground triples are ignored). Counting mode
@@ -3029,8 +3205,9 @@ impl MaterializedN3Graph {
             return 0;
         }
         if rebuild || self.mode == N3Mode::Fallback {
-            use crate::n3::bounded::Truncation;
-            self.rematerialize(Truncation::top_level(), Truncation::top_level());
+            use bounded::Truncation;
+            let limits = self.limits;
+            self.rematerialize(Truncation::top_level_with(limits), Truncation::top_level_with(limits));
             return added.len();
         }
         let pending: Vec<[N3Term; 3]> = added
@@ -3045,8 +3222,9 @@ impl MaterializedN3Graph {
             Err(rebuild) => Err(rebuild),
         };
         if let Err(_rebuild) = outcome {
-            use crate::n3::bounded::Truncation;
-            self.rematerialize(Truncation::top_level(), Truncation::top_level());
+            use bounded::Truncation;
+            let limits = self.limits;
+            self.rematerialize(Truncation::top_level_with(limits), Truncation::top_level_with(limits));
         }
         added.len()
     }
@@ -3085,8 +3263,9 @@ impl MaterializedN3Graph {
             }
         };
         if let Err(_rebuild) = outcome {
-            use crate::n3::bounded::Truncation;
-            self.rematerialize(Truncation::top_level(), Truncation::top_level());
+            use bounded::Truncation;
+            let limits = self.limits;
+            self.rematerialize(Truncation::top_level_with(limits), Truncation::top_level_with(limits));
         }
         removed.len()
     }

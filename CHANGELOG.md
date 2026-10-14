@@ -7,8 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **sparq-reason:** `MaterializedN3Graph::with_limits` builds the incremental N3 graph under
+  a `ClosureLimits` (`new` uses the default). The counting path now sizes each builtin's
+  argument list and result before building it and charges a round and fact allowance; past
+  a limit the graph rebuilds through the batch engine, which refuses with
+  `"n3: forward closure limit exceeded …"`, so the graph fails closed instead of growing a
+  term every round. (#6854)
+- **sparq-reason:** `ClosureLimits::max_join_rows` is an opt-in allowance for the
+  transient work of one round of an N3 forward closure: the binding rows its premise joins
+  produce and the times its rules fire, counted together. The default is unbounded, so
+  every closure accepted before is still accepted; set a limit to opt in. The text engine,
+  the `compiled-rules` evaluator and the incremental counting engine of
+  `MaterializedN3Graph` charge each before it is stored; a round past a set allowance
+  returns `"n3: forward closure limit exceeded … max_join_rows …"` instead of building rows
+  that multiply with each unconstrained premise pattern. `ClosureLimits` is
+  `#[non_exhaustive]`, so the new field is additive. The `compiled-rules` evaluator's
+  first round of each stratum is now naive, as the text engine's is, instead of seeding
+  each join position with the whole store. (#6938)
+
 ### Changed
 
+- **sparq-reason (N3):** a run already refused by a `ClosureLimits` limit no longer reports
+  a negation or aggregation evaluated after the refusal ("refused a negation or aggregation
+  … over an incomplete set"); it fails with the refusal itself, which names the limit
+  (for example `… over max_term_bytes (…)`). Both are refusals: only the error text
+  changes. (#6938)
+- **sparq-reason (N3):** formula-level `@forAll` declarations keep their own scope,
+  including nested and sibling quoted formulas. Naive, compiled and incremental engines
+  reject `@forAll` in a rule's own premise or a scoped body pattern with a specific error;
+  a `log:forAllIn` / `log:collectAllIn` clause or a `log:includes` / `log:notIncludes`
+  pattern bound through a variable is checked when it is evaluated and fails the run the
+  same way. Templates and other quoted values keep their own universals at any nesting
+  depth. A document parsed by `log:parsedAsN3` / `log:semantics` declares its top-level
+  `@forAll` in the resulting formula, the same term as the inline `{ @forAll … }`.
+  Quoted formula terms retain identity matching, conclusion universals keep their own
+  scope, and closure-introduced universals are restored in the result formula.
+  Document-level `@forAll` is unchanged. Exact writers place each formula-level
+  declaration inside its formula. (#6754)
+- **Breaking (sparq-reason, `compiled-rules` feature):** `n3::compiled::eval` and
+  `BoundRuleSet::eval` now return `Result<Vec<[Id; 3]>, String>` and run under the default
+  `ClosureLimits`; new `n3::compiled::eval_with_limits` and `BoundRuleSet::eval_with_limits`
+  take a `ClosureLimits`. A compiled closure past its round, fact or term-size allowance
+  returns `Err("n3: forward closure limit exceeded …")` instead of running until memory
+  runs out. (#6855)
 - **Breaking (sparq-reason):** `ClosureLimits` has a new field, `max_term_bytes` (default
   16 MiB), and is now `#[non_exhaustive]`, so it can no longer be built with a struct literal
   outside the crate. Start from the default and set fields:

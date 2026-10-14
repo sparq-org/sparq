@@ -391,6 +391,27 @@ mod tests {
         }
     }
 
+    /// A dataset clause is refused before evaluation, as the verifier refuses
+    /// it, instead of evaluating over an empty dataset to an empty trace.
+    #[test]
+    fn traced_query_refuses_a_dataset_clause() {
+        let store = store();
+        let zk = IngestedDataset::ingest(&store, &names()).unwrap().into_zk_dataset(&store).unwrap();
+        let g = names()[0].as_str().to_string();
+        for q in [
+            format!("SELECT ?t FROM <{g}> WHERE {{ <http://ex/alice> <http://ex/title> ?t }}"),
+            format!("SELECT ?t FROM NAMED <{g}> WHERE {{ <http://ex/alice> <http://ex/title> ?t }}"),
+            format!("ASK FROM <{g}> {{ <http://ex/alice> <http://ex/title> ?t }}"),
+        ] {
+            let Err(TraceError::Query(msg)) = zk.query_traced(&q) else {
+                panic!("{q}: a dataset clause was traced");
+            };
+            assert!(msg.contains("FROM / FROM NAMED"), "{q}: {msg}");
+        }
+        let exec = zk.query_traced("SELECT ?t WHERE { <http://ex/alice> <http://ex/title> ?t }").unwrap();
+        assert_eq!(exec.result.rows.len(), 1);
+    }
+
     /// Missing graph fails closed.
     #[test]
     fn missing_graph_fails_closed() {
