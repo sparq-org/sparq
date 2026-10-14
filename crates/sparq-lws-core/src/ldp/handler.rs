@@ -5291,6 +5291,69 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn get_ntriples_and_nquads_are_served_with_their_own_validators() {
+        // #4879: an explicit N-Triples or N-Quads Accept is served in that format (no longer the
+        // Turtle fallback), with a validator distinct from every other representation that 304s
+        // only for its own type.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let turtle_tag =
+            etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        let expected = format!("{COND_DOC}\n");
+        let mut tags = vec![turtle_tag];
+        for media in ["application/n-triples", "application/n-quads"] {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let resp = get_with(&state, owner_token(), "/alice/doc", accept.clone()).await;
+            assert_eq!(resp.status(), StatusCode::OK, "{media}");
+            assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), media);
+            let tag = etag_of(&resp);
+            assert!(
+                !tags.contains(&tag),
+                "{media} reuses another representation's tag"
+            );
+            // A single default-graph triple: the N-Quads line carries no graph label, so both
+            // bodies are the one canonical line.
+            assert_eq!(body_bytes(resp).await, expected.as_bytes(), "{media}");
+
+            let mut cond = accept;
+            cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(&tag).unwrap());
+            let not_mod = get_with(&state, owner_token(), "/alice/doc", cond).await;
+            assert_eq!(not_mod.status(), StatusCode::NOT_MODIFIED, "{media}");
+            for other in &tags {
+                let mut cond = HeaderMap::new();
+                cond.insert(header::ACCEPT, HeaderValue::from_static(media));
+                cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(other).unwrap());
+                let resp = get_with(&state, owner_token(), "/alice/doc", cond).await;
+                assert_eq!(resp.status(), StatusCode::OK, "{media} 304'd for {other}");
+            }
+            tags.push(tag);
+        }
+    }
+
+    #[tokio::test]
+    async fn get_container_as_ntriples_lists_its_children() {
+        // #4879: the container listing path negotiates the same formats as a plain resource.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let mut accept = HeaderMap::new();
+        accept.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/n-triples"),
+        );
+        let resp = get_with(&state, owner_token(), "/alice/", accept).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/n-triples"
+        );
+        let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+        assert!(
+            body.lines().any(|l| l
+                == "<https://pod.example/alice/> <http://www.w3.org/ns/ldp#contains> <https://pod.example/alice/doc> ."),
+            "{body}"
+        );
+    }
+
     #[test]
     fn negotiated_validator_is_profile_variant_specific_when_the_bytes_differ() {
         // sq-10ty4: an honoured JSON-LD `profile` changes which bytes are served, so it changes
