@@ -7,13 +7,16 @@
 //! agent is the party (and default recipient), its clock is the request time, and the
 //! recorded asset memberships are the collection evidence.
 //!
-//! [`Mode::Read`] is **granted** when some attached policy's [`decide`] permits
-//! `odrl:read`. The store applies a grant only to an eligible target: a graph that
-//! exists now, that the last static WAC/ACP materialization covered (so every deny that
-//! applies to it is in the view), whose static decision is authoritative, and on which
-//! the auth view does not explicitly deny `Read`. So an ACP deny still wins, and a graph
-//! no access-control document governs, or one created since, is never granted. No other
-//! mode is granted: creating and changing resources stay with the static decision.
+//! A mode is **granted** when some attached policy's [`decide`] permits it: [`Mode::Read`]
+//! on `odrl:read`, [`Mode::Write`] on both `odrl:modify` and `odrl:delete` (in one
+//! policy), [`Mode::Append`] on `odrl:append` or a `Write` grant. The store applies a
+//! grant only to an eligible target: a graph that exists now, that the last static
+//! WAC/ACP materialization covered (so every deny that applies to it is in the view),
+//! whose static decision is authoritative, and on which the auth view does not
+//! explicitly deny the mode. So an ACP deny still wins, and a graph no access-control
+//! document governs, or one created since, is never granted. `Write` and `Append` are
+//! never granted on a container or on a referenced group document: a permission never
+//! creates a resource, and never changes who holds a static grant.
 //!
 //! A mode is **removed** when some attached prohibition applies (True or Unknown) to a
 //! request for any ODRL action that maps to it, after any grant:
@@ -200,18 +203,31 @@ impl OdrlEnforcement {
         })
     }
 
-    /// Whether an attached permission grants `mode` on `target` to `session`: only
-    /// [`Mode::Read`], when some attached policy's [`decide`] permits `odrl:read`.
-    /// Access-control documents and reserved graphs are never granted. The caller still
-    /// checks the target's eligibility and applies [`OdrlEnforcement::denies`].
+    /// Whether an attached permission grants `mode` on `target` to `session`, through some
+    /// attached policy's [`decide`]: [`Mode::Read`] when it permits `odrl:read`;
+    /// [`Mode::Write`] when one policy permits both `odrl:modify` and `odrl:delete`;
+    /// [`Mode::Append`] when it permits `odrl:append` or grants `Write`. [`Mode::Control`],
+    /// access-control documents and reserved graphs are never granted, and neither is
+    /// `Write` or `Append` on a container (a slash-terminated IRI), so a grant never
+    /// extends to minting a child. The caller still checks the target's eligibility and
+    /// applies [`OdrlEnforcement::denies`].
     pub(crate) fn grants(&self, s: &Session, mode: Mode, target: &str) -> bool {
-        mode == Mode::Read
-            && Self::governs(target)
-            && self.may_grant(target)
-            && self
-                .policies
-                .iter()
-                .any(|p| permitted(p, &self.request("read", target, s), s.agent))
+        if mode == Mode::Control || !Self::governs(target) || !self.may_grant(target) {
+            return false;
+        }
+        if mode != Mode::Read && target.ends_with('/') {
+            return false;
+        }
+        let permits = |p: &ValidatedPolicy, action: &str| {
+            permitted(p, &self.request(action, target, s), s.agent)
+        };
+        let writes = |p: &ValidatedPolicy| permits(p, "modify") && permits(p, "delete");
+        self.policies.iter().any(|p| match mode {
+            Mode::Read => permits(p, "read"),
+            Mode::Write => writes(p),
+            Mode::Append => permits(p, "append") || writes(p),
+            Mode::Control => false,
+        })
     }
 
     /// Whether any attached policy has a permission (only then can [`grants`] hold).

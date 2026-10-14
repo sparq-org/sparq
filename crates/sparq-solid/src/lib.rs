@@ -972,10 +972,11 @@ impl PodStore {
     }
 
     /// Whether an attached ODRL permission grants `mode` on `target` for `session`: the
-    /// one grant-eligibility predicate every path uses. Only `Read` is granted, and only
-    /// on a graph that exists now and that the last static WAC/ACP materialization
-    /// covered (so every deny that applies to it is in the view), when the auth view
-    /// does not explicitly deny it. The caller checks that the target's decision is
+    /// one grant-eligibility predicate every path uses. A grant applies only on a graph
+    /// that exists now and that the last static WAC/ACP materialization covered (so every
+    /// deny that applies to it is in the view), when the auth view does not explicitly
+    /// deny it. `Write` and `Append` are never granted on a referenced group document,
+    /// whose members hold static grants. The caller checks that the target's decision is
     /// authoritative.
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
@@ -987,6 +988,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants_present(&self, session: &Session, mode: Mode, target: &str) -> bool {
         self.statically_covered.contains(target)
+            && (mode == Mode::Read || !self.group_docs().contains(target))
             && self.odrl.grants(session, mode, target)
             && !self.auth.denies(session, mode, target)
     }
@@ -1177,9 +1179,9 @@ impl PodStore {
             child_name,
             mode,
         );
-        // The child-name refusal above stays first. A permission never grants a create (it
-        // grants only `Read`); a prohibition on the container or on the child it would mint
-        // can only narrow what is left.
+        // The child-name refusal above stays first. A permission never grants a create (no
+        // grant is applied here, and none covers a container); a prohibition on the
+        // container or on the child it would mint can only narrow what is left.
         let d = self.apply_odrl_with(d, session, container, mode, false);
         self.apply_odrl_with(d, session, &format!("{container}{child_name}"), mode, false)
     }
@@ -1256,7 +1258,7 @@ impl PodStore {
         #[cfg(feature = "odrl-bridge")]
         if !self.odrl.is_empty() {
             let mut set = sets.sorted.to_vec();
-            if mode == Mode::Read && self.odrl.has_permissions() {
+            if mode != Mode::Control && self.odrl.has_permissions() {
                 let have: FxHashSet<&str> = sets.sorted.iter().map(NamedNode::as_str).collect();
                 // Each graph here exists, so the existence half of `odrl_grants` holds.
                 for (name, _) in self.graph.named.iter() {

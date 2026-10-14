@@ -359,13 +359,14 @@ let out = store.materialize_odrl_policy(&policy, &req);
 
 `PodStore::attach_odrl_policy(policy)` keeps a `ValidatedPolicy` on the store and evaluates it for the **accessing session** on every authorizing call: its permissions through `decide`, its prohibitions through `matched_prohibition`. Nothing is materialized, so a party-scoped rule applies only to the parties it names, a time window follows the session's clock, and an asset needs no materialization to be covered.
 
-- **Grants.** `Read` is added when some attached policy's `decide` permits `odrl:read` under every party membership the agent could have, on an eligible graph:
+- **Grants.** A mode is added when some attached policy's `decide` permits it under every party membership the agent could have: `Read` on `odrl:read`; `Write` when one policy permits both `odrl:modify` and `odrl:delete`; `Append` on `odrl:append` or that `Write` condition. The grant applies only on an eligible graph:
   - it exists now, and the last static WAC/ACP materialization covered it, so every deny that applies to it is in the view (a graph created or dropped since is not granted until the next materialization);
   - its static decision is authoritative (a governing ACL exists and the auth view is loaded), so a graph no access-control document governs is never granted;
   - the auth view does not explicitly deny it (an ACP `acp:deny` wins);
-  - it is not an `.acl`/`.acr` document or a reserved graph.
+  - it is not an `.acl`/`.acr` document or a reserved graph;
+  - for `Write` and `Append`, it is not a container (a slash-terminated IRI) and not a group document an access-control document references.
 
-  No other mode is granted: creating and changing resources stay with the static decision. Count constraints are not evaluated per request, so a counted permission does not grant here.
+  `Control` is never granted, and a permission never grants a create: `decide_create` applies no grant, a graph that does not exist is never granted, and a container never gets a change mode, so a grant cannot extend to minting a child. Count constraints are not evaluated per request, so a counted permission does not grant here.
 - **Denies.** A mode is removed when an attached prohibition applies, after any grant, so prohibitions beat every allow.
 - **One gate.** Every entry point goes through it:
   - the reads behind the cached session set: `accessible`, `accessible_set`, the views and queries, `wac_allow` and `scoped_dataset`;
