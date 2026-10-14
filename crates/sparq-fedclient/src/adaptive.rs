@@ -292,7 +292,7 @@ fn adaptive_join_phase(
         // the static interpreter is proven multiset-equal to). The first leaf seeds the acc.
         let leaf = leaf_rel
             .remove(&pattern)
-            .expect("[OPUS-4.8] sq-ij5x: every join_order pattern was scanned above");
+            .expect("sq-ij5x: every join_order pattern was scanned above");
         acc = Some(match acc {
             None => leaf,
             Some(prev) => natural_join(&prev, &leaf),
