@@ -1029,16 +1029,11 @@ impl HttpFragmentTransport {
 /// Percent-encode a query-parameter VALUE (RFC 3986 unreserved set passes through; everything
 /// else is `%XX`-escaped, uppercase hex per UTF-8 byte), so an N-Triples term (`<`, `>`, `"`,
 /// spaces, newlines in a brTPF block) round-trips through the URL back to the same term. The
-/// server's TPF `hydra:next` builder uses the byte-identical `sparq_core::percent::encode`,
+/// server's TPF `hydra:next` builder calls the same `sparq_core::percent::encode`,
 /// so the link the transport builds is read identically server-side; the discovery ASK probe
 /// shares this helper too (#3712).
 pub(crate) fn pct_encode(value: &str) -> String {
-    const UNRESERVED: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
-        .remove(b'-')
-        .remove(b'.')
-        .remove(b'_')
-        .remove(b'~');
-    percent_encoding::utf8_percent_encode(value, UNRESERVED).to_string()
+    sparq_core::percent::encode(value)
 }
 
 /// Convert one parsed oxrdf [`oxrdf::Term`] (a triple object) into a [`FragTerm`], preserving the
