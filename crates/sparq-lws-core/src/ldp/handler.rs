@@ -1055,9 +1055,8 @@ async fn serve_read_once<S: Store>(
     // `Range` is defined for GET (RFC 9110 §14.2); ignore it for HEAD so a HEAD never returns 206.
     let outcome = if with_body {
         // An If-Range that no longer names this representation serves it whole (RFC 9110 §13.1.5).
-        let range = header_str(req_headers, header::RANGE).filter(|_| {
-            conditional::if_range_holds(header_str(req_headers, header::IF_RANGE), &etag)
-        });
+        let range = header_str(req_headers, header::RANGE)
+            .filter(|_| conditional::if_range_holds(req_headers, &etag));
         range::evaluate(range, total_len)
     } else {
         RangeOutcome::Full
@@ -5256,6 +5255,15 @@ mod tests {
                 "{if_range:?}: {len}"
             );
         }
+        // If-Range names one validator: a repeated field serves the whole representation even
+        // when each line names the current tag.
+        let mut h = HeaderMap::new();
+        h.insert(header::RANGE, HeaderValue::from_static("bytes=0-3"));
+        for _ in 0..2 {
+            h.append(header::IF_RANGE, HeaderValue::from_str(&etag).unwrap());
+        }
+        let resp = get_with(&state, owner_token(), "/alice/doc", h).await;
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     #[tokio::test]

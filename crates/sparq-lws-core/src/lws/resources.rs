@@ -1008,7 +1008,7 @@ fn ranged(req: &LwsRequest, body: Bytes, content_type: &str, etag: &str) -> Resp
     let range = req
         .header(header::RANGE)
         .filter(|_| req.method == Method::GET)
-        .filter(|_| crate::ldp::conditional::if_range_holds(req.header(header::IF_RANGE), etag));
+        .filter(|_| crate::ldp::conditional::if_range_holds(&req.headers, etag));
     match range.map(|r| parse_range(r, len)) {
         Some(ByteRange::Unsatisfiable) => {
             let mut r = problem(StatusCode::RANGE_NOT_SATISFIABLE, None);
@@ -4975,6 +4975,20 @@ mod tests {
         .await;
         assert_eq!(r.status(), StatusCode::OK);
         assert_eq!(&body_of(r).await[..], b"0123456789");
+        // If-Range names one validator, so a repeated field never lets the Range apply.
+        let r = call(
+            &st,
+            "GET",
+            p,
+            &[
+                ("range", "bytes=2-3"),
+                ("if-range", &etag),
+                ("if-range", &etag),
+            ],
+            "",
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::OK);
     }
 
     #[tokio::test]

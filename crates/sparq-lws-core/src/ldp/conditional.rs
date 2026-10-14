@@ -150,18 +150,22 @@ pub enum ReadPrecondition {
 }
 
 /// Whether an If-Range precondition lets the Range apply (RFC 9110 section 13.1.5): absent, or a
-/// strong entity tag equal to the current one. A date never does: two versions written within
-/// one second share a Last-Modified, so a date is not a strong validator here, and the whole
-/// representation is served instead. Both the LDP and the LWS surface use it.
-pub(crate) fn if_range_holds(if_range: Option<&str>, etag: &str) -> bool {
-    let Some(v) = if_range.map(str::trim) else {
+/// single strong entity tag equal to the current one. A date never does: two versions written
+/// within one second share a Last-Modified, so a date is not a strong validator here, and the
+/// whole representation is served instead. If-Range carries one validator, so a repeated field
+/// or an unreadable one never holds either. Both the LDP and the LWS surface use it.
+pub(crate) fn if_range_holds(headers: &http::HeaderMap, etag: &str) -> bool {
+    let mut lines = headers.get_all(http::header::IF_RANGE).iter();
+    let Some(line) = lines.next() else {
         return true;
     };
-    if v.starts_with('"') || v.starts_with("W/") {
-        // A weak tag never matches: the comparison is strong.
-        return !v.starts_with("W/") && !etag.starts_with("W/") && v == etag;
+    if lines.next().is_some() {
+        return false;
     }
-    false
+    let v = String::from_utf8_lossy(line.as_bytes());
+    let v = v.trim();
+    // A weak tag never matches: the comparison is strong.
+    v.starts_with('"') && !etag.starts_with("W/") && v == etag
 }
 
 /// Evaluate the READ preconditions (`If-None-Match`, then `If-Modified-Since`) of a GET/HEAD against
@@ -373,17 +377,32 @@ mod tests {
 
     #[test]
     fn if_range() {
+        fn holds(lines: &[&[u8]], etag: &str) -> bool {
+            let mut h = http::HeaderMap::new();
+            for line in lines {
+                h.append(
+                    http::header::IF_RANGE,
+                    http::HeaderValue::from_bytes(line).unwrap(),
+                );
+            }
+            if_range_holds(&h, etag)
+        }
         let date =
             crate::http_date::format(UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
                 .unwrap();
-        assert!(if_range_holds(None, "\"a\""));
-        assert!(if_range_holds(Some("\"a\""), "\"a\""));
-        assert!(!if_range_holds(Some("\"b\""), "\"a\""));
-        assert!(!if_range_holds(Some("W/\"a\""), "\"a\""));
+        assert!(holds(&[], "\"a\""));
+        assert!(holds(&[b"\"a\""], "\"a\""));
+        assert!(!holds(&[b"\"b\""], "\"a\""));
+        assert!(!holds(&[b"W/\"a\""], "\"a\""));
         // Review finding: a date is not a strong validator (two versions can share one), so
         // even one equal to Last-Modified serves the whole representation.
-        assert!(!if_range_holds(Some(&date), "\"a\""));
-        assert!(!if_range_holds(Some("garbage"), "\"a\""));
+        assert!(!holds(&[date.as_bytes()], "\"a\""));
+        assert!(!holds(&[b"garbage"], "\"a\""));
+        // One validator only: a repeated field holds even when a line names the current tag.
+        assert!(!holds(&[b"\"a\"", b"\"a\""], "\"a\""));
+        assert!(!holds(&[b"\"a\"", b"\"b\""], "\"a\""));
+        // A line that is not UTF-8 is read, not skipped, so it cannot fall back to "absent".
+        assert!(!holds(&[b"\"\xff\""], "\"a\""));
     }
 
     const TAG: &str = "\"abc-123\"";
