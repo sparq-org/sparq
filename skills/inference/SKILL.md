@@ -699,6 +699,20 @@ definitions) and returns a `DlProfileReport`. It is fail-closed: `verdict()` is
 content, an unloaded imports closure, anonymous individuals outside an anonymous forest).
 `blocking()` lists the violations a reasoner must refuse. `owl:imports` is recorded in
 `Ontology::imports`, never dereferenced.
+`owl2dl::check(&dict, &onto, Budget::default())` is the reasoner: a hypertableau (Motik,
+Shearer and Horrocks) over DL-clauses, with pairwise anywhere blocking, merging and
+dependency-directed backjumping. It returns a `DlReport` with the profile report,
+`consistency` (`Consistent`, `Inconsistent`, or `Unknown(reason)`) and, when consistent, a
+`Classification` (unsatisfiable named classes, every entailed named subsumption, and the
+`inferred` ones not asserted). `owl2dl::Reasoner::new(&dict, &onto, budget)` answers single
+`is_satisfiable` / `is_subclass_of` queries (`Option<bool>`). The decided fragment is
+ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`; anything else (data properties and
+datatypes, nominals and `hasValue`, other chains, keys, the top and bottom object
+properties) gives `Unknown(OutOfFragment { construct, source })`, a blocking profile
+violation gives `Unknown(NotInDl)`, an exhausted step budget gives
+`Unknown(ResourceBudget)`, and unloaded imports turn `Consistent` into
+`Unknown(ImportsNotLoaded)`. It never guesses a verdict. Its answers are checked against
+HermiT on a seeded corpus (`tests/owl2dl_reasoner.rs`).
 
 ## Common recipes
 
