@@ -75,6 +75,10 @@ const nextConfig: NextConfig = {
   // Next 16 `next dev` otherwise writes a Next-managed AGENTS.md into this app; the repo keeps
   // one AGENTS.md at its root.
   agentRules: false,
+  // Next 16 `next dev` blocks dev resources (HMR socket, chunks) for any origin but
+  // `localhost`; the Playwright web server is reached at 127.0.0.1 (playwright.config.ts),
+  // and without this the pages never hydrate under test. Dev-only: no effect on the export.
+  allowedDevOrigins: ["127.0.0.1"],
   output: "export",
   // Only emit basePath/assetPrefix when there IS a prefix. An empty basePath must not be
   // set as `assetPrefix: ""` either — leaving both unset is exactly the root-relative
