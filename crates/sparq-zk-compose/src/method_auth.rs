@@ -11,10 +11,11 @@
 //! before the trust anchor moved outside the proof.
 //!
 //! So the method is not read anywhere. It is RECOVERED from the signature. The
-//! issuer-signature family already has METHOD-BOUND members — `ZKSIG_M3`
-//! ([`sparq_zk::sig::commitment_message_with_status_and_scheme`]) and
-//! `ZKSIG_M4` ([`sparq_zk::sig::commitment_message_with_holder_and_scheme`]) —
-//! whose signed object folds the method's
+//! METHOD-BOUND presentation messages are `ZKSIG_M5`
+//! ([`sparq_zk::sig::presentation_message_with_status_and_scheme`], for a bearer
+//! attestation) and `ZKSIG_M4`
+//! ([`sparq_zk::sig::commitment_message_with_holder_and_scheme`], for a
+//! holder-bound one), whose signed object folds the method's
 //! [`sparq_zk::sig::scheme_iri_to_field`] digest. The verifier builds one
 //! candidate message per recognised method from values it computed ITSELF (the
 //! commitment, the issuer-attested salt, the issuer-bound status reference, and
@@ -22,11 +23,26 @@
 //! asks which candidate the one presented signature verifies over. The answer
 //! is an [`AuthenticatedMethod`].
 //!
-//! Nothing in the candidate set is prover-chosen. A prover cannot make a method
-//! be recovered that its issuer did not sign, because every candidate is a
-//! distinct signed message under a distinct domain tag, and producing a
-//! signature over a message the issuer never signed is exactly the forgery the
-//! signature scheme is assumed to resist.
+//! A registry entry's own `ZKSIG_M3` signature
+//! ([`sparq_zk::sig::commitment_message_with_status_and_scheme`]) is NOT a
+//! candidate: recording a commitment in an issuer's registry is a different
+//! statement from authorising its presentation, so it is left under its own
+//! domain tag and never authenticates a presentation.
+//!
+//! # Who chooses what
+//! Every candidate MESSAGE is verifier-built: the verifier computes the whole set
+//! from its own values, so no prover field enters a candidate. On the CLEAR path
+//! the prover supplies only the signature, and which candidate verifies is
+//! decided by the signature scheme. On the HIDDEN path the prover additionally
+//! declares WHICH candidate its hidden-issuer proof is over, and that declared
+//! message must EQUAL one of them — an unmatched message is refused
+//! (`CheckError::HiddenIssuerMessageMismatch`) rather than ignored, and whichever
+//! candidate it selects, the prover must still exhibit a key-set-membership proof
+//! over that exact message under the relying party's own root. Either way a
+//! prover cannot make a method be recovered that its issuer did not sign, because
+//! every candidate is a distinct signed message under a distinct domain tag, and
+//! producing a signature over a message the issuer never signed is exactly the
+//! forgery the signature scheme is assumed to resist.
 //!
 //! # Back-compatibility is the load-bearing requirement
 //! Every credential issued so far signs a method-UNBOUND message (`ZKSIG_C3`
@@ -49,7 +65,8 @@ use sparq_zk::commit::CommitmentMethod;
 use sparq_zk::field::Fr;
 use sparq_zk::sig::{
     commitment_message_with_holder, commitment_message_with_holder_and_scheme,
-    commitment_message_with_status, commitment_message_with_status_and_scheme, scheme_iri_to_field,
+    commitment_message_with_status, presentation_message_with_status_and_scheme,
+    scheme_iri_to_field,
 };
 
 /// What a commitment's issuer signature attests about the COMMITMENT METHOD.
@@ -62,7 +79,7 @@ use sparq_zk::sig::{
 /// existing invalid-signature refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthenticatedMethod {
-    /// The issuer signed a METHOD-BOUND message (`ZKSIG_M3` / `ZKSIG_M4`) whose
+    /// The issuer signed a METHOD-BOUND message (`ZKSIG_M5` / `ZKSIG_M4`) whose
     /// folded scheme digest is this method's. The method is issuer-attested.
     Bound(CommitmentMethod),
     /// The issuer signed a method-UNBOUND message (`ZKSIG_C3` / `ZKSIG_C4`). The
@@ -133,7 +150,7 @@ impl MethodPolicy {
     ///
     /// This is the strict posture. It rejects every credential issued before the
     /// method-bound message shapes existed, so a relying party opts in only once
-    /// its issuers re-issue over `ZKSIG_M3` / `ZKSIG_M4`.
+    /// its issuers re-issue over `ZKSIG_M5` / `ZKSIG_M4`.
     #[must_use]
     pub fn require_method_bound(mut self) -> Self {
         self.accept_unbound = false;
@@ -257,7 +274,7 @@ pub struct CommitmentMessageInputs<'a> {
     pub status_ref: &'a Fr,
     /// The attested holder-key digest, for a HOLDER-BOUND attestation. `Some`
     /// selects the holder-bound message shapes (`ZKSIG_C4` / `ZKSIG_M4`);
-    /// `None` selects the status-only ones (`ZKSIG_C3` / `ZKSIG_M3`).
+    /// `None` selects the status-only ones (`ZKSIG_C3` / `ZKSIG_M5`).
     pub holder_digest: Option<&'a Fr>,
 }
 
@@ -287,7 +304,7 @@ pub fn candidate_messages(inputs: &CommitmentMessageInputs<'_>) -> Vec<(Authenti
                 holder,
                 &scheme,
             ),
-            None => commitment_message_with_status_and_scheme(
+            None => presentation_message_with_status_and_scheme(
                 inputs.commitment,
                 inputs.salt,
                 inputs.status_ref,
@@ -594,7 +611,7 @@ mod tests {
                 &inputs(None, &c, &s, &r),
                 AuthenticatedMethod::Bound(CommitmentMethod::StringCanonicalV1)
             ),
-            commitment_message_with_status_and_scheme(
+            presentation_message_with_status_and_scheme(
                 &c,
                 &s,
                 &r,
@@ -603,18 +620,18 @@ mod tests {
         );
     }
 
-    /// End to end against a REAL signature: an issuer that signs the `ZKSIG_M3`
-    /// message of one method is authenticated as that method, and the same
-    /// signature authenticates as nothing else.
+    /// End to end against a REAL signature: an issuer that signs the `ZKSIG_M5`
+    /// presentation message of one method is authenticated as that method, and
+    /// the same signature authenticates as nothing else.
     #[test]
-    fn a_real_m3_signature_authenticates_as_its_own_method() {
+    fn a_real_m5_signature_authenticates_as_its_own_method() {
         use sparq_zk::sig::{public_key_from_hex, signature_from_hex, verify, SecretKey};
         let sk = SecretKey::from_seed(9);
         let pk_hex = sparq_zk::sig::public_key_to_hex(&sk.public_key());
         let (c, s, r) = (Fr::from(12u64), Fr::from(34u64), Fr::from(56u64));
         for method in [CommitmentMethod::StringCanonicalV1, CommitmentMethod::DualLeafV2] {
             let scheme = scheme_iri_to_field(method.scheme_iri());
-            let sig_hex = sk.sign_commitment_with_status_and_scheme(&c, &s, &r, &scheme);
+            let sig_hex = sk.sign_presentation_with_status_and_scheme(&c, &s, &r, &scheme);
             let pk = public_key_from_hex(&pk_hex).unwrap();
             let sig = signature_from_hex(&sig_hex).unwrap();
             assert_eq!(
@@ -645,6 +662,72 @@ mod tests {
         );
     }
 
+    /// A REGISTRY entry's signature is over `ZKSIG_M3`, which is not in the
+    /// candidate set, so it authenticates NOTHING — publishing a commitment to an
+    /// issuer's registry does not make it presentable. The equivalent `ZKSIG_M5`
+    /// presentation signature over the same tuple does authenticate, which shows
+    /// the refusal is the domain tag and nothing else.
+    #[test]
+    fn a_registry_signature_authenticates_no_presentation_method() {
+        use oxrdf::NamedNode;
+        use sparq_zk::registry::{RegistryEntry, Status};
+        use sparq_zk::sig::{
+            public_key_from_hex, signature_from_hex, status_list_id_to_field, status_ref_digest,
+            verify, SecretKey,
+        };
+        const LIST: &str = "http://ex/status/1";
+        const INDEX: u64 = 3;
+        const VERSION: u64 = 1;
+        let sk = SecretKey::from_seed(23);
+        let pk = public_key_from_hex(&sparq_zk::sig::public_key_to_hex(&sk.public_key())).unwrap();
+        let (c, s) = (Fr::from(2u64), Fr::from(4u64));
+        let r = status_ref_digest(&status_list_id_to_field(LIST), INDEX, VERSION);
+        let method = CommitmentMethod::DualLeafV2;
+
+        // A real registry entry's own signature, over `ZKSIG_M3`.
+        let entry = RegistryEntry::issued_with_status(
+            NamedNode::new("http://ex/vc/1").unwrap(),
+            c,
+            s,
+            method,
+            NamedNode::new(LIST).unwrap(),
+            INDEX,
+            VERSION,
+            Status::Active,
+            &sk,
+        )
+        .expect("DualLeafV2 is selectable for new issuance");
+        assert!(
+            entry.verify_commitment_signature_with_status(),
+            "the fixture really is a valid registry signature"
+        );
+        let registry_sig = signature_from_hex(
+            entry
+                .commitment_signature
+                .as_ref()
+                .expect("an issued entry carries a signature"),
+        )
+        .unwrap();
+        assert_eq!(
+            authenticate(&inputs(None, &c, &s, &r), &MethodPolicy::current(), |m| {
+                verify(&pk, m, &registry_sig)
+            }),
+            Err(MethodAuthError::NoCandidateVerified)
+        );
+
+        // The issuer's PRESENTATION signature over the same tuple does authenticate.
+        let scheme = scheme_iri_to_field(method.scheme_iri());
+        let presentation_sig =
+            signature_from_hex(&sk.sign_presentation_with_status_and_scheme(&c, &s, &r, &scheme))
+                .unwrap();
+        assert_eq!(
+            authenticate(&inputs(None, &c, &s, &r), &MethodPolicy::current(), |m| {
+                verify(&pk, m, &presentation_sig)
+            }),
+            Ok(AuthenticatedMethod::Bound(method))
+        );
+    }
+
     /// An attested `DualLeafV1` is refused by the default policy at the POLICY
     /// step, not by failing to authenticate — the two refusals are distinct.
     #[test]
@@ -654,7 +737,7 @@ mod tests {
         let pk = public_key_from_hex(&sparq_zk::sig::public_key_to_hex(&sk.public_key())).unwrap();
         let (c, s, r) = (Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
         let scheme = scheme_iri_to_field(CommitmentMethod::DualLeafV1.scheme_iri());
-        let sig = signature_from_hex(&sk.sign_commitment_with_status_and_scheme(&c, &s, &r, &scheme))
+        let sig = signature_from_hex(&sk.sign_presentation_with_status_and_scheme(&c, &s, &r, &scheme))
             .unwrap();
         let i = inputs(None, &c, &s, &r);
         // It DOES authenticate.

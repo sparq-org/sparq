@@ -1226,17 +1226,27 @@ are still CLOSED. What is now ENFORCED by the verifier:
 
 - **The commitment method is AUTHENTICATED, not assumed.** `sparq-zk-compose`'s `method_auth`
   recovers it from the issuer signature rather than reading it from the manifest: it builds the
-  METHOD-BOUND signed message (`ZKSIG_M3`, or `ZKSIG_M4` for a holder-bound attestation) of every
-  `CommitmentMethod::recognised()` method from values the verifier itself established — the
+  METHOD-BOUND PRESENTATION message (`ZKSIG_M5`, or `ZKSIG_M4` for a holder-bound attestation) of
+  every `CommitmentMethod::recognised()` method from values the verifier itself established — the
   commitment, the issuer-attested salt, the issuer-bound status reference, the attested holder
   digest — plus the method-UNBOUND `ZKSIG_C3`/`ZKSIG_C4` message, and asks which one the presented
   signature verifies over. Exactly one bound candidate verifying names the method; more than one is
   refused rather than resolved; only the unbound one verifying is `AuthenticatedMethod::Unbound`,
-  which is the explicit ABSENCE of an attested method and never a default. The relying party's
-  `MethodPolicy` (on the `KeySet`, like every other external anchor) then decides: the default
-  accepts `Unbound`, so every already-issued credential verifies exactly as before;
+  which is the explicit ABSENCE of an attested method and never a default. A registry entry's own
+  `ZKSIG_M3` signature is not a candidate: being recorded in an issuer's registry is a separate
+  statement from being authorised for presentation, and the two tags keep them separate. The relying
+  party's `MethodPolicy` (on the `KeySet`, like every other external anchor) then decides: the
+  default accepts `Unbound`, so every already-issued credential verifies exactly as before;
   `require_method_bound()` refuses it; an attested `DualLeafV1` needs the written-down
   `admit_legacy_dual_leaf_v1()` opt-in, and the `value-only` dial is admitted by no policy.
+- **For a HIDDEN-ONLY commitment the declared message is held to that same candidate set.** A
+  commitment attested solely by a hidden-issuer proof has no clear signature, so the method is
+  selected by the hidden entry's public `message`. That value must EQUAL one of the verifier-built
+  candidates — one matching none of them is refused (`HiddenIssuerMessageMismatch`) — and the policy
+  applies to the method the bb hidden-issuer stage is then required to BIND, so a declared message
+  outside the candidate set cannot carry a presentation past the policy. Until that bb stage has run,
+  a hidden-only commitment's recorded method is the method SELECTED, not one yet shown to be signed.
+
 What is now COMPUTABLE but NOT ENFORCED (no verify path calls it):
 
 - **The member, the lane constant, the SCALE and the bound are PINNED — as a computation.**

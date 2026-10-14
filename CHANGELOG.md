@@ -23,15 +23,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no method (`CheckError::MethodNotAuthenticated`), and `admit_legacy_dual_leaf_v1()` is the
   written-down opt-in for an attested superseded method (refused otherwise with
   `CheckError::MethodNotAdmitted`); more than one method's message verifying is
-  `CheckError::AmbiguousMethod`. New message shapes and signers in `sparq-zk`:
-  `sig::commitment_message_with_holder_and_scheme` (the `ZKSIG_M4` tag — the one shape binding both a
-  holder key and a method) plus `SecretKey::{sign_commitment_with_status_and_scheme,
-  sign_commitment_with_holder_and_scheme}` for the `ZKSIG_M3`/`ZKSIG_M4` messages, and
-  `CommitmentAttestation::from_registry_entry` bridges a registry entry's already-method-bound
-  signature into a manifest. Hardening only, and back-compatible: an attestation over the
-  method-unbound `ZKSIG_C3`/`ZKSIG_C4` message authenticates as `Unbound`, the default policy accepts
-  it, and a bad signature still reports `CheckError::InvalidIssuerSignature`, so every manifest
-  that verified before still verifies. Not externally audited (sq-qhy4); no soundness or
+  `CheckError::AmbiguousMethod`. For a HIDDEN-ONLY commitment the method is selected by the hidden
+  entry's declared `message`, which must EQUAL one of the candidates — a value matching none of them
+  is refused with `CheckError::HiddenIssuerMessageMismatch`, and the policy applies to the method the
+  hidden-issuer proof is then required to bind. New PRESENTATION message shapes and signers in
+  `sparq-zk`, each under its own domain tag: `sig::presentation_message_with_status_and_scheme`
+  (`ZKSIG_M5`, for a bearer attestation) and `sig::commitment_message_with_holder_and_scheme`
+  (`ZKSIG_M4`, the one shape binding both a holder key and a method), signed with
+  `SecretKey::{sign_presentation_with_status_and_scheme, sign_commitment_with_holder_and_scheme}`. A
+  REGISTRY entry's own `ZKSIG_M3` signature is deliberately NOT a presentation attestation — recording
+  a commitment in an issuer's registry is a separate statement from authorising its presentation, so
+  presenting one as a clear attestation reports `CheckError::InvalidIssuerSignature`. Back-compatible:
+  every manifest that verified before still verifies under the default policy — an attestation over
+  the method-unbound `ZKSIG_C3`/`ZKSIG_C4` message authenticates as `Unbound`, which the default
+  policy accepts, and a bad signature still reports `CheckError::InvalidIssuerSignature`. The
+  newly accepted manifests are only those carrying an issuer signature over a method-bound
+  PRESENTATION message (`ZKSIG_M5`/`ZKSIG_M4`). Not externally audited (sq-qhy4); no soundness or
   privacy property is claimed.
 - **sparq-zk:** `verify::fragment_typed_filters` re-derives a query's FILTER obligations keeping each
   constant as the typed `oxrdf::Literal` the query spells (`verify::TypedQueryFilter { variable, op,

@@ -112,6 +112,7 @@ const SIG_DOMAIN_SCHEME_IRI: u64 = 0x5a4b_5349_475f_5349; // "ZKSIG_SI"
 const SIG_DOMAIN_COMMITMENT_SALT_SCHEME: u64 = 0x5a4b_5349_475f_4d32; // "ZKSIG_M2"
 const SIG_DOMAIN_COMMITMENT_STATUS_SCHEME: u64 = 0x5a4b_5349_475f_4d33; // "ZKSIG_M3"
 const SIG_DOMAIN_COMMITMENT_HOLDER_SCHEME: u64 = 0x5a4b_5349_475f_4d34; // "ZKSIG_M4"
+const SIG_DOMAIN_PRESENTATION_STATUS_SCHEME: u64 = 0x5a4b_5349_475f_4d35; // "ZKSIG_M5"
 const SIG_DOMAIN_HOLDER_POP: u64 = 0x5a4b_5349_475f_4850; // "ZKSIG_HP"
 
 /// Which signature scheme an issuer key/signature uses. v1 ships Schnorr over
@@ -537,19 +538,29 @@ impl SecretKey {
         signature_to_hex(&sig)
     }
 
-    /// Sign the METHOD-BOUND status attestation message
-    /// ([`commitment_message_with_status_and_scheme`], `ZKSIG_M3`): the audit-#12
+    /// Sign the METHOD-BOUND **presentation** attestation message
+    /// ([`presentation_message_with_status_and_scheme`], `ZKSIG_M5`): the audit-#12
     /// `(C(G), salt, status_ref)` plus the commitment method's
-    /// [`scheme_iri_to_field`] digest. A verifier that authenticates the
-    /// commitment method recovers the method by finding which recognised method's
-    /// digest makes this signature verify, so the method becomes ISSUER-ATTESTED
-    /// rather than read from a prover-supplied field.
+    /// [`scheme_iri_to_field`] digest, under the PRESENTATION domain tag. A
+    /// verifier that authenticates the commitment method recovers the method by
+    /// finding which recognised method's digest makes this signature verify, so
+    /// the method becomes ISSUER-ATTESTED rather than read from a prover-supplied
+    /// field.
+    ///
+    /// # Not the registry's message
+    /// A registry entry's status-bound signature is over the separate `ZKSIG_M3`
+    /// [`commitment_message_with_status_and_scheme`], and the two tags keep the
+    /// two statements apart: "this commitment is recorded in my registry under
+    /// this method and status" is not "this commitment may be presented as a
+    /// bearer credential under this method". An M3 signature therefore does not
+    /// verify over this message, and a registry signature cannot stand in for a
+    /// presentation attestation.
     ///
     /// `scheme_digest` is [`scheme_iri_to_field`]`(method.scheme_iri())`. Same
     /// deterministic `(sk, m)` nonce discipline as [`Self::sign_commitment`].
     /// Purely additive: it signs a DIFFERENT message from
     /// [`Self::sign_commitment_with_status`] and changes no existing signature.
-    pub fn sign_commitment_with_status_and_scheme(
+    pub fn sign_presentation_with_status_and_scheme(
         &self,
         commitment: &Fr,
         salt: &Fr,
@@ -558,7 +569,12 @@ impl SecretKey {
     ) -> String {
         let sig = sign_deterministic(
             self,
-            &commitment_message_with_status_and_scheme(commitment, salt, status_ref, scheme_digest),
+            &presentation_message_with_status_and_scheme(
+                commitment,
+                salt,
+                status_ref,
+                scheme_digest,
+            ),
         );
         signature_to_hex(&sig)
     }
@@ -1119,6 +1135,47 @@ pub fn commitment_message_with_holder_and_scheme(
     ])
 }
 
+/// The method-bound **PRESENTATION** message for a bearer (non-holder-bound)
+/// credential: the same `(C(G), salt_G, status_ref, scheme_digest)` preimage shape
+/// as [`commitment_message_with_status_and_scheme`], under its own domain tag
+/// (`ZKSIG_M5`).
+///
+/// # Why a separate tag from `ZKSIG_M3`
+/// `ZKSIG_M3` is the message a REGISTRY entry signs
+/// ([`crate::registry::RegistryEntry::issued_with_status`]): it records that a
+/// commitment exists in the issuer's registry under a method and a status
+/// reference. That is a different statement from "this commitment may be
+/// PRESENTED under this method with no holder binding", which is what a bearer
+/// manifest attestation asserts. Sharing one tag would make every commitment an
+/// issuer publishes to its registry presentable as a bearer credential, including
+/// one the issuer bound to a specific holder key over
+/// [`commitment_message_with_holder`] / [`commitment_message_with_holder_and_scheme`].
+/// Under two tags the issuer states each thing separately, and neither signature
+/// verifies over the other's message.
+///
+/// # Purely additive
+/// A NEW message shape under a NEW domain tag; no existing message changes, so
+/// every already-issued signature keeps verifying over the message it was made
+/// against. A verifier authenticating the commitment method treats a signature
+/// over a method-UNBOUND shape as carrying no attested method, never a default one.
+///
+/// Research-grade, NOT externally audited (sq-qhy4) — no soundness or privacy
+/// property is claimed as achieved.
+pub fn presentation_message_with_status_and_scheme(
+    commitment: &Fr,
+    salt: &Fr,
+    status_ref: &Fr,
+    scheme_digest: &Fr,
+) -> Fr {
+    poseidon2::hash(&[
+        Fr::from(SIG_DOMAIN_PRESENTATION_STATUS_SCHEME),
+        *commitment,
+        *salt,
+        *status_ref,
+        *scheme_digest,
+    ])
+}
+
 /// A holder key that cannot be digested into a binding (sq-y464, HolderPoP T1).
 /// Fails closed — mirrors the [`verify`] / [`public_key_from_hex`] discipline that
 /// the curve identity is never an admissible key.
@@ -1659,6 +1716,75 @@ mod tests {
         );
     }
 
+    /// The `ZKSIG_M5` PRESENTATION message is pinned to its WIRE DEFINITION the
+    /// same way: the tag is the eight ASCII bytes of `"ZKSIG_M5"` big-endian, and
+    /// the preimage is `[tag, commitment, salt, status_ref, scheme_digest]`.
+    /// `ZKSIG_M5` shares its preimage SHAPE with `ZKSIG_M3`, so distinctness
+    /// alone cannot pin it: only the tag value separates the two, and that is
+    /// exactly what keeps a registry signature from standing in for a
+    /// presentation attestation.
+    #[test]
+    fn the_m5_presentation_message_is_poseidon2_over_the_ascii_tag_and_input_order() {
+        let c = Fr::from(7u64);
+        let salt = Fr::from(11u64);
+        let status_ref = Fr::from(13u64);
+        let scheme = Fr::from(19u64);
+        let expected = poseidon2::hash(&[
+            Fr::from(u64::from_be_bytes(*b"ZKSIG_M5")),
+            c,
+            salt,
+            status_ref,
+            scheme,
+        ]);
+        assert_eq!(
+            presentation_message_with_status_and_scheme(&c, &salt, &status_ref, &scheme),
+            expected
+        );
+        // And it is NOT the registry's `ZKSIG_M3` message over the same tuple.
+        assert_ne!(
+            presentation_message_with_status_and_scheme(&c, &salt, &status_ref, &scheme),
+            commitment_message_with_status_and_scheme(&c, &salt, &status_ref, &scheme)
+        );
+    }
+
+    /// A REGISTRY signature (`ZKSIG_M3`) never verifies as a PRESENTATION
+    /// attestation (`ZKSIG_M5`) over the same
+    /// `(commitment, salt, status_ref, scheme_digest)` tuple, and the reverse
+    /// does not hold either. This is the property that keeps the two statements
+    /// an issuer can make — "recorded in my registry" and "presentable as a
+    /// bearer credential" — separate signed objects.
+    #[test]
+    fn a_registry_m3_signature_does_not_verify_as_an_m5_presentation() {
+        let sk = SecretKey::from_seed(77);
+        let pk = sk.public_key();
+        let c = Fr::from(3u64);
+        let salt = Fr::from(5u64);
+        let status_ref = Fr::from(9u64);
+        let sc = scheme_iri_to_field(crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2);
+
+        // The registry's own signing path, over `ZKSIG_M3`.
+        let m3 = commitment_message_with_status_and_scheme(&c, &salt, &status_ref, &sc);
+        let m3_sig = sign_deterministic(&sk, &m3);
+        assert!(verify(&pk, &m3, &m3_sig));
+        assert!(!verify(
+            &pk,
+            &presentation_message_with_status_and_scheme(&c, &salt, &status_ref, &sc),
+            &m3_sig
+        ));
+
+        // And the presentation signature is not a registry one.
+        let m5_sig = signature_from_hex(
+            &sk.sign_presentation_with_status_and_scheme(&c, &salt, &status_ref, &sc),
+        )
+        .expect("signature hex parses");
+        assert!(verify(
+            &pk,
+            &presentation_message_with_status_and_scheme(&c, &salt, &status_ref, &sc),
+            &m5_sig
+        ));
+        assert!(!verify(&pk, &m3, &m5_sig));
+    }
+
     /// Every commitment-message shape in the family must be a DIFFERENT field
     /// element on the SAME inputs — that is what the per-shape domain tag buys.
     /// If two shapes collided, a signature made over one would verify as the
@@ -1701,6 +1827,10 @@ mod tests {
                     &sc_a,
                 ),
             ),
+            (
+                "M5",
+                presentation_message_with_status_and_scheme(&c, &salt, &status_ref, &sc_a),
+            ),
             // The SAME method-bound shapes under a DIFFERENT method digest: a
             // method-bound message must also separate one method from another,
             // which is what makes the recovered method unambiguous.
@@ -1718,6 +1848,10 @@ mod tests {
                     &holder,
                     &sc_b,
                 ),
+            ),
+            (
+                "M5/b",
+                presentation_message_with_status_and_scheme(&c, &salt, &status_ref, &sc_b),
             ),
         ];
 
@@ -1746,23 +1880,29 @@ mod tests {
         let sc = scheme_iri_to_field(crate::registry::ZK_SCHEME_POSEIDON2_DUALLEAF_V2);
         let other = scheme_iri_to_field(crate::registry::ZK_SCHEME_POSEIDON2_RDFC10_V1);
 
-        let m3_hex = sk.sign_commitment_with_status_and_scheme(&c, &salt, &status_ref, &sc);
-        let m3_sig = signature_from_hex(&m3_hex).expect("signature hex parses");
+        let m5_hex = sk.sign_presentation_with_status_and_scheme(&c, &salt, &status_ref, &sc);
+        let m5_sig = signature_from_hex(&m5_hex).expect("signature hex parses");
         assert!(verify(
             &pk,
-            &commitment_message_with_status_and_scheme(&c, &salt, &status_ref, &sc),
-            &m3_sig
+            &presentation_message_with_status_and_scheme(&c, &salt, &status_ref, &sc),
+            &m5_sig
         ));
         // Not over the method-UNBOUND status message, and not under another method.
         assert!(!verify(
             &pk,
             &commitment_message_with_status(&c, &salt, &status_ref),
-            &m3_sig
+            &m5_sig
         ));
         assert!(!verify(
             &pk,
-            &commitment_message_with_status_and_scheme(&c, &salt, &status_ref, &other),
-            &m3_sig
+            &presentation_message_with_status_and_scheme(&c, &salt, &status_ref, &other),
+            &m5_sig
+        ));
+        // Nor over the REGISTRY's `ZKSIG_M3` message for the same method.
+        assert!(!verify(
+            &pk,
+            &commitment_message_with_status_and_scheme(&c, &salt, &status_ref, &sc),
+            &m5_sig
         ));
 
         let m4_hex =
@@ -1778,11 +1918,11 @@ mod tests {
             &commitment_message_with_holder(&c, &salt, &status_ref, &holder),
             &m4_sig
         ));
-        // And an M3 signature never verifies as an M4 one over the same tuple.
+        // And an M5 signature never verifies as an M4 one over the same tuple.
         assert!(!verify(
             &pk,
             &commitment_message_with_holder_and_scheme(&c, &salt, &status_ref, &holder, &sc),
-            &m3_sig
+            &m5_sig
         ));
     }
 
@@ -2779,7 +2919,7 @@ mod tests {
     /// Every `ZKSIG_*` domain tag in this module, with the ASCII label its value
     /// spells. `sig_domain_tags_are_pinned_and_pairwise_distinct` checks the
     /// table; a tag added to the module belongs here too.
-    const ALL_SIG_DOMAIN_TAGS: [(&str, u64, &[u8; 8]); 19] = [
+    const ALL_SIG_DOMAIN_TAGS: [(&str, u64, &[u8; 8]); 20] = [
         ("COMMITMENT", SIG_DOMAIN_COMMITMENT, b"ZKSIG_C1"),
         ("COMMITMENT_SALT", SIG_DOMAIN_COMMITMENT_SALT, b"ZKSIG_C2"),
         ("COMMITMENT_STATUS", SIG_DOMAIN_COMMITMENT_STATUS, b"ZKSIG_C3"),
@@ -2787,6 +2927,7 @@ mod tests {
         ("COMMITMENT_SALT_SCHEME", SIG_DOMAIN_COMMITMENT_SALT_SCHEME, b"ZKSIG_M2"),
         ("COMMITMENT_STATUS_SCHEME", SIG_DOMAIN_COMMITMENT_STATUS_SCHEME, b"ZKSIG_M3"),
         ("COMMITMENT_HOLDER_SCHEME", SIG_DOMAIN_COMMITMENT_HOLDER_SCHEME, b"ZKSIG_M4"),
+        ("PRESENTATION_STATUS_SCHEME", SIG_DOMAIN_PRESENTATION_STATUS_SCHEME, b"ZKSIG_M5"),
         ("NONCE", SIG_DOMAIN_NONCE, b"ZKSIG_N1"),
         ("STATUS_REF", SIG_DOMAIN_STATUS_REF, b"ZKSIG_SR"),
         ("STATUS_IDX_COMMIT", SIG_DOMAIN_STATUS_IDX_COMMIT, b"ZKSIG_IC"),
