@@ -411,7 +411,8 @@ since:
   cross-group bind-join block primitive (each cell goes through the same strict term renderer;
   a variable cell, a row whose length differs from `vars`, or a bad variable name is a
   `RenderError`; VALUES for endpoints — `DEFAULT_BIND_BLOCK`; `maxMpR` for brTPF; none for
-  plain TPF), mirroring `sparq-engine`'s `pub(crate)` `service.rs` helpers. Pushdown only ever
+  plain TPF), mirroring the same-named helpers in the `sparq-engine-service` crate's `service`
+  module (the SERVICE transport the engine's `service` feature pulls in). Pushdown only ever
   **narrows** a source's result, so it is correctness-preserving; the FILTER model is light
   (the parsed-query FILTER algebra wiring is Phase 5).
 - **Phase 5 streaming operators** (`sq-vtba`) — the streaming counterpart of the Phase-3

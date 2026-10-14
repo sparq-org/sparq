@@ -1087,3 +1087,261 @@ fn entailment_budget_fallback_respects_the_rl_divergence_guard() {
     // abstention above is the guard being conservative, not the answer being unknowable.
     assert_eq!(entail(premise, conclusion).0, EntailmentVerdict::NotEntailed);
 }
+
+// -------------------------------------------------------------------------------------------
+// #4762 — the EMPTY built-in roles `owl:bottomObjectProperty` / `owl:bottomDataProperty`
+// -------------------------------------------------------------------------------------------
+
+/// W3C `New-Feature-BottomObjectProperty-001` in shape: `∃⊥ᵣ.⊤(i)` is unsatisfiable because
+/// the bottom object property's extension is empty. Formerly an OutOfFragment abstention.
+#[test]
+fn bottom_object_property_existential_is_unsatisfiable() {
+    let (v, b) = check(
+        ":i a owl:NamedIndividual . \
+         :i a [ a owl:Restriction ; owl:onProperty owl:bottomObjectProperty ; \
+                owl:someValuesFrom owl:Thing ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Inconsistent);
+    assert_eq!(b, Branch::AlchTableau, "a rewritten ontology is owned by the tableau");
+    // Nested under a disjunction it is just a dead branch: `(A ⊔ ∃⊥ᵣ.C)(i)` is satisfiable.
+    let (v, _) = check(
+        ":i a [ owl:unionOf ( :A [ owl:onProperty owl:bottomObjectProperty ; \
+                                   owl:someValuesFrom :C ] ) ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Consistent);
+    // ... and forced to the dead branch it clashes: `(¬A ⊓ (A ⊔ ∃⊥ᵣ.C))(i)`.
+    let (v, _) = check(
+        ":i a [ owl:complementOf :A ] . \
+         :i a [ owl:unionOf ( :A [ owl:onProperty owl:bottomObjectProperty ; \
+                                   owl:someValuesFrom :C ] ) ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Inconsistent);
+}
+
+/// `∀⊥ᵣ.C` holds everywhere: `¬∀⊥ᵣ.C(i)` is unsatisfiable, `∀⊥ᵣ.⊥(i)` is satisfiable.
+#[test]
+fn bottom_object_property_universal_is_top() {
+    let (v, _) = check(
+        ":i a [ owl:onProperty owl:bottomObjectProperty ; owl:allValuesFrom owl:Nothing ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Consistent);
+    let (v, _) = check(
+        ":i a [ owl:complementOf [ owl:onProperty owl:bottomObjectProperty ; \
+                                   owl:allValuesFrom :C ] ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Inconsistent);
+}
+
+/// A ground assertion over an empty property can never hold.
+#[test]
+fn bottom_property_assertions_are_inconsistent() {
+    assert_eq!(check(":a owl:bottomObjectProperty :b .").0, ConsistencyVerdict::Inconsistent);
+    assert_eq!(
+        check("owl:bottomObjectProperty a owl:ObjectProperty . :a owl:bottomObjectProperty :b .").0,
+        ConsistencyVerdict::Inconsistent
+    );
+    assert_eq!(check(":a owl:bottomDataProperty \"v\" .").0, ConsistencyVerdict::Inconsistent);
+}
+
+/// `owl:bottomDataProperty` restrictions over a datatype filler: `∃` is `⊥`, `∀` is `⊤`.
+#[test]
+fn bottom_data_property_restrictions() {
+    let pre = "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> . ";
+    assert_eq!(
+        check(&format!(
+            "{}:i a [ owl:onProperty owl:bottomDataProperty ; owl:someValuesFrom xsd:integer ] .",
+            pre
+        ))
+        .0,
+        ConsistencyVerdict::Inconsistent
+    );
+    assert_eq!(
+        check(&format!(
+            "{}:i a [ owl:onProperty owl:bottomDataProperty ; owl:allValuesFrom xsd:integer ] .",
+            pre
+        ))
+        .0,
+        ConsistencyVerdict::Consistent
+    );
+}
+
+/// `⊥ᵣ ⊑ r` is a tautology (dropped); the rest of the ontology is still decided.
+#[test]
+fn bottom_as_sub_property_is_trivially_true() {
+    assert_eq!(
+        check("owl:bottomObjectProperty rdfs:subPropertyOf :r . :a :r :b .").0,
+        ConsistencyVerdict::Consistent
+    );
+    assert_eq!(
+        check("owl:bottomObjectProperty rdfs:subPropertyOf :r . :a a owl:Nothing .").0,
+        ConsistencyVerdict::Inconsistent
+    );
+    // Entailed as a conclusion from the empty premise.
+    assert_eq!(
+        entail(":a a :A .", "owl:bottomObjectProperty rdfs:subPropertyOf :r .").0,
+        EntailmentVerdict::Entailed
+    );
+}
+
+/// Entailment with bottom-property conclusions: `∃⊥ᵣ.C(a)` is entailed only by an
+/// inconsistent premise; `∀⊥ᵣ.C(a)` by every premise.
+#[test]
+fn bottom_property_entailment() {
+    let some = ":a a [ owl:onProperty owl:bottomObjectProperty ; owl:someValuesFrom :C ] .";
+    let all = ":a a [ owl:onProperty owl:bottomObjectProperty ; owl:allValuesFrom :C ] .";
+    assert_eq!(entail(":a a :A .", some).0, EntailmentVerdict::NotEntailed);
+    assert_eq!(entail(":a a :A .", all).0, EntailmentVerdict::Entailed);
+    assert_eq!(
+        entail(":a a :A , [ owl:complementOf :A ] .", some).0,
+        EntailmentVerdict::Entailed
+    );
+}
+
+/// Positions with no sound ALCH rewrite stay REFUSED (fail-closed abstention), and the TOP
+/// properties stay refused everywhere exactly as before #4762.
+#[test]
+fn bottom_property_unsupported_positions_and_top_properties_stay_refused() {
+    for body in [
+        // bottom as a SUPER-property forces `r` empty — not expressible, refused.
+        ":r rdfs:subPropertyOf owl:bottomObjectProperty . :a :r :b .",
+        "owl:bottomObjectProperty rdfs:domain :A .",
+        "owl:bottomObjectProperty rdfs:range :A .",
+        // cardinality over it is out of fragment like every cardinality.
+        ":i a [ owl:onProperty owl:bottomObjectProperty ; owl:minCardinality 1 ] .",
+        // ill-typed data filler.
+        ":i a [ owl:onProperty owl:bottomDataProperty ; owl:someValuesFrom :C ] .",
+        // ⊥ sub, but the super is the top property — still refused.
+        "owl:bottomObjectProperty rdfs:subPropertyOf owl:topObjectProperty .",
+        // The top properties (New-Feature-TopObjectProperty-001 in shape, and the rest).
+        ":i a [ owl:complementOf [ owl:onProperty owl:topObjectProperty ; \
+                                   owl:someValuesFrom owl:Thing ] ] .",
+        ":i a [ owl:onProperty owl:topObjectProperty ; owl:allValuesFrom :C ] .",
+        "owl:topObjectProperty a owl:ObjectProperty . :x owl:topObjectProperty :y .",
+        ":x owl:topDataProperty \"v\" .",
+        ":r rdfs:subPropertyOf owl:topObjectProperty .",
+    ] {
+        let (v, b) = check(body);
+        assert!(
+            matches!(v, ConsistencyVerdict::Unknown(UnknownReason::OutOfFragment(_))),
+            "expected an OutOfFragment abstention for {:?}, got {:?}",
+            body,
+            v
+        );
+        assert_eq!(b, Branch::Extraction);
+    }
+}
+
+/// #4762 review: a `owl:bottomDataProperty` restriction filler must be a datatype in the
+/// OWL 2 datatype map — a facet IRI such as `xsd:minInclusive` (in the XSD namespace, but not
+/// a datatype) is refused.
+#[test]
+fn bottom_data_property_filler_must_be_a_datatype_map_entry() {
+    let pre = "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> . ";
+    for filler in ["xsd:minInclusive", "xsd:maxLength", "xsd:notADatatype"] {
+        for q in ["owl:allValuesFrom", "owl:someValuesFrom"] {
+            let body = format!(
+                "{}:i a [ owl:onProperty owl:bottomDataProperty ; {} {} ] .",
+                pre, q, filler
+            );
+            let (v, b) = check(&body);
+            assert!(
+                matches!(v, ConsistencyVerdict::Unknown(UnknownReason::OutOfFragment(_))),
+                "expected a refusal for {:?}, got {:?}",
+                body,
+                v
+            );
+            assert_eq!(b, Branch::Extraction);
+        }
+    }
+    // Datatype-map entries outside the XSD namespace are accepted.
+    assert_eq!(
+        check(":i a [ owl:onProperty owl:bottomDataProperty ; owl:someValuesFrom rdfs:Literal ] .")
+            .0,
+        ConsistencyVerdict::Inconsistent
+    );
+}
+
+/// #4762 review: an explicit `owl:bottomDataProperty a owl:DatatypeProperty` declaration is
+/// consistent with its use in a restriction (in either triple order), while an incompatible
+/// `owl:ObjectProperty` declaration is still refused.
+#[test]
+fn declared_bottom_data_property_restrictions() {
+    let pre = "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> . ";
+    let decl = "owl:bottomDataProperty a owl:DatatypeProperty .";
+    let some = ":i a [ owl:onProperty owl:bottomDataProperty ; owl:someValuesFrom xsd:integer ] .";
+    let all = ":i a [ owl:onProperty owl:bottomDataProperty ; owl:allValuesFrom xsd:integer ] .";
+    for (restriction, expected) in [
+        (some, ConsistencyVerdict::Inconsistent),
+        (all, ConsistencyVerdict::Consistent),
+    ] {
+        for body in [
+            format!("{}{} {}", pre, decl, restriction),
+            format!("{}{} {}", pre, restriction, decl),
+        ] {
+            assert_eq!(check(&body).0, expected, "{:?}", body);
+        }
+        for body in [
+            format!("{}owl:bottomDataProperty a owl:ObjectProperty . {}", pre, restriction),
+            format!("{}{} owl:bottomDataProperty a owl:ObjectProperty .", pre, restriction),
+        ] {
+            assert!(
+                matches!(
+                    check(&body).0,
+                    ConsistencyVerdict::Unknown(UnknownReason::OutOfFragment(_))
+                ),
+                "an ObjectProperty declaration of owl:bottomDataProperty must stay refused: {:?}",
+                body
+            );
+        }
+    }
+    // A declared data assertion is inconsistent too.
+    assert_eq!(
+        check(&format!("{}{} :a owl:bottomDataProperty \"v\" .", pre, decl)).0,
+        ConsistencyVerdict::Inconsistent
+    );
+}
+
+/// #4762 review: the bottom properties carry their INTRINSIC kind (⊥ object = object
+/// property, ⊥ data = data property) whether they are used in a restriction or an assertion,
+/// so an incompatible declaration is a refused pun in either triple order — never an
+/// annotation that silently swallows the assertion, never a definitive verdict.
+#[test]
+fn bottom_property_assertions_with_incompatible_declarations_are_refused() {
+    let cases = [
+        ("owl:bottomDataProperty a owl:ObjectProperty .", ":a owl:bottomDataProperty \"v\" ."),
+        ("owl:bottomDataProperty a owl:AnnotationProperty .", ":a owl:bottomDataProperty \"v\" ."),
+        ("owl:bottomObjectProperty a owl:DatatypeProperty .", ":a owl:bottomObjectProperty :b ."),
+        ("owl:bottomObjectProperty a owl:AnnotationProperty .", ":a owl:bottomObjectProperty :b ."),
+    ];
+    for (decl, assertion) in cases {
+        for body in [format!("{} {}", decl, assertion), format!("{} {}", assertion, decl)] {
+            let (v, b) = check(&body);
+            assert!(
+                matches!(v, ConsistencyVerdict::Unknown(UnknownReason::OutOfFragment(_))),
+                "expected an OutOfFragment refusal for {:?}, got {:?}",
+                body,
+                v
+            );
+            assert_eq!(b, Branch::Extraction);
+        }
+    }
+    // Compatible declarations, in either order, still decide the assertion.
+    for (decl, assertion) in [
+        ("owl:bottomDataProperty a owl:DatatypeProperty .", ":a owl:bottomDataProperty \"v\" ."),
+        ("owl:bottomObjectProperty a owl:ObjectProperty .", ":a owl:bottomObjectProperty :b ."),
+    ] {
+        for body in [format!("{} {}", decl, assertion), format!("{} {}", assertion, decl)] {
+            assert_eq!(check(&body).0, ConsistencyVerdict::Inconsistent, "{:?}", body);
+        }
+    }
+    // Inputs without the bottom properties are untouched by the seeding: an ordinary
+    // declared annotation property is still ignored, an ordinary role still asserted.
+    assert_eq!(
+        check(":p a owl:AnnotationProperty . :a :p :b . :a a :A .").0,
+        ConsistencyVerdict::Consistent
+    );
+    assert_eq!(
+        check(":r a owl:ObjectProperty . :a :r :b . :a a owl:Nothing .").0,
+        ConsistencyVerdict::Inconsistent
+    );
+}
