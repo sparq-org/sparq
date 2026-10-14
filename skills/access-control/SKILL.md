@@ -23,6 +23,13 @@ reserved `<urn:sparq:auth>` graph. Every query/update is then filtered per
 **fail-closed**, with zero Solid-specific code in the engine itself (the crate is a
 dependency of nothing in the workspace).
 
+The loader skolemizes blank nodes as
+`urn:skolem:graph:<encoded-graph-IRI>:<encoded-label>`, using UTF-8 percent-encoding
+of each component (only URI-unreserved characters remain literal). This keeps
+document scopes distinct and identities stable when unrelated documents are put
+or deleted, even if named-graph positions change. The source documents retain
+their blank nodes; these IRIs appear in the reasoning input and authorization view.
+
 ## What this is — and is NOT (read first)
 
 This is an **architecture / research-track** layer, not a deployable Solid server.

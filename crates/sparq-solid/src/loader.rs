@@ -29,6 +29,7 @@ use oxrdf::{Literal, NamedNode, Term};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::{Dict, Id};
 use sparq_core::Graph;
+use sparq_reason::n3::encode_for_uri;
 
 pub(crate) const ACL_SUFFIX: &str = ".acl";
 pub(crate) const ACR_SUFFIX: &str = ".acr";
@@ -137,12 +138,17 @@ fn graph_iri(name: &Term) -> Option<&str> {
     }
 }
 
-/// A term with blank nodes skolemized per graph (`gix`) so the single-graph merge keeps
-/// per-document scoping and `solidx:inDoc` stays sound. Named nodes and literals pass
-/// through unchanged — the reasoner sees exactly the control document's own terms.
-fn skolemize(t: &Term, gix: usize) -> Term {
+/// Skolemize blank nodes using the graph IRI, independent of named-graph ordering.
+/// Both components are percent-encoded so the separator cannot occur inside either
+/// component: distinct (graph IRI, label) pairs produce distinct, valid IRIs.
+/// Named nodes and literals pass through unchanged.
+fn skolemize(t: &Term, graph_iri: &str) -> Term {
     match t {
-        Term::BlankNode(b) => named(&format!("urn:skolem:g{}:{}", gix, b.as_str())),
+        Term::BlankNode(b) => named(&format!(
+            "urn:skolem:graph:{}:{}",
+            encode_for_uri(graph_iri),
+            encode_for_uri(b.as_str())
+        )),
         other => other.clone(),
     }
 }
@@ -193,8 +199,8 @@ pub(crate) fn assemble_facts(
     // 1) resources: every non-control, non-auth graph + every structural container
     //    prefix (containers exist as inheritance anchors even without their own graph).
     let mut resources: FxHashSet<String> = FxHashSet::default();
-    let mut control_graphs: Vec<(usize, &str, &Graph)> = Vec::new(); // (idx, name, sub)
-    for (gix, (name, sub)) in graph.named.iter().enumerate() {
+    let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
+    for (name, sub) in &graph.named {
         let Some(iri) = graph_iri(name) else { continue };
         // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
         // never reasoning input. [`strip_reserved_graphs`] also drops these from the
@@ -206,7 +212,7 @@ pub(crate) fn assemble_facts(
         }
         if iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX) {
             if iri.ends_with(suffix) {
-                control_graphs.push((gix, iri, sub));
+                control_graphs.push((iri, sub));
             }
             continue;
         }
@@ -226,7 +232,7 @@ pub(crate) fn assemble_facts(
 
     // 2) control-document linkage by naming convention: <R + ".acl"> controls <R>.
     //    The .acl/.acr graphs are themselves resources too (Control gates them).
-    for (_, iri, _) in &control_graphs {
+    for (iri, _) in &control_graphs {
         let r = &iri[..iri.len() - suffix.len()];
         out.push([named(r), owns.clone(), named(iri)]);
     }
@@ -236,7 +242,7 @@ pub(crate) fn assemble_facts(
     let mut group_docs: FxHashSet<String> = FxHashSet::default();
     let mut webids: FxHashSet<String> = FxHashSet::default();
     let mut principal_iris: FxHashSet<String> = FxHashSet::default();
-    for (gix, iri, sub) in &control_graphs {
+    for (iri, sub) in &control_graphs {
         let mut in_doc: FxHashSet<Term> = FxHashSet::default();
         for t in graph_triples(sub) {
             // [OPUS-4.8] sq-3jtd.5: hard-reject any forged derivation-internal fact
@@ -245,9 +251,9 @@ pub(crate) fn assemble_facts(
             if is_reserved_derivation_predicate(&t) {
                 continue;
             }
-            let s = skolemize(&t[0], *gix);
+            let s = skolemize(&t[0], iri);
             in_doc.insert(s.clone());
-            out.push([s, skolemize(&t[1], *gix), skolemize(&t[2], *gix)]);
+            out.push([s, skolemize(&t[1], iri), skolemize(&t[2], iri)]);
             collect_agents(&t, &mut webids, &mut group_docs, &mut principal_iris);
         }
         for s in in_doc {
@@ -255,7 +261,7 @@ pub(crate) fn assemble_facts(
         }
     }
     if system == System::Wac {
-        for (gix, (name, sub)) in graph.named.iter().enumerate() {
+        for (name, sub) in &graph.named {
             let Some(iri) = graph_iri(name) else { continue };
             // Same reserved-space skip as the resource pass above: a forged
             // `<urn:sparq:…>` graph named by an `acl:agentGroup` must never be read.
@@ -269,9 +275,9 @@ pub(crate) fn assemble_facts(
                     continue;
                 }
                 out.push([
-                    skolemize(&t[0], gix),
-                    skolemize(&t[1], gix),
-                    skolemize(&t[2], gix),
+                    skolemize(&t[0], iri),
+                    skolemize(&t[1], iri),
+                    skolemize(&t[2], iri),
                 ]);
                 if let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) {
                     if p.as_str() == VCARD_MEMBER {
@@ -490,7 +496,219 @@ pub(crate) fn parent_iri(iri: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    use super::{assemble_facts, graph_triples, named, skolemize, System};
     use super::{iri_origin, parent_iri};
+    use crate::{
+        AccessProvenance, Mode, PodStore, Session, VerifiedCredentials, AUTH_GRAPH, AUTH_NS,
+    };
+    use oxrdf::{BlankNode, Literal, NamedNode, Term};
+    use rustc_hash::FxHashSet;
+    use sparq_core::Graph;
+
+    const ACR: &str = "https://pod.ex/doc.acr";
+    const OTHER_ACR: &str = "https://other.ex/doc.acr";
+
+    #[test]
+    fn skolem_components_are_valid_and_unambiguous() {
+        let graphs = [
+            "https://pod.ex/doc.acr",
+            "https://pod.ex/doc:part.acr",
+            "https://pod.ex/doc%3Apart.acr",
+            "https://例.example/文?x=1&y=2#片",
+            "urn:doc:a",
+            "urn:doc:a:b",
+        ];
+        let labels = ["b", "b:c", "é", "c"];
+        let mut seen = FxHashSet::default();
+        for graph in graphs {
+            NamedNode::new(graph).unwrap();
+            for label in labels {
+                let blank = Term::BlankNode(BlankNode::new(label).unwrap());
+                let skolem = skolemize(&blank, graph);
+                let Term::NamedNode(node) = &skolem else {
+                    panic!("expected skolem IRI")
+                };
+                NamedNode::new(node.as_str()).unwrap();
+                assert_eq!(skolem, skolemize(&blank, graph));
+                assert!(
+                    seen.insert(skolem),
+                    "distinct graph/label pairs must not collide"
+                );
+            }
+        }
+        assert_eq!(
+            skolemize(
+                &Term::BlankNode(BlankNode::new("b:c").unwrap()),
+                "urn:doc:a"
+            ),
+            named("urn:skolem:graph:urn%3Adoc%3Aa:b%3Ac")
+        );
+        for term in [
+            named("https://pod.ex/node"),
+            Term::Literal(Literal::new_simple_literal("value")),
+        ] {
+            assert_eq!(skolemize(&term, ACR), term);
+        }
+    }
+
+    #[test]
+    fn wac_group_and_control_blank_nodes_keep_distinct_stable_scopes() {
+        let mut graph = Graph::new();
+        // Construct the same label directly: separate parser calls may rename it.
+        for (iri, predicate, object) in [
+            ("https://pod.ex/doc.acl", super::ACL_AGENT_GROUP, "https://pod.ex/group#team"),
+            ("https://pod.ex/group", super::VCARD_MEMBER, "https://alice.ex/card#me"),
+        ] {
+            let mut sub = Graph::new();
+            sub.insert_triple(BlankNode::new("shared").unwrap(), named(predicate), named(object))
+                .unwrap();
+            graph.named.push((named(iri), sub));
+        }
+        let facts = |g: &Graph| -> FxHashSet<_> {
+            assemble_facts(
+                g,
+                System::Wac,
+                &AccessProvenance::new(),
+                &VerifiedCredentials::default(),
+            )
+            .unwrap()
+            .into_iter()
+            .collect()
+        };
+        let before = facts(&graph);
+        let subjects: FxHashSet<_> = before
+            .iter()
+            .filter(|t| t[1] == named(super::ACL_AGENT_GROUP) || t[1] == named(super::VCARD_MEMBER))
+            .map(|t| t[0].clone())
+            .collect();
+        assert_eq!(
+            subjects.len(),
+            2,
+            "the same label belongs to separate documents"
+        );
+        graph.named.reverse();
+        assert_eq!(facts(&graph), before);
+    }
+
+    fn blank_matcher_store() -> PodStore {
+        let mut graph = Graph::new();
+        graph.named.push((named(OTHER_ACR), Graph::new()));
+        graph
+            .named
+            .push((named("https://pod.ex/doc"), Graph::new()));
+        graph.named.push((
+            named(ACR),
+            Graph::load_str(
+                include_str!("../tests/fixtures/blank_node_matcher.ttl"),
+                "turtle",
+            )
+            .unwrap(),
+        ));
+        let mut store = PodStore::new(graph);
+        store.materialize_acp().unwrap();
+        store
+    }
+
+    fn assert_blank_matcher_decisions(store: &PodStore) {
+        for (agent, allowed) in [
+            (None, true),
+            (Some("https://alice.ex/card#me"), true),
+            (Some("https://bob.ex/card#me"), false),
+        ] {
+            let session = Session {
+                agent,
+                ..Session::default()
+            };
+            for mode in [Mode::Read, Mode::Write] {
+                let expected = if mode == Mode::Read && allowed {
+                    vec!["https://pod.ex/doc"]
+                } else {
+                    vec![]
+                };
+                let actual = store.accessible(&session, mode);
+                assert_eq!(
+                    actual.iter().map(|n| n.as_str()).collect::<Vec<_>>(),
+                    expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn blank_node_matcher_authorization_decisions() {
+        assert_blank_matcher_decisions(&blank_matcher_store());
+    }
+
+    fn skolem_iris(store: &PodStore) -> FxHashSet<Term> {
+        assemble_facts(
+            &store.graph,
+            System::Acp,
+            &AccessProvenance::new(),
+            &VerifiedCredentials::default(),
+        )
+        .unwrap()
+        .into_iter()
+        .flatten()
+        .filter(|t| matches!(t, Term::NamedNode(n) if n.as_str().starts_with("urn:skolem:")))
+        .collect()
+    }
+
+    #[test]
+    fn blank_node_matchers_survive_unrelated_put_and_delete() {
+        for delete in [false, true] {
+            let mut store = blank_matcher_store();
+            assert_blank_matcher_decisions(&store);
+            let before = skolem_iris(&store);
+            assert_eq!(before.len(), 2, "both anonymous matchers are present");
+            let old_auth = store.auth.clone();
+            let auth_graph = &store
+                .graph
+                .named
+                .iter()
+                .find(|(n, _)| *n == named(AUTH_GRAPH))
+                .unwrap()
+                .1;
+            assert!(
+                graph_triples(auth_graph)
+                    .iter()
+                    .any(|t| t[1] == named(&format!("{AUTH_NS}exceptMatcher"))
+                        && before.contains(&t[2])),
+                "the blank noneOf matcher reaches the auth view"
+            );
+            let position = |s: &PodStore| {
+                s.graph
+                    .named
+                    .iter()
+                    .position(|(n, _)| *n == named(ACR))
+                    .unwrap()
+            };
+            let old_position = position(&store);
+            if delete {
+                assert!(store.delete_acl_acp(OTHER_ACR).unwrap().existed);
+            } else {
+                assert!(store.put_acl_acp(OTHER_ACR, "", "turtle").unwrap().existed);
+            }
+            assert_ne!(position(&store), old_position, "exercise graph renumbering");
+            assert_eq!(
+                skolem_iris(&store),
+                before,
+                "unrelated writes preserve skolem IRIs"
+            );
+            assert!(
+                old_auth.matchers_eq(&store.auth),
+                "matcher diff must stay unchanged"
+            );
+            store
+                .cache
+                .with_entry(&(None, None, None, None, Mode::Read), |entry| {
+                    assert!(
+                        entry.is_some(),
+                        "the warmed anonymous session survives the write"
+                    );
+                });
+            assert_blank_matcher_decisions(&store);
+        }
+    }
 
     #[test]
     fn parent_walks_to_root_and_stops() {
