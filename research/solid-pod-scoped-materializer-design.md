@@ -276,9 +276,10 @@ A `put_acl` today costs:
 Pod-scoping term 2 alone leaves 1, 3 and 4 at `O(all)`. Terms 1 and 4 have their own fixes
 (§8 P2, P6) and term 3 needs the splice (§5.4). **No implementation bead should land before
 a profile attributes the write path across these four.** If term 2 does not dominate, the
-priority order changes and this design is the wrong first move. The repo has no solid write
-benchmark today (`crates/sparq-bench/benches` has none; `crates/sparq-solid/examples/bench.rs`
-is a read-path harness) — building one is P0.
+priority order changes and this design is the wrong first move. Building that profile is P0:
+`MaterializeStats` now times the four terms (`assemble_millis`, `reason_millis`,
+`install_millis`, `index_millis`) and `crates/sparq-solid/examples/acl_write_bench.rs`
+reports them for a `put_acl` over a configurable number of pods.
 
 ### 5.2 The document dependency graph
 

@@ -76,7 +76,7 @@ transitive `oxrdf 0.3.3 → rand → getrandom` needs the host bundle to select 
 `sparq-wasm` does (`getrandom`'s `wasm_js` feature + the `getrandom_backend` cfg; see the
 [migration guide](../../docs/migrating-from-oxigraph.md#wasm-compilation)). **Timing on wasm32:**
 `std::time::Instant` panics (no monotonic clock), so `materialize_wac`/`materialize_acp` `cfg`-gate the
-wall-clock plumbing off and report `stats.millis == 0.0` (rest of `MaterializeStats` unchanged); a wasm32
+wall-clock plumbing off and report `stats.millis == 0.0`, and every phase timing as `0.0` (rest of `MaterializeStats` unchanged); a wasm32
 smoke test (`tests/wasm_materialize.rs`, `wasm-pack test --node`) guards it. Deno-wasm / Workers run-feasible.
 
 ## Conformance, security & containment

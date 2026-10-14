@@ -101,9 +101,15 @@ Materialize the authorization view from the access-control documents, then enfor
 - `store.materialize_wac()` / `store.materialize_acp() -> Result<MaterializeStats, _>` —
   run the N3 rules to (re)install `<urn:sparq:auth>`. ACP uses one three-stratum
   in-memory reasoning run; `MaterializeStats::strata_facts` reports its term-level closure
-  size after each stratum, before RDF list expansion and interning. On `wasm32-unknown-unknown` the
-  informational `MaterializeStats::millis` is reported as `0.0` (no `std::time::Instant`);
-  the auth view is identical (sq-7agop).
+  size after each stratum, before RDF list expansion and interning. `millis` is split into
+  `assemble_millis` (rules + reasoning input), `reason_millis` (the fixpoint) and
+  `install_millis` (filtering and installing the view); `index_millis` is the time the
+  `PodStore` methods then spend rebuilding the session index (`0.0` from the free functions).
+  `store.last_rebuild() -> Option<&MaterializeStats>` returns the timings of the last rebuild,
+  including one a `put_acl`/`delete_acl` or a rule-changing update ran;
+  `examples/acl_write_bench.rs` reports that split for a `put_acl`. On `wasm32-unknown-unknown`
+  every informational timing is reported as `0.0` (no `std::time::Instant`); the auth view
+  is identical (sq-7agop).
 - `store.materialize_acp_with(&AccessProvenance) -> Result<MaterializeStats, _>` —
   (sq-3jtd.5) ACP materialization that ALSO resolves `acp:CreatorAgent` /
   `acp:OwnerAgent` matchers against per-resource creator/owner WebIDs supplied by the
