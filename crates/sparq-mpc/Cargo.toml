@@ -1,4 +1,4 @@
-# [OPUS-4.8] sparq-mpc — MPC over federated SPARQL (RQ2). Through M3.
+# sparq-mpc — MPC over federated SPARQL (RQ2). Through M3.
 # Native-only research crate. DELIBERATELY NOT a dependency of sparq-wasm:
 # the WASM bundle must stay free of any MPC/crypto surface (verify with
 # `cargo tree -p sparq-wasm` — sparq-mpc must NOT appear).
@@ -35,7 +35,7 @@ publish = false
 # invariant "each holder evaluates locally over its own graphs" core.
 
 [features]
-# [OPUS-4.8] sq-1vt: gate exposing the DETERMINISTIC, SEEDABLE masking RNG
+# sq-1vt: gate exposing the DETERMINISTIC, SEEDABLE masking RNG
 # (`ShamirBackend::new_seeded` / `rng::InsecureTestRng`) outside `#[cfg(test)]`,
 # e.g. for an external benchmark harness that needs reproducible masks. It is
 # OFF by default, so a normal `sparq-mpc` build CANNOT construct a predictable
@@ -64,7 +64,7 @@ sparq-engine = { path = "../sparq-engine" }
 # re-encode its own data to hand a partial to the join layer.
 oxrdf = { workspace = true }
 
-# [OPUS-4.8] sq-1vt / sq-it50 / sq-8xug: OS-entropy seed for the secret-sharing /
+# sq-1vt / sq-it50 / sq-8xug: OS-entropy seed for the secret-sharing /
 # masking CSPRNG. The dealer's polynomial coefficients and the equality-test mask
 # MUST be unpredictable — a non-crypto PRNG there is a real confidentiality
 # weakness (sq-1vt). We own the ChaCha20 keystream generator (`crate::chacha`,
@@ -80,7 +80,7 @@ oxrdf = { workspace = true }
 # invariant intact. `getrandom` 0.4 is the workspace OS-entropy floor.
 getrandom = "0.4"
 
-# [OPUS-4.8] sq-u8a8 (epic sq-toze / from side-channel analysis sq-egx6, gap
+# sq-u8a8 (epic sq-toze / from side-channel analysis sq-egx6, gap
 # CR-G5): secret-memory hygiene (`zeroize`) + constant-time-equality PRIMITIVES
 # (`subtle`) for the secret-bearing MPC types. HYGIENE ONLY — no protocol,
 # algorithm, wire-format, or disclosure-minimisation behaviour changes. The
@@ -94,7 +94,7 @@ getrandom = "0.4"
 zeroize = { version = "1", features = ["zeroize_derive"] }
 subtle = "2"
 
-# [OPUS-4.8] sq-dl81: a vetted cryptographic hash for the domain-separated
+# sq-dl81: a vetted cryptographic hash for the domain-separated
 # Term->Fp join-key encoder (`crate::term_encode`). The hidden-value join's
 # secret-shared field-equality is a SOUND stand-in for RDF term equality ONLY
 # if the encoding is injective on the join domain; a uniform-output hash makes

@@ -82,7 +82,7 @@
 //! drift tests below keep that profile and these constants from diverging (the
 //! `crates/sparq-trust/src/secprop.rs` discipline).
 //!
-//! [OPUS-4.8] sq-uor3g (epic sq-0dksu, Phase 4; design record
+//! sq-uor3g (epic sq-0dksu, Phase 4; design record
 //! `research/security-properties-ontology-design.md` §4.3.1 + §9). 🤖 SPARQ agent —
 //! security-properties ontology. Flag for re-review when Fable returns.
 
@@ -164,7 +164,7 @@ pub const REQUIRES_CORRUPTION_THRESHOLD: &str =
 
 // ── the dimension IRIs (the `secx:overDimension` targets) ────────────────────
 //
-// [OPUS-5] sq-3705: these are NOT declared here — every one is an alias of the
+// sq-3705: these are NOT declared here — every one is an alias of the
 // canonical constant in the ZERO-dependency `sparq-secprop-vocab` leaf, which owns
 // the `secx:` vocabulary, its `secprop-ext.ttl`, and the single drift test pinning
 // the two. They used to be byte-identical copies of `sparq-trust::secprop`'s set,

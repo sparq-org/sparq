@@ -92,9 +92,9 @@
 //! `JoinTree` leaf resolving to a TPF/brTPF source is answered through `solutions` (the typed
 //! fragment path), not through `execute` (bead `sq-yzca`).
 //!
-//! [OPUS-4.8] sq-rsxf (epic sq-dnko / sq-3183): Phase-2 source-type abstraction +
-//! Endpoint adapter + default-deny SSRF guard. [OPUS-4.8] sq-2qze: Phase-6 brTPF + TPF
-//! adapters + count-metadata cardinality. [OPUS-4.8] sq-yzca: native HTTP `FragmentTransport`
+//! sq-rsxf (epic sq-dnko / sq-3183): Phase-2 source-type abstraction +
+//! Endpoint adapter + default-deny SSRF guard. sq-2qze: Phase-6 brTPF + TPF
+//! adapters + count-metadata cardinality. sq-yzca: native HTTP `FragmentTransport`
 //! (ureq + SSRF resolver + Hydra URI-template + Turtle/TriG parse) + interpreter wiring.
 //! Flagged for Fable re-review when available.
 
@@ -107,7 +107,7 @@ use std::net::IpAddr;
 
 /// Failure modes a [`FederatedSource`] can surface. `String`-payload variants mirror the
 /// engine's `Transport`-error convention (`service.rs` returns `Result<_, String>`), so an
-/// `Endpoint` can forward a transport error verbatim. [OPUS-4.8] sq-rsxf.
+/// `Endpoint` can forward a transport error verbatim. sq-rsxf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FedError {
     /// The endpoint IRI could not be parsed / had no host authority to vet.
@@ -147,7 +147,7 @@ impl std::error::Error for FedError {}
 /// pattern as `SELECT * WHERE { … }` before `fetch`). The capability-aware *construction*
 /// of this sub-query (projection, pushable FILTERs, VALUES bind-join blocks, ORDER/LIMIT)
 /// is the `pushdown` module's job in **Phase 4**; this type is the seam between that phase
-/// and the adapters. [OPUS-4.8] sq-rsxf.
+/// and the adapters. sq-rsxf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubQuery {
     /// The SPARQL query string to send to the source (already capability-narrowed by the
@@ -219,7 +219,7 @@ pub enum FilterClass {
 /// Phase 2 fills this from a *static default per interface* (see [`Capability::endpoint`]
 /// / [`Capability::local`] / [`Capability::tpf`] / [`Capability::brtpf`]); the
 /// `discovery` module (Phase 1) will refine an `Endpoint`'s capability from its parsed
-/// Service Description (`sd:supportedLanguage`, `sd:resultFormat`, …). [OPUS-4.8] sq-rsxf.
+/// Service Description (`sd:supportedLanguage`, `sd:resultFormat`, …). sq-rsxf.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capability {
     /// The remote interface this capability describes.
@@ -299,7 +299,7 @@ impl Capability {
 /// transport — including a test double — without depending on engine internals, while the
 /// dependency arrow still points one-way *into* the engine. A native `HttpTransport`
 /// (ureq, default-deny SSRF resolver) lands alongside `execute()`'s streaming in a later
-/// phase; Phase 2 ships the seam + the egress gate that fronts it. [OPUS-4.8] sq-rsxf.
+/// phase; Phase 2 ships the seam + the egress gate that fronts it. sq-rsxf.
 pub trait Transport: Send + Sync {
     /// Send `query` to `endpoint`; return the raw response body or an error string.
     fn fetch(&self, endpoint: &str, query: &str) -> Result<String, String>;
@@ -324,7 +324,7 @@ pub use sparq_engine::is_forbidden_ip;
 /// is refused, and a deployer must explicitly allowlist a host to re-open it. This is
 /// DNS-rebinding-safe: [`EgressGuard::check_addr`] vets a *resolved* [`IpAddr`], not the
 /// literal IRI host, so a hostile DNS answer pointing at loopback / cloud-metadata is
-/// dropped on the resolved IP. [OPUS-4.8] sq-rsxf.
+/// dropped on the resolved IP. sq-rsxf.
 #[derive(Debug, Clone, Default)]
 pub struct EgressGuard {
     /// Hosts (DNS name or IP literal, lowercased authority) exempt from the
@@ -353,7 +353,7 @@ impl EgressGuard {
     ///
     /// The `host:port` split + matching is the engine SERVICE guard's shared rule
     /// ([`sparq_engine::allowlist_entry_permits`]) so the two guards agree on every edge case
-    /// (port-0/overflow/IPv6-bracket/trailing-colon all fail-CLOSED). [OPUS-4.8] sq-vbnyc.
+    /// (port-0/overflow/IPv6-bracket/trailing-colon all fail-CLOSED). sq-vbnyc.
     pub fn allow_host(mut self, host: impl Into<String>) -> Self {
         self.allow.insert(host.into().to_ascii_lowercase());
         self
@@ -363,7 +363,7 @@ impl EgressGuard {
     /// `true` when some entry permits `host` on at least one port — a host-level entry (all ports)
     /// or a port-scoped entry (its single port). The load-bearing, port-precise check is
     /// [`is_allowed_port`](Self::is_allowed_port); this convenience form answers "is this host on
-    /// the allowlist at all" and is used where the port is not yet known. [OPUS-4.8] sq-vbnyc.
+    /// the allowlist at all" and is used where the port is not yet known. sq-vbnyc.
     pub fn is_allowed(&self, host: &str) -> bool {
         let h = host.to_ascii_lowercase();
         // "Allowed on SOME port" = some entry's host part names `h` (port ignored). Reuses the
@@ -377,7 +377,7 @@ impl EgressGuard {
     /// Is `(host, port)` permitted by the allowlist? The load-bearing, PORT-SCOPED check: a
     /// host-level entry permits `host` on every port; a `host:port` entry permits it ONLY on that
     /// exact port. Delegates to the engine SERVICE guard's shared per-entry rule so the fedclient
-    /// guard and the engine guard decide every host:port case identically. [OPUS-4.8] sq-vbnyc.
+    /// guard and the engine guard decide every host:port case identically. sq-vbnyc.
     pub fn is_allowed_port(&self, host: &str, port: u16) -> bool {
         let h = host.to_ascii_lowercase();
         self.allow
@@ -388,7 +388,7 @@ impl EgressGuard {
     /// The set of allowlisted hosts (lowercased bare authorities), so a native transport can
     /// bridge *this guard's* allowlist into the ureq SSRF resolver — making the IP the guard
     /// vets and the IP the socket dials come from the **same** resolution (no second,
-    /// unguarded re-resolve). [OPUS-4.8] sq-25xk.
+    /// unguarded re-resolve). sq-25xk.
     pub fn allowed_hosts(&self) -> &HashSet<String> {
         &self.allow
     }
@@ -397,7 +397,7 @@ impl EgressGuard {
     /// to refuse. The allowlist exemption fires only when the host AND port BOTH match (a
     /// port-scoped entry re-opens a private address on its one port only); otherwise a
     /// [`is_forbidden_ip`] address is refused. This is the per-address hook a resolver calls on
-    /// every candidate IP, now port-scoped to mirror the engine SERVICE guard. [OPUS-4.8] sq-vbnyc.
+    /// every candidate IP, now port-scoped to mirror the engine SERVICE guard. sq-vbnyc.
     pub fn check_addr(&self, host: &str, port: u16, ip: IpAddr) -> Result<(), String> {
         if self.is_allowed_port(host, port) || !is_forbidden_ip(ip) {
             Ok(())
@@ -418,7 +418,7 @@ impl EgressGuard {
     ///
     /// The PORT is the authority's explicit `:port` or the scheme default (the SAME port actually
     /// dialled), so a port-scoped allowlist entry (`host:port`) is honoured exactly as the engine
-    /// SERVICE guard honours it: it re-opens the host on that one port only. [OPUS-4.8] sq-vbnyc.
+    /// SERVICE guard honours it: it re-opens the host on that one port only. sq-vbnyc.
     pub fn check_endpoint(&self, endpoint: &str) -> Result<String, FedError> {
         let (host, port) = endpoint_host_port(endpoint)
             .ok_or_else(|| FedError::BadEndpoint(format!("no host authority in {endpoint:?}")))?;
@@ -464,7 +464,7 @@ impl EgressGuard {
 /// port from an endpoint IRI: the explicit `:port`, or the scheme default (443 for `https`,
 /// 80 otherwise — the SAME port that is actually dialled). Returns `None` when there is no host
 /// authority. The port is what makes a PORT-SCOPED allowlist entry (`host:port`) decidable, so the
-/// fedclient guard matches the engine SERVICE guard's authority handling exactly. [OPUS-4.8] sq-vbnyc.
+/// fedclient guard matches the engine SERVICE guard's authority handling exactly. sq-vbnyc.
 fn endpoint_host_port(endpoint: &str) -> Option<(String, u16)> {
     // scheme://authority/path?query — take the scheme + what follows "://".
     let (scheme, after_scheme) = endpoint.split_once("://")?;
@@ -538,7 +538,7 @@ fn endpoint_host_port(endpoint: &str) -> Option<(String, u16)> {
 /// Native-only (`cfg(not(target_arch = "wasm32"))`): neither ureq nor its TLS stack ever
 /// enters the wasm bundle (the wasm federation client would carry a `fetch`-based transport
 /// instead). Build one with [`Endpoint::native`] / [`Endpoint::with_guard_native`], or
-/// directly via [`HttpTransport::new`] / [`HttpTransport::from_guard`]. [OPUS-4.8] sq-25xk.
+/// directly via [`HttpTransport::new`] / [`HttpTransport::from_guard`]. sq-25xk.
 #[cfg(not(target_arch = "wasm32"))]
 pub struct HttpTransport {
     /// The timeout and the SSRF resolver's allowlist, bridged from the [`EgressGuard`] so the
@@ -603,7 +603,7 @@ impl Transport for HttpTransport {
 /// `discover()` resolves the source's [`Capability`] (and, once Phase 1 lands, its
 /// [`SourceDescriptor`](sparq_fedplan::SourceDescriptor) statistics) one-shot; `execute()` answers the most-precise
 /// sub-query the source can evaluate. Phase 2 returns the raw SRJ body from `execute()`;
-/// the streamed `SolutionStream` boundary is Phase 5. [OPUS-4.8] sq-rsxf.
+/// the streamed `SolutionStream` boundary is Phase 5. sq-rsxf.
 pub trait FederatedSource {
     /// Which interface this source speaks — drives pushdown shape and operator choice.
     fn source_type(&self) -> SourceType<'_>;
@@ -614,7 +614,7 @@ pub trait FederatedSource {
 
     /// Answer `sub` against this source. Phase 2: vets the endpoint through the SSRF guard,
     /// forwards `sub.sparql` to the transport, and returns the raw SRJ body. The SRJ→
-    /// solution parse and the streaming boundary are Phase 5. [OPUS-4.8] sq-rsxf.
+    /// solution parse and the streaming boundary are Phase 5. sq-rsxf.
     fn execute(&self, sub: &SubQuery) -> Result<String, FedError>;
 }
 
@@ -629,7 +629,7 @@ pub trait FederatedSource {
 ///   (**Phase 6, real here**: a fragment-server adapter that returns a complete answer for
 ///   one triple pattern via [`BrTpfSource::solutions`] / [`TpfSource::solutions`]);
 /// * [`SourceType::Local`] — the in-process engine (capability "everything"; `execute`
-///   is wired in the planner/operators phases). [OPUS-4.8] sq-rsxf / sq-2qze.
+///   is wired in the planner/operators phases). sq-rsxf / sq-2qze.
 pub enum SourceType<'a> {
     /// A full SPARQL 1.1 endpoint.
     Endpoint(&'a Endpoint),
@@ -651,7 +651,7 @@ pub enum SourceType<'a> {
 /// supply an allowlisting [`EgressGuard`]. The transport is any `Transport` impl — a real
 /// HTTP client or a test double — so the adapter is exercised without a network. The host
 /// is **vetted on every `execute`** (not cached), matching the engine's
-/// resolve-then-dial-the-vetted-IP discipline. [OPUS-4.8] sq-rsxf.
+/// resolve-then-dial-the-vetted-IP discipline. sq-rsxf.
 pub struct Endpoint {
     endpoint: String,
     transport: Box<dyn Transport>,
@@ -687,7 +687,7 @@ impl Endpoint {
     /// A new endpoint source over the native IP-pinning [`HttpTransport`] with the **secure
     /// default** SSRF guard. The transport's ureq resolver and the pre-flight guard share the
     /// (empty) default-deny allowlist, so the IP vetted before the request is the IP dialled —
-    /// the DNS-rebinding re-resolve window is closed end-to-end. Native-only. [OPUS-4.8] sq-25xk.
+    /// the DNS-rebinding re-resolve window is closed end-to-end. Native-only. sq-25xk.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn native(endpoint: impl Into<String>) -> Self {
         Endpoint {
@@ -701,7 +701,7 @@ impl Endpoint {
     /// [`EgressGuard`]. The transport's resolver is built [`from_guard`](HttpTransport::from_guard),
     /// so the guard's allowlist governs BOTH the pre-flight [`check_endpoint`](EgressGuard::check_endpoint)
     /// and the socket resolver — one allowlist, no second unguarded re-resolve. Native-only.
-    /// [OPUS-4.8] sq-25xk.
+    /// sq-25xk.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn with_guard_native(endpoint: impl Into<String>, guard: EgressGuard) -> Self {
         let transport = Box::new(HttpTransport::from_guard(&guard));
@@ -754,7 +754,7 @@ impl FederatedSource for Endpoint {
 /// One RDF term in a fragment triple or a query position — the minimal term model the TPF
 /// adapters need without re-pulling the engine's full term type. A fragment server speaks
 /// concrete RDF, so a triple is three [`FragTerm`]s; a query pattern is three
-/// [`PatternTerm`]s (a term, or a named variable). [OPUS-4.8] sq-2qze.
+/// [`PatternTerm`]s (a term, or a named variable). sq-2qze.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FragTerm {
     /// An IRI (no angle brackets — the bare IRI string).
@@ -805,7 +805,7 @@ impl PatternTerm {
 
 /// A single triple pattern the planner pushes to a fragment source: subject, predicate,
 /// object, each either bound or a variable (exactly the TPF/brTPF access unit — one triple
-/// pattern). [OPUS-4.8] sq-2qze.
+/// pattern). sq-2qze.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FragPattern {
     /// The subject position.
@@ -873,7 +873,7 @@ impl FragTriple {
 ///
 /// The token is whatever the transport needs to fetch the next page (a URL, a page number);
 /// `None` means this is the last page. The adapters follow it to exhaustion so the result
-/// is COMPLETE. [OPUS-4.8] sq-2qze.
+/// is COMPLETE. sq-2qze.
 #[derive(Debug, Clone)]
 pub struct FragmentPage {
     /// The triples on this page (already filtered to the requested pattern by the server).
@@ -897,7 +897,7 @@ pub struct FragmentPage {
 /// The native HTTP implementation is [`HttpFragmentTransport`] (bead `sq-yzca`): ureq + the
 /// default-deny SSRF resolver, serialising the pattern into the Hydra URI template + the binding
 /// block as the brTPF `values` parameter, and parsing the Turtle/TriG fragment body. The trait
-/// is also exercised through an in-memory fixture server in the tests (zero network). [OPUS-4.8].
+/// is also exercised through an in-memory fixture server in the tests (zero network).
 pub trait FragmentTransport: Send + Sync {
     /// Fetch one fragment page. `bindings` is the brTPF block (empty for plain TPF);
     /// `page` is the next-page token (`None` for the first page).
@@ -912,16 +912,16 @@ pub trait FragmentTransport: Send + Sync {
 
 // ─── Native HTTP FragmentTransport (ureq + SSRF resolver + Hydra template + Turtle/TriG) ─
 
-/// The Hydra Core vocabulary namespace (the TPF control vocabulary). [OPUS-4.8] sq-yzca.
+/// The Hydra Core vocabulary namespace (the TPF control vocabulary). sq-yzca.
 #[cfg(not(target_arch = "wasm32"))]
 const HYDRA_NS: &str = "http://www.w3.org/ns/hydra/core#";
-/// The VoID namespace (`void:triples` — the fragment's match-count estimate). [OPUS-4.8].
+/// The VoID namespace (`void:triples` — the fragment's match-count estimate).
 #[cfg(not(target_arch = "wasm32"))]
 const VOID_NS: &str = "http://rdfs.org/ns/void#";
 /// The brTPF `values` control property the sparq server mints (sq-dxhb) — the
 /// `hydra:property` its `{values}` template variable maps to. The native transport attaches
 /// the brTPF binding block under the `values` query parameter (the server's text wire).
-/// [OPUS-4.8] sq-yzca.
+/// sq-yzca.
 #[cfg(not(target_arch = "wasm32"))]
 const BRTPF_VALUES_PARAM: &str = "values";
 
@@ -953,7 +953,7 @@ const BRTPF_VALUES_PARAM: &str = "values";
 /// Native-only (`cfg(not(target_arch = "wasm32"))`): ureq + its TLS stack never enter the wasm
 /// bundle (a wasm federation client would carry a `fetch`-based transport). Construct with
 /// [`HttpFragmentTransport::new`] (strict default-deny) or [`HttpFragmentTransport::from_guard`]
-/// to share an [`EgressGuard`]'s allowlist. [OPUS-4.8] sq-yzca.
+/// to share an [`EgressGuard`]'s allowlist. sq-yzca.
 #[cfg(not(target_arch = "wasm32"))]
 pub struct HttpFragmentTransport {
     /// The timeout and the SSRF resolver's allowlist, bridged from an [`EgressGuard`] so the
@@ -1038,7 +1038,7 @@ pub(crate) fn pct_encode(value: &str) -> String {
 
 /// Convert one parsed oxrdf [`oxrdf::Term`] (a triple object) into a [`FragTerm`], preserving the
 /// term's canonical N-Triples lexical identity (so equality against a bound pattern position is
-/// exact). [OPUS-4.8] sq-yzca.
+/// exact). sq-yzca.
 #[cfg(not(target_arch = "wasm32"))]
 fn oxterm_to_fragterm(term: &oxrdf::Term) -> FragTerm {
     match term {
@@ -1053,7 +1053,7 @@ fn oxterm_to_fragterm(term: &oxrdf::Term) -> FragTerm {
     }
 }
 
-/// Convert a parsed oxrdf subject ([`oxrdf::NamedOrBlankNode`]) into a [`FragTerm`]. [OPUS-4.8].
+/// Convert a parsed oxrdf subject ([`oxrdf::NamedOrBlankNode`]) into a [`FragTerm`].
 #[cfg(not(target_arch = "wasm32"))]
 fn oxsubject_to_fragterm(s: &oxrdf::NamedOrBlankNode) -> FragTerm {
     match s {
@@ -1065,7 +1065,7 @@ fn oxsubject_to_fragterm(s: &oxrdf::NamedOrBlankNode) -> FragTerm {
 /// Whether a predicate IRI is a TPF **control** predicate (Hydra / VoID), i.e. metadata about
 /// the fragment rather than a data triple. The native parser uses this to SPLIT the fragment
 /// document: control triples feed the count + next-page link; everything else is candidate
-/// data. [OPUS-4.8] sq-yzca.
+/// data. sq-yzca.
 #[cfg(not(target_arch = "wasm32"))]
 fn is_control_predicate(pred: &str) -> bool {
     pred.starts_with(HYDRA_NS)
@@ -1117,7 +1117,7 @@ impl FragmentTransport for HttpFragmentTransport {
 ///   match and a misbehaving server cannot smuggle a non-matching triple through.
 ///
 /// A malformed body (a TriG syntax error) is a clean transport-error string, never a panic — this
-/// crate is `forbid(unsafe_code)`. [OPUS-4.8] sq-yzca.
+/// crate is `forbid(unsafe_code)`. sq-yzca.
 #[cfg(not(target_arch = "wasm32"))]
 fn parse_fragment_body(body: &str, pattern: &FragPattern) -> Result<FragmentPage, String> {
     let mut triples: Vec<FragTriple> = Vec::new();
@@ -1171,7 +1171,7 @@ fn parse_fragment_body(body: &str, pattern: &FragPattern) -> Result<FragmentPage
 /// (a bound position disagrees, or the same variable in two positions binds two different
 /// terms — so a self-join pattern like `?s ?p ?s` only yields a row when the positions
 /// agree). This is the load-bearing correctness step: a misbehaving fragment server that
-/// returns a non-matching triple cannot smuggle a wrong binding through. [OPUS-4.8] sq-2qze.
+/// returns a non-matching triple cannot smuggle a wrong binding through. sq-2qze.
 fn bind_triple(pattern: &FragPattern, triple: &FragTriple) -> Option<FragBinding> {
     let mut out: FragBinding = Vec::with_capacity(3);
     for (pos, term) in [
@@ -1202,7 +1202,7 @@ fn bind_triple(pattern: &FragPattern, triple: &FragTriple) -> Option<FragBinding
 
 /// Split `bindings` into blocks of at most `max_mpr` (≥1) mappings — the brTPF
 /// `maxMpR`-bounded binding blocks. A `max_mpr` of 0 is treated as 1 (a degenerate cap must
-/// not produce zero-sized blocks, which would loop forever). [OPUS-4.8] sq-2qze.
+/// not produce zero-sized blocks, which would loop forever). sq-2qze.
 fn chunk_bindings(bindings: &[FragBinding], max_mpr: u32) -> Vec<&[FragBinding]> {
     let block = max_mpr.max(1) as usize;
     if bindings.is_empty() {
@@ -1216,7 +1216,7 @@ fn chunk_bindings(bindings: &[FragBinding], max_mpr: u32) -> Vec<&[FragBinding]>
 /// rows plus the fragment's `hydra:totalItems` (from the first page; constant per fragment).
 /// `page_cap` bounds the number of pages followed so a buggy server that never stops
 /// paginating cannot hang the client (a defensive bound, not a correctness limit — a
-/// well-behaved server terminates with `next = None` well within it). [OPUS-4.8] sq-2qze.
+/// well-behaved server terminates with `next = None` well within it). sq-2qze.
 fn drain_fragment(
     transport: &dyn FragmentTransport,
     url: &str,
@@ -1262,7 +1262,7 @@ const FRAGMENT_PAGE_CAP: usize = 1_000_000;
 /// CostFed estimate keys on the *served* `hydra:totalItems` for this source. When the pattern
 /// has a bound predicate IRI the count is attributed to that predicate partition (the exact
 /// signal `estimate_cardinality` reads); otherwise it seeds the descriptor's total only.
-/// [OPUS-4.8] sq-2qze.
+/// sq-2qze.
 fn descriptor_from_count(
     id: &str,
     pattern: &FragPattern,
@@ -1296,7 +1296,7 @@ fn descriptor_from_count(
 ///
 /// `discover()` reports the brTPF [`Capability`] and a count-metadata [`SourceDescriptor`](sparq_fedplan::SourceDescriptor)
 /// for the open pattern (`?s ?p ?o`), the recall-safe upper-bound cardinality the planner
-/// keys on. [OPUS-4.8] sq-2qze.
+/// keys on. sq-2qze.
 pub struct BrTpfSource {
     /// The brTPF fragment-template / base URL.
     pub url: String,
@@ -1399,7 +1399,7 @@ impl FederatedSource for BrTpfSource {
 /// triple into the pattern's variables. There is **no** bind-join: a plain-TPF source shifts
 /// every join client-side, so the adapter materialises the whole (selective) fragment for
 /// the planner to greedy count-driven hash-join locally (design §2.1). `discover()` reports
-/// the TPF [`Capability`] and the count-metadata [`SourceDescriptor`](sparq_fedplan::SourceDescriptor). [OPUS-4.8] sq-2qze.
+/// the TPF [`Capability`] and the count-metadata [`SourceDescriptor`](sparq_fedplan::SourceDescriptor). sq-2qze.
 pub struct TpfSource {
     /// The TPF fragment-template / base URL.
     pub url: String,
@@ -1465,7 +1465,7 @@ impl FederatedSource for TpfSource {
 /// The in-process local engine source over a `Graph`. The capability is "everything"; the
 /// actual local BGP evaluation through `sparq-engine` is wired in the planner/operators
 /// phases, so `execute` is a clearly-labelled stub here (no overclaim). The source id lets
-/// the planner address it. [OPUS-4.8] sq-rsxf.
+/// the planner address it. sq-rsxf.
 pub struct LocalSource {
     /// A stable id for the local source (used by the planner to address it).
     pub id: String,
@@ -1515,7 +1515,7 @@ mod tests {
 
     /// A canned-response transport double: records the (endpoint, query) it was asked for
     /// and returns a fixed body. Lets us assert the adapter reached the transport (i.e.
-    /// the SSRF gate ALLOWED) without any network. [OPUS-4.8] sq-rsxf.
+    /// the SSRF gate ALLOWED) without any network. sq-rsxf.
     struct CannedTransport {
         body: String,
         seen: Mutex<Vec<(String, String)>>,
@@ -1539,7 +1539,7 @@ mod tests {
     }
 
     /// A transport that PANICS if called — proves the SSRF gate refused before any
-    /// transport round-trip (a deny must never reach `fetch`). [OPUS-4.8] sq-rsxf.
+    /// transport round-trip (a deny must never reach `fetch`). sq-rsxf.
     struct PanicTransport;
     impl Transport for PanicTransport {
         fn fetch(&self, _endpoint: &str, _query: &str) -> Result<String, String> {
@@ -1652,7 +1652,7 @@ mod tests {
             Some(("host.example".to_string(), 9000))
         );
         assert_eq!(endpoint_host_port("http:///nohost"), None);
-        // [FABLE-5] sq-3dyje.6: a BARE (unbracketed) multi-colon IPv6 authority must NOT be
+        // sq-3dyje.6: a BARE (unbracketed) multi-colon IPv6 authority must NOT be
         // split on its last colon into host + port — the `!h.contains(':')` guard keeps the
         // whole thing as the host with the scheme default port. Mutating that guard to `true`
         // would wrongly split `fe80::1` into host `fe80:` + port 1. (No earlier test exercised
@@ -1979,7 +1979,7 @@ mod tests {
     /// block. It is a REAL server model — it computes the matching triples itself (no canned
     /// rows), follows the same match semantics a conformant TPF/brTPF server would, reports a
     /// truthful `hydra:totalItems`, and records every request it saw so a test can assert the
-    /// `maxMpR`-bounded block discipline. [OPUS-4.8] sq-2qze.
+    /// `maxMpR`-bounded block discipline. sq-2qze.
     struct FixtureFragments {
         triples: Vec<FragTriple>,
         page_size: usize,
@@ -2327,7 +2327,7 @@ mod tests {
     // above prove WHICH IPs are forbidden; these prove the *resolver ureq actually calls*
     // applies that classification — including the host-authority parse, the IPv6 bracket
     // strip, and the allowlist bypass. Every case uses an IP-LITERAL netloc so `to_socket_addrs`
-    // is hermetic (no DNS lookup, no network), so the tests are deterministic. [OPUS-4.8] sq-25xk.
+    // is hermetic (no DNS lookup, no network), so the tests are deterministic. sq-25xk.
 
     #[cfg(not(target_arch = "wasm32"))]
     fn resolver_with(allow: &[&str]) -> EgressFilterResolver {
@@ -2338,7 +2338,7 @@ mod tests {
         }
     }
 
-    /// [OPUS-4.8] sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building the
+    /// sq-g2xs: invoke the ureq-3 `Resolver` for a `host:port` netloc by building the
     /// `http://<netloc>/` URI the resolver parses, with a default `Config` + no-deadline timeout.
     #[cfg(not(target_arch = "wasm32"))]
     fn resolve_netloc(
@@ -2440,7 +2440,7 @@ mod tests {
     // serialisation, the brTPF `values` text-wire attachment, the Turtle/TriG fragment-body
     // parse (control/data split + hydra:totalItems + hydra:next extraction), and that a control
     // triple is never mistaken for a data match. The SSRF resolver itself is the SAME
-    // `EgressFilterResolver` the SRJ transport tests above exercise. [OPUS-4.8] sq-yzca.
+    // `EgressFilterResolver` the SRJ transport tests above exercise. sq-yzca.
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -2596,7 +2596,7 @@ mod tests {
         );
     }
 
-    // [FABLE-5] sq-3dyje.6 (mutation-kill): the fragment-body control/data split must set
+    // sq-3dyje.6 (mutation-kill): the fragment-body control/data split must set
     // `next` from EXACTLY the hydra:next / legacy hydra:nextPage predicates — cargo-mutants
     // showed `pred == …nextPage` mutated to `!=` survived, i.e. no test pinned that another
     // control link (hydra:first / hydra:last also pass is_control_predicate and carry
@@ -2635,7 +2635,7 @@ mod tests {
         );
     }
 
-    // [FABLE-5] sq-3dyje.6 (mutation-kill): each arm of is_control_predicate's `||` chain is
+    // sq-3dyje.6 (mutation-kill): each arm of is_control_predicate's `||` chain is
     // INDEPENDENTLY load-bearing. cargo-mutants showed `||`→`&&` survive because no test
     // isolates an arm: a document whose only non-data triple is classified by JUST ONE arm.
     // Mutating any single arm to `&&` makes that predicate fail the whole (now-conjunctive)
@@ -2710,7 +2710,7 @@ mod tests {
         assert!(page.triples.is_empty(), "control-only fragment has no data");
     }
 
-    // [FABLE-5] sq-3dyje.6 (mutation-kill): the count comes from EITHER hydra:totalItems OR
+    // sq-3dyje.6 (mutation-kill): the count comes from EITHER hydra:totalItems OR
     // void:triples. The earlier fragment tests read the count from hydra:totalItems only, so
     // the `pred == void:triples` half of the count predicate could be mutated to `!=` unnoticed
     // (a void:triples-only fragment would then report count 0). Pin BOTH count predicates, and

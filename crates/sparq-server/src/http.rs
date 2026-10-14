@@ -6,7 +6,7 @@
 //!     interop) and the `update` operation (POST).
 //!   * Graph Store HTTP Protocol — `GET`/`HEAD` (read) and, since sq-gxsj, `PUT`/`POST`/
 //!     `DELETE` (write) on `/graphs/*path` (direct) and on `/sparql/graph` via
-//!     `?graph=<uri>` / `?default` (indirect). [OPUS-4.8] The write verbs translate into a
+//!     `?graph=<uri>` / `?default` (indirect). The write verbs translate into a
 //!     SPARQL Update and submit through the SAME sequenced [`sparq_serve::Writer`] the
 //!     `application/sparql-update` path uses, so they inherit its atomicity, group commit
 //!     and snapshot-consistency — and its **no-auth** posture (a GSP write is as powerful
@@ -23,7 +23,7 @@
 //! pinned-snapshot writer stalls and reclaim polling) the ring removes by design.
 
 use std::collections::HashMap;
-use std::net::SocketAddr; // [OPUS-4.8] sq-o4qf: bind_posture classifies the listen address
+use std::net::SocketAddr; // sq-o4qf: bind_posture classifies the listen address
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -44,7 +44,7 @@ use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 
-// [OPUS-4.8] (sq-o5bi, sq-0g6g) `ArcSwap` is the swap mechanism for the ONLINE restore and is
+// (sq-o5bi, sq-0g6g) `ArcSwap` is the swap mechanism for the ONLINE restore and is
 // pulled in ONLY under the `backup` feature — the default serving core is the plain
 // `ring`/`writer` pair (byte-identical to pre-#941), so the default read path never touches it.
 #[cfg(feature = "backup")]
@@ -89,7 +89,7 @@ pub(crate) fn with_extensions<T>(f: impl FnOnce() -> T) -> T {
     f()
 }
 
-/// [OPUS-4.8] (sq-4w18) Runs an engine call inside the full per-request engine scope:
+/// (sq-4w18) Runs an engine call inside the full per-request engine scope:
 /// the SERVICE egress allowlist policy AND the SPARQL extension functions.
 ///
 /// With the `service` cargo feature, this installs
@@ -115,7 +115,7 @@ pub(crate) fn with_engine_scope<T>(_config: &ServerConfig, f: impl FnOnce() -> T
     with_extensions(f)
 }
 
-/// [OPUS-4.8] (sq-9xoh) Runs an engine call inside the per-request engine scope using an
+/// (sq-9xoh) Runs an engine call inside the per-request engine scope using an
 /// EXPLICIT, already-resolved SERVICE egress allowlist instead of the static
 /// [`ServerConfig::service_allow`].
 ///
@@ -140,7 +140,7 @@ pub(crate) fn with_engine_scope_allow<T>(
     sparq_engine::with_service_egress_policy(true, allow.engine_entries(), || with_extensions(f))
 }
 
-/// [OPUS-4.8] (sq-9xoh) Without the `service` feature there is no federation code to gate, so
+/// (sq-9xoh) Without the `service` feature there is no federation code to gate, so
 /// the per-request allowlist is inert — this is exactly [`with_extensions`], mirroring the
 /// `#[cfg(not(feature = "service"))]` form of [`with_engine_scope`].
 #[cfg(not(feature = "service"))]
@@ -156,7 +156,7 @@ pub(crate) fn with_engine_scope_allow<T>(
 // Hardening configuration (T15)
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] (sq-9xoh) A per-request SERVICE egress allowlist override hook (see
+/// (sq-9xoh) A per-request SERVICE egress allowlist override hook (see
 /// [`ServerConfig::service_allow_override`]). Given a request's headers it returns
 /// `Some(allowlist)` to use that allowlist (in STRICT mode) for this one request, or `None` to
 /// fall back to the operator's static [`ServerConfig::service_allow`].
@@ -164,7 +164,7 @@ pub(crate) fn with_engine_scope_allow<T>(
 /// A thin newtype over the boxed closure so [`ServerConfig`] can keep deriving [`Debug`] (a bare
 /// `dyn Fn` is not `Debug`) and so the construction site reads clearly. Held behind an [`Arc`] so
 /// [`ServerConfig`] stays cheaply [`Clone`].
-/// [OPUS-4.8] (sq-9xoh) The boxed per-request resolver behind a [`ServiceAllowOverride`]: maps a
+/// (sq-9xoh) The boxed per-request resolver behind a [`ServiceAllowOverride`]: maps a
 /// request's headers to `Some(allowlist)` (use it) or `None` (fall back to the static config).
 #[cfg(feature = "service")]
 type ServiceAllowResolver =
@@ -196,7 +196,7 @@ impl std::fmt::Debug for ServiceAllowOverride {
     }
 }
 
-/// [GPT-5.6] Loaded, immutable SHACL shapes used by transaction guard mode.
+/// Loaded, immutable SHACL shapes used by transaction guard mode.
 #[cfg(feature = "shacl")]
 #[derive(Clone)]
 pub struct ShaclShapes(Arc<Graph>);
@@ -226,7 +226,7 @@ pub struct ServerConfig {
     /// `timeout + TIMEOUT_GRACE` guarantees the HTTP 503 even if the engine is inside
     /// an uninstrumented stretch. `None` disables the timeout.
     pub query_timeout: Option<Duration>,
-    /// [OPUS-4.8] (sq-nulp) **Writer-side WHERE deadline for SPARQL UPDATE — a head-of-line
+    /// (sq-nulp) **Writer-side WHERE deadline for SPARQL UPDATE — a head-of-line
     /// blocking bound.** Updates are *sequenced* on a single writer thread (sparq-serve's
     /// group-commit writer), so while one update runs its `DELETE/INSERT … WHERE` to its
     /// cooperative stop, every queued update behind it waits. The plain [`query_timeout`](Self::query_timeout)
@@ -248,7 +248,7 @@ pub struct ServerConfig {
     /// writer is out of scope — see `sparq_serve`'s scheduler docs). Set via
     /// `--update-where-timeout` / `SPARQ_UPDATE_WHERE_TIMEOUT` (seconds; `0` disables).
     pub update_where_timeout: Option<Duration>,
-    /// [OPUS-4.8] (sq-p7kk5) **Adaptive group-commit for the write path.** The sequenced
+    /// (sq-p7kk5) **Adaptive group-commit for the write path.** The sequenced
     /// writer normally waits a fixed group-commit window (`sparq_serve`'s 3 ms default) after
     /// the first update in a batch, absorbing any concurrent updates that arrive within it into
     /// one published generation. For a **serial / low-concurrency interactive** client (one
@@ -273,7 +273,7 @@ pub struct ServerConfig {
     pub max_body_bytes: usize,
     /// Maximum in-flight requests; excess requests are shed with 429.
     pub max_concurrent: usize,
-    /// [OPUS-4.8] (sq-2gqr) **Slow-loris guard — connection header-read deadline.** The maximum
+    /// (sq-2gqr) **Slow-loris guard — connection header-read deadline.** The maximum
     /// time a freshly-accepted HTTP/1 connection may take to transmit its COMPLETE request-header
     /// block. A client that dribbles headers byte-by-byte (the classic slow-loris) otherwise holds
     /// a connection — and, behind the `concurrency_limit`, a concurrency slot — open indefinitely;
@@ -288,7 +288,7 @@ pub struct ServerConfig {
     /// because reading a header block is sub-second on any healthy client; 15s is generous
     /// headroom for a slow but honest network without leaving the slot open for minutes.
     pub header_read_timeout: Option<Duration>,
-    /// [OPUS-4.8] (sq-lodb) **Slow-body guard — request-body read/idle deadline (complement to
+    /// (sq-lodb) **Slow-body guard — request-body read/idle deadline (complement to
     /// [`header_read_timeout`](Self::header_read_timeout)).** The maximum time the server will wait
     /// for the NEXT chunk of a request body once the previous one has arrived — an *idle* deadline
     /// between consecutive body reads, reset after every chunk. The header-read deadline closes the
@@ -316,7 +316,7 @@ pub struct ServerConfig {
     /// Maximum SELECT result rows. Exceeding it is an honest 413 refusal (the engine
     /// aborts evaluation via the row budget), never a silent truncation.
     pub max_results: Option<usize>,
-    /// [OPUS-4.8] (sq-ebii) **Memory cap (coarse).** Upper bound on the row count of any
+    /// (sq-ebii) **Memory cap (coarse).** Upper bound on the row count of any
     /// *materialised intermediate or final* result the engine builds for ONE query, on
     /// EVERY form (SELECT / ASK / CONSTRUCT / DESCRIBE / GSP-read), enforced via the
     /// engine's cooperative [`QueryBudget::max_rows`] working-set bound — the query aborts
@@ -342,7 +342,7 @@ pub struct ServerConfig {
     /// `make_budget(_, false)` paths — ASK and GSP-read — nor to UPDATE (`update_budget`,
     /// which has no projection). When both apply, the effective cap is the tighter of the two.
     pub max_query_rows: Option<usize>,
-    /// [OPUS-4.8] (sq-s5is) **Byte-accounted memory cap.** The byte-accounted companion to
+    /// (sq-s5is) **Byte-accounted memory cap.** The byte-accounted companion to
     /// [`max_query_rows`](Self::max_query_rows): an upper bound, in BYTES, on the engine's
     /// estimated working-set size for ONE query, on EVERY form (SELECT / ASK / CONSTRUCT /
     /// DESCRIBE / GSP-read / UPDATE-WHERE), enforced via [`QueryBudget::max_bytes`]. A query
@@ -367,7 +367,7 @@ pub struct ServerConfig {
     /// default) disables it; it composes with `--max-query-rows` and `--max-results`
     /// (whichever ceiling trips first aborts).
     pub max_query_bytes: Option<usize>,
-    /// [OPUS-4.8] (sq-ebii) **Decompression-ratio cap (zip-bomb guard).** When a request
+    /// (sq-ebii) **Decompression-ratio cap (zip-bomb guard).** When a request
     /// body arrives `Content-Encoding: gzip` (the GSP write / RDF-load path), the server
     /// streams the inflate but refuses once the decompressed size would exceed
     /// `min(max_decompress_ratio × compressed_len, max_body_bytes)` — so a tiny highly-
@@ -394,7 +394,7 @@ pub struct ServerConfig {
     pub time_travel_max_age: Option<Duration>,
     /// Log every request/response via `tower_http::trace::TraceLayer`.
     pub verbose: bool,
-    /// [OPUS-4.8] (sq-toze.34, epic sq-toze) **Redact request content from the `--verbose`
+    /// (sq-toze.34, epic sq-toze) **Redact request content from the `--verbose`
     /// request log.** When `true` (the **default**), the request log records the URI's *path*
     /// verbatim but replaces its *query string* — where `GET /sparql?query=…` carries the full
     /// SPARQL query text, which can contain PII (a patient IRI, an email in a `FILTER`) — with a
@@ -411,7 +411,7 @@ pub struct ServerConfig {
     /// log otherwise). It is also NOT the ZK/MPC privacy story. Inert unless `verbose` is also on
     /// (no request log => nothing to redact). See [`crate::redact`].
     pub redact_logs: bool,
-    /// [OPUS-4.8] (sq-0bxp) **Per-query access audit log** runtime switch (CDMC CD-2 / ISO
+    /// (sq-0bxp) **Per-query access audit log** runtime switch (CDMC CD-2 / ISO
     /// 27001 A.8.15 / EU CRA logging). When `true`, every query / update / Graph-Store request
     /// emits a structured `tracing` record under the dedicated `target: "sparq_server::audit"`
     /// — requester identity (a Bearer-token fingerprint or `anonymous`, NEVER the secret),
@@ -426,7 +426,7 @@ pub struct ServerConfig {
     /// `crate::audit`.
     #[cfg(feature = "audit-log")]
     pub audit_log: bool,
-    /// [OPUS-4.8] (sq-gos8, epic sq-toze) **Richer STRUCTURED access-audit sink** target (ASVS
+    /// (sq-gos8, epic sq-toze) **Richer STRUCTURED access-audit sink** target (ASVS
     /// V7 / ISO 27001 A.8.15 / CDMC CD-2). `Some(target)` installs the default JSON-Lines sink
     /// ([`crate::access_audit::WriterSink`]) writing to a file or stderr; every enforced access
     /// decision is then recorded as a TYPED record (actor / action / resource / decision +
@@ -439,7 +439,7 @@ pub struct ServerConfig {
     /// compiled out (byte-identical to before). See [`crate::access_audit`].
     #[cfg(feature = "access-audit")]
     pub access_audit: Option<crate::access_audit::SinkTarget>,
-    /// [OPUS-4.8] (sq-ljfz, sq-gos8 follow-up) **Trusted forwarded-identity header** for the
+    /// (sq-ljfz, sq-gos8 follow-up) **Trusted forwarded-identity header** for the
     /// structured access-audit actor. `Some(name)` tells the audit seam that a fronting
     /// authorization layer — `sparq-solid`, or any Solid/WAC reverse-proxy / identity gateway,
     /// the very "reverse proxy / gateway or sparq-solid" the bind warnings name — authenticates
@@ -458,7 +458,7 @@ pub struct ServerConfig {
     /// it the field + the seam are compiled out (byte-identical to before).
     #[cfg(feature = "access-audit")]
     pub audit_webid_header: Option<String>,
-    /// [OPUS-4.8] sq-o4qf: explicit opt-in to bind a **non-loopback** address.
+    /// sq-o4qf: explicit opt-in to bind a **non-loopback** address.
     ///
     /// By default the server has **no authentication** on any endpoint — including the
     /// mutating `application/sparql-update` path and the `/subscriptions` WebSocket.
@@ -475,7 +475,7 @@ pub struct ServerConfig {
     /// This is purely a *bind-time* posture gate in the binary; it does not add any
     /// per-request auth and does not affect the library `router`/`harden` surface.
     pub allow_remote: bool,
-    /// [OPUS-4.8] sq-zcby (PSS gh-46): the required Bearer token that gates the **write
+    /// sq-zcby (PSS gh-46): the required Bearer token that gates the **write
     /// surface**. When `Some(token)`, every request that MUTATES the dataset must present
     /// `Authorization: Bearer <token>` (scheme casing tolerated) or it is refused `401`
     /// with `WWW-Authenticate: Bearer`. The write surface is: a SPARQL UPDATE on `/sparql`
@@ -490,13 +490,13 @@ pub struct ServerConfig {
     /// write auth** — today's behaviour, preserved exactly. Mirrors QLever's `-a <token>`.
     /// Enforced by the library `router` itself, so an embedder gets the gate for free.
     pub auth_token: Option<String>,
-    /// [OPUS-4.8] sq-zcby: ALSO gate **reads** (SPARQL query, GSP `GET`/`HEAD`) with the same
+    /// sq-zcby: ALSO gate **reads** (SPARQL query, GSP `GET`/`HEAD`) with the same
     /// [`auth_token`](Self::auth_token). Off by default (QLever-style: writes gated, reads
     /// open). Has no effect unless `auth_token` is also set. When on, the whole surface is
     /// authenticated, which the bind posture ([`AuthPosture`]) treats as "auth present" for
     /// allowing a non-loopback bind without `--allow-remote`.
     ///
-    /// [OPUS-4.8] sq-cxk5: the subscription READ surfaces — the `/subscriptions` WebSocket and
+    /// sq-cxk5: the subscription READ surfaces — the `/subscriptions` WebSocket and
     /// the `/subscriptions/sse` Server-Sent-Events stream (both stream live SELECT diffs) — are
     /// gated by this flag too, closing the read-auth bypass that existed when they were always
     /// open. The SSE GET reads the `Authorization: Bearer` header like any other GET; the WS
@@ -504,7 +504,7 @@ pub struct ServerConfig {
     /// WS handshake) a `Sec-WebSocket-Protocol: bearer.<token>` subprotocol — see
     /// [`crate::subscriptions::subscriptions_endpoint`] and `ws_auth_gate`.
     pub auth_token_read: bool,
-    /// [OPUS-4.8] (sq-4w18) SERVICE federation egress allowlist. SPARQL `SERVICE <iri>`
+    /// (sq-4w18) SERVICE federation egress allowlist. SPARQL `SERVICE <iri>`
     /// makes attacker-controlled query text trigger an outbound HTTP request from the
     /// server host — an SSRF surface. The server's posture is **default-DENY-all
     /// SERVICE**: with the `service` cargo feature on but this allowlist EMPTY (the
@@ -518,7 +518,7 @@ pub struct ServerConfig {
     /// this field is still present (so the config shape is stable) but inert: no
     /// federation code is compiled and a SERVICE clause errors at execution as before.
     pub service_allow: crate::service_config::ServiceAllowlist,
-    /// [OPUS-4.8] (sq-9xoh) OPTIONAL per-request SERVICE egress allowlist override hook for
+    /// (sq-9xoh) OPTIONAL per-request SERVICE egress allowlist override hook for
     /// multi-tenant / gateway deployments. The operator installs ONE static allowlist in
     /// [`service_allow`](Self::service_allow); a gateway in front of many tenants may instead want
     /// the reachable SERVICE host set to depend on the REQUEST (e.g. derived from a bearer token or
@@ -546,7 +546,7 @@ pub struct ServerConfig {
     /// substitute the host set; the policy is always allowlist-only.
     #[cfg(feature = "service")]
     pub service_allow_override: Option<ServiceAllowOverride>,
-    /// [OPUS-4.8] (sq-o7o0, ASVS V14.5.3) First-party CORS origin allowlist. `sparq-server`
+    /// (sq-o7o0, ASVS V14.5.3) First-party CORS origin allowlist. `sparq-server`
     /// is a SPARQL DATA API, so its safe default is to emit **no CORS headers** — a
     /// cross-origin browser `fetch` cannot read a response with no
     /// `Access-Control-Allow-Origin`, which is exactly the historical behaviour and the
@@ -562,7 +562,7 @@ pub struct ServerConfig {
     /// This is a browser-read gate ONLY: it does not relax auth, the bind posture, body
     /// limits, the SERVICE egress allowlist, or the row caps.
     pub cors_allow: crate::cors_config::CorsAllowlist,
-    /// [OPUS-4.8] (sq-7cxr, gh-44) DURABLE PERSISTENCE directory — the QLever `--persist-updates`
+    /// (sq-7cxr, gh-44) DURABLE PERSISTENCE directory — the QLever `--persist-updates`
     /// equivalent. When `Some(dir)`, the server treats the on-disk index at `dir` as the durable,
     /// rebuildable source of truth: at startup it opens the existing store there (replaying its
     /// write-ahead log so prior updates are present with **no rebuild**), or creates it from the
@@ -571,7 +571,7 @@ pub struct ServerConfig {
     /// ALL updates. `None` (the default) is the historical purely in-memory server — updates are
     /// lost on restart. Set by the binary's `--persist <DIR>` flag / `SPARQ_PERSIST_DIR` env.
     pub persist_dir: Option<std::path::PathBuf>,
-    /// [OPUS-4.8] (sq-o5bi) RESTORE-ON-START artifact path. When `Some(file)`, the binary
+    /// (sq-o5bi) RESTORE-ON-START artifact path. When `Some(file)`, the binary
     /// imports the backup artifact at `file` and seeds the in-memory serving store from it
     /// BEFORE binding (fail-closed: a corrupt/mismatched artifact aborts startup with a clean
     /// error). This is the bootstrap primitive for horizontal-scaling stage-2 (a fresh replica
@@ -582,7 +582,7 @@ pub struct ServerConfig {
     /// Set by the binary's `--restore <FILE>` flag / `SPARQ_RESTORE` env.
     #[cfg(feature = "backup")]
     pub restore: Option<std::path::PathBuf>,
-    /// [OPUS-4.8] (sq-bu1a) POINT-IN-TIME-RECOVERY delta chain replayed forward onto the
+    /// (sq-bu1a) POINT-IN-TIME-RECOVERY delta chain replayed forward onto the
     /// `restore` base on start. When non-empty (and `restore` is `Some`), the binary imports the
     /// base, then replays these incremental delta artifacts in order BEFORE binding, so the
     /// in-memory store starts at the chain's last `to-generation` — a chosen recovery point.
@@ -594,7 +594,7 @@ pub struct ServerConfig {
     /// `SPARQ_RESTORE_DELTA` env (a path list).
     #[cfg(feature = "backup")]
     pub restore_delta: Vec<std::path::PathBuf>,
-    /// [OPUS-4.8] (sq-ft7u) RESTORE-INTO-DURABLE opt-in for the restore-on-start path. When
+    /// (sq-ft7u) RESTORE-INTO-DURABLE opt-in for the restore-on-start path. When
     /// `true` AND both [`restore`](Self::restore) and [`persist_dir`](Self::persist_dir) are set,
     /// the restore-on-start writes the artifact THROUGH to the durable `--persist` directory
     /// crash-safely, so the restored dataset SURVIVES A RESTART (the on-disk base becomes the
@@ -605,7 +605,7 @@ pub struct ServerConfig {
     /// restore code. Set by the binary's `--restore-persist` flag / `SPARQ_RESTORE_PERSIST=1` env.
     #[cfg(feature = "backup")]
     pub restore_persist: bool,
-    /// [OPUS-4.8] (sq-d3d8, epic sq-3183) OPT-IN federation discovery descriptors. When
+    /// (sq-d3d8, epic sq-3183) OPT-IN federation discovery descriptors. When
     /// `true`, the server serves a W3C VoID dataset description at `GET /.well-known/void`
     /// and a SPARQL 1.1 Service Description for a `GET /sparql` with no `query` parameter
     /// (advertising the endpoint, supported languages, result formats and the default
@@ -618,7 +618,7 @@ pub struct ServerConfig {
     /// binary's `--federation-descriptors` flag / `SPARQ_FEDERATION_DESCRIPTORS=1` env.
     #[cfg(feature = "federation-descriptors")]
     pub federation_descriptors: bool,
-    /// [GPT-5.6] (sq-lsp7k.5.2) OPT-IN grouped facet-count endpoint. When `true`, the server
+    /// (sq-lsp7k.5.2) OPT-IN grouped facet-count endpoint. When `true`, the server
     /// serves `POST /facets`: the client supplies a JSON `sparq_introspect::FacetRequest`, and
     /// the server evaluates its class / constraint filters against one pinned graph snapshot,
     /// returning the `sparq_introspect::FacetResponse` JSON with type, predicate, and value
@@ -630,7 +630,7 @@ pub struct ServerConfig {
     /// store, so the endpoint is gated by the read auth.
     #[cfg(feature = "facets")]
     pub facets: bool,
-    /// [GPT-5.6] (sq-lsp7k.9.3) OPT-IN prefix-completion endpoint. When `true`, the server
+    /// (sq-lsp7k.9.3) OPT-IN prefix-completion endpoint. When `true`, the server
     /// serves `GET /complete?q=<prefix>&limit=<k>` from a `sparq_text::CompletionIndex` built
     /// against one pinned graph generation. The index is cached in [`AppState`] and rebuilt on
     /// the blocking pool when a later published generation makes it stale. Results are capped at
@@ -642,7 +642,7 @@ pub struct ServerConfig {
     /// store, so the endpoint is gated by the read auth.
     #[cfg(feature = "complete")]
     pub complete: bool,
-    /// [OPUS-4.8] (sq-bzh1, epic sq-3183) OPT-IN Triple Pattern Fragments / Linked Data
+    /// (sq-bzh1, epic sq-3183) OPT-IN Triple Pattern Fragments / Linked Data
     /// Fragments READ-ONLY source endpoint. When `true`, the server serves a paged RDF
     /// fragment of the triples matching one triple pattern at `GET /tpf?subject=&predicate=&
     /// object=` (with Hydra controls: `hydra:totalItems` from the cheap cardinality estimate,
@@ -655,7 +655,7 @@ pub struct ServerConfig {
     /// zero cost. Set by the binary's `--tpf` flag / `SPARQ_TPF=1` env.
     #[cfg(feature = "tpf")]
     pub tpf: bool,
-    /// [OPUS-4.8] (sq-r74h, follow-up to sq-dxhb) **brTPF binding-set DoS cap — maximum number of
+    /// (sq-r74h, follow-up to sq-dxhb) **brTPF binding-set DoS cap — maximum number of
     /// solution mappings** accepted on a `GET /tpf?values=…` / `POST /tpf` brTPF request. A brTPF
     /// fragment runs ONE index scan per attached mapping (see [`crate::tpf::evaluate_brtpf`]), so
     /// the per-request cost is super-linear in the mapping *count*, not the payload *bytes* — and
@@ -666,7 +666,7 @@ pub struct ServerConfig {
     /// `SPARQ_BRTPF_MAX_BINDINGS`. Present only with the `brtpf` cargo feature.
     #[cfg(feature = "brtpf")]
     pub brtpf_max_bindings: usize,
-    /// [OPUS-4.8] (sq-r74h, follow-up to sq-dxhb) **brTPF binding-set DoS cap — maximum `values`
+    /// (sq-r74h, follow-up to sq-dxhb) **brTPF binding-set DoS cap — maximum `values`
     /// payload bytes.** The companion byte cap to [`brtpf_max_bindings`](Self::brtpf_max_bindings),
     /// enforced on the raw binding-set payload BEFORE it is parsed (`413` on breach). It exists
     /// because the brTPF `values` binding set can ride the **query string** of a `GET /tpf`, which
@@ -677,7 +677,7 @@ pub struct ServerConfig {
     /// `SPARQ_BRTPF_MAX_VALUES_BYTES`. Present only with the `brtpf` cargo feature.
     #[cfg(feature = "brtpf")]
     pub brtpf_max_values_bytes: usize,
-    /// [OPUS-4.8] (sq-r868, from-pss gh-162 follow-up (c)) OPT-IN HTTP SHACL validation
+    /// (sq-r868, from-pss gh-162 follow-up (c)) OPT-IN HTTP SHACL validation
     /// endpoint. When `true`, the server serves `POST /shacl/validate`: the client POSTs a
     /// SHACL shapes graph (RDF, by `Content-Type`) and the server validates its
     /// CURRENTLY-LOADED data graph against it, returning a validation report — a JSON
@@ -691,10 +691,10 @@ pub struct ServerConfig {
     /// is a READ over the store, so the endpoint is gated by the read auth like any GET.
     #[cfg(feature = "shacl")]
     pub shacl: bool,
-    /// [GPT-5.6] (sq-lsp7k.2.4) Reject writes whose post-state does not conform to
+    /// (sq-lsp7k.2.4) Reject writes whose post-state does not conform to
     /// [`shacl_shapes`](Self::shacl_shapes). Validation runs before persistence or publish.
     ///
-    /// [FABLE-5] (PR #1999 security review) Guard mode is STRICT / fail-CLOSED: a shapes
+    /// (PR #1999 security review) Guard mode is STRICT / fail-CLOSED: a shapes
     /// graph the validator cannot fully evaluate is a hard startup error (ill-formed
     /// constructs, SHACL-SPARQL pre-binding violations), and a constraint skipped at
     /// evaluation time (e.g. an uncompilable `sh:pattern`) rejects the write (HTTP 500)
@@ -702,10 +702,10 @@ pub struct ServerConfig {
     /// `/shacl/validate` endpoint keeps the lenient W3C-report behaviour.
     #[cfg(feature = "shacl")]
     pub shacl_guard: bool,
-    /// [GPT-5.6] Loaded shapes graph used by SHACL guard mode. Required when the guard is on.
+    /// Loaded shapes graph used by SHACL guard mode. Required when the guard is on.
     #[cfg(feature = "shacl")]
     pub shacl_shapes: Option<ShaclShapes>,
-    /// [OPUS-4.8] (sq-hj4n, gh-916) OPT-IN Solid-style **N3-Patch** (`text/n3`) dialect for the
+    /// (sq-hj4n, gh-916) OPT-IN Solid-style **N3-Patch** (`text/n3`) dialect for the
     /// Graph-Store-Protocol `PATCH` method. When `true`, a `PATCH` whose body is `text/n3` (a
     /// `solid:InsertDeletePatch`) is parsed into its `solid:deletes` / `solid:inserts` /
     /// `solid:where` formulas and applied as ONE atomic graph-scoped SPARQL Update through the same
@@ -719,7 +719,7 @@ pub struct ServerConfig {
     /// gated by `--auth-token` exactly like an UPDATE.
     #[cfg(feature = "n3-patch")]
     pub n3_patch: bool,
-    /// [OPUS-4.8] (sq-vczh2, epic sq-2m6zm, design `research/llm-ergonomic-sparql-surface.md` §4)
+    /// (sq-vczh2, epic sq-2m6zm, design `research/llm-ergonomic-sparql-surface.md` §4)
     /// OPT-IN, VERIFIABLE LLM-ergonomic transpiler endpoint. When `true`, the server serves
     /// `POST /terse/transpile`: the client POSTs a *terse* query (the `K:<name>` keyword layer
     /// over canonical SPARQL) and the server returns the CANONICAL, conformant SPARQL it expands
@@ -737,7 +737,7 @@ pub struct ServerConfig {
     /// `vectors`-gated extension (the `V()` ambiguity caveat is tracked by `sq-26fdp`).
     #[cfg(feature = "terse")]
     pub terse: bool,
-    /// [FABLE-5] (sq-lsp7k.10) OPT-IN named-parameterized-template surface. When `true`, the
+    /// (sq-lsp7k.10) OPT-IN named-parameterized-template surface. When `true`, the
     /// server serves the `/templates` REST store (list / `PUT`-`GET`-`DELETE`
     /// `/templates/{name}` / `POST`-invoke) over `sparq_engine::templates` — the GraphDB
     /// "SPARQL templates" / Stardog "stored queries" parity surface. `false` (the default)
@@ -751,7 +751,7 @@ pub struct ServerConfig {
     /// the gated-update posture. See [`crate::templates`].
     #[cfg(feature = "templates")]
     pub templates: bool,
-    /// [FABLE-5] (sq-lsp7k.10) OPT-IN template persistence file. When `Some(path)`, the
+    /// (sq-lsp7k.10) OPT-IN template persistence file. When `Some(path)`, the
     /// template store is durable: definitions are loaded from `path` (a JSON array of
     /// template definitions) at startup — fail-closed, an invalid file is a startup error —
     /// and every successful `PUT` / `DELETE` rewrites it atomically (write-temp + rename).
@@ -759,7 +759,7 @@ pub struct ServerConfig {
     /// `SPARQ_TEMPLATES_FILE`.
     #[cfg(feature = "templates")]
     pub templates_file: Option<std::path::PathBuf>,
-    /// [GPT-5.6] (sq-kqofk, gh-906) OPT-IN durable CDC change-stream directory. When `Some(dir)`,
+    /// (sq-kqofk, gh-906) OPT-IN durable CDC change-stream directory. When `Some(dir)`,
     /// the server (1) RECORDS every published update generation as one ordered change record on
     /// the writer thread to the segmented, fsync'd append-only `sparq_serve::ChangeLog` rooted at
     /// `dir`, and (2) serves the Amazon-Neptune-Streams `GetRecords`-shaped poll endpoint
@@ -777,7 +777,7 @@ pub struct ServerConfig {
     /// as the backup family); a consumer needing an authentic feed wraps its own signing.
     #[cfg(feature = "change-stream")]
     pub change_stream_dir: Option<std::path::PathBuf>,
-    /// [FABLE-5] (sq-snopa.6, issue #992 FR-4) OPT-IN Solid WAC/ACP HTTP authorization surface.
+    /// (sq-snopa.6, issue #992 FR-4) OPT-IN Solid WAC/ACP HTTP authorization surface.
     /// When `true`, the server serves `POST /authz/decide`, `POST /authz/wac-allow` and
     /// `POST /authz/query` — a THIN HTTP shell over the `sparq-solid` library authoriser
     /// (`PodStore::decide` / `wac_allow` / `query_json_as`). Each endpoint takes an
@@ -788,14 +788,14 @@ pub struct ServerConfig {
     /// default) leaves all three off: `/authz/*` is `404`.
     ///
     /// This field exists only with the `solid-authz` cargo feature (like `Self::tpf` under
-    // [FABLE-5] sq-lrtc3.1: code span, not an intra-doc link — `tpf` is itself feature-gated, so
+    // sq-lrtc3.1: code span, not an intra-doc link — `tpf` is itself feature-gated, so
     // the link breaks any `solid-authz`-without-`tpf` rustdoc build (the recurring
     // feature-gated-intra-doc-link trap; surfaced by the new `odrl-authz` feature state).
     /// `tpf`); a build without that feature compiles no Solid/access-control code and pays zero
     /// cost. Set by the binary's `--solid-authz` flag / `SPARQ_SOLID_AUTHZ=1` env.
     #[cfg(feature = "solid-authz")]
     pub solid_authz: bool,
-    /// [SONNET-4.6] (sq-pfae.17) OPT-IN stateless trust-graph extension to `POST /authz/decide`.
+    /// (sq-pfae.17) OPT-IN stateless trust-graph extension to `POST /authz/decide`.
     ///
     /// When both this flag AND the `solid-authz-trust` cargo feature are active, the endpoint
     /// accepts an optional `"trust"` JSON block carrying credential graphs + a trust policy +
@@ -816,11 +816,11 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             query_timeout: Some(Duration::from_secs(30)),
-            // [OPUS-4.8] sq-nulp: no separate writer-side WHERE deadline by default — an
+            // sq-nulp: no separate writer-side WHERE deadline by default — an
             // update's WHERE budget is the plain query_timeout, exactly as before. An operator
             // who wants to bound writer-queue head-of-line blocking opts a shorter one in.
             update_where_timeout: None,
-            // [OPUS-4.8] sq-p7kk5: adaptive group-commit ON by default — the server's write
+            // sq-p7kk5: adaptive group-commit ON by default — the server's write
             // path is interactive (a serial client blocked on its own ack), where the fixed
             // group-commit window is pure latency. A serial client now commits in engine-time
             // instead of window-time; concurrent load still batches. Pure latency change, no
@@ -829,14 +829,14 @@ impl Default for ServerConfig {
             adaptive_commit: true,
             max_body_bytes: 1024 * 1024, // 1 MiB
             max_concurrent: 32,
-            // [OPUS-4.8] sq-2gqr: a 15s header-read deadline closes the slow-loris hole ON by
+            // sq-2gqr: a 15s header-read deadline closes the slow-loris hole ON by
             // default. `axum::serve` configures hyper's auto-Builder WITHOUT a timer, so hyper's
             // own 30s header_read_timeout default is inert (it requires a Timer) — meaning the
             // out-of-the-box stack has NO header deadline at all. `crate::serve` installs a
             // TokioTimer and wires this value. 0 / env-unset keeps the guard; SPARQ_HEADER_READ_TIMEOUT=0
             // disables it. See ServerConfig::header_read_timeout.
             header_read_timeout: Some(Duration::from_secs(15)),
-            // [OPUS-4.8] sq-lodb: a 30s body read/idle deadline closes the slow-BODY hole ON by
+            // sq-lodb: a 30s body read/idle deadline closes the slow-BODY hole ON by
             // default — the complement to the header-read guard above. A client that finishes its
             // headers then dribbles the request body (or stalls mid-body) otherwise holds the slot
             // forever. The timer resets after each received chunk, so an honest large upload is
@@ -844,12 +844,12 @@ impl Default for ServerConfig {
             // ServerConfig::body_read_timeout.
             body_read_timeout: Some(Duration::from_secs(30)),
             max_results: None,
-            // [OPUS-4.8] sq-ebii: memory cap OFF by default (no surprise refusals on an
+            // sq-ebii: memory cap OFF by default (no surprise refusals on an
             // unconfigured server); an operator exposing the endpoint opts a ceiling in.
             max_query_rows: None,
-            // [OPUS-4.8] sq-s5is: byte-accounted cap likewise OFF by default; opt-in ceiling.
+            // sq-s5is: byte-accounted cap likewise OFF by default; opt-in ceiling.
             max_query_bytes: None,
-            // [OPUS-4.8] sq-ebii: 20× decompressed:compressed is a permissive-but-bounded
+            // sq-ebii: 20× decompressed:compressed is a permissive-but-bounded
             // default (well above real RDF gzip ratios ~3–8×, far below a bomb's ~1000×+).
             max_decompress_ratio: 20,
             max_subscriptions_per_conn: 16,
@@ -859,66 +859,66 @@ impl Default for ServerConfig {
             #[cfg(feature = "time-travel")]
             time_travel_max_age: None,
             verbose: false,
-            // [OPUS-4.8] sq-toze.34: redact request content from the verbose log by DEFAULT — a
+            // sq-toze.34: redact request content from the verbose log by DEFAULT — a
             // privacy-respecting default so enabling --verbose for debugging does not silently
             // start writing query text (possibly PII) into operator logs. Opt out with
             // --log-full-requests / SPARQ_LOG_FULL_REQUESTS=1. Inert unless `verbose` is also set.
             redact_logs: true,
-            // [OPUS-4.8] sq-0bxp: audit log OFF by default even when the feature is compiled in
+            // sq-0bxp: audit log OFF by default even when the feature is compiled in
             // (the operator opts in deliberately via --audit-log / SPARQ_AUDIT_LOG=1).
             #[cfg(feature = "audit-log")]
             audit_log: false,
-            // [OPUS-4.8] sq-gos8: no structured access-audit sink by default even when the
+            // sq-gos8: no structured access-audit sink by default even when the
             // feature is compiled in (the operator opts in via --access-audit / SPARQ_ACCESS_AUDIT).
             #[cfg(feature = "access-audit")]
             access_audit: None,
-            // [OPUS-4.8] sq-ljfz: trust NO forwarded WebID header by default — the audit actor
+            // sq-ljfz: trust NO forwarded WebID header by default — the audit actor
             // is the local Bearer gate unless the operator names a trusted front's header
             // (--audit-webid-header / SPARQ_AUDIT_WEBID_HEADER).
             #[cfg(feature = "access-audit")]
             audit_webid_header: None,
-            allow_remote: false, // [OPUS-4.8] sq-o4qf: safe default — refuse non-loopback bind unless opted in
-            // [OPUS-4.8] sq-zcby: safe default — no token => no write auth (back-compat).
+            allow_remote: false, // sq-o4qf: safe default — refuse non-loopback bind unless opted in
+            // sq-zcby: safe default — no token => no write auth (back-compat).
             auth_token: None,
             auth_token_read: false,
-            // [OPUS-4.8] sq-4w18: safe default — empty allowlist = deny ALL SERVICE.
+            // sq-4w18: safe default — empty allowlist = deny ALL SERVICE.
             service_allow: crate::service_config::ServiceAllowlist::default(),
-            // [OPUS-4.8] sq-9xoh: no per-request override by default — every request uses the
+            // sq-9xoh: no per-request override by default — every request uses the
             // single static `service_allow`, exactly as before this hook existed.
             #[cfg(feature = "service")]
             service_allow_override: None,
-            // [OPUS-4.8] sq-o7o0: safe default — empty allowlist = NO CORS headers (a
+            // sq-o7o0: safe default — empty allowlist = NO CORS headers (a
             // cross-origin browser read is blocked, the historical posture for a data API).
             cors_allow: crate::cors_config::CorsAllowlist::default(),
-            // [OPUS-4.8] sq-7cxr: safe default — no persistence dir = in-memory (back-compat).
+            // sq-7cxr: safe default — no persistence dir = in-memory (back-compat).
             persist_dir: None,
-            // [OPUS-4.8] sq-o5bi: no restore-on-start by default (seed from data file / empty).
+            // sq-o5bi: no restore-on-start by default (seed from data file / empty).
             #[cfg(feature = "backup")]
             restore: None,
-            // [OPUS-4.8] sq-bu1a: no PITR delta chain by default (base-only restore).
+            // sq-bu1a: no PITR delta chain by default (base-only restore).
             #[cfg(feature = "backup")]
             restore_delta: Vec::new(),
-            // [OPUS-4.8] sq-ft7u: restore-into-durable OFF by default — `--restore` + `--persist`
+            // sq-ft7u: restore-into-durable OFF by default — `--restore` + `--persist`
             // stay mutually exclusive unless the operator opts in with `--restore-persist`.
             #[cfg(feature = "backup")]
             restore_persist: false,
-            // [OPUS-4.8] sq-d3d8: safe default — federation discovery descriptors OFF even
+            // sq-d3d8: safe default — federation discovery descriptors OFF even
             // when the feature is compiled in (the operator opts in deliberately).
             #[cfg(feature = "federation-descriptors")]
             federation_descriptors: false,
-            // [GPT-5.6] sq-lsp7k.5.2: safe default — the grouped facet-count endpoint is OFF
+            // sq-lsp7k.5.2: safe default — the grouped facet-count endpoint is OFF
             // even when compiled in; the operator opts in via --facets / SPARQ_FACETS=1.
             #[cfg(feature = "facets")]
             facets: false,
-            // [GPT-5.6] sq-lsp7k.9.3: safe default — prefix completion is OFF even when compiled
+            // sq-lsp7k.9.3: safe default — prefix completion is OFF even when compiled
             // in; the operator opts in via --complete / SPARQ_COMPLETE=1.
             #[cfg(feature = "complete")]
             complete: false,
-            // [OPUS-4.8] sq-bzh1: safe default — the TPF / LDF source endpoint is OFF even when
+            // sq-bzh1: safe default — the TPF / LDF source endpoint is OFF even when
             // the feature is compiled in (the operator opts in deliberately via --tpf / SPARQ_TPF=1).
             #[cfg(feature = "tpf")]
             tpf: false,
-            // [OPUS-4.8] sq-r74h: brTPF binding-set DoS caps — ON by default (a public source
+            // sq-r74h: brTPF binding-set DoS caps — ON by default (a public source
             // endpoint should be bounded out of the box). 1024 mappings and a 1 MiB payload mirror
             // the conservative LDF page size and the --max-body-bytes default; an operator widens
             // (or, with 0, disables) either via the flags.
@@ -926,7 +926,7 @@ impl Default for ServerConfig {
             brtpf_max_bindings: 1024,
             #[cfg(feature = "brtpf")]
             brtpf_max_values_bytes: 1024 * 1024,
-            // [OPUS-4.8] sq-r868: safe default — the SHACL validate endpoint is OFF even when
+            // sq-r868: safe default — the SHACL validate endpoint is OFF even when
             // the feature is compiled in (the operator opts in deliberately via --shacl /
             // SPARQ_SHACL=1).
             #[cfg(feature = "shacl")]
@@ -935,17 +935,17 @@ impl Default for ServerConfig {
             shacl_guard: false,
             #[cfg(feature = "shacl")]
             shacl_shapes: None,
-            // [OPUS-4.8] sq-hj4n: safe default — the OPT-IN N3-Patch PATCH dialect is OFF even when
+            // sq-hj4n: safe default — the OPT-IN N3-Patch PATCH dialect is OFF even when
             // the feature is compiled in (the operator opts in deliberately via --n3-patch /
             // SPARQ_N3_PATCH=1). The always-on application/sparql-update PATCH dialect is unaffected.
             #[cfg(feature = "n3-patch")]
             n3_patch: false,
-            // [OPUS-4.8] sq-vczh2: safe default — the OPT-IN terse-transpiler endpoint is OFF even
+            // sq-vczh2: safe default — the OPT-IN terse-transpiler endpoint is OFF even
             // when the feature is compiled in (the operator opts in deliberately via --terse /
             // SPARQ_TERSE=1).
             #[cfg(feature = "terse")]
             terse: false,
-            // [FABLE-5] sq-lsp7k.10: safe default — the OPT-IN template surface is OFF even
+            // sq-lsp7k.10: safe default — the OPT-IN template surface is OFF even
             // when the feature is compiled in (the operator opts in deliberately via
             // --templates / SPARQ_TEMPLATES=1), and the store is in-memory unless a
             // persistence file is named (--templates-file / SPARQ_TEMPLATES_FILE).
@@ -953,18 +953,18 @@ impl Default for ServerConfig {
             templates: false,
             #[cfg(feature = "templates")]
             templates_file: None,
-            // [OPUS-4.8] sq-2999l: safe default — no durable CDC change-stream directory, so the
+            // sq-2999l: safe default — no durable CDC change-stream directory, so the
             // `GET /streams` endpoint is OFF (404) and nothing is recorded even when the feature is
             // compiled in (the operator opts in deliberately via --change-stream DIR /
             // SPARQ_CHANGE_STREAM).
             #[cfg(feature = "change-stream")]
             change_stream_dir: None,
-            // [FABLE-5] sq-snopa.6: safe default — the OPT-IN Solid WAC/ACP authorization surface is
+            // sq-snopa.6: safe default — the OPT-IN Solid WAC/ACP authorization surface is
             // OFF even when the feature is compiled in (the operator opts in deliberately via
             // --solid-authz / SPARQ_SOLID_AUTHZ=1). Fail-closed: `/authz/*` is 404 until set.
             #[cfg(feature = "solid-authz")]
             solid_authz: false,
-            // [SONNET-4.6] sq-pfae.17: safe default — the OPT-IN stateless trust-graph extension
+            // sq-pfae.17: safe default — the OPT-IN stateless trust-graph extension
             // is OFF even when the feature is compiled in. The operator opts in deliberately via
             // SPARQ_SOLID_AUTHZ_TRUST=1. Fail-closed: trust block is ignored until set.
             #[cfg(feature = "solid-authz-trust")]
@@ -974,7 +974,7 @@ impl Default for ServerConfig {
 }
 
 impl ServerConfig {
-    /// [OPUS-4.8] (sq-9xoh) Resolves the EFFECTIVE SERVICE egress allowlist for one READ
+    /// (sq-9xoh) Resolves the EFFECTIVE SERVICE egress allowlist for one READ
     /// request: the per-request [`service_allow_override`](Self::service_allow_override) hook if it
     /// is installed AND returns `Some` for these headers, otherwise the static
     /// [`service_allow`](Self::service_allow).
@@ -1000,7 +1000,7 @@ impl ServerConfig {
         }
     }
 
-    /// [OPUS-4.8] (sq-9xoh) Without the `service` feature there is no federation code and no
+    /// (sq-9xoh) Without the `service` feature there is no federation code and no
     /// override hook, so the effective allowlist is always the static one — this just clones it,
     /// keeping the read-path callsites feature-uniform.
     #[cfg(not(feature = "service"))]
@@ -1012,24 +1012,24 @@ impl ServerConfig {
     }
 
     /// Defaults overridden by the `SPARQ_QUERY_TIMEOUT` (seconds; `0` disables),
-    /// `SPARQ_UPDATE_WHERE_TIMEOUT` ([OPUS-4.8] sq-nulp: the separate, typically-shorter
+    /// `SPARQ_UPDATE_WHERE_TIMEOUT` (sq-nulp: the separate, typically-shorter
     /// writer-side WHERE deadline that bounds writer-queue head-of-line blocking from a slow
     /// UPDATE; seconds, `0`/unset disables — the update WHERE budget is then the plain
     /// `query_timeout`), `SPARQ_MAX_BODY_BYTES`, `SPARQ_MAX_CONCURRENT`,
-    /// `SPARQ_HEADER_READ_TIMEOUT` ([OPUS-4.8] sq-2gqr: the slow-loris connection header-read
+    /// `SPARQ_HEADER_READ_TIMEOUT` (sq-2gqr: the slow-loris connection header-read
     /// deadline in seconds; `0` disables, default 15),
-    /// `SPARQ_BODY_READ_TIMEOUT` ([OPUS-4.8] sq-lodb: the slow-body request-body read/idle
+    /// `SPARQ_BODY_READ_TIMEOUT` (sq-lodb: the slow-body request-body read/idle
     /// deadline in seconds; `0` disables, default 30), `SPARQ_MAX_RESULTS`,
-    /// `SPARQ_MAX_QUERY_ROWS` ([OPUS-4.8] sq-ebii: the coarse memory cap; `0` disables) and
-    /// `SPARQ_MAX_DECOMPRESS_RATIO` ([OPUS-4.8] sq-ebii: the zip-bomb guard; `0` refuses gzip
+    /// `SPARQ_MAX_QUERY_ROWS` (sq-ebii: the coarse memory cap; `0` disables) and
+    /// `SPARQ_MAX_DECOMPRESS_RATIO` (sq-ebii: the zip-bomb guard; `0` refuses gzip
     /// bodies) environment variables — plus, with the `time-travel` feature,
     /// `SPARQ_TIME_TRAVEL_GENERATIONS` and `SPARQ_TIME_TRAVEL_MAX_AGE` (seconds;
     /// `0` disables the age bound), `SPARQ_ALLOW_REMOTE` (non-loopback bind opt-in),
     /// and `SPARQ_SERVICE_ALLOW` (comma/whitespace-separated SERVICE egress allowlist;
-    /// [OPUS-4.8] sq-4w18). CLI flags override / widen these in `main` (the allowlist is
+    /// sq-4w18). CLI flags override / widen these in `main` (the allowlist is
     /// additive: `--service-allow` / `--service-allow-file` UNION with the env baseline).
     ///
-    /// [OPUS-4.8] sq-4w18: returns `Err` (rather than panicking) on a malformed
+    /// sq-4w18: returns `Err` (rather than panicking) on a malformed
     /// `SPARQ_SERVICE_ALLOW` entry. `from_env` is public config API an embedder may
     /// call, and a panic in a config constructor is a hostile surprise; a `Result`
     /// (the crate's `Result<_, String>` error style, e.g. `from_sources` / nlq's
@@ -1040,13 +1040,13 @@ impl ServerConfig {
         if let Some(secs) = env_parse::<u64>("SPARQ_QUERY_TIMEOUT") {
             cfg.query_timeout = (secs > 0).then(|| Duration::from_secs(secs));
         }
-        // [OPUS-4.8] sq-nulp: separate, typically-shorter writer-side WHERE deadline that
+        // sq-nulp: separate, typically-shorter writer-side WHERE deadline that
         // bounds writer-queue head-of-line blocking from a slow UPDATE; 0 / unset disables it
         // (the update WHERE budget is then the plain query_timeout, exactly as before).
         if let Some(secs) = env_parse::<u64>("SPARQ_UPDATE_WHERE_TIMEOUT") {
             cfg.update_where_timeout = (secs > 0).then(|| Duration::from_secs(secs));
         }
-        // [OPUS-4.8] sq-p7kk5: adaptive group-commit (ON by default). SPARQ_ADAPTIVE_COMMIT=0
+        // sq-p7kk5: adaptive group-commit (ON by default). SPARQ_ADAPTIVE_COMMIT=0
         // restores the always-windowed writer; anything else (or unset) keeps it on.
         if let Some(n) = env_parse::<u8>("SPARQ_ADAPTIVE_COMMIT") {
             cfg.adaptive_commit = n != 0;
@@ -1057,12 +1057,12 @@ impl ServerConfig {
         if let Some(n) = env_parse::<usize>("SPARQ_MAX_CONCURRENT") {
             cfg.max_concurrent = n.max(1);
         }
-        // [OPUS-4.8] sq-2gqr: slow-loris header-read deadline (seconds); `0` disables it (an
+        // sq-2gqr: slow-loris header-read deadline (seconds); `0` disables it (an
         // unbounded header read, the pre-fix behaviour), anything else sets the deadline.
         if let Some(secs) = env_parse::<u64>("SPARQ_HEADER_READ_TIMEOUT") {
             cfg.header_read_timeout = (secs > 0).then(|| Duration::from_secs(secs));
         }
-        // [OPUS-4.8] sq-lodb: slow-body read/idle deadline (seconds); `0` disables it (an
+        // sq-lodb: slow-body read/idle deadline (seconds); `0` disables it (an
         // unbounded body read — a slow body can hold the slot forever), anything else sets it.
         if let Some(secs) = env_parse::<u64>("SPARQ_BODY_READ_TIMEOUT") {
             cfg.body_read_timeout = (secs > 0).then(|| Duration::from_secs(secs));
@@ -1070,17 +1070,17 @@ impl ServerConfig {
         if let Some(n) = env_parse::<usize>("SPARQ_MAX_RESULTS") {
             cfg.max_results = (n > 0).then_some(n);
         }
-        // [OPUS-4.8] sq-ebii: memory cap (coarse working-set row ceiling on every form);
+        // sq-ebii: memory cap (coarse working-set row ceiling on every form);
         // 0 / unset disables it.
         if let Some(n) = env_parse::<usize>("SPARQ_MAX_QUERY_ROWS") {
             cfg.max_query_rows = (n > 0).then_some(n);
         }
-        // [OPUS-4.8] sq-s5is: byte-accounted memory cap (prices row width + computed
+        // sq-s5is: byte-accounted memory cap (prices row width + computed
         // literals, on every form); 0 / unset disables it.
         if let Some(n) = env_parse::<usize>("SPARQ_MAX_QUERY_BYTES") {
             cfg.max_query_bytes = (n > 0).then_some(n);
         }
-        // [OPUS-4.8] sq-ebii: decompression-ratio cap (zip-bomb guard); 0 disables
+        // sq-ebii: decompression-ratio cap (zip-bomb guard); 0 disables
         // ratio-capped decompression (a Content-Encoding body is then refused outright).
         if let Some(n) = env_parse::<usize>("SPARQ_MAX_DECOMPRESS_RATIO") {
             cfg.max_decompress_ratio = n;
@@ -1100,19 +1100,19 @@ impl ServerConfig {
                 cfg.time_travel_max_age = (secs > 0).then(|| Duration::from_secs(secs));
             }
         }
-        // [OPUS-4.8] sq-0bxp: SPARQ_AUDIT_LOG truthy ("1"/"true"/"yes"/"on") turns the per-query
+        // sq-0bxp: SPARQ_AUDIT_LOG truthy ("1"/"true"/"yes"/"on") turns the per-query
         // access audit log on at runtime (only when the `audit-log` feature is compiled in).
         #[cfg(feature = "audit-log")]
         if let Ok(v) = std::env::var("SPARQ_AUDIT_LOG") {
             cfg.audit_log = env_truthy(&v);
         }
-        // [OPUS-4.8] sq-toze.34: SPARQ_LOG_FULL_REQUESTS truthy ("1"/"true"/"yes"/"on") OPTS OUT of
+        // sq-toze.34: SPARQ_LOG_FULL_REQUESTS truthy ("1"/"true"/"yes"/"on") OPTS OUT of
         // request-log redaction (logs full URIs/query text verbatim). Default (unset / falsey) keeps
         // redaction ON — the privacy-respecting posture. Only meaningful together with --verbose.
         if let Ok(v) = std::env::var("SPARQ_LOG_FULL_REQUESTS") {
             cfg.redact_logs = !env_truthy(&v);
         }
-        // [OPUS-4.8] sq-gos8: SPARQ_ACCESS_AUDIT=<file|stderr> installs the structured
+        // sq-gos8: SPARQ_ACCESS_AUDIT=<file|stderr> installs the structured
         // access-audit sink (only when the `access-audit` feature is compiled in). An empty /
         // unset value leaves it off. The literal `stderr` selects the stderr sink; anything else
         // is a file path the default JSON-Lines sink appends to.
@@ -1123,7 +1123,7 @@ impl ServerConfig {
                 cfg.access_audit = Some(crate::access_audit::SinkTarget::parse(v));
             }
         }
-        // [OPUS-4.8] sq-ljfz: SPARQ_AUDIT_WEBID_HEADER=<header-name> names a TRUSTED forwarded
+        // sq-ljfz: SPARQ_AUDIT_WEBID_HEADER=<header-name> names a TRUSTED forwarded
         // -identity header — a fronting auth layer (sparq-solid / a Solid-WAC proxy / gateway)
         // sets it to the authenticated user's WebID, which the audit seam then records as
         // Actor::WebId. Empty / unset => trust no header (the local Bearer gate, unchanged).
@@ -1132,13 +1132,13 @@ impl ServerConfig {
             let v = v.trim();
             cfg.audit_webid_header = (!v.is_empty()).then(|| v.to_string());
         }
-        // [OPUS-4.8] sq-o4qf: SPARQ_ALLOW_REMOTE truthy ("1"/"true"/"yes"/"on", case-insensitive)
+        // sq-o4qf: SPARQ_ALLOW_REMOTE truthy ("1"/"true"/"yes"/"on", case-insensitive)
         // opts in to a non-loopback bind. Anything else (incl. unset / "0" / "false") leaves the
         // safe default of refusing to expose the unauthenticated surface beyond loopback.
         if let Ok(v) = std::env::var("SPARQ_ALLOW_REMOTE") {
             cfg.allow_remote = env_truthy(&v);
         }
-        // [OPUS-4.8] sq-zcby: SPARQ_AUTH_TOKEN sets the write-gate token (an empty value is
+        // sq-zcby: SPARQ_AUTH_TOKEN sets the write-gate token (an empty value is
         // treated as "unset" — an empty shared secret is a footgun, never a valid token);
         // SPARQ_AUTH_TOKEN_READ truthy ("1"/"true"/"yes"/"on") additionally gates reads.
         if let Ok(v) = std::env::var("SPARQ_AUTH_TOKEN") {
@@ -1147,7 +1147,7 @@ impl ServerConfig {
         if let Ok(v) = std::env::var("SPARQ_AUTH_TOKEN_READ") {
             cfg.auth_token_read = env_truthy(&v);
         }
-        // [OPUS-4.8] sq-4w18: SERVICE egress allowlist baseline from SPARQ_SERVICE_ALLOW
+        // sq-4w18: SERVICE egress allowlist baseline from SPARQ_SERVICE_ALLOW
         // (comma/whitespace-separated). The binary then ADDS any `--service-allow` /
         // `--service-allow-file` entries (the union — CLI only ever widens). A malformed
         // env entry is a hard startup error (propagated, not panicked) rather than a
@@ -1158,7 +1158,7 @@ impl ServerConfig {
                 .add_many(&v)
                 .map_err(|e| format!("SPARQ_SERVICE_ALLOW: {e}"))?;
         }
-        // [OPUS-4.8] sq-o7o0: first-party CORS origin allowlist baseline from
+        // sq-o7o0: first-party CORS origin allowlist baseline from
         // SPARQ_CORS_ALLOW_ORIGIN (comma/whitespace-separated). The binary then ADDS any
         // `--cors-allow-origin` / `--cors-allow-origin-file` entries (the union — CLI only
         // ever widens). A malformed env origin is a hard startup error (propagated, not
@@ -1169,19 +1169,19 @@ impl ServerConfig {
                 .add_many(&v)
                 .map_err(|e| format!("SPARQ_CORS_ALLOW_ORIGIN: {e}"))?;
         }
-        // [OPUS-4.8] sq-7cxr: SPARQ_PERSIST_DIR enables durable persistence at the given
+        // sq-7cxr: SPARQ_PERSIST_DIR enables durable persistence at the given
         // directory (the binary's --persist flag overrides it). An empty value is "unset".
         if let Ok(v) = std::env::var("SPARQ_PERSIST_DIR") {
             cfg.persist_dir = (!v.is_empty()).then(|| std::path::PathBuf::from(v));
         }
-        // [OPUS-4.8] sq-o5bi: SPARQ_RESTORE seeds the in-memory store from a backup artifact
+        // sq-o5bi: SPARQ_RESTORE seeds the in-memory store from a backup artifact
         // at startup (the binary's --restore flag overrides it). An empty value is "unset".
         // Only present with the `backup` feature.
         #[cfg(feature = "backup")]
         if let Ok(v) = std::env::var("SPARQ_RESTORE") {
             cfg.restore = (!v.is_empty()).then(|| std::path::PathBuf::from(v));
         }
-        // [OPUS-4.8] sq-bu1a: SPARQ_RESTORE_DELTA is a platform-path-separator-delimited list of
+        // sq-bu1a: SPARQ_RESTORE_DELTA is a platform-path-separator-delimited list of
         // incremental delta artifacts replayed forward onto the --restore base (PITR), oldest
         // first. Repeated --restore-delta flags override it. Only present with the `backup` feature.
         #[cfg(feature = "backup")]
@@ -1190,7 +1190,7 @@ impl ServerConfig {
                 .filter(|p| !p.as_os_str().is_empty())
                 .collect();
         }
-        // [OPUS-4.8] sq-ft7u: SPARQ_RESTORE_PERSIST truthy ("1"/"true"/"yes"/"on") makes the
+        // sq-ft7u: SPARQ_RESTORE_PERSIST truthy ("1"/"true"/"yes"/"on") makes the
         // restore-on-start write THROUGH to the durable `--persist` dir (so it survives a restart)
         // instead of the historical refusal of the --restore + --persist combination. Off by
         // default. Only present with the `backup` feature; the binary's --restore-persist overrides.
@@ -1198,32 +1198,32 @@ impl ServerConfig {
         if let Ok(v) = std::env::var("SPARQ_RESTORE_PERSIST") {
             cfg.restore_persist = env_truthy(&v);
         }
-        // [OPUS-4.8] sq-d3d8: SPARQ_FEDERATION_DESCRIPTORS truthy ("1"/"true"/"yes"/"on")
+        // sq-d3d8: SPARQ_FEDERATION_DESCRIPTORS truthy ("1"/"true"/"yes"/"on")
         // serves the VoID + Service-Description discovery endpoints. Off by default. Only
         // present with the `federation-descriptors` feature.
         #[cfg(feature = "federation-descriptors")]
         if let Ok(v) = std::env::var("SPARQ_FEDERATION_DESCRIPTORS") {
             cfg.federation_descriptors = env_truthy(&v);
         }
-        // [GPT-5.6] sq-lsp7k.5.2: SPARQ_FACETS truthy ("1"/"true"/"yes"/"on") serves the
+        // sq-lsp7k.5.2: SPARQ_FACETS truthy ("1"/"true"/"yes"/"on") serves the
         // grouped facet-count endpoint. Off by default. Only present with the `facets` feature.
         #[cfg(feature = "facets")]
         if let Ok(v) = std::env::var("SPARQ_FACETS") {
             cfg.facets = env_truthy(&v);
         }
-        // [GPT-5.6] sq-lsp7k.9.3: SPARQ_COMPLETE truthy ("1"/"true"/"yes"/"on") serves the
+        // sq-lsp7k.9.3: SPARQ_COMPLETE truthy ("1"/"true"/"yes"/"on") serves the
         // prefix-completion endpoint. Off by default. Only present with the `complete` feature.
         #[cfg(feature = "complete")]
         if let Ok(v) = std::env::var("SPARQ_COMPLETE") {
             cfg.complete = env_truthy(&v);
         }
-        // [OPUS-4.8] sq-bzh1: SPARQ_TPF truthy ("1"/"true"/"yes"/"on") serves the Triple Pattern
+        // sq-bzh1: SPARQ_TPF truthy ("1"/"true"/"yes"/"on") serves the Triple Pattern
         // Fragments / LDF source endpoint. Off by default. Only present with the `tpf` feature.
         #[cfg(feature = "tpf")]
         if let Ok(v) = std::env::var("SPARQ_TPF") {
             cfg.tpf = env_truthy(&v);
         }
-        // [OPUS-4.8] sq-r74h: brTPF binding-set DoS caps (mapping count + payload bytes); 0
+        // sq-r74h: brTPF binding-set DoS caps (mapping count + payload bytes); 0
         // disables that cap. Only present with the `brtpf` feature.
         #[cfg(feature = "brtpf")]
         {
@@ -1234,7 +1234,7 @@ impl ServerConfig {
                 cfg.brtpf_max_values_bytes = n;
             }
         }
-        // [OPUS-4.8] sq-r868: SPARQ_SHACL truthy ("1"/"true"/"yes"/"on") serves the SHACL
+        // sq-r868: SPARQ_SHACL truthy ("1"/"true"/"yes"/"on") serves the SHACL
         // validate endpoint. Off by default. Only present with the `shacl` feature.
         #[cfg(feature = "shacl")]
         if let Ok(v) = std::env::var("SPARQ_SHACL") {
@@ -1244,20 +1244,20 @@ impl ServerConfig {
         if let Ok(v) = std::env::var("SPARQ_SHACL_GUARD") {
             cfg.shacl_guard = env_truthy(&v);
         }
-        // [OPUS-4.8] sq-hj4n: SPARQ_N3_PATCH truthy ("1"/"true"/"yes"/"on") enables the OPT-IN
+        // sq-hj4n: SPARQ_N3_PATCH truthy ("1"/"true"/"yes"/"on") enables the OPT-IN
         // Solid N3-Patch PATCH dialect (text/n3). Off by default. Only present with the
         // `n3-patch` feature.
         #[cfg(feature = "n3-patch")]
         if let Ok(v) = std::env::var("SPARQ_N3_PATCH") {
             cfg.n3_patch = env_truthy(&v);
         }
-        // [OPUS-4.8] sq-vczh2: SPARQ_TERSE truthy ("1"/"true"/"yes"/"on") serves the OPT-IN
+        // sq-vczh2: SPARQ_TERSE truthy ("1"/"true"/"yes"/"on") serves the OPT-IN
         // terse-transpiler endpoint. Off by default. Only present with the `terse` feature.
         #[cfg(feature = "terse")]
         if let Ok(v) = std::env::var("SPARQ_TERSE") {
             cfg.terse = env_truthy(&v);
         }
-        // [FABLE-5] sq-lsp7k.10: SPARQ_TEMPLATES truthy ("1"/"true"/"yes"/"on") serves the
+        // sq-lsp7k.10: SPARQ_TEMPLATES truthy ("1"/"true"/"yes"/"on") serves the
         // OPT-IN named-parameterized-template REST surface (/templates); SPARQ_TEMPLATES_FILE
         // names the optional persistence file (empty = in-memory). Off by default. Only
         // present with the `templates` feature.
@@ -1270,7 +1270,7 @@ impl ServerConfig {
                 cfg.templates_file = (!v.is_empty()).then(|| std::path::PathBuf::from(v));
             }
         }
-        // [OPUS-4.8] sq-2999l: SPARQ_CHANGE_STREAM=<DIR> enables the durable CDC change-stream
+        // sq-2999l: SPARQ_CHANGE_STREAM=<DIR> enables the durable CDC change-stream
         // (recording + the `GET /streams` poll endpoint) rooted at the given directory (the
         // binary's --change-stream flag overrides it). An empty value is "unset". Only present with
         // the `change-stream` feature.
@@ -1278,14 +1278,14 @@ impl ServerConfig {
         if let Ok(v) = std::env::var("SPARQ_CHANGE_STREAM") {
             cfg.change_stream_dir = (!v.is_empty()).then(|| std::path::PathBuf::from(v));
         }
-        // [FABLE-5] sq-snopa.6: SPARQ_SOLID_AUTHZ truthy ("1"/"true"/"yes"/"on") serves the OPT-IN
+        // sq-snopa.6: SPARQ_SOLID_AUTHZ truthy ("1"/"true"/"yes"/"on") serves the OPT-IN
         // Solid WAC/ACP HTTP authorization surface (POST /authz/*). Off by default. Only present
         // with the `solid-authz` feature.
         #[cfg(feature = "solid-authz")]
         if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ") {
             cfg.solid_authz = env_truthy(&v);
         }
-        // [SONNET-4.6] sq-pfae.17: SPARQ_SOLID_AUTHZ_TRUST truthy ("1"/"true"/"yes"/"on") enables
+        // sq-pfae.17: SPARQ_SOLID_AUTHZ_TRUST truthy ("1"/"true"/"yes"/"on") enables
         // the OPT-IN stateless trust-graph extension to POST /authz/decide. Off by default. Only
         // present with the `solid-authz-trust` feature.
         #[cfg(feature = "solid-authz-trust")]
@@ -1296,7 +1296,7 @@ impl ServerConfig {
     }
 }
 
-/// [OPUS-4.8] sq-o4qf: parse a boolean-ish env value. Truthy: `1`, `true`, `yes`, `on`
+/// sq-o4qf: parse a boolean-ish env value. Truthy: `1`, `true`, `yes`, `on`
 /// (case-insensitive, trimmed); everything else (including empty) is false.
 fn env_truthy(v: &str) -> bool {
     matches!(
@@ -1306,10 +1306,10 @@ fn env_truthy(v: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-o4qf / sq-zcby — bind-time security posture (auth-aware)
+// sq-o4qf / sq-zcby — bind-time security posture (auth-aware)
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] sq-o4qf: the decision the binary makes about a requested bind address,
+/// sq-o4qf: the decision the binary makes about a requested bind address,
 /// given the configured auth posture. Returned by [`bind_posture`] so `main` (and tests)
 /// can act on it without the side effect of actually binding.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1326,7 +1326,7 @@ pub enum BindPosture {
     RemoteRefused { message: String },
 }
 
-/// [OPUS-4.8] sq-o4qf / sq-zcby: classify a requested bind address under the configured auth
+/// sq-o4qf / sq-zcby: classify a requested bind address under the configured auth
 /// posture.
 ///
 /// By default `sparq-server` has no authentication on any endpoint (query,
@@ -1343,7 +1343,7 @@ pub enum BindPosture {
 /// surface gets exposed, so they are treated as remote. This is a deliberately blunt,
 /// fail-closed check: it errs toward refusing exposure, not toward allowing it.
 ///
-/// [OPUS-4.8] sq-zcby: `auth` folds the configured Bearer-token gate into the decision. A
+/// sq-zcby: `auth` folds the configured Bearer-token gate into the decision. A
 /// non-loopback bind is allowed when `--allow-remote` is set OR the **whole surface** is
 /// authenticated ([`AuthPosture::ReadAndWrite`]) — a write-token alone ([`AuthPosture::
 /// WriteOnly`]) still requires `--allow-remote`, because it leaves an OPEN read endpoint on
@@ -1422,11 +1422,11 @@ pub fn bind_posture(addr: &SocketAddr, allow_remote: bool, auth: AuthPosture) ->
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-zcby (PSS gh-46) — the Bearer-token auth gate (write surface +
+// sq-zcby (PSS gh-46) — the Bearer-token auth gate (write surface +
 // optional read gate), mirroring QLever's `-a <token>`.
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] sq-zcby: how much of the surface a configured token authenticates — folded into
+/// sq-zcby: how much of the surface a configured token authenticates — folded into
 /// the bind decision ([`bind_posture`]). `WriteOnly` (a token, reads open) still requires
 /// `--allow-remote` for a non-loopback bind because reads stay open; `ReadAndWrite` (token +
 /// `--auth-token-read`) makes the whole surface authenticated, so it does not.
@@ -1452,7 +1452,7 @@ impl AuthPosture {
     }
 }
 
-/// [OPUS-4.8] sq-zcby: whether a request is a WRITE (mutates the dataset) or a READ, for the
+/// sq-zcby: whether a request is a WRITE (mutates the dataset) or a READ, for the
 /// auth gate. Classification keys on "does this mutate", NOT the route — an UPDATE smuggled
 /// through the query path is a write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1461,7 +1461,7 @@ pub(crate) enum Operation {
     Write,
 }
 
-/// [OPUS-4.8] sq-zcby: constant-time byte-string equality. Returns `true` iff `a == b`,
+/// sq-zcby: constant-time byte-string equality. Returns `true` iff `a == b`,
 /// taking time that depends only on `a.len()` (not on the contents or on how far the first
 /// difference is), so a token check cannot be turned into a timing oracle that recovers the
 /// secret byte-by-byte.
@@ -1482,7 +1482,7 @@ pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     for (x, y) in a.iter().zip(b.iter()) {
         diff |= x ^ y;
     }
-    // [OPUS-4.8] sq-zcby (Copilot PR#71 fix): route the accumulator through
+    // sq-zcby (Copilot PR#71 fix): route the accumulator through
     // `core::hint::black_box` BEFORE the `== 0` test so the optimiser cannot prove anything
     // about `diff` and rewrite the loop+compare into an early-exit `memcmp`-style
     // short-circuit. This matches the doc claim ("black_box-style fold"): without it the
@@ -1491,7 +1491,7 @@ pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     core::hint::black_box(diff) == 0
 }
 
-/// [OPUS-4.8] sq-zcby: extracts the token from an `Authorization: Bearer <token>` header,
+/// sq-zcby: extracts the token from an `Authorization: Bearer <token>` header,
 /// tolerant of scheme casing (`Bearer`/`bearer`/`BEARER`) and of leading/trailing space. Any
 /// other scheme (or no header) yields `None`.
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
@@ -1504,13 +1504,13 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
     }
 }
 
-/// [OPUS-4.8] sq-cxk5: the WebSocket subprotocol-token prefix. A browser cannot set an
+/// sq-cxk5: the WebSocket subprotocol-token prefix. A browser cannot set an
 /// `Authorization` header on a WebSocket handshake, so it carries the Bearer token as a
 /// `Sec-WebSocket-Protocol: bearer.<token>` subprotocol instead. See [`subprotocol_bearer_token`]
 /// and `crates/sparq-server/README.md` → "Authenticating a WebSocket subscription from a browser".
 pub(crate) const WS_BEARER_SUBPROTOCOL_PREFIX: &str = "bearer.";
 
-/// [OPUS-4.8] sq-cxk5: extracts a Bearer token offered as a `Sec-WebSocket-Protocol`
+/// sq-cxk5: extracts a Bearer token offered as a `Sec-WebSocket-Protocol`
 /// subprotocol of the form `bearer.<token>` (the browser-compatible channel — browsers CANNOT
 /// set an `Authorization` header on a WS handshake, but `new WebSocket(url, [proto])` sets
 /// `Sec-WebSocket-Protocol`). The header may list several comma-separated subprotocols; the FIRST
@@ -1534,7 +1534,7 @@ pub(crate) fn subprotocol_bearer_token(headers: &HeaderMap) -> Option<(&str, &st
         })
 }
 
-/// [OPUS-4.8] sq-zcby / sq-cxk5: the per-request auth decision core. Returns `None` to proceed,
+/// sq-zcby / sq-cxk5: the per-request auth decision core. Returns `None` to proceed,
 /// or `Some(401)` to refuse. A request is gated when its [`Operation`] is covered by the
 /// configured posture: a `Write` whenever a token is set; a `Read` only additionally when
 /// `--auth-token-read` is on. An ungated operation (or no token configured at all) always
@@ -1564,7 +1564,7 @@ pub(crate) fn auth_check(
     }
 }
 
-/// [OPUS-4.8] sq-zcby: the per-request auth gate for the plain-HTTP surface — validates the
+/// sq-zcby: the per-request auth gate for the plain-HTTP surface — validates the
 /// `Authorization: Bearer <token>` header against the configured posture. See [`auth_check`].
 /// The SSE subscription GET (`/subscriptions/sse`) uses this exactly like the other GET routes
 /// (sq-cxk5): it is a plain GET, so the Bearer header is the only channel.
@@ -1576,7 +1576,7 @@ pub(crate) fn auth_gate(
     auth_check(config, op, bearer_token(headers))
 }
 
-/// [OPUS-4.8] sq-cxk5: the auth gate for the `/subscriptions` WebSocket UPGRADE. A browser cannot
+/// sq-cxk5: the auth gate for the `/subscriptions` WebSocket UPGRADE. A browser cannot
 /// set an `Authorization` header on a WS handshake, so this accepts the token from EITHER channel:
 /// the `Authorization: Bearer <token>` header (non-browser clients) OR a `Sec-WebSocket-Protocol:
 /// bearer.<token>` subprotocol (browsers). The token is validated against the read token
@@ -1595,11 +1595,11 @@ pub(crate) fn ws_auth_gate(
     auth_check(config, op, presented)
 }
 
-/// [OPUS-4.8] sq-zcby: the 401 a gated request without a valid token gets — `WWW-Authenticate:
+/// sq-zcby: the 401 a gated request without a valid token gets — `WWW-Authenticate:
 /// Bearer` plus the server's standard JSON error body. Identical for a missing vs a wrong
 /// token (the body carries no hint either way), so it never leaks which.
 ///
-/// [OPUS-4.8] sq-2bhm (ASVS-G1): this auth-refusal is a SENSITIVE response, so — unlike the
+/// sq-2bhm (ASVS-G1): this auth-refusal is a SENSITIVE response, so — unlike the
 /// general surface, where a blanket `Cache-Control` is deliberately NOT forced (results are
 /// uncached by default; see [`security_headers`]) — it carries `Cache-Control: no-store` so a
 /// shared cache / proxy never retains the 401 (or any future body it grows). This is the
@@ -1622,11 +1622,11 @@ pub(crate) fn unauthorized() -> Response {
     resp
 }
 
-/// [OPUS-4.8] sq-zcby: does this SPARQL string MUTATE the dataset, for the auth classifier?
+/// sq-zcby: does this SPARQL string MUTATE the dataset, for the auth classifier?
 /// The classifier keys on this, not on the route or Content-Type, so an UPDATE smuggled
 /// through a `query=`/generic body path is still gated as a write.
 ///
-/// [OPUS-4.8] (Copilot PR#71 doc/impl-consistency fix) The implemented rule is
+/// (Copilot PR#71 doc/impl-consistency fix) The implemented rule is
 /// **default-to-write unless it provably parses as a read-only query**: a string that parses
 /// as a read-only query (SELECT/ASK/CONSTRUCT/DESCRIBE) returns `false` (a read); EVERYTHING
 /// ELSE returns `true` (gated as a write). That "everything else" deliberately collapses the
@@ -1648,7 +1648,7 @@ pub(crate) fn payload_mutates(sparql: &str) -> bool {
     spargebra::SparqlParser::new().parse_query(sparql).is_err()
 }
 
-/// [OPUS-4.8] (sq-gos8) Maps the auth-classifier [`Operation`] to the structured-audit
+/// (sq-gos8) Maps the auth-classifier [`Operation`] to the structured-audit
 /// [`Action`](crate::access_audit::Action) for the plain SPARQL surface (read => a query,
 /// write => an update).
 #[cfg(feature = "access-audit")]
@@ -1659,7 +1659,7 @@ fn sparql_action(op: Operation) -> crate::access_audit::Action {
     }
 }
 
-/// [OPUS-4.8] (sq-ljfz) The forwarded WebID a TRUSTED front placed on the request, IFF the
+/// (sq-ljfz) The forwarded WebID a TRUSTED front placed on the request, IFF the
 /// operator named a trusted header ([`ServerConfig::audit_webid_header`]). `None` when no
 /// trusted header is configured (the common case), the header is absent, or its value is not
 /// valid UTF-8 — in every such case the audit actor falls back to the local Bearer gate.
@@ -1671,7 +1671,7 @@ fn forwarded_webid<'a>(config: &ServerConfig, headers: &'a HeaderMap) -> Option<
     headers.get(name)?.to_str().ok()
 }
 
-/// [OPUS-4.8] (sq-gos8; sq-ljfz) Begins a structured access-audit record IFF a sink is installed
+/// (sq-gos8; sq-ljfz) Begins a structured access-audit record IFF a sink is installed
 /// — snapshotting the actor, the action class, the resource and the (non-reversible) request
 /// fingerprint at the enforcement seam. Returns `None` (and builds nothing) when no sink is
 /// configured, so an audit-disabled request pays only the `Option` check.
@@ -1700,7 +1700,7 @@ fn audit_access_begin(
     })
 }
 
-/// [OPUS-4.8] (sq-gos8) Finishes a pending record and records it through the installed sink,
+/// (sq-gos8) Finishes a pending record and records it through the installed sink,
 /// deriving the ACTUALLY-enforced decision from the finished [`Response`]: a `401` is the auth
 /// gate's denial (`Deny` + the bearer-auth policy basis), anything else is the allowed-and-served
 /// outcome. So the recorded decision is the one the server enforced, never a claimed-but-
@@ -1747,7 +1747,7 @@ pub type PinnedGen = Arc<Generation<Graph>>;
 /// honest conflict unit for any write that cannot be scoped to a finite set of named
 /// graphs (§6.3/§6.5).
 ///
-/// [OPUS-4.8] (sq-uqh, Wave B) Bumping this pod's epoch means "invalidate everything":
+/// (sq-uqh, Wave B) Bumping this pod's epoch means "invalidate everything":
 /// it represents the DEFAULT graph (which the GSP surface maps every direct graph onto)
 /// plus any cross-graph / dynamically-scoped write whose touched named graphs are not
 /// statically knowable from the parsed update. A correct cache MUST therefore record
@@ -1760,7 +1760,7 @@ pub type PinnedGen = Arc<Generation<Graph>>;
 /// epoch on every entry — the contract that makes a global bump invalidate everything.
 pub const GLOBAL_POD: &str = "urn:sparq:pod:global";
 
-/// [OPUS-4.8] (sq-uqh, Wave B) The visibility scope (`PodId` set) a SPARQL Update writes,
+/// (sq-uqh, Wave B) The visibility scope (`PodId` set) a SPARQL Update writes,
 /// for per-named-graph cache invalidation (§6.3/§6.5).
 ///
 /// Each pod is a named graph (its graph IRI); a write to graph A bumps only graph A's
@@ -1854,7 +1854,7 @@ fn touched_pods(sparql: &str) -> Vec<PodId> {
     acc.into_pods()
 }
 
-/// [OPUS-4.8] (sq-uqh) Accumulator for [`touched_pods`]: the set of concrete named-graph
+/// (sq-uqh) Accumulator for [`touched_pods`]: the set of concrete named-graph
 /// pods a write touches, plus a flag for any unscopable (global) effect. The two are kept
 /// independent — concrete pods are recorded even alongside a global effect — so the final
 /// set never under-invalidates regardless of how a cache entry records its scope.
@@ -1893,8 +1893,8 @@ impl TouchedPods {
 /// opt-in `geo` registry AND the SERVICE egress allowlist (sq-4w18) apply to updates
 /// exactly as they do to queries — an `INSERT … WHERE { SERVICE <iri> { … } }` update
 /// federates under the same default-deny allowlist as a read. The trait is sparq-serve's
-/// documented seam for exactly this wrapper. [OPUS-4.8]
-/// [OPUS-4.8] (sq-7cxr, gh-44) Resolves the durable directory-backed [`Graph`] for
+/// documented seam for exactly this wrapper.
+/// (sq-7cxr, gh-44) Resolves the durable directory-backed [`Graph`] for
 /// `--persist <DIR>`: OPEN an existing on-disk store (replaying its WAL — prior updates
 /// present with NO rebuild — and ignoring `seed`), or CREATE a fresh store by saving `seed`
 /// there and re-opening it so it carries a WAL.
@@ -1924,7 +1924,7 @@ fn open_or_create_durable(dir: &std::path::Path, seed: Graph) -> Result<Graph, S
     })
 }
 
-/// [OPUS-4.8] (sq-vpx4) Internal marker prefixed onto the error string of a
+/// (sq-vpx4) Internal marker prefixed onto the error string of a
 /// [`WriteError::Unavailable`] (durable-write refusal) as it crosses from
 /// [`AppState::apply_update`] to the HTTP response mapper, so
 /// [`update_rejection_response`] can route it to HTTP 503 (retryable) rather than the
@@ -1933,7 +1933,7 @@ fn open_or_create_durable(dir: &std::path::Path, seed: Graph) -> Result<Graph, S
 const DURABLE_UNAVAILABLE_PREFIX: &str = "\u{1}durable-unavailable\u{1}";
 #[cfg(feature = "shacl")]
 const SHACL_GUARD_REJECTED_PREFIX: &str = "\u{1}shacl-guard-rejected\u{1}";
-/// [FABLE-5] (PR #1999 security review) Marker for a write the SHACL guard refused because
+/// (PR #1999 security review) Marker for a write the SHACL guard refused because
 /// the guard shapes graph could not be FULLY evaluated (a strict-validation failure or a
 /// skipped/unevaluable constraint) — the fail-closed outcome, mapped to HTTP 500 (an
 /// operator-side guard misconfiguration, not a client error). Never leaves the process.
@@ -1945,13 +1945,13 @@ struct ServerApplier {
     /// The config the writer thread enforces around every engine call (carries the
     /// SERVICE egress allowlist; the writer has no per-request config, so it owns its own).
     config: Arc<ServerConfig>,
-    /// [OPUS-4.8] (sq-7cxr, gh-44) The optional DURABLE mirror of the published lineage.
+    /// (sq-7cxr, gh-44) The optional DURABLE mirror of the published lineage.
     /// `Some` exactly when `--persist <DIR>` is set: a directory-backed [`Graph`] (its own
     /// WAL + named-graph persistence) that the writer thread keeps in lockstep with the ring
     /// by re-applying each committed batch to it, WAL-durably, BEFORE the generation is
     /// published (and hence before the client ack). `None` is today's purely in-memory server.
     durable: Option<DurableStore>,
-    /// [SONNET-4.6] (sq-m9prn) The SAME registry `AppState` serves `GET /queries` from —
+    /// (sq-m9prn) The SAME registry `AppState` serves `GET /queries` from —
     /// shared by `Arc`, so an update the writer thread registers is visible to (and killable
     /// by) the HTTP handlers. Compiled only with the `query-registry` feature; without it the
     /// applier has no extra field and the write path is byte-identical to before.
@@ -1959,7 +1959,7 @@ struct ServerApplier {
     running_queries: Arc<QueryRegistry>,
 }
 
-/// [OPUS-4.8] (sq-7cxr, gh-44) The writer-thread-owned durable store: the on-disk [`Graph`]
+/// (sq-7cxr, gh-44) The writer-thread-owned durable store: the on-disk [`Graph`]
 /// plus the buffer of RESOLVED update effects accumulated for the batch currently being committed.
 ///
 /// The writer drives `fork → apply* → seal` per batch (and re-`fork`s + replays the
@@ -1971,7 +1971,7 @@ struct ServerApplier {
 /// single writer thread, no lock is needed and the durable graph never diverges from the
 /// published lineage.
 ///
-/// [OPUS-4.8] (Copilot PR#80) We buffer the *resolved* [`sparq_engine::UpdateEffect`] log
+/// (Copilot PR#80) We buffer the *resolved* [`sparq_engine::UpdateEffect`] log
 /// captured during the in-memory application — NOT the update text. Re-executing the text against
 /// the durable graph would re-roll non-deterministic functions (`NOW()`/`RAND()`/`UUID()`/fresh
 /// `BNODE()`) and could re-fetch different `LOAD <remote>` content, so the durable state could
@@ -1980,7 +1980,7 @@ struct ServerApplier {
 struct DurableStore {
     graph: Graph,
     batch: Vec<sparq_engine::UpdateEffect>,
-    /// [OPUS-4.8] (sq-vpx4) TEST SEAM for injecting durable-write I/O failures into the
+    /// (sq-vpx4) TEST SEAM for injecting durable-write I/O failures into the
     /// seal path. In production this is `None` and the real [`sparq_engine::apply_effects`]
     /// runs. A test can install a hook that fails the durable commit (e.g. once with a
     /// simulated `ENOSPC`, then clears) WITHOUT touching the production code path — the
@@ -2001,7 +2001,7 @@ impl DurableStore {
         }
     }
 
-    /// [OPUS-4.8] (sq-vpx4) Commit the buffered batch durably. Returns `Err` on a
+    /// (sq-vpx4) Commit the buffered batch durably. Returns `Err` on a
     /// durable-write failure (real I/O error, or an injected one via the test seam) —
     /// the caller ([`ServerApplier::seal`]) propagates this WITHOUT publishing or
     /// acking, so a write that didn't durably commit is never observed.
@@ -2016,7 +2016,7 @@ impl DurableStore {
         sparq_engine::apply_effects(&mut self.graph, &batch)
     }
 
-    /// [OPUS-4.8] (sq-x32t) WAL COMPACTION / VACUUM for erasure-completeness. Rewrites the
+    /// (sq-x32t) WAL COMPACTION / VACUUM for erasure-completeness. Rewrites the
     /// durable on-disk store to a fresh segment set containing ONLY the current LIVE triples,
     /// so superseded INSERTs, logically-DELETEd data and DROPped graphs that still linger in
     /// earlier WAL segments are PHYSICALLY removed from the on-disk history (the manual purge
@@ -2038,7 +2038,7 @@ impl DurableStore {
             self.batch.is_empty(),
             "compaction must run between batches (the durable batch buffer must be drained by seal)"
         );
-        // [OPUS-4.8] (sq-x32t) Use the ERASURE-GRADE `vacuum`, not the serving-path `compact`:
+        // (sq-x32t) Use the ERASURE-GRADE `vacuum`, not the serving-path `compact`:
         // vacuum re-interns into a fresh dictionary so a term VALUE orphaned by a DELETE / DROP
         // GRAPH (e.g. a personal-data literal) is physically purged from the on-disk dict blob,
         // not just from the triple indexes. `compact` keeps the dict for O(triples) folding,
@@ -2058,7 +2058,7 @@ impl ServerApplier {
         }
     }
 
-    /// [SONNET-4.6] (sq-m9prn) Points this applier at the `AppState`'s shared running-query
+    /// (sq-m9prn) Points this applier at the `AppState`'s shared running-query
     /// registry, so the updates it applies are listed by `GET /queries` and killable by
     /// `DELETE /queries/{id}`. Without this call the applier keeps its own private registry
     /// and its updates are simply not listed (the pre-sq-m9prn behaviour).
@@ -2068,7 +2068,7 @@ impl ServerApplier {
         self
     }
 
-    /// [OPUS-4.8] (sq-7cxr, gh-44) An applier whose committed batches are also mirrored to
+    /// (sq-7cxr, gh-44) An applier whose committed batches are also mirrored to
     /// `graph` — a directory-backed [`Graph`] opened/created at `--persist <DIR>`. Every
     /// committed batch is re-applied to it WAL-durably in [`seal`] before publish.
     fn with_durable(config: Arc<ServerConfig>, graph: Graph) -> Self {
@@ -2088,7 +2088,7 @@ impl ApplyUpdates for ServerApplier {
     type Update = String;
 
     fn fork(&mut self, base: &Graph) -> Result<Graph, String> {
-        // [OPUS-4.8] (sq-7cxr) A fresh attempt (first fork of a batch OR a re-fork during the
+        // (sq-7cxr) A fresh attempt (first fork of a batch OR a re-fork during the
         // writer's failure replay) restarts the durable batch buffer; only the updates that go
         // on to apply cleanly are re-accumulated, so `seal` mirrors exactly the published set.
         if let Some(d) = &mut self.durable {
@@ -2098,7 +2098,7 @@ impl ApplyUpdates for ServerApplier {
     }
 
     fn apply(&mut self, working: &mut Graph, update: &String) -> Result<(), String> {
-        // [OPUS-4.8] sq-ebii: run the update under the SAME cooperative QueryBudget the read
+        // sq-ebii: run the update under the SAME cooperative QueryBudget the read
         // paths use — the memory cap (`max_query_rows`) bounds a `DELETE/INSERT … WHERE`
         // whose WHERE blows up (cross-product alloc capped + abort at the row cap), and the
         // deadline (from `query_timeout`, measured from when the writer starts THIS update)
@@ -2106,7 +2106,7 @@ impl ApplyUpdates for ServerApplier {
         // to an OOM. The deadline here is the writer-side cooperative stop; the HTTP side
         // separately hard-caps the client's await (see `await_update_worker`). With both
         // limits off (the default) this is the unlimited budget — identical to before.
-        // [SONNET-4.6] (sq-m9prn) Register this update with the running-query registry
+        // (sq-m9prn) Register this update with the running-query registry
         // (feature `query-registry`) and install its cancel flag into the budget, so
         // `GET /queries` lists it as `kind: "update"` and `DELETE /queries/{id}` trips the
         // engine's cooperative-cancellation poll site inside its WHERE evaluation. The RAII
@@ -2125,7 +2125,7 @@ impl ApplyUpdates for ServerApplier {
         };
         #[cfg(not(feature = "query-registry"))]
         let budget = update_budget(&self.config);
-        // [OPUS-4.8] (Copilot PR#80) When mirroring durably, CAPTURE the resolved effect log of
+        // (Copilot PR#80) When mirroring durably, CAPTURE the resolved effect log of
         // the in-memory application so the durable graph can replay the EXACT committed delta —
         // never re-executing the (possibly non-deterministic / side-effecting) update text. With
         // no durable mirror this is `update_in_place_with_budget` exactly as before (no capture).
@@ -2141,9 +2141,9 @@ impl ApplyUpdates for ServerApplier {
                 sparq_engine::update_in_place_with_budget(working, update, &budget)
             })?;
         }
-        // [GPT-5.6] sq-lsp7k.2.4: validate the private candidate before seal/publish.
+        // sq-lsp7k.2.4: validate the private candidate before seal/publish.
         //
-        // [FABLE-5] (PR #1999 security review) The guard is FAIL-CLOSED on an unevaluable
+        // (PR #1999 security review) The guard is FAIL-CLOSED on an unevaluable
         // shapes graph. The lenient `sparq_shacl::validate` SKIPS constraints it cannot
         // evaluate (ill-formed constructs, an uncompilable `sh:pattern`, SHACL-SPARQL
         // pre-binding violations) and reports `conforms` over only the rest — which would
@@ -2178,19 +2178,19 @@ impl ApplyUpdates for ServerApplier {
     }
 
     fn seal(&mut self, working: Graph) -> Result<Graph, String> {
-        // [OPUS-4.8] (sq-7cxr, gh-44) Persist the committed batch to the durable graph BEFORE
+        // (sq-7cxr, gh-44) Persist the committed batch to the durable graph BEFORE
         // returning — `seal` runs on the writer thread immediately before `publish`, so the
         // batch is WAL-durable (fsync'd by `Graph::apply_delta`) before the generation is
         // published and thus before any client ack.
         //
-        // [OPUS-4.8] (Copilot PR#80) The batch is the RESOLVED effect log captured from the
+        // (Copilot PR#80) The batch is the RESOLVED effect log captured from the
         // in-memory application (see `apply`), replayed via `apply_effects` rather than by
         // re-executing the update text. This is what makes the durable graph BYTE-EQUIVALENT to
         // the published in-memory state even for non-deterministic / side-effecting updates
         // (`NOW()`/`RAND()`/`UUID()`/`BNODE()`, `LOAD <remote>`): both apply the identical
         // resolved triples, in the same order, starting from one shared seed.
         //
-        // [OPUS-4.8] FAIL-CLOSED, GRACEFULLY (sq-vpx4, was sq-7cxr fatal-panic): a durable-write
+        // FAIL-CLOSED, GRACEFULLY (sq-vpx4, was sq-7cxr fatal-panic): a durable-write
         // error (disk full, I/O error) is propagated as `Err` rather than panicking the writer
         // thread. `seal` runs BEFORE `publish`, so returning `Err` here means the generation is
         // NEVER published and the in-flight batch's submitters are failed with
@@ -2210,7 +2210,7 @@ impl ApplyUpdates for ServerApplier {
         self.inner.seal(working)
     }
 
-    /// [OPUS-4.8] (sq-x32t) Out-of-band WAL COMPACTION / VACUUM of the durable store, for
+    /// (sq-x32t) Out-of-band WAL COMPACTION / VACUUM of the durable store, for
     /// erasure-completeness. A no-op for an in-memory server (`durable == None`) — there is no
     /// on-disk history to purge. For a `--persist` server it physically rewrites the on-disk
     /// store to contain only the current live triples (see [`DurableStore::compact`]). It runs
@@ -2227,7 +2227,7 @@ impl ApplyUpdates for ServerApplier {
         }
     }
 
-    /// [OPUS-4.8] (sq-ft7u) RESTORE-INTO-DURABLE. Replace the `--persist` durable store's contents
+    /// (sq-ft7u) RESTORE-INTO-DURABLE. Replace the `--persist` durable store's contents
     /// with the freshly-imported (already-validated) `fresh` graph, crash-safely, and return the
     /// snapshot the ring should publish so reads serve the restored data. Runs on the WRITER THREAD
     /// (the only thread that mutates the durable store), so the on-disk swap never races a commit.
@@ -2283,7 +2283,7 @@ impl ApplyUpdates for ServerApplier {
 /// §4.3/§4.4 pathologies: the 5.4 s/32 s pinned-snapshot writer stall and reclaim-poll
 /// degradation under reader churn. `compact_every` went with it: the writer's per-batch
 /// fork rebuilds a folded base, so overlays never accumulate across batches.
-/// [OPUS-4.8] (sq-o5bi, sq-0g6g) The swappable serving core: the generation ring + the single
+/// (sq-o5bi, sq-0g6g) The swappable serving core: the generation ring + the single
 /// sequenced writer that publishes onto it. **`backup`-feature only.** It exists solely so an
 /// online RESTORE can atomically install a freshly-built ring+writer rehydrated from a backup
 /// artifact while readers keep loading lock-free — the same lock-free-read discipline the ring
@@ -2304,7 +2304,7 @@ struct ServingCore {
     writer: Arc<Writer<String, Graph>>,
 }
 
-/// [GPT-5.6] (sq-kqofk) The opt-in server adapter around the writer-thread CDC hook. The
+/// (sq-kqofk) The opt-in server adapter around the writer-thread CDC hook. The
 /// append-capable `ChangeLog` is consumed by `into_commit_hook`; the separate handle is read-only
 /// by convention and may safely `poll` concurrently because polling never mutates the log. The
 /// hook mutex is writer-thread-side only: it keeps the single log writer safe across an online
@@ -2314,19 +2314,19 @@ struct ChangeStreamState {
     reader: sparq_serve::ChangeLog,
     hook: Arc<std::sync::Mutex<Box<ChangeStreamHook>>>,
     next_seq: Arc<std::sync::atomic::AtomicU64>,
-    /// [FABLE-5] (gh-2436) Operator control over the LIVE append log the hook consumed —
+    /// (gh-2436) Operator control over the LIVE append log the hook consumed —
     /// the `POST /admin/change-stream/rebase` path. Serialized with the recording hook on
     /// the log's own mutex (see `sparq_serve::ChangeStreamControl`).
     control: sparq_serve::ChangeStreamControl,
 }
 
-/// [GPT-5.6] (sq-kqofk) Named to keep the optional state's writer-thread callback readable.
+/// (sq-kqofk) Named to keep the optional state's writer-thread callback readable.
 #[cfg(feature = "change-stream")]
 type ChangeStreamHook = dyn FnMut(&Generation<Graph>, &Generation<Graph>) + Send + 'static;
 
 #[cfg(feature = "change-stream")]
 impl ChangeStreamState {
-    /// [GPT-5.6] (sq-kqofk) Opens separate writer/read handles before the writer thread starts,
+    /// (sq-kqofk) Opens separate writer/read handles before the writer thread starts,
     /// then consumes the append handle into the production `ChangeLog` commit hook. The tracked
     /// tail advances only after a successful durable append, so `LATEST` remains an O(1) lookup.
     fn open(dir: &std::path::Path) -> Result<Self, sparq_serve::BackupError> {
@@ -2360,7 +2360,7 @@ impl ChangeStreamState {
         })
     }
 
-    /// [GPT-5.6] (sq-kqofk) Gives each sequenced writer a lightweight adapter to the one durable
+    /// (sq-kqofk) Gives each sequenced writer a lightweight adapter to the one durable
     /// hook. Normal serving has one writer; online restore may briefly retain the old one too.
     fn commit_hook(&self) -> impl FnMut(&Generation<Graph>, &Generation<Graph>) + Send + 'static {
         let hook = self.hook.clone();
@@ -2378,13 +2378,13 @@ impl ChangeStreamState {
         self.next_seq.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// [OPUS-5] (sq-iz7ag) The read handle's trim horizon — the oldest seq the durable log still
+    /// (sq-iz7ag) The read handle's trim horizon — the oldest seq the durable log still
     /// retains (`0` until retention drops a segment).
     fn trim_horizon(&self) -> u64 {
         self.reader.first_seq()
     }
 
-    /// [FABLE-5] (gh-2436) Operator resync of the LIVE tracked log — the state-level body of
+    /// (gh-2436) Operator resync of the LIVE tracked log — the state-level body of
     /// `POST /admin/change-stream/rebase`. Holds the outer hook mutex for the whole
     /// append + tail update, so no commit hook interleaves between the gap-record append
     /// and the tracked `next_seq` advance (lock order outer-hook → inner-log, the same
@@ -2412,7 +2412,7 @@ impl ChangeStreamState {
     }
 }
 
-/// [OPUS-4.8] (sq-o5bi) Builds the ring's retention config from the server config — the default
+/// (sq-o5bi) Builds the ring's retention config from the server config — the default
 /// concurrency-only retention, or, under the `time-travel` feature, the extended retention so
 /// `?generation=N` has history to serve. Shared by the constructor and the online restore so a
 /// restored ring inherits exactly the same retention posture as the original.
@@ -2434,7 +2434,7 @@ fn build_ring_config(config: &ServerConfig) -> sparq_serve::RingConfig {
     }
 }
 
-/// [GPT-5.6] (sq-kqofk) Spawns the server's sequenced writer, installing the optional durable
+/// (sq-kqofk) Spawns the server's sequenced writer, installing the optional durable
 /// change-stream hook on the writer thread. Without `change-stream`, the conditional parameter and
 /// branch are compiled out and this remains the original `Writer::spawn` path.
 fn spawn_server_writer(
@@ -2460,7 +2460,7 @@ fn spawn_server_writer(
 pub struct AppState {
     /// The generation ring (Wave A1): lock-free `current()`, bounded retention.
     ///
-    /// [OPUS-4.8] (sq-o5bi, sq-0g6g) DEFAULT representation — held directly, byte-identical to
+    /// (sq-o5bi, sq-0g6g) DEFAULT representation — held directly, byte-identical to
     /// pre-#941. Under the `backup` feature the ring (and the writer below) move behind the
     /// swappable [`ServingCore`] so an online restore can atomically install a rehydrated pair.
     #[cfg(not(feature = "backup"))]
@@ -2470,7 +2470,7 @@ pub struct AppState {
     /// handlers call it on the blocking pool.
     #[cfg(not(feature = "backup"))]
     writer: Arc<Writer<String, Graph>>,
-    /// [OPUS-4.8] (sq-o5bi, sq-0g6g) `backup`-only: the swappable serving core (ring + writer).
+    /// (sq-o5bi, sq-0g6g) `backup`-only: the swappable serving core (ring + writer).
     /// See [`ServingCore`]. Loaded lock-free on every read/update; replaced atomically only by an
     /// online restore. This `ArcSwap` indirection exists solely to enable that atomic swap and is
     /// compiled out of the default build entirely.
@@ -2485,22 +2485,22 @@ pub struct AppState {
     pub(crate) subs: Arc<crate::subscriptions::SubscriptionCounters>,
     /// Prometheus metrics (T22), exposed at `GET /metrics`.
     metrics: Arc<crate::metrics::Metrics>,
-    /// [GPT-5.6] (sq-lsp7k.9.3) Lazily-built prefix-completion index, paired with the immutable
+    /// (sq-lsp7k.9.3) Lazily-built prefix-completion index, paired with the immutable
     /// graph generation it represents. A matching generation reuses the index; a newer pinned
     /// generation rebuilds it on the blocking pool before replacing this entry. The whole cache
     /// is feature-gated so the default AppState layout and request path remain unchanged.
     #[cfg(feature = "complete")]
     completion_index: Arc<std::sync::RwLock<Option<(u64, sparq_text::CompletionIndex)>>>,
-    /// [OPUS-4.8] (sq-gos8) The opt-in structured access-audit sink. `None` unless the operator
+    /// (sq-gos8) The opt-in structured access-audit sink. `None` unless the operator
     /// configured one (`--access-audit` / `SPARQ_ACCESS_AUDIT`); shared across handlers.
     #[cfg(feature = "access-audit")]
     access_audit_sink: Option<Arc<dyn crate::access_audit::AuditSink>>,
-    /// [GPT-5.6] (sq-kqofk) The opt-in durable CDC adapter. The append handle lives inside the
+    /// (sq-kqofk) The opt-in durable CDC adapter. The append handle lives inside the
     /// writer-thread commit hook, while handlers poll through a separate read handle. Recording
     /// therefore rides group commit and never holds a caller-side lock across `submit`.
     #[cfg(feature = "change-stream")]
     change_stream: Option<Arc<ChangeStreamState>>,
-    /// [FABLE-5] (sq-fy8ci) SINGLE-FLIGHT restore permit. `true` while a restore is in flight.
+    /// (sq-fy8ci) SINGLE-FLIGHT restore permit. `true` while a restore is in flight.
     /// Two concurrent restores were previously silently serialized by the single writer thread
     /// (each individually crash-safe, last-writer-wins) — harmless but surprising: an operator
     /// scripting parallel restores got no signal that one restore clobbered the other. This flag
@@ -2510,7 +2510,7 @@ pub struct AppState {
     /// compiled out of the default build entirely, like the rest of the restore machinery.
     #[cfg(feature = "backup")]
     restore_in_flight: Arc<std::sync::atomic::AtomicBool>,
-    /// [FABLE-5] (sq-lsp7k.10) The named-parameterized-template store backing the OPT-IN
+    /// (sq-lsp7k.10) The named-parameterized-template store backing the OPT-IN
     /// `/templates` REST surface (feature `templates`): name → validated
     /// `sparq_engine::templates::Template`. Seeded from
     /// [`ServerConfig::templates_file`] at startup (fail-closed); mutated only by the
@@ -2518,13 +2518,13 @@ pub struct AppState {
     /// invocations (reads) dominate and never block each other.
     #[cfg(feature = "templates")]
     templates: Arc<std::sync::RwLock<std::collections::BTreeMap<String, sparq_engine::templates::Template>>>,
-    /// [SONNET-4.6] (sq-qsm5z) The opt-in running-query registry backing `GET /queries` and
+    /// (sq-qsm5z) The opt-in running-query registry backing `GET /queries` and
     /// `DELETE /queries/{id}`. Compiled only with the `query-registry` feature. The registry
     /// stores cancellation handles and metadata but never raw query text; cloned `AppState`
     /// values share one registry (the `Arc`).
     #[cfg(feature = "query-registry")]
     running_queries: Arc<QueryRegistry>,
-    /// [SONNET-4.6] (sq-snopa.8) `solid-authz`-only: the STATEFUL Solid authorization view over
+    /// (sq-snopa.8) `solid-authz`-only: the STATEFUL Solid authorization view over
     /// the server's OWN loaded store, cached per generation. `None` until the first
     /// `"source":"server"` `/authz/*` request builds it.
     ///
@@ -2549,10 +2549,10 @@ pub struct AppState {
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] (sq-qsm5z) Running-query registry — feature `query-registry`.
+// (sq-qsm5z) Running-query registry — feature `query-registry`.
 // ---------------------------------------------------------------------------
 
-/// [SONNET-4.6] (sq-qsm5z) Metadata and cooperative-cancel handles for currently executing
+/// (sq-qsm5z) Metadata and cooperative-cancel handles for currently executing
 /// queries. The mutex is never held while engine code runs — registration and deregistration
 /// are the only critical sections, and they are short (HashMap insert / remove). Listing clones
 /// the small per-entry view; cancellation flips an atomic flag while holding the lock.
@@ -2563,12 +2563,12 @@ struct QueryRegistry {
     entries: std::sync::Mutex<std::collections::HashMap<String, RegistryEntry>>,
 }
 
-/// [SONNET-4.6] (sq-qsm5z) One row in the registry. The `cancel` flag is wired into the
+/// (sq-qsm5z) One row in the registry. The `cancel` flag is wired into the
 /// `QueryBudget` passed to the engine, so flipping it trips the engine's cooperative-cancellation
 /// poll site on the next iteration.
 #[cfg(feature = "query-registry")]
 struct RegistryEntry {
-    /// [SONNET-4.6] (sq-m9prn) Which operation class this row is: `"query"` for a READ
+    /// (sq-m9prn) Which operation class this row is: `"query"` for a READ
     /// (SELECT/ASK/CONSTRUCT/DESCRIBE/EXPLAIN) or `"update"` for a SPARQL UPDATE running on
     /// the sequenced writer thread. Serialised as `kind` so an operator deciding what to kill
     /// can tell the two apart — an UPDATE holds the single writer, so it is the row whose
@@ -2585,7 +2585,7 @@ struct RegistryEntry {
     cancel: Arc<std::sync::atomic::AtomicBool>,
 }
 
-/// [SONNET-4.6] (sq-qsm5z) RAII membership token. Moving it into the `spawn_blocking` closure
+/// (sq-qsm5z) RAII membership token. Moving it into the `spawn_blocking` closure
 /// means the registry row is present exactly while the engine is running; any return path —
 /// normal, panic, or engine abort — fires `Drop` and removes the row.
 #[cfg(feature = "query-registry")]
@@ -2617,7 +2617,7 @@ impl QueryRegistry {
         self.register_kind("query", sparql)
     }
 
-    /// [SONNET-4.6] (sq-m9prn) Register a SPARQL UPDATE that the sequenced writer thread is
+    /// (sq-m9prn) Register a SPARQL UPDATE that the sequenced writer thread is
     /// about to apply. Same contract as [`register`](Self::register) — the flag goes into the
     /// UPDATE's `QueryBudget` (which the engine installs thread-locally for the whole update,
     /// so it reaches the `DELETE/INSERT … WHERE` evaluation), the guard is held for the apply.
@@ -2705,7 +2705,7 @@ impl QueryRegistry {
     }
 }
 
-/// [SONNET-4.6] (sq-qsm5z) FNV-1a fingerprint of the SPARQL query / update text (trimmed).
+/// (sq-qsm5z) FNV-1a fingerprint of the SPARQL query / update text (trimmed).
 /// Satisfies the #241 / sq-m9prn audit-log REDACTION discipline: the `GET /queries` listing
 /// exposes only this hash, never raw text.
 ///
@@ -2741,7 +2741,7 @@ fn registry_fingerprint(sparql: &str) -> String {
     format!("{:016x}", hash)
 }
 
-/// [FABLE-5] (sq-fy8ci) RAII permit for the SINGLE-FLIGHT restore guard: while one of these is
+/// (sq-fy8ci) RAII permit for the SINGLE-FLIGHT restore guard: while one of these is
 /// alive, [`AppState::try_begin_restore`] returns `None` (the route maps that to 409 Conflict).
 /// Dropping it — normally, or during an unwind if the restore panics — releases the permit, so
 /// the guard can never wedge the server into permanently refusing restores. Obtain one via
@@ -2774,7 +2774,7 @@ impl AppState {
         Self::try_with_config(graph, config).expect("AppState::with_config: durable open failed")
     }
 
-    /// [OPUS-4.8] (sq-7cxr, gh-44) Builds the state, returning the durable-persistence open
+    /// (sq-7cxr, gh-44) Builds the state, returning the durable-persistence open
     /// error (rather than panicking) so the binary can print a clean message and exit non-zero.
     ///
     /// PERSISTENCE (`config.persist_dir == Some(dir)`): the on-disk index at `dir` is the
@@ -2793,7 +2793,7 @@ impl AppState {
             let Some(shapes) = &config.shacl_shapes else {
                 return Err("SHACL guard requires a loaded shapes graph (set ServerConfig::shacl_shapes or --shacl-shapes)".to_string());
             };
-            // [FABLE-5] (PR #1999 security review) FAIL-CLOSED at startup: a guard shapes
+            // (PR #1999 security review) FAIL-CLOSED at startup: a guard shapes
             // graph the strict validator rejects (an ill-formed construct the lenient
             // validator would silently SKIP, or a SHACL-SPARQL pre-binding violation) is a
             // hard configuration error HERE — a mis-authored guard must never boot a server
@@ -2823,7 +2823,7 @@ impl AppState {
         )
     }
 
-    /// [OPUS-4.8] (sq-vpx4) Like [`try_with_config`](Self::try_with_config) but installs a
+    /// (sq-vpx4) Like [`try_with_config`](Self::try_with_config) but installs a
     /// durable-write failure-injection hook on the `--persist` seal path. The hook is called
     /// once per seal; returning `Some(msg)` makes that seal fail (modelling a transient/persistent
     /// I/O error), `None` lets the real durable commit run. For the graceful-degradation
@@ -2846,7 +2846,7 @@ impl AppState {
             Box<dyn FnMut() -> Option<String> + Send>,
         >,
     ) -> Result<Self, String> {
-        // [OPUS-4.8] sq-7cxr: resolve the durable graph (open existing / create fresh) when a
+        // sq-7cxr: resolve the durable graph (open existing / create fresh) when a
         // persistence dir is configured. `seed` is what the ring starts from; `durable` is the
         // on-disk graph the writer mirrors committed batches to.
         let (seed, durable) = match &config.persist_dir {
@@ -2864,23 +2864,23 @@ impl AppState {
         // feature extends retention so `?generation=N` has history to serve.
         let ring_config = build_ring_config(&config);
         let ring = Arc::new(GenerationRing::with_config(seed, ring_config));
-        // [OPUS-4.8] sq-4w18: share the config Arc with the writer so its update path
+        // sq-4w18: share the config Arc with the writer so its update path
         // enforces the same SERVICE egress allowlist (a federated `INSERT … WHERE` is
         // gated like a read).
         let config = Arc::new(config);
-        // [SONNET-4.6] (sq-qsm5z) Empty registry at boot; queries self-register when the
+        // (sq-qsm5z) Empty registry at boot; queries self-register when the
         // `query-registry` feature is compiled in. Built BEFORE the applier so the writer
         // thread shares the one registry the HTTP handlers list and cancel through
-        // ([SONNET-4.6] sq-m9prn — the UPDATE half).
+        // (sq-m9prn — the UPDATE half).
         #[cfg(feature = "query-registry")]
         let running_queries = Arc::new(QueryRegistry::default());
-        // [OPUS-4.8] sq-7cxr: a durable-mirroring applier when persistence is on, else the
+        // sq-7cxr: a durable-mirroring applier when persistence is on, else the
         // historical in-memory applier.
         let applier = match durable {
             Some(g) => {
                 #[allow(unused_mut)]
                 let mut a = ServerApplier::with_durable(config.clone(), g);
-                // [OPUS-4.8] (sq-vpx4) Install the durable-write failure-injection hook, if any
+                // (sq-vpx4) Install the durable-write failure-injection hook, if any
                 // (test-seams only). A no-op in production (the field/parameter do not exist).
                 #[cfg(any(test, feature = "test-seams"))]
                 if let (Some(d), Some(hook)) = (a.durable.as_mut(), fail_seal) {
@@ -2890,10 +2890,10 @@ impl AppState {
             }
             None => ServerApplier::new(config.clone()),
         };
-        // [SONNET-4.6] (sq-m9prn) Share the one registry with the writer thread.
+        // (sq-m9prn) Share the one registry with the writer thread.
         #[cfg(feature = "query-registry")]
         let applier = applier.with_registry(Arc::clone(&running_queries));
-        // [GPT-5.6] (sq-kqofk) Open the CDC state before spawning the writer so the append log can
+        // (sq-kqofk) Open the CDC state before spawning the writer so the append log can
         // be consumed into its commit hook. A corrupt log remains a clean startup failure.
         #[cfg(feature = "change-stream")]
         let change_stream = match &config.change_stream_dir {
@@ -2911,7 +2911,7 @@ impl AppState {
             #[cfg(feature = "change-stream")]
             change_stream.as_deref(),
         );
-        // [OPUS-4.8] sq-gos8: open the structured access-audit sink if one is configured. A
+        // sq-gos8: open the structured access-audit sink if one is configured. A
         // failure to open (e.g. an unwritable audit-file path) is surfaced as a clean startup
         // error rather than silently dropping the trail — the operator asked for an audit log.
         #[cfg(feature = "access-audit")]
@@ -2922,7 +2922,7 @@ impl AppState {
             ),
             None => None,
         };
-        // [FABLE-5] sq-lsp7k.10: seed the named-template store from the optional persistence
+        // sq-lsp7k.10: seed the named-template store from the optional persistence
         // file. Fail-closed: an unreadable / invalid definition file is a clean startup error
         // (the operator asked for durable templates), never a silently-empty store.
         #[cfg(feature = "templates")]
@@ -2933,7 +2933,7 @@ impl AppState {
         Ok(Self {
             #[cfg(feature = "templates")]
             templates,
-            // [OPUS-4.8] (sq-o5bi, sq-0g6g) DEFAULT: hold ring+writer directly (pre-#941). Under
+            // (sq-o5bi, sq-0g6g) DEFAULT: hold ring+writer directly (pre-#941). Under
             // `backup`: wrap them in the swappable `ServingCore` so an online restore can swap.
             #[cfg(not(feature = "backup"))]
             ring,
@@ -2951,13 +2951,13 @@ impl AppState {
             access_audit_sink,
             #[cfg(feature = "change-stream")]
             change_stream,
-            // [FABLE-5] sq-fy8ci: no restore in flight at boot (restore-on-start runs on the
+            // sq-fy8ci: no restore in flight at boot (restore-on-start runs on the
             // seed graph in main.rs BEFORE this state exists, so it never holds the permit).
             #[cfg(feature = "backup")]
             restore_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(feature = "query-registry")]
             running_queries,
-            // [SONNET-4.6] sq-snopa.8: cold at boot — the stateful auth view is built lazily on
+            // sq-snopa.8: cold at boot — the stateful auth view is built lazily on
             // the first `"source":"server"` request and re-built whenever the generation moves.
             #[cfg(feature = "solid-authz")]
             authz_view: Arc::new(std::sync::RwLock::new(None)),
@@ -2983,7 +2983,7 @@ impl AppState {
         &self.metrics
     }
 
-    /// [SONNET-4.6] (sq-t1isr) Test-only: returns the current count of registered queries.
+    /// (sq-t1isr) Test-only: returns the current count of registered queries.
     /// Used by integration tests to observe in-flight registration without the HTTP route.
     /// Only compiled with the `query-registry` feature.
     ///
@@ -2996,7 +2996,7 @@ impl AppState {
         self.running_queries.list().len()
     }
 
-    /// [FABLE-5] (sq-lsp7k.10) The named-template store (see the field doc). Handlers in
+    /// (sq-lsp7k.10) The named-template store (see the field doc). Handlers in
     /// [`crate::templates`] read it per invocation and mutate it under the write gate.
     #[cfg(feature = "templates")]
     pub(crate) fn templates(
@@ -3006,14 +3006,14 @@ impl AppState {
         &self.templates
     }
 
-    /// [OPUS-4.8] (sq-2999l) Whether the durable CDC change-stream is configured (a directory was
+    /// (sq-2999l) Whether the durable CDC change-stream is configured (a directory was
     /// set via `--change-stream` / `SPARQ_CHANGE_STREAM`). When `false`, `GET /streams` is `404`.
     #[cfg(feature = "change-stream")]
     pub(crate) fn change_stream_enabled(&self) -> bool {
         self.change_stream.is_some()
     }
 
-    /// [OPUS-4.8] (sq-2999l) Polls the durable CDC change-stream for every recorded change record
+    /// (sq-2999l) Polls the durable CDC change-stream for every recorded change record
     /// with `seq >= from_seq`, in order (the resume primitive backing `GET /streams`). Reads the
     /// segments from disk through the shared single-writer log handle, so it observes every
     /// durably-appended record and never returns a half-written trailing one — and stops
@@ -3031,7 +3031,7 @@ impl AppState {
         }
     }
 
-    /// [OPUS-4.8] (sq-2999l) The seq the NEXT recorded commit will get — i.e. the count of records
+    /// (sq-2999l) The seq the NEXT recorded commit will get — i.e. the count of records
     /// already in the log, the `nextSeq` continuation token a caller persists to resume. `None`
     /// when the change-stream is not configured.
     #[cfg(feature = "change-stream")]
@@ -3039,7 +3039,7 @@ impl AppState {
         self.change_stream.as_ref().map(|stream| stream.next_seq())
     }
 
-    /// [OPUS-5] (sq-iz7ag) The change-stream's **trim horizon** — the oldest seq retention still
+    /// (sq-iz7ag) The change-stream's **trim horizon** — the oldest seq retention still
     /// keeps (`sparq_serve::ChangeLog::first_seq`; `0` for a never-trimmed log). `GET /streams`
     /// resolves `TRIM_HORIZON` to it (a whole-stream replay of a trimmed log would otherwise poll
     /// below the log's earliest record and fail closed), and answers `410` for an `at`/`after`
@@ -3060,7 +3060,7 @@ impl AppState {
             .map(|stream| stream.trim_horizon())
     }
 
-    /// [FABLE-5] (gh-2436) Re-baselines the RUNNING tracked change log — the operator resync
+    /// (gh-2436) Re-baselines the RUNNING tracked change log — the operator resync
     /// behind `POST /admin/change-stream/rebase` (`ChangeLog::rebase_to` /
     /// `rebase_to_new_lineage` routed through the live commit-hook state, serialized with
     /// the writer thread's recording). `None` when the change-stream is not configured (the
@@ -3083,7 +3083,7 @@ impl AppState {
         self.ring().current()
     }
 
-    /// [OPUS-4.8] (sq-o5bi) Pins the current generation for an ONLINE backup export: a
+    /// (sq-o5bi) Pins the current generation for an ONLINE backup export: a
     /// lock-free `Arc<Generation>` the `backup` route serialises off-thread while the writer
     /// keeps publishing forward (the snapshot is frozen by its `Arc`, never by a lock). Same
     /// pin as [`current`](Self::current); a distinct name makes the backup call site explicit.
@@ -3092,7 +3092,7 @@ impl AppState {
         self.ring().current()
     }
 
-    /// [OPUS-4.8] (sq-o5bi, sq-0g6g) The generation ring. DEFAULT: a direct reference to the
+    /// (sq-o5bi, sq-0g6g) The generation ring. DEFAULT: a direct reference to the
     /// `ring` field — byte-identical to pre-#941 (no `ArcSwap` on the read path). Under `backup`:
     /// resolved through the swappable [`ServingCore`], whose loaded `Arc` lives for the call. Every
     /// ring read (`current`, `at`) routes through here, so the two representations stay behind one
@@ -3104,7 +3104,7 @@ impl AppState {
         &self.ring
     }
 
-    /// [OPUS-4.8] (sq-o5bi, sq-0g6g) `backup`-only ring accessor: clones the ring `Arc` out of the
+    /// (sq-o5bi, sq-0g6g) `backup`-only ring accessor: clones the ring `Arc` out of the
     /// loaded serving core so the returned handle outlives the transient `ArcSwap` load guard. The
     /// clone is one atomic refcount bump (the swap mechanism's marginal cost); it exists only on the
     /// opt-in path.
@@ -3114,7 +3114,7 @@ impl AppState {
         self.core.load().ring.clone()
     }
 
-    /// [OPUS-4.8] (sq-o5bi, sq-0g6g) The sequenced writer. DEFAULT: a direct reference to the
+    /// (sq-o5bi, sq-0g6g) The sequenced writer. DEFAULT: a direct reference to the
     /// `writer` field — byte-identical to pre-#941. Under `backup`: cloned out of the swappable
     /// [`ServingCore`] (one atomic refcount bump) so the handle outlives the load guard.
     #[cfg(not(feature = "backup"))]
@@ -3123,7 +3123,7 @@ impl AppState {
         &self.writer
     }
 
-    /// [OPUS-4.8] (sq-o5bi, sq-0g6g) `backup`-only writer accessor (see [`ring`](Self::ring)).
+    /// (sq-o5bi, sq-0g6g) `backup`-only writer accessor (see [`ring`](Self::ring)).
     #[cfg(feature = "backup")]
     #[inline(always)]
     fn writer(&self) -> Arc<Writer<String, Graph>> {
@@ -3153,13 +3153,13 @@ impl AppState {
     /// it was woken for. Blocking (window + batch application): call it on the
     /// blocking pool.
     pub fn apply_update(&self, sparql: &str) -> Result<u64, String> {
-        // [OPUS-4.8] (sq-uqh, Wave B) Extract the per-named-graph visibility scope the
+        // (sq-uqh, Wave B) Extract the per-named-graph visibility scope the
         // update writes (§6.3/§6.5) so the publish bumps only those pods' epochs — a
         // write to graph A no longer churns a cache scoped to graph B. Cross-graph /
         // default-graph / dynamically-scoped writes still fall back to the global pod
         // (conservative, never under-invalidating). See [`touched_pods`].
         let touched = touched_pods(sparql);
-        // [GPT-5.6] (sq-kqofk) CDC recording now happens inside the writer's commit hook, once per
+        // (sq-kqofk) CDC recording now happens inside the writer's commit hook, once per
         // published generation and before its acknowledgements. Concurrent submitters can join the
         // same group-commit batch; there is no caller-side change-log lock on this path.
         let result = self.writer().submit(sparql.to_string(), touched);
@@ -3179,7 +3179,7 @@ impl AppState {
             }
             Err(WriteError::Rejected(e)) => Err(e),
             Err(WriteError::Shutdown) => Err("update writer has shut down".to_string()),
-            // [OPUS-4.8] (sq-vpx4) Durable-write failure (e.g. transient ENOSPC on the
+            // (sq-vpx4) Durable-write failure (e.g. transient ENOSPC on the
             // `--persist` mirror): the write was REFUSED — not durably committed, not
             // published, not acked. It is retryable, so it maps to HTTP 503 (see
             // `update_rejection_response`'s `DURABLE_UNAVAILABLE_PREFIX` sniff), NOT a
@@ -3189,7 +3189,7 @@ impl AppState {
         }
     }
 
-    /// [OPUS-4.8] (sq-x32t) Compacts/vacuums the durable on-disk store for ERASURE-
+    /// (sq-x32t) Compacts/vacuums the durable on-disk store for ERASURE-
     /// COMPLETENESS: physically rewrites the `--persist` directory so only the current live
     /// triples remain, dropping superseded INSERTs / DELETEd data / DROPped graphs that still
     /// linger in earlier WAL segments. **Blocks until the compaction completes** (it runs on
@@ -3210,7 +3210,7 @@ impl AppState {
         }
     }
 
-    /// [OPUS-4.8] (sq-o5bi) Exports an ONLINE consistent snapshot of the current generation to
+    /// (sq-o5bi) Exports an ONLINE consistent snapshot of the current generation to
     /// `out` as a single self-describing backup artifact (sparq-serve's Option-A format). It
     /// pins the current generation lock-free ([`pin_for_backup`](Self::pin_for_backup)) and
     /// serialises off that immutable `Arc` — so it runs **while serving**, never stopping the
@@ -3222,7 +3222,7 @@ impl AppState {
         sparq_serve::backup_export(&pin, out).map_err(|e| e.to_string())
     }
 
-    /// [OPUS-4.8] (sq-o5bi, sq-ft7u) ONLINE RESTORE: rehydrates the serving store from a backup
+    /// (sq-o5bi, sq-ft7u) ONLINE RESTORE: rehydrates the serving store from a backup
     /// artifact. **Fail-closed**: a corrupt/mismatched artifact returns `Err` and the live store is
     /// left UNTOUCHED (the artifact is imported + validated fully BEFORE anything is swapped; if
     /// import fails there is nothing to swap in).
@@ -3241,7 +3241,7 @@ impl AppState {
     ///
     /// `persist == true` on an IN-MEMORY server is an `Err` (there is no durable dir to write
     /// through). Blocking (import parses + indexes the whole dataset): call it on the blocking pool.
-    /// [FABLE-5] (sq-fy8ci) Acquires the SINGLE-FLIGHT restore permit: `Some(guard)` if no other
+    /// (sq-fy8ci) Acquires the SINGLE-FLIGHT restore permit: `Some(guard)` if no other
     /// restore is currently in flight on this server state, `None` if one is (the caller should
     /// reject with a conflict — `/admin/restore` maps it to 409 — rather than let the writer
     /// thread silently serialize a last-writer-wins pile-up). Hold the returned [`RestoreGuard`]
@@ -3287,7 +3287,7 @@ impl AppState {
         }
     }
 
-    /// [OPUS-4.8] (sq-o5bi) IN-MEMORY restore: build the entire new core BEFORE touching the live
+    /// (sq-o5bi) IN-MEMORY restore: build the entire new core BEFORE touching the live
     /// one (fail-closed), then atomically swap it in. The restored content is RAM-only — it does
     /// NOT survive a restart (the historical in-memory restore; `restore_from(.., persist=false)`
     /// on an in-memory server). Returns the artifact's source generation for operator correlation.
@@ -3299,7 +3299,7 @@ impl AppState {
         Ok(meta.generation)
     }
 
-    /// [OPUS-4.8] (sq-bu1a) ONLINE point-in-time RESTORE: rehydrates from a BASE artifact, then
+    /// (sq-bu1a) ONLINE point-in-time RESTORE: rehydrates from a BASE artifact, then
     /// REPLAYS an ordered chain of incremental DELTA artifacts forward onto it to reach a chosen
     /// recovery point, and atomically installs the result — the change-stream / PITR companion to
     /// [`restore_from`](Self::restore_from). `base` is the base artifact; `deltas` is the ordered
@@ -3335,7 +3335,7 @@ impl AppState {
         Ok(recovered.generation)
     }
 
-    /// [OPUS-4.8] (sq-bu1a) Shared restore precondition: the PITR delta path is in-memory-only in
+    /// (sq-bu1a) Shared restore precondition: the PITR delta path is in-memory-only in
     /// v1 (replaying a delta chain into a `--persist` durable directory needs its own crash-safe
     /// swap, a recorded follow-up; the base `restore_from` already has the write-through path).
     #[cfg(feature = "backup")]
@@ -3350,7 +3350,7 @@ impl AppState {
         Ok(())
     }
 
-    /// [OPUS-4.8] (sq-bu1a) Shared restore install: builds a fresh ring+writer around the
+    /// (sq-bu1a) Shared restore install: builds a fresh ring+writer around the
     /// rehydrated `graph` and atomically swaps it in. Readers in flight keep serving from the OLD
     /// core (its `Arc` survives until they release their pin); every read/update after the swap
     /// loads the new core. The restored ring restarts at generation 0; the recorded source
@@ -3360,11 +3360,11 @@ impl AppState {
         let ring_config = build_ring_config(&self.config);
         let ring = Arc::new(GenerationRing::with_config(graph, ring_config));
         let applier = ServerApplier::new(self.config.clone());
-        // [SONNET-4.6] (sq-m9prn) The swapped-in writer keeps listing/killing through the SAME
+        // (sq-m9prn) The swapped-in writer keeps listing/killing through the SAME
         // registry the HTTP handlers read, so an update on a restored core is still visible.
         #[cfg(feature = "query-registry")]
         let applier = applier.with_registry(Arc::clone(&self.running_queries));
-        // [GPT-5.6] (sq-kqofk) A restored writer retains the same single CDC hook. The hook's
+        // (sq-kqofk) A restored writer retains the same single CDC hook. The hook's
         // same-lineage guard reports the documented restore discontinuity instead of diffing it.
         let writer = spawn_server_writer(
             ring.clone(),
@@ -3376,7 +3376,7 @@ impl AppState {
         // Atomic swap: subsequent loads see the new ring+writer; the old core's writer thread
         // joins once its last in-flight reader/Arc drops (Writer's Drop drains + joins).
         self.core.store(Arc::new(ServingCore { ring, writer }));
-        // [GPT-5.6] sq-lsp7k.9.3: a restored ring restarts at generation zero. Clear a cached
+        // sq-lsp7k.9.3: a restored ring restarts at generation zero. Clear a cached
         // generation-zero index from the prior lineage so equality on the numeric generation
         // cannot reuse completion data from the replaced graph.
         #[cfg(feature = "complete")]
@@ -3391,7 +3391,7 @@ impl AppState {
         self.commits.send_replace(restored_gen);
     }
 
-    /// [OPUS-4.8] (sq-bu1a) Exports an INCREMENTAL DELTA between a RETAINED generation `from` and
+    /// (sq-bu1a) Exports an INCREMENTAL DELTA between a RETAINED generation `from` and
     /// the CURRENT generation to `out` (sparq-serve's self-describing delta format) — the
     /// change-stream / PITR producer. Pins both generations lock-free (so it runs **while
     /// serving**) and serialises the quad-set difference off those immutable `Arc`s.
@@ -3427,7 +3427,7 @@ impl AppState {
             .map_err(|e| e.to_string())
     }
 
-    /// [OPUS-4.8] (sq-ft7u) RESTORE-INTO-LIVE-DURABLE-STORE (`--persist` write-through). Imports +
+    /// (sq-ft7u) RESTORE-INTO-LIVE-DURABLE-STORE (`--persist` write-through). Imports +
     /// validates the artifact into a fresh `Graph` (fail-closed — done BEFORE the live store is
     /// touched), then routes the durable swap THROUGH THE EXISTING WRITER THREAD
     /// (`Writer::restore`): the writer commits any in-flight batch first, then replaces the durable
@@ -3477,7 +3477,7 @@ impl AppState {
         &self.config
     }
 
-    /// [SONNET-4.6] (sq-snopa.8) The per-generation cache holding the STATEFUL Solid
+    /// (sq-snopa.8) The per-generation cache holding the STATEFUL Solid
     /// authorization view over this server's own loaded store (see the `authz_view` field).
     /// The whole cache is `solid-authz`-gated, so the default build has neither the field nor
     /// this accessor.
@@ -3488,7 +3488,7 @@ impl AppState {
         &self.authz_view
     }
 
-    /// [OPUS-4.8] (sq-gos8) The installed structured access-audit sink, if any. `None` short-
+    /// (sq-gos8) The installed structured access-audit sink, if any. `None` short-
     /// circuits every audit call site (no record is built), so a request with no sink configured
     /// pays only this `Option` check.
     #[cfg(feature = "access-audit")]
@@ -3508,14 +3508,14 @@ pub fn router(state: AppState) -> Router {
         // Graph Store HTTP Protocol (indirect graph identification): ?graph=<uri> / ?default
         .route("/sparql/graph", any(graph_store_indirect))
         // Graph Store HTTP Protocol (direct graph identification).
-        // [OPUS-4.8] axum 0.8 (matchit 0.8) wildcard-capture syntax: `/*path` -> `/{*path}`.
+        // axum 0.8 (matchit 0.8) wildcard-capture syntax: `/*path` -> `/{*path}`.
         .route("/graphs/{*path}", any(graph_store_direct))
         // SEPA-style SPARQL subscriptions over WebSocket (T23).
         .route(
             "/subscriptions",
             get(crate::subscriptions::subscriptions_endpoint),
         )
-        // [OPUS-4.8] sq-bxog: the same subscription engine over Server-Sent Events
+        // sq-bxog: the same subscription engine over Server-Sent Events
         // (text/event-stream) — one subscription per stream, query in the query string.
         .route(
             "/subscriptions/sse",
@@ -3523,14 +3523,14 @@ pub fn router(state: AppState) -> Router {
         )
         // Liveness.
         .route("/health", get(|| async { "ok" }))
-        // [OPUS-4.8] (sq-x32t) ADMIN: WAL compaction/vacuum for erasure-completeness. POST-only
+        // (sq-x32t) ADMIN: WAL compaction/vacuum for erasure-completeness. POST-only
         // (it mutates the durable on-disk store), gated by the WRITE auth token (the existing
         // admin gate). Physically purges superseded/deleted data from the on-disk WAL history so
         // a logical DELETE / DROP GRAPH is followed by real erasure. See [`admin_compact`].
         .route("/admin/compact", post(admin_compact))
         // Prometheus metrics (T22).
         .route("/metrics", get(metrics_endpoint));
-    // [OPUS-4.8] sq-o5bi: OPT-IN online consistent-snapshot backup/restore admin routes.
+    // sq-o5bi: OPT-IN online consistent-snapshot backup/restore admin routes.
     // Compiled only with the `backup` feature; both are POST-only + WRITE/admin-gated.
     // `/admin/backup` streams a self-describing artifact of the live store WITHOUT stopping
     // the world; `/admin/restore` atomically installs a ring+writer rehydrated from one
@@ -3540,31 +3540,31 @@ pub fn router(state: AppState) -> Router {
     let routes = routes
         .route("/admin/backup", post(admin_backup))
         .route("/admin/restore", post(admin_restore))
-        // [OPUS-4.8] sq-bu1a: the INCREMENTAL change-stream / PITR producer. `?from=N` streams the
+        // sq-bu1a: the INCREMENTAL change-stream / PITR producer. `?from=N` streams the
         // delta between RETAINED generation N and the current generation; restore-forward replay is
         // driven by the binary's `--restore` + `--restore-delta` (see main.rs), not a route.
         .route("/admin/backup/delta", post(admin_backup_delta));
-    // [OPUS-4.8] sq-d3d8 (epic sq-3183): OPT-IN federation discovery — the VoID dataset
+    // sq-d3d8 (epic sq-3183): OPT-IN federation discovery — the VoID dataset
     // description at /.well-known/void. Compiled only with the `federation-descriptors`
     // feature; even then the handler refuses (404) unless the config flag is set. The SD is
     // served on the existing /sparql GET path (no extra route — it is the protocol's
     // "GET with no query" response). See [`crate::descriptors`].
     #[cfg(feature = "federation-descriptors")]
     let routes = routes.route("/.well-known/void", get(well_known_void));
-    // [GPT-5.6] sq-lsp7k.5.2: OPT-IN grouped facet counts over one pinned graph snapshot.
+    // sq-lsp7k.5.2: OPT-IN grouped facet counts over one pinned graph snapshot.
     // Compiled only with the `facets` feature; even then the handler returns 404 unless the
     // runtime flag is set. POST is a READ and is gated by the read auth.
     #[cfg(feature = "facets")]
     let routes = routes.route("/facets", post(facets_endpoint));
-    // [GPT-5.6] sq-lsp7k.9.3: OPT-IN IRI/label/local-name prefix completion over a cached
+    // sq-lsp7k.9.3: OPT-IN IRI/label/local-name prefix completion over a cached
     // generation-pinned index. Compiled only with `complete`; even then the handler returns 404
     // unless the runtime flag is set. GET is a READ and is gated by the read auth.
     #[cfg(feature = "complete")]
     let routes = routes.route("/complete", get(complete_endpoint));
-    // [OPUS-4.8] sq-bzh1 (epic sq-3183): OPT-IN Triple Pattern Fragments / LDF source endpoint.
+    // sq-bzh1 (epic sq-3183): OPT-IN Triple Pattern Fragments / LDF source endpoint.
     // Compiled only with the `tpf` feature; even then the handler refuses (404) unless the config
     // flag is set. READ-only — a GET (with HEAD) only. See [`crate::tpf`].
-    // [OPUS-4.8] sq-dxhb: with the `brtpf` feature it ALSO accepts POST — a brTPF client posts a
+    // sq-dxhb: with the `brtpf` feature it ALSO accepts POST — a brTPF client posts a
     // (potentially large) binding set in the body, which would not fit a query string. POST is
     // still a READ (it returns a fragment; it never mutates the store) and is gated by the same
     // read auth + flag.
@@ -3575,27 +3575,27 @@ pub fn router(state: AppState) -> Router {
         "/tpf",
         get(tpf_endpoint).head(tpf_endpoint).post(tpf_endpoint),
     );
-    // [OPUS-4.8] sq-r868 (from-pss gh-162 follow-up (c)): OPT-IN HTTP SHACL validate endpoint.
+    // sq-r868 (from-pss gh-162 follow-up (c)): OPT-IN HTTP SHACL validate endpoint.
     // Compiled only with the `shacl` feature; even then the handler refuses (404) unless the
     // config flag is set. POST only — the client sends a shapes graph and the server validates
     // its loaded data graph (a READ); axum returns a 405 with `Allow: POST` for other methods.
     // See [`shacl_validate_endpoint`].
     #[cfg(feature = "shacl")]
     let routes = routes.route("/shacl/validate", post(shacl_validate_endpoint));
-    // [OPUS-4.8] sq-vczh2 (epic sq-2m6zm): OPT-IN verifiable terse-transpiler endpoint.
+    // sq-vczh2 (epic sq-2m6zm): OPT-IN verifiable terse-transpiler endpoint.
     // Compiled only with the `terse` feature; even then the handler refuses (404) unless the
     // config flag is set. POST only — the client sends a terse query and the server returns the
     // canonical SPARQL it expands to (it never executes it). See [`terse_transpile_endpoint`].
     #[cfg(feature = "terse")]
     let routes = routes.route("/terse/transpile", post(terse_transpile_endpoint));
-    // [OPUS-4.8] sq-2999l (gh-906): OPT-IN CDC change-stream poll endpoint (Neptune GetRecords
+    // sq-2999l (gh-906): OPT-IN CDC change-stream poll endpoint (Neptune GetRecords
     // shape). Compiled only with the `change-stream` feature; even then the handler refuses (404)
     // unless a durable log directory is configured. READ-only — a GET (with HEAD) only. See
     // [`streams_endpoint`].
     #[cfg(feature = "change-stream")]
     let routes = routes
         .route("/streams", get(streams_endpoint).head(streams_endpoint))
-        // [FABLE-5] (gh-2436) The operator resync for that stream: appends an honest gap
+        // (gh-2436) The operator resync for that stream: appends an honest gap
         // record to the RUNNING tracked log (`ChangeLog::rebase_to`, routed through the live
         // commit-hook state — the recorder never stops). POST-only + WRITE/admin-gated (it
         // appends to the durable log); same double-opt-in 404 as `/streams`. See
@@ -3604,7 +3604,7 @@ pub fn router(state: AppState) -> Router {
             "/admin/change-stream/rebase",
             post(admin_change_stream_rebase),
         );
-    // [SONNET-4.6] (sq-qsm5z) OPT-IN running-query registry admin routes.
+    // (sq-qsm5z) OPT-IN running-query registry admin routes.
     // `GET /queries` — admin READ-gated list; `DELETE /queries/{id}` — admin WRITE-gated kill.
     // Both compiled only with the `query-registry` feature; without it the routes are absent
     // and the fallback handler produces the standard 404. No runtime flag needed: the routes
@@ -3613,13 +3613,13 @@ pub fn router(state: AppState) -> Router {
     let routes = routes
         .route("/queries", get(list_queries_handler))
         .route("/queries/{id}", axum::routing::delete(cancel_query_handler));
-    // [FABLE-5] sq-snopa.6 (issue #992 FR-4): OPT-IN Solid WAC/ACP HTTP authorization surface.
+    // sq-snopa.6 (issue #992 FR-4): OPT-IN Solid WAC/ACP HTTP authorization surface.
     // Compiled only with the `solid-authz` feature; even then each handler refuses (404) unless the
     // config flag is set. POST only — a thin HTTP shell over the `sparq-solid` library authoriser
     // (`PodStore::decide` / `wac_allow` / `query_json_as`), fail-closed on every error path. The
     // handlers live in [`crate::solid_authz`] to keep the touch surface on this conflict-hot file
     // minimal.
-    // [FABLE-5] sq-lsp7k.10: OPT-IN named-parameterized-template REST surface. Compiled only
+    // sq-lsp7k.10: OPT-IN named-parameterized-template REST surface. Compiled only
     // with the `templates` feature; even then every handler refuses (404) unless the config
     // flag is set (--templates / SPARQ_TEMPLATES=1). The handlers live in [`crate::templates`]
     // to keep the touch surface on this conflict-hot file minimal. GET /templates lists;
@@ -3645,7 +3645,7 @@ pub fn router(state: AppState) -> Router {
             post(crate::solid_authz::wac_allow_endpoint),
         )
         .route("/authz/query", post(crate::solid_authz::query_endpoint));
-    // [OPUS-4.8] (sq-pj6u) Categorised unmatched-route 404. Without an explicit fallback,
+    // (sq-pj6u) Categorised unmatched-route 404. Without an explicit fallback,
     // axum answers an unmatched path with a 404 whose body is EMPTY; `json_error_bodies`
     // then wraps that into the uncategorised `{"error":""}` envelope — leak-free but with no
     // actionable category. Register a fallback that mints the SAME structured 404 a handler
@@ -3659,7 +3659,7 @@ pub fn router(state: AppState) -> Router {
     // (429), body-limit rejections (413) and panics (500) are counted with the
     // status the client actually saw.
     let routes = harden(routes, &config);
-    // [GPT-5.6] (sq-abhuq) Transport-transparent compression remains entirely opt-in. The
+    // (sq-abhuq) Transport-transparent compression remains entirely opt-in. The
     // default tower-http predicate deliberately skips `text/event-stream` and responses that
     // already carry Content-Encoding; its body wrapper compresses frames as they are polled, so
     // the existing bounded-channel streaming/backpressure path is not buffered or materialised.
@@ -3671,7 +3671,7 @@ pub fn router(state: AppState) -> Router {
     ))
 }
 
-/// [OPUS-4.8] (sq-pj6u) Router fallback for any path that matched no route: a CATEGORISED,
+/// (sq-pj6u) Router fallback for any path that matched no route: a CATEGORISED,
 /// leak-free `404 Not Found`. Returns the same structured `{"error":"not found"}` envelope a
 /// handler mints for a disabled opt-in route (e.g. `/.well-known/void`, `/tpf`,
 /// `/shacl/validate` with their flags off), so an unmatched route is no longer the bare
@@ -3685,7 +3685,7 @@ async fn unmatched_route() -> Response {
 /// `GET /metrics` — Prometheus text exposition (T22). The gauges (graph triple
 /// count, active subscriptions) are read at scrape time from live state.
 ///
-/// [OPUS-4.8] sq-9jrx: the exposition leaks the live graph triple count and the
+/// sq-9jrx: the exposition leaks the live graph triple count and the
 /// active-subscription count, so it is treated as a READ and gated by
 /// `--auth-token-read` like any other GET (mirrors QLever, which keeps its stats
 /// endpoint behind the same token). `/health` stays ungated for liveness probes.
@@ -3705,10 +3705,10 @@ async fn metrics_endpoint(State(state): State<AppState>, headers: HeaderMap) -> 
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-d3d8 (epic sq-3183) — OPT-IN federation discovery descriptors
+// sq-d3d8 (epic sq-3183) — OPT-IN federation discovery descriptors
 // ---------------------------------------------------------------------------
 
-/// [GPT-5.6] sq-oprna.6: transport scheme injected by the feature-on TCP accept loop. HTTP/2
+/// sq-oprna.6: transport scheme injected by the feature-on TCP accept loop. HTTP/2
 /// and HTTP/3 also carry `:scheme` in the request URI; HTTP/1 TLS needs this explicit marker.
 #[cfg(feature = "http2")]
 #[derive(Clone, Copy)]
@@ -3727,7 +3727,7 @@ impl TransportScheme {
     }
 }
 
-/// [OPUS-4.8] sq-d3d8: derives the base URL (`scheme://host`) this server is reached at,
+/// sq-d3d8: derives the base URL (`scheme://host`) this server is reached at,
 /// from the request `Host` header. Used to name the VoID dataset, the `sd:Service`/endpoint
 /// and the `dcterms:source` link in the descriptors, so they self-describe the URL a client
 /// actually used to fetch them.
@@ -3763,7 +3763,7 @@ fn request_base(headers: &HeaderMap, uri: &Uri, transport: Option<&str>) -> Stri
 mod request_base_tests {
     use super::*;
 
-    /// [GPT-5.6] sq-oprna.6: direct TLS must not advertise a plain-HTTP descriptor IRI.
+    /// sq-oprna.6: direct TLS must not advertise a plain-HTTP descriptor IRI.
     #[test]
     fn transport_or_pseudo_header_selects_https() {
         let mut headers = HeaderMap::new();
@@ -3786,7 +3786,7 @@ mod request_base_tests {
     }
 }
 
-/// [OPUS-4.8] sq-d3d8: `GET /.well-known/void` — the W3C VoID dataset description (read-only).
+/// sq-d3d8: `GET /.well-known/void` — the W3C VoID dataset description (read-only).
 ///
 /// OPT-IN: returns `404` unless [`ServerConfig::federation_descriptors`] is set (the route is
 /// mounted only with the `federation-descriptors` feature, and the handler refuses unless the
@@ -3819,7 +3819,7 @@ async fn well_known_void(
     let pin = state.current();
     match crate::descriptors::void_descriptor(pin.snapshot(), &dataset_iri, accept) {
         Ok(d) => text_response(StatusCode::OK, d.content_type, d.body, false),
-        // [OPUS-4.8] (sq-kfel, ASVS-G3) `e` is an internal serializer error — withhold it.
+        // (sq-kfel, ASVS-G3) `e` is an internal serializer error — withhold it.
         Err(e) => sanitized_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "void-descriptor",
@@ -3829,7 +3829,7 @@ async fn well_known_void(
     }
 }
 
-/// [OPUS-4.8] sq-d3d8: the SPARQL 1.1 Service Description served for a `GET /sparql` with no
+/// sq-d3d8: the SPARQL 1.1 Service Description served for a `GET /sparql` with no
 /// `query` parameter (SPARQL Protocol §2.1.2 / Service Description §2). Returns `Some(resp)`
 /// when the descriptor should be served (the feature is compiled in AND the config flag is
 /// set), or `None` to fall through to the historical `400 missing 'query'`.
@@ -3851,7 +3851,7 @@ fn service_description_response(
     let dataset_iri = format!("{base}/.well-known/void#dataset");
     let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok());
     let caps = service_capabilities(state.config());
-    // [OPUS-4.8] sq-optl: enumerate the served dataset's named graphs so the SD advertises each
+    // sq-optl: enumerate the served dataset's named graphs so the SD advertises each
     // as an sd:namedGraph (not just the default graph). Read off the same pinned snapshot the
     // VoID descriptor uses, so the two descriptors describe one consistent dataset state.
     let pin = state.current();
@@ -3866,7 +3866,7 @@ fn service_description_response(
             accept,
         ) {
             Ok(d) => text_response(StatusCode::OK, d.content_type, d.body, false),
-            // [OPUS-4.8] (sq-kfel, ASVS-G3) `e` is an internal serializer error — withhold it.
+            // (sq-kfel, ASVS-G3) `e` is an internal serializer error — withhold it.
             Err(e) => sanitized_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "service-description",
@@ -3877,7 +3877,7 @@ fn service_description_response(
     )
 }
 
-/// [OPUS-4.8] sq-qfcb: derive the server's ACTUAL capability profile for the Service
+/// sq-qfcb: derive the server's ACTUAL capability profile for the Service
 /// Description from this build's cargo features + the running config — never a fiction.
 ///
 ///   * `update` — advertise `sd:SPARQL11Update` only when an anonymous client could run one:
@@ -3910,14 +3910,14 @@ fn service_capabilities(config: &ServerConfig) -> crate::descriptors::Capabiliti
     };
     #[cfg(not(feature = "geo"))]
     let extension_functions: Vec<String> = Vec::new();
-    // [OPUS-4.8] sq-yyy3: PROV-O data-lineage is NOT advertised by `sparq-server` today — the
+    // sq-yyy3: PROV-O data-lineage is NOT advertised by `sparq-server` today — the
     // server exposes no lineage-serving endpoint (the `sparq-prov` capture surface is a separate
     // crate not wired into the HTTP layer), so advertising it would over-promise. The descriptor
     // SUPPORT exists (`Capabilities::provenance` ⇒ `sd:feature <…/prov#lineage>`) so a node that
     // genuinely serves lineage can flip this honestly without a vocabulary change; until then it
     // stays `false`. Set explicitly (not via `..default()`) so the honesty stays visible here.
     let provenance = false;
-    // [OPUS-4.8] sq-2msb (gh-917): the SPARQL language versions to advertise via
+    // sq-2msb (gh-917): the SPARQL language versions to advertise via
     // `sd:supportedVersion`. Sourced from the single documented conformance constant (not a
     // `cfg!` — SPARQL 1.2 is always compiled into the base engine), so the honesty gate lives in
     // exactly one place and this binary advertises precisely the versions its W3C suites pass.
@@ -3935,10 +3935,10 @@ fn service_capabilities(config: &ServerConfig) -> crate::descriptors::Capabiliti
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-bzh1 (epic sq-3183) — OPT-IN Triple Pattern Fragments / LDF source endpoint
+// sq-bzh1 (epic sq-3183) — OPT-IN Triple Pattern Fragments / LDF source endpoint
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] sq-bzh1: derives `scheme://host` from the request `Host` header for the TPF
+/// sq-bzh1: derives `scheme://host` from the request `Host` header for the TPF
 /// fragment / dataset / template URLs (independent of the `federation-descriptors`-gated
 /// [`request_base`] so the two opt-in features never depend on each other). Same `http` +
 /// safe-`localhost` fallback posture: a hostile `Host` that would make an invalid IRI falls
@@ -3959,7 +3959,7 @@ fn tpf_base(headers: &HeaderMap) -> String {
     }
 }
 
-/// [OPUS-4.8] sq-bzh1: percent-encodes a query-parameter VALUE for building the `hydra:next` /
+/// sq-bzh1: percent-encodes a query-parameter VALUE for building the `hydra:next` /
 /// `hydra:previous` page URLs: the RFC 3986 unreserved set passes through, everything else is
 /// uppercase `%XX` per UTF-8 byte, so an N-Triples term value (`<`, `>`, `"`, spaces, …)
 /// round-trips through the URL back to the same term. Uses [`sparq_core::percent::encode`],
@@ -3991,7 +3991,7 @@ mod pct_encode_tests {
     }
 }
 
-/// [OPUS-4.8] sq-bzh1: builds a `/tpf` page URL for the given pattern parameters and page,
+/// sq-bzh1: builds a `/tpf` page URL for the given pattern parameters and page,
 /// re-encoding the bound positions so the link is self-contained.
 #[cfg(feature = "tpf")]
 fn tpf_page_url(
@@ -4021,7 +4021,7 @@ fn tpf_page_url(
     url
 }
 
-/// [OPUS-4.8] sq-bzh1: negotiates the TPF fragment serialisation. TPF clients send
+/// sq-bzh1: negotiates the TPF fragment serialisation. TPF clients send
 /// `Accept: text/turtle` (or N-Triples); we reuse the graph negotiation but DEFAULT to Turtle
 /// (the conventional, control-readable TPF serialisation), matching the descriptor surface.
 #[cfg(feature = "tpf")]
@@ -4031,7 +4031,7 @@ fn negotiate_tpf(accept: Option<&str>) -> GraphFormat {
             let f = negotiate_graph(Some(a));
             // negotiate_graph defaults to N-Triples on an unrecognised header; for TPF a bare
             // `*/*` (or anything unmatched) should land on Turtle.
-            // [OPUS-4.8] sq-oy1f.1: an explicit JSON-LD request is honoured too (only matchable
+            // sq-oy1f.1: an explicit JSON-LD request is honoured too (only matchable
             // when the `jsonld` feature is on; `negotiate_graph` returns Turtle/N-Triples without
             // it, so the substring is harmless when the feature is off).
             if a.contains("n-triples")
@@ -4048,7 +4048,7 @@ fn negotiate_tpf(accept: Option<&str>) -> GraphFormat {
     }
 }
 
-/// [GPT-5.6] sq-lsp7k.5.2: `POST /facets` — grouped type, predicate, and value counts for a
+/// sq-lsp7k.5.2: `POST /facets` — grouped type, predicate, and value counts for a
 /// filtered candidate-subject set.
 ///
 /// The JSON body is a `sparq_introspect::FacetRequest`. Evaluation pins exactly one published
@@ -4104,7 +4104,7 @@ const COMPLETION_DEFAULT_LIMIT: usize = 20;
 #[cfg(feature = "complete")]
 const COMPLETION_MAX_LIMIT: usize = 100;
 
-/// [GPT-5.6] sq-lsp7k.9.3: stable wire names for `sparq_text::CandidateKind`.
+/// sq-lsp7k.9.3: stable wire names for `sparq_text::CandidateKind`.
 #[cfg(feature = "complete")]
 fn completion_kind_name(kind: sparq_text::CandidateKind) -> &'static str {
     match kind {
@@ -4114,7 +4114,7 @@ fn completion_kind_name(kind: sparq_text::CandidateKind) -> &'static str {
     }
 }
 
-/// [GPT-5.6] sq-lsp7k.9.3: materialises completion candidates into the endpoint's compact JSON
+/// sq-lsp7k.9.3: materialises completion candidates into the endpoint's compact JSON
 /// array. Entity ids are resolved through the same pinned snapshot dictionary that the index was
 /// built against; IRI terms use their raw IRI string, while the defensive non-IRI fallback uses
 /// the term's N-Triples display form.
@@ -4145,7 +4145,7 @@ fn completion_json(
     serde_json::to_string(&candidates).expect("completion candidates are JSON-serializable")
 }
 
-/// [GPT-5.6] sq-lsp7k.9.3: `GET /complete?q=<prefix>&limit=<k>` — case-insensitive prefix
+/// sq-lsp7k.9.3: `GET /complete?q=<prefix>&limit=<k>` — case-insensitive prefix
 /// completion over graph IRIs, local names, and `rdfs:label`/`skos:prefLabel` values.
 ///
 /// The handler pins one immutable graph generation. A generation-matched AppState cache answers
@@ -4220,7 +4220,7 @@ async fn complete_endpoint(
     await_worker(task, state.config()).await
 }
 
-/// [OPUS-4.8] sq-bzh1: `GET /tpf?subject=&predicate=&object=` — the Triple Pattern Fragments /
+/// sq-bzh1: `GET /tpf?subject=&predicate=&object=` — the Triple Pattern Fragments /
 /// LDF source endpoint (read-only). Returns a paged RDF fragment of the triples matching the
 /// pattern, with Hydra controls (`hydra:totalItems` from the cheap cardinality estimate,
 /// `hydra:next`/`hydra:previous` paging, the `hydra:search` template).
@@ -4268,7 +4268,7 @@ async fn tpf_endpoint(
     let object = params.get("object").map(String::as_str);
 
     // Parse the triple pattern; a malformed term is a 400.
-    // [OPUS-4.8] (sq-kfel, ASVS-G3) `e` quotes the caller's offending term verbatim — the same
+    // (sq-kfel, ASVS-G3) `e` quotes the caller's offending term verbatim — the same
     // echo-of-input info-leak class the rest of the surface sanitizes (sq-cz89/sq-j9zs). Withhold
     // it from the client; the operator gets the full parse error in the server log.
     let pattern = match TriplePattern::parse(subject, predicate, object) {
@@ -4292,7 +4292,7 @@ async fn tpf_endpoint(
     let base = tpf_base(&headers);
     let dataset_url = format!("{base}/tpf");
 
-    // [OPUS-4.8] sq-dxhb: the brTPF binding set. The mappings come from the `values` query
+    // sq-dxhb: the brTPF binding set. The mappings come from the `values` query
     // parameter (GET) or — preferred for a large set — the request BODY (POST). An empty / absent
     // payload is the plain-TPF case (no restriction). A malformed payload is a 400.
     #[cfg(feature = "brtpf")]
@@ -4303,7 +4303,7 @@ async fn tpf_endpoint(
         } else {
             std::borrow::Cow::Borrowed(params.get("values").map(String::as_str).unwrap_or(""))
         };
-        // [OPUS-4.8] sq-r74h: enforce the binding-set DoS caps (mapping count + payload bytes)
+        // sq-r74h: enforce the binding-set DoS caps (mapping count + payload bytes)
         // BEFORE parsing/evaluation. These bound the brTPF fan-out independently of
         // `--max-body-bytes` — which does not cover the `values` query-string carrier at all, and
         // bounds the per-mapping index-scan cost only transitively. A too-large set is a `413`
@@ -4356,7 +4356,7 @@ async fn tpf_endpoint(
     let prev_url = frag
         .has_previous()
         .then(|| tpf_page_url(&base, subject, predicate, object, page - 1));
-    // [OPUS-4.8] sq-dxhb: the fuller Hydra paging vocabulary — hydra:first (always page 0) and
+    // sq-dxhb: the fuller Hydra paging vocabulary — hydra:first (always page 0) and
     // hydra:last (the page holding the final match). Emitted on every page.
     let first_url = tpf_page_url(&base, subject, predicate, object, 0);
     let last_url = tpf_page_url(&base, subject, predicate, object, frag.last_page());
@@ -4373,7 +4373,7 @@ async fn tpf_endpoint(
     );
 
     let fmt = negotiate_tpf(headers.get(header::ACCEPT).and_then(|v| v.to_str().ok()));
-    // [OPUS-4.8] sq-oy1f.1: route through the shared graph serialiser so the JSON-LD arm is
+    // sq-oy1f.1: route through the shared graph serialiser so the JSON-LD arm is
     // covered uniformly (and the match stays exhaustive when the `jsonld` feature is on).
     match serialise_graph_triples(&triples, fmt) {
         Ok(body) => text_response(StatusCode::OK, fmt.content_type(), body, head_only),
@@ -4382,10 +4382,10 @@ async fn tpf_endpoint(
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-r868 (from-pss gh-162 follow-up (c)) — OPT-IN HTTP SHACL validate endpoint
+// sq-r868 (from-pss gh-162 follow-up (c)) — OPT-IN HTTP SHACL validate endpoint
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] sq-r868: `POST /shacl/validate` — validate the server's currently-loaded data
+/// sq-r868: `POST /shacl/validate` — validate the server's currently-loaded data
 /// graph against a SHACL shapes graph the client POSTs.
 ///
 /// OPT-IN: returns `404` unless [`ServerConfig::shacl`] is set (the route is mounted only with
@@ -4456,7 +4456,7 @@ async fn shacl_validate_endpoint(
     await_worker(task, state.config()).await
 }
 
-/// [OPUS-4.8] sq-r868: parse a SHACL shapes graph from a request body classified by its
+/// sq-r868: parse a SHACL shapes graph from a request body classified by its
 /// `Content-Type` (the same media-type matrix as a GSP write body — see [`rdf_format_for`]).
 /// Returns the caller's `415` for an unsupported type, `400` for malformed RDF. The offending
 /// body fragment the parser would echo is withheld from the client and logged server-side, the
@@ -4496,7 +4496,7 @@ fn parse_shapes_graph(body: &Bytes, content_type: &str) -> Result<Graph, Respons
     }
 }
 
-/// [OPUS-4.8] sq-r868: pick the report serialisation from `Accept`. `text/turtle` (the W3C SHACL
+/// sq-r868: pick the report serialisation from `Accept`. `text/turtle` (the W3C SHACL
 /// report vocabulary) when explicitly requested at non-zero q; otherwise the JSON projection
 /// (the default — the shape PSS / the wasm `shacl` binding consume). q-value aware: an explicit
 /// `text/turtle;q=0` falls back to JSON.
@@ -4527,7 +4527,7 @@ fn negotiate_shacl_report_turtle(accept: Option<&str>) -> bool {
     turtle_q > 0.0 && turtle_q > json_q
 }
 
-/// [OPUS-4.8] sq-r868: serialise a [`sparq_shacl::ValidationReport`] to the JSON projection the
+/// sq-r868: serialise a [`sparq_shacl::ValidationReport`] to the JSON projection the
 /// PSS Pod-Manager + the wasm `shacl` binding consume:
 /// `{ "conforms": bool, "results": [{ focusNode, path, value, sourceShape,
 /// sourceConstraintComponent, severity, message }] }`. `path`/`value` are `null` when the result
@@ -4593,10 +4593,10 @@ fn shacl_report_to_json(report: &sparq_shacl::ValidationReport) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-vczh2 (epic sq-2m6zm) — OPT-IN verifiable terse-transpiler endpoint
+// sq-vczh2 (epic sq-2m6zm) — OPT-IN verifiable terse-transpiler endpoint
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] sq-vczh2: `POST /terse/transpile` — transpile a *terse* query into the canonical,
+/// sq-vczh2: `POST /terse/transpile` — transpile a *terse* query into the canonical,
 /// conformant SPARQL it expands to, returning the verifiable EXPANSION (NOT an answer).
 ///
 /// OPT-IN: returns `404` unless [`ServerConfig::terse`] is set (the route is mounted only with
@@ -4672,7 +4672,7 @@ async fn terse_transpile_endpoint(
     }
 }
 
-/// [OPUS-4.8] sq-vczh2: serialise a [`sparq_terse::Expansion`] to the verifiable JSON contract
+/// sq-vczh2: serialise a [`sparq_terse::Expansion`] to the verifiable JSON contract
 /// (`{ canonical_sparql, keywords, resolutions, warnings, legendVersion }`). `serde_json` is
 /// already a `server`-feature dependency, so the JSON is built with the same escaping discipline
 /// the rest of the server's JSON uses.
@@ -4718,10 +4718,10 @@ fn terse_expansion_to_json(expansion: &sparq_terse::Expansion) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-2999l (gh-906) — OPT-IN CDC change-stream poll endpoint (GET /streams)
+// sq-2999l (gh-906) — OPT-IN CDC change-stream poll endpoint (GET /streams)
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] sq-2999l: `GET /streams` — poll the durable change-data-capture stream in the
+/// sq-2999l: `GET /streams` — poll the durable change-data-capture stream in the
 /// Amazon-Neptune-Streams `GetRecords` shape, over the merged durable change-stream
 /// (sq-b4fns / #1223).
 ///
@@ -4746,7 +4746,7 @@ fn terse_expansion_to_json(expansion: &sparq_terse::Expansion) -> String {
 /// (the on-disk log is the source of truth). A poll is a READ over the durable log, so the endpoint
 /// is gated by the read auth like any GET.
 ///
-/// [OPUS-5] (sq-iz7ag) **Retention-aware.** `TRIM_HORIZON` starts at the log's trim horizon
+/// (sq-iz7ag) **Retention-aware.** `TRIM_HORIZON` starts at the log's trim horizon
 /// (`AppState::change_stream_trim_horizon`), so a retention-trimmed log still replays instead of
 /// answering `500`; an `at` / `after` anchor resolving BELOW the horizon is a `410 Gone` naming
 /// the horizon to resume from (the records are permanently gone — that consumer re-bootstraps),
@@ -4788,11 +4788,11 @@ async fn streams_endpoint(
     };
     let limit = parse_limit(params.get("limit").map(String::as_str));
 
-    // [GPT-5.6] (sq-kqofk) `LATEST` starts at the successful-hook tail. The writer-thread hook
+    // (sq-kqofk) `LATEST` starts at the successful-hook tail. The writer-thread hook
     // advances this atomic only after a durable append, so the lookup needs no submitter/log lock.
     // Absent (disabled) is the 404 above, so this is `Some`.
     let next_seq = state.change_stream_next_seq().unwrap_or(0);
-    // [OPUS-5] (sq-iz7ag) Resolve against the TRIM HORIZON, not seq 0. Retention (sq-n9s4d) drops
+    // (sq-iz7ag) Resolve against the TRIM HORIZON, not seq 0. Retention (sq-n9s4d) drops
     // whole old segments, and the durable log fails a poll below its earliest retained record
     // closed — so a `TRIM_HORIZON` replay pinned at 0 would answer `500` on any trimmed log. An
     // `at`/`after` anchor below the horizon is the caller-recoverable `410` instead of that `500`:
@@ -4813,7 +4813,7 @@ async fn streams_endpoint(
         // A read error (corruption / I/O fault) is a 500; the detail goes to the operator's log,
         // never the client (the #241 info-leak posture).
         Err(e) => {
-            // [OPUS-4.8] positional format arg (CodeQL rust/unused-variable false-positive).
+            // positional format arg (CodeQL rust/unused-variable false-positive).
             tracing::warn!(target: "sparq_server", detail = %e, "change-stream poll failed (detail withheld from client)");
             return json_error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -4832,7 +4832,7 @@ async fn streams_endpoint(
     )
 }
 
-/// [FABLE-5] (gh-2436) `POST /admin/change-stream/rebase` — OPERATOR RESYNC of the running
+/// (gh-2436) `POST /admin/change-stream/rebase` — OPERATOR RESYNC of the running
 /// server's tracked change log (`ChangeLog::rebase_to` / `rebase_to_new_lineage`, sq-r2cu1,
 /// routed through the live commit-hook state so the recorder never stops). A BROKEN stream —
 /// a dropped record after a recording I/O failure, or an `/admin/restore` (which replaces
@@ -4975,7 +4975,7 @@ pub fn harden(routes: Router, config: &ServerConfig) -> Router {
                     )
                 },
             ))
-            // [OPUS-4.8] sq-cmvh (ASVS V14.4): stamp the security hardening headers onto EVERY
+            // sq-cmvh (ASVS V14.4): stamp the security hardening headers onto EVERY
             // response. Placed second so it runs LAST on the response path (after the
             // panic-catcher, the load-shed 429 mapper and `json_error_bodies`), guaranteeing the
             // headers land on success, streamed, error and panic responses alike. See
@@ -4990,7 +4990,7 @@ pub fn harden(routes: Router, config: &ServerConfig) -> Router {
                         "server is at its concurrent-request limit, retry later",
                     )
                 } else {
-                    // [OPUS-4.8] (sq-kfel, ASVS-G3) Defensive fallback (in this configured stack
+                    // (sq-kfel, ASVS-G3) Defensive fallback (in this configured stack
                     // only `load_shed` produces a `BoxError`, handled above, so this is
                     // effectively unreachable). Do NOT Display the internal `err` into the body —
                     // that would leak the internal error type / chain. Log it server-side, return
@@ -5006,7 +5006,7 @@ pub fn harden(routes: Router, config: &ServerConfig) -> Router {
             .layer(axum::middleware::map_response(json_error_bodies))
             .layer(DefaultBodyLimit::max(config.max_body_bytes)),
     );
-    // [OPUS-4.8] sq-o7o0 (ASVS V14.5.3): OPT-IN first-party CORS. When the allowlist is
+    // sq-o7o0 (ASVS V14.5.3): OPT-IN first-party CORS. When the allowlist is
     // EMPTY (the default) this layer is NOT added at all — the stack is byte-identical to
     // before and NO CORS headers are emitted (a cross-origin browser read stays blocked).
     // When configured, the layer wraps the WHOLE hardened stack so a preflight `OPTIONS`
@@ -5026,7 +5026,7 @@ pub fn harden(routes: Router, config: &ServerConfig) -> Router {
         ))
     };
     if config.verbose {
-        // [OPUS-4.8] sq-toze.34: with redaction ON (the default), swap tower-http's
+        // sq-toze.34: with redaction ON (the default), swap tower-http's
         // `DefaultMakeSpan` (which records the RAW request URI — and so the full
         // `?query=…` SPARQL text, a PII exposure) for a span that records a redacted
         // target (path verbatim, query string => `<redacted len=N fp=…>`). With
@@ -5043,7 +5043,7 @@ pub fn harden(routes: Router, config: &ServerConfig) -> Router {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-2gqr / sq-lodb) Serve loop with connection-layer slow-client deadlines
+// (sq-2gqr / sq-lodb) Serve loop with connection-layer slow-client deadlines
 // (slow-loris HEADER guard + slow-BODY guard)
 // ---------------------------------------------------------------------------
 
@@ -5103,7 +5103,7 @@ where
     use tower::ServiceBuilder;
     use tower_http::timeout::RequestBodyTimeoutLayer;
 
-    // [OPUS-4.8] sq-lodb: wrap the per-connection service with the slow-body read/idle deadline.
+    // sq-lodb: wrap the per-connection service with the slow-body read/idle deadline.
     // `option_layer` makes a `None` an `Identity` (true no-op) layer, so the disabled path is
     // byte-for-byte the pre-sq-lodb behaviour. The layer feeds the `Router` a `TimeoutBody`-wrapped
     // request body, which the `Router`'s body-generic `Service` impl accepts directly.
@@ -5146,9 +5146,9 @@ where
         };
 
         let io = TokioIo::new(stream);
-        // [OPUS-4.8] sq-lodb: apply the (optional) slow-body read/idle deadline around this
+        // sq-lodb: apply the (optional) slow-body read/idle deadline around this
         // connection's clone of the router, then hand the composed tower service to hyper.
-        // [GPT-5.6] sq-rejk9: expose the accepted TCP peer to every request, matching serve_h3.
+        // sq-rejk9: expose the accepted TCP peer to every request, matching serve_h3.
         let service = ServiceBuilder::new()
             .layer(Extension(ConnectInfo(remote)))
             .layer(body_timeout_layer.clone())
@@ -5210,7 +5210,7 @@ where
 
 /// Serves HTTP/1.1 and HTTP/2 on `listener` until `shutdown` resolves.
 ///
-/// [GPT-5.6] sq-oprna.6: with the default-off `http2` feature, [`serve`] switches from
+/// sq-oprna.6: with the default-off `http2` feature, [`serve`] switches from
 /// hyper's HTTP/1-only builder to hyper-util's h1+h2 auto builder. Its HTTP/1 configuration
 /// retains [`ServerConfig::header_read_timeout`], request-body idle deadlines, WebSocket
 /// upgrades, peer `ConnectInfo`, and graceful drain. A plain listener accepts h1 and h2c;
@@ -5245,7 +5245,7 @@ where
 /// WebSocket upgrades, peer `ConnectInfo`, and graceful drain exactly as [`serve`]. HTTP/2
 /// multiplexed streams share the same request middleware and graceful-drain path.
 ///
-/// [GPT-5.6] sq-oprna.6
+/// sq-oprna.6
 #[cfg(feature = "http2")]
 #[cfg_attr(docsrs, doc(cfg(feature = "http2")))]
 pub async fn serve_tls<F>(
@@ -5270,7 +5270,7 @@ where
     .await
 }
 
-/// [GPT-5.6] sq-oprna.6: feature-on h1+h2 accept loop shared by cleartext and TLS entry points.
+/// sq-oprna.6: feature-on h1+h2 accept loop shared by cleartext and TLS entry points.
 #[cfg(feature = "http2")]
 async fn serve_auto<F>(
     listener: tokio::net::TcpListener,
@@ -5366,7 +5366,7 @@ where
     Ok(())
 }
 
-/// [GPT-5.6] sq-oprna.6: one auto-detected HTTP/1.1 or HTTP/2 connection.
+/// sq-oprna.6: one auto-detected HTTP/1.1 or HTTP/2 connection.
 #[cfg(feature = "http2")]
 async fn serve_auto_connection<I>(
     stream: I,
@@ -5425,7 +5425,7 @@ async fn serve_auto_connection<I>(
 
 #[cfg(test)]
 mod header_read_timeout_config_tests {
-    //! [OPUS-4.8] (sq-2gqr / sq-lodb) The slow-loris header-read deadline and the slow-body
+    //! (sq-2gqr / sq-lodb) The slow-loris header-read deadline and the slow-body
     //! read/idle deadline live in `ServerConfig` so they are configurable + testable in isolation;
     //! the END-TO-END behaviour (a partial-header socket / a dribbled-body socket is actually
     //! closed by `serve`) is the integration suite in `tests/hardening.rs`. These pin the config
@@ -5461,7 +5461,7 @@ mod header_read_timeout_config_tests {
 
     #[test]
     fn slow_body_guard_is_on_by_default() {
-        // [OPUS-4.8] sq-lodb: a fresh, unconfigured server must also bound the slow-BODY vector.
+        // sq-lodb: a fresh, unconfigured server must also bound the slow-BODY vector.
         // A generous-but-finite 30s idle deadline ships ON.
         assert_eq!(
             ServerConfig::default().body_read_timeout,
@@ -5472,7 +5472,7 @@ mod header_read_timeout_config_tests {
 
     #[test]
     fn body_read_timeout_is_independent_of_the_header_and_query_deadlines() {
-        // [OPUS-4.8] sq-lodb: three distinct deadlines (body phase / header phase / engine
+        // sq-lodb: three distinct deadlines (body phase / header phase / engine
         // evaluation). Setting one must not move the others.
         let cfg = ServerConfig {
             body_read_timeout: Some(Duration::from_secs(5)),
@@ -5498,7 +5498,7 @@ const SPARQL_QUERY_CT: &str = "application/sparql-query";
 const FORM_CT: &str = "application/x-www-form-urlencoded";
 /// `Accept` media type that turns a query request into an EXPLAIN response (T22).
 const EXPLAIN_CT: &str = "text/x-sparq-explain";
-/// [FABLE-5] sq-ixc3.19: the STRUCTURED explain media type. `Accept`ing it answers an
+/// sq-ixc3.19: the STRUCTURED explain media type. `Accept`ing it answers an
 /// EXPLAIN request with the engine's typed plan tree (`explain_json::PlanNode`,
 /// sq-u4lgr/#902) as camelCase JSON — `operator`/`estimated`/`actual`/`nanos`/`qError`/
 /// `children`, the sq-jbqh4 schema contract the GUI plan explorer renders — instead of
@@ -5508,7 +5508,7 @@ const EXPLAIN_CT: &str = "text/x-sparq-explain";
 /// back to the text plan.
 const EXPLAIN_JSON_CT: &str = "application/x-sparq-explain+json";
 
-/// Whether the request `Accept`s the structured JSON plan tree. [FABLE-5] sq-ixc3.19
+/// Whether the request `Accept`s the structured JSON plan tree. sq-ixc3.19
 fn accepts_explain_json(headers: &HeaderMap) -> bool {
     headers
         .get(header::ACCEPT)
@@ -5566,7 +5566,7 @@ fn explain_mode(
 // `sparq_serve::ring`). The opt-in `time-travel` feature only WIDENS how far back a
 // pin can reach (its extended-retention config + `--time-travel-*` CLI flags stay
 // feature-gated); the header/pin surface here is byte-identical in both feature
-// states. [SONNET-4.6] (sq-ci2d6)
+// states. (sq-ci2d6)
 // ---------------------------------------------------------------------------
 
 /// Resolves the generation a query request is pinned to. `generation=N` — URL query
@@ -5606,7 +5606,7 @@ fn resolve_pin(
         Some(raw) => raw,
         None => return Ok(state.current()),
     };
-    // [SONNET-4.6] (sq-ci2d6) Positional format args throughout (CodeQL `rust/unused-variable`
+    // (sq-ci2d6) Positional format args throughout (CodeQL `rust/unused-variable`
     // false-positive on inline captures — this path is now compiled into the DEFAULT build).
     let number: u64 = raw.parse().map_err(|_| {
         bad_request(&format!(
@@ -5625,12 +5625,12 @@ fn resolve_pin(
     if number == current.number() {
         return Ok(current);
     }
-    // [OPUS-4.8] (sq-o5bi, sq-0g6g) Resolve the ring once via the accessor: DEFAULT this is a
+    // (sq-o5bi, sq-0g6g) Resolve the ring once via the accessor: DEFAULT this is a
     // direct field reference (byte-identical to pre-#941); under `backup` it is one clone out of
     // the swappable serving core. Binding it locally keeps `at` + `oldest_retained` on one ring.
     let ring = state.ring();
     ring.at(number).ok_or_else(|| {
-        // [SONNET-4.6] (sq-ci2d6) The 410 + "aged out … oldest retained" prefix is byte-identical
+        // (sq-ci2d6) The 410 + "aged out … oldest retained" prefix is byte-identical
         // in both feature states (the `time-travel` suite is unchanged); only the closing HINT
         // differs — the default build's window is the ring's concurrency-retention floor, the
         // `time-travel` build's is the extended retention the CLI flags size.
@@ -5658,7 +5658,7 @@ fn resolve_pin(
 /// produced against — the current generation for unpinned queries (capture it as the
 /// read-your-writes / snapshot-pin token; the same generation-number concept as the
 /// horizontal-scaling ADR's `shard_seq`), the pin for pinned queries, and the generation
-/// containing the update for a 204 update ack. [SONNET-4.6] (sq-ci2d6) Present in the
+/// containing the update for a 204 update ack. (sq-ci2d6) Present in the
 /// DEFAULT build — the pin/header mechanics are bounded to the ring's concurrency-retention
 /// window; the opt-in `time-travel` feature only widens how far back `?generation=N` reaches.
 fn with_generation_header(mut resp: Response, number: u64) -> Response {
@@ -5682,7 +5682,7 @@ async fn sparql_endpoint(
 ) -> Response {
     let raw = raw_query.as_deref().unwrap_or("");
     let url_params = parse_form(raw);
-    // [OPUS-4.8] sq-z33x: the SPARQL 1.1 Protocol query/update dataset overrides live in the URL
+    // sq-z33x: the SPARQL 1.1 Protocol query/update dataset overrides live in the URL
     // query string for GET and the direct (`application/sparql-query` / `application/sparql-update`)
     // POSTs; the form-POST path reads them from the request BODY instead (see `handle_post`).
     let url_dataset = query_dataset_override(raw);
@@ -5692,8 +5692,8 @@ async fn sparql_endpoint(
             // Query string carries `query=` (+ optional dataset params). Per protocol, a
             // GET without a `query` parameter is a malformed request (400). A GET is always a
             // READ (the protocol has no GET update), so it is gated only under --auth-token-read.
-            // [OPUS-4.8] sq-zcby.
-            // [OPUS-4.8] sq-0bxp: begin an access-audit record for the GET query (always a
+            // sq-zcby.
+            // sq-0bxp: begin an access-audit record for the GET query (always a
             // read; fingerprint the `query=` param if present).
             #[cfg(feature = "audit-log")]
             let audit = crate::audit::enabled(state.config()).then(|| {
@@ -5703,7 +5703,7 @@ async fn sparql_endpoint(
                     url_params.get("query").map(String::as_str),
                 )
             });
-            // [OPUS-4.8] sq-gos8: structured access-audit for the GET query (a read on the
+            // sq-gos8: structured access-audit for the GET query (a read on the
             // dataset; the `query=` param is fingerprinted, never recorded raw).
             #[cfg(feature = "access-audit")]
             let aa = audit_access_begin(
@@ -5755,7 +5755,7 @@ async fn sparql_endpoint(
                     audit_access_finish(&state, aa, &resp);
                     resp
                 }
-                // [OPUS-4.8] sq-d3d8: per SPARQL Protocol §2.1.2, a GET with no `query` may
+                // sq-d3d8: per SPARQL Protocol §2.1.2, a GET with no `query` may
                 // serve the endpoint's Service Description (OPT-IN — only when the
                 // `federation-descriptors` feature is compiled in AND the config flag is set).
                 // Otherwise the historical 400.
@@ -5790,7 +5790,7 @@ async fn sparql_endpoint(
             )
             .await
         }
-        // [OPUS-4.8] sq-b3df9 (epic sq-my8wd, w3c/sparql-protocol#40): the HTTP `QUERY` method.
+        // sq-b3df9 (epic sq-my8wd, w3c/sparql-protocol#40): the HTTP `QUERY` method.
         // Oxigraph's CLI server already serves this verb (route arm
         // `("/sparql", "POST" | "QUERY")` with `let is_query = method == "QUERY"`). It behaves
         // EXACTLY like a POST query EXCEPT it is query-ONLY: an `application/sparql-update` body
@@ -5821,15 +5821,15 @@ async fn handle_post(
     headers: &HeaderMap,
     body: &Bytes,
     url_params: &HashMap<String, String>,
-    // [OPUS-4.8] sq-z33x: the §2.1.4 query dataset override carried in the URL query string
+    // sq-z33x: the §2.1.4 query dataset override carried in the URL query string
     // (applies to the direct `application/sparql-query` POST; the form-POST path overrides it with
     // the override carried in the form BODY, per the protocol's url-encoded encoding).
     url_dataset: &DatasetOverride,
-    // [OPUS-4.8] sq-z33x: the §2.2 UPDATE dataset override (`using-*`) carried in the URL query
+    // sq-z33x: the §2.2 UPDATE dataset override (`using-*`) carried in the URL query
     // string (applies to the direct `application/sparql-update` POST; the form-POST `update=` path
     // reads it from the form BODY).
     url_using: &UsingOverride,
-    // [OPUS-4.8] sq-b3df9 (epic sq-my8wd, w3c/sparql-protocol#40): `true` when this is the HTTP
+    // sq-b3df9 (epic sq-my8wd, w3c/sparql-protocol#40): `true` when this is the HTTP
     // `QUERY` method, which is QUERY-ONLY. It mirrors Oxigraph's `is_query` flag: an
     // `application/sparql-update` body is NOT accepted (it falls through to 415) and a `update=`
     // form field is rejected with an explicit 400 — a `POST` (`is_query == false`) accepts both.
@@ -5839,7 +5839,7 @@ async fn handle_post(
 ) -> Response {
     let ct = content_type(headers);
     if ct.starts_with(SPARQL_QUERY_CT) {
-        // POST directly — body IS the SPARQL query. [OPUS-4.8] sq-zcby: the auth gate keys on
+        // POST directly — body IS the SPARQL query. sq-zcby: the auth gate keys on
         // whether the body MUTATES, not on the route — an UPDATE smuggled through the query
         // Content-Type is gated as a write before the query handler ever sees it.
         let s = match std::str::from_utf8(body) {
@@ -5851,7 +5851,7 @@ async fn handle_post(
         } else {
             Operation::Read
         };
-        // [OPUS-4.8] sq-0bxp: audit the direct-POST query/update (op keys on whether it mutates).
+        // sq-0bxp: audit the direct-POST query/update (op keys on whether it mutates).
         #[cfg(feature = "audit-log")]
         let audit = crate::audit::enabled(state.config()).then(|| {
             crate::audit::AuditRecord::begin(
@@ -5860,7 +5860,7 @@ async fn handle_post(
                 Some(s),
             )
         });
-        // [OPUS-4.8] sq-gos8: structured access-audit — the plain SPARQL surface names no
+        // sq-gos8: structured access-audit — the plain SPARQL surface names no
         // per-graph resource at the request boundary, so the resource is the dataset (`/sparql`);
         // the query body is fingerprinted, NEVER recorded raw (the privacy boundary).
         #[cfg(feature = "access-audit")]
@@ -5905,7 +5905,7 @@ async fn handle_post(
         audit_access_finish(state, aa, &resp);
         resp
     } else if ct.starts_with(FORM_CT) {
-        // POST url-encoded — `query=` (read) or `update=` (write) in the body. [OPUS-4.8]
+        // POST url-encoded — `query=` (read) or `update=` (write) in the body.
         // sq-zcby: classify on the payload for the ambiguous `query=` path; an `update=` form
         // is ALWAYS a write (see below).
         let s = match std::str::from_utf8(body) {
@@ -5913,7 +5913,7 @@ async fn handle_post(
             Err(_) => return bad_request("request body is not valid UTF-8"),
         };
         let params = parse_form(s);
-        // [OPUS-4.8] sq-b3df9 (w3c/sparql-protocol#40): the HTTP `QUERY` method is query-ONLY, so
+        // sq-b3df9 (w3c/sparql-protocol#40): the HTTP `QUERY` method is query-ONLY, so
         // an `update=` form field is rejected with an explicit 400 BEFORE any auth/work (matching
         // Oxigraph's "SPARQL updates are not compatible with the QUERY HTTP method"). A normal
         // `POST` (`is_query == false`) keeps accepting `update=` as a write below.
@@ -5923,7 +5923,7 @@ async fn handle_post(
                  'update=' form field",
             );
         }
-        // [OPUS-4.8] sq-zcby (Copilot PR#71 SECURITY fix): the `update=` form field IS an
+        // sq-zcby (Copilot PR#71 SECURITY fix): the `update=` form field IS an
         // update operation BY DEFINITION (SPARQL 1.1 Protocol §2.2), so it is a WRITE
         // UNCONDITIONALLY — regardless of whether its value happens to parse as a read-only
         // query (e.g. `update=SELECT…`). Classifying it on its payload (the old
@@ -5941,7 +5941,7 @@ async fn handle_post(
                 None => Operation::Read,
             }
         };
-        // [OPUS-4.8] sq-0bxp: audit the url-encoded form request (fingerprint the update= or
+        // sq-0bxp: audit the url-encoded form request (fingerprint the update= or
         // query= payload it carries).
         #[cfg(feature = "audit-log")]
         let audit = crate::audit::enabled(state.config()).then(|| {
@@ -5954,7 +5954,7 @@ async fn handle_post(
                     .map(String::as_str),
             )
         });
-        // [OPUS-4.8] sq-gos8: structured access-audit for the url-encoded form request.
+        // sq-gos8: structured access-audit for the url-encoded form request.
         #[cfg(feature = "access-audit")]
         let aa = audit_access_begin(
             state,
@@ -5978,7 +5978,7 @@ async fn handle_post(
         // The SPARQL 1.1 Protocol url-encoded UPDATE operation (`update=` form) submits through
         // the same sequenced writer as `application/sparql-update`.
         if let Some(u) = params.get("update") {
-            // [SONNET-4.6] (sq-ci2d6) `?generation` is a READ pin (default build, bounded to the
+            // (sq-ci2d6) `?generation` is a READ pin (default build, bounded to the
             // ring's concurrency-retention window); an update always applies to the current
             // generation, so pinning one is an HONEST refusal, never a silent ignore.
             if url_params.contains_key("generation") {
@@ -5994,7 +5994,7 @@ async fn handle_post(
                 audit_access_finish(state, aa, &resp);
                 return resp;
             }
-            // [OPUS-4.8] sq-z33x: §2.2 UPDATE dataset override — for the url-encoded form encoding
+            // sq-z33x: §2.2 UPDATE dataset override — for the url-encoded form encoding
             // the `using-*` params are carried in the FORM BODY (`s`), not the URL query string.
             let resp = match rewrite_update(u, &update_dataset_override(s)) {
                 Ok(rewritten) => run_update(state, rewritten).await,
@@ -6023,9 +6023,9 @@ async fn handle_post(
                     }
                 };
                 let explain = explain_mode(url_params, Some(&params), headers);
-                // [OPUS-4.8] sq-z33x: per the SPARQL 1.1 Protocol url-encoded encoding, a `POST`
+                // sq-z33x: per the SPARQL 1.1 Protocol url-encoded encoding, a `POST`
                 // form carries the dataset override (`default-graph-uri` / `named-graph-uri`) in the
-                // FORM BODY. [OPUS-4.8] sq-b3df9 (w3c/sparql-protocol#40): the HTTP `QUERY` method
+                // FORM BODY. sq-b3df9 (w3c/sparql-protocol#40): the HTTP `QUERY` method
                 // instead always reads the dataset override from the URL query string (Oxigraph's
                 // `url_query_parameters(request)` — body graph params are not consulted on QUERY).
                 let form_dataset;
@@ -6048,12 +6048,12 @@ async fn handle_post(
         resp
     } else if ct.starts_with("application/sparql-update") && !is_query {
         // SPARQL 1.1 Protocol — update operation (T11b). Body IS the update; success → 204.
-        // [OPUS-4.8] sq-b3df9 (w3c/sparql-protocol#40): the `&& !is_query` guard mirrors Oxigraph
+        // sq-b3df9 (w3c/sparql-protocol#40): the `&& !is_query` guard mirrors Oxigraph
         // — under the HTTP `QUERY` method an `application/sparql-update` body is NOT a valid update
         // operation, so it falls through to the 415 branch below (NOT a 400/403); only a `POST`
         // reaches this update path.
-        // [OPUS-4.8] sq-zcby: an UPDATE is always a write — gate it before doing any work.
-        // [OPUS-4.8] sq-0bxp: audit the update (fingerprint the body if it is valid UTF-8).
+        // sq-zcby: an UPDATE is always a write — gate it before doing any work.
+        // sq-0bxp: audit the update (fingerprint the body if it is valid UTF-8).
         #[cfg(feature = "audit-log")]
         let audit = crate::audit::enabled(state.config()).then(|| {
             crate::audit::AuditRecord::begin(
@@ -6062,7 +6062,7 @@ async fn handle_post(
                 std::str::from_utf8(body).ok(),
             )
         });
-        // [OPUS-4.8] sq-gos8: structured access-audit for the SPARQL UPDATE body.
+        // sq-gos8: structured access-audit for the SPARQL UPDATE body.
         #[cfg(feature = "access-audit")]
         let aa = audit_access_begin(
             state,
@@ -6082,7 +6082,7 @@ async fn handle_post(
         }
         // `apply_update` blocks for the writer's group-commit ack (window + batch
         // application, which includes an O(graph) fork), so it runs off the async workers.
-        // [SONNET-4.6] (sq-ci2d6) A `generation` pin is a READ concept (default build, bounded to
+        // (sq-ci2d6) A `generation` pin is a READ concept (default build, bounded to
         // the ring's concurrency-retention window): an update can only apply to the current
         // generation, so a `generation` pin on an update is an honest refusal, not a silent ignore.
         if url_params.contains_key("generation") {
@@ -6099,7 +6099,7 @@ async fn handle_post(
             return resp;
         }
         let resp = match std::str::from_utf8(body) {
-            // [OPUS-4.8] sq-z33x: §2.2 UPDATE dataset override — for the `application/sparql-update`
+            // sq-z33x: §2.2 UPDATE dataset override — for the `application/sparql-update`
             // body the `using-*` params are carried in the URL query string (`url_using`).
             Ok(u) => match rewrite_update(u, url_using) {
                 Ok(rewritten) => run_update(state, rewritten).await,
@@ -6115,7 +6115,7 @@ async fn handle_post(
         audit_access_finish(state, aa, &resp);
         resp
     } else {
-        // Unsupported media type for the query/update operation. [OPUS-4.8] sq-b3df9
+        // Unsupported media type for the query/update operation. sq-b3df9
         // (w3c/sparql-protocol#40): under the HTTP `QUERY` method `application/sparql-update`
         // is NOT accepted (the `&& !is_query` guard above sent it here) — Oxigraph parity is a
         // 415, not a 400/403, since QUERY is query-only.
@@ -6136,10 +6136,10 @@ async fn handle_post(
 /// Applies a SPARQL Update string through the sequenced writer off the async workers (it
 /// blocks for the group-commit ack), mapping the outcome onto 204/400/503/500. Shared by the
 /// `application/sparql-update` body path and the url-encoded `update=` form path (T11b /
-/// [OPUS-4.8] sq-zcby). The caller is responsible for the auth gate (so the gate runs before
+/// sq-zcby). The caller is responsible for the auth gate (so the gate runs before
 /// any work) and any `generation`-pin refusal.
 ///
-/// [OPUS-4.8] sq-ebii: both update entry points inherit the query-timeout cap here — the SAME
+/// sq-ebii: both update entry points inherit the query-timeout cap here — the SAME
 /// wall-clock hard cap (`timeout + TIMEOUT_GRACE`) the read paths use, applied via
 /// [`await_update_worker`]. The cooperative `QueryBudget` ALSO reaches the update itself
 /// (`ServerApplier::apply` runs it via `update_in_place_with_budget`), so a `DELETE/INSERT …
@@ -6147,7 +6147,7 @@ async fn handle_post(
 /// BACKSTOP for an uninstrumented stretch, not the only stop. See [`await_update_worker`] for
 /// the remaining caveats (coarse cooperative checks; single sequenced writer; the writer
 /// finishes its next budget check after the HTTP side has already answered 503).
-/// [OPUS-4.8] (sq-x32t) `POST /admin/compact` — WAL COMPACTION / VACUUM for ERASURE-
+/// (sq-x32t) `POST /admin/compact` — WAL COMPACTION / VACUUM for ERASURE-
 /// COMPLETENESS (epic sq-toze.33). A logical SPARQL `DELETE` / `DROP GRAPH` retracts data from
 /// the live view but leaves the superseded bytes in earlier `--persist` WAL segments until a
 /// compaction folds the live state into a fresh base. This operator-invokable endpoint runs that
@@ -6193,7 +6193,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
         ),
         // A compaction failure (e.g. durable-write I/O error) is retryable: the writer thread
         // stays alive and reads keep flowing from the last published snapshot.
-        // [OPUS-4.8] (sq-kfel, ASVS-G3) `e` is the durable-rewrite error string, which carries
+        // (sq-kfel, ASVS-G3) `e` is the durable-rewrite error string, which carries
         // the server's `--persist` filesystem path (an I/O error embeds the absolute path).
         // Although this route is write/admin-gated, withhold the path from the response body —
         // the operator gets the full detail in the server log.
@@ -6210,7 +6210,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
     }
 }
 
-/// [OPUS-4.8] (sq-o5bi) `POST /admin/backup` — ONLINE consistent snapshot backup of the live
+/// (sq-o5bi) `POST /admin/backup` — ONLINE consistent snapshot backup of the live
 /// serving store. Returns a single self-describing backup artifact (sparq-serve's Option-A
 /// format: a textual header recording the generation/writer-seq + per-pod epoch vectors + the
 /// triple count + a body digest, then the full dataset as N-Quads) as
@@ -6248,7 +6248,7 @@ async fn admin_backup(State(state): State<AppState>, headers: HeaderMap) -> Resp
             .body(axum::body::Body::from(bytes))
             .unwrap(),
         // A serialisation/IO failure: the live store is untouched (export only reads).
-        // [OPUS-4.8] (sq-kfel) the error may embed internals; withhold from the body.
+        // (sq-kfel) the error may embed internals; withhold from the body.
         Ok(Err(e)) => sanitized_error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "backup",
@@ -6259,7 +6259,7 @@ async fn admin_backup(State(state): State<AppState>, headers: HeaderMap) -> Resp
     }
 }
 
-/// [OPUS-4.8] (sq-o5bi, sq-ft7u) `POST /admin/restore` — ONLINE restore of the serving store from
+/// (sq-o5bi, sq-ft7u) `POST /admin/restore` — ONLINE restore of the serving store from
 /// a backup artifact POSTed in the request body.
 ///
 /// - **In-memory server** (no `--persist`): atomically installs a freshly rehydrated ring+writer
@@ -6272,7 +6272,7 @@ async fn admin_backup(State(state): State<AppState>, headers: HeaderMap) -> Resp
 ///   `recover_compaction`). WITHOUT `?persist=true` a durable server REFUSES the restore (409): an
 ///   in-memory-only swap would be silently lost on the next restart, which is a footgun.
 /// - `?persist=true` on an in-memory server → 409 (no durable dir to write through).
-/// - **Single-flight** ([FABLE-5] sq-fy8ci): a second restore posted while one is still in flight
+/// - **Single-flight** (sq-fy8ci): a second restore posted while one is still in flight
 ///   is rejected 409 (`a restore is already in progress`) instead of being silently serialized
 ///   into a last-writer-wins pile-up by the writer thread. Retry after the first completes.
 ///
@@ -6290,7 +6290,7 @@ async fn admin_restore(
     if let Some(resp) = auth_gate(state.config(), &headers, Operation::Write) {
         return resp;
     }
-    // [OPUS-4.8] (sq-ft7u) Opt in to writing the restore THROUGH to the durable `--persist` store
+    // (sq-ft7u) Opt in to writing the restore THROUGH to the durable `--persist` store
     // (so it survives a restart) via `?persist=true` (truthy: "1"/"true"/"yes"/"on"). Default off:
     // a restore is in-memory-only unless the operator explicitly asks for write-through.
     let persist = params.get("persist").map(|v| env_truthy(v)).unwrap_or(false);
@@ -6312,7 +6312,7 @@ async fn admin_restore(
              is no durable directory to write the restore through to)",
         );
     }
-    // [FABLE-5] (sq-fy8ci) SINGLE-FLIGHT: claim the restore permit AFTER the deterministic
+    // (sq-fy8ci) SINGLE-FLIGHT: claim the restore permit AFTER the deterministic
     // posture 409s above (so those errors never depend on timing) and BEFORE any work. A second
     // concurrent restore gets an explicit 409 instead of being silently serialized behind the
     // first by the writer thread (last-writer-wins). The permit rides into the blocking closure
@@ -6353,7 +6353,7 @@ async fn admin_restore(
     }
 }
 
-/// [OPUS-4.8] (sq-bu1a) `POST /admin/backup/delta?from=N` — the INCREMENTAL change-stream / PITR
+/// (sq-bu1a) `POST /admin/backup/delta?from=N` — the INCREMENTAL change-stream / PITR
 /// producer. Streams a single self-describing DELTA artifact (sparq-serve's delta format: a header
 /// keying the `from-generation` N → the current `to-generation`, plus the per-pod epoch vector at
 /// `to` and the inserted/deleted quad bodies as N-Quads) as `application/octet-stream`. Replayed
@@ -6409,7 +6409,7 @@ async fn admin_backup_delta(
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/octet-stream")
             .header(header::CONTENT_LENGTH, bytes.len())
-            // [OPUS-4.8] positional format args (CodeQL rust/unused-variable false-positive).
+            // positional format args (CodeQL rust/unused-variable false-positive).
             .header(
                 header::CONTENT_DISPOSITION,
                 format!(
@@ -6480,13 +6480,13 @@ async fn run_query_pinned(
     head_only: bool,
     explain: ExplainMode,
     gen: PinnedGen,
-    // [OPUS-4.8] sq-z33x: the SPARQL 1.1 Protocol §2.1.4 dataset override
+    // sq-z33x: the SPARQL 1.1 Protocol §2.1.4 dataset override
     // (`default-graph-uri` / `named-graph-uri`); empty for the common in-query / no-dataset case.
     dataset: &DatasetOverride,
 ) -> Response {
     let prepared = match prepare_with_dataset(sparql, dataset) {
         Ok(p) => p,
-        // [OPUS-4.8] (sq-cz89/sq-j9zs) The parser echoes the offending query token verbatim;
+        // (sq-cz89/sq-j9zs) The parser echoes the offending query token verbatim;
         // withhold it from the body (it is caller input, but an info-leak contract regardless)
         // — the operator gets the full parse error in the server log.
         Err(PrepareError::Malformed(msg)) => {
@@ -6497,7 +6497,7 @@ async fn run_query_pinned(
                 &msg,
             )
         }
-        // [OPUS-4.8] sq-z33x: a `default-graph-uri` / `named-graph-uri` value that is not a valid
+        // sq-z33x: a `default-graph-uri` / `named-graph-uri` value that is not a valid
         // absolute IRI is a client error (the protocol parameter is caller input).
         Err(PrepareError::BadGraphUri(msg)) => return bad_request(&msg),
     };
@@ -6511,7 +6511,7 @@ async fn run_query_pinned(
     // but both run on the blocking pool and under the worker timeout cap anyway;
     // analyze executes, so it gets the standard per-request budget.
     if explain != ExplainMode::Off {
-        // [FABLE-5] sq-ixc3.19: structured-plan negotiation. Resolved HERE (headers are
+        // sq-ixc3.19: structured-plan negotiation. Resolved HERE (headers are
         // not `'static`) and moved into the worker. A build without the `explain-json`
         // feature answers a structured request 406 up front — never a silent text
         // fallback the caller would then mis-parse as JSON — so clients (the GUI plan
@@ -6534,7 +6534,7 @@ async fn run_query_pinned(
         let cfg = config.clone();
         let q = sparql.to_string();
         let analyze = explain == ExplainMode::Analyze;
-        // [SONNET-4.6] (sq-t1isr) Register EXPLAIN ANALYZE with the running-query registry
+        // (sq-t1isr) Register EXPLAIN ANALYZE with the running-query registry
         // (feature `query-registry`), mirroring the SELECT/CONSTRUCT pattern from sq-qsm5z.
         // The RAII guard is moved into the blocking closure so the row is present for the
         // full duration of the engine call and removed on any exit path (normal, error, unwind).
@@ -6549,14 +6549,14 @@ async fn run_query_pinned(
         #[cfg(not(feature = "query-registry"))]
         let (budget, qr_guard): (QueryBudget, Option<Box<dyn std::any::Any + Send>>) =
             (make_budget(&config, true), None);
-        // [OPUS-4.8] sq-9xoh: resolve the per-request SERVICE egress allowlist HERE (headers are
+        // sq-9xoh: resolve the per-request SERVICE egress allowlist HERE (headers are
         // not `'static`, so it must happen before the spawn) and move it into the worker.
         let allow = config.resolve_service_allow(headers);
         let task = tokio::task::spawn_blocking(move || {
             // Hold qr_guard alive for the duration of the engine call (sq-t1isr).
             let _guard = qr_guard;
             let graph = gen.snapshot();
-            // [FABLE-5] sq-ixc3.19: the STRUCTURED explain response — the caller
+            // sq-ixc3.19: the STRUCTURED explain response — the caller
             // `Accept`ed `application/x-sparq-explain+json`, so answer with the typed
             // plan tree (camelCase JSON, the sq-jbqh4 schema contract) instead of the
             // plan text. Same budget + egress-allowlist envelope as the text arm.
@@ -6582,10 +6582,10 @@ async fn run_query_pinned(
                     Err(e) => engine_error_response(&e, &cfg, true),
                 };
             }
-            // [OPUS-4.8] sq-4w18: EXPLAIN ANALYZE executes (can hit SERVICE), so it runs
+            // sq-4w18: EXPLAIN ANALYZE executes (can hit SERVICE), so it runs
             // under the egress allowlist policy like a normal query; plan-only is a dry
             // run but is wrapped identically for uniformity (it never dials).
-            // [OPUS-4.8] sq-9xoh: under the request-resolved allowlist (the static one unless a
+            // sq-9xoh: under the request-resolved allowlist (the static one unless a
             // per-request override hook is installed).
             let r = with_engine_scope_allow(&allow, || {
                 if analyze {
@@ -6608,14 +6608,14 @@ async fn run_query_pinned(
     }
     let accept = headers.get(header::ACCEPT).and_then(|v| v.to_str().ok());
     let config = state.config.clone();
-    // [OPUS-4.8] sq-9xoh: the per-request SERVICE egress allowlist for this read (the static
+    // sq-9xoh: the per-request SERVICE egress allowlist for this read (the static
     // `service_allow` unless a per-request override hook is installed). Resolved here while the
     // request headers are still in scope, then cloned into the per-form worker closure.
     let allow = config.resolve_service_allow(headers);
 
     match prepared.form {
         QueryForm::Select | QueryForm::Ask => {
-            // [OPUS-4.8] sq-406acc: Oxigraph-parity content negotiation — a PRESENT-but-unsatisfiable
+            // sq-406acc: Oxigraph-parity content negotiation — a PRESENT-but-unsatisfiable
             // `Accept` (naming no supported SELECT/ASK result format and no wildcard) is `406 Not
             // Acceptable` rather than the old silent JSON fallback. An absent / empty / `*/*` Accept
             // still defaults to SPARQL-results JSON (W3C-permitted default representation).
@@ -6624,7 +6624,7 @@ async fn run_query_pinned(
                 Err(_) => return not_acceptable_response(head_only),
             };
             let is_ask = prepared.form == QueryForm::Ask;
-            // [SONNET-4.6] (sq-qsm5z) Register with the running-query registry (feature
+            // (sq-qsm5z) Register with the running-query registry (feature
             // `query-registry`). The RAII guard is boxed as `Box<dyn Any + Send>` so the
             // call site is uniform in both feature states; it is moved into the blocking
             // closure and held alive for the entire engine call, then dropped on exit.
@@ -6639,16 +6639,16 @@ async fn run_query_pinned(
                 (make_budget(&config, !is_ask), None);
             let cfg = config.clone();
             let allow = allow.clone();
-            // [OPUS-4.8] (sq-7d3dj.34.2) SELECT → SPARQL-results JSON streams its body: the
+            // (sq-7d3dj.34.2) SELECT → SPARQL-results JSON streams its body: the
             // engine runs on a blocking worker and feeds a bounded channel, so the results
             // header + early solutions reach the socket before the whole result is
             // serialised (TTFB). ASK and the XML/CSV/TSV SELECT forms keep the buffered
             // worker path below (their serialisers are `&QueryResult`-driven).
-            // [OPUS-4.8] (sq-7d3dj.34.1) The floor path (JSON SELECT stream + ASK) runs the
+            // (sq-7d3dj.34.1) The floor path (JSON SELECT stream + ASK) runs the
             // algebra already parsed in `prepare` via the engine's `*_prepared` entry points —
             // no second parse per request.
             if !is_ask && fmt == Format::Json {
-                // [SONNET-4.6] (sq-7d3dj.26) Whether THIS client negotiated HTTP trailers
+                // (sq-7d3dj.26) Whether THIS client negotiated HTTP trailers
                 // decides how a mid-stream truncation is signalled (trailer vs. an aborted
                 // chunked framing) — see `StreamingJsonBody`. Resolved here, while the
                 // request headers are still in scope.
@@ -6708,7 +6708,7 @@ async fn run_query_pinned(
         // The engine's row budget applies to the WHERE-pattern solutions, the deadline
         // to the whole evaluation — same guard semantics as SELECT.
         QueryForm::Construct | QueryForm::Describe => {
-            // [OPUS-4.8] sq-406acc: same Oxigraph-parity strictness for the RDF-graph result — a
+            // sq-406acc: same Oxigraph-parity strictness for the RDF-graph result — a
             // PRESENT-but-unsatisfiable `Accept` (no supported RDF media type and no wildcard) is
             // 406; absent / empty / `*/*` keeps the N-Triples default.
             let gfmt = match negotiate_graph_or_406(accept) {
@@ -6716,7 +6716,7 @@ async fn run_query_pinned(
                 Err(_) => return not_acceptable_response(head_only),
             };
             let query = prepared.runnable;
-            // [SONNET-4.6] (sq-qsm5z) Register with the running-query registry.
+            // (sq-qsm5z) Register with the running-query registry.
             #[cfg(feature = "query-registry")]
             let (budget, qr_guard): (QueryBudget, Option<Box<dyn std::any::Any + Send>>) = {
                 let base = make_budget(&config, true);
@@ -6746,10 +6746,10 @@ async fn run_query_pinned(
             let cfg = config.clone();
             let task = tokio::task::spawn_blocking(move || {
                 let _guard = qr_guard;
-                // [OPUS-4.8] sq-rt6v: produce the triple list once, then serialise it in the
+                // sq-rt6v: produce the triple list once, then serialise it in the
                 // negotiated graph syntax — N-Triples (default), prefix-compacting Turtle, or
                 // RDF/XML — rather than always emitting N-Triples.
-                // [OPUS-4.8] sq-9xoh: under the request-resolved SERVICE egress allowlist.
+                // sq-9xoh: under the request-resolved SERVICE egress allowlist.
                 match with_engine_scope_allow(&allow, || {
                     sparq_engine::construct_or_describe_with_budget(gen.snapshot(), &query, &budget)
                 }) {
@@ -6772,7 +6772,7 @@ async fn run_query_pinned(
 /// the memory cap (`--max-query-rows`, applied on EVERY form) AND — when `apply_max_results`
 /// is set — `--max-results`, whichever is tighter.
 ///
-/// [OPUS-4.8] (sq-ebii) `--max-query-rows` is the coarse memory cap: it bounds the
+/// (sq-ebii) `--max-query-rows` is the coarse memory cap: it bounds the
 /// working-set cardinality of any materialised intermediate/final result on all forms
 /// (SELECT/ASK/CONSTRUCT/DESCRIBE/GSP-read), so a join blow-up aborts (413) instead of
 /// OOMing. `--max-results` is the narrower result/solution cap: callers pass
@@ -6789,7 +6789,7 @@ pub(crate) fn make_budget(config: &ServerConfig, apply_max_results: bool) -> Que
     QueryBudget {
         deadline: config.query_timeout.map(|t| std::time::Instant::now() + t),
         max_rows: tighter(config.max_query_rows, results_cap),
-        // [OPUS-4.8] (sq-s5is) byte-accounted cap applies on every form (it has no
+        // (sq-s5is) byte-accounted cap applies on every form (it has no
         // `--max-results` analogue — it bounds the working set, not the projection).
         max_bytes: config.max_query_bytes,
         temporal_year_range: None, // Native server retains the checked temporal range.
@@ -6799,13 +6799,13 @@ pub(crate) fn make_budget(config: &ServerConfig, apply_max_results: bool) -> Que
     }
 }
 
-/// [OPUS-4.8] (sq-ebii) The per-UPDATE engine budget: the coarse memory cap
+/// (sq-ebii) The per-UPDATE engine budget: the coarse memory cap
 /// (`--max-query-rows`) as the working-set row ceiling, and a cooperative deadline measured
 /// from NOW (the moment the writer starts this update). The SELECT-projection cap
 /// (`--max-results`) does NOT apply to updates — there is no result to project — but the
 /// working-set memory cap and the deadline do.
 ///
-/// [OPUS-4.8] (sq-nulp) The WHERE deadline is [`update_where_deadline`]: the TIGHTER of the
+/// (sq-nulp) The WHERE deadline is [`update_where_deadline`]: the TIGHTER of the
 /// read [`query_timeout`](ServerConfig::query_timeout) and the optional, typically-shorter
 /// [`update_where_timeout`](ServerConfig::update_where_timeout). Because updates are sequenced
 /// on a single writer thread, this deadline is what BOUNDS writer-queue head-of-line blocking:
@@ -6816,7 +6816,7 @@ fn update_budget(config: &ServerConfig) -> QueryBudget {
     QueryBudget {
         deadline: update_where_deadline(config).map(|t| std::time::Instant::now() + t),
         max_rows: config.max_query_rows,
-        // [OPUS-4.8] (sq-s5is) the byte cap reaches the UPDATE's WHERE evaluation too.
+        // (sq-s5is) the byte cap reaches the UPDATE's WHERE evaluation too.
         max_bytes: config.max_query_bytes,
         temporal_year_range: None, // Native server retains the checked temporal range.
         strict_numeric_capacity: false, // Proof-only numeric capacity is opt-in.
@@ -6825,7 +6825,7 @@ fn update_budget(config: &ServerConfig) -> QueryBudget {
     }
 }
 
-/// [OPUS-4.8] (sq-p7kk5) The sequenced writer's config, derived from the server config: the
+/// (sq-p7kk5) The sequenced writer's config, derived from the server config: the
 /// stock `sparq_serve` group-commit window/batch defaults, but with adaptive group-commit
 /// wired from [`ServerConfig::adaptive_commit`] (ON by default — the write path is interactive,
 /// where the fixed window is pure latency for a serial client blocked on its own ack). Adaptive
@@ -6839,7 +6839,7 @@ fn writer_config(config: &ServerConfig) -> WriterConfig {
     }
 }
 
-/// [OPUS-4.8] (sq-nulp) The effective WHERE-phase deadline for a SPARQL UPDATE on the writer
+/// (sq-nulp) The effective WHERE-phase deadline for a SPARQL UPDATE on the writer
 /// thread: the tighter of the read [`query_timeout`](ServerConfig::query_timeout) and the
 /// opt-in [`update_where_timeout`](ServerConfig::update_where_timeout). `None` (no deadline)
 /// only when BOTH are unset; otherwise the smaller of whichever are present. This is the knob
@@ -6852,7 +6852,7 @@ fn update_where_deadline(config: &ServerConfig) -> Option<Duration> {
     }
 }
 
-/// [OPUS-4.8] (sq-ebii) The tighter (smaller) of two optional row caps: `None` is "no cap",
+/// (sq-ebii) The tighter (smaller) of two optional row caps: `None` is "no cap",
 /// so the combined cap is `None` only when both are `None`, else the min of those present.
 fn tighter(a: Option<usize>, b: Option<usize>) -> Option<usize> {
     match (a, b) {
@@ -6883,7 +6883,7 @@ pub(crate) async fn await_worker(task: tokio::task::JoinHandle<Response>, config
     }
 }
 
-/// [OPUS-4.8] (sq-ebii) The result of awaiting a SPARQL Update worker under the timeout cap.
+/// (sq-ebii) The result of awaiting a SPARQL Update worker under the timeout cap.
 pub(crate) enum UpdateOutcome {
     /// Published; carries the generation number containing the update.
     Ok(u64),
@@ -6895,7 +6895,7 @@ pub(crate) enum UpdateOutcome {
     Panicked,
 }
 
-/// [OPUS-4.8] (sq-ebii) Awaits a SPARQL Update worker under the SAME hard wall-clock cap the
+/// (sq-ebii) Awaits a SPARQL Update worker under the SAME hard wall-clock cap the
 /// read paths use (`query_timeout + TIMEOUT_GRACE`), so a pathological UPDATE (e.g. a
 /// `DELETE/INSERT … WHERE` whose WHERE pattern blows up) cannot pin a connection indefinitely.
 ///
@@ -6913,7 +6913,7 @@ pub(crate) enum UpdateOutcome {
 /// consult the budget (they are bounded by operand size, already capped by `--max-body-bytes`);
 /// (3) updates are *sequenced* on a single writer, so a long-running update blocks the queue
 /// behind it until it finishes — this *await* cap bounds the client's own wait, not the writer's
-/// work. [OPUS-4.8] (sq-nulp) The writer's work — and hence that head-of-line blocking — is
+/// work. (sq-nulp) The writer's work — and hence that head-of-line blocking — is
 /// bounded SEPARATELY by the WHERE-phase deadline ([`update_budget`] / [`update_where_deadline`]):
 /// `--update-where-timeout` sets a typically-shorter cooperative deadline so a slow update
 /// releases the writer within that window instead of holding it for the full (longer) read
@@ -6982,7 +6982,7 @@ fn render_select(
     text_response(StatusCode::OK, ct, body, head_only)
 }
 
-/// [OPUS-4.8] (sq-7d3dj.34.2) Bounded chunk buffer between the engine worker and the HTTP
+/// (sq-7d3dj.34.2) Bounded chunk buffer between the engine worker and the HTTP
 /// response body. Small on purpose: a slow client back-pressures the worker (which waits in
 /// [`SendLimits::send`], up to the query deadline) rather than letting a large serialised
 /// result pile up in server memory.
@@ -7154,15 +7154,15 @@ impl SendLimits {
     }
 }
 
-/// [SONNET-4.6] (sq-7d3dj.26) Trailer field asserting the streamed body is the COMPLETE result.
+/// (sq-7d3dj.26) Trailer field asserting the streamed body is the COMPLETE result.
 /// Sent (value `true`) only after the engine has confirmed it produced every chunk.
 const TRAILER_COMPLETE: &str = "x-sparq-complete";
 
-/// [SONNET-4.6] (sq-7d3dj.26) Trailer field reporting a TRUNCATED streamed body; the value is
+/// (sq-7d3dj.26) Trailer field reporting a TRUNCATED streamed body; the value is
 /// the reason from [`truncation_reason`].
 const TRAILER_TRUNCATED: &str = "x-sparq-truncated";
 
-/// [SONNET-4.6] (sq-7d3dj.26) One item on the engine-worker → HTTP-body channel.
+/// (sq-7d3dj.26) One item on the engine-worker → HTTP-body channel.
 ///
 /// [`StreamItem::Done`] is a load-bearing EXPLICIT end-of-stream marker, not a convenience:
 /// without it a worker that dies mid-result (a panic in the engine or the serialiser) is
@@ -7179,7 +7179,7 @@ enum StreamItem {
     Failed(String),
 }
 
-/// [SONNET-4.6] (sq-7d3dj.26) Maps the engine's abort message onto the stable
+/// (sq-7d3dj.26) Maps the engine's abort message onto the stable
 /// `X-Sparq-Truncated` reason vocabulary. Mirrors the classification
 /// [`engine_error_response`] applies when the same abort lands BEFORE the first byte, so a
 /// client sees the same cause named either side of the status commit.
@@ -7197,7 +7197,7 @@ fn truncation_reason(e: &str) -> &'static str {
     }
 }
 
-/// [SONNET-4.6] (sq-7d3dj.26) `true` when the request's `TE` header lists `trailers`
+/// (sq-7d3dj.26) `true` when the request's `TE` header lists `trailers`
 /// (RFC 9110 §10.1.4) — i.e. the client declared it can receive trailer fields. hyper only
 /// writes a trailers frame for such a client, so this also decides how a mid-stream truncation
 /// is signalled: a trailer for a client that asked for one, an aborted chunked framing (no
@@ -7235,7 +7235,7 @@ fn client_accepts_trailers(headers: &HeaderMap) -> bool {
     })
 }
 
-/// [SONNET-4.6] `true` when `raw` is a well-formed, strictly positive RFC 9110 §12.4.2 qvalue
+/// `true` when `raw` is a well-formed, strictly positive RFC 9110 §12.4.2 qvalue
 /// (`( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3"0" ] )`). `0`, `0.0`, `0.000` — and anything
 /// that is not a valid qvalue at all — are `false`, so a caller reading this as "acceptable"
 /// fails closed on malformed input.
@@ -7252,7 +7252,7 @@ fn qvalue_is_positive(raw: &str) -> bool {
     }
 }
 
-/// [SONNET-4.6] (sq-7d3dj.26) Where a [`StreamingJsonBody`] is in its lifecycle.
+/// (sq-7d3dj.26) Where a [`StreamingJsonBody`] is in its lifecycle.
 #[derive(Clone, Copy)]
 enum BodyState {
     /// Still forwarding chunks from the engine worker.
@@ -7264,7 +7264,7 @@ enum BodyState {
     Finished,
 }
 
-/// [SONNET-4.6] (sq-7d3dj.26) **Truncation-safe** streamed SPARQL-results-JSON body.
+/// (sq-7d3dj.26) **Truncation-safe** streamed SPARQL-results-JSON body.
 ///
 /// Once the first byte of a `200 OK` body is on the wire the status is committed, so a
 /// mid-stream abort (deadline, `--max-results` / `--max-query-rows` row cap, `--max-query-bytes`
@@ -7443,7 +7443,7 @@ impl http_body::Body for StreamingJsonBody {
     }
 }
 
-/// [SONNET-4.6] (sq-7d3dj.26) The two request-head facts that decide the SHAPE of a streamed
+/// (sq-7d3dj.26) The two request-head facts that decide the SHAPE of a streamed
 /// SELECT-JSON response, carried together rather than as adjacent `bool` parameters: they are
 /// resolved at the same place from the same request, and a pair of positional booleans is
 /// exactly the signature a caller can silently transpose.
@@ -7471,7 +7471,7 @@ fn stream_workers_exhausted() -> Response {
     json_error(StatusCode::TOO_MANY_REQUESTS, "server is at its concurrent-request limit, retry later")
 }
 
-/// [OPUS-4.8] (sq-7d3dj.34.2) Streams a SELECT result as SPARQL-results JSON.
+/// (sq-7d3dj.34.2) Streams a SELECT result as SPARQL-results JSON.
 ///
 /// The engine runs on a `spawn_blocking` worker and hands each ~64 KiB chunk
 /// ([`sparq_engine::query_json_stream_with_budget`]) to a bounded channel; the HTTP body
@@ -7497,15 +7497,15 @@ fn stream_workers_exhausted() -> Response {
 /// never be mistaken for a complete result either.
 async fn stream_select_json(
     gen: PinnedGen,
-    // [OPUS-4.8] (sq-7d3dj.34.1) The query PARSED ONCE in `prepare` — the engine runs it via
+    // (sq-7d3dj.34.1) The query PARSED ONCE in `prepare` — the engine runs it via
     // `query_json_stream_prepared_with_budget` without re-parsing (the HTTP floor win).
     query: sparq_engine::PreparedQuery,
     budget: QueryBudget,
-    // [SONNET-4.6] (sq-7d3dj.26) `HEAD`-ness and `TE: trailers` negotiation, both read off the
+    // (sq-7d3dj.26) `HEAD`-ness and `TE: trailers` negotiation, both read off the
     // request head by the caller — see [`StreamShape`].
     shape: StreamShape,
     allow: crate::service_config::ServiceAllowlist,
-    // [SONNET-4.6] (sq-qsm5z) The RAII registry guard plus the streamed-worker slot, moved into
+    // (sq-qsm5z) The RAII registry guard plus the streamed-worker slot, moved into
     // the worker so both are held for the full streaming evaluation and dropped when it exits.
     held: StreamHeld,
     config: &ServerConfig,
@@ -7540,7 +7540,7 @@ async fn stream_select_json(
             if stopped {
                 return;
             }
-            // [SONNET-4.6] (sq-7d3dj.26) ALWAYS post a terminal marker: the body side treats
+            // (sq-7d3dj.26) ALWAYS post a terminal marker: the body side treats
             // "channel closed without one" as a truncation, so the completion claim can only
             // ever come from the engine actually returning `Ok`. If the marker cannot be
             // delivered (cancelled, past the deadline), record the reason instead.
@@ -7597,7 +7597,7 @@ async fn stream_select_json(
                 .body(body)
                 .unwrap()
         }
-        // [OPUS-4.8] (sq-7d3dj.34.2) The engine produced the (only) chunk and THEN failed —
+        // (sq-7d3dj.34.2) The engine produced the (only) chunk and THEN failed —
         // e.g. a row/byte cap that the single-pattern scan only confirms after emitting the
         // document, or a cooperative deadline trip. Because we buffer the first chunk before
         // committing a status, NOTHING has been flushed to the socket yet, so we still return
@@ -7605,7 +7605,7 @@ async fn stream_select_json(
         // 200. (A cap tripped on a genuinely multi-chunk result — both peeked items are
         // chunks — cannot be un-committed and is truncated mid-stream; see below.)
         Some(StreamItem::Failed(e)) => engine_error_response(&e, config, true),
-        // [SONNET-4.6] (sq-7d3dj.26) The worker vanished without a terminal marker (a panic in
+        // (sq-7d3dj.26) The worker vanished without a terminal marker (a panic in
         // the engine or the serialiser) having produced exactly one chunk. Nothing has been
         // flushed to the socket, so the status is NOT yet committed: answer with the honest
         // 500 rather than a truncated 200.
@@ -7658,7 +7658,7 @@ async fn stream_select_json(
     }
 }
 
-/// [OPUS-4.8] (sq-7d3dj.34.2) Awaits the first streamed chunk (or the pre-first-byte error)
+/// (sq-7d3dj.34.2) Awaits the first streamed chunk (or the pre-first-byte error)
 /// under the read wall-clock cap (`query_timeout + TIMEOUT_GRACE`), mirroring
 /// [`await_worker`]. `Err(())` means the cap elapsed before the worker produced anything.
 ///
@@ -7805,7 +7805,7 @@ async fn stream_graph_result(
     gfmt: GraphFormat,
     budget: QueryBudget,
     allow: crate::service_config::ServiceAllowlist,
-    // [SONNET-4.6] (sq-qsm5z) The RAII running-query registry guard plus the streamed-worker
+    // (sq-qsm5z) The RAII running-query registry guard plus the streamed-worker
     // slot. Held for the whole evaluation AND rendering, released when the worker exits.
     held: StreamHeld,
     config: &ServerConfig,
@@ -8319,7 +8319,7 @@ mod stalled_reader_tests {
 
 #[cfg(test)]
 mod truncation_safety_tests {
-    //! [SONNET-4.6] (sq-7d3dj.26) The mid-stream truncation-safety invariant for the
+    //! (sq-7d3dj.26) The mid-stream truncation-safety invariant for the
     //! pull-streaming SELECT body: *a client MUST NOT be able to mistake a truncated stream
     //! for a complete result*. These pin [`StreamingJsonBody`]'s side of it directly (the
     //! end-to-end HTTP assertion, over the real engine + budget, is
@@ -8548,7 +8548,7 @@ mod truncation_safety_tests {
 /// function whether `--max-results` actually contributed to the `max_rows` budget on THIS
 /// request, so the 413 message names the right knob.
 ///
-/// [OPUS-4.8] (sq-ebii) Only SELECT projections (and EXPLAIN ANALYZE / CONSTRUCT / DESCRIBE,
+/// (sq-ebii) Only SELECT projections (and EXPLAIN ANALYZE / CONSTRUCT / DESCRIBE,
 /// which also pass `apply_max_results = true`) fold `--max-results` into the budget. ASK,
 /// GSP-read and UPDATE build their budget from `--max-query-rows` ALONE
 /// (`make_budget(_, false)` / `update_budget`), so on those paths `--max-results` did NOT
@@ -8576,7 +8576,7 @@ pub(crate) fn engine_error_response(e: &str, config: &ServerConfig, apply_max_re
             &format!("result exceeds the server's working-set row limit ({max} rows, {which}); narrow the query (e.g. add LIMIT) or raise the limit"),
         );
     }
-    // [OPUS-4.8] (sq-s5is) the byte-accounted cap tripped — an honest 413, same class as the
+    // (sq-s5is) the byte-accounted cap tripped — an honest 413, same class as the
     // row cap, naming the byte knob (this path applies on EVERY form, so no `--max-results`).
     if e.contains("query budget exceeded (max-bytes)") {
         let max = config.max_query_bytes.unwrap_or(0);
@@ -8585,7 +8585,7 @@ pub(crate) fn engine_error_response(e: &str, config: &ServerConfig, apply_max_re
             &format!("result exceeds the server's working-set byte limit ({max} bytes, --max-query-bytes (memory cap)); narrow the query (e.g. project fewer variables, add LIMIT) or raise the limit"),
         );
     }
-    // [OPUS-4.8] (sq-iu0c) A SERVICE to a host the egress allowlist / default-deny SSRF
+    // (sq-iu0c) A SERVICE to a host the egress allowlist / default-deny SSRF
     // policy blocked is a POLICY decision, not a server fault — surface it as an honest 403
     // (Forbidden), distinct from the generic 500 below, so clients and alerting can tell a
     // refused federation target apart from a real execution failure. The engine marks every
@@ -8599,7 +8599,7 @@ pub(crate) fn engine_error_response(e: &str, config: &ServerConfig, apply_max_re
     execution_error(e)
 }
 
-/// [OPUS-4.8] (sq-ebii) Maps a writer-rejected UPDATE onto HTTP status: a cooperative budget
+/// (sq-ebii) Maps a writer-rejected UPDATE onto HTTP status: a cooperative budget
 /// hit (the memory cap / deadline tripped inside a `DELETE/INSERT … WHERE`) is a 413 / 503,
 /// exactly like a query; any other rejection (parse / semantic error) is the client's 400.
 fn update_rejection_response(e: &str, config: &ServerConfig) -> Response {
@@ -8607,7 +8607,7 @@ fn update_rejection_response(e: &str, config: &ServerConfig) -> Response {
     if let Some(report_json) = e.strip_prefix(SHACL_GUARD_REJECTED_PREFIX) {
         return text_response(StatusCode::UNPROCESSABLE_ENTITY, "application/json; charset=utf-8", report_json.to_string(), false);
     }
-    // [FABLE-5] (PR #1999 security review) The guard could not FULLY evaluate its shapes
+    // (PR #1999 security review) The guard could not FULLY evaluate its shapes
     // graph → the write was refused fail-CLOSED. This is the operator's guard
     // misconfiguration (a 5xx), not the client's data (422); the detail (which quotes
     // shapes-graph fragments) goes to the server log, not the response body.
@@ -8620,12 +8620,12 @@ fn update_rejection_response(e: &str, config: &ServerConfig) -> Response {
             detail,
         );
     }
-    // [OPUS-4.8] (sq-vpx4) A durable-write refusal is a retryable 503, NOT a 400. The write
+    // (sq-vpx4) A durable-write refusal is a retryable 503, NOT a 400. The write
     // was valid but could not be made durable (transient ENOSPC/I/O on the `--persist` mirror);
     // nothing was published or acked, the server is still serving reads, and the client should
     // retry. Sniffed before the budget/parse mapping so it always wins.
     if let Some(detail) = e.strip_prefix(DURABLE_UNAVAILABLE_PREFIX) {
-        // [OPUS-4.8] (sq-cz89/sq-j9zs) `detail` is the underlying I/O error, which carries the
+        // (sq-cz89/sq-j9zs) `detail` is the underlying I/O error, which carries the
         // server's `--persist` filesystem path (e.g. an ENOSPC on the mirror) — withhold it
         // from the client; the operator sees the path in the server log.
         return sanitized_error(
@@ -8640,7 +8640,7 @@ fn update_rejection_response(e: &str, config: &ServerConfig) -> Response {
         // so the 413 message must not consider `--max-results` → `apply_max_results = false`.
         return engine_error_response(e, config, false);
     }
-    // [OPUS-4.8] (sq-cz89/sq-j9zs) A parse/semantic rejection echoes the offending UPDATE
+    // (sq-cz89/sq-j9zs) A parse/semantic rejection echoes the offending UPDATE
     // token (and, for a `DELETE/INSERT … WHERE`, can quote loaded data); withhold it — the
     // full reason is in the server log.
     sanitized_error(
@@ -8665,7 +8665,7 @@ fn timeout_response(config: &ServerConfig) -> Response {
 // Graph Store HTTP Protocol — READ side
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] (sq-gxsj) Which graph a GSP request addresses: the default graph or a
+/// (sq-gxsj) Which graph a GSP request addresses: the default graph or a
 /// concrete named graph. Indirect identification yields `?default` → [`GraphRef::Default`]
 /// or `?graph=<iri>` → [`GraphRef::Named`]; direct identification turns the request URI
 /// into the graph's IRI ([`GraphRef::Named`]). The engine has a real named-graph store
@@ -8746,7 +8746,7 @@ fn mint_graph_iri() -> String {
     format!("urn:sparq:gsp:graph:{nanos:x}-{n:x}")
 }
 
-/// [OPUS-4.8] (sq-gxsj) Shared GSP dispatcher across direct + indirect identification.
+/// (sq-gxsj) Shared GSP dispatcher across direct + indirect identification.
 /// READ (`GET`/`HEAD`) serialises the addressed graph; WRITE (`PUT`/`POST`/`DELETE`)
 /// translates into a SPARQL Update submitted through the sequenced writer.
 async fn graph_store(
@@ -8756,7 +8756,7 @@ async fn graph_store(
     headers: &HeaderMap,
     body: Bytes,
 ) -> Response {
-    // [OPUS-4.8] sq-zcby: the GSP write methods (PUT/POST/DELETE, and PATCH which we 405) are
+    // sq-zcby: the GSP write methods (PUT/POST/DELETE, and PATCH which we 405) are
     // as powerful as an UPDATE, so they are gated as writes; GET/HEAD are reads (gated only
     // under --auth-token-read). Any other method is gated as a write too (fail-closed). The
     // gate runs before any work — even the 405 for an unsupported method is behind it for a
@@ -8765,7 +8765,7 @@ async fn graph_store(
         Method::GET | Method::HEAD => Operation::Read,
         _ => Operation::Write,
     };
-    // [OPUS-4.8] sq-0bxp: begin an access-audit record for the GSP request (the Graph-Store
+    // sq-0bxp: begin an access-audit record for the GSP request (the Graph-Store
     // surface has no query text to fingerprint — only the operation class + graph access).
     #[cfg(feature = "audit-log")]
     let audit = crate::audit::enabled(state.config()).then(|| {
@@ -8775,7 +8775,7 @@ async fn graph_store(
             None,
         )
     });
-    // [OPUS-4.8] sq-gos8: begin the RICHER structured access-audit record. The GSP surface
+    // sq-gos8: begin the RICHER structured access-audit record. The GSP surface
     // carries the resource at its highest fidelity — the named-graph IRI (or the default graph)
     // the request addresses. There is no query body to fingerprint (the body is RDF, not a
     // query); the action class distinguishes read vs write.
@@ -8810,7 +8810,7 @@ async fn graph_store(
         Method::PUT => gsp_put(state, graph, headers, &body).await,
         Method::POST => gsp_post(state, graph, headers, &body).await,
         Method::DELETE => gsp_delete(state, graph).await,
-        // [OPUS-4.8] (sq-hj4n, gh-916) PATCH = a graph-scoped, atomic in-place modify. Two body
+        // (sq-hj4n, gh-916) PATCH = a graph-scoped, atomic in-place modify. Two body
         // dialects: an always-on `application/sparql-update` body (executed atomically through the
         // same sequenced writer the /sparql update path uses, scoped to this graph), and — only
         // with the `n3-patch` feature AND the `--n3-patch` runtime flag — a Solid-style `text/n3`
@@ -8836,18 +8836,18 @@ async fn graph_store(
 }
 
 // ---------------------------------------------------------------------------
-// Graph Store HTTP Protocol — WRITE side (sq-gxsj) [OPUS-4.8]
+// Graph Store HTTP Protocol — WRITE side (sq-gxsj)
 // ---------------------------------------------------------------------------
 
 /// The body media type a GSP write carries. `sparq-core` token formats parse through
-/// `Graph::load_str`; RDF/XML is parsed by `oxrdfxml` ([OPUS-4.8] sq-rt6v) since the engine
+/// `Graph::load_str`; RDF/XML is parsed by `oxrdfxml` (sq-rt6v) since the engine
 /// loader has no RDF/XML token. The body carries the triples for ONE graph (the graph is
 /// named by the URL, not the body), so a quad syntax (N-Quads/TriG) is parsed as triples too
 /// — its graph names are folded, exactly as `Graph::load_str` does.
 enum BodyFormat {
     /// A `sparq-core` `Graph::load_str` token format ("turtle"/"ntriples"/"nquads"/"trig").
     Core(&'static str),
-    /// `application/rdf+xml`, parsed via `oxrdfxml`. [OPUS-4.8] sq-rt6v.
+    /// `application/rdf+xml`, parsed via `oxrdfxml`. sq-rt6v.
     RdfXml,
 }
 
@@ -8860,13 +8860,13 @@ fn rdf_format_for(content_type: &str) -> Option<BodyFormat> {
         "application/n-triples" | "text/plain" => Some(BodyFormat::Core("ntriples")),
         "application/n-quads" => Some(BodyFormat::Core("nquads")),
         "application/trig" => Some(BodyFormat::Core("trig")),
-        // [OPUS-4.8] sq-oy1f.1: JSON-LD request body, OPT-IN behind the `jsonld` feature (which
+        // sq-oy1f.1: JSON-LD request body, OPT-IN behind the `jsonld` feature (which
         // turns on `sparq-core/jsonld`, the `oxjsonld` parser `Graph::load_str` dispatches the
         // "jsonld" token to). Without the feature this arm is compiled out, so an
         // `application/ld+json` body is a plain `415` — byte-identical to before.
         #[cfg(feature = "jsonld")]
         "application/ld+json" => Some(BodyFormat::Core("jsonld")),
-        // [OPUS-4.8] sq-rt6v: RDF/XML request body.
+        // sq-rt6v: RDF/XML request body.
         "application/rdf+xml" => Some(BodyFormat::RdfXml),
         // No explicit Content-Type: default to Turtle (a superset of N-Triples), matching
         // the read side's default emission and common GSP client behaviour.
@@ -8875,7 +8875,7 @@ fn rdf_format_for(content_type: &str) -> Option<BodyFormat> {
     }
 }
 
-/// [OPUS-4.8] sq-oy1f.1: the `415` message for an unsupported GSP write-body media type. With
+/// sq-oy1f.1: the `415` message for an unsupported GSP write-body media type. With
 /// the `jsonld` feature ON it names `application/ld+json` among the accepted dialects; OFF it
 /// names only the always-available RDF syntaxes (an `application/ld+json` body is then a plain
 /// `415`), so the advertised contract matches what the build actually parses.
@@ -8883,7 +8883,7 @@ fn rdf_format_for(content_type: &str) -> Option<BodyFormat> {
 const GSP_WRITE_BODY_415: &str =
     "GSP write body must be RDF: Content-Type 'text/turtle', 'application/n-triples', \
      'application/n-quads', 'application/trig', 'application/rdf+xml' or 'application/ld+json'";
-/// [OPUS-4.8] sq-oy1f.1: the feature-OFF `415` message — JSON-LD is not parseable in this build.
+/// sq-oy1f.1: the feature-OFF `415` message — JSON-LD is not parseable in this build.
 #[cfg(not(feature = "jsonld"))]
 const GSP_WRITE_BODY_415: &str =
     "GSP write body must be RDF: Content-Type 'text/turtle', 'application/n-triples', \
@@ -8892,7 +8892,7 @@ const GSP_WRITE_BODY_415: &str =
 /// Parses a GSP request body into canonical N-Triples (the term syntax accepted verbatim
 /// inside a SPARQL `INSERT DATA` block), validating the RDF in the process. The `sparq-core`
 /// token formats reuse `Graph::load_str` (the same parsers the loader uses); RDF/XML is
-/// parsed by `oxrdfxml` and serialised straight to canonical N-Triples ([OPUS-4.8] sq-rt6v).
+/// parsed by `oxrdfxml` and serialised straight to canonical N-Triples (sq-rt6v).
 /// A parse failure is the caller's 400. `base` resolves any relative IRIs in the body — the
 /// addressed graph's IRI, so a relative reference resolves predictably.
 // clippy: Err is axum's `Response` (the idiomatic handler error, as in `resolve_pin`);
@@ -8916,7 +8916,7 @@ fn body_to_ntriples(
         BodyFormat::Core(format) => {
             let text = std::str::from_utf8(body)
                 .map_err(|_| bad_request("request body is not valid UTF-8"))?;
-            // [OPUS-4.8] (sq-cz89/sq-j9zs) `oxttl` echoes the offending body token verbatim
+            // (sq-cz89/sq-j9zs) `oxttl` echoes the offending body token verbatim
             // (e.g. an invalid subject quotes the loaded term) — withhold it; the operator
             // gets the full parse error in the server log.
             let graph = Graph::load_str(text, format).map_err(|e| {
@@ -8931,11 +8931,11 @@ fn body_to_ntriples(
             // and the terms are exactly what `INSERT DATA` will re-intern.
             nt_dump(&graph, &QueryBudget::default()).map_err(|e| execution_error(&e))
         }
-        // [OPUS-4.8] sq-rt6v: parse RDF/XML to triples and emit canonical N-Triples directly.
+        // sq-rt6v: parse RDF/XML to triples and emit canonical N-Triples directly.
         // `oxrdf`'s Display is canonical N-Triples term syntax, exactly what `INSERT DATA`
         // re-interns, so no Graph round-trip is needed (and RDF/XML is not a loader token).
         BodyFormat::RdfXml => {
-            // [OPUS-4.8] (sq-cz89/sq-j9zs) `oxrdfxml` echoes the offending body fragment — withhold it.
+            // (sq-cz89/sq-j9zs) `oxrdfxml` echoes the offending body fragment — withhold it.
             let triples = crate::graph::parse_rdfxml(body, base).map_err(|e| {
                 sanitized_error(
                     StatusCode::BAD_REQUEST,
@@ -8950,7 +8950,7 @@ fn body_to_ntriples(
     }
 }
 
-/// [OPUS-4.8] sq-rt6v: the base IRI a GSP write body resolves relative references against —
+/// sq-rt6v: the base IRI a GSP write body resolves relative references against —
 /// the addressed named graph's IRI (a sensible, round-trippable base), or `None` for the
 /// default graph (no natural base; an RDF/XML body with relative IRIs against the default
 /// graph is then a parse error, which is the honest outcome).
@@ -8996,7 +8996,7 @@ fn escape_iri(iri: &str) -> String {
 async fn apply_gsp_update(state: &AppState, update: String, success: StatusCode) -> Response {
     let st = state.clone();
     let task = tokio::task::spawn_blocking(move || st.apply_update(&update));
-    // [OPUS-4.8] sq-ebii: GSP writes inherit the same UPDATE timeout cap as the
+    // sq-ebii: GSP writes inherit the same UPDATE timeout cap as the
     // `application/sparql-update` path (they share the sequenced writer).
     match await_update_worker(task, &state.config).await {
         UpdateOutcome::Ok(number) => {
@@ -9004,20 +9004,20 @@ async fn apply_gsp_update(state: &AppState, update: String, success: StatusCode)
             with_generation_header(success.into_response(), number)
         }
         UpdateOutcome::Rejected(e) => {
-            // [GPT-5.6] sq-lsp7k.2.4: preserve the shared 422 + report mapping for GSP writes.
-            // [FABLE-5] (PR #1999 security review) …and the fail-closed unevaluable-guard 500.
+            // sq-lsp7k.2.4: preserve the shared 422 + report mapping for GSP writes.
+            // (PR #1999 security review) …and the fail-closed unevaluable-guard 500.
             #[cfg(feature = "shacl")]
             if e.starts_with(SHACL_GUARD_REJECTED_PREFIX)
                 || e.starts_with(SHACL_GUARD_UNEVALUABLE_PREFIX)
             {
                 return update_rejection_response(&e, &state.config);
             }
-            // [OPUS-4.8] sq-ebii: a budget hit (timeout / memory cap) inside a GSP write's
+            // sq-ebii: a budget hit (timeout / memory cap) inside a GSP write's
             // WHERE maps to 503/413; a genuine parse/semantic failure stays a 400.
             if e.contains("query budget exceeded") {
                 update_rejection_response(&e, &state.config)
             } else {
-                // [OPUS-4.8] (sq-kfel, ASVS-G3) The writer-rejection string `e` is the engine's
+                // (sq-kfel, ASVS-G3) The writer-rejection string `e` is the engine's
                 // error for the SERVER-MINTED `DROP`/`INSERT DATA` update built from the request
                 // body — it can quote term text drawn from the (caller-supplied) body, exactly
                 // the info-leak class the rest of the surface sanitizes (sq-cz89/sq-j9zs). Route
@@ -9045,7 +9045,7 @@ async fn apply_gsp_update(state: &AppState, update: String, success: StatusCode)
 /// DATA` for the default graph) so the replace is one atomic, group-committed generation.
 /// 201 when the graph did not exist (created), 204 when it replaced an existing one.
 async fn gsp_put(state: &AppState, graph: GraphRef, headers: &HeaderMap, body: &Bytes) -> Response {
-    // [OPUS-4.8] sq-ebii: inflate a `Content-Encoding: gzip` body under the
+    // sq-ebii: inflate a `Content-Encoding: gzip` body under the
     // decompression-ratio cap (zip-bomb guard) before parsing it as RDF.
     let body = match decode_request_body(body, headers, state.config()) {
         Ok(b) => b,
@@ -9088,7 +9088,7 @@ async fn gsp_post(
     headers: &HeaderMap,
     body: &Bytes,
 ) -> Response {
-    // [OPUS-4.8] sq-ebii: inflate a gzip body under the decompression-ratio cap first.
+    // sq-ebii: inflate a gzip body under the decompression-ratio cap first.
     let body = match decode_request_body(body, headers, state.config()) {
         Ok(b) => b,
         Err(e) => return e.into_response(),
@@ -9140,7 +9140,7 @@ async fn gsp_delete(state: &AppState, graph: GraphRef) -> Response {
         }
         GraphRef::Named(iri) => {
             if !graph_exists(state, &graph) {
-                // [OPUS-4.8] (sq-ttv2) The 404 reflects the REQUESTED graph IRI. Assessed and
+                // (sq-ttv2) The 404 reflects the REQUESTED graph IRI. Assessed and
                 // accepted as standard REST: `iri` is the CLIENT'S OWN input — either the
                 // verbatim `?graph=<uri>` value (indirect identification) or
                 // `http://<Host>/graphs/<path>` reconstructed from the client's request line +
@@ -9161,7 +9161,7 @@ async fn gsp_delete(state: &AppState, graph: GraphRef) -> Response {
     }
 }
 
-/// [OPUS-4.8] (sq-hj4n, gh-916) `PATCH <graph>` — apply an ATOMIC, graph-scoped in-place modify
+/// (sq-hj4n, gh-916) `PATCH <graph>` — apply an ATOMIC, graph-scoped in-place modify
 /// to the addressed graph. Two body dialects, classified by `Content-Type`:
 ///
 ///   * **`application/sparql-update`** (ALWAYS-ON, no feature, no new dep) — the body IS a SPARQL
@@ -9192,7 +9192,7 @@ async fn gsp_patch(
     headers: &HeaderMap,
     body: &Bytes,
 ) -> Response {
-    // [OPUS-4.8] sq-hj4n: inflate a `Content-Encoding: gzip` body under the decompression-ratio
+    // sq-hj4n: inflate a `Content-Encoding: gzip` body under the decompression-ratio
     // cap (zip-bomb guard) before parsing it, exactly as the GSP PUT/POST write paths do.
     let body = match decode_request_body(body, headers, state.config()) {
         Ok(b) => b,
@@ -9236,7 +9236,7 @@ async fn gsp_patch(
     }
 }
 
-/// [OPUS-4.8] (sq-hj4n) The `415` message for an unsupported `PATCH` body media type. With the
+/// (sq-hj4n) The `415` message for an unsupported `PATCH` body media type. With the
 /// `n3-patch` feature on, `text/n3` is offered (so it is named); with the feature off it is not.
 /// Two literals (not a runtime `if`) so the message is exactly right per build, and the
 /// feature-off message never advertises a dialect the build cannot serve.
@@ -9246,13 +9246,13 @@ fn n3_patch_unsupported_media_msg() -> &'static str {
      (always available) or 'text/n3' (Solid N3-Patch, when --n3-patch is enabled)"
 }
 
-/// [OPUS-4.8] (sq-hj4n) The feature-OFF `415` message — names only the always-on dialect.
+/// (sq-hj4n) The feature-OFF `415` message — names only the always-on dialect.
 #[cfg(not(feature = "n3-patch"))]
 fn n3_patch_unsupported_media_msg() -> &'static str {
     "PATCH body must be a graph patch: Content-Type 'application/sparql-update'"
 }
 
-/// [OPUS-4.8] (sq-hj4n, gh-916) Applies a Solid N3-Patch (`text/n3`) body to the addressed graph.
+/// (sq-hj4n, gh-916) Applies a Solid N3-Patch (`text/n3`) body to the addressed graph.
 /// Compiled ONLY behind the `n3-patch` feature. Honours the `--n3-patch` runtime flag: with it off
 /// the dialect is `415` even though the feature is compiled in (the double-opt-in posture). Parses
 /// the body, builds ONE atomic graph-scoped SPARQL Update, and submits it through the shared
@@ -9272,7 +9272,7 @@ async fn gsp_patch_n3(state: &AppState, graph: GraphRef, body: &Bytes) -> Respon
     let base = base_iri(&graph);
     let patch = match crate::n3_patch::parse(body, base) {
         Ok(p) => p,
-        // [OPUS-4.8] (sq-cz89/sq-j9zs) The parse error can quote the offending body token —
+        // (sq-cz89/sq-j9zs) The parse error can quote the offending body token —
         // withhold it from the client (the operator gets the detail in the server log) via the
         // same sanitized-error discipline the other body-parse paths use.
         Err(e) => {
@@ -9293,7 +9293,7 @@ async fn gsp_patch_n3(state: &AppState, graph: GraphRef, body: &Bytes) -> Respon
     run_update(state, update).await
 }
 
-/// [OPUS-4.8] (sq-hj4n) Assembles the ATOMIC, graph-scoped SPARQL Update for a parsed N3-Patch.
+/// (sq-hj4n) Assembles the ATOMIC, graph-scoped SPARQL Update for a parsed N3-Patch.
 ///
 /// * With a `solid:where` clause → a single pattern-based `DELETE { … } INSERT { … } WHERE { … }`
 ///   (one atomic modify; the empty blocks are omitted). The `WHERE` block reads the addressed
@@ -9362,7 +9362,7 @@ fn graph_exists(state: &AppState, graph: &GraphRef) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Serialises the addressed graph in the negotiated RDF syntax: `application/n-triples`
-/// (default), prefix-compacting `text/turtle`, or `application/rdf+xml` ([OPUS-4.8] sq-rt6v
+/// (default), prefix-compacting `text/turtle`, or `application/rdf+xml` (sq-rt6v
 /// — `text/turtle` is now a real compact Turtle document, not N-Triples-as-Turtle, and
 /// RDF/XML is newly offered). CPU-bound (a full-graph dump), so it runs on the blocking pool
 /// under the request timeout (no row cap: a dump is inherently graph-sized). A named graph
@@ -9394,7 +9394,7 @@ async fn serialise_graph(
     await_worker(task, &config).await
 }
 
-/// [OPUS-4.8] sq-rt6v: serialises an RDF graph (triple list) in the negotiated [`GraphFormat`]
+/// sq-rt6v: serialises an RDF graph (triple list) in the negotiated [`GraphFormat`]
 /// — the single dispatch shared by the CONSTRUCT/DESCRIBE and GSP-read paths. N-Triples is the
 /// canonical line form; Turtle compacts the [`crate::graph::COMMON_PREFIXES`]; RDF/XML is the
 /// `application/rdf+xml` document. The writers are guaranteed to emit well-formed output.
@@ -9426,7 +9426,7 @@ fn serialise_graph_triples_to<W: std::io::Write>(
         GraphFormat::NTriples => crate::graph::write_ntriples_to(triples, w),
         GraphFormat::Turtle => crate::graph::write_turtle_to(triples, w),
         GraphFormat::RdfXml => crate::graph::write_rdfxml_to(triples, w),
-        // [OPUS-4.8] sq-oy1f.1: JSON-LD (flattened) — only reachable when the `jsonld` feature
+        // sq-oy1f.1: JSON-LD (flattened) — only reachable when the `jsonld` feature
         // is on (the variant does not exist otherwise, so the match stays exhaustive).
         #[cfg(feature = "jsonld")]
         GraphFormat::JsonLd => crate::graph::write_jsonld_to(triples, w),
@@ -9435,7 +9435,7 @@ fn serialise_graph_triples_to<W: std::io::Write>(
 
 /// Dumps the addressed graph as a triple list by reusing the engine's SELECT path and the
 /// materialised terms — `?s ?p ?o` for the default graph, `GRAPH <g> { ?s ?p ?o }` for a
-/// named graph — so no private store API is needed. [OPUS-4.8] sq-rt6v: returns `Vec<Triple>`
+/// named graph — so no private store API is needed. sq-rt6v: returns `Vec<Triple>`
 /// (was N-Triples text) so the caller can serialise in any RDF syntax.
 fn graph_dump_triples(
     graph: &Graph,
@@ -9465,7 +9465,7 @@ fn graph_dump_triples(
     Ok(triples)
 }
 
-/// [OPUS-4.8] sq-rt6v: builds an [`oxrdf::Triple`] from an `?s ?p ?o` solution row, or `None`
+/// sq-rt6v: builds an [`oxrdf::Triple`] from an `?s ?p ?o` solution row, or `None`
 /// if the slots are not a legal triple shape (subject must be IRI/bnode, predicate an IRI).
 fn row_to_triple(s: &oxrdf::Term, p: &oxrdf::Term, o: &oxrdf::Term) -> Option<oxrdf::Triple> {
     use oxrdf::{NamedOrBlankNode, Term};
@@ -9530,7 +9530,7 @@ fn parse_form(s: &str) -> HashMap<String, String> {
     map
 }
 
-/// [OPUS-4.8] sq-z33x: collects EVERY value of a repeated `application/x-www-form-urlencoded`
+/// sq-z33x: collects EVERY value of a repeated `application/x-www-form-urlencoded`
 /// key (in request order). [`parse_form`]'s `HashMap` keeps only the last value, but the SPARQL
 /// 1.1 Protocol dataset parameters (`default-graph-uri` / `named-graph-uri` / `using-*`) are
 /// intrinsically multi-valued — a dataset can name several default and several named graphs — so
@@ -9545,7 +9545,7 @@ fn form_values(raw: &str, key: &str) -> Vec<String> {
         .collect()
 }
 
-/// [OPUS-4.8] sq-z33x: extracts the SPARQL 1.1 Protocol §2.1.4 query dataset override
+/// sq-z33x: extracts the SPARQL 1.1 Protocol §2.1.4 query dataset override
 /// (`default-graph-uri` / `named-graph-uri`) from a raw urlencoded string — the request URL query
 /// string for GET / direct-POST, or the form body for an `application/x-www-form-urlencoded` POST.
 fn query_dataset_override(raw: &str) -> DatasetOverride {
@@ -9555,7 +9555,7 @@ fn query_dataset_override(raw: &str) -> DatasetOverride {
     }
 }
 
-/// [OPUS-4.8] sq-z33x: extracts the SPARQL 1.1 Protocol §2.2 UPDATE dataset override
+/// sq-z33x: extracts the SPARQL 1.1 Protocol §2.2 UPDATE dataset override
 /// (`using-graph-uri` / `using-named-graph-uri`) from a raw urlencoded string.
 fn update_dataset_override(raw: &str) -> UsingOverride {
     UsingOverride {
@@ -9564,7 +9564,7 @@ fn update_dataset_override(raw: &str) -> UsingOverride {
     }
 }
 
-/// [OPUS-4.8] sq-z33x: applies the UPDATE dataset override to the update string, mapping a rewrite
+/// sq-z33x: applies the UPDATE dataset override to the update string, mapping a rewrite
 /// failure onto the right HTTP 400. Returns the (possibly rewritten) update on success.
 // clippy: Err is axum's `Response` (the idiomatic handler error, as at `resolve_pin`); boxing it
 // would only desync the call sites that already thread `Response` errors.
@@ -9599,10 +9599,10 @@ fn content_type(headers: &HeaderMap) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-ebii — decompression-ratio cap (zip-bomb guard)
+// sq-ebii — decompression-ratio cap (zip-bomb guard)
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] (sq-ebii) The error of a bounded body decode, mapped to its HTTP status.
+/// (sq-ebii) The error of a bounded body decode, mapped to its HTTP status.
 #[derive(Debug)]
 enum DecodeError {
     /// `Content-Encoding` names a codec we do not decode (only `gzip`/`x-gzip` and
@@ -9613,7 +9613,7 @@ enum DecodeError {
     TooLarge(String),
     /// The gzip stream was malformed → 400. The payload is the underlying decoder error,
     /// which can quote bytes of the caller's compressed body — it is the WITHHELD detail
-    /// ([OPUS-4.8] sq-cz89/sq-j9zs), routed to the server log, never the response body.
+    /// (sq-cz89/sq-j9zs), routed to the server log, never the response body.
     Malformed(String),
 }
 
@@ -9622,7 +9622,7 @@ impl DecodeError {
         match self {
             DecodeError::Unsupported(m) => json_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, &m),
             DecodeError::TooLarge(m) => json_error(StatusCode::PAYLOAD_TOO_LARGE, &m),
-            // [OPUS-4.8] (sq-cz89/sq-j9zs) Generic class to the client; decoder detail to the log.
+            // (sq-cz89/sq-j9zs) Generic class to the client; decoder detail to the log.
             DecodeError::Malformed(detail) => sanitized_error(
                 StatusCode::BAD_REQUEST,
                 "gzip-decode",
@@ -9633,7 +9633,7 @@ impl DecodeError {
     }
 }
 
-/// [OPUS-4.8] (sq-ebii) Decodes a request body honouring `Content-Encoding`, under the
+/// (sq-ebii) Decodes a request body honouring `Content-Encoding`, under the
 /// decompression-ratio cap (zip-bomb guard). Returns the body verbatim for `identity` /
 /// no encoding; for `gzip` it inflates with a HARD ceiling of
 /// `min(max_decompress_ratio × compressed_len, max_body_bytes)` and refuses (413) the
@@ -9673,7 +9673,7 @@ fn decode_request_body(
     }
 }
 
-/// [OPUS-4.8] (sq-ebii) gzip inflate bounded by the decompression-ratio cap. The ceiling is
+/// (sq-ebii) gzip inflate bounded by the decompression-ratio cap. The ceiling is
 /// `min(ratio × compressed_len, max_body_bytes)`, clamped to at least 1 byte so an empty /
 /// tiny compressed body whose ratio product rounds below its real (small) output still
 /// decodes. Reading is wrapped in `Read::take(ceiling + 1)`: if the decoder produces more
@@ -9701,7 +9701,7 @@ fn decode_gzip_bounded(body: &Bytes, config: &ServerConfig) -> Result<Bytes, Dec
     let mut out = Vec::with_capacity(ceiling.min(64 * 1024));
     decoder
         .read_to_end(&mut out)
-        // [OPUS-4.8] (sq-cz89/sq-j9zs) Carry only the raw decoder detail; `into_response`
+        // (sq-cz89/sq-j9zs) Carry only the raw decoder detail; `into_response`
         // logs it server-side and returns a generic "malformed gzip body" to the client.
         .map_err(|e| DecodeError::Malformed(e.to_string()))?;
     if out.len() > ceiling {
@@ -9776,7 +9776,7 @@ fn chunked_response(
 /// Structured error body: every error the server emits is `{"error": "..."}` JSON, so
 /// programmatic clients never have to scrape prose out of plain text.
 ///
-/// [OPUS-4.8] sq-bxog: `pub(crate)` so the SSE subscription handler returns the SAME error
+/// sq-bxog: `pub(crate)` so the SSE subscription handler returns the SAME error
 /// envelope as the rest of the HTTP surface for a pre-stream registration refusal.
 pub(crate) fn json_error(status: StatusCode, msg: &str) -> Response {
     let mut body = String::with_capacity(msg.len() + 16);
@@ -9827,7 +9827,7 @@ pub(crate) fn bad_request(msg: &str) -> Response {
     json_error(StatusCode::BAD_REQUEST, msg)
 }
 
-/// [OPUS-4.8] sq-406acc: a `406 Not Acceptable` for a present-but-unsatisfiable `Accept` header
+/// sq-406acc: a `406 Not Acceptable` for a present-but-unsatisfiable `Accept` header
 /// on a SPARQL query — the `Accept` named no result/RDF media type the server can produce and no
 /// wildcard, matching Oxigraph (w3c/sparql-protocol#40). The body is the structured
 /// `{"error":"..."}` envelope the rest of the surface uses (so a programmatic client need not
@@ -9848,7 +9848,7 @@ fn not_acceptable_response(head_only: bool) -> Response {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-cmvh (ASVS-G1, cert remediation #237) — security response headers
+// sq-cmvh (ASVS-G1, cert remediation #237) — security response headers
 //
 // ASVS V14.4 wants standard hardening response headers on every HTTP response. sparq-server
 // is a SPARQL *API* (it emits SPARQL-results JSON/XML/CSV/TSV and RDF — never HTML it asks a
@@ -9905,7 +9905,7 @@ pub(crate) const SECURITY_HEADERS: &[(header::HeaderName, &str)] = &[
     (header::REFERRER_POLICY, "no-referrer"),
 ];
 
-/// `map_response` middleware ([OPUS-4.8] sq-cmvh): stamps the [`SECURITY_HEADERS`] hardening
+/// `map_response` middleware (sq-cmvh): stamps the [`SECURITY_HEADERS`] hardening
 /// set onto every response — success, streamed and error alike. Each header is only set when
 /// absent, so a handler may override a specific one without this clobbering it. Header names
 /// and values are all static and pre-validated, so the `from_static` conversions never fail.
@@ -9920,7 +9920,7 @@ async fn security_headers(mut resp: Response) -> Response {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-o7o0 (ASVS V14.5.3) — OPT-IN first-party CORS
+// sq-o7o0 (ASVS V14.5.3) — OPT-IN first-party CORS
 //
 // sparq-server is a SPARQL DATA API and its DEFAULT is to emit NO CORS headers (an
 // empty [`CorsAllowlist`] => this middleware is not even installed; see `harden`). The
@@ -9942,7 +9942,7 @@ async fn security_headers(mut resp: Response) -> Response {
 /// DELETE are the GSP write verbs; QUERY is the SPARQL Protocol query verb
 /// (w3c/sparql-protocol#40, sq-b3df9) so a browser can preflight a `fetch(…, {method:
 /// 'QUERY'})`. A browser's actual request is still subject to every other guard (auth,
-/// body limit, …) — advertising a method here does not bypass them. [OPUS-4.8]
+/// body limit, …) — advertising a method here does not bypass them.
 const CORS_ALLOW_METHODS: &str = "GET, HEAD, POST, PUT, DELETE, QUERY, OPTIONS";
 
 /// The request headers advertised as allowed in a preflight when the browser does not
@@ -9956,7 +9956,7 @@ const CORS_ALLOW_HEADERS_DEFAULT: &str = "content-type, authorization";
 /// request.
 const CORS_MAX_AGE: &str = "600";
 
-/// [OPUS-4.8] sq-o7o0: the opt-in first-party CORS middleware (installed by [`harden`]
+/// sq-o7o0: the opt-in first-party CORS middleware (installed by [`harden`]
 /// only when [`ServerConfig::cors_allow`] is non-empty).
 ///
 /// Reads the request `Origin`; if it is allowlisted (exact match, never `*`), reflects it
@@ -10046,7 +10046,7 @@ async fn cors_layer(
 }
 
 // ---------------------------------------------------------------------------
-// Information-leak guard (sq-cz89 / sq-j9zs / sq-zg0u) [OPUS-4.8]
+// Information-leak guard (sq-cz89 / sq-j9zs / sq-zg0u)
 //
 // On the B3 no-auth-by-default path an unauthenticated caller could provoke an error
 // whose body echoed its own (or the loaded data's, or the server's filesystem path's)
@@ -10075,7 +10075,7 @@ fn sanitized_error(status: StatusCode, class: &str, safe_msg: &str, detail: &str
     json_error(status, safe_msg)
 }
 
-/// [OPUS-4.8] (sq-iu0c) A SERVICE egress refusal → HTTP 403 (Forbidden). The engine `msg`
+/// (sq-iu0c) A SERVICE egress refusal → HTTP 403 (Forbidden). The engine `msg`
 /// names the refused host (an info-leak / SSRF-probe oracle), so it is SANITIZED: the client
 /// gets only a stable, generic policy-refusal class message; the host detail goes to the
 /// server log via [`sanitized_error`], the same posture as [`execution_error`].
@@ -10119,7 +10119,7 @@ fn method_not_allowed(allow: &[Method]) -> Response {
 
 #[cfg(test)]
 mod touched_pods_tests {
-    //! [OPUS-4.8] (sq-uqh) Per-named-graph `PodId` extraction from a parsed SPARQL Update.
+    //! (sq-uqh) Per-named-graph `PodId` extraction from a parsed SPARQL Update.
     //! The whole point of Wave B's finer-than-global tagging: a write that names graph A
     //! must NOT bump graph B's epoch, while any write that cannot be scoped finer than the
     //! whole dataset MUST still bump the global pod (conservative, never under-invalidating).
@@ -10290,7 +10290,7 @@ mod touched_pods_tests {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-o4qf — bind-posture (no-auth non-loopback gate) tests
+// sq-o4qf — bind-posture (no-auth non-loopback gate) tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod bind_posture_tests {
@@ -10366,7 +10366,7 @@ mod bind_posture_tests {
         }
     }
 
-    // [OPUS-4.8] sq-zcby — auth folded into the bind decision.
+    // sq-zcby — auth folded into the bind decision.
 
     /// A WRITE-only token (reads still open) is NOT sufficient to bind a non-loopback address:
     /// --allow-remote is still required, because reads remain open on the remote bind. The
@@ -10432,10 +10432,10 @@ mod bind_posture_tests {
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] sq-qsm5z — running-query registry HTTP handlers
+// sq-qsm5z — running-query registry HTTP handlers
 // ---------------------------------------------------------------------------
 
-/// [SONNET-4.6] (sq-qsm5z) `GET /queries` — list currently executing SPARQL queries.
+/// (sq-qsm5z) `GET /queries` — list currently executing SPARQL queries.
 ///
 /// Returns a JSON object `{"queries": [...]}` where each entry carries `id`, `start`
 /// (Unix epoch ms), `fingerprint` (FNV-1a hex — never raw query text), and `elapsed_ms`.
@@ -10454,7 +10454,7 @@ async fn list_queries_handler(
     text_response(StatusCode::OK, "application/json", body, false)
 }
 
-/// [SONNET-4.6] (sq-qsm5z) `DELETE /queries/{id}` — cooperatively cancel one executing query.
+/// (sq-qsm5z) `DELETE /queries/{id}` — cooperatively cancel one executing query.
 ///
 /// Flips the `sq-kq9ia` `Arc<AtomicBool>` cancel flag that was wired into the query's
 /// `QueryBudget` at registration time. The engine observes the flag at its next cooperative
@@ -10486,7 +10486,7 @@ async fn cancel_query_handler(
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] sq-qsm5z — registry unit tests
+// sq-qsm5z — registry unit tests
 // ---------------------------------------------------------------------------
 
 #[cfg(all(test, feature = "query-registry"))]
@@ -10550,7 +10550,7 @@ mod query_registry_tests {
         assert!(cancel.load(Ordering::Acquire), "flag must be true after cancel");
     }
 
-    // [SONNET-4.6] (sq-m9prn) A read query and an UPDATE are distinguishable in the listing,
+    // (sq-m9prn) A read query and an UPDATE are distinguishable in the listing,
     // so an operator can tell which row is holding the sequenced writer thread.
     // Non-vacuity: collapsing `register_update` onto `register` makes both rows read
     // "query" and the `kind` assertions below fail.
@@ -10568,7 +10568,7 @@ mod query_registry_tests {
         assert!(kinds.contains(&"update".to_string()), "update row must be kind=update: {:?}", kinds);
     }
 
-    // [SONNET-4.6] (sq-m9prn) An update row is cancellable and RAII-cleaned exactly like a
+    // (sq-m9prn) An update row is cancellable and RAII-cleaned exactly like a
     // query row — the two properties `DELETE /queries/{id}` depends on.
     #[test]
     fn update_row_is_cancellable_and_raii_cleaned() {
@@ -10584,7 +10584,7 @@ mod query_registry_tests {
         assert_eq!(registry.list().len(), 0, "update row must be removed once the apply returns");
     }
 
-    // [SONNET-4.6] (sq-m9prn) The listing never carries raw query text — for updates too,
+    // (sq-m9prn) The listing never carries raw query text — for updates too,
     // which is where a `INSERT DATA` body would otherwise leak the written triples.
     #[test]
     fn update_row_exposes_no_raw_text() {
@@ -10599,7 +10599,7 @@ mod query_registry_tests {
         );
     }
 
-    // [SONNET-4.6] (sq-m9prn) Pins the ACTUAL security contract of the exposed fingerprint, so
+    // (sq-m9prn) Pins the ACTUAL security contract of the exposed fingerprint, so
     // the docs cannot drift back into claiming it is a one-way/"non-reversible" hash. FNV-1a is
     // UNKEYED: a party holding only the listing can recompute the fingerprint of candidate texts
     // offline and confirm which one is running. This test performs exactly that recovery — it is
@@ -10656,7 +10656,7 @@ mod query_registry_tests {
     }
 
     // ---------------------------------------------------------------------------
-    // [SONNET-4.6] sq-t1isr — EXPLAIN ANALYZE path registry tests
+    // sq-t1isr — EXPLAIN ANALYZE path registry tests
     //
     // These tests simulate the EXACT code pattern added to the EXPLAIN ANALYZE
     // spawn_blocking path in `run_query_pinned`.  They are the mutation target:
@@ -10745,7 +10745,7 @@ mod query_registry_tests {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-zcby — auth-gate unit tests (constant-time eq, Bearer parsing,
+// sq-zcby — auth-gate unit tests (constant-time eq, Bearer parsing,
 // mutation classification, the gate decision, posture derivation)
 // ---------------------------------------------------------------------------
 #[cfg(test)]
@@ -10902,7 +10902,7 @@ mod auth_tests {
         );
     }
 
-    // [OPUS-4.8] sq-cxk5: the WebSocket subprotocol-token channel + the WS auth gate.
+    // sq-cxk5: the WebSocket subprotocol-token channel + the WS auth gate.
 
     fn headers_with_subprotocol(value: &str) -> HeaderMap {
         let mut h = HeaderMap::new();
@@ -11013,11 +11013,11 @@ mod auth_tests {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-4w18 — SERVICE egress allowlist config wiring tests
+// sq-4w18 — SERVICE egress allowlist config wiring tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod hardening_unit_tests {
-    //! [OPUS-4.8] (sq-ebii) Pure-logic units for the memory cap (`tighter`) and the
+    //! (sq-ebii) Pure-logic units for the memory cap (`tighter`) and the
     //! decompression-ratio cap (`decode_request_body`). The HTTP-level 413/503 wiring is
     //! covered by tests/hardening.rs; these pin the boundary math without a server boot.
     use super::{decode_request_body, tighter, update_where_deadline, ServerConfig};
@@ -11034,7 +11034,7 @@ mod hardening_unit_tests {
         assert_eq!(tighter(Some(9), Some(7)), Some(7));
     }
 
-    // [OPUS-4.8] (sq-nulp) The writer-side WHERE deadline for an UPDATE is the TIGHTER of the
+    // (sq-nulp) The writer-side WHERE deadline for an UPDATE is the TIGHTER of the
     // read query_timeout and the opt-in update_where_timeout — that smaller value is what
     // bounds writer-queue head-of-line blocking. `None` only when BOTH are unset.
     #[test]
@@ -11058,7 +11058,7 @@ mod hardening_unit_tests {
         assert_eq!(with(Some(5), Some(30)), Some(Duration::from_secs(5)));
     }
 
-    // [OPUS-4.8] (sq-nulp) The DEFAULT config sets no update_where_timeout, so the update WHERE
+    // (sq-nulp) The DEFAULT config sets no update_where_timeout, so the update WHERE
     // budget is exactly the plain query_timeout — byte-for-byte the historical behaviour.
     #[test]
     fn update_where_deadline_defaults_to_query_timeout_unchanged() {
@@ -11149,7 +11149,7 @@ mod hardening_unit_tests {
 
 #[cfg(test)]
 mod json_error_tests {
-    //! [OPUS-4.8] sq-4vao: the `{"error":"…"}` envelope every error response carries hand-rolls
+    //! sq-4vao: the `{"error":"…"}` envelope every error response carries hand-rolls
     //! its JSON-string escaping (it is built without `serde_json` to stay dependency-light on the
     //! hot error path). A message containing a quote / backslash / control character MUST be
     //! escaped or the envelope is malformed (and an unescaped `"` is a JSON-injection vector that
@@ -11189,7 +11189,7 @@ mod json_error_tests {
 
     #[tokio::test]
     async fn sanitized_error_withholds_the_sensitive_detail_from_the_body() {
-        // [OPUS-4.8] sq-4vao: the info-leak guard (#241 posture) — the response body MUST carry
+        // sq-4vao: the info-leak guard (#241 posture) — the response body MUST carry
         // ONLY the generic class message, never the `detail` (which may echo caller input, a
         // loaded-data fragment, or a filesystem path). The detail goes to the server-side log.
         let detail = "patient_alice_smith is not a valid subject (/srv/data/phi.ttl)";
@@ -11236,7 +11236,7 @@ mod service_allow_config_tests {
         );
     }
 
-    // [OPUS-4.8] (sq-9xoh) Per-request / per-query egress-policy override hook.
+    // (sq-9xoh) Per-request / per-query egress-policy override hook.
     #[cfg(feature = "service")]
     mod override_hook {
         use super::ServiceAllowlist;
@@ -11332,7 +11332,7 @@ mod service_allow_config_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-vpx4) The HTTP status CONTRACT for a durable-write refusal: a
+/// (sq-vpx4) The HTTP status CONTRACT for a durable-write refusal: a
 /// `WriteError::Unavailable` (carried across `apply_update` with the internal
 /// `DURABLE_UNAVAILABLE_PREFIX`) maps to HTTP 503 (retryable) — NOT the default 400 for a
 /// rejected update, and NOT a 500. The internal marker must never leak to the client.
@@ -11370,7 +11370,7 @@ mod durable_degrade_tests {
             !body.contains("\\u0001"),
             "JSON-escaped internal marker leaked into the client-facing body: {body:?}",
         );
-        // [OPUS-4.8] (sq-cz89/sq-j9zs) The post-marker detail is the underlying I/O error,
+        // (sq-cz89/sq-j9zs) The post-marker detail is the underlying I/O error,
         // which can carry the server's `--persist` filesystem PATH (an info-leak). It is now
         // WITHHELD from the client body (routed to the server log instead). The client gets
         // only the stable, retry-actionable class message.
@@ -11396,7 +11396,7 @@ mod durable_degrade_tests {
 
 #[cfg(test)]
 mod gsp_helpers_tests {
-    //! [OPUS-4.8] sq-4vao: the pure Graph-Store-Protocol write helpers that mint the
+    //! sq-4vao: the pure Graph-Store-Protocol write helpers that mint the
     //! server-side SPARQL UPDATE from a request body. These are security-relevant — a graph
     //! IRI is interpolated into a `<…>` term, so `escape_iri` must neutralise the IRIREF
     //! delimiters that would otherwise let a crafted graph name inject SPARQL — and the
@@ -11469,7 +11469,7 @@ mod gsp_helpers_tests {
 
 #[cfg(test)]
 mod dataset_override_tests {
-    //! [OPUS-4.8] sq-4vao: the SPARQL 1.1 Protocol §2.1.4 / §2.2 dataset-override parsing
+    //! sq-4vao: the SPARQL 1.1 Protocol §2.1.4 / §2.2 dataset-override parsing
     //! (`default-graph-uri` / `named-graph-uri` / `using-*`) and the UPDATE rewrite wrapper that
     //! maps an override failure onto the right HTTP 400. The end-to-end protocol behaviour is in
     //! tests/protocol.rs; these pin the pure parse + the rewrite-error → Response mapping.
@@ -11523,7 +11523,7 @@ mod dataset_override_tests {
         assert_eq!(form_decode("a%zzb"), "a%zzb"); // not hex => literal '%'
     }
 
-    // [OPUS-4.8] sq-qcnn.37: direct tests for the parse_form/form_values `None` (no-equals)
+    // sq-qcnn.37: direct tests for the parse_form/form_values `None` (no-equals)
     // branch and the rewrite_update BadGraphUri arm — all left uncovered by the existing tests.
 
     #[test]
@@ -11565,7 +11565,7 @@ mod dataset_override_tests {
     }
 }
 
-/// [OPUS-4.8] sq-qcnn.37: direct tests for the pure helper functions that the integration-test
+/// sq-qcnn.37: direct tests for the pure helper functions that the integration-test
 /// path leaves uncovered: `row_to_triple` (BlankNode subject + non-legal predicate + non-legal
 /// subject shapes), `execution_error` (the whole function body is missed at the unit level), and
 /// `DecodeError::Unsupported` (the one arm of `into_response` left uncovered).
@@ -11634,7 +11634,7 @@ mod pure_helper_unit_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-iu0c) The HTTP status CONTRACT for a SERVICE egress refusal: a blocked
+/// (sq-iu0c) The HTTP status CONTRACT for a SERVICE egress refusal: a blocked
 /// SERVICE (host not on the allowlist / default-deny SSRF policy) is an authorization
 /// POLICY decision, not a server fault — it maps to HTTP 403 (Forbidden), NOT the 500 the
 /// generic execution-error path would give. The host-naming engine detail is still
@@ -11687,7 +11687,7 @@ mod egress_refusal_status_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-qcnn.19) Direct unit tests for `engine_error_response` budget-envelope
+/// (sq-qcnn.19) Direct unit tests for `engine_error_response` budget-envelope
 /// branches that are not reached by the loopback integration tests:
 ///   * the byte-cap (max-bytes) path naming `--max-query-bytes`
 ///   * the row-cap which-knob logic:
@@ -11813,7 +11813,7 @@ mod budget_envelope_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-qcnn.19) `timeout_response` with `query_timeout = None` uses
+/// (sq-qcnn.19) `timeout_response` with `query_timeout = None` uses
 /// `unwrap_or(0)` → the body says "0s". Pins the None arm of the timeout formatter,
 /// which is dead under the default config (`query_timeout` defaults to `Some(30s)`).
 #[cfg(test)]
@@ -11835,7 +11835,7 @@ mod timeout_none_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-qcnn.19) `not_acceptable_response` HEAD vs GET branch: `head_only=true`
+/// (sq-qcnn.19) `not_acceptable_response` HEAD vs GET branch: `head_only=true`
 /// must preserve the 406 status + headers but emit an EMPTY body (HEAD contract);
 /// `head_only=false` must carry the structured `{"error":"…"}` envelope.
 #[cfg(test)]
@@ -11867,7 +11867,7 @@ mod not_acceptable_head_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-qcnn.19) `json_error_bodies` async middleware — three distinct code
+/// (sq-qcnn.19) `json_error_bodies` async middleware — three distinct code
 /// paths that the unit tests here pin directly (the integration tests only exercise the
 /// middleware indirectly via the full stack and do not exercise every branch):
 ///
@@ -11966,7 +11966,7 @@ mod json_error_bodies_middleware_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-qcnn.19) `method_not_allowed` helper: must build a 405 with a correctly
+/// (sq-qcnn.19) `method_not_allowed` helper: must build a 405 with a correctly
 /// formatted `Allow` header listing every supplied method.
 #[cfg(test)]
 mod method_not_allowed_tests {
@@ -11999,7 +11999,7 @@ mod method_not_allowed_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-qcnn.19) `gsp_post` empty-body early-return paths (lines ~5774-5788).
+/// (sq-qcnn.19) `gsp_post` empty-body early-return paths (lines ~5774-5788).
 ///
 /// An empty body after decode means no triples to merge. The three cases are:
 ///
@@ -12080,7 +12080,7 @@ mod gsp_empty_body_paths_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-qcnn.19) `AppState::apply_update` MVCC sequencing: a successful INSERT
+/// (sq-qcnn.19) `AppState::apply_update` MVCC sequencing: a successful INSERT
 /// DATA returns a positive generation number; a malformed update returns Err; two sequential
 /// updates advance the generation monotonically. Pins the `Ok(number)` / `Err(Rejected(_))`
 /// arms of the `submit` result mapping.
@@ -12144,7 +12144,7 @@ mod apply_update_mvcc_tests {
     }
 }
 
-/// [GPT-5.6] (sq-kqofk) Server-adapter coverage for writer-thread CDC recording. This uses a
+/// (sq-kqofk) Server-adapter coverage for writer-thread CDC recording. This uses a
 /// deliberately wide group-commit window so concurrent submitters deterministically share one
 /// published generation. Mutation witness: replacing `spawn_with_commit_hook` with `spawn` makes
 /// the log empty, while changing the expected record/generation count makes the test fail.
@@ -12223,7 +12223,7 @@ mod change_stream_commit_hook_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// [FABLE-5] (gh-2436) THE operator-resync invariant on a RUNNING server: a lineage
+    /// (gh-2436) THE operator-resync invariant on a RUNNING server: a lineage
     /// swap (the restore shape — a fresh ring restarting at generation 0, writer respawned
     /// with the SAME hook state) breaks the stream fail-closed; `ChangeStreamState::rebase`
     /// with `new_lineage` appends the honest gap record THROUGH the live hook state (the
@@ -12310,7 +12310,7 @@ mod change_stream_commit_hook_tests {
     }
 }
 
-/// [OPUS-4.8] (sq-qcnn.19) `ServerConfig::from_env()` and `env_parse` coverage.
+/// (sq-qcnn.19) `ServerConfig::from_env()` and `env_parse` coverage.
 ///
 /// `from_env()` is the production entry point for reading all `SPARQ_*` environment
 /// variables into the config. These tests pin the function's scaffolding (the path
@@ -12322,13 +12322,13 @@ mod change_stream_commit_hook_tests {
 /// touches the environment holds the module-local `ENV_LOCK` (see `env_guard`) for the
 /// whole set → `from_env()` → remove critical section. That serialization — not any
 /// "single-threaded test binary" assumption — is what keeps one test's `SPARQ_*` write
-/// from leaking into another's `from_env()` read. [OPUS-4.8] sq-gum8.14.
+/// from leaking into another's `from_env()` read. sq-gum8.14.
 #[cfg(test)]
 mod from_env_tests {
     use super::{env_parse, ServerConfig};
     use std::sync::{Mutex, MutexGuard};
 
-    // [OPUS-4.8] sq-gum8.14: `std::env::{set_var,remove_var}` mutate the SINGLE
+    // sq-gum8.14: `std::env::{set_var,remove_var}` mutate the SINGLE
     // process-global environment, and `cargo test` runs the tests in this module
     // CONCURRENTLY on multiple threads. Without serialization, one test's
     // `set_var("SPARQ_*")` leaks into another test's `from_env()` read — which is
@@ -12411,7 +12411,7 @@ mod from_env_tests {
         assert!(result.is_none(), "unparseable env var value must yield None from env_parse");
     }
 
-    // [OPUS-4.8] (sq-p7kk5) Adaptive group-commit: default ON, env toggle, and the
+    // (sq-p7kk5) Adaptive group-commit: default ON, env toggle, and the
     // WriterConfig mapping — the write-path latency fix.
     #[test]
     fn adaptive_commit_is_on_by_default() {
@@ -12457,7 +12457,7 @@ mod from_env_tests {
         assert!(!super::writer_config(&off).adaptive_commit);
     }
 
-    // [OPUS-4.8] sq-qcnn.37: individual tests for each remaining SPARQ_* env-var body branch
+    // sq-qcnn.37: individual tests for each remaining SPARQ_* env-var body branch
     // that the existing tests leave uncovered. Each test sets exactly ONE env var, calls
     // from_env(), then removes it — keeping the set/remove within the same call so the
     // single-threaded coverage runner sees a clean environment. Tests are hermetic by the
@@ -12601,7 +12601,7 @@ mod from_env_tests {
         );
     }
 
-    // [OPUS-4.8] sq-qcnn.37: cover the remaining SPARQ_* env-var branches not yet exercised.
+    // sq-qcnn.37: cover the remaining SPARQ_* env-var branches not yet exercised.
     // Each test sets ONE env var, calls from_env, and immediately removes it to stay hermetic.
 
     #[test]
@@ -12671,7 +12671,7 @@ mod from_env_tests {
         assert!(!cfg.redact_logs, "SPARQ_LOG_FULL_REQUESTS=1 must disable redact_logs");
     }
 
-    // [GPT-5.6] sq-lsp7k.5.2: direct config tests for the public facets runtime flag.
+    // sq-lsp7k.5.2: direct config tests for the public facets runtime flag.
     #[cfg(feature = "facets")]
     #[test]
     fn facets_is_off_by_default() {
@@ -12692,7 +12692,7 @@ mod from_env_tests {
         assert!(cfg.facets, "SPARQ_FACETS=1 must enable the facet-count route");
     }
 
-    // [GPT-5.6] sq-lsp7k.9.3: direct config tests for the public completion runtime flag.
+    // sq-lsp7k.9.3: direct config tests for the public completion runtime flag.
     #[cfg(feature = "complete")]
     #[test]
     fn complete_is_off_by_default() {

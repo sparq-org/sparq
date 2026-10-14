@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-pbz04.4.5 (epic sq-pbz04.4) — the OWL 2 **Direct-Semantics arm** ratchet:
+//! sq-pbz04.4.5 (epic sq-pbz04.4) — the OWL 2 **Direct-Semantics arm** ratchet:
 //! the `inference::dl_suite` runner over the DIRECT-sanctioned arm of the OWL WG
 //! test-repository export (`tests/w3c/owl2/all.rdf`), with PINNED sparq-extension floors.
 //! 🤖 SPARQ agent.
@@ -51,7 +51,7 @@
 //!   (`UnknownReason::ConclusionAnonymousIndividual`), NEVER the old wrong skolem-constant
 //!   `NotEntailed` — e.g. `WebOnt-AnnotationProperty-002` (whose `ap` edge is an annotation, so
 //!   its conclusion `_:x owl:Thing` is an unanchored free-existential root) shifts from a
-//!   coincidental skolem pass to an honest abstention. [OPUS-4.8]
+//!   coincidental skolem pass to an honest abstention.
 //! - **M3 — reserved vocabulary treated as plain names.** OWL-Full-shaped axioms over
 //!   reserved IRIs (`rdfs:Class ≡ owl:Class`, `owl:imports` domain/range, `rdf:type`
 //!   domain) extract as ordinary names; the legacy dual-tagged expectation assumes the
@@ -68,7 +68,7 @@
 //!   closing it also correctly refuses three graphs that carry an anonymous composite
 //!   appearing in NO axiom and had been passing only by that accident (I5.26-001, I5.26-006
 //!   consistency; I5.5-005 positive-entailment) — all honest fail-closed abstentions, never
-//!   wrong verdicts. [OPUS-4.8]
+//!   wrong verdicts.
 //! - **M5 — ontology-header stripping vs a header-sensitive legacy expectation.** The
 //!   harness strips `owl:Ontology` typings on both sides (the RL/EL-lane convention);
 //!   WebOnt-Ontology-003's OWL-1-era non-entailment hinges on the stripped header.
@@ -84,7 +84,7 @@
 //!   extract to the atomic member and PASS — the whole `PROFILE_DIVERGENCES` pin cleared.
 //!   The arity rule is UNCHANGED for genuine ≥ 2-member intersections. (WebOnt-I5.26-001
 //!   was already removed under sq-pbz04.4.12: its anonymous singleton intersection appears
-//!   in no axiom, so the M4 fix ABSTAINS on it rather than reaching this rule.) [FABLE-5]
+//!   in no axiom, so the M4 fix ABSTAINS on it rather than reaching this rule.)
 //!
 //! ## Explicit-negative profile lane (sq-pbz04.4.16)
 //!
@@ -110,7 +110,7 @@
 //! green. The floor consts are read TEXTUALLY by `tests/scoreboard_floors.rs`, so the
 //! central scoreboard's mirrored values can never silently drift.
 
-// [FABLE-5] cfg gate, not a runtime branch — zero Direct-Semantics code compiles in the
+// cfg gate, not a runtime branch — zero Direct-Semantics code compiles in the
 // default state (the lean opt-in posture).
 #[cfg(not(feature = "dl-direct"))]
 #[test]
@@ -132,11 +132,11 @@ mod gated {
     /// Mirrored in `scoreboard::SUITES` and read TEXTUALLY by
     /// `tests/scoreboard_floors.rs`. A sparq EXTENSION measurement over the L1/L2
     /// fragment, NOT a W3C ProfileIdentificationTest conformance claim.
-    /// [FABLE-5] sq-pbz04.4.5
+    /// sq-pbz04.4.5
     /// Re-pinned by sq-pbz04.4.16 (M7 singleton-intersection normalization): +27 (68 → 95).
     /// The 27 pinned M7 rows (`WebOnt-I5.26-002`/`-005`, `WebOnt-disjointWith-003`…`-009`,
     /// each EL/QL/RL) whose singleton `owl:intersectionOf ( :A )` L1 now normalizes to its
-    /// member all PASS; `PROFILE_DIVERGENCES` is now empty. [FABLE-5]
+    /// member all PASS; `PROFILE_DIVERGENCES` is now empty.
     /// Re-pinned by sq-pbz04.4.9 (datatype-map IRI refusal at L1): −1 (95 → 94). One
     /// positively-tagged profile row (`WebOnt-I5.3-015`, tagged EL — the same case whose
     /// premise carries `xsd:integer`/`xsd:string` ranges) previously EXTRACTED under the
@@ -144,28 +144,28 @@ mod gated {
     /// IRI as a `DataConstruct`, so its profile set is `Unknown` → the row moves to the
     /// abstained bucket (`DL_PROFILE_ABSTAINED` 117 → 118). Honest fail-closed shift — a
     /// pass under a wrong opaque-datatype reading becomes an honest abstention (the M4
-    /// precedent). [FABLE-5]
+    /// precedent).
     /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −1 (94 → 93).
     /// `New-Feature-BottomObjectProperty-001` is tagged `test:profile EL` and previously
     /// extracted with `owl:bottomObjectProperty` read as an ordinary named role; L1 now
     /// refuses the built-in IRI, so its profile set is `Unknown` → the row moves to the
     /// abstained bucket (`DL_PROFILE_ABSTAINED` 118 → 119). The same honest fail-closed shift
     /// as the sq-pbz04.4.9 datatype-map precedent: a pass under a wrong opaque-role reading
-    /// becomes an honest abstention. [SONNET-4.6]
+    /// becomes an honest abstention.
     pub const DL_PROFILE_FLOOR: usize = 93;
 
     /// EXPLICIT-NEGATIVE profile lane REFUTED (pass) count — checkable
     /// `owl:NegativePropertyAssertion(case, test:profile, {EL|QL|RL})` rows the L2 checker
     /// DEFINITIVELY refuted (`NotIn`), driven `expect_in = false`. RISE-only in the ABSENCE
     /// of an extraction-boundary change: a genuine new full-profile restriction only ADDS
-    /// refutations. [FABLE-5] sq-pbz04.4.16
+    /// refutations. sq-pbz04.4.16
     /// Re-pinned by sq-pbz04.4.9 (datatype-map IRI refusal at L1): −2 (139 → 137). Two
     /// explicit-negation rows whose input carries a bare datatype IRI in a class position now
     /// REFUSE extraction (`DataConstruct`), so L2 can no longer answer `NotIn` on them — they
     /// move from refuted to abstained (`DL_PROFILE_NEGATIVE_ABSTAINED` 615 → 617; checkable
     /// denominator 319 → 317). Not a refutation regression: the rows became honestly
-    /// out-of-fragment, exactly the fail-closed L1 boundary. [FABLE-5]
-    /// Re-pinned by sq-zfwzq ([GPT-5.6]): +1 (137 → 138). Enabling fail-closed extraction
+    /// out-of-fragment, exactly the fail-closed L1 boundary.
+    /// Re-pinned by sq-zfwzq: +1 (137 → 138). Enabling fail-closed extraction
     /// of `owl:TransitiveProperty` makes one formerly-abstained negative-profile row
     /// definitively refutable; the two other newly checkable rows enter the measured In-gap.
     /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −4
@@ -174,7 +174,7 @@ mod gated {
     /// longer answer `NotIn` on them — they move from refuted to abstained
     /// (`DL_PROFILE_NEGATIVE_ABSTAINED` 614 → 619; checkable denominator 320 → 315). Not a
     /// refutation regression: the rows became honestly out-of-fragment, exactly the
-    /// fail-closed L1 boundary (the sq-pbz04.4.9 datatype precedent). [SONNET-4.6]
+    /// fail-closed L1 boundary (the sq-pbz04.4.9 datatype precedent).
     pub const DL_PROFILE_NEGATIVE_REFUTED: usize = 134;
 
     /// EXPLICIT-NEGATIVE profile lane In-GAP — checkable explicit-negation rows where L2
@@ -187,31 +187,30 @@ mod gated {
     /// M7 normalization moved the 27 singleton cases into the checkable set on BOTH sides).
     /// Unchanged by sq-pbz04.4.9: the two datatype rows that left the checkable set were
     /// REFUTED (not In-gap), so IN_GAP stays 180 while the denominator drops 319 → 317.
-    /// [FABLE-5] sq-pbz04.4.16
-    /// Re-pinned by sq-zfwzq ([GPT-5.6]): +2 (180 → 182) as two transitive-property inputs
+    /// sq-pbz04.4.16
+    /// Re-pinned by sq-zfwzq: +2 (180 → 182) as two transitive-property inputs
     /// become structurally checkable but L2 axiom-grammar membership cannot refute their
     /// full-profile negations. This is the existing honest In-gap, never a fabricated pass.
     /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −1
     /// (182 → 181), denominator 320 → 315. One In-gap row left the checkable set with the
-    /// four refuted ones; the gap is now 181 of 315. [SONNET-4.6]
+    /// four refuted ones; the gap is now 181 of 315.
     pub const DL_PROFILE_NEGATIVE_IN_GAP: usize = 181;
 
     /// EXPLICIT-NEGATIVE profile lane ABSTAINED — explicit-negation rows where L1 extraction
     /// refused (out-of-fragment input), so L2 abstained (`Unknown`) rather than answering
-    /// either direction. Pinned so the tri-state accounting closes. [FABLE-5] sq-pbz04.4.16
+    /// either direction. Pinned so the tri-state accounting closes. sq-pbz04.4.16
     /// Re-pinned by sq-pbz04.4.9 (datatype-map IRI refusal at L1): +2 (615 → 617) — the two
-    /// datatype rows that left [`DL_PROFILE_NEGATIVE_REFUTED`] land here. [FABLE-5]
-    /// Re-pinned by sq-zfwzq ([GPT-5.6]): −3 (617 → 614); all three rows moved out only
+    /// datatype rows that left [`DL_PROFILE_NEGATIVE_REFUTED`] land here.
+    /// Re-pinned by sq-zfwzq: −3 (617 → 614); all three rows moved out only
     /// because `dl_transitive` now extracts their transitivity axiom, closing accounting
     /// with +1 refuted pass and +2 measured In-gap rows above.
     /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): +5
     /// (614 → 619) — the four rows that left [`DL_PROFILE_NEGATIVE_REFUTED`] plus the one
     /// that left [`DL_PROFILE_NEGATIVE_IN_GAP`] land here, closing the accounting.
-    /// [SONNET-4.6]
     pub const DL_PROFILE_NEGATIVE_ABSTAINED: usize = 619;
 
     /// EXPLICIT-NEGATIVE profile lane OUT-OF-SCOPE — explicit-negation rows excluded at
-    /// selection (owl:imports / functional-syntax-only input). [FABLE-5] sq-pbz04.4.16
+    /// selection (owl:imports / functional-syntax-only input). sq-pbz04.4.16
     pub const DL_PROFILE_NEGATIVE_OUT_OF_SCOPE: usize = 74;
 
     /// DIRECT consistency/entailment lane pass count through the L4 `DirectChecker` —
@@ -221,8 +220,8 @@ mod gated {
     /// fragment — NOT full OWL 2 DL.
     ///
     /// COMPOSITION: 98 consistency + 14 inconsistency + 72 positive-entailment +
-    /// 2 negative-entailment = 186. [FABLE-5] sq-pbz04.4.5 / [OPUS-4.8]
-    /// sq-pbz04.4.12/.13 / [GPT-5.6] sq-zfwzq (was 96+14+70+2 before sq-zfwzq;
+    /// 2 negative-entailment = 186. sq-pbz04.4.5 /
+    /// sq-pbz04.4.12/.13 / sq-zfwzq (was 96+14+70+2 before sq-zfwzq;
     /// see the re-pin notes below).
     /// Re-pinned by sq-pbz04.4.11 (M1 named-composite fix): +8 net.
     /// Re-pinned by sq-pbz04.4.12 (M4 orphan/cyclic fix): −3 (192 → 189) — three graphs with
@@ -236,7 +235,7 @@ mod gated {
     /// bnode is a FREE-EXISTENTIAL ROOT (`_:x owl:Thing` with the anchoring edge being an
     /// annotation, so it is unanchored / non-rollable — its old skolem pass was coincidental
     /// and unsound for a non-trivial class). Net positive-entailment +1 (70 − 1 = 69), all
-    /// four consistency/inconsistency lanes unchanged. [OPUS-4.8] sq-pbz04.4.13
+    /// four consistency/inconsistency lanes unchanged. sq-pbz04.4.13
     /// Re-pinned by sq-pbz04.4.16 (M7 singleton-intersection normalization): −8 (190 → 182),
     /// ALL in the CONSISTENCY lane (105 → 97) and ALL honest fail-closed abstentions (verified:
     /// the fail set is UNCHANGED at 5, M3/M5/M6 — never a wrong verdict). MECHANISM: `WebOnt-
@@ -249,7 +248,7 @@ mod gated {
     /// DisjointClasses-001/-003 divergences), because "no clash" does not certify consistency
     /// there. Honest routing to a guarded branch, not a lost capability — the tableau would
     /// still decide these if reached; graduating them back is a deliberate future re-pin once
-    /// the RL divergence guard is narrowed or a tableau fallback is added. [FABLE-5]
+    /// the RL divergence guard is narrowed or a tableau fallback is added.
     /// UNCHANGED at 182 by sq-pbz04.4.9, but COMPOSITION shifted (97+69 → 96+70 across the
     /// consistency/positive-entailment split). TWO independent effects net to zero on the pass
     /// total AND leave the audited fail set (M3/M5/M6, 5 rows) exactly unchanged:
@@ -265,20 +264,20 @@ mod gated {
     ///       decided `NotEntailed` — sound-as-scoped under opaque datatypes, but a wrong-looking
     ///       definitive verdict on an input the fragment cannot actually reason about; the
     ///       escalated soundness verdict directed refusing at L1 rather than pinning it). Net:
-    ///       DIRECT pass total 182 → 182, fail set unchanged. [FABLE-5] sq-pbz04.4.9
-    /// Re-pinned by sq-zfwzq ([GPT-5.6]): +4 (182 → 186): +2 consistency
+    ///       DIRECT pass total 182 → 182, fail set unchanged. sq-pbz04.4.9
+    /// Re-pinned by sq-zfwzq: +4 (182 → 186): +2 consistency
     /// (`rdfbased-sem-char-transitive-inst`, `WebOnt-TransitiveProperty-001`) and +2
     /// positive entailment for those same composed-edge cases (96 → 98 consistency,
     /// 70 → 72 positive-entailment). They previously failed closed at L1; the premise
     /// now extracts into ALCHS and the declaration-free conclusion roles reuse only the
     /// premise-confirmed role kind. The audited five-row divergence set is unchanged.
-    /// UNCHANGED at 186 by sq-fj8lj ([FABLE-5] — `dl-direct` now enables
+    /// UNCHANGED at 186 by sq-fj8lj (`dl-direct` now enables
     /// `sparq-reason-dl/dispatch_ql`, graduating the QL dispatch branch to the
     /// sparq-reason-ql DL-Lite_R checker): MEASURED at the pinned export, ZERO corpus rows
     /// dispatch to the QL branch — reaching it needs in-QL ∧ not-RL ∧ not-EL, which forces
     /// a complement shape absent from the extractable corpus (the pre-change abstention
     /// histogram carried no "QL consistency pending" entry), so no row's verdict moves.
-    /// Re-pinned by sq-pbz04.4.8 ([SONNET-4.6] — the guard-abstention tableau fall-through,
+    /// Re-pinned by sq-pbz04.4.8 (the guard-abstention tableau fall-through,
     /// design record §4 as amended): **+41 (186 → 227)**, composition 136 consistency +
     /// 17 inconsistency + 72 positive-entailment + 2 negative-entailment. This is the bead,
     /// and it is the largest single move this floor has made. MECHANISM: when the owning
@@ -306,7 +305,7 @@ mod gated {
     /// sq-pbz04.4.9 precedent, where the escalated soundness verdict likewise directed
     /// refusing at L1 rather than pinning a wrong definitive verdict. With that refusal the
     /// inconsistency lane's fail count returns to 0 and both rows abstain honestly.
-    /// [SONNET-4.6]
+    ///
     /// Re-pinned by #4762 (bottom properties decided as empty roles): +2 (227 → 229),
     /// composition 136 consistency + 19 inconsistency + 72 positive- + 2 negative-entailment.
     /// `New-Feature-BottomObjectProperty-001` and `New-Feature-BottomDataProperty-001`
@@ -320,21 +319,21 @@ mod gated {
 
     /// Abstained (fail-closed OutOfFragment / guard / deferred / budget) row totals,
     /// EXACT-pinned so the tri-state accounting is closed: profile lane, then the four
-    /// reasoning lanes summed. [FABLE-5] sq-pbz04.4.5
+    /// reasoning lanes summed. sq-pbz04.4.5
     /// Re-pinned by sq-pbz04.4.12 (M4 orphan/cyclic fix): +3 (114 → 117). Closing the
     /// declaration-typing reachability bypass makes the profile lane's extraction refuse the
     /// three `WebOnt-I5.26-001` profile rows (EL/QL/RL): the input carries an anonymous
     /// `owl:intersectionOf` that appears in no axiom, so extraction now fails → the profile
     /// set is `Unknown` → abstain (previously it extracted and answered a wrong `NotIn`, the
     /// M7 singleton-intersection divergence — now superseded by the honest abstention).
-    /// [OPUS-4.8] sq-pbz04.4.12
+    /// sq-pbz04.4.12
     /// Re-pinned by sq-pbz04.4.9 (datatype-map IRI refusal at L1): +1 (117 → 118). The
     /// `WebOnt-I5.3-015` positive profile row (EL-tagged; its premise carries `xsd:integer`/
     /// `xsd:string` ranges) now REFUSES extraction, moving from a pass to an abstention (see
-    /// [`DL_PROFILE_FLOOR`]). [FABLE-5]
+    /// [`DL_PROFILE_FLOOR`]).
     /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): +1
     /// (118 → 119). The `New-Feature-BottomObjectProperty-001` positive profile row (EL-tagged)
-    /// now REFUSES extraction — see [`DL_PROFILE_FLOOR`]. [SONNET-4.6]
+    /// now REFUSES extraction — see [`DL_PROFILE_FLOOR`].
     pub const DL_PROFILE_ABSTAINED: usize = 119;
     /// See [`DL_PROFILE_ABSTAINED`].
     /// Re-pinned by sq-pbz04.4.11: +4 from the 4 consistency cases that shifted from
@@ -345,33 +344,33 @@ mod gated {
     /// OutOfFragment (fail-closed refusal), and additionally REFUSES 3 previously-passing
     /// rows that carried an unconsumed anonymous composite the declaration typing had been
     /// rescuing (I5.26-001, I5.26-006 consistency; I5.5-005 positive-entailment) — all
-    /// honest abstentions, never wrong verdicts. [OPUS-4.8] sq-pbz04.4.12
+    /// honest abstentions, never wrong verdicts. sq-pbz04.4.12
     /// Re-pinned by sq-pbz04.4.13 (M2 conclusion-bnode fix): +1 (463 → 464). The
     /// free-existential-root conclusion bnode of `WebOnt-AnnotationProperty-002` shifts from a
     /// (coincidental) Pass to a fail-closed `ConclusionAnonymousIndividual` abstention; the two
-    /// graduated M2 cases move Fail → Pass (they never counted as abstentions). [OPUS-4.8]
+    /// graduated M2 cases move Fail → Pass (they never counted as abstentions).
     /// Re-pinned by sq-pbz04.4.16 (M7 singleton-intersection normalization): +8 (464 → 472).
     /// The 8 consistency cases (`WebOnt-disjointWith-003`…`-009`, `WebOnt-I5.26-005`) that the
     /// M7 fix re-routes from the ALCH tableau (Pass) to the RL branch move to a fail-closed
     /// `RlDivergenceGuard("owl:disjointWith")` abstention — see [`DL_DIRECT_FLOOR`] for the full
-    /// mechanism (honest routing to a guarded branch, never a wrong verdict). [FABLE-5]
+    /// mechanism (honest routing to a guarded branch, never a wrong verdict).
     /// UNCHANGED at 472 by sq-pbz04.4.9 (measured), composition-shifted: the new
     /// `SubObjectPropertyOf` conclusion encoding graduates property-axiom-conclusion rows OUT
     /// of abstention (−N), while the L1 datatype-map refusal moves the `WebOnt-I5.3-015`
     /// consistency row plus its would-be positive-entailment divergence INTO OutOfFragment
     /// abstention (+N) — the two effects net to zero on the total; see [`DL_DIRECT_FLOOR`].
-    /// [FABLE-5] sq-pbz04.4.9
-    /// Re-pinned by sq-zfwzq ([GPT-5.6]): −4 (472 → 468), exactly the two consistency
+    /// sq-pbz04.4.9
+    /// Re-pinned by sq-zfwzq: −4 (472 → 468), exactly the two consistency
     /// and two positive-entailment rows graduated into [`DL_DIRECT_FLOOR`].
     /// UNCHANGED at 468 by sq-fj8lj (the graduated QL dispatch branch): zero corpus rows
     /// reach the QL branch — see the [`DL_DIRECT_FLOOR`] note.
-    /// Re-pinned by sq-pbz04.4.8 ([SONNET-4.6]): **−41 (468 → 427)**, composition 194
+    /// Re-pinned by sq-pbz04.4.8: **−41 (468 → 427)**, composition 194
     /// consistency + 96 inconsistency + 123 positive-entailment + 14 negative-entailment.
     /// The mirror image of the [`DL_DIRECT_FLOOR`] +41: the guard-abstention tableau
     /// fall-through is strictly abstention-REDUCING, so every row it graduated leaves this
     /// bucket and nothing enters it from that change. The L1 built-in-property refusal moves
     /// its 2 rows WITHIN the bucket (guard → out-of-fragment), not into or out of it, which
-    /// is why the two deltas are exactly equal and opposite. [SONNET-4.6]
+    /// is why the two deltas are exactly equal and opposite.
     /// Re-pinned by #4762: −2 (427 → 425) — the two bottom-property inconsistency rows
     /// graduated into [`DL_DIRECT_FLOOR`] (inconsistency abstained 96 → 94).
     pub const DL_DIRECT_ABSTAINED: usize = 425;
@@ -384,13 +383,13 @@ mod gated {
     /// this list — those 4 cases now ABSTAIN (OutOfFragment refusal) rather than producing
     /// wrong definitive verdicts. M1 (named-composite name-binding) was FIXED by
     /// sq-pbz04.4.11; M2 (conclusion-bnode existential reading) was FIXED by sq-pbz04.4.13 and
-    /// its two cases removed — they now PASS. [FABLE-5] sq-pbz04.4.5 / [OPUS-4.8] sq-pbz04.4.13
+    /// its two cases removed — they now PASS. sq-pbz04.4.5 / sq-pbz04.4.13
     const DOCUMENTED_DIVERGENCES: &[(&str, &str)] = &[
         // M2 (anonymous individuals in the conclusion read as constants) FIXED by
         // sq-pbz04.4.13 — `somevaluesfrom2bnode` / `WebOnt-someValuesFrom-003` now roll their
         // tree-shaped conclusion bnodes into existential class assertions and PASS; a
         // non-rollable conclusion bnode (e.g. WebOnt-AnnotationProperty-002's
-        // free-existential root) abstains fail-closed, never a wrong verdict. [OPUS-4.8]
+        // free-existential root) abstains fail-closed, never a wrong verdict.
         //
         // --- M3: reserved vocabulary treated as plain names ---
         (
@@ -409,7 +408,7 @@ mod gated {
         ),
         // M4 (orphan/cyclic list and unconsumed backbone) FIXED by sq-pbz04.4.12 —
         // WebOnt-I5.5-003/-004/-006/-007 now correctly ABSTAIN (OutOfFragment refusal)
-        // instead of producing wrong Consistent / Entailed verdicts. [OPUS-4.8]
+        // instead of producing wrong Consistent / Entailed verdicts.
         //
         // --- M5: header-stripping vs a header-sensitive legacy expectation ---
         (
@@ -435,7 +434,7 @@ mod gated {
     /// and `DL_PROFILE_FLOOR` rose 68 → 95. `WebOnt-I5.26-001` had already been removed by
     /// sq-pbz04.4.12 (its anonymous singleton appears in no axiom → the M4 orphan fix
     /// ABSTAINS, never reaching the arity rule). The exact-set assertion keeps the lane
-    /// RED if any future regression re-introduces a positive-tag `NotIn`. [FABLE-5]
+    /// RED if any future regression re-introduces a positive-tag `NotIn`.
     const PROFILE_DIVERGENCES: &[(&str, &str)] = &[];
 
     /// RENDER ROUND-TRIP arm (sq-pbz04.4.17) — the number of DIRECT-arm corpus documents
@@ -452,7 +451,7 @@ mod gated {
     /// self-referential `WebOnt-someValuesFrom-003` rendering to a cyclic expression the
     /// extractor refuses) — fixed by always emitting the explicit
     /// `A owl:equivalentClass _:b` shape (see `render.rs`), which moved those 15 from
-    /// violations to passes (278 → 293). [FABLE-5] sq-pbz04.4.17
+    /// violations to passes (278 → 293). sq-pbz04.4.17
     /// Re-pinned by sq-pbz04.4.9 (datatype-map IRI refusal at L1): −2 (293 → 291). Two
     /// DIRECT-arm documents carried a bare `xsd:*` datatype IRI in a class-expression
     /// position (an `rdfs:range`/`rdfs:domain` object) and had been round-tripping through
@@ -460,8 +459,8 @@ mod gated {
     /// (`extract.rs` `datatype_iri_name`), so they move from round-tripped to
     /// extraction-refused (`DL_RENDER_ROUNDTRIP_REFUSED` 378 → 380). Honest shift — a
     /// coincidental round-trip under a wrong reading becomes an honest refusal; `violations`
-    /// stays 0 (no fidelity bug). [FABLE-5]
-    /// Re-pinned by sq-zfwzq ([GPT-5.6]): +5 (291 → 296). Five corpus documents whose
+    /// stays 0 (no fidelity bug).
+    /// Re-pinned by sq-zfwzq: +5 (291 → 296). Five corpus documents whose
     /// only formerly-unmodelled role characteristic was `owl:TransitiveProperty` now
     /// extract and round-trip through the feature-gated structural axiom; violations stay 0.
     /// Re-pinned by sq-pbz04.4.8 (L1 built-in fixed-extension property refusal): −2
@@ -469,15 +468,14 @@ mod gated {
     /// closed at 672 documents. The two `New-Feature-{Top,Bottom}ObjectProperty-001` premise
     /// documents no longer extract, so they leave the round-trip pass set for the
     /// extraction-refused bucket. `violations` remains EMPTY, which is the load-bearing
-    /// assertion here: no renderer/extractor fidelity bug is involved. [SONNET-4.6]
+    /// assertion here: no renderer/extractor fidelity bug is involved.
     pub const DL_RENDER_ROUNDTRIP_FLOOR: usize = 294;
     /// See [`DL_RENDER_ROUNDTRIP_FLOOR`] — documents the L1 extractor refused
     /// (out-of-ALCH-fragment; the renderer contract is scoped to successful extractions).
     /// Re-pinned by sq-pbz04.4.9: +2 (378 → 380) — see [`DL_RENDER_ROUNDTRIP_FLOOR`].
-    /// Re-pinned by sq-zfwzq ([GPT-5.6]): −5 (380 → 375), exactly the five documents
+    /// Re-pinned by sq-zfwzq: −5 (380 → 375), exactly the five documents
     /// graduated to [`DL_RENDER_ROUNDTRIP_FLOOR`].
     /// Re-pinned by sq-pbz04.4.8: +2 (375 → 377). See [`DL_RENDER_ROUNDTRIP_FLOOR`].
-    /// [SONNET-4.6]
     pub const DL_RENDER_ROUNDTRIP_REFUSED: usize = 377;
     /// See [`DL_RENDER_ROUNDTRIP_FLOOR`] — documents whose RDF/XML literal oxrdfxml
     /// rejects (the M6 mechanism, `FS2RDF-literals-ar`); they reach no lane's extraction.
@@ -554,7 +552,7 @@ mod gated {
         let text = std::fs::read_to_string(&export)
             .unwrap_or_else(|e| panic!("read {}: {e}", export.display()));
         let report = dl_suite::run_render_roundtrip_arm(&text).expect("all.rdf parses");
-        // [FABLE-5] Grep-able ratchet line — pass count in field $8, positional args
+        // Grep-able ratchet line — pass count in field $8, positional args
         // (CodeQL rust/unused-variable guard).
         println!("{}", report.render());
         println!(
@@ -804,7 +802,7 @@ mod gated {
             .unwrap_or_else(|e| panic!("read {}: {e}", export.display()));
         let report = dl_suite::run_direct_arm(&text).expect("all.rdf parses");
 
-        // [FABLE-5] The grep-able ratchet lines — pass count in field $7. Positional
+        // The grep-able ratchet lines — pass count in field $7. Positional
         // `println!` args (CodeQL rust/unused-variable guard).
         println!("{}", report.render());
         println!(

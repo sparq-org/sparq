@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-s1uy (epic sq-dnko / sq-3183): Phase 0 skeleton of the OPT-IN
+# sq-s1uy (epic sq-dnko / sq-3183): Phase 0 skeleton of the OPT-IN
 # streaming federation CLIENT. This crate is the query *consumer* that fans out to
 # heterogeneous remote RDF sources (full SPARQL endpoints, brTPF, TPF, the local
 # engine), discovers each source's capability, plans a federated execution (REUSING
@@ -24,7 +24,7 @@ description = "Streaming federation CLIENT over heterogeneous remote RDF sources
 # exempt from the bench + SKILL artifact requirements; README still shipped). The
 # dependency arrow points one-way INTO sparq-engine — the engine NEVER depends on the
 # client — and that boundary is enforced by scripts/fedclient-boundary-guard.sh and the
-# `boundary` integration test. [OPUS-4.8] sq-s1uy.
+# `boundary` integration test. sq-s1uy.
 publish = false
 
 [features]
@@ -44,7 +44,7 @@ fedclient = [
     "dep:oxttl",
     "dep:spargebra",
     "dep:rustc-hash",
-    # [OPUS-4.8] sq-nfxl: ureq is the discovery client's blocking HTTP GET (Phase 1). It is
+    # sq-nfxl: ureq is the discovery client's blocking HTTP GET (Phase 1). It is
     # already in the tree (sparq-engine's `service` transport pulls the same crate), and is
     # native-only — the discovery module `#[cfg]`-excludes it from the wasm build.
     "dep:ureq",
@@ -56,7 +56,7 @@ fedclient = [
     # fragment transport and the discovery probe. Already in the tree via sparq-engine.
     "dep:sparq-core",
 ]
-# [OPUS-4.8] sq-ij5x (epic sq-dnko, FINAL phase): Phase-7 client-side ADAPTIVE re-planning.
+# sq-ij5x (epic sq-dnko, FINAL phase): Phase-7 client-side ADAPTIVE re-planning.
 # OFF by default; IMPLIES `fedclient` (it is the streaming client's execution loop) AND
 # `sparq-fedplan/adaptive-replan` (it DRIVES that planner's AdaptiveExecutor/RuntimeStats/
 # ReplanPolicy on the unjoined remainder — the re-plan DECISION engine lives in the planner,
@@ -65,7 +65,7 @@ fedclient = [
 # `adaptive-replan` edge into `sparq-fedplan` is not pulled. The dependency arrow still points
 # one-way INTO the engine (never the reverse), so the boundary guard is unaffected.
 fedclient-adaptive = ["fedclient", "sparq-fedplan/adaptive-replan"]
-# [GPT-5.6] sq-fx5id: bounded, per-query pattern-level ASK/cardinality probing. OFF by
+# sq-fx5id: bounded, per-query pattern-level ASK/cardinality probing. OFF by
 # default and implies the client surface whose SSRF-guarded Fetcher + planner bridge it reuses.
 pattern_probe = ["fedclient"]
 
@@ -79,7 +79,7 @@ sparq-engine = { path = "../sparq-engine", optional = true }
 # Term model + SPARQL algebra (already in the tree) for the source/query surface.
 oxrdf = { workspace = true, optional = true }
 spargebra = { workspace = true, optional = true }
-# [OPUS-4.8] sq-nfxl: N-Triples parsing for the Service-Description / VoID discovery
+# sq-nfxl: N-Triples parsing for the Service-Description / VoID discovery
 # documents, and the small hash maps the SD parser builds. Both already in the workspace.
 oxttl = { workspace = true, optional = true }
 rustc-hash = { workspace = true, optional = true }
@@ -88,17 +88,17 @@ rustc-hash = { workspace = true, optional = true }
 # `fedclient` tree gains no new crate. Version pinned to match.
 serde_json = { version = "1", optional = true }
 sparq-core = { path = "../sparq-core", default-features = false, optional = true }
-# [OPUS-4.8] sq-nfxl: the discovery client's blocking HTTP GET (SSRF-guarded). Native-only;
+# sq-nfxl: the discovery client's blocking HTTP GET (SSRF-guarded). Native-only;
 # the discovery module gates it out of wasm. Mirrors sparq-engine's `service` ureq config so
 # the resolved dependency is the SAME crate/version (no new tree growth on a default build).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# [OPUS-4.8] sq-g2xs: ureq 3 (was 2) — drops the unmaintained `rustls-pemfile` (RUSTSEC-2025-0134).
+# sq-g2xs: ureq 3 (was 2) — drops the unmaintained `rustls-pemfile` (RUSTSEC-2025-0134).
 # `rustls,platform-verifier` is the faithful successor of ureq 2's `tls,native-certs` (rustls TLS +
 # OS-trust-store cert validation). Mirrors sparq-engine's `service` ureq config so the resolved
 # dependency is the SAME crate/version (no new tree growth on a default build).
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"], optional = true }
 
-# [OPUS-4.8] sq-j27p: the Phase-3 result-equivalence test
+# sq-j27p: the Phase-3 result-equivalence test
 # (`tests/planner_result_equals_local_eval.rs`, gated on `fedclient`) builds an in-process
 # `sparq_core::Graph`, serves each leaf sub-query from the REAL engine, and compares the
 # materialised federated result against `sparq_engine::query`. These dev-deps exist ONLY for
@@ -107,7 +107,7 @@ ureq = { version = "3", default-features = false, features = ["rustls", "platfor
 [dev-dependencies]
 sparq-core = { path = "../sparq-core" }
 sparq-engine = { path = "../sparq-engine", features = ["service"] }
-# [OPUS-4.8] sq-my8wd.2: stand up a REAL in-process `sparq-server` loopback endpoint on
+# sq-my8wd.2: stand up a REAL in-process `sparq-server` loopback endpoint on
 # `127.0.0.1:0` in `tests/endpoint_loopback_result_equals_local.rs` (gated on `fedclient`), so
 # the `Endpoint` SRJ adapter + `discovery` are driven over the crate's own native `ureq` HTTP
 # transport — closing the honest gap that the other result-equals-local tests only exercise the

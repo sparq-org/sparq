@@ -2,7 +2,7 @@
 //! transitive `strongerThan` closure, the reflexive `atLeast` lift, the
 //! `gteq` discharge rule, and the Rust default-deny universal.
 //!
-//! 🤖 SPARQ agent — sq-ufsi9 (epic sq-0dksu) [OPUS-4.8]. The §4.3.3 worked
+//! 🤖 SPARQ agent — sq-ufsi9 (epic sq-0dksu). The §4.3.3 worked
 //! end-to-end example (empty under the strict preference, non-empty under the
 //! relaxed one) is the GOLDEN integration test in
 //! `tests/secprop_admissibility.rs`; these pin the rule mechanics.

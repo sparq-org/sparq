@@ -1,4 +1,4 @@
-// [FABLE-5] sq-pbz04.4.4 (epic sq-pbz04.4) — integration tests for the L4 fragment-dispatch
+// sq-pbz04.4.4 (epic sq-pbz04.4) — integration tests for the L4 fragment-dispatch
 // Direct-Semantics checker + entailment-by-refutation (design record
 // research/owl2-direct-semantics-scoping.md §4).
 //
@@ -35,7 +35,7 @@ fn parse(body: &str) -> (Dict, Vec<[Id; 3]>) {
 /// space across both documents: each distinct label (`_:foo`) maps to one dict id regardless
 /// of which document introduced it. Tests that use blank nodes in BOTH the premise and the
 /// conclusion must therefore use disjoint blank-node labels to avoid aliasing distinct
-/// anonymous individuals. [OPUS-4.8] sq-pbz04.4.6 — stale "blank-node-free" claim removed.
+/// anonymous individuals. sq-pbz04.4.6 — stale "blank-node-free" claim removed.
 fn parse_two(premise: &str, conclusion: &str) -> (Dict, Vec<[Id; 3]>, Vec<[Id; 3]>) {
     let (mut dict, prem) = parse(premise);
     let (cdict, ctriples) = parse(conclusion);
@@ -309,7 +309,7 @@ fn ql_always_pending() {
     assert_eq!(branch, Branch::QlDeferred);
 }
 
-// [FABLE-5] sq-fj8lj acceptance: with `dispatch_ql` the QL branch delegates to the
+// sq-fj8lj acceptance: with `dispatch_ql` the QL branch delegates to the
 // sparq-reason-ql DL-Lite_R checker (its OWN capture accounting owns the verdict) instead of
 // abstaining `QlConsistencyPending`. Every graph below is in-QL but NOT in-RL/EL, so the QL
 // branch owns it (the complement kills EL; the super-∃ kills RL).
@@ -368,7 +368,7 @@ mod dispatch_ql {
 }
 
 // -------------------------------------------------------------------------------------------
-// Guard-abstention tableau fall-through ([SONNET-4.6] sq-pbz04.4.8) — the bead's acceptance set.
+// Guard-abstention tableau fall-through (sq-pbz04.4.8) — the bead's acceptance set.
 // Each case: the OWNING profile branch abstains (pinned by its `*_abstains` test above under a
 // starved budget), and with a real budget the ALCH tableau — complete for the whole L1
 // fragment — supplies a DEFINITIVE verdict attributed to `Branch::AlchTableau`.
@@ -643,7 +643,7 @@ fn entailment_disjointness_domain_range_desugarings() {
 }
 
 // -------------------------------------------------------------------------------------------
-// SubObjectPropertyOf conclusions — the fresh-individual-pair encoding ([FABLE-5] sq-pbz04.4.9)
+// SubObjectPropertyOf conclusions — the fresh-individual-pair encoding (sq-pbz04.4.9)
 // -------------------------------------------------------------------------------------------
 
 #[test]
@@ -755,7 +755,7 @@ fn entailment_empty_conclusion_is_trivially_entailed() {
 }
 
 // -------------------------------------------------------------------------------------------
-// Opt-in transitive roles ([GPT-5.6] sq-zfwzq, features `dispatch` + `dl_transitive`)
+// Opt-in transitive roles (sq-zfwzq, features `dispatch` + `dl_transitive`)
 // -------------------------------------------------------------------------------------------
 
 #[cfg(feature = "dl_transitive")]
@@ -859,7 +859,7 @@ mod transitive {
 }
 
 // -------------------------------------------------------------------------------------------
-// Conclusion anonymous individuals — existential reading + rolling-up ([OPUS-4.8] sq-pbz04.4.13)
+// Conclusion anonymous individuals — existential reading + rolling-up (sq-pbz04.4.13)
 // -------------------------------------------------------------------------------------------
 
 #[test]
@@ -983,7 +983,7 @@ fn entailment_premise_side_bnode_unaffected_skolemisation_stays() {
 }
 
 // -------------------------------------------------------------------------------------------
-// Refutation budget fallback ([OPUS-5] sq-pbz04.4.10)
+// Refutation budget fallback (sq-pbz04.4.10)
 //
 // The tableau owns every refutation, but its budget is a deterministic COUNT — a big in-RL
 // premise can exhaust it where the RL materializer decides in one pass. These tests pin BOTH
