@@ -114,7 +114,10 @@ Materialize the authorization view from the access-control documents, then enfor
   (§2.4), so a writer who embeds `<r> solidx:creator <self>` in a content document OR in the
   `.acr` they control cannot self-grant (this also blocks forged `solidx:appliesToResource`
   policy redirection). Each grant is RESOURCE-SCOPED (the creator of `R1` is never
-  granted `R2`) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
+  granted `R2`), and so is every role a provenance matcher plays: in `allOf`, `anyOf` and
+  `noneOf` it is decided against the resource being accessed (an `allOf` of
+  `CreatorAgent` and `OwnerAgent` needs both on the same resource, and a `noneOf`
+  `CreatorAgent` excepts that resource's creator) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
   `materialize_acp()` is `materialize_acp_with(&AccessProvenance::new())` — no provenance ⇒
   no `CreatorAgent`/`OwnerAgent` grant (fail-closed).
 - `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
