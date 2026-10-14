@@ -5717,12 +5717,13 @@ mod tests {
     #[tokio::test]
     async fn if_unmodified_since_guards_put_patch_and_delete() {
         // RFC 9110 §13.1.4: a write proceeds only if the target has not changed after the date. The
-        // resource's own Last-Modified passes; a date before it, in any of the three HTTP-date forms,
-        // fails with 412 and changes nothing; an invalid date is ignored.
-        const STALE: [&str; 3] = [
+        // resource's own Last-Modified passes; a date before it, in any of the three HTTP-date forms
+        // or as a leap second, fails with 412 and changes nothing; an invalid date is ignored.
+        const STALE: [&str; 4] = [
             "Thu, 01 Jan 1970 00:00:00 GMT",
             "Sunday, 06-Nov-94 08:49:37 GMT",
             "Sun Nov  6 08:49:37 1994",
+            "Thu, 31 Dec 1998 23:59:60 GMT",
         ];
         for verb in ["PUT", "PATCH", "DELETE"] {
             for stale_date in STALE {
