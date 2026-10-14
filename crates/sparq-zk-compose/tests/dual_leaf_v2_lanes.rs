@@ -1646,6 +1646,85 @@ fn the_prove_entry_refuses_a_nested_datatype_const_line() {
     );
 }
 
+/// The TOML check accepts only the renderers' flat form, so no TOML parser can
+/// read a different `datatype_const` from the one it compared. Each spelling
+/// below is valid TOML (or close to it) whose top-level `datatype_const` a
+/// parser could read differently from a line scan; every one is refused, while
+/// the honest rendering passes the check.
+#[test]
+fn the_prove_entry_refuses_every_prover_toml_outside_the_flat_form() {
+    let prover = CircuitProver::from_crate_root();
+    let out = unique_out_dir("flat_form");
+    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
+        .expect("the V2 boolean builder accepts a canonical literal");
+    let p = unpack(&built.inputs);
+    let honest = raw_value_lane_toml(
+        &FieldHex("0x01".to_string()),
+        p.operand_enc,
+        p.op.code(),
+        p.bound,
+        p.datatype_const,
+        p.expected,
+        &built.value_hook,
+        &built.lexical_component,
+    );
+    let v2 = &p.datatype_const.0;
+    let v1 = &boolean_datatype_const().0;
+    let line = format!("datatype_const = \"{}\"", v2);
+    let without = honest.replace(&format!("{}\n", line), "");
+    assert_ne!(without, honest, "the honest rendering carries the line");
+    let cases: Vec<(&str, String)> = vec![
+        ("comment line", format!("# note\n{}", honest)),
+        ("blank line", format!("\n{}", honest)),
+        ("CRLF", honest.replace('\n', "\r\n")),
+        ("byte-order mark", format!("\u{feff}{}", honest)),
+        ("quoted key", format!("{}\"datatype_const\" = \"{}\"\n", without, v2)),
+        ("dotted key", format!("{}a.datatype_const = \"{}\"\n", without, v2)),
+        ("literal string", format!("{}datatype_const = '{}'\n", without, v2)),
+        ("escape in string", format!("{}datatype_const = \"{}\\u0030\"\n", without, v2)),
+        ("multi-line string", format!("{}datatype_const = \"\"\"{}\"\"\"\n", without, v2)),
+        ("inline table", format!("{}t = {{ datatype_const = \"{}\" }}\n{}\n", without, v1, line)),
+        ("array of tables after", format!("{}[[t]]\ndatatype_const = \"{}\"\n", honest, v1)),
+        ("extra spaces", format!("{}datatype_const  =  \"{}\"\n", without, v2)),
+        ("trailing comment", format!("{}{} # x\n", without, line)),
+        ("duplicate key", format!("{}{}\n", honest, line)),
+        ("no key", without.clone()),
+    ];
+    for (label, toml) in cases {
+        let err = prover
+            .prove_in_for_method(
+                CommitmentMethod::DualLeafV2,
+                &built.inputs,
+                &toml,
+                &out,
+                "flatform",
+                MethodUse::NewIssuance,
+            )
+            .expect_err(label);
+        assert!(
+            matches!(err, DriverError::ProverTomlLaneMismatch { .. }),
+            "{}: {:?}",
+            label,
+            err
+        );
+    }
+    assert!(!out.exists(), "every refusal must precede any scratch directory");
+    let honest_err = prover
+        .prove_in_for_method(
+            CommitmentMethod::DualLeafV2,
+            &built.inputs,
+            &honest,
+            &out,
+            "flatformhonest",
+            MethodUse::NewIssuance,
+        )
+        .err();
+    assert!(
+        !matches!(honest_err, Some(DriverError::ProverTomlLaneMismatch { .. })),
+        "the honest rendering must pass the flat-form check"
+    );
+}
+
 // =========================================================================
 // 9. The lane↔member ALLOW-LIST, over every (constant, member) cell
 // =========================================================================

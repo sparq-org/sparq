@@ -88,11 +88,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same member (`DispatchError::ValueLaneVariantIdMismatch`) — without it a non-value-lane
   variant declaring a value-lane id, e.g. `FilterInt { id: FilterValueDl }`, carried no
   `datatype_const` to read and so skipped the pairing entirely while the declared id still chose
-  the circuit. `prove_in_for_method` also refuses a `Prover.toml` whose TOP-LEVEL
-  `datatype_const` is not the checked inputs' one (`DriverError::ProverTomlLaneMismatch`); it
-  reads the top-level key by a strict scan that stops at the first `[`, since a whole-file line
-  scan accepted a `datatype_const` nested under a table while the top level — the part that
-  feeds the witness — carried another lane's constant. The raw
+  the circuit. `prove_in_for_method` also refuses a `Prover.toml` that is not in the
+  renderers' flat form (one `key = "alnum"` or `key = true|false` per `\n`-terminated line, bare
+  `a-z_` keys, no repeats; tables, comments, quoted or dotted keys, escapes and `\r` are
+  refused), so no TOML parser reads a different `datatype_const` from the one it compares, or
+  whose `datatype_const` is not the checked inputs' one (`DriverError::ProverTomlLaneMismatch`). The raw
   `CircuitProver::{prove, prove_in, gen_witness*}` entries stay method- and lane-agnostic, so a
   caller rendering its own `Prover.toml` is outside this boundary. `datatype_const` is a public
   input no member pins, which is why the decision lives here. Under
