@@ -5379,6 +5379,10 @@ mod tests {
         // the same state, in every format, because each carries a strong validator.
         const BODY: &str =
             "<> <http://p> [ <http://q> \"x\" ] ; <http://r> ( 1 [ <http://s> 2 ] ) .";
+        const COMPACTED_JSONLD: &str =
+            "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#compacted\"";
+        const EXPANDED_JSONLD: &str =
+            "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#expanded\"";
         let store = store_with_owner_root_acl().await;
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
         for path in ["/alice/c/", "/alice/doc"] {
@@ -5395,10 +5399,14 @@ mod tests {
         for (path, media) in [
             ("/alice/c/", "text/turtle"),
             ("/alice/c/", "application/ld+json"),
+            ("/alice/c/", COMPACTED_JSONLD),
+            ("/alice/c/", EXPANDED_JSONLD),
             ("/alice/c/", "application/n-triples"),
             ("/alice/c/", "application/n-quads"),
             ("/alice/doc", "application/ld+json"),
+            ("/alice/doc", COMPACTED_JSONLD),
             ("/alice/doc", "application/n-triples"),
+            ("/alice/doc", "application/n-quads"),
         ] {
             let mut reads = Vec::new();
             for _ in 0..2 {
@@ -5757,6 +5765,24 @@ mod tests {
         assert_ne!(
             tag("\"1-a\"", &["a:x", "a:yb:z"]),
             tag("\"1-a\"", &["a:xa:y", "b:z"])
+        );
+        // Equal-size memberships whose additive FNV-1a sums collide: a digest over the framed list
+        // tells them apart.
+        assert_ne!(
+            tag(
+                "\"1-a\"",
+                &[
+                    "https://pod.example/alice/c/a0",
+                    "https://pod.example/alice/c/c1"
+                ]
+            ),
+            tag(
+                "\"1-a\"",
+                &[
+                    "https://pod.example/alice/c/a1",
+                    "https://pod.example/alice/c/c0"
+                ]
+            )
         );
         assert_eq!(tag("\"1-a\"", &[]), tag("\"1-a\"", &[]));
         assert!(tag("\"1-a\"", &["http://x/a"]).starts_with("\"1-"));
