@@ -301,6 +301,9 @@ getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 # `std::time::SystemTime::now()` traps on wasm32-unknown-unknown. The portable in-memory store still
 # needs HTTP Last-Modified timestamps, so the private clock shim reads the host's epoch milliseconds.
 js-sys = "0.3"
+# The container state ETag (`ldp::handler::container_state_etag`) hashes with SHA-256 on every
+# target, so the wasm tier needs `sha2` as much as the native one.
+sha2 = "0.10"
 
 [dev-dependencies]
 # Mint test JWS access tokens + DPoP proofs for the auth-middleware unit tests (mirrors the
