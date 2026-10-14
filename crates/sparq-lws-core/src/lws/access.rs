@@ -703,6 +703,18 @@ pub async fn aside<S: Store + 'static>(
     )
 }
 
+/// Whether the resource at `uri` was there before the change in flight to it (or set aside) began,
+/// as [`aside`] reads it, for every caller alike.
+pub async fn existed_before<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+) -> Result<bool, ServerError> {
+    match state.locks.prior(uri).existed {
+        Some(existed) => Ok(existed),
+        None => state.store.exists(uri).await,
+    }
+}
+
 /// What a decision about a resource rests on, taken while the resource is there: its metadata
 /// and its format. A Delete is announced once the resource is gone, so each delivery of it is
 /// authorized against this snapshot (and the grants as they stand then).

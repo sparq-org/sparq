@@ -517,7 +517,8 @@ async fn unread_precondition<S: Store + 'static>(
         req.method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     );
-    if !writes || !compares_state(&req.headers, dated) {
+    // A patch reads what it patches, whatever its preconditions (see [`patch`]).
+    if !writes || (req.method != Method::PATCH && !compares_state(&req.headers, dated)) {
         return None;
     }
     if req.method == Method::POST
@@ -526,7 +527,39 @@ async fn unread_precondition<S: Store + 'static>(
     {
         return None;
     }
-    (!state.allowed(Action::Read, uri, agent).await).then(|| state.deny(agent))
+    match reads_stably(state, uri, agent).await {
+        Ok(true) => None,
+        Ok(false) => Some(state.deny(agent)),
+        Err(retry) => Some(retry),
+    }
+}
+
+/// Whether `agent` may read `uri`, decided without its lock the way [`authorize_unlocked`] decides:
+/// on what the resource was before a change in flight to it (or one set aside) began, and only once
+/// no change began or ended meanwhile. A resource such a change is creating has no state before it
+/// to decide on: every caller, the owner included, is told to retry (`Err`), and nothing is
+/// decided on what the change wrote meanwhile.
+async fn reads_stably<S: Store + 'static>(
+    state: &LwsState<S>,
+    uri: &str,
+    agent: &Agent,
+) -> Result<bool, Response> {
+    use super::access::{aside, existed_before, Aside};
+    let being_created = || retry_later("the resource is being created");
+    stably(state, uri, || async {
+        if !state.visible(uri) || state.locks.changing(uri) {
+            if !existed_before(state, uri).await.unwrap_or(false) {
+                return Err(being_created());
+            }
+            return Ok(matches!(
+                aside(state, Action::Read, uri, agent).await,
+                Ok(Aside::Allowed)
+            ));
+        }
+        Ok(state.allowed(Action::Read, uri, agent).await)
+    })
+    .await
+    .unwrap_or(Ok(false))
 }
 
 /// The tag a precondition is evaluated against when it asks only whether an existing target
@@ -2892,29 +2925,6 @@ pub fn validate_json_patch(ops: &Value) -> Result<&[Value], PatchError> {
     Ok(ops)
 }
 
-/// Whether a JSON Patch's outcome depends on the target's content, so that applying it (or failing
-/// to) tells the patcher something about it: `test` compares a value, `copy` and `move` read one,
-/// `remove` and `replace` need their path to exist, and an `add` below the top level needs its
-/// parent to. Only an `add` of one member of the document (a single segment that is not an array
-/// index) stays blind; it fails only when the document is not an object.
-pub fn json_patch_reads(ops: &Value) -> bool {
-    ops.as_array().is_some_and(|ops| {
-        ops.iter()
-            .any(|op| match op.get("op").and_then(Value::as_str) {
-                Some("add") => !op
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .and_then(|p| p.strip_prefix('/'))
-                    .is_some_and(|member| {
-                        !member.contains('/')
-                            && member != "-"
-                            && !(!member.is_empty() && member.bytes().all(|b| b.is_ascii_digit()))
-                    }),
-                _ => true,
-            })
-    })
-}
-
 /// The size of `v` as written, in bytes: a number held as text ([`NUMBER_MARK`]) counts as the
 /// number it is written back as, not as the marked string it is held as.
 fn json_size(v: &Value) -> usize {
@@ -3373,11 +3383,6 @@ impl Patch {
         read_json_patch(&req.body).map(Patch::Json)
     }
 
-    /// Whether the patch's outcome depends on the target's content (see [`json_patch_reads`]).
-    fn reads_content(&self) -> bool {
-        matches!(self, Patch::Json(ops) if json_patch_reads(ops))
-    }
-
     /// Apply the patch to `target` within `budget` serialized bytes. `Err` carries the response.
     fn apply(&self, target: &Value, budget: usize) -> Result<Value, Response> {
         match self {
@@ -3425,21 +3430,6 @@ fn patch_refused(e: PatchError) -> Response {
     }
 }
 
-/// A patch whose outcome depends on the content (see [`Patch::reads_content`]) needs Read as well
-/// as Modify: otherwise 403, or the challenge for an anonymous caller, before it is applied, so the
-/// refusal is the same whatever the content.
-async fn patch_read_check<S: Store + 'static>(
-    state: &LwsState<S>,
-    patch: &Patch,
-    uri: &str,
-    agent: &Agent,
-) -> Result<(), Response> {
-    if patch.reads_content() {
-        return recheck(state, Action::Read, uri, agent).await;
-    }
-    Ok(())
-}
-
 async fn patch<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -3458,6 +3448,12 @@ async fn patch<S: Store + 'static>(
         Err(r) => return r,
     };
     if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
+        return r;
+    }
+    // A patch reads what it patches: whether it applies, and what it makes, depend on the content
+    // (a member there or not, the document's shape, format and size). So it needs Read as well as
+    // Modify, checked before anything about the resource answers it.
+    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
         return r;
     }
     if uri.ends_with('/') {
@@ -3483,17 +3479,8 @@ async fn patch<S: Store + 'static>(
         );
         r
     };
-    // A writer that may not read the content applies only a blind patch ([`patch_read_check`]),
-    // and is told nothing about the content, its format included, when even that cannot apply: it
-    // is refused as it would be had the patch read the content. Nor does the new tag, which
-    // describes the content as patched (its length and a hash of it), go to it.
-    let reader = state.allowed(Action::Read, uri, agent).await;
-    let unread = |refused: Response| if reader { refused } else { state.deny(agent) };
     if !is_json_type(&meta.content_type) {
-        return unread(not_json());
-    }
-    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
-        return r;
+        return not_json();
     }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
         &req.headers,
@@ -3502,9 +3489,6 @@ async fn patch<S: Store + 'static>(
         false,
     ) {
         return problem(StatusCode::PRECONDITION_FAILED, None);
-    }
-    if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
-        return r;
     }
     let body = match state.store.read_at(uri, &meta).await {
         Ok(b) => b,
@@ -3515,12 +3499,12 @@ async fn patch<S: Store + 'static>(
     // An empty body is not JSON either.
     let target = match read_numbers_as_text(&body) {
         Ok(target) => target,
-        Err(Unreadable::Number) => return unread(number_refused()),
-        Err(Unreadable::NotJson) => return unread(not_json()),
+        Err(Unreadable::Number) => return number_refused(),
+        Err(Unreadable::NotJson) => return not_json(),
     };
     let patched = match patch.apply(&target, patch_budget(state)) {
         Ok(v) => v,
-        Err(r) => return unread(r),
+        Err(r) => return r,
     };
     let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
@@ -3542,9 +3526,7 @@ async fn patch<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     let mut resp = StatusCode::NO_CONTENT.into_response();
-    if reader {
-        set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
-    }
+    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
     resp
 }
 
@@ -4647,10 +4629,17 @@ async fn linkset<S: Store + 'static>(
     if let Err(r) = recheck(state, action, uri, agent).await {
         return r;
     }
-    if writes {
-        if let Err(r) = precondition_read_check(state, req, uri, agent, false).await {
-            return r;
-        }
+    // A patch reads the linkset it patches (see [`patch`]), so it needs Read; a whole linkset
+    // replaces it, and needs Read only to compare it.
+    let read_check = if req.method == Method::PATCH {
+        recheck(state, Action::Read, uri, agent).await
+    } else if writes {
+        precondition_read_check(state, req, uri, agent, false).await
+    } else {
+        Ok(())
+    };
+    if let Err(r) = read_check {
+        return r;
     }
     let meta = match state.resource_meta(uri).await {
         Ok(m) => m,
@@ -4699,21 +4688,11 @@ async fn linkset<S: Store + 'static>(
                 Ok(p) => p,
                 Err(r) => return r,
             };
-            if let Err(r) = precondition_read_check(state, req, uri, agent, false).await {
-                return r;
-            }
             if let Precondition::Failed | Precondition::NotModified =
                 evaluate(&req.headers, Some(&etag), None, false)
             {
                 return problem(StatusCode::PRECONDITION_FAILED, None);
             }
-            if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
-                return r;
-            }
-            // As for a resource ([`patch`]): a writer that may not read the linkset is refused,
-            // not told why, when even a blind patch cannot apply to it.
-            let reader = state.allowed(Action::Read, uri, agent).await;
-            let unread = |refused: Response| if reader { refused } else { state.deny(agent) };
             let base = linkset_base(uri);
             // The patch holds its numbers as their text, so the linkset is read the same way,
             // and written back with every number restored. A linkset holds no numbers, so one a
@@ -4734,10 +4713,10 @@ async fn linkset<S: Store + 'static>(
             // what a target past the budget costs.
             let legacy = !admissible(&document, base.len());
             if legacy && !patch.only_removes() {
-                return unread(problem(
+                return problem(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     Some("the linkset is more than a linkset may hold: only remove and test operations apply to it until it is within"),
-                ));
+                );
             }
             let budget = if legacy {
                 LINKSET_COST_BUDGET.max(patch_cost(&held))
@@ -4746,7 +4725,7 @@ async fn linkset<S: Store + 'static>(
             };
             let mut patched = match patch.apply_in_memory(&held, budget) {
                 Ok(v) => v,
-                Err(r) => return unread(r),
+                Err(r) => return r,
             };
             // Its strings are restored in place; a number (which a linkset never holds) refuses
             // it. Nothing is written out and parsed again.
@@ -4766,12 +4745,7 @@ async fn linkset<S: Store + 'static>(
                 meta,
                 patched,
                 locks,
-                // The tag describes the linkset as patched, which only a reader may learn.
-                if reader {
-                    LinksetValidator::Sent
-                } else {
-                    LinksetValidator::Withheld
-                },
+                LinksetValidator::Sent,
             )
             .await
         }
@@ -6566,7 +6540,7 @@ mod tests {
         }
         let status = send(
             dave.clone(),
-            "PATCH",
+            "PUT",
             meta.clone(),
             vec![("if-unmodified-since", date.clone())],
         )
@@ -6686,7 +6660,8 @@ mod tests {
             assert_eq!(r.status(), StatusCode::NO_CONTENT);
             assert_eq!(r.headers().contains_key("etag"), sent, "PUT {who:?}");
         }
-        for (who, sent) in [(&dave, false), (&bob, true)] {
+        // A patch needs Read in any case; a reader gets the new tag.
+        for (who, ok) in [(&dave, false), (&bob, true)] {
             for (path, body) in [(&p, add), (&meta, link)] {
                 let r = handle(
                     &st,
@@ -6694,14 +6669,13 @@ mod tests {
                     who,
                 )
                 .await;
-                assert_eq!(r.status(), StatusCode::NO_CONTENT, "{path}");
-                assert_eq!(r.headers().contains_key("etag"), sent, "{path} {who:?}");
+                assert_eq!(r.status().is_success(), ok, "{path} {who:?}");
+                assert_eq!(r.headers().contains_key("etag"), ok, "{path} {who:?}");
             }
         }
         // `*` stays open to a writer that may not read.
         for (method, path) in [
             ("PUT", meta.clone()),
-            ("PATCH", p.clone()),
             ("PUT", p.clone()),
             ("DELETE", p.clone()),
         ] {
@@ -6922,7 +6896,13 @@ mod tests {
                 &bob,
             )
             .await;
-            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{method}");
+            // A patch, which needs Read, is refused before its target is looked for.
+            let expected = if method == "PATCH" {
+                StatusCode::FORBIDDEN
+            } else {
+                StatusCode::NOT_FOUND
+            };
+            assert_eq!(r.status(), expected, "{method}");
         }
         *store.hide.lock().unwrap() = None;
         let r = handle(&st, &get, &owner).await;
@@ -10606,10 +10586,8 @@ mod tests {
     }
 
     /// A writer that may not read a JSON resource learns nothing about its content from a patch:
-    /// one whose outcome depends on the content is refused before it is applied, the same whether
-    /// its path is there or not, and a blind one that cannot apply is refused the same way. (A
-    /// blind `add` past the size limit is refused too, so whether what it adds still fits is the
-    /// one thing it learns, as any writer to a bounded document does.)
+    /// every patch reads what it patches (even an `add` of one member applies only to an object of
+    /// a size it fits), so it is refused before it is applied, whatever the content.
     #[tokio::test]
     async fn a_patch_tells_a_writer_without_read_nothing() {
         let mut cfg = super::super::LwsConfig::new(BASE);
@@ -10668,6 +10646,9 @@ mod tests {
             let status = patch(bob.clone(), doc.clone(), ops).await;
             assert_eq!(status.is_success(), applies, "{op} {there}: {status}");
         }
+        // Not even an empty patch is answered to it.
+        let status = patch(dave.clone(), doc.clone(), json!([])).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
         let nested = json!([{"op": "add", "path": "/gone/x", "value": 1}]);
         let status = patch(dave.clone(), doc.clone(), nested.clone()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
@@ -10675,11 +10656,15 @@ mod tests {
             patch(bob.clone(), doc.clone(), nested).await,
             StatusCode::UNPROCESSABLE_ENTITY
         );
-        // A blind add applies, and when it cannot (the document is not an object), it is the same
-        // refusal, not the 422 a reader gets.
+        // Nor may it add one member: whether that applies (the document is an object, the result
+        // fits) depends on the content too.
         let blind = json!([{"op": "add", "path": "/new", "value": 1}]);
         let status = patch(dave.clone(), doc.clone(), blind.clone()).await;
-        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            patch(bob.clone(), doc.clone(), blind.clone()).await,
+            StatusCode::NO_CONTENT
+        );
         let status = patch(dave.clone(), list.clone(), blind.clone()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(
@@ -10737,61 +10722,16 @@ mod tests {
         assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
         // A linkset is patched under the same rule.
         let meta = format!("{doc}{META_SUFFIX}");
-        for there in ["/linkset/0", "/linkset/9"] {
-            let ops = json!([{"op": "remove", "path": there}]);
-            let status = patch(dave.clone(), meta.clone(), ops).await;
-            assert_eq!(status, StatusCode::FORBIDDEN, "{there}");
+        for ops in [
+            json!([{"op": "remove", "path": "/linkset/0"}]),
+            json!([{"op": "remove", "path": "/linkset/9"}]),
+            json!([{"op": "add", "path": "/linkset", "value": []}]),
+        ] {
+            let status = patch(dave.clone(), meta.clone(), ops.clone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{ops}");
         }
         let status = patch(bob, meta, json!([{"op": "remove", "path": "/linkset/9"}])).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    }
-
-    #[tokio::test]
-    async fn content_reading_patches_need_read() {
-        let st = state_with(false).await;
-        let anonymous = Agent::anonymous();
-        let reads = Patch::Json(json!([{"op": "test", "path": "/a", "value": 1}]));
-        let blind = Patch::Json(json!([{"op": "add", "path": "/a", "value": 1}]));
-        assert!(reads.reads_content());
-        assert!(!blind.reads_content());
-        for op in ["copy", "move"] {
-            assert!(json_patch_reads(
-                &json!([{"op": op, "from": "/a", "path": "/b"}])
-            ));
-        }
-        // Whether these apply depends on what is there.
-        for op in [
-            json!({"op": "remove", "path": "/a"}),
-            json!({"op": "replace", "path": "/a", "value": 1}),
-            json!({"op": "add", "path": "/a/b", "value": 1}),
-            json!({"op": "add", "path": "/0", "value": 1}),
-            json!({"op": "add", "path": "/-", "value": 1}),
-            json!({"op": "add", "path": "", "value": 1}),
-        ] {
-            assert!(json_patch_reads(&json!([op])), "{op}");
-        }
-        // One member added at the top level does not, however many.
-        assert!(!json_patch_reads(&json!([
-            {"op": "add", "path": "/a", "value": 1},
-            {"op": "add", "path": "/", "value": 1},
-            {"op": "add", "path": "/0a", "value": 1},
-        ])));
-        let uri = format!("{BASE}/");
-        let denied = patch_read_check(&st, &reads, &uri, &anonymous)
-            .await
-            .unwrap_err();
-        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
-        let someone = Agent {
-            subject: Some("https://someone.example/#me".into()),
-            client: None,
-        };
-        let denied = patch_read_check(&st, &reads, &uri, &someone)
-            .await
-            .unwrap_err();
-        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
-        assert!(patch_read_check(&st, &blind, &uri, &anonymous)
-            .await
-            .is_ok());
     }
 
     /// `doc` with its `/d` wrapped in `n` more objects, by add and move alone.
@@ -11877,5 +11817,178 @@ mod tests {
         super::super::test_store::put_back(&st, &uri).await;
         assert_eq!(get("https://old.example/#me").await, StatusCode::OK);
         assert_eq!(get("https://new.example/#me").await, StatusCode::FORBIDDEN);
+    }
+
+    /// Review finding: the Read check a conditional write or a patch makes before the lock read the
+    /// metadata a change in flight had written part way (`pending`), so a grantee of the resource as
+    /// it was could be refused while the change was put back. It is decided as the other checks
+    /// before the lock are, on the metadata before the change.
+    #[tokio::test]
+    async fn the_read_check_before_the_lock_is_made_on_the_metadata_before_a_change() {
+        use super::super::meta_key;
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let owner = agent(OWNER);
+        let (public, private) = ("https://e.example/Public", "https://e.example/Private");
+        for (who, ty) in [
+            ("https://old.example/#me", public),
+            ("https://new.example/#me", private),
+        ] {
+            let grant = json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": ["AccessGrant"],
+                "storage": st.cfg.storage(),
+                "access": [{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": who,
+                    "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": ty}]}],
+            });
+            let r = super::super::access::handle(
+                &st,
+                &req(
+                    Method::POST,
+                    GRANTS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &grant.to_string(),
+                ),
+                &owner,
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = create(
+            &st,
+            &req(Method::POST, "/", &h, "x"),
+            &owner,
+            &st.cfg.storage(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let uri = st.cfg.absolute("/doc.txt");
+        let put = |ty: &str, body: &str| {
+            let link = format!("<{ty}>; rel=\"type\"");
+            req(
+                Method::PUT,
+                "/doc.txt",
+                &[("content-type", "text/plain"), ("link", &link)],
+                body,
+            )
+        };
+        let get = |who: &str| {
+            let (st, who) = (st.clone(), agent(who));
+            async move {
+                handle(&st, &req(Method::GET, "/doc.txt", &[], ""), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert!(handle(&st, &put(public, "public"), &owner)
+            .await
+            .status()
+            .is_success());
+        assert_eq!(get("https://old.example/#me").await, StatusCode::OK);
+        // The PUT to the private type: the pending mark is written, then the content, then the
+        // new metadata, which lands but reports a failure; putting the metadata back stalls.
+        let key = meta_key(&uri);
+        *store.lose_nth_write_of.lock().unwrap() = Some((key.clone(), 2));
+        *store.fail_restore_of.lock().unwrap() = Some(key.clone());
+        let r = handle(&st, &put(private, "private"), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri));
+        assert_eq!(
+            st.resource_meta(&uri).await.unwrap().types,
+            vec![private.to_string()],
+            "the new metadata landed"
+        );
+        // A conditional PATCH by the grantee of the old type is decided on the metadata before the
+        // change, as its GET is: it is told to retry, not refused.
+        let patch = |who: &str| {
+            let (st, who) = (st.clone(), agent(who));
+            async move {
+                let h = [("content-type", JSON_PATCH), ("if-match", "\"x\"")];
+                handle(&st, &req(Method::PATCH, "/doc.txt", &h, "[]"), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert_eq!(
+            patch("https://old.example/#me").await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            patch("https://new.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    /// Review findings: the Read check before the lock let a writer through, unchecked, on a
+    /// resource a stalled change was creating (one with no state before it), and then answered it
+    /// differently for different callers. Every caller, the owner included, is told to retry, the
+    /// same way, on the resource and on its linkset.
+    #[tokio::test]
+    async fn a_resource_being_created_is_retried_by_every_caller_alike() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (dave, bob) = ("https://dave.example/#me", "https://bob.example/#me");
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave));
+        st.access
+            .put_grant_for_test("bob", grant(json!(["read", "modify"]), bob));
+        // A create that lands, reports a failure, and cannot be taken back: it is set aside,
+        // with nothing there before it.
+        let uri = st.cfg.absolute("/new.json");
+        store
+            .fail_after_create
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        let h = [("slug", "new.json"), ("content-type", JSON)];
+        let r = create(&st, &req(Method::POST, "/", &h, "{}"), &agent(OWNER), &root).await;
+        store
+            .fail_after_create
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri), "the create is set aside");
+        let callers = [agent(OWNER), agent(bob), agent(dave), Agent::anonymous()];
+        let requests = [
+            (Method::PATCH, "/new.json", JSON_PATCH, "[]", None),
+            (Method::PATCH, "/new.json.meta", JSON_PATCH, "[]", None),
+            (Method::PUT, "/new.json", JSON, "{}", Some("\"x\"")),
+        ];
+        for (method, path, ty, body, tag) in requests {
+            let mut answers = Vec::new();
+            for who in &callers {
+                let mut h = vec![("content-type", ty)];
+                if let Some(tag) = tag {
+                    h.push(("if-match", tag));
+                }
+                let r = handle(&st, &req(method.clone(), path, &h, body), who).await;
+                let mut headers: Vec<String> = r
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v:?}"))
+                    .collect();
+                headers.sort();
+                answers.push((r.status(), headers, body_of(r).await));
+            }
+            assert_eq!(
+                answers[0].0,
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{method} {path}"
+            );
+            assert!(
+                answers[0].1.iter().any(|h| h.starts_with("retry-after")),
+                "{method} {path}"
+            );
+            for answer in &answers[1..] {
+                assert_eq!(answer, &answers[0], "{method} {path}");
+            }
+        }
     }
 }
