@@ -624,6 +624,29 @@ fn use_grants_read_only() {
     assert!(!holds(&mixed, &bob, N2, Mode::Write), "use does not stand in for modify");
 }
 
+/// A static writer of every graph may write a graph, drop it, then `DROP NAMED`, with a
+/// policy attached: the wildcard checks only the graphs still there.
+#[test]
+fn drop_then_wildcard_stays_open_to_a_static_writer() {
+    let nq = r#"
+<https://pod.ex/.acl#alice> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#accessTo> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#agent> <https://alice.ex/card#me> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Write> <https://pod.ex/.acl> .
+<https://pod.ex/.acl#alice> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Control> <https://pod.ex/.acl> .
+<https://pod.ex/notes/n2#it> <https://ex.dev/ns#title> "private" <https://pod.ex/notes/n2> .
+<https://pod.ex/notes/n3#it> <https://ex.dev/ns#title> "other" <https://pod.ex/notes/n3> .
+"#;
+    let mut s = PodStore::new(Graph::load_dataset(nq, "nquads").expect("pod loads"));
+    s.materialize_wac().expect("wac");
+    s.attach_odrl_policy(change_policy()).expect("attach");
+    let wipe = "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 1 } } ; \
+                DROP GRAPH <https://pod.ex/notes/n2> ; DROP NAMED";
+    s.update_as(&session(Some(ALICE), None), wipe).expect("alice may drop every graph");
+}
+
 /// `Write` needs `odrl:modify` and `odrl:delete` from one policy; `Append` alone never
 /// implies `Write`.
 #[test]
