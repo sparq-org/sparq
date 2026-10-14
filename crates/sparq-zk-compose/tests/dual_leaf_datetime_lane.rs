@@ -561,6 +561,23 @@ fn prover_toml_matches_the_member_main_declaration_order() {
         MethodUse::LegacyAlreadyIssued,
     )
     .expect("the V1 dateTime lane constant rides its member under the legacy use");
+    // The LOCAL renderer the in-circuit vectors use emits those same bytes, so
+    // routing them around the host boundary cannot silently change the witness.
+    assert_eq!(
+        toml,
+        raw_datetime_toml(
+            &FieldHex("0x01".to_string()),
+            p.operand_enc,
+            p.op.code(),
+            p.bound_neg,
+            p.bound_scaled_epoch,
+            p.datatype_const,
+            p.expected,
+            built.value_neg,
+            &built.value_hook_scaled,
+            &built.lexical_component,
+        )
+    );
     let lines: Vec<&str> = toml.lines().collect();
     assert!(lines[0].starts_with("challenge = "));
     assert!(lines[1].starts_with("operand_enc = "));

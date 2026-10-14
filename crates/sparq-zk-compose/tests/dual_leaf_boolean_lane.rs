@@ -461,6 +461,21 @@ fn boolean_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
     )
     .expect("the same values through the shared renderer");
     assert_eq!(boolean, shared);
+    // And the LOCAL renderer the in-circuit vectors use emits those same bytes, so
+    // routing them around the host boundary cannot silently change the witness.
+    assert_eq!(
+        boolean,
+        raw_value_lane_toml(
+            &challenge,
+            operand_enc,
+            op.code(),
+            bound,
+            dt,
+            expected,
+            &built.value_hook,
+            &built.lexical_component,
+        )
+    );
     // Both are V1 renders, so both are refused for a NEW issuance.
     assert!(filter_value_dl_boolean_prover_toml(
         &challenge,
