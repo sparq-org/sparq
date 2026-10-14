@@ -225,6 +225,46 @@ many-to-one datatype. Reject-list item **(v)** (#794 §8) is enforced here
 *structurally* — by the resolver refusing to bind an identity operator to a
 `FilterValue` member or to the `value_component` slot — not by prose.
 
+### 3.1.1 The lane↔member allow-list, as shipped
+
+`(method, circuit)` legality is about the leaf SHAPE, so it admits a V1 graph's value
+lane and a V2 graph's alike. It therefore does not decide which LANE a given
+`datatype_const` belongs to — and `datatype_const` is a PUBLIC INPUT no shipped member
+pins. `dispatch::check_lane_const_for_member` adds that second, finer decision as an
+AFFIRMATIVE allow-list over DECODED field elements:
+
+| `datatype_const` | may ride | available for a NEW proof |
+|---|---|---|
+| V1 `xsd:integer`, V1 `xsd:boolean` (its own `derive_key` constant) | `filter_value_dl_int` | no — `MethodUse::LegacyAlreadyIssued` only |
+| V1 `xsd:double` · V2 `xsd:double` | `filter_value_dl_f64` | V2 only |
+| V1 / V2 `xsd:decimal@scale=fd`, `fd ∈ 1..=19` | `filter_value_dl_decimal` | V2 only |
+| V1 / V2 `xsd:dateTime`, `xsd:date` | `filter_value_dl_datetime` | V2 only |
+| V2 `xsd:integer` | `filter_value_dl_int` | yes |
+| V2 `xsd:boolean` | `filter_value_dl_bool` ONLY | yes |
+
+Three properties make it a boundary rather than a lookup:
+
+1. **affirmative** — a constant no shipped lane derives is refused on EVERY member, so
+   the bit-domain member opens the V2 boolean lane and nothing else, and the shared
+   integer member does not open it;
+2. **decoded** — the comparison is on field elements, and a value-lane `FieldHex` must
+   additionally be the CANONICAL rendering of what it decodes to, because the permissive
+   parser accepts uppercase, `0x`-less, short and at-or-above-modulus spellings of the
+   same element;
+3. **one function, four call sites** — the value-lane builders, every value-lane
+   `Prover.toml` renderer, the method-checked prove entry (which also checks the
+   rendered TOML carries the checked inputs' constant) and the verifier's structural
+   pre-filter all call it. The raw `CircuitProver::{prove, prove_in, gen_witness*}`
+   entries deliberately do NOT: they take a `CircuitId` and TOML bytes, so a caller
+   rendering its own TOML is outside this boundary (and the in-circuit vectors rely on
+   that to test what the RELATION refuses rather than what the host permits).
+
+Scope, stated plainly: (1)–(3) are HOST-side refusals plus one structural pre-filter
+refusal. The value-lane verifier GATES stay closed until the verifier authenticates the
+commitment method and pins member, lane, scale and bound itself (sq-j506), and
+`LegacyAlreadyIssued` is a caller assertion, not evidence of issuance history. Nothing
+here is an audited soundness property (CR-G8 / sq-qhy4).
+
 ### 3.2 The value-bearing FILTER family collapses
 
 A key structural simplification (carried from #794 §4 / the gate-reduction doc §5):

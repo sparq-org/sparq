@@ -151,9 +151,12 @@ fn expect_legal(method_key: &str, member: &str) -> bool {
         // graphs; it cannot reuse a dual-leaf graph's lexical handle as its root.
         method_key == "string-canonical"
     } else if is_value_lane(member) {
-        matches!(method_key, "dual-leaf" | "value-only")
+        // BOTH dual-leaf versions commit a value handle, so both admit the value
+        // lane — legality is the leaf SHAPE, not which version new issuance may
+        // select.
+        matches!(method_key, "dual-leaf" | "dual-leaf-v2" | "value-only")
     } else {
-        matches!(method_key, "string-canonical" | "dual-leaf")
+        matches!(method_key, "string-canonical" | "dual-leaf" | "dual-leaf-v2")
     }
 }
 
@@ -395,12 +398,12 @@ fn comparison_numbers_are_joined_from_snapshot() {
     );
 }
 
-/// Sanity: the matrix names exactly the three commitment methods with their
+/// Sanity: the matrix names exactly the four commitment methods with their
 /// registry `zk:scheme` IRIs, and the #769 headline value-lane reduction is
 /// present. Guards against a future edit silently dropping the comparison the
 /// bead exists to produce.
 #[test]
-fn matrix_spans_the_three_methods_and_the_headline_comparison() {
+fn matrix_spans_every_method_and_the_headline_comparison() {
     let (_snapshot, matrix) = load();
     let by_key: BTreeMap<&str, &str> = matrix
         .methods
@@ -418,10 +421,35 @@ fn matrix_spans_the_three_methods_and_the_headline_comparison() {
         "dual-leaf method/IRI must be present"
     );
     assert_eq!(
+        by_key.get("dual-leaf-v2").copied(),
+        Some("https://sparq.dev/ns/zk#poseidon2-dualleaf-v2"),
+        "dual-leaf-v2 method/IRI must be present"
+    );
+    assert_eq!(
         by_key.get("value-only").copied(),
         Some("https://sparq.dev/ns/zk#poseidon2-valuehook-v1"),
         "value-only research-dial method/IRI must be present"
     );
+    assert_eq!(by_key.len(), 4, "the matrix must span exactly these four methods");
+    // Only v2 is selectable for new issuance, of the two dual-leaf versions —
+    // mirroring `CommitmentMethod::is_production_selectable`.
+    let selectable: BTreeMap<&str, bool> = matrix
+        .methods
+        .iter()
+        .map(|m| (m.key.as_str(), m.production_selectable))
+        .collect();
+    assert_eq!(selectable.get("string-canonical"), Some(&true));
+    assert_eq!(selectable.get("dual-leaf-v2"), Some(&true));
+    assert_eq!(selectable.get("dual-leaf"), Some(&false));
+    assert_eq!(selectable.get("value-only"), Some(&false));
+    // The bit-domain boolean member has a comparison row carrying its value-lane
+    // cost alone (it has no blake3-token counterpart, so no ratio is fabricated).
+    let boolean = matrix
+        .comparison
+        .get("boolean")
+        .expect("boolean comparison row must be present");
+    assert_eq!(boolean.value_lane_member, "filter_value_dl_bool");
+    assert!(boolean.gate_reduction_x.is_none());
     // The integer datatype's value-lane reduction is the #769 headline.
     let int = matrix
         .comparison
@@ -447,7 +475,7 @@ fn matrix_spans_the_three_methods_and_the_headline_comparison() {
 #[test]
 fn committed_legality_matches_resolve_circuit() {
     use sparq_zk::commit::CommitmentMethod;
-    use sparq_zk_compose::dispatch::{resolve_circuit, DispatchError};
+    use sparq_zk_compose::dispatch::resolve_circuit;
     use sparq_zk_compose::manifest::CircuitId;
 
     let (_snapshot, matrix) = load();
@@ -457,6 +485,7 @@ fn committed_legality_matches_resolve_circuit() {
     let mut methods: Vec<(&str, CommitmentMethod)> = vec![
         ("string-canonical", CommitmentMethod::StringCanonicalV1),
         ("dual-leaf", CommitmentMethod::DualLeafV1),
+        ("dual-leaf-v2", CommitmentMethod::DualLeafV2),
     ];
     #[cfg(feature = "commitment-value-only")]
     methods.push(("value-only", CommitmentMethod::ValueOnlyV1));
@@ -469,6 +498,8 @@ fn committed_legality_matches_resolve_circuit() {
             "filter_value_dl_int" => Some(CircuitId::FilterValueDl),
             "filter_value_dl_f64" => Some(CircuitId::FilterValueDlF64),
             "filter_value_dl_decimal" => Some(CircuitId::FilterValueDlDecimal),
+            "filter_value_dl_datetime" => Some(CircuitId::FilterValueDlDateTime),
+            "filter_value_dl_bool" => Some(CircuitId::FilterValueDlBool),
             "filter_int_d2" => Some(CircuitId::FilterInt { d: 2 }),
             "filter_f64_d2" => Some(CircuitId::FilterF64 { d: 2 }),
             "scan_k1_n16_r4" => Some(CircuitId::Scan { k: 1, n: 16, r: 4 }),
@@ -484,12 +515,11 @@ fn committed_legality_matches_resolve_circuit() {
         let Some(id) = circuit_for(member) else { continue };
         for (key, method) in &methods {
             let Some(cell) = c.configs.get(*key) else { continue };
-            let resolved_legal = match resolve_circuit(*method, &id) {
-                Ok(_) => true,
-                Err(DispatchError::IllegalPair { .. })
-                | Err(DispatchError::IdentityOpAtValueLane { .. })
-                | Err(DispatchError::UnknownMethod { .. }) => false,
-            };
+            // Every refusal is a refusal; the matrix records legality, not which
+            // of the resolver's reasons applied. (`resolve_circuit` is the
+            // legacy/verification view, so it never raises the issuance-only or
+            // lane/member variants here.)
+            let resolved_legal = resolve_circuit(*method, &id).is_ok();
             if resolved_legal != cell.legal {
                 errors.push(format!(
                     "{member} × {key}: committed legal={} but resolve_circuit says {resolved_legal}",
@@ -538,6 +568,7 @@ fn successful_result_members_only_admit_string_canonical_commitments() {
     for (_, row) in members {
         assert!(row.configs["string-canonical"].legal);
         assert!(!row.configs["dual-leaf"].legal);
+        assert!(!row.configs["dual-leaf-v2"].legal);
         assert!(!row.configs["value-only"].legal);
     }
 }
