@@ -23,6 +23,9 @@ pub mod fixture;
 mod credentials;
 mod loader;
 mod materialize;
+// Consumed by the scoped materializer (#5579); built and tested ahead of it (#5312).
+#[allow(dead_code)]
+mod deps;
 // sq-3jtd.5: TRUSTED per-resource creator/owner provenance — the channel by
 // which the storage layer (PSS) supplies the `acp:CreatorAgent`/`acp:OwnerAgent` facts.
 mod provenance;
