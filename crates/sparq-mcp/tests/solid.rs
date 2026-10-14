@@ -2053,4 +2053,27 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
         Some(BOB),
         "a new container"
     );
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({"url": "https://pod.ex/n//odd", "content": "<https://pod.ex/n//odd#it> <https://ex.dev/ns#k> \"o\" .", "content_type": "text/turtle"}),
+    );
+    assert!(!is_err, "bob writes /n//odd: {text}");
+    let prov = s.store().acp_provenance();
+    for r in [
+        "https://pod.ex/n//odd",
+        "https://pod.ex/n//",
+        "https://pod.ex/n/",
+    ] {
+        assert_eq!(
+            prov.creator(r),
+            Some(BOB),
+            "bob created {r} and every container it needed"
+        );
+    }
+    assert_eq!(
+        prov.creator("https://pod.ex/e/"),
+        Some(CAROL),
+        "/e/ still keeps its creator"
+    );
 }

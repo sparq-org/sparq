@@ -121,18 +121,20 @@ Materialize the authorization view from the access-control documents, then enfor
   no `CreatorAgent`/`OwnerAgent` grant (fail-closed). `materialize_acp_with(&prov)` stores
   `prov` with NO credentials (it is `materialize_acp_with_credentials(&prov, &empty)`). To
   clear them, or when a holding expires or is revoked, call
-  `materialize_acp_with_credentials` with the current maps. The store forgets the creator
-  and owner of a resource that no longer exists (an update's `DROP`, or any rebuild that
-  finds it gone), so the same IRI created again inherits neither.
-  `store.record_creator(resource, webid)` / `record_creators(&[..], webid)` add a creator to
-  the stored context for a caller that creates resources through the store, after the write
-  (the MCP server does, under ACP); `store.acp_provenance()` / `store.replace_acp_provenance(p)`
-  read and swap the stored provenance, so such a caller can forget a resource it deletes
-  (`AccessProvenance::forget`) and restore the previous map when it rolls a change back.
-  Under an ACP view each rebuilds it at once and installs the new provenance only if that
-  succeeds (`Err`, nothing changed, for a WebID the view refuses or a failed rebuild).
-  A resource removed by editing `store.graph` directly is forgotten at the next rebuild,
-  so rebuild before creating it again.
+  `materialize_acp_with_credentials` with the current maps. Provenance follows every
+  change to which graphs exist, staged with the change and installed only once it
+  commits: a graph removed, or a resource that stops existing (a container left with no
+  graph below it), at any point of an update loses its creator and owner, and a resource
+  the update brings into being (or back) gets the session agent as its creator. A commit
+  that fails after staging a provenance change drops the view, and `materialize_acp()`
+  refuses until the context is passed again. A caller that edits `store.graph` directly
+  takes `store.stored_graphs()` first and then calls
+  `store.rematerialize_after_edit(&before, creator, acp)` (the MCP server does), which
+  applies the same rule and installs the view and provenance together only on success.
+  `store.acp_provenance()` reads the stored provenance. A resource removed by editing
+  `store.graph` without that call is forgotten at the next rebuild, so rebuild before
+  creating it again. The view is rebuilt for a provenance change only when its `.acr`
+  documents name `acp:CreatorAgent` or `acp:OwnerAgent`.
 - `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
   (sq-ysv3u, issue #2935) the same, ALSO resolving **`acp:vc`** matchers.
   `VerifiedCredentials::hold(agent_webid, requirement_iri)` asserts that the TRUSTED caller

@@ -2,7 +2,8 @@
 //! materialized with stays in force across the rebuilds the store makes itself: after an
 //! authoritative `.acr` replace or delete, and after an authorized update, the grants and
 //! denies that context decides are unchanged. A resource that goes keeps none of it: one
-//! created again under the same IRI has no creator or owner.
+//! created again under the same IRI has no owner, and its creator is whoever created it
+//! again.
 
 use sparq_core::Graph;
 use sparq_solid::{AccessProvenance, Mode, PodStore, Session, VerifiedCredentials};
@@ -365,14 +366,21 @@ fn a_dropped_resource_created_again_has_no_creator_or_owner() {
 }
 
 #[test]
-fn a_resource_dropped_and_created_in_one_update_has_no_creator_or_owner() {
+fn a_resource_dropped_and_created_in_one_update_has_only_its_new_creator() {
     let mut store = store();
     let update = format!("DROP GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}");
     store
         .update_as_acp(&alice(), &update)
         .expect("the creator may replace d0");
+    let prov = store.acp_provenance();
+    assert_eq!(prov.creator(D0), Some(ALICE), "alice created d0 again");
+    assert_eq!(prov.owner(D0), None, "the old owner is forgotten");
+    assert!(
+        holds(&store, ERIN, Mode::Read),
+        "the owner deny no longer applies"
+    );
     store.materialize_acp().expect("rebuild");
-    assert_context_forgotten(&store, "drop and create in one update");
+    assert!(holds(&store, ERIN, Mode::Read), "nor after a rebuild");
 }
 
 #[test]
@@ -490,38 +498,47 @@ fn decisions_follow_a_drop_and_create_in_one_update() {
 }
 
 #[test]
-fn a_provenance_change_through_the_store_applies_to_the_next_decision() {
+fn a_container_that_goes_and_comes_back_in_one_update_is_new() {
+    const DOCS: &str = "https://pod.ex/docs/";
     let mut store = store();
-    let dave = Session {
-        agent: Some(DAVE),
-        client: None,
-        issuer: None,
-        now: None,
-    };
-    let dave_writes_d1 =
-        |store: &PodStore| store.accessible(&dave, Mode::Write).iter().any(|g| g == D1);
-    assert!(
-        !dave_writes_d1(&store),
-        "dave writes nothing yet (and the session cache holds that)"
+    let mut prov = store.acp_provenance().clone();
+    prov.set_creator(DOCS, ALICE);
+    let mut creds = VerifiedCredentials::new();
+    creds.hold(CAROL, FLAGGED);
+    store
+        .materialize_acp_with_credentials(&prov, &creds)
+        .expect("acp materializes");
+    assert_eq!(store.acp_provenance().creator(DOCS), Some(ALICE));
+    // d0 and d1 are the only graphs below /docs/ (its .acr is not a resource): dropping both
+    // ends the container, and the insert brings it back.
+    let update = format!(
+        "DROP GRAPH <{D0}> ; DROP GRAPH <{D1}> ; INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}"
     );
-    assert!(
-        store.record_creator(D1, "urn:sparq:forged").is_err(),
-        "not a principal"
+    store
+        .update_as_acp(&admin(), &update)
+        .expect("ADMIN may replace the documents");
+    let prov = store.acp_provenance();
+    assert_eq!(
+        prov.creator(DOCS),
+        Some(ADMIN),
+        "the container was created again"
     );
-    store.record_creator(D1, DAVE).expect("a WebID");
-    assert!(
-        store.decide(&dave, D1, Mode::Write).allow,
-        "the recorded creator writes d1"
-    );
-    assert!(dave_writes_d1(&store), "and the cached set follows");
-    assert_context_in_force(&store, "the earlier provenance is kept");
+    assert_eq!(prov.creator(D0), Some(ADMIN), "so was d0");
+    assert_eq!(prov.owner(D0), None, "with no owner");
+    assert_eq!(prov.creator(D1), None, "d1 is gone");
+    assert_context_forgotten(&store, "the container went and came back");
+}
 
-    let mut without_alice = store.acp_provenance().clone();
-    without_alice.forget(D0);
-    let previous = store
-        .replace_acp_provenance(without_alice)
-        .expect("rebuild");
-    assert_context_forgotten(&store, "a replaced provenance, no explicit rebuild");
-    store.replace_acp_provenance(previous).expect("rebuild");
-    assert_context_in_force(&store, "the restored provenance");
+#[test]
+fn an_update_that_creates_nothing_keeps_every_creator_and_owner() {
+    let mut store = store();
+    let before = store.acp_provenance().clone();
+    store
+        .update_as_acp(
+            &admin(),
+            &format!("CLEAR GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}"),
+        )
+        .expect("ADMIN may rewrite d0");
+    assert_eq!(*store.acp_provenance(), before, "d0 was never removed");
+    assert_context_in_force(&store, "a clear and an insert");
 }

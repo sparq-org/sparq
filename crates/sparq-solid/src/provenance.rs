@@ -90,14 +90,9 @@ impl AccessProvenance {
         self.by_resource.retain(|r, _| exists(r));
     }
 
-    /// Forget every fact about `resource` (for a resource that no longer exists).
-    pub fn forget(&mut self, resource: &str) {
+    /// Forget every fact about `resource` (for a resource that no longer exists). Internal.
+    pub(crate) fn forget(&mut self, resource: &str) {
         self.by_resource.remove(resource);
-    }
-
-    /// Forget every fact. Internal (see [`AccessProvenance::retain`]).
-    pub(crate) fn clear(&mut self) {
-        self.by_resource.clear();
     }
 
     /// Iterate `(resource, creator?, owner?)` for every resource with a fact. Internal —

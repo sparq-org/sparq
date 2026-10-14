@@ -474,31 +474,151 @@ fn enumerate<'g>(graph: &'g Graph, suffix: &str) -> (FxHashSet<String>, Vec<(&'g
         if iri.starts_with(RESERVED_PREFIX) {
             continue;
         }
-        let control_of = iri.strip_suffix(ACL_SUFFIX).or_else(|| iri.strip_suffix(ACR_SUFFIX));
-        // A bare `scheme://` names no authority, so it is not a container of any pod
-        // root, and neither it nor its control document takes part in the auth view.
-        // (The parent rule's textual scrape of `https://pod.ex/` yields `https://`;
-        // [`parent_iri`] already stops at the authority root.)
-        if is_authority_less(control_of.unwrap_or(iri)) {
-            continue;
-        }
-        if control_of.is_some() {
-            if iri.ends_with(suffix) {
+        if is_control_graph(iri) {
+            if iri.ends_with(suffix) && !is_authority_less(control_target(iri)) {
                 control_graphs.push((iri, sub));
             }
             continue;
         }
-        resources.insert(iri.to_owned());
-        // structural container chain: https://host/a/b/doc -> /a/b/ -> /a/ -> /
-        let mut cur = iri;
-        while let Some(parent) = parent_iri(cur) {
-            if !resources.insert(parent.to_owned()) {
-                break;
-            }
-            cur = parent;
+        if is_resource_graph(iri) {
+            insert_with_containers(&mut resources, iri);
         }
     }
     (resources, control_graphs)
+}
+
+/// Whether the stored graph `iri` is an access-control document.
+fn is_control_graph(iri: &str) -> bool {
+    iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX)
+}
+
+/// The resource an access-control document `iri` governs.
+fn control_target(iri: &str) -> &str {
+    iri.strip_suffix(ACL_SUFFIX)
+        .or_else(|| iri.strip_suffix(ACR_SUFFIX))
+        .unwrap_or(iri)
+}
+
+/// Whether the stored graph `iri` is a resource of the auth view by itself: outside the
+/// reserved space, not an access-control document, and below an authority. A bare
+/// `scheme://` names no authority, so it is not a container of any pod root, and neither it
+/// nor its control document takes part in the auth view. (The parent rule's textual scrape
+/// of `https://pod.ex/` yields `https://`; [`parent_iri`] already stops at the authority
+/// root.)
+fn is_resource_graph(iri: &str) -> bool {
+    !iri.starts_with(RESERVED_PREFIX) && !is_control_graph(iri) && !is_authority_less(iri)
+}
+
+/// Add `iri` and its structural container chain (https://host/a/b/doc -> /a/b/ -> /a/ -> /).
+fn insert_with_containers(resources: &mut FxHashSet<String>, iri: &str) {
+    resources.insert(iri.to_owned());
+    let mut cur = iri;
+    while let Some(parent) = parent_iri(cur) {
+        if !resources.insert(parent.to_owned()) {
+            break;
+        }
+        cur = parent;
+    }
+}
+
+/// The stored graphs that are resources by themselves (see [`is_resource_graph`]), kept in
+/// order so the resources they make can be tested one at a time: a graph is a resource, and
+/// so is every container on its chain (see [`enumerate`]). Every lifecycle decision about
+/// the stored provenance is made against this one rule.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ResourceGraphs(std::collections::BTreeSet<String>);
+
+impl ResourceGraphs {
+    /// The resource graphs among the names of `graph`'s named graphs.
+    pub(crate) fn of(graph: &Graph) -> Self {
+        Self::from_names(graph.named.iter().filter_map(|(n, _)| graph_iri(n)))
+    }
+
+    /// The resource graphs among `names`.
+    pub(crate) fn from_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
+        ResourceGraphs(
+            names
+                .into_iter()
+                .filter(|n| is_resource_graph(n))
+                .map(str::to_owned)
+                .collect(),
+        )
+    }
+
+    /// Whether `iri` is a resource: a stored resource graph, or a container on the chain of
+    /// one. Every `/`-terminated prefix of a graph name (below its authority) is on its chain,
+    /// so a container is held exactly when some graph name starts with it.
+    pub(crate) fn holds(&self, iri: &str) -> bool {
+        self.0.contains(iri)
+            || (iri.ends_with('/')
+                && self
+                    .0
+                    .range::<str, _>((std::ops::Bound::Included(iri), std::ops::Bound::Unbounded))
+                    .next()
+                    .is_some_and(|n| n.starts_with(iri)))
+    }
+
+    /// Every resource, with its containers.
+    pub(crate) fn all(&self) -> FxHashSet<String> {
+        let mut out = FxHashSet::default();
+        for name in &self.0 {
+            insert_with_containers(&mut out, name);
+        }
+        out
+    }
+
+    /// Store a graph named `name`, calling `appears` for each resource it makes that was
+    /// not one just before (the graph itself and the containers it brings).
+    pub(crate) fn add(&mut self, name: &str, mut appears: impl FnMut(&str)) {
+        if !is_resource_graph(name) || self.0.contains(name) {
+            return;
+        }
+        let mut chain = vec![name];
+        let mut cur = name;
+        while let Some(parent) = parent_iri(cur) {
+            chain.push(parent);
+            cur = parent;
+        }
+        let fresh: Vec<&str> = chain.into_iter().filter(|r| !self.holds(r)).collect();
+        self.0.insert(name.to_owned());
+        fresh.into_iter().for_each(&mut appears);
+    }
+
+    /// Remove the graph named `name`, calling `gone` for each resource that is not one any
+    /// more (the graph itself, and each container left with no graph below it).
+    pub(crate) fn remove(&mut self, name: &str, mut gone: impl FnMut(&str)) {
+        if !self.0.remove(name) {
+            return;
+        }
+        let mut cur = name;
+        if !self.holds(cur) {
+            gone(cur);
+        }
+        while let Some(parent) = parent_iri(cur) {
+            if self.holds(parent) {
+                break;
+            }
+            gone(parent);
+            cur = parent;
+        }
+    }
+
+    /// Remove every graph, calling `gone` for every resource.
+    pub(crate) fn clear(&mut self, mut gone: impl FnMut(&str)) {
+        self.all().iter().for_each(|r| gone(r));
+        self.0.clear();
+    }
+}
+
+/// Whether an access-control resource document in `graph` names `acp:CreatorAgent` or
+/// `acp:OwnerAgent`: whether an ACP view built from it depends on the trusted provenance.
+pub(crate) fn control_documents_name_provenance(graph: &Graph) -> bool {
+    graph.named.iter().any(|(name, g)| {
+        graph_iri(name).is_some_and(|iri| iri.ends_with(ACR_SUFFIX))
+            && graph_triples(g).iter().any(|t| {
+                matches!(&t[2], Term::NamedNode(o) if SPECIAL_AGENTS[2..4].contains(&o.as_str()))
+            })
+    })
 }
 
 /// The auth view's resources in `graph` (see [`enumerate`]).
@@ -516,8 +636,10 @@ fn is_authority_less(iri: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
-/// Solid slash-semantics parent of an IRI (None at/above the authority root).
-pub(crate) fn parent_iri(iri: &str) -> Option<&str> {
+/// Solid slash-semantics parent of an IRI (None at/above the authority root): the one
+/// container traversal the auth view, the store's provenance and the MCP server's
+/// containment all use.
+pub fn parent_iri(iri: &str) -> Option<&str> {
     let scheme_end = iri.find("://").map(|i| i + 3)?;
     let path = &iri[scheme_end..];
     let host_end = scheme_end + path.find('/')?;

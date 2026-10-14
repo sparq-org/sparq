@@ -11,6 +11,19 @@ thread_local! {
     pub(crate) static FORKS: Cell<usize> = const { Cell::new(0) };
 }
 
+thread_local! {
+    /// Whether the next commit on this thread fails after applying its effects.
+    static FAIL_COMMIT: Cell<bool> = const { Cell::new(false) };
+}
+
+/// The injected commit failure, consumed by the commit it fails.
+pub(crate) fn injected_commit_failure() -> Result<(), String> {
+    if FAIL_COMMIT.with(|f| f.replace(false)) {
+        return Err("injected commit failure".to_owned());
+    }
+    Ok(())
+}
+
 fn forks() -> usize {
     FORKS.with(Cell::get)
 }
@@ -206,4 +219,78 @@ fn a_where_update_touching_the_rules_takes_the_fork() {
         .update_as(&session(BOB), &patch("bob"))
         .expect("bob now holds Write");
     assert_eq!(titles(&store), ["\"bob\""]);
+}
+
+/// An ACP pod whose `/docs/` members grant their creator Read and Write, and ADMIN Write;
+/// alice created d0.
+fn creator_pod() -> PodStore {
+    let (acp, acl) = ("http://www.w3.org/ns/solid/acp#", "http://www.w3.org/ns/auth/acl#");
+    let acr = "https://pod.ex/docs/.acr";
+    let nq = format!(
+        "<{D0}#it> <{TITLE}> \"v\" <{D0}> .\n\
+         <{acr}> <{acp}memberAccessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#creator> <{acr}> .\n\
+         <{acr}#creator> <{acp}allow> <{acl}Read> <{acr}> .\n\
+         <{acr}#creator> <{acp}allow> <{acl}Write> <{acr}> .\n\
+         <{acr}#creator> <{acp}anyOf> <{acr}#mc> <{acr}> .\n\
+         <{acr}#mc> <{acp}agent> <{acp}CreatorAgent> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#admin> <{acr}> .\n\
+         <{acr}#admin> <{acp}allow> <{acl}Write> <{acr}> .\n\
+         <{acr}#admin> <{acp}anyOf> <{acr}#ma> <{acr}> .\n\
+         <{acr}#ma> <{acp}agent> <{ADMIN}> <{acr}> .\n"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("pod loads"));
+    let mut prov = AccessProvenance::new();
+    prov.set_creator(D0, ALICE);
+    store.materialize_acp_with(&prov).expect("acp");
+    store
+}
+
+const D0: &str = "https://pod.ex/docs/d0";
+const ADMIN: &str = "https://admin.ex/card#me";
+
+fn reads_d0(store: &PodStore, agent: &str) -> bool {
+    store.decide(&session(agent), D0, Mode::Read).allow
+}
+
+/// A failed commit of an update that leaves every resource in place changes neither the
+/// stored provenance nor the view.
+#[test]
+fn a_failed_commit_that_moves_no_provenance_keeps_the_context_and_the_view() {
+    let mut store = creator_pod();
+    let before = store.acp_provenance().clone();
+    FAIL_COMMIT.with(|f| f.set(true));
+    store
+        .update_as_acp(&session(ADMIN), &format!("INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"))
+        .expect_err("the commit fails");
+    assert_eq!(*store.acp_provenance(), before);
+    assert!(reads_d0(&store, ALICE), "the creator still reads d0");
+    store.materialize_acp().expect("the stored context is still usable");
+    assert!(reads_d0(&store, ALICE));
+}
+
+/// A failed commit of an update that would have moved the provenance (here d0 dropped and
+/// created again, so alice is no longer its creator) leaves the store holding an unknown
+/// part of it: the view goes, and no rebuild uses the stored provenance until the caller
+/// supplies the context again.
+#[test]
+fn a_failed_commit_that_moves_provenance_fails_closed_until_the_context_is_supplied() {
+    let mut store = creator_pod();
+    let before = store.acp_provenance().clone();
+    FAIL_COMMIT.with(|f| f.set(true));
+    let update = format!("DROP GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}");
+    store.update_as_acp(&session(ADMIN), &update).expect_err("the commit fails");
+    assert_eq!(*store.acp_provenance(), before, "the staged provenance was not installed");
+    assert!(!reads_d0(&store, ALICE), "the view is gone");
+    assert!(!reads_d0(&store, ADMIN));
+    assert!(store.materialize_acp().is_err(), "the stored context is not used");
+    assert!(
+        store.update_as_acp(&session(ADMIN), &update).is_err(),
+        "nor is any update authorized"
+    );
+    let mut prov = AccessProvenance::new();
+    prov.set_creator(D0, ADMIN);
+    store.materialize_acp_with(&prov).expect("the caller supplies the context");
+    assert!(reads_d0(&store, ADMIN) && !reads_d0(&store, ALICE));
+    store.materialize_acp().expect("the stored context is usable again");
 }
