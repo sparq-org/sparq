@@ -2212,7 +2212,7 @@ fn match_premise_admitted(
     if let Some((delta, k)) = delta_at {
         let mut seeds = Vec::new();
         for fact in delta {
-            if let Some(nb) = unify(&premise[k], fact, seed) {
+            if let Some(nb) = unify(&premise[k], fact, seed, &bw.truncated) {
                 if !bw.work.charge(1, &bw.truncated) {
                     return Vec::new();
                 }
@@ -2390,7 +2390,7 @@ fn match_premise_admitted(
                         };
                         let collected = Term::List(items);
                         let mut nb = b.clone();
-                        if unify_term(list_pat, &collected, &mut nb) && within_depth(&nb, bw) {
+                        if unify_term(list_pat, &collected, &mut nb, &bw.truncated) && within_depth(&nb, bw) {
                             next.push(nb);
                         }
                     }
@@ -2450,7 +2450,7 @@ fn match_premise_admitted(
                             ]),
                         };
                         let mut nb = b.clone();
-                        if unify_term(var_pos, &target, &mut nb) && within_depth(&nb, bw) {
+                        if unify_term(var_pos, &target, &mut nb, &bw.truncated) && within_depth(&nb, bw) {
                             if !bw.work.charge(1, &bw.truncated) {
                                 return Vec::new();
                             }
@@ -2500,7 +2500,7 @@ fn match_premise_admitted(
                                 bounded::list_tail(ms, run)
                             };
                             let mut nb = b.clone();
-                            if val.is_some_and(|val| unify_term(&pat[2], &val, &mut nb)) && within_depth(&nb, bw) {
+                            if val.is_some_and(|val| unify_term(&pat[2], &val, &mut nb, &bw.truncated)) && within_depth(&nb, bw) {
                                 if !bw.work.charge(1, run) {
                                     return Vec::new();
                                 }
@@ -2512,7 +2512,7 @@ fn match_premise_admitted(
                 }
                 let cands = facts.candidates(&s_a, &p_a, &o_a);
                 for fact in &cands {
-                    if let Some(nb) = unify(pat, fact, b) {
+                    if let Some(nb) = unify(pat, fact, b, &bw.truncated) {
                         // Each row is charged before it is kept ([`bounded::JoinWork`]).
                         if !bw.work.charge(1, run) {
                             return Vec::new();
@@ -2733,7 +2733,7 @@ fn backward_prove(pat: &[Term; 3], b: &Binding, facts: &FactIndex, bw: &BwCtx, d
                             break;
                         };
                         if (val.is_ground() || matches!(val, Term::Formula(_)))
-                            && !unify_term(g, &val, &mut nb)
+                            && !unify_term(g, &val, &mut nb, &bw.truncated)
                         {
                             ok = false;
                             break;
@@ -2871,15 +2871,19 @@ fn rename_blanks(t: &[Term; 3], map: &FxHashMap<String, String>) -> [Term; 3] {
     [go(&t[0], map), go(&t[1], map), go(&t[2], map)]
 }
 
-/// Try to unify pattern triple `pat` with ground fact `f`, extending binding `b`.
-fn unify(pat: &[Term; 3], f: &[Term; 3], b: &Binding) -> Option<Binding> {
+/// Try to unify pattern triple `pat` with ground fact `f`, extending binding `b`. When the
+/// unification runs out of steps it fails, and the cut is recorded on `run`.
+fn unify(pat: &[Term; 3], f: &[Term; 3], b: &Binding, run: &Truncation) -> Option<Binding> {
     let mut nb = b.clone();
-    for i in 0..3 {
-        if !unify_term(&pat[i], &f[i], &mut nb) {
-            return None;
+    let mut steps = bounded::StepBudget::unification();
+    match unify_all(pat, f, &mut nb, &mut steps) {
+        Some(true) => Some(nb),
+        Some(false) => None,
+        None => {
+            bounded::unification_exhausted(run);
+            None
         }
     }
-    Some(nb)
 }
 
 /// Is `v` a quoted formula's own `@forAll` universal (GH #6754)? Such a variable is bound
@@ -3035,14 +3039,31 @@ pub(crate) fn validate_rule_quantifiers(parsed: &parser::Parsed) -> Result<(), S
     Ok(())
 }
 
-fn unify_term(pat: &Term, val: &Term, b: &mut Binding) -> bool {
-    match (pat, val) {
+/// [`unify_term_in`] under a fresh [`bounded::StepBudget::unification`]. When the budget
+/// runs out the terms do not unify, and the cut is recorded on `run`.
+fn unify_term(pat: &Term, val: &Term, b: &mut Binding, run: &Truncation) -> bool {
+    let mut steps = bounded::StepBudget::unification();
+    unify_term_in(pat, val, b, &mut steps).unwrap_or_else(|| {
+        bounded::unification_exhausted(run);
+        false
+    })
+}
+
+/// Unify `pat` with `val`, extending `b`. Matching two quoted formulae takes steps from
+/// `steps` ([`formula_unify`]); `None` when they run out.
+fn unify_term_in(
+    pat: &Term,
+    val: &Term,
+    b: &mut Binding,
+    steps: &mut bounded::StepBudget,
+) -> Option<bool> {
+    Some(match (pat, val) {
         (Term::Var(v), _) if unbindable_var(v) => pat == val,
         (Term::Var(v), _) => match b.get(v) {
             Some(existing) => existing == val,
             None => {
                 if !v.starts_with(PATTERN_WILDCARD) && frees_quoted_universal(val) {
-                    return false;
+                    return Some(false);
                 }
                 b.insert(v.clone(), val.clone());
                 true
@@ -3051,30 +3072,86 @@ fn unify_term(pat: &Term, val: &Term, b: &mut Binding) -> bool {
         // First-class lists unify STRUCTURALLY: same length, members pairwise
         // (so `(?x)` matches `(17)` binding ?x=17 — cwm/EYE list unification).
         (Term::List(ps), Term::List(vs)) => {
-            ps.len() == vs.len() && ps.iter().zip(vs).all(|(p, v)| unify_term(p, v, b))
+            ps.len() == vs.len() && unify_all(ps, vs, b, steps)?
         }
         // Unification THROUGH quoting: a `{ … }` pattern matches a `{ … }`
         // value when their triple multisets correspond under the binding
         // (pattern variables may bind quoted terms — cwm unify1/unify2).
-        (Term::Formula(ps), Term::Formula(vs)) => formula_unify(ps, vs, b),
+        (Term::Formula(ps), Term::Formula(vs)) => formula_unify(ps, vs, b, steps)?,
         // Quoted triples unify STRUCTURALLY, component by component (so
         // `<< ?s :p ?o >>` matches `<< :a :p :b >>` binding ?s/?o —
         // SPARQL-star / RDF-star triple-pattern semantics). [FABLE-5]
-        (Term::Triple(ps), Term::Triple(vs)) => {
-            ps.iter().zip(vs.iter()).all(|(p, v)| unify_term(p, v, b))
-        }
+        (Term::Triple(ps), Term::Triple(vs)) => unify_all(&ps[..], &vs[..], b, steps)?,
         (other, _) => other == val,
+    })
+}
+
+/// [`unify_term_in`] pairwise over `ps` and `vs` (of equal length), stopping at the first
+/// pair that does not unify.
+fn unify_all(
+    ps: &[Term],
+    vs: &[Term],
+    b: &mut Binding,
+    steps: &mut bounded::StepBudget,
+) -> Option<bool> {
+    for (p, v) in ps.iter().zip(vs) {
+        if !unify_term_in(p, v, b, steps)? {
+            return Some(false);
+        }
     }
+    Some(true)
 }
 
 /// Multiset unification of two formula bodies under `b`: a backtracking search that
 /// matches pattern statement `i` to an unused value statement, with a binding clone per
 /// branch. The search state is an explicit stack (one entry per matched statement), so
 /// formulae of any width take no stack per statement.
-fn formula_unify(ps: &[[Term; 3]], vs: &[[Term; 3]], b: &mut Binding) -> bool {
+///
+/// Each pairing it tries takes a step from `steps`. The outermost formula match gets a
+/// free allowance of [`formula_statements`]`(ps) * formula_statements(vs)` steps, which
+/// covers every pairing of a search that never backtracks, nested matches included (it
+/// tries each pair of statements at most once), so only backtracking spends the budget.
+/// `None` when the steps run out.
+fn formula_unify(
+    ps: &[[Term; 3]],
+    vs: &[[Term; 3]],
+    b: &mut Binding,
+    steps: &mut bounded::StepBudget,
+) -> Option<bool> {
     if ps.len() != vs.len() {
-        return false;
+        return Some(false);
     }
+    steps.enter_formula(formula_statements(ps).saturating_mul(formula_statements(vs)));
+    let matched = formula_search(ps, vs, b, steps);
+    steps.exit_formula();
+    matched
+}
+
+/// The statements of `ts` and of every formula nested in them.
+fn formula_statements(ts: &[[Term; 3]]) -> usize {
+    let mut n = ts.len();
+    let mut stack: Vec<&Term> = ts.iter().flatten().collect();
+    while let Some(t) = stack.pop() {
+        match t {
+            Term::Formula(rs) => {
+                n = n.saturating_add(rs.len());
+                stack.extend(rs.iter().flatten());
+            }
+            Term::List(ms) => stack.extend(ms),
+            Term::Triple(tr) => stack.extend(tr.iter()),
+            _ => {}
+        }
+    }
+    n
+}
+
+/// The search of [`formula_unify`].
+fn formula_search(
+    ps: &[[Term; 3]],
+    vs: &[[Term; 3]],
+    b: &mut Binding,
+    steps: &mut bounded::StepBudget,
+) -> Option<bool> {
     let mut used = vec![false; vs.len()];
     // `stack[i]`: the binding after matching `ps[..i]`, and the next value statement to
     // try for `ps[i]`.
@@ -3085,7 +3162,7 @@ fn formula_unify(ps: &[[Term; 3]], vs: &[[Term; 3]], b: &mut Binding) -> bool {
         let (cur, next) = &mut stack[i];
         if i == ps.len() {
             *b = std::mem::take(cur);
-            return true;
+            return Some(true);
         }
         let mut found = None;
         while *next < vs.len() {
@@ -3094,8 +3171,11 @@ fn formula_unify(ps: &[[Term; 3]], vs: &[[Term; 3]], b: &mut Binding) -> bool {
             if used[j] {
                 continue;
             }
+            if !steps.take() {
+                return None;
+            }
             let mut nb = cur.clone();
-            if (0..3).all(|k| unify_term(&ps[i][k], &vs[j][k], &mut nb)) {
+            if unify_all(&ps[i], &vs[j], &mut nb, steps)? {
                 found = Some((j, nb));
                 break;
             }
@@ -3115,7 +3195,7 @@ fn formula_unify(ps: &[[Term; 3]], vs: &[[Term; 3]], b: &mut Binding) -> bool {
             }
         }
     }
-    false
+    Some(false)
 }
 
 
@@ -3669,7 +3749,7 @@ fn eval_binder_inner(
         },
     };
     let mut nb = b;
-    unify_term(result.0, &result.1, &mut nb).then_some(nb)
+    unify_term(result.0, &result.1, &mut nb, run).then_some(nb)
 }
 
 registry_enum! {
@@ -3773,14 +3853,17 @@ fn formula_containment<S: std::borrow::Borrow<[Term; 3]>>(
         .collect();
     let mut out = Vec::new();
     let mut steps = bounded::StepBudget::containment();
-    containment_search(&pat, scope, seed.clone(), &mut out, &mut steps, bw);
+    let mut unify = bounded::StepBudget::unification();
+    containment_search(&pat, scope, seed.clone(), &mut out, (&mut steps, &mut unify), bw);
     bw.settle(steps.finish(out))
 }
 
 /// The depth-first search of [`formula_containment`]: every binding under which each
 /// pattern statement matches a scope statement (or virtual list structure), in match
 /// order, pushed to `out`. Each step of the search is one visit of a pattern statement,
-/// taken from `steps`. The search state is an explicit stack (one entry per matched
+/// taken from the first budget of `steps`; the unifications it runs share the second
+/// (a unification budget). One that runs out spends the first and ends the search at
+/// once, as a cut. The search state is an explicit stack (one entry per matched
 /// pattern statement), so patterns of any width take no stack per statement. Every
 /// binding the search extends is checked against the term-depth limit
 /// ([`within_depth`]) before it is carried to the next statement, so every binding it
@@ -3792,7 +3875,7 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
     scope: &[S],
     seed: Binding,
     out: &mut Vec<Binding>,
-    steps: &mut bounded::StepBudget,
+    (steps, unify): (&mut bounded::StepBudget, &mut bounded::StepBudget),
     bw: &BwCtx,
 ) {
     /// The order the pattern statements are matched in, as indices into `pat`: as
@@ -3884,9 +3967,15 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
                                     bounded::list_tail(&ms, &bw.truncated)
                                 };
                                 let mut nb = b.clone();
-                                if val.is_some_and(|val| unify_term(&p[2], &val, &mut nb))
-                                    && within_depth(&nb, bw)
-                                {
+                                let matched = match val {
+                                    Some(val) => match unify_term_in(&p[2], &val, &mut nb, unify) {
+                                        Some(matched) => matched,
+                                        // Out of unification steps: the search stops, as a cut.
+                                        None => return steps.spend(),
+                                    },
+                                    None => false,
+                                };
+                                if matched && within_depth(&nb, bw) {
                                     let (at, defers_left) = (at + 1, rest);
                                     visit = Some(Visit {
                                         order,
@@ -3934,10 +4023,15 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
         while let Some(st) = scope.get(scan.next) {
             let st: &[Term; 3] = st.borrow();
             scan.next += 1;
+            #[cfg(test)]
+            tests::SCOPE_STATEMENTS_TRIED.with(|n| n.set(n.get() + 1));
             let mut nb = v.b.clone();
+            // Out of unification steps: the search stops, as a cut.
+            let Some(matched) = unify_all(&p[..], &st[..], &mut nb, unify) else {
+                return steps.spend();
+            };
             // A match that bound nothing new extends nothing to check.
-            if (0..3).all(|k| unify_term(&p[k], &st[k], &mut nb))
-                && (nb.len() == v.b.len() || within_depth(&nb, bw))
+            if matched && (nb.len() == v.b.len() || within_depth(&nb, bw))
             {
                 visit = Some(Visit {
                     order: v.order.clone(),
@@ -5512,7 +5606,7 @@ fn eval_functional_inner(
             // forward: ( "lex" xsd:dt ) → "lex"^^xsd:dt (sized above; the parts are moved)
             (Term::Lit(v, _, _), Term::Iri(dt)) => {
                 let lit = Term::Lit(v, dt, None);
-                unify_term(obj, &lit, &mut nb).then_some(nb)
+                unify_term(obj, &lit, &mut nb, &bw.truncated).then_some(nb)
             }
             // reverse: decompose a ground object literal into its parts
             // (each part sized from the borrowed literal before it is copied)
@@ -5528,7 +5622,7 @@ fn eval_functional_inner(
                     return None;
                 }
                 let (lex, dt) = (Term::Lit(v.clone(), XSD_STRING.into(), None), Term::Iri(dt.clone()));
-                (unify_term(&members[0], &lex, &mut nb) && unify_term(&members[1], &dt, &mut nb))
+                (unify_term(&members[0], &lex, &mut nb, &bw.truncated) && unify_term(&members[1], &dt, &mut nb, &bw.truncated))
                     .then_some(nb)
             }
         };
@@ -5549,7 +5643,7 @@ fn eval_functional_inner(
                 .then(|| Term::Formula(all.iter().map(|t| (*t).clone()).collect()))
         })?;
         let mut nb = b;
-        return unify_term(obj, &result, &mut nb).then_some(nb);
+        return unify_term(obj, &result, &mut nb, &bw.truncated).then_some(nb);
     }
     // math:negation is bidirectional in EYE: `?x math:negation 3` solves
     // ?x = -3 (the one reverse mode the suites rely on).
@@ -5562,7 +5656,7 @@ fn eval_functional_inner(
                 // Sized from the value before it is rendered.
                 let t = numeric_result(&bw.truncated, pending, f, Numeral::Num(negated))?;
                 let mut nb = b;
-                return unify_term(subj, &t, &mut nb).then_some(nb);
+                return unify_term(subj, &t, &mut nb, &bw.truncated).then_some(nb);
             }
             return None;
         }
@@ -5608,7 +5702,7 @@ fn eval_functional_inner(
                 }
                 let mut nb = b;
                 let lit = Term::Lit(format_epoch(secs), XSD_STRING.into(), None);
-                return unify_term(subj, &lit, &mut nb).then_some(nb);
+                return unify_term(subj, &lit, &mut nb, &bw.truncated).then_some(nb);
             }
             // not-a-cut: defined-float (the inverse trig functions)
             if let Some(x) = numval_in(&o_applied, pending).map(NumVal::to_f64) {
@@ -5618,7 +5712,7 @@ fn eval_functional_inner(
                     }
                     let t = numeric_result(&bw.truncated, pending, f, Numeral::Double(v))?;
                     let mut nb = b;
-                    return unify_term(subj, &t, &mut nb).then_some(nb);
+                    return unify_term(subj, &t, &mut nb, &bw.truncated).then_some(nb);
                 }
             }
             return None;
@@ -6015,7 +6109,7 @@ fn eval_functional_inner(
             return (cmp_promoted(x, y) == Some(std::cmp::Ordering::Equal)).then_some(nb);
         }
     }
-    if unify_term(obj, &result, &mut nb) {
+    if unify_term(obj, &result, &mut nb, &bw.truncated) {
         Some(nb)
     } else {
         None
@@ -6876,6 +6970,98 @@ mod tests {
         let run = Truncation::top_level();
         let r = reason_n3_terms_in(src, None, resolver, NegationCycles::Reject, &run);
         (r.map(|c| c.facts), run.get())
+    }
+
+    /// #6953: a `{ … }` pattern matched against a `{ … }` value backtracks over statement
+    /// pairings. A pattern whose last statement matches nothing tries every ordering of
+    /// the others first; its budget stops it, as a cut, and the rule does not fire. A
+    /// negation in the same run is then refused.
+    #[test]
+    fn formula_unification_backtracking_is_budgeted() {
+        let n = 10;
+        let value: String = (0..n).map(|i| format!(":s :p :o{i} . ")).collect();
+        let pattern: String = (0..n).map(|i| format!(":s :p ?v{i} . ")).collect();
+        let doc = |negation: &str| {
+            format!(
+                "@prefix : <http://ex/> .\n\
+                 @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                 :d :f {{ {value}:t :r :x }} .\n\
+                 {{ :d :f {{ {pattern}:t :r :y }} }} => {{ :m :m :m }} .\n\
+                 {negation}"
+            )
+        };
+        let (facts, cut) = closure_and_cut(&doc(""), None);
+        let facts = facts.expect("a cut alone does not refuse a positive run");
+        assert!(!facts.iter().any(|t| t[0] == Term::Iri("http://ex/m".into())));
+        assert_eq!(cut, Some("formula unification exhausted its step budget"));
+
+        let negation = "{ ?x log:notIncludes { :m :m :m } } => { :n :n :n } .";
+        let (refused, _) = closure_and_cut(&doc(negation), None);
+        assert!(refused.is_err(), "{refused:?}");
+
+        // The same match inside a formula-containment search stops that search, as a cut.
+        let containment = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             {{ {{ :d :f {{ {value}:t :r :x }} }} log:includes \
+             {{ :d :f {{ {pattern}:t :r :y }} }} }} => {{ :m :m :m }} ."
+        );
+        let (facts, cut) = closure_and_cut(&containment, None);
+        assert!(!facts.unwrap().iter().any(|t| t[0] == Term::Iri("http://ex/m".into())));
+        assert_eq!(cut, Some("formula containment search exhausted its step budget"));
+    }
+
+    std::thread_local! {
+        /// Scope statements the formula-containment searches of this thread tried.
+        pub(super) static SCOPE_STATEMENTS_TRIED: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+    }
+
+    /// #6953: a containment search whose unification runs out stops there: it does not
+    /// go on to try the rest of the scope.
+    #[test]
+    fn containment_stops_at_an_exhausted_unification() {
+        let n = 10;
+        let value: String = (0..n).map(|i| format!(":s :p :o{i} . ")).collect();
+        let pattern: String = (0..n).map(|i| format!(":s :p ?v{i} . ")).collect();
+        let rest: String = (0..1000).map(|i| format!(":e :g {i} . ")).collect();
+        let doc = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             {{ {{ :d :f {{ {value}:t :r :x }} . {rest} }} log:includes \
+             {{ :d :f {{ {pattern}:t :r :y }} }} }} => {{ :m :m :m }} ."
+        );
+        SCOPE_STATEMENTS_TRIED.with(|n| n.set(0));
+        let (_, cut) = closure_and_cut(&doc, None);
+        assert_eq!(cut, Some("formula containment search exhausted its step budget"));
+        let tried = SCOPE_STATEMENTS_TRIED.with(std::cell::Cell::get);
+        assert!(tried < 100, "the search went on past the exhausted unification: {tried}");
+    }
+
+    /// #6953: a match that never backtracks is never refused, however many statements
+    /// it pairs (here far more pairings than the backtracking budget), and a match that
+    /// backtracks a little still succeeds.
+    #[test]
+    fn formula_unification_without_backtracking_is_not_budgeted() {
+        // The pattern lists the value's statements in reverse, so pairing each one scans
+        // past every unused value statement before it: n * (n + 1) / 2 pairings.
+        let n = 1000;
+        let value: String = (0..n).map(|i| format!(":s :p :o{i} . ")).collect();
+        let reversed: String = (0..n).rev().map(|i| format!(":s :p :o{i} . ")).collect();
+        let doc = format!(
+            "@prefix : <http://ex/> .\n\
+             :d :f {{ {value} }} .\n\
+             :e :f {{ :a :p :c . :a :p :b . :c :q :z }} .\n\
+             {{ :d :f {{ {reversed} }} }} => {{ :m :m :m }} .\n\
+             {{ :e :f {{ :a :p ?x . :a :p ?y . ?y :q :z }} }} => {{ :k :k ?x }} ."
+        );
+        let (facts, cut) = closure_and_cut(&doc, None);
+        let facts = facts.unwrap();
+        let m = Term::Iri("http://ex/m".into());
+        assert!(facts.contains(&[m.clone(), m.clone(), m]));
+        let k = Term::Iri("http://ex/k".into());
+        assert!(facts.contains(&[k.clone(), k, Term::Iri("http://ex/b".into())]));
+        assert_eq!(cut, None);
     }
 
     /// The deepest nesting of `t`, counted in list, formula and quoted-triple levels.

@@ -1414,9 +1414,9 @@ impl ProofInputs {
 }
 
 /// The PUBLIC `datatype_const` of the DUAL-LEAF `xsd:boolean` value lane
-/// (sq-5xdlk) — `blake3_field(xsd:boolean IRI)`, exactly the constant
-/// `sparq_zk::dual_leaf_boolean::encode_boolean` (the host half, sq-hh7a4) folds
-/// into the committed leaf's `value_component`.
+/// (sq-5xdlk) — BLAKE3 key derivation over the `xsd:boolean` IRI, exactly the
+/// constant `sparq_zk::dual_leaf_boolean::encode_boolean` (the host half,
+/// sq-hh7a4) folds into the committed leaf's `value_component`.
 ///
 /// # The boolean lane adds NO new Noir member
 ///
@@ -1431,11 +1431,16 @@ impl ProofInputs {
 /// # Lane separation is the public `datatype_const`, and only that
 ///
 /// `datatype_const` is folded into `value_component = h3(VALUE_HOOK,
-/// DATATYPE_CONST, LANG_NONE)`, and `blake3(xsd:boolean) != blake3(xsd:integer)`.
-/// So the honest witness for a committed `"1"^^xsd:integer` leaf recomputes a
+/// DATATYPE_CONST, LANG_NONE)`, and this constant differs from
+/// `blake3(xsd:integer)`. So the honest witness for a committed `"1"^^xsd:integer` leaf recomputes a
 /// DIFFERENT leaf under this constant and fails the member's
 /// `assert_eq(leaf, operand_enc)` binding — and symmetrically for a boolean leaf
-/// under the integer constant. That is a BINDING argument resting on Poseidon2
+/// under the integer constant. The member range-checks the hook to `u64`, not to
+/// `{0, 1}`, so the constant also differs from the `blake3(datatype IRI)` any
+/// string-lane leaf folds with `VALUE_NONE`: it is derived in BLAKE3's
+/// key-derivation mode, a domain separate from the plain fold for every byte
+/// string, so neither an `xsd:boolean` nor an opaque-datatype leaf can be opened
+/// as a boolean value. That is a BINDING argument resting on Poseidon2
 /// preimage resistance (a prover free to search preimages is out of scope of this
 /// statement), NOT an audited soundness claim.
 ///
@@ -1446,9 +1451,7 @@ impl ProofInputs {
 // sq-5xdlk: boolean value-lane wiring. Opt-in (`dual-leaf`), NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn boolean_datatype_const() -> FieldHex {
-    FieldHex(field_to_hex(&sparq_zk::dual_leaf::datatype_const(
-        sparq_zk::dual_leaf_boolean::XSD_BOOLEAN,
-    )))
+    FieldHex(field_to_hex(&sparq_zk::dual_leaf_boolean::boolean_datatype_const()))
 }
 
 /// The PUBLIC `datatype_const` of the DUAL-LEAF `xsd:dateTime` value lane

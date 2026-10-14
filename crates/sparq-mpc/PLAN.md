@@ -90,7 +90,7 @@ Join holders' partials on GLOBAL IRIs (architecture §2 #6, §4.3 step 4).
 
 ### M3 — `MpcBackend` (honest-majority Shamir) + hidden-value join  ✅ DONE [OPUS-4.8]
 First concrete secret-sharing impl behind the trait + the hidden-value join,
-**plus the RS tampered-share-detection hardening (guarantee (D), sq-uu0u)** —
+**plus the RS tampered-share-detection hardening (reconstruction-only, toward guarantee (D) — NOT malicious security; sq-uu0u)** —
 detect-and-abort / robust-correct on every reconstruction path, surfaced via the
 `MaliciousSecurity` enum. See the "Security model" bullet below and the
 "Deferred malicious-security seams" subsection for what remains beyond v1.
@@ -115,9 +115,10 @@ detect-and-abort / robust-correct on every reconstruction path, surfaced via the
   honest-majority now, configurable long-term). The four flatmates *cooperate*
   among themselves to prove an aggregate to an external landlord — the regime
   Shamir serves. LAN secret-sharing chosen (the aggregate is linear → zero-round
-  under Shamir; WAN garbled-circuit unneeded for v1). The *adversary model* is no
-  longer purely semi-honest on integrity: tamper-detection / robust-correction
-  (guarantee (D)) is now wired through the reconstruction layer (see the "Security
+  under Shamir; WAN garbled-circuit unneeded for v1). The *adversary model* stays
+  semi-honest; what is wired through the reconstruction layer is reconstruction-only
+  tamper-detection / robust-correction of opened shares (a step toward guarantee
+  (D), not malicious security) (see the "Security
   model" bullet), so the exact integrity guarantee a given `(n, t)` delivers is
   reported by the `MaliciousSecurity` enum rather than asserted as a blanket
   "semi-honest" label here.
@@ -146,7 +147,7 @@ detect-and-abort / robust-correct on every reconstruction path, surfaced via the
   trip; the threshold actually hides (a <=t-share set is consistent with a
   DIFFERENT secret — information-theoretic hiding witness); reconstruction below
   t+1 errors; the equality primitive in isolation (n=5,t=2). The adversarial
-  suite (`adversarial_tests.rs`) pins guarantee (D): tampered-share detection /
+  suite (`adversarial_tests.rs`) pins the reconstruction hardening: tampered-share detection /
   RS correction across the `(n, t, e)` regimes and at the end-to-end
   `reconstruct_disclosed` API boundary, the non-detection boundaries (exact `t+1`
   and the degree-`2t` `n=2t+1` equality open), and the "no fake crypto" stub
@@ -155,7 +156,8 @@ detect-and-abort / robust-correct on every reconstruction path, surfaced via the
 - **Security model (stated, not papered over):** honest-majority. Privacy holds
   while `< t+1` parties pool shares; each party learns only its shares + the
   disclosed output (confidentiality, guarantee (A)). **Tampered-share detection
-  (guarantee (D)) IS now provided at the Shamir reconstruction layer** (sq-uu0u
+  IS now provided at the Shamir reconstruction layer** (reconstruction-only, toward
+  guarantee (D); malicious security is NOT delivered — sq-uu0u
   WI-1/WI-2/WI-3, merged) — *not* the old semi-honest-only stance:
   - Shamir shares are an `[n, t+1]` Reed–Solomon codeword over the same `F_p`, so
     `robust.rs::reconstruct_robust` (Berlekamp–Welch via Gaussian elimination,
@@ -202,8 +204,10 @@ detect-and-abort / robust-correct on every reconstruction path, surfaced via the
   (zero published data points).
 
 #### Deferred malicious-security seams (sq-uu0u WI-4, bead sq-6d6g) [OPUS-4.8]
-The RS detect-and-abort / robust path (WI-1/2/3) closes guarantee (D) **in the
-honest-majority, redundancy-present regime** (`reconstruct` at degree `t`; the
+The RS detect-and-abort / robust path (WI-1/2/3) gives reconstruction-only
+detection / correction of opened shares **in the honest-majority,
+redundancy-present regime** (it does NOT close guarantee (D): a cheat inside a
+re-sharing or multiplication round is not checked) (`reconstruct` at degree `t`; the
 degree-`2t` equality open when `n > 2t+1`). Two gaps are explicitly NOT covered
 by RS redundancy and are deferred to dedicated future backends behind the SAME
 `MpcBackend` trait — recorded here so the boundary is a documented design seam,
@@ -336,11 +340,16 @@ credentialed host, so the measured envelope is not baked into any doc.
   **the principal thing that remains.** Unsolved in the literature; SPIKE.
 - **Q2** ✅ DECIDED at **M3**: honest-majority Shamir for v1 (configurable behind
   the trait long-term). Done.
-- **Guarantee (D), malicious security** ✅ DELIVERED at **M3** for the honest-
-  majority, redundancy-present regime (sq-uu0u WI-1/2/3): RS / Berlekamp–Welch
+- **Guarantee (D), malicious security** — **NOT delivered.** What **M3**
+  delivered (sq-uu0u WI-1/2/3) is the **tamper-evident-with-abort** tier for the
+  honest-majority, redundancy-present regime: RS / Berlekamp–Welch
   detect-and-abort / robust-correct on every reconstruction path, surfaced via
-  the `MaliciousSecurity` enum. Remaining seams (no-redundancy points + dishonest
-  majority via an IT-MAC backend; M4 attestation commitments) are deferred and
+  the `MaliciousSecurity` enum. That checks opened shares only — a cheat inside a
+  re-sharing round is undetected, and the IT-MAC tier is likewise tamper-evident
+  (`auth_mul` adopts a value tamper on its second operand), so the registry reports
+  `OperatorClass::Comparison` as semi-honest-only. Remaining seams (no-redundancy
+  points + dishonest majority via an IT-MAC backend; M4 attestation commitments)
+  are deferred and
   documented under M3 "Deferred malicious-security seams" (bead sq-6d6g);
   attribution sharpening is bead sq-6u6b.
 - **Q3** (BGP-join obliviousness cost / RQ2b) — surfaced concretely at **M3**:

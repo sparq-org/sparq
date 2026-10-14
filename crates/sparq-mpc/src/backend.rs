@@ -515,9 +515,14 @@ pub enum OperatorClass {
     /// (the honest-majority odd-`n` case) degree `2t` has ZERO RS redundancy, so
     /// this open is semi-honest-only there even though the aggregate is robust.
     EqualityJoin,
-    /// Comparison (`<`, `≤`, `>`): bit-decomposition; not yet realized in the
-    /// crate (disclosed operands are recomputed by the verifier outside the
-    /// crypto). Reported for completeness so a federation sees the gap.
+    /// Comparison (`<`, `≤`, `>`, threshold): realized in-crypto by the
+    /// bit-decomposition chain in [`crate::compare`], opening only the verdict
+    /// bit. `ShamirBackend` reports it as
+    /// [`SecurityDescriptor::semi_honest_only`] (`SemiHonest` +
+    /// `Abort(Selective)`) for every `(n, t)`: the re-sharing rounds inside the
+    /// chain carry no in-protocol check, and the IT-MAC twin
+    /// ([`crate::auth_compare`]) is tamper-evident (detect + local abort), not
+    /// malicious-secure, so it does not raise this class.
     Comparison,
 }
 
@@ -542,10 +547,12 @@ pub enum TrustModel {
     DishonestMajority,
 }
 
-/// The malicious-security guarantee a backend delivers against *actively*
-/// deviating parties — guarantee (D) of §4.2, orthogonal to [`TrustModel`]'s
-/// majority axis. A `bool` is too coarse: WI-1/WI-2 gave the honest-majority
-/// Shamir backend two *distinct* active-security levels depending on how much
+/// The reconstruction-hardening level a backend reports against *actively*
+/// deviating parties — a step toward guarantee (D) of §4.2, NOT malicious
+/// security (the adversary model stays `SemiHonest`; only opened shares are
+/// checked), orthogonal to [`TrustModel`]'s majority axis. A `bool` is too
+/// coarse: WI-1/WI-2 gave the honest-majority Shamir backend two *distinct*
+/// reconstruction-hardening levels depending on how much
 /// reconstruction redundancy a given `(n, t)` configuration carries, and a
 /// federation inspecting [`BackendInfo`] needs to tell them apart. The variants
 /// are ordered from weakest to strongest. `[OPUS-4.8]`
@@ -592,8 +599,8 @@ pub enum MaliciousSecurity {
 }
 
 impl MaliciousSecurity {
-    /// `true` iff the backend provides *some* active-security guarantee (detects
-    /// or corrects an actively-deviating party), i.e. anything other than
+    /// `true` iff the backend provides *some* reconstruction hardening (detects
+    /// or corrects a tampered opened share; NOT malicious security), i.e. anything other than
     /// [`MaliciousSecurity::SemiHonestOnly`]. The backwards-compatible projection
     /// of the former `malicious_secure: bool` field, for callers that only need
     /// the coarse "is this hardened at all?" bit.
@@ -675,8 +682,9 @@ pub struct BackendInfo {
     /// The trust regime (the Q2 axis). **Back-compat projection** of
     /// `security.threshold` — see [`SecurityDescriptor::trust_model`].
     pub trust_model: TrustModel,
-    /// The malicious-security guarantee against actively-deviating parties
-    /// (§4.2's guarantee (D)), orthogonal to `trust_model`. **Back-compat
+    /// The reconstruction-hardening level against actively-deviating parties
+    /// (toward §4.2's guarantee (D), not malicious security), orthogonal to
+    /// `trust_model`. **Back-compat
     /// projection** of `security` — see [`SecurityDescriptor::malicious_security`].
     /// Replaces the former coarse `malicious_secure: bool` so the *kind* of active
     /// security (detect-and-abort vs robust-up-to-`max_cheaters`) is legible to a
@@ -707,7 +715,8 @@ impl BackendInfo {
     }
 
     /// Backwards-compatible coarse bool: `true` iff this backend provides *any*
-    /// active-security guarantee (i.e. `malicious_security != None`). Preserves
+    /// reconstruction hardening (i.e. `malicious_security != SemiHonestOnly`;
+    /// despite the name, NOT malicious security). Preserves
     /// the question the old `malicious_secure: bool` field answered for callers
     /// that don't need the finer variant.
     pub fn malicious_secure(&self) -> bool {
