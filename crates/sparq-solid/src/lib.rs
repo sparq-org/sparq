@@ -285,6 +285,8 @@ pub struct PodStore {
     /// The auth view was dropped (see [`PodStore::drop_auth_view`]) and no static
     /// materialization has succeeded since: no other grant source may install grants.
     view_dropped: bool,
+    /// The timings of the last successful auth-view rebuild, whatever triggered it.
+    last_rebuild: Option<MaterializeStats>,
     /// The ODRL policies evaluated per request (issue #6743). Applied on top of the
     /// cached static view, so attaching or detaching needs no cache invalidation.
     #[cfg(feature = "odrl-bridge")]
@@ -457,6 +459,7 @@ impl PodStore {
             #[cfg(feature = "odrl-bridge")]
             bridge_ledger: odrl_bridge::BridgeLedger::new(),
             view_dropped: false,
+            last_rebuild: None,
             #[cfg(feature = "odrl-bridge")]
             odrl: odrl_enforce::OdrlEnforcement::default(),
             #[cfg(feature = "odrl-bridge")]
@@ -481,6 +484,13 @@ impl PodStore {
         self.materialize_wac_scoped(ReindexScope::Full)
     }
 
+    /// The timings of the last successful auth-view rebuild, including one an access-control
+    /// write ([`PodStore::put_acl`], [`PodStore::delete_acl`]) or an update to an
+    /// access-control or group document ran. `None` before the first.
+    pub fn last_rebuild(&self) -> Option<&MaterializeStats> {
+        self.last_rebuild.as_ref()
+    }
+
     /// [`PodStore::materialize_wac`] re-materializing the whole WAC view but invalidating the
     /// session cache only at `scope` — the internal seam an atomic single-`.acl` `put_acl`
     /// uses with [`ReindexScope::Origin`] so an ACL write to one pod does not cold-start every
@@ -494,6 +504,7 @@ impl PodStore {
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
         stats.index_millis = clock.lap();
+        self.last_rebuild = Some(stats.clone());
         Ok(stats)
     }
 
@@ -660,6 +671,7 @@ impl PodStore {
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
         stats.index_millis = clock.lap();
+        self.last_rebuild = Some(stats.clone());
         Ok(stats)
     }
 

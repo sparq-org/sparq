@@ -4,10 +4,10 @@
 //!     cargo run -p sparq-solid --example acl_write_bench --release -- [pods] [docs] [runs]
 //!
 //! Builds `pods` WAC pods of `docs` documents each, every pod governed by its own root
-//! `.acl`, then reports the median and spread of:
-//!   1. `put_acl` of one pod's root `.acl` (the whole view is rebuilt for one write);
-//!   2. the four phases of that rebuild, from `MaterializeStats`: assembling the reasoning
-//!      input, the reasoning fixpoint, installing the view, and rebuilding the index.
+//! `.acl`, then reports the median and spread of `put_acl` of one pod's root `.acl` (the
+//! whole view is rebuilt for one write) and of the four phases of that same rebuild, from
+//! `PodStore::last_rebuild`: assembling the reasoning input, the reasoning fixpoint,
+//! installing the view, and rebuilding the index (with the per-origin cache diff).
 
 use sparq_core::Graph;
 use sparq_solid::PodStore;
@@ -73,7 +73,8 @@ fn main() {
     store.materialize_wac().expect("materializes");
     println!("{pods} pods x {docs} documents, {runs} runs");
 
-    let mut put = Vec::with_capacity(runs);
+    let (mut put, mut assemble, mut reason, mut install, mut index) =
+        (vec![], vec![], vec![], vec![], vec![]);
     for i in 1..=runs {
         let acl = root_acl(0, i);
         let t = Instant::now();
@@ -81,22 +82,16 @@ fn main() {
             .put_acl("https://p0.ex/.acl", &acl, "ntriples")
             .expect("put_acl");
         put.push(t.elapsed().as_secs_f64() * 1e3);
-    }
-    report("put_acl, one pod's root .acl", put);
-
-    let (mut assemble, mut reason, mut install, mut index, mut total) =
-        (vec![], vec![], vec![], vec![], vec![]);
-    for _ in 0..runs {
-        let s = store.materialize_wac().expect("materializes");
+        // The rebuild this `put_acl` ran, origin-scoped index diff included.
+        let s = store.last_rebuild().expect("put_acl rebuilt the view");
         assemble.push(s.assemble_millis);
         reason.push(s.reason_millis);
         install.push(s.install_millis);
         index.push(s.index_millis);
-        total.push(s.millis + s.index_millis);
     }
-    report("rebuild: assemble", assemble);
-    report("rebuild: reason", reason);
-    report("rebuild: install view", install);
-    report("rebuild: index", index);
-    report("rebuild: total", total);
+    report("put_acl, one pod's root .acl", put);
+    report("  assemble", assemble);
+    report("  reason", reason);
+    report("  install view", install);
+    report("  index", index);
 }

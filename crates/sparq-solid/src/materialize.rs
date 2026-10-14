@@ -94,7 +94,7 @@ const MATCHER_FACTS: [&str; 3] = [
 ///          stats.auth_triples, stats.strata_facts, stats.millis);
 /// # Ok::<(), String>(())
 /// ```
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct MaterializeStats {
     /// Triples in the produced auth view.
     pub auth_triples: usize,
@@ -550,9 +550,21 @@ mod tests {
             assert_eq!(s.millis, s.assemble_millis + s.reason_millis + s.install_millis);
             assert!(s.reason_millis > 0.0 && s.index_millis == 0.0, "{s:?}");
             let mut store = crate::PodStore::new(graph);
+            assert!(store.last_rebuild().is_none());
             let s = if acp { store.materialize_acp() } else { store.materialize_wac() }
                 .expect("materializes");
             assert!(s.index_millis > 0.0, "{s:?}");
+            assert_eq!(store.last_rebuild().map(|l| l.millis), Some(s.millis));
+            // An access-control write records the rebuild it ran.
+            let triple = "<urn:a> <urn:b> <urn:c> .";
+            if acp {
+                store.put_acl_acp("https://pod.ex/x.acr", triple, "ntriples")
+            } else {
+                store.put_acl("https://pod.ex/x.acl", triple, "ntriples")
+            }
+            .expect("writes");
+            let after = store.last_rebuild().expect("recorded");
+            assert!(after.millis != s.millis && after.index_millis > 0.0, "{after:?}");
         }
     }
 
