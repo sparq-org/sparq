@@ -145,6 +145,27 @@ pub enum ReadPrecondition {
     NotModified,
 }
 
+/// Whether an If-Range precondition lets the Range apply (RFC 9110 section 13.1.5): absent, or a
+/// single strong entity tag equal to the current one. A date never does: two versions written
+/// within one second share a Last-Modified, so a date is not a strong validator here, and the
+/// whole representation is served instead. If-Range carries one validator, so a repeated field
+/// or an unreadable one never holds either. Both the LDP and the LWS surface use it.
+pub(crate) fn if_range_holds(headers: &http::HeaderMap, etag: &str) -> bool {
+    let mut lines = headers.get_all(http::header::IF_RANGE).iter();
+    let Some(line) = lines.next() else {
+        return true;
+    };
+    if lines.next().is_some() {
+        return false;
+    }
+    // One strong tag, in the RFC 9110 grammar, and no list; a weak tag never matches: the
+    // comparison is strong.
+    match crate::entity_tag::single(line.as_bytes()) {
+        Some((false, tag)) => parse_current(etag) == Some(tag),
+        _ => false,
+    }
+}
+
 /// Evaluate RFC 9110 §13.2.2 steps 1 and 2 for a GET/HEAD: `If-Match`, or without it
 /// `If-Unmodified-Since`, before the read's own [`evaluate_read`]. `If-Match` uses EXACT strong
 /// comparison against the selected representation's tag (§8.8.3.2), variant suffix included, so a
@@ -309,6 +330,47 @@ fn state_part(opaque: &[u8]) -> &[u8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn if_range() {
+        fn holds(lines: &[&[u8]], etag: &str) -> bool {
+            let mut h = http::HeaderMap::new();
+            for line in lines {
+                h.append(
+                    http::header::IF_RANGE,
+                    http::HeaderValue::from_bytes(line).unwrap(),
+                );
+            }
+            if_range_holds(&h, etag)
+        }
+        let date =
+            crate::http_date::format(UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000))
+                .unwrap();
+        assert!(holds(&[], "\"a\""));
+        assert!(holds(&[b"\"a\""], "\"a\""));
+        assert!(!holds(&[b"\"b\""], "\"a\""));
+        assert!(!holds(&[b"W/\"a\""], "\"a\""));
+        // Review finding: a date is not a strong validator (two versions can share one), so
+        // even one equal to Last-Modified serves the whole representation.
+        assert!(!holds(&[date.as_bytes()], "\"a\""));
+        assert!(!holds(&[b"garbage"], "\"a\""));
+        // One validator only: a repeated field holds even when a line names the current tag.
+        assert!(!holds(&[b"\"a\"", b"\"a\""], "\"a\""));
+        assert!(!holds(&[b"\"a\"", b"\"b\""], "\"a\""));
+        // A line that is not UTF-8 is read, not skipped, so it cannot fall back to "absent".
+        assert!(!holds(&[b"\"\xff\""], "\"a\""));
+        // One tag in the RFC 9110 grammar: a list never holds, and only space and tab may surround it.
+        assert!(!holds(&[b"\"a\", \"b\""], "\"a\""));
+        // Nor a list of one: If-Range takes one tag, with no empty members around it.
+        assert!(!holds(&[b"\"a\","], "\"a\""));
+        assert!(!holds(&[b",\"a\""], "\"a\""));
+        assert!(!holds(&[b" , \"a\" "], "\"a\""));
+        // A comma inside the quoted tag is part of it.
+        assert!(holds(&[b"\"a,b\""], "\"a,b\""));
+        assert!(!holds(&[b"\"a,b\""], "\"a\""));
+        assert!(holds(&[b" \"a\"\t"], "\"a\""));
+        assert!(!holds(&[b"\xc2\xa0\"a\""], "\"a\""));
+    }
 
     const TAG: &str = "\"abc-123\"";
     const OTHER: &str = "\"xyz-999\"";

@@ -43,8 +43,10 @@ use sparq_zk::dual_leaf_v2;
 use sparq_zk::encode::TYPE_CODE_LITERAL;
 use sparq_zk::field::{field_from_hash_bytes, field_from_hex_str, field_to_hex, Fr};
 use sparq_zk::poseidon2;
-use sparq_zk_compose::build::{
-    boolean_verdict, build_filter_value_dl_bool, build_filter_value_dl_boolean, BuildValueDlV1Error,
+use sparq_zk_compose::build::{boolean_verdict, build_filter_value_dl_bool};
+use sparq_zk_compose::legacy_v1::{self, boolean_datatype_const, build_filter_value_dl_boolean};
+use sparq_zk_compose::value_lane::{
+    BooleanLane, HookWitness, IntegerLane, LaneWitness, ValueLane, ValueLaneProof,
 };
 use sparq_zk_compose::driver::{CircuitProver, DriverError};
 use sparq_zk_compose::dispatch::{
@@ -52,7 +54,7 @@ use sparq_zk_compose::dispatch::{
     resolve_circuit, resolve_circuit_for_use, DispatchError,
 };
 use sparq_zk_compose::manifest::{
-    boolean_datatype_const, boolean_lane_const_v2, CircuitId, FieldHex, FilterOp, ProofInputs,
+    boolean_lane_const_v2, CircuitId, FieldHex, FilterOp, ProofInputs,
     ProofManifest,
 };
 use sparq_zk_compose::verifier::{
@@ -84,6 +86,12 @@ fn fr(hex: &FieldHex) -> Fr {
 
 fn hexf(f: &Fr) -> FieldHex {
     FieldHex(field_to_hex(f))
+}
+
+/// A canonical challenge: every renderer and the checked prove entry refuse a
+/// non-canonical `FieldHex`, the challenge included.
+fn challenge_one() -> FieldHex {
+    hexf(&Fr::from(1u64))
 }
 
 /// The member's OWN leaf recompute, transcribed from
@@ -529,7 +537,7 @@ fn v2_is_the_selectable_dual_leaf_method() {
 fn the_v2_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
     let built = build_filter_value_dl_bool(&bool_lit(true), FilterOp::Ge, false).unwrap();
     let p = unpack(&built.inputs);
-    let challenge = FieldHex("0x01".to_string());
+    let challenge = challenge_one();
 
     let dedicated = filter_value_dl_bool_prover_toml(
         &challenge,
@@ -539,7 +547,6 @@ fn the_v2_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
         p.expected,
         &built.value_hook,
         &built.lexical_component,
-        MethodUse::NewIssuance,
     )
     .expect("the pinned V2 boolean constant rides its own member");
     // The layout is the integer member's, byte for byte.
@@ -568,7 +575,6 @@ fn the_v2_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
         p.expected,
         &built.value_hook,
         &built.lexical_component,
-        MethodUse::LegacyAlreadyIssued,
     );
     assert!(matches!(crossed, Err(DispatchError::LaneMemberMismatch { .. })), "{:?}", crossed);
 
@@ -586,8 +592,8 @@ fn the_v2_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
     assert!(lines[7].starts_with("lexical_component = "));
 
     // The rendered constant is the V2 boolean one — a V1-lane render differs, and
-    // is available only under the explicit legacy use.
-    let v1_lane = filter_value_dl_prover_toml(
+    // is available only under the explicit legacy NAME.
+    let v1_lane = legacy_v1::filter_value_dl_prover_toml(
         &challenge,
         p.operand_enc,
         p.op.code(),
@@ -596,9 +602,8 @@ fn the_v2_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
         p.expected,
         &built.value_hook,
         &built.lexical_component,
-        MethodUse::LegacyAlreadyIssued,
     )
-    .expect("the V1 boolean constant rides the shared integer member, legacy use");
+    .expect("the V1 boolean constant rides the shared integer member, legacy name");
     assert_ne!(dedicated, v1_lane);
     assert!(matches!(
         filter_value_dl_prover_toml(
@@ -610,7 +615,6 @@ fn the_v2_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
             p.expected,
             &built.value_hook,
             &built.lexical_component,
-            MethodUse::NewIssuance,
         ),
         Err(DispatchError::LegacyLaneConstForIssuance { .. })
     ));
@@ -622,14 +626,13 @@ fn the_v2_prover_toml_renders_the_true_bound_hook() {
     let built = build_filter_value_dl_bool(&bool_lit(true), FilterOp::Eq, true).unwrap();
     let p = unpack(&built.inputs);
     let toml = filter_value_dl_bool_prover_toml(
-        &FieldHex("0x01".to_string()),
+        &challenge_one(),
         p.operand_enc,
         p.op.code(),
         true,
         p.expected,
         &built.value_hook,
         &built.lexical_component,
-        MethodUse::NewIssuance,
     )
     .expect("the pinned V2 boolean constant rides its own member");
     assert!(toml.contains("bound = \"1\"\n"));
@@ -712,7 +715,7 @@ fn member_accepts(
     lexical_component: &FieldHex,
 ) -> bool {
     let toml = raw_value_lane_toml(
-        &FieldHex("0x01".to_string()),
+        &challenge_one(),
         operand_enc,
         op.code(),
         bound,
@@ -769,18 +772,17 @@ fn in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict()
     // The dedicated renderer's bytes are what the honest case was solved from.
     assert_eq!(
         filter_value_dl_bool_prover_toml(
-            &FieldHex("0x01".to_string()),
+            &challenge_one(),
             p.operand_enc,
             p.op.code(),
             false,
             p.expected,
             &built.value_hook,
             &built.lexical_component,
-            MethodUse::NewIssuance,
         )
         .expect("the pinned V2 boolean constant rides its own member"),
         raw_value_lane_toml(
-            &FieldHex("0x01".to_string()),
+            &challenge_one(),
             p.operand_enc,
             p.op.code(),
             p.bound,
@@ -1140,22 +1142,55 @@ fn routing_a_fresh_proof_under_v1_is_refused_and_a_legacy_one_resolves() {
     }
 }
 
-/// The V1 boolean-lane BUILDER is behind the same boundary: a fresh build is
-/// refused, a legacy one builds, and the refusal is distinguishable from the
-/// encoder's own fail-closed rejection.
+/// A V1 boolean filter is built only by its LEGACY name, and the checked prove
+/// entry decides what it may be proved under: a `DualLeafV1` method for an
+/// already-issued graph and nothing else. Every other `(method, use)` combination
+/// is a typed refusal, each from a different check — so deleting any one of the
+/// four checks turns one row of this table green.
 #[test]
-fn building_a_fresh_v1_boolean_filter_is_refused_at_the_method_boundary() {
+fn a_v1_boolean_filter_needs_its_legacy_name_and_a_v1_legacy_prove() {
     let lit = typed("true", XSD_BOOLEAN);
-    let err = build_filter_value_dl_boolean(&lit, FilterOp::Eq, true, MethodUse::NewIssuance)
-        .expect_err("a fresh V1 build must be refused");
-    let BuildValueDlV1Error::MethodNotSelectable(e) = err else {
-        panic!("the refusal must name the method, not the literal");
-    };
-    assert_eq!(e.method(), CommitmentMethod::DualLeafV1);
-    assert!(
-        build_filter_value_dl_boolean(&lit, FilterOp::Eq, true, MethodUse::LegacyAlreadyIssued)
-            .is_ok()
-    );
+    let built = build_filter_value_dl_boolean(&lit, FilterOp::Eq, true)
+        .expect("the legacy name builds a V1 boolean proof");
+    assert_eq!(built.inputs.circuit_id(), &CircuitId::FilterValueDl);
+    // The ORDINARY boolean builder is the V2 one: its own member, its own constant.
+    let v2 = build_filter_value_dl_bool(&lit, FilterOp::Eq, true).unwrap();
+    assert_eq!(v2.inputs.circuit_id(), &CircuitId::FilterValueDlBool);
+
+    let proof = built.lane_proof().expect("the V1 build assembles typed inputs");
+    assert_eq!(proof.lane(), ValueLane::Integer);
+    let c = challenge_one();
+    let at = |m, u| proof.checked_prover_toml(m, u, &c);
+    assert!(at(CommitmentMethod::DualLeafV1, MethodUse::LegacyAlreadyIssued).is_ok());
+    assert!(matches!(
+        at(CommitmentMethod::DualLeafV1, MethodUse::NewIssuance),
+        Err(DispatchError::MethodNotSelectableForIssuance { .. })
+    ));
+    assert!(matches!(
+        at(CommitmentMethod::DualLeafV2, MethodUse::NewIssuance),
+        Err(DispatchError::LegacyLaneConstForIssuance { .. })
+    ));
+    assert!(matches!(
+        at(CommitmentMethod::DualLeafV2, MethodUse::LegacyAlreadyIssued),
+        Err(DispatchError::MethodLaneVersionMismatch { .. })
+    ));
+    assert!(matches!(
+        at(CommitmentMethod::StringCanonicalV1, MethodUse::LegacyAlreadyIssued),
+        Err(DispatchError::IllegalPair { .. })
+    ));
+    // ...and the mirror: a V2 lane under the V1 method is a version mismatch.
+    let v2_proof = v2.lane_proof().unwrap();
+    assert!(v2_proof
+        .checked_prover_toml(CommitmentMethod::DualLeafV2, MethodUse::NewIssuance, &c)
+        .is_ok());
+    assert!(matches!(
+        v2_proof.checked_prover_toml(
+            CommitmentMethod::DualLeafV1,
+            MethodUse::LegacyAlreadyIssued,
+            &c
+        ),
+        Err(DispatchError::MethodLaneVersionMismatch { .. })
+    ));
 }
 
 /// A V2 boolean lane constant may ONLY ride the bit-constrained member. On the
@@ -1244,9 +1279,10 @@ fn bb_available() -> bool {
 }
 
 /// LIVE prove+verify on the dedicated bit-domain member: `nargo execute` +
-/// `bb prove` + `bb verify`, through the method-checked prove entry and the
-/// library renderer, for an honest TRUE and an honest FALSE case — plus the
-/// refusal of a handle of `2` at witness generation.
+/// `bb prove` + `bb verify`, through the TYPED checked prove entry
+/// (`prove_value_lane`, which renders its own `Prover.toml`), for an honest TRUE
+/// and an honest FALSE case — plus the refusal of a handle of `2` at witness
+/// generation.
 ///
 /// Why all three in one test: a proof that verifies says the relation is
 /// satisfiable for the honest assignment, and the `2` case says the bit
@@ -1267,26 +1303,36 @@ fn full_prove_verify_filter_value_dl_bool() {
         let built = build_filter_value_dl_bool(&bool_lit(value), op, bound)
             .expect("the V2 boolean builder accepts a canonical literal");
         let p = unpack(&built.inputs);
-        let toml = filter_value_dl_bool_prover_toml(
-            &FieldHex("0x01".to_string()),
-            p.operand_enc,
-            p.op.code(),
-            bound,
-            p.expected,
-            &built.value_hook,
-            &built.lexical_component,
-            MethodUse::NewIssuance,
-        )
-        .expect("the pinned V2 boolean constant rides its own member");
+        let proof = built.lane_proof().expect("the V2 build assembles typed inputs");
+        // The checked entry renders exactly the public renderer's bytes.
+        assert_eq!(
+            proof
+                .checked_prover_toml(
+                    CommitmentMethod::DualLeafV2,
+                    MethodUse::NewIssuance,
+                    &challenge_one()
+                )
+                .unwrap(),
+            filter_value_dl_bool_prover_toml(
+                &challenge_one(),
+                p.operand_enc,
+                p.op.code(),
+                bound,
+                p.expected,
+                &built.value_hook,
+                &built.lexical_component,
+            )
+            .expect("the pinned V2 boolean constant rides its own member"),
+        );
         let out = unique_out_dir(tag);
         let art = prover
-            .prove_in_for_method(
+            .prove_value_lane(
                 CommitmentMethod::DualLeafV2,
-                &built.inputs,
-                &toml,
+                MethodUse::NewIssuance,
+                &challenge_one(),
+                &proof,
                 &out,
                 tag,
-                MethodUse::NewIssuance,
             )
             .expect("the honest V2 boolean assignment must prove");
         assert!(!art.proof.is_empty(), "bb must emit a proof");
@@ -1367,32 +1413,39 @@ fn unique_out_dir(label: &str) -> std::path::PathBuf {
     ))
 }
 
-/// The method-checked prove entry refuses a FRESH proof under the superseded
-/// method BEFORE it spawns `nargo`/`bb` — so the boundary holds on the proving
-/// path too, not only in the builder. No toolchain needed: the refusal happens
-/// first, which is the point.
-#[test]
-fn the_method_checked_prove_entry_refuses_a_fresh_v1_proof_before_spawning() {
-    let prover = CircuitProver::from_crate_root();
-    let out = unique_out_dir("v1_issuance_boundary");
-    let v1_inputs = ProofInputs::FilterValueDl {
-        id: CircuitId::FilterValueDl,
-        operand_enc: FieldHex(field_to_hex(&Fr::from(7u64))),
+/// An integer-lane typed proof with canonical placeholder fields and the given
+/// constant — enough for every check that precedes the toolchain.
+fn integer_lane(datatype_const: FieldHex) -> ValueLaneProof {
+    ValueLaneProof::Integer(IntegerLane {
+        operand_enc: hexf(&Fr::from(7u64)),
         op: FilterOp::Eq,
         bound: 7,
-        datatype_const: FieldHex(field_to_hex(&sparq_zk::dual_leaf::datatype_const(
-            XSD_INTEGER,
-        ))),
+        datatype_const,
         expected: true,
-    };
+        witness: HookWitness {
+            value_hook: hexf(&Fr::from(7u64)),
+            lexical_component: hexf(&Fr::from(8u64)),
+        },
+    })
+}
+
+/// The checked prove entry refuses a FRESH proof under the superseded method
+/// BEFORE it spawns `nargo`/`bb` — so the boundary holds on the proving path, not
+/// only in the builder. No toolchain needed: the refusal happens first, which is
+/// the point.
+#[test]
+fn the_checked_prove_entry_refuses_a_fresh_v1_proof_before_spawning() {
+    let prover = CircuitProver::from_crate_root();
+    let out = unique_out_dir("v1_issuance_boundary");
+    let v1 = integer_lane(hexf(&sparq_zk::dual_leaf::datatype_const(XSD_INTEGER)));
     let err = prover
-        .prove_in_for_method(
+        .prove_value_lane(
             CommitmentMethod::DualLeafV1,
-            &v1_inputs,
-            "",
+            MethodUse::NewIssuance,
+            &challenge_one(),
+            &v1,
             &out,
             "boundary",
-            MethodUse::NewIssuance,
         )
         .expect_err("a fresh V1 proof must be refused");
     assert!(matches!(err, DriverError::Dispatch(_)), "{:?}", err);
@@ -1401,265 +1454,368 @@ fn the_method_checked_prove_entry_refuses_a_fresh_v1_proof_before_spawning() {
     assert!(!out.exists(), "the refusal must precede any scratch directory");
 }
 
-/// The prove entry checks the INPUTS' lane constant as well as the method enum: a
-/// V2 method paired with a V1-constant input is refused for new issuance. A check
-/// on the method enum alone would accept it, since the enum says V2. The refusal
-/// still precedes any subprocess.
+/// The checked entry checks the INPUTS' lane constant as well as the method enum:
+/// a V2 method paired with a V1-constant input is refused for new issuance, and
+/// — because the entry takes the method — also for a legacy re-proof, where the
+/// method version and the constant version must agree. Still before any
+/// subprocess.
 #[test]
-fn the_prove_entry_refuses_a_v2_method_carrying_a_v1_lane_constant_for_issuance() {
+fn the_checked_prove_entry_refuses_a_v2_method_carrying_a_v1_lane_constant() {
     let prover = CircuitProver::from_crate_root();
     let out = unique_out_dir("v2_method_v1_const");
-    let inputs = ProofInputs::FilterValueDl {
-        id: CircuitId::FilterValueDl,
-        operand_enc: FieldHex(field_to_hex(&Fr::from(7u64))),
-        op: FilterOp::Eq,
-        bound: 7,
-        datatype_const: boolean_datatype_const(), // the V1 boolean lane constant
-        expected: true,
-    };
-    let err = prover
-        .prove_in_for_method(
-            CommitmentMethod::DualLeafV2,
-            &inputs,
-            "",
-            &out,
-            "v1const",
-            MethodUse::NewIssuance,
-        )
-        .expect_err("a V1 lane constant must not be freshly provable under V2");
-    match err {
-        DriverError::Dispatch(DispatchError::LegacyLaneConstForIssuance { .. }) => {}
-        other => panic!("expected the legacy-constant refusal, got {:?}", other),
+    let proof = integer_lane(boolean_datatype_const()); // the V1 boolean lane constant
+    for (use_, check) in [
+        (MethodUse::NewIssuance, "legacy-constant"),
+        (MethodUse::LegacyAlreadyIssued, "version-agreement"),
+    ] {
+        let err = prover
+            .prove_value_lane(CommitmentMethod::DualLeafV2, use_, &challenge_one(), &proof, &out, "v1const")
+            .expect_err("a V1 lane constant must not be provable under the V2 method");
+        match (use_, err) {
+            (
+                MethodUse::NewIssuance,
+                DriverError::Dispatch(DispatchError::LegacyLaneConstForIssuance { .. }),
+            )
+            | (
+                MethodUse::LegacyAlreadyIssued,
+                DriverError::Dispatch(DispatchError::MethodLaneVersionMismatch { .. }),
+            ) => {}
+            (_, other) => panic!("expected the {} refusal, got {:?}", check, other),
+        }
     }
     assert!(!out.exists(), "the refusal must precede any scratch directory");
 }
 
-/// The prove entry also refuses a `Prover.toml` that does not carry the checked
-/// inputs' `datatype_const`: the TOML is what the witness is generated from, so a
-/// checked `ProofInputs` beside an unchecked TOML would leave the actual lane
-/// unchecked. Still before any subprocess.
-#[test]
-fn the_prove_entry_refuses_a_prover_toml_that_carries_another_lane_constant() {
-    let prover = CircuitProver::from_crate_root();
-    let out = unique_out_dir("toml_lane_mismatch");
-    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
-        .expect("the V2 boolean builder accepts a canonical literal");
-    let p = unpack(&built.inputs);
-    // An honest V2 boolean TOML, then the SAME bytes with the V1 boolean constant
-    // substituted — the inputs still say V2.
-    let honest = raw_value_lane_toml(
-        &FieldHex("0x01".to_string()),
-        p.operand_enc,
-        p.op.code(),
-        p.bound,
-        p.datatype_const,
-        p.expected,
-        &built.value_hook,
-        &built.lexical_component,
-    );
-    let swapped = honest.replace(&p.datatype_const.0, &boolean_datatype_const().0);
-    assert_ne!(honest, swapped, "the substitution must change the bytes");
-    let err = prover
-        .prove_in_for_method(
-            CommitmentMethod::DualLeafV2,
-            &built.inputs,
-            &swapped,
-            &out,
-            "tomlmismatch",
-            MethodUse::NewIssuance,
-        )
-        .expect_err("a TOML carrying another lane's constant must be refused");
-    assert!(
-        matches!(err, DriverError::ProverTomlLaneMismatch { .. }),
-        "{:?}",
-        err
-    );
-    assert!(!out.exists(), "the refusal must precede any scratch directory");
+/// Non-canonical texts for a value-lane `FieldHex`: texts that would add TOML
+/// structure the fields did not produce (a second top-level key, a nested
+/// table, a trailing newline), plus the spellings the permissive parser accepts
+/// (uppercase, short, `0x`-less).
+fn non_canonical_spellings() -> Vec<(&'static str, String)> {
+    let v1 = boolean_datatype_const().0;
+    // An element whose canonical text has hex LETTERS, so its uppercase
+    // spelling actually differs from it.
+    let canonical = hexf(&Fr::from(0xabc7u64)).0;
+    assert_ne!(canonical, canonical.to_uppercase().replace("0X", "0x"));
+    vec![
+        ("second key", format!("{}\"\ndatatype_const = \"{}", canonical, v1)),
+        ("nested table", format!("{}\"\n[unused]\ndatatype_const = \"{}", canonical, v1)),
+        ("trailing newline", format!("{}\n", canonical)),
+        ("uppercase", format!("0x{}", canonical[2..].to_uppercase())),
+        ("short", "0x7".to_string()),
+        ("no prefix", canonical[2..].to_string()),
+    ]
 }
 
-/// REPRO 1 (round-3 gate, a real `bb` proof): a NON-value-lane variant declaring
-/// a value-lane member id — `FilterInt { id: FilterValueDl }` — carried no
-/// `datatype_const` for the pairing check to read, so the check returned `Ok` and
-/// the declared id still chose the circuit. The variant↔id agreement now refuses
-/// it, before any subprocess.
+/// CALLER TEXT CANNOT REACH `nargo`. The checked entry has no TOML parameter, so
+/// the only caller text that enters its `Prover.toml` arrives through `FieldHex`
+/// fields — and each of those, in every position the file is rendered from
+/// (`challenge`, `operand_enc`, `datatype_const`, `value_hook`,
+/// `lexical_component`), is refused unless it is canonical hex, naming the field,
+/// before any subprocess. The public renderers refuse the same texts.
 #[test]
-fn the_prove_entry_refuses_a_non_value_lane_variant_declaring_a_value_lane_member() {
+fn caller_text_cannot_reach_the_rendered_prover_toml() {
     let prover = CircuitProver::from_crate_root();
-    let out = unique_out_dir("variant_id_mismatch");
-    let inputs = ProofInputs::FilterInt {
+    let out = unique_out_dir("non_canonical_field_text");
+    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true).unwrap();
+    let honest = built.lane_proof().unwrap();
+    let ValueLaneProof::Boolean(base) = honest.clone() else {
+        panic!("the V2 boolean build is a boolean lane")
+    };
+    let int_base = integer_lane(hexf(&dual_leaf_v2::integer_lane_const()));
+    for (label, text) in non_canonical_spellings() {
+        let h = FieldHex(text);
+        let mut cases: Vec<(&str, FieldHex, ValueLaneProof)> = Vec::new();
+        cases.push(("challenge", h.clone(), honest.clone()));
+        let mut b = base.clone();
+        b.operand_enc = h.clone();
+        cases.push(("operand_enc", challenge_one(), ValueLaneProof::Boolean(b)));
+        let mut b = base.clone();
+        b.witness.value_hook = h.clone();
+        cases.push(("value_hook", challenge_one(), ValueLaneProof::Boolean(b)));
+        let mut b = base.clone();
+        b.witness.lexical_component = h.clone();
+        cases.push(("lexical_component", challenge_one(), ValueLaneProof::Boolean(b)));
+        if let ValueLaneProof::Integer(mut i) = int_base.clone() {
+            i.datatype_const = h.clone();
+            cases.push(("datatype_const", challenge_one(), ValueLaneProof::Integer(i)));
+        }
+        for (field, challenge, proof) in cases {
+            let err = prover
+                .prove_value_lane(
+                    CommitmentMethod::DualLeafV2,
+                    MethodUse::NewIssuance,
+                    &challenge,
+                    &proof,
+                    &out,
+                    "non_canonical",
+                )
+                .expect_err("non-canonical field text must be refused");
+            match err {
+                DriverError::Dispatch(DispatchError::NonCanonicalFieldHex { field: f, .. }) => {
+                    assert_eq!(f, field, "{} in {}", label, field)
+                }
+                other => panic!("{} in {}: expected a non-canonical refusal, got {:?}", label, field, other),
+            }
+        }
+        // The public renderer refuses the same text in the same positions.
+        let p = unpack(&built.inputs);
+        let r = |c: &FieldHex, e: &FieldHex, vh: &FieldHex, lc: &FieldHex| {
+            filter_value_dl_bool_prover_toml(c, e, p.op.code(), true, p.expected, vh, lc)
+        };
+        for (field, res) in [
+            ("challenge", r(&h, p.operand_enc, &built.value_hook, &built.lexical_component)),
+            ("operand_enc", r(&challenge_one(), &h, &built.value_hook, &built.lexical_component)),
+            ("value_hook", r(&challenge_one(), p.operand_enc, &h, &built.lexical_component)),
+            ("lexical_component", r(&challenge_one(), p.operand_enc, &built.value_hook, &h)),
+        ] {
+            assert!(
+                matches!(&res, Err(DispatchError::NonCanonicalFieldHex { field: f, .. }) if f == field),
+                "{} in {}: {:?}",
+                label,
+                field,
+                res
+            );
+        }
+    }
+    assert!(!out.exists(), "every refusal must precede any scratch directory");
+}
+
+/// What the checked entry DOES render is always the flat form: one `key = value`
+/// per line, each key once, no table header, every quoted value either canonical
+/// hex or a decimal integer, in the member's declaration order. Checked for every
+/// lane, so a renderer that grew a stray key, a table or an unquoted string would
+/// show up here.
+#[test]
+fn the_checked_prover_toml_is_always_the_flat_form() {
+    let h = |n: u64| hexf(&Fr::from(n));
+    let hook = || HookWitness { value_hook: h(3), lexical_component: h(4) };
+    let signed = || sparq_zk_compose::value_lane::SignedWitness {
+        value_neg: true,
+        value_hook_scaled: h(3),
+        lexical_component: h(4),
+    };
+    use sparq_zk_compose::value_lane::{DateTimeLane, DecimalLane, DoubleLane};
+    let cases: Vec<(ValueLaneProof, Vec<&str>)> = vec![
+        (
+            integer_lane(hexf(&dual_leaf_v2::integer_lane_const())),
+            vec!["challenge", "operand_enc", "op", "bound", "datatype_const", "expected", "value_hook", "lexical_component"],
+        ),
+        (
+            ValueLaneProof::Double(DoubleLane {
+                operand_enc: h(2),
+                op: FilterOp::Lt,
+                b_bits: 0x4008_0000_0000_0000,
+                datatype_const: hexf(&dual_leaf_v2::double_lane_const()),
+                expected: false,
+                witness: hook(),
+            }),
+            vec!["challenge", "operand_enc", "op", "b_bits", "datatype_const", "expected", "value_hook", "lexical_component"],
+        ),
+        (
+            ValueLaneProof::Decimal(DecimalLane {
+                operand_enc: h(2),
+                op: FilterOp::Ge,
+                bound_neg: false,
+                bound_scaled: 725,
+                datatype_const: hexf(&dual_leaf_v2::decimal_lane_const(2)),
+                expected: true,
+                witness: signed(),
+            }),
+            vec!["challenge", "operand_enc", "op", "bound_neg", "bound_scaled", "datatype_const", "expected", "value_neg", "value_hook_scaled", "lexical_component"],
+        ),
+        (
+            ValueLaneProof::DateTime(DateTimeLane {
+                operand_enc: h(2),
+                op: FilterOp::Ne,
+                bound_neg: true,
+                bound_scaled_epoch: 86_400_000,
+                datatype_const: hexf(&dual_leaf_v2::date_lane_const()),
+                expected: true,
+                witness: signed(),
+            }),
+            vec!["challenge", "operand_enc", "op", "bound_neg", "bound_scaled_epoch", "datatype_const", "expected", "value_neg", "value_hook_scaled", "lexical_component"],
+        ),
+        (
+            ValueLaneProof::Boolean(BooleanLane {
+                operand_enc: h(2),
+                op: FilterOp::Eq,
+                bound: true,
+                expected: true,
+                witness: hook(),
+            }),
+            vec!["challenge", "operand_enc", "op", "bound", "datatype_const", "expected", "value_hook", "lexical_component"],
+        ),
+    ];
+    for (proof, keys) in cases {
+        let toml = proof
+            .checked_prover_toml(CommitmentMethod::DualLeafV2, MethodUse::NewIssuance, &challenge_one())
+            .unwrap_or_else(|e| panic!("{:?}: {}", proof.lane(), e));
+        let lines: Vec<&str> = toml.lines().collect();
+        assert_eq!(lines.len(), keys.len(), "{:?}", proof.lane());
+        for (line, key) in lines.iter().zip(&keys) {
+            let (k, v) = line.split_once(" = ").expect("key = value");
+            assert_eq!(k, *key, "{:?}", proof.lane());
+            let flat_value = v == "true"
+                || v == "false"
+                || (v.len() == 68
+                    && v.starts_with("\"0x")
+                    && v.ends_with('"')
+                    && v[3..67].bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+                || (v.len() >= 3
+                    && v.starts_with('"')
+                    && v.ends_with('"')
+                    && v[1..v.len() - 1].bytes().all(|b| b.is_ascii_digit()));
+            assert!(flat_value, "{:?}: `{}` is not a flat value", proof.lane(), line);
+        }
+        assert!(toml.ends_with('\n') && !toml.contains('['), "{:?}", proof.lane());
+    }
+}
+
+/// A crossed variant/id is not expressible through the typed inputs — a
+/// `ValueLaneProof` has no id field, and its member is derived — and assembling
+/// typed inputs from a crossed `ProofInputs` is refused by the SAME derivation
+/// the verifier uses. A non-value-lane variant declaring a value-lane member
+/// (`FilterInt { id: FilterValueDl }`) and a value-lane variant declaring another
+/// member are both refused.
+#[test]
+fn a_crossed_variant_and_member_is_refused_by_the_shared_derivation() {
+    let witness = || {
+        LaneWitness::Hook(HookWitness {
+            value_hook: hexf(&Fr::from(1u64)),
+            lexical_component: hexf(&Fr::from(2u64)),
+        })
+    };
+    let filter_int_crossed = ProofInputs::FilterInt {
         id: CircuitId::FilterValueDl,
-        operand_enc: FieldHex(field_to_hex(&Fr::from(1u64))),
+        operand_enc: hexf(&Fr::from(1u64)),
         op: FilterOp::Eq,
         bound: 1,
         expected: true,
     };
-    // Directly, so the refusal is pinned at the shared check and not only at the
-    // prove entry.
-    assert!(matches!(
-        check_lane_member_pairing_for_use(&inputs, MethodUse::NewIssuance),
-        Err(DispatchError::ValueLaneVariantIdMismatch { .. })
-    ));
-    assert!(matches!(
-        check_lane_member_pairing_for_use(&inputs, MethodUse::LegacyAlreadyIssued),
-        Err(DispatchError::ValueLaneVariantIdMismatch { .. })
-    ));
-    let err = prover
-        .prove_in_for_method(
-            CommitmentMethod::DualLeafV2,
-            &inputs,
-            "",
-            &out,
-            "variantid",
-            MethodUse::NewIssuance,
-        )
-        .expect_err("a FilterInt declaring a value-lane member must be refused");
-    assert!(
-        matches!(
-            err,
-            DriverError::Dispatch(DispatchError::ValueLaneVariantIdMismatch { .. })
-        ),
-        "{:?}",
-        err
-    );
-    assert!(!out.exists(), "the refusal must precede any scratch directory");
-
-    // The mirror case: a value-lane VARIANT declaring another member's id.
     let crossed = ProofInputs::FilterValueDlBool {
         id: CircuitId::FilterValueDl,
-        operand_enc: FieldHex(field_to_hex(&Fr::from(1u64))),
+        operand_enc: hexf(&Fr::from(1u64)),
         op: FilterOp::Eq,
         bound: 1,
         datatype_const: boolean_lane_const_v2(),
         expected: true,
     };
+    for inputs in [&filter_int_crossed, &crossed] {
+        assert!(matches!(
+            ValueLaneProof::from_inputs(inputs, witness()),
+            Err(DispatchError::ValueLaneVariantIdMismatch { .. })
+        ));
+        for use_ in [MethodUse::NewIssuance, MethodUse::LegacyAlreadyIssued] {
+            assert!(matches!(
+                check_lane_member_pairing_for_use(inputs, use_),
+                Err(DispatchError::ValueLaneVariantIdMismatch { .. })
+            ));
+        }
+    }
+    // The honest variant assembles, and its derived member is its own.
+    let mut honest = crossed.clone();
+    if let ProofInputs::FilterValueDlBool { id, .. } = &mut honest {
+        *id = CircuitId::FilterValueDlBool;
+    }
+    let typed_ok = ValueLaneProof::from_inputs(&honest, witness()).unwrap();
+    assert_eq!(typed_ok.circuit_id(), CircuitId::FilterValueDlBool);
+    assert_eq!(typed_ok.proof_inputs(), honest);
+    // A witness of the other shape, and a boolean bound outside {0, 1}, are refused.
+    let signed = LaneWitness::Signed(sparq_zk_compose::value_lane::SignedWitness {
+        value_neg: false,
+        value_hook_scaled: hexf(&Fr::from(1u64)),
+        lexical_component: hexf(&Fr::from(2u64)),
+    });
     assert!(matches!(
-        check_lane_member_pairing_for_use(&crossed, MethodUse::NewIssuance),
-        Err(DispatchError::ValueLaneVariantIdMismatch { .. })
+        ValueLaneProof::from_inputs(&honest, signed),
+        Err(DispatchError::MalformedValueLaneInputs { .. })
     ));
-
-    // And a NON-value-lane variant declaring its OWN member is still accepted —
-    // the rule is agreement, not a ban on non-value-lane inputs.
-    let honest = ProofInputs::FilterInt {
+    let mut two = honest.clone();
+    if let ProofInputs::FilterValueDlBool { bound, .. } = &mut two {
+        *bound = 2;
+    }
+    assert!(matches!(
+        ValueLaneProof::from_inputs(&two, witness()),
+        Err(DispatchError::MalformedValueLaneInputs { .. })
+    ));
+    // A NON-value-lane variant declaring its OWN member is still accepted by the
+    // pairing check — the rule is agreement, not a ban on non-value-lane inputs.
+    let honest_int = ProofInputs::FilterInt {
         id: CircuitId::FilterInt { d: 2 },
-        operand_enc: FieldHex(field_to_hex(&Fr::from(1u64))),
+        operand_enc: hexf(&Fr::from(1u64)),
         op: FilterOp::Eq,
         bound: 1,
         expected: true,
     };
     assert_eq!(
-        check_lane_member_pairing_for_use(&honest, MethodUse::NewIssuance),
+        check_lane_member_pairing_for_use(&honest_int, MethodUse::NewIssuance),
         Ok(())
     );
 }
 
-/// REPRO 2 (round-3 gate, a real `bb` proof): the TOML check was a whole-file line
-/// scan, so a `datatype_const` line under a `[table]` header satisfied it while
-/// the TOP LEVEL — the part that feeds the witness — carried another lane's
-/// constant. The check now reads the top-level key only.
+/// An uppercase or short `operand_enc` — both of which the permissive parser
+/// decodes to the intended element — is refused by the `ProofInputs`-level check,
+/// by every ordinary renderer and by the checked prove entry.
 #[test]
-fn the_prove_entry_refuses_a_nested_datatype_const_line() {
-    let prover = CircuitProver::from_crate_root();
-    let out = unique_out_dir("nested_datatype_const");
-    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
-        .expect("the V2 boolean builder accepts a canonical literal");
-    let p = unpack(&built.inputs);
-    let honest = raw_value_lane_toml(
-        &FieldHex("0x01".to_string()),
-        p.operand_enc,
-        p.op.code(),
-        p.bound,
-        p.datatype_const,
-        p.expected,
-        &built.value_hook,
-        &built.lexical_component,
-    );
-    // The top level says V1 boolean; an `[unused]` table underneath carries the V2
-    // constant the inputs declare. The old whole-file scan accepted this.
-    let smuggled = format!(
-        "{}\n[unused]\ndatatype_const = \"{}\"\n",
-        honest.replace(&p.datatype_const.0, &boolean_datatype_const().0),
-        p.datatype_const.0
-    );
-    assert!(
-        smuggled.lines().any(|l| l.trim()
-            == format!("datatype_const = \"{}\"", p.datatype_const.0)),
-        "the repro must still contain the declared constant SOMEWHERE in the file"
-    );
-    let err = prover
-        .prove_in_for_method(
+fn an_uppercase_or_short_operand_enc_is_refused_everywhere() {
+    let canonical = hexf(&Fr::from(0xabc7u64));
+    for text in [format!("0x{}", canonical.0[2..].to_uppercase()), "0xabc7".to_string()] {
+        let bad = FieldHex(text.clone());
+        assert_ne!(bad, canonical, "the spelling must differ from the canonical text");
+        assert_eq!(field_from_hex_str(&text), Some(Fr::from(0xabc7u64)), "{}", text);
+        let mut proof = integer_lane(hexf(&dual_leaf_v2::integer_lane_const()));
+        if let ValueLaneProof::Integer(i) = &mut proof {
+            i.operand_enc = bad.clone();
+        }
+        let named = |r: Result<String, DispatchError>| {
+            matches!(r, Err(DispatchError::NonCanonicalFieldHex { field, .. }) if field == "operand_enc")
+        };
+        assert!(named(proof.checked_prover_toml(
             CommitmentMethod::DualLeafV2,
-            &built.inputs,
-            &smuggled,
-            &out,
-            "nestedconst",
             MethodUse::NewIssuance,
-        )
-        .expect_err("a nested datatype_const must not satisfy the TOML check");
-    assert!(
-        matches!(err, DriverError::ProverTomlLaneMismatch { .. }),
-        "{:?}",
-        err
-    );
-    assert!(!out.exists(), "the refusal must precede any scratch directory");
-
-    // A TOML with NO top-level key at all, and one with the key twice, are both
-    // refused rather than resolved to a guess.
-    for bad in [
-        format!("[unused]\ndatatype_const = \"{}\"\n", p.datatype_const.0),
-        format!(
-            "datatype_const = \"{}\"\ndatatype_const = \"{}\"\n",
-            p.datatype_const.0, p.datatype_const.0
-        ),
-    ] {
-        let err = prover
-            .prove_in_for_method(
-                CommitmentMethod::DualLeafV2,
-                &built.inputs,
-                &bad,
-                &out,
-                "nestedconst2",
-                MethodUse::NewIssuance,
-            )
-            .expect_err("no unambiguous top-level constant must be refused");
-        assert!(
-            matches!(err, DriverError::ProverTomlLaneMismatch { .. }),
-            "{:?}",
-            err
-        );
+            &challenge_one()
+        )));
+        assert!(matches!(
+            check_lane_member_pairing(&proof.proof_inputs()),
+            Err(DispatchError::NonCanonicalFieldHex { .. })
+        ));
+        let (c, h) = (challenge_one(), hexf(&Fr::from(3u64)));
+        let f = |x: Fr| hexf(&x);
+        assert!(named(filter_value_dl_prover_toml(
+            &c, &bad, 4, 7, &f(dual_leaf_v2::integer_lane_const()), true, &h, &h
+        )));
+        assert!(named(filter_value_dl_bool_prover_toml(&c, &bad, 4, true, true, &h, &h)));
+        assert!(named(filter_value_dl_f64_prover_toml(
+            &c, &bad, 4, 7, &f(dual_leaf_v2::double_lane_const()), true, &h, &h
+        )));
+        assert!(named(filter_value_dl_decimal_prover_toml(
+            &c, &bad, 4, false, 7, &f(dual_leaf_v2::decimal_lane_const(2)), true, false, &h, &h
+        )));
+        assert!(named(filter_value_dl_datetime_prover_toml(
+            &c, &bad, 4, false, 7, &f(dual_leaf_v2::datetime_lane_const()), true, false, &h, &h
+        )));
+        assert!(named(legacy_v1::filter_value_dl_prover_toml(
+            &c, &bad, 4, 7, &f(sparq_zk::dual_leaf::datatype_const(XSD_INTEGER)), true, &h, &h
+        )));
     }
-    // The honest rendering still passes the TOML check (it fails later, at the
-    // toolchain, which is not present in every environment) — assert the check
-    // itself by its distinct error NOT being raised.
-    let honest_err = prover
-        .prove_in_for_method(
-            CommitmentMethod::DualLeafV2,
-            &built.inputs,
-            &honest,
-            &out,
-            "honestconst",
-            MethodUse::NewIssuance,
-        )
-        .err();
-    assert!(
-        !matches!(honest_err, Some(DriverError::ProverTomlLaneMismatch { .. })),
-        "the honest rendering must pass the TOML lane check"
-    );
 }
 
-/// The TOML check accepts only the renderers' flat form, so no TOML parser can
-/// read a different `datatype_const` from the one it compared. Each spelling
-/// below is valid TOML (or close to it) whose top-level `datatype_const` a
-/// parser could read differently from a line scan; every one is refused, while
-/// the honest rendering passes the check.
+/// The checked entry takes no TOML, so a `Prover.toml` outside the renderers'
+/// flat form cannot be HANDED to it; the remaining route for such text is a
+/// field value. Each spelling below is valid TOML (or close to it) that a parser
+/// could read a different `datatype_const` from; placed in any `FieldHex` field
+/// the checked entry renders from, every one is refused as non-canonical before
+/// any subprocess — and the honest proof renders exactly the flat bytes the
+/// in-circuit vectors are solved from.
 #[test]
-fn the_prove_entry_refuses_every_prover_toml_outside_the_flat_form() {
+fn every_prover_toml_spelling_outside_the_flat_form_is_refused_as_field_text() {
     let prover = CircuitProver::from_crate_root();
     let out = unique_out_dir("flat_form");
     let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
         .expect("the V2 boolean builder accepts a canonical literal");
     let p = unpack(&built.inputs);
     let honest = raw_value_lane_toml(
-        &FieldHex("0x01".to_string()),
+        &challenge_one(),
         p.operand_enc,
         p.op.code(),
         p.bound,
@@ -1667,6 +1823,14 @@ fn the_prove_entry_refuses_every_prover_toml_outside_the_flat_form() {
         p.expected,
         &built.value_hook,
         &built.lexical_component,
+    );
+    let proof = built.lane_proof().unwrap();
+    assert_eq!(
+        proof
+            .checked_prover_toml(CommitmentMethod::DualLeafV2, MethodUse::NewIssuance, &challenge_one())
+            .unwrap(),
+        honest,
+        "the checked entry renders the flat form"
     );
     let v2 = &p.datatype_const.0;
     let v1 = &boolean_datatype_const().0;
@@ -1690,39 +1854,38 @@ fn the_prove_entry_refuses_every_prover_toml_outside_the_flat_form() {
         ("duplicate key", format!("{}{}\n", honest, line)),
         ("no key", without.clone()),
     ];
+    let ValueLaneProof::Boolean(base) = proof else { panic!("boolean lane") };
     for (label, toml) in cases {
-        let err = prover
-            .prove_in_for_method(
-                CommitmentMethod::DualLeafV2,
-                &built.inputs,
-                &toml,
-                &out,
-                "flatform",
-                MethodUse::NewIssuance,
-            )
-            .expect_err(label);
-        assert!(
-            matches!(err, DriverError::ProverTomlLaneMismatch { .. }),
-            "{}: {:?}",
-            label,
-            err
-        );
+        let text = FieldHex(toml);
+        let mut in_operand = base.clone();
+        in_operand.operand_enc = text.clone();
+        let mut in_lexical = base.clone();
+        in_lexical.witness.lexical_component = text.clone();
+        for (field, challenge, proof) in [
+            ("challenge", text.clone(), ValueLaneProof::Boolean(base.clone())),
+            ("operand_enc", challenge_one(), ValueLaneProof::Boolean(in_operand)),
+            ("lexical_component", challenge_one(), ValueLaneProof::Boolean(in_lexical)),
+        ] {
+            let err = prover
+                .prove_value_lane(
+                    CommitmentMethod::DualLeafV2,
+                    MethodUse::NewIssuance,
+                    &challenge,
+                    &proof,
+                    &out,
+                    "flatform",
+                )
+                .expect_err(label);
+            assert!(
+                matches!(&err, DriverError::Dispatch(DispatchError::NonCanonicalFieldHex { field: f, .. }) if f == field),
+                "{} in {}: {:?}",
+                label,
+                field,
+                err
+            );
+        }
     }
     assert!(!out.exists(), "every refusal must precede any scratch directory");
-    let honest_err = prover
-        .prove_in_for_method(
-            CommitmentMethod::DualLeafV2,
-            &built.inputs,
-            &honest,
-            &out,
-            "flatformhonest",
-            MethodUse::NewIssuance,
-        )
-        .err();
-    assert!(
-        !matches!(honest_err, Some(DriverError::ProverTomlLaneMismatch { .. })),
-        "the honest rendering must pass the flat-form check"
-    );
 }
 
 // =========================================================================
@@ -1868,19 +2031,19 @@ fn every_lane_constant_member_cell_is_decided_by_the_allow_list() {
 #[test]
 fn every_renderer_that_takes_a_constant_refuses_another_lane() {
     let f = |x: Fr| FieldHex(field_to_hex(&x));
-    let c = FieldHex("0x01".to_string());
+    let c = challenge_one();
     let hook = FieldHex(field_to_hex(&Fr::from(5u64)));
     let lex = FieldHex(field_to_hex(&Fr::from(9u64)));
     let enc = FieldHex(field_to_hex(&Fr::from(5u64)));
     let unknown = f(sparq_zk::dual_leaf::datatype_const("http://ex/opaque"));
 
     // --- f64 (M14) ---
-    let f64_render = |dt: &FieldHex, use_| {
+    let f64_render = |dt: &FieldHex| {
         filter_value_dl_f64_prover_toml(
-            &c, &enc, FilterOp::Eq.code(), 5, dt, true, &hook, &lex, use_,
+            &c, &enc, FilterOp::Eq.code(), 5, dt, true, &hook, &lex,
         )
     };
-    assert!(f64_render(&f(dual_leaf_v2::double_lane_const()), MethodUse::NewIssuance).is_ok());
+    assert!(f64_render(&f(dual_leaf_v2::double_lane_const())).is_ok());
     for (label, wrong) in [
         ("the integer lane", f(dual_leaf_v2::integer_lane_const())),
         ("the decimal lane", f(dual_leaf_v2::decimal_lane_const(2))),
@@ -1889,7 +2052,7 @@ fn every_renderer_that_takes_a_constant_refuses_another_lane() {
     ] {
         assert!(
             matches!(
-                f64_render(&wrong, MethodUse::NewIssuance),
+                f64_render(&wrong),
                 Err(DispatchError::LaneMemberMismatch { .. })
             ),
             "the f64 renderer must refuse {}",
@@ -1897,19 +2060,17 @@ fn every_renderer_that_takes_a_constant_refuses_another_lane() {
         );
     }
     assert!(matches!(
-        f64_render(&unknown, MethodUse::NewIssuance),
+        f64_render(&unknown),
         Err(DispatchError::UnknownLaneConst { .. })
     ));
     assert!(matches!(
         f64_render(
-            &f(sparq_zk::dual_leaf::datatype_const(XSD_DOUBLE)),
-            MethodUse::NewIssuance
-        ),
+            &f(sparq_zk::dual_leaf::datatype_const(XSD_DOUBLE))),
         Err(DispatchError::LegacyLaneConstForIssuance { .. })
     ));
 
     // --- decimal (M15) ---
-    let dec_render = |dt: &FieldHex, use_| {
+    let dec_render = |dt: &FieldHex| {
         filter_value_dl_decimal_prover_toml(
             &c,
             &enc,
@@ -1920,11 +2081,10 @@ fn every_renderer_that_takes_a_constant_refuses_another_lane() {
             true,
             false,
             &hook,
-            &lex,
-            use_,
+            &lex
         )
     };
-    assert!(dec_render(&f(dual_leaf_v2::decimal_lane_const(2)), MethodUse::NewIssuance).is_ok());
+    assert!(dec_render(&f(dual_leaf_v2::decimal_lane_const(2))).is_ok());
     for (label, wrong) in [
         ("the integer lane", f(dual_leaf_v2::integer_lane_const())),
         ("the double lane", f(dual_leaf_v2::double_lane_const())),
@@ -1933,7 +2093,7 @@ fn every_renderer_that_takes_a_constant_refuses_another_lane() {
     ] {
         assert!(
             matches!(
-                dec_render(&wrong, MethodUse::NewIssuance),
+                dec_render(&wrong),
                 Err(DispatchError::LaneMemberMismatch { .. })
             ),
             "the decimal renderer must refuse {}",
@@ -1941,19 +2101,17 @@ fn every_renderer_that_takes_a_constant_refuses_another_lane() {
         );
     }
     assert!(matches!(
-        dec_render(&unknown, MethodUse::NewIssuance),
+        dec_render(&unknown),
         Err(DispatchError::UnknownLaneConst { .. })
     ));
     assert!(matches!(
         dec_render(
-            &f(sparq_zk::dual_leaf::decimal_datatype_const(2)),
-            MethodUse::NewIssuance
-        ),
+            &f(sparq_zk::dual_leaf::decimal_datatype_const(2))),
         Err(DispatchError::LegacyLaneConstForIssuance { .. })
     ));
 
     // --- datetime (M16) ---
-    let dt_render = |dt: &FieldHex, use_| {
+    let dt_render = |dt: &FieldHex| {
         filter_value_dl_datetime_prover_toml(
             &c,
             &enc,
@@ -1964,12 +2122,11 @@ fn every_renderer_that_takes_a_constant_refuses_another_lane() {
             true,
             false,
             &hook,
-            &lex,
-            use_,
+            &lex
         )
     };
-    assert!(dt_render(&f(dual_leaf_v2::datetime_lane_const()), MethodUse::NewIssuance).is_ok());
-    assert!(dt_render(&f(dual_leaf_v2::date_lane_const()), MethodUse::NewIssuance).is_ok());
+    assert!(dt_render(&f(dual_leaf_v2::datetime_lane_const())).is_ok());
+    assert!(dt_render(&f(dual_leaf_v2::date_lane_const())).is_ok());
     for (label, wrong) in [
         ("the integer lane", f(dual_leaf_v2::integer_lane_const())),
         ("the double lane", f(dual_leaf_v2::double_lane_const())),
@@ -1978,7 +2135,7 @@ fn every_renderer_that_takes_a_constant_refuses_another_lane() {
     ] {
         assert!(
             matches!(
-                dt_render(&wrong, MethodUse::NewIssuance),
+                dt_render(&wrong),
                 Err(DispatchError::LaneMemberMismatch { .. })
             ),
             "the datetime renderer must refuse {}",
@@ -1986,14 +2143,12 @@ fn every_renderer_that_takes_a_constant_refuses_another_lane() {
         );
     }
     assert!(matches!(
-        dt_render(&unknown, MethodUse::NewIssuance),
+        dt_render(&unknown),
         Err(DispatchError::UnknownLaneConst { .. })
     ));
     assert!(matches!(
         dt_render(
-            &f(sparq_zk::dual_leaf_datetime::datetime_datatype_const()),
-            MethodUse::NewIssuance
-        ),
+            &f(sparq_zk::dual_leaf_datetime::datetime_datatype_const())),
         Err(DispatchError::LegacyLaneConstForIssuance { .. })
     ));
 }

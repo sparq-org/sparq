@@ -240,14 +240,6 @@ impl CommitmentMethod {
     }
 }
 
-/// A [`CommitmentMethod`] that is NOT selectable for new issuance, returned by
-/// [`CommitmentMethod::checked_for_issuance`] and
-/// [`crate::registry::RegistryEntry::with_issuance_method`].
-///
-/// It carries the refused method, so a caller can report the recorded
-/// `zk:scheme` IRI it would have written. A method is refused because it is a
-/// research-only dial (`value-only`) or because it is SUPERSEDED (`dual-leaf`
-/// v1); neither refusal is a statement about the method's audited security.
 /// WHY a caller is selecting a commitment method — the axis
 /// [`CommitmentMethod::checked_for`] gates on.
 ///
@@ -271,6 +263,16 @@ pub enum MethodUse {
     LegacyAlreadyIssued,
 }
 
+/// A [`CommitmentMethod`] that is NOT selectable for new issuance, returned by
+/// [`CommitmentMethod::checked_for_issuance`] and by the registry's issuance
+/// constructors ([`crate::registry::RegistryEntry::new_for_issuance`],
+/// [`crate::registry::RegistryEntry::issued`],
+/// [`crate::registry::RegistryEntry::issued_with_status`]).
+///
+/// It carries the refused method, so a caller can report the recorded
+/// `zk:scheme` IRI it would have written. A method is refused because it is a
+/// research-only dial (`value-only`) or because it is SUPERSEDED (`dual-leaf`
+/// v1); neither refusal is a statement about the method's audited security.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MethodNotSelectable {
     method: CommitmentMethod,
