@@ -268,16 +268,20 @@ struct ConditionalGrant {
 /// # Ok::<(), String>(())
 /// ```
 /// The auth-view predicate marking a resource whose ACP access-control document the loader
-/// rejected (`<r> auth:withheld true`); only the loader emits it. (A WAC resource whose
-/// `.acl` was rejected keeps that `.acl` as its governing document with no authorizations;
-/// grants from other sources still apply to it, and WAC has no deny for them to bypass.)
+/// rejected (`<r> auth:withheld true`), covering what is below it too; only the loader emits
+/// it. (A WAC resource whose governing `.acl` was rejected is marked with
+/// [`WITHHELD_RESOURCE`] instead.)
 pub(crate) const WITHHELD: &str = "https://sparq.dev/ns/auth#withheld";
+/// The auth-view predicate marking ONE resource (not what is below it) whose WAC ACL, its own
+/// or the nearest ancestor's, the loader rejected (`<r> auth:withheldResource true`).
+pub(crate) const WITHHELD_RESOURCE: &str = "https://sparq.dev/ns/auth#withheldResource";
 
-/// Whether `graph` is in `withheld` or below a withheld container.
-fn is_withheld_in(withheld: &FxHashSet<String>, graph: &str) -> bool {
-    !withheld.is_empty()
-        && (withheld.contains(graph)
-            || graph.match_indices('/').any(|(i, _)| withheld.contains(&graph[..=i])))
+/// Whether `graph` is in `withheld` or below a withheld container, or in `exact`.
+fn is_withheld_in(withheld: &FxHashSet<String>, exact: &FxHashSet<String>, graph: &str) -> bool {
+    exact.contains(graph)
+        || (!withheld.is_empty()
+            && (withheld.contains(graph)
+                || graph.match_indices('/').any(|(i, _)| withheld.contains(&graph[..=i]))))
 }
 
 #[derive(Debug, Default)]
@@ -310,6 +314,8 @@ pub struct AuthIndex {
     /// Resources (and, for a container, everything below it) whose ACP access-control
     /// document the loader rejected: no grant applies to them, whichever source installed it.
     withheld: FxHashSet<String>,
+    /// Single resources whose governing WAC ACL the loader rejected, withheld the same way.
+    withheld_exact: FxHashSet<String>,
 }
 
 impl AuthIndex {
@@ -334,6 +340,10 @@ impl AuthIndex {
             };
             if p.as_str() == WITHHELD {
                 ix.withheld.insert(subj);
+                continue;
+            }
+            if p.as_str() == WITHHELD_RESOURCE {
+                ix.withheld_exact.insert(subj);
                 continue;
             }
             if let Some((mode, is_allow)) = Mode::from_pred(p.as_str()) {
@@ -392,9 +402,10 @@ impl AuthIndex {
             ix.cond.entry(origin).or_default().push(g);
         }
         // Withheld resources get no grant from any source; denies stay.
-        if !ix.withheld.is_empty() {
+        if !ix.withheld.is_empty() || !ix.withheld_exact.is_empty() {
             let withheld = std::mem::take(&mut ix.withheld);
-            let open = |g: &NamedNode| !is_withheld_in(&withheld, g.as_str());
+            let exact = std::mem::take(&mut ix.withheld_exact);
+            let open = |g: &NamedNode| !is_withheld_in(&withheld, &exact, g.as_str());
             for buckets in ix.allow.values_mut() {
                 for graphs in buckets.values_mut() {
                     graphs.retain(open);
@@ -404,14 +415,16 @@ impl AuthIndex {
                 grants.retain(|g| !g.allow || g.graph.as_ref().is_none_or(open));
             }
             ix.withheld = withheld;
+            ix.withheld_exact = exact;
         }
         ix
     }
 
     /// Whether `graph` is withheld: its access-control document, or a container's above
     /// it, was rejected, so no grant applies to it whatever its source.
+    #[cfg_attr(not(feature = "odrl-bridge"), allow(dead_code))]
     pub(crate) fn is_withheld(&self, graph: &str) -> bool {
-        is_withheld_in(&self.withheld, graph)
+        is_withheld_in(&self.withheld, &self.withheld_exact, graph)
     }
 
     /// The session's agent-dimension principals (most-specific last).
@@ -630,6 +643,7 @@ impl AuthIndex {
             && self.matcher_clients == other.matcher_clients
             && self.matcher_issuers == other.matcher_issuers
             && self.withheld == other.withheld
+            && self.withheld_exact == other.withheld_exact
     }
 
     /// Whether the auth view explicitly denies `mode` on `graph` to this session: a deny

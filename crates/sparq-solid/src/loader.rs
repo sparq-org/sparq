@@ -117,36 +117,23 @@ const SKOLEM_PREFIX: &str = "urn:skolem:";
 /// Whether `t` names an IRI the view mints itself: a skolem name ([`SKOLEM_PREFIX`]) or a
 /// name in the reserved space ([`RESERVED_PREFIX`]: principals, candidates, matcher
 /// instances, grants), in any position, as a datatype or inside a triple term. No document
-/// can then address a node the rules create. The one exception is a reserved name as the
-/// principal of an agent, member, origin, client or issuer statement, which fails the
-/// materialization instead (see [`validate_principal_iri`]).
+/// can then address a node the rules create.
 fn names_minted_iri(t: &[Term; 3]) -> bool {
-    let principal = matches!(&t[1], Term::NamedNode(p) if PRINCIPAL_PREDICATES.contains(&p.as_str()));
-    // Only a top-level named principal is left to that check; a principal written as a
-    // literal or a triple term is checked in full like any other term.
-    let named_principal = principal && matches!(&t[2], Term::NamedNode(_));
-    term_names_minted_iri(&t[0], true)
-        || term_names_minted_iri(&t[1], true)
-        || term_names_minted_iri(&t[2], !named_principal)
+    t.iter().any(term_names_minted_iri)
 }
 
-const PRINCIPAL_PREDICATES: [&str; 6] =
-    [ACL_AGENT, ACP_AGENT, VCARD_MEMBER, ACL_ORIGIN, ACP_CLIENT, ACP_ISSUER];
-
 /// Whether `x` names a minted IRI anywhere: as itself, as a literal's datatype, or inside a
-/// triple term. `reserved` also counts the reserved space, not only skolem names.
-fn term_names_minted_iri(x: &Term, reserved: bool) -> bool {
-    let minted = |n: &NamedNode| {
-        n.as_str().starts_with(SKOLEM_PREFIX) || (reserved && n.as_str().starts_with(RESERVED_PREFIX))
-    };
+/// triple term.
+fn term_names_minted_iri(x: &Term) -> bool {
+    let minted = |n: &str| n.starts_with(SKOLEM_PREFIX) || n.starts_with(RESERVED_PREFIX);
     match x {
-        Term::NamedNode(n) => minted(n),
+        Term::NamedNode(n) => minted(n.as_str()),
         Term::BlankNode(_) => false,
-        Term::Literal(l) => minted(&l.datatype().into_owned()),
+        Term::Literal(l) => minted(l.datatype().as_str()),
         Term::Triple(tt) => {
-            term_names_minted_iri(&tt.subject.clone().into(), true)
-                || minted(&tt.predicate)
-                || term_names_minted_iri(&tt.object, true)
+            term_names_minted_iri(&tt.subject.clone().into())
+                || minted(tt.predicate.as_str())
+                || term_names_minted_iri(&tt.object)
         }
     }
 }
@@ -165,22 +152,23 @@ fn term_names_minted_iri(x: &Term, reserved: bool) -> bool {
 /// describing nodes it does not define.
 fn admits(t: &[Term; 3], graph_iri: &str) -> bool {
     !is_reserved_derivation_predicate(t)
-        && !names_view_principal(t)
+        && !names_reserved_principal(t)
         && !names_minted_iri(t)
         && speaks_for(t, graph_iri)
 }
 
-/// Whether `t` names one of the view's own `auth:`/`solidx:` principals (`auth:Public`,
-/// `auth:AnyClient`, …) as an agent, group member, origin, client or issuer. Such a
-/// document is rejected like any other. (A name in the reserved pair encoding still fails
-/// the materialization, see [`validate_principal_iri`].)
-fn names_view_principal(t: &[Term; 3]) -> bool {
+/// Whether `t` names, as an agent, group member, origin, client or issuer, a principal the
+/// view keeps for itself: one of its own `auth:`/`solidx:` principals (`auth:Public`,
+/// `auth:AnyClient`, …), a name in the reserved or skolem space, or one containing the pair
+/// delimiter (see [`external_principal`]). Such a document is rejected like any other, so
+/// no document can make the whole materialization fail.
+fn names_reserved_principal(t: &[Term; 3]) -> bool {
     let (Term::NamedNode(p), Term::NamedNode(o)) = (&t[1], &t[2]) else { return false };
-    matches!(
-        p.as_str(),
-        ACL_AGENT | ACP_AGENT | VCARD_MEMBER | ACL_ORIGIN | ACP_CLIENT | ACP_ISSUER
-    ) && (o.as_str().starts_with(AUTH_NS) || o.as_str().starts_with(SOLIDX_NS))
+    PRINCIPAL_PREDICATES.contains(&p.as_str()) && !external_principal(o.as_str())
 }
+
+const PRINCIPAL_PREDICATES: [&str; 6] =
+    [ACL_AGENT, ACP_AGENT, VCARD_MEMBER, ACL_ORIGIN, ACP_CLIENT, ACP_ISSUER];
 
 fn speaks_for(t: &[Term; 3], graph_iri: &str) -> bool {
     match &t[0] {
@@ -417,6 +405,30 @@ pub(crate) fn assemble_facts(
     // attached or bridged ODRL permission, a trust grant) applies to them either.
     for b in &blocked {
         out.push([named(b), named(crate::authindex::WITHHELD), xsd_true()]);
+    }
+    // WAC: each resource whose governing ACL (its own, or the nearest ancestor's) was
+    // rejected is withheld from the other grant sources the same way. Only that resource:
+    // one below it with an ACL of its own is governed by that ACL.
+    if system == System::Wac && !rejected.is_empty() {
+        let acls: FxHashSet<&str> = control_graphs.iter().map(|(iri, _)| *iri).collect();
+        for r in &resources {
+            let mut cur = r.as_str();
+            loop {
+                let acl = format!("{cur}{ACL_SUFFIX}");
+                if acls.contains(acl.as_str()) {
+                    if rejected.contains(acl.as_str()) {
+                        out.push([
+                            named(r),
+                            named(crate::authindex::WITHHELD_RESOURCE),
+                            xsd_true(),
+                        ]);
+                    }
+                    break;
+                }
+                let Some(parent) = parent_iri(cur) else { break };
+                cur = parent;
+            }
+        }
     }
 
     // 2) control-document linkage by naming convention: <R + ".acl"> controls <R>.
@@ -1270,16 +1282,10 @@ mod tests {
         assert!(names_minted_iri(&[reserved.clone(), agent.clone(), doc.clone()]), "subject");
         assert!(names_minted_iri(&[doc.clone(), reserved.clone(), doc.clone()]), "predicate");
         assert!(names_minted_iri(&[doc.clone(), any_of, reserved.clone()]), "object");
-        assert!(
-            !names_minted_iri(&[doc.clone(), agent.clone(), reserved]),
-            "a reserved principal fails the materialization instead"
-        );
+        assert!(names_minted_iri(&[doc.clone(), agent.clone(), reserved]), "principal");
         let minted_type = NamedNode::new_unchecked("urn:sparq:x");
         let typed_principal = Term::Literal(Literal::new_typed_literal("v", minted_type));
-        assert!(
-            names_minted_iri(&[doc, agent, typed_principal]),
-            "a principal that is not a named node is checked in full"
-        );
+        assert!(names_minted_iri(&[doc, agent, typed_principal]), "datatype of a principal");
     }
 
     /// A rejected document never leaves an allow standing without the restrictions it
@@ -1527,6 +1533,10 @@ mod tests {
             "{base}<{doc}.acl#a> <https://ex.dev/ns#note> \"v\"^^<urn:skolem:graph:x:b> <{doc}.acl> .\n"
         );
         assert!(!reads(&typed), "a skolem datatype rejects the document");
+        let nested = format!(
+            "{base}<{doc}.acl#a> <https://ex.dev/ns#said>              <<( <{doc}.acl#a> <https://ex.dev/ns#p> <urn:sparq:x> )>> <{doc}.acl> .\n"
+        );
+        assert!(!reads(&nested), "a reserved name inside a triple term rejects the document");
     }
 
     /// The view's own principal names are not principals a document or a session can
@@ -1546,13 +1556,20 @@ mod tests {
             )
         };
         let bob = Session { agent: Some("https://bob.ex/me"), client: None, issuer: None, now: None };
-        for internal in [crate::authindex::AUTHENTICATED, crate::authindex::ANY_CLIENT] {
+        let pair = "https://bob.ex/me&client=https://app.ex";
+        for internal in [
+            crate::authindex::AUTHENTICATED,
+            crate::authindex::ANY_CLIENT,
+            "urn:sparq:pair?agent=https://bob.ex/me&client=https://app.ex",
+            "urn:skolem:graph:x:b",
+            pair,
+        ] {
             let mut store = PodStore::new(Graph::load_dataset(&acl(internal), "nquads").unwrap());
             store.materialize_wac().expect("the rest of the pod still materializes");
             assert!(store.accessible(&bob, Mode::Read).is_empty(), "{internal} named as an agent");
+            let app = Session { agent: Some("https://bob.ex/me"), client: Some("https://app.ex"), issuer: None, now: None };
+            assert!(store.accessible(&app, Mode::Read).is_empty(), "{internal}: nor through a client");
         }
-        let mut store = PodStore::new(Graph::load_dataset(&acl("urn:sparq:x"), "nquads").unwrap());
-        assert!(store.materialize_wac().is_err(), "the reserved encoding stays refused");
         let alice = "https://alice.ex/me";
         let mut store = PodStore::new(Graph::load_dataset(&acl(alice), "nquads").unwrap());
         store.materialize_wac().unwrap();

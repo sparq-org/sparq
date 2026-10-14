@@ -324,29 +324,36 @@ fn acp_issuer_noneof_conditional_grant() {
     assert!(!can_iss(&mut s, Some(BOB), None, Some(EVIL_IDP), r, ISS_DOC), "bob @ evil-idp carved out");
 }
 
-/// Fail-closed: a malicious `acp:issuer` value inside the reserved `urn:sparq:` space (or
-/// carrying the pair delimiter) is rejected at materialization, exactly like a malicious
-/// agent/client value — it cannot smuggle a forged triple principal into the auth view.
+/// Fail-closed: an ACR naming a malicious `acp:issuer` value inside the reserved
+/// `urn:sparq:` space (or carrying the pair delimiter) is rejected whole at admission,
+/// exactly like a malicious agent/client value: it cannot smuggle a forged triple principal
+/// into the auth view, and the resource it governs gets no grants.
 #[test]
 fn acp_issuer_reserved_encoding_rejected() {
     let acl = "http://www.w3.org/ns/auth/acl#";
     let acp = "http://www.w3.org/ns/solid/acp#";
-    let evil = "urn:sparq:triple?agent=x&client=y&issuer=z";
-    let body = format!(
-        "<{ISS_ACR}#pol> <{acp}allow> <{acl}Read> <{ISS_ACR}> .\n\
-         <{ISS_ACR}#pol> <{acp}allOf> <{ISS_ACR}#m> <{ISS_ACR}> .\n\
-         <{ISS_ACR}#m> <{acp}agent> <{BOB}> <{ISS_ACR}> .\n\
-         <{ISS_ACR}#m> <{acp}issuer> <{evil}> <{ISS_ACR}> .\n"
-    );
-    let acr = format!(
-        "<{ISS_DOC}#it> <https://ex.dev/ns#title> \"iss\" <{ISS_DOC}> .\n\
-         <{ISS_ACR}> <{acp}accessControl> <{ISS_ACR}#ctl> <{ISS_ACR}> .\n\
-         <{ISS_ACR}#ctl> <{acp}apply> <{ISS_ACR}#pol> <{ISS_ACR}> .\n\
-         {body}"
-    );
-    let g = Graph::load_dataset(&acr, "nquads").expect("loads");
-    let mut s = PodStore::new(g);
-    assert!(s.materialize_acp().is_err(), "reserved-space issuer IRI rejected at materialization");
+    for evil in [
+        "urn:sparq:triple?agent=x&client=y&issuer=z",
+        "https://idp.ex/x&client=https://app.ex",
+    ] {
+        let body = format!(
+            "<{ISS_ACR}#pol> <{acp}allow> <{acl}Read> <{ISS_ACR}> .\n\
+             <{ISS_ACR}#pol> <{acp}allOf> <{ISS_ACR}#m> <{ISS_ACR}> .\n\
+             <{ISS_ACR}#m> <{acp}agent> <{BOB}> <{ISS_ACR}> .\n\
+             <{ISS_ACR}#m> <{acp}issuer> <{evil}> <{ISS_ACR}> .\n"
+        );
+        let acr = format!(
+            "<{ISS_DOC}#it> <https://ex.dev/ns#title> \"iss\" <{ISS_DOC}> .\n\
+             <{ISS_ACR}> <{acp}accessControl> <{ISS_ACR}#ctl> <{ISS_ACR}> .\n\
+             <{ISS_ACR}#ctl> <{acp}apply> <{ISS_ACR}#pol> <{ISS_ACR}> .\n\
+             {body}"
+        );
+        let g = Graph::load_dataset(&acr, "nquads").expect("loads");
+        let mut s = PodStore::new(g);
+        s.materialize_acp().expect("the document is rejected, not fatal");
+        assert!(!can_iss(&mut s, Some(BOB), None, None, Mode::Read, ISS_DOC), "{evil}: no grant without an issuer");
+        assert!(!can_iss(&mut s, Some(BOB), None, Some(evil), Mode::Read, ISS_DOC), "{evil}: nor with it");
+    }
 }
 
 // ── sq-3jtd.5: acp:CreatorAgent / acp:OwnerAgent support ───────────────────

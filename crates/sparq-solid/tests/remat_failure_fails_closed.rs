@@ -1,10 +1,10 @@
 //! A permitted write that changes the access-control rules re-materializes the auth view.
 //! The view is rebuilt from the rules the write would leave before the write is committed:
-//! rules that cannot be materialized (here an ACL that names a reserved `urn:sparq:` agent,
-//! which the loader refuses) refuse the write, which then changes nothing, so the current
-//! view still describes the current rules. A write that fails part way changes nothing
-//! either, and a controller of one access-control document cannot take the store's whole
-//! view down.
+//! rules that cannot be materialized refuse the write, which then changes nothing, so the
+//! current view still describes the current rules. An ACL naming a reserved `urn:sparq:`
+//! agent is rejected whole by the loader instead, so it fails nothing. A write that fails
+//! part way changes nothing either, and a controller of one access-control document cannot
+//! take the store's whole view down.
 
 use sparq_core::Graph;
 use sparq_solid::{Mode, PodStore, Session};
@@ -95,33 +95,26 @@ const REVOKE_AND_BREAK: &str = "DELETE DATA { GRAPH <https://pod.ex/.acl> { \
 const REVOKE: &str = "DELETE DATA { GRAPH <https://pod.ex/.acl> { \
     <https://pod.ex/.acl#team> <http://www.w3.org/ns/auth/acl#agentGroup> <https://pod.ex/groups#team> } }";
 
-fn acl_len(store: &PodStore, acl: &str) -> usize {
-    store
-        .graph
-        .named
-        .iter()
-        .find(|(n, _)| matches!(n, oxrdf::Term::NamedNode(n) if n.as_str() == acl))
-        .map_or(0, |(_, g)| g.len())
-}
-
+/// An ACL naming a reserved agent is admitted as content and rejected whole by the loader:
+/// the write goes through, and the document governs with no authorizations (fail-closed),
+/// so a revocation in the same write still takes effect.
 #[test]
-fn rules_that_cannot_be_materialized_refuse_the_update() {
+fn rules_naming_a_reserved_agent_govern_with_no_grants() {
     let mut store = store();
-    let rules = acl_len(&store, "https://pod.ex/.acl");
     assert!(reads(&store, ALICE), "control: the team reads");
-    let err = store
+    store
         .update_as(&sess(ADMIN), REVOKE_AND_BREAK)
-        .expect_err("the rules cannot be materialized");
-    assert!(err.contains("nothing was changed"), "{err}");
-    // Nothing changed: not the rules (the revocation and the bad rule are both absent) and
-    // not the view, which still describes them.
-    assert!(reads(&store, ALICE));
-    assert!(reads(&store, ADMIN));
-    assert_eq!(acl_len(&store, "https://pod.ex/.acl"), rules);
-    // The same revocation, without the bad rule, goes through and takes effect.
-    store.update_as(&sess(ADMIN), REVOKE).expect("sound rules");
+        .expect("the write is stored");
     assert!(!reads(&store, ALICE), "the revocation took effect");
-    assert!(reads(&store, ADMIN));
+    assert!(!reads(&store, ADMIN), "the rejected root ACL grants nothing");
+    assert!(store.accessible(&sess("urn:sparq:forged"), Mode::Read).is_empty());
+    assert!(
+        store
+            .accessible(&sess(BOB), Mode::Read)
+            .iter()
+            .any(|g| g == "https://pod.ex/bob/b1"),
+        "bob's own ACL still governs his container"
+    );
 }
 
 /// Review finding: a rule change that failed part way (here a later operation over its
@@ -146,22 +139,23 @@ fn a_rule_change_that_fails_part_way_changes_nothing() {
 }
 
 /// Review finding: a controller of one access-control document could write rules that fail
-/// to materialize, and the store dropped its whole view, denying every pod. The write is
-/// refused instead; everyone else's access is untouched.
+/// to materialize, and the store dropped its whole view, denying every pod. Such rules now
+/// reject only their own document; everyone else's access is untouched.
 #[test]
 fn one_controller_cannot_deny_the_whole_store() {
     let mut store = store();
-    let rules = acl_len(&store, "https://pod.ex/bob/.acl");
     let break_own = "INSERT DATA { GRAPH <https://pod.ex/bob/.acl> { \
         <https://pod.ex/bob/.acl#bad> <http://www.w3.org/ns/auth/acl#agent> <urn:sparq:forged> } }";
     store
         .update_as(&sess(BOB), break_own)
-        .expect_err("rules that cannot be materialized");
+        .expect("bob may write his own ACL");
     assert!(reads(&store, ALICE));
     assert!(reads(&store, ADMIN));
-    assert!(store
-        .accessible(&sess(BOB), Mode::Read)
-        .iter()
-        .any(|g| g == "https://pod.ex/bob/b1"));
-    assert_eq!(acl_len(&store, "https://pod.ex/bob/.acl"), rules);
+    assert!(
+        !store
+            .accessible(&sess(BOB), Mode::Read)
+            .iter()
+            .any(|g| g == "https://pod.ex/bob/b1"),
+        "bob's rejected ACL governs his container with no grants"
+    );
 }

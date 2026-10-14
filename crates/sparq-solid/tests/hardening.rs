@@ -31,7 +31,8 @@ fn sentinel_graph_cannot_be_smuggled() {
 }
 
 /// An ACL whose agent WebID embeds the pair delimiter could collide with a minted
-/// (agent, client) pair principal — the loader must refuse to materialize it.
+/// (agent, client) pair principal: the loader rejects the whole document, so it grants
+/// nothing, and the pair it imitates gets nothing from it.
 #[test]
 fn pair_delimiter_injection_is_rejected() {
     let mut nq = wac_fixture();
@@ -41,8 +42,15 @@ fn pair_delimiter_injection_is_rejected() {
         "<https://pod.ex/.acl#evil> <http://www.w3.org/ns/auth/acl#agent> <{evil}> <https://pod.ex/.acl> .\n"
     ));
     let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
-    let err = s.materialize_wac().unwrap_err();
-    assert!(err.contains("reserved"), "got: {err}");
+    s.materialize_wac().expect("the document is rejected, not fatal");
+    let mut clean = PodStore::new(Graph::load_dataset(&wac_fixture(), "nquads").unwrap());
+    clean.materialize_wac().unwrap();
+    let alone = Session { agent: Some(&evil), client: None, issuer: None, now: None };
+    assert!(s.accessible(&alone, Mode::Read).is_empty(), "the crafted name is no principal");
+    let pair = Session { agent: Some("https://alice.ex/card#me"), client: Some("https://app.ex"), issuer: None, now: None };
+    let before = clean.accessible(&pair, Mode::Read);
+    let after = s.accessible(&pair, Mode::Read);
+    assert!(after.iter().all(|g| before.contains(g)), "the imitated pair gains nothing: {after:?}");
 }
 
 /// User variables shaped like the internal graph variables must not be captured by the

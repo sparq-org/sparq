@@ -177,33 +177,26 @@ fn auth_view_is_pure_function_of_final_acl_state() {
 // --- atomic rollback: a rejected new ACL leaves the store EXACTLY as it was -------------
 
 #[test]
-fn put_acl_rolls_back_on_reserved_principal() {
+fn put_acl_naming_a_reserved_principal_governs_with_no_grants() {
     let mut store = empty_pod();
     // Establish a known-good grant first.
     store
         .put_acl("https://pod.ex/.acl", &root_acl_read(ALICE), "ntriples")
         .expect("good put");
     assert_eq!(store.accessible(&sess(ALICE), Mode::Read).len(), 2);
-    let prior_acl_len = graph_len(&store, "https://pod.ex/.acl");
 
-    // Now PUT a body naming a RESERVED-encoding agent — materialization REJECTS it.
-    let bad = "<https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#agent> <urn:sparq:evil> .\n";
-    let err = store
-        .put_acl("https://pod.ex/.acl", bad, "ntriples")
-        .expect_err("reserved-encoding principal must be rejected");
-    assert!(err.contains("urn:sparq:") || err.to_lowercase().contains("reserved"), "{err}");
-
-    // Atomic: the PRIOR content and the PRIOR auth view are both intact.
-    assert_eq!(
-        graph_len(&store, "https://pod.ex/.acl"),
-        prior_acl_len,
-        "the rejected content was rolled back — prior .acl restored"
+    // A body naming a RESERVED-encoding agent is stored, and the loader rejects the whole
+    // document: it governs the root with no authorizations (fail-closed), and the reserved
+    // name is never a principal.
+    let bad = format!(
+        "{}<https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#agent> <urn:sparq:evil> .\n",
+        root_acl_read(ALICE)
     );
-    assert_eq!(
-        store.accessible(&sess(ALICE), Mode::Read).len(),
-        2,
-        "alice's prior grant still stands after the failed put (no partial write)"
-    );
+    store
+        .put_acl("https://pod.ex/.acl", &bad, "ntriples")
+        .expect("the write is stored");
+    assert!(store.accessible(&sess(ALICE), Mode::Read).is_empty(), "the rejected ACL grants nothing");
+    assert!(store.accessible(&sess("urn:sparq:evil"), Mode::Read).is_empty());
 }
 
 // --- input validation ------------------------------------------------------------------

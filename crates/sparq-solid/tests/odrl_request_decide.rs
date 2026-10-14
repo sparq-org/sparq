@@ -1274,7 +1274,51 @@ fn a_rejected_access_control_document_withholds_every_grant_source() {
         assert!(!reads(&s, &dave, N2), "{label}: no static grant");
         s.attach_odrl_policy(pol.clone()).expect("attach");
         assert!(!reads(&s, &dave, N2), "{label}: no attached grant");
-        let _ = s.materialize_odrl_permission(&pol, &request("read", N2, Some(UNSEEN), None));
+        let bridged = Request::new(format!("{ODRL}read")).on(N2).by(UNSEEN);
+        assert!(s.materialize_odrl_permission(&pol, &bridged).granted, "{label}: bridged");
         assert!(!reads(&s, &dave, N2), "{label}: no bridged grant");
+    }
+}
+
+/// The same under WAC: a resource whose governing ACL cannot be used gets no grant from
+/// an attached or bridged ODRL permission either. A resource below it with an ACL of its
+/// own is governed by that ACL and unaffected.
+#[test]
+fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
+    let acl = "http://www.w3.org/ns/auth/acl#";
+    let rdf_type = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    let (notes_acl, n1_acl) = (format!("{NOTES}.acl"), format!("{N1}.acl"));
+    let pod = format!(
+        "<{N1}#it> <https://ex.dev/ns#title> \"hello\" <{N1}> .\n\
+         <{N2}#it> <https://ex.dev/ns#title> \"private\" <{N2}> .\n\
+         <{notes_acl}#a> <{rdf_type}> <{acl}Authorization> <{notes_acl}> .\n\
+         <{notes_acl}#a> <{acl}default> <{NOTES}> <{notes_acl}> .\n\
+         <{notes_acl}#a> <{acl}agent> <{ALICE}> <{notes_acl}> .\n\
+         <{notes_acl}#a> <{acl}mode> <{acl}Control> <{notes_acl}> .\n\
+         <{n1_acl}#a> <{rdf_type}> <{acl}Authorization> <{n1_acl}> .\n\
+         <{n1_acl}#a> <{acl}accessTo> <{N1}> <{n1_acl}> .\n\
+         <{n1_acl}#a> <{acl}agent> <{ALICE}> <{n1_acl}> .\n\
+         <{n1_acl}#a> <{acl}mode> <{acl}Read> <{n1_acl}> .\n"
+    );
+    let stray = format!("<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{notes_acl}> .\n");
+    let dave = session(Some(UNSEEN), None);
+    let pol = policy("permission", "read", "", Some(UNSEEN), Some(N2)).expect("policy");
+    for (nq, usable) in [(pod.clone(), true), (format!("{pod}{stray}"), false)] {
+        let label = if usable { "usable" } else { "rejected" };
+        let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("pod loads"));
+        s.materialize_wac().expect("wac");
+        assert!(reads(&s, &session(Some(ALICE), None), N1), "{label}: n1's own ACL applies");
+        assert!(!reads(&s, &dave, N2), "{label}: no static grant");
+        s.attach_odrl_policy(pol.clone()).expect("attach");
+        for pass in ["cold", "warm"] {
+            assert_eq!(reads(&s, &dave, N2), usable, "{label} ({pass}): the attached grant");
+        }
+        s.detach_odrl_policies();
+        let bridged = Request::new(format!("{ODRL}read")).on(N2).by(UNSEEN);
+        assert!(s.materialize_odrl_permission(&pol, &bridged).granted, "{label}: bridged");
+        assert_eq!(reads(&s, &dave, N2), usable, "{label}: the bridged grant");
+        s.materialize_wac().expect("wac again");
+        assert_eq!(reads(&s, &dave, N2), usable, "{label}: the bridged grant, replayed");
+        assert!(reads(&s, &session(Some(ALICE), None), N1), "{label}: n1 is still governed by its ACL");
     }
 }

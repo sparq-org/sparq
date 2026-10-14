@@ -506,30 +506,30 @@ mod tests {
     /// untouched. That holds ONLY if every fallible step (rule compilation, fact
     /// assembly / principal validation) runs BEFORE `strip_reserved_graphs` deletes the
     /// old `<urn:sparq:auth>` — strip-first would fail OPEN into a dataset whose
-    /// authorization view had silently vanished. Both materializers are checked.
+    /// authorization view had silently vanished. A document naming a reserved principal is
+    /// rejected at admission and fails nothing, so the error comes from trusted provenance.
     #[test]
     fn a_failed_rematerialization_leaves_the_previous_auth_view_in_place() {
         let mut graph = Graph::load_dataset(&crate::wac_fixture(), "nquads").expect("fixture loads");
         materialize_wac(&mut graph).expect("first WAC materialization succeeds");
-        let before = auth_view(&graph);
-        assert!(!before.is_empty(), "no auth view to preserve — vacuous test");
         graph.named.extend(poison_graph(
             "https://pod.ex/evil.acl",
             "http://www.w3.org/ns/auth/acl#agent",
         ));
-        let err = materialize_wac(&mut graph).expect_err("a reserved agent IRI must fail");
-        assert!(err.contains("urn:sparq:"), "unexpected WAC error: {}", err);
-        assert_eq!(auth_view(&graph), before, "WAC: the previous auth view must survive the error");
+        materialize_wac(&mut graph).expect("a document naming a reserved agent is rejected, not fatal");
+        assert!(
+            !auth_view(&graph).iter().any(|t| t.contains("urn:sparq:evil")),
+            "the rejected document grants nothing"
+        );
 
         let mut graph = Graph::load_dataset(&crate::acp_fixture(), "nquads").expect("fixture loads");
         materialize_acp(&mut graph).expect("first ACP materialization succeeds");
         let before = auth_view(&graph);
         assert!(!before.is_empty(), "no auth view to preserve — vacuous test");
-        graph.named.extend(poison_graph(
-            "https://pod.ex/evil.acr",
-            "http://www.w3.org/ns/solid/acp#agent",
-        ));
-        let err = materialize_acp(&mut graph).expect_err("a reserved agent IRI must fail");
+        let mut poisoned = AccessProvenance::new();
+        poisoned.set_creator("https://pod.ex/docs/d0", "urn:sparq:evil");
+        let err = materialize_acp_with_credentials(&mut graph, &poisoned, &VerifiedCredentials::new())
+            .expect_err("a reserved creator IRI must fail");
         assert!(err.contains("urn:sparq:"), "unexpected ACP error: {}", err);
         assert_eq!(auth_view(&graph), before, "ACP: the previous auth view must survive the error");
     }
