@@ -166,15 +166,21 @@
       "feature": "FILTER xsd:boolean (=, !=, and the degenerate order false < true)",
       "sparql": "SELECT ?x WHERE { ?x :active ?flag FILTER(?flag = true) }",
       "zk_members": [
-        "filter_value_dl_int"
+        "filter_value_dl_int",
+        "filter_value_dl_bool"
       ],
       "circuit_size": 3033,
       "status": "covered",
       "flag": null,
       "circuit_size_per_member": {
-        "filter_value_dl_int": 3033
+        "filter_value_dl_int": 3033,
+        "filter_value_dl_bool": 3032
       },
-      "note": "Boolean value lane (sq-5xdlk, #3973) — it adds NO new Noir member: it REUSES `filter_value_dl_int` with the PUBLIC boolean `datatype_const` = blake3_field(xsd:boolean) and the value hooks {0 = false, 1 = true} inside that member's u64 comparison domain, so XSD's false<true order (and the degenerate LT/LE/GT/GE verdicts) falls out of the integer comparison unchanged. Lane separation is the public datatype_const and only that: an integer leaf recomputed under the boolean constant fails the member's leaf binding — a BINDING argument resting on Poseidon2 preimage resistance, NOT an audited soundness claim. Opt-in (`dual-leaf`) and only against a value-committing method; the blake3 digit-byte lane has no boolean member. The encoder is fail-closed on non-canonical lexicals (\"1\"/\"0\" are rejected). Inherits the value lane's INV-VL downgrade (#769 / CR-G8); NOT externally audited (sq-qhy4)."
+      "circuit_size_range": [
+        3032,
+        3033
+      ],
+      "note": "Boolean value lane (sq-5xdlk, #3973), now with TWO members, one per dual-leaf version. Under dual-leaf v1 the lane REUSES `filter_value_dl_int` with a PUBLIC boolean `datatype_const` and the value hooks {0 = false, 1 = true} inside that member's u64 comparison domain, so XSD's false<true order (and the degenerate LT/LE/GT/GE verdicts) falls out of the integer comparison unchanged. Under dual-leaf v2 it targets the DEDICATED `filter_value_dl_bool`, whose public layout is the integer member's but whose relation additionally constrains BOTH the witnessed handle and the public bound to {0, 1} — so a handle of 2, which the integer member's u64 range decomposition admits, is refused by the relation and not only by the host encoder. Lane separation is the public datatype_const: a leaf recomputed under another lane's constant fails the member's leaf binding — a property under Poseidon2 preimage resistance, NOT an audited soundness claim. Opt-in (`dual-leaf`) and only against a value-committing method; the blake3 digit-byte lane has no boolean member. Both encoders are fail-closed on non-canonical lexicals (\"1\"/\"0\" are rejected). Inherits the value lane's INV-VL downgrade (#769 / CR-G8); NOT externally audited (sq-qhy4)."
     },
     "Q08_filter_string_ops": {
       "feature": "FILTER string ops (STR, STRLEN, CONTAINS, STRSTARTS, STRENDS, SUBSTR, REGEX)",
