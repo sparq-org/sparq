@@ -1372,7 +1372,14 @@ fn listing<S: Store + 'static>(
         )
         .map(|id| json!({"id": format!("{base}{id}"), "type": "DataResource", "format": LWS_JSON}))
         .collect();
-    let version = state.notify.etag.read().expect("lock").clone();
+    // The owner's listing changes with every subscription; a subscriber's only with its own, so
+    // its tag follows those alone and says nothing of anyone else's.
+    let version = if owner {
+        state.notify.etag.read().expect("lock").clone()
+    } else {
+        let listed: Vec<String> = items.iter().map(Value::to_string).collect();
+        etag_of(listed.iter().map(String::as_str))
+    };
     let mut resp = service_listing(&state.cfg, req, &base, items, &version);
     // Each subscriber sees only its own subscriptions.
     set(resp.headers_mut(), header::VARY, "Accept, Authorization");
@@ -1864,6 +1871,48 @@ mod tests {
         }
         let r = handle(&state, &get(&[("if-none-match", &tag)]), &reader).await;
         assert_eq!(r.status(), StatusCode::OK);
+    }
+
+    /// A subscriber's listing changes only with its own subscriptions, and so does its tag.
+    #[tokio::test]
+    async fn a_subscribers_tag_does_not_follow_anyone_elses_subscriptions() {
+        use test_store::{agent, closed_state, data, grant_read};
+        let (state, _store) = closed_state(4).await;
+        let b = data(&state, "b").await;
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [b.clone()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let (alice, bob) = ("https://alice.example/#me", "https://bob.example/#me");
+        grant_read(&state, alice, &[&b]).await;
+        grant_read(&state, bob, &[&b]).await;
+        let (alice, bob) = (agent(alice), agent(bob));
+        let subscribe = |agent: Agent, headers: Vec<(&'static str, String)>| {
+            let (state, body) = (state.clone(), body.clone());
+            async move {
+                let mut h = vec![("content-type", LWS_JSON)];
+                h.extend(headers.iter().map(|(k, v)| (*k, v.as_str())));
+                let req = test_store::request(Method::POST, SUBSCRIPTIONS_PATH, &h, &body);
+                test_store::route_as(&state, req, &agent).await.status()
+            }
+        };
+        let tag = || {
+            let (state, alice) = (state.clone(), alice.clone());
+            async move {
+                let req = test_store::request(Method::GET, SUBSCRIPTIONS_PATH, &[], "");
+                let r = test_store::route_as(&state, req, &alice).await;
+                r.headers()["etag"].to_str().unwrap().to_string()
+            }
+        };
+        assert_eq!(subscribe(alice.clone(), vec![]).await, StatusCode::CREATED);
+        let before = tag().await;
+        assert_eq!(subscribe(bob, vec![]).await, StatusCode::CREATED);
+        assert_eq!(tag().await, before);
+        let status = subscribe(alice.clone(), vec![("if-match", before.clone())]).await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_ne!(tag().await, before);
     }
 
     /// Review finding: a purge always tried the first expired subscriptions, so sixteen that could

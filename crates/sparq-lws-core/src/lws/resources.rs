@@ -2373,10 +2373,18 @@ async fn update<S: Store + 'static>(
     ) {
         return problem(StatusCode::PRECONDITION_FAILED, None);
     }
-    let content_type = req
-        .header(header::CONTENT_TYPE)
-        .map(str::to_string)
-        .unwrap_or(meta.content_type.clone());
+    // What the write keeps from before (the stored content type, the declared types, the stored
+    // links) can decide whether it is admitted. A writer that may not read the resource is told
+    // nothing about those: what would refuse the write for what it keeps is the refusal it would
+    // get without Modify, and a PUT that would keep the stored content type is refused outright.
+    // Nor does the new tag, which covers the content type, go to it.
+    let reader = state.allowed(Action::Read, uri, agent).await;
+    let unread = |refused: Response| if reader { refused } else { state.deny(agent) };
+    let content_type = match req.header(header::CONTENT_TYPE) {
+        Some(ty) => ty.to_string(),
+        None if reader => meta.content_type.clone(),
+        None => return state.deny(agent),
+    };
     let set_linkset = prefers_set_linkset(req);
     let old_rmeta = match stored_meta(state, uri).await {
         Ok(m) => m,
@@ -2411,7 +2419,7 @@ async fn update<S: Store + 'static>(
             match state.store.read_at(uri, &meta).await {
                 Ok(b) => match content_types(uri, &meta.content_type, &b) {
                     Ok(t) => t,
-                    Err(r) => return r,
+                    Err(r) => return unread(r),
                 },
                 Err(e) => return store_error(e),
             }
@@ -2436,11 +2444,8 @@ async fn update<S: Store + 'static>(
     // The linkset as it would be served, the stored one's links and attributes with it.
     let format = (!uri.ends_with('/')).then_some(content_type.as_str());
     if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &rmeta, format) {
-        return refused;
+        return unread(refused);
     }
-    // The new tag covers the stored content type, which a PUT without `Content-Type` keeps from
-    // before: only a writer that may read the resource is given it.
-    let reader = state.allowed(Action::Read, uri, agent).await;
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
     let (written, _guard, _) = write_with_meta(
@@ -6631,10 +6636,9 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let status = send(erin, "POST", c.clone(), other()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        // A new tag describes content only a reader may learn: a PUT without `Content-Type` keeps
-        // the stored type, which the tag covers.
+        // A new tag describes content only a reader may learn, the content type among it.
         for (who, sent) in [(&dave, false), (&bob, true)] {
-            let r = handle(&st, &request("PUT", &p, &[], "{}"), who).await;
+            let r = handle(&st, &request("PUT", &p, &[("content-type", JSON)], "{}"), who).await;
             assert_eq!(r.status(), StatusCode::NO_CONTENT);
             assert_eq!(r.headers().contains_key("etag"), sent, "PUT {who:?}");
         }
@@ -10634,9 +10638,30 @@ mod tests {
         let status = patch(dave.clone(), text.clone(), blind.clone()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(
-            patch(bob.clone(), text, blind).await,
+            patch(bob.clone(), text.clone(), blind).await,
             StatusCode::UNSUPPORTED_MEDIA_TYPE
         );
+        // A PUT is under the same rule for what it keeps from before: the stored content type
+        // when it sends none, and the stored links and types its linkset is held to with it.
+        let put = |who: Agent, headers: Vec<(&'static str, &'static str)>, body: String| {
+            let (st, text) = (st.clone(), text.clone());
+            async move {
+                let req = request("PUT", &text, &headers, &body);
+                handle(&st, &req, &who).await.status()
+            }
+        };
+        let status = put(dave.clone(), vec![], "plain".into()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = put(bob.clone(), vec![], "plain".into()).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let many: String = (0..MAX_LINKSET_TARGETS)
+            .map(|i| format!("<> a <https://ex.org/T{i}> .\n"))
+            .collect();
+        let turtle = vec![("content-type", "text/turtle")];
+        let status = put(dave.clone(), turtle.clone(), many.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = put(bob.clone(), turtle, many).await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
         // A linkset is patched under the same rule.
         let meta = format!("{doc}{META_SUFFIX}");
         for there in ["/linkset/0", "/linkset/9"] {
