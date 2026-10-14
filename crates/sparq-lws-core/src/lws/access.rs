@@ -703,6 +703,21 @@ pub async fn aside<S: Store + 'static>(
     )
 }
 
+/// [`allowed`] for a resource that is not there (one a change in flight is creating, see
+/// [`Aside::Missing`]): decided on no metadata and no format, with the grants in force now, so
+/// nothing the change may have written meanwhile is read for it.
+pub async fn allowed_absent<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<bool, ServerError> {
+    if state.cfg.open || is_owner(state, agent) {
+        return Ok(true);
+    }
+    decide(state, action, uri, agent, &ResourceMeta::default(), None).await
+}
+
 /// What a decision about a resource rests on, taken while the resource is there: its metadata
 /// and its format. A Delete is announced once the resource is gone, so each delivery of it is
 /// authorized against this snapshot (and the grants as they stand then).

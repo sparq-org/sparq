@@ -533,14 +533,18 @@ async fn unread_precondition<S: Store + 'static>(
 /// Whether `agent` may read `uri`, decided without its lock the way [`authorize_unlocked`] decides:
 /// on what the resource was before a change in flight to it (or one set aside) began, and only once
 /// no change began or ended meanwhile. A resource such a change is creating was not there before
-/// it, and nothing may be read of it: the write is refused, whoever asks.
+/// it: Read on it is decided on the grants alone ([`allowed_absent`](super::access::allowed_absent)).
 async fn reads_stably<S: Store + 'static>(state: &LwsState<S>, uri: &str, agent: &Agent) -> bool {
+    use super::access::{allowed_absent, aside, Aside};
     stably(state, uri, || async {
         if !state.visible(uri) || state.locks.changing(uri) {
-            return matches!(
-                super::access::aside(state, Action::Read, uri, agent).await,
-                Ok(super::access::Aside::Allowed)
-            );
+            return match aside(state, Action::Read, uri, agent).await {
+                Ok(Aside::Allowed) => true,
+                Ok(Aside::Missing) => allowed_absent(state, Action::Read, uri, agent)
+                    .await
+                    .unwrap_or(false),
+                Ok(Aside::Denied) | Err(_) => false,
+            };
         }
         state.allowed(Action::Read, uri, agent).await
     })
@@ -11855,5 +11859,50 @@ mod tests {
             patch("https://new.example/#me").await,
             StatusCode::FORBIDDEN
         );
+    }
+
+    /// Review finding: the Read check before the lock let a writer through, unchecked, on a
+    /// resource a stalled change was creating (one that was not there before it). Read on it is
+    /// decided on the grants alone: a writer without Read is refused as on any other target.
+    #[tokio::test]
+    async fn the_read_check_before_the_lock_decides_a_resource_being_created_on_the_grants() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (dave, bob) = ("https://dave.example/#me", "https://bob.example/#me");
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave));
+        st.access
+            .put_grant_for_test("bob", grant(json!(["read", "modify"]), bob));
+        let uri = st.cfg.absolute("/new.json");
+        store
+            .fail_after_create
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        let h = [("slug", "new.json"), ("content-type", JSON)];
+        let r = create(&st, &req(Method::POST, "/", &h, "{}"), &agent(OWNER), &root).await;
+        store
+            .fail_after_create
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri), "the create is set aside");
+        let patch = |who: &str| {
+            let (st, who) = (st.clone(), agent(who));
+            async move {
+                let h = [("content-type", JSON_PATCH)];
+                handle(&st, &req(Method::PATCH, "/new.json", &h, "[]"), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert_eq!(patch(dave).await, StatusCode::FORBIDDEN);
+        assert_ne!(patch(bob).await, StatusCode::FORBIDDEN);
     }
 }
