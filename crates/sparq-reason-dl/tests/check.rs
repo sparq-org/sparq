@@ -1087,3 +1087,146 @@ fn entailment_budget_fallback_respects_the_rl_divergence_guard() {
     // abstention above is the guard being conservative, not the answer being unknowable.
     assert_eq!(entail(premise, conclusion).0, EntailmentVerdict::NotEntailed);
 }
+
+// -------------------------------------------------------------------------------------------
+// #4762 — the EMPTY built-in roles `owl:bottomObjectProperty` / `owl:bottomDataProperty`
+// -------------------------------------------------------------------------------------------
+
+/// W3C `New-Feature-BottomObjectProperty-001` in shape: `∃⊥ᵣ.⊤(i)` is unsatisfiable because
+/// the bottom object property's extension is empty. Formerly an OutOfFragment abstention.
+#[test]
+fn bottom_object_property_existential_is_unsatisfiable() {
+    let (v, b) = check(
+        ":i a owl:NamedIndividual . \
+         :i a [ a owl:Restriction ; owl:onProperty owl:bottomObjectProperty ; \
+                owl:someValuesFrom owl:Thing ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Inconsistent);
+    assert_eq!(b, Branch::AlchTableau, "a rewritten ontology is owned by the tableau");
+    // Nested under a disjunction it is just a dead branch: `(A ⊔ ∃⊥ᵣ.C)(i)` is satisfiable.
+    let (v, _) = check(
+        ":i a [ owl:unionOf ( :A [ owl:onProperty owl:bottomObjectProperty ; \
+                                   owl:someValuesFrom :C ] ) ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Consistent);
+    // ... and forced to the dead branch it clashes: `(¬A ⊓ (A ⊔ ∃⊥ᵣ.C))(i)`.
+    let (v, _) = check(
+        ":i a [ owl:complementOf :A ] . \
+         :i a [ owl:unionOf ( :A [ owl:onProperty owl:bottomObjectProperty ; \
+                                   owl:someValuesFrom :C ] ) ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Inconsistent);
+}
+
+/// `∀⊥ᵣ.C` holds everywhere: `¬∀⊥ᵣ.C(i)` is unsatisfiable, `∀⊥ᵣ.⊥(i)` is satisfiable.
+#[test]
+fn bottom_object_property_universal_is_top() {
+    let (v, _) = check(
+        ":i a [ owl:onProperty owl:bottomObjectProperty ; owl:allValuesFrom owl:Nothing ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Consistent);
+    let (v, _) = check(
+        ":i a [ owl:complementOf [ owl:onProperty owl:bottomObjectProperty ; \
+                                   owl:allValuesFrom :C ] ] .",
+    );
+    assert_eq!(v, ConsistencyVerdict::Inconsistent);
+}
+
+/// A ground assertion over an empty property can never hold.
+#[test]
+fn bottom_property_assertions_are_inconsistent() {
+    assert_eq!(check(":a owl:bottomObjectProperty :b .").0, ConsistencyVerdict::Inconsistent);
+    assert_eq!(
+        check("owl:bottomObjectProperty a owl:ObjectProperty . :a owl:bottomObjectProperty :b .").0,
+        ConsistencyVerdict::Inconsistent
+    );
+    assert_eq!(check(":a owl:bottomDataProperty \"v\" .").0, ConsistencyVerdict::Inconsistent);
+}
+
+/// `owl:bottomDataProperty` restrictions over a datatype filler: `∃` is `⊥`, `∀` is `⊤`.
+#[test]
+fn bottom_data_property_restrictions() {
+    let pre = "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> . ";
+    assert_eq!(
+        check(&format!(
+            "{}:i a [ owl:onProperty owl:bottomDataProperty ; owl:someValuesFrom xsd:integer ] .",
+            pre
+        ))
+        .0,
+        ConsistencyVerdict::Inconsistent
+    );
+    assert_eq!(
+        check(&format!(
+            "{}:i a [ owl:onProperty owl:bottomDataProperty ; owl:allValuesFrom xsd:integer ] .",
+            pre
+        ))
+        .0,
+        ConsistencyVerdict::Consistent
+    );
+}
+
+/// `⊥ᵣ ⊑ r` is a tautology (dropped); the rest of the ontology is still decided.
+#[test]
+fn bottom_as_sub_property_is_trivially_true() {
+    assert_eq!(
+        check("owl:bottomObjectProperty rdfs:subPropertyOf :r . :a :r :b .").0,
+        ConsistencyVerdict::Consistent
+    );
+    assert_eq!(
+        check("owl:bottomObjectProperty rdfs:subPropertyOf :r . :a a owl:Nothing .").0,
+        ConsistencyVerdict::Inconsistent
+    );
+    // Entailed as a conclusion from the empty premise.
+    assert_eq!(
+        entail(":a a :A .", "owl:bottomObjectProperty rdfs:subPropertyOf :r .").0,
+        EntailmentVerdict::Entailed
+    );
+}
+
+/// Entailment with bottom-property conclusions: `∃⊥ᵣ.C(a)` is entailed only by an
+/// inconsistent premise; `∀⊥ᵣ.C(a)` by every premise.
+#[test]
+fn bottom_property_entailment() {
+    let some = ":a a [ owl:onProperty owl:bottomObjectProperty ; owl:someValuesFrom :C ] .";
+    let all = ":a a [ owl:onProperty owl:bottomObjectProperty ; owl:allValuesFrom :C ] .";
+    assert_eq!(entail(":a a :A .", some).0, EntailmentVerdict::NotEntailed);
+    assert_eq!(entail(":a a :A .", all).0, EntailmentVerdict::Entailed);
+    assert_eq!(
+        entail(":a a :A , [ owl:complementOf :A ] .", some).0,
+        EntailmentVerdict::Entailed
+    );
+}
+
+/// Positions with no sound ALCH rewrite stay REFUSED (fail-closed abstention), and the TOP
+/// properties stay refused everywhere exactly as before #4762.
+#[test]
+fn bottom_property_unsupported_positions_and_top_properties_stay_refused() {
+    for body in [
+        // bottom as a SUPER-property forces `r` empty — not expressible, refused.
+        ":r rdfs:subPropertyOf owl:bottomObjectProperty . :a :r :b .",
+        "owl:bottomObjectProperty rdfs:domain :A .",
+        "owl:bottomObjectProperty rdfs:range :A .",
+        // cardinality over it is out of fragment like every cardinality.
+        ":i a [ owl:onProperty owl:bottomObjectProperty ; owl:minCardinality 1 ] .",
+        // ill-typed data filler.
+        ":i a [ owl:onProperty owl:bottomDataProperty ; owl:someValuesFrom :C ] .",
+        // ⊥ sub, but the super is the top property — still refused.
+        "owl:bottomObjectProperty rdfs:subPropertyOf owl:topObjectProperty .",
+        // The top properties (New-Feature-TopObjectProperty-001 in shape, and the rest).
+        ":i a [ owl:complementOf [ owl:onProperty owl:topObjectProperty ; \
+                                   owl:someValuesFrom owl:Thing ] ] .",
+        ":i a [ owl:onProperty owl:topObjectProperty ; owl:allValuesFrom :C ] .",
+        "owl:topObjectProperty a owl:ObjectProperty . :x owl:topObjectProperty :y .",
+        ":x owl:topDataProperty \"v\" .",
+        ":r rdfs:subPropertyOf owl:topObjectProperty .",
+    ] {
+        let (v, b) = check(body);
+        assert!(
+            matches!(v, ConsistencyVerdict::Unknown(UnknownReason::OutOfFragment(_))),
+            "expected an OutOfFragment abstention for {:?}, got {:?}",
+            body,
+            v
+        );
+        assert_eq!(b, Branch::Extraction);
+    }
+}

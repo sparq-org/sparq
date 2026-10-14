@@ -304,7 +304,7 @@
 //! under the opt-in `dispatch_ql` feature (and wholly deferred without it), and every
 //! uncertain case is a typed [`UnknownReason`].
 
-use crate::extract::extract;
+use crate::extract::{extract, extract_rewriting_bottom};
 use crate::model::{Axiom, ClassExpression, ObjectPropertyExpression, Ontology};
 use crate::profile::profiles;
 // [OPUS-5] sq-pbz04.4.10: the L1 forward renderer is the Ontology→triples encoder the
@@ -540,8 +540,8 @@ impl DirectChecker {
     /// nothing (module docs §"Guard-abstention tableau fall-through").
     #[must_use]
     pub fn consistency(&self, dict: &mut Dict, triples: &[[Id; 3]]) -> ConsistencyOutcome {
-        let onto = match extract(dict, triples) {
-            Ok(onto) => onto,
+        let (onto, bottom_rewritten) = match extract_rewriting_bottom(dict, triples) {
+            Ok(extracted) => extracted,
             Err(e) => {
                 return ConsistencyOutcome {
                     verdict: ConsistencyVerdict::Unknown(UnknownReason::OutOfFragment(format!(
@@ -568,6 +568,18 @@ impl DirectChecker {
             .iter()
             .any(|a| matches!(a, Axiom::TransitiveObjectProperty { .. }))
         {
+            return ConsistencyOutcome {
+                verdict: tableau_consistency(&onto, self.budget),
+                branch: Branch::AlchTableau,
+            };
+        }
+        // #4762: the extraction rewrote a use of an EMPTY built-in role (`owl:bottomObject/
+        // DataProperty`) into its fixed meaning. The rewritten axioms have exactly the models
+        // of the input, so the ALCH tableau decides them soundly and completely with no new
+        // blocking argument (no bottom role is left in the model). The profile branches are
+        // NOT consulted: they re-read the RAW triples, which still carry the built-in IRI as
+        // an ordinary name — the very misreading the L1 refusal exists to prevent.
+        if bottom_rewritten {
             return ConsistencyOutcome {
                 verdict: tableau_consistency(&onto, self.budget),
                 branch: Branch::AlchTableau,
@@ -631,8 +643,12 @@ impl DirectChecker {
             verdict: EntailmentVerdict::Unknown(UnknownReason::OutOfFragment(e)),
             branch: Branch::Extraction,
         };
-        let prem = match extract(dict, premise) {
-            Ok(onto) => onto,
+        // #4762: both sides use the bottom-property rewriting extraction. Entailment is
+        // decided by per-axiom refutation on the ALCH tableau over the extracted MODEL; the
+        // budget fallback re-asks the profile branches only over the RENDERED model (never
+        // the raw triples), and the rewrites are model-preserving, so both stay sound.
+        let prem = match extract_rewriting_bottom(dict, premise) {
+            Ok((onto, _)) => onto,
             Err(e) => return unknown_extraction(format!("premise: {}", e)),
         };
         // [GPT-5.6] sq-zfwzq: declarations have no Direct-Semantics import. Seed the
@@ -668,8 +684,8 @@ impl DirectChecker {
             }
             conclusion_for_extraction
         };
-        let concl = match extract(dict, &conclusion_for_extraction) {
-            Ok(onto) => onto,
+        let concl = match extract_rewriting_bottom(dict, &conclusion_for_extraction) {
+            Ok((onto, _)) => onto,
             Err(e) => return unknown_extraction(format!("conclusion: {}", e)),
         };
         // [OPUS-4.8] sq-pbz04.4.13 — conclusion anonymous individuals are EXISTENTIAL under
