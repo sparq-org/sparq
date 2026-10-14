@@ -12,6 +12,7 @@
 //! The same fail-closed contract as the ALCH layer holds: [`extract()`] understands a graph
 //! in full or refuses it, naming the triple it could not read.
 
+pub mod data_ranges;
 pub mod datatypes;
 pub mod dl_profile;
 pub mod extract;

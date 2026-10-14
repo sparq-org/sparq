@@ -706,6 +706,17 @@ the violations an import could repair (undeclared entities, unknown datatypes) a
 unchecked rather than definite.
 `blocking()` lists the violations a reasoner must refuse. `owl:imports` is recorded in
 `Ontology::imports`, never dereferenced.
+`owl2dl::data_ranges` answers the datatype questions the tableau asks of a data range
+(`DataRangeExpr`: a datatype, a facet restriction, `OneOf`, `And`, `Or`, `Not`):
+`is_empty`, `contains`, `has_at_least(r, n)` for data cardinalities, and
+`conjunction_satisfiable(pos, neg, distinct, values)`, which asks whether `distinct`
+pairwise different values exist inside every range of `pos`, outside every range of `neg`
+and outside `values`. Each answer is a `Tri`: `Yes` and `No` are exact (rational bounds
+without rounding, discrete floats with `-0` and `+0` distinct, the ±14:00 rule for
+`xsd:dateTime`, XSD patterns, lengths and extended language ranges as automata), and
+`Unknown` covers a facet outside the datatype's facet space, an XSD pattern this
+implementation does not support (block escapes such as `\p{IsBasicLatin}`), and string
+searches over a fixed automaton budget.
 
 ## Common recipes
 
