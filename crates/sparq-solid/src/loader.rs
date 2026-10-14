@@ -35,7 +35,7 @@ pub(crate) const ACL_SUFFIX: &str = ".acl";
 pub(crate) const ACR_SUFFIX: &str = ".acr";
 
 const ACL_AGENT: &str = "http://www.w3.org/ns/auth/acl#agent";
-const ACL_AGENT_GROUP: &str = "http://www.w3.org/ns/auth/acl#agentGroup";
+pub(crate) const ACL_AGENT_GROUP: &str = "http://www.w3.org/ns/auth/acl#agentGroup";
 const ACL_ORIGIN: &str = "http://www.w3.org/ns/auth/acl#origin";
 const ACP_AGENT: &str = "http://www.w3.org/ns/solid/acp#agent";
 const ACP_CLIENT: &str = "http://www.w3.org/ns/solid/acp#client";
@@ -131,7 +131,7 @@ pub(crate) fn graph_triples(g: &Graph) -> Vec<[Term; 3]> {
         .collect()
 }
 
-fn graph_iri(name: &Term) -> Option<&str> {
+pub(crate) fn graph_iri(name: &Term) -> Option<&str> {
     match name {
         Term::NamedNode(n) => Some(n.as_str()),
         _ => None,
@@ -388,7 +388,7 @@ pub(crate) fn assemble_input(
 /// truth for the mapping — [`collect_agents`] uses it to decide which named graphs the
 /// materializer merges in, and [`referenced_group_docs`] uses it to tell the write path
 /// which graphs are auth-view inputs.
-fn group_doc_of(group_iri: &str) -> &str {
+pub(crate) fn group_doc_of(group_iri: &str) -> &str {
     group_iri.split('#').next().unwrap_or(group_iri)
 }
 
