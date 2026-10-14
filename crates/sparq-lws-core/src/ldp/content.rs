@@ -915,6 +915,18 @@ mod tests {
         .expect("acceptable")
     }
 
+    /// A quoted-pair in the profile is the character it escapes (RFC 9110 §5.6.4), so an escaped
+    /// IRI asks for the same document form as the plain one.
+    #[test]
+    fn an_escaped_profile_is_the_profile_it_spells() {
+        let escaped = jsonld_with_profile(r"http:\/\/www.w3.org\/ns\/json-ld#compacted");
+        assert_eq!(
+            escaped,
+            jsonld_with_profile("http://www.w3.org/ns/json-ld#compacted")
+        );
+        assert_eq!(escaped.jsonld_profile, Some(JsonLdProfileParam::Compacted));
+    }
+
     #[test]
     fn profile_iris_come_from_the_vendored_implementation() {
         assert_eq!(

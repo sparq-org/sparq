@@ -12,17 +12,18 @@ pub struct MediaRange<'a> {
     /// The weight in `[0, 1]`: `1` when absent, `0` when not a valid qvalue (RFC 9110 §12.4.2),
     /// so a malformed weight never makes a range acceptable.
     pub q: f32,
-    params: Vec<(String, &'a str)>,
+    params: Vec<(String, std::borrow::Cow<'a, str>)>,
 }
 
 impl<'a> MediaRange<'a> {
-    /// The value of the parameter `name` (matched case-insensitively), with the quotes of a
-    /// quoted-string removed. Parameters after the weight are accept-extensions and are kept too.
-    pub fn param(&self, name: &str) -> Option<&'a str> {
+    /// The value of the parameter `name` (matched case-insensitively); a quoted-string is
+    /// unquoted and its quoted-pairs decoded (RFC 9110 §5.6.4). Parameters after the weight are
+    /// accept-extensions and are kept too.
+    pub fn param(&self, name: &str) -> Option<&str> {
         self.params
             .iter()
             .find(|(n, _)| n.eq_ignore_ascii_case(name))
-            .map(|(_, v)| *v)
+            .map(|(_, v)| v.as_ref())
     }
 
     /// How specifically this range names `media_type` (a lowercase `type/subtype`): `3` for the
@@ -59,7 +60,7 @@ pub fn media_ranges(accept: &str) -> impl Iterator<Item = MediaRange<'_>> {
             let name = name.trim().to_ascii_lowercase();
             let value = unquote(value.trim());
             if name == "q" {
-                q = qvalue(value).unwrap_or(0.0);
+                q = qvalue(&value).unwrap_or(0.0);
             } else {
                 params.push((name, value));
             }
@@ -79,12 +80,25 @@ fn qvalue(v: &str) -> Option<f32> {
     valid.then(|| v.parse().ok()).flatten()
 }
 
-/// `value` without the surrounding quotes of a quoted-string (escapes are left in place).
-fn unquote(value: &str) -> &str {
-    value
-        .strip_prefix('"')
-        .and_then(|v| v.strip_suffix('"'))
-        .unwrap_or(value)
+/// `value` as a token, or the content of a quoted-string with each quoted-pair (`\x`) read as
+/// the character it escapes (RFC 9110 §5.6.4).
+fn unquote(value: &str) -> std::borrow::Cow<'_, str> {
+    let Some(inner) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) else {
+        return value.into();
+    };
+    if !inner.contains('\\') {
+        return inner.into();
+    }
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        out.push(if c == '\\' {
+            chars.next().unwrap_or(c)
+        } else {
+            c
+        });
+    }
+    out.into()
 }
 
 /// `s` split at each `sep` outside a quoted-string.
@@ -157,7 +171,26 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].param("p"), Some("x,y;z"));
         assert_eq!(all[1].essence, "c/d");
-        assert_eq!(all[1].param("p"), Some(r#"\"q\",r"#));
+        assert_eq!(all[1].param("p"), Some(r#""q",r"#));
+    }
+
+    #[test]
+    fn quoted_pairs_are_decoded() {
+        let escaped = r#"application/ld+json;profile="http:\/\/www.w3.org/ns/json-ld#compacted""#;
+        let plain = r#"application/ld+json;profile="http://www.w3.org/ns/json-ld#compacted""#;
+        let bare = "application/ld+json;profile=http://www.w3.org/ns/json-ld#compacted";
+        for accept in [escaped, plain, bare] {
+            let r = media_ranges(accept).next().unwrap();
+            assert_eq!(
+                r.param("profile"),
+                Some("http://www.w3.org/ns/json-ld#compacted"),
+                "{accept}"
+            );
+        }
+        assert_eq!(
+            media_ranges(r#"a/b;p="x\\y""#).next().unwrap().param("p"),
+            Some("x\\y")
+        );
     }
 
     #[test]
