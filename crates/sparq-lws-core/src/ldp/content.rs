@@ -796,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn read_only_formats_are_refused_for_writes() {
+    fn classify_does_not_accept_the_read_only_formats() {
         for media in ["application/n-triples", "application/n-quads", "text/n3"] {
             assert!(
                 matches!(

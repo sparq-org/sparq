@@ -901,7 +901,7 @@ async fn serve_read_once<S: Store>(
             accept,
         )
         .await?;
-        let etag = representation_etag(&body);
+        let etag = representation_etag(&content_type, &body);
         (Some((body, content_type)), etag)
     } else {
         let etag = negotiated_validator(&resource.meta.etag, &resource.meta.content_type, accept)?;
@@ -2023,18 +2023,27 @@ async fn render_container<S: Store>(
     Ok((Bytes::from(bytes), negotiated.content_type()))
 }
 
-/// A STRONG ETag computed from a rendered representation's BYTES — `"<len>-<hash>"`.
+/// A STRONG ETag computed from a rendered representation's media type and BYTES — `"<len>-<hash>"`.
 ///
 /// Used for a container response, whose body is generated from live membership (not stored bytes), so
 /// the validator must track the actual representation: it changes whenever the serialised body changes
-/// (a child added/removed, or the negotiated format differs). The same body computed for GET and HEAD
-/// yields the same validator, so the two methods agree. This is a non-cryptographic content hash
-/// (FNV-1a over the bytes), sufficient for a cache validator — collisions across distinct
-/// representations are vanishingly unlikely and the length prefix further disambiguates.
-fn representation_etag(body: &[u8]) -> String {
-    // FNV-1a 64-bit over the serialised representation.
+/// (a child added/removed) or the negotiated `Content-Type` differs. The media type is hashed too
+/// because two formats can render identical bytes (N-Triples and default-graph N-Quads always do, and
+/// a one-triple Turtle body can match them), and a validator must never 304 a request for one of them
+/// with the other's tag. The same body computed for GET and HEAD yields the same validator, so the two
+/// methods agree. This is a non-cryptographic content hash (FNV-1a), sufficient for a cache validator
+/// — collisions across distinct representations are vanishingly unlikely and the length prefix
+/// further disambiguates.
+fn representation_etag(content_type: &str, body: &[u8]) -> String {
+    // FNV-1a 64-bit over the media type, a 0xFF separator (never part of a header value), and the
+    // serialised representation.
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in body {
+    let bytes = content_type
+        .as_bytes()
+        .iter()
+        .chain(std::iter::once(&0xFF))
+        .chain(body);
+    for &b in bytes {
         hash ^= b as u64;
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
@@ -5100,6 +5109,54 @@ mod tests {
         let not_mod = get_with(&state, owner_token(), "/alice/c/", cond).await;
         assert_eq!(not_mod.status(), StatusCode::NOT_MODIFIED);
         assert_eq!(etag_of(&not_mod), etag, "container 304 ETag == 200 ETag");
+    }
+
+    #[tokio::test]
+    async fn container_validators_are_distinct_across_formats_with_identical_bytes() {
+        // #4879 review: N-Triples and default-graph N-Quads render identical bytes, and a one-triple
+        // Turtle listing can too, so the container validator must carry the format: each format's
+        // tag 304s only a request for that same format, on GET and HEAD alike.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let formats = [
+            "text/turtle",
+            "application/n-triples",
+            "application/n-quads",
+        ];
+        let mut tags = Vec::new();
+        for media in formats {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let resp = get_with(&state, owner_token(), "/alice/", accept).await;
+            assert_eq!(resp.status(), StatusCode::OK, "{media}");
+            tags.push(etag_of(&resp));
+        }
+        for (i, held) in tags.iter().enumerate() {
+            for (j, media) in formats.iter().enumerate() {
+                for verb in ["GET", "HEAD"] {
+                    let mut cond = HeaderMap::new();
+                    cond.insert(header::ACCEPT, HeaderValue::from_static(media));
+                    cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(held).unwrap());
+                    let uri: axum::http::Uri = "/alice/".parse().unwrap();
+                    let (s, t) = (State(state.clone()), Extension(owner_token()));
+                    let resp = match verb {
+                        "GET" => get_handler(s, t, uri, cond).await,
+                        _ => head_handler(s, t, uri, cond).await,
+                    }
+                    .unwrap();
+                    let expected = if i == j {
+                        StatusCode::NOT_MODIFIED
+                    } else {
+                        StatusCode::OK
+                    };
+                    assert_eq!(
+                        resp.status(),
+                        expected,
+                        "{verb} {media} holding the {} tag",
+                        formats[i]
+                    );
+                }
+            }
+        }
     }
 
     #[tokio::test]

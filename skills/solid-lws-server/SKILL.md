@@ -194,8 +194,10 @@ curl -H 'Accept: application/ld+json' https://solid.example/alice/profile/card
 curl -H 'Accept: application/n-triples' https://solid.example/alice/profile/card
 ```
 
-N-Triples and N-Quads are read-only: writes still take Turtle or JSON-LD. A
-resource is one default graph, so its N-Quads lines carry no graph label.
+N-Triples and N-Quads are read formats only. A PUT or POST body sent with
+either media type is stored as an opaque non-RDF resource, not parsed as RDF,
+and PATCH refuses them with 415. A resource is one default graph, so its
+N-Quads lines carry no graph label.
 `text/n3` is not produced and falls back to Turtle. When q-values tie, the
 stored format wins, then Turtle, JSON-LD, N-Triples, N-Quads in that order,
 so `application/*` still yields JSON-LD.
