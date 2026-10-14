@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the HOST side. The in-circuit half stays open: no Noir global or assert names the sentinel, so a
   member refuses it only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
   unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
-  §14.1 `LANG_NONE` assumption is not discharged. Both versions carry the same #769-accepted INV-VL
+  §14.1 `LANG_NONE` separation is asserted on the host side only (see the hardening entry below). Both versions carry the same #769-accepted INV-VL
   downgrade; not externally audited (CR-G8 / sq-qhy4).
 - **sparq-zk-compose:** `filter_value_dl_bool` is the `DualLeafV2` `xsd:boolean` lane's dedicated
   member — `filter_value_dl_int`'s public layout field-for-field, plus in-circuit constraints that the
@@ -33,6 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   soundness or privacy claim.
 
 ### Changed
+
+- **sparq-zk:** hardening — the dual-leaf encoders now assert the §14.1 `LANG_NONE` separation
+  on the host side instead of assuming it. `dual_leaf::degenerate_value_component` and
+  `dual_leaf_v2::degenerate_value_component` return `Result<Fr, DualLeafError>` and refuse a language
+  tag whose language constant equals the reserved `LANG_NONE` sentinel with the new
+  `DualLeafError::ReservedLanguageConstant`, so such a tag fails the literal, term, triple and
+  whole-graph encoders rather than being encoded; `checked_lang_const` (in both modules) is the gate.
+  A language constant is a 248-bit truncated BLAKE3 digest and `LANG_NONE` is the field element `1`,
+  so only a fixed-target preimage reaches the refusal. No committed value, vector or leaf changes. The
+  in-circuit half of the assert stays open (no Noir member checks it;
+  `research/zk-field-native-encoding.md` §14.1, §14.3).
 
 - **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
   the same parsed input, and as long as the binding values and firing sets are themselves

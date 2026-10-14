@@ -388,7 +388,7 @@ fn a_v2_string_lane_literal_is_separated_from_every_value_lane() {
         // either boolean handle, and for every lane constant.
         let lit = typed_unchecked("true", datatype);
         let string_lane_leaf = dual_leaf_v2::encode_literal(&lit).unwrap();
-        let degenerate = dual_leaf_v2::degenerate_value_component(datatype, None);
+        let degenerate = dual_leaf_v2::degenerate_value_component(datatype, None).unwrap();
         let plain = dual_leaf_v2::degenerate_datatype_const(datatype);
         for lane in lane_constants {
             assert_ne!(plain, lane, "{}", datatype);
@@ -1026,7 +1026,7 @@ fn in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members() {
     // rather than a leaf-shaped construction.
     let lexical_component =
         field_from_hash_bytes(blake3::hash(lit.to_string().as_bytes()).as_bytes());
-    let degenerate = dual_leaf_v2::degenerate_value_component(datatype, None);
+    let degenerate = dual_leaf_v2::degenerate_value_component(datatype, None).unwrap();
     assert_eq!(
         poseidon2::hash(&[
             degenerate,
