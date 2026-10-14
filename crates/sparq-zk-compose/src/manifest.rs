@@ -741,8 +741,8 @@ pub enum CircuitId {
     /// (no `[u8; D]` witness), so the per-`d` family collapses to ONE member per
     /// datatype class and the member selection no longer leaks `ceil(log10(value))`.
     ///
-    /// LEGAL ONLY against the `DualLeafV1` commitment method (and the
-    /// feature-gated `ValueOnlyV1` research dial) — a graph committed
+    /// LEGAL ONLY against the dual-leaf commitment methods `DualLeafV1` /
+    /// `DualLeafV2` (and the feature-gated `ValueOnlyV1` research dial) — a graph committed
     /// `string-canonical` has no `value_component`, so this member is unprovable
     /// against it. The `(method, circuit)` legality is enforced FAIL-CLOSED by
     /// [`crate::dispatch`] (sq-cfmv).
@@ -764,8 +764,9 @@ pub enum CircuitId {
     /// CANONICALISES the IEEE bits (`-0.0` → `+0.0`; any NaN → the canonical qNaN)
     /// before forming `value_component`, so two bit-distinct but
     /// SPARQL-numerically-equal terms collapse to ONE value handle. DIGIT-COUNT-FREE
-    /// (one member per datatype class). LEGAL ONLY against `DualLeafV1` / the
-    /// `ValueOnlyV1` research dial — fail-closed via `crate::dispatch`.
+    /// (one member per datatype class). LEGAL ONLY against `DualLeafV1` /
+    /// `DualLeafV2` / the `ValueOnlyV1` research dial — fail-closed via
+    /// `crate::dispatch`.
     ///
     /// DOCUMENTED RISK: carries the INV-VL downgrade (value↔lexical agreement is
     /// trusted-issuer-honesty, not machine-enforced; #769 accepted, CR-G8 / sq-qhy4).
@@ -786,7 +787,8 @@ pub enum CircuitId {
     /// never collide a value at another. DIGIT-COUNT-FREE AND scale-agnostic (ONE
     /// compiled member serves every scale — the scale lives in the public input),
     /// unlike the blake3 `FilterDecimal { id, fd }` family. LEGAL ONLY against
-    /// `DualLeafV1` / `ValueOnlyV1` — fail-closed via `crate::dispatch`.
+    /// `DualLeafV1` / `DualLeafV2` / `ValueOnlyV1` — fail-closed via
+    /// `crate::dispatch`.
     ///
     /// DOCUMENTED RISK: carries the INV-VL downgrade (CR-G8 / sq-qhy4). NOT
     /// externally audited; no soundness / privacy claim.
@@ -817,8 +819,8 @@ pub enum CircuitId {
     /// The hookable DOMAIN (strict XSD-canonical `Z`-timezoned lexicals only) is
     /// the host's §13.4 fail-closed predicate, not an in-circuit check — the same
     /// division of labour the decimal member uses for its canonical fraction width.
-    /// LEGAL ONLY against `DualLeafV1` / `ValueOnlyV1` — fail-closed via
-    /// `crate::dispatch`.
+    /// LEGAL ONLY against `DualLeafV1` / `DualLeafV2` / `ValueOnlyV1` —
+    /// fail-closed via `crate::dispatch`.
     ///
     /// DOCUMENTED RISK: carries the INV-VL downgrade, and the whole §13 rule set is
     /// itself an OPEN external-audit obligation (CR-G8 / sq-qhy4). NOT externally
@@ -1520,8 +1522,18 @@ impl ProofInputs {
 /// `(xsd:boolean IRI, "bit")` pair (`sparq_zk::dual_leaf_v2::boolean_lane_const`),
 /// so — under BLAKE3's mode domain separation and, after the 248-bit field
 /// reduction, its collision resistance — it differs from the plain datatype fold a
-/// V2 string-lane leaf carries, for every datatype byte string. That is what keeps
-/// a string-lane leaf from opening on this lane.
+/// V2 string-lane leaf carries, for every datatype byte string.
+///
+/// That split separates the CONSTANTS; it is not by itself what keeps a
+/// string-lane leaf off this lane. `datatype_const` is a PUBLIC INPUT this member
+/// takes UNPINNED, so a prover may present the plain fold in its place. What
+/// refuses a string-lane leaf is the handle it would have to witness: a degenerate
+/// `value_component` carries `sparq_zk::dual_leaf_v2::value_none`, which lies
+/// outside the reachable handle band and therefore outside this member's
+/// `{0, 1}` constraint (and outside the other value-lane members' `u64` range
+/// decomposition). A relying party must additionally PIN `datatype_const` to this
+/// constant for the lane it expects — that verifier-side binding is the sq-j506
+/// wiring, not a property of the constant.
 ///
 /// # Unlike the V1 boolean lane, this one has its OWN member
 ///

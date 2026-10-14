@@ -41,7 +41,7 @@ use sparq_zk::dual_leaf::{DualLeafError, LANG_NONE, XSD_DECIMAL, XSD_DOUBLE, XSD
 use sparq_zk::dual_leaf_boolean::XSD_BOOLEAN;
 use sparq_zk::dual_leaf_v2;
 use sparq_zk::encode::TYPE_CODE_LITERAL;
-use sparq_zk::field::{field_from_hex_str, field_to_hex, Fr};
+use sparq_zk::field::{field_from_hash_bytes, field_from_hex_str, field_to_hex, Fr};
 use sparq_zk::poseidon2;
 use sparq_zk_compose::build::{boolean_verdict, build_filter_value_dl_bool};
 use sparq_zk_compose::dispatch::{resolve_circuit, DispatchError};
@@ -703,8 +703,17 @@ fn in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict()
 
 /// THE BIT DOMAIN — the reason this member exists. A handle (and a bound) of `2`
 /// is inside the shared integer member's `u64` range decomposition, and a leaf
-/// committed for it satisfies the binding constraint, so the integer member
-/// ACCEPTS that assignment. The dedicated member refuses both, in-circuit.
+/// committed for it satisfies that member's binding constraint, so the integer
+/// member ACCEPTS the assignment. The dedicated member REFUSES it.
+///
+/// Note what this vector does and does not attribute: on the dedicated member the
+/// assignment is refused, but TWO of its constraints independently refuse it —
+/// `assert_bit(value_hook)`, and the leaf binding (the member rebinds the leaf from
+/// the canonicalised BIT, not from the raw handle, so a leaf committed for `2`
+/// cannot match). The bit constraint is isolated by
+/// [`in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witness`]
+/// below. The `bound` half here IS isolated: the handle is honest and the leaf
+/// binds, so only `assert_bit(bound)` can refuse.
 #[test]
 fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
     if !toolchain_available() {
@@ -733,7 +742,8 @@ fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
         ),
         "control: the integer member's u64 range admits the handle 2"
     );
-    // The dedicated member refuses the witnessed handle...
+    // The dedicated member refuses that assignment (by either of its two
+    // constraints — see the doc comment; the isolating vector is below).
     assert!(
         !member_accepts(
             &CircuitId::FilterValueDlBool,
@@ -824,5 +834,179 @@ fn in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_cons
             "the honest witness must be unprovable under the {} string-lane constant",
             datatype
         );
+    }
+}
+
+/// ISOLATES `assert_bit(value_hook)`. The member rebinds its leaf from the
+/// CANONICALISED bit (`value_hook == 1`), so a witness whose committed leaf was
+/// built for the bit `0` SATISFIES the binding constraint even when the witnessed
+/// handle is `2` — and the disclosed verdict is the honest one for `false`. Every
+/// constraint except the hook's bit constraint is therefore met, so this vector is
+/// refused by `assert_bit(value_hook)` and by nothing else.
+///
+/// Deleting that one assert in `filter_value_bool.nr` makes this test pass, which
+/// is what makes it a guard rather than a restatement.
+#[test]
+fn in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witness() {
+    if !toolchain_available() {
+        eprintln!("nargo absent; skipping the in-circuit hook bit-constraint vector");
+        return;
+    }
+    // An honest committed `false` leaf and its honest public inputs.
+    let built = build_filter_value_dl_bool(&bool_lit(false), FilterOp::Eq, false).unwrap();
+    let p = unpack(&built.inputs);
+    assert!(p.expected, "false == false is the honest verdict");
+    assert_eq!(fr(&built.value_hook), Fr::from(0u64));
+
+    // Control: the honest witness is provable.
+    assert!(
+        member_accepts(
+            &CircuitId::FilterValueDlBool,
+            "dlv2_bit_iso_ok",
+            p.operand_enc,
+            p.op,
+            p.bound,
+            p.datatype_const,
+            p.expected,
+            &built.value_hook,
+            &built.lexical_component,
+        ),
+        "control: the honest false witness must be provable"
+    );
+
+    // The ONLY change is the witnessed handle, from `0` to `2`. The member reads
+    // `value = (2 == 1) = false`, rebinds the leaf from the bit `0` — which still
+    // equals `operand_enc` — and computes the same verdict. The host mirror of that
+    // rebinding, asserted so the vector cannot silently stop being isolating:
+    let hook_two = hexf(&Fr::from(2u64));
+    assert_eq!(
+        member_rebinds_leaf(
+            Fr::from(0u64),
+            fr(p.datatype_const),
+            fr(&built.lexical_component)
+        ),
+        fr(p.operand_enc),
+        "the leaf the member rebinds for a handle of 2 must still be operand_enc, \
+         otherwise this vector is not isolating the bit constraint"
+    );
+    assert!(
+        !member_accepts(
+            &CircuitId::FilterValueDlBool,
+            "dlv2_bit_iso_two",
+            p.operand_enc,
+            p.op,
+            p.bound,
+            p.datatype_const,
+            p.expected,
+            &hook_two,
+            &built.lexical_component,
+        ),
+        "a witnessed handle of 2 must be refused even though the leaf binding and \
+         the verdict both hold"
+    );
+}
+
+/// What actually keeps a V2 STRING-LANE leaf off the value lanes: the handle, not
+/// the lane constant. `datatype_const` is an UNPINNED public input, so this vector
+/// presents a real V2 string-lane leaf together with the constant it was committed
+/// under (the PLAIN datatype fold) and the handle a degenerate `value_component`
+/// carries (`value_none`) — the most favourable presentation available to a prover.
+/// Both members refuse it, because `value_none` lies outside the reachable handle
+/// band: the integer member's `u64` range decomposition rejects it, and the
+/// dedicated boolean member's `{0, 1}` constraint rejects it.
+#[test]
+fn in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members() {
+    if !toolchain_available() {
+        eprintln!("nargo absent; skipping the in-circuit V2 string-lane vector");
+        return;
+    }
+    // A real V2 string-lane literal: an opaque datatype, so `encode_literal` takes
+    // the degenerate path.
+    let datatype = "http://example.org/opaque";
+    assert!(!dual_leaf_v2::is_hookable_datatype(datatype));
+    let lit = typed_unchecked("some value", datatype);
+    let committed_leaf = dual_leaf_v2::encode_literal(&lit).unwrap();
+
+    // Reconstruct that leaf's parts: the degenerate value component (which folds
+    // `value_none` and the PLAIN datatype fold) and the string-canonical lexical
+    // hash. Equality with the committed leaf is what makes this the REAL leaf
+    // rather than a leaf-shaped construction.
+    let lexical_component =
+        field_from_hash_bytes(blake3::hash(lit.to_string().as_bytes()).as_bytes());
+    let degenerate = dual_leaf_v2::degenerate_value_component(datatype, None);
+    assert_eq!(
+        poseidon2::hash(&[
+            degenerate,
+            lexical_component,
+            Fr::from(TYPE_CODE_LITERAL)
+        ]),
+        committed_leaf,
+        "the reconstructed parts must be the committed string-lane leaf"
+    );
+    // The handle that component carries is out of band, which is the whole point.
+    assert!(!dual_leaf_v2::is_in_handle_band(&dual_leaf_v2::value_none()));
+
+    let enc = hexf(&committed_leaf);
+    let hook = hexf(&dual_leaf_v2::value_none());
+    let plain = hexf(&dual_leaf_v2::degenerate_datatype_const(datatype));
+    let lexical = hexf(&lexical_component);
+
+    // The shared integer member: the leaf binding is the member's own recompute
+    // over the range-decomposed handle, so the `u64` range constraint is what
+    // refuses this.
+    assert!(
+        !member_accepts(
+            &CircuitId::FilterValueDl,
+            "dlv2_strlane_int",
+            &enc,
+            FilterOp::Eq,
+            0,
+            &plain,
+            true,
+            &hook,
+            &lexical,
+        ),
+        "a string-lane leaf must be unprovable on the integer value-lane member"
+    );
+    // The dedicated boolean member: the `{0, 1}` constraint refuses it.
+    assert!(
+        !member_accepts(
+            &CircuitId::FilterValueDlBool,
+            "dlv2_strlane_bool",
+            &enc,
+            FilterOp::Eq,
+            0,
+            &plain,
+            true,
+            &hook,
+            &lexical,
+        ),
+        "a string-lane leaf must be unprovable on the bit-domain boolean member"
+    );
+}
+
+/// The decimal and dateTime members cannot even be ASKED the question above: their
+/// ABI takes the handle as `(value_neg: bool, value_hook_scaled: u64)`, and the set
+/// of field elements such a pair can denote — `mag` or its field negation, for
+/// `mag: u64` — is EXACTLY the reachable handle band. So an out-of-band handle is
+/// not expressible through those members' public interface, and `value_none` is
+/// out of band. Host-side statement; no toolchain needed.
+#[test]
+fn the_sign_folded_members_cannot_express_an_out_of_band_handle() {
+    let sentinel = dual_leaf_v2::value_none();
+    assert!(!dual_leaf_v2::is_in_handle_band(&sentinel));
+    // Every `(neg, u64)` pair lands inside the band, by construction...
+    for mag in [0u64, 1, 2, u64::MAX, u64::MAX / 2] {
+        for neg in [false, true] {
+            let folded = if neg { -Fr::from(mag) } else { Fr::from(mag) };
+            assert!(
+                dual_leaf_v2::is_in_handle_band(&folded),
+                "({}, {}) must be in band",
+                neg,
+                mag
+            );
+            // ...so none of them is the sentinel.
+            assert_ne!(folded, sentinel);
+        }
     }
 }

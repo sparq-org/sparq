@@ -48,6 +48,14 @@
 //! collision/preimage resistance. They are **not** unconditional facts, and they
 //! are not audited (see *Honesty* below).
 //!
+//! What this separation does is keep the CONSTANTS apart. It is not what keeps a
+//! string-lane leaf from opening on a value-lane member: `datatype_const` is an
+//! UNPINNED public input of those members, so that job falls to the out-of-band
+//! sentinel of §2 below (a degenerate handle is outside every member's
+//! range/bit constraint) plus the relying party's own pinning of
+//! `datatype_const` to the expected lane constant (the sq-j506 verifier wiring).
+//! See [`lane_const`].
+//!
 //! ## 2. The out-of-band no-value sentinel (§14.1's reserved-tag requirement)
 //!
 //! §14.1 requires the reserved no-value tag to be a domain-separated
@@ -165,9 +173,25 @@ fn derive(context: &str, key_material: &[u8]) -> Fr {
 ///
 /// Because this is the key-derivation mode and [`degenerate_datatype_const`] is
 /// the plain mode, a lane constant also differs from the degenerate fold of any
-/// byte string — the property that keeps a string-lane leaf from opening on a
-/// value-lane member. Both are properties under BLAKE3's mode domain separation
-/// and, after the 248-bit field reduction, its collision/preimage resistance.
+/// byte string. Both are properties under BLAKE3's mode domain separation and,
+/// after the 248-bit field reduction, its collision resistance.
+///
+/// # What the split does, and what actually keeps the lanes apart
+///
+/// This separates the CONSTANTS: a lane constant and the string lane's plain fold
+/// are distinct field elements, so the two lanes are distinguishable. It does
+/// NOT, on its own, stop a string-lane leaf opening on a value-lane member —
+/// `datatype_const` is a PUBLIC INPUT those members take UNPINNED, so a prover may
+/// present the degenerate fold as if it were the lane constant and the leaf
+/// binding would still be satisfied.
+///
+/// What refuses such a leaf is slot 0: a degenerate `value_component` carries
+/// [`value_none`], which lies OUTSIDE the reachable handle band, so every shipped
+/// value-lane member's `u64` range decomposition — and `filter_value_dl_bool`'s
+/// `{0, 1}` constraint — rejects the handle it would have to witness. On top of
+/// that, a relying party must PIN `datatype_const` to the lane constant it
+/// expects; that verifier-side binding is the sq-j506 wiring, not a property of
+/// this constant.
 pub fn lane_const(datatype: &str, params: &str) -> Fr {
     derive(
         LANE_CONTEXT,
@@ -227,8 +251,9 @@ pub fn datetime_lane_const() -> Fr {
 /// The V2 `xsd:date` lane constant — [`lane_const`] with
 /// `params = "epochscale=3"`. A date's handle is numerically equal to the
 /// dateTime handle of its starting instant, so this constant is the only thing
-/// separating the two lanes — a property under Poseidon2 preimage resistance, not
-/// an audited soundness claim.
+/// separating the two lanes: the two constants differ because BLAKE3 separates
+/// them (see [`lane_const`]), and the two LEAVES differ under Poseidon2's
+/// collision resistance. Neither is an audited soundness claim.
 pub fn date_lane_const() -> Fr {
     lane_const(XSD_DATE, &format!("epochscale={}", EPOCH_SCALE_FS))
 }

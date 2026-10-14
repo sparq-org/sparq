@@ -1142,6 +1142,18 @@ string. Both statements are properties under BLAKE3's mode domain separation and
 the 248-bit field reduction, its collision/preimage resistance — not unconditional facts.
 V2's language constants move into their own key-derivation context the same way.
 
+What this buys, stated precisely: it separates the **constants**, so a value lane and the
+string lane are distinguishable field elements. It is NOT what keeps a string-lane leaf
+from opening on a value-lane member, because `datatype_const` is an **unpinned public
+input** of every such member — a prover may present the plain fold in the lane's place and
+the leaf binding is still satisfied. What refuses that leaf is **(a)** the out-of-band
+sentinel of (a) above: a degenerate `value_component` carries `VALUE_NONE`, which lies
+outside the reachable handle band, so the members' `u64` range decomposition and
+`filter_value_dl_bool`'s `{0, 1}` constraint reject the handle it would have to witness;
+and **(b)** the relying party, which must pin `datatype_const` to the lane constant it
+expects. That verifier-side pinning is the sq-j506 wiring and has not shipped, so today it
+is an obligation on the relying party, recorded here rather than claimed as enforced.
+
 **(c) The boolean lane gets its own bit-constrained member.** `filter_value_dl_bool`
 (`zk/compose/compose_core/src/filter_value_bool.nr`) has `filter_value_dl_int`'s public
 layout field-for-field and additionally constrains the witnessed `VALUE_HOOK` **and** the

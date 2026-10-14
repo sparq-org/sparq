@@ -2462,7 +2462,8 @@ fn derive_id(inputs: &ProofInputs) -> Option<CircuitId> {
         // `FilterValueDl` member. The full CircuitId is what the public-input
         // reconstruction + canonical-vk recompute pin. The fail-closed legality of
         // this member against the recorded COMMITMENT METHOD (it is LEGAL only for
-        // `DualLeafV1` / the `ValueOnlyV1` research dial, never `string-canonical`)
+        // the dual-leaf methods `DualLeafV1` / `DualLeafV2` and the `ValueOnlyV1`
+        // research dial, never `string-canonical`)
         // is the dispatch matrix `crate::dispatch::resolve_circuit` (sq-cfmv) — the
         // host-encoding wiring that gives the verifier the method is sq-j506, gated
         // behind sq-qhy4. Here the derive only confirms the member identity.
