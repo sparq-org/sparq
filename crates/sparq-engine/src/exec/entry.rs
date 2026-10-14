@@ -7,6 +7,8 @@ pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult,
     // uninstrumented rayon branches) into the error before the expensive term
     // materialisation below.
     budget::check(bindings.rows.len())?;
+    #[cfg(test)]
+    materialise_budget_tests::BEFORE_MATERIALISE.with(|hook| hook.take().map(|f| f()));
 
     // SELECT * exposes only real variables, never synthetic blank-node variables.
     let out_vars: Vec<Variable> = bindings
@@ -24,16 +26,35 @@ pub fn eval_select(graph: &Graph, pattern: &GraphPattern) -> Result<QueryResult,
     let materialise = |row: &Row| -> Vec<Option<Term>> {
         col_of.iter().map(|c| c.and_then(|i| term_of(graph, &local, row[i]))).collect()
     };
+    // The gate after materialising turns a deadline or cancellation that falls due during it
+    // (the sequential path stops early on one) into the budget error, so a late result is
+    // never returned (#4344).
+    let sequential = || materialise_budgeted(&bindings.rows, materialise);
     #[cfg(feature = "parallel")]
     let rows: Vec<Vec<Option<Term>>> = if bindings.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
         bindings.rows.par_iter().map(materialise).collect()
     } else {
-        bindings.rows.iter().map(materialise).collect()
+        sequential()
     };
     #[cfg(not(feature = "parallel"))]
-    let rows: Vec<Vec<Option<Term>>> = bindings.rows.iter().map(materialise).collect();
+    let rows: Vec<Vec<Option<Term>>> = sequential();
+    budget::check(bindings.rows.len())?;
     Ok(QueryResult { vars: out_vars, rows })
+}
+
+/// Map `rows` through `materialise`, re-checking the installed budget's deadline and
+/// cancellation every 1024 rows and stopping early once it is exhausted: the caller's
+/// `budget::check` then reports the error instead of returning the shortened result.
+fn materialise_budgeted<T>(rows: &[Row], materialise: impl Fn(&Row) -> T) -> Vec<T> {
+    let mut out = Vec::with_capacity(rows.len());
+    for (i, row) in rows.iter().enumerate() {
+        if i & 1023 == 0 && budget::exhausted(0) {
+            break;
+        }
+        out.push(materialise(row));
+    }
+    out
 }
 
 /// Writes one binding's JSON value directly from its id — no intermediate `oxrdf::Term`
@@ -701,4 +722,65 @@ pub(super) fn count_leftjoin(
         total += cl * cr.max(1);
     }
     Some(total)
+}
+
+#[cfg(test)]
+mod materialise_budget_tests {
+    use super::*;
+    use crate::QueryBudget;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    thread_local! {
+        /// Runs once in `eval_select`, after its pre-materialisation budget check.
+        pub(super) static BEFORE_MATERIALISE: std::cell::Cell<Option<Box<dyn FnOnce()>>> =
+            const { std::cell::Cell::new(None) };
+    }
+
+    /// A query cancelled after evaluation but while its terms are materialised returns the
+    /// budget error, not a complete or shortened result, on the sequential path and (with
+    /// `parallel`, at `PAR_THRESHOLD` rows or more) the parallel one.
+    #[test]
+    fn a_select_cancelled_while_materialising_returns_the_budget_error() {
+        // The larger size takes the parallel branch when `parallel` is on.
+        #[cfg(feature = "parallel")]
+        const _: () = assert!(PAR_THRESHOLD < 51_000);
+        for n in [3_000, 51_000] {
+            let nt: String = (0..n).map(|i| format!("<http://ex/s{i}> <http://ex/p> \"v{i}\" .\n")).collect();
+            let graph = Graph::load_str(&nt, "ntriples").unwrap();
+            let flag = Arc::new(AtomicBool::new(false));
+            let budget = QueryBudget::cancelled_by(Arc::clone(&flag));
+            let q = "SELECT ?s ?v WHERE { ?s <http://ex/p> ?v }";
+            assert_eq!(crate::query_with_budget(&graph, q, &budget).unwrap().rows.len(), n);
+            let set = Arc::clone(&flag);
+            BEFORE_MATERIALISE.with(|hook| {
+                hook.set(Some(Box::new(move || set.store(true, std::sync::atomic::Ordering::Relaxed))))
+            });
+            let Err(err) = crate::query_with_budget(&graph, q, &budget) else {
+                panic!("{n} rows: the result was returned");
+            };
+            assert!(err.contains("query budget exceeded (cancelled"), "{n} rows: {err}");
+        }
+    }
+
+    /// A budget that falls due while rows are materialised stops the loop early, and the gate
+    /// after it reports the budget error rather than the shortened result; an untripped budget
+    /// materialises every row (#4344).
+    #[test]
+    fn materialising_stops_and_errors_once_the_budget_trips() {
+        let rows: Vec<Row> = (0..5000u64).map(|i| std::iter::once(i as Id).collect()).collect();
+        let tripped = QueryBudget::cancelled_by(Arc::new(AtomicBool::new(true)));
+        let (done, gate) = budget::with_budget(&tripped, || {
+            let done = materialise_budgeted(&rows, |r| r[0]);
+            (done.len(), budget::check(rows.len()))
+        });
+        assert_eq!(done, 0, "the loop stops at the first re-check");
+        assert!(gate.unwrap_err().contains("budget exceeded"));
+        let (done, gate) = budget::with_budget(&QueryBudget::unlimited(), || {
+            let done = materialise_budgeted(&rows, |r| r[0]);
+            (done, budget::check(rows.len()))
+        });
+        assert!(gate.is_ok());
+        assert_eq!(done, (0..5000u64).map(|i| i as Id).collect::<Vec<_>>());
+    }
 }
