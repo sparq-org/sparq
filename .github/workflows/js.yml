@@ -29,13 +29,19 @@ on:
     # every sparq-*-wasm crate the build compiles (sparq-wasm + reason/rsp/shacl/text-wasm),
     # and this workflow file. A pure-Rust-engine or docs-only PR matches none of these.
     # sparq-lws-core is listed too: it carries its own wasm32 dependency table, and only the
-    # solid-server step here compiles it for wasm32 (#6995 broke that build unnoticed).
+    # solid-server step here compiles it for wasm32 (#6995 broke that build unnoticed). The
+    # other crates these bundles compile that declare target-specific dependencies are
+    # matched on their manifests only, so a wasm-only dependency change runs this lane
+    # without every engine source edit doing so.
     paths:
       - "js/**"
       - "packages/**"
       - "crates/sparq-wasm/**"
       - "crates/sparq-*-wasm/**"
       - "crates/sparq-lws-core/**"
+      - "crates/sparq-engine/Cargo.toml"
+      - "crates/sparq-forms/Cargo.toml"
+      - "crates/sparq-shacl/Cargo.toml"
       - "package.json"
       - "package-lock.json"
       - "site/package.json"
