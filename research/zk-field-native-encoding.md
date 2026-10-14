@@ -1135,9 +1135,8 @@ operand, and it belongs with the `scan.nr` / `join.nr` leaf recompute (§11 bead
 `DATATYPE_CONST` is `derive_key(LANE_CONTEXT, u32_be(len iri) ‖ iri ‖ u32_be(len params) ‖
 params)`, where `params` names the lane's sub-domain or scale (`""`, `"scale=<fd>"`,
 `"epochscale=3"`, `"bit"`). The length framing makes a lane constant injective in
-`(datatype, params)` jointly, for **arbitrary byte strings** — `sparq-core`'s native
-N-Triples loader does not validate datatype IRIs, so the argument must not rest on IRI
-syntax. A V2 string-lane leaf keeps folding the **plain** `blake3_field(datatype)`, a
+`(datatype, params)` jointly, for **arbitrary byte strings**, so the argument does not
+rest on the datatype being a syntactically valid IRI. A V2 string-lane leaf keeps folding the **plain** `blake3_field(datatype)`, a
 different BLAKE3 mode, so a lane constant differs from the degenerate fold of every byte
 string. Both statements are properties under BLAKE3's mode domain separation and, after
 the 248-bit field reduction, its collision/preimage resistance — not unconditional facts.

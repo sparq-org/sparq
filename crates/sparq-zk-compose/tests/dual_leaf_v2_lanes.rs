@@ -55,8 +55,7 @@ fn typed(lexical: &str, datatype: &str) -> Literal {
 }
 
 /// A typed literal over a datatype string that is NOT run through RFC 3987
-/// validation — the shape `sparq-core`'s native N-Triples loader can produce, and
-/// the reason the V2 framing argument is stated over arbitrary byte strings.
+/// validation; the V2 framing argument is stated over arbitrary byte strings.
 fn typed_unchecked(lexical: &str, datatype: &str) -> Literal {
     Literal::new_typed_literal(lexical, NamedNode::new_unchecked(datatype))
 }
@@ -769,7 +768,7 @@ fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
 }
 
 /// IN-CIRCUIT lane separation, over several datatype byte strings built WITHOUT
-/// IRI validation (the shape `sparq-core`'s native N-Triples loader can store).
+/// IRI validation.
 /// The honest V2 boolean witnesses are presented under each opaque datatype's
 /// PLAIN fold — a V2 string-lane constant — and the member refuses every one,
 /// while the control under the real lane constant is accepted.

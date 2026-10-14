@@ -34,10 +34,9 @@
 //! a hash domain separate from BLAKE3's **plain mode**; the degenerate fold a
 //! string-lane leaf carries stays in plain mode. So a lane constant differs from
 //! the degenerate fold of **any** byte string — valid RFC 3987 IRI or not. That
-//! matters because a datatype string reaching the encoder is **not** guaranteed
-//! to be a valid IRI: `sparq-core`'s native N-Triples loader skips IRI
-//! validation and its dictionary builds terms unchecked, so the committer may see
-//! arbitrary UTF-8 (including spaces and NUL bytes) in the datatype position.
+//! keeps the argument independent of whether every path that builds terms
+//! validates the datatype as an IRI: the encoder accepts arbitrary UTF-8
+//! (including spaces and NUL bytes) in the datatype position.
 //!
 //! Inside the key-derivation domain, the `u32_be` **length framing** makes
 //! `(iri, params)` injective for arbitrary byte strings: no concatenation of one
@@ -571,12 +570,10 @@ mod tests {
     }
 
     /// Datatype strings the disjointness properties are swept over. Deliberately
-    /// NOT all valid IRIs: `sparq-core`'s native N-Triples loader skips RFC 3987
-    /// validation and its dictionary builds terms unchecked, so the committer can
-    /// see arbitrary UTF-8 here. The list covers the suffix shapes an older
-    /// derivation folded into the datatype bytes (`@scale=`, `@epochscale=`,
-    /// `%20`), strings with spaces, `=` and embedded NUL bytes, the derivation
-    /// CONTEXT strings themselves, and strings that spell out a framed part.
+    /// NOT all valid IRIs: the encoder accepts arbitrary UTF-8 here. The list
+    /// covers suffixes such as `@scale=`, `@epochscale=` and `%20`, strings with
+    /// spaces, `=` and embedded NUL bytes, the derivation CONTEXT strings
+    /// themselves, and strings that spell out a framed part.
     fn datatype_corpus() -> Vec<String> {
         let mut v: Vec<String> = vec![
             XSD_INTEGER.to_string(),
