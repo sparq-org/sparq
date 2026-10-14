@@ -4023,6 +4023,8 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
         while let Some(st) = scope.get(scan.next) {
             let st: &[Term; 3] = st.borrow();
             scan.next += 1;
+            #[cfg(test)]
+            tests::SCOPE_STATEMENTS_TRIED.with(|n| n.set(n.get() + 1));
             let mut nb = v.b.clone();
             // Out of unification steps: the search stops, as a cut.
             let Some(matched) = unify_all(&p[..], &st[..], &mut nb, unify) else {
@@ -7007,6 +7009,33 @@ mod tests {
         let (facts, cut) = closure_and_cut(&containment, None);
         assert!(!facts.unwrap().iter().any(|t| t[0] == Term::Iri("http://ex/m".into())));
         assert_eq!(cut, Some("formula containment search exhausted its step budget"));
+    }
+
+    std::thread_local! {
+        /// Scope statements the formula-containment searches of this thread tried.
+        pub(super) static SCOPE_STATEMENTS_TRIED: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+    }
+
+    /// #6953: a containment search whose unification runs out stops there: it does not
+    /// go on to try the rest of the scope.
+    #[test]
+    fn containment_stops_at_an_exhausted_unification() {
+        let n = 10;
+        let value: String = (0..n).map(|i| format!(":s :p :o{i} . ")).collect();
+        let pattern: String = (0..n).map(|i| format!(":s :p ?v{i} . ")).collect();
+        let rest: String = (0..1000).map(|i| format!(":e :g {i} . ")).collect();
+        let doc = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+             {{ {{ :d :f {{ {value}:t :r :x }} . {rest} }} log:includes \
+             {{ :d :f {{ {pattern}:t :r :y }} }} }} => {{ :m :m :m }} ."
+        );
+        SCOPE_STATEMENTS_TRIED.with(|n| n.set(0));
+        let (_, cut) = closure_and_cut(&doc, None);
+        assert_eq!(cut, Some("formula containment search exhausted its step budget"));
+        let tried = SCOPE_STATEMENTS_TRIED.with(std::cell::Cell::get);
+        assert!(tried < 100, "the search went on past the exhausted unification: {tried}");
     }
 
     /// #6953: a match that never backtracks is never refused, however many statements
