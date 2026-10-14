@@ -5253,7 +5253,7 @@ mod tests {
         precondition: HeaderName,
         tag: &str,
     ) -> Response {
-        owner_conditional_lines(state, verb, path, precondition, &[tag]).await
+        owner_conditional_lines(state, verb, path, precondition, &[tag.as_bytes()]).await
     }
 
     /// As [`owner_conditional_write`], with the precondition sent as one field line per entry.
@@ -5262,7 +5262,7 @@ mod tests {
         verb: &str,
         path: &str,
         precondition: HeaderName,
-        lines: &[&str],
+        lines: &[&[u8]],
     ) -> Response {
         let uri: axum::http::Uri = path.parse().unwrap();
         let (s, t) = (State(state.clone()), Extension(owner_token()));
@@ -5271,7 +5271,7 @@ mod tests {
             _ => turtle_write_headers(),
         };
         for line in lines {
-            headers.append(precondition.clone(), HeaderValue::from_str(line).unwrap());
+            headers.append(precondition.clone(), HeaderValue::from_bytes(line).unwrap());
         }
         let patch = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
                      _:p solid:inserts { <#it> <http://p> \"v\" . }.\n";
@@ -5400,6 +5400,12 @@ mod tests {
             }
             h
         };
+        let obs_text_line = [b"\"caf\xe9\", ".as_slice(), tag.as_bytes()].concat();
+        let with_bytes = |name: HeaderName, line: &[u8]| {
+            let mut h = HeaderMap::new();
+            h.insert(name, HeaderValue::from_bytes(line).unwrap());
+            h
+        };
         for verb in ["GET", "HEAD"] {
             let cases = [
                 (
@@ -5414,6 +5420,12 @@ mod tests {
                 (
                     with(&[(header::IF_MATCH, &format!("W/{tag}"))]),
                     StatusCode::PRECONDITION_FAILED,
+                ),
+                // A tag holding obs-text does not cost the current tag on its line its match.
+                (with_bytes(header::IF_MATCH, &obs_text_line), StatusCode::OK),
+                (
+                    with_bytes(header::IF_NONE_MATCH, &obs_text_line),
+                    StatusCode::NOT_MODIFIED,
                 ),
                 // A list split over two field lines is one list.
                 (
@@ -6528,7 +6540,7 @@ mod tests {
                 let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
                 let tag =
                     etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
-                let lines = ["\"other\"", tag.as_str()];
+                let lines = [b"\"other\"".as_slice(), tag.as_bytes()];
                 let got = owner_conditional_lines(&state, verb, "/alice/doc", name.clone(), &lines)
                     .await
                     .status();
@@ -6537,6 +6549,16 @@ mod tests {
                     assert_eq!(got, StatusCode::PRECONDITION_FAILED, "{verb} {name}");
                 }
             }
+            // A tag holding obs-text shares the current tag's line without costing it its match.
+            let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+            let tag =
+                etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+            let line = [b"\"caf\xe9\", ".as_slice(), tag.as_bytes()].concat();
+            let got =
+                owner_conditional_lines(&state, verb, "/alice/doc", header::IF_MATCH, &[&line])
+                    .await
+                    .status();
+            assert!(got.is_success(), "{verb} obs-text line: {got}");
         }
     }
 

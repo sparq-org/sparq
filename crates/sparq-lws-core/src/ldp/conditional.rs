@@ -150,9 +150,10 @@ pub enum ReadPrecondition {
 }
 
 /// The entity-tag list a precondition header carries across all of its field lines, which combine
-/// as one comma-separated list (RFC 9110 §5.3), or `None` when the header is absent. A line that is
-/// not visible ASCII contributes no tag but keeps the header present, so it can never be ignored
-/// into a pass.
+/// as one comma-separated list (RFC 9110 §5.3), or `None` when the header is absent. A byte above
+/// ASCII (`obs-text`, valid inside a quoted entity tag, §8.8.3) is read as a replacement character,
+/// so a tag holding one still parses (and matches none of this server's ASCII tags) while every
+/// other tag on its line is kept.
 pub(crate) fn tag_header(
     headers: &http::HeaderMap,
     name: http::HeaderName,
@@ -160,18 +161,18 @@ pub(crate) fn tag_header(
     let mut lines = headers
         .get_all(name)
         .iter()
-        .map(|v| v.to_str().unwrap_or(""));
+        .map(|v| String::from_utf8_lossy(v.as_bytes()));
     let first = lines.next()?;
-    let rest: Vec<&str> = lines.collect();
+    let rest: Vec<_> = lines.collect();
     if rest.is_empty() {
-        return Some(std::borrow::Cow::Borrowed(first));
+        return Some(first);
     }
-    Some(std::borrow::Cow::Owned(
-        std::iter::once(first)
-            .chain(rest)
-            .collect::<Vec<_>>()
-            .join(", "),
-    ))
+    let mut all = first.into_owned();
+    for line in rest {
+        all.push_str(", ");
+        all.push_str(&line);
+    }
+    Some(std::borrow::Cow::Owned(all))
 }
 
 /// Evaluate RFC 9110 §13.2.2 steps 1 and 2 for a GET/HEAD: `If-Match`, or without it
