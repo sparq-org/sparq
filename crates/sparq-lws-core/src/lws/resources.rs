@@ -139,6 +139,9 @@ async fn handle_now<S: Store + 'static>(
             Method::DELETE => Action::Delete,
             _ => Action::Modify,
         };
+        if let Some(refused) = unread_precondition(state, req, agent, &uri, true).await {
+            return refused;
+        }
         // A backend failure is a 500, never "absent": absence skips the permission check. Nothing
         // was authorized on a missing target, so nothing is served or changed: every method on it
         // is a 404, and answering it here (rather than in the handler) means a resource that
@@ -495,6 +498,35 @@ async fn precondition_read_check<S: Store + 'static>(
         return recheck(state, Action::Read, uri, agent).await;
     }
     Ok(())
+}
+
+/// [`precondition_read_check`] made first, from the request alone, before anything about the
+/// target (whether it exists, its format, its metadata) can shape the answer: a write whose
+/// preconditions compare state, by a caller that may not read what they compare, is refused
+/// whatever the target. `dated` says whether the route evaluates `If-Unmodified-Since` at all (a
+/// linkset's does not). A conditional `POST` to the storage root that compares the public storage
+/// description needs no Read. The check is made again under the target's lock.
+async fn unread_precondition<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    uri: &str,
+    dated: bool,
+) -> Option<Response> {
+    let writes = matches!(
+        req.method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    );
+    if !writes || !compares_state(&req.headers, dated) {
+        return None;
+    }
+    if req.method == Method::POST
+        && uri == state.cfg.storage()
+        && serves_description(plain_get(req).header(header::ACCEPT))
+    {
+        return None;
+    }
+    (!state.allowed(Action::Read, uri, agent).await).then(|| state.deny(agent))
 }
 
 /// The tag a precondition is evaluated against when it asks only whether an existing target
@@ -2345,9 +2377,7 @@ async fn update<S: Store + 'static>(
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
     }
-    if let Err(r) =
-        precondition_read_check(state, req, uri, agent, meta.last_modified.is_some()).await
-    {
+    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
         return r;
     }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
@@ -3450,9 +3480,7 @@ async fn patch<S: Store + 'static>(
     if !is_json_type(&meta.content_type) {
         return unread(not_json());
     }
-    if let Err(r) =
-        precondition_read_check(state, req, uri, agent, meta.last_modified.is_some()).await
-    {
+    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
         return r;
     }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
@@ -3543,8 +3571,7 @@ async fn delete<S: Store + 'static>(
     };
     // A data resource's date is compared only when it has one; a container's listing may have
     // one.
-    let dated = uri.ends_with('/') || meta.last_modified.is_some();
-    if let Err(r) = precondition_read_check(state, req, uri, agent, dated).await {
+    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
         return r;
     }
     // The validators the preconditions are evaluated against (RFC 9110 section 13): a data
@@ -4561,6 +4588,9 @@ async fn linkset<S: Store + 'static>(
     } else {
         Action::Modify
     };
+    if let Some(refused) = unread_precondition(state, req, agent, uri, false).await {
+        return refused;
+    }
     // A request is authorized once before it waits for the resource's lock, so one that may not
     // touch the resource never queues behind a write (holding its admission slot while it waits).
     if let Some(refused) = authorize_unlocked(state, action, uri, agent, &req.method).await {
@@ -4602,6 +4632,11 @@ async fn linkset<S: Store + 'static>(
     }
     if let Err(r) = recheck(state, action, uri, agent).await {
         return r;
+    }
+    if writes {
+        if let Err(r) = precondition_read_check(state, req, uri, agent, false).await {
+            return r;
+        }
     }
     let meta = match state.resource_meta(uri).await {
         Ok(m) => m,
@@ -6484,6 +6519,20 @@ mod tests {
             )
             .await;
             assert_eq!(status, StatusCode::PRECONDITION_FAILED, "{method} {path}");
+        }
+        // Nor is a writer that may not read told whether the target is there at all, or its
+        // format, before the comparison would be refused.
+        let gone = || vec![("if-match", "\"x\"".to_string())];
+        for (method, path) in [
+            ("PUT", "/nope".to_string()),
+            ("PATCH", "/nope".to_string()),
+            ("DELETE", "/nope".to_string()),
+            ("PATCH", "/nope.meta".to_string()),
+        ] {
+            let status = send(dave.clone(), method, path.clone(), gone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
+            let status = send(bob.clone(), method, path.clone(), gone()).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
         }
         // A date the write compares is state too; on a linkset, which a date never decides, it is
         // ignored, so it is no reason to refuse.
@@ -10530,7 +10579,9 @@ mod tests {
 
     /// A writer that may not read a JSON resource learns nothing about its content from a patch:
     /// one whose outcome depends on the content is refused before it is applied, the same whether
-    /// its path is there or not, and a blind one that cannot apply is refused the same way.
+    /// its path is there or not, and a blind one that cannot apply is refused the same way. (A
+    /// blind `add` past the size limit is refused too, so whether what it adds still fits is the
+    /// one thing it learns, as any writer to a bounded document does.)
     #[tokio::test]
     async fn a_patch_tells_a_writer_without_read_nothing() {
         let mut cfg = super::super::LwsConfig::new(BASE);
@@ -10607,6 +10658,18 @@ mod tests {
             patch(bob.clone(), list, blind.clone()).await,
             StatusCode::UNPROCESSABLE_ENTITY
         );
+        // Nor that the stored JSON holds a number past what is read, or is not JSON at all.
+        let long: &'static str = Box::leak(format!("[{}]", "9".repeat(2000)).into_boxed_str());
+        let unreadable = [make("n.json", long).await, make("x.json", "not json").await];
+        for path in unreadable {
+            let status = patch(dave.clone(), path.clone(), blind.clone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+            let status = patch(bob.clone(), path.clone(), blind.clone()).await;
+            assert!(
+                status.is_client_error() && status != StatusCode::FORBIDDEN,
+                "{path}"
+            );
+        }
         // Nor is a writer without Read told the resource's format.
         let req = request(
             "POST",

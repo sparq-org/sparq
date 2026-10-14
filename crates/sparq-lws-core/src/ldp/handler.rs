@@ -653,13 +653,7 @@ impl<S: Store> LdpState<S> {
                     crate::http_date::single_line(headers, header::IF_UNMODIFIED_SINCE),
                 )
                 .is_some());
-        // The mode that governs reading THIS target's representation: Control for an `.acl`, else Read.
-        let read_mode = if crate::authz::is_acl_resource(target_iri) {
-            AccessMode::Control
-        } else {
-            AccessMode::Read
-        };
-        if has_etag_conditional && !granted.contains(&read_mode) {
+        if has_etag_conditional && !may_read(target_iri, granted) {
             return Err(if token.web_id.is_none() {
                 self.unauthenticated()
             } else {
@@ -1283,7 +1277,8 @@ pub async fn put_handler<S: Store>(
     // `invalidate_acl_if_acl`).
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target))
+    let reader = may_read(&target.iri, &granted);
+    Ok(write_response(existed, &meta, &target, reader))
 }
 
 /// `POST /{path}` — create a child resource inside a container.
@@ -1673,19 +1668,14 @@ pub async fn patch_handler<S: Store>(
     // `N3PatchModesExtractor`, which adds `read` when the patch has `conditions`. Fold to the
     // requester's denial (401 anon / 403 auth) BEFORE the target read, so it adds no oracle of its
     // own. An unconditional (no-`where`) patch is unaffected.
-    if !patch.conditions.is_empty() {
-        let read_mode = if crate::authz::is_acl_resource(&target.iri) {
-            AccessMode::Control
+    // `solid:deletes` reads the target as much as `solid:where` does: a patch whose deletes are
+    // not all there is refused (409), so its outcome says which triples the target holds.
+    if (!patch.conditions.is_empty() || has_deletes) && !may_read(&target.iri, &granted) {
+        return Err(if token.web_id.is_none() {
+            state.unauthenticated()
         } else {
-            AccessMode::Read
-        };
-        if !granted.contains(&read_mode) {
-            return Err(if token.web_id.is_none() {
-                state.unauthenticated()
-            } else {
-                ServerError::Forbidden
-            });
-        }
+            ServerError::Forbidden
+        });
     }
 
     // V4 (`research/lws-design-records.md` §6): a conditional precondition is a CONTENT-derived
@@ -1834,7 +1824,8 @@ pub async fn patch_handler<S: Store>(
     // read resolves against the patched ACL immediately.
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target))
+    let reader = may_read(&target.iri, &granted);
+    Ok(write_response(existed, &meta, &target, reader))
 }
 
 /// `OPTIONS /{path}` — advertise the methods + write media types for a target (RFC 9110 §9.3.7 +
@@ -2248,16 +2239,28 @@ async fn reject_slash_semantics_conflict<S: Store>(
     Ok(())
 }
 
+/// Whether `granted` lets the requester read `target_iri`'s representation: Control for an `.acl`,
+/// else Read.
+fn may_read(target_iri: &str, granted: &std::collections::BTreeSet<AccessMode>) -> bool {
+    granted.contains(&if crate::authz::is_acl_resource(target_iri) {
+        AccessMode::Control
+    } else {
+        AccessMode::Read
+    })
+}
+
 /// The shared 201/204 + ETag (+ Location on create) response for PUT / PATCH writes.
 ///
 /// A container's validators are [`container_state_etag`]s, so a newly created (hence empty)
 /// container gets the empty-listing state tag. A replaced container gets no `ETag`: its current tag
 /// depends on a listing the writer may not be allowed to read, and its stored tag is not a
-/// validator for any of its representations.
+/// validator for any of its representations. A tag describes the stored representation (its
+/// length and a hash of it), so it goes only to a writer that may read it (`reader`).
 fn write_response(
     existed: bool,
     meta: &ResourceMeta,
     target: &crate::ldp::target::LdpTarget,
+    reader: bool,
 ) -> Response {
     let status = if existed {
         StatusCode::NO_CONTENT
@@ -2265,9 +2268,9 @@ fn write_response(
         StatusCode::CREATED
     };
     let mut out = HeaderMap::new();
-    if !target.is_container {
+    if reader && !target.is_container {
         set_str(&mut out, header::ETAG, &meta.etag);
-    } else if !existed {
+    } else if reader && !existed {
         set_str(
             &mut out,
             header::ETAG,
