@@ -98,11 +98,9 @@ pub global OP_NE: u32 = 5;
 /// A reserved "no language" tag constant for the value lane's `LANG_CONST`
 /// slot, mirroring the host `sparq_zk::dual_leaf::LANG_NONE`. A real lang tag
 /// is `blake3(lang)`; numeric datatypes have no language, so they fold this
-/// fixed sentinel. A language constant keeps the low 248 bits of
-/// `blake3(lang)` and nothing excludes the value 1, so a tag folds to
-/// `LANG_NONE` only if its hash hits that fixed target. The separation rests on
-/// the truncated hash's preimage resistance for a fixed target, not on
-/// construction.
+/// fixed sentinel. Distinct from any plausible `blake3` output by construction
+/// (a small reserved field tag), so a value_component can never collide a
+/// language-tagged one.
 pub global LANG_NONE: Field = 1;
 
 /// Range-decompose `v` (a `Field` witness) into a `u64`, proving it lies in the
