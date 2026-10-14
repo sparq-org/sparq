@@ -773,3 +773,40 @@ the PR's diff against `master`:
 The bead stays **open**, blocked on the §6 author review and on `sq-i50o4` like
 the rest of the program. Nothing was posted upstream, and the PR's body and review
 thread were not read — only its diff.
+
+### 10.14 October 2026 rebuild on Noir master `61c1fa97` — program status (2026-10-14)
+
+The open upstream drafts were rebuilt as one-concern branches on `jeswr/noir`, each with
+its PR text kept outside this repository for the maintainer's own review. Nothing has been
+opened, closed or commented on in noir-lang/noir; the maintainer does that.
+
+| branch on `jeswr/noir` | replaces | sparq issue |
+|---|---|---|
+| `fix/field-sum-truncate-width` | new | — |
+| `series/divmod-const-bounds` | noir#13263, noir#12781 | — |
+| `series/and-mask-truncate` | noir#13264 | — |
+| `series/dominated-range-checks` | noir#13265, noir#13266, noir#13315 | #2865 |
+| `series/boundedvec-push-hint` | noir#13314 | — |
+| `series/range-analysis` | noir#12780, noir#12927 | #2863 |
+| `series/unchecked-required-bits` | new | #4557 |
+
+What changed against the blockers recorded above:
+
+- **`bb` is available** (#5013). CI installs the pinned `bb` in `zk-toolchain.yml`,
+  `bench/zk-compose/scripts/bb_gates_matrix.py` is the committed gate-count harness, and the
+  rebuild measured every gate row it quotes with `bb gates`.
+- **The §5.2 corpus is retired as the regression arbiter** (#5686, #5766). Each branch is
+  measured on the programs the change reaches: Noir's own `test_programs` (ACIR opcodes,
+  master against branch, over `execution_success` and `compile_success_empty`) and a
+  fixture or reproducer that exercises the patched code. None of the rebuilt PR texts
+  quotes a whole-corpus "no change" row as evidence of correctness.
+- **No witness forge in this repository** (#5715, #5716). The BoundedVec soundness question
+  of §10.11 was answered out of tree: on UltraHonk, forged witnesses writing past the end of
+  an array are rejected and an in-range forgery is accepted. `acir` is not a dependency.
+- **#4557 was a real gap.** In ACIR an unchecked `u1` add can hold 2, and `checked_to_unchecked`
+  dropped overflow checks downstream of it (through a cast, through `not`, and for a wide value
+  multiplied by a bit). `series/unchecked-required-bits` fixes it. `series/range-analysis` had
+  the same class of gap, and also removed range checks on unchecked sums that can exceed their
+  type; it now bounds such values by the field element they hold.
+
+Rows 4 and 7 (#2865, #2863) stay open until their branches land upstream.
