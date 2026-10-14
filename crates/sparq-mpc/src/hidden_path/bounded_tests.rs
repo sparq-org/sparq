@@ -470,3 +470,217 @@ fn bounded_empty_edges_is_empty() {
     let got0 = secure_bounded(&backend, &edges, &HiddenBoundedPath::range(P, 0, 3), 8);
     assert!(got0.is_empty());
 }
+
+// ---- sq-yyro / issue #6117: the union stage draws through the seam ----
+
+/// The disclosed `(a, b)` IRI pairs among the revealed slots (dummies dropped).
+fn slot_pairs(slots: &[crate::oblivious_join::OutputSlot]) -> BTreeSet<(String, String)> {
+    use crate::oblivious_join::OutputSlot;
+    slots
+        .iter()
+        .filter_map(|s| match s {
+            OutputSlot::Row(p) => match (&p[0], &p[1]) {
+                (Some(Term::NamedNode(a)), Some(Term::NamedNode(b))) => {
+                    Some((a.as_str().to_string(), b.as_str().to_string()))
+                }
+                other => panic!("endpoints must be bound IRIs, got {other:?}"),
+            },
+            OutputSlot::Dummy => None,
+        })
+        .collect()
+}
+
+/// A source whose `(n, t)` differs from the backend's is refused before any draw.
+#[test]
+fn bounded_through_refuses_a_source_that_does_not_match_the_backend() {
+    use crate::randomness::test_sources::MisreportedThresholdSource;
+    let backend = ShamirBackend::new_seeded(3, 0xB0C).unwrap();
+    let edges = predicated_edges(&[(P, "http://ex/a", "http://ex/b")]);
+    let form = HiddenBoundedPath::optional(P);
+    let mut lying = MisreportedThresholdSource {
+        inner: backend.dealer(),
+        t: 0,
+    };
+    let mut other = ShamirBackend::new_seeded(5, 0xB0C).unwrap().dealer();
+    for source in [
+        &mut lying as &mut dyn crate::randomness::DistributedRandomness,
+        &mut other,
+    ] {
+        match eval_bounded_path_hidden_slots_through(source, &backend, &edges, &form, 3) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+            other => panic!("a mismatched source must be refused, got {other:?}"),
+        }
+    }
+}
+
+/// A malformed draw in the union's OR-fold is refused by the degree-reduction
+/// re-sharing check. `{0,1}` over a self-loop `a → a` folds the length-1 chain
+/// into the reflexive `(a, a)`: one OR, i.e. one degree reduction, so the very
+/// first own-input draw is that reduction's first re-sharing.
+#[test]
+fn malformed_draws_in_the_or_fold_are_refused() {
+    use crate::randomness::test_sources::{MalformedSource, SeamMethod, ALL_MALFORMATIONS};
+    let backend = ShamirBackend::new_seeded(3, 0xB0D).unwrap();
+    let edges = predicated_edges(&[(P, "http://ex/a", "http://ex/a")]);
+    let form = HiddenBoundedPath::optional(P);
+    for how in ALL_MALFORMATIONS {
+        let mut src = MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, 0, how);
+        match eval_bounded_path_hidden_slots_through(&mut src, &backend, &edges, &form, 2) {
+            Err(MpcError::Protocol(m)) => {
+                assert!(
+                    m.contains("re-sharing that is not the canonical"),
+                    "{how:?}: {m}"
+                )
+            }
+            other => panic!("{how:?}: must fail closed, got {other:?}"),
+        }
+        assert!(src.fired());
+    }
+}
+
+/// Under PRSS only the draw-free shape runs: `{0,1}` over a single predicate with no self-loop and no repeated endpoint pair adds the
+/// constant reflexive diagonal and the length-1 edges with no hop equality and no
+/// colliding pair to OR-fold, so it draws nothing from the source. `{1,2}` needs a
+/// hop equality (a holder's own input shared), which PRSS refuses — it fails
+/// closed with `NotYetImplemented`.
+#[test]
+fn prss_runs_only_draw_free_bounded_shapes_and_fails_closed_otherwise() {
+    use crate::prss::PrssRandomness;
+    let backend = ShamirBackend::new_seeded(3, 0xB0E).unwrap();
+    let mut prss = PrssRandomness::with_simulated_setup(3).unwrap();
+    let triples = [
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ];
+    let edges = predicated_edges(&triples);
+    let optional = HiddenBoundedPath::optional(P);
+    let (slots, _) =
+        eval_bounded_path_hidden_slots_through(&mut prss, &backend, &edges, &optional, 6).unwrap();
+    assert_eq!(slots.len(), 6);
+    assert_eq!(
+        slot_pairs(&slots),
+        secure_bounded(&backend, &edges, &optional, 6)
+    );
+
+    let outcome = eval_bounded_path_hidden_slots_through(
+        &mut prss,
+        &backend,
+        &edges,
+        &HiddenBoundedPath::range(P, 1, 2),
+        8,
+    );
+    assert!(
+        matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
+        "{{1,2}}: PRSS must fail closed, got {outcome:?}"
+    );
+}
+
+/// Render revealed slots as `"<a> <b>"` / `"dummy"`, in revealed order.
+fn slot_strings(slots: &[crate::oblivious_join::OutputSlot]) -> Vec<String> {
+    use crate::oblivious_join::OutputSlot;
+    slots
+        .iter()
+        .map(|s| match s {
+            OutputSlot::Row(p) => p
+                .iter()
+                .map(|t| t.as_ref().unwrap().to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+            OutputSlot::Dummy => "dummy".to_string(),
+        })
+        .collect()
+}
+
+/// A 2-cycle `a ⇄ b` under `{0,2}`: the reflexive diagonal, both length-1 edges
+/// and all four length-2 tuples, four of which OR-fold into an existing pair.
+fn pin_edges() -> PredicatedEdges {
+    predicated_edges(&[
+        ("p", "http://ex/a", "http://ex/b"),
+        ("p", "http://ex/b", "http://ex/a"),
+    ])
+}
+
+/// Captured on the PRE-ROUTING code by logging every dealer draw and re-checked
+/// byte-identical after the routing: the connected-bit sharings pin the values,
+/// the trailing `draw_fp()` WITNESS pins the draw count, and the revealed slot
+/// order pins the public output.
+#[test]
+fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
+    let backend = ShamirBackend::new_seeded(3, 0xB0B).unwrap();
+    let edges = pin_edges();
+    let form = HiddenBoundedPath::range("p", 0, 2);
+    let mut dealer = backend.dealer();
+    let candidates = build_bounded_candidates(&backend, &mut dealer, &edges, &form).unwrap();
+    let bits: Vec<(Vec<String>, Vec<u64>)> = candidates
+        .iter()
+        .map(|c| {
+            let MatchBit::SecretShared(bit) = &c.matched else {
+                panic!("connected-bit must be secret-shared");
+            };
+            (
+                c.payload
+                    .iter()
+                    .map(|t| t.as_ref().unwrap().to_string())
+                    .collect(),
+                bit.iter().map(|s| s.y.value()).collect(),
+            )
+        })
+        .collect();
+    let pair = |a: &str, b: &str| vec![format!("<http://ex/{a}>"), format!("<http://ex/{b}>")];
+    assert_eq!(
+        bits,
+        [
+            (
+                pair("a", "a"),
+                vec![319826375870180777, 639652751740361553, 959479127610542329]
+            ),
+            (
+                pair("a", "b"),
+                vec![
+                    2049686828521023477,
+                    1793530647828353002,
+                    1537374467135682527
+                ]
+            ),
+            (
+                pair("b", "a"),
+                vec![1022014675660616802, 2044029351321233603, 760201017768156453]
+            ),
+            (
+                pair("b", "b"),
+                vec![
+                    2039469137268213830,
+                    1773095265322733708,
+                    1506721393377253586
+                ]
+            ),
+        ]
+    );
+    assert_eq!(dealer.draw_fp().value(), 1940071552581823960);
+    let (slots, _) = eval_bounded_path_hidden_slots(&backend, &edges, &form, 5).unwrap();
+    assert_eq!(
+        slot_strings(&slots),
+        [
+            "<http://ex/a> <http://ex/b>",
+            "<http://ex/b> <http://ex/a>",
+            "dummy",
+            "<http://ex/a> <http://ex/a>",
+            "<http://ex/b> <http://ex/b>"
+        ]
+    );
+}
+
+/// The COMPLETE draw sequence of the `{0,2}` union stage (entry count and an
+/// order-sensitive fingerprint over every method and returned `y`), captured on
+/// the pre-routing code.
+#[test]
+fn seeded_bounded_stage_transcript_is_pinned() {
+    use crate::randomness::test_sources::{fingerprint, RecordingSource};
+    let backend = ShamirBackend::new_seeded(3, 0xB0B).unwrap();
+    let edges = pin_edges();
+    let form = HiddenBoundedPath::range("p", 0, 2);
+    let mut rec = RecordingSource::new(backend.dealer());
+    eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 5).unwrap();
+    assert_eq!(rec.log.len(), 1932);
+    assert_eq!(fingerprint(&rec.log), 0x690e_cad1_cdf7_7eb0);
+}
