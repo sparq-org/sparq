@@ -296,6 +296,89 @@ fn elk_differential_for_a_brand_new_restriction_node() {
 }
 
 #[test]
+fn repeated_structural_additions_keep_the_concept_index_flat() {
+    // Distinct RDF nodes encode the same expressions, so every batch is a real delta
+    // rather than a duplicate-triple NoOp. Cover nested RHS restrictions/conjunctions,
+    // LHS restrictions, and both nested and intermediate LHS conjunction names.
+    let batches: Vec<String> = (0..5)
+        .map(|i| {
+            format!(
+                ":X rdfs:subClassOf :P, :Q, :R, _:exists{i}, _:rhs{i} .
+             _:rhs{i} owl:onProperty :r ; owl:someValuesFrom _:inner{i} .
+             _:inner{i} owl:onProperty :s ; owl:someValuesFrom _:and{i} .
+             _:and{i} owl:intersectionOf (:P :Q) .
+             _:lhs{i} owl:intersectionOf (_:nested{i} _:exists{i} :Q) ;
+                      rdfs:subClassOf :D .
+             _:nested{i} owl:intersectionOf (:P :Q :R) .
+             _:exists{i} owl:onProperty :r ; owl:someValuesFrom :P ."
+            )
+        })
+        .collect();
+    let (dict, all) = parse(&format!("{PRE}{}", batches.join("\n")));
+    // Give each batch its structural list cells too, using the connected components
+    // of anonymous nodes. Named classes/properties are shared, never traversed.
+    let mut edits = Vec::new();
+    for i in 0..batches.len() {
+        let root = dict.lookup(&OTerm::BlankNode(
+            oxrdf::BlankNode::new(format!("rhs{i}")).expect("blank node"),
+        ));
+        let lhs = dict.lookup(&OTerm::BlankNode(
+            oxrdf::BlankNode::new(format!("lhs{i}")).expect("blank node"),
+        ));
+        let mut nodes = std::collections::HashSet::from([root, lhs]);
+        loop {
+            let before = nodes.len();
+            for &[s, _, o] in &all {
+                if nodes.contains(&s) && matches!(dict.term(o), OTerm::BlankNode(_)) {
+                    nodes.insert(o);
+                }
+            }
+            if nodes.len() == before {
+                break;
+            }
+        }
+        edits.push(
+            all.iter()
+                .copied()
+                .filter(|t| {
+                    nodes.contains(&t[0])
+                        || nodes.contains(&t[2])
+                        || (t[0] == iri(&dict, "X")
+                            && matches!(dict.term(t[2]), OTerm::NamedNode(_)))
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+    let mut inc = IncrementalClassifier::new(&dict, &edits[0]);
+    let initial = inc.hierarchy().report().named_classes;
+    let mut counts = vec![initial];
+    for edit in &edits[1..] {
+        let report = inc.apply_edits(&dict, edit, &[]);
+        assert_eq!(report.disposition, EditDisposition::Incremental);
+        assert!(report.added_triples > 0);
+        counts.push(report.report.named_classes);
+        assert_eq!(
+            inc.hierarchy().report().named_classes,
+            report.report.named_classes
+        );
+        assert_closure(
+            &dict,
+            &inc.hierarchy(),
+            &["X", "P", "Q", "R", "D"],
+            &[("X", "P"), ("X", "Q"), ("X", "R"), ("X", "D")],
+            "repeat",
+        );
+        assert_matches_full_reclassification(&dict, &inc, "repeat");
+    }
+    eprintln!("repeated-add concept/index counts: {counts:?}");
+    assert_eq!(
+        counts,
+        vec![initial; batches.len()],
+        "equivalent structure grew the index"
+    );
+}
+
+#[test]
 fn elk_differential_for_an_incrementally_derived_clash() {
     // Unsatisfiability must appear incrementally too: A ⊓ B ⊑ ⊥ via owl:disjointWith, reached only
     // after the second membership axiom lands.
