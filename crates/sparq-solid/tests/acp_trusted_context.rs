@@ -10,6 +10,7 @@ use sparq_solid::{AccessProvenance, Mode, PodStore, Session, VerifiedCredentials
 const ACP: &str = "http://www.w3.org/ns/solid/acp#";
 const ACL: &str = "http://www.w3.org/ns/auth/acl#";
 const D0: &str = "https://pod.ex/docs/d0";
+const D1: &str = "https://pod.ex/docs/d1"; // no creator or owner
 const ALICE: &str = "https://alice.ex/card#me"; // created d0
 const ERIN: &str = "https://erin.ex/card#me"; // owns d0
 const CAROL: &str = "https://carol.ex/card#me"; // holds the flagged credential
@@ -17,14 +18,15 @@ const DAVE: &str = "https://dave.ex/card#me"; // no context at all
 const ADMIN: &str = "https://admin.ex/card#me";
 const FLAGGED: &str = "https://issuer.ex/req#Flagged";
 
-/// `/docs/` policies: everyone reads, the creator writes but is denied Read, and the owner
-/// and holders of the flagged credential are denied Read. `/other.acr` is unrelated; ADMIN holds Write
+/// `/docs/` policies: everyone reads, the creator and ADMIN write, the creator is denied
+/// Read, and the owner and holders of the flagged credential are denied Read. `/other.acr` is unrelated; ADMIN holds Write
 /// on it through `/other.acr.acr`.
 fn store() -> PodStore {
     let docs = "https://pod.ex/docs/.acr";
     let mut nq = format!(
         "<{D0}#it> <https://ex.dev/ns#k> \"v\" <{D0}> .\n\
-         <https://pod.ex/other#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/other> .\n"
+         <https://pod.ex/other#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/other> .\n\
+         <{D1}#it> <https://ex.dev/ns#k> \"v\" <{D1}> .\n"
     );
     let quads = [
         (docs, docs, "memberAccessControl", format!("{docs}#c")),
@@ -137,6 +139,10 @@ fn store() -> PodStore {
             format!("{docs}#mf"),
         ),
         (docs, &format!("{docs}#mf"), "vc", FLAGGED.to_owned()),
+        (docs, &format!("{docs}#c"), "apply", format!("{docs}#editor")),
+        (docs, &format!("{docs}#editor"), "allow", format!("{ACL}Write")),
+        (docs, &format!("{docs}#editor"), "anyOf", format!("{docs}#me")),
+        (docs, &format!("{docs}#me"), "agent", ADMIN.to_owned()),
         (
             "https://pod.ex/other.acr.acr",
             "https://pod.ex/other.acr.acr",
@@ -287,13 +293,13 @@ fn a_failed_materialization_keeps_the_context() {
 #[test]
 fn a_rolled_back_write_keeps_the_context() {
     let mut store = store();
-    // An agent in the reserved encoding cannot be materialized, so the write rolls back.
+    // An agent in the reserved pair encoding cannot be materialized, so the write rolls back.
     let bad = "<https://pod.ex/other.acr> <http://www.w3.org/ns/solid/acp#accessControl> \
         <https://pod.ex/other.acr#c> .\n\
         <https://pod.ex/other.acr#c> <http://www.w3.org/ns/solid/acp#apply> <https://pod.ex/other.acr#p> .\n\
         <https://pod.ex/other.acr#p> <http://www.w3.org/ns/solid/acp#allow> <http://www.w3.org/ns/auth/acl#Read> .\n\
         <https://pod.ex/other.acr#p> <http://www.w3.org/ns/solid/acp#anyOf> <https://pod.ex/other.acr#m> .\n\
-        <https://pod.ex/other.acr#m> <http://www.w3.org/ns/solid/acp#agent> <urn:sparq:forged> .\n";
+        <https://pod.ex/other.acr#m> <http://www.w3.org/ns/solid/acp#agent> <https://forged.ex/a&client=b> .\n";
     assert!(store
         .put_acl_acp("https://pod.ex/other.acr", bad, "ntriples")
         .is_err());
@@ -368,4 +374,103 @@ fn a_resource_removed_outside_an_update_is_forgotten_at_the_next_rebuild() {
     store.graph.named.push(removed);
     store.materialize_acp().expect("rebuild with d0 again");
     assert_context_forgotten(&store, "remove, rebuild, restore");
+}
+
+#[test]
+fn a_container_left_with_only_its_access_control_document_is_forgotten() {
+    const BOX: &str = "https://pod.ex/box/";
+    let acr = format!("{BOX}.acr");
+    let data = format!("<{BOX}x#it> <https://ex.dev/ns#k> \"v\" <{BOX}x> .\n");
+    let nq = format!(
+        "{data}\
+         <{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{ACP}apply> <{acr}#p> <{acr}> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Read> <{acr}> .\n\
+         <{acr}#p> <{ACP}anyOf> <{acr}#m> <{acr}> .\n\
+         <{acr}#m> <{ACP}agent> <{ACP}CreatorAgent> <{acr}> .\n"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    let mut prov = AccessProvenance::new();
+    prov.set_creator(BOX, ALICE);
+    store
+        .materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())
+        .expect("acp materializes");
+    assert!(store.decide(&alice(), BOX, Mode::Read).allow, "the creator reads the container");
+
+    let x = store
+        .graph
+        .named
+        .iter()
+        .position(|(n, _)| n.to_string() == format!("<{BOX}x>"))
+        .expect("x is stored");
+    let removed = store.graph.named.remove(x);
+    store.materialize_acp().expect("rebuild with only the .acr under the container");
+    store.graph.named.push(removed);
+    store.materialize_acp().expect("rebuild with the container again");
+    assert!(
+        !store.decide(&alice(), BOX, Mode::Read).allow,
+        "a container that held only its access-control document was gone"
+    );
+}
+
+fn admin() -> Session<'static> {
+    Session {
+        agent: Some(ADMIN),
+        client: None,
+        issuer: None,
+        now: None,
+    }
+}
+
+#[test]
+fn decisions_follow_a_drop_with_no_rebuild_after_it() {
+    let mut store = store();
+    store
+        .update_as_acp(&admin(), &format!("DROP GRAPH <{D0}>"))
+        .expect("ADMIN may remove d0");
+    // d0 comes back without any rebuild: the view the drop left grants nothing on it.
+    let again = Graph::load_dataset(&format!("{D0_DATA} <{D0}> .\n"), "nquads").expect("parses");
+    store.graph.named.extend(again.named);
+    assert!(
+        !holds(&store, ALICE, Mode::Write),
+        "the dropped resource's creator does not write it"
+    );
+}
+
+#[test]
+fn decisions_follow_a_move_onto_a_resource_with_no_rebuild_after_it() {
+    let mut store = store();
+    let writes_d0 = |store: &PodStore| store.accessible(&alice(), Mode::Write).iter().any(|g| g == D0);
+    assert!(writes_d0(&store), "the creator writes d0 (and the session cache holds it)");
+    store
+        .update_as_acp(&admin(), &format!("MOVE <{D1}> TO <{D0}>"))
+        .expect("ADMIN may move d1 onto d0");
+    assert_context_forgotten(&store, "move onto d0");
+    assert!(!writes_d0(&store), "the cached set no longer holds d0");
+}
+
+#[test]
+fn decisions_follow_a_drop_and_create_in_one_update() {
+    let mut store = store();
+    let update = format!("DROP GRAPH <{D0}> ; INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}");
+    store
+        .update_as_acp(&admin(), &update)
+        .expect("ADMIN may replace d0");
+    assert_context_forgotten(&store, "drop and create in one update, no rebuild");
+}
+
+#[test]
+fn a_creator_recorded_through_the_store_applies_at_the_next_update() {
+    let mut store = store();
+    store.record_creator(D1, DAVE);
+    store
+        .update_as_acp(&admin(), &format!("INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}"))
+        .expect("ADMIN may write d0");
+    let dave = Session {
+        agent: Some(DAVE),
+        client: None,
+        issuer: None,
+        now: None,
+    };
+    assert!(store.decide(&dave, D1, Mode::Write).allow, "the recorded creator writes d1");
 }

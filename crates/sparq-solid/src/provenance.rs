@@ -43,7 +43,7 @@ struct ResourceProvenance {
 /// assert_eq!(prov.creator("https://pod.ex/notes/n1.ttl"), Some("https://alice.ex/card#me"));
 /// assert_eq!(prov.creator("https://pod.ex/notes/n2.ttl"), None); // unknown -> fail-closed
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AccessProvenance {
     by_resource: FxHashMap<String, ResourceProvenance>,
 }

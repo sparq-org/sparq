@@ -196,44 +196,8 @@ pub(crate) fn assemble_facts(
     let in_doc_p = named(&format!("{SOLIDX_NS}inDoc"));
     let is_webid = named(&format!("{SOLIDX_NS}isWebId"));
 
-    // 1) resources: every non-control, non-auth graph + every structural container
-    //    prefix (containers exist as inheritance anchors even without their own graph).
-    let mut resources: FxHashSet<String> = FxHashSet::default();
-    let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
-    for (name, sub) in &graph.named {
-        let Some(iri) = graph_iri(name) else { continue };
-        // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
-        // never reasoning input. [`strip_reserved_graphs`] also drops these from the
-        // dataset, but assembly must not DEPEND on that having run first — the
-        // materializer defers every mutation until after this fallible pass so an error
-        // leaves the previous auth view in place (roborev 5005).
-        if iri.starts_with(RESERVED_PREFIX) {
-            continue;
-        }
-        let control_of = iri.strip_suffix(ACL_SUFFIX).or_else(|| iri.strip_suffix(ACR_SUFFIX));
-        // A bare `scheme://` names no authority, so it is not a container of any pod
-        // root, and neither it nor its control document takes part in the auth view.
-        // (The parent rule's textual scrape of `https://pod.ex/` yields `https://`;
-        // [`parent_iri`] already stops at the authority root.)
-        if is_authority_less(control_of.unwrap_or(iri)) {
-            continue;
-        }
-        if control_of.is_some() {
-            if iri.ends_with(suffix) {
-                control_graphs.push((iri, sub));
-            }
-            continue;
-        }
-        resources.insert(iri.to_owned());
-        // structural container chain: https://host/a/b/doc -> /a/b/ -> /a/ -> /
-        let mut cur = iri;
-        while let Some(parent) = parent_iri(cur) {
-            if !resources.insert(parent.to_owned()) {
-                break;
-            }
-            cur = parent;
-        }
-    }
+    // 1) resources (see [`enumerate`]).
+    let (resources, control_graphs) = enumerate(graph, suffix);
     for r in &resources {
         out.push([named(r), is_resource.clone(), xsd_true()]);
     }
@@ -306,6 +270,11 @@ pub(crate) fn assemble_facts(
     // candidate-generation lattice picks them up.
     if system == System::Acp {
         for (resource, creator, owner) in provenance.iter() {
+            // Only for a resource the view holds: the store keeps no facts for any other
+            // (see [`resources`]), and one created again later has none.
+            if !resources.contains(resource) {
+                continue;
+            }
             if let Some(c) = creator {
                 validate_principal_iri(c)?;
                 webids.insert(c.to_owned());
@@ -484,6 +453,57 @@ pub(crate) fn iri_origin(iri: &str) -> &str {
         }
         None => iri,
     }
+}
+
+/// The auth view's resources in `graph`, and its control documents ending in `suffix`.
+/// The resources are every graph that is not reserved, not an `.acl`/`.acr` and has an
+/// authority, plus every structural container above one (a container is an inheritance
+/// anchor even without a graph of its own, but not when only control documents sit below
+/// it). The materializer and the store's provenance pruning both use this, so trusted
+/// creator/owner facts are kept for exactly the resources the view holds.
+fn enumerate<'g>(graph: &'g Graph, suffix: &str) -> (FxHashSet<String>, Vec<(&'g str, &'g Graph)>) {
+    let mut resources: FxHashSet<String> = FxHashSet::default();
+    let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
+    for (name, sub) in &graph.named {
+        let Some(iri) = graph_iri(name) else { continue };
+        // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
+        // never reasoning input. [`strip_reserved_graphs`] also drops these from the
+        // dataset, but assembly must not DEPEND on that having run first — the
+        // materializer defers every mutation until after this fallible pass so an error
+        // leaves the previous auth view in place (roborev 5005).
+        if iri.starts_with(RESERVED_PREFIX) {
+            continue;
+        }
+        let control_of = iri.strip_suffix(ACL_SUFFIX).or_else(|| iri.strip_suffix(ACR_SUFFIX));
+        // A bare `scheme://` names no authority, so it is not a container of any pod
+        // root, and neither it nor its control document takes part in the auth view.
+        // (The parent rule's textual scrape of `https://pod.ex/` yields `https://`;
+        // [`parent_iri`] already stops at the authority root.)
+        if is_authority_less(control_of.unwrap_or(iri)) {
+            continue;
+        }
+        if control_of.is_some() {
+            if iri.ends_with(suffix) {
+                control_graphs.push((iri, sub));
+            }
+            continue;
+        }
+        resources.insert(iri.to_owned());
+        // structural container chain: https://host/a/b/doc -> /a/b/ -> /a/ -> /
+        let mut cur = iri;
+        while let Some(parent) = parent_iri(cur) {
+            if !resources.insert(parent.to_owned()) {
+                break;
+            }
+            cur = parent;
+        }
+    }
+    (resources, control_graphs)
+}
+
+/// The auth view's resources in `graph` (see [`enumerate`]).
+pub(crate) fn resources(graph: &Graph) -> FxHashSet<String> {
+    enumerate(graph, ACR_SUFFIX).0
 }
 
 /// Whether `iri` is exactly a bare `scheme://` with no authority — above every authority
