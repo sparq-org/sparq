@@ -1541,14 +1541,11 @@ fn build_store_with_admitted(
     let mut augmented = req.dataset.clone();
     for fact in admitted {
         // Named-graph position: the document of the fact's subject (a group IRI's group
-        // document), the only document whose statements about that node the loader keeps.
-        // Admitted facts describe group membership, so they never go into an access-control
-        // document.
+        // document, which may itself be an `.acl`), the only document whose statements about
+        // that node the loader keeps. The loader applies the same confinement to it as to the
+        // rest of that document.
         if let oxrdf::NamedOrBlankNode::NamedNode(group) = &fact.triple.subject {
             let doc = group.as_str().split('#').next().unwrap_or(group.as_str());
-            if doc.ends_with(".acl") || doc.ends_with(".acr") {
-                continue;
-            }
             let _ = writeln!(
                 &mut augmented,
                 "{} {} {} <{}> .",

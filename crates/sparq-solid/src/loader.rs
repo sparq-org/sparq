@@ -122,9 +122,12 @@ const SKOLEM_PREFIX: &str = "urn:skolem:";
 /// materialization instead (see [`validate_principal_iri`]).
 fn names_minted_iri(t: &[Term; 3]) -> bool {
     let principal = matches!(&t[1], Term::NamedNode(p) if PRINCIPAL_PREDICATES.contains(&p.as_str()));
+    // Only a top-level named principal is left to that check; a principal written as a
+    // literal or a triple term is checked in full like any other term.
+    let named_principal = principal && matches!(&t[2], Term::NamedNode(_));
     term_names_minted_iri(&t[0], true)
         || term_names_minted_iri(&t[1], true)
-        || term_names_minted_iri(&t[2], !principal)
+        || term_names_minted_iri(&t[2], !named_principal)
 }
 
 const PRINCIPAL_PREDICATES: [&str; 6] =
@@ -1268,8 +1271,14 @@ mod tests {
         assert!(names_minted_iri(&[doc.clone(), reserved.clone(), doc.clone()]), "predicate");
         assert!(names_minted_iri(&[doc.clone(), any_of, reserved.clone()]), "object");
         assert!(
-            !names_minted_iri(&[doc, agent, reserved]),
+            !names_minted_iri(&[doc.clone(), agent.clone(), reserved]),
             "a reserved principal fails the materialization instead"
+        );
+        let minted_type = NamedNode::new_unchecked("urn:sparq:x");
+        let typed_principal = Term::Literal(Literal::new_typed_literal("v", minted_type));
+        assert!(
+            names_minted_iri(&[doc, agent, typed_principal]),
+            "a principal that is not a named node is checked in full"
         );
     }
 
