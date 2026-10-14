@@ -189,8 +189,9 @@ evaluation-with-evidence-that-exists-today → threats → honest-status).
    whole-circuit-compiler design.
 8. **Limitations & honest status.** The drafts are unmerged and awaiting @jeswr +
    upstream review; measurements are work-box (deterministic counts reproducible,
-   wall-clock indicative); these are size opts and make no ZK-soundness/privacy
-   claim; some wins are floor-limited on small circuits.
+   wall-clock indicative); these are size opts and make no ZK privacy or
+   proof-system soundness claim, but each carries a constraint-equivalence
+   obligation; some wins are floor-limited on small circuits.
 9. **Conclusion.**
 
 ## 4. Measurement plan
@@ -311,4 +312,6 @@ maintainer's explicit "LOW PRIORITY, defer until little else to do" on the paren
   treated as canonical, wall-clock/memory as indicative. The upstream CI gates-diff
   remains the external arbiter and is pending for the drafts.
 - **No ZK claim.** These are circuit-*size* (proving-cost) optimisations; they make
-  and require no zero-knowledge privacy or soundness property.
+  no claim about zero-knowledge privacy or the backend's proof-system soundness.
+  Each still carries a constraint-equivalence obligation (§0): a rewrite must not
+  under-constrain the compiled circuit.
