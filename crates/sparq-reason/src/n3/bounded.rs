@@ -26,6 +26,11 @@ use super::model::Term;
 const BW_DEPTH: usize = 64;
 /// Steps one formula-containment search may take.
 const CONTAINMENT_BUDGET: usize = 100_000;
+/// Pairing attempts one unification may make past those of a search that never
+/// backtracks ([`StepBudget::unification`]).
+const UNIFICATION_BUDGET: usize = 100_000;
+/// Why a unification was cut short.
+const UNIFICATION_CUT: &str = "formula unification exhausted its step budget";
 /// Cells one walk of an `rdf:first`/`rdf:rest` data list may visit.
 const LIST_WALK_CAP: usize = 100_000;
 
@@ -176,12 +181,25 @@ pub(crate) fn backward_step(
     }
 }
 
-/// A fresh step budget for one formula-containment search.
+/// A fresh step budget for one formula-containment search or one unification.
 pub(crate) struct StepBudget(usize);
 
 impl StepBudget {
     pub(crate) fn containment() -> Self {
         StepBudget(CONTAINMENT_BUDGET)
+    }
+
+    /// The budget of one unification of two terms. A formula match [`grant`]s the
+    /// pairings of a search that never backtracks, so only backtracking spends this.
+    ///
+    /// [`grant`]: StepBudget::grant
+    pub(crate) fn unification() -> Self {
+        StepBudget(UNIFICATION_BUDGET)
+    }
+
+    /// Add `steps` to the budget.
+    pub(crate) fn grant(&mut self, steps: usize) {
+        self.0 = self.0.saturating_add(steps);
     }
 
     /// Take one step; `false` once the budget is spent.
@@ -206,6 +224,11 @@ impl StepBudget {
             Bounded::complete(value)
         }
     }
+}
+
+/// A unification of the run `run` ran out of steps: it did not unify, which is a cut.
+pub(crate) fn unification_exhausted(run: &Truncation) {
+    run.record(UNIFICATION_CUT);
 }
 
 /// Walk a list cell by cell: `next(cell)` yields `(member, rest)` for a cons cell, or
@@ -374,10 +397,12 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// * the steps of a formula-scope search beyond the matches it finds: each search is
 ///   bounded by its own step budget (`CONTAINMENT_BUDGET`, through
 ///   `StepBudget::containment`), and a search it stops is a cut;
-/// * the backtracking of formula unification (a `{ … }` pattern matched against a
-///   `{ … }` value, `formula_unify` in the text engine): it returns at most one binding
-///   and holds one binding per pattern statement, so it adds no rows; its backtracking is
-///   not charged to a step budget (tracked in GH #6953);
+/// * the pairings formula unification tries (a `{ … }` pattern matched against a
+///   `{ … }` value, `formula_unify` in the text engine): it returns at most one binding,
+///   so it adds no rows. Each unification has its own step budget
+///   (`StepBudget::unification`): the pairings of a search that never backtracks, plus
+///   `UNIFICATION_BUDGET` for backtracking. Past it the terms do not unify and the run
+///   records a cut (GH #6953);
 /// * the document's own parse, which is not charged: its memory is bounded by its input
 ///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
 ///   holds only a scratch copy of one token, or an error message quoting one, at a time

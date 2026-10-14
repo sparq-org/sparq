@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-reason (N3):** matching a quoted-formula pattern against a quoted-formula value
+  now has a step budget for its backtracking over statement pairings. A match that never
+  backtracks is not limited; past the budget the formula does not match and the run
+  records a cut (`formula unification exhausted its step budget`), so a negation or
+  aggregation in that run is refused. (#6953)
 - **sparq-reason (N3):** a run already refused by a `ClosureLimits` limit no longer reports
   a negation or aggregation evaluated after the refusal ("refused a negation or aggregation
   … over an incomplete set"); it fails with the refusal itself, which names the limit
