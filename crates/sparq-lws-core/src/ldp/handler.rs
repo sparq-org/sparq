@@ -650,7 +650,7 @@ impl<S: Store> LdpState<S> {
             || (!target_iri.ends_with('/')
                 && conditional::unmodified_since_applies(
                     header_str(headers, header::IF_MATCH),
-                    header_str(headers, header::IF_UNMODIFIED_SINCE),
+                    crate::http_date::single_line(headers, header::IF_UNMODIFIED_SINCE),
                 )
                 .is_some());
         // The mode that governs reading THIS target's representation: Control for an `.acl`, else Read.
@@ -1024,12 +1024,12 @@ async fn serve_read_once<S: Store>(
     // path is unusable in normal cache flows. Set on the SHARED headers (so the 304 carries it too,
     // §15.4.5) and only for a plain resource with a known time; a container's stale record time is
     // deliberately not advertised (matching the 304 exclusion above). GET and HEAD emit it identically.
-    if let Some(imf) = effective_last_modified.and_then(crate::store::timestamp::to_imf_fixdate) {
+    if let Some(imf) = effective_last_modified.and_then(crate::http_date::format) {
         set_str(&mut out, header::LAST_MODIFIED, &imf);
     }
     if conditional::evaluate_read(
         header_str(req_headers, header::IF_NONE_MATCH),
-        header_str(req_headers, header::IF_MODIFIED_SINCE),
+        crate::http_date::single_line(req_headers, header::IF_MODIFIED_SINCE),
         &etag,
         effective_last_modified,
     ) == conditional::ReadPrecondition::NotModified
@@ -1195,7 +1195,7 @@ pub async fn put_handler<S: Store>(
     conditional::require(conditional::evaluate_write(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
-        header_str(&headers, header::IF_UNMODIFIED_SINCE),
+        crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag,
         write_precondition_time(&target, current.as_ref().and_then(|m| m.last_modified)),
     ))?;
@@ -1515,7 +1515,7 @@ pub async fn delete_handler<S: Store>(
     conditional::require(conditional::evaluate_write(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
-        header_str(&headers, header::IF_UNMODIFIED_SINCE),
+        crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         Some(current.etag.as_str()),
         write_precondition_time(&target, current.last_modified),
     ))?;
@@ -1693,7 +1693,7 @@ pub async fn patch_handler<S: Store>(
     conditional::require(conditional::evaluate_write(
         header_str(&headers, header::IF_MATCH),
         header_str(&headers, header::IF_NONE_MATCH),
-        header_str(&headers, header::IF_UNMODIFIED_SINCE),
+        crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
@@ -5930,6 +5930,51 @@ mod tests {
             let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
             let invalid = write_if_unmodified_since(&state, verb, "last week").await;
             assert!(invalid.is_success(), "{verb}: an invalid date is ignored");
+        }
+    }
+
+    /// A date header sent on more than one field line is not one HTTP-date, so it is ignored
+    /// (RFC 9110 §13.1.4) rather than read from its first line: two stale lines do not refuse the write.
+    #[tokio::test]
+    async fn a_repeated_if_unmodified_since_is_ignored() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let mut headers = turtle_write_headers();
+        for _ in 0..2 {
+            headers.append(
+                header::IF_UNMODIFIED_SINCE,
+                HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"),
+            );
+        }
+        let uri: axum::http::Uri = "/alice/doc".parse().unwrap();
+        let got = put_handler(
+            State(state),
+            Extension(owner_token()),
+            uri,
+            headers,
+            body_doc(),
+        )
+        .await
+        .unwrap_or_else(IntoResponse::into_response)
+        .status();
+        assert!(got.is_success(), "{got}");
+    }
+
+    /// The read path accepts the two obsolete HTTP-date forms as well as IMF-fixdate (RFC 9110
+    /// §5.6.7): a later date in any form is a 304, an earlier one a 200.
+    #[tokio::test]
+    async fn if_modified_since_accepts_every_http_date_form() {
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let cases = [
+            ("Saturday, 06-Nov-60 08:49:37 GMT", StatusCode::NOT_MODIFIED),
+            ("Sat Nov  6 08:49:37 2100", StatusCode::NOT_MODIFIED),
+            ("Sunday, 06-Nov-94 08:49:37 GMT", StatusCode::OK),
+            ("Sun Nov  6 08:49:37 1994", StatusCode::OK),
+        ];
+        for (date, want) in cases {
+            let mut cond = HeaderMap::new();
+            cond.insert(header::IF_MODIFIED_SINCE, HeaderValue::from_static(date));
+            let got = get_with(&state, owner_token(), "/alice/doc", cond).await;
+            assert_eq!(got.status(), want, "{date}");
         }
     }
 

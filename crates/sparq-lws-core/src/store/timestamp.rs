@@ -10,9 +10,9 @@
 //!
 //! We do NOT pull in a date crate for this: `chrono` is only a *transitive* dependency (via
 //! `object_store`), not a direct one, and adding a direct date dependency for one canonical-UTC
-//! round-trip is not worth the supply-chain surface — the same reasoning the IMF-fixdate parser in
-//! [`crate::ldp::conditional`] documents. The civil-date maths is Howard Hinnant's exact
-//! `days_from_civil` / `civil_from_days` algorithm (valid for all proleptic-Gregorian dates).
+//! round-trip is not worth the supply-chain surface — the same reasoning the HTTP-date parser in
+//! `crate::http_date` documents, whose exact civil-date arithmetic (Howard Hinnant's
+//! `days_from_civil` / `civil_from_days`, valid for all proleptic-Gregorian dates) this reuses.
 //!
 //! # The correctness contract (fail-OPEN on read)
 //! Both directions are TOTAL and never panic. On the READ side a value that cannot be parsed (a
@@ -24,6 +24,8 @@
 //! might hand back (fractional seconds, an explicit `+00:00`/`-HH:MM` offset).
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::http_date::{civil_from_days, days_from_civil, days_in_month};
 
 /// Seconds in one day.
 const SECS_PER_DAY: i64 = 86_400;
@@ -140,33 +142,6 @@ fn parse_timezone(tz: &str) -> Option<i64> {
     Some(sign * (oh * 3_600 + om * 60))
 }
 
-/// The three-letter English month abbreviations, 1-based (`MONTH_ABBREV[m - 1]`).
-const MONTH_ABBREV: [&str; 12] = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
-
-/// The IMF-fixdate day-name for a day count since the Unix epoch (1970-01-01 was a Thursday).
-const DAY_NAME: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
-
-/// Format a [`SystemTime`] as an HTTP **IMF-fixdate** (RFC 9110 §5.6.7), e.g.
-/// `Sun, 05 Jul 2026 12:34:56 GMT` — the form the `Last-Modified` response header MUST use so a
-/// client can echo it back in a later `If-Modified-Since`. Truncated to whole seconds; `None` for a
-/// pre-epoch instant.
-pub fn to_imf_fixdate(t: SystemTime) -> Option<String> {
-    let secs = t.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
-    let days = secs.div_euclid(SECS_PER_DAY);
-    let tod = secs.rem_euclid(SECS_PER_DAY);
-    let (y, m, d) = civil_from_days(days);
-    let hh = tod / 3_600;
-    let mm = (tod % 3_600) / 60;
-    let ss = tod % 60;
-    let day_name = DAY_NAME[days.rem_euclid(7) as usize];
-    let month = MONTH_ABBREV[(m - 1) as usize];
-    Some(format!(
-        "{day_name}, {d:02} {month} {y:04} {hh:02}:{mm:02}:{ss:02} GMT"
-    ))
-}
-
 /// Parse exactly `n` ASCII digits at `b[at..at+n]` as a non-negative integer, or `None`.
 fn digits(b: &[u8], at: usize, n: usize) -> Option<i64> {
     if at + n > b.len() {
@@ -180,56 +155,6 @@ fn digits(b: &[u8], at: usize, n: usize) -> Option<i64> {
         acc = acc * 10 + i64::from(d - b'0');
     }
     Some(acc)
-}
-
-/// The true length of `month` in `year` (proleptic Gregorian, leap years included).
-///
-/// (Deliberately a small self-contained copy — the identical helper in
-/// [`crate::ldp::conditional`] lives in the higher LDP layer, and the storage layer must not depend
-/// upward on it.)
-fn days_in_month(year: i64, month: u32) -> u32 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 => {
-            if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 {
-                29
-            } else {
-                28
-            }
-        }
-        _ => 0,
-    }
-}
-
-/// Days from the Unix epoch (1970-01-01) to `y-m-d` (proleptic Gregorian), by Howard Hinnant's
-/// `days_from_civil`. Exact for all civil dates; negative before the epoch. (The same standard
-/// algorithm as [`crate::ldp::conditional`]'s private copy — duplicated rather than shared to keep
-/// the `store` layer from depending on the `ldp` layer.)
-fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
-    let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = y - era * 400; // [0, 399]
-    let m = m as i64;
-    let d = d as i64;
-    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1; // [0, 365]
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
-    era * 146_097 + doe - 719_468
-}
-
-/// The INVERSE of [`days_from_civil`] — Howard Hinnant's `civil_from_days`: the `(year, month, day)`
-/// for a day count since the Unix epoch. Exact for all civil dates.
-fn civil_from_days(z: i64) -> (i64, u32, u32) {
-    let z = z + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097; // [0, 146096]
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
-    let mp = (5 * doy + 2) / 153; // [0, 11]
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
-    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32; // [1, 12]
-    (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
 #[cfg(test)]
@@ -328,19 +253,6 @@ mod tests {
         assert_eq!(from_xsd_datetime("2026-07-05T12:34:56+14:01"), None);
         assert_eq!(from_xsd_datetime("2026-07-05T12:34:56-14:01"), None);
         assert_eq!(from_xsd_datetime("2026-07-05T12:34:56+23:59"), None);
-    }
-
-    #[test]
-    fn imf_fixdate_matches_the_http_date_form() {
-        // 2026-07-05 is a Sunday; the parser in `conditional` round-trips this exact string.
-        assert_eq!(
-            to_imf_fixdate(known()).unwrap(),
-            "Sun, 05 Jul 2026 12:34:56 GMT"
-        );
-        assert_eq!(
-            to_imf_fixdate(UNIX_EPOCH).unwrap(),
-            "Thu, 01 Jan 1970 00:00:00 GMT"
-        );
     }
 
     #[test]
