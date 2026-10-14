@@ -88,6 +88,7 @@
 //! prevent.
 
 use crate::canon::{self, CanonError, CanonicalGraph};
+use crate::commit::{CommitmentMethod, MethodNotSelectable, MethodUse};
 use crate::encode::{TYPE_CODE_BLANK_NODE, TYPE_CODE_IRI, TYPE_CODE_LITERAL};
 use crate::field::{field_from_hash_bytes, Fr};
 use crate::poseidon2;
@@ -99,7 +100,11 @@ use oxrdf::{Literal, NamedOrBlankNode, Term, Triple};
 /// field tag. A language constant keeps the low 248 bits of `blake3(lang)` and
 /// nothing excludes the value 1, so a tag folds to `LANG_NONE` only if its hash
 /// hits that fixed target. The separation rests on the truncated hash's
-/// preimage resistance for a fixed target, not on construction.
+/// preimage resistance for a fixed target, not on construction. The encoder
+/// checks it rather than assuming it: [`checked_lang_const`] (and so
+/// [`degenerate_value_component`] and every whole-graph encoder above it)
+/// refuses a language tag whose constant equals `LANG_NONE` with
+/// [`DualLeafError::ReservedLanguageConstant`] instead of encoding it.
 pub const LANG_NONE: u64 = 1;
 
 /// The `xsd:integer` datatype IRI (the integer value-lane datatype class,
@@ -172,6 +177,12 @@ pub enum DualLeafError {
     /// mitigation that keeps sparq's own commitments INV-VL-consistent; it does
     /// NOT bind a malicious external issuer.
     NonCanonicalValue(String),
+    /// The language tag's `LANG_CONST` equals the reserved [`LANG_NONE`]
+    /// sentinel, so its literal would share a `value_component` with the same
+    /// datatype's no-language form. Refused fail-closed; see
+    /// [`checked_lang_const`]. No known language tag reaches this: it needs a
+    /// fixed-target preimage of the 248-bit truncated hash.
+    ReservedLanguageConstant(String),
 }
 
 impl std::fmt::Display for DualLeafError {
@@ -182,6 +193,9 @@ impl std::fmt::Display for DualLeafError {
             }
             DualLeafError::NonCanonicalValue(t) => {
                 write!(f, "non-canonical value-lane literal (fail-closed co-binding): {}", t)
+            }
+            DualLeafError::ReservedLanguageConstant(t) => {
+                write!(f, "language tag {:?} derives the reserved LANG_NONE constant", t)
             }
         }
     }
@@ -258,7 +272,7 @@ pub fn encode_literal(literal: &Literal) -> Result<DualLeafComponents, DualLeafE
 /// Canonical = ASCII digits only, no sign, no leading zero (except the single
 /// digit "0"), value `< 2^64`. Returns `None` for any non-canonical / signed /
 /// overflowing form (the §6 fail-closed predicate).
-fn canonical_nonneg_u64(lexical: &str) -> Option<u64> {
+pub(crate) fn canonical_nonneg_u64(lexical: &str) -> Option<u64> {
     if lexical.is_empty() || !lexical.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
@@ -337,7 +351,7 @@ pub fn encode_decimal(literal: &Literal) -> Result<DualLeafComponents, DualLeafE
 
 /// Parse a canonical `xsd:double` lexical form to its IEEE-754 `u64` bit pattern.
 /// Returns `None` for any non-canonical or unrepresentable form (fail-closed).
-fn parse_xsd_double_bits(lexical: &str) -> Option<u64> {
+pub(crate) fn parse_xsd_double_bits(lexical: &str) -> Option<u64> {
     let v = match lexical {
         "INF" => f64::INFINITY,
         "-INF" => f64::NEG_INFINITY,
@@ -389,7 +403,7 @@ fn parse_xsd_double_bits(lexical: &str) -> Option<u64> {
 /// `None` for any non-canonical / integer-only / overflowing form (the §6
 /// fail-closed predicate, mirroring the `filter_signed::filter_decimal_check`
 /// canonical-form discipline).
-fn canonical_decimal_scaled(lexical: &str) -> Option<(bool, u64, u32)> {
+pub(crate) fn canonical_decimal_scaled(lexical: &str) -> Option<(bool, u64, u32)> {
     let (neg, rest) = match lexical.strip_prefix('-') {
         Some(r) => (true, r),
         None => (false, lexical),
@@ -471,9 +485,36 @@ pub const NO_VALUE: u64 = VALUE_NONE;
 /// The `LANG_CONST` for a language tag: `blake3_field(lang)` — the `rdf:langString`
 /// slot-2 constant of the degenerate `value_component` (§3.3). A literal with no
 /// language folds the reserved [`LANG_NONE`] sentinel instead, so a language-tagged
-/// literal can never share a `value_component` with an un-tagged one.
+/// literal can never share a `value_component` with an un-tagged one — a
+/// property the encoder enforces through [`checked_lang_const`], not one this
+/// raw derivation guarantees.
 pub fn lang_const(language: &str) -> Fr {
     blake3_field(language.as_bytes())
+}
+
+/// [`lang_const`], refusing fail-closed a language tag whose constant equals the
+/// reserved [`LANG_NONE`] sentinel ([`DualLeafError::ReservedLanguageConstant`]).
+///
+/// `lang_const` truncates a BLAKE3 digest to 248 bits and `LANG_NONE` is the
+/// field element `1`, so the two meet only on a fixed-target preimage of the
+/// truncated hash. This check turns that retained assumption into an asserted
+/// host-side invariant: a tag that did hit `1` is rejected, never encoded as a
+/// literal indistinguishable (in `value_component`) from the untagged one.
+/// [`degenerate_value_component`] applies the same gate to every language
+/// constant it folds.
+pub fn checked_lang_const(language: &str) -> Result<Fr, DualLeafError> {
+    refuse_lang_none(language, lang_const(language))
+}
+
+/// The shared `LANG_CONST != LANG_NONE` gate of the V1 and V2 encoders: `Ok(c)`
+/// for an admissible constant, [`DualLeafError::ReservedLanguageConstant`] when
+/// `c` is the reserved sentinel.
+pub(crate) fn refuse_lang_none(language: &str, c: Fr) -> Result<Fr, DualLeafError> {
+    if c == Fr::from(LANG_NONE) {
+        Err(DualLeafError::ReservedLanguageConstant(language.to_string()))
+    } else {
+        Ok(c)
+    }
 }
 
 /// Whether a datatype IRI is on a HOOKABLE value lane **in this build** — i.e.
@@ -502,12 +543,29 @@ pub fn is_hookable_datatype(datatype_iri: &str) -> bool {
 /// [`LANG_NONE`] sentinel otherwise. Used for `xsd:string`, `rdf:langString` and
 /// every opaque (non-hookable) datatype — the terms that have no numeric handle
 /// and whose `lexical_component` is the sole binding.
-pub fn degenerate_value_component(datatype_iri: &str, language: Option<&str>) -> Fr {
+///
+/// **Fail-closed:** returns [`DualLeafError::ReservedLanguageConstant`] when the
+/// language tag's constant equals [`LANG_NONE`] (see [`checked_lang_const`]).
+/// Every other input yields the same component as before the check existed.
+pub fn degenerate_value_component(
+    datatype_iri: &str,
+    language: Option<&str>,
+) -> Result<Fr, DualLeafError> {
+    degenerate_value_component_with(datatype_iri, language, lang_const)
+}
+
+/// [`degenerate_value_component`] over an injected language derivation, so a
+/// test can drive the `LANG_NONE` refusal with a derivation that hits it.
+fn degenerate_value_component_with(
+    datatype_iri: &str,
+    language: Option<&str>,
+    derive_lang: fn(&str) -> Fr,
+) -> Result<Fr, DualLeafError> {
     let lang = match language {
-        Some(l) => lang_const(l),
+        Some(l) => refuse_lang_none(l, derive_lang(l))?,
         None => Fr::from(LANG_NONE),
     };
-    poseidon2::hash(&[Fr::from(VALUE_NONE), datatype_const(datatype_iri), lang])
+    Ok(poseidon2::hash(&[Fr::from(VALUE_NONE), datatype_const(datatype_iri), lang]))
 }
 
 /// Encodes a literal to its DualLeafV1 leaf, routing by datatype (§3.2/§3.3).
@@ -520,7 +578,9 @@ pub fn degenerate_value_component(datatype_iri: &str, language: Option<&str>) ->
 ///
 /// **Fail-closed (§6):** a hookable-datatyped literal whose lexical form the lane
 /// encoder rejects returns the encoder's [`DualLeafError`]. It is NEVER
-/// downgraded onto the string lane — that silent downgrade is the §6 desync.
+/// downgraded onto the string lane — that silent downgrade is the §6 desync. A
+/// language tag whose constant equals [`LANG_NONE`] is likewise refused
+/// ([`DualLeafError::ReservedLanguageConstant`]).
 pub fn encode_literal_dual(literal: &Literal) -> Result<Fr, DualLeafError> {
     let datatype = literal.datatype();
     let components = match datatype.as_str() {
@@ -538,7 +598,7 @@ pub fn encode_literal_dual(literal: &Literal) -> Result<Fr, DualLeafError> {
     Ok(match components {
         Some(c) => c.leaf(),
         None => poseidon2::hash(&[
-            degenerate_value_component(datatype.as_str(), literal.language()),
+            degenerate_value_component(datatype.as_str(), literal.language())?,
             // The lexical slot is EXACTLY the string-canonical `h_s` over the
             // canonical N-Triples token — byte-identical to `encode.rs`'s.
             blake3_field(literal.to_string().as_bytes()),
@@ -609,6 +669,11 @@ pub enum DualCommitError {
     /// predicate. **Fail-closed for the WHOLE graph** — never a silent
     /// string-lane downgrade of the offending literal.
     Leaf(DualLeafError),
+    /// The caller asked for a FRESH `DualLeafV1` commitment. V1 is superseded and
+    /// not production-selectable, so a new-issuance call is refused; re-deriving
+    /// an already-issued V1 commitment opts in with
+    /// [`crate::commit::MethodUse::LegacyAlreadyIssued`].
+    MethodNotSelectable(MethodNotSelectable),
 }
 
 impl std::fmt::Display for DualCommitError {
@@ -617,6 +682,7 @@ impl std::fmt::Display for DualCommitError {
             DualCommitError::Canon(e) => write!(f, "{e}"),
             DualCommitError::UncommittableTerm(t) => write!(f, "uncommittable term: {t}"),
             DualCommitError::Leaf(e) => write!(f, "dual-leaf value lane rejected a literal: {e}"),
+            DualCommitError::MethodNotSelectable(e) => write!(f, "{}", e),
         }
     }
 }
@@ -657,20 +723,39 @@ pub struct DualGraphCommitment {
 /// The ordering contract is `commit.rs`'s, unchanged: RDFC10-canonicalize, then
 /// one leaf per canonical triple in canonical N-Quads order (index = leaf
 /// index), then ONE flat Poseidon2 sponge over the leaf sequence.
+///
+/// `use_` is the CHECKED method boundary: `DualLeafV1` is SUPERSEDED, so
+/// [`crate::commit::MethodUse::NewIssuance`] is REFUSED with
+/// [`DualCommitError::MethodNotSelectable`]. Re-deriving an ALREADY-ISSUED V1
+/// commitment (to re-verify it, or to re-check a stored commitment) passes
+/// [`crate::commit::MethodUse::LegacyAlreadyIssued`] and is accepted — the opt-in
+/// is written down at the call site. New issuance uses
+/// `crate::dual_leaf_v2::commit_triples_v2`.
 pub fn commit_triples_dual(
     triples: &[Triple],
     salt: Fr,
+    use_: MethodUse,
 ) -> Result<DualGraphCommitment, DualCommitError> {
+    check_v1_selectable(use_)?;
     commit_canonical_dual(canon::canonicalize_triples(triples)?, salt)
+}
+
+/// The V1 method boundary shared by this module's whole-graph builders.
+fn check_v1_selectable(use_: MethodUse) -> Result<(), DualCommitError> {
+    CommitmentMethod::DualLeafV1.checked_for(use_).map(|_| ()).map_err(DualCommitError::MethodNotSelectable)
 }
 
 /// Commits the content of a `sparq_core::Graph` under `salt` using the
 /// `DualLeafV1` leaf shape — the DualLeafV1 mirror of
 /// `commit::commit_graph_content`.
+///
+/// Same CHECKED method boundary as [`commit_triples_dual`].
 pub fn commit_graph_dual(
     g: &sparq_core::Graph,
     salt: Fr,
+    use_: MethodUse,
 ) -> Result<DualGraphCommitment, DualCommitError> {
+    check_v1_selectable(use_)?;
     commit_canonical_dual(canon::canonicalize_graph_content(g)?, salt)
 }
 
@@ -1063,7 +1148,7 @@ mod tests {
             let value_component = if is_hookable_datatype(lit.datatype().as_str()) {
                 encode_literal(&lit).unwrap().value_component()
             } else {
-                degenerate_value_component(lit.datatype().as_str(), lit.language())
+                degenerate_value_component(lit.datatype().as_str(), lit.language()).unwrap()
             };
             assert_eq!(
                 encode_term_dual(&Term::Literal(lit.clone()), &salt).unwrap(),
@@ -1131,12 +1216,12 @@ mod tests {
         // A different language is a different value_component (LANG_CONST is
         // load-bearing, not decorative).
         assert_ne!(
-            degenerate_value_component(RDF_LANG_STRING, Some("en")),
-            degenerate_value_component(RDF_LANG_STRING, Some("fr")),
+            degenerate_value_component(RDF_LANG_STRING, Some("en")).unwrap(),
+            degenerate_value_component(RDF_LANG_STRING, Some("fr")).unwrap(),
         );
         assert_ne!(
-            degenerate_value_component(RDF_LANG_STRING, Some("en")),
-            degenerate_value_component(RDF_LANG_STRING, None),
+            degenerate_value_component(RDF_LANG_STRING, Some("en")).unwrap(),
+            degenerate_value_component(RDF_LANG_STRING, None).unwrap(),
         );
     }
 
@@ -1154,7 +1239,7 @@ mod tests {
             assert_eq!(encode_literal_dual(&lit).unwrap(), components.leaf());
             // NOT the degenerate lane.
             let degenerate = poseidon2::hash(&[
-                degenerate_value_component(lit.datatype().as_str(), lit.language()),
+                degenerate_value_component(lit.datatype().as_str(), lit.language()).unwrap(),
                 blake3_field(lit.to_string().as_bytes()),
                 Fr::from(TYPE_CODE_LITERAL),
             ]);
@@ -1183,7 +1268,7 @@ mod tests {
             assert_eq!(
                 encode_literal_dual(&lit).unwrap(),
                 poseidon2::hash(&[
-                    degenerate_value_component(iri, lit.language()),
+                    degenerate_value_component(iri, lit.language()).unwrap(),
                     blake3_field(lit.to_string().as_bytes()),
                     Fr::from(TYPE_CODE_LITERAL),
                 ]),
@@ -1206,11 +1291,14 @@ mod tests {
             let lit = Literal::new_typed_literal(lexical, NamedNode::new(boolean_iri).unwrap());
             let real = crate::dual_leaf_boolean::encode_boolean(&lit).unwrap();
             assert_eq!(real.datatype_const, boolean_const);
-            assert_ne!(real.value_component(), degenerate_value_component(boolean_iri, None));
+            assert_ne!(
+                real.value_component(),
+                degenerate_value_component(boolean_iri, None).unwrap()
+            );
         }
         let none_on_boolean_lane =
             poseidon2::hash(&[Fr::from(VALUE_NONE), boolean_const, Fr::from(LANG_NONE)]);
-        assert_ne!(none_on_boolean_lane, degenerate_value_component(boolean_iri, None));
+        assert_ne!(none_on_boolean_lane, degenerate_value_component(boolean_iri, None).unwrap());
         for (iri, real_const) in [
             (
                 crate::dual_leaf_datetime::XSD_DATE_TIME,
@@ -1294,7 +1382,7 @@ mod tests {
             NamedNode::new("http://ex/p").unwrap(),
             Term::Literal(bad.clone()),
         )];
-        let err = commit_triples_dual(&triples, salt).unwrap_err();
+        let err = commit_triples_dual(&triples, salt, MethodUse::LegacyAlreadyIssued).unwrap_err();
         assert!(
             matches!(err, DualCommitError::Leaf(DualLeafError::NonCanonicalValue(_))),
             "expected a fail-closed value-lane rejection, got {err}"
@@ -1302,7 +1390,7 @@ mod tests {
         // And the downgrade the rule forbids is genuinely a DIFFERENT leaf — the
         // rejection is not a no-op dressed up as a guard.
         let downgraded = poseidon2::hash(&[
-            degenerate_value_component(XSD_INTEGER, None),
+            degenerate_value_component(XSD_INTEGER, None).unwrap(),
             blake3_field(bad.to_string().as_bytes()),
             Fr::from(TYPE_CODE_LITERAL),
         ]);
@@ -1315,7 +1403,7 @@ mod tests {
             NamedNode::new("http://ex/p").unwrap(),
             Term::Literal(int_lit("5")),
         )];
-        assert!(commit_triples_dual(&ok, salt).is_ok());
+        assert!(commit_triples_dual(&ok, salt, MethodUse::LegacyAlreadyIssued).is_ok());
     }
 
     #[test]
@@ -1325,7 +1413,7 @@ mod tests {
         // over the leaf sequence. Only the per-term leaf SHAPE differs.
         let salt = salt_from_bytes(&[7u8; 32]);
         let g = graph_triples();
-        let dual = commit_triples_dual(&g, salt).unwrap();
+        let dual = commit_triples_dual(&g, salt, MethodUse::LegacyAlreadyIssued).unwrap();
         let string_canonical = crate::commit::commit_triples(&g, salt).unwrap();
 
         assert_eq!(dual.canonical.lines, string_canonical.canonical.lines);
@@ -1353,11 +1441,37 @@ mod tests {
         // separates graphs exactly as in the string-canonical pipeline.
         let mut reversed = g.clone();
         reversed.reverse();
-        assert_eq!(commit_triples_dual(&reversed, salt).unwrap().commitment, dual.commitment);
+        assert_eq!(commit_triples_dual(&reversed, salt, MethodUse::LegacyAlreadyIssued).unwrap().commitment, dual.commitment);
         assert_ne!(
-            commit_triples_dual(&g, salt_from_bytes(&[8u8; 32])).unwrap().commitment,
+            commit_triples_dual(&g, salt_from_bytes(&[8u8; 32]), MethodUse::LegacyAlreadyIssued).unwrap().commitment,
             dual.commitment
         );
+    }
+
+    #[test]
+    fn a_fresh_v1_whole_graph_commitment_is_refused_and_a_legacy_one_is_not() {
+        let g = vec![Triple::new(
+            NamedNode::new("http://ex/s").unwrap(),
+            NamedNode::new("http://ex/p").unwrap(),
+            int_lit("7"),
+        )];
+        let salt = salt_from_bytes(&[3u8; 32]);
+        let err = commit_triples_dual(&g, salt, MethodUse::NewIssuance).unwrap_err();
+        let DualCommitError::MethodNotSelectable(e) = err else {
+            panic!("new issuance must be refused at the method boundary, got {:?}", err);
+        };
+        assert_eq!(e.method(), CommitmentMethod::DualLeafV1);
+        assert!(e.to_string().contains(CommitmentMethod::DualLeafV1.scheme_iri()));
+        // Re-deriving an already-issued commitment opts in explicitly and works,
+        // and the two calls would otherwise be the same commitment.
+        assert!(commit_triples_dual(&g, salt, MethodUse::LegacyAlreadyIssued).is_ok());
+        let store = sparq_core::Graph::load_str(
+            "<http://ex/s> <http://ex/p> \"7\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+            "ntriples",
+        )
+        .unwrap();
+        assert!(commit_graph_dual(&store, salt, MethodUse::NewIssuance).is_err());
+        assert!(commit_graph_dual(&store, salt, MethodUse::LegacyAlreadyIssued).is_ok());
     }
 
     #[test]
@@ -1369,9 +1483,10 @@ mod tests {
             "turtle",
         )
         .unwrap();
-        let from_store = commit_graph_dual(&g, salt).unwrap();
+        let from_store = commit_graph_dual(&g, salt, MethodUse::LegacyAlreadyIssued).unwrap();
         let from_triples =
-            commit_triples_dual(&crate::canon::graph_triples(&g).unwrap(), salt).unwrap();
+            commit_triples_dual(&crate::canon::graph_triples(&g).unwrap(), salt, MethodUse::LegacyAlreadyIssued)
+                .unwrap();
         assert_eq!(from_store.commitment, from_triples.commitment);
         assert_eq!(from_store.leaves, from_triples.leaves);
         assert_eq!(from_store.canonical.lines, from_triples.canonical.lines);
@@ -1395,5 +1510,49 @@ mod tests {
         let wrapped: DualCommitError = canon_err.into();
         assert!(matches!(wrapped, DualCommitError::Canon(_)));
         assert_eq!(wrapped.to_string(), canon_msg);
+    }
+
+    /// The `LANG_CONST != LANG_NONE` gate is fail-closed: a language derivation
+    /// that hits the reserved sentinel is refused with
+    /// `ReservedLanguageConstant`, never folded into a component, while the
+    /// no-language slot keeps folding `LANG_NONE` itself. Real tags pass it, and
+    /// pass it with their committed constants unchanged.
+    #[test]
+    fn a_language_constant_equal_to_lang_none_is_refused() {
+        let sentinel = Fr::from(LANG_NONE);
+        // The gate itself.
+        assert_eq!(
+            refuse_lang_none("xx", sentinel),
+            Err(DualLeafError::ReservedLanguageConstant("xx".to_string()))
+        );
+        assert_eq!(refuse_lang_none("xx", Fr::from(2u64)), Ok(Fr::from(2u64)));
+        // Through the encoder, with a derivation that lands on the sentinel.
+        let colliding: fn(&str) -> Fr = |_| Fr::from(LANG_NONE);
+        assert_eq!(
+            degenerate_value_component_with(RDF_LANG_STRING, Some("en"), colliding),
+            Err(DualLeafError::ReservedLanguageConstant("en".to_string()))
+        );
+        // No language: the sentinel is the legitimate fold, not a refusal.
+        assert_eq!(
+            degenerate_value_component_with(XSD_STRING, None, colliding),
+            degenerate_value_component(XSD_STRING, None)
+        );
+        assert!(DualLeafError::ReservedLanguageConstant("en".to_string())
+            .to_string()
+            .contains("LANG_NONE"));
+        // Real tags: admitted, distinct from the sentinel, and the checked
+        // constant IS the raw one (the gate moves no committed value).
+        let tags = [
+            "en", "EN", "en-GB", "fr", "de-CH-1996", "zh-Hant-TW", "x-private", "", " ", "\0",
+        ];
+        for tag in tags {
+            let c = checked_lang_const(tag).unwrap();
+            assert_ne!(c, sentinel, "lang const of {tag:?} is LANG_NONE");
+            assert_eq!(c, lang_const(tag));
+            assert_eq!(
+                degenerate_value_component(RDF_LANG_STRING, Some(tag)).unwrap(),
+                poseidon2::hash(&[Fr::from(VALUE_NONE), datatype_const(RDF_LANG_STRING), c])
+            );
+        }
     }
 }

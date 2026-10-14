@@ -64,6 +64,20 @@ pub fn boolean_datatype_const() -> Fr {
     field_from_hash_bytes(&blake3::derive_key(BOOLEAN_LANE_CONTEXT, XSD_BOOLEAN.as_bytes()))
 }
 
+/// Map a CANONICAL `xsd:boolean` lexical form to its value handle: `"true"` →
+/// `1`, `"false"` → `0`, everything else `None` (the §6 fail-closed predicate).
+/// The XSD-legal but NON-canonical spellings `"1"` / `"0"` return `None`.
+///
+/// Crate-internal so the versioned sibling encoder shares exactly this
+/// predicate instead of restating it.
+pub(crate) fn canonical_boolean(lexical: &str) -> Option<u64> {
+    match lexical {
+        "true" => Some(1),
+        "false" => Some(0),
+        _ => None,
+    }
+}
+
 /// Encodes an `xsd:boolean` literal under the dual-leaf method, with fail-closed
 /// same-leaf co-binding (§6): the lexical bytes are parsed once, ONLY the
 /// canonical forms `"true"` / `"false"` map to `VALUE_HOOK` `1` / `0`, and the
@@ -83,11 +97,8 @@ pub fn encode_boolean(literal: &Literal) -> Result<DualLeafComponents, DualLeafE
     // Same-leaf co-binding: parse the lexical bytes once; ONLY the canonical
     // spellings are accepted (the §6 fail-closed predicate). "1"/"0" are
     // XSD-legal but NON-canonical — rejected, never silently canonicalised.
-    let value: u64 = match literal.value() {
-        "true" => 1,
-        "false" => 0,
-        _ => return Err(DualLeafError::NonCanonicalValue(literal.to_string())),
-    };
+    let value: u64 = canonical_boolean(literal.value())
+        .ok_or_else(|| DualLeafError::NonCanonicalValue(literal.to_string()))?;
     Ok(DualLeafComponents {
         value_hook: Fr::from(value),
         datatype_const: boolean_datatype_const(),

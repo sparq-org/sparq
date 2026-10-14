@@ -159,7 +159,7 @@ pub fn encode_date(literal: &Literal) -> Result<DualLeafComponents, DualLeafErro
 /// Parse a strict XSD-canonical `Z`-timezoned `xsd:dateTime` lexical form to its
 /// signed scaled-epoch `(neg, |T| in ms)`. Returns `None` for anything outside
 /// the §13.4 fail-closed domain.
-fn canonical_datetime_scaled(lexical: &str) -> Option<(bool, u64)> {
+pub(crate) fn canonical_datetime_scaled(lexical: &str) -> Option<(bool, u64)> {
     let body = lexical.strip_suffix('Z')?;
     let (date_part, time_part) = body.split_once('T')?;
     let days = parse_canonical_date_days(date_part)?;
@@ -173,7 +173,7 @@ fn canonical_datetime_scaled(lexical: &str) -> Option<(bool, u64)> {
 /// Parse a strict XSD-canonical `YYYY-MM-DDZ` `xsd:date` lexical form to the
 /// signed scaled-epoch `(neg, |T| in ms)` of its starting instant (midnight
 /// UTC). Returns `None` for anything outside the §13.4 fail-closed domain.
-fn canonical_date_scaled(lexical: &str) -> Option<(bool, u64)> {
+pub(crate) fn canonical_date_scaled(lexical: &str) -> Option<(bool, u64)> {
     let body = lexical.strip_suffix('Z')?;
     let days = parse_canonical_date_days(body)?;
     signed_mag(days * MS_PER_DAY)

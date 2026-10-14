@@ -2303,6 +2303,12 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
     let not_includes = n3_iri(N3_LOG, "notIncludes");
     let mut raws: Vec<RawRule> = Vec::new();
     for (rix, rule) in parsed.rules.iter().enumerate() {
+        // A premise's own universal (GH #6882) needs the batch engine's firing check.
+        if crate::n3::premise_universals(&rule.premise).is_some() {
+            return Err(format!(
+                "rule {rix}: premise-local @forAll universal (matched by the batch engine)"
+            ));
+        }
         let ordered = n3_order_premise(&rule.premise);
         let mut atoms = Vec::new();
         let mut n_plain = 0usize;
@@ -2629,7 +2635,8 @@ use cut_gate::{checkpoint, CountingOk, FullRebuild, Op};
 
 impl MaterializedN3Graph {
     /// Build the graph from an N3 RULES document (forward rules; any facts in the document
-    /// join the base) plus `base_facts`, and fully materialize the closure. The rules are
+    /// join the base) plus `base_facts`, and fully materialize the closure. A `base_facts`
+    /// entry with a variable outside a formula is ignored, as by [`insert`](Self::insert). The rules are
     /// analyzed once: if they qualify (see the module notes) the graph runs in
     /// [`N3Mode::Counting`] and ABox mutations are incremental; otherwise it runs in
     /// [`N3Mode::Fallback`] (every mutation re-runs the batch engine — always correct).
@@ -2722,7 +2729,8 @@ impl MaterializedN3Graph {
             limits,
         };
         let mut caller = Vec::with_capacity(base_facts.len());
-        for f in base_facts {
+        // As `insert`: a fact with a variable outside a formula is not a fact.
+        for f in base_facts.iter().filter(|f| f.iter().all(n3_fact_term)) {
             let Some(f) = g.inward(f) else {
                 return Err(format!(
                     "base blank label in {N3_GRAPH_BLANK}{}… names no node of the graph",

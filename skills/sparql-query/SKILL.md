@@ -89,6 +89,10 @@ The ordinary text-query entry points take `&Graph` + `&str` and return `Result<_
 - `sparq_core::civil::{days_from_civil, civil_from_days, format_utc}` convert proleptic-Gregorian
   dates to and from days since 1970-01-01 and format epoch seconds as a UTC `xsd:dateTime`
   (`YYYY-MM-DDTHH:MM:SSZ`), dependency-free.
+- `sparq_core::accept::media_ranges(&str)` parses an `Accept` header into `MediaRange`s
+  (lowercased `essence`, weight `q`, `param(name)`, `specificity(media_type)`); a weight that is
+  not a valid qvalue is `0`, and quoted parameter values may contain `,` and `;`. Every sparq HTTP
+  surface (sparq-server, the Solid / LWS server and its SPARQL endpoint) negotiates with it.
 - `pub struct QueryResult { pub vars: Vec<oxrdf::Variable>, pub rows: Vec<Vec<Option<oxrdf::Term>>> }`
   — `len()` / `is_empty()` count solution rows. The layout is **columnar** (the `vars` header is
   stored once, not per cell); index a cell as `result.rows[row][col]` where `col` is the position of
@@ -247,6 +251,12 @@ worse in either direction). `PlanNode::to_json()` emits a hand-written JSON proj
 N worst-by-wall-time analyzed plans (`record` / `push` / `slowest` / `to_json`) for an ops slow-query
 view. Honest boundaries: only BGP nodes carry an estimate (the only operators the planner sizes);
 q-error is `None` when either side is 0; `nanos` are always 0 on wasm32.
+
+Under the same `explain-json` feature, `plan.to_mermaid()` and `plan.to_dot()` return
+standalone Mermaid flowchart and Graphviz DOT source, respectively (no new dependencies).
+Both show escaped operator labels and parent-to-input edges, with deterministic preorder
+IDs (`n0`, `n1`, …) following `children` order. Metrics remain in `to_json()`;
+diagram strings end with a newline and contain no Markdown fences.
 
 Persistent planner statistics *(opt-in `persistent-stats`, OFF by default)* are rebuilt explicitly
 with `stats::analyze(&graph, saved_store_dir)`. This atomically writes a deterministic `stats.bin`

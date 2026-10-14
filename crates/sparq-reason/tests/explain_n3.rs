@@ -361,3 +361,26 @@ fn an_asserted_fact_and_a_derived_one_that_intern_alike_are_ambiguous() {
         assert!(n3_proof_tree_for_key(&dict, &run.steps, asserted, ExplainOpts::default()).is_none(), "{src}");
     }
 }
+
+/// `why()` re-runs the batch engine over the rules document and the graph's base: a fact
+/// the rules document asserted and the graph then deleted must not reappear as a premise.
+#[test]
+fn a_deleted_rules_document_fact_is_not_a_premise() {
+    let rules = "@prefix : <http://ex/> .\n\
+                 :a :p :v .\n\
+                 :a :p :w .\n\
+                 { ?s :p ?o } => { ?s :q :c } .";
+    let mut g = MaterializedN3Graph::new(rules, &[]).expect("rules parse");
+    let deleted = [ex("a"), ex("p"), ex("v")];
+    let f = [ex("a"), ex("q"), ex("c")];
+    assert_eq!(g.delete(std::slice::from_ref(&deleted)), 1);
+    assert!(g.contains(&f));
+    let tree = g.why(&f).expect("still derived from :w");
+    let leaves = proof_leaves(&tree);
+    assert_eq!(leaves.len(), 1, "{}", tree.to_text());
+    assert!(
+        !tree.to_text().contains("<http://ex/v>"),
+        "deleted fact used as a premise:\n{}",
+        tree.to_text()
+    );
+}

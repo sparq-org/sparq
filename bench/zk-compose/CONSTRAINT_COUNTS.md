@@ -308,6 +308,7 @@ VALUE lane: FILTER against the committed value handle of the dual-leaf commitmen
 
 | member | parameters | `circuit_size` |
 | --- | --- | --- |
+| `filter_value_dl_bool` | datatype=bool | 3,032 |
 | `filter_value_dl_datetime` | datatype=datetime | 3,070 |
 | `filter_value_dl_decimal` | datatype=decimal | 3,070 |
 | `filter_value_dl_f64` | datatype=f64 | 4,502 |
@@ -395,4 +396,4 @@ bench/zk-compose/scripts/constraint_pack.py --write
 bench/zk-compose/scripts/constraint_pack.py --check
 ```
 
-Coverage: 69 of 69 snapshot members across 18 families, 77 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
+Coverage: 70 of 70 snapshot members across 18 families, 77 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.

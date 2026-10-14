@@ -35,6 +35,14 @@ pub mod derivation;
 #[cfg(feature = "dual-leaf")]
 pub mod dispatch;
 pub mod driver;
+// The DualLeafV1 value-lane builders and renderers, reachable only by this
+// explicit name: the ordinary names build and render the V2 lanes.
+#[cfg(feature = "dual-leaf")]
+pub mod legacy_v1;
+// The typed value-lane proving inputs behind the checked prove entry
+// `driver::CircuitProver::prove_value_lane`.
+#[cfg(feature = "dual-leaf")]
+pub mod value_lane;
 // sq-xqfg (HolderPoP T5): in-circuit holder-PoK host-side wiring (B2).
 pub mod holder;
 pub mod issuer;
@@ -82,7 +90,10 @@ pub use sameas::{CanonEntry, CanonError, CanonTable, OWL_SAME_AS};
 pub use n3::{N3Builtin, N3Premise, N3Rule, N3RuleSet, N3Slot, N3SubsetError, MATH_NS};
 // sq-cfmv: the fail-closed (method × circuit) dispatch resolver.
 #[cfg(feature = "dual-leaf")]
-pub use dispatch::{resolve_circuit, resolve_circuit_for_scheme, DispatchError};
+pub use dispatch::{
+    check_lane_member_pairing, resolve_circuit, resolve_circuit_for_scheme,
+    resolve_circuit_for_use, DispatchError,
+};
 // sq-3kd2g.6: the fail-closed wave-1 fragment DISPATCH routing gate.
 // sq-h732x: + `verify_fragment_manifest`, the end-to-end extended-
 // fragment verification entry point (dispatch routing + the shared crypto stage,
