@@ -40,8 +40,11 @@ the historical private-store results above are not substituted for these checks.
 
 The dedicated [native composition CI workflow](../../.github/workflows/zk-native-composition.yml)
 runs real release tests, scoped Clippy and the unsupported-Noir CLI check on pull
-requests, merge groups and main-branch pushes. Heavy work runs only for relevant
-workspace, shared harness or Rust configuration changes; uncertain diffs run it.
+requests, merge groups and main-branch pushes. A pull request or push starts it only
+when it touches one of the lane's inputs (path filters generated from the classifier,
+`scripts/ci_native_composition_paths.py`); merge groups always start it. Inside a run,
+heavy work runs only for relevant workspace, shared harness or Rust configuration
+changes; uncertain diffs run it.
 It builds Circom from a pinned source commit and uses both committed lockfiles.
 It can also be run manually. Passing this lane is regression evidence for the
 bounded prototype, not an external cryptographic audit.

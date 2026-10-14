@@ -306,6 +306,11 @@ Materialize the authorization view from the access-control documents, then enfor
   (proposed-stable)** — the proposed semver-stable per-resource decision surface (freeze
   pending maintainer ratification, #1346 / #1248; see
   [`docs/api-stability.md`](../../docs/api-stability.md)).
+- `store.decide_removal(&Session, resource: &str) -> WacDecision` — the **removal decision**
+  for an LDP `DELETE` of a whole resource: `Write` from the static view, narrowed by attached
+  ODRL prohibitions. Unlike `decide`, no attached ODRL permission counts (those grant data
+  changes, not graph management; see the usage-control-policy SKILL). The MCP
+  `resource_delete` tool uses it.
 - `store.decide_create(&Session, container: &str, child_name: &str, Mode) -> WacDecision` /
   `is_control_document_name(name: &str) -> bool` — the **CREATE decision + its
   control-document guard** (sq-gg0qq.5, issue #2571). Minting a container child
