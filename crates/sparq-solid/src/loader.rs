@@ -24,7 +24,7 @@
 //! group-document triple whose predicate is in `solidx:` space — the analogue of the
 //! `urn:sparq:` reserved-principal guard ([`validate_principal_iri`]).
 
-use crate::{AccessProvenance, VerifiedCredentials, SOLIDX_NS};
+use crate::{AccessProvenance, VerifiedCredentials, AUTH_NS, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::{Dict, Id};
@@ -82,9 +82,23 @@ fn validate_principal_iri(iri: &str) -> Result<(), String> {
 /// space is DROPPED before it reaches the reasoner — the direct analogue of the
 /// `urn:sparq:` reserved-principal guard in [`validate_principal_iri`]. The trusted
 /// channel for creator/owner facts is [`AccessProvenance`] and nothing else.
+///
+/// The same holds for the `auth:` view vocabulary: only the rules conclude `auth:`
+/// facts and `rdf:type auth:…` classes, and those are what the auth view installs. A
+/// document triple in that vocabulary is dropped too, as is an `rdf:type` naming a
+/// `solidx:` or `auth:` class.
 fn is_reserved_derivation_predicate(t: &[Term; 3]) -> bool {
-    matches!(&t[1], Term::NamedNode(n) if n.as_str().starts_with(SOLIDX_NS))
+    let reserved = |iri: &str| iri.starts_with(SOLIDX_NS) || iri.starts_with(AUTH_NS);
+    match (&t[1], &t[2]) {
+        (Term::NamedNode(p), _) if reserved(p.as_str()) => true,
+        (Term::NamedNode(p), Term::NamedNode(o)) => {
+            p.as_str() == RDF_TYPE && reserved(o.as_str())
+        }
+        _ => false,
+    }
 }
+
+const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
 /// Drop ALL named graphs in the reserved IRI space — including a pre-existing
 /// `<urn:sparq:auth>`: a loaded dataset must not be able to smuggle in the rewrite
@@ -757,5 +771,51 @@ mod tests {
         assert_ne!(iri_origin(acl), iri_origin("https://other.ex/notes/n1"));
         // No scheme → the whole IRI is its own fallback bucket (no slash `.acl` governs it).
         assert_eq!(iri_origin("urn:sparq:auth"), "urn:sparq:auth");
+    }
+
+    /// Document triples in the view vocabulary (an `auth:` predicate, or an `rdf:type`
+    /// naming an `auth:`/`solidx:` class) never reach the reasoner, for either system.
+    #[test]
+    fn view_vocabulary_in_documents_is_dropped() {
+        let other = "https://other.ex/card#me";
+        let target = "https://pod.ex/secret";
+        let auth = |local: &str| format!("<{AUTH_NS}{local}>");
+        let rdf_type = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
+        let docs = [(System::Wac, "https://other.ex/.acl"), (System::Acp, "https://other.ex/.acr")];
+        for (system, doc) in docs {
+            let nq = format!(
+                "<https://pod.ex/secret#it> <https://ex.dev/ns#title> \"t\" <{target}> .\n\
+                 <https://other.ex/doc#it> <https://ex.dev/ns#title> \"t\" \
+                 <https://other.ex/doc> .\n\
+                 <{other}> {read} <{target}> <{doc}> .\n\
+                 <{other}> {write} <{target}> <{doc}> .\n\
+                 <https://other.ex/.acl#g> {rdf_type} {cond} <{doc}> .\n\
+                 <https://other.ex/.acl#g> {rdf_type} <{solidx}Thing> <{doc}> .\n",
+                read = auth("read"),
+                write = auth("write"),
+                cond = auth("ConditionalGrant"),
+                solidx = crate::SOLIDX_NS,
+            );
+            let graph = Graph::load_dataset(&nq, "nquads").unwrap();
+            let (prov, creds) = (AccessProvenance::new(), VerifiedCredentials::new());
+            let facts = assemble_facts(&graph, system, &prov, &creds).unwrap();
+            let in_view =
+                |x: &Term| matches!(x, Term::NamedNode(n) if n.as_str().starts_with(AUTH_NS));
+            let leaked: Vec<_> = facts
+                .iter()
+                .filter(|t| t.iter().any(in_view))
+                .collect();
+            assert!(leaked.is_empty(), "{leaked:?}");
+
+            let mut store = PodStore::new(graph);
+            match system {
+                System::Wac => store.materialize_wac().unwrap(),
+                System::Acp => store.materialize_acp().unwrap(),
+            };
+            let session = Session { agent: Some(other), client: None, issuer: None, now: None };
+            for mode in [Mode::Read, Mode::Write] {
+                assert!(store.accessible(&session, mode).is_empty(), "{mode:?}");
+            }
+        }
     }
 }
