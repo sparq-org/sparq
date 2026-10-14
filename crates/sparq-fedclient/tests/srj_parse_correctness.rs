@@ -16,7 +16,7 @@
 //!
 //! Gated on `fedclient`; the default build compiles this file to nothing.
 //!
-//! [OPUS-4.8] sq-bif.2 — flagged for Fable re-review when available.
+//! sq-bif.2 — flagged for Fable re-review when available.
 
 #![cfg(feature = "fedclient")]
 
@@ -74,7 +74,7 @@ fn ask_boolean_body_is_rejected_for_select() {
 
 #[test]
 fn results_before_head_and_unused_malformed_cells_preserve_dom_semantics() {
-    // [GPT-5.6] sq-1rtc2: witnesses order-independent borrowed parsing and deferred cell
+    // sq-1rtc2: witnesses order-independent borrowed parsing and deferred cell
     // decoding. Eagerly decoding every binding cell would reject `ignored`.
     let relation = parse_srj(
         r#"{"results":{"bindings":[{"ignored":17,"x":{"type":"literal","value":"ok"}}]},"head":{"vars":["x"]}}"#,

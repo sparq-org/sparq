@@ -457,11 +457,12 @@ four-flatmates pipeline.
    two patterns share a **subject**-position join variable and no characteristic set of a source
    carries both their predicates, no subject of that source satisfies both conjuncts — that
    same-source pairing, and every source-combination containing it, is provably dead, while the
-   source stays a valid candidate for each pattern *individually*. Recall-safety rests on a
-   **completeness guard** (`Σ_{C ∋ p} subjects == void:distinctSubjects` over distinct set
-   keys): served characteristic sets are routinely truncated, and truncation strictly lowers
-   that sum, so a truncated / unknown / non-partition summary **declines** rather than
-   over-prunes. *(P3, depends Phase 2)*
+   source stays a valid candidate for each pattern *individually*. Recall-safety rests on the
+   trusted builder-only `SourceDescriptor::char_sets_complete()` declaration, or the unchanged
+   accounting guard (`Σ_{C ∋ p} subjects == void:distinctSubjects` over distinct set keys).
+   Without the declaration, a truncated / unknown / non-partition summary **declines**;
+   falsely declaring completeness can drop answers (lose recall), like authority completeness.
+   *(P3, depends Phase 2)*
 7. **Phase 7 — B7 authorisation hook (WAC/ACP-aware source skipping).** **[NOT STARTED —
    needs the §9 Q4 decision; only the reserved `participates` field exists (Phase 1), which
    Phase 2 reads as a bare participation flag, NOT as access control]** Design + wire the

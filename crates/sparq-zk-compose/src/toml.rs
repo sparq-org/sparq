@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! Prover.toml emission for the circuit family.
 //!
 //! Each circuit `main`'s public + private inputs are written in declaration
@@ -13,7 +13,7 @@ use crate::manifest::{CircuitId, FieldHex, ProofInputs};
 /// Error returned by [`prover_toml_for`] when a `Prover.toml` cannot be emitted
 /// for the given inputs.
 ///
-/// [OPUS-4.8] sq-fi03 / PR #178: `prover_toml_for` is a public fn, so a premature
+/// sq-fi03 / PR #178: `prover_toml_for` is a public fn, so a premature
 /// call on a not-yet-wired arm must surface a recoverable error rather than panic
 /// (a `unimplemented!` in a public fn is a downstream-crash footgun).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub enum ProverTomlError {
     /// the witness, not the manifest, so a join Prover.toml cannot be emitted
     /// without it. The caller obtains the witness from [`crate::build::build_join`]
     /// and threads it through `prover_toml_for`'s `join_witness` parameter.
-    // [OPUS-4.8] sq-r2s8: the join proving path is now implemented; this error is
+    // sq-r2s8: the join proving path is now implemented; this error is
     // the "witness omitted for a JoinEq input" recoverable failure (no panic in a
     // public fn).
     JoinEqMissingWitness,
@@ -35,7 +35,7 @@ pub enum ProverTomlError {
     /// the witness from [`crate::build::build_filter_signed_int`] /
     /// [`crate::build::build_filter_decimal`] and threads it through
     /// `prover_toml_for`'s `filter_signed_witness` parameter.
-    // [OPUS-4.8] sq-7lrq: signed/decimal proving path; witness-omitted recoverable
+    // sq-7lrq: signed/decimal proving path; witness-omitted recoverable
     // failure (no panic in a public fn).
     FilterSignedMissingWitness,
     /// A [`ProofInputs::FilterValueDl`] (DUAL-LEAF value lane) was passed to the
@@ -44,12 +44,12 @@ pub enum ProverTomlError {
     /// witnesses the general entry threads, so the value-lane Prover.toml is
     /// emitted by the DEDICATED [`filter_value_dl_prover_toml`] instead. This keeps
     /// the general entry's signature unchanged (the value lane is opt-in,
-    /// `dual-leaf` feature). [OPUS-4.8] sq-xojl.
+    /// `dual-leaf` feature). sq-xojl.
     ///
-    /// [OPUS-4.8] sq-2ezsx: the same applies to the `xsd:double`
+    /// sq-2ezsx: the same applies to the `xsd:double`
     /// ([`filter_value_dl_f64_prover_toml`]) and `xsd:decimal`
     /// ([`filter_value_dl_decimal_prover_toml`]) sibling members, and
-    /// [OPUS-5] sq-wz99x: to the `xsd:dateTime` / `xsd:date` member
+    /// sq-wz99x: to the `xsd:dateTime` / `xsd:date` member
     /// ([`filter_value_dl_datetime_prover_toml`]).
     #[cfg(feature = "dual-leaf")]
     FilterValueDlUseDedicatedFn,
@@ -61,7 +61,7 @@ pub enum ProverTomlError {
     /// [`path_reach_prover_toml`] instead (obtain the witness from
     /// [`crate::build::build_path_reach`]). This keeps the general entry's
     /// signature unchanged (the path lane is opt-in, `extended-fragment` feature).
-    // [OPUS-4.8] sq-3kd2g.6.
+    // sq-3kd2g.6.
     #[cfg(feature = "extended-fragment")]
     PathReachUseDedicatedFn,
 }
@@ -103,7 +103,7 @@ impl std::fmt::Display for ProverTomlError {
 }
 
 /// Render the `Prover.toml` body for a DUAL-LEAF value-lane FILTER proof
-/// (`filter_value_dl_int`, [OPUS-4.8] sq-xojl). Order MUST match
+/// (`filter_value_dl_int`, sq-xojl). Order MUST match
 /// `zk/compose/filter_value_dl_int/src/main.nr`:
 /// challenge, operand_enc, op, bound, datatype_const, expected (public), then
 /// value_hook, lexical_component (private). The two private witnesses are FIELD
@@ -150,7 +150,7 @@ pub fn filter_value_dl_prover_toml(
 ///
 /// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
 /// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
-// [OPUS-5] sq-5xdlk: boolean value-lane Prover.toml. Opt-in, NOT-yet-sound.
+// sq-5xdlk: boolean value-lane Prover.toml. Opt-in, NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn filter_value_dl_boolean_prover_toml(
     challenge: &FieldHex,
@@ -174,7 +174,7 @@ pub fn filter_value_dl_boolean_prover_toml(
 }
 
 /// Render the `Prover.toml` body for a DUAL-LEAF `xsd:double` value-lane FILTER
-/// proof (`filter_value_dl_f64`, [OPUS-4.8] sq-2ezsx). Order MUST match
+/// proof (`filter_value_dl_f64`, sq-2ezsx). Order MUST match
 /// `zk/compose/filter_value_dl_f64/src/main.nr`: challenge, operand_enc, op,
 /// b_bits, datatype_const, expected (public), then value_hook, lexical_component
 /// (private). `value_hook` is the IEEE-754 double bit pattern (as a field);
@@ -207,7 +207,7 @@ pub fn filter_value_dl_f64_prover_toml(
 }
 
 /// Render the `Prover.toml` body for a DUAL-LEAF `xsd:decimal` value-lane FILTER
-/// proof (`filter_value_dl_decimal`, [OPUS-4.8] sq-2ezsx). Order MUST match
+/// proof (`filter_value_dl_decimal`, sq-2ezsx). Order MUST match
 /// `zk/compose/filter_value_dl_decimal/src/main.nr`: challenge, operand_enc, op,
 /// bound_neg, bound_scaled, datatype_const, expected (public), then value_neg,
 /// value_hook_scaled, lexical_component (private). The value handle is the SIGNED
@@ -243,7 +243,7 @@ pub fn filter_value_dl_decimal_prover_toml(
 }
 
 /// Render the `Prover.toml` body for a DUAL-LEAF `xsd:dateTime` / `xsd:date`
-/// value-lane FILTER proof (`filter_value_dl_datetime`, [OPUS-5] sq-wz99x). Order
+/// value-lane FILTER proof (`filter_value_dl_datetime`, sq-wz99x). Order
 /// MUST match `zk/compose/filter_value_dl_datetime/src/main.nr`: challenge,
 /// operand_enc, op, bound_neg, bound_scaled_epoch, datatype_const, expected
 /// (public), then value_neg, value_hook_scaled, lexical_component (private).
@@ -377,7 +377,7 @@ pub fn filter_int_prover_toml(
 }
 
 /// Render the `Prover.toml` body for a MANIFEST-COMPOSABLE filter_f64 proof
-/// ([OPUS-4.8] sq-q7e / sq-tat). Order MUST match `filter_f64_d{d}/src/main.nr`:
+/// (sq-q7e / sq-tat). Order MUST match `filter_f64_d{d}/src/main.nr`:
 /// challenge, operand_enc, op, b_bits, expected, digits.
 pub fn filter_f64_prover_toml(
     challenge: &FieldHex,
@@ -418,7 +418,7 @@ fn digits_array(digits: &[u8]) -> String {
 }
 
 /// Render the `Prover.toml` body for a MANIFEST-COMPOSABLE `filter_signed_int`
-/// proof ([OPUS-4.8] sq-7lrq). Order MUST match
+/// proof (sq-7lrq). Order MUST match
 /// `filter_signed_int_d{md}/src/main.nr`: PUBLIC `challenge, operand_enc, op,
 /// bound_neg, bound, expected` then PRIVATE `neg, mag_digits`. `neg` is the hidden
 /// operand's sign flag; `mag_digits` are its canonical MAGNITUDE digits (length
@@ -447,7 +447,7 @@ pub fn filter_signed_int_prover_toml(
 }
 
 /// Render the `Prover.toml` body for a MANIFEST-COMPOSABLE `filter_decimal` proof
-/// ([OPUS-4.8] sq-7lrq). Order MUST match `filter_decimal_i{id}_f{fd}/src/main.nr`:
+/// (sq-7lrq). Order MUST match `filter_decimal_i{id}_f{fd}/src/main.nr`:
 /// PUBLIC `challenge, operand_enc, op, bound_neg, bound_scaled, expected` then
 /// PRIVATE `neg, int_digits, frac_digits`. `neg` is the hidden operand's sign flag;
 /// `int_digits` (length ID) / `frac_digits` (length FD) are its canonical
@@ -478,7 +478,7 @@ pub fn filter_decimal_prover_toml(
 }
 
 /// Render the `Prover.toml` body for a hidden cross-credential `join_eq` proof
-/// ([OPUS-4.8] sq-r2s8). Order MUST match `join_eq_na{n_a}_nb{n_b}/src/main.nr`:
+/// (sq-r2s8). Order MUST match `join_eq_na{n_a}_nb{n_b}/src/main.nr`:
 /// PUBLIC `challenge, commit_a, commit_b, join_commitment, slot_a, slot_b` then
 /// PRIVATE `enc_a, counts_a, enc_b, counts_b, row_a, row_b, blinding`. `enc_a`/
 /// `enc_b` are padded to `n_a`/`n_b` slots by the caller (mirrors the scan arm).
@@ -527,7 +527,7 @@ pub fn join_prover_toml(
 /// depth_bound, attribution` then PRIVATE `path_len, nodes, counts, enc`. `nodes`
 /// is padded to `d` and each graph's `enc` to `n` by the caller (mirrors the scan
 /// arm's padding of `enc` to `n`).
-// [OPUS-4.8] sq-3kd2g.6.
+// sq-3kd2g.6.
 #[cfg(feature = "extended-fragment")]
 #[allow(clippy::too_many_arguments)]
 pub fn path_reach_prover_toml(
@@ -638,7 +638,7 @@ pub fn canonical_digits(value: u64) -> Vec<u8> {
 /// [`ProverTomlError::JoinEqMissingWitness`] — a recoverable error, never a panic
 /// (a public fn must not crash a downstream caller). The `join_witness` argument is
 /// ignored for every non-join input, exactly as `scan_*` is ignored for filters.
-/// [OPUS-4.8] sq-r2s8: the join_eq proving path is now implemented.
+/// sq-r2s8: the join_eq proving path is now implemented.
 ///
 /// For [`ProofInputs::FilterSignedInt`] / [`ProofInputs::FilterDecimal`] the private
 /// [`FilterSignedWitness`] (operand sign + canonical digits) MUST be supplied via
@@ -646,7 +646,7 @@ pub fn canonical_digits(value: u64) -> Vec<u8> {
 /// [`ProverTomlError::FilterSignedMissingWitness`] (recoverable, never a panic — the
 /// `filter_digits` arg does NOT carry the sign these members need). The
 /// `filter_signed_witness` argument is ignored for every other input.
-/// [OPUS-4.8] sq-7lrq: the signed-int / decimal proving path is now implemented.
+/// sq-7lrq: the signed-int / decimal proving path is now implemented.
 #[allow(clippy::too_many_arguments)]
 pub fn prover_toml_for(
     inputs: &ProofInputs,
@@ -659,10 +659,10 @@ pub fn prover_toml_for(
     // filter_f64). Signed-int / decimal carry their digits in `filter_signed_witness`.
     filter_digits: &[u8],
     // join witness (ignored for scan/filter): the join_eq member's private inputs
-    // (enc_a/counts_a/enc_b/counts_b/row_a/row_b/blinding). [OPUS-4.8] sq-r2s8.
+    // (enc_a/counts_a/enc_b/counts_b/row_a/row_b/blinding). sq-r2s8.
     join_witness: Option<&JoinWitness>,
     // signed-int / decimal witness (ignored for every other input): the operand's
-    // PRIVATE sign flag + canonical digits. [OPUS-4.8] sq-7lrq.
+    // PRIVATE sign flag + canonical digits. sq-7lrq.
     filter_signed_witness: Option<&FilterSignedWitness>,
 ) -> Result<(CircuitId, String), ProverTomlError> {
     let out = match inputs {
@@ -714,7 +714,7 @@ pub fn prover_toml_for(
             );
             (id.clone(), toml)
         }
-        // [OPUS-4.8] sq-q7e + sq-tat: composable xsd:double FILTER. `filter_digits`
+        // sq-q7e + sq-tat: composable xsd:double FILTER. `filter_digits`
         // carries the integer-valued double's canonical decimal digits (same role
         // as the filter_int digit witness); `b_bits` is the constant double's IEEE
         // bit pattern.
@@ -735,7 +735,7 @@ pub fn prover_toml_for(
             );
             (id.clone(), toml)
         }
-        // [OPUS-4.8] sq-7lrq: composable SIGNED xsd:integer FILTER. The operand's
+        // sq-7lrq: composable SIGNED xsd:integer FILTER. The operand's
         // PRIVATE sign flag + magnitude digits come from `filter_signed_witness`
         // (built by `build_filter_signed_int`); omitting it is a recoverable `Err`
         // (no panic in a public fn). `frac_digits` is empty for signed-int.
@@ -760,7 +760,7 @@ pub fn prover_toml_for(
             );
             (id.clone(), toml)
         }
-        // [OPUS-4.8] sq-7lrq: composable xsd:decimal FILTER. The operand's PRIVATE
+        // sq-7lrq: composable xsd:decimal FILTER. The operand's PRIVATE
         // sign flag + integer-part / fraction digits come from `filter_signed_witness`
         // (built by `build_filter_decimal`); `bound_scaled` is the host-prescaled
         // constant magnitude. Omitting the witness is a recoverable `Err`.
@@ -786,7 +786,7 @@ pub fn prover_toml_for(
             );
             (id.clone(), toml)
         }
-        // [OPUS-4.8] sq-xojl: DUAL-LEAF value-lane FILTER. Its private witness is two
+        // sq-xojl: DUAL-LEAF value-lane FILTER. Its private witness is two
         // FIELD elements (value_hook + lexical_component), a different shape from the
         // digit-byte witnesses this general entry threads, so the value-lane
         // Prover.toml is emitted by the dedicated `filter_value_dl_prover_toml` (which
@@ -796,10 +796,10 @@ pub fn prover_toml_for(
         ProofInputs::FilterValueDl { .. } => {
             return Err(ProverTomlError::FilterValueDlUseDedicatedFn);
         }
-        // [OPUS-4.8] sq-2ezsx: the double + decimal value-lane siblings also carry
+        // sq-2ezsx: the double + decimal value-lane siblings also carry
         // FIELD-element private witnesses, so they use the dedicated fns
         // (`filter_value_dl_f64_prover_toml` / `filter_value_dl_decimal_prover_toml`).
-        // [OPUS-5] sq-wz99x: same for the dateTime/date member
+        // sq-wz99x: same for the dateTime/date member
         // (`filter_value_dl_datetime_prover_toml`).
         #[cfg(feature = "dual-leaf")]
         ProofInputs::FilterValueDlF64 { .. }
@@ -807,7 +807,7 @@ pub fn prover_toml_for(
         | ProofInputs::FilterValueDlDateTime { .. } => {
             return Err(ProverTomlError::FilterValueDlUseDedicatedFn);
         }
-        // [OPUS-4.8] sq-bwwl / sq-r2s8 (step 4 proving path): hidden cross-credential
+        // sq-bwwl / sq-r2s8 (step 4 proving path): hidden cross-credential
         // JOIN. The public inputs (commit_a/commit_b/join_commitment/slot_a/slot_b)
         // come from `inputs`; the PRIVATE witnesses
         // (enc_a/counts_a/enc_b/counts_b/row_a/row_b/blinding) come from the
@@ -845,7 +845,7 @@ pub fn prover_toml_for(
             );
             (id.clone(), toml)
         }
-        // [OPUS-4.8] sq-3kd2g.6: bounded-depth path. Its private witness is the
+        // sq-3kd2g.6: bounded-depth path. Its private witness is the
         // chain-shaped `PathReachWitness` (path_len/nodes/counts/enc), a different
         // shape from the scalar/digit witnesses this general entry threads, so the
         // path Prover.toml is emitted by the dedicated `path_reach_prover_toml`
@@ -859,7 +859,7 @@ pub fn prover_toml_for(
     Ok(out)
 }
 
-// [OPUS-4.8] sq-bif.6: GLUE unit tests for the witness `Prover.toml` SERIALIZATION
+// sq-bif.6: GLUE unit tests for the witness `Prover.toml` SERIALIZATION
 // — the `FieldHex` hex round-trip, the array-vs-scalar rendering shape, the
 // declaration-order field layout each `*_prover_toml` emits, and the recoverable
 // missing-witness error arms of the public `prover_toml_for`. These cover the
@@ -1135,7 +1135,7 @@ mod toml_glue_tests {
         assert!(b.to_string().contains("FilterSignedWitness"));
     }
 
-    // [OPUS-4.8] sq-2ezsx: the double + decimal dedicated Prover.toml renderers
+    // sq-2ezsx: the double + decimal dedicated Prover.toml renderers
     // emit the public + private fields in the EXACT `main` declaration order of
     // their member, with the FIELD-element private witnesses. These cover the
     // NON-cryptographic serialization plumbing only (NOT-yet-sound, sq-qhy4).
@@ -1196,7 +1196,7 @@ mod toml_glue_tests {
         assert!(lines[9].starts_with("lexical_component = "));
     }
 
-    /// [OPUS-5] sq-wz99x: the dateTime/date renderer emits the member `main`'s
+    /// sq-wz99x: the dateTime/date renderer emits the member `main`'s
     /// declaration order — the decimal layout with `bound_scaled` renamed
     /// `bound_scaled_epoch`. A reorder silently desyncs the proof from the
     /// verifier's public-input reconstruction, so pin it here too.
@@ -1253,7 +1253,7 @@ mod toml_glue_tests {
                 datatype_const: fh("0x03"),
                 expected: true,
             },
-            // [OPUS-5] sq-wz99x: the dateTime/date member routes the same way.
+            // sq-wz99x: the dateTime/date member routes the same way.
             ProofInputs::FilterValueDlDateTime {
                 id: CircuitId::FilterValueDlDateTime,
                 operand_enc: fh("0x02"),
@@ -1269,7 +1269,7 @@ mod toml_glue_tests {
         }
     }
 
-    // [OPUS-4.8] sq-3kd2g.6: the bounded-depth path Prover.toml renderer emits the
+    // sq-3kd2g.6: the bounded-depth path Prover.toml renderer emits the
     // public + private fields in the EXACT `main` declaration order, and the
     // general `prover_toml_for` routes a PathReach input to the dedicated-fn error.
     #[cfg(feature = "extended-fragment")]

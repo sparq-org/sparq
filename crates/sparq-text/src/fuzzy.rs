@@ -4,7 +4,7 @@
 //! additionally records deletion signatures through distance two. A query
 //! probes only its own bounded deletion neighbourhood, then verifies candidates
 //! with exact Levenshtein distance; it never walks the full token dictionary.
-//! [GPT-5.6] sq-lsp7k.14
+//! sq-lsp7k.14
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

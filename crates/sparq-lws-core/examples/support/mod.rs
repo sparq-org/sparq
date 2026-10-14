@@ -19,7 +19,7 @@
 //!
 //! No perf NUMBERS live in markdown — the docs point at the JSON these examples generate.
 
-#![warn(clippy::undocumented_unsafe_blocks)] // [FABLE-5] every unsafe site needs a // SAFETY:
+#![warn(clippy::undocumented_unsafe_blocks)] // every unsafe site needs a // SAFETY:
 #![allow(dead_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -73,7 +73,7 @@ pub struct CountingAllocator;
 // SAFETY: pure pass-through wrapper over `System` (a sound allocator), adding Relaxed atomic
 // counters around it; the pointer/layout contracts are forwarded unchanged and no pointer `System`
 // returns is ever dereferenced, retained, or aliased. Registered in the unsafe-count ratchet:
-// compliance/memsafety/unsafe-register.md (sq-gg0qq.2). [FABLE-5]
+// compliance/memsafety/unsafe-register.md (sq-gg0qq.2).
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);

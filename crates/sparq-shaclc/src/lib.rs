@@ -1,4 +1,4 @@
-//! [FABLE-5] (epic sq-tonhr, child sq-tonhr.6) SHACL Compact Syntax
+//! (epic sq-tonhr, child sq-tonhr.6) SHACL Compact Syntax
 //! (1.2 + extended) parser for sparq — **rdf-shuttle-generated**.
 //!
 //! Two checked-in parsers generated from ONE Shuttle grammar

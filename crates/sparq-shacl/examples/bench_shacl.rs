@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-7iai) SHACL validation benchmark runner — the G1 TSV-emitting
+//! (sq-7iai) SHACL validation benchmark runner — the G1 TSV-emitting
 //! runner for `bench/shacl/`. It is the SHACL analogue of `sparq-cli bench`:
 //! validate one data graph against a directory of shape graphs and emit, per
 //! workload, the deterministic gate metrics + an advisory timing.

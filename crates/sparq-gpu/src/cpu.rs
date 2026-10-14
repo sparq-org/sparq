@@ -94,7 +94,7 @@ pub fn group_aggregate(
     Ok(out)
 }
 
-// [OPUS-4.8] sq-goay: unit tests for the CPU reference itself.
+// sq-goay: unit tests for the CPU reference itself.
 //
 // `tests/correctness.rs` only exercises these functions transitively, *and only
 // when a GPU adapter exists* — on CI (no device) every differential test takes

@@ -222,7 +222,7 @@ pub fn prov_from_proof(proof: &ProofTree, config: &ProvProofConfig) -> Vec<Tripl
 /// This is the string-serialization counterpart to `prov_from_proof`; it preserves
 /// that function's deterministic triple order and content-addressed IRIs.
 ///
-/// [GPT-5.6] sq-8jn86
+/// sq-8jn86
 pub fn prov_ntriples(proof: &ProofTree, config: &ProvProofConfig) -> String {
     sparq_engine::triples_to_ntriples(&prov_from_proof(proof, config))
 }

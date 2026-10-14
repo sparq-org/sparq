@@ -1,4 +1,4 @@
-//! Acceptance tests for the admission-decision equivalence comparator (bead `sq-yxkp7`). [FABLE-5]
+//! Acceptance tests for the admission-decision equivalence comparator (bead `sq-yxkp7`).
 //!
 //! Structural set-equivalence + fail-closed-asymmetry checks only — NOT a cryptographic
 //! soundness proof of any policy engine.

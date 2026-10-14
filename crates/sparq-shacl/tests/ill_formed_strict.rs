@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-11a) Ill-formed shapes graphs are reported as a FAILURE by the
+//! (sq-11a) Ill-formed shapes graphs are reported as a FAILURE by the
 //! strict channel — the W3C test-suite `sht:Failure` outcome — instead of only
 //! being skipped leniently.
 //!

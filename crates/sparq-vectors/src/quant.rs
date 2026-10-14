@@ -1,4 +1,4 @@
-//! [OPUS-4.8] **Vector quantization** for large stores (sibling task **sq-nq5**): shrink the
+//! **Vector quantization** for large stores (sibling task **sq-nq5**): shrink the
 //! per-vector memory footprint so 100M-scale stores fit a candidate cache in RAM, at a measured
 //! cost in recall. Two encoders, both round-trippable and both able to *estimate* a distance
 //! from the compressed codes alone:
@@ -396,7 +396,7 @@ impl ProductQuantizer {
         out
     }
 
-    /// [OPUS-4.8] (sq-qamd) Serializes the codebook to a self-describing little-endian byte block
+    /// (sq-qamd) Serializes the codebook to a self-describing little-endian byte block
     /// — `dim, m, k` (u32 each) then every centroid value as f32 — so it can be persisted alongside
     /// the on-disk graph and reloaded with [`from_bytes`](Self::from_bytes). The subspace layout is
     /// recomputed from `dim`/`m` on load (it is a pure function of the two), so only the learned
@@ -415,7 +415,7 @@ impl ProductQuantizer {
         out
     }
 
-    /// [OPUS-4.8] (sq-qamd) Reconstructs a quantizer from [`to_bytes`](Self::to_bytes). Errors on a
+    /// (sq-qamd) Reconstructs a quantizer from [`to_bytes`](Self::to_bytes). Errors on a
     /// truncated/over-long block or an invalid header (`m == 0`, `m > dim`, `k == 0`, `k > 256`) —
     /// the same validity envelope [`fit`](Self::fit) enforces, so a decoded quantizer is always sound.
     pub fn from_bytes(bytes: &[u8]) -> Result<ProductQuantizer, String> {
@@ -655,7 +655,7 @@ pub struct EncodedStore {
 }
 
 impl EncodedStore {
-    /// [OPUS-4.8] (sq-qamd) Builds an [`EncodedStore`] from a slot→id mapping and the flat
+    /// (sq-qamd) Builds an [`EncodedStore`] from a slot→id mapping and the flat
     /// `len × stride` code array (slot order) — the inverse of the `ids`/`codes` an encoder
     /// produces, used to reload a persisted candidate cache. Errors if `codes.len()` is not
     /// `ids.len() × stride` (or `stride == 0` with codes present), so a malformed block can't
@@ -694,7 +694,7 @@ impl EncodedStore {
     pub fn code(&self, slot: usize) -> &[u8] {
         &self.codes[slot * self.stride..(slot + 1) * self.stride]
     }
-    /// [OPUS-4.8] (sq-qamd) The flat `len × stride` code array (slot order) — for persisting the
+    /// (sq-qamd) The flat `len × stride` code array (slot order) — for persisting the
     /// candidate cache; pair with [`from_parts`](Self::from_parts) to reload it.
     pub fn codes(&self) -> &[u8] {
         &self.codes

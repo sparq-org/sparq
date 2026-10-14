@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-py8h.4 — hidden-key endpoint DISTINCT (the gated sub-piece of the
+// sq-py8h.4 — hidden-key endpoint DISTINCT (the gated sub-piece of the
 // bounded property-path operator): collapse duplicate *secret* endpoint pairs.
 //! Hidden-key endpoint **DISTINCT**: collapse duplicate *secret* endpoint pairs
 //! `(?a, ?b)` — where BOTH endpoints are private secret-shared join keys — into a
@@ -119,7 +119,7 @@ const OBJECT_VAR: &str = "__pp_b";
 /// each a bit-decomposition + AND-tree, so an unbounded `N` is a CPU/round
 /// denial-of-service on this surface. `N` is PUBLIC (the sort-network width is
 /// public), so the guard is a closed-form check before any crypto runs. A protocol
-/// guard, not a tuning knob. `[OPUS-4.8]`
+/// guard, not a tuning knob.
 pub const MAX_DISTINCT_ROWS: usize = 1 << 12; // 4096
 
 /// One candidate endpoint pair whose endpoints are **secret** join keys. The keys
@@ -171,7 +171,7 @@ struct SortRow {
 /// `(x', y')` where `x' = x + bit·(y − x)` and `y' = y − bit·(y − x)`. When
 /// `bit = 0` the pair is unchanged; when `bit = 1` it is swapped. One
 /// [`shamir::mul_shares_raw`] + [`ShamirDealer::degree_reduce`] for the shared
-/// `bit·(y − x)` term, reused for both sides; nothing is opened. `[OPUS-4.8]`
+/// `bit·(y − x)` term, reused for both sides; nothing is opened.
 fn conditional_swap(
     dealer: &mut ShamirDealer,
     bit: &[Share],
@@ -197,7 +197,7 @@ fn secret_and(dealer: &mut ShamirDealer, a: &[Share], b: &[Share]) -> Result<Vec
 /// `(a_i, b_i) > (a_j, b_j)` iff `a_i > a_j`, OR `a_i == a_j` AND `b_i > b_j`. Built
 /// from [`secure_greater_than`] + [`secure_equal_to_bit`]; the result is a fresh
 /// degree-`t` 0/1 sharing that is **never opened** (it drives the conditional swap
-/// arithmetically). `[OPUS-4.8]`
+/// arithmetically).
 fn lex_greater_bit(
     dealer: &mut ShamirDealer,
     a_i: Fp,
@@ -218,7 +218,7 @@ fn lex_greater_bit(
 
 /// Secret-shared equality on the composite key `(a, b)`: `(a_i, b_i) == (a_j, b_j)`
 /// iff `a_i == a_j` AND `b_i == b_j`. Two [`secure_equal_to_bit`] + one
-/// [`secret_and`]; never opened. `[OPUS-4.8]`
+/// [`secret_and`]; never opened.
 fn lex_equal_bit(
     dealer: &mut ShamirDealer,
     a_i: Fp,
@@ -258,7 +258,7 @@ fn const_sharing(n: usize, c: Fp) -> Vec<Share> {
 /// Fail-closed parameter checks: `n >= 2t+1` (the conditional swap / AND / compare
 /// all need the degree-reduction headroom), `N` within [`MAX_DISTINCT_ROWS`],
 /// `bound >= N` (never truncate a distinct pair), and every key `< 2^COMPARE_BITS`.
-/// All PUBLIC / statically checkable before any crypto runs. `[OPUS-4.8]`
+/// All PUBLIC / statically checkable before any crypto runs.
 fn check_params(
     backend: &ShamirBackend,
     pairs: &[SecretEndpointPair],
@@ -387,7 +387,7 @@ fn build_distinct_candidates(
 /// `pairs.len()` — fail-closed).
 ///
 /// See the module docs for the full construction and the (semi-honest,
-/// honest-majority) security tier. `[OPUS-4.8]`
+/// honest-majority) security tier.
 pub fn distinct_hidden_pairs(
     backend: &ShamirBackend,
     pairs: &[SecretEndpointPair],
@@ -416,7 +416,7 @@ pub fn distinct_hidden_pairs(
 
 /// Like [`distinct_hidden_pairs`] but returns the raw oblivious-output slots
 /// (`B` shuffled slots) + the modelled [`DistinctCost`] — the transcript-level view
-/// (witnesses that exactly `B` slots are revealed, L1 bounded to `B`). `[OPUS-4.8]`
+/// (witnesses that exactly `B` slots are revealed, L1 bounded to `B`).
 pub fn distinct_hidden_pairs_slots(
     backend: &ShamirBackend,
     pairs: &[SecretEndpointPair],
@@ -436,7 +436,7 @@ pub fn distinct_hidden_pairs_slots(
 }
 
 /// The raw oblivious output (`ObliviousOutput`-shaped: `B` slots + output cost), for
-/// callers wiring this into the oblivious-output cost model. `[OPUS-4.8]`
+/// callers wiring this into the oblivious-output cost model.
 pub fn distinct_hidden_pairs_oblivious(
     backend: &ShamirBackend,
     pairs: &[SecretEndpointPair],

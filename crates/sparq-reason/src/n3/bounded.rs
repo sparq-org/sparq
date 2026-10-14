@@ -26,6 +26,11 @@ use super::model::Term;
 const BW_DEPTH: usize = 64;
 /// Steps one formula-containment search may take.
 const CONTAINMENT_BUDGET: usize = 100_000;
+/// Pairing attempts the unifications of one budget may make past the free allowances of
+/// their formula matches ([`StepBudget::unification`]).
+const UNIFICATION_BUDGET: usize = 100_000;
+/// Why a unification was cut short.
+const UNIFICATION_CUT: &str = "formula unification exhausted its step budget";
 /// Cells one walk of an `rdf:first`/`rdf:rest` data list may visit.
 const LIST_WALK_CAP: usize = 100_000;
 
@@ -176,28 +181,90 @@ pub(crate) fn backward_step(
     }
 }
 
-/// A fresh step budget for one formula-containment search.
-pub(crate) struct StepBudget(usize);
+/// A step budget: for one formula-containment search, or for unifications.
+///
+/// A unification budget also carries a free allowance for the formula match it is in
+/// ([`StepBudget::enter_formula`]): the pairings of a search that never backtracks.
+/// Steps come from the free allowance first; it is dropped when the outermost formula
+/// match ends, so it never carries over to another match or tops up `left`.
+pub(crate) struct StepBudget {
+    /// Steps left beyond the free allowance. Never added to.
+    left: usize,
+    /// The free allowance of the outermost formula match in progress.
+    free: usize,
+    /// Formula matches in progress, nested.
+    depth: usize,
+    /// A step was refused: the budget stays spent.
+    spent: bool,
+}
 
 impl StepBudget {
-    pub(crate) fn containment() -> Self {
-        StepBudget(CONTAINMENT_BUDGET)
+    fn new(left: usize) -> Self {
+        StepBudget {
+            left,
+            free: 0,
+            depth: 0,
+            spent: false,
+        }
     }
 
-    /// Take one step; `false` once the budget is spent.
+    pub(crate) fn containment() -> Self {
+        Self::new(CONTAINMENT_BUDGET)
+    }
+
+    /// The budget of unifications: `UNIFICATION_BUDGET` steps, plus each outermost
+    /// formula match's free allowance.
+    pub(crate) fn unification() -> Self {
+        Self::new(UNIFICATION_BUDGET)
+    }
+
+    /// A formula match starts. The outermost one gets `free` steps for itself and every
+    /// match nested in it.
+    pub(crate) fn enter_formula(&mut self, free: usize) {
+        if self.depth == 0 {
+            self.free = free;
+        }
+        self.depth += 1;
+    }
+
+    /// A formula match ended. When it was the outermost, its unused free steps are
+    /// dropped.
+    pub(crate) fn exit_formula(&mut self) {
+        self.depth -= 1;
+        if self.depth == 0 {
+            self.free = 0;
+        }
+    }
+
+    /// Take one step; `false` once the budget is spent, and from then on.
     pub(crate) fn take(&mut self) -> bool {
-        match self.0.checked_sub(1) {
+        if self.spent {
+            return false;
+        }
+        if let Some(n) = self.free.checked_sub(1) {
+            self.free = n;
+            return true;
+        }
+        match self.left.checked_sub(1) {
             Some(n) => {
-                self.0 = n;
+                self.left = n;
                 true
             }
-            None => false,
+            None => {
+                self.spent = true;
+                false
+            }
         }
+    }
+
+    /// Mark the budget spent: every later step is refused.
+    pub(crate) fn spend(&mut self) {
+        self.spent = true;
     }
 
     /// The search result, cut if the budget ran out.
     pub(crate) fn finish<T>(self, value: T) -> Bounded<T> {
-        if self.0 == 0 {
+        if self.spent || self.left == 0 {
             Bounded::cut(
                 value,
                 "formula containment search exhausted its step budget",
@@ -206,6 +273,11 @@ impl StepBudget {
             Bounded::complete(value)
         }
     }
+}
+
+/// A unification of the run `run` ran out of steps: it did not unify, which is a cut.
+pub(crate) fn unification_exhausted(run: &Truncation) {
+    run.record(UNIFICATION_CUT);
 }
 
 /// Walk a list cell by cell: `next(cell)` yields `(member, rest)` for a cons cell, or
@@ -293,12 +365,16 @@ const CLOSURE_FACTS: usize = 50_000_000;
 /// rule set builds on purpose, and small enough that a term which doubles each round
 /// (GH #6771) is refused while the closure's copies of it still fit in memory.
 const CLOSURE_TERM_BYTES: usize = 16 << 20;
+/// Default [`ClosureLimits::max_join_rows`] (GH #6938): unbounded, so a closure accepted
+/// before the allowance existed is still accepted. A caller opts in by setting a limit.
+const CLOSURE_JOIN_ROWS: usize = usize::MAX;
 
 /// Why a forward closure was stopped by its [`ClosureLimits`].
 const CLOSURE_CUT: &str = "forward closure limit exceeded";
 
 /// The allowance of one N3 forward closure: how many rounds it may run, how many facts it
-/// may hold, and how large a term a functional builtin may derive, before it is refused.
+/// may hold, how large a term a functional builtin may derive, and how many binding rows
+/// and rule firings one round may produce, before it is refused.
 ///
 /// A rule set that never reaches a fixpoint (each round derives a new, syntactically
 /// distinct fact) would otherwise run forever, and one whose derived terms grow (a string
@@ -330,12 +406,54 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// module; the guard test `substitution_goes_through_the_bounded_module` is a lexical
 /// tripwire for a crate-internal copy, not the guarantee.
 ///
+/// `max_join_rows` (GH #6938) bounds the transient work of one round: the binding rows its
+/// premise joins produce and the times its rules fire. Without it their number grows with
+/// the product of the pattern matches (a premise of k unconstrained patterns over n facts
+/// makes n^k rows) even when the distinct facts fit. The default is unbounded
+/// (`usize::MAX`), so no closure accepted without the allowance is refused by default; set
+/// a limit to opt in. Each round of a closure gets the allowance afresh, and every engine
+/// charges the same two things:
+/// * a **row** for each binding row a premise step that can multiply rows produces: a
+///   join atom (each stored fact it matches, each backward proof of it, and the delta
+///   facts a semi-naive round seeds it with), a list generator (`list:member`, `list:in`,
+///   `list:iterate`), and each match a formula-scope search finds (`log:includes`,
+///   `log:notIncludes`, `log:collectAllIn` and `log:forAllIn` over a written formula). A
+///   step that keeps at most one row per input row (a filter, a functional builtin, the
+///   outcome of a negation or an aggregation) cannot multiply them and is not charged. The
+///   rows a store-scoped clause (`log:includes`, `log:notIncludes`, `log:collectAllIn`,
+///   `log:forAllIn` over the store) or a backward rule's premise produces are charged the
+///   same way, to the round that evaluates them;
+/// * a **firing** for each conclusion triple a complete premise binding instantiates, and
+///   for each conclusion the transitivity fast path instantiates, whether or not the fact
+///   is new.
+///
+/// The text engine and the counting engine charge each row as it is produced, before it
+/// is stored (a backward proof as it is projected onto its goal, a formula-scope match as
+/// the search finds it), so a round never holds more charged rows than the allowance. The compiled
+/// evaluator's hash join checks the allowance once per candidate fact it probes, so a
+/// join stops at most one candidate's matches past it. Every engine charges a rule's
+/// firings in one batch, once its premise is evaluated and before any conclusion is
+/// instantiated. A round that would pass the allowance is refused like any other limit: a
+/// cut, and the run's error naming `max_join_rows`. An N3 query
+/// ([`reason_n3_query_terms`](crate::n3::reason_n3_query_terms)) charges the rows of its
+/// premises over the closure as one more round (its answers are deduplicated as they are
+/// built, so its firings are not charged).
+///
 /// What it does not bound:
 /// * the closure's total memory: many distinct terms just under the limit are bounded
-///   only by `max_facts`;
-/// * the intermediate join work within a round (the binding rows of a premise join, or
-///   how many times rules fire), on any engine: the text engine, the compiled evaluator
-///   and the incremental counting engine alike (GH #6938);
+///   only by `max_facts`, and the rows of one round only by `max_join_rows`, which is
+///   unbounded unless set;
+/// * the steps of a formula-scope search beyond the matches it finds: each search is
+///   bounded by its own step budget (`CONTAINMENT_BUDGET`, through
+///   `StepBudget::containment`), and a search it stops is a cut;
+/// * the pairings formula unification tries (a `{ … }` pattern matched against a
+///   `{ … }` value, `formula_unify` in the text engine): it returns at most one binding,
+///   so it adds no rows. Each unification has its own step budget
+///   (`StepBudget::unification`): `UNIFICATION_BUDGET` steps, plus a free allowance for
+///   its outermost formula match that covers a search that never backtracks and is
+///   dropped when that match ends. Past it the terms do not unify and the run records a
+///   cut. The unifications of one formula-containment search share one such budget, and
+///   one that runs out stops that search as a cut (GH #6953);
 /// * the document's own parse, which is not charged: its memory is bounded by its input
 ///   text. A `log:parsedAsN3` / `log:semantics` parse is charged; beyond its allowance it
 ///   holds only a scratch copy of one token, or an error message quoting one, at a time
@@ -355,16 +473,24 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// `max_facts` facts. Past any limit the graph rebuilds through the batch engine
 /// under the same limits, so it holds the batch engine's closure or fails closed with its
 /// error. Its rounds are not the batch engine's schedule, so under equal round or fact
-/// limits it can hold a closure a from-scratch batch run near the boundary refuses.
+/// limits it can hold a closure a from-scratch batch run near the boundary refuses. It
+/// charges `max_join_rows` per wave (and per local round of a layer): each row a plain
+/// atom, its seed or a negation guard produces, and each firing. A wave over a small delta
+/// charges far less than a batch round over every fact, so the graph never refuses a
+/// closure the batch engine accepts (a refusal rebuilds through it), but it keeps a
+/// mutation whose wave fits even when a from-scratch batch round would not.
 ///
 /// The opt-in `compiled-rules` evaluator (`n3::compiled`, GH #6855) takes the same
 /// allowance (`eval_with_limits`; `eval` uses the default) and refuses with the same
 /// error: each builtin result, and each argument list a builtin is evaluated over, is
 /// sized the way the text engine sizes it before it is built, and its conclusions build
-/// no new term (they copy ids the premise bound). Its fixpoint schedule differs (no
-/// closing naive check round, no transitivity fast path, no quoted-triple substitution
-/// checkpoints), so under equal limits the two engines can accept or refuse differently
-/// near a boundary.
+/// no new term (they copy ids the premise bound). It charges `max_join_rows` for each row
+/// its hash join emits (before the join's repeated-variable check) and each firing, and
+/// its first round of a stratum is naive, as the text engine's is. Its fixpoint schedule
+/// differs (no closing naive check round, no transitivity fast path, no quoted-triple
+/// substitution checkpoints, and a semi-naive round seeds a pattern from the delta in
+/// place rather than first), so under equal limits the two engines can accept or refuse
+/// differently near a boundary.
 ///
 /// One over-refusal is deliberate: a builtin's argument list is a term it builds, so
 /// `log:conjunction` over many copies of one large formula is refused when the copies
@@ -392,16 +518,105 @@ pub struct ClosureLimits {
     /// triples. The terms it covers are checked before they are built (see the type's
     /// docs). Default 16 MiB.
     pub max_term_bytes: usize,
+    /// Binding rows and rule firings one round of the closure may produce, counted
+    /// together: each row a join atom, list generator or `log:includes` produces, and each
+    /// conclusion triple a rule instantiates (see the type's docs for exactly what is
+    /// charged and when). Default unbounded (`usize::MAX`): set a limit to opt in.
+    pub max_join_rows: usize,
 }
 
 impl Default for ClosureLimits {
-    /// 1,000,000 rounds, 50,000,000 facts and 16 MiB per derived term.
+    /// 1,000,000 rounds, 50,000,000 facts, 16 MiB per derived term and unbounded join rows
+    /// per round.
     fn default() -> Self {
         ClosureLimits {
             max_rounds: CLOSURE_ROUNDS,
             max_facts: CLOSURE_FACTS,
             max_term_bytes: CLOSURE_TERM_BYTES,
+            max_join_rows: CLOSURE_JOIN_ROWS,
         }
+    }
+}
+
+/// The join-work allowance of one round of a forward closure
+/// ([`ClosureLimits::max_join_rows`], GH #6938): the binding rows and rule firings the
+/// round may still produce. Each closure makes its own (a nested closure gets the
+/// allowance afresh, as with its rounds) and calls [`JoinWork::round`] at the start of
+/// each round; every row and firing is [charged](JoinWork::charge) before it is stored.
+///
+/// Spent, it refuses the run (the cut and the run's error, as [`derived_term`] does) and
+/// stays spent: later rounds of the same closure produce nothing, so the closure reaches
+/// its end quickly and fails with the refusal.
+///
+/// `usize::MAX`, the default, is the unbounded sentinel: no accounting at all, and every
+/// charge succeeds, so the default can never refuse. A set limit is checked exactly.
+pub(crate) struct JoinWork {
+    left: Cell<usize>,
+    limit: usize,
+    spent: Cell<bool>,
+    /// The limit is the unbounded sentinel: charges are not counted.
+    unbounded: bool,
+}
+
+impl JoinWork {
+    /// The allowance of one round of a closure of the run `run`.
+    pub(crate) fn forward(run: &Truncation) -> JoinWork {
+        let limit = run.limits.max_join_rows;
+        JoinWork {
+            left: Cell::new(limit),
+            limit,
+            spent: Cell::new(false),
+            unbounded: limit == usize::MAX,
+        }
+    }
+
+    /// A new round: the full allowance again, unless it was spent.
+    pub(crate) fn round(&self) {
+        if !self.spent.get() {
+            self.left.set(self.limit);
+        }
+    }
+
+    /// The join kernel's view of the rows the round may still produce.
+    #[cfg(feature = "compiled-rules")]
+    pub(crate) fn kernel_view(&self) -> RowsLeft {
+        // Unbounded: `rows > usize::MAX` never holds, so the kernel never stops.
+        RowsLeft(if self.unbounded { usize::MAX } else { self.left.get() })
+    }
+
+    /// Charge `n` rows or firings about to be stored: `true` when the round's allowance
+    /// covers them. Otherwise the run is refused (recorded on `run`) and nothing may be
+    /// stored. Under the unbounded default it always succeeds and counts nothing.
+    #[inline]
+    pub(crate) fn charge(&self, n: usize, run: &Truncation) -> bool {
+        if self.unbounded {
+            return true;
+        }
+        match self.left.get().checked_sub(n) {
+            Some(left) => {
+                self.left.set(left);
+                true
+            }
+            None => {
+                self.exceeded(run);
+                false
+            }
+        }
+    }
+
+    #[cold]
+    fn exceeded(&self, run: &Truncation) {
+        self.left.set(0);
+        self.spent.set(true);
+        let limit = self.limit;
+        run.refuse(|| {
+            format!(
+                "n3: {CLOSURE_CUT}: one round's premise joins and rule firings would \
+                 produce more than max_join_rows ({limit}) binding rows: the rules join \
+                 patterns whose matches multiply (raise ClosureLimits::max_join_rows to \
+                 allow more)"
+            )
+        });
     }
 }
 
@@ -432,6 +647,20 @@ pub(crate) fn term_bytes(t: &Term) -> usize {
         }
     }
     total
+}
+
+/// The compiled evaluator's join kernel's view of a round's [`JoinWork`]: the rows it may
+/// still emit. Past them the kernel stops at its next candidate, and the evaluator's
+/// charge of the rows it emitted refuses the run.
+#[cfg(feature = "compiled-rules")]
+pub(crate) struct RowsLeft(usize);
+
+#[cfg(feature = "compiled-rules")]
+impl sparq_substrate::join::Budget for RowsLeft {
+    #[inline]
+    fn exhausted(&self, rows: usize) -> bool {
+        rows > self.0
+    }
 }
 
 /// The [`term_bytes`] of an `xsd:string` literal whose lexical form has `lex` bytes.
@@ -1366,6 +1595,46 @@ pub(crate) fn int_of_f64(n: f64) -> Bounded<Option<i64>> {
 mod tests {
     use super::*;
 
+    /// #6953: a formula match's free allowance covers only that match: what it leaves
+    /// unused is dropped when it ends, so repeated matches never top up the budget.
+    #[test]
+    fn free_formula_steps_never_top_up_the_budget() {
+        let mut steps = StepBudget::unification();
+        for _ in 0..3 {
+            steps.enter_formula(UNIFICATION_BUDGET);
+            steps.enter_formula(UNIFICATION_BUDGET); // nested: no allowance of its own
+            assert!(steps.take());
+            steps.exit_formula();
+            steps.exit_formula();
+        }
+        let taken = std::iter::from_fn(|| steps.take().then_some(())).count();
+        assert_eq!(taken, UNIFICATION_BUDGET);
+        steps.enter_formula(10);
+        assert!(!steps.take(), "a spent budget stays spent");
+    }
+
+    #[test]
+    fn the_unbounded_join_work_never_refuses() {
+        let run = Truncation::top_level();
+        let work = JoinWork::forward(&run);
+        assert!(work.charge(usize::MAX, &run));
+        assert!(work.charge(usize::MAX, &run));
+        assert!(work.charge(usize::MAX.saturating_mul(3), &run));
+        work.round();
+        assert!(work.charge(usize::MAX, &run));
+        assert_eq!(run.refusal(), None);
+        assert_eq!(run.get(), None);
+        // A set limit is checked exactly.
+        let run = Truncation::top_level_with(ClosureLimits {
+            max_join_rows: 2,
+            ..ClosureLimits::default()
+        });
+        let work = JoinWork::forward(&run);
+        assert!(work.charge(2, &run));
+        assert!(!work.charge(1, &run));
+        assert!(run.refusal().is_some_and(|e| e.contains("max_join_rows (2)")));
+    }
+
     thread_local! {
         /// A test's `(rounds, facts)` closure allowance in place of the defaults.
         pub(super) static CLOSURE_OVERRIDE: Cell<Option<(usize, usize)>> =
@@ -1579,6 +1848,7 @@ mod tests {
                 max_rounds: 1_000_000,
                 max_facts: 50_000_000,
                 max_term_bytes: 16 << 20,
+                max_join_rows: usize::MAX,
             }
         );
         let sink = Cell::new(false);

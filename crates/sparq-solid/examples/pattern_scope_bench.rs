@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-lrtc3.3 — the pattern-scope measured overhead envelope. Run:
+//! sq-lrtc3.3 — the pattern-scope measured overhead envelope. Run:
 //!     cargo run -p sparq-solid --features pattern-scope --release --example pattern_scope_bench
 //!
 //! Emits ONE JSON object to stdout (committed under `bench/pattern-scope/`; work-box

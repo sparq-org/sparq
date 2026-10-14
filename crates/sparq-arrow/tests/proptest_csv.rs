@@ -1,4 +1,4 @@
-//! [FABLE-5] Seeded property tests for flattened-CSV identity over generated query
+//! Seeded property tests for flattened-CSV identity over generated query
 //! results, mirroring the IPC/Parquet suites with CSV-hostile lexical content
 //! (delimiters, quotes, newlines, whitespace) in the literal strategy.
 #![cfg(feature = "csv")]
@@ -71,7 +71,7 @@ proptest! {
         ..ProptestConfig::default()
     })]
 
-    /// [FABLE-5] Mutation witness: changing a variable position, term, null cell, or
+    /// Mutation witness: changing a variable position, term, null cell, or
     /// row in either expected value makes the corresponding exact identity assertion
     /// fail.
     #[test]

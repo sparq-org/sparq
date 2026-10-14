@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-4foq0 (design record `research/stratified-datalog-rules.md` §6.3) —
+//! sq-4foq0 (design record `research/stratified-datalog-rules.md` §6.3) —
 //! **incremental maintenance under insert/delete across strata**: DRed
 //! (delete-and-rederive, Gupta–Mumick–Subrahmanian, SIGMOD 1993) for positive
 //! strata plus rederivation at stratum boundaries for the non-monotonic ones.
@@ -32,7 +32,7 @@
 //!   the stratification guarantee makes recomputation from the maintained lower
 //!   layers exact. The new derived set is diffed against the old one, so higher
 //!   strata still see a minimal delta.
-//! * **[GPT-5.6] Variable-predicate relevance.** A variable-predicate read is
+//! * **Variable-predicate relevance.** A variable-predicate read is
 //!   marked `read_any`, and a variable-predicate head is marked `head_any`.
 //!   Therefore no changed predicate can be skipped at that stratum (including
 //!   removal/re-ownership through a dynamic head), mirroring the stratifier's

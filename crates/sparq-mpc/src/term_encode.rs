@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-dl81 — the collision-resistant Term->Fp join-key encoder + the
+// sq-dl81 — the collision-resistant Term->Fp join-key encoder + the
 // injectivity contract the hidden-value join rests on.
 //! Domain-separated `Term -> Fp` encoding for PRIVATE join keys.
 //!
@@ -442,7 +442,7 @@ mod tests {
         );
     }
 
-    // === Byte-stability known-answer (KAT) guard. [OPUS-4.8] sq-jkcj.
+    // === Byte-stability known-answer (KAT) guard. sq-jkcj.
     //
     // The `sha2` 0.10 -> 0.11 dependency bump changed the crate's *API* (the
     // `Digest`/`Output` types: `GenericArray` -> `hybrid-array::Array`), NOT the

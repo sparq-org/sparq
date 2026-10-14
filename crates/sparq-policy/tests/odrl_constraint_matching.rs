@@ -1,6 +1,6 @@
 //! ODRL constraint-matching conformance batch — end-to-end parse + evaluate tests
 //! for the three related matching-semantics features, each through the REAL
-//! `parse_policy_str` + `evaluate` path (not a mock). [OPUS-4.8]
+//! `parse_policy_str` + `evaluate` path (not a mock).
 //!
 //! - **`odrl:use` umbrella vs the ODRL action hierarchy (sq-euhr3).** `use` subsumes
 //!   its sub-actions (`read`/`write`/…) but NOT the ownership-`transfer` subtree
@@ -452,8 +452,8 @@ fn empty_or_is_fail_closed() {
 }
 
 // ===========================================================================
-// sq-c2aze — `odrl:recipient` constraints resolve party-collection membership
-// ([FABLE-5]): a recipient may be a party OR a member of an `odrl:PartyCollection`,
+// sq-c2aze — `odrl:recipient` constraints resolve party-collection membership:
+// a recipient may be a party OR a member of an `odrl:PartyCollection`,
 // mirroring the assignee field's equality-or-membership lookup. Membership draws
 // ONLY on the request-supplied `with_party_membership(s)` evidence — with no edge,
 // recipient matching stays the flat base case (fail-closed, never widened).
@@ -691,7 +691,7 @@ fn recipient_status_reflects_membership_resolution() {
 }
 
 // ===========================================================================
-// sq-dkuff — LIST-valued LogicalConstraint combinator operands ([FABLE-5]):
+// sq-dkuff — LIST-valued LogicalConstraint combinator operands:
 // `odrl:or ( <c1> <c2> )` binds the combinator object to the RDF-collection
 // HEAD; pre-fold that head degraded to the unsatisfiable guard (fail-closed on
 // permissions, but silently DISABLING a prohibition's compound carve-out). The
@@ -1041,7 +1041,7 @@ rdf:nil odrl:leftOperand odrl:purpose ; odrl:operator odrl:eq ;
 // membership evidence, added so a consumer that PERSISTS a rule as a re-checked head
 // (the sparq-solid ODRL bridge) can expand a collection-valued `odrl:assignee` into one
 // head per member — `party_matches` is unusable there because a session carries no
-// membership evidence. [SONNET-4.6]
+// membership evidence.
 // ===========================================================================
 
 #[test]
@@ -1079,7 +1079,7 @@ fn party_collection_members_reports_exactly_the_supplied_evidence() {
 // DOCUMENT, carried independently of any member list. A consumer that freezes a rule
 // into an identity-matched head (the sparq-solid ODRL bridge) must recognise a
 // collection with ZERO supplied membership edges, which request evidence alone can
-// never do. [SONNET-4.6]
+// never do.
 // ===========================================================================
 
 #[test]

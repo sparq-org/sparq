@@ -8,7 +8,7 @@
 //! pattern (the predicate-passthrough arm), and the "ambiguous"/"duplicate"
 //! companion-attachment errors (more than one match on a variable carrying a
 //! `text:score`/`text:slop`). Every test asserts a CONCRETE result, not mere
-//! line execution. [OPUS-4.8] sq-bj7j
+//! line execution. sq-bj7j
 #![cfg(feature = "engine")]
 
 use oxrdf::Term;
@@ -41,7 +41,7 @@ fn iri(t: &Option<Term>) -> String {
 const PREFIX: &str = "PREFIX text: <http://sparq.dev/text#>";
 
 /// The budgeted entry point under an unlimited budget returns exactly what the
-/// unbudgeted one does — same hits, same rewrite path. [OPUS-4.8]
+/// unbudgeted one does — same hits, same rewrite path.
 #[test]
 fn with_budget_unlimited_matches_unbudgeted() {
     let (g, idx) = setup();
@@ -60,7 +60,7 @@ fn with_budget_unlimited_matches_unbudgeted() {
 }
 
 /// A tight `max_rows` budget aborts the rewritten query: the budget is threaded
-/// through the rewrite into the engine, not silently dropped. [OPUS-4.8]
+/// through the rewrite into the engine, not silently dropped.
 #[test]
 fn with_budget_max_rows_is_enforced_through_the_rewrite() {
     let (g, idx) = setup();
@@ -75,7 +75,7 @@ fn with_budget_max_rows_is_enforced_through_the_rewrite() {
 }
 
 /// CONSTRUCT carrying a `text:` pattern: the non-SELECT arm of `rewrite_query`
-/// is exercised, and the produced triples reflect the text hits. [OPUS-4.8]
+/// is exercised, and the produced triples reflect the text hits.
 #[test]
 fn construct_query_with_text_pattern() {
     let (g, idx) = setup();
@@ -104,7 +104,7 @@ fn construct_query_with_text_pattern() {
 }
 
 /// DESCRIBE carrying a `text:` pattern: the Describe arm of `rewrite_query`
-/// rewrites, and DESCRIBE emits triples about the matched resources. [OPUS-4.8]
+/// rewrites, and DESCRIBE emits triples about the matched resources.
 #[test]
 fn describe_query_with_text_pattern() {
     let (g, idx) = setup();
@@ -131,7 +131,7 @@ fn describe_query_with_text_pattern() {
 }
 
 /// A magic pattern in each branch of a UNION: `rewrite_pattern` must recurse
-/// into BOTH the left and the right arm. [OPUS-4.8]
+/// into BOTH the left and the right arm.
 #[test]
 fn union_rewrites_both_branches() {
     let (g, idx) = setup();
@@ -155,7 +155,7 @@ fn union_rewrites_both_branches() {
 }
 
 /// A magic pattern under MINUS: the right (subtrahend) arm is rewritten, so the
-/// matched rows are removed from the left. [OPUS-4.8]
+/// matched rows are removed from the left.
 #[test]
 fn minus_rewrites_the_subtrahend() {
     let (g, idx) = setup();
@@ -179,7 +179,7 @@ fn minus_rewrites_the_subtrahend() {
 
 /// A magic pattern under FILTER + a sub-SELECT projection + ORDER BY + DISTINCT:
 /// the Filter/Project/OrderBy/Distinct arms of `rewrite_pattern` recurse into
-/// the inner BGP. The FILTER additionally prunes one hit. [OPUS-4.8]
+/// the inner BGP. The FILTER additionally prunes one hit.
 #[test]
 fn filter_project_orderby_distinct_recurse_into_inner() {
     let (g, idx) = setup();
@@ -208,7 +208,7 @@ fn filter_project_orderby_distinct_recurse_into_inner() {
 /// A property path triple sharing a BGP with a magic pattern: spargebra lifts
 /// the path into a `GraphPattern::Path` joined onto the BGP, exercising the
 /// Path pass-through arm of `rewrite_pattern` while the BGP's magic pattern is
-/// still rewritten. [OPUS-4.8]
+/// still rewritten.
 #[test]
 fn property_path_passes_through_while_bgp_is_rewritten() {
     let (g, idx) = setup();
@@ -235,7 +235,7 @@ fn property_path_passes_through_while_bgp_is_rewritten() {
 
 /// A triple with a VARIABLE predicate in the SAME BGP as a magic pattern is
 /// left untouched (the predicate-passthrough arm), while the magic pattern is
-/// still rewritten and joined. [OPUS-4.8]
+/// still rewritten and joined.
 #[test]
 fn variable_predicate_triple_passes_through() {
     let (g, idx) = setup();
@@ -260,7 +260,7 @@ fn variable_predicate_triple_passes_through() {
 }
 
 /// `text:score` on a variable that carries TWO match patterns is ambiguous —
-/// the scorer cannot pick which match it ranks. [OPUS-4.8]
+/// the scorer cannot pick which match it ranks.
 #[test]
 fn ambiguous_text_score_over_two_matches_errors() {
     let (g, idx) = setup();
@@ -280,7 +280,7 @@ fn ambiguous_text_score_over_two_matches_errors() {
     assert!(err.contains("ambiguous"), "error {err:?} should flag the ambiguity");
 }
 
-/// A `text:score` declared TWICE for one match is a duplicate. [OPUS-4.8]
+/// A `text:score` declared TWICE for one match is a duplicate.
 #[test]
 fn duplicate_text_score_errors() {
     let (g, idx) = setup();
@@ -301,7 +301,7 @@ fn duplicate_text_score_errors() {
 }
 
 /// `text:slop` on a variable with TWO match patterns is ambiguous (the slop
-/// cannot be attached to a single `text:near`). [OPUS-4.8]
+/// cannot be attached to a single `text:near`).
 #[test]
 fn ambiguous_text_slop_over_two_matches_errors() {
     let (g, idx) = setup();

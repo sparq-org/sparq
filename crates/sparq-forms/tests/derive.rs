@@ -1,6 +1,6 @@
 //! Direct tests for the public derivation API: `derive_form`,
 //! `derive_form_with_model`, `applicable_shapes`, `FormOptions`.
-//! [FABLE-5] sq-lsp7k.1.1
+//! sq-lsp7k.1.1
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
@@ -292,7 +292,7 @@ fn form_options_default_values() {
 }
 
 // ---- dash presentation flags: hidden / readOnly / defaultValue -------------
-// [FABLE] sq-lsp7k.1.5
+// sq-lsp7k.1.5
 
 const FLAGGABLE_SHAPES: &str = r#"
   ex:PersonShape a sh:NodeShape ; sh:targetClass ex:Person ;

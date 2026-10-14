@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-1vt: cryptographically-secure masking RNG for the Shamir backend.
+// sq-1vt: cryptographically-secure masking RNG for the Shamir backend.
 //! Randomness for secret-sharing / masking — the security-critical RNG seam.
 //!
 //! ## Why this module exists (sq-1vt, a real confidentiality weakness)
@@ -109,7 +109,7 @@ pub trait MpcRng {
 /// it *re-seeds* a brand-new `SecureRng` from the OS, never copies state.
 ///
 /// # Secret-memory hygiene (sq-u8a8 / sq-19ej / sq-it50, from the side-channel analysis CR-G5)
-/// [OPUS-4.8] The CSPRNG seed/key/keystream state is secret (it predicts every
+/// The CSPRNG seed/key/keystream state is secret (it predicts every
 /// mask and Shamir coefficient). `SecureRng` redacts its [`Debug`], forbids
 /// [`Clone`], and zeroizes on drop **the entire secret state, including the key
 /// schedule**:
@@ -149,7 +149,7 @@ impl SecureRng {
     /// which is the correct behaviour for a security-critical seed: we must NOT
     /// silently continue with predictable randomness.
     ///
-    /// [OPUS-4.8] sq-19ej/sq-it50: the 32-byte seed is pulled into a [`Zeroizing`]
+    /// sq-19ej/sq-it50: the 32-byte seed is pulled into a [`Zeroizing`]
     /// buffer owned by this crate and wiped when this function returns, so the only
     /// sparq-held copy of the *seed* secret is scrubbed. The copy handed to the
     /// owned `crate::chacha::ChaCha20Csprng` is absorbed into its block state —
@@ -163,7 +163,7 @@ impl SecureRng {
         // wipes `seed` on scope exit (incl. on an unwind), so the sparq-held seed
         // secret never lingers on the stack.
         let mut seed = zeroize::Zeroizing::new([0u8; 32]);
-        // [OPUS-4.8] sq-8xug: draw the seed straight from the OS CSPRNG via
+        // sq-8xug: draw the seed straight from the OS CSPRNG via
         // `getrandom::fill`. `rand_core` 0.10 removed `OsRng`, so the prior
         // `rand_chacha::rand_core::OsRng::try_fill_bytes` path no longer exists;
         // `getrandom` is the underlying OS-entropy source that `OsRng` wrapped.
@@ -286,7 +286,7 @@ mod tests {
 
     #[test]
     fn secure_rng_from_os_seed_path_still_unpredictable() {
-        // [OPUS-4.8] sq-19ej: switching from `from_os_rng()` to a scrubbed-seed
+        // sq-19ej: switching from `from_os_rng()` to a scrubbed-seed
         // `from_seed` constructor must NOT change the security property — two
         // freshly OS-seeded instances still produce independent streams. (RNG
         // behaviour is identical; the zeroize is drop-time only.)
@@ -299,7 +299,7 @@ mod tests {
 
     #[test]
     fn secure_rng_drop_does_not_panic() {
-        // [OPUS-4.8] sq-it50: dropping `SecureRng` drops the owned
+        // sq-it50: dropping `SecureRng` drops the owned
         // `ChaCha20Csprng`, whose `ZeroizeOnDrop` scrubs the full key schedule +
         // keystream. The drop must run cleanly (the key-schedule scrub is now
         // complete, not best-effort). The actual zeroing is asserted in the

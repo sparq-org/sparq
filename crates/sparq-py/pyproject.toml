@@ -2,7 +2,7 @@
 requires = ["maturin>=1.14.0,<2.0"]
 build-backend = "maturin"
 
-# [OPUS-4.8] sq-8slf: the PyPI *distribution* name is `sparq-rdf` (owner-approved):
+# sq-8slf: the PyPI *distribution* name is `sparq-rdf` (owner-approved):
 # the bare `sparq` distribution name is taken by an unrelated package (see docs/release.md
 # §0a). This is the wheel / `pip install <name>` name ONLY. The *import* name stays `sparq`
 # (pinned by [tool.maturin] module-name + the cdylib [lib] name + `#[pymodule] fn sparq`),
@@ -35,7 +35,7 @@ Issues = "https://github.com/sparq-org/sparq/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=8.4.2"]
-# [OPUS-4.8] sq-5jjei (gh-910): the `arrow` extra makes `pip install sparq-rdf[arrow]`
+# sq-5jjei (gh-910): the `arrow` extra makes `pip install sparq-rdf[arrow]`
 # pull in pyarrow — the CONSUMER side of the Arrow C Data Interface the opt-in
 # `Graph.query_arrow() -> pyarrow.Table` surface uses (the binding hands the batch over a
 # PyCapsule stream, no re-serialisation). This extra is necessary BUT NOT SUFFICIENT to
@@ -49,7 +49,7 @@ test = ["pytest>=8.4.2"]
 arrow = ["pyarrow>=14"]
 
 [tool.maturin]
-# [OPUS-4.8] sq-8slf: pin the IMPORT/module name to `sparq` independently of the
+# sq-8slf: pin the IMPORT/module name to `sparq` independently of the
 # `[project] name` (the PyPI *distribution* name, now `sparq-rdf`). maturin derives
 # the module name from `module-name` first, then the cdylib `[lib] name`, then the
 # distribution name; without this pin it would normalise `sparq-rdf` → `sparq_rdf`
@@ -63,7 +63,7 @@ module-name = "sparq"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# [OPUS-4.8] sq-th1u: also collect bench_*.py (pytest's default python_files is
+# sq-th1u: also collect bench_*.py (pytest's default python_files is
 # only test_*.py / *_test.py, so without this the FFI micro-bench file would be
 # silently skipped by a plain `pytest tests/` directory run).
 python_files = ["test_*.py", "bench_*.py"]

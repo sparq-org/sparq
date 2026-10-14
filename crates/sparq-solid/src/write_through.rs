@@ -1,4 +1,4 @@
-//! [OPUS-4.8] issue #992 FR-3 (sq-snopa.5) — the AUTHORITATIVE ACL write-through.
+//! issue #992 FR-3 (sq-snopa.5) — the AUTHORITATIVE ACL write-through.
 //!
 //! A Solid LDP server treats a `PUT`/`DELETE` to a `.acl`/`.acr` document as a change to
 //! the access-control rules: the new rule text becomes the storage of record, and the
@@ -53,7 +53,7 @@ use sparq_core::Graph;
 
 /// What a successful [`crate::PodStore::put_acl`] / [`crate::PodStore::delete_acl`] did, for
 /// the server's audit log / response. The auth view has already been re-materialized when
-/// this is returned. [OPUS-4.8] sq-snopa.5.
+/// this is returned. sq-snopa.5.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AclWriteOutcome {
     /// The control-document IRI that was written (`put_acl`) or removed (`delete_acl`).
@@ -80,7 +80,7 @@ fn graph_len(g: &Graph) -> usize {
 }
 
 impl PodStore {
-    /// [OPUS-4.8] issue #992 FR-3 (sq-snopa.5) — authoritatively write an access-control
+    /// issue #992 FR-3 (sq-snopa.5) — authoritatively write an access-control
     /// document and re-materialize the auth view, ATOMICALLY (WAC pods).
     ///
     /// Replaces the `<acl_iri>` control graph with the parsed `content` and rebuilds
@@ -150,7 +150,7 @@ impl PodStore {
 
     /// [`PodStore::put_acl`] for **ACP** pods: identical atomic replace + re-materialize, but
     /// the view is rebuilt by the ACP rules ([`PodStore::materialize_acp`]) over the `.acr`
-    /// graphs instead of the WAC ones. [OPUS-4.8] sq-snopa.5.
+    /// graphs instead of the WAC ones. sq-snopa.5.
     pub fn put_acl_acp(
         &mut self,
         acl_iri: &str,
@@ -160,7 +160,7 @@ impl PodStore {
         self.put_acl_inner(acl_iri, content, format, true)
     }
 
-    /// [OPUS-4.8] issue #992 FR-3 (sq-snopa.5) — authoritatively REMOVE an access-control
+    /// issue #992 FR-3 (sq-snopa.5) — authoritatively REMOVE an access-control
     /// document and re-materialize the auth view, ATOMICALLY (WAC pods).
     ///
     /// Removes the `<acl_iri>` control graph entirely and rebuilds `<urn:sparq:auth>` from the
@@ -216,7 +216,7 @@ impl PodStore {
     }
 
     /// [`PodStore::delete_acl`] for **ACP** pods: identical atomic removal + re-materialize,
-    /// rebuilding the view with the ACP rules. [OPUS-4.8] sq-snopa.5.
+    /// rebuilding the view with the ACP rules. sq-snopa.5.
     pub fn delete_acl_acp(&mut self, acl_iri: &str) -> Result<AclWriteOutcome, String> {
         self.delete_acl_inner(acl_iri, true)
     }
@@ -253,10 +253,10 @@ impl PodStore {
         let existed = prior.is_some();
         self.graph.named.push((term.clone(), new_graph));
 
-        // Re-materialize; roll back to the prior content on any error. [OPUS-4.8] sq-b7k7u
+        // Re-materialize; roll back to the prior content on any error. sq-b7k7u
         // (issue #1571): the whole WAC/ACP view is still re-derived, but the session cache
         // uses diff-based invalidation — `reindex_with` diffs old vs new AuthIndex per-origin
-        // and invalidates exactly the origins whose buckets changed ([SONNET-4.6] sq-b7k7u
+        // and invalidates exactly the origins whose buckets changed (sq-b7k7u
         // fix). Every other pod's cached view stays warm if its grants are unaffected.
         // The rollback path stays a full clear (conservative).
         let scope = crate::ReindexScope::Origin;
@@ -285,7 +285,7 @@ impl PodStore {
         let prior = self.take_named_slot(&term);
         let existed = prior.is_some();
 
-        // [OPUS-4.8] sq-b7k7u: use diff-based invalidation — reindex_with diffs old vs new
+        // sq-b7k7u: use diff-based invalidation — reindex_with diffs old vs new
         // AuthIndex per-origin and invalidates exactly the origins whose buckets changed.
         let scope = crate::ReindexScope::Origin;
         if let Err(e) = self.rematerialize_scoped(acp, scope) {
@@ -347,14 +347,14 @@ impl PodStore {
         }
     }
 
-    /// [OPUS-4.8] sq-b7k7u (issue #1571) — re-materialize the WAC or ACP view with
+    /// sq-b7k7u (issue #1571) — re-materialize the WAC or ACP view with
     /// `scope`-controlled session-cache invalidation. The successful `put_acl`/`delete_acl`
     /// path passes [`crate::ReindexScope::Origin`], which is **diff-based**: `reindex_with`
     /// diffs the old vs new `AuthIndex` per-origin and invalidates exactly the origins whose
     /// buckets changed — NOT merely the written ACL's own origin (a write at origin A can
-    /// affect origin B's grants; the diff catches every such case). [FABLE-5] sq-vhhl0 doc
+    /// affect origin B's grants; the diff catches every such case). sq-vhhl0 doc
     /// sweep. ACP re-materializes with no provenance, exactly as the non-scoped
-    /// `materialize_acp()` the write path used before — and, [SONNET-4.6] sq-ysv3u, with no
+    /// `materialize_acp()` the write path used before — and, sq-ysv3u, with no
     /// verified credentials either, so an `acp:vc` matcher stays fail-closed across an ACL
     /// write exactly as it is on a plain `materialize_acp()`.
     fn rematerialize_scoped(

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-i2a0 — canonical OGC GeoSPARQL **requirements-class** conformance map.
+//! sq-i2a0 — canonical OGC GeoSPARQL **requirements-class** conformance map.
 //!
 //! ## Why this exists (and what it is NOT)
 //!
@@ -195,7 +195,7 @@ fn round_trips_wkt(lit: &str) -> bool {
 
 // ---- R1/R2/R3/R7/R8/R14/R18: REAL SPARQL graph-pattern probes --------------
 //
-// [SONNET-4.6] sq-6ep. These seven are GRAPH-PATTERN requirements ("allow
+// sq-6ep. These seven are GRAPH-PATTERN requirements ("allow
 // geo:Feature / geo:Geometry / geo:asWKT / … in SPARQL graph patterns"). Each
 // used to be probed by asserting that a vocabulary CONSTANT ends with its own
 // local name — `vocab::AS_WKT.ends_with("#asWKT")`, and for R2 the outright
@@ -866,13 +866,13 @@ fn requirements() -> Vec<Req> {
     ]
 }
 
-/// [OPUS-4.8] sq-i2a0 — FLOOR on the number of OGC GeoSPARQL requirements sparq
+/// sq-i2a0 — FLOOR on the number of OGC GeoSPARQL requirements sparq
 /// demonstrates with a passing executable probe. A ratchet: it may only RISE.
 /// 30 requirements total; ALL 30 now demonstrated after sq-mzmh closed the last
-/// two gaps (R9 geometry-metadata properties + R16 empty gmlLiteral). [OPUS-4.8]
+/// two gaps (R9 geometry-metadata properties + R16 empty gmlLiteral).
 ///
 /// This CANONICAL 30 is the `engine`-enabled figure — the conformance claim sparq
-/// makes. [SONNET-4.6] sq-6ep: the pure-geometry build has no evaluator, so the
+/// makes. sq-6ep: the pure-geometry build has no evaluator, so the
 /// seven [`GRAPH_PATTERN_IDS`] rows are gaps there and its floor is 30 - 7; see
 /// `graph_pattern_requirements_are_not_demonstrated_without_engine`. Both floors
 /// ratchet independently.
@@ -938,7 +938,7 @@ fn ogc_geosparql_requirements_conformance() {
         "demonstrated {passed} / {} requirements (gaps {gaps}; floor {REQUIREMENTS_FLOOR})",
         reqs.len()
     );
-    // [OPUS-4.8] sq-cbe4t — DISTANCE-APPROXIMATION HONESTY NOTE on the scoreboard
+    // sq-cbe4t — DISTANCE-APPROXIMATION HONESTY NOTE on the scoreboard
     // output: the R19 geof:distance pass is NOT a claim of metric exactness for
     // every operand pair. Point↔point / point↔geometry is exact haversine;
     // extended↔extended is a local equirectangular approximation. State it here so
@@ -964,7 +964,7 @@ fn ogc_geosparql_requirements_conformance() {
     );
 }
 
-/// [SONNET-4.6] sq-6ep — the ENGINE-enabled run is where the committed 30/30
+/// sq-6ep — the ENGINE-enabled run is where the committed 30/30
 /// floor comes from: every graph-pattern row must really be a demonstrated pass
 /// here, so the canonical claim is derived from an evaluator, never from
 /// vocabulary constants.
@@ -995,7 +995,7 @@ fn graph_pattern_requirements_are_demonstrated_with_engine() {
     );
 }
 
-/// [SONNET-4.6] sq-6ep — feature-off honesty guard. Without `engine` there is no
+/// sq-6ep — feature-off honesty guard. Without `engine` there is no
 /// evaluator, so the seven graph-pattern requirements MUST NOT be reported as
 /// demonstrated: their rows are gaps, their probes report false (never a
 /// vocabulary-constant comparison dressed up as evidence), and the floor for this
@@ -1057,7 +1057,7 @@ fn requirements_floor_is_consistent() {
     );
 }
 
-/// [OPUS-4.8] sq-cbe4t — pins the HONEST distance semantics the scoreboard note
+/// sq-cbe4t — pins the HONEST distance semantics the scoreboard note
 /// describes, so the documented boundary is enforced, not just asserted in prose:
 ///
 /// * point↔point metric distance is EXACT haversine (matches a hand-computed

@@ -1,4 +1,4 @@
-// [OPUS-4.8] GlobalJoin trait + disclosed-key equi-join over GLOBAL IRIs (M2).
+// GlobalJoin trait + disclosed-key equi-join over GLOBAL IRIs (M2).
 //! The cross-holder join protocol.
 //!
 //! Architecture refs: §2 convention #6 (GLOBAL IRIs as cross-credential join
@@ -313,7 +313,7 @@ fn canonicalize_rows(rows: &mut [Vec<Option<Term>>]) {
 }
 
 // =====================================================================
-// [OPUS-4.8] M3 — the HIDDEN-VALUE join (the path M2 deferred).
+// M3 — the HIDDEN-VALUE join (the path M2 deferred).
 // =====================================================================
 
 /// A holder's contribution to a hidden-value join: rows whose JOIN KEY is
@@ -565,7 +565,7 @@ impl HiddenValueJoin {
 }
 
 // =====================================================================
-// [OPUS-4.8] sq-khf9 — the BATCHED hidden-value join: wire the
+// sq-khf9 — the BATCHED hidden-value join: wire the
 // `BatchedShares` / `RowBinding` primitive (sq-dwb5) + the oblivious output
 // transform (`oblivious_join`, sq-jnkm) into the hidden join so it ranges over
 // a COLUMN of rows per holder under a documented row-binding, with the output
@@ -2140,7 +2140,7 @@ mod batched_hidden_value_tests {
         assert_eq!(*shared.binding(), RowBinding::Positional);
     }
 
-    // =========== [OPUS-4.8] sq-xhaw: FULLY-OBLIVIOUS batched hidden join ==========
+    // =========== sq-xhaw: FULLY-OBLIVIOUS batched hidden join ==========
     //
     // The match bit per candidate is SECRET-SHARED and NEVER opened per pair (vs
     // `batched_join`, which opens `secure_equal`'s masked product per pair — the L2

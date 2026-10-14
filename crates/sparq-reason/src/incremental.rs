@@ -1523,8 +1523,10 @@ fn tc_pairs(pairs: &FxHashSet<(Id, Id)>) -> FxHashSet<(Id, Id)> {
 //   layer's local fixpoint, is one round of a `ClosureRounds` allowance. A term refused
 //   for its size, or a spent allowance, reaches the cut checkpoint as
 //   `FullRebuild::Refused`, and the graph rebuilds through the batch engine under the same
-//   limits (which refuses, failing the graph closed, or — near a round or fact boundary,
-//   where the two schedules differ — returns its closure). tests/
+//   limits (which refuses, failing the graph closed, or — near a round, fact or join-row
+//   boundary, where the two schedules differ — returns its closure). Each wave and layer
+//   round also gets a `JoinWork` allowance (`max_join_rows`, GH #6938) that `n3_fire` and
+//   the guard check charge per binding row and per firing. tests/
 //   incremental_n3_closure_limits.rs checks the two agree at every term-size limit it
 //   sweeps, through construction, insert and delete.
 
@@ -1686,12 +1688,14 @@ pub struct MaterializedN3Graph {
     /// Sticky runtime disqualification: evaluation met data outside the builtin-parity
     /// whitelist; every rebuild stays in fallback (always correct).
     data_fallback: Option<String>,
-    /// [OPUS-4.8] NON-sticky fallback cause: the base currently contains `log:implies`-family
+    /// NON-sticky fallback cause: the base currently contains `log:implies`-family
     /// triples (rules-as-data), which the batch engine would parse as RULES, so counting is
     /// forced off this rematerialize. Recomputed every `rematerialize`; cleared when the
     /// implies-data is removed and counting resumes. Keeps `fallback_reason()`'s
     /// `None ⇔ counting active` contract exact for this cause. See review 1868.
     data_rule_fallback: Option<String>,
+    /// Non-sticky: formula values with variables in the current base need batch emission.
+    data_formula_fallback: Option<String>,
     /// NON-sticky fallback cause: the last counting run recorded a cut and the rules
     /// negate, or passed a closure limit, so the checkpoint ([`cut_gate`]) handed the
     /// rebuild to the checked engine. Recomputed every `rematerialize`.
@@ -1797,6 +1801,8 @@ struct N3Cx<'a> {
     /// The graph's cut record ([`crate::n3::bounded::Truncation`]). Kept apart from
     /// `unsupported`: a cut changes no result, so it never switches the evaluation path.
     cuts: &'a crate::n3::bounded::Truncation,
+    /// The round's join-work allowance ([`bounded::JoinWork`]), refused on `cuts`.
+    work: &'a bounded::JoinWork,
 }
 
 impl N3Cx<'_> {
@@ -1865,14 +1871,18 @@ fn n3_unify_atom(pat: &[N3Term; 3], fact: &[N3Term; 3], b: &NB) -> Option<NB> {
 
 /// Does the guard's inner conjunction match anywhere in the guard scope (under `b`; inner
 /// free variables are wildcards, bindings never leak — the engine's notIncludes semantics)?
-fn n3_guard_matches(inner: &[[N3Term; 3]], idx: &N3Index, b: &NB) -> bool {
+fn n3_guard_matches(inner: &[[N3Term; 3]], cx: &N3Cx, b: &NB) -> bool {
     let mut binds = vec![b.clone()];
     for pat in inner {
         let mut next = Vec::new();
         for bb in &binds {
             let (s, o) = (n3_apply(&pat[0], bb), n3_apply(&pat[2], bb));
-            for f in idx.candidates(&s, &pat[1], &o) {
+            for f in cx.guards.candidates(&s, &pat[1], &o) {
                 if let Some(nb) = n3_unify_atom(pat, &f, bb) {
+                    // A spent allowance refuses the run; the guard's answer is then moot.
+                    if !cx.work.charge(1, cx.cuts) {
+                        return false;
+                    }
                     next.push(nb);
                 }
             }
@@ -2041,6 +2051,9 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
                 let mut next = Vec::new();
                 for b in &binds {
                     if let Some(nb) = n3_unify_atom(pat, f, b) {
+                        if !cx.work.charge(1, cx.cuts) {
+                            return Vec::new();
+                        }
                         next.push(nb);
                     }
                 }
@@ -2110,6 +2123,10 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
                     let (s, o) = (n3_apply(&pat[0], b), n3_apply(&pat[2], b));
                     for f in cx.atom_candidates(&s, &pat[1], &o, phase) {
                         if let Some(nb) = n3_unify_atom(pat, &f, b) {
+                            // Each row is charged before it is kept, as the text engine does.
+                            if !cx.work.charge(1, cx.cuts) {
+                                return Vec::new();
+                            }
                             next.push(nb);
                         }
                     }
@@ -2128,9 +2145,13 @@ fn n3_fire(rule: &N3CompiledRule, cx: &N3Cx, seed: Option<(usize, &[N3Term; 3])>
                 n3_term_vars(o, &mut bound);
             }
             N3Atom::Guard { inner } => {
-                binds.retain(|b| !n3_guard_matches(inner, cx.guards, b));
+                binds.retain(|b| !n3_guard_matches(inner, cx, b));
             }
         }
+    }
+    // The firings [`n3_emit`] instantiates, charged before any is built.
+    if !cx.work.charge(binds.len().saturating_mul(rule.conclusions.len()), cx.cuts) {
+        return Vec::new();
     }
     binds
 }
@@ -2178,6 +2199,28 @@ fn n3_whitelisted(p: &str) -> Option<N3Builtin> {
 /// Is this term shape allowed in a plain (join) atom / conclusion atom position?
 fn n3_simple_term(t: &N3Term) -> bool {
     matches!(t, N3Term::Iri(_) | N3Term::Lit(..) | N3Term::Var(_))
+}
+
+/// Formula-scoped variables are values, as in the batch engine's `ground_triple`.
+/// Variables outside formulas still make an inserted fact uninstantiated.
+fn n3_fact_term(t: &N3Term) -> bool {
+    match t {
+        N3Term::Var(_) => false,
+        N3Term::List(ms) => ms.iter().all(n3_fact_term),
+        N3Term::Triple(tr) => tr.iter().all(n3_fact_term),
+        _ => true,
+    }
+}
+
+/// `n3_emit` requires recursive groundness even for a formula bound by a premise.
+/// Only formulas containing variables need fallback; ground formula values still count.
+fn n3_variable_formula(t: &N3Term) -> bool {
+    match t {
+        N3Term::Formula(_) => !t.is_ground(),
+        N3Term::List(ms) => ms.iter().any(n3_variable_formula),
+        N3Term::Triple(tr) => tr.iter().any(n3_variable_formula),
+        _ => false,
+    }
 }
 
 fn n3_term_vars(t: &N3Term, out: &mut FxHashSet<String>) {
@@ -2321,7 +2364,7 @@ fn n3_compile(parsed: &n3p::Parsed) -> Result<N3Compiled, String> {
             atoms.push(N3Atom::Plain { pat: pat.clone(), plain_ix: n_plain });
             n_plain += 1;
         }
-        // [OPUS-4.8] Counting propagation seeds emissions ONLY from N3Atom::Plain premise atoms
+        // Counting propagation seeds emissions ONLY from N3Atom::Plain premise atoms
         // (see `propagate` / the rematerialize seed). A rule with NO plain join atom — an empty
         // premise `{}` rule or a builtin/guard-only premise — would therefore never fire in
         // counting mode, so its conclusions would be missing from the maintained closure even
@@ -2628,10 +2671,15 @@ impl MaterializedN3Graph {
     /// under equal round or fact limits the graph can hold a closure that a from-scratch
     /// batch run near the boundary would refuse.
     ///
-    /// [`ClosureLimits`](crate::n3::ClosureLimits) bounds derived term size, rounds and
-    /// distinct facts. It does not bound the intermediate join work within a round (the
-    /// binding rows of a premise join, or how many times rules fire) on any engine, batch
-    /// or incremental, so memory is not bounded overall (GH #6938).
+    /// The counting path charges `max_join_rows` (GH #6938) as the batch engine does:
+    /// each binding row a plain atom, seed or guard clause produces, before it is stored,
+    /// and each conclusion a rule fires, once its premise is evaluated. Each wave, and each
+    /// round of a layer's local fixpoint, gets the allowance afresh. Its waves are not the
+    /// batch engine's rounds, so the two charge different amounts for the same facts.
+    /// Past the allowance the graph rebuilds through the batch engine, so the graph never
+    /// refuses a closure that the batch engine accepts. A mutation whose wave fits is
+    /// kept even when a from-scratch batch round over the new facts would pass the
+    /// allowance.
     ///
     /// # Errors
     ///
@@ -2658,6 +2706,7 @@ impl MaterializedN3Graph {
             disqualified,
             data_fallback: None,
             data_rule_fallback: None,
+            data_formula_fallback: None,
             cut_fallback: None,
             base,
             mode: N3Mode::Fallback,
@@ -2742,8 +2791,11 @@ impl MaterializedN3Graph {
 
     /// Does mutating `t` require a full rebuild? (Guard predicates — their truth is baked
     /// into every count — and `log:implies`-family predicates, which the batch engine would
-    /// parse as RULES.)
+    /// parse as RULES, and formula values with variables that counting cannot emit.)
     fn triggers_rebuild(&self, t: &[N3Term; 3]) -> bool {
+        if t.iter().any(n3_variable_formula) {
+            return true;
+        }
         let Some(p) = n3_pred_iri(&t[1]) else { return true };
         if p == n3_iri(N3_LOG, "implies")
             || p == n3_iri(N3_LOG, "isImpliedBy")
@@ -2801,14 +2853,22 @@ impl MaterializedN3Graph {
             .base
             .iter()
             .any(|t| n3_pred_iri(&t[1]).is_some_and(|p| implies.iter().any(|i| i == p)));
-        // [OPUS-4.8] Record (or clear) the non-sticky data-rule fallback cause so fallback_reason()
+        // Record (or clear) the non-sticky data-rule fallback cause so fallback_reason()
         // reports it instead of silently returning None. See review 1868.
         self.data_rule_fallback = data_rules.then(|| {
             "base contains log:implies-family triples (rules-as-data); the batch engine reasons \
              over them — outside the counting profile"
                 .to_string()
         });
-        if self.compiled.is_some() && self.data_fallback.is_none() && !data_rules {
+        self.data_formula_fallback = self.base.iter().flatten().any(n3_variable_formula).then(|| {
+            "base contains formula values with variables; counting emission requires recursive \
+             groundness — outside the counting profile".to_string()
+        });
+        if self.compiled.is_some()
+            && self.data_fallback.is_none()
+            && !data_rules
+            && self.data_formula_fallback.is_none()
+        {
             self.cuts = counting_run;
             self.mode = N3Mode::Counting;
             let pending: Vec<[N3Term; 3]> = self.base.iter().cloned().collect();
@@ -2900,6 +2960,7 @@ impl MaterializedN3Graph {
         let unsupported = Cell::new(false);
         let cuts = self.cuts.clone();
         let mut rounds = bounded::ClosureRounds::forward(&cuts);
+        let work = bounded::JoinWork::forward(&cuts);
         while !pending.is_empty() {
             let mut pend_set: FxHashSet<[N3Term; 3]> = pending.iter().cloned().collect();
             for f in &pending {
@@ -2912,6 +2973,7 @@ impl MaterializedN3Graph {
             // Charged with the wave in the index, so the closure a propagation publishes
             // (its last wave included) never holds more than the fact allowance.
             rounds.round(self.index.all.len(), &cuts)?;
+            work.round();
             let mut next: Vec<[N3Term; 3]> = Vec::new();
             let mut queued: FxHashSet<[N3Term; 3]> = FxHashSet::default();
             // 1. Recursive layers (dependency order), recomputed when touched. This runs
@@ -2998,6 +3060,7 @@ impl MaterializedN3Graph {
                     delta: Some((&pend_set, inserting)),
                     unsupported: &unsupported,
                     cuts: &cuts,
+                    work: &work,
                 };
                 for rule in &compiled.counted {
                     for atom in &rule.atoms {
@@ -3099,8 +3162,11 @@ impl MaterializedN3Graph {
         // Facts the local fixpoint holds that the closure does not (yet): with the
         // closure's own, what the closure would hold.
         let mut grown = 0usize;
+        // Each local round's own join-work allowance, apart from the enclosing wave's.
+        let work = bounded::JoinWork::forward(&cuts);
         while !pending.is_empty() {
             rounds.round(self.index.all.len().saturating_add(grown), &cuts)?;
+            work.round();
             let mut emissions = Vec::new();
             {
                 let cx = N3Cx {
@@ -3109,6 +3175,7 @@ impl MaterializedN3Graph {
                     delta: None,
                     unsupported,
                     cuts: &cuts,
+                    work: &work,
                 };
                 for rule in &def.rules {
                     for atom in &rule.atoms {
@@ -3152,14 +3219,15 @@ impl MaterializedN3Graph {
         Ok((added, removed))
     }
 
-    /// Insert base facts (set semantics; non-ground triples are ignored). Counting mode
-    /// updates the closure incrementally; guard-predicate / implies-as-data deltas, and any
-    /// mutation in fallback mode, re-materialize. Returns how many facts joined the base.
+    /// Insert base facts (set semantics; facts with variables outside formulas are ignored).
+    /// Counting mode updates incrementally; guard-predicate / implies-as-data deltas,
+    /// formula values with variables, and any mutation in fallback mode re-materialize.
+    /// Returns how many facts joined the base.
     pub fn insert(&mut self, facts: &[[N3Term; 3]]) -> usize {
         let mut added = Vec::new();
         let mut rebuild = false;
         for f in facts {
-            if !f.iter().all(N3Term::is_ground) {
+            if !f.iter().all(n3_fact_term) {
                 continue;
             }
             // A label `outward` never produces names no node: ignored like a non-ground fact.
@@ -3291,15 +3359,16 @@ impl MaterializedN3Graph {
 
     /// Why the graph is (or would be) in fallback mode: the rule-analysis disqualification, the
     /// sticky runtime data disqualification, or the (non-sticky) presence of `log:implies`-family
-    /// rules-as-data in the base, or (also non-sticky) a counting run that was cut short while
-    /// the rules negate. `None` ⇔ the counting path is active. See review 1868.
+    /// rules-as-data or formula values with variables in the base, or a counting run cut short
+    /// while the rules negate. `None` ⇔ the counting path is active. See review 1868.
     pub fn fallback_reason(&self) -> Option<&str> {
-        // [OPUS-4.8] Include the data-rule cause so the documented `None ⇔ counting` contract
+        // Include the data-rule cause so the documented `None ⇔ counting` contract
         // holds even when fallback is forced by implies-as-data rather than rule analysis.
         self.data_fallback
             .as_deref()
             .or(self.disqualified.as_deref())
             .or(self.data_rule_fallback.as_deref())
+            .or(self.data_formula_fallback.as_deref())
             .or(self.cut_fallback.as_deref())
     }
 
@@ -4099,7 +4168,7 @@ mod tests {
         assert_matches_oracle(&g, &mut dict, &set);
         assert_eq!(g.full_rebuilds(), 0, "new() is not a fallback rebuild");
         assert_eq!(g.base_len(), base.len());
-        // [OPUS-4.8] sq-qcnn.16: exercise base_triples() iterator (previously uncovered).
+        // sq-qcnn.16: exercise base_triples() iterator (previously uncovered).
         let base_via_iter: FxHashSet<[Id; 3]> = g.base_triples().collect();
         assert_eq!(base_via_iter, set, "base_triples() iterator yields the exact asserted set");
     }

@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-zgbso.3 — the IN-CRATE measurement instrument for the sq-zgbso.1 spike's
+//! sq-zgbso.3 — the IN-CRATE measurement instrument for the sq-zgbso.1 spike's
 //! open question: what fraction of a WAC/ACP-shaped `reason_n3` materialize call is the
 //! per-call FACT round-trip (id-level graph -> N3 text -> re-parse -> String-term
 //! fixpoint -> re-intern; 3x for the stratified ACP pipeline) that the id-level compiled

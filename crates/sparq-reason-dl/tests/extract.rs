@@ -1,4 +1,4 @@
-// [FABLE-5] sq-pbz04.4.1 (epic sq-pbz04.4): integration tests for the FAIL-CLOSED reverse RDF
+// sq-pbz04.4.1 (epic sq-pbz04.4): integration tests for the FAIL-CLOSED reverse RDF
 // mapping (design record research/owl2-direct-semantics-scoping.md §L1).
 //
 // 🤖 SPARQ agent. Two families:
@@ -342,7 +342,7 @@ fn reject_out_of_fragment_property_characteristic() {
     ));
 }
 
-/// [SONNET-4.6] sq-pbz04.4.8 — OWL 2's built-in properties have a FIXED extension
+/// sq-pbz04.4.8 — OWL 2's built-in properties have a FIXED extension
 /// (`owl:topObjectProperty` = ΔI × ΔI, `owl:bottomObjectProperty` = ∅). L1 can only
 /// represent axiom-constrained named roles, so reading one as an ordinary role does not
 /// merely lose precision — it manufactures models. Refused fail-closed at EVERY property
@@ -467,7 +467,7 @@ fn reject_unclassifiable_undeclared_predicate() {
 
 /// A branching list: the same list cell carries two DIFFERENT rdf:first values.
 /// Before fix 1 the second value silently overwrote the first, dropping the constraint.
-/// After fix 1 this must be refused with MalformedList. [OPUS-4.8]
+/// After fix 1 this must be refused with MalformedList.
 #[test]
 fn reject_branching_list_rdf_first() {
     let (d, t) = parse(
@@ -534,7 +534,7 @@ fn reject_duplicate_on_property() {
 
 /// owl:onProperty _:bp — a blank node is not a named object property.
 /// Before fix 2 this was accepted as an opaque named property.
-/// After fix 2 it must be refused with Unclassifiable. [OPUS-4.8]
+/// After fix 2 it must be refused with Unclassifiable.
 #[test]
 fn reject_blank_node_object_property_on_property() {
     let (d, t) = parse(
@@ -560,7 +560,7 @@ fn reject_blank_node_sub_property_of() {
 
 /// :p declared as both AnnotationProperty AND ObjectProperty, then used in :a :p :b.
 /// Before fix 3 the annotation arm silently dropped the triple (wrong classification).
-/// After fix 3 this must be refused with Unclassifiable. [OPUS-4.8]
+/// After fix 3 this must be refused with Unclassifiable.
 #[test]
 fn reject_punned_annotation_and_object_property() {
     let (d, t) = parse(
@@ -575,13 +575,13 @@ fn reject_punned_annotation_and_object_property() {
 }
 
 // ============================== REJECT (soundness closure: punned property in axiom-arg position) ==============================
-// [SONNET-4.6] sq-pbz04.4.1: the original Fix-3 check only covered the role-assertion
+// sq-pbz04.4.1: the original Fix-3 check only covered the role-assertion
 // fall-through path. The axiom-dispatch arms (domain/range/subPropertyOf) and decode_restriction
 // (owl:onProperty) each call decode_object_property, which is now the structural chokepoint.
 // These four tests confirm that a punned property is refused in EVERY axiom-argument position.
 
 /// Punned :p (AnnotationProperty + ObjectProperty) in rdfs:domain subject position.
-/// Must be refused — ObjectPropertyDomain(:p, :C) must NOT be produced. [SONNET-4.6]
+/// Must be refused — ObjectPropertyDomain(:p, :C) must NOT be produced.
 #[test]
 fn reject_punned_property_in_domain() {
     let (d, t) = parse(
@@ -596,7 +596,7 @@ fn reject_punned_property_in_domain() {
 }
 
 /// Punned :p (AnnotationProperty + ObjectProperty) in rdfs:range subject position.
-/// Must be refused — ObjectPropertyRange(:p, :C) must NOT be produced. [SONNET-4.6]
+/// Must be refused — ObjectPropertyRange(:p, :C) must NOT be produced.
 #[test]
 fn reject_punned_property_in_range() {
     let (d, t) = parse(
@@ -611,7 +611,7 @@ fn reject_punned_property_in_range() {
 }
 
 /// Punned :p (AnnotationProperty + ObjectProperty) in rdfs:subPropertyOf subject AND object
-/// positions (two separate triples). Both must be refused. [SONNET-4.6]
+/// positions (two separate triples). Both must be refused.
 #[test]
 fn reject_punned_property_in_sub_property_of() {
     // Subject position: :p rdfs:subPropertyOf :q — :p is punned.
@@ -640,7 +640,7 @@ fn reject_punned_property_in_sub_property_of() {
 }
 
 /// Punned :p (AnnotationProperty + ObjectProperty) in owl:onProperty object position inside a
-/// restriction. Must be refused — ObjectSomeValuesFrom(:p, :C) must NOT be produced. [SONNET-4.6]
+/// restriction. Must be refused — ObjectSomeValuesFrom(:p, :C) must NOT be produced.
 #[test]
 fn reject_punned_property_in_on_property() {
     let (d, t) = parse(
@@ -655,9 +655,9 @@ fn reject_punned_property_in_on_property() {
 }
 
 // ============================== ACCEPT (control: unambiguous property in each axiom-arg position) ==============================
-// [SONNET-4.6] sq-pbz04.4.1: confirm the fix does not over-reject an unambiguous ObjectProperty.
+// sq-pbz04.4.1: confirm the fix does not over-reject an unambiguous ObjectProperty.
 
-/// An unambiguously declared ObjectProperty in rdfs:domain produces ObjectPropertyDomain. [SONNET-4.6]
+/// An unambiguously declared ObjectProperty in rdfs:domain produces ObjectPropertyDomain.
 #[test]
 fn accept_unambiguous_property_in_domain() {
     let (d, t) = parse(":p a owl:ObjectProperty .\n:p rdfs:domain :C .");
@@ -668,7 +668,7 @@ fn accept_unambiguous_property_in_domain() {
     );
 }
 
-/// An unambiguously declared ObjectProperty in rdfs:range produces ObjectPropertyRange. [SONNET-4.6]
+/// An unambiguously declared ObjectProperty in rdfs:range produces ObjectPropertyRange.
 #[test]
 fn accept_unambiguous_property_in_range() {
     let (d, t) = parse(":p a owl:ObjectProperty .\n:p rdfs:range :C .");
@@ -679,7 +679,7 @@ fn accept_unambiguous_property_in_range() {
     );
 }
 
-/// An unambiguously declared ObjectProperty in rdfs:subPropertyOf produces SubObjectPropertyOf. [SONNET-4.6]
+/// An unambiguously declared ObjectProperty in rdfs:subPropertyOf produces SubObjectPropertyOf.
 #[test]
 fn accept_unambiguous_property_in_sub_property_of() {
     let (d, t) = parse(
@@ -694,7 +694,7 @@ fn accept_unambiguous_property_in_sub_property_of() {
     );
 }
 
-/// An unambiguous restriction over a declared ObjectProperty produces ObjectSomeValuesFrom. [SONNET-4.6]
+/// An unambiguous restriction over a declared ObjectProperty produces ObjectSomeValuesFrom.
 #[test]
 fn accept_unambiguous_property_in_on_property() {
     let (d, t) = parse(
@@ -717,7 +717,7 @@ fn accept_unambiguous_property_in_on_property() {
 // ============================== ACCEPT (Fix 4: owl:Deprecated* meta-classes) ==============================
 
 /// owl:DeprecatedClass is a structural meta-class (OWL 2 §11.2) — no logical axioms.
-/// Before fix 4 this produced a spurious ClassAssertion. [OPUS-4.8]
+/// Before fix 4 this produced a spurious ClassAssertion.
 #[test]
 fn accept_deprecated_class_as_declaration() {
     let (d, t) = parse(":A a owl:DeprecatedClass .");
@@ -736,7 +736,7 @@ fn accept_deprecated_property_as_declaration() {
 // ============================== REJECT (existing guards, now explicitly pinned) ==============================
 
 /// Direct self-referential cycle: _:x owl:complementOf _:x.
-/// The cycle guard (visiting set) must catch this. [OPUS-4.8] pinned
+/// The cycle guard (visiting set) must catch this. pinned
 #[test]
 fn reject_cyclic_class_expression() {
     let (d, t) = parse(
@@ -750,7 +750,7 @@ fn reject_cyclic_class_expression() {
 }
 
 /// A complementOf chain 513 levels deep exceeds MAX_CE_DEPTH (512): must produce
-/// MalformedClassExpression rather than a stack overflow. [OPUS-4.8] pinned
+/// MalformedClassExpression rather than a stack overflow. pinned
 #[test]
 fn reject_max_ce_depth() {
     let mut ttl = String::from(":A rdfs:subClassOf _:n0 .\n");
@@ -767,7 +767,7 @@ fn reject_max_ce_depth() {
 }
 
 /// A node simultaneously carrying owl:intersectionOf AND owl:unionOf shapes — shape_count > 1.
-/// [OPUS-4.8] pinned
+/// pinned
 #[test]
 fn reject_multi_shape_node() {
     let (d, t) = parse(
@@ -782,7 +782,7 @@ fn reject_multi_shape_node() {
 }
 
 /// A restriction carrying BOTH someValuesFrom AND allValuesFrom — decode_restriction rejects.
-/// [OPUS-4.8] pinned
+/// pinned
 #[test]
 fn reject_restriction_both_some_and_all_values_from() {
     let (d, t) = parse(
@@ -796,7 +796,7 @@ fn reject_restriction_both_some_and_all_values_from() {
 }
 
 /// A class-expression / restriction blank node used as the TARGET of a role assertion —
-/// role_assertion checks structural_nodes. [OPUS-4.8] pinned
+/// role_assertion checks structural_nodes. pinned
 #[test]
 fn reject_structural_node_used_as_individual() {
     let (d, t) = parse(
@@ -811,13 +811,13 @@ fn reject_structural_node_used_as_individual() {
 }
 
 // ============================== REJECT (order-asymmetry in punning detection) ==============================
-// [SONNET-4.6] sq-pbz04.4.1: Index::build usage-typing arms must detect a pun regardless of
+// sq-pbz04.4.1: Index::build usage-typing arms must detect a pun regardless of
 // whether the conflicting declaration appears BEFORE or AFTER the usage triple (RDF graphs are
 // sets — triple ordering must not affect the verdict).
 
 /// ORDER: AnnotationProperty declaration FIRST, then owl:onProperty use (the formerly-broken
 /// order). Before the order-asymmetry fix, annotation_props got the IRI and the later usage arm
-/// added it to object_props without checking annotation_props → pun undetected → ACCEPTED. [SONNET-4.6]
+/// added it to object_props without checking annotation_props → pun undetected → ACCEPTED.
 #[test]
 fn reject_pun_declare_annotation_then_use_on_property() {
     let (d, t) = parse(
@@ -831,7 +831,7 @@ fn reject_pun_declare_annotation_then_use_on_property() {
 }
 
 /// ORDER: owl:onProperty use FIRST, then AnnotationProperty declaration (direction already
-/// caught by the declaration arm). Pinned as the symmetric pair. [SONNET-4.6]
+/// caught by the declaration arm). Pinned as the symmetric pair.
 #[test]
 fn reject_pun_use_then_declare_annotation_on_property() {
     let (d, t) = parse(
@@ -844,7 +844,7 @@ fn reject_pun_use_then_declare_annotation_on_property() {
     );
 }
 
-/// Same two-order test with DatatypeProperty (F2). [SONNET-4.6]
+/// Same two-order test with DatatypeProperty (F2).
 #[test]
 fn reject_pun_declare_datatype_then_use_on_property() {
     let (d, t) = parse(
@@ -870,7 +870,7 @@ fn reject_pun_use_then_declare_datatype_on_property() {
 }
 
 /// Triple-order permutation test: a punned AnnotationProperty used in owl:onProperty must be
-/// refused with Unclassifiable under at least 3 orderings of the triples slice. [SONNET-4.6]
+/// refused with Unclassifiable under at least 3 orderings of the triples slice.
 #[test]
 fn extract_verdict_order_independent_pun_permutation() {
     let (d, mut t) = parse(
@@ -893,11 +893,11 @@ fn extract_verdict_order_independent_pun_permutation() {
 }
 
 // ============================== REJECT (bare blank in class-expression position) ==============================
-// [SONNET-4.6] sq-pbz04.4.1 (Copilot thread 4): a blank node in a class-expression position
+// sq-pbz04.4.1 (Copilot thread 4): a blank node in a class-expression position
 // with no class-expression backbone predicates has no sound OWL mapping and must be refused.
 
 /// :A rdfs:subClassOf _:b with NO triples about _:b previously yielded Ok(Class(_:b)) — an
-/// opaque blank that the downstream checker would treat as a real class constant. Now refused. [SONNET-4.6]
+/// opaque blank that the downstream checker would treat as a real class constant. Now refused.
 #[test]
 fn reject_bare_blank_in_class_expression_position() {
     // _:b carries no backbone predicates — no owl:intersectionOf / owl:unionOf /
@@ -909,7 +909,7 @@ fn reject_bare_blank_in_class_expression_position() {
     );
 }
 
-/// Control: a blank node WITH a proper backbone (owl:complementOf) still decodes. [SONNET-4.6]
+/// Control: a blank node WITH a proper backbone (owl:complementOf) still decodes.
 #[test]
 fn accept_blank_with_backbone_in_class_expression_position() {
     let (d, t) = parse(":A rdfs:subClassOf [ owl:complementOf :B ] .");
@@ -920,7 +920,7 @@ fn accept_blank_with_backbone_in_class_expression_position() {
 }
 
 // ============================== REJECT (inverse-property-expression pin) ==============================
-// [SONNET-4.6] sq-pbz04.4.1 (Copilot threads 2/3): owl:onProperty [ owl:inverseOf :r ] is
+// sq-pbz04.4.1 (Copilot threads 2/3): owl:onProperty [ owl:inverseOf :r ] is
 // refused as OutOfFragment. The owl:inverseOf :r triple's PREDICATE fires in classify_triple's
 // out_of_fragment arm before any restriction decoding is attempted, so the check order inside
 // decode_object_property (blank-before-inverseOf) does not affect the overall verdict.
@@ -928,7 +928,7 @@ fn accept_blank_with_backbone_in_class_expression_position() {
 /// Pin test: owl:onProperty [ owl:inverseOf :r ] → OutOfFragment. The owl:inverseOf predicate
 /// is in classify_triple's out_of_fragment map; it fires before decode_restriction is reached.
 /// This makes the blank-before-inverseOf concern in decode_object_property moot for this graph
-/// shape (Copilot threads 2/3 empirically refuted). [SONNET-4.6]
+/// shape (Copilot threads 2/3 empirically refuted).
 #[test]
 fn reject_inverse_property_expression_in_on_property_pin() {
     let (d, t) = parse(
@@ -958,14 +958,14 @@ fn fail_closed_rejects_whole_graph_on_one_bad_triple() {
 
 // ============================== sq-pbz04.4.11 — named-composite EquivalentClasses (M1 fix) ======
 
-// [SONNET-4.6] sq-pbz04.4.11: the M1 fidelity gap — a NAMED class carrying an inline backbone
+// sq-pbz04.4.11: the M1 fidelity gap — a NAMED class carrying an inline backbone
 // definition must emit EquivalentClasses(name, expr) so entailment through the name works.
 // These tests are the acceptance tests for the 12 M1 divergence cases identified by the
 // conformance arm in tests/dl_suite.rs.
 
 /// A NAMED class carrying an owl:intersectionOf definition must produce
 /// EquivalentClasses(A, x⊓y) — the M1 fix for intersection cases.
-/// [SONNET-4.6] sq-pbz04.4.11
+/// sq-pbz04.4.11
 #[test]
 fn named_class_intersection_emits_equivalent_classes() {
     // :A owl:intersectionOf (:B :C) — A is named; must produce EquivalentClasses(A, B⊓C).
@@ -988,7 +988,7 @@ fn named_class_intersection_emits_equivalent_classes() {
 }
 
 // -------------------------------------------------------------------------------------------
-// Opt-in transitive roles ([GPT-5.6] sq-zfwzq, feature `dl_transitive`)
+// Opt-in transitive roles (sq-zfwzq, feature `dl_transitive`)
 // -------------------------------------------------------------------------------------------
 
 #[cfg(feature = "dl_transitive")]
@@ -1070,7 +1070,7 @@ mod transitive {
 
 /// A NAMED class carrying an owl:unionOf definition must produce
 /// EquivalentClasses(A, x⊔y) — the M1 fix for union cases.
-/// [SONNET-4.6] sq-pbz04.4.11
+/// sq-pbz04.4.11
 #[test]
 fn named_class_union_emits_equivalent_classes() {
     let (d, t) = parse(":A owl:unionOf ( :Human :Animal ) .");
@@ -1086,7 +1086,7 @@ fn named_class_union_emits_equivalent_classes() {
 
 /// A NAMED class carrying an owl:complementOf definition must produce
 /// EquivalentClasses(A, ¬B).
-/// [SONNET-4.6] sq-pbz04.4.11
+/// sq-pbz04.4.11
 #[test]
 fn named_class_complement_emits_equivalent_classes() {
     let (d, t) = parse(":A owl:complementOf :B .");
@@ -1102,7 +1102,7 @@ fn named_class_complement_emits_equivalent_classes() {
 
 /// A NAMED class carrying an owl:Restriction backbone must produce
 /// EquivalentClasses(A, ∃r.C) — the M1 fix for restriction cases.
-/// [SONNET-4.6] sq-pbz04.4.11
+/// sq-pbz04.4.11
 #[test]
 fn named_class_restriction_backbone_emits_equivalent_classes() {
     // :z a owl:Restriction; owl:onProperty :p; owl:someValuesFrom :C  (z is named IRI)
@@ -1120,7 +1120,7 @@ fn named_class_restriction_backbone_emits_equivalent_classes() {
 /// The name-binding EquivalentClasses axiom must be PREPENDED before any use-site axioms,
 /// so the structural model sees "define name, then use name". This is the ordering contract
 /// the downstream tableau depends on.
-/// [SONNET-4.6] sq-pbz04.4.11
+/// sq-pbz04.4.11
 #[test]
 fn named_composite_equiv_prepended_before_use_site_axioms() {
     // :A owl:intersectionOf (:B :C); then a subClassOf using :A.
@@ -1140,7 +1140,7 @@ fn named_composite_equiv_prepended_before_use_site_axioms() {
 
 /// A BLANK node carrying a backbone definition must NOT emit EquivalentClasses —
 /// only NAMED classes (IRIs) get the binding; anonymous nodes are just inline expressions.
-/// [SONNET-4.6] sq-pbz04.4.11
+/// sq-pbz04.4.11
 #[test]
 fn blank_node_backbone_does_not_emit_equivalent_classes() {
     // _:x owl:intersectionOf (:A :B) used in :D rdfs:subClassOf _:x — anonymous expression.
@@ -1166,7 +1166,7 @@ fn blank_node_backbone_does_not_emit_equivalent_classes() {
 /// (like `A owl:unionOf (Human Animal)`) used with a ClassAssertion must now
 /// allow the downstream checker to derive A(John) from Human(John) — the
 /// EquivalentClasses binding is what makes that entailment possible.
-/// [SONNET-4.6] sq-pbz04.4.11
+/// sq-pbz04.4.11
 #[test]
 fn named_union_with_class_assertion_emits_both_equiv_and_assertion() {
     // :A owl:unionOf (:Human :Animal) — named union; :John a :Human.
@@ -1205,7 +1205,7 @@ fn named_union_with_class_assertion_emits_both_equiv_and_assertion() {
 }
 
 // ============================== REJECT (M4: orphan/cyclic list and unconsumed backbone) ======
-// [OPUS-4.8] sq-pbz04.4.12: the M4 fail-closed fix — orphan/cyclic rdf:first/rdf:rest cells
+// sq-pbz04.4.12: the M4 fail-closed fix — orphan/cyclic rdf:first/rdf:rest cells
 // and unconsumed class-expression backbones must be REFUSED, not silently treated as inert.
 // These four cases correspond to the four M4 W3C Direct-Semantics corpus divergences:
 // I5.5-003, I5.5-004, I5.5-006, I5.5-007.
@@ -1215,7 +1215,7 @@ fn named_union_with_class_assertion_emits_both_equiv_and_assertion() {
 
 /// rdf:nil rdf:rest _:b — `rdf:nil` cannot be a list cell (W3C I5.5-003 analog).
 /// Before sq-pbz04.4.12, this extracted to an empty ontology (consistent).
-/// After: refused as MalformedList. [OPUS-4.8] sq-pbz04.4.12
+/// After: refused as MalformedList. sq-pbz04.4.12
 #[test]
 fn reject_rdf_nil_rdf_rest() {
     // Directly build the triple <rdf:nil rdf:rest _:b> in Turtle.
@@ -1232,7 +1232,7 @@ fn reject_rdf_nil_rdf_rest() {
 
 /// rdf:nil rdf:first _:b — `rdf:nil` cannot be a list cell (W3C I5.5-004 analog).
 /// Before sq-pbz04.4.12, this extracted to an empty ontology (consistent).
-/// After: refused as MalformedList. [OPUS-4.8] sq-pbz04.4.12
+/// After: refused as MalformedList. sq-pbz04.4.12
 #[test]
 fn reject_rdf_nil_rdf_first() {
     let (d, t) = parse(
@@ -1248,10 +1248,10 @@ fn reject_rdf_nil_rdf_first() {
 /// A cyclic orphan list — `_:l rdf:first :a; rdf:rest _:l` — never consumed by any axiom.
 /// FAITHFUL reconstruction of W3C WebOnt-I5.5-006: the corpus non-conclusion is
 /// `<rdf:List rdf:nodeID="list"> … <rdf:rest rdf:nodeID="list"/></rdf:List>`, which emits the
-/// `_:l rdf:type rdf:List` typing triple. That declaration typing is the BYPASS the [OPUS-4.8]
+/// `_:l rdf:type rdf:List` typing triple. That declaration typing is the BYPASS the
 /// sq-pbz04.4.12 fix closes: it produces no axiom, so it must NOT seed the cyclic cell
 /// reachable. Before the fix this (with the typing) extracted to an empty ontology — a WRONG
-/// definitive verdict. After: refused as MalformedList (abstention). [OPUS-4.8]
+/// definitive verdict. After: refused as MalformedList (abstention).
 #[test]
 fn reject_cyclic_orphan_list_i5_5_006() {
     // A cyclic rdf:List with the `a rdf:List` typing and no owl:intersectionOf/unionOf
@@ -1272,12 +1272,12 @@ fn reject_cyclic_orphan_list_i5_5_006() {
 /// FAITHFUL reconstruction of W3C WebOnt-I5.5-007: an anonymous `owl:Class` whose
 /// `owl:unionOf` list's first member is an anonymous `owl:Class` with a CYCLIC
 /// `owl:intersectionOf` list (`_:il rdf:rest _:il`), and every `rdf:List` node carries the
-/// `a rdf:List` typing. None of it is referenced by any axiom predicate. Before [OPUS-4.8]
+/// `a rdf:List` typing. None of it is referenced by any axiom predicate. Before
 /// sq-pbz04.4.12 the `a rdf:List` declaration typing seeded the cyclic intersection cell
 /// reachable, so the whole graph slipped past the refusal and extracted to an empty ontology
 /// (a WRONG definitive verdict). After: refused with MalformedList or MalformedClassExpression
 /// (whichever orphan is detected first — both are the correct fail-closed response).
-/// [OPUS-4.8] sq-pbz04.4.12
+/// sq-pbz04.4.12
 #[test]
 fn reject_unconsumed_union_backbone_i5_5_007() {
     // Nested cyclic union/intersection with the `a rdf:List` typings, exactly the corpus
@@ -1312,7 +1312,7 @@ fn reject_unconsumed_union_backbone_i5_5_007() {
 
 /// Companion minimal case: a single unconsumed anonymous `owl:unionOf` list with the
 /// `a rdf:List` typing, ensuring the declaration typing does not rescue the orphan even
-/// without the full I5.5-007 nesting. [OPUS-4.8] sq-pbz04.4.12
+/// without the full I5.5-007 nesting. sq-pbz04.4.12
 #[test]
 fn reject_unconsumed_union_backbone_typed_list() {
     // _:x owl:unionOf ( :a :b ) where the list head carries `a rdf:List`. _:x is an
@@ -1336,7 +1336,7 @@ fn reject_unconsumed_union_backbone_typed_list() {
 
 /// Control: an anonymous union backbone that IS consumed via a subClassOf still decodes
 /// normally. Ensures the new validation does not over-reject valid anonymous expressions.
-/// [OPUS-4.8] sq-pbz04.4.12
+/// sq-pbz04.4.12
 #[test]
 fn accept_consumed_anonymous_union_backbone() {
     // _:x owl:unionOf (:a :b) consumed by :C rdfs:subClassOf _:x.
@@ -1349,7 +1349,7 @@ fn accept_consumed_anonymous_union_backbone() {
 
 /// Control: a named class with an inline intersectionOf definition consumed via a use-site
 /// axiom — should still produce the EquivalentClasses binding and the use-site axiom.
-/// The M4 fix must not regress the M1 fix. [OPUS-4.8] sq-pbz04.4.12
+/// The M4 fix must not regress the M1 fix. sq-pbz04.4.12
 #[test]
 fn accept_named_intersection_with_use_site() {
     // :A owl:intersectionOf (:B :C) and :D rdfs:subClassOf :A — consumed.
@@ -1363,4 +1363,18 @@ fn accept_named_intersection_with_use_site() {
         "named intersectionOf must still emit EquivalentClasses; got {:?}",
         o.axioms
     );
+}
+
+/// #4762: the PUBLIC `extract` is the syntactic view (profile checker, renderer) and keeps
+/// refusing the bottom built-ins at every position — only `DirectChecker` rewrites them.
+#[test]
+fn public_extract_still_refuses_bottom_properties() {
+    for body in [
+        ":i a [ owl:onProperty owl:bottomObjectProperty ; owl:allValuesFrom :C ] .",
+        "owl:bottomObjectProperty rdfs:subPropertyOf :r .",
+        "owl:bottomObjectProperty a owl:ObjectProperty . :a owl:bottomObjectProperty :b .",
+    ] {
+        let (d, t) = parse(body);
+        assert!(extract(&d, &t).is_err(), "expected a refusal for {:?}", body);
+    }
 }

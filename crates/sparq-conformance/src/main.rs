@@ -7,7 +7,7 @@
 //!
 //! Informational by default (always exits 0); `--strict` exits 1 on any FAIL
 //! so the pass rate can be ratcheted in CI later.
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use sparq_conformance::manifest::{self, EntryKind, TestEntry};
 use sparq_conformance::run::{self, Status};

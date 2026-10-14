@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-gr8mb / survey §A3) Feature-on vs feature-off equivalence for the
+//! (sq-gr8mb / survey §A3) Feature-on vs feature-off equivalence for the
 //! opt-in `semijoin-bitmap` exact-bitmap semi-join reducer.
 //!
 //! The reducer (`semijoin::KeyFilter`, wired into `exec::eval_bgp_binary`) prefilters a

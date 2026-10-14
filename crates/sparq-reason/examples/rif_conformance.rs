@@ -1,4 +1,4 @@
-// [FABLE-5] sq-hmd7l.24 (epic sq-hmd7l) — the W3C RIF conformance PASS-RATE runner
+// sq-hmd7l.24 (epic sq-hmd7l) — the W3C RIF conformance PASS-RATE runner
 // (bench registry id `rif-conformance`). This is the CONFORMANCE-ONLY arm of the RIF
 // axis: the comparative-benchmarking design record's verdict for RIF is NOT-COMPARABLE
 // (no runnable open-source RIF peer exists to race — fuxi is dead, Jena dropped RIF,

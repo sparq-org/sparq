@@ -1,7 +1,7 @@
-//! [FABLE-5] sq-oy1f.26 — the W3C JSON-LD 1.1 `flatten` lane ratchet floor
+//! sq-oy1f.26 — the W3C JSON-LD 1.1 `flatten` lane ratchet floor
 //! (lib-side single source; imported by the runner + scoreboard + ci grep).
 
-/// [FABLE-5] sq-oy1f.26 — `flatten` pass floor over the `flatten` category of
+/// sq-oy1f.26 — `flatten` pass floor over the `flatten` category of
 /// `w3c/json-ld-api`, under the NATIVE DOCUMENT-LEVEL oracle
 /// (`sparq_jsonld::flatten()` + `json_ld_equal`). RATCHET: may only RISE.
 ///
@@ -20,7 +20,7 @@
 /// * **New oracle (native `flatten()`): MEASURED 53 pass / 0 fail / 5 skip** at the
 ///   pinned suite revision, ON THE MERGED TREE.
 ///
-/// ## [FABLE-5] sq-oy1f.26 rebase note — native oracle now BEATS the RDF-writer oracle
+/// ## sq-oy1f.26 rebase note — native oracle now BEATS the RDF-writer oracle
 ///
 /// When this branch was first cut the native lane measured 46 pass / 7 fail (below the
 /// old writer oracle's 50), because the 7 fails were ALL inherited gaps of the native

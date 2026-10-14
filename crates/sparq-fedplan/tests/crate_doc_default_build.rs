@@ -18,7 +18,7 @@
 //! workspace uses for `cargo metadata`/`cargo` guard tests) so a regression is caught IN THE
 //! TEST SUITE, not silently.
 //!
-//! [OPUS-4.8] sq-gxx7 — flagged for Fable re-review when available.
+//! sq-gxx7 — flagged for Fable re-review when available.
 
 use std::path::PathBuf;
 use std::process::Command;

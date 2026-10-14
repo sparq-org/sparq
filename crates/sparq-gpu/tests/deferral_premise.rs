@@ -1,4 +1,4 @@
-//! [OPUS-5] sq-vrye — trip-wire for the deferred `sparq-gpu` threat model.
+//! sq-vrye — trip-wire for the deferred `sparq-gpu` threat model.
 //!
 //! The threat model for this crate is deliberately DEFERRED, and the deferral is
 //! justified by unreachability, not by benignity: nothing depends on the crate and

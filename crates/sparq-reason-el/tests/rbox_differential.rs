@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-xetf7: differential-correctness fixtures for the EL+ RBox classifier (Phase E2:
+// sq-xetf7: differential-correctness fixtures for the EL+ RBox classifier (Phase E2:
 // CR10 role inclusion + CR11 role composition / transitive roles / property chains).
 //
 // `#![cfg(feature = "rbox")]` — these run ONLY with the `rbox` feature on. A feature-matrix.yml
@@ -83,7 +83,7 @@ fn cr10_does_not_lift_downward() {
 
 #[test]
 fn cr10_lifts_self_restriction_to_super_role() {
-    // [SONNET-4.6] sq-l2o9e: r ⊑ s, A ⊑ ∃r.Self, ∃s.Self ⊑ D. The r-self loop is also
+    // sq-l2o9e: r ⊑ s, A ⊑ ∃r.Self, ∃s.Self ⊑ D. The r-self loop is also
     // locally reflexive for its super-role s, so CR-Self-2 must derive A ⊑ D. A generic
     // existential `(A,A)` link remains insufficient; this fixture specifically carries
     // `ObjectHasSelf` provenance.
@@ -219,7 +219,7 @@ fn no_chain_no_spurious_composition() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// [OPUS-4.8] sq-bif: RBox correctness-coverage additions. The fixtures above all use the LEFT
+// sq-bif: RBox correctness-coverage additions. The fixtures above all use the LEFT
 // (`r ∘ s ⊑ r`) right-identity and the transitive special case; the additions below close the
 // distinct RIGHT-identity `r ∘ s ⊑ s` direction (the super-role is the SECOND chain component —
 // indexed in `comp_by_second` not `comp_by_first`), a chain that fires through a SUPER-role of a
@@ -285,7 +285,7 @@ fn rbox_axioms_are_not_counted_as_skipped_class_axioms() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// [SONNET-4.6] sq-pbz04.2.7: role-lattice readoff — `classify_graph` under `rbox` emits the
+// sq-pbz04.2.7: role-lattice readoff — `classify_graph` under `rbox` emits the
 // non-reflexive told-inclusion closure as `rdfs:subPropertyOf` triples.
 //
 // ORACLE: every emitted pair (r, s) holds in every model of the told inclusions (soundness),
@@ -306,7 +306,7 @@ fn sub_property_of_id(dict: &Dict) -> Id {
 
 #[test]
 fn role_readoff_chain_closure_emits_all_three_pairs() {
-    // [SONNET-4.6] sq-pbz04.2.7: r ⊑ s ⊑ t (two told inclusions). The told-inclusion
+    // sq-pbz04.2.7: r ⊑ s ⊑ t (two told inclusions). The told-inclusion
     // closure contains: (r,s), (r,t), (s,t). All 3 non-reflexive pairs must be present in
     // `triples` after `classify_graph`. Exactly 1 triple is NEW (r⊑t is the derived one;
     // r⊑s and s⊑t were already in the input).
@@ -362,7 +362,7 @@ fn role_readoff_chain_closure_emits_all_three_pairs() {
 
 #[test]
 fn role_readoff_mutual_inclusion_emits_both_directions() {
-    // [SONNET-4.6] sq-pbz04.2.7: r ⊑ s and s ⊑ r (equivalent roles). Both directions must
+    // sq-pbz04.2.7: r ⊑ s and s ⊑ r (equivalent roles). Both directions must
     // be present in the output. Neither is a self-pair. Exactly 0 NEW triples (both directions
     // were told — the readoff covers them but adds nothing new).
     let ttl = format!(
@@ -405,7 +405,7 @@ fn role_readoff_mutual_inclusion_emits_both_directions() {
 
 #[test]
 fn role_readoff_no_self_pairs_ever() {
-    // [SONNET-4.6] sq-pbz04.2.7: a transitive role (r ∘ r ⊑ r) and a plain inclusion (r ⊑ s)
+    // sq-pbz04.2.7: a transitive role (r ∘ r ⊑ r) and a plain inclusion (r ⊑ s)
     // — the closure gives super_of[r] = {r, s}. The self-pair (r, r) must never appear in the
     // emitted triples, even though `r` is in its own `super_of` row (reflexivity). Likewise
     // for `s`.
@@ -440,7 +440,7 @@ fn role_readoff_no_self_pairs_ever() {
 
 #[test]
 fn role_readoff_is_idempotent() {
-    // [SONNET-4.6] sq-pbz04.2.7: a second `classify_graph` call adds no new role triples
+    // sq-pbz04.2.7: a second `classify_graph` call adds no new role triples
     // (the `present`-set deduplication covers the derived pairs too).
     let ttl = format!(
         "{PRE}
@@ -459,7 +459,7 @@ fn role_readoff_is_idempotent() {
     );
 }
 
-// [SONNET-4.6] sq-oj06v: told-RBox regularity — the honest non-regular report (E2 follow-up).
+// sq-oj06v: told-RBox regularity — the honest non-regular report (E2 follow-up).
 // The saturation is sound + terminating on ANY input, but EL+ completeness assumes a REGULAR
 // RBox (the OWL 2 global restrictions forbid non-regular ones); `Report::rbox_non_regular` is
 // the flag that keeps a spec-illegal input from being silently classified as if complete.

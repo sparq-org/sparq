@@ -22,7 +22,7 @@
 //!
 //! Gated on `fedclient`; the default build compiles this file to nothing.
 //!
-//! [OPUS-4.8] sq-7yf0 — flagged for Fable re-review when available.
+//! sq-7yf0 — flagged for Fable re-review when available.
 
 #![cfg(feature = "fedclient")]
 
@@ -62,7 +62,7 @@ fn var(s: &str) -> Term {
 
 /// A per-source descriptor declaring `preds` so `select_sources` retains the source for
 /// every pattern it covers. Identical predicate coverage across sources ⇒ a leaf retains
-/// EVERY such source (the multi-source case). [OPUS-4.8] sq-7yf0.
+/// EVERY such source (the multi-source case). sq-7yf0.
 fn descriptor(id: &str, preds: &[&str]) -> SourceDescriptor {
     let mut b = SourceDescriptor::builder(SourceId::new(id)).total_triples(1000);
     for p in preds {
@@ -78,7 +78,7 @@ fn descriptor(id: &str, preds: &[&str]) -> SourceDescriptor {
 
 /// Build the federation harness for `bgp` over the given per-source `(turtle, preds)` set:
 /// returns the descriptors, the per-pattern selection, and the plan. The endpoints are kept
-/// alive by the caller (they borrow their graphs). [OPUS-4.8] sq-7yf0.
+/// alive by the caller (they borrow their graphs). sq-7yf0.
 fn plan(
     bgp: &Bgp,
     sources: &[(&str, &[&str])],
@@ -95,7 +95,7 @@ fn plan(
 }
 
 /// Assert the multi-source federated result (materialised AND streaming) equals local
-/// evaluation of `whole_query` over the union of every source graph. [OPUS-4.8] sq-7yf0.
+/// evaluation of `whole_query` over the union of every source graph. sq-7yf0.
 fn assert_multi_source_equals_union(
     bgp: &Bgp,
     sources: &[(&str, &[&str])],

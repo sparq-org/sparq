@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-q0o82 (E4 follow-up) — PARALLEL-SATURATION PHASE ATTRIBUTION bench.
+//! sq-q0o82 (E4 follow-up) — PARALLEL-SATURATION PHASE ATTRIBUTION bench.
 //!
 //! The E4 increment (sq-wy3i6) parallelises only the COMPUTE phase of the bulk-synchronous
 //! saturation round — the membership-triggered rule derivation against the round-start

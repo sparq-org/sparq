@@ -36,7 +36,7 @@
 //! `StreamJoin` feeder are Phase 5. The resolver and lowering are the real, tested seam
 //! those phases build on.
 //
-// [OPUS-4.8] sq-j27p (epic sq-dnko): Phase-3 planner bridge — index→adapter resolution +
+// sq-j27p (epic sq-dnko): Phase-3 planner bridge — index→adapter resolution +
 // per-leaf lowering. Flagged for Fable re-review when available.
 
 use crate::source::{FederatedSource, FragPattern, FragTerm, PatternTerm, SubQuery};
@@ -52,7 +52,7 @@ use sparq_fedplan::{select_sources, PatternSources, SourceCandidate, SourceDescr
 /// The slice passed to [`select_sources_with_pattern_probes`] establishes source indices:
 /// item `i` here is source `i` in the returned [`PatternSources`]. A missing descriptor means
 /// capability/cardinality is unknown, never empty; the source starts with the configured
-/// uniform fallback and is removed only by a definitive ASK `false`. [GPT-5.6] sq-fx5id.
+/// uniform fallback and is removed only by a definitive ASK `false`. sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 #[derive(Debug, Clone, Copy)]
 pub struct ProbeSource<'a> {
@@ -73,7 +73,7 @@ pub struct ProbeSource<'a> {
 ///   budget exhaustion.
 ///
 /// This function changes source ranking/join order, never the set of answer-producing sources
-/// unless the endpoint itself definitively reported no match. [GPT-5.6] sq-fx5id.
+/// unless the endpoint itself definitively reported no match. sq-fx5id.
 #[cfg(feature = "pattern_probe")]
 pub fn select_sources_with_pattern_probes(
     bgp: &Bgp,
@@ -142,7 +142,7 @@ fn descriptor_has_cardinality(tp: &TriplePattern, descriptor: &SourceDescriptor)
 /// An error from resolving a plan index — the plan referenced an out-of-range
 /// pattern/source for the BGP / adapter slice this resolver carries. These are
 /// *programmer* errors (a plan and a resolver built from different inputs), surfaced
-/// rather than panicked so the interpreter can fail closed. [OPUS-4.8] sq-j27p.
+/// rather than panicked so the interpreter can fail closed. sq-j27p.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveError {
     /// A plan pattern index is out of range for the BGP this resolver carries.
@@ -189,7 +189,7 @@ impl std::error::Error for ResolveError {}
 ///
 /// `SourceResolver` borrows the BGP and the adapters (it never owns transports), so a
 /// caller can build one per query without cloning the heterogeneous source set.
-/// [OPUS-4.8] sq-j27p.
+/// sq-j27p.
 pub struct SourceResolver<'a> {
     bgp: &'a Bgp,
     adapters: &'a [&'a dyn FederatedSource],
@@ -250,7 +250,7 @@ impl<'a> SourceResolver<'a> {
 /// This is the deliberately-simple Phase-3 lowering — one self-contained single-pattern
 /// SELECT per leaf. Capability-aware sub-query *construction* (only join+output vars,
 /// pushable FILTERs, VALUES bind-join blocks, ORDER/LIMIT) is Phase 4's `pushdown` module;
-/// `lower_leaf` is the seam it narrows. [OPUS-4.8] sq-j27p.
+/// `lower_leaf` is the seam it narrows. sq-j27p.
 pub fn lower_leaf(tp: &TriplePattern) -> Result<SubQuery, RenderError> {
     debug_assert!(
         !matches!(tp.subject, Term::Literal(_)),
@@ -276,7 +276,7 @@ pub fn lower_leaf(tp: &TriplePattern) -> Result<SubQuery, RenderError> {
 
 /// Render one triple pattern's body without the surrounding query form. Shared by normal leaf
 /// lowering and the opt-in pattern probe so the two paths cannot disagree about term escaping.
-/// [GPT-5.6] sq-fx5id.
+/// sq-fx5id.
 pub(crate) fn render_pattern_clause(tp: &TriplePattern) -> Result<String, RenderError> {
     Ok(format!(
         "{} {} {}",
@@ -288,7 +288,7 @@ pub(crate) fn render_pattern_clause(tp: &TriplePattern) -> Result<String, Render
 
 /// The variables a pattern produces, de-duplicated in position order (subject, predicate,
 /// object). Mirrors `TriplePattern::vars` but returns owned names (the [`SubQuery::project`]
-/// hint the interpreter binds rows against). [OPUS-4.8] sq-j27p.
+/// hint the interpreter binds rows against). sq-j27p.
 pub fn pattern_vars(tp: &TriplePattern) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for t in [&tp.subject, &tp.predicate, &tp.object] {
@@ -315,7 +315,7 @@ pub fn pattern_vars(tp: &TriplePattern) -> Vec<String> {
 ///
 /// This is the fragment-source twin of [`lower_leaf`] (which produces a SPARQL `SubQuery` for an
 /// [`Endpoint`](crate::source::Endpoint)); the interpreter dispatches on the source's interface
-/// to pick which lowering to use. [OPUS-4.8] sq-yzca.
+/// to pick which lowering to use. sq-yzca.
 pub fn lower_leaf_fragment(tp: &TriplePattern) -> FragPattern {
     FragPattern::new(
         term_to_pattern_term(&tp.subject),
@@ -324,7 +324,7 @@ pub fn lower_leaf_fragment(tp: &TriplePattern) -> FragPattern {
     )
 }
 
-/// Map one fedplan [`Term`] position to a [`PatternTerm`] for a [`FragPattern`]. [OPUS-4.8].
+/// Map one fedplan [`Term`] position to a [`PatternTerm`] for a [`FragPattern`].
 fn term_to_pattern_term(t: &Term) -> PatternTerm {
     match t {
         Term::Var(v) => PatternTerm::Var(v.0.clone()),
@@ -345,6 +345,9 @@ pub enum RenderError {
     Iri(String),
     /// A literal that starts with `"` but is not exactly one SPARQL literal.
     Literal(String),
+    /// A `VALUES` row that is not one bound term per variable: a row of the wrong length,
+    /// or a variable where a term is required.
+    Values(String),
 }
 
 impl std::fmt::Display for RenderError {
@@ -353,6 +356,7 @@ impl std::fmt::Display for RenderError {
             RenderError::Var(v) => write!(f, "not a SPARQL variable name: {v:?}"),
             RenderError::Iri(i) => write!(f, "IRI has a character SPARQL forbids: {i:?}"),
             RenderError::Literal(l) => write!(f, "not exactly one SPARQL literal: {l:?}"),
+            RenderError::Values(v) => write!(f, "not a VALUES row of bound terms: {v}"),
         }
     }
 }
@@ -377,11 +381,68 @@ pub(crate) fn render_term(t: &Term) -> Result<String, RenderError> {
         Term::Var(v) => Err(RenderError::Var(v.0.clone())),
         Term::Iri(iri) if is_iriref_body(iri) => Ok(format!("<{iri}>")),
         Term::Iri(iri) => Err(RenderError::Iri(iri.clone())),
-        Term::Literal(lit) if lit.starts_with('"') => parse_sparql_literal(lit)
-            .map(|l| l.to_string())
-            .ok_or_else(|| RenderError::Literal(lit.clone())),
-        Term::Literal(lit) => Ok(oxrdf::Literal::new_simple_literal(lit.as_str()).to_string()),
+        Term::Literal(lit) => {
+            let parsed = if lit.starts_with('"') {
+                parse_sparql_literal(lit)
+            } else {
+                Some(oxrdf::Literal::new_simple_literal(lit.as_str()))
+            };
+            parsed.as_ref().and_then(render_literal).ok_or_else(|| RenderError::Literal(lit.clone()))
+        }
     }
+}
+
+/// Serialise `l` with escapes that SPARQL's code-point preprocessing leaves alone: the lexical
+/// form uses only `ECHAR` escapes (other characters are written as they are), and a value whose
+/// rendering holds a complete `\u`/`\U` code-point escape, which an endpoint would expand
+/// before parsing, is `None`, as is a datatype IRI that is not an `IRIREF`.
+fn render_literal(l: &oxrdf::Literal) -> Option<String> {
+    let mut out = String::with_capacity(l.value().len() + 2);
+    out.push('"');
+    for c in l.value().chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    if has_code_point_escape(&out) {
+        return None;
+    }
+    if let Some(lang) = l.language() {
+        out.push('@');
+        out.push_str(lang);
+        if let Some(direction) = l.direction() {
+            out.push_str(&format!("--{direction}"));
+        }
+    } else if l.datatype() != oxrdf::vocab::xsd::STRING {
+        let dt = l.datatype().as_str();
+        if !is_iriref_body(dt) {
+            return None;
+        }
+        out.push_str(&format!("^^<{dt}>"));
+    }
+    Some(out)
+}
+
+/// Whether `text` holds a complete SPARQL code-point escape (`\u` and four hex digits, or
+/// `\U` and eight), which an endpoint expands before parsing.
+fn has_code_point_escape(text: &str) -> bool {
+    let b = text.as_bytes();
+    (0..b.len()).any(|i| {
+        let width = match (b[i], b.get(i + 1)) {
+            (b'\\', Some(b'u')) => 4,
+            (b'\\', Some(b'U')) => 8,
+            _ => return false,
+        };
+        b.get(i + 2..i + 2 + width).is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit))
+    })
 }
 
 /// Parse `lit` as exactly one SPARQL literal, in any of SPARQL's literal forms (short or long
@@ -424,7 +485,7 @@ fn is_iriref_body(iri: &str) -> bool {
 
 /// SPARQL `VARNAME`: `( PN_CHARS_U | [0-9] ) ( PN_CHARS_U | [0-9] | #xB7 | [#x300-#x36F] |
 /// [#x203F-#x2040] )*`.
-fn is_varname(name: &str) -> bool {
+pub(crate) fn is_varname(name: &str) -> bool {
     fn pn_chars_u_or_digit(c: char) -> bool {
         c == '_'
             || c.is_ascii_alphanumeric()
@@ -464,7 +525,7 @@ mod tests {
     }
 
     /// A transport double that returns an empty SRJ — used only to build a concrete
-    /// `Endpoint` adapter for resolver tests (no network). [OPUS-4.8] sq-j27p.
+    /// `Endpoint` adapter for resolver tests (no network). sq-j27p.
     struct NullTransport;
     impl Transport for NullTransport {
         fn fetch(&self, _e: &str, _q: &str) -> Result<String, String> {
@@ -596,7 +657,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-qcnn.22: Additional direct unit tests for coverage ratchet
+    // sq-qcnn.22: Additional direct unit tests for coverage ratchet
     #[test]
     fn pattern_vars_all_distinct() {
         // All three positions hold distinct variables.
@@ -651,7 +712,7 @@ mod tests {
     fn lower_leaf_literal_in_subject() {
         // A literal in subject position is invalid in RDF/SPARQL 1.1; lower_leaf debug-asserts
         // this never happens. sparq-fedplan must never produce such a pattern — this test
-        // documents the rejection path. [OPUS-4.8] sq-qcnn.22
+        // documents the rejection path. sq-qcnn.22
         let _ = lower_leaf(&TriplePattern::new(
             Term::Literal("hello".to_string()),
             iri("http://ex/prop"),
@@ -759,6 +820,59 @@ mod tests {
         }
     }
 
+    /// SPARQL 1.1 §19.2 code-point escape preprocessing, as a conforming endpoint applies it
+    /// to the query text before parsing.
+    fn preprocess(text: &str) -> String {
+        let mut out = String::new();
+        let mut rest = text;
+        while let Some(i) = rest.find('\\') {
+            out.push_str(&rest[..i]);
+            let tail = &rest[i..];
+            let width = match tail.as_bytes().get(1) {
+                Some(b'u') => 4,
+                Some(b'U') => 8,
+                _ => 0,
+            };
+            let code = tail.get(2..2 + width).filter(|h| width > 0 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+            match code.and_then(|h| char::from_u32(u32::from_str_radix(h, 16).unwrap())) {
+                Some(c) => {
+                    out.push(c);
+                    rest = &tail[2 + width..];
+                }
+                None => {
+                    out.push('\\');
+                    rest = &tail[1..];
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
+    #[test]
+    fn rendered_literals_survive_code_point_preprocessing() {
+        let cases = [
+            "a\"b\\c\nd\re\tf\u{8}g\u{c}h\u{0}i\u{1}j\u{7F}k",
+            "\\x \\\\ u U",
+            "x\"\"\"\\\"",
+            "é \u{1F600}",
+            // Escape-like text that is not a complete code-point escape is left alone.
+            "\\u12 \\uZZZZ \\U0041 \\u",
+        ];
+        for value in cases {
+            let tp = TriplePattern::new(var("s"), iri("http://ex/p"), Term::Literal(value.into()));
+            let sparql = lower_leaf(&tp).unwrap().sparql;
+            let expanded = preprocess(&sparql);
+            assert_eq!(expanded, sparql, "{value:?}");
+            assert_eq!(parse_back(&expanded).object.to_string(), oxrdf::Literal::new_simple_literal(value).to_string());
+        }
+        // A value that preprocessing would change is refused rather than sent.
+        for value in ["\\u0022", "a\\U0000007Db", "\\\\u0041"] {
+            let tp = TriplePattern::new(var("s"), iri("http://ex/p"), Term::Literal(value.into()));
+            assert!(matches!(lower_leaf(&tp), Err(RenderError::Literal(_))), "{value:?}");
+        }
+    }
+
     #[test]
     fn rendered_terms_parse_back_to_the_same_terms() {
         use oxrdf::{Literal, NamedNode};
@@ -775,6 +889,13 @@ mod tests {
                 Literal::new_typed_literal("q\"} \\", NamedNode::new("http://ex/d").unwrap()).into(),
             ),
             (Term::Literal("\"x\"".into()), Literal::new_simple_literal("x").into()),
+            (
+                Term::Literal("\"hi\"@ar--rtl".into()),
+                Literal::new_directional_language_tagged_literal("hi", "ar", oxrdf::BaseDirection::Rtl)
+                    .unwrap()
+                    .into(),
+            ),
+            (Term::Literal("\"1\"^^<http://www.w3.org/2001/XMLSchema#integer>".into()), Literal::from(1).into()),
             // Long-string forms, which the SPARQL grammar accepts in every literal position.
             (
                 Term::Literal("\"\"\"line 1\nline \"2\" }\"\"\"".into()),

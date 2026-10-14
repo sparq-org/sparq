@@ -1,4 +1,4 @@
-//! [GPT-5.6] (sq-bif.30) Integration coverage for empty SHACL inputs, Turtle
+//! (sq-bif.30) Integration coverage for empty SHACL inputs, Turtle
 //! loader failures, and strict rejection of unsound SPARQL pre-binding.
 
 use sparq_shacl::{
@@ -10,7 +10,7 @@ fn empty_graph() -> sparq_core::Graph {
     graph_from_triples(std::iter::empty::<oxrdf::Triple>())
 }
 
-// [GPT-5.6] (sq-bif.30) Zero targeted shapes produce a vacuously conforming,
+// (sq-bif.30) Zero targeted shapes produce a vacuously conforming,
 // completely empty report.
 #[test]
 fn empty_shapes_conform_without_results_or_diagnostics() {
@@ -24,7 +24,7 @@ fn empty_shapes_conform_without_results_or_diagnostics() {
     assert!(report.diagnostics.is_empty());
 }
 
-// [GPT-5.6] (sq-bif.30) A declared target class selects nothing when the data
+// (sq-bif.30) A declared target class selects nothing when the data
 // graph itself is empty.
 #[test]
 fn target_class_has_zero_focus_nodes_in_empty_data() {
@@ -43,7 +43,7 @@ fn target_class_has_zero_focus_nodes_in_empty_data() {
     assert_eq!(count_focus_nodes(&data, &model), 0);
 }
 
-// [GPT-5.6] (sq-bif.30) Both document parsing and base-IRI validation surface
+// (sq-bif.30) Both document parsing and base-IRI validation surface
 // errors through the public Turtle loader.
 #[test]
 fn turtle_loader_rejects_malformed_input_and_invalid_base() {
@@ -51,7 +51,7 @@ fn turtle_loader_rejects_malformed_input_and_invalid_base() {
     assert!(load_turtle_with_base("", "not a valid base").is_err());
 }
 
-// [GPT-5.6] (sq-bif.30) Mirror the crate's existing MINUS fixture: lenient
+// (sq-bif.30) Mirror the crate's existing MINUS fixture: lenient
 // validation skips the unsound constraint, while strict validation rejects it.
 #[test]
 fn strict_validation_reports_unsound_pre_binding() {

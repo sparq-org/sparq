@@ -22,7 +22,7 @@
 //!
 //! Gated on `fedclient-adaptive`; with the feature off the file compiles to nothing.
 //!
-//! [OPUS-4.8] sq-ij5x — flagged for Fable re-review when available.
+//! sq-ij5x — flagged for Fable re-review when available.
 
 #![cfg(feature = "fedclient-adaptive")]
 
@@ -38,7 +38,7 @@ use sparq_fedplan::{
 use std::sync::Arc;
 
 /// A faithful endpoint-over-`G` transport: the "remote" answer is the engine's own evaluation
-/// of the forwarded sub-query, serialised to SRJ. No network. [OPUS-4.8] sq-ij5x.
+/// of the forwarded sub-query, serialised to SRJ. No network. sq-ij5x.
 struct EngineTransport {
     graph: Arc<Graph>,
 }
@@ -58,7 +58,7 @@ fn var(s: &str) -> Term {
 }
 
 /// A single-source descriptor with EXPLICIT per-predicate triple counts, so a test can make
-/// the planner's estimate diverge from the real engine row count. [OPUS-4.8] sq-ij5x.
+/// the planner's estimate diverge from the real engine row count. sq-ij5x.
 fn descriptor(preds: &[(&str, u64)]) -> SourceDescriptor {
     let mut b = SourceDescriptor::builder(SourceId::new("S")).total_triples(1_000_000);
     for (p, triples) in preds {
@@ -91,7 +91,7 @@ fn graph() -> Arc<Graph> {
 /// Drive BOTH the Phase-7 adaptive executor and the Phase-3 materialised interpreter over the
 /// same plan + engine-backed source, and assert all three (adaptive, static, ground-truth local
 /// eval) carry the same solution multiset. Returns the adaptive outcome so the caller can
-/// additionally assert on the re-plan trace. [OPUS-4.8] sq-ij5x.
+/// additionally assert on the re-plan trace. sq-ij5x.
 fn assert_adaptive_equals_static_and_local(
     bgp: &Bgp,
     descriptor: &SourceDescriptor,
@@ -179,7 +179,7 @@ fn assert_adaptive_equals_static_and_local(
 /// pick the static suffix [:a, :b, :c], but whose REAL engine cardinalities are :a=3, :b=3,
 /// :c=2 — so the planner's belief that :c is huge is wrong by >4×, and the adaptive executor
 /// re-orders the unjoined remainder. The result multiset is identical to the static plan and
-/// to local eval, across the genuine reorder. [OPUS-4.8] sq-ij5x.
+/// to local eval, across the genuine reorder. sq-ij5x.
 #[test]
 fn divergent_star_replans_yet_result_equals_static_and_local() {
     let bgp = Bgp::new(vec![
@@ -222,7 +222,7 @@ fn divergent_star_replans_yet_result_equals_static_and_local() {
 
 /// With ACCURATE descriptors (estimates match the real engine counts) the trigger never fires:
 /// the adaptive path keeps the static order and returns the same result — adaptivity is inert
-/// until evidence diverges. [OPUS-4.8] sq-ij5x.
+/// until evidence diverges. sq-ij5x.
 #[test]
 fn accurate_star_keeps_static_order_and_result() {
     let bgp = Bgp::new(vec![
@@ -252,7 +252,7 @@ fn accurate_star_keeps_static_order_and_result() {
 /// A chain `?s a ?o . ?o ... ` — single-source, divergent or not, the adaptive path must equal
 /// the static path and local eval. A two-pattern chain has only one operator boundary; this
 /// exercises the minimal case (and that a single-boundary plan still never thrashes).
-/// [OPUS-4.8] sq-ij5x.
+/// sq-ij5x.
 #[test]
 fn two_pattern_chain_equals_static_and_local() {
     let bgp = Bgp::new(vec![

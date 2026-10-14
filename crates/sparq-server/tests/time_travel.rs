@@ -24,7 +24,7 @@
 //! are unit-tested in sparq-serve with an injected clock (the recorded
 //! determinism concern). 🤖 SPARQ agent.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the
@@ -225,7 +225,7 @@ mod with_feature {
 
 #[cfg(not(feature = "time-travel"))]
 mod default_build {
-    //! [SONNET-4.6] (sq-ci2d6) The DEFAULT build (no `time-travel` feature) exposes the SAME
+    //! (sq-ci2d6) The DEFAULT build (no `time-travel` feature) exposes the SAME
     //! `Sparq-Generation` header + `?generation=N` pin, bounded to the generation ring's EXISTING
     //! concurrency-retention window (`sparq_serve::ring::DEFAULT_RETAIN` = 4 generations older than
     //! current, always kept). Unblocks solid-server-rs snapshot-consistent multi-request pagination.

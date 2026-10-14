@@ -2,7 +2,7 @@
 
 use sparq_policy::{decide, parse_policy_str, report::DecisionReport, Request};
 
-// [GPT-5.6] sq-mu4au: every input exercises a distinct aggregation branch. Removing
+// sq-mu4au: every input exercises a distinct aggregation branch. Removing
 // any counter update, conflict recognition, or BTreeMap ordering makes this test fail.
 #[test]
 fn fixed_decision_batch_has_stable_complete_report() {

@@ -1,6 +1,6 @@
-// [GPT-5.6] sq-6xasp.3: execute the real LWS router through the exported wasm entry.
-// [SONNET-4.6] sq-wubkf: and the linear-memory admission refusal.
-// [GPT-5.6] sq-6xasp.7: and the opt-in snapshot that survives a listener restart.
+// sq-6xasp.3: execute the real LWS router through the exported wasm entry.
+// sq-wubkf: and the linear-memory admission refusal.
+// sq-6xasp.7: and the opt-in snapshot that survives a listener restart.
 #![cfg(target_arch = "wasm32")]
 
 use sparq_lws_wasm::memory;
@@ -13,7 +13,7 @@ const INTRUDER: &str = "https://id.example/mallory#me";
 const TURTLE: &[u8] = b"<https://pod.example/card> <http://xmlns.com/foaf/0.1/name> \"Ada\" .\n";
 const TURTLE_V2: &[u8] = b"<https://pod.example/card> <http://xmlns.com/foaf/0.1/name> \"Grace\" .\n";
 
-// [SONNET-4.6] sq-wubkf: the bounded allocator is only installed on wasm32, so this is the only
+// sq-wubkf: the bounded allocator is only installed on wasm32, so this is the only
 // place the live-byte accounting and the 507 refusal can be exercised end to end. A ceiling below
 // the module's own live total must refuse the very next request with a clean HTTP 507 — an HTTP
 // answer, not the `unreachable` trap an allocation failure at the real ceiling would produce.
@@ -128,7 +128,7 @@ async fn put_get_round_trip_and_wac_denial_drive_the_real_router() {
 
     #[cfg(feature = "sparql-endpoint")]
     {
-        // [GPT-5.6] sq-r1ei8: the full wasm artifact drives the same WAC-scoped
+        // sq-r1ei8: the full wasm artifact drives the same WAC-scoped
         // handler. The owner can query the card just PUT through LDP.
         let query = server
             .handle_request(
@@ -153,7 +153,7 @@ async fn put_get_round_trip_and_wac_denial_drive_the_real_router() {
     }
 }
 
-// [GPT-5.6] sq-6xasp.7: the acceptance property for opt-in persistence — a pod rebuilt from the
+// sq-6xasp.7: the acceptance property for opt-in persistence — a pod rebuilt from the
 // bytes a host kept serves exactly what the previous instance held. Only reachable on wasm32,
 // where the store, the router, and the journal decorator are all compiled in.
 async fn put(server: &SolidServer, path: &str, body: &[u8]) -> u16 {

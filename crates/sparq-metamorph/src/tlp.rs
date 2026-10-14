@@ -1,5 +1,5 @@
 //! **Ternary Logic Partitioning (TLP), re-derived for SPARQL's three-valued
-//! effective-boolean-value semantics.** [FABLE-5] sq-gum8.6 — the research core of the
+//! effective-boolean-value semantics.** sq-gum8.6 — the research core of the
 //! planned SPARQL logic-bug paper (sq-gum8.7).
 //!
 //! TLP for SQL (Rigger & Su, OOPSLA 2020) partitions a query on a predicate `p` into
@@ -107,7 +107,7 @@
 //!    *untestable* — they need a **different** recombination law, each derived in its
 //!    own module: [`crate::distinct`] (set union instead of multiset union) and
 //!    [`crate::aggregate`] (numeric recombination plus an error-status law). `LIMIT`
-//!    /`OFFSET` remain out of scope for every variant. [OPUS-5] sq-gum8.12
+//!    /`OFFSET` remain out of scope for every variant. sq-gum8.12
 //! 4. **Top-level filter placement**: the branch filter is appended at the top level of
 //!    the group, where a constraint applies to the whole group regardless of position
 //!    (§17.2). The construction never pushes the filter into `OPTIONAL`/subquery scope
@@ -146,7 +146,7 @@ pub struct TlpQueries {
 /// Single source of the partitioning construction: every TLP variant
 /// (`tlp_queries`, `crate::distinct`, `crate::aggregate`) appends exactly these
 /// clauses, so the case analysis in the module docs above covers all of them and the
-/// variants cannot drift apart. [OPUS-5] sq-gum8.12
+/// variants cannot drift apart. sq-gum8.12
 pub(crate) fn branch_filters(predicate: &str) -> [String; 3] {
     [
         format!("FILTER( {predicate} )"),

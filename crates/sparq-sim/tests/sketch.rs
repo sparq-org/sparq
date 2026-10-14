@@ -1,5 +1,5 @@
 #![cfg(feature = "sketch")]
-// [FABLE-5] sq-lgw: the MinHash/LSH sketch index (dense-graph candidate generation).
+// sq-lgw: the MinHash/LSH sketch index (dense-graph candidate generation).
 //
 // The load-bearing obligations, in order:
 //   - RESULT EXACTNESS: every (entity, score) `SketchIndex::most_similar` returns must

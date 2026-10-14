@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-zgbso.1 — CI enforcement of the ODRL-as-N3 spike's load-bearing
+//! sq-zgbso.1 — CI enforcement of the ODRL-as-N3 spike's load-bearing
 //! invariant: for the representative ODRL permission-evaluation case, the `auth:*`
 //! decision SET derived by the N3 rules (`rules/odrl-spike.n3`) MUST EQUAL the SET
 //! materialised by the real Rust path (`odrl_bridge::materialize_policy` over

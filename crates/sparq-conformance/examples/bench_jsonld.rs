@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-hmd7l.15 — the sparq-side runner for the `bench/jsonld`
+//! sq-hmd7l.15 — the sparq-side runner for the `bench/jsonld`
 //! comparative harness (see `bench/jsonld/README.md`). Drives the REAL shipped
 //! JSON-LD paths:
 //!

@@ -21,7 +21,7 @@
 //!
 //! Gated on `fedclient`; with the feature off the file compiles to nothing.
 //!
-//! [OPUS-4.8] sq-vtba — flagged for Fable re-review when available.
+//! sq-vtba — flagged for Fable re-review when available.
 
 #![cfg(feature = "fedclient")]
 
@@ -42,7 +42,7 @@ use std::time::Duration;
 
 /// A faithful endpoint-over-`G` transport that ALSO sleeps for a per-sub-query duration
 /// before answering, so the leaf fetches complete in a controllable order. The "remote"
-/// answer is the engine's own evaluation serialised to SRJ — no network. [OPUS-4.8] sq-vtba.
+/// answer is the engine's own evaluation serialised to SRJ — no network. sq-vtba.
 struct DelayTransport {
     graph: Arc<Graph>,
     /// sub-query SPARQL → artificial delay before answering.
@@ -62,7 +62,7 @@ impl Transport for DelayTransport {
 /// An `Endpoint`-equivalent `FederatedSource` that is `Send + Sync` (the streaming
 /// interpreter needs `Arc<dyn FederatedSource + Send + Sync>`). It delegates to a real
 /// `sparq_fedclient::Endpoint` for the SSRF gate + transport, but the engine-backed transport
-/// (`DelayTransport`) is the load-bearing part. [OPUS-4.8] sq-vtba.
+/// (`DelayTransport`) is the load-bearing part. sq-vtba.
 struct EngineSource {
     endpoint: sparq_fedclient::Endpoint,
 }
@@ -123,7 +123,7 @@ fn graph() -> Arc<Graph> {
 /// Drive BOTH the Phase-5 streaming interpreter and the Phase-3 materialised interpreter over
 /// the same plan + engine-backed source (with the given delay schedule for the streaming run)
 /// and assert all three (streamed, materialised, ground-truth local eval) carry the same
-/// solution multiset. [OPUS-4.8] sq-vtba.
+/// solution multiset. sq-vtba.
 fn assert_stream_equals_phase3_and_local(
     bgp: &Bgp,
     descriptor: &SourceDescriptor,
@@ -205,7 +205,7 @@ fn assert_stream_equals_phase3_and_local(
 
 /// A two-pattern star with FOUR delay schedules: no delay, first-leaf-slow, second-leaf-slow,
 /// and both-slow. Each forces a different arrival order into the streaming join; the result
-/// must be identical across all of them. [OPUS-4.8] sq-vtba.
+/// must be identical across all of them. sq-vtba.
 #[test]
 fn two_pattern_star_equals_across_interleavings() {
     let bgp = Bgp::new(vec![
@@ -239,7 +239,7 @@ fn two_pattern_star_equals_across_interleavings() {
 }
 
 /// A three-pattern path `?s knows ?o . ?o knows ?z . ?z name ?n` — chained streaming joins.
-/// Run under a "middle leaf slow" schedule to interleave the chain. [OPUS-4.8] sq-vtba.
+/// Run under a "middle leaf slow" schedule to interleave the chain. sq-vtba.
 #[test]
 fn three_pattern_path_equals_with_middle_slow() {
     let bgp = Bgp::new(vec![
@@ -267,7 +267,7 @@ fn three_pattern_path_equals_with_middle_slow() {
 
 /// A typed-literal join under a tiny `StreamJoin` budget so the **spill** path is exercised in
 /// the streaming interpreter — the spilled streamed result must still equal Phase 3 / local.
-/// [OPUS-4.8] sq-vtba.
+/// sq-vtba.
 #[test]
 fn typed_literal_join_equals_under_spill() {
     let bgp = Bgp::new(vec![
@@ -293,7 +293,7 @@ fn typed_literal_join_equals_under_spill() {
 }
 
 /// An empty-result join: the bound object matches nothing, so the streamed path must also be
-/// empty (not error, not a spurious row). [OPUS-4.8] sq-vtba.
+/// empty (not error, not a spurious row). sq-vtba.
 #[test]
 fn empty_result_join_streams_empty() {
     let bgp = Bgp::new(vec![
@@ -311,7 +311,7 @@ fn empty_result_join_streams_empty() {
 }
 
 /// Single-pattern (no join): the streamed path is just the fanned-out leaf, which must equal
-/// Phase 3 / local. [OPUS-4.8] sq-vtba.
+/// Phase 3 / local. sq-vtba.
 #[test]
 fn single_pattern_streams_equal() {
     let bgp = Bgp::new(vec![TriplePattern::new(

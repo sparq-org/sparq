@@ -1,8 +1,8 @@
-// [OPUS-4.8] sq-jxl0: single-source the crate overview from README.md so crates.io
+// sq-jxl0: single-source the crate overview from README.md so crates.io
 // (package.readme) and the docs.rs front page render identical content. The README's
 // rust fences are API-map sketches marked `ignore` (they reference an external graph).
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use oxrdf::vocab::xsd;
 use oxrdf::{Literal, NamedNode, Term};
@@ -23,20 +23,20 @@ use sparq_core::Graph;
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDFS_DOMAIN: &str = "http://www.w3.org/2000/01/rdf-schema#domain";
 const RDFS_RANGE: &str = "http://www.w3.org/2000/01/rdf-schema#range";
-// [OPUS-4.8] sq-lc3: the class-subsumption predicate driving ABSTAT-style type
+// sq-lc3: the class-subsumption predicate driving ABSTAT-style type
 // minimalization. A `(C rdfs:subClassOf D)` triple makes `D` a superclass of `C`
 // (proper when `C ≠ D`); minimalization drops a subject's superclass types in favour
 // of its most-specific (minimal) types — see `BuildOptions::minimalize_types`.
 const RDFS_SUBCLASS_OF: &str = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
 const XSD_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#integer";
 const VOID_NS: &str = "http://rdfs.org/ns/void#";
-/// [OPUS-4.8] sq-bde: the W3C SHACL namespace. [`Introspection::to_shacl`] exports each
+/// sq-bde: the W3C SHACL namespace. [`Introspection::to_shacl`] exports each
 /// mined characteristic set as an `sh:NodeShape` under this namespace — a CS ≈ a node
 /// shape (Neumann & Moerkotte's per-entity-type predicate co-occurrence is exactly the
 /// "what properties does an entity of this kind carry, and how often" question SHACL's
 /// property shapes describe).
 const SHACL_NS: &str = "http://www.w3.org/ns/shacl#";
-/// [OPUS-4.8] sq-mr32 (federation A3/Z2): the **sparq characteristic-set** extension
+/// sq-mr32 (federation A3/Z2): the **sparq characteristic-set** extension
 /// vocabulary. VoID has no native term for per-entity-type predicate co-occurrence
 /// statistics (the Neumann & Moerkotte characteristic sets sparq mines), so the served
 /// descriptor expresses them under this documented sparq namespace, alongside (not
@@ -57,13 +57,13 @@ const SHACL_NS: &str = "http://www.w3.org/ns/shacl#";
 /// VoID-aware-but-cs-unaware client still reads a meaningful property partition.
 const CS_NS: &str = "http://sparq.dev/ns/cs#";
 
-/// [OPUS-4.8] sq-3n4: the conventional file extension for a persisted introspection
+/// sq-3n4: the conventional file extension for a persisted introspection
 /// sidecar — the mined effective schema as JSON, written next to the source dataset so
 /// later processes can produce summaries / VoID without re-mining the graph. See
 /// [`Introspection::save`]/[`Introspection::load`] and [`sidecar_path_for`].
 pub const SIDECAR_EXTENSION: &str = "introspect";
 
-/// [OPUS-4.8] sq-3n4: the conventional sidecar path for a dataset — the dataset path
+/// sq-3n4: the conventional sidecar path for a dataset — the dataset path
 /// with [`SIDECAR_EXTENSION`] **appended** (not replacing the dataset's own extension),
 /// so `data/olympics.nt` ⇒ `data/olympics.nt.introspect`. Appending (rather than
 /// swapping the extension) keeps the sidecar unambiguous when two datasets differ only
@@ -166,7 +166,7 @@ pub struct BuildOptions {
     pub max_join_hints: usize,
     /// Sample values are truncated to this many characters.
     pub max_sample_chars: usize,
-    /// [OPUS-4.8] sq-lc3: **ABSTAT-style type minimalization** over the graph's
+    /// sq-lc3: **ABSTAT-style type minimalization** over the graph's
     /// `rdfs:subClassOf` hierarchy. When `true`, before any pattern is mined each
     /// subject's asserted type set is folded to its **minimal** (most-specific) types:
     /// a type `D` is dropped from a subject iff the subject also carries some type `C`
@@ -196,7 +196,7 @@ impl Default for BuildOptions {
             max_namespaces: 200,
             max_join_hints: 1000,
             max_sample_chars: 60,
-            // [OPUS-4.8] sq-lc3: report every asserted type by default; minimalization
+            // sq-lc3: report every asserted type by default; minimalization
             // is opt-in.
             minimalize_types: false,
         }
@@ -250,7 +250,7 @@ pub struct ClassPredicate {
     pub triples: u64,
     /// `subjects / instances` of the class, in `[0, 1]`.
     pub coverage: f64,
-    /// [OPUS-4.8] sq-3n4: sample object values **scoped to this class** (literals
+    /// sq-3n4: sample object values **scoped to this class** (literals
     /// quoted, IRIs bare), bounded by [`BuildOptions::samples_per_predicate`]. Unlike
     /// [`PredicateProfile::samples`] — which are global across every subject of the
     /// predicate and so can show values that belong only to a *different*, larger class
@@ -397,7 +397,7 @@ struct PredAcc {
     domains: FxHashMap<Id, u64>,
 }
 
-/// [OPUS-4.8] sq-3n4: per (class, predicate) accumulator — usage counts plus the
+/// sq-3n4: per (class, predicate) accumulator — usage counts plus the
 /// class-scoped sample labels. `samples` holds the lex-smallest distinct rendered
 /// object values seen on triples of this predicate whose subject is an instance of the
 /// class (bounded by [`BuildOptions::samples_per_predicate`]).
@@ -426,7 +426,7 @@ fn keep_min_sample(samples: &mut Vec<String>, cap: usize, s: String) {
     }
 }
 
-/// [OPUS-4.8] sq-3n4: as [`keep_min_sample`], but skips a value already retained — the
+/// sq-3n4: as [`keep_min_sample`], but skips a value already retained — the
 /// per-class sample path feeds *every* triple's object (not the POS-collapsed distinct
 /// objects the per-predicate path sees), so the same value can arrive repeatedly; this
 /// keeps the retained set a set of **distinct** rendered values, matching the
@@ -557,7 +557,7 @@ impl Introspection {
             }
         }
 
-        // [OPUS-4.8] sq-lc3: ABSTAT-style type minimalization over the graph's
+        // sq-lc3: ABSTAT-style type minimalization over the graph's
         // `rdfs:subClassOf` hierarchy. Opt-in (`BuildOptions::minimalize_types`) and
         // applied here, once, so EVERY downstream pattern (class extents, per-class
         // predicate usage, characteristic-set type histograms, observed domain/range,
@@ -592,7 +592,7 @@ impl Introspection {
         // one pass.
         let mut cs: FxHashMap<Box<[Id]>, CsAcc> = FxHashMap::default();
         let mut preds: FxHashMap<Id, PredAcc> = FxHashMap::default();
-        // [OPUS-4.8] sq-3n4: per (class, predicate): (subjects, triples, class-scoped
+        // sq-3n4: per (class, predicate): (subjects, triples, class-scoped
         // sample labels). The samples are the lex-smallest distinct rendered objects
         // among triples whose subject is an instance of the class — so a minority class
         // shows ITS OWN representative values, not the predicate's global minimum (which
@@ -639,7 +639,7 @@ impl Introspection {
                                 }
                             }
                         }
-                        // [OPUS-4.8] sq-3n4: class-scoped sample labels. Render this
+                        // sq-3n4: class-scoped sample labels. Render this
                         // typed subject's object once and offer it to each of the
                         // subject's classes' (class, predicate) sample sets — so a
                         // minority class keeps its OWN representative values instead of
@@ -758,7 +758,7 @@ impl Introspection {
                     }
                 }
                 // Sample label — rendered by the shared helper so the global samples and
-                // the per-class samples ([OPUS-4.8] sq-3n4) are byte-identical. Distinct
+                // the per-class samples (sq-3n4) are byte-identical. Distinct
                 // objects are already run-collapsed here, so `keep_min_sample` suffices.
                 keep_min_sample(
                     &mut acc.samples,
@@ -1017,7 +1017,7 @@ impl Introspection {
         serde_json::to_string_pretty(self).expect("introspection serialises to JSON")
     }
 
-    /// [OPUS-4.8] sq-3n4: parses a persisted introspection back from the JSON
+    /// sq-3n4: parses a persisted introspection back from the JSON
     /// [`to_json`](Introspection::to_json) produced — the in-memory inverse of
     /// [`save`](Introspection::save)/[`load`](Introspection::load) for callers that hold
     /// the bytes themselves (e.g. a WASM tab that cached the sidecar in IndexedDB). Once
@@ -1029,7 +1029,7 @@ impl Introspection {
         serde_json::from_str(json)
     }
 
-    /// [OPUS-4.8] sq-3n4: writes the introspection to a persisted **`*.introspect`
+    /// sq-3n4: writes the introspection to a persisted **`*.introspect`
     /// sidecar** — the mined effective schema as JSON, alongside the source graph — so a
     /// later process can produce summaries / VoID / retrieval-mode cards **without
     /// rescanning the graph** ([`build`](Introspection::build) is `O(|G| + |dict|)`;
@@ -1041,7 +1041,7 @@ impl Introspection {
         std::fs::write(path, self.to_json())
     }
 
-    /// [OPUS-4.8] sq-3n4: loads a persisted [`save`](Introspection::save) sidecar. A
+    /// sq-3n4: loads a persisted [`save`](Introspection::save) sidecar. A
     /// malformed sidecar surfaces as [`std::io::ErrorKind::InvalidData`] (so the one
     /// `io::Result` covers both the read and the parse). Round-trips
     /// [`save`](Introspection::save) exactly.
@@ -1135,7 +1135,7 @@ impl Introspection {
         out
     }
 
-    /// [OPUS-4.8] sq-mr32 (federation A3/Z2): the VoID description (`to_void`) **plus**
+    /// sq-mr32 (federation A3/Z2): the VoID description (`to_void`) **plus**
     /// the characteristic-set source statistics, as one N-Triples document.
     ///
     /// This is the served federation-descriptor surface: it is a strict superset of
@@ -1216,7 +1216,7 @@ impl Introspection {
         out
     }
 
-    /// [OPUS-4.8] sq-bde: export each mined characteristic set as a W3C **SHACL node
+    /// sq-bde: export each mined characteristic set as a W3C **SHACL node
     /// shape**, returned as one N-Triples document (valid Turtle).
     ///
     /// A characteristic set (Neumann & Moerkotte: the exact set of predicates a group of
@@ -1465,7 +1465,7 @@ impl Introspection {
 
     /// A short range hint for a predicate line in the class section: the dominant
     /// observed range class, else the dominant literal datatype (from the predicate's
-    /// GLOBAL profile), plus one sample. [OPUS-4.8] sq-3n4: when `class_sample` is
+    /// GLOBAL profile), plus one sample. sq-3n4: when `class_sample` is
     /// supplied (the class-scoped sample for this predicate) it is preferred for the
     /// `e.g.` example — so a minority class shows ITS OWN representative value rather
     /// than the predicate's global minimum, which may belong only to a larger class; the
@@ -1639,7 +1639,7 @@ fn is_iri(graph: &Graph, id: Id) -> bool {
     !dict::is_inline(id) && matches!(graph.dict.term_parts(id), TermParts::Iri { .. })
 }
 
-/// [OPUS-4.8] sq-lc3: build the **transitive** superclass relation from the graph's
+/// sq-lc3: build the **transitive** superclass relation from the graph's
 /// `rdfs:subClassOf` triples — `supers[c]` is the set of classes strictly above `c`
 /// (every `d` with `c subClassOf+ d`, excluding `c` itself). Returns `None` when the
 /// graph carries no `rdfs:subClassOf` predicate at all (the common case — minimalization
@@ -1704,7 +1704,7 @@ fn build_superclass_closure(graph: &Graph) -> Option<FxHashMap<Id, FxHashMap<Id,
     Some(supers)
 }
 
-/// [OPUS-4.8] sq-lc3: fold one subject's asserted type list to its **minimal**
+/// sq-lc3: fold one subject's asserted type list to its **minimal**
 /// (most-specific) members. A type `d` is removed iff some *other* type `c` in the same
 /// asserted list has `d` among its strict superclasses (`c subClassOf+ d`) AND `c` is
 /// not itself subsumed by `d` (the cycle / mutual-equivalence guard — when `c` and `d`
@@ -1738,7 +1738,7 @@ fn minimalize_type_set(types: &mut Vec<Id>, supers: &FxHashMap<Id, FxHashMap<Id,
     });
 }
 
-/// [OPUS-4.8] sq-3n4: renders an object id to the sample-string form used by every
+/// sq-3n4: renders an object id to the sample-string form used by every
 /// histogram in this crate — literals quoted (`"v"`, `"v"@en`), IRIs bare, blanks
 /// `_:b`, triple terms via the dict's Display — truncated to `max_chars`. Factored out
 /// of the per-predicate POS scan so the per-class sample labels render objects
@@ -1956,7 +1956,7 @@ mod tests {
         assert_eq!(company.instances, 1);
     }
 
-    // [OPUS-4.8] sq-lc3: ABSTAT-style type minimalization over rdfs:subClassOf.
+    // sq-lc3: ABSTAT-style type minimalization over rdfs:subClassOf.
     #[test]
     fn minimalize_types_keeps_only_the_minimal_class() {
         // The bead's olympics shape: a subject typed both as a subclass and its
@@ -2001,7 +2001,7 @@ mod tests {
         assert_eq!(cs_classes, vec![ex("SportsEvent").as_str()]);
     }
 
-    // [OPUS-4.8] sq-lc3: minimalization follows multi-step subClassOf chains and does
+    // sq-lc3: minimalization follows multi-step subClassOf chains and does
     // not cross-contaminate independent subjects.
     #[test]
     fn minimalize_types_chain_and_independence() {
@@ -2029,7 +2029,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] sq-lc3: a subClassOf cycle (mutually-equivalent classes) is tolerated —
+    // sq-lc3: a subClassOf cycle (mutually-equivalent classes) is tolerated —
     // neither member is dropped.
     #[test]
     fn minimalize_types_tolerates_cycles() {
@@ -2405,7 +2405,7 @@ mod tests {
         assert!(nt2.contains("http://xmlns.com/foaf/0.1/Person"));
     }
 
-    /// [OPUS-4.8] sq-mr32 (federation A3/Z2): the VoID+CS export is a strict superset of
+    /// sq-mr32 (federation A3/Z2): the VoID+CS export is a strict superset of
     /// `to_void` (every standard VoID triple unchanged) plus the characteristic-set
     /// statistics under the `scs:` extension, and the whole document re-parses as valid
     /// RDF.
@@ -2480,7 +2480,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-bde: each characteristic set exports as a SHACL `sh:NodeShape` — a
+    /// sq-bde: each characteristic set exports as a SHACL `sh:NodeShape` — a
     /// universal class becomes `sh:targetClass`, every (non-type) predicate a
     /// `sh:PropertyShape` with `sh:minCount 1`, and `sh:maxCount 1` exactly when the set's
     /// avg multiplicity for that predicate is 1. The whole document is valid RDF.
@@ -2606,7 +2606,7 @@ mod tests {
             && t.object.to_string() == format!("<{}>", sh("PropertyShape"))));
     }
 
-    /// [OPUS-4.8] sq-bde: the empty graph yields an empty (but valid) SHACL document.
+    /// sq-bde: the empty graph yields an empty (but valid) SHACL document.
     #[test]
     fn shacl_empty_graph_is_empty_and_valid() {
         let g = graph("");
@@ -2655,7 +2655,7 @@ mod tests {
         }
     }
 
-    /// [OPUS-4.8] sq-3n4: per-class sample labels isolate a minority class. The shared
+    /// sq-3n4: per-class sample labels isolate a minority class. The shared
     /// predicate `:p` is used by a large `:Big` class (with the lexicographically
     /// smallest object values) and a one-instance `:Minor` class (a large value). The
     /// global per-predicate samples are the small `:Big` values — so the minority class
@@ -2726,7 +2726,7 @@ mod tests {
         assert_eq!(p_json["samples"][0], "\"zzz\"");
     }
 
-    /// [OPUS-4.8] sq-3n4: per-class samples are bounded by `samples_per_predicate` and
+    /// sq-3n4: per-class samples are bounded by `samples_per_predicate` and
     /// hold DISTINCT values (the per-class path feeds every triple, not POS-collapsed
     /// distinct objects, so repeats must be de-duplicated).
     #[test]
@@ -2756,7 +2756,7 @@ mod tests {
         assert_eq!(sorted.len(), cp.samples.len(), "samples must be distinct");
     }
 
-    /// [OPUS-4.8] sq-3n4: the persisted `*.introspect` sidecar round-trips byte-exactly
+    /// sq-3n4: the persisted `*.introspect` sidecar round-trips byte-exactly
     /// through `save`/`load`, and a loaded sidecar produces the same O(output) summaries
     /// as the freshly-built one WITHOUT re-touching the graph.
     #[test]
@@ -2815,7 +2815,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-3n4: `from_json` is the in-memory inverse of `to_json`, and a
+    /// sq-3n4: `from_json` is the in-memory inverse of `to_json`, and a
     /// missing / malformed sidecar surfaces as a clean `io::Error`.
     #[test]
     fn sidecar_from_json_and_error_paths() {
@@ -2839,7 +2839,7 @@ mod tests {
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 
-    /// [OPUS-4.8] sq-3n4: the conventional sidecar path appends `.introspect` to the
+    /// sq-3n4: the conventional sidecar path appends `.introspect` to the
     /// dataset name (keeping the dataset's own extension), so two datasets differing only
     /// by extension get distinct sidecars.
     #[test]
@@ -2858,9 +2858,9 @@ mod tests {
         assert_eq!(SIDECAR_EXTENSION, "introspect");
     }
 
-    // ---- [OPUS-4.8] sq-qcnn.21: mutation-kill direct unit tests ------------------
+    // ---- sq-qcnn.21: mutation-kill direct unit tests ------------------
 
-    /// [OPUS-4.8] sq-qcnn.21: `keep_min_sample` keeps the `cap` lex-smallest values.
+    /// sq-qcnn.21: `keep_min_sample` keeps the `cap` lex-smallest values.
     /// Kills mutations on `samples.len() < cap` (line 409) and `s < *last` (line 413):
     /// - `len < cap` → `<=`: would push a 3rd sample when len already equals cap.
     /// - `s < *last` → `>`: would keep larger values instead of smaller ones.
@@ -2896,7 +2896,7 @@ mod tests {
         assert_eq!(t, vec!["a", "aa", "b"], "smaller value replaced the max");
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `keep_min_sample_distinct` must reject a duplicate even
+    /// sq-qcnn.21: `keep_min_sample_distinct` must reject a duplicate even
     /// when capacity remains — the `contains` guard is the ONLY de-dup path for the
     /// class-scoped sample set. Kills `replace keep_min_sample_distinct with ()`.
     #[test]
@@ -2917,7 +2917,7 @@ mod tests {
         assert_eq!(s.len(), 2, "second duplicate still rejected");
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `truncate_chars` exact boundary — exactly `max` chars
+    /// sq-qcnn.21: `truncate_chars` exact boundary — exactly `max` chars
     /// must NOT be truncated; `max + 1` must produce `take(max-1)` chars + `…`.
     /// Kills mutation `replace <= with >` (line 1763) and tests `saturating_sub(1)`.
     #[test]
@@ -2946,7 +2946,7 @@ mod tests {
         assert_eq!(truncate_chars("", 0), "", "empty string is never truncated");
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `BudgetWriter::line` exact +2 reserve and > vs >= boundary.
+    /// sq-qcnn.21: `BudgetWriter::line` exact +2 reserve and > vs >= boundary.
     /// Kills mutations: `replace + with -/×` (line 1840), `replace > with >=` (line 1840).
     ///
     /// Design: "hello" = 5 chars + 1 newline = cost 6.
@@ -2971,7 +2971,7 @@ mod tests {
         assert_eq!(w8.finish(), "hello\n", "accepted line appears in output");
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `BudgetWriter::finish` elision-marker exact threshold.
+    /// sq-qcnn.21: `BudgetWriter::finish` elision-marker exact threshold.
     /// Kills mutations: `replace <= with >` and `replace + with -/×` in finish (line 1855).
     ///
     /// After "hello" (used=6) fails to fit "world" (truncated=true), limit=8:
@@ -3005,13 +3005,13 @@ mod tests {
         // The elision marker "…\n" costs 2 chars. With limit=1 no line can ever fit
         // (min cost = 1 char + 1 newline = 2 > 1), so used stays 0 but truncated=true.
         // finish: 0+2=2 > 1=limit → the elision marker has no room and is not emitted.
-        // [OPUS-4.8] sq-qcnn.21
+        // sq-qcnn.21
         let mut w3 = BudgetWriter::new(1);
         assert!(!w3.line("x"), "no line fits when limit=1");
         assert_eq!(w3.finish(), "", "no marker emitted when limit=1 (no room for the marker)");
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `PrefixAssigner::compact` exact `i + 1` split point.
+    /// sq-qcnn.21: `PrefixAssigner::compact` exact `i + 1` split point.
     /// Kills mutation `replace + with -/×` (line 1795): `rfind` index ± 1 off-by-one.
     ///
     /// For `http://ex.org/Foo`: last `/` is at byte 13, `cut = 14`.
@@ -3059,7 +3059,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `render_object_sample` inline integer exact value.
+    /// sq-qcnn.21: `render_object_sample` inline integer exact value.
     /// Kills `replace render_object_sample -> String with String::new()/"xyzzy"`.
     /// Also pins the `o - INLINE_BASE` arithmetic: if mutated to `o + INLINE_BASE`,
     /// the sample would be a huge number rather than the expected integer string.
@@ -3090,7 +3090,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `to_void_with_cs` avg multiplicity: exact `/ subjects`
+    /// sq-qcnn.21: `to_void_with_cs` avg multiplicity: exact `/ subjects`
     /// arithmetic. Kills `replace / with %` and `replace / with *` (line 1198).
     ///
     /// 2 subjects each emitting 3 triples via `:p` → avg = 6/2 = 3.0000.
@@ -3127,7 +3127,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `to_void` exact class and property counts — ensures
+    /// sq-qcnn.21: `to_void` exact class and property counts — ensures
     /// `void:classes` is `classes.len()` and `void:properties` is `predicates.len()`,
     /// with distinct values so any swap is observable.
     #[test]
@@ -3175,7 +3175,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `to_shacl` exact `triples == subjects` guard for `sh:maxCount 1`.
+    /// sq-qcnn.21: `to_shacl` exact `triples == subjects` guard for `sh:maxCount 1`.
     /// Kills `replace == with !=` (line 1296): would emit maxCount for multi-valued predicates.
     /// Also kills `replace == with !=` (line 1285): would skip maxCount for single-valued ones.
     #[test]
@@ -3229,7 +3229,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `characteristic_set_ids` exact multiplicity counting.
+    /// sq-qcnn.21: `characteristic_set_ids` exact multiplicity counting.
     /// Kills `replace - with +` (line 495): `(k - j) as u64` off-by-one.
     /// Kills `replace += with -=/×=` (lines 500, 502, 492): counter corruption.
     #[test]
@@ -3268,7 +3268,7 @@ mod tests {
         assert_eq!(triples_for("/q"), 2, ":q triples = 2 (1 from each subject)");
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: class coverage is `subjects / instances` exactly.
+    /// sq-qcnn.21: class coverage is `subjects / instances` exactly.
     /// Kills `replace / with %` and `replace / with *` (line 851 in build_with).
     /// Also kills `replace / with %/*` on literal_fraction (line 892 in build_with).
     #[test]
@@ -3307,7 +3307,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `minimalize_type_set` — the `len <= 1` early return
+    /// sq-qcnn.21: `minimalize_type_set` — the `len <= 1` early return
     /// keeps single-element lists unchanged even with a non-trivial supers map,
     /// and duplicates in a two-element list collapse to one.
     /// Kills `replace <= with >` (line 1705): would skip the early return, potentially
@@ -3340,7 +3340,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `to_text_summary` arithmetic — percent coverage and
+    /// sq-qcnn.21: `to_text_summary` arithmetic — percent coverage and
     /// "avg X/subj" label appear at exact computed values. Kills `replace * with +/÷`
     /// on coverage (line 1337) and `replace > with </<=/==` on the 1.05 threshold (line 1339).
     #[test]
@@ -3372,7 +3372,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] sq-qcnn.21: `build_superclass_closure` `c != d` self-loop guard.
+    /// sq-qcnn.21: `build_superclass_closure` `c != d` self-loop guard.
     /// Kills `replace != with ==` (line 1652): would accept only self-loops, rejecting
     /// real A⊑B edges, breaking minimalization.
     #[test]

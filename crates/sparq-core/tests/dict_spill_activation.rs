@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-bif.13) Edge tests for the SPILLED build-time dictionary (`dict-spill`
+//! (sq-bif.13) Edge tests for the SPILLED build-time dictionary (`dict-spill`
 //! feature) that go beyond the existing byte-identity guards: they prove the spill path
 //! actually ACTIVATES under a tight memory budget (not merely that the output happens to
 //! match), and that a store BUILT with spilling reloads correctly through the mmap'd open +

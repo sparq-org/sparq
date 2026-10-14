@@ -1,5 +1,5 @@
 // ─── Crate-level documentation ──────────────────────────────────────────────────────
-// [OPUS-4.8] sq-tiq4: the narrative below intra-doc-links the per-phase modules
+// sq-tiq4: the narrative below intra-doc-links the per-phase modules
 // (`source`/`discovery`/`planner`/`pushdown`/`operators`/`stream`/`adaptive`) and the
 // re-exported items — but EVERY one of those is `#[cfg(feature = "fedclient")]`-gated, so in
 // the DEFAULT (fedclient OFF) build none of them are in scope and `cargo doc` under
@@ -111,7 +111,7 @@ Both must FAIL if a future edit introduces such an edge.
 )]
 // Default (fedclient OFF) build: a concise, link-free crate doc. None of the per-phase
 // modules/items linked above exist in this build, so the doc is plain text + code spans
-// (matching `README.md`). [OPUS-4.8] sq-tiq4.
+// (matching `README.md`). sq-tiq4.
 #![cfg_attr(
     not(feature = "fedclient"),
     doc = r#"sparq-fedclient: a **streaming federation CLIENT** over heterogeneous remote RDF
@@ -131,12 +131,12 @@ feature).
 [OPUS-4.8] sq-s1uy / sq-73om / sq-tiq4 — flagged for Fable re-review when available."#
 )]
 #![forbid(unsafe_code)]
-// [OPUS-4.8] sq-tiq4: lock the fix in. `rustdoc::broken_intra_doc_links` is a rustdoc-only
+// sq-tiq4: lock the fix in. `rustdoc::broken_intra_doc_links` is a rustdoc-only
 // lint — it fires under `cargo doc`, NOT under `cargo build`/`clippy`/`test` — so denying it
 // keeps the existing build/clippy/test gates untouched while making a future broken crate-doc
 // link a hard `cargo doc` error in EITHER feature state.
 #![deny(rustdoc::broken_intra_doc_links)]
-// [OPUS-4.8] sq-s1uy: crate has zero `unsafe`.
+// sq-s1uy: crate has zero `unsafe`.
 // When `fedclient` is off the crate is intentionally empty, so its items are unused.
 #![cfg_attr(not(feature = "fedclient"), allow(dead_code, unused_imports))]
 
@@ -152,29 +152,29 @@ feature).
 /// Endpoint adapter over the engine's existing SRJ transport; Phase 6 adds brTPF/TPF.
 #[cfg(feature = "fedclient")]
 pub mod source;
-// [OPUS-4.8] sq-g2xs: shared ureq-3 SSRF-resolver helpers (URI→host:port, capacity-bounded
-// filtered resolve, refusal error) used by every native federation transport. Native-only —
-// only built when `fedclient` pulls ureq in.
+// sq-g2xs: the SSRF-guarded ureq resolver and client used by every native federation
+// transport, over the engine's shared `resolve_vetted`. Native-only — only built when
+// `fedclient` pulls ureq in.
 #[cfg(all(feature = "fedclient", not(target_arch = "wasm32")))]
 pub(crate) mod ureq_egress;
-// [OPUS-4.8] sq-rsxf: re-export the Phase-2 §4.1 source surface at the crate root.
+// sq-rsxf: re-export the Phase-2 §4.1 source surface at the crate root.
 #[cfg(feature = "fedclient")]
 pub use source::{
     is_forbidden_ip, BindJoin, BrTpfSource, Capability, EgressGuard, Endpoint, FedError,
     FederatedSource, FilterClass, Interface, LocalSource, SourceType, SubQuery, TpfSource,
     Transport,
 };
-// [OPUS-4.8] sq-2qze: re-export the Phase-6 brTPF/TPF fragment surface at the crate root.
+// sq-2qze: re-export the Phase-6 brTPF/TPF fragment surface at the crate root.
 #[cfg(feature = "fedclient")]
 pub use source::{
     FragBinding, FragPattern, FragTerm, FragTriple, FragmentPage, FragmentTransport, PatternTerm,
 };
-// [OPUS-4.8] sq-25xk: re-export the native IP-pinning HTTP transport for the Endpoint adapter.
+// sq-25xk: re-export the native IP-pinning HTTP transport for the Endpoint adapter.
 // Native-only — it wraps ureq (gated out of the wasm bundle) and installs an SSRF resolver so
 // the guard-vetted IP IS the dialled IP (no DNS-rebinding re-resolve window).
 #[cfg(all(feature = "fedclient", not(target_arch = "wasm32")))]
 pub use source::HttpTransport;
-// [OPUS-4.8] sq-yzca: re-export the native HTTP FragmentTransport for the TPF/brTPF adapters.
+// sq-yzca: re-export the native HTTP FragmentTransport for the TPF/brTPF adapters.
 // Native-only — ureq + the SAME default-deny SSRF resolver, Hydra URI-template serialisation
 // (`?subject=&predicate=&object=` + the brTPF `values` block) and Turtle/TriG fragment-body
 // parse (control/data split, `hydra:totalItems`/`void:triples` count, `hydra:next` pagination).
@@ -193,7 +193,7 @@ pub use source::HttpFragmentTransport;
 /// parameter; the binary wire here is the alternative a body-carrying transport emits.
 #[cfg(feature = "fedclient")]
 pub mod wire;
-// [OPUS-4.8] sq-6ihg: re-export the brTPF binding-block wire codec at the crate root.
+// sq-6ihg: re-export the brTPF binding-block wire codec at the crate root.
 #[cfg(feature = "fedclient")]
 pub use wire::{
     decode_bindings, encode_bindings, encode_bindings_text, WireError, BINARY_MAGIC, BINARY_VERSION,
@@ -207,7 +207,7 @@ pub use wire::{
 /// SSRF-guarded [`Fetcher`](discovery::Fetcher) seam (default-deny private/internal IPs).
 #[cfg(feature = "fedclient")]
 pub mod discovery;
-// [GPT-5.6] sq-fx5id: the live pattern-probe surface is separately default-OFF even though it
+// sq-fx5id: the live pattern-probe surface is separately default-OFF even though it
 // reuses the always-fedclient discovery module and Fetcher policy seam.
 #[cfg(feature = "pattern_probe")]
 pub use discovery::{
@@ -221,8 +221,8 @@ pub use discovery::{
 /// patterns / endpoint adapters (Phase 3). The client does NOT write a new planner.
 #[cfg(feature = "fedclient")]
 pub mod planner;
-// [OPUS-4.8] sq-j27p: re-export the Phase-3 planner-bridge surface at the crate root.
-// [OPUS-4.8] sq-yzca: `lower_leaf_fragment` lowers a leaf to a `FragPattern` for a TPF/brTPF
+// sq-j27p: re-export the Phase-3 planner-bridge surface at the crate root.
+// sq-yzca: `lower_leaf_fragment` lowers a leaf to a `FragPattern` for a TPF/brTPF
 // source (the fragment-source twin of `lower_leaf`'s SPARQL `SubQuery`).
 #[cfg(feature = "fedclient")]
 pub use planner::{lower_leaf, lower_leaf_fragment, pattern_vars, ResolveError, SourceResolver};
@@ -236,11 +236,11 @@ pub use planner::{select_sources_with_pattern_probes, ProbeSource};
 /// local (Phase 4). Pushdown only ever NARROWS a source's result — correctness-preserving.
 #[cfg(feature = "fedclient")]
 pub mod pushdown;
-// [OPUS-4.8] sq-7byx: re-export the Phase-4 capability-aware pushdown surface at the crate root.
+// sq-7byx: re-export the Phase-4 capability-aware pushdown surface at the crate root.
 #[cfg(feature = "fedclient")]
 pub use pushdown::{
     bind_block_size, common_variable_check, exclusive_groups, group_vars, push_group,
-    render_values_block, ExclusiveGroup, Filter, PushedGroup, DEFAULT_BIND_BLOCK,
+    render_values_block, ExclusiveGroup, Filter, OrderKey, PushedGroup, DEFAULT_BIND_BLOCK,
 };
 
 /// §4.4 — **physical federation operators**: interpret a `JoinTree` into operators —
@@ -250,14 +250,14 @@ pub use pushdown::{
 /// with concurrent fan-out (Phase 3/5).
 #[cfg(feature = "fedclient")]
 pub mod operators;
-// [OPUS-4.8] sq-j27p: re-export the Phase-3 materialised single-source interpreter surface.
+// sq-j27p: re-export the Phase-3 materialised single-source interpreter surface.
 #[cfg(feature = "fedclient")]
 pub use operators::{materialize_single_source, parse_srj, solutions_equal, InterpError, Relation};
-// [OPUS-4.8] sq-vtba: re-export the Phase-5 streaming-operator surface — the bounded blocking
+// sq-vtba: re-export the Phase-5 streaming-operator surface — the bounded blocking
 // thread-pool, the `StreamJoin`-feeder streaming join, and the streaming interpreter.
 #[cfg(feature = "fedclient")]
 pub use operators::{stream_single_source, ScatterPool, StreamOptions, StreamingJoin};
-// [OPUS-4.8] sq-7yf0: re-export the multi-source UNION-per-leaf interpreters — a leaf the
+// sq-7yf0: re-export the multi-source UNION-per-leaf interpreters — a leaf the
 // planner retained >1 source for is fanned out as a per-source bag-union rather than rejected
 // with `InterpError::MultiSource` (the materialised + streaming counterparts of the
 // single-source entry points above).
@@ -270,7 +270,7 @@ pub use operators::{materialize_multi_source, stream_multi_source};
 /// operators consume and produce it (Phase 5).
 #[cfg(feature = "fedclient")]
 pub mod stream;
-// [OPUS-4.8] sq-vtba: re-export the Phase-5 `SolutionStream` boundary surface at the crate root.
+// sq-vtba: re-export the Phase-5 `SolutionStream` boundary surface at the crate root.
 #[cfg(feature = "fedclient")]
 pub use stream::{Solution, SolutionSink, SolutionStream, StreamItem};
 
@@ -283,14 +283,14 @@ pub use stream::{Solution, SolutionSink, SolutionStream, StreamItem};
 /// Re-planning changes the plan, never the answer (result-multiset-preserving). Behind the
 /// extra default-OFF `fedclient-adaptive` feature (which pulls `sparq-fedplan/adaptive-replan`).
 /// Two entry points: single-source (the `MultiSource`-guarded loop) and multi-source
-/// ([FABLE-5] sq-xw8zz) — the latter answers a leaf as the bag-union of its retained arms
+/// (sq-xw8zz) — the latter answers a leaf as the bag-union of its retained arms
 /// and feeds LIVE per-arm fetch latencies into the planner's per-source EWMA, making the
 /// latency-aware cost bias (incl. the opt-in `LatencyAggregation::CardinalityWeighted`,
 /// sq-s5kd) consumable from a real execution.
 #[cfg(feature = "fedclient-adaptive")]
 pub mod adaptive;
-// [OPUS-4.8] sq-ij5x: re-export the Phase-7 adaptive surface at the crate root.
-// [FABLE-5] sq-xw8zz: + the multi-source (union-arm) entry point.
+// sq-ij5x: re-export the Phase-7 adaptive surface at the crate root.
+// sq-xw8zz: + the multi-source (union-arm) entry point.
 #[cfg(feature = "fedclient-adaptive")]
 pub use adaptive::{
     execute_adaptive_multi_source, execute_adaptive_single_source, static_plan, AdaptiveOutcome,

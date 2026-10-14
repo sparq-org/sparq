@@ -6,7 +6,7 @@
 //! These complement `trace_guard.rs` (the Q6 bnode anti-correlation tests):
 //! here the focus is correct ATTRIBUTION, not rejection.
 //!
-//! [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+//! written while Fable 5 unavailable — re-review when Fable returns.
 
 use oxrdf::NamedNode;
 use sparq_zk::encode::salt_from_bytes;

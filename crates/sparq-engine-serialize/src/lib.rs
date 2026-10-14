@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-6vshe.4) Internal RDF-serializer sub-crate of `sparq-engine`.
+//! (sq-6vshe.4) Internal RDF-serializer sub-crate of `sparq-engine`.
 //!
 //! **Unstable-internal.** This crate is an implementation detail of `sparq-engine`
 //! (seam 1 of the staged facade split, RFC `research/engine-split-rfc.md` §4 Option A /
@@ -22,7 +22,7 @@
 //! `streaming-serialization` implies `serialize-rdf` and additionally enables the streaming
 //! Turtle/TriG writers.
 
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-6vshe.4: the serializer carries zero `unsafe` (moved verbatim from sparq-engine, which forbids it crate-wide).
+#![forbid(unsafe_code)] // sq-6vshe.4: the serializer carries zero `unsafe` (moved verbatim from sparq-engine, which forbids it crate-wide).
 
 // The entire serializer matrix is behind `serialize-rdf`, mirroring the gating this code
 // had inside `sparq-engine` (`#[cfg(feature = "serialize-rdf")] pub mod serialize;`). When

@@ -54,7 +54,7 @@ pub const ZK_CRYPTOSUITE: &str = "https://sparq.dev/ns/zk#cryptosuite";
 /// (§5.3): the query proof does not re-check the VC's Data-Integrity signature.
 /// Recorded as a plain literal (the verbatim `proof.cryptosuite` value, which is
 /// a bare suite token in a W3C VC, not an absolute IRI).
-// [OPUS-4.8] sq-9c5e.
+// sq-9c5e.
 pub const ZK_SOURCE_CRYPTOSUITE: &str = "https://sparq.dev/ns/zk#sourceCryptosuite";
 pub const ZK_ISSUER_KEY: &str = "https://sparq.dev/ns/zk#issuerKey";
 /// The issuer's actual verification-key material (compressed Baby-JubJub point,
@@ -64,11 +64,11 @@ pub const ZK_ISSUER_KEY: &str = "https://sparq.dev/ns/zk#issuerKey";
 /// under. (`zk:issuerKey` carries provenance; `zk:issuerPublicKey` carries the
 /// cryptographic key. A production resolver would dereference the former to the
 /// latter; v1 records the latter directly so the proof is self-contained.)
-// [OPUS-4.8] audit #3: real signing key, not just a did: IRI.
+// audit #3: real signing key, not just a did: IRI.
 pub const ZK_ISSUER_PUBLIC_KEY: &str = "https://sparq.dev/ns/zk#issuerPublicKey";
 /// The issuer's signature over `C(G)` (hex), under `zk:cryptosuite`. This is
 /// what makes the commitment attested rather than prover-chosen (audit #3).
-// [OPUS-4.8] audit #3.
+// audit #3.
 pub const ZK_COMMITMENT_SIGNATURE: &str = "https://sparq.dev/ns/zk#commitmentSignature";
 pub const ZK_SIGNATURE_GRAPH: &str = "https://sparq.dev/ns/zk#signatureGraph";
 pub const ZK_STATUS_LIST: &str = "https://sparq.dev/ns/zk#statusList";
@@ -76,7 +76,7 @@ pub const ZK_STATUS_LIST: &str = "https://sparq.dev/ns/zk#statusList";
 /// signature is bound to (audit #12). Both are folded — with `H(zk:statusList)`
 /// — into the issuer-signed status reference digest, so the reference is
 /// unforgeable/un-omittable on the verify path.
-// [OPUS-4.8] audit #12: issuer-bound status-list index + version.
+// audit #12: issuer-bound status-list index + version.
 pub const ZK_STATUS_LIST_INDEX: &str = "https://sparq.dev/ns/zk#statusListIndex";
 pub const ZK_STATUS_LIST_VERSION: &str = "https://sparq.dev/ns/zk#statusListVersion";
 pub const ZK_RDFC10_SALT: &str = "https://sparq.dev/ns/zk#rdfc10Salt";
@@ -92,7 +92,7 @@ pub const ZK_SCHEME_POSEIDON2_RDFC10_V1: &str = "https://sparq.dev/ns/zk#poseido
 /// — [`crate::commit::CommitmentMethod::DualLeafV1`]. Selecting it records the
 /// #769-accepted INV-VL downgrade on the entry (config only here; the leaf
 /// encoding is the audit-gated `sq-j506` — NOT implemented in this crate yet).
-// [OPUS-4.8] sq-zzxt: configurable-commitment scheme IRIs (design
+// sq-zzxt: configurable-commitment scheme IRIs (design
 // `research/zk-configurable-commitment-design.md` §2.1).
 pub const ZK_SCHEME_POSEIDON2_DUALLEAF_V1: &str = "https://sparq.dev/ns/zk#poseidon2-dualleaf-v1";
 /// The `value-only` commitment scheme id (value handle only, lexical hash
@@ -101,7 +101,7 @@ pub const ZK_SCHEME_POSEIDON2_DUALLEAF_V1: &str = "https://sparq.dev/ns/zk#posei
 /// present, but the method that selects it is compiled out unless the
 /// OFF-by-default `commitment-value-only` feature is enabled, so a default build
 /// cannot select it.
-// [OPUS-4.8] sq-zzxt.
+// sq-zzxt.
 pub const ZK_SCHEME_POSEIDON2_VALUEHOOK_V1: &str = "https://sparq.dev/ns/zk#poseidon2-valuehook-v1";
 pub const ZK_STATUS_ACTIVE: &str = "https://sparq.dev/ns/zk#active";
 pub const ZK_STATUS_REVOKED: &str = "https://sparq.dev/ns/zk#revoked";
@@ -136,18 +136,18 @@ pub struct RegistryEntry {
     /// (`crate::vc_bridge`). Back-compat / perf-comparison provenance only — NOT a
     /// re-verifiable in-proof property; distinct from [`Self::cryptosuite`] (the
     /// sparq scheme the query proof binds to). `None` for non-VC-bridge entries.
-    // [OPUS-4.8] sq-9c5e.
+    // sq-9c5e.
     pub source_cryptosuite: Option<String>,
     /// Issuer verification-method reference (a `did:` URL).
     pub issuer_key: Option<NamedNode>,
     /// The issuer's actual verification key (compressed Baby-JubJub point, hex)
     /// — the key the verifier checks the commitment signature under (audit #3).
-    // [OPUS-4.8]
+    //
     pub issuer_public_key: Option<String>,
     /// The issuer's signature over `C(G)` (hex), under `cryptosuite`. Absent =>
     /// the commitment is UNATTESTED and a verifier requiring attestation must
     /// reject it (audit #3).
-    // [OPUS-4.8]
+    //
     pub commitment_signature: Option<String>,
     /// The credential's proof graph (`<D>?proof` by convention).
     pub signature_graph: Option<NamedNode>,
@@ -156,10 +156,10 @@ pub struct RegistryEntry {
     /// The credential's index into its status list (audit #12). Bound — with
     /// `status_list_version` and `H(status_list)` — under the issuer signature
     /// when the entry is issued via [`Self::issued_with_status`].
-    // [OPUS-4.8] audit #12.
+    // audit #12.
     pub status_list_index: Option<u64>,
     /// The status-list version this entry's signature is bound to (audit #12).
-    // [OPUS-4.8] audit #12.
+    // audit #12.
     pub status_list_version: Option<u64>,
     /// The per-graph RDFC10 bnode salt (Q6).
     pub salt: Fr,
@@ -201,7 +201,7 @@ impl RegistryEntry {
     /// [`Self::method`] is `None` rather than assume `string-canonical`. The method
     /// is **in-circuit-affecting**, so a later `(method, circuit)` dispatch matrix
     /// (sq-cfmv) consumes this to refuse an illegal pairing.
-    // [OPUS-4.8] sq-zzxt: commitment-method selection over the `zk:scheme` slot.
+    // sq-zzxt: commitment-method selection over the `zk:scheme` slot.
     pub fn method(&self) -> Option<crate::commit::CommitmentMethod> {
         crate::commit::CommitmentMethod::from_scheme_iri(self.scheme.as_str())
     }
@@ -214,7 +214,7 @@ impl RegistryEntry {
     /// different leaf shape (that is the audit-gated `sq-j506` host-encoding bead);
     /// it records the selection so the method is an explicit, recorded property
     /// rather than the silent hard-wired `string-canonical` default.
-    // [OPUS-4.8] sq-zzxt.
+    // sq-zzxt.
     #[must_use]
     pub fn with_method(mut self, method: crate::commit::CommitmentMethod) -> Self {
         self.scheme = method.scheme_node();
@@ -227,7 +227,7 @@ impl RegistryEntry {
     /// source VC (e.g. `eddsa-rdfc-2022`). This is back-compat / perf-comparison
     /// provenance ONLY; it does not change [`Self::cryptosuite`] (the sparq scheme
     /// the query proof binds to) and is not a re-verifiable in-proof property.
-    // [OPUS-4.8] sq-9c5e.
+    // sq-9c5e.
     #[must_use]
     pub fn with_source_cryptosuite(mut self, suite: impl Into<String>) -> Self {
         self.source_cryptosuite = Some(suite.into());
@@ -249,7 +249,7 @@ impl RegistryEntry {
     /// signing fix added `sign_commitment` but issuance still took a caller RNG;
     /// this routes issuance through it.) The random-nonce `sig::sign` is now
     /// test-only — no public API takes a caller RNG.
-    // [OPUS-4.8] audit #3; codex 2216 MEDIUM: deterministic-nonce issuance, no caller RNG.
+    // audit #3; codex 2216 MEDIUM: deterministic-nonce issuance, no caller RNG.
     pub fn issued(
         document: NamedNode,
         commitment: Fr,
@@ -259,7 +259,7 @@ impl RegistryEntry {
         let pk = sk.public_key();
         // Deterministic (sk, m) nonce — see `SecretKey::sign_commitment` /
         // `sign_deterministic`. No RNG state crosses the API boundary.
-        // [OPUS-4.8] audit #9: bind the per-graph salt into the signed object so
+        // audit #9: bind the per-graph salt into the signed object so
         // the salt is issuer-attested and salt reuse is detectable verifier-side.
         let sig_hex = sk.sign_commitment_with_salt(&commitment, &salt);
         let mut e = RegistryEntry::new(document, commitment, salt);
@@ -279,7 +279,7 @@ impl RegistryEntry {
     /// issuer-attested and cannot be omitted or forged by the prover on the
     /// verify path. Same deterministic `(sk, m)` nonce discipline as
     /// [`Self::issued`].
-    // [OPUS-4.8] audit #12: status-bound issuance.
+    // audit #12: status-bound issuance.
     // clippy: each arg is a distinct cryptographic input to a signing constructor;
     // bundling into a params struct would only obscure the call sites.
     #[allow(clippy::too_many_arguments)]
@@ -317,7 +317,7 @@ impl RegistryEntry {
     /// status-list/index/version, an unknown cryptosuite, or malformed hex all
     /// return `false`. The caller must ALSO check the key is in the disclosed
     /// key-set `K` and validate liveness (status bit + freshness) separately.
-    // [OPUS-4.8] audit #12.
+    // audit #12.
     pub fn verify_commitment_signature_with_status(&self) -> bool {
         let (Some(pk_hex), Some(sig_hex), Some(cs), Some(sl), Some(idx), Some(ver)) = (
             &self.issuer_public_key,
@@ -332,7 +332,7 @@ impl RegistryEntry {
         let list_id = crate::sig::status_list_id_to_field(sl.as_str());
         let status_ref = crate::sig::status_ref_digest(&list_id, idx, ver);
         let msg = crate::sig::commitment_message_with_status(&self.commitment, &self.salt, &status_ref);
-        // [OPUS-4.8] sq-1hsl: route through the pluggable OFF-circuit signature
+        // sq-1hsl: route through the pluggable OFF-circuit signature
         // seam. `verify_commitment_with_scheme` resolves the cryptosuite to its
         // `IssuerSignatureScheme` and fails closed on an unknown cryptosuite or
         // malformed key/signature hex — byte-identical accept/reject to the prior
@@ -346,17 +346,17 @@ impl RegistryEntry {
     /// missing signature, unknown cryptosuite, or malformed hex all return
     /// `false`. NB this checks the signature is INTERNALLY valid; the caller
     /// must ALSO check the key is a member of the disclosed key-set `K`.
-    // [OPUS-4.8] audit #3.
+    // audit #3.
     pub fn verify_commitment_signature(&self) -> bool {
         let (Some(pk_hex), Some(sig_hex), Some(cs)) =
             (&self.issuer_public_key, &self.commitment_signature, &self.cryptosuite)
         else {
             return false;
         };
-        // [OPUS-4.8] audit #9: issuance via `issued` signs the SALT-BOUND
+        // audit #9: issuance via `issued` signs the SALT-BOUND
         // message, so verification recomputes it over `(commitment, salt)`.
         let msg = crate::sig::commitment_message_with_salt(&self.commitment, &self.salt);
-        // [OPUS-4.8] sq-1hsl: route through the pluggable OFF-circuit signature
+        // sq-1hsl: route through the pluggable OFF-circuit signature
         // seam. Only the v1 scheme is verifiable in-tree; an unknown cryptosuite
         // (no resolved `IssuerSignatureScheme`) or malformed key/signature hex
         // fails closed — byte-identical to the prior inline `from_cryptosuite_iri`
@@ -399,7 +399,7 @@ impl RegistryEntry {
         if let Some(cs) = &self.cryptosuite {
             out.push([s.clone(), pred(ZK_CRYPTOSUITE), Term::NamedNode(cs.clone())]);
         }
-        // [OPUS-4.8] sq-9c5e: source-VC cryptosuite provenance (plain literal,
+        // sq-9c5e: source-VC cryptosuite provenance (plain literal,
         // the verbatim W3C `proof.cryptosuite` token).
         if let Some(scs) = &self.source_cryptosuite {
             out.push([
@@ -411,7 +411,7 @@ impl RegistryEntry {
         if let Some(k) = &self.issuer_key {
             out.push([s.clone(), pred(ZK_ISSUER_KEY), Term::NamedNode(k.clone())]);
         }
-        // [OPUS-4.8] audit #3: the cryptographic key + the commitment signature.
+        // audit #3: the cryptographic key + the commitment signature.
         if let Some(pk) = &self.issuer_public_key {
             out.push([
                 s.clone(),
@@ -432,7 +432,7 @@ impl RegistryEntry {
         if let Some(sl) = &self.status_list {
             out.push([s.clone(), pred(ZK_STATUS_LIST), Term::NamedNode(sl.clone())]);
         }
-        // [OPUS-4.8] audit #12: the issuer-bound status-list index + version.
+        // audit #12: the issuer-bound status-list index + version.
         let xsd_int = NamedNode::new_unchecked("http://www.w3.org/2001/XMLSchema#nonNegativeInteger");
         if let Some(idx) = self.status_list_index {
             out.push([
@@ -578,14 +578,14 @@ pub fn read_registry(graph: &Graph) -> Vec<RegistryEntry> {
             Term::Literal(l) if p == ZK_INGESTED => Some(l.value().to_string()),
             _ => None,
         });
-        // [OPUS-4.8] audit #3: plain-literal key + signature hex.
+        // audit #3: plain-literal key + signature hex.
         let str_of = |pred: &str| -> Option<String> {
             props.iter().find_map(|(p, o)| match o {
                 Term::Literal(l) if p == pred => Some(l.value().to_string()),
                 _ => None,
             })
         };
-        // [OPUS-4.8] audit #12: integer literal (status-list index / version).
+        // audit #12: integer literal (status-list index / version).
         let u64_of = |pred: &str| -> Option<u64> {
             props.iter().find_map(|(p, o)| match o {
                 Term::Literal(l) if p == pred => l.value().parse::<u64>().ok(),
@@ -597,7 +597,7 @@ pub fn read_registry(graph: &Graph) -> Vec<RegistryEntry> {
             commitment,
             scheme,
             cryptosuite: iri_of(ZK_CRYPTOSUITE),
-            // [OPUS-4.8] sq-9c5e: source-VC cryptosuite provenance (plain literal).
+            // sq-9c5e: source-VC cryptosuite provenance (plain literal).
             source_cryptosuite: str_of(ZK_SOURCE_CRYPTOSUITE),
             issuer_key: iri_of(ZK_ISSUER_KEY),
             issuer_public_key: str_of(ZK_ISSUER_PUBLIC_KEY),
@@ -633,7 +633,7 @@ mod tests {
         e
     }
 
-    // [OPUS-4.8] sq-9c5e: the `zk:sourceCryptosuite` provenance slot round-trips
+    // sq-9c5e: the `zk:sourceCryptosuite` provenance slot round-trips
     // through the store unchanged (the real serialize/parse path), independent of
     // the sparq `zk:cryptosuite`. An entry without it parses back as `None`.
     #[test]
@@ -659,7 +659,7 @@ mod tests {
         assert_eq!(read_registry(&g2)[0].source_cryptosuite, None);
     }
 
-    // [OPUS-4.8] audit #3: an attested entry, its signature, and tamper cases.
+    // audit #3: an attested entry, its signature, and tamper cases.
     #[test]
     fn issued_entry_signature_round_trips_through_store_and_verifies() {
         use crate::sig::SecretKey;
@@ -681,7 +681,7 @@ mod tests {
         assert!(back[0].verify_commitment_signature(), "read-back entry verifies");
     }
 
-    // [OPUS-4.8] audit #12: a status-bound issued entry verifies, round-trips
+    // audit #12: a status-bound issued entry verifies, round-trips
     // through the store (index + version survive), and rejects a tampered
     // status-list reference (index/version/list) — the property that makes an
     // omitted/forged status reference unverifiable on the verify path.
@@ -738,7 +738,7 @@ mod tests {
         assert!(!e.verify_commitment_signature(), "tampered commitment must not verify");
     }
 
-    // [OPUS-4.8] codex 2216 MEDIUM: issuance is deterministic + nonce-safe. The
+    // codex 2216 MEDIUM: issuance is deterministic + nonce-safe. The
     // signature comes from the `(sk, m)`-derived-nonce path, so (a) re-issuing
     // the SAME (sk, commitment) yields byte-identical signatures (no caller RNG),
     // and (b) two DISTINCT commitments under the same key get DISTINCT nonces `R`
@@ -837,7 +837,7 @@ mod tests {
         assert_eq!(proof_graph_name(&d).as_str(), "https://dmv.example/vc/lic-123?proof");
     }
 
-    // [OPUS-4.8] sq-zzxt: commitment-method selection over the `zk:scheme` slot.
+    // sq-zzxt: commitment-method selection over the `zk:scheme` slot.
 
     #[test]
     fn fresh_entry_defaults_to_string_canonical_method() {

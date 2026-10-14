@@ -31,9 +31,12 @@ base URL unless configured otherwise. The default Cargo features are:
 
 - `embedded-sparq`, which enables the in-process SPARQ engine backend.
 - `sparql-endpoint`, which mounts the query-only `/sparql` route.
+- `authn-ssi` and `authn-openid`, two of the LWS 1.0 authorization server's
+  authentication suites (§ *Run the LWS 1.0 protocol* below). `authn-saml` is off.
 
 Use `--no-default-features` for the engine-free Solid core tier; that tier keeps
-LDP and WAC but does not expose `/sparql`.
+LDP and WAC but does not expose `/sparql`, and it compiles in no authentication
+suite, so LWS mode offers none.
 
 For a deployed instance, set at least:
 
@@ -177,8 +180,20 @@ curl -i -X POST \
 `GET` and `HEAD` read resources. `PUT` creates or replaces, `POST` mints a
 collision-resistant child IRI below a container, `PATCH` accepts supported
 Solid/SPARQL patch forms, and `DELETE` removes a resource or an empty
-container. Use `If-Match` and `If-None-Match` for conditional mutations.
-Container reads include generated `ldp:contains` triples.
+container. Use `If-Match`, `If-None-Match` and `If-Unmodified-Since` for
+conditional mutations. `If-Unmodified-Since` is ignored when `If-Match` is
+present, when the date is not one valid HTTP-date (IMF-fixdate, RFC 850 or
+asctime; a date sent on several header lines is none), and for containers, whose
+listing can change without moving their recorded time. `If-Modified-Since` on a
+read accepts the same three forms. As with a concrete ETag validator, a
+writer without Read on the target is refused rather than told the outcome.
+Container reads include generated `ldp:contains` triples. A container's `ETag`
+covers its own record and its membership: a tag read in any format is a valid
+`If-Match` for the container until it or its membership changes. Creating a
+container returns its current tag; replacing one returns no `ETag`. Generated
+and re-serialised representations list children in IRI order and label blank
+nodes `_:b0`, `_:b1`, … by position, so one state always reads back as the
+same bytes.
 
 Use a trailing slash for containers. A resource and container cannot coexist at
 slash-equivalent paths. ACL resources use the sibling `.acl` convention and
@@ -186,12 +201,21 @@ are themselves protected by `acl:Control`.
 
 ## Negotiate RDF representations
 
-Request Turtle or JSON-LD:
+Request Turtle, JSON-LD, N-Triples or N-Quads:
 
 ```sh
 curl -H 'Accept: text/turtle' https://solid.example/alice/profile/card
 curl -H 'Accept: application/ld+json' https://solid.example/alice/profile/card
+curl -H 'Accept: application/n-triples' https://solid.example/alice/profile/card
 ```
+
+N-Triples and N-Quads are read formats only. A PUT or POST body sent with
+either media type is stored as an opaque non-RDF resource, not parsed as RDF,
+and PATCH refuses them with 415. A resource is one default graph, so its
+N-Quads lines carry no graph label.
+`text/n3` is not produced and falls back to Turtle. When q-values tie, the
+stored format wins, then Turtle, JSON-LD, N-Triples, N-Quads in that order,
+so `application/*` still yields JSON-LD.
 
 The JSON-LD reader also recognizes the canonical expanded and compacted
 profile parameters and echoes the honored profile in `Content-Type`. Its

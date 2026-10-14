@@ -147,10 +147,10 @@ cargo deny check advisories bans sources licenses
   (`grep -n "is_empty\|deny\|allow" crates/sparq-server/src/service_config.rs`) — empty
   allowlist = deny-all; sources `--service-allow` / `SPARQ_SERVICE_ALLOW` / `--service-allow-file`.
 - **Resolved-IP filter (loopback/private/link-local/metadata).**
-  `grep -n "fn is_forbidden_ip\|169.254.169.254\|EgressFilterResolver" crates/sparq-engine/src/service.rs`
+  `grep -n "fn is_forbidden_ip\|169.254.169.254\|EgressFilterResolver" crates/sparq-core/src/net.rs crates/sparq-engine-service/src/service.rs`
   — enforced on the **resolved** address (no DNS-rebinding TOCTOU).
 - **Tests.** `crates/sparq-server/tests/service_allowlist.rs` (empty allowlist refuses SERVICE
-  **before any dial**); `is_forbidden_ip` unit tests in `crates/sparq-engine/src/service.rs`.
+  **before any dial**); `is_forbidden_ip` unit tests in `crates/sparq-core/src/net.rs`.
 - **No static-file serving sink.** `grep -rn "ServeDir\|ServeFile\|fs::read.*req\|\.\./" crates/sparq-server/src` returns no path-traversal sink; routes are SPARQL + Graph-Store protocol only.
 
 ## V13 — API & web service

@@ -1,6 +1,6 @@
 //! Typed-literal encoders (structure-aware vectorisation **P1**).
 //!
-//! [OPUS-4.8] sq-0wo9e.2 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.2 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §3.1 + §3.2 + §3.3 layout + §6.A formal-properties table). This module is the **second**
 //! additive slice of the structure-aware-vectorisation epic, on top of P0
 //! ([`crate::structure`]: closure-before-vectorise + type-constrained negatives). It is
@@ -120,7 +120,7 @@ pub enum Encoder {
     /// [`crate::taxonomy`]). It is **not** a literal-datatype lane (so [`route`] never returns it);
     /// it is produced by the taxonomy encoder and registered in the [`SchemaHeader`] so the row is
     /// self-describing. The default (Euclidean) taxonomy block is [`Metric::Euclidean`]; a
-    /// gate-selected hyperbolic block is [`Metric::NonEuclidean`]. [OPUS-4.8] sq-0wo9e.4
+    /// gate-selected hyperbolic block is [`Metric::NonEuclidean`]. sq-0wo9e.4
     Taxonomy,
     /// Anything else — a plain string, a language-tagged literal, a free IRI. The router does
     /// **not** encode these: strings go to the existing out-of-process text lane (the
@@ -204,12 +204,13 @@ pub fn temporal_value(lexical: &str, datatype: &str) -> Option<f64> {
     }
 }
 
-/// Parse an `xsd:gYear` lexical (`[-]YYYY`, with an optional trailing timezone we ignore for
-/// ordering) to a signed year. The lexical space requires at least 4 digits.
+/// Parse an `xsd:gYear` lexical (`[-]YYYY`, with an optional trailing timezone) to a signed
+/// year. The lexical space requires at least 4 digits. A timezone is validated (a malformed one
+/// returns `None`) but does not affect the year used for ordering.
 fn parse_gyear(lexical: &str) -> Option<i64> {
     let s = lexical.trim_matches([' ', '\t', '\r', '\n']);
-    // Strip a trailing timezone suffix (`Z` or `±hh:mm`) if present — it does not affect the year
-    // for ordering purposes.
+    // Strip a trailing timezone suffix (`Z` or `±hh:mm`) if present, after validating it — it
+    // does not affect the year for ordering purposes.
     let core = if let Some(stripped) = s.strip_suffix('Z') {
         stripped
     } else if s.len() > 6 && (s.as_bytes()[s.len() - 6] == b'+' || s.as_bytes()[s.len() - 6] == b'-')
@@ -454,7 +455,7 @@ pub enum Metric {
 /// searched under, its `[offset, offset+width)` span of `f32` dimensions, and an **optional
 /// per-block default fusion weight** (`weight`).
 ///
-/// # The per-block fusion weight (design §USE-1 integration point 3, [OPUS-4.8] sq-oy9ya)
+/// # The per-block fusion weight (design §USE-1 integration point 3, sq-oy9ya)
 ///
 /// `weight` is the **query-time modality multiplier** for this block, consumed by the existing
 /// [`fuse_rrf_weighted`](crate::fuse_rrf_weighted) / [`fuse_scores`](crate::fuse_scores) path: a
@@ -483,21 +484,21 @@ pub struct Block {
     /// Optional per-block default **fusion weight** (the design §USE-1 point-3 query-time modality
     /// multiplier). `None` ≡ `1.0` (fail-open). Read via [`Block::fusion_weight`]; set via
     /// [`Block::with_weight`]. **Not** part of the block's identity ([`PartialEq`]/[`Eq`] ignore
-    /// it). [OPUS-4.8] sq-oy9ya
+    /// it). sq-oy9ya
     pub weight: Option<f32>,
 }
 
 impl Block {
     /// A block with **no** recorded fusion weight (`weight: None`, i.e. the fail-open `1.0`
     /// default). This is the constructor the typed encoders and the byte parser use; attach a
-    /// provenance-derived weight afterwards with [`with_weight`](Self::with_weight). [OPUS-4.8]
+    /// provenance-derived weight afterwards with [`with_weight`](Self::with_weight).
     pub fn new(encoder: Encoder, metric: Metric, offset: usize, width: usize) -> Block {
         Block { encoder, metric, offset, width, weight: None }
     }
 
     /// This block with its per-block fusion `weight` set to `w` (clamped to `>= 0` and finite; a
     /// non-finite or negative `w` is coerced to the fail-open `1.0`, never propagated as a poison
-    /// value into the fusion path). [OPUS-4.8] sq-oy9ya
+    /// value into the fusion path). sq-oy9ya
     pub fn with_weight(mut self, w: f32) -> Block {
         self.weight = Some(if w.is_finite() && w >= 0.0 { w } else { 1.0 });
         self
@@ -510,13 +511,13 @@ impl Block {
 
     /// The resolved per-block fusion weight: the recorded [`weight`](Self::weight) if any, else the
     /// fail-open default `1.0`. This is the scalar the query-time fusion path multiplies a node's
-    /// contribution from this modality by. [OPUS-4.8] sq-oy9ya
+    /// contribution from this modality by. sq-oy9ya
     pub fn fusion_weight(&self) -> f32 {
         self.weight.unwrap_or(1.0)
     }
 }
 
-// [OPUS-4.8] sq-oy9ya: `weight` is layout METADATA, not part of the block's identity. Hand-write
+// sq-oy9ya: `weight` is layout METADATA, not part of the block's identity. Hand-write
 // `PartialEq`/`Eq` over only `(encoder, metric, offset, width)` so (a) `Block` stays `Eq` despite
 // carrying an `f32` field (a derive could not), and (b) the `SchemaHeader` round-trip `PartialEq`
 // contract holds regardless of whether a weight is attached — a header that round-trips its layout
@@ -554,7 +555,7 @@ pub struct SchemaHeader {
 
 /// Magic bytes for a serialised [`SchemaHeader`] sidecar — `"SPQS"` (sparq vectors **s**chema).
 pub const SPQS_MAGIC: [u8; 4] = *b"SPQS";
-/// On-disk/byte-string version of the [`SchemaHeader`] format. **`2`** since [OPUS-4.8] sq-oy9ya:
+/// On-disk/byte-string version of the [`SchemaHeader`] format. **`2`** since sq-oy9ya:
 /// each block record gained a trailing 4-byte little-endian `f32` **fusion weight** (design §USE-1
 /// point 3). A **version-`1`** header — every header written before this field existed — still
 /// parses: its block records are the old 10-byte form and every block is read back with
@@ -564,7 +565,7 @@ pub const SPQS_VERSION: u32 = 2;
 /// metric(1) | offset(4) | width(4)` — no per-block fusion weight. Read for back-compat only.
 const SPQS_BLOCK_LEN_V1: usize = 10;
 /// Byte length of one serialised block record in a **version-2** [`SchemaHeader`]: the v1 record
-/// plus a trailing 4-byte little-endian `f32` fusion weight ([OPUS-4.8] sq-oy9ya).
+/// plus a trailing 4-byte little-endian `f32` fusion weight (sq-oy9ya).
 const SPQS_BLOCK_LEN_V2: usize = 14;
 
 impl SchemaHeader {
@@ -627,7 +628,7 @@ impl SchemaHeader {
 
     /// Serialise to a deterministic little-endian byte string: `magic | version | dim | n_blocks |
     /// (encoder, metric, offset, width, weight)*`, where `weight` is a 4-byte little-endian `f32`
-    /// ([OPUS-4.8] sq-oy9ya — design §USE-1 point 3). An absent per-block weight (`None`)
+    /// (sq-oy9ya — design §USE-1 point 3). An absent per-block weight (`None`)
     /// serialises as the fail-open `1.0`, so a freshly-parsed header is byte-identical whether the
     /// weight was explicit or defaulted. The inverse of [`from_bytes`](Self::from_bytes).
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -651,7 +652,7 @@ impl SchemaHeader {
     /// unknown version, truncated body, unknown tag, or a partition that does not validate via
     /// [`new`](Self::new) is an `Err`, never a silent partial parse.
     ///
-    /// **Back-compatible** ([OPUS-4.8] sq-oy9ya): a **version-`1`** header (10-byte block records,
+    /// **Back-compatible** (sq-oy9ya): a **version-`1`** header (10-byte block records,
     /// no fusion weight) parses with every block read back as `weight: None` (the fail-open `1.0`);
     /// a **version-`2`** header (14-byte records) reads the trailing `f32` weight per block. A
     /// non-finite or negative serialised weight is normalised to the fail-open `1.0` rather than
@@ -719,10 +720,10 @@ fn encoder_tag(e: Encoder) -> u8 {
         Encoder::Boolean => 2,
         Encoder::Date => 3,
         Encoder::Other => 4,
-        // [OPUS-4.8] sq-0wo9e.3 (P2): tag 5 is additive — a header written by P1 never used it, so
+        // sq-0wo9e.3 (P2): tag 5 is additive — a header written by P1 never used it, so
         // older serialised headers still parse and new ones round-trip the enum (codebook) block.
         Encoder::Enum => 5,
-        // [OPUS-4.8] sq-0wo9e.4 (P3): tag 6 is the next additive tag — the taxonomy block.
+        // sq-0wo9e.4 (P3): tag 6 is the next additive tag — the taxonomy block.
         Encoder::Taxonomy => 6,
     }
 }
@@ -1158,7 +1159,7 @@ mod tests {
         assert!(metric_of_tag(99).is_err());
     }
 
-    // ---- [OPUS-4.8] sq-oy9ya: per-block fusion weight (design §USE-1 point 3) ----
+    // ---- sq-oy9ya: per-block fusion weight (design §USE-1 point 3) ----
 
     #[test]
     fn block_fusion_weight_defaults_to_one_and_is_settable() {

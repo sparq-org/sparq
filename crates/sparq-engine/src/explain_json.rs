@@ -33,7 +33,6 @@
 //!   the text trace already documents, so `slowest`-by-time is row-count-only
 //!   there.
 //!
-//! [OPUS-4.8]
 
 use std::collections::VecDeque;
 use std::fmt::Write as _;

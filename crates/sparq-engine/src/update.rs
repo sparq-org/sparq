@@ -13,7 +13,7 @@
 //! graph, CREATE of an existing one) are no-ops here — a graph store that auto-creates graphs
 //! is explicitly allowed to succeed on them — so `SILENT` only matters for LOAD.
 
-// [OPUS-4.8] (sq-glw2) `empty_graph` is now only needed by the tests — the named-graph
+// (sq-glw2) `empty_graph` is now only needed by the tests — the named-graph
 // CLEAR/DROP arms route through the durable `Graph` methods instead of swapping in a fresh
 // in-memory graph — so it is imported locally in the test module rather than crate-wide.
 use crate::dataset::{build, decode_triples, TripleSet, TripleTerms};
@@ -62,7 +62,7 @@ fn graph_name_slot(g: &GraphName) -> GraphSlot {
     }
 }
 
-/// [OPUS-4.8] roborev 1646 (Med): per SPARQL 1.1 Update §3.1.1, blank nodes in INSERT DATA are
+/// roborev 1646 (Med): per SPARQL 1.1 Update §3.1.1, blank nodes in INSERT DATA are
 /// "assumed to be disjoint from the blank nodes in the Graph Store" — they MUST be inserted as
 /// FRESH nodes. The old `quad_to_triple` preserved the parsed label, so `INSERT DATA { _:b … }`
 /// would conflate with an existing `_:b` in the store. We rewrite every blank-node label
@@ -350,7 +350,7 @@ fn instantiate_templates(
 
 // --- LOAD ----------------------------------------------------------------------------------------
 
-/// LOAD `file://` policy (roborev 1646, High). [OPUS-4.8] `LOAD <file://…>` dereferences a
+/// LOAD `file://` policy (roborev 1646, High). `LOAD <file://…>` dereferences a
 /// server-LOCAL file, so on the public update path (HTTP `apply_update`) an untrusted client
 /// could otherwise import any RDF-readable file the process can read and query it back. The
 /// DEFAULT policy is therefore REJECT: `file://` LOAD only works when a caller has explicitly
@@ -553,7 +553,7 @@ fn require_update_budget(budget: &crate::QueryBudget) -> Result<(), String> {
 /// The shared rebuild loop over an ALREADY-PARSED `Update` (decode → apply ops →
 /// rebuild). Shared by [`update`] and, under the `params` feature, the parameterized
 /// prepared-update path so the bound algebra is applied DIRECTLY (no re-serialise /
-/// re-parse — a hostile bound value can never re-enter the parser). [OPUS-4.8] (sq-rp3um)
+/// re-parse — a hostile bound value can never re-enter the parser). (sq-rp3um)
 fn apply_update_rebuild(graph: &Graph, upd: &Update) -> Result<Graph, String> {
     crate::exec::budget::with_query_budget(&crate::QueryBudget::unlimited(), crate::EbvSemantics::Rec2013, || {
         let mut ds = Dataset::decode(graph);
@@ -564,7 +564,7 @@ fn apply_update_rebuild(graph: &Graph, upd: &Update) -> Result<Graph, String> {
     })
 }
 
-/// [OPUS-4.8] (sq-rp3um) [`update`] over an ALREADY-PARSED bound `Update` — the rebuild
+/// (sq-rp3um) [`update`] over an ALREADY-PARSED bound `Update` — the rebuild
 /// path for a parameterized [`crate::PreparedUpdate`] (`params` feature).
 #[cfg(feature = "params")]
 pub(crate) fn update_prepared_impl(graph: &Graph, upd: &Update) -> Result<Graph, String> {
@@ -659,7 +659,7 @@ fn apply_slot_delta(
             if inserts.is_empty() {
                 return Ok(()); // deleting from an absent graph is a no-op
             }
-            // [OPUS-4.8] (sq-7cxr, gh-44) Route NEW named-graph creation through
+            // (sq-7cxr, gh-44) Route NEW named-graph creation through
             // `Graph::ensure_named` so that on a DIRECTORY-BACKED parent the sub-graph is
             // born durable (its own WAL + manifest entry) — its first triples then persist
             // across a restart like any other write. For an in-memory parent this is the
@@ -672,7 +672,7 @@ fn apply_slot_delta(
 
 // --- durable-mirror effect capture (sq-7cxr, gh-44; Copilot PR#80 fix) -------------------------
 
-/// [OPUS-4.8] (sq-7cxr, Copilot PR#80) A **resolved**, deterministic record of what one
+/// (sq-7cxr, Copilot PR#80) A **resolved**, deterministic record of what one
 /// `update_in_place` actually did, captured during the single in-memory application so a
 /// durable mirror can reproduce EXACTLY that state without re-executing the update string.
 ///
@@ -702,7 +702,7 @@ pub enum UpdateEffect {
     Create(Term),
 }
 
-/// [OPUS-4.8] (sq-7cxr, Copilot PR#80) Optional sink for [`UpdateEffect`]s, threaded through
+/// (sq-7cxr, Copilot PR#80) Optional sink for [`UpdateEffect`]s, threaded through
 /// the in-place apply so capture is zero-cost (`None`) when no durable mirror is configured.
 type EffectSink<'a> = Option<&'a mut Vec<UpdateEffect>>;
 
@@ -723,7 +723,7 @@ fn record_delta(sink: &mut EffectSink, slot: &GraphSlot, inserts: &[TripleTerms]
 /// operations route to [`Graph::apply_delta`] per target graph — O(batch) per operation instead
 /// of the O(n) decode-everything-and-rebuild that [`update`] performs — and, for a
 /// directory-backed graph, each batch is WAL-logged (fsync'd) before it is applied, so updates
-/// are durable across a crash. [OPUS-4.8] (sq-glw2) `CLEAR`/`DROP` are durable BEFORE the ack on
+/// are durable across a crash. (sq-glw2) `CLEAR`/`DROP` are durable BEFORE the ack on
 /// a directory-backed graph too: default-graph CLEAR/DROP retract via [`Graph::clear_default_durable`];
 /// named-graph CLEAR empties the slot via [`Graph::clear_named_durable`] (WAL-logged retraction,
 /// slot preserved) and named-graph DROP removes the sub-dir + manifest entry via
@@ -733,7 +733,7 @@ pub fn update_in_place(graph: &mut Graph, sparql: &str) -> Result<(), String> {
     update_in_place_with_budget(graph, sparql, &crate::QueryBudget::unlimited())
 }
 
-/// [OPUS-4.8] (sq-ebii) [`update_in_place`] under a cooperative [`crate::QueryBudget`].
+/// (sq-ebii) [`update_in_place`] under a cooperative [`crate::QueryBudget`].
 ///
 /// The budget is installed thread-locally for the whole update, so a `DELETE/INSERT … WHERE`
 /// whose WHERE pattern blows up is bounded EXACTLY as a budgeted query's `SELECT` is: the
@@ -752,7 +752,7 @@ pub fn update_in_place_with_budget(
     update_in_place_core(graph, sparql, budget, None)
 }
 
-/// [OPUS-4.8] (sq-7cxr, Copilot PR#80) [`update_in_place_with_budget`] that ALSO returns the
+/// (sq-7cxr, Copilot PR#80) [`update_in_place_with_budget`] that ALSO returns the
 /// ordered, *resolved* [`UpdateEffect`] log of what it applied — for a durable mirror that must
 /// reproduce the committed state WITHOUT re-executing the (possibly non-deterministic /
 /// side-effecting) update text. See [`UpdateEffect`] and [`apply_effects`].
@@ -847,7 +847,7 @@ pub fn where_update_effects(
     Ok(Some(effects))
 }
 
-/// [OPUS-4.8] (sq-o1wp) Request-ATOMIC variant of [`update_in_place`]: applies the whole
+/// (sq-o1wp) Request-ATOMIC variant of [`update_in_place`]: applies the whole
 /// `;`-separated update request to a private [`fork`](Graph::fork) and only commits it back into
 /// `graph` (by replacing `*graph`) when EVERY operation succeeds. On any error — a parse failure,
 /// a non-SILENT failing `LOAD`, or a budget/WHERE blow-up on operation *K* — the partial fork is
@@ -871,7 +871,7 @@ pub fn update_in_place_atomic(graph: &mut Graph, sparql: &str) -> Result<(), Str
     update_in_place_atomic_with_budget(graph, sparql, &crate::QueryBudget::unlimited())
 }
 
-/// [OPUS-4.8] (sq-o1wp) [`update_in_place_atomic`] under a cooperative [`crate::QueryBudget`] (the
+/// (sq-o1wp) [`update_in_place_atomic`] under a cooperative [`crate::QueryBudget`] (the
 /// budget bounds a `DELETE/INSERT … WHERE` exactly as in [`update_in_place_with_budget`]). The
 /// fork is applied under the budget; a budget-exceeded error rolls the request back whole.
 pub fn update_in_place_atomic_with_budget(
@@ -904,7 +904,7 @@ fn update_in_place_core(
 /// The shared per-operation in-place apply loop over an ALREADY-PARSED `Update`.
 /// Split out of [`update_in_place_core`] so the parameterized prepared-update path
 /// ([`crate::PreparedUpdate`], `params` feature) can apply a bound algebra without
-/// re-serialising it to a string. [OPUS-4.8] (sq-rp3um)
+/// re-serialising it to a string. (sq-rp3um)
 fn apply_update_in_place(
     graph: &mut Graph,
     upd: &Update,
@@ -928,7 +928,7 @@ fn apply_update_in_place(
                     record_delta(&mut sink, &slot, &[], &del);
                 }
             }
-            // [OPUS-4.8] (sq-glw2) CLEAR keeps the named-graph SLOT but empties it. On a
+            // (sq-glw2) CLEAR keeps the named-graph SLOT but empties it. On a
             // directory-backed parent, retract the existing graph's contents through its own WAL
             // (`Graph::clear_named_durable`) so the emptied state is fsync'd BEFORE the ack — the
             // old `entry.1 = empty_graph()` dropped the sub-graph's WAL/dir association, so the
@@ -950,7 +950,7 @@ fn apply_update_in_place(
                     s.push(UpdateEffect::Clear(target.clone()));
                 }
             }
-            // [OPUS-4.8] (sq-glw2) DROP makes the named graph cease to exist. On a directory-
+            // (sq-glw2) DROP makes the named graph cease to exist. On a directory-
             // backed parent, `Graph::drop_named_durable` removes the sub-dir + manifest entry
             // durably (fsync'd) so the removal survives a reopen immediately — the old
             // `graph.named.retain(...)` dropped only the in-memory entry, leaving the on-disk
@@ -973,7 +973,7 @@ fn apply_update_in_place(
                 }
             }
             GraphUpdateOperation::Create { graph: name, .. } => {
-                // [OPUS-4.8] (sq-7cxr, gh-44) `ensure_named` makes the new graph DURABLE on a
+                // (sq-7cxr, gh-44) `ensure_named` makes the new graph DURABLE on a
                 // directory-backed parent (empty graphs are persisted via the manifest, so an
                 // empty CREATE survives a restart) and is a no-op when it already exists.
                 let name = Term::NamedNode(name.clone());
@@ -1038,7 +1038,7 @@ fn apply_update_in_place(
     Ok(())
 }
 
-/// [OPUS-4.8] (sq-7cxr, Copilot PR#80) Replays a captured [`UpdateEffect`] log onto `graph`,
+/// (sq-7cxr, Copilot PR#80) Replays a captured [`UpdateEffect`] log onto `graph`,
 /// reproducing the exact committed state a [`update_in_place_capturing`] call applied to its
 /// (identically-seeded) in-memory working copy — WITHOUT re-parsing or re-evaluating the
 /// original update text. This is the durable mirror's apply path: each [`UpdateEffect::Delta`]
@@ -1050,7 +1050,7 @@ fn apply_update_in_place(
 /// (deletes before inserts within a DELETE/INSERT … WHERE), so order-sensitive sequences
 /// reproduce faithfully.
 ///
-/// [OPUS-4.8] (sq-ycle) ATOMICITY: a multi-op body materialises through MANY independent
+/// (sq-ycle) ATOMICITY: a multi-op body materialises through MANY independent
 /// `apply_delta` fsyncs across DIFFERENT files (the per-slot `wal.log`s + the `named.bin`
 /// manifest), so a crash between them used to leave a PARTIAL durable write (e.g. a `<parent>
 /// ldp:contains <r>` containment present without the `<r>` graph it points at). To make the WHOLE
@@ -1068,7 +1068,7 @@ fn apply_update_in_place(
 /// unchanged. `DROP`'s manifest/sub-dir removal stays a materialisation concern (already crash-safe
 /// via `recover_named_drop`); the journal only carries the DATA retraction needed for atomicity.
 pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), String> {
-    // [OPUS-4.8] (sq-ycle) (1) RESOLVE + (2) COMMIT: the single durable commit point for the body.
+    // (sq-ycle) (1) RESOLVE + (2) COMMIT: the single durable commit point for the body.
     let records = resolve_effect_records(graph, effects);
     graph.commit_txn(&records)?;
     // (3) MATERIALISE: the per-effect loop (unchanged from the pre-journal `apply_effects`).
@@ -1079,7 +1079,7 @@ pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), 
                 apply_slot_delta(graph, slot, &[], deletes)?;
                 apply_slot_delta(graph, slot, inserts, &[])?;
             }
-            // [OPUS-4.8] (sq-glw2) The durable mirror replays CLEAR/DROP through the SAME durable
+            // (sq-glw2) The durable mirror replays CLEAR/DROP through the SAME durable
             // helpers the live path uses (`clear_named_durable` / `drop_named_durable`), so the
             // mirror's named-graph clear/drop is WAL/manifest-durable before its ack too — not
             // just at the next compaction (the old `empty_graph()`/`retain` swap dropped the
@@ -1111,13 +1111,13 @@ pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), 
             }
         }
     }
-    // [OPUS-4.8] (sq-ycle) (4) The body is fully materialised into the per-graph state — clear the
+    // (sq-ycle) (4) The body is fully materialised into the per-graph state — clear the
     // redo journal so the next body starts fresh and a clean reopen is a no-op (no-op in-memory).
     graph.clear_txn()?;
     Ok(())
 }
 
-/// [OPUS-4.8] (sq-ycle) RESOLVE a captured `&[UpdateEffect]` into the flat, ORDERED quad-delta
+/// (sq-ycle) RESOLVE a captured `&[UpdateEffect]` into the flat, ORDERED quad-delta
 /// that the atomic redo journal commits in ONE fsync — computed against the CURRENT `graph` state
 /// so structural ops are concrete:
 ///   * `Delta { slot, inserts, deletes }` -> the deletes (false) then the inserts (true), the same
@@ -1133,7 +1133,7 @@ pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), 
 fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool, GraphSlot, TripleTerms)> {
     let mut records: Vec<(bool, GraphSlot, TripleTerms)> = Vec::new();
 
-    // [OPUS-4.8] (sq-aalh) A CLEAR/DROP retracts the triples PRESENT WHEN IT RUNS — i.e. the state
+    // (sq-aalh) A CLEAR/DROP retracts the triples PRESENT WHEN IT RUNS — i.e. the state
     // of its target slot AFTER every prior op in THIS body, not the pre-body state. Resolving it
     // against the pre-body `graph` (as the old code did) missed the retraction of triples inserted
     // EARLIER in the same body (e.g. `INSERT DATA { GRAPH X { … } } ; CLEAR GRAPH X`): the journal
@@ -1149,7 +1149,7 @@ fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool,
     // the members present at the point the CLEAR/DROP runs. Slot insertion order is preserved so a
     // CLEAR NAMED / DROP ALL visits slots in a stable order.
     //
-    // [OPUS-4.8] (sq-aalh, review #189) PERF: the running view is decoded LAZILY, per slot, ONLY when
+    // (sq-aalh, review #189) PERF: the running view is decoded LAZILY, per slot, ONLY when
     // an op actually touches that slot — `decode_triples` is the expensive part (a full scan of the
     // slot's store), and the common path is delta-only updates that never CLEAR/DROP. The previous
     // version eagerly decoded the default slot AND every named slot up-front, forcing a full-dataset
@@ -1260,7 +1260,7 @@ fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool,
     records
 }
 
-/// [OPUS-4.8] (review 1593) DURABLY empties the default graph, preserving the named graphs
+/// (review 1593) DURABLY empties the default graph, preserving the named graphs
 /// AND (crucially) a directory-backed graph's WAL/directory association — so a CLEAR/DROP of
 /// the default graph is persistent across a reopen, instead of being silently lost (the old
 /// `*graph = empty_graph()` dropped the WAL, and the on-disk base was untouched, so a reopen
@@ -1269,7 +1269,7 @@ fn replace_default(graph: &mut Graph) -> Result<(), String> {
     graph.clear_default_durable()
 }
 
-/// [OPUS-4.8] (sq-glw2) DURABLY empties EVERY named graph (CLEAR NAMED / the named part of
+/// (sq-glw2) DURABLY empties EVERY named graph (CLEAR NAMED / the named part of
 /// CLEAR ALL), preserving each slot — mirrors a per-graph CLEAR GRAPH across the whole set. On a
 /// directory-backed parent each sub-graph's contents are WAL-logged + fsync'd before the ack.
 fn clear_all_named_durable(graph: &mut Graph) -> Result<(), String> {
@@ -1280,7 +1280,7 @@ fn clear_all_named_durable(graph: &mut Graph) -> Result<(), String> {
     Ok(())
 }
 
-/// [OPUS-4.8] (sq-glw2, Copilot #123) DURABLY removes EVERY named graph (DROP NAMED / the named
+/// (sq-glw2, Copilot #123) DURABLY removes EVERY named graph (DROP NAMED / the named
 /// part of DROP ALL) in ONE batch. The old implementation looped, calling
 /// [`Graph::drop_named_durable`] once per graph — but EACH such call rebuilds the entire surviving
 /// named set (renumber + manifest rewrite + per-survivor save/re-open), making DROP ALL O(n²) in
@@ -1294,7 +1294,7 @@ fn drop_all_named_durable(graph: &mut Graph) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataset::empty_graph; // [OPUS-4.8] (sq-glw2) test-only now (see top-of-file note)
+    use crate::dataset::empty_graph; // (sq-glw2) test-only now (see top-of-file note)
     use sparq_core::store::Pattern as IdPattern;
 
     fn count(g: &Graph) -> usize {
@@ -1302,7 +1302,7 @@ mod tests {
         g.store.scan(&pat).rows.len()
     }
 
-    // --- [OPUS-4.8] (sq-aalh) intra-body CLEAR/DROP durable-journal resolution ------------------
+    // --- (sq-aalh) intra-body CLEAR/DROP durable-journal resolution ------------------
     //
     // The DURABLE multi-op path (`apply_effects`) resolves the redo-journal frame ONCE up-front via
     // `resolve_effect_records`. The bug: a CLEAR/DROP in the body resolved its retraction set
@@ -1788,7 +1788,7 @@ mod tests {
             old.as_secs_f64() / new_avg.as_secs_f64(), old.as_secs_f64(), new_avg.as_secs_f64());
     }
 
-    /// [OPUS-4.8] roborev 1646 (High): `LOAD <file://…>` must be REFUSED by default — an
+    /// roborev 1646 (High): `LOAD <file://…>` must be REFUSED by default — an
     /// untrusted update on the public path cannot import server-local files. It only works
     /// inside an allowlisted base, and even then cannot escape it via `..`.
     #[test]
@@ -1835,7 +1835,7 @@ mod tests {
         let _ = std::fs::remove_file(&secret);
     }
 
-    /// [OPUS-4.8] roborev 1646 (Med): blank nodes in INSERT DATA are FRESH per SPARQL — they
+    /// roborev 1646 (Med): blank nodes in INSERT DATA are FRESH per SPARQL — they
     /// must not conflate with an existing store blank node of the same label. The rebuild and
     /// delta-overlay paths must both freshen.
     #[test]
@@ -1915,7 +1915,7 @@ mod tests {
     }
 }
 
-/// [OPUS-4.8] (sq-qu8o) Pins the SPARQL 1.1 Update SILENT / non-SILENT error contract per
+/// (sq-qu8o) Pins the SPARQL 1.1 Update SILENT / non-SILENT error contract per
 /// operation AND request-level atomicity, against the W3C SPARQL 1.1 Update Recommendation.
 ///
 /// IMPORTANT — read before changing an assertion here. Two findings this module DOCUMENTS
@@ -2148,7 +2148,7 @@ mod update_contract {
         assert_eq!(dump(&base), snapshot, "the published base is never mutated by a working-copy apply");
     }
 
-    /// [OPUS-4.8] (sq-o1wp) [`update_in_place_atomic`] packages the fork → apply → seal-only-on-`Ok`
+    /// (sq-o1wp) [`update_in_place_atomic`] packages the fork → apply → seal-only-on-`Ok`
     /// pattern as a safe public default, so a DIRECT library consumer gets SPARQL-1.1 all-or-nothing
     /// request semantics WITHOUT writing its own recovery. Pins both arms: a failing multi-op request
     /// leaves `graph` exactly at its pre-request snapshot (full rollback — the hazard the bare
@@ -2174,7 +2174,7 @@ mod update_contract {
         assert_eq!(dataset_count(&g), 3, "an all-succeed request commits every operation in place");
     }
 
-    /// [OPUS-4.8] (sq-o1wp) A parse error never mutates `graph` under the atomic wrapper (the fork is
+    /// (sq-o1wp) A parse error never mutates `graph` under the atomic wrapper (the fork is
     /// built but `parse_update` fails before any op applies), and the budgeted entry point shares the
     /// same all-or-nothing contract.
     #[test]
@@ -2195,7 +2195,7 @@ mod update_contract {
     }
 }
 
-/// [OPUS-4.8] (sq-7cxr, gh-44, Copilot PR#80) Coverage for the RESOLVED-DELTA CAPTURE/REPLAY
+/// (sq-7cxr, gh-44, Copilot PR#80) Coverage for the RESOLVED-DELTA CAPTURE/REPLAY
 /// machinery — [`update_in_place_capturing`], [`apply_effects`], the [`UpdateEffect`] enum and
 /// its four variants, [`record_delta`]'s empty-batch elision, and the `ensure_named` durable
 /// routing reached through `apply_slot_delta`. PR#80 added this whole code path with no unit

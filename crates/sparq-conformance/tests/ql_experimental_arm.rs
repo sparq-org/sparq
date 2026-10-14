@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-kuvu3 / [FABLE-5] sq-pbz04.3.4 (epic sq-pbz04) — the OWL 2 QL
+//! sq-kuvu3 / sq-pbz04.3.4 (epic sq-pbz04) — the OWL 2 QL
 //! (DL-Lite_R) query-rewriting arm of the `sparql11/entailment` conformance suite.
 //!
 //! ## What this lane is — and what it is deliberately NOT

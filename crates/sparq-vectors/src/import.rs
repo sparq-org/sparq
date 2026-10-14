@@ -1,6 +1,6 @@
-//! [OPUS-4.8] (sq-xsq9) Bulk import of **externally-computed** embeddings into a `.spqv`
+//! (sq-xsq9) Bulk import of **externally-computed** embeddings into a `.spqv`
 //! [`VectorStore`].
-// [FABLE-5] (sq-98c) The public entry points (`import_npy` / `import_numeric_dump`) are
+// (sq-98c) The public entry points (`import_npy` / `import_numeric_dump`) are
 // `#[cfg(not(target_arch = "wasm32"))]` (they need a real filesystem), which leaves the private
 // npy-header/streaming machinery intentionally unused on wasm32 — silence dead_code there ONLY;
 // the native build keeps full dead-code detection.
@@ -48,7 +48,7 @@
 //! an `Err`, never a silent reinterpretation. The header length itself is bounded to
 //! [`MAX_NPY_HEADER_LEN`] (64 KiB) so a malformed/oversized `HEADER_LEN` is rejected up front, and only
 //! the header prefix (≤ that cap plus the fixed magic/version/len bytes) is ever read into memory to
-//! parse it — never the array body. [OPUS-4.8]
+//! parse it — never the array body.
 //!
 //! # Peak memory
 //!
@@ -61,7 +61,7 @@
 //! the transient `8·rows`-byte id→slot index that [`StreamingWriter::finalize`] sorts is the only
 //! row-count-proportional allocation, a `dim·4 / 8` reduction versus the dense matrix (e.g. 192× for
 //! 384-d). This replaces the old whole-file-then-decode path whose peak was **~2× the embedding
-//! matrix**. The resulting `.spqv` is byte-identical to the non-streaming writer's output. [OPUS-4.8]
+//! matrix**. The resulting `.spqv` is byte-identical to the non-streaming writer's output.
 //!
 //! # Graph binding
 //!
@@ -79,10 +79,10 @@ use sparq_core::Graph;
 /// NumPy header is a tiny ASCII dict (`{'descr': '<f4', 'fortran_order': False, 'shape': (N, D), }` plus
 /// padding to a 64-byte boundary); 64 KiB is already far larger than any real header. Bounding it keeps
 /// a malformed or hostile declared `HEADER_LEN` from forcing a large pre-allocation before we have even
-/// seen the body (the sq-tzwa fail-closed discipline). [OPUS-4.8]
+/// seen the body (the sq-tzwa fail-closed discipline).
 pub const MAX_NPY_HEADER_LEN: usize = 64 * 1024;
 
-/// [OPUS-4.8] (sq-xsq9) How to bind a bulk-imported store to its source graph.
+/// (sq-xsq9) How to bind a bulk-imported store to its source graph.
 ///
 /// (No `Debug`: [`sparq_core::Graph`] is not `Debug`, and a graph is not meaningfully printable here.)
 #[derive(Clone, Copy, Default)]
@@ -96,7 +96,7 @@ pub enum ImportBinding<'g> {
     Graph(&'g Graph),
 }
 
-/// [OPUS-4.8] (sq-xsq9) The contract for one bulk import: where to write the `.spqv`, the per-row dict
+/// (sq-xsq9) The contract for one bulk import: where to write the `.spqv`, the per-row dict
 /// ids, and the optional graph binding.
 ///
 /// `ids[i]` is the dictionary term id for row `i` of the imported matrix (the **row → dict-id
@@ -142,7 +142,7 @@ struct NpyHeader {
     data_offset: usize,
 }
 
-/// [OPUS-4.8] (sq-xsq9) Parse and fully validate a `.npy` header from the leading bytes of the file.
+/// (sq-xsq9) Parse and fully validate a `.npy` header from the leading bytes of the file.
 ///
 /// `file_len` is the total length of the file the header came from; it is used to bound the declared
 /// `HEADER_LEN` and to let the caller cross-check the declared shape against the real body size before
@@ -296,7 +296,7 @@ fn parse_shape(dict: &str) -> Result<(usize, usize), String> {
     }
 }
 
-/// [OPUS-4.8] (sq-3jc8) Stream `rows` matrix rows into a freshly-created `.spqv`, feeding each row to
+/// (sq-3jc8) Stream `rows` matrix rows into a freshly-created `.spqv`, feeding each row to
 /// the store as it is produced rather than buffering the whole payload. Shared by both import formats.
 ///
 /// `next_row(buf)` is called `rows` times, in order; it must fill `buf` (a reusable `dim`-element
@@ -347,18 +347,18 @@ where
 }
 
 impl VectorStore {
-    /// [OPUS-4.8] (sq-xsq9) Bulk-import an externally-computed embedding matrix from a NumPy `.npy`
+    /// (sq-xsq9) Bulk-import an externally-computed embedding matrix from a NumPy `.npy`
     /// file into a finalized `.spqv` store keyed by dictionary id.
     ///
     /// `spec.ids[i]` is the dict id for row `i` of the matrix (the row → dict-id contract). The file
     /// must be a **2-D, C-order, little-endian `f4`/`f8`** array whose `shape == (spec.ids.len(),
     /// spec.dim)`; any other dtype, byte-order, dimensionality, fortran-order or shape mismatch is a
-    /// fail-closed `Err`. [OPUS-4.8] (sq-3jc8) Only the header **prefix** is read into memory (a bounded
+    /// fail-closed `Err`. (sq-3jc8) Only the header **prefix** is read into memory (a bounded
     /// `≤ MAX_NPY_HEADER_LEN + 12` bytes); the declared header length and shape are validated against the
     /// actual file length before any body read, then the array body is streamed **row by row** through
     /// [`StreamingWriter`] — the whole file is never read into a `Vec<u8>` and no full owned `Vec<f32>`
     /// copy of the matrix is materialized, so peak RAM is `O(dim + index)` rather than ~2× the matrix
-    /// (see the [module peak-memory note](self#peak-memory)). `f8` rows are narrowed to `f32`. [OPUS-4.8]
+    /// (see the [module peak-memory note](self#peak-memory)). `f8` rows are narrowed to `f32`.
     ///
     /// Returns the finalized, memory-mapped store (same handle [`VectorStore::open`] would yield); the
     /// `.spqv` is byte-identical to what the non-streaming writer produced for the same input.
@@ -444,7 +444,7 @@ impl VectorStore {
         // Checked: validate the per-row buffer size BEFORE allocating it. `want_body` above only
         // bounds `rows*dim*elem`; with `rows == 0` an absurd `dim` would never have been multiplied
         // in, so guard `dim*elem` directly so a malicious header can't overflow or force a huge
-        // allocation here. Fail closed. [OPUS-4.8] sq-3jc8
+        // allocation here. Fail closed. sq-3jc8
         let row_bytes = header
             .dim
             .checked_mul(elem)
@@ -478,7 +478,7 @@ impl VectorStore {
         )
     }
 
-    /// [OPUS-4.8] (sq-xsq9) Bulk-import an externally-computed embedding matrix from a **header-less**
+    /// (sq-xsq9) Bulk-import an externally-computed embedding matrix from a **header-less**
     /// flat little-endian `f32` dump into a finalized `.spqv` store keyed by dictionary id.
     ///
     /// The file must be exactly `spec.ids.len() · spec.dim · 4` bytes of contiguous row-major
@@ -489,11 +489,11 @@ impl VectorStore {
     /// language.
     ///
     /// The expected length is checked from `metadata` *before* the file is read, so a wrong-size file
-    /// is rejected without any large read. [OPUS-4.8] (sq-3jc8) A correctly-sized file is then streamed
+    /// is rejected without any large read. (sq-3jc8) A correctly-sized file is then streamed
     /// **row by row** through [`StreamingWriter`] — never read fully into a `Vec<u8>` and never decoded
     /// into a flat owned `Vec<f32>` — so peak RAM is `O(dim + index)` rather than ~2× the matrix. See the
     /// [module peak-memory note](self#peak-memory). The resulting `.spqv` is byte-identical to what the
-    /// non-streaming writer produced. [OPUS-4.8]
+    /// non-streaming writer produced.
     ///
     /// Returns the finalized, memory-mapped store.
     #[cfg(not(target_arch = "wasm32"))]
@@ -513,7 +513,7 @@ impl VectorStore {
         let dump_path = dump_path.as_ref();
         let rows = spec.ids.len();
         // The expected file length is fully determined by ids.len() and dim — check it BEFORE opening
-        // the stream (fail closed on a wrong size; no trust in file bytes). [OPUS-4.8] sq-tzwa discipline.
+        // the stream (fail closed on a wrong size; no trust in file bytes). sq-tzwa discipline.
         let expect = rows
             .checked_mul(spec.dim)
             .and_then(|n| n.checked_mul(4))

@@ -6,7 +6,7 @@
 //! records measurements to `target/criterion/` for local comparison with Criterion's
 //! own baseline mechanism. Do not bake numbers into documentation or tests.
 //!
-//! # [SONNET-4.6] sq-qonbz.4 — epic sq-qonbz
+//! # sq-qonbz.4 — epic sq-qonbz
 //!
 //! Surfaces covered:
 //! - `join::merge_join` — sorted merge join on a single shared key column.
@@ -16,7 +16,7 @@
 //!   tiers.
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-// [OPUS-4.8] criterion 0.8 deprecated its own black_box in favour of std::hint::black_box.
+// criterion 0.8 deprecated its own black_box in favour of std::hint::black_box.
 use std::hint::black_box;
 use sparq_substrate::{
     join::{build_table, hash_probe_serial, lftj_recurse, merge_join, JoinKeys, NoBudget, Trie, TrieIter},
@@ -87,7 +87,7 @@ fn bench_hash_build(c: &mut Criterion) {
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
             b.iter(|| {
-                // [SONNET-4.6] black_box prevents LLVM from eliding the build entirely
+                // black_box prevents LLVM from eliding the build entirely
                 // when the result would otherwise be dropped without being observed.
                 black_box(build_table(&left, &keys));
             });
@@ -204,7 +204,7 @@ fn bench_num_arithmetic(c: &mut Criterion) {
 //   2 = T(a,c): tuples (a,c) for all 0 ≤ a < c < n, sorted (a,c).
 // parts_at_level: level 0 → [0,2]; level 1 → [0,1]; level 2 → [1,2].
 //
-// [SONNET-4.6] sq-7d3dj.20
+// sq-7d3dj.20
 
 fn bench_lftj_triangle(c: &mut Criterion) {
     let mut group = c.benchmark_group("lftj_triangle");
@@ -250,7 +250,7 @@ fn bench_lftj_triangle(c: &mut Criterion) {
 // controlled overlap: even values (R), multiples-of-3 (S), multiples-of-5 (T)
 // in 0..n.  The intersection is multiples of lcm(2,3,5)=30 — easy to verify.
 //
-// [SONNET-4.6] sq-7d3dj.20
+// sq-7d3dj.20
 
 fn bench_lftj_intersection_k3(c: &mut Criterion) {
     let mut group = c.benchmark_group("lftj_intersection_k3");
@@ -262,7 +262,7 @@ fn bench_lftj_intersection_k3(c: &mut Criterion) {
         let parts_at_level = vec![vec![0usize, 1, 2]];
         // multiples of lcm(2,3,5)=30 in 0..n — 0 IS included, so the count is
         // ceil(n/30), not floor.  E.g. n=1000 → {0,30,...,990} = 34 values.
-        // [OPUS-4.8] off-by-one fix sq-7d3dj.20
+        // off-by-one fix sq-7d3dj.20
         let expected = n.div_ceil(30);
         group.throughput(Throughput::Elements(n as u64));
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {

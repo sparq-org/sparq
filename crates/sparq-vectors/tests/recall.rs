@@ -3,7 +3,7 @@
 //! ordinary `cargo test` — the workspace Cargo.toml raises the dev opt-level for this
 //! crate and `instant-distance` so the build stays seconds, not minutes.
 
-// [OPUS-4.8] (sq-ip3a) HNSW (VectorIndex) is the approximate backend — gated behind `approx-ann`.
+// (sq-ip3a) HNSW (VectorIndex) is the approximate backend — gated behind `approx-ann`.
 #![cfg(feature = "approx-ann")]
 
 use sparq_vectors::{nearest_exact, HnswConfig, VectorIndex, VectorStore};
@@ -103,7 +103,7 @@ fn exact_and_hnsw_agree_on_tiny_separable_data() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// [OPUS-4.8] (sq-ose80) The `fast_build` build-time preset must still clear the recall floor,
+/// (sq-ose80) The `fast_build` build-time preset must still clear the recall floor,
 /// and `high_recall`'s denser graph must not recall *worse* than `fast_build`'s. This exercises
 /// the REAL `VectorIndex::build_with` path for each preset (not a mock) — the load-bearing
 /// invariant of sq-ose80 is that trading `ef_construction` for build speed keeps recall ≥ 0.95.

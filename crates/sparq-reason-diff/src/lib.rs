@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-xg6uu — OWL 2 RL differential-vs-external-oracle harness.
+//! sq-xg6uu — OWL 2 RL differential-vs-external-oracle harness.
 //!
 //! Read-only differential testing of `sparq_reason::materialize(Profile::OwlRl, ..)`
 //! against **pre-captured** golden closure vectors from the Python

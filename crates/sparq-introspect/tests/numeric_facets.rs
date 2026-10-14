@@ -16,7 +16,7 @@ fn requested_age() -> FacetRequest {
 
 #[test]
 fn numeric_range_and_ten_bucket_oracle_are_exact() {
-    // [GPT-5.6] Mutation witness for sq-lsp7k.29: removing numeric collection or
+    // Mutation witness for sq-lsp7k.29: removing numeric collection or
     // changing the bucket assignment makes the exact vector below fail.
     let graph = Graph::load_str(
         &format!(

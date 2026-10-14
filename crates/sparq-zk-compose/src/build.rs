@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! Builds circuit inputs + witnesses from sparq-zk commitments.
 //!
 //! The (k, n, r) circuit-family id is DERIVED from the data: `k` = number of
@@ -25,11 +25,11 @@ pub const SCAN_K_VALUES: &[u32] = &[1, 2];
 /// count to EXACTLY equal `D` (see `compose_core::filter_int::filter_int_check`),
 /// so a member is provable for an operand iff its digit count == `D`. v1 compiles
 /// the contiguous range 1..=4 plus the historical gap-fill at 3 (sq-wto).
-// [OPUS-4.8] sq-wto: 3 added so the {1,2,4} family is contiguous 1..=4 and no
+// sq-wto: 3 added so the {1,2,4} family is contiguous 1..=4 and no
 // in-range digit count derives an unprovable wrong-D member.
 pub const FILTER_INT_D_VALUES: &[u32] = &[1, 2, 3, 4];
 /// Compiled digit counts (`d`) of the MANIFEST-COMPOSABLE filter_f64 family
-/// ([OPUS-4.8] sq-q7e / sq-tat). Same EXACT-match discipline as `filter_int`:
+/// (sq-q7e / sq-tat). Same EXACT-match discipline as `filter_int`:
 /// `filter_f64_d{D}`'s `digits: [u8; D]` witness pins the operand's digit count
 /// to `D`, so a member is provable iff the integer-valued double's decimal digit
 /// count equals `D`. v1 compiles the contiguous 1..=4; `D <= 15` is the soundness
@@ -37,7 +37,7 @@ pub const FILTER_INT_D_VALUES: &[u32] = &[1, 2, 3, 4];
 /// and `derive_filter_f64_id` returns `None` (clean error, never a wrong-D).
 pub const FILTER_F64_D_VALUES: &[u32] = &[1, 2, 3, 4];
 /// Compiled MAGNITUDE-digit counts (`md`) of the MANIFEST-COMPOSABLE
-/// `filter_signed_int` family ([OPUS-4.8] sq-7lrq, the sq-1q9h members). Same
+/// `filter_signed_int` family (sq-7lrq, the sq-1q9h members). Same
 /// EXACT-match discipline as `filter_int` / `filter_f64`: the
 /// `filter_signed_int_d{MD}` circuit's `mag_digits: [u8; MD]` witness pins the
 /// operand's magnitude-digit count to `MD` (`filter_signed_int_check::<MD>` rebuilds
@@ -49,7 +49,7 @@ pub const FILTER_F64_D_VALUES: &[u32] = &[1, 2, 3, 4];
 /// silently-unprovable member — sq-wto). `MD <= 19` is the `u64`-magnitude ceiling.
 pub const FILTER_SIGNED_INT_MD_VALUES: &[u32] = &[2, 4];
 /// Compiled `(id, fd)` integer-/fraction-digit counts of the MANIFEST-COMPOSABLE
-/// `filter_decimal` family ([OPUS-4.8] sq-7lrq, the sq-1q9h member). The
+/// `filter_decimal` family (sq-7lrq, the sq-1q9h member). The
 /// `filter_decimal_i{ID}_f{FD}` circuit pins the operand's integer-digit count to
 /// `ID` AND its fraction-digit count to `FD` (the `int_digits: [u8; ID]` /
 /// `frac_digits: [u8; FD]` witnesses), so a `(id, fd)`-shaped operand is provable
@@ -67,8 +67,8 @@ pub const FILTER_DECIMAL_ID_FD_VALUES: &[(u32, u32)] = &[(3, 2)];
 /// can compose with a scan over either scan-`n` bucket; an out-of-family size
 /// (`> 64`) derives `None` (a clean error, never a wrong-N member). The verifier
 /// gate that consumes the derived id is `bind_joins` (step 4, sq-sfsi).
-// [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): compiled join_eq graph-size buckets.
-// [OPUS-4.8] sq-pzet (sq-8dx2): add the `64` bucket — the remaining (na, nb)
+// sq-bwwl / sq-fi03 (step 3): compiled join_eq graph-size buckets.
+// sq-pzet (sq-8dx2): add the `64` bucket — the remaining (na, nb)
 // members so a hidden join composes with the n=64 scan bucket. NOT a soundness
 // change (the verifier remains NOT-yet-sound, sq-qhy4 / sq-9hrn / sq-1s2): the
 // in-circuit relation is `join_eq_check` verbatim, only the bucket grows.
@@ -105,7 +105,7 @@ pub fn derive_scan_id(k: u32, max_graph: u32, match_rows: u32) -> Option<Circuit
 /// silently-unprovable d). With the d3 member the provable range is the
 /// contiguous 1..=4; 0 maps to the 1-digit canonical form ("0"); 5..=19 (and
 /// >19, which overflows u64) have no member and return `None`.
-// [OPUS-4.8] sq-wto: exact digit-count match; out-of-bucket => None (clean
+// sq-wto: exact digit-count match; out-of-bucket => None (clean
 // error), never a wrong-D silently-unprovable member.
 pub fn derive_filter_int_id(digits: u32) -> Option<CircuitId> {
     let d = digits.max(1);
@@ -117,13 +117,13 @@ pub fn derive_filter_int_id(digits: u32) -> Option<CircuitId> {
 }
 
 /// Derive the MANIFEST-COMPOSABLE filter_f64 circuit id for a `digits`-digit
-/// integer-valued double ([OPUS-4.8] sq-q7e / sq-tat). EXACT-match discipline,
+/// integer-valued double (sq-q7e / sq-tat). EXACT-match discipline,
 /// identical to [`derive_filter_int_id`]: the `filter_f64_d{D}` circuit pins the
 /// operand's digit count to `D` (`digits: [u8; D]`), so only the `D == digits`
 /// member is provable. Out-of-family counts (no compiled `D == digits`, incl. the
 /// `>15` soundness ceiling) return `None` — a clean error, never a wrong-D
 /// silently-unprovable member.
-// [OPUS-4.8] sq-q7e + sq-tat: exact digit-count match for the composable f64 family.
+// sq-q7e + sq-tat: exact digit-count match for the composable f64 family.
 pub fn derive_filter_f64_id(digits: u32) -> Option<CircuitId> {
     let d = digits.max(1);
     if FILTER_F64_D_VALUES.contains(&d) {
@@ -134,14 +134,14 @@ pub fn derive_filter_f64_id(digits: u32) -> Option<CircuitId> {
 }
 
 /// Derive the MANIFEST-COMPOSABLE `filter_signed_int` circuit id for a
-/// `mag_digits`-magnitude-digit SIGNED xsd:integer operand ([OPUS-4.8] sq-7lrq).
+/// `mag_digits`-magnitude-digit SIGNED xsd:integer operand (sq-7lrq).
 /// EXACT-match discipline, identical to [`derive_filter_int_id`]: the
 /// `filter_signed_int_d{MD}` circuit pins the operand's MAGNITUDE-digit count to
 /// `MD` (`mag_digits: [u8; MD]`; the optional leading `-` is bound into the token
 /// but not counted in `MD`), so only the `MD == mag_digits` member is provable.
 /// Out-of-family counts (no compiled `MD == mag_digits`) return `None` — a clean
 /// error, never a wrong-MD silently-unprovable member (sq-wto).
-// [OPUS-4.8] sq-7lrq: exact magnitude-digit match for the composable signed-int family.
+// sq-7lrq: exact magnitude-digit match for the composable signed-int family.
 pub fn derive_filter_signed_int_id(mag_digits: u32) -> Option<CircuitId> {
     let md = mag_digits.max(1);
     if FILTER_SIGNED_INT_MD_VALUES.contains(&md) {
@@ -152,7 +152,7 @@ pub fn derive_filter_signed_int_id(mag_digits: u32) -> Option<CircuitId> {
 }
 
 /// Derive the MANIFEST-COMPOSABLE `filter_decimal` circuit id for an operand with
-/// `int_digits` integer-part digits and `frac_digits` fraction digits ([OPUS-4.8]
+/// `int_digits` integer-part digits and `frac_digits` fraction digits (
 /// sq-7lrq). EXACT-match discipline over BOTH counts: the `filter_decimal_i{ID}_f{FD}`
 /// circuit pins the operand's integer-digit count to `ID` AND its fraction-digit
 /// count to `FD` (`int_digits: [u8; ID]` / `frac_digits: [u8; FD]`), so only the
@@ -162,7 +162,7 @@ pub fn derive_filter_signed_int_id(mag_digits: u32) -> Option<CircuitId> {
 /// its lexical form, including trailing zeros, which `oxrdf` preserves). An
 /// out-of-family `(id, fd)` returns `None` — a clean error, never a wrong-shape
 /// member.
-// [OPUS-4.8] sq-7lrq: exact (id, fd) digit-shape match for the composable decimal family.
+// sq-7lrq: exact (id, fd) digit-shape match for the composable decimal family.
 pub fn derive_filter_decimal_id(int_digits: u32, frac_digits: u32) -> Option<CircuitId> {
     let id = int_digits.max(1);
     let fd = frac_digits;
@@ -181,7 +181,7 @@ pub fn derive_filter_decimal_id(int_digits: u32, frac_digits: u32) -> Option<Cir
 /// side exceeds every compiled bucket — a clean error, never a wrong-N member.
 /// Prover and verifier both derive the id this way so a `join_eq` proof can only
 /// verify against the member its witnesses fit (audit-#2 canonical-vk discipline).
-// [OPUS-4.8] sq-bwwl / sq-fi03 (step 3): derive the join_eq member id.
+// sq-bwwl / sq-fi03 (step 3): derive the join_eq member id.
 pub fn derive_join_eq_id(n_a: u32, n_b: u32) -> Option<CircuitId> {
     let n_a = smallest_bucket(JOIN_EQ_N_BUCKETS, n_a.max(1))?;
     let n_b = smallest_bucket(JOIN_EQ_N_BUCKETS, n_b.max(1))?;
@@ -195,13 +195,13 @@ pub fn derive_join_eq_id(n_a: u32, n_b: u32) -> Option<CircuitId> {
 /// EXACTLY (no wrong-bucket fallback), mirroring the filter families' EXACT-match
 /// discipline (sq-wto). The four members `zk/compose/` compiles today:
 /// `(2,1,16)`, `(4,1,16)`, `(4,2,16)`, `(8,1,16)`.
-// [OPUS-4.8] sq-3kd2g.6: compiled path_reach members. Opt-in (`extended-fragment`).
+// sq-3kd2g.6: compiled path_reach members. Opt-in (`extended-fragment`).
 #[cfg(feature = "extended-fragment")]
 pub const PATH_REACH_MEMBERS: &[(u32, u32, u32)] =
     &[(2, 1, 16), (4, 1, 16), (4, 2, 16), (8, 1, 16)];
 
 /// Compiled slot buckets (`n`) of the path family, ascending (only `16` today).
-// [OPUS-4.8] sq-3kd2g.6.
+// sq-3kd2g.6.
 #[cfg(feature = "extended-fragment")]
 pub const PATH_REACH_N_BUCKETS: &[u32] = &[16];
 
@@ -214,7 +214,7 @@ pub const PATH_REACH_N_BUCKETS: &[u32] = &[16];
 /// the member's VK and re-stated as the public `depth_bound`. `k` = commitments
 /// arity, `n` = slot bucket. Prover and verifier both call this so a proof only
 /// fits the member its public inputs name.
-// [OPUS-4.8] sq-3kd2g.6: derive the bounded-depth path member id (EXACT match).
+// sq-3kd2g.6: derive the bounded-depth path member id (EXACT match).
 #[cfg(feature = "extended-fragment")]
 pub fn derive_path_reach_id(d: u32, k: u32, n: u32) -> Option<CircuitId> {
     if PATH_REACH_MEMBERS.contains(&(d, k, n)) {
@@ -229,7 +229,7 @@ pub fn derive_path_reach_id(d: u32, k: u32, n: u32) -> Option<CircuitId> {
 /// compiled `d >= min_depth` with a matching `(k, n)`, where `n` is the smallest
 /// slot bucket `>= max_graph`. `None` if no compiled member covers it (e.g. a
 /// chain longer than every member's depth, or a graph larger than every bucket).
-// [OPUS-4.8] sq-3kd2g.6.
+// sq-3kd2g.6.
 #[cfg(feature = "extended-fragment")]
 pub fn smallest_path_reach_id(k: u32, max_graph: u32, min_depth: u32) -> Option<CircuitId> {
     let n = smallest_bucket(PATH_REACH_N_BUCKETS, max_graph.max(1))?;
@@ -243,13 +243,13 @@ pub fn smallest_path_reach_id(k: u32, max_graph: u32, min_depth: u32) -> Option<
         .map(|d| CircuitId::PathReach { d, k, n })
 }
 
-/// [OPUS-5] sq-kndw: the compiled `revoke_hidden_ref_d{depth}_a{set_depth}`
+/// sq-kndw: the compiled `revoke_hidden_ref_d{depth}_a{set_depth}`
 /// FULLY-HIDDEN revocation members, as `(status-list depth, accepted-set depth)`.
 /// This is the SINGLE SOURCE of the family list —
 /// [`derive_revoke_hidden_ref_id`] validates a pair against it EXACTLY (no
 /// wrong-bucket fallback), mirroring the path/filter families' EXACT-match
 /// discipline (sq-wto). One member `zk/compose/` compiles today: `(10, 4)`.
-// [OPUS-5] sq-kndw: compiled fully-hidden revocation members.
+// sq-kndw: compiled fully-hidden revocation members.
 pub const REVOKE_HIDDEN_REF_MEMBERS: &[(u32, u32)] = &[(10, 4)];
 
 /// Derive the `revoke_hidden_ref_d{depth}_a{set_depth}` member id (sq-kndw).
@@ -259,7 +259,7 @@ pub const REVOKE_HIDDEN_REF_MEMBERS: &[(u32, u32)] = &[(10, 4)];
 /// circuit gets a clean refusal rather than a proof attempt against a member that
 /// does not exist. Prover and verifier both call this, so a proof only ever fits
 /// the member its public inputs name.
-// [OPUS-5] sq-kndw: derive the fully-hidden revocation member id (EXACT match).
+// sq-kndw: derive the fully-hidden revocation member id (EXACT match).
 pub fn derive_revoke_hidden_ref_id(depth: u32, set_depth: u32) -> Option<CircuitId> {
     if REVOKE_HIDDEN_REF_MEMBERS.contains(&(depth, set_depth)) {
         Some(CircuitId::RevokeHiddenRef { depth, set_depth })
@@ -323,7 +323,7 @@ fn encode_slot(slot: &Slot, salt: &Fr) -> (bool, FieldHex, Option<Fr>) {
 /// `h3(enc) == leaf`), so this re-derivation is sound by construction: a wrong
 /// encoding would fail the in-circuit commitment recompute.
 ///
-/// # Strict-ordering canonicalisation (plan S2.5, [OPUS-4.8])
+/// # Strict-ordering canonicalisation (plan S2.5)
 /// `scan_check` enforces `commitments[0] < commitments[1] < ...` (strict, on the
 /// canonical field representative) to force the committed graphs pairwise
 /// distinct and close the duplicate-inclusion / COUNT-forgery class. So this
@@ -388,7 +388,7 @@ pub fn build_scan(
     // is true iff graph `g` contributes at least one matched triple — the exact
     // bit `scan.nr` step 4 constrains. This is the proof-bound provenance the
     // verifier cross-checks against `manifest.attributions`.
-    // [OPUS-4.8] audit #8.
+    // audit #8.
     let mut rows: Vec<[FieldHex; 3]> = Vec::new();
     let mut attribution: Vec<bool> = Vec::with_capacity(enc_fr.len());
     for graph in &enc_fr {
@@ -455,7 +455,7 @@ pub fn build_filter_int(
 /// DEGENERATE orderings XPath's `op:boolean-less-than` / `op:boolean-greater-than`
 /// define, i.e. exactly `false < true` — they are meaningful, not errors, which is
 /// why the integer member serves this lane unchanged.
-// [OPUS-5] sq-5xdlk: boolean value-lane verdict oracle. Opt-in (`dual-leaf`).
+// sq-5xdlk: boolean value-lane verdict oracle. Opt-in (`dual-leaf`).
 #[cfg(feature = "dual-leaf")]
 pub fn boolean_verdict(value: bool, op: FilterOp, bound: bool) -> bool {
     match op {
@@ -474,7 +474,7 @@ pub fn boolean_verdict(value: bool, op: FilterOp, bound: bool) -> bool {
 /// The witnesses are the dual-leaf components `sparq_zk::dual_leaf_boolean::
 /// encode_boolean` produced for the committed literal, so `inputs.operand_enc`
 /// is by construction the leaf those witnesses rebind to in-circuit.
-// [OPUS-5] sq-5xdlk: boolean value-lane host wiring. Opt-in, NOT-yet-sound.
+// sq-5xdlk: boolean value-lane host wiring. Opt-in, NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltFilterValueDlBoolean {
@@ -509,7 +509,7 @@ pub struct BuiltFilterValueDlBoolean {
 ///
 /// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
 /// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
-// [OPUS-5] sq-5xdlk: boolean value-lane host wiring. Opt-in, NOT-yet-sound.
+// sq-5xdlk: boolean value-lane host wiring. Opt-in, NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn build_filter_value_dl_boolean(
     literal: &oxrdf::Literal,
@@ -541,7 +541,7 @@ pub fn build_filter_value_dl_boolean(
 ///
 /// On the `Z`-only hookable domain this IS the XSD `timeOnTimeline` order, so
 /// all six operators are meaningful for `xsd:dateTime` / `xsd:date`.
-// [OPUS-5] sq-wz99x: dateTime/date value-lane verdict oracle. Opt-in (`dual-leaf`).
+// sq-wz99x: dateTime/date value-lane verdict oracle. Opt-in (`dual-leaf`).
 #[cfg(feature = "dual-leaf")]
 pub fn signed_epoch_verdict(v_neg: bool, v_mag: u64, b_neg: bool, b_mag: u64, op: FilterOp) -> bool {
     let eq = v_neg == b_neg && v_mag == b_mag;
@@ -597,7 +597,7 @@ fn split_signed_hook(hook: &Fr) -> Option<(bool, u64)> {
 /// committed literal, with the signed `VALUE_HOOK` split back into the member's
 /// `(value_neg, value_hook_scaled)` shape — so `inputs.operand_enc` is by
 /// construction the leaf those witnesses rebind to in-circuit.
-// [OPUS-5] sq-wz99x: dateTime/date value-lane host wiring. Opt-in, NOT-yet-sound.
+// sq-wz99x: dateTime/date value-lane host wiring. Opt-in, NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BuiltFilterValueDlDateTime {
@@ -638,7 +638,7 @@ pub struct BuiltFilterValueDlDateTime {
 /// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted),
 /// and the §13 rule set is itself an OPEN external-audit obligation (CR-G8 /
 /// sq-qhy4). NOT externally audited; no soundness / privacy claim.
-// [OPUS-5] sq-wz99x: dateTime lane host wiring. Opt-in, NOT-yet-sound.
+// sq-wz99x: dateTime lane host wiring. Opt-in, NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn build_filter_value_dl_datetime(
     literal: &oxrdf::Literal,
@@ -668,7 +668,7 @@ pub fn build_filter_value_dl_datetime(
 /// INDETERMINATE per §13.2) is rejected fail-closed rather than compared.
 ///
 /// DOCUMENTED RISK: as [`build_filter_value_dl_datetime`] (CR-G8 / sq-qhy4).
-// [OPUS-5] sq-wz99x: date lane host wiring. Opt-in, NOT-yet-sound.
+// sq-wz99x: date lane host wiring. Opt-in, NOT-yet-sound.
 #[cfg(feature = "dual-leaf")]
 pub fn build_filter_value_dl_date(
     literal: &oxrdf::Literal,
@@ -742,7 +742,7 @@ const XSD_DOUBLE: &str = "http://www.w3.org/2001/XMLSchema#double";
 /// Build a MANIFEST-COMPOSABLE filter_f64 proof for a hidden INTEGER-VALUED
 /// xsd:double operand `value` (written in plain canonical decimal-integer lexical
 /// form, e.g. `42` => `"42"^^xsd:double`) under operator `op` against the constant
-/// double `bound`, with the disclosed `expected` verdict ([OPUS-4.8] sq-q7e /
+/// double `bound`, with the disclosed `expected` verdict (sq-q7e /
 /// sq-tat). `operand_enc` must be the SAME term encoding the scan proof disclosed
 /// for the operand column (binding consistency, exactly like `build_filter_int`).
 ///
@@ -780,7 +780,7 @@ pub fn build_filter_f64(
 /// wiring a composable float filter to a known constant operand. The lexical form
 /// is `value.to_string()` (no `.0`/exponent), matching the
 /// `filter_f64_composable_check` token rebuild. (Salt-independent for literals.)
-// [OPUS-4.8] sq-q7e + sq-tat.
+// sq-q7e + sq-tat.
 pub fn encode_double_literal(value: u64) -> FieldHex {
     let lit = oxrdf::Literal::new_typed_literal(
         value.to_string(),
@@ -792,13 +792,13 @@ pub fn encode_double_literal(value: u64) -> FieldHex {
 }
 
 /// XSD integer / decimal datatype IRIs (the signed-int / decimal filter
-/// fragments' literal types). [OPUS-4.8] sq-1q9h.
+/// fragments' literal types). sq-1q9h.
 const XSD_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#integer";
 const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
 
 /// Build a MANIFEST-COMPOSABLE `filter_signed_int` proof for a hidden SIGNED
 /// xsd:integer operand `value` under operator `op` against the constant `bound`
-/// (also signed `i64`), with the disclosed `expected` verdict ([OPUS-4.8] sq-7lrq).
+/// (also signed `i64`), with the disclosed `expected` verdict (sq-7lrq).
 /// `operand_enc` must be the SAME term encoding the scan proof disclosed for the
 /// operand column (binding consistency, exactly like [`build_filter_int`]).
 ///
@@ -812,7 +812,7 @@ const XSD_DECIMAL: &str = "http://www.w3.org/2001/XMLSchema#decimal";
 /// FILTER's constant `bound` is carried sign-split as `(bound_neg, |bound|)` in the
 /// PUBLIC inputs. Thread the witness through [`crate::toml::prover_toml_for`]'s
 /// `filter_signed_witness` arg (mirrors `build_join` -> the `join_witness` arg).
-// [OPUS-4.8] sq-7lrq: composable signed xsd:integer FILTER builder.
+// sq-7lrq: composable signed xsd:integer FILTER builder.
 pub fn build_filter_signed_int(
     operand_enc: FieldHex,
     value: i64,
@@ -846,7 +846,7 @@ pub fn build_filter_signed_int(
 /// EXACTLY `frac` fraction-digit string (lexical form `[-]?<int>.<frac>`, e.g.
 /// `(false, "123", "45")` => `"123.45"`), under operator `op` against a HOST-PRESCALED
 /// constant `(bound_neg, bound_scaled)` where `bound_scaled = round(|bound| * 10^fd)`
-/// and `fd == frac.len()` ([OPUS-4.8] sq-7lrq), with the disclosed `expected` verdict.
+/// and `fd == frac.len()` (sq-7lrq), with the disclosed `expected` verdict.
 /// `operand_enc` must be the SAME term encoding the scan proof disclosed for the
 /// operand column (binding consistency, exactly like [`build_filter_int`]).
 ///
@@ -863,7 +863,7 @@ pub fn build_filter_signed_int(
 /// clean error, never a silently-unprovable wrong shape — sq-wto), or if either
 /// string contains a non-ASCII-digit byte. Thread the witness through
 /// [`crate::toml::prover_toml_for`]'s `filter_signed_witness` arg.
-// [OPUS-4.8] sq-7lrq: composable xsd:decimal FILTER builder.
+// sq-7lrq: composable xsd:decimal FILTER builder.
 #[allow(clippy::too_many_arguments)]
 pub fn build_filter_decimal(
     operand_enc: FieldHex,
@@ -906,7 +906,7 @@ pub fn build_filter_decimal(
 /// magnitude digits) and [`Self::frac_digits`] is empty; for
 /// [`ProofInputs::FilterDecimal`] both arrays carry the integer-part and fraction
 /// digits. Mirrors [`JoinWitness`]: a non-manifest witness threaded through
-/// [`crate::toml::prover_toml_for`]'s `filter_signed_witness` arg. [OPUS-4.8] sq-7lrq.
+/// [`crate::toml::prover_toml_for`]'s `filter_signed_witness` arg. sq-7lrq.
 #[derive(Debug, Clone)]
 pub struct FilterSignedWitness {
     /// The hidden operand's sign flag (`true` = negative). For signed-int this is
@@ -926,7 +926,7 @@ pub struct FilterSignedWitness {
 /// constant operand. The lexical form (with an optional leading `-`) matches the
 /// `filter_signed_int_check` token rebuild byte-for-byte (oxrdf passes the
 /// lexical form through verbatim). (Salt-independent for literals.)
-/// [OPUS-4.8] sq-1q9h.
+/// sq-1q9h.
 pub fn encode_signed_int_literal(value: i64) -> FieldHex {
     let lit = oxrdf::Literal::new_typed_literal(
         value.to_string(),
@@ -944,7 +944,7 @@ pub fn encode_signed_int_literal(value: i64) -> FieldHex {
 /// The lexical form matches the `filter_decimal_check` token rebuild
 /// byte-for-byte. `frac` must be exactly the member's `FD` digits (zero-padded
 /// by the caller, e.g. `"50"` for `0.50`). (Salt-independent for literals.)
-/// [OPUS-4.8] sq-1q9h.
+/// sq-1q9h.
 pub fn encode_decimal_literal(neg: bool, int_part: u64, frac: &str) -> FieldHex {
     let sign = if neg { "-" } else { "" };
     let lexical = format!("{sign}{int_part}.{frac}");
@@ -962,7 +962,7 @@ fn subj_term(t: &oxrdf::Triple) -> Term {
 }
 
 // === Hidden cross-credential JOIN (sq-bwwl / sq-r2s8, step 4 proving path) ====
-// [OPUS-4.8] sq-r2s8: assemble the `join_eq` witness for proving — the host
+// sq-r2s8: assemble the `join_eq` witness for proving — the host
 // analogue of `build_scan`. Mirrors the scan build_* pattern: re-encode each
 // witnessed graph's canonical triples (same salt convention the commitment used,
 // so the in-circuit `commit_fold` recompute reproduces `C(G)`), locate the two
@@ -977,7 +977,7 @@ fn subj_term(t: &oxrdf::Triple) -> Term {
 /// joined rows, and the per-presentation blinder. `build` does NOT pad to the
 /// circuit's `N` slots; [`crate::toml::join_prover_toml`] pads `enc_a`/`enc_b` to
 /// the member's bucket exactly as `prover_toml_for`'s scan arm pads `enc`.
-// [OPUS-4.8] sq-r2s8: hidden cross-credential JOIN witness (mirrors ScanWitness).
+// sq-r2s8: hidden cross-credential JOIN witness (mirrors ScanWitness).
 #[derive(Debug, Clone)]
 pub struct JoinWitness {
     /// Graph-A per-slot term encodings of every canonical triple (active leaves).
@@ -998,7 +998,7 @@ pub struct JoinWitness {
 
 /// A built hidden-join proof: the public inputs ([`ProofInputs::JoinEq`]) + the
 /// private witness ([`JoinWitness`]). Mirrors [`BuiltScan`].
-// [OPUS-4.8] sq-r2s8.
+// sq-r2s8.
 #[derive(Debug, Clone)]
 pub struct BuiltJoin {
     pub inputs: ProofInputs,
@@ -1006,12 +1006,12 @@ pub struct BuiltJoin {
 }
 
 /// One graph's canonical triples re-encoded both as field elements (to locate the
-/// joined rows) and as hex (the witness the toml emits). [OPUS-4.8] sq-r2s8.
+/// joined rows) and as hex (the witness the toml emits). sq-r2s8.
 type EncodedGraph = (Vec<[Fr; 3]>, Vec<[FieldHex; 3]>);
 
 /// Re-encode every canonical triple of `c` under its recorded salt — the same
 /// re-derivation [`build_scan`] performs. `None` if a term is not committable.
-// [OPUS-4.8] sq-r2s8.
+// sq-r2s8.
 fn encode_join_graph(c: &GraphCommitment) -> Option<EncodedGraph> {
     let salt = c.salt;
     let mut fr = Vec::with_capacity(c.canonical.triples.len());
@@ -1049,7 +1049,7 @@ fn encode_join_graph(c: &GraphCommitment) -> Option<EncodedGraph> {
 /// same join value under different blinders produce UNLINKABLE `join_commitment`s
 /// (design §2.4 R4). The caller draws it (e.g. from its CSPRNG mapped into the
 /// field), exactly as the ingest salt is drawn.
-// [OPUS-4.8] sq-r2s8: hidden cross-credential JOIN builder.
+// sq-r2s8: hidden cross-credential JOIN builder.
 pub fn build_join(
     commit_a: &GraphCommitment,
     slot_a: u32,
@@ -1120,7 +1120,7 @@ pub fn build_join(
 /// carries (sq-3kd2g.6): the PRIVATE chain length, the per-step node array, and
 /// the per-graph triple encodings. Mirrors [`ScanWitness`] / [`JoinWitness`]. The
 /// build pads `nodes` to `d` and each graph's `enc` to `n` (the member buckets).
-// [OPUS-4.8] sq-3kd2g.6. Opt-in (`extended-fragment`), NOT-yet-sound (sq-qhy4).
+// sq-3kd2g.6. Opt-in (`extended-fragment`), NOT-yet-sound (sq-qhy4).
 #[cfg(feature = "extended-fragment")]
 #[derive(Debug, Clone)]
 pub struct PathReachWitness {
@@ -1138,7 +1138,7 @@ pub struct PathReachWitness {
 /// A built bounded-depth path proof: the public inputs
 /// ([`ProofInputs::PathReach`]) + the private witness ([`PathReachWitness`]).
 /// Mirrors [`BuiltScan`] / [`BuiltJoin`].
-// [OPUS-4.8] sq-3kd2g.6.
+// sq-3kd2g.6.
 #[cfg(feature = "extended-fragment")]
 #[derive(Debug, Clone)]
 pub struct BuiltPathReach {
@@ -1153,7 +1153,7 @@ pub struct BuiltPathReach {
 /// SHORTEST witness. Returns the node list `[src, n_1, ..., dst]`, or `None` if
 /// `dst` is unreachable within the bound (or `src == dst`, which is the
 /// zero-length case handled by the caller — a `+` cycle back to `src` is not
-/// searched here). [OPUS-4.8] sq-3kd2g.6.
+/// searched here). sq-3kd2g.6.
 #[cfg(feature = "extended-fragment")]
 fn bfs_path_chain(edges: &[(Fr, Fr)], src: Fr, dst: Fr, max_depth: usize) -> Option<Vec<Fr>> {
     if src == dst {
@@ -1225,7 +1225,7 @@ fn bfs_path_chain(edges: &[(Fr, Fr)], src: Fr, dst: Fr, max_depth: usize) -> Opt
 /// A bounded path proof is EXISTENCE-ONLY. This builds a satisfying witness; the
 /// verifier stack is internally re-audited but NOT externally audited (sq-qhy4);
 /// no soundness / privacy property is asserted.
-// [OPUS-4.8] sq-3kd2g.6: bounded-depth path-reachability builder.
+// sq-3kd2g.6: bounded-depth path-reachability builder.
 #[cfg(feature = "extended-fragment")]
 pub fn build_path_reach(
     commitments: &[GraphCommitment],
@@ -1349,7 +1349,7 @@ pub fn build_path_reach(
     })
 }
 
-// [OPUS-4.8] sq-bif.6: GLUE unit tests for the circuit-family id derivation —
+// sq-bif.6: GLUE unit tests for the circuit-family id derivation —
 // the (data shape -> compiled member) plumbing the prover AND verifier both call
 // so a proof can only fit its member. These cover the NON-cryptographic
 // composition logic ONLY (bucket selection, exact-digit-count discipline,
@@ -1597,7 +1597,7 @@ mod derive_id_tests {
     }
 }
 
-// [OPUS-4.8] sq-3kd2g.6: DIRECT unit tests for the bounded-depth path member
+// sq-3kd2g.6: DIRECT unit tests for the bounded-depth path member
 // derivation + builder (host-level; the bb round-trip is symmetric to build_join
 // and exercised under the nargo-gated e2e when the toolchain is present).
 #[cfg(all(test, feature = "extended-fragment"))]

@@ -1,4 +1,4 @@
-//! Oracle self-tests — the crate's non-vacuity + fail-closed invariant. [FABLE-5] sq-gum8.6
+//! Oracle self-tests — the crate's non-vacuity + fail-closed invariant. sq-gum8.6
 //!
 //! * **Non-vacuity (mutation check):** a deliberately-injected wrong-result mutant
 //!   (`FilterDropsRow`, which silently removes a row from any `FILTER` query's result)
@@ -51,7 +51,7 @@ fn rows(engine: &dyn SparqlEngine, query: &str) -> usize {
     }
 }
 
-// [GPT-5.6] sq-aglhv: independently guard the row-preserving Extend/Project step on
+// sq-aglhv: independently guard the row-preserving Extend/Project step on
 // which NoREC's relative optimized-count versus true-flag-count comparison relies.
 fn norec_rewrite_preserves_cardinality(
     engine: &dyn SparqlEngine,
@@ -357,7 +357,7 @@ fn generated_cases_with_the_new_atoms_hold_on_pristine_sparq() {
 
 // ===========================================================================
 // sq-gum8.12 oracle extensions — each derivation checked against the REAL engine,
-// each law carrying a mutant that flags it non-vacuously. [OPUS-5]
+// each law carrying a mutant that flags it non-vacuously.
 // ===========================================================================
 
 /// The `DISTINCT` fixture. `?g` is the *projected* column and `?v` drives the partition,

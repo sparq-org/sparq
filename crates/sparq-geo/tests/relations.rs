@@ -457,7 +457,7 @@ fn intersection_line_grazing_polygon_vertex_is_a_multipoint() {
     // A line that only TOUCHES the polygon at an isolated corner vertex (with no
     // in-polygon span): the intersection is that single point as a MULTIPOINT.
     // `i_overlay`'s string-line clip drops zero-length pieces, so this exercises
-    // the isolated-touch-point fallback preserved through the migration. [OPUS-4.8]
+    // the isolated-touch-point fallback preserved through the migration.
     let poly = "POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))";
     // A line whose ENDPOINT lands on the (0,0) corner, otherwise heading
     // below-left (outside): no in-polygon span, just the isolated touch vertex.
@@ -542,7 +542,7 @@ fn difference_and_symdifference_point_operands() {
 // Now SUPPORTED via i_overlay's string-line clip (line−polygon) plus a
 // linear-referencing collinear-overlap subtraction (line−line). Hand-computed
 // expected geometries below; compared with geof::sf_equals (topological
-// equality, so vertex order / multi-wrapping don't matter). [OPUS-4.8]
+// equality, so vertex order / multi-wrapping don't matter).
 
 /// Assert a wktLiteral result is topologically equal to `expected`.
 fn assert_geo_eq(got_lit: &str, expected: &str) {
@@ -612,7 +612,7 @@ fn difference_line_along_polygon_boundary_excludes_the_boundary_span() {
     // A line running exactly ALONG the polygon's top edge (y=4). The polygon is
     // a CLOSED set, so the boundary span belongs to the polygon: it is REMOVED
     // from line−polygon (only the two outside overhangs survive) and KEPT in
-    // line∩polygon — the two operations remain a clean partition. [OPUS-4.8]
+    // line∩polygon — the two operations remain a clean partition.
     let sq = "POLYGON((0 0, 4 0, 4 4, 0 4, 0 0))";
     let along = "LINESTRING(-1 4, 5 4)";
     assert_geo_eq(

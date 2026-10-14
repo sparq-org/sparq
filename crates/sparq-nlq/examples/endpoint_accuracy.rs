@@ -1,5 +1,4 @@
 //! Standalone exec-accuracy runner for the `nlq-endpoint` feature — bead sq-2m6zm.7.
-//! [SONNET-4.6]
 //!
 //! Measures end-to-end NL→SPARQL→run exec-accuracy against any OpenAI-compatible
 //! cheap-model endpoint (Ollama, llama.cpp server, vLLM, OpenRouter, OpenAI, etc.)

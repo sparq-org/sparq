@@ -41,7 +41,7 @@
 //! fail-closed against the declared envelope. The adapter itself enforces nothing
 //! cryptographic — see the crate `README.md` and the design record.
 //!
-//! [OPUS-4.8] sq-fix4.
+//! sq-fix4.
 
 use std::collections::BTreeMap;
 
@@ -200,7 +200,7 @@ impl SelectedPrivateSources {
 /// `sources` with no `privacy` entry is treated as "no authorisation policy declared" and kept.
 ///
 /// This function performs **no** MPC and makes **no** soundness/privacy claim — see the module
-/// docs and the crate `README.md`. [OPUS-4.8] sq-fix4.
+/// docs and the crate `README.md`. sq-fix4.
 pub fn select_private_sources(
     bgp: &Bgp,
     sources: &[SourceDescriptor],
@@ -513,7 +513,7 @@ mod tests {
     }
 
     // A two-pattern BGP `?s p1 ?o . ?s p2 ?o2` (joins on ?s) so a source can appear in BOTH
-    // patterns and a per-pattern cardinality sum is non-trivial. [OPUS-4.8] sq-bif.
+    // patterns and a per-pattern cardinality sum is non-trivial. sq-bif.
     fn bgp_two_preds(p1: &str, p2: &str) -> Bgp {
         Bgp::new(vec![
             TriplePattern::new(
@@ -532,7 +532,7 @@ mod tests {
     /// `total_cardinality` sums ONLY the surviving candidates, and it excludes a pruned one — a
     /// regression that summed pruned candidates (or the wrong field) would change the number. The
     /// surviving sum must equal the upstream per-pattern total minus the pruned source's estimate.
-    /// [OPUS-4.8] sq-bif.
+    /// sq-bif.
     #[test]
     fn total_cardinality_sums_only_surviving_candidates() {
         let pred = "http://ex/p";
@@ -576,7 +576,7 @@ mod tests {
 
     /// `participating_sources` deduplicates a source that contributes to MULTIPLE patterns — it
     /// returns each distinct id once, ascending. A regression that concatenated per-pattern ids
-    /// without the dedup would report the source twice.  [OPUS-4.8] sq-bif.
+    /// without the dedup would report the source twice.  sq-bif.
     #[test]
     fn participating_sources_dedups_a_source_across_patterns() {
         let p1 = "http://ex/p1";
@@ -613,7 +613,7 @@ mod tests {
 
     /// The audit-trail `PruneReason::label` is the human-readable diagnostic surfaced to a relying
     /// party. Pin its content (a regression that blanked or reworded it past the load-bearing
-    /// `participates=false` token would be caught). [OPUS-4.8] sq-bif.
+    /// `participates=false` token would be caught). sq-bif.
     #[test]
     fn prune_reason_label_names_the_non_participation_cause() {
         let label = PruneReason::NonParticipating.label();

@@ -1,6 +1,6 @@
 //! Exact centrality and cohesion measures over a [`NodeGraph`].
 //!
-//! [GPT-5.6] sq-lsp7k.15: these algorithms use the weak (undirected) topology: an RDF
+//! sq-lsp7k.15: these algorithms use the weak (undirected) topology: an RDF
 //! edge `a → b` connects `a` and `b` in either traversal direction. This matches the
 //! crate's community-analysis topology and makes the result independent of which RDF
 //! direction was chosen to encode a relationship. Parallel edges were already collapsed

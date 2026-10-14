@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-d1dw) SHACL Advanced Features (SHACL-AF) **rules** — `sh:rule`.
+//! (sq-d1dw) SHACL Advanced Features (SHACL-AF) **rules** — `sh:rule`.
 //!
 //! OPT-IN: this whole module is gated behind the `shacl-af` cargo feature, so the
 //! base SHACL Core + SHACL-SPARQL validation path carries zero rule code or parse
@@ -73,7 +73,7 @@ use oxrdf::{NamedNode, NamedOrBlankNode, Term, Triple};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::Graph;
 
-/// [OPUS-4.8] (sq-mue75) The SHACL 1.2 node-expression namespace. The SHACL-AF
+/// (sq-mue75) The SHACL 1.2 node-expression namespace. The SHACL-AF
 /// public API the crate's parser was originally written against spells the
 /// node-expression operators in the `sh:` namespace, but the W3C SHACL 1.2
 /// node-expression vocabulary (and its conformance suite) uses `shnex:`. The
@@ -91,7 +91,7 @@ fn ne_object(g: &GraphView, subject: &Term, local: &str) -> Option<Term> {
         .or_else(|| g.object(subject, &sh(local)))
 }
 
-// [OPUS-4.8] (sq-mk9n) The SHACL-function registry + the function-expression form
+// (sq-mk9n) The SHACL-function registry + the function-expression form
 // ([`NodeExpr::Func`]). A child module so its (sizeable) operator table stays out
 // of this file; it reaches the node-expression machinery through `super::`.
 #[path = "func.rs"]
@@ -173,7 +173,7 @@ pub(crate) enum NodeExpr {
     List(Vec<NodeExpr>),
 }
 
-/// [OPUS-4.8] (sq-u5rxj) A caller-supplied node-expression VARIABLE SCOPE: a map
+/// (sq-u5rxj) A caller-supplied node-expression VARIABLE SCOPE: a map
 /// of variable name → bound node set, consulted by `shnex:var "<name>"`
 /// (`func::Op::Var`). `"focusNode"` is always the focus node and need not appear
 /// here; any other name resolves against this scope (empty when absent). The W3C
@@ -390,7 +390,7 @@ pub(crate) fn parse_node_expr(g: &GraphView, model: &ShapesModel, node: &Term) -
 /// union. The `sh:nodes` of a path or filter expression is itself a node
 /// expression (defaulting to `sh:this` for a path), so these nest.
 fn parse_blank_node_expr(g: &GraphView, model: &ShapesModel, node: &Term) -> Option<NodeExpr> {
-    // [OPUS-4.8] (sq-mk9n) A bare `rdf:list` blank node is a SHACL 1.2 *list
+    // (sq-mk9n) A bare `rdf:list` blank node is a SHACL 1.2 *list
     // expression* — its members are themselves node expressions. (Checked first:
     // a list head carries `rdf:first`, which no operator/filter expression does.)
     if g.object(node, crate::view::RDF_FIRST).is_some() {
@@ -746,7 +746,7 @@ fn scoped_working_graph(data: &Graph, scope: &GraphScope) -> (Graph, Vec<(Term, 
 /// `sh:expression` / `sh:nodeByExpression` constraints. Both the SHACL 1.2
 /// `shnex:` and the SHACL-AF `sh:` spellings of the shared algebra are accepted.
 ///
-/// [OPUS-4.8] (sq-mue75) The W3C conformance harness (`tests/w3c_node_expr.rs`)
+/// (sq-mue75) The W3C conformance harness (`tests/w3c_node_expr.rs`)
 /// now drives THIS function for real (it previously re-implemented the algebra
 /// in-harness — a fidelity gap). Inline anonymous filter shapes the expression
 /// references (`sh:filterShape` / `shnex:findFirst`/`matchAll`/`nodesMatching`
@@ -762,7 +762,7 @@ pub fn eval_node_expression(
     eval_node_expression_with_scope(data, shapes, expr, focus, &Scope::default())
 }
 
-/// [OPUS-4.8] (sq-u5rxj) [`eval_node_expression`] with a caller-supplied node
+/// (sq-u5rxj) [`eval_node_expression`] with a caller-supplied node
 /// expression VARIABLE SCOPE: `scope` maps variable names to bound node sets that
 /// a `shnex:var "<name>"` (other than `"focusNode"`) resolves against. The W3C
 /// node-expr suite supplies these via its `sht:scope-<name>` action bindings; the
@@ -787,7 +787,7 @@ pub fn eval_node_expression_with_scope(
     Some(parsed.eval(data, &view, &model, focus, scope))
 }
 
-/// [OPUS-4.8] (sq-mk9n) Evaluates a parsed node expression `expr` against a value
+/// (sq-mk9n) Evaluates a parsed node expression `expr` against a value
 /// node `value` over the data `graph` (with `model` for filter-shape conformance),
 /// returning its result node set. The `sh:expression` constraint (in `eval.rs`)
 /// uses this to test whether an expression evaluates to `{ true }` for a value.
@@ -952,10 +952,10 @@ fn focus_nodes(view: &GraphView, model: &ShapesModel, sid: usize) -> Vec<Term> {
             Target::Class(c) | Target::ImplicitClass(c) => out.extend(view.instances_of(c)),
             Target::SubjectsOf(p) => out.extend(view.subjects_of(p)),
             Target::ObjectsOf(p) => out.extend(view.objects_of(p)),
-            // [OPUS-4.8] (sq-rnkdh) SHACL 1.2 SPARQL-valued `sh:targetNode`: the
+            // (sq-rnkdh) SHACL 1.2 SPARQL-valued `sh:targetNode`: the
             // node expression SELECTs the focus nodes (no `$this` to bind).
             Target::Sparql(idx) => out.extend(model.select_exprs[*idx].eval_target(view.graph())),
-            // [OPUS-4.8] (sq-rnkdh) SHACL 1.2 `sh:targetWhere`: every data-graph node
+            // (sq-rnkdh) SHACL 1.2 `sh:targetWhere`: every data-graph node
             // conforming to the inline shape. Conformance is checked through the
             // full validator (`conforms_node`), mirroring `sh:condition` gating.
             Target::Where(inner) => {
@@ -1366,7 +1366,7 @@ mod tests {
         assert_eq!(inf.iterations, 0);
     }
 
-    // [OPUS-4.8] (sq-1m0n) -------- full node-expression algebra + sh:values --------
+    // (sq-1m0n) -------- full node-expression algebra + sh:values --------
 
     /// All inferred object IRIs for `(s, p, ?)`, as ex:-local sorted strings.
     fn objs(inf: &Inference, s: &str, p: &str) -> Vec<String> {
@@ -1630,7 +1630,7 @@ mod tests {
         assert!(inf.triples.is_empty(), "{:?}", inf.triples);
     }
 
-    // ---- [OPUS-4.8] (sq-mk9n) function-expression operators in a sh:values rule ----
+    // ---- (sq-mk9n) function-expression operators in a sh:values rule ----
     #[test]
     fn values_rule_function_concat() {
         // A `shnex:concat` function expression in sh:values infers one triple per
@@ -1782,7 +1782,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] (sq-u5rxj) A `shnex:var "<name>"` resolves a caller-supplied
+    /// (sq-u5rxj) A `shnex:var "<name>"` resolves a caller-supplied
     /// scope binding (other than `"focusNode"`); an absent name is the empty set.
     #[test]
     fn node_expr_var_resolves_caller_scope() {

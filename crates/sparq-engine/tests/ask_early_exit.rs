@@ -1,5 +1,5 @@
 //! ASK first-solution early termination through joins / unions / optionals
-//! (sq-7d3dj.30.8). [FABLE-5]
+//! (sq-7d3dj.30.8).
 //!
 //! INVARIANT UNDER TEST: `ask()` returns the identical boolean the unoptimized
 //! path computes — for every query, ASK == non-emptiness of its SELECT twin
@@ -299,7 +299,7 @@ fn ask_distinct_under_offset_is_not_stripped() {
 
 /// Shapes `try_capped` declines (cyclic BGPs, MINUS, property paths, VALUES) must
 /// still answer through the full path — the ASK/SELECT differential holds on every
-/// decline branch, not just the optimised ones. [FABLE-5]
+/// decline branch, not just the optimised ones.
 #[test]
 fn ask_fail_closed_shapes_match_oracle() {
     let g = load(":a :p :b . :b :p :c . :c :p :a . :a :q :b . :a :name \"x\" .");

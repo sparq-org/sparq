@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-1m0n) Manifest-driven runner for the W3C SHACL **node
+//! (sq-1m0n) Manifest-driven runner for the W3C SHACL **node
 //! expression** test suite (`sht:EvalNodeExpr` entries in
 //! `w3c/data-shapes`, `shacl12-test-suite/tests/node-expr/...`).
 //!
@@ -9,7 +9,7 @@
 //!
 //! ## Drives the REAL crate evaluation (sq-mue75)
 //!
-//! [OPUS-4.8] (sq-mue75) This runner drives the crate's own node-expression
+//! (sq-mue75) This runner drives the crate's own node-expression
 //! parse + evaluation through the public, feature-gated
 //! [`sparq_shacl::eval_node_expression`] seam — it does NOT re-implement the
 //! algebra in the harness. The crate parser now accepts both the SHACL 1.2
@@ -43,7 +43,7 @@
 //!
 //! ## Scope (honest)
 //!
-//! The runner covers the **implemented algebra** end-to-end. [OPUS-4.8] (sq-u5rxj)
+//! The runner covers the **implemented algebra** end-to-end. (sq-u5rxj)
 //! The suite's `shnex:var "<name>"` entries that resolve a `sht:scope-<name>`
 //! action binding are now driven through the crate's real evaluation: the harness
 //! builds a [`sparq_shacl::Scope`] from those bindings and passes it to
@@ -71,10 +71,10 @@ const SHT: &str = "http://www.w3.org/ns/shacl-test#";
 /// order-insensitive set operator) by multiset. A regression below this floor
 /// fails the build; raising it is a deliberate bump.
 ///
-/// [OPUS-4.8] (sq-mue75) Recalibrated when the harness moved from an inline
+/// (sq-mue75) Recalibrated when the harness moved from an inline
 /// re-implementation (set-blind) to driving `eval_node_expression`.
 ///
-/// [OPUS-4.8] (sq-u5rxj) Raised 62 → 63: the `shnex:var "bound"` /
+/// (sq-u5rxj) Raised 62 → 63: the `shnex:var "bound"` /
 /// `sht:scope-bound` entry now PASSES via the caller-supplied variable scope
 /// ([`sparq_shacl::eval_node_expression_with_scope`]) the harness threads in — the
 /// previous documented xfail is closed, so all runnable entries now pass.
@@ -269,7 +269,7 @@ fn run_entry(g: &Graph, view: &GraphView, entry: &Term) -> Outcome {
         .object(&action, &format!("{SHT}focusNode"))
         .unwrap_or_else(|| iri("urn:x-sparq:no-focus"));
 
-    // [OPUS-4.8] (sq-u5rxj) Build the caller-supplied node-expression variable
+    // (sq-u5rxj) Build the caller-supplied node-expression variable
     // scope from the suite's `sht:scope-<name>` action bindings. A `shnex:var
     // "<name>"` (other than `"focusNode"`) now resolves against this scope through
     // the crate's real evaluation, rather than being recorded as a divergence.
@@ -295,7 +295,7 @@ fn run_entry(g: &Graph, view: &GraphView, entry: &Term) -> Outcome {
     }
 }
 
-/// [OPUS-4.8] (sq-u5rxj) Builds the caller-supplied node-expression variable scope
+/// (sq-u5rxj) Builds the caller-supplied node-expression variable scope
 /// from the suite's `sht:scope-<name>` action bindings: each
 /// `[action] sht:scope-<name> <value>` becomes `name -> { value }`. A `shnex:var
 /// "<name>"` resolves against this map (the crate threads it through

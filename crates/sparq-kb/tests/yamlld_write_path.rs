@@ -1,7 +1,7 @@
 //! Write-path YAML-LD authoring form — the round-trip + SHACL-conformance gate
 //! (FO-bridge Phase 4, sq-mztg8.2; epic sq-mztg8).
 //!
-//! [OPUS-4.8] 🤖 SPARQ agent. Design record: `research/fo-llm-bridge.md` §3.4 / §6
+//! 🤖 SPARQ agent. Design record: `research/fo-llm-bridge.md` §3.4 / §6
 //! Phase 4 (#1112). Written while Fable unavailable; flag for re-review when Fable
 //! returns.
 //!

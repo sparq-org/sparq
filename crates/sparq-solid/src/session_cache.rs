@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-cnuqd (issue #1569) — the BOUNDED, SHARDED, `&self`-readable session cache.
+//! sq-cnuqd (issue #1569) — the BOUNDED, SHARDED, `&self`-readable session cache.
 //!
 //! # Why this exists
 //!
@@ -73,7 +73,7 @@ pub(crate) const SHARD_CAP: usize = 1024;
 /// live key. Bounding it is load-bearing: a hot session that is repeatedly invalidated
 /// (miss → fill → `invalidate_origin` → miss → fill …) re-touches the SAME key without ever
 /// growing `map` past the cap, so without this the recency queue would grow WITHOUT BOUND
-/// (breaking the whole "bounded" guarantee) and make each eviction O(queue) — [FABLE-5]
+/// (breaking the whole "bounded" guarantee) and make each eviction O(queue) —
 /// sq-cnuqd fix.
 const RECENCY_SLACK: usize = 2;
 
@@ -251,7 +251,7 @@ impl SessionCache {
 
 #[cfg(test)]
 mod tests {
-    //! [FABLE-5] sq-cnuqd — DIRECT unit tests for the bounded, sharded cache mechanics
+    //! sq-cnuqd — DIRECT unit tests for the bounded, sharded cache mechanics
     //! (independent of the WAC/ACP auth path): hit/miss/compute, bounded eviction, `clear`,
     //! per-origin invalidation, and shard-selection stability.
     use super::*;
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn recency_queue_stays_bounded_under_hot_key_churn() {
-        // Regression ([FABLE-5] sq-cnuqd): a hot session re-touched over and over (the real
+        // Regression (sq-cnuqd): a hot session re-touched over and over (the real
         // miss → fill → invalidate_origin → miss → fill … churn a per-origin ACL write drives)
         // must NOT grow the recency queue without bound. Before the compaction fix, `map`
         // stayed at 1 entry so `evict_to_cap` never fired and `recency` grew one copy per

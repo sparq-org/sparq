@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-hmd7l.14) Serialization-throughput runner for `bench/serialize/`
+//! (sq-hmd7l.14) Serialization-throughput runner for `bench/serialize/`
 //! — drives the PUBLIC writer matrix of this crate (buffered / streaming / pretty)
 //! so the same-box comparison panel (vs serd / rapper / Jena riot / an oxrdfio
 //! scratch shim) exercises exactly the surface sparq ships.

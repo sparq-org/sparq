@@ -188,7 +188,7 @@ const ECDSA_RDFC_2019_P256: Vector = Vector {
         "zaHXrr7AQdydBk3ahpCDpWbxfLokDqmCToYm2dyWvpcFVyWooC2he63w1f7UNQoAMKdhaRtcnaE2KTo5o5vTCcfw",
 };
 
-/// [OPUS-5] sq-txg1y — vc-di-ecdsa § A.3 "Representation: ecdsa-rdfc-2019, with
+/// sq-txg1y — vc-di-ecdsa § A.3 "Representation: ecdsa-rdfc-2019, with
 /// curve P-384". Same cryptosuite token as the vector above; SHA-384 throughout,
 /// a 96-byte `hashData` and a 96-byte signature.
 const ECDSA_RDFC_2019_P384: Vector = Vector {
@@ -408,7 +408,7 @@ fn hash_data_matches_published_vector() {
 /// token tells the bridge which digest to use — only the issuer key's curve does.
 /// Deriving the P-384 vector's `hashData` with the SHA-256 entry point (what a
 /// dispatch that ignored the curve would do) must NOT reproduce the published
-/// value, and vice versa. [OPUS-5] sq-txg1y.
+/// value, and vice versa. sq-txg1y.
 #[test]
 fn ecdsa_curve_profiles_select_different_hash_data() {
     let cred = triples(CREDENTIAL_NQ);

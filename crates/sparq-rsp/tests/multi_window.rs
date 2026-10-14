@@ -1,7 +1,7 @@
-//! [OPUS-4.8] Multi-window joins (sq-9u1, part 2): an RSP-QL query opening more
+//! Multi-window joins (sq-9u1, part 2): an RSP-QL query opening more
 //! than one named window and JOINing across them, evaluated correctly over the
 //! per-window contents at each synchronized evaluation tick.
-//! [SONNET-4.6] sq-2n1q3.3: 3+-window join correctness, the explicit
+//! sq-2n1q3.3: 3+-window join correctness, the explicit
 //! no-output-until-all-windows-populated property test, and ISTREAM/DSTREAM
 //! over multi-window joins.
 
@@ -146,7 +146,7 @@ FROM NAMED WINDOW <http://ex/w2> ON <http://ex/meta> RANGE 20 STEP 20";
     assert_eq!(tick10, Some(vec![]), "slow window not closed at boundary 10 → empty join");
 }
 
-// ==================== [SONNET-4.6] sq-2n1q3.3: new tests below ====================
+// ==================== sq-2n1q3.3: new tests below ====================
 
 /// 3-window RSP-QL query text: observation stream (w1) joined with type stream
 /// (w2) joined with location stream (w3).  All three windows must be populated
@@ -168,7 +168,7 @@ fn row3(typ: &str, loc: &str, v: i32) -> Vec<Option<Term>> {
     vec![Some(iri(typ)), Some(iri(loc)), Some(Literal::from(v).into())]
 }
 
-/// [SONNET-4.6] sq-2n1q3.3 — EXPLICIT non-vacuous property test.
+/// sq-2n1q3.3 — EXPLICIT non-vacuous property test.
 ///
 /// Three windows are declared.  Data is pushed to w1 (obs) and w2 (meta1) but
 /// NOT to w3 (meta2).  When the shared clock closes [0,10) on all three
@@ -211,7 +211,7 @@ fn no_output_until_all_windows_populated_is_enforced() {
     );
 }
 
-/// [SONNET-4.6] sq-2n1q3.3 — 3-window join correctness.
+/// sq-2n1q3.3 — 3-window join correctness.
 ///
 /// All three windows are populated.  The join produces one row per sensor that
 /// is present in all three windows' content.
@@ -253,7 +253,7 @@ fn three_window_join_correctness() {
     assert_eq!(total, 0, "missing w2/w3 content in [10,20) → empty 3-window join");
 }
 
-/// [SONNET-4.6] sq-2n1q3.3 — ISTREAM over a multi-window join.
+/// sq-2n1q3.3 — ISTREAM over a multi-window join.
 ///
 /// ISTREAM emits only rows that APPEARED in the join result relative to the
 /// previous tick.  The first tick diffs against the empty multiset and emits
@@ -305,7 +305,7 @@ FROM NAMED WINDOW <http://ex/w2> ON <http://ex/meta> RANGE 10 STEP 10";
     assert_eq!(tick1_rows, 2, "ISTREAM tick 1: both new rows vs (kitchen,10) prev");
 }
 
-/// [SONNET-4.6] sq-2n1q3.3 — DSTREAM over a multi-window join.
+/// sq-2n1q3.3 — DSTREAM over a multi-window join.
 ///
 /// DSTREAM emits only rows that DISAPPEARED from the join result relative to the
 /// previous tick.  The first tick always emits nothing (nothing can disappear

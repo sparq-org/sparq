@@ -1,4 +1,4 @@
-//! Feature-state coverage for the `result-cache` surface ([OPUS-4.8] sq-jluc).
+//! Feature-state coverage for the `result-cache` surface (sq-jluc).
 //!
 //! `result-cache` is OFF by default: when off, the whole cache + canonicalization
 //! surface (`cache.rs`, `canon.rs`) is `cfg`'d out of the crate entirely, and the

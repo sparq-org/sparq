@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-jnkm: oblivious result-size protection + match-bit aggregation
+// sq-jnkm: oblivious result-size protection + match-bit aggregation
 // output path for SET-returning hidden joins. Closes leaks L1 (true result
 // cardinality) and L2 (the per-pair match graph / key fan-out) that the per-pair
 // `HiddenValueJoin` open exposes, building on the oblivious shuffle substrate
@@ -58,7 +58,7 @@
 //!   candidates matched and the exact count (only `B` is revealed). This is fully
 //!   sound and shippable now.
 //!
-//! ### [OPUS-4.8] sq-xhaw — the HIDDEN-key match bit is now REALISED (gate landed)
+//! ### sq-xhaw — the HIDDEN-key match bit is now REALISED (gate landed)
 //!
 //! - **Deriving the secret match bit from genuinely-secret keys WITHOUT opening
 //!   it.** Feeding step 1 in the HIDDEN-key regime needs a secure
@@ -126,13 +126,13 @@ use std::str::FromStr;
 /// thread 1). `Fp` is the Mersenne prime `2^61 − 1` ([`crate::field::P`]), so a
 /// field element holds any 60-bit value; we pack 7 bytes (56 bits) per limb,
 /// well under the modulus, so every limb is a canonical residue with no reduction
-/// and the byte→limb→byte round-trip is exact. `[OPUS-4.8]`
+/// and the byte→limb→byte round-trip is exact.
 const BYTES_PER_LIMB: usize = 7;
 
 /// The fixed value packed into padding limbs (the limbs that bring a short
 /// entry up to the uniform width). The exact byte length is carried in an explicit
 /// LENGTH-PREFIX limb (see [`bytes_to_limbs`]), so padding content is irrelevant to
-/// decoding — `0` is used purely for determinism. `[OPUS-4.8]`
+/// decoding — `0` is used purely for determinism.
 const PAD_LIMB: u64 = 0;
 
 /// One disclosed payload row — a column vector of nullable `oxrdf` terms, the same
@@ -200,7 +200,7 @@ pub struct ObliviousOutputCost {
     /// a real secret-control shuffle pays a conditional swap per field element per
     /// switch, and the payloads now ride through the shuffle as secret limbs, so a
     /// single-element switch count would understate the work (Copilot review #93,
-    /// thread 2). `[OPUS-4.8]`
+    /// thread 2).
     pub shuffle: ShuffleCost,
 }
 
@@ -395,8 +395,8 @@ fn selector_sharing(dealer: &mut ShamirDealer, bit: &MatchBit) -> Result<Vec<Sha
 /// a 1-byte presence flag (`0` = unbound `None`, `1` = bound `Some`), and for a
 /// bound column the term's canonical N-Triples serialization (`Term::to_string`)
 /// as UTF-8, NUL-terminated. The N-Triples form escapes control characters
-/// (including NUL → ` `), so a raw `0x00` never appears inside a term and is
-/// an unambiguous field terminator. `[OPUS-4.8]`
+/// (including NUL → `\u0000`), so a raw `0x00` never appears inside a term and is
+/// an unambiguous field terminator.
 fn encode_payload_row(row: &[Option<Term>]) -> Vec<u8> {
     let mut bytes = Vec::new();
     for cell in row {
@@ -415,7 +415,7 @@ fn encode_payload_row(row: &[Option<Term>]) -> Vec<u8> {
 /// Inverse of [`encode_payload_row`]: parse a byte stream back into `arity`
 /// nullable terms. Fails closed ([`MpcError::Protocol`]) on any malformed encoding
 /// (truncated stream, non-UTF-8, unparseable term) — a corrupted shuffle entry must
-/// not silently yield a wrong or partial row. `[OPUS-4.8]`
+/// not silently yield a wrong or partial row.
 fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, MpcError> {
     let mut out = Vec::with_capacity(arity);
     let mut pos = 0usize;
@@ -467,7 +467,6 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
 /// endian within a limb), each `< 2^56`. The length prefix removes the trailing-
 /// zero ambiguity a sentinel/implicit-length scheme has (a final partial limb is
 /// zero-padded to 7 bytes; the prefix tells the decoder exactly how many to keep).
-/// `[OPUS-4.8]`
 fn bytes_to_limbs(bytes: &[u8]) -> Vec<Fp> {
     let mut limbs = Vec::with_capacity(1 + bytes.len().div_ceil(BYTES_PER_LIMB));
     limbs.push(Fp::new(bytes.len() as u64));
@@ -482,7 +481,7 @@ fn bytes_to_limbs(bytes: &[u8]) -> Vec<Fp> {
 }
 
 /// The number of limbs [`bytes_to_limbs`] produces for a `byte_len`-byte stream:
-/// one length-prefix limb plus `⌈byte_len / 7⌉` data limbs. `[OPUS-4.8]`
+/// one length-prefix limb plus `⌈byte_len / 7⌉` data limbs.
 fn limb_count_for(byte_len: usize) -> usize {
     1 + byte_len.div_ceil(BYTES_PER_LIMB)
 }
@@ -492,7 +491,7 @@ fn limb_count_for(byte_len: usize) -> usize {
 /// Fails closed ([`MpcError::Protocol`]) if the length prefix is missing, if it
 /// claims more bytes than the data limbs can supply, or if a data limb's value
 /// exceeds the 7-byte range — any of which signals a corrupted shuffle entry rather
-/// than a recoverable payload. `[OPUS-4.8]`
+/// than a recoverable payload.
 fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
     let len_limb = limbs.first().ok_or_else(|| {
         MpcError::Protocol("limbs_to_bytes: empty limb block (missing length prefix)".to_string())
@@ -693,7 +692,7 @@ fn canonicalize_rows(rows: &mut [Vec<Option<Term>>]) {
 /// truly-private join key (the disclosed-key path closes L2 too, but only because
 /// the key was public to begin with).
 ///
-/// ## [OPUS-4.8] sq-xhaw — UNGATED: the secure equality-to-shared-bit landed
+/// ## sq-xhaw — UNGATED: the secure equality-to-shared-bit landed
 ///
 /// This path was previously an honest [`MpcError::NotYetImplemented`] gated on a
 /// secure equality-to-shared-bit (the prior `secure_equal` only *opened* the bit —
@@ -1041,7 +1040,7 @@ mod tests {
         assert_eq!(got, exp, "disclosed multiset wrong (canonical order)");
     }
 
-    /// [OPUS-4.8] sq-xhaw — the HIDDEN-key path is now REALISED (the secure
+    /// sq-xhaw — the HIDDEN-key path is now REALISED (the secure
     /// equality-to-shared-bit gate landed): the per-pair match bit is secret-shared
     /// and never opened, and the revealed result matches a plaintext all-pairs
     /// equi-join. Keys 1 and 3 are shared between the two sides → 2 matches; the
@@ -1111,7 +1110,6 @@ mod tests {
 
     /// The encode→limbs→bytes→decode pipeline round-trips a mix of IRIs, simple
     /// and typed literals, special characters, and unbound `None` cells exactly.
-    /// `[OPUS-4.8]`
     #[test]
     fn payload_row_encode_decode_round_trips() {
         let rows: Vec<Vec<Option<Term>>> = vec![
@@ -1137,7 +1135,7 @@ mod tests {
     /// oblivious output path (carried through the shuffle as secret limbs), and the
     /// real multiset is shuffle-invariant across seeds. This is the regression test
     /// for the L2-leak fix — payloads no longer ride as cleartext reordered by an
-    /// opened permutation. `[OPUS-4.8]`
+    /// opened permutation.
     #[test]
     fn rich_payloads_survive_shuffle_without_opening_permutation() {
         let cands = public_candidates(&[
@@ -1182,7 +1180,7 @@ mod tests {
     /// The modelled shuffle switch count scales with the packed-entry width
     /// (tag + payload limbs), not one element per item (Copilot #93, thread 2).
     /// A wider payload (more limbs) yields a strictly larger switch count than a
-    /// narrow one at the same slot count. `[OPUS-4.8]`
+    /// narrow one at the same slot count.
     #[test]
     fn shuffle_cost_scales_with_payload_width() {
         let backend = ShamirBackend::new_seeded(3, 5).unwrap();
@@ -1207,7 +1205,7 @@ mod tests {
 
     /// A `MatchBit::SecretShared` selector that is NOT a sharing of 0/1 makes the
     /// opened tag fall outside `{0, REAL_TAG}`; rather than silently dropping it as
-    /// a dummy, the path FAILS CLOSED with a typed `Tampered` error. `[OPUS-4.8]`
+    /// a dummy, the path FAILS CLOSED with a typed `Tampered` error.
     #[test]
     fn out_of_set_tag_fails_closed() {
         let backend = ShamirBackend::new_seeded(3, 7).unwrap();

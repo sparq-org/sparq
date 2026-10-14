@@ -1,4 +1,4 @@
-//! [OPUS-5] sq-xqchl.2 (GH #3143) — the EYE `--pass-all` / `--pass-all-ground` output
+//! sq-xqchl.2 (GH #3143) — the EYE `--pass-all` / `--pass-all-ground` output
 //! document: the deductive closure PLUS the document's own rules, echoed back as N3.
 //!
 //! The load-bearing invariant is that the rules SURVIVE the round trip: under

@@ -9,7 +9,7 @@
 //! Unconditional: this crate is the dependency-free leaf that OWNS the vocabulary, so
 //! there is no feature to gate on — its consumers keep their own default-OFF gates.
 //!
-//! [OPUS-5] sq-3705 (moved here from `sparq-trust/tests/secprop_ttl.rs` with the
+//! sq-3705 (moved here from `sparq-trust/tests/secprop_ttl.rs` with the
 //! Turtle it validates). Originally sq-5oru9 (epic sq-0dksu; design PR #972).
 //! 🤖 SPARQ agent — security-properties ontology.
 

@@ -8,7 +8,7 @@
 //!   sparq-bench --mem sparq|oxigraph --scale N
 //!       # internal: build one engine, print peak RSS (used by the orchestrator)
 
-// [OPUS-4.8] MS-G2 (sq-8wbn): make `// SAFETY:` mandatory on every first-party unsafe block.
+// MS-G2 (sq-8wbn): make `// SAFETY:` mandatory on every first-party unsafe block.
 #![warn(clippy::undocumented_unsafe_blocks)]
 
 use std::process::Command;
@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 mod dataset;
 mod fuzz;
-// [OPUS-5] sq-qcnn.5: the oxrdf → sparq-difftest neutral-term bridge the query differential's
+// sq-qcnn.5: the oxrdf → sparq-difftest neutral-term bridge the query differential's
 // value-level comparators run on (see its module docs for the independence constraint).
 mod neutral;
 mod update_fuzz;
@@ -118,7 +118,7 @@ fn main() {
         return;
     }
 
-    // [OPUS-4.8] sq-ays7 — `sparq-bench bench-corpus <corpus> <format> <queries-dir> [iters]`:
+    // sq-ays7 — `sparq-bench bench-corpus <corpus> <format> <queries-dir> [iters]`:
     // load a REAL featured-suite corpus (the same file `sparq-cli bench` consumes) into
     // Oxigraph and time each `.rq` query, min-of-N, COUNT semantics — emitting the BYTE-FOR-BYTE
     // same `<name>\t<rows>\t<best_us>` TSV contract as crates/sparq-cli run_query_suite (count
@@ -229,7 +229,7 @@ fn compare(scale: u32, iters: usize) {
     }
 }
 
-/// [OPUS-4.8] sq-ays7 — load a featured-suite corpus into Oxigraph and time each `.rq`
+/// sq-ays7 — load a featured-suite corpus into Oxigraph and time each `.rq`
 /// query (min-of-N, COUNT semantics), emitting the SAME `<name>\t<rows>\t<best_us>` TSV
 /// contract as `sparq-cli bench … count`. The query loop mirrors run_query_suite exactly:
 /// sort the `.rq` files, read each, run `iters` times keeping the min wall-µs, report the
@@ -395,7 +395,7 @@ fn measure_mem_subprocess(engine: &str, scale: u32) -> usize {
 fn peak_rss_bytes() -> usize {
     // SAFETY: `rusage` is a plain C struct that is sound to zero-initialise, and
     // `getrusage(RUSAGE_SELF, &mut ru)` writes only into the valid `&mut ru`
-    // out-param; the return is checked before any field is read. [OPUS-4.8]
+    // out-param; the return is checked before any field is read.
     unsafe {
         let mut ru: libc::rusage = std::mem::zeroed();
         if libc::getrusage(libc::RUSAGE_SELF, &mut ru) != 0 {

@@ -96,8 +96,10 @@ use oxrdf::{Literal, NamedOrBlankNode, Term, Triple};
 /// The reserved "no language" sentinel for the `LANG_NONE` slot — mirrors the
 /// Noir `filter_value::LANG_NONE` global. A real language tag would be
 /// `blake3(lang)`; numeric datatypes have no language, so they fold this fixed
-/// field tag, which is distinct from any plausible blake3 output (a small
-/// reserved value) so a value component can never collide a language-tagged one.
+/// field tag. A language constant keeps the low 248 bits of `blake3(lang)` and
+/// nothing excludes the value 1, so a tag folds to `LANG_NONE` only if its hash
+/// hits that fixed target. The separation rests on the truncated hash's
+/// preimage resistance for a fixed target, not on construction.
 pub const LANG_NONE: u64 = 1;
 
 /// The `xsd:integer` datatype IRI (the integer value-lane datatype class,
@@ -289,7 +291,7 @@ pub fn encode_double(literal: &Literal) -> Result<DualLeafComponents, DualLeafEr
     if literal.datatype().as_str() != XSD_DOUBLE {
         return Err(DualLeafError::NotValueLane(literal.to_string()));
     }
-    // [GPT-5.6] Same-leaf co-binding: validate the canonical lexical form before
+    // Same-leaf co-binding: validate the canonical lexical form before
     // asking Rust for its value. Rust deliberately accepts a wider language.
     let bits = parse_xsd_double_bits(literal.value())
         .ok_or_else(|| DualLeafError::NonCanonicalValue(literal.to_string()))?;
@@ -428,7 +430,7 @@ fn canonical_decimal_scaled(lexical: &str) -> Option<(bool, u64, u32)> {
 /// of the DEGENERATE `value_component` a term with no numeric handle folds:
 /// `h3(VALUE_NONE, DATATYPE_CONST, LANG_CONST)`.
 ///
-/// **Distinctness does NOT rest on this tag's numeric value** (Q1, resolved
+/// **Distinctness in this build does NOT rest on this tag's numeric value** (Q1, resolved
 /// proceed-and-document under epic-owner sq-1s2.1). A `VALUE_HOOK` is an
 /// arbitrary field element — for `xsd:integer` it is the integer itself — so no
 /// small reserved tag can be globally disjoint from every real hook. What keeps
@@ -447,6 +449,15 @@ fn canonical_decimal_scaled(lexical: &str) -> Option<(bool, u64, u32)> {
 /// not-yet-routed lanes use (see [`is_hookable_datatype`]'s seam note), and
 /// distinct from a real `VALUE_HOOK = 0`, so `literal_shapes_are_distinguished`
 /// (`encode.rs`) stays true without leaning on the lexical lane alone.
+///
+/// This routing argument does NOT discharge the reserved-tag obligation in
+/// `research/zk-field-native-encoding.md` §14.1: `VALUE_NONE` must be a
+/// domain-separated `blake3_field` constant asserted outside the reachable handle
+/// band `[0, 2^64) ∪ (p − 2^64, p)` (where `p` is the circuit field modulus), with
+/// a host test and a Noir compile-time check. The routing argument stops holding
+/// if any lane degrades instead of rejecting. The shipped `VALUE_NONE = 2` lies
+/// inside that band, so this invariant remains an OPEN external-audit obligation
+/// (§14.3, CR-G8 / sq-qhy4), not an established soundness or privacy guarantee.
 pub const VALUE_NONE: u64 = 2;
 
 /// The §3.2 table's **flat slot-0 `NO_VALUE` sentinel** for IRI and blank-node
@@ -474,12 +485,13 @@ pub fn lang_const(language: &str) -> Fr {
 /// joined here — joining them is a follow-on, because it narrows what a
 /// DualLeafV1 graph may CONTAIN (e.g. the XSD-legal but non-canonical
 /// `"1"^^xsd:boolean` becomes uncommittable) and re-bases those leaves. Until
-/// they join, those literals take the degenerate string lane, and the §3.2
-/// no-collision property still holds by construction:
-/// - `xsd:boolean`'s real hooks are `{0, 1}` and [`VALUE_NONE`] is neither;
-/// - the `xsd:dateTime`/`xsd:date` lanes fold their epoch SCALE into their
-///   `DATATYPE_CONST` (`blake3("<iri>@epochscale=3")`), which is not the bare
-///   `blake3(iri)` the degenerate folds — so the consts are disjoint outright.
+/// they join, those literals take the degenerate string lane, whose component
+/// folds `blake3(datatype IRI)`. A value-lane member range-checks the hook to
+/// `u64`, so a lane constant must never equal that fold for any datatype IRI.
+/// The boolean lane's constant
+/// (`dual_leaf_boolean::boolean_datatype_const`) is derived in BLAKE3's
+/// key-derivation mode, a domain separate from the plain fold, so no string-lane
+/// leaf can be opened on it whatever hook the member accepts.
 pub fn is_hookable_datatype(datatype_iri: &str) -> bool {
     matches!(datatype_iri, XSD_INTEGER | XSD_DECIMAL | XSD_DOUBLE)
 }
@@ -845,7 +857,7 @@ mod tests {
 
     #[test]
     fn double_rejects_non_canonical_lexicals() {
-        // [GPT-5.6] Audit regression: Rust's permissive `f64` parser accepts all
+        // Audit regression: Rust's permissive `f64` parser accepts all
         // of these, but none is in the canonical xsd:double lexical space.
         for lexical in [
             "inf", "Infinity", "+INF", "1.", "+.5", "01.5", "1e3", "1.0E+3",
@@ -1182,21 +1194,23 @@ mod tests {
     #[test]
     fn unrouted_lane_hooks_cannot_collide_the_degenerate_component() {
         // The §3.2 no-collision obligation for the lanes NOT yet routed (the
-        // documented seam). `xsd:boolean` shares the bare `blake3(IRI)`
-        // DATATYPE_CONST with its degenerate form, so distinctness there rests on
-        // VALUE_NONE differing from both boolean hooks {0, 1}. The dateTime/date
-        // lanes fold their epoch scale into the const, so the consts are disjoint
-        // outright and the hook value is irrelevant.
-        assert_ne!(VALUE_NONE, 0);
-        assert_ne!(VALUE_NONE, 1);
+        // documented seam). Every such lane folds a tagged DATATYPE_CONST that is
+        // not the bare `blake3(IRI)` its degenerate form folds. The value-lane
+        // members range-check hooks to u64, so a shared const would let a
+        // degenerate leaf open with hook VALUE_NONE.
         let boolean_iri = crate::dual_leaf_boolean::XSD_BOOLEAN;
         assert!(!is_hookable_datatype(boolean_iri));
+        let boolean_const = crate::dual_leaf_boolean::boolean_datatype_const();
+        assert_ne!(boolean_const, datatype_const(boolean_iri));
         for lexical in ["true", "false"] {
             let lit = Literal::new_typed_literal(lexical, NamedNode::new(boolean_iri).unwrap());
             let real = crate::dual_leaf_boolean::encode_boolean(&lit).unwrap();
-            assert_eq!(real.datatype_const, datatype_const(boolean_iri));
+            assert_eq!(real.datatype_const, boolean_const);
             assert_ne!(real.value_component(), degenerate_value_component(boolean_iri, None));
         }
+        let none_on_boolean_lane =
+            poseidon2::hash(&[Fr::from(VALUE_NONE), boolean_const, Fr::from(LANG_NONE)]);
+        assert_ne!(none_on_boolean_lane, degenerate_value_component(boolean_iri, None));
         for (iri, real_const) in [
             (
                 crate::dual_leaf_datetime::XSD_DATE_TIME,

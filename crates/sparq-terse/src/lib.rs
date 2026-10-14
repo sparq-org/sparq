@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-//! [OPUS-4.8] sq-leg8n — see the crate README (rendered above) for the overview. This
+//! sq-leg8n — see the crate README (rendered above) for the overview. This
 //! module documentation covers the public API contract.
 //!
 //! The crate is a **pre-parse transpiler**: [`terse_to_sparql`] takes a terse query and

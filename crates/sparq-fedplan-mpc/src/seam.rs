@@ -34,7 +34,7 @@
 //! and audit-gated (sq-9hrn / sq-qhy4). See the crate `README.md` and
 //! `research/mpc-untrusted-planner-routing-design.md`.
 //!
-//! [OPUS-4.8] sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2. `[OPUS-5]` sq-1fo4.
+//! sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2. sq-1fo4.
 
 use std::collections::BTreeSet;
 
@@ -60,7 +60,7 @@ pub enum SeamPhase {
     SourceCombination,
     /// Phase 5 — the untrusted-plan binding + soundness re-validation
     /// ([`commit_plan`](crate::commit_plan) / [`revalidate_plan`](crate::revalidate_plan) /
-    /// the still-deferred [`bind_plan_to_proof`](crate::bind_plan_to_proof)). `[OPUS-5]` sq-1fo4.
+    /// the still-deferred [`bind_plan_to_proof`](crate::bind_plan_to_proof)). sq-1fo4.
     PlanBinding,
 }
 

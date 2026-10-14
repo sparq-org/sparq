@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-tg6b — the LAN/WAN network profiles for the MPC benchmark
+// sq-tg6b — the LAN/WAN network profiles for the MPC benchmark
 // network tier (Tier 3). New module: the tc/netem shaping PARAMETERS as data, +
 // the `tc qdisc` command-line generator that `scripts/mpc-netem.sh` applies.
 //
@@ -19,7 +19,7 @@
 //! on the loopback (or a veth) interface. The canonical literature profiles
 //! (design record §5.3):
 //!
-//! [OPUS-4.8] PR #96 — `delay_ms` is the netem **one-way** delay and
+//! PR #96 — `delay_ms` is the netem **one-way** delay and
 //! [`NetemProfile::rtt_ms`] returns `2 × delay_ms`, so the labels/docs below
 //! state the emulated **RTT** consistently with that (and with the `rtt_ms()`
 //! tests and `scripts/mpc-netem.sh`):
@@ -72,7 +72,7 @@ pub struct NetemProfile {
 impl NetemProfile {
     /// **LAN** — 1 Gbit/s, 2 ms RTT (1 ms one-way), no jitter/loss. The
     /// datacenter / same-rack condition (design record §5.3; MP-SPDZ / Secrecy
-    /// LAN setup). [OPUS-4.8] PR #96: label states the emulated RTT (`2 ×
+    /// LAN setup). PR #96: label states the emulated RTT (`2 ×
     /// delay_ms`), not the one-way `delay_ms`, so it matches [`Self::rtt_ms`].
     pub const fn lan() -> Self {
         NetemProfile {
@@ -87,7 +87,7 @@ impl NetemProfile {
 
     /// **WAN** — 100 Mbit/s, 100 ms RTT (50 ms one-way), 5 ms jitter, 0.1 % loss.
     /// The cross-region federation condition (design record §5.3; the 100–200
-    /// Mbit/s, 20–100 ms band the cited systems use; ORQ's WAN setup). [OPUS-4.8]
+    /// Mbit/s, 20–100 ms band the cited systems use; ORQ's WAN setup).
     /// PR #96: label states the emulated RTT (`2 × delay_ms`), not the one-way
     /// `delay_ms`, so it matches [`Self::rtt_ms`].
     pub const fn wan() -> Self {

@@ -44,7 +44,7 @@ pub struct NumericBucket {
     pub count: u64,
 }
 
-/// [GPT-5.6] Numeric range and fixed ten-bucket histogram for one predicate.
+/// Numeric range and fixed ten-bucket histogram for one predicate.
 ///
 /// `count` includes finite, well-formed XSD numeric literal occurrences only.
 /// Non-numeric, ill-formed, NaN, and infinite objects remain in the ordinary value
@@ -88,7 +88,7 @@ fn iri_id(graph: &Graph, iri: &str) -> Option<Id> {
 }
 
 fn object_id(graph: &Graph, nt: &str) -> Option<Id> {
-    // [GPT-5.6] Parse through sparq-core so constraint syntax has exactly the same
+    // Parse through sparq-core so constraint syntax has exactly the same
     // RDF 1.2/N-Triples semantics as data loading, including escaped literals.
     let line = format!("<urn:sparq:facet:s> <urn:sparq:facet:p> {nt} .");
     let parsed = Graph::load_str(&line, "ntriples").ok()?;
@@ -155,7 +155,7 @@ fn numeric_facet(predicate: String, values: Vec<f64>) -> NumericFacet {
         let edge = if span.is_finite() {
             min + span * fraction
         } else {
-            // [GPT-5.6] Opposite-sign finite extrema can overflow `max - min`.
+            // Opposite-sign finite extrema can overflow `max - min`.
             // Convex interpolation keeps every interior edge finite and ordered.
             min * (1.0 - fraction) + max * fraction
         };

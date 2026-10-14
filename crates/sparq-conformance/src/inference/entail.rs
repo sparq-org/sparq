@@ -29,7 +29,7 @@ pub enum Regime {
     Rdf,
     Rdfs,
     OwlRl,
-    /// [OPUS-4.8] sq-e5atd — D-entailment (datatype / value-space, RDF 1.1
+    /// sq-e5atd — D-entailment (datatype / value-space, RDF 1.1
     /// Semantics §7-8): the rdfD1 datatype-typing closure under the recognized
     /// datatype map, computed THROUGH `sparq_reason::Profile::D` (the materializer
     /// under test). OPT-IN, behind the crate's `d-entail` feature.
@@ -112,7 +112,7 @@ pub fn close(premise: &[Row], conclusion: &[Row], regime: Regime, d: &Recognized
             materialize_through_dict(&mut set, sparq_reason::Profile::OwlRl);
             return set.into_iter().collect();
         }
-        // [OPUS-4.8] sq-e5atd — D-entailment: simple entailment PLUS the rdfD1
+        // sq-e5atd — D-entailment: simple entailment PLUS the rdfD1
         // datatype-typing closure, computed THROUGH the materializer under test
         // (`sparq_reason::materialize_d`) with the test's recognized datatype map.
         // No RDF/RDFS axiomatic layer (D-entailment is over simple, not RDFS).
@@ -272,7 +272,7 @@ fn materialize_through_dict(set: &mut FxHashSet<Row>, profile: sparq_reason::Pro
     }
 }
 
-/// [OPUS-4.8] sq-e5atd — round-trips the row set through
+/// sq-e5atd — round-trips the row set through
 /// `sparq_reason::materialize_d` (the D-entailment materializer under test), with
 /// the test's recognized datatype map `d` translated into the reasoner's
 /// [`sparq_reason::Recognized`]. The rdfD1 typing triples it emits are GENERALIZED
@@ -459,7 +459,7 @@ pub fn xsd_value(lex: &str, dt: &str) -> Option<XsdVal> {
         "decimal" => Some(XsdVal::Num(canon_decimal(lex)?)),
         "float" => {
             // Parsed DIRECTLY at f32 — parsing at f64 and narrowing double-rounds.
-            // [OPUS-5] issue #3796
+            // issue #3796
             let f = parse_xsd_float_single(lex)?;
             Some(XsdVal::F32(if f.is_nan() {
                 f32::NAN.to_bits()
@@ -557,7 +557,7 @@ fn xml_content_well_formed(lex: &str) -> bool {
 /// The non-special part of the XSD float/double lexical space: xsd float/double syntax is a
 /// subset of Rust's, so reject the forms Rust accepts but XSD does not. Shared by
 /// [`parse_xsd_float`] and [`parse_xsd_float_single`] so the two widths cannot disagree on
-/// which lexicals are well-formed. [OPUS-5] issue #3796
+/// which lexicals are well-formed. issue #3796
 ///
 /// This is an ALLOWLIST of the byte classes XSD `floatRep`/`doubleRep` can contain, and it is
 /// byte-for-byte the gate `sparq_core::parse_xsd_f64` applies. It replaced a BLOCKLIST
@@ -570,7 +570,7 @@ fn xml_content_well_formed(lex: &str) -> bool {
 /// `tests::xsd_float_acceptance_rejects_non_xsd_spellings` pins the rejections directly AND
 /// differentially against `sparq_core::parse_xsd_f64` so the two seams cannot drift apart.
 /// Every valid `floatRep` lexical is spelled from these bytes, so nothing well-formed is lost.
-/// [OPUS-5] issue #3808
+/// issue #3808
 #[inline]
 fn xsd_float_body_wellformed(lex: &str) -> bool {
     lex.bytes()
@@ -595,7 +595,7 @@ fn parse_xsd_float(lex: &str) -> Option<f64> {
 /// ingested one ULP off and, in THIS crate, scored as conformant. Witness (verified by exact
 /// rational arithmetic): `"4611686293305294849"` has correctly-rounded `f32` bits
 /// `0x5E80_0001`, but parsing at `f64` and narrowing yields `0x5E80_0000`.
-/// [OPUS-5] issue #3796
+/// issue #3796
 fn parse_xsd_float_single(lex: &str) -> Option<f32> {
     match lex {
         "INF" | "+INF" => Some(f32::INFINITY),
@@ -912,7 +912,7 @@ mod tests {
     /// rational-verified: `H = (2m+1) * 2^38` is an f32 midpoint exactly representable in
     /// f64, so `H +/- 1` rounds to `H` in f64 and then ties-to-even to the WRONG neighbour.
     /// Asserted on `to_bits()` — the two candidates are adjacent floats that format alike.
-    /// [OPUS-5] issue #3796
+    /// issue #3796
     #[test]
     fn xsd_float_value_is_single_rounded_bit_exact() {
         let float = format!("{XSD}float");
@@ -953,7 +953,7 @@ mod tests {
     /// accept `Infinity`/`INFINITY`/`nan`/`NAN` (issue #3808), which the old fixture list
     /// mislabelled as "spellings XSD rejects". So assert the REJECTIONS directly, at both
     /// widths, and pin the seam differentially against the engine's own strict parser.
-    /// [OPUS-5] issue #3808
+    /// issue #3808
     #[test]
     fn xsd_float_acceptance_rejects_non_xsd_spellings() {
         // Rust-`FromStr`-only spellings outside XSD `floatRep`/`doubleRep`. Every one of

@@ -1,7 +1,7 @@
 //! Neuro-symbolic **propose(neural)-then-verify(deductive)** grounding pipeline
 //! (structure-aware vectorisation **P5**).
 //!
-//! [OPUS-4.8] sq-0wo9e.6 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.6 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §5 (B) "Neuro-symbolic propose-then-verify" + §6.A "Verify-soundness / answer-safety").
 //! This module is the **fifth** additive slice of the structure-aware-vectorisation epic, on top
 //! of P0 ([`crate::structure`]: closure-before-vectorise + type-constrained negatives) and P4

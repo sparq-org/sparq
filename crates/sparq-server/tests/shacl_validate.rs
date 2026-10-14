@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-r868 (from-pss gh-162 follow-up (c)): e2e integration tests for the
+//! sq-r868 (from-pss gh-162 follow-up (c)): e2e integration tests for the
 //! OPT-IN HTTP SHACL validate endpoint (`POST /shacl/validate`).
 //!
 //! These tests run ONLY with the `shacl` cargo feature (the whole file is gated). They spin
@@ -60,7 +60,7 @@ async fn spawn(data: &str, shacl_on: bool) -> String {
     spawn_with(data, shacl_on, ServerConfig::default()).await
 }
 
-/// [GPT-5.6] sq-lsp7k.2.4: boots guard mode with pre-loaded shapes.
+/// sq-lsp7k.2.4: boots guard mode with pre-loaded shapes.
 async fn spawn_guard(data: &str, guard_on: bool) -> String {
     spawn_with(data, false, ServerConfig {
         shacl_guard: guard_on,
@@ -184,7 +184,7 @@ async fn guard_covers_gsp_and_runtime_off_preserves_write_path() {
     assert!(accepted.status().is_success(), "{}", accepted.status());
 }
 
-/// [FABLE-5] (PR #1999 security review) A guard shapes graph whose `sh:pattern` regex does
+/// (PR #1999 security review) A guard shapes graph whose `sh:pattern` regex does
 /// not compile: well-formed at parse time (the value IS a string literal), but the constraint
 /// is unevaluable — the lenient validator SKIPS it and reports `conforms:true`.
 const UNEVALUABLE_PATTERN_SHAPES: &str = r#"
@@ -195,7 +195,7 @@ const UNEVALUABLE_PATTERN_SHAPES: &str = r#"
       sh:property [ sh:path ex:age ; sh:pattern "(unclosed" ] .
 "#;
 
-/// [FABLE-5] A guard shapes graph with a parse-time ill-formed construct (a non-integer
+/// A guard shapes graph with a parse-time ill-formed construct (a non-integer
 /// `sh:minCount` — a violated SHACL syntax rule the lenient validator silently skips).
 const ILL_FORMED_SHAPES: &str = r#"
     @prefix sh: <http://www.w3.org/ns/shacl#> .
@@ -205,7 +205,7 @@ const ILL_FORMED_SHAPES: &str = r#"
       sh:property [ sh:path ex:age ; sh:minCount "one" ] .
 "#;
 
-/// [FABLE-5] (PR #1999 security review) The guard FAILS CLOSED on an unevaluable shapes
+/// (PR #1999 security review) The guard FAILS CLOSED on an unevaluable shapes
 /// graph — it must never silently ADMIT a write just because the operator's shapes graph
 /// could not be (fully) evaluated. Two layers:
 ///   (a) runtime: an uncompilable `sh:pattern` (NOT parse-time detectable) rejects the

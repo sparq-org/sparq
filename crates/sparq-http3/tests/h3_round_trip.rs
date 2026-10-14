@@ -280,7 +280,7 @@ async fn per_ip_connection_cap_refuses_excess_connections() -> TestResult {
     stop_limited_server(endpoint, shutdown_tx, server).await
 }
 
-// [FABLE-5] sq-4rkcc: the load-bearing DoS-hardening invariant — with the per-connection request
+// sq-4rkcc: the load-bearing DoS-hardening invariant — with the per-connection request
 // limit at 1, a second request on the SAME connection must not reach the router while the first
 // request task still holds the sole permit; it may start only after that task completes. A raised
 // or removed limit, a permit dropped at the end of the accept-loop iteration, or a permit dropped

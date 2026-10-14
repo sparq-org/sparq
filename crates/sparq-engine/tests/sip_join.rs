@@ -1,5 +1,5 @@
 //! Acceptance tests for sideways information passing (SIP) — correlated
-//! graph-pattern join evaluation (bead sq-7d3dj.30.3). [OPUS-4.8]
+//! graph-pattern join evaluation (bead sq-7d3dj.30.3).
 //!
 //! When `Join(A, B)` is evaluated and the already-evaluated side `A` is SMALL,
 //! the engine evaluates the big child `B` CORRELATED on A's bindings: for each

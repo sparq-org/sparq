@@ -42,7 +42,7 @@
 //! standard `sparq_engine` entry points keep their exact W3C-conformant behaviour
 //! (a `geo:sfWithin` triple still matches only asserted triples there). This
 //! mirrors the engine's `query_over` window-syntax front end: an opt-in transform
-//! that leaves the conformance-tracking parser untouched. [OPUS-4.8] sq-9g58
+//! that leaves the conformance-tracking parser untouched. sq-9g58
 //!
 //! # Usage
 //!
@@ -166,7 +166,7 @@ fn fresh_geom_var() -> Variable {
 /// convenience makes equivalent. We deliberately do NOT add a bare `geo:asWKT`
 /// alternative: that would make a Geometry NODE (which carries `geo:asWKT` but is
 /// not a Feature with a default geometry) bind as if it were a feature, which is
-/// not the rewrite's subject. [OPUS-4.8]
+/// not the rewrite's subject.
 fn default_geometry_path() -> PropertyPathExpression {
     let has_default =
         PropertyPathExpression::NamedNode(NamedNode::new_unchecked(HAS_DEFAULT_GEOMETRY));
@@ -309,7 +309,7 @@ fn rewrite_pattern(pattern: GraphPattern) -> GraphPattern {
             expression: expression.map(rewrite_expression),
         },
         // `Lateral` exists because the workspace builds `spargebra` with `sep-0006`
-        // (LATERAL joins, SEP-0006). [OPUS-4.8]
+        // (LATERAL joins, SEP-0006).
         GraphPattern::Lateral { left, right } => GraphPattern::Lateral {
             left: Box::new(rewrite_pattern(*left)),
             right: Box::new(rewrite_pattern(*right)),
@@ -517,7 +517,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // [OPUS-4.8] sq-9g58 coverage: the rewrite must recurse through EVERY
+    // sq-9g58 coverage: the rewrite must recurse through EVERY
     // GraphPattern variant the engine's `spargebra` algebra exposes, expanding
     // a topology triple nested arbitrarily deep. Each query below places a
     // `geo:sfWithin` triple inside exactly one structural node so that the

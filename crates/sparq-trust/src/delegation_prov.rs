@@ -56,7 +56,7 @@
 //!   the **clear**; the audit graph is the opposite of anonymous. The ZK estate is
 //!   research-grade and externally UNAUDITED (`sq-qhy4`).
 //!
-//! [OPUS-4.8] sq-pfae.6: PROV-O delegation audit for human + AI agents (issue #940, #1190,
+//! sq-pfae.6: PROV-O delegation audit for human + AI agents (issue #940, #1190,
 //! epic sq-pfae P5). Written while Fable unavailable — flag for re-review when Fable returns.
 //! 🤖 SPARQ agent — trust-graph delegation PROV-O audit.
 

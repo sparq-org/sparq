@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-7d3dj.26) **Mid-stream truncation-safety for the pull-streaming SELECT
+//! (sq-7d3dj.26) **Mid-stream truncation-safety for the pull-streaming SELECT
 //! body** — Wave D child D3 of `research/wave-d-pull-streaming-response-body.md` §6.
 //!
 //! Once the first byte of a `200 OK` streamed body is on the wire the status is COMMITTED: a

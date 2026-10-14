@@ -1,5 +1,5 @@
 //! **The seeded CI driver window** — feed generated cases to the TLP + NoREC oracles
-//! and report every verdict, fail-closed. [FABLE-5] Bead `sq-3dyje.9` (epic
+//! and report every verdict, fail-closed. Bead `sq-3dyje.9` (epic
 //! `sq-3dyje`, design record `research/testing-strategy-assessment-2026-07.md` §7.3).
 //!
 //! This module is the missing plumbing between the oracles and CI: the

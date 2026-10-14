@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-t58w.7 — the **independent procedural ACP reference evaluator**.
+//! sq-t58w.7 — the **independent procedural ACP reference evaluator**.
 //!
 //! A from-scratch, hand-written reading of Solid Access Control Policy
 //! (<https://solidproject.org/TR/acp>) over the parsed N-Quad model — the second paradigm
@@ -188,7 +188,7 @@ impl AcpModel {
     /// Decide a request, procedurally, per the ACP spec (deny-overrides over the cumulative
     /// applicable policy set).
     pub fn decide(&self, req: &Request) -> RefDecision {
-        // [GPT-5.6] sq-61uvs: an ACR is a control document, not an ordinary member
+        // sq-61uvs: an ACR is a control document, not an ordinary member
         // resource. A member Read/Write policy must not disclose it. ACP has no WAC-style
         // Control-to-control-document translation, so this corpus surface fails closed.
         if req.resource.ends_with(ACR_SUFFIX)
@@ -241,7 +241,7 @@ impl AcpModel {
     /// Is `policy` satisfied for `req`? Every `allOf` matcher matches AND (no `anyOf`, or at
     /// least one `anyOf` matches) AND no `noneOf` matcher matches. A positive matcher is required.
     fn policy_satisfied(&self, pol: &Policy, req: &Request) -> bool {
-        // [GPT-6] ACP §6.4: noneOf alone cannot satisfy a policy.
+        // ACP §6.4: noneOf alone cannot satisfy a policy.
         // https://solidproject.org/TR/acp#satisfied-policy
         if pol.all_of.is_empty() && pol.any_of.is_empty() {
             return false;
@@ -443,7 +443,7 @@ mod tests {
         );
     }
 
-    // [GPT-6] Independent fixtures for ACP §6.4's positive-matcher requirement.
+    // Independent fixtures for ACP §6.4's positive-matcher requirement.
     fn policy_fixture(conditions: &str) -> String {
         let acr = "https://pod.ex/d1.acr";
         format!(

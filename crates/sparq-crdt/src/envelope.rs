@@ -1,7 +1,7 @@
 //! The bounded, versioned canonical delta envelope (research §6.1, proposal
 //! `CRDT-WIRE-1..4`) and its strict codec.
 //!
-//! [FABLE-5] Wire shape (canonical JSON, all scalars strings, keys sorted):
+//! Wire shape (canonical JSON, all scalars strings, keys sorted):
 //!
 //! ```json
 //! {"adds":[{"dot":["<b64url>","<dec>"],"quad":"<n-quads line>"}],

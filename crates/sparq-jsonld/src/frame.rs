@@ -1,6 +1,6 @@
 //! Framing Algorithm (JSON-LD 1.1 Framing §3) — matching, value patterns, `@embed`.
 //!
-//! [FABLE-5] (sq-oy1f.29) The document-level **Framing** operation over the native
+//! (sq-oy1f.29) The document-level **Framing** operation over the native
 //! expanded-document pipeline (design record §3.1–3.2): the input is expanded
 //! ([`crate::expand::expand`]), the frame is expanded in `frameExpansion` mode, the input's
 //! node map is generated ([`crate::node_map::generate_node_map`]) and — unless
@@ -37,6 +37,7 @@
 //!
 //! Spec: <https://www.w3.org/TR/json-ld11-framing/>.
 
+use crate::cache::Lru;
 use crate::compact::compact_expanded;
 use crate::error::{JsonLdError, JsonLdErrorCode as E};
 use crate::expand::expand;
@@ -58,7 +59,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// `explicit` / `omitDefault` / `requireAll`). Construct with [`FrameOptions::default`];
 /// `None` fields resolve per the active [`ProcessingMode`].
 ///
-/// [FABLE-5] (sq-oy1f.29)
+/// (sq-oy1f.29)
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct FrameOptions {
@@ -104,7 +105,7 @@ impl FrameOptions {
 /// [`JsonLdError`] raised by expansion, context processing, compaction, or frame
 /// validation (`invalid frame`, `invalid @embed value`).
 ///
-/// [FABLE-5] (sq-oy1f.29)
+/// (sq-oy1f.29)
 pub fn frame(
     input: &Json,
     frame_doc: &Json,
@@ -189,12 +190,11 @@ fn frame_match_inner(
 }
 
 thread_local! {
-    /// The last frame expanded on this thread, its options and its expansion, so callers
-    /// framing many documents with one frame expand it once.
-    static LAST_FRAME: RefCell<Option<(Json, JsonLdOptions, Rc<Json>)>> = const { RefCell::new(None) };
+    /// Recently expanded self-contained frames, with their full processing options.
+    static FRAME_CACHE: RefCell<Lru<(Json, JsonLdOptions, Rc<Json>)>> = const { RefCell::new(Lru::new()) };
 }
 
-/// `frame_doc` expanded in `frameExpansion` mode, reusing [`LAST_FRAME`] when it matches.
+/// `frame_doc` expanded in `frameExpansion` mode, reusing [`FRAME_CACHE`] when it matches.
 /// Only frames whose contexts (and `expandContext`) cannot reach the loader are cached,
 /// since a loader may resolve the same IRI differently between calls.
 fn expanded_frame(frame_doc: &Json, options: &JsonLdOptions, loader: &dyn DocumentLoader) -> Result<Rc<Json>, JsonLdError> {
@@ -204,10 +204,9 @@ fn expanded_frame(frame_doc: &Json, options: &JsonLdOptions, loader: &dyn Docume
             .as_ref()
             .is_none_or(|c| crate::compact::self_contained(c.get("@context").unwrap_or(c)) && contexts_self_contained(c));
     if cacheable {
-        let hit = LAST_FRAME.with(|last| {
-            last.borrow()
-                .as_ref()
-                .filter(|(f, o, _)| f == frame_doc && o == options)
+        let hit = FRAME_CACHE.with(|cache| {
+            cache.borrow_mut()
+                .get(|(f, o, _)| f == frame_doc && o == options)
                 .map(|(_, _, e)| Rc::clone(e))
         });
         if let Some(expanded) = hit {
@@ -218,8 +217,8 @@ fn expanded_frame(frame_doc: &Json, options: &JsonLdOptions, loader: &dyn Docume
     fr_opts.frame_expansion = true;
     let expanded = Rc::new(expand(frame_doc, &fr_opts, loader)?);
     if cacheable {
-        LAST_FRAME.with(|last| {
-            *last.borrow_mut() = Some((frame_doc.clone(), options.clone(), Rc::clone(&expanded)));
+        FRAME_CACHE.with(|cache| {
+            cache.borrow_mut().insert((frame_doc.clone(), options.clone(), Rc::clone(&expanded)));
         });
     }
     Ok(expanded)
@@ -282,7 +281,7 @@ pub fn compact_framed(
 /// [`JsonLdOptions::frame_expansion`] set (an array holding one frame object; an empty
 /// array is treated as the match-everything `{}` frame).
 ///
-/// [FABLE-5] (sq-oy1f.29)
+/// (sq-oy1f.29)
 pub fn frame_expanded(
     expanded_input: &Json,
     expanded_frame: &Json,
@@ -1022,7 +1021,7 @@ fn match_frame(
                 continue;
             }
             for o in objects.items() {
-                if is_list_object(o) {
+                if o.is_list_object() {
                     // @list re-emit: node entries recurse with the list sub-frame,
                     // value entries copy verbatim.
                     let implicit;
@@ -1401,26 +1400,26 @@ fn filter_subject(
                     }
                     match_this = true;
                 }
-                Some(tf) if is_list_object(tf) => {
+                Some(tf) if tf.is_list_object() => {
                     let list_pattern = tf.get("@list").map(Json::items).unwrap_or_default();
                     let node_list = node_values
                         .first()
-                        .filter(|nv| is_list_object(nv))
+                        .filter(|nv| nv.is_list_object())
                         .and_then(|nv| nv.get("@list"))
                         .map(Json::items)
                         .unwrap_or_default();
                     match_this = match list_pattern.first() {
-                        Some(lp) if is_value_object(lp) => {
+                        Some(lp) if lp.is_value_object() => {
                             node_list.iter().any(|lv| value_match(lp, lv))
                         }
                         Some(lp) => any_node_match(graph_subjects, lp, node_list, flags, memo)?,
                         None => false,
                     };
                 }
-                Some(tf) if is_value_object(tf) => {
+                Some(tf) if tf.is_value_object() => {
                     match_this = node_values
                         .iter()
-                        .any(|nv| is_value_object(nv) && value_match(tf, nv));
+                        .any(|nv| nv.is_value_object() && value_match(tf, nv));
                 }
                 Some(tf) if tf.is_obj() => {
                     // A node pattern (subject / subject reference / wildcard object):
@@ -1545,7 +1544,7 @@ fn value_match(pattern: &Json, value: &Json) -> bool {
             match (p.as_str(), l1) {
                 (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
                 // A null alternative admits a language-less value.
-                _ => matches!(p, Json::Raw(r) if r == "null") && l1.is_none(),
+                _ => p.is_null() && l1.is_none(),
             }
         })
         || (l1.is_some() && l2.first().map(is_empty_obj).unwrap_or(false));
@@ -1666,7 +1665,7 @@ fn cleanup_preserve(j: Json, compact_arrays: bool) -> Json {
             items
                 .into_iter()
                 .map(|i| cleanup_preserve(i, compact_arrays))
-                .filter(|i| !matches!(i, Json::Raw(r) if r == "null"))
+                .filter(|i| !i.is_null())
                 .collect(),
         ),
         Json::Obj(members) => {
@@ -1674,14 +1673,14 @@ fn cleanup_preserve(j: Json, compact_arrays: bool) -> Json {
             if let Some(pos) = members.iter().position(|(k, _)| k == "@preserve") {
                 let preserved = members[pos].1.clone();
                 let unwrapped = match preserved {
-                    Json::Str(s) if s == "@null" => Json::Raw("null".to_string()),
+                    Json::Str(s) if s == "@null" => Json::null(),
                     Json::Arr(items) if items.len() == 1 && compact_arrays => {
                         items.into_iter().next().unwrap()
                     }
                     other => other,
                 };
                 return match unwrapped {
-                    Json::Str(s) if s == "@null" => Json::Raw("null".to_string()),
+                    Json::Str(s) if s == "@null" => Json::null(),
                     other => cleanup_preserve(other, compact_arrays),
                 };
             }
@@ -1792,21 +1791,11 @@ fn is_empty_obj(v: &Json) -> bool {
     matches!(v, Json::Obj(m) if m.is_empty())
 }
 
-/// True iff `v` is a list object (`{"@list": …}`).
-fn is_list_object(v: &Json) -> bool {
-    v.is_obj() && v.get("@list").is_some()
-}
-
-/// True iff `v` is a value object (`{"@value": …}`).
-fn is_value_object(v: &Json) -> bool {
-    v.is_obj() && v.get("@value").is_some()
-}
-
 /// The `@id` of a node object / node reference (a non-value, non-list object with an
 /// `@id`), else `None`. In an expanded document every node under a property is a
 /// reference into the node map, so this is the "recurse into subject" discriminator.
 fn subject_reference_id(v: &Json) -> Option<&str> {
-    if is_value_object(v) || is_list_object(v) {
+    if v.is_value_object() || v.is_list_object() {
         return None;
     }
     v.get("@id").and_then(Json::as_str)
@@ -1819,6 +1808,65 @@ mod tests {
 
     fn parse(s: &str) -> Json {
         Json::parse(s).expect("valid JSON fixture")
+    }
+
+    #[test]
+    fn alternating_frames_hit_cache_with_identical_bytes() {
+        FRAME_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let input = parse(r#"[{"@id":"http://ex/s","http://ex/p":[{"@value":"v"}]}]"#);
+        let frames = [
+            parse(r#"{"@context":{"p":"http://ex/p"},"p":{}}"#),
+            parse(r#"{"@context":{"q":"http://ex/p"},"q":{}}"#),
+        ];
+        let render = |f: &Json| {
+            let out = frame(&input, f, &JsonLdOptions::default(), &FrameOptions::default(), &NoopLoader).unwrap();
+            let mut bytes = String::new();
+            out.write(&mut bytes);
+            bytes
+        };
+        let cold: Vec<_> = frames.iter().map(render).collect();
+        assert_ne!(cold[0], cold[1]);
+        let before = FRAME_CACHE.with(|cache| cache.borrow().hits);
+        for _ in 0..3 {
+            for (f, expected) in frames.iter().zip(&cold) {
+                assert_eq!(render(f), *expected);
+            }
+        }
+        assert_eq!(FRAME_CACHE.with(|cache| cache.borrow().hits) - before, 6);
+    }
+
+    #[test]
+    fn frame_cache_evicts_the_least_recent_frame() {
+        FRAME_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let opts = JsonLdOptions::default();
+        let frames: Vec<_> = (0..9).map(|i| parse(&format!(r#"{{"@id":"http://ex/{i}"}}"#))).collect();
+        let first: Vec<_> = frames[..8].iter().map(|f| expanded_frame(f, &opts, &NoopLoader).unwrap()).collect();
+        assert!(Rc::ptr_eq(&first[0], &expanded_frame(&frames[0], &opts, &NoopLoader).unwrap()));
+        expanded_frame(&frames[8], &opts, &NoopLoader).unwrap();
+        assert!(Rc::ptr_eq(&first[0], &expanded_frame(&frames[0], &opts, &NoopLoader).unwrap()));
+        assert!(!Rc::ptr_eq(&first[1], &expanded_frame(&frames[1], &opts, &NoopLoader).unwrap()));
+    }
+
+    #[test]
+    fn frame_cache_separates_base_and_options() {
+        FRAME_CACHE.with(|cache| *cache.borrow_mut() = Lru::new());
+        let f = parse(r#"{"@id":"child","@type":"T"}"#);
+        let a = JsonLdOptions {
+            base: Some("http://ex/a/".into()),
+            expand_context: Some(parse(r#"{"T":"http://ex/A"}"#)),
+            ..JsonLdOptions::default()
+        };
+        let b = JsonLdOptions { base: Some("http://ex/b/".into()), ..a.clone() };
+        let c = JsonLdOptions { expand_context: Some(parse(r#"{"T":"http://ex/B"}"#)), ..a.clone() };
+        let d = JsonLdOptions { processing_mode: ProcessingMode::JsonLd10, ..a.clone() };
+        let results: Vec<_> = [&a, &b, &c, &d].iter().map(|o| expanded_frame(&f, o, &NoopLoader).unwrap()).collect();
+        assert_ne!(results[0], results[1]);
+        assert_ne!(results[0], results[2]);
+        assert!(!Rc::ptr_eq(&results[0], &results[3]));
+        assert_eq!(FRAME_CACHE.with(|cache| cache.borrow().hits), 0);
+        for (o, expected) in [&a, &b, &c, &d].iter().zip(&results) {
+            assert!(Rc::ptr_eq(expected, &expanded_frame(&f, o, &NoopLoader).unwrap()));
+        }
     }
 
     /// `FrameOptions::default` resolves the mode-dependent defaults per spec.

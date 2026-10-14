@@ -10,7 +10,7 @@ fn relative_error(actual: f64, expected: f64) -> f64 {
 
 #[test]
 fn equatorial_square_area_and_degenerate_ring() {
-    // [GPT-5.6] sq-lsp7k.18: the analytic one-degree equatorial square is about
+    // sq-lsp7k.18: the analytic one-degree equatorial square is about
     // 12,300 km². A 1% bound is deliberately wider than the local-frame model's
     // expected error while tight enough to kill degree-space or length returns.
     let square = parse_wkt_literal("POLYGON((0 0, 1 0, 1 1, 0 1, 0 0))").unwrap();

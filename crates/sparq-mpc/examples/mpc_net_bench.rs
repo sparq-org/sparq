@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-tg6b — the DRIVER / coordinator for the MPC network tier (Tier
+// sq-tg6b — the DRIVER / coordinator for the MPC network tier (Tier
 // 2/3). It binds a loopback listener, spawns N REAL `mpc_party` CHILD PROCESSES
 // (each its own OS process), drives one representative cell over the accepted
 // connections, and emits the MEASURED wall-clock + bytes-on-wire as a stable JSON
@@ -24,9 +24,9 @@
 //   cargo run    -p sparq-mpc --features insecure-test-rng --example mpc_net_bench -- \
 //                --query join --parties 5 --scale 4 --json
 //   cargo run    -p sparq-mpc --features insecure-test-rng --example mpc_net_bench -- \
-//                --query shuffle --parties 5 --scale 8         # [OPUS-4.8] sq-bdbv
+//                --query shuffle --parties 5 --scale 8         # sq-bdbv
 //   cargo run    -p sparq-mpc --features insecure-test-rng --example mpc_net_bench -- \
-//                --query sort --parties 5 --scale 8 --json     # [OPUS-4.8] sq-bdbv
+//                --query sort --parties 5 --scale 8 --json     # sq-bdbv
 //
 // The four cells: `aggregate` + `join` are single-round (deal → local op → open);
 // `shuffle` (AS-Waksman switches) + `sort` (Batcher compare-exchanges) are
@@ -144,13 +144,13 @@ fn run(
         QueryClass::ObliviousShuffle => {
             // The reference is the multiset-invariant column SUM of the canonical
             // `i*7+1` input (the in-process `check_shuffle` correctness gate asserts
-            // the SAME multiset is preserved). [OPUS-4.8] sq-bdbv.
+            // the SAME multiset is preserved). sq-bdbv.
             let reference: u64 = (0..scale as u64).map(|i| i * 7 + 1).sum();
             (Vec::new(), reference)
         }
         QueryClass::ObliviousSort => {
             // Reference = multiset-invariant column sum of the canonical reverse-
-            // sorted `scale-i` input. [OPUS-4.8] sq-bdbv.
+            // sorted `scale-i` input. sq-bdbv.
             let reference: u64 = (0..scale as u64).map(|i| scale as u64 - i).sum();
             (Vec::new(), reference)
         }
@@ -158,7 +158,7 @@ fn run(
             // The hidden bounded property path (sq-py8h.5) has no live-wire driver —
             // its cost is modelled analytically (bench::run_matrix /
             // BoundedPathPlan::comm_counter), not measured over the socket. The CLI
-            // never selects it; this arm keeps the match exhaustive. [OPUS-4.8]
+            // never selects it; this arm keeps the match exhaustive.
             return Err(
                 "hidden-bounded-path has no networked driver (cost is modelled \
                         analytically via bench::run_matrix, sq-py8h.5)"
@@ -203,7 +203,7 @@ fn run(
         QueryClass::HiddenValueEquiJoin => (coord.hidden_join(&mut dealer, scale)?, 2u64),
         QueryClass::ObliviousShuffle => {
             // Same canonical input as the in-process reference; report the multiset-
-            // invariant column sum + the per-switch round count. [OPUS-4.8] sq-bdbv.
+            // invariant column sum + the per-switch round count. sq-bdbv.
             let col: Vec<u64> = (0..scale as u64).map(|i| i * 7 + 1).collect();
             let (opened, gates) = coord.shuffle(&mut dealer, &col)?;
             (opened.iter().copied().sum(), gates)
@@ -216,7 +216,7 @@ fn run(
         QueryClass::HiddenBoundedPath => {
             // Unreachable from the CLI (no string maps to it); the analytic cost is
             // the only modelled path for this class. Keep the match exhaustive.
-            // [OPUS-4.8] sq-py8h.5
+            // sq-py8h.5
             return Err("hidden-bounded-path has no networked driver".into());
         }
     };

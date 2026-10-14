@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-1wc1) **Predicate-constrained (filtered) ANN** — the RDF-native vector
+//! (sq-1wc1) **Predicate-constrained (filtered) ANN** — the RDF-native vector
 //! differentiator.
 //!
 //! A SPARQL basic graph pattern constrains *which* graph nodes are eligible neighbours
@@ -146,7 +146,7 @@ impl Default for FilterConfig {
         // Conservative line: pre-filter (exact) up to 1% of the store or 256 nodes, whichever is
         // larger. Pre-filter never costs recall, only mild throughput on a mid-selective mask, so
         // erring toward it is the honest default. Traversal beam ×4 so accepting k stays robust
-        // under a moderately selective mask. [OPUS-4.8] non-canonical: see tests/filtered.rs for
+        // under a moderately selective mask. non-canonical: see tests/filtered.rs for
         // the measured recall these defaults clear.
         FilterConfig {
             prefilter_fraction: 0.01,

@@ -1,7 +1,7 @@
 //! Identifier contract of the SPARQL-CRDT design (research §4.1): replica
 //! identifiers, dataset identifiers, dots, and envelope identities.
 //!
-//! [FABLE-5] `ReplicaId` ordering is by **raw identifier bytes** (not by the
+//! `ReplicaId` ordering is by **raw identifier bytes** (not by the
 //! base64url text), because the proposal's canonical sort rules
 //! (`CRDT-WIRE-3`) order dot arrays "by replica bytes then numeric counter"
 //! and the base64url alphabet is not order-preserving over raw bytes.

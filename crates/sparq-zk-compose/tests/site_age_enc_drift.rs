@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-1s2.4 (FL1 follow-up) — BUILD-TIME DRIFT GUARD for the browser
+// sq-1s2.4 (FL1 follow-up) — BUILD-TIME DRIFT GUARD for the browser
 // age-gate's precomputed `operand_enc` anchors.
 //
 // The ZK car-hire flagship proves `age >= 25` LIVE in the browser against the

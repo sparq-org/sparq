@@ -1,4 +1,4 @@
-// [OPUS-5] sq-1rg2q.4: public-surface witnesses for the symmetric extended literal
+// sq-1rg2q.4: public-surface witnesses for the symmetric extended literal
 // codecs. The in-module unit tests pin each function; this file pins the property the
 // proposal actually promises across the crate boundary — every codec is bidirectional
 // and preserves lexical form, datatype, and language, and unsupported or out-of-range

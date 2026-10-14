@@ -157,7 +157,7 @@ fn fork_cost_measurement() {
         let first = applier.fork(&g).unwrap();
         let first_cost = t.elapsed();
         assert_eq!(first.len(), n);
-        let frozen = applier.seal(first).unwrap(); // [OPUS-4.8] (sq-vpx4) fallible seal; in-memory never Err
+        let frozen = applier.seal(first).unwrap(); // (sq-vpx4) fallible seal; in-memory never Err
 
         // Steady-state fork off the frozen lineage (no pending delta).
         let mut best = Duration::MAX;

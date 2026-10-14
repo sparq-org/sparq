@@ -18,7 +18,6 @@
 //!    it (Kleene). A permission grants only on True; a prohibition fires on True **or**
 //!    Unknown, so it stops applying only when one of its constraints is definitely False.
 //!
-//! [OPUS-4.8]
 
 use crate::model::{
     Action, Constraint, ConstraintNode, LogicalConstraint, LogicalOperator, Operator, Policy, Rule,
@@ -29,13 +28,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 /// The `odrl:purpose` left-operand IRI — the dimension a *purpose constraint*
 /// restricts (the purpose of use a permission/prohibition is gated on, e.g.
-/// `odrl:purpose eq <urn:purpose/research>`). [OPUS-4.8] sq-q56r.
+/// `odrl:purpose eq <urn:purpose/research>`). sq-q56r.
 pub const ODRL_PURPOSE: &str = "http://www.w3.org/ns/odrl/2/purpose";
 
 /// The `odrl:count` left-operand IRI — the dimension a *count constraint* restricts
 /// (the number of times a permission may be exercised, e.g. `odrl:count lteq 5`).
 /// Stateful enforcement of this lives in the opt-in `crate::count` module.
-/// [OPUS-4.8] sq-zi5w.
+/// sq-zi5w.
 pub const ODRL_COUNT: &str = "http://www.w3.org/ns/odrl/2/count";
 
 /// The `odrl:recipient` left-operand IRI — the dimension a *recipient constraint*
@@ -43,7 +42,7 @@ pub const ODRL_COUNT: &str = "http://www.w3.org/ns/odrl/2/count";
 /// the "everyone EXCEPT bob" shape). The recipient-of-data is the requesting party,
 /// so when a request carries **no** explicit `odrl:recipient` context value the
 /// evaluator reads its [`Request::party`] as the recipient evidence (see
-/// [`recipient_status`]). [OPUS-4.8] sq-5037.
+/// [`recipient_status`]). sq-5037.
 pub const ODRL_RECIPIENT: &str = "http://www.w3.org/ns/odrl/2/recipient";
 
 /// The `odrl:spatial` left-operand IRI — the dimension a *spatial constraint*
@@ -53,7 +52,7 @@ pub const ODRL_RECIPIENT: &str = "http://www.w3.org/ns/odrl/2/recipient";
 /// sub-region the request declares part-of the named region by supplying the region
 /// `isPartOf` tree as subsumption evidence via [`Request::with_purpose_subsumption`] /
 /// [`Request::with_purpose_taxonomy`] (`DEU ⊑ EU` — the same caller-supplied closure the
-/// DPV purpose taxonomy uses; see [`spatial_status`]). [OPUS-4.8] sq-wukl.
+/// DPV purpose taxonomy uses; see [`spatial_status`]). sq-wukl.
 pub const ODRL_SPATIAL: &str = "http://www.w3.org/ns/odrl/2/spatial";
 
 /// The `odrl:dateTime` left-operand IRI — the dimension a *temporal constraint*
@@ -63,7 +62,7 @@ pub const ODRL_SPATIAL: &str = "http://www.w3.org/ns/odrl/2/spatial";
 /// [`Value::DateTime`] evidence (see [`Request::at`] / [`datetime_status`]); a
 /// request that supplies **no** time carries no temporal evidence, so a temporal
 /// permission does not grant and a temporal prohibition is not withdrawn
-/// (fail-closed). [OPUS-4.8] sq-idnv.
+/// (fail-closed). sq-idnv.
 pub const ODRL_DATETIME: &str = "http://www.w3.org/ns/odrl/2/dateTime";
 
 /// An access request evaluated against a [`Policy`](crate::Policy): who wants to do what, to
@@ -82,7 +81,7 @@ pub struct Request {
     /// (set by [`Request::by`]) so a `recipient` constraint with no explicit
     /// `odrl:recipient` context can be re-checked against *who is asking* without an
     /// allocation per constraint. Internal — [`party`] is the public field.
-    /// [OPUS-4.8] sq-5037.
+    /// sq-5037.
     ///
     /// [`party`]: Request::party
     pub(crate) recipient_party: Option<Value>,
@@ -107,14 +106,14 @@ pub struct Request {
     /// **Soundness:** subsumption matching draws ONLY on this caller-supplied closure
     /// (never inferred from IRI string structure), so with an empty closure matching is
     /// byte-for-byte the exact-IRI base case and access is never widened on an unproven
-    /// relation. [OPUS-4.8] sq-z3ve / sq-wukl.
+    /// relation. sq-z3ve / sq-wukl.
     pub(crate) purpose_subsumes: BTreeSet<(String, String)>,
     /// **Party-collection** membership evidence the request supplies: `(party,
     /// collection)` pairs asserting `party odrl:partOf collection` (an
     /// `odrl:PartyCollection`). A rule whose `assignee` names a collection matches a
     /// request whose [`party`](Request::party) is a member of that collection. Populated
     /// only via [`Request::with_party_membership`] / [`Request::with_party_memberships`].
-    /// [OPUS-4.8] sq-k7itg.
+    /// sq-k7itg.
     ///
     /// **Soundness:** membership draws ONLY on this caller-supplied set (read out of the
     /// state-of-the-world graph), never inferred — with an empty set, assignee matching is
@@ -125,7 +124,7 @@ pub struct Request {
     /// names a collection matches a request whose [`target`](Request::target) is a member
     /// of that collection. Populated only via [`Request::with_asset_membership`] /
     /// [`Request::with_asset_memberships`]. Same soundness contract as
-    /// [`party_memberships`](Request::party_memberships). [OPUS-4.8] sq-k7itg.
+    /// [`party_memberships`](Request::party_memberships). sq-k7itg.
     pub(crate) asset_memberships: BTreeSet<(String, String)>,
 }
 
@@ -149,7 +148,7 @@ impl Request {
     /// The party doubles as the default **recipient-of-data**: an `odrl:recipient`
     /// constraint with no explicit context value is re-checked against this party
     /// (see [`recipient_status`]), so a `recipient neq X` rule gates on who is asking.
-    /// [OPUS-4.8] sq-5037.
+    /// sq-5037.
     pub fn by(mut self, party: impl Into<String>) -> Request {
         let p = party.into();
         self.recipient_party = Some(Value::Iri(p.clone()));
@@ -171,7 +170,7 @@ impl Request {
 
     /// Declare the **purpose of use** this request carries as evidence (chainable)
     /// — the `odrl:purpose` left-operand value a purpose-gated rule is checked
-    /// against. [OPUS-4.8] sq-q56r.
+    /// against. sq-q56r.
     ///
     /// This is first-class sugar over [`Request::with`]`(ODRL_PURPOSE, ..)`: it
     /// makes the *evidence the requester supplies* explicit (and auditable via
@@ -193,7 +192,7 @@ impl Request {
     /// The purpose-of-use evidence this request carries (`odrl:purpose`), or `None`
     /// if the request supplied none. The auditable answer to *"did the request
     /// actually state a purpose?"* — the question faithful purpose enforcement turns
-    /// on. [OPUS-4.8] sq-q56r.
+    /// on. sq-q56r.
     pub fn purpose(&self) -> Option<&Value> {
         self.context.get(ODRL_PURPOSE)
     }
@@ -201,7 +200,7 @@ impl Request {
     /// Declare one **purpose-subsumption** edge `narrower ⊑ broader` (chainable) —
     /// "the purpose `narrower` IS-A / is-part-of the broader purpose `broader`" —
     /// from a DPV/purpose-taxonomy (`skos:broader` / `rdfs:subClassOf` /
-    /// `dpv:isSubTypeOf`). [OPUS-4.8] sq-z3ve.
+    /// `dpv:isSubTypeOf`). sq-z3ve.
     ///
     /// With one or more such edges supplied, an `odrl:purpose` constraint that names
     /// a purpose `B` is satisfied by a request whose stated purpose `P` is `B` **or
@@ -230,7 +229,7 @@ impl Request {
     /// (chainable) — the bulk form of [`Request::with_purpose_subsumption`], e.g. the
     /// `skos:broader`/`rdfs:subClassOf` edges read out of a DPV taxonomy graph. The
     /// transitive closure is computed across all supplied edges (order-independent).
-    /// [OPUS-4.8] sq-z3ve.
+    /// sq-z3ve.
     pub fn with_purpose_taxonomy<N, B, I>(mut self, edges: I) -> Request
     where
         N: Into<String>,
@@ -244,7 +243,7 @@ impl Request {
     }
 
     /// Whether the request's supplied taxonomy proves the purpose `p` is `target`
-    /// or transitively narrower than it (`p ⊑ target`). [OPUS-4.8] sq-z3ve.
+    /// or transitively narrower than it (`p ⊑ target`). sq-z3ve.
     pub(crate) fn purpose_subsumed_by(&self, p: &str, target: &str) -> bool {
         p == target
             || self
@@ -254,7 +253,7 @@ impl Request {
 
     /// Declare the **evaluation time** this request is made at as evidence
     /// (chainable) — the `odrl:dateTime` left-operand value a temporal (time-window)
-    /// rule is checked against. [OPUS-4.8] sq-idnv.
+    /// rule is checked against. sq-idnv.
     ///
     /// First-class sugar over [`Request::with`]`(ODRL_DATETIME, Value::DateTime(..))`:
     /// it makes the *time evidence the requester supplies* explicit (and auditable via
@@ -267,7 +266,7 @@ impl Request {
     /// comparison time, so the `lt`/`gt`/`lteq`/`gteq`/`eq`/`neq` operators compare
     /// the *point in time* the value denotes — mixed timezone offsets are normalized
     /// (`…T13:00:00+02:00` == `…T11:00:00Z`) rather than compared lexically
-    /// ([OPUS-4.8] sq-qj2q). An unparseable instant compares fail-closed.
+    /// (sq-qj2q). An unparseable instant compares fail-closed.
     pub fn at(self, instant: impl Into<String>) -> Request {
         self.with(ODRL_DATETIME, Value::DateTime(instant.into()))
     }
@@ -276,14 +275,14 @@ impl Request {
     /// if the request supplied none. The auditable answer to *"did the request supply
     /// a time to check the window against?"* — the question faithful time-window
     /// enforcement turns on (a missing time is Unprovable, not "any time").
-    /// [OPUS-4.8] sq-idnv.
+    /// sq-idnv.
     pub fn request_time(&self) -> Option<&Value> {
         self.context.get(ODRL_DATETIME)
     }
 
     /// Declare one **party-collection membership** edge `party odrl:partOf
     /// collection` (chainable) — read out of the request's state-of-the-world.
-    /// [OPUS-4.8] sq-k7itg.
+    /// sq-k7itg.
     ///
     /// With one or more such edges supplied, a rule whose `odrl:assignee` names an
     /// `odrl:PartyCollection` is matched by a request whose [`party`](Request::party) is
@@ -302,7 +301,7 @@ impl Request {
     }
 
     /// Declare many **party-collection membership** edges `(party, collection)` at once
-    /// (chainable) — the bulk form of [`Request::with_party_membership`]. [OPUS-4.8]
+    /// (chainable) — the bulk form of [`Request::with_party_membership`].
     /// sq-k7itg.
     pub fn with_party_memberships<P, C, I>(mut self, edges: I) -> Request
     where
@@ -321,7 +320,7 @@ impl Request {
     /// of [`Request::with_party_membership`]. Returned in the deterministic sorted
     /// order of the underlying set; empty when `collection` is not a collection the
     /// request supplied evidence for (including when it is a plain party IRI).
-    /// [SONNET-4.6] sq-rf9uv.
+    /// sq-rf9uv.
     ///
     /// A consumer that PERSISTS an ODRL rule as a re-checked head (the sparq-solid ODRL
     /// bridge) cannot call the crate-internal `party_matches` per session — a
@@ -352,7 +351,7 @@ impl Request {
     /// Declare one **asset-collection membership** edge `asset odrl:partOf collection`
     /// (chainable) — the asset twin of [`Request::with_party_membership`]. A rule whose
     /// `odrl:target` names an `odrl:AssetCollection` is then matched by a request whose
-    /// [`target`](Request::target) is a member of that collection. [OPUS-4.8] sq-k7itg.
+    /// [`target`](Request::target) is a member of that collection. sq-k7itg.
     pub fn with_asset_membership(
         mut self,
         asset: impl Into<String>,
@@ -364,7 +363,7 @@ impl Request {
     }
 
     /// Declare many **asset-collection membership** edges `(asset, collection)` at once
-    /// (chainable) — the bulk form of [`Request::with_asset_membership`]. [OPUS-4.8]
+    /// (chainable) — the bulk form of [`Request::with_asset_membership`].
     /// sq-k7itg.
     pub fn with_asset_memberships<A, C, I>(mut self, edges: I) -> Request
     where
@@ -379,7 +378,7 @@ impl Request {
     }
 
     /// Whether the request's party is `target` or a member of the collection `target`
-    /// (`party odrl:partOf target`) under the supplied membership evidence. [OPUS-4.8]
+    /// (`party odrl:partOf target`) under the supplied membership evidence.
     /// sq-k7itg.
     pub(crate) fn party_matches(&self, target: &str) -> bool {
         match self.party.as_deref() {
@@ -652,7 +651,7 @@ pub fn duty_discharged(duty: &crate::model::Duty, request: &Request) -> bool {
 /// The first [`Prohibition`](crate::model::Rule) in `policy` that **applies** to
 /// `request` (its action permits the requested action, its target/assignee agree,
 /// and no constraint is definitely false — an Unknown constraint still applies), or
-/// `None` if no prohibition carves the request out. [OPUS-4.8] sq-w693.
+/// `None` if no prohibition carves the request out. sq-w693.
 ///
 /// This is the same match test [`evaluate`] applies in step 1 (a matching
 /// prohibition overrides everything) — exposed so the `sparq-solid` ODRL→AUTH_GRAPH
@@ -689,7 +688,7 @@ pub fn matched_prohibition<'p>(policy: &'p ValidatedPolicy, request: &Request) -
 }
 
 /// Whether `policy`'s prohibitions still carve `request` out — and, when they do
-/// not, **whether that is a definite no or merely unprovable**. [OPUS-4.8] sq-2pcf.
+/// not, **whether that is a definite no or merely unprovable**. sq-2pcf.
 ///
 /// This is the *deny-retraction dual* of [`matched_prohibition`], which (like
 /// [`evaluate`]) treats a prohibition as applying unless it is definitely withdrawn.
@@ -762,7 +761,7 @@ pub fn prohibition_status(policy: &ValidatedPolicy, request: &Request) -> Prohib
 }
 
 /// The deny-retraction verdict for a request's prohibitions — see
-/// [`prohibition_status`]. [OPUS-4.8] sq-2pcf.
+/// [`prohibition_status`]. sq-2pcf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProhibitionStatus {
     /// A prohibition still carves the request out — a materialized deny must be KEPT.
@@ -780,7 +779,7 @@ pub enum ProhibitionStatus {
 /// The three-valued verdict of a rule's `odrl:purpose` constraints against the
 /// purpose evidence a request carries — a FAITHFUL report of exactly what
 /// [`evaluate`] checks for purpose (it reuses the same `constraint_status` the
-/// evaluator's purpose constraints go through). [OPUS-4.8] sq-q56r.
+/// evaluator's purpose constraints go through). sq-q56r.
 ///
 /// The honesty contract: this never claims a stronger verdict than the evaluator
 /// would act on. `Satisfied`/`Unprovable`/`DefinitelyUnsatisfied` map 1:1 onto the
@@ -809,7 +808,7 @@ pub enum PurposeMatch {
 
 /// Report how `rule`'s `odrl:purpose` constraint(s) stand against the purpose
 /// evidence `request` carries — the auditable surface of faithful purpose
-/// enforcement. [OPUS-4.8] sq-q56r.
+/// enforcement. sq-q56r.
 ///
 /// This does NOT re-implement matching: it runs the request through the SAME
 /// `constraint_status` every `odrl:purpose` constraint goes through inside
@@ -829,7 +828,7 @@ pub enum PurposeMatch {
 /// an unproven relation). A `neq` purpose constraint is honoured (purpose ≠ the named
 /// one, AND ≠ any sub-purpose of it — a sub-purpose IS that purpose, so it stays
 /// carved out). Several purpose constraints on one rule are ANDed (every one must
-/// hold), mirroring the evaluator's constraint conjunction. [OPUS-4.8] sq-z3ve.
+/// hold), mirroring the evaluator's constraint conjunction. sq-z3ve.
 ///
 /// Returns [`PurposeMatch::NotConstrained`] when the rule has no purpose constraint.
 ///
@@ -857,7 +856,7 @@ pub enum PurposeMatch {
 /// assert_eq!(purpose_status(rule, &base), PurposeMatch::Unprovable);
 ///
 /// // A NARROWER purpose + the taxonomy edge clinical ⊑ research → Satisfied
-/// // (a research permission covers clinical research). [OPUS-4.8] sq-z3ve.
+/// // (a research permission covers clinical research). sq-z3ve.
 /// let sub = base.clone()
 ///     .for_purpose(Value::Iri("urn:purpose/research/clinical".into()))
 ///     .with_purpose_subsumption("urn:purpose/research/clinical", "urn:purpose/research");
@@ -889,7 +888,7 @@ pub fn purpose_status(rule: &Rule, request: &Request) -> PurposeMatch {
 /// The three-valued verdict of a rule's `odrl:recipient` constraints against the
 /// recipient evidence a request carries — a FAITHFUL report of exactly what
 /// [`evaluate`] checks for recipient (it reuses the same `constraint_status` the
-/// evaluator's recipient constraints go through). [OPUS-4.8] sq-5037.
+/// evaluator's recipient constraints go through). sq-5037.
 ///
 /// The honesty contract mirrors [`PurposeMatch`]: this never claims a stronger verdict
 /// than the evaluator acts on. `Satisfied` is the ONLY verdict under which a
@@ -919,7 +918,7 @@ pub enum RecipientMatch {
 
 /// Report how `rule`'s `odrl:recipient` constraint(s) stand against the recipient
 /// evidence `request` carries — the auditable surface of faithful recipient (incl.
-/// `neq` / "everyone-except") enforcement. [OPUS-4.8] sq-5037.
+/// `neq` / "everyone-except") enforcement. sq-5037.
 ///
 /// Like [`purpose_status`], this does NOT re-implement matching: it runs the request
 /// through the SAME `constraint_status` every `odrl:recipient` constraint goes
@@ -984,7 +983,7 @@ pub fn recipient_status(rule: &Rule, request: &Request) -> RecipientMatch {
 /// against the evaluation-time evidence a request carries — a FAITHFUL report of
 /// exactly what [`evaluate`] checks for the clock (it reuses the same
 /// `constraint_status` the evaluator's `odrl:dateTime` constraints go through).
-/// [OPUS-4.8] sq-idnv.
+/// sq-idnv.
 ///
 /// The honesty contract mirrors [`PurposeMatch`] / [`RecipientMatch`]: this never
 /// claims a stronger verdict than the evaluator acts on. `Satisfied` is the ONLY
@@ -1018,7 +1017,7 @@ pub enum DateTimeMatch {
 
 /// Report how `rule`'s `odrl:dateTime` (time-window) constraint(s) stand against the
 /// evaluation-time evidence `request` carries — the auditable surface of faithful
-/// temporal enforcement. [OPUS-4.8] sq-idnv.
+/// temporal enforcement. sq-idnv.
 ///
 /// Like [`purpose_status`] / [`recipient_status`], this does NOT re-implement
 /// matching: it runs the request through the SAME `constraint_status` every
@@ -1080,7 +1079,7 @@ pub fn datetime_status(rule: &Rule, request: &Request) -> DateTimeMatch {
 /// The three-valued verdict of a rule's `odrl:spatial` constraints against the spatial
 /// (region) evidence a request carries — a FAITHFUL report of exactly what [`evaluate`]
 /// checks for the location (it reuses the same `constraint_status` the evaluator's
-/// `odrl:spatial` constraints go through). [OPUS-4.8] sq-wukl.
+/// `odrl:spatial` constraints go through). sq-wukl.
 ///
 /// The honesty contract mirrors [`PurposeMatch`] / [`RecipientMatch`] / [`DateTimeMatch`]:
 /// it never claims a stronger verdict than the evaluator acts on. `Satisfied` is the ONLY
@@ -1116,7 +1115,7 @@ pub enum SpatialMatch {
 
 /// Report how `rule`'s `odrl:spatial` constraint(s) stand against the region evidence
 /// `request` carries — the auditable surface of faithful spatial (incl. `isPartOf`-tree)
-/// enforcement. [OPUS-4.8] sq-wukl.
+/// enforcement. sq-wukl.
 ///
 /// Like [`purpose_status`] / [`recipient_status`] / [`datetime_status`], this does NOT
 /// re-implement matching: it runs the request through the SAME `constraint_status`
@@ -1178,7 +1177,7 @@ pub fn spatial_status(rule: &Rule, request: &Request) -> SpatialMatch {
 
 /// How one prohibition rule re-evaluates against a request, distinguishing a
 /// *definite* non-match from an *unprovable* one (missing-evidence constraint).
-/// [OPUS-4.8] sq-2pcf.
+/// sq-2pcf.
 enum RuleClass {
     /// Structural attributes agree AND every constraint is satisfied.
     Match,
@@ -1192,7 +1191,7 @@ enum RuleClass {
 /// Classify a single prohibition rule for deny-retraction. Structural attributes
 /// (action / target / assignee) are definite (no "world state" needed). Constraints
 /// split into *definitely false* (evidence present, bound not met — a definite no) vs
-/// *unprovable* (no evidence for the dimension — ambiguous). [OPUS-4.8] sq-2pcf.
+/// *unprovable* (no evidence for the dimension — ambiguous). sq-2pcf.
 fn classify_prohibition(rule: &Rule, request: &Request, req_action: &Action) -> RuleClass {
     // Structural attributes are definite: if any disagrees the rule no longer names
     // this request at all (a genuine withdrawal of *this* carve-out). Action/target/
@@ -1245,7 +1244,7 @@ fn classify_prohibition(rule: &Rule, request: &Request, req_action: &Action) -> 
 
 /// Whether one constraint is satisfied, *definitely* unsatisfied, or *unprovable* for
 /// lack of evidence — the three-valued refinement of [`constraint_satisfied`] that
-/// deny-retraction needs (a plain bool conflates the last two). [OPUS-4.8] sq-2pcf.
+/// deny-retraction needs (a plain bool conflates the last two). sq-2pcf.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConstraintStatus {
     /// The request supplies evidence and the comparison holds.
@@ -1279,7 +1278,7 @@ fn constraint_status(c: &Constraint, request: &Request) -> ConstraintStatus {
 
 /// The three-valued verdict of one [`ConstraintNode`] operand — an atomic constraint
 /// goes through [`constraint_status`], a nested compound recurses through
-/// [`logical_constraint_status`]. [OPUS-4.8] sq-a0zef.
+/// [`logical_constraint_status`]. sq-a0zef.
 fn constraint_node_status(node: &ConstraintNode, request: &Request) -> ConstraintStatus {
     match node {
         ConstraintNode::Atomic(c) => constraint_status(c, request),
@@ -1290,7 +1289,7 @@ fn constraint_node_status(node: &ConstraintNode, request: &Request) -> Constrain
 /// The three-valued verdict of a compound `odrl:LogicalConstraint` against a request —
 /// each operand's three-valued [`constraint_status`] folded through the combinator,
 /// **fail-closed** (an indeterminate operand never silently satisfies an `and`/`xone`).
-/// [OPUS-4.8] sq-a0zef.
+/// sq-a0zef.
 ///
 /// Combinator semantics (operands carry one of `Satisfied` / `DefinitelyUnsatisfied` /
 /// `Unprovable`):
@@ -1360,8 +1359,8 @@ fn logical_constraint_status(lc: &LogicalConstraint, request: &Request) -> Const
 
 /// Whether a constraint's `leftOperand` is a **taxonomic** dimension that subsumption
 /// (the request's supplied `narrower ⊑ broader` closure) applies to — `odrl:purpose`
-/// (a DPV/purpose taxonomy — [OPUS-4.8] sq-z3ve) and `odrl:spatial` (a region
-/// `isPartOf` tree — [OPUS-4.8] sq-wukl). Every other dimension matches by exact
+/// (a DPV/purpose taxonomy — sq-z3ve) and `odrl:spatial` (a region
+/// `isPartOf` tree — sq-wukl). Every other dimension matches by exact
 /// value / magnitude only.
 fn is_subsumable_dimension(left: &str) -> bool {
     left == ODRL_PURPOSE || left == ODRL_SPATIAL
@@ -1374,10 +1373,10 @@ fn is_subsumable_dimension(left: &str) -> bool {
 /// supplied subsumption closure proves it falls under (see
 /// [`Request::with_purpose_subsumption`]); every other dimension is the plain
 /// [`compare`]. One source of truth for both [`constraint_status`] and
-/// [`constraint_satisfied`]. [OPUS-4.8] sq-z3ve / sq-wukl.
+/// [`constraint_satisfied`]. sq-z3ve / sq-wukl.
 ///
 /// The `odrl:recipient` dimension is additionally **party-collection resolvable**
-/// ([FABLE-5] sq-c2aze): when the request supplies party-membership evidence
+/// (sq-c2aze): when the request supplies party-membership evidence
 /// ([`Request::with_party_membership`]), a recipient bound may name an
 /// `odrl:PartyCollection` the recipient is a *member* of — the same
 /// equality-or-membership lookup the `odrl:assignee` field gets via
@@ -1397,7 +1396,7 @@ fn compare_constraint(c: &Constraint, actual: &Value, request: &Request) -> bool
 /// `odrl:spatial`). The stated value `actual` matches the named value `bound` when it
 /// equals it OR is a transitively-narrower value under the request's supplied closure
 /// (`actual ⊑ bound`) — `clinical ⊑ research` for purpose, `DEU ⊑ EU` for spatial.
-/// [OPUS-4.8] sq-z3ve / sq-wukl.
+/// sq-z3ve / sq-wukl.
 ///
 /// - `eq`/`isA`: `actual ⊑ bound`.
 /// - `neq`: NOT `actual ⊑ bound` — a sub-value of the excluded value is also excluded
@@ -1405,7 +1404,7 @@ fn compare_constraint(c: &Constraint, actual: &Value, request: &Request) -> bool
 ///   is not widened away.
 /// - `isPartOf` / `isAnyOf`: `actual ⊑ some member` of the named set (the spatial
 ///   `isPartOf EU` region-tree case, and the purpose-set-with-hierarchy case;
-///   `isAnyOf` is the same set-membership relation — [FABLE-5] sq-uaz85).
+///   `isAnyOf` is the same set-membership relation — sq-uaz85).
 /// - `isNoneOf`: `actual ⊑ NO member` of the named set — a sub-value of an excluded
 ///   member is ALSO excluded (mirrors `neq`: the carve-out is not widened away), and
 ///   the same representability guard as the flat [`is_none_of`] applies (fail-closed).
@@ -1437,7 +1436,7 @@ fn compare_subsumed(actual: &Value, op: Operator, bound: &Value, request: &Reque
 
 /// Party-collection-aware comparison for the `odrl:recipient` dimension — invoked
 /// only when the request supplies [`Request::party_memberships`] evidence (see
-/// [`compare_constraint`]). [FABLE-5] sq-c2aze.
+/// [`compare_constraint`]). sq-c2aze.
 ///
 /// A recipient may be a party **or a member of an `odrl:PartyCollection`**: a
 /// recipient value `r` matches a bound member `m` when `r == m` OR the request's
@@ -1487,7 +1486,7 @@ fn compare_recipient(actual: &Value, op: Operator, bound: &Value, request: &Requ
 
 /// The *actual* world value a constraint's `leftOperand` is compared against, or
 /// `None` when the request supplies no evidence for that dimension (⇒ unprovable /
-/// fail-closed). [OPUS-4.8] sq-5037.
+/// fail-closed). sq-5037.
 ///
 /// Dimensions take their value from [`Request::context`] keyed by the left operand —
 /// EXCEPT `odrl:recipient`, where the recipient-of-data IS the requesting party: a
@@ -1643,7 +1642,7 @@ fn compare(actual: &Value, op: Operator, bound: &Value) -> bool {
 /// Adding `a⊑b` also derives `a⊑c` for every already-known `b⊑c`, and `x⊑b` for
 /// every already-known `x⊑a`. Self-edges (`a⊑a`) are dropped (handled by the
 /// reflexive `p == target` short-circuit in [`Request::purpose_subsumed_by`]).
-/// [OPUS-4.8] sq-z3ve.
+/// sq-z3ve.
 fn insert_subsumption(set: &mut BTreeSet<(String, String)>, narrower: String, broader: String) {
     if narrower == broader || set.contains(&(narrower.clone(), broader.clone())) {
         return;
@@ -1706,7 +1705,7 @@ fn is_part_of(actual: &Value, bound: &Value) -> bool {
 }
 
 /// `odrl:isNoneOf` (flat base case): the actual value equals **no** member of the
-/// right-operand set — the negative dual of [`is_part_of`]. [FABLE-5] sq-uaz85.
+/// right-operand set — the negative dual of [`is_part_of`]. sq-uaz85.
 ///
 /// **Fail-closed representability guard:** negating a lexical set-membership test is
 /// only faithful when both operands live in the IRI/string space the
@@ -1723,7 +1722,7 @@ fn is_none_of(actual: &Value, bound: &Value) -> bool {
 
 /// Whether negating a lexical set-membership test over `(actual, bound)` is
 /// faithful: both operands must be IRI/string values (the space the
-/// `|`/space/comma set encoding covers). See [`is_none_of`]. [FABLE-5] sq-uaz85.
+/// `|`/space/comma set encoding covers). See [`is_none_of`]. sq-uaz85.
 fn set_negation_representable(actual: &Value, bound: &Value) -> bool {
     matches!(actual, Value::Iri(_) | Value::Str(_)) && matches!(bound, Value::Iri(_) | Value::Str(_))
 }
@@ -1781,7 +1780,7 @@ pub(crate) fn order(a: &Value, b: &Value) -> Option<std::cmp::Ordering> {
 /// **Public so other crates compare dateTime bounds by the *same* instant
 /// normalizer the evaluator uses — never a divergent (lexical) one.** It is the one
 /// source of truth for `xsd:dateTime` ordering across the workspace: `sparq-solid`'s
-/// opt-in live-clock window re-check ([OPUS-4.8] sq-0q7n) calls this so a persisted
+/// opt-in live-clock window re-check (sq-0q7n) calls this so a persisted
 /// `not_before`/`not_after` window is enforced on the real UTC instant, exactly as
 /// the evaluator's `odrl:dateTime` constraint was, rather than on `str::cmp`.
 pub fn cmp_datetime(x: &str, y: &str) -> Option<std::cmp::Ordering> {
@@ -1985,7 +1984,7 @@ fn days_in_month(year: i64, month: u32) -> Option<u32> {
     })
 }
 
-// [OPUS-4.8] sq-qj2q — unit tests for the self-contained instant normalizer that
+// sq-qj2q — unit tests for the self-contained instant normalizer that
 // backs mixed-offset dateTime comparison (the public-API behaviour is covered by
 // tests/odrl_eval.rs; these pin the internal arithmetic + the rejection grammar).
 #[cfg(test)]
@@ -2092,7 +2091,7 @@ mod instant_tests {
     }
 }
 
-// [OPUS-4.8] sq-z3ve — unit tests for the incremental transitive-closure
+// sq-z3ve — unit tests for the incremental transitive-closure
 // maintenance that backs purpose-subsumption matching. The public-API behaviour
 // is covered by tests/odrl_eval.rs; these pin the closure arithmetic, including
 // the order-independence and cycle-tolerance that a string-prefix shortcut would

@@ -1,4 +1,4 @@
-# [OPUS-4.8] (sq-6vshe.4) Seam A2 of the sparq-engine facade split (RFC
+# (sq-6vshe.4) Seam A2 of the sparq-engine facade split (RFC
 # research/engine-split-rfc.md §4 Option A / §7 Phase A2). This crate holds the SPARQL
 # 1.1 federated-query (`SERVICE`) client surface peeled out of `sparq-engine`: the HTTP
 # `Transport` seam + production ureq `HttpTransport`, the SPARQL-Results JSON/XML
@@ -21,7 +21,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-# [GPT-5.6] Published only to satisfy sparq-engine's crates.io dependency closure.
+# Published only to satisfy sparq-engine's crates.io dependency closure.
 
 # Render the README as the docs.rs front page and document with all features so the
 # `service` client surface appears (mirrors sparq-engine).
@@ -62,7 +62,7 @@ quick-xml = { version = "0.41", default-features = false, optional = true }
 # the wasm build would drag an HTTP/TLS stack into the browser graph, and SERVICE never runs
 # there. `tls-native-root` (rustls + platform-verifier) reuses the OS trust store for https
 # endpoints without bundling webpki-roots — the same runtime trust behaviour sparq-engine had
-# (ureq 3, off the archived rustls-pemfile / RUSTSEC-2025-0134). [OPUS-4.8]
+# (ureq 3, off the archived rustls-pemfile / RUSTSEC-2025-0134).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"], optional = true }
 
@@ -70,5 +70,5 @@ ureq = { version = "3", default-features = false, features = ["rustls", "platfor
 # The SRJ/SRX round-trip and egress tests build/parse Terms with sparq-core's default
 # features (dict decode helpers) on.
 sparq-core = { path = "../sparq-core", version = "0.1.6" }
-# [GPT-5.6] (sq-zvavi) Value-level differential coverage for the SRJ/SRX codecs.
+# (sq-zvavi) Value-level differential coverage for the SRJ/SRX codecs.
 proptest = "1"

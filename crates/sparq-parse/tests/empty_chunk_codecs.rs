@@ -1,4 +1,4 @@
-//! [GPT-5.6] Deterministic empty-chunk member and decoded-equivalence coverage.
+//! Deterministic empty-chunk member and decoded-equivalence coverage.
 
 use sparq_parse::{
     compress_chunks, compress_member, decode_gzip_concat, decode_zstd_concat, gzip_single_member,

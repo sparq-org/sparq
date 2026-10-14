@@ -55,7 +55,7 @@
 //! re-audit (sq-9hrn) are pending. This pass does not change that posture by one inch. See the
 //! crate `README.md` and `research/mpc-untrusted-planner-routing-design.md` §2.1 / §2.2 / §4.4 / §6.
 //!
-//! [OPUS-4.8] sq-pwr.2.
+//! sq-pwr.2.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -90,7 +90,7 @@ use crate::SourcePrivacyDescriptor;
 /// claims to describe (fail-closed: refuse rather than emit a misleading envelope).
 ///
 /// This function performs **no** MPC and makes **no** soundness/privacy claim — it produces a
-/// *declaration*. See the module docs and the crate `README.md`. [OPUS-4.8] sq-pwr.2.
+/// *declaration*. See the module docs and the crate `README.md`. sq-pwr.2.
 pub fn assemble_leakage_envelope(
     routing: &PrivateRouting,
     operators: &[QueryOperator],
@@ -208,7 +208,7 @@ fn operand_disclosure_label(operand: &Operand) -> String {
 /// rejection) or the budget overrun (verifier rejection), never silently dropped.
 ///
 /// This is a **plan-time policy gate, not a cryptographic enforcement.** It runs **no** MPC and
-/// makes **no** soundness/privacy claim — see the module docs. [OPUS-4.8] sq-pwr.2.
+/// makes **no** soundness/privacy claim — see the module docs. sq-pwr.2.
 pub fn ratify_envelope(
     envelope: &LeakageEnvelope,
     holders: &[SourcePrivacyDescriptor],
@@ -696,7 +696,7 @@ mod tests {
 
     // A single-operator plan that discloses one global IRI binding NO specific predicate, plus the
     // routing that matches it (so `assemble_leakage_envelope` accepts the pair). Returns
-    // (routing, ops). [OPUS-4.8] sq-bif.
+    // (routing, ops). sq-bif.
     fn disclosed_empty_global_iri_plan() -> (PrivateRouting, Vec<QueryOperator>) {
         let ops = vec![QueryOperator::new(
             "membership-join (anonymous global IRI)",
@@ -720,7 +720,7 @@ mod tests {
 
     /// An empty-predicate global-IRI operand, when disclosed, is recorded HONESTLY in the envelope
     /// as the `<global-iri>` placeholder (not silently dropped, not a panic) — the disclosure of
-    /// *a* global IRI is enumerated even though it binds no named predicate. [OPUS-4.8] sq-bif.
+    /// *a* global IRI is enumerated even though it binds no named predicate. sq-bif.
     #[test]
     fn empty_global_iri_operand_is_recorded_as_the_placeholder() {
         let (routing, ops) = disclosed_empty_global_iri_plan();
@@ -794,7 +794,7 @@ mod tests {
     }
 
     /// The placeholder counts against the VERIFIER budget like any disclosed operand: a budget of
-    /// 0 rejects it even though the (consenting) holder accepted. [OPUS-4.8] sq-bif.
+    /// 0 rejects it even though the (consenting) holder accepted. sq-bif.
     #[test]
     fn placeholder_global_iri_counts_against_the_verifier_budget() {
         let (routing, ops) = disclosed_empty_global_iri_plan();
@@ -828,7 +828,7 @@ mod tests {
     /// declared non-participation) no longer gates a predicate's disclosability, so a predicate the
     /// *remaining* sources all mark public becomes Disclosed — and the assembled envelope honestly
     /// records that disclosure. This is the cross-phase interaction (selection → routing →
-    /// envelope) over the REAL path. [OPUS-4.8] sq-bif.
+    /// envelope) over the REAL path. sq-bif.
     #[test]
     fn pruned_private_holder_does_not_gate_disclosure_downstream() {
         // Source A marks memberOf public and participates; source B marks it PRIVATE but declares

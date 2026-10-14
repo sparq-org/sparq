@@ -1,7 +1,7 @@
 //! Trust-graph admission-program provenance tier — the sourced-honesty ingest gate
 //! (bead `sq-7utko`).
 //!
-//! [FABLE-5] 🤖 SPARQ agent. Source record:
+//! 🤖 SPARQ agent. Source record:
 //! `research/trust-graph-authorisation-2026-07.md` (epic `sq-pfae`).
 //!
 //! The PKG ingests AGENTS.md / skills / beads but did not surface the trust-graph

@@ -1,5 +1,5 @@
 //! LOCAL rows-returning `SERVICE` handlers — the table-function seam.
-//! [OPUS-5] (sq-lsp7k.2.2)
+//! (sq-lsp7k.2.2)
 //!
 //! A toy in-process handler stands in for the "extension that returns a RELATION"
 //! case (`sparq-shacl`'s conforming-focus-nodes lookup is the motivating consumer;

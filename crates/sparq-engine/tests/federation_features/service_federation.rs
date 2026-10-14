@@ -1,5 +1,5 @@
 //! SPARQL 1.1 SERVICE (federated query) — end-to-end tests over a real loopback
-//! HTTP endpoint. [OPUS-4.8]
+//! HTTP endpoint.
 //!
 //! These exercise the PRODUCTION path (the ureq `HttpTransport`): a tiny in-process
 //! `TcpListener` thread serves a canned SPARQL-Results-JSON body on `127.0.0.1`, the
@@ -21,7 +21,7 @@ use sparq_engine::{query, with_service_egress_allow};
 use sparq_core::Graph;
 
 /// The loopback test endpoints below resolve to `127.0.0.1`, which the default-deny
-/// SSRF egress filter ([OPUS-4.8], bead sq-2v6f) refuses. The tests are legitimately
+/// SSRF egress filter (bead sq-2v6f) refuses. The tests are legitimately
 /// federating to a known-safe local server, so they opt the loopback host back in via
 /// the allowlist — exercising the end-to-end allowlist path against the real ureq
 /// transport, not just the policy classifier.
@@ -169,7 +169,7 @@ fn service_malformed_response_errors_but_silent_swallows() {
 
 #[test]
 fn service_default_deny_refuses_loopback_endpoint() {
-    // SSRF default-deny [OPUS-4.8] (bead sq-2v6f): with NO allowlist, a SERVICE
+    // SSRF default-deny (bead sq-2v6f): with NO allowlist, a SERVICE
     // endpoint that resolves to loopback must be refused by the egress filter — even
     // though a real server is listening there. Non-SILENT => the query errors.
     let body = r#"{"head":{"vars":["name"]},"results":{"bindings":[]}}"#.to_string();
@@ -188,7 +188,7 @@ fn service_default_deny_refuses_loopback_endpoint() {
             || err.to_lowercase().contains("dns"),
         "expected an egress/SSRF refusal, got: {err}"
     );
-    // [OPUS-4.8] sq-g2xs: the SSRF refusal originates in the ureq-3 resolver (as a
+    // sq-g2xs: the SSRF refusal originates in the ureq-3 resolver (as a
     // `ureq::Error::Io(PermissionDenied)`); the stable `SERVICE_EGRESS_REFUSED_MARKER`
     // the server `contains()`-classifies as a 403 (http.rs) MUST survive ureq-3's error
     // wrapping all the way out through `HttpTransport::fetch`. Guard that contract.

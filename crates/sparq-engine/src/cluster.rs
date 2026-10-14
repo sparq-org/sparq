@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-7d3dj.30.14) Membership-cluster pre-materialisation for the greedy
+//! (sq-7d3dj.30.14) Membership-cluster pre-materialisation for the greedy
 //! BGP planner — the opt-in `cluster-materialize` feature (OFF by default).
 //!
 //! # The shape this fixes (SP2Bench q07)
@@ -108,7 +108,7 @@ impl Thresholds {
 thread_local! {
     /// When `true`, the executor uses [`Thresholds::PERMISSIVE`] instead of `PROD`, so
     /// a small-graph integration differential can force the cluster path. Test-only; the
-    /// production query API never touches it. [FABLE-5]
+    /// production query API never touches it.
     static USE_TEST_THRESHOLDS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
@@ -125,7 +125,7 @@ pub(crate) fn active_thresholds() -> Thresholds {
 
 /// Test-only hook (`#[doc(hidden)]`): run `f` with the permissive thresholds installed,
 /// so a small-graph query actually TRIGGERS the cluster path. Restores the prior value
-/// on the way out (nestable). Not part of the stable query API. [FABLE-5]
+/// on the way out (nestable). Not part of the stable query API.
 #[cfg(feature = "cluster-materialize")]
 #[doc(hidden)]
 pub fn with_test_thresholds<R>(f: impl FnOnce() -> R) -> R {

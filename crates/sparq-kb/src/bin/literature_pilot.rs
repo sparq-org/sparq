@@ -1,6 +1,6 @@
 //! `literature-pilot` — the hard-capped, DRY-RUN-FIRST literature ingestion pilot
 //! (`sq-tzars.9`, epic `sq-tzars`; design record `research/research-kb-program.md` §2.9).
-//! [FABLE-5] 🤖 SPARQ agent — research-KB live ingestion pilot.
+//! 🤖 SPARQ agent — research-KB live ingestion pilot.
 //!
 //! The iteration protocol itself (PREREG bar → hard caps → dry-run staging → honest
 //! append-only metrics → audit → verdict → maintainer-armed live-emit gate) lives in

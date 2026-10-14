@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-iywur) Result-equivalence for the opt-in `dp-planner` DPccp
+//! (sq-iywur) Result-equivalence for the opt-in `dp-planner` DPccp
 //! join-order enumerator.
 //!
 //! The DP planner (`exec::eval_bgp_dp`, enumeration in `dp::plan`) picks a
@@ -35,7 +35,7 @@ fn result_bag(graph: &Graph, q: &str) -> Vec<Vec<(String, String)>> {
     // string: no `Term::to_string()` can ever produce this marker (every bound RDF term
     // serializes as `<iri>`, `"lex"…`, or `_:b` — even the empty literal renders WITH its
     // surrounding quotes), so an unbound slot can never collide with a legitimately bound
-    // value. [OPUS-4.8] sq-iywur (addresses Copilot review re: empty-string ambiguity).
+    // value. sq-iywur (addresses Copilot review re: empty-string ambiguity).
     const UNBOUND: &str = "\0\u{1}unbound\u{1}\0";
     let r = query(graph, &format!("{PFX}{q}")).unwrap();
     let vars: Vec<String> = r.vars.iter().map(|v| v.as_str().to_string()).collect();

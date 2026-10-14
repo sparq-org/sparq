@@ -1,4 +1,4 @@
-//! Bounded-memory assertion for streaming SERVICE result consumption. [FABLE-5]
+//! Bounded-memory assertion for streaming SERVICE result consumption.
 //! (bead sq-my8wd.4)
 //!
 //! The engine must not materialise a remote SERVICE relation as owned terms before
@@ -26,7 +26,7 @@
 //!   cargo test -p sparq-engine --features service --test service_stream_bounded
 
 #![cfg(feature = "service")]
-// [OPUS-4.8] sq-my8wd.4 / cert gap GX-5: this is the ONLY first-party `unsafe` in
+// sq-my8wd.4 / cert gap GX-5: this is the ONLY first-party `unsafe` in
 // sparq-engine — a byte-counting `#[global_allocator]`, which a custom allocator
 // unavoidably requires (the `GlobalAlloc` trait is `unsafe` by definition and there is
 // no safe substitute for a deterministic thread-local allocation counter). The engine
@@ -79,7 +79,7 @@ struct Counting;
 // wrapper adds nothing unsound: it only reads `layout.size()`/`new_size` (always valid
 // `usize` reads) and updates a thread-local `Cell<isize>` counter; no pointer that
 // `System` returns is ever dereferenced, retained, or aliased here. `System` is
-// zero-sized, so `Counting` is a valid stand-in global allocator. [OPUS-4.8]
+// zero-sized, so `Counting` is a valid stand-in global allocator.
 unsafe impl GlobalAlloc for Counting {
     // SAFETY: forwards to `System.alloc(layout)` unchanged — the caller's `layout`
     // validity contract (non-zero size, valid align) is passed straight through, and
@@ -206,7 +206,7 @@ fn big_srj_body(rows: usize) -> String {
     )
 }
 
-/// (bead sq-my8wd.5) [OPUS-4.8] Transport-reader seam: peak memory stays BELOW the
+/// (bead sq-my8wd.5) Transport-reader seam: peak memory stays BELOW the
 /// response body size because the body is NEVER fully buffered as a `String`. The
 /// pre-reader-seam path held a full body String even with streaming row parsing, so
 /// peak was necessarily >= body. This test asserts we crossed that threshold.

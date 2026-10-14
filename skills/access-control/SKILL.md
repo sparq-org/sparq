@@ -23,6 +23,13 @@ reserved `<urn:sparq:auth>` graph. Every query/update is then filtered per
 **fail-closed**, with zero Solid-specific code in the engine itself (the crate is a
 dependency of nothing in the workspace).
 
+The loader skolemizes blank nodes as
+`urn:skolem:graph:<encoded-graph-IRI>:<encoded-label>`, using UTF-8 percent-encoding
+of each component (only URI-unreserved characters remain literal). This keeps
+document scopes distinct and identities stable when unrelated documents are put
+or deleted, even if named-graph positions change. The source documents retain
+their blank nodes; these IRIs appear in the reasoning input and authorization view.
+
 ## What this is — and is NOT (read first)
 
 This is an **architecture / research-track** layer, not a deployable Solid server.
@@ -198,8 +205,10 @@ Materialize the authorization view from the access-control documents, then enfor
   default-graph pattern with no `USING`/`WITH` is refused. A conditional write needs read
   access to its condition; a blind `INSERT DATA`/`DELETE DATA` needs none. The WHERE is
   evaluated once: a `GRAPH ?var` write target is authorized against the graphs that
-  evaluation instantiates, before anything is written. Such an operation must be sent on its
-  own: a multi-operation request that includes one is refused. Every update entry point
+  evaluation instantiates, before anything is written. In a multi-operation request a
+  denial in any operation leaves the store untouched; on a directory-backed store such an
+  operation must still be sent on its own (a multi-operation request that includes one is
+  refused there). Every update entry point
   takes one path: the update runs on a fork, what it actually wrote is authorized against
   the view in force (so a later operation cannot reach a graph an earlier one named), rules
   it leaves are materialized on the fork first (rules that cannot be **refuse the update**),
@@ -297,6 +306,11 @@ Materialize the authorization view from the access-control documents, then enfor
   (proposed-stable)** — the proposed semver-stable per-resource decision surface (freeze
   pending maintainer ratification, #1346 / #1248; see
   [`docs/api-stability.md`](../../docs/api-stability.md)).
+- `store.decide_removal(&Session, resource: &str) -> WacDecision` — the **removal decision**
+  for an LDP `DELETE` of a whole resource: `Write` from the static view, narrowed by attached
+  ODRL prohibitions. Unlike `decide`, no attached ODRL permission counts (those grant data
+  changes, not graph management; see the usage-control-policy SKILL). The MCP
+  `resource_delete` tool uses it.
 - `store.decide_create(&Session, container: &str, child_name: &str, Mode) -> WacDecision` /
   `is_control_document_name(name: &str) -> bool` — the **CREATE decision + its
   control-document guard** (sq-gg0qq.5, issue #2571). Minting a container child
@@ -991,6 +1005,18 @@ secx:Proven` mechanically **empties** the admissible set for the whole sparq ZK 
 open), and `requiresPostQuantumForgery gteq …` removes the DL-signature methods — the value is a
 **principled refusal** ("no admissible proof") over silently serving a non-conforming one. The §4.3.3
 worked example is the golden test: empty under Alice's strict preference, non-empty under the relaxed one.
+
+**MPC trust model is on the order too (issues #3275 / #6186).** `LEVEL_ORDERS` carries two further
+chains — `secx:AdversaryModel` (`Malicious ⊐ Covert ⊐ SemiHonest`) and `secx:CorruptionThreshold`
+(`DishonestMajority ⊐ HonestMajority ⊐ SuperHonestMajority`, ordered by how much corruption is
+*tolerated*) — with `secx:requiresAdversaryModel` / `secx:requiresCorruptionThreshold` as their
+leftOperands. `secx:assumption` stays human-facing PROVENANCE: this reasoner keys only on
+`(dimension, level)`, so an `secx:assumption secx:SemiHonest` triple alone can never be discharged.
+`sparq-mpc` ships its per-protocol levels as `crates/sparq-mpc/ontologies/secprop-mpc-methods.ttl`
+(behind its default-OFF `secprop-annotations` feature, surfaced as `sparq_mpc::secprop::annotations_n3()`),
+so `requiresAdversaryModel gteq secx:Malicious` mechanically excludes **every** `sparq-mpc` protocol
+while `gteq secx:SemiHonest` admits them — the exclusion is computed by THIS reasoner, not by a
+crate-local predicate (end-to-end test `crates/sparq-mpc/tests/secprop_admissibility.rs`).
 
 ### Property-admissibility PRE-CHECK in the admission gate — opt-in `secprop-precheck` (sq-dt5hv Phase 5 + sq-nrwqs Phase 5.1, design §5b)
 

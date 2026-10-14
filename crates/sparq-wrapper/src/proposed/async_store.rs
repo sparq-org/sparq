@@ -44,7 +44,7 @@
 //!
 //! [`Store`]: crate::Store
 
-// [SONNET-4.6] sq-1rg2q.8: poll-based streaming wrapper; no executor, no eager collection.
+// sq-1rg2q.8: poll-based streaming wrapper; no executor, no eager collection.
 
 use oxrdf::{NamedNode, Term};
 use std::fmt;

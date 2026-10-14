@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-6y92 — the end-to-end federated MPC pipeline driver: the GLUE
+// sq-6y92 — the end-to-end federated MPC pipeline driver: the GLUE
 // that composes holder → share → join → secure-threshold → reconstruct →
 // ProofStatement into ONE worked federated response for the four-flatmates use case.
 //! The end-to-end federated MPC pipeline driver (architecture §4.3 steps 1–6).
@@ -156,7 +156,7 @@ pub struct FederatedQuery<'a> {
     /// canonicalize it — it is used VERBATIM as the union-store query in the
     /// differential and stored verbatim as [`ProofStatement::query`]. Any
     /// canonicalization the (deferred) proof's query-text digest needs is the
-    /// CALLER's responsibility; it is not performed here. [OPUS-4.8]
+    /// CALLER's responsibility; it is not performed here.
     pub federated_query: &'a str,
     /// The public threshold for the secure cumulative-salary comparison (e.g.
     /// `100_000`). Only the boolean `cumulative > threshold` verdict is disclosed.
@@ -311,7 +311,7 @@ pub fn run_federated(
     // test). The proof itself stays the honest NotYetImplemented stub: this glue
     // is crypto-free + fork-invariant to Q1/Q2, so we do NOT fake a proof — we
     // only assemble the public-statement shape the proof will eventually bind.
-    // [OPUS-4.8] The disclosed key-set is a SET `K` (convention #3): caller order
+    // The disclosed key-set is a SET `K` (convention #3): caller order
     // and multiplicity must NOT matter, because it is later bound into the proof's
     // public-inputs digest — two runs over the same logical key-set must produce the
     // SAME statement. Collect, then canonicalise (sort + dedup) into a deterministic
@@ -752,7 +752,7 @@ mod tests {
         }
     }
 
-    /// [OPUS-4.8] Determinism: the disclosed key-set `K` is a SET, so caller order
+    /// Determinism: the disclosed key-set `K` is a SET, so caller order
     /// and multiplicity must NOT affect the assembled `ProofStatement`. Two runs
     /// over the SAME logical key-set — one with the issuer keys in a permuted caller
     /// order, one with a DUPLICATE key — must both yield the SAME canonical

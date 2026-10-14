@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-jocpn) A native, hand-rolled byte-level **Turtle** tokenizer/parser that interns
+//! (sq-jocpn) A native, hand-rolled byte-level **Turtle** tokenizer/parser that interns
 //! each S/P/O directly into the [`Dict`], modelled on the N-Triples parser in [`crate::nt`]. It is
 //! the structural fix for the single-thread Turtle parse gap (sq-wrn61 profiled ~53% of the parse
 //! in oxttl's tokenizer/state-machine + prefixed-name expansion), which the pre-sizing hint could
@@ -13,7 +13,7 @@
 //! only permitted difference is the *labels* of ANONYMOUS blank nodes (`[]`, collections `()`, and
 //! `[ … ]` property lists): oxttl mints those as random 128-bit ids, so two oxttl parses of the
 //! same document already differ there — every differential/conformance comparison is therefore
-//! blank-node **isomorphic**. [GPT-5.6] This parser mints labels with a process-global monotonic
+//! blank-node **isomorphic**. This parser mints labels with a process-global monotonic
 //! seed so independently minted anonymous nodes remain distinct. Turtle does not reserve that
 //! internal label spelling, however, so a deliberately matching user-written `_:label` could
 //! collide in principle.
@@ -54,7 +54,7 @@ const XSD_STRING: &str = "http://www.w3.org/2001/XMLSchema#string";
 const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 const RDF_DIR_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#dirLangString";
 
-/// [OPUS-4.8] (sq-jocpn, ASVS V5.5.2) Maximum nesting depth of `[ … ]` property lists / `( … )`
+/// (sq-jocpn, ASVS V5.5.2) Maximum nesting depth of `[ … ]` property lists / `( … )`
 /// collections before the parser returns a clean error instead of recursing until the native stack
 /// overflows on adversarial input like `[[[[ … ]]]]` nested tens of thousands deep. Far deeper than
 /// any real Turtle nests; kept in step with `nt::MAX_TRIPLE_TERM_DEPTH` and spargebra's recursion
@@ -294,7 +294,7 @@ impl Parser<'_, '_> {
         }
     }
 
-    /// [OPUS-4.8] (sq-jocpn) Parse zero or more RDF 1.2 annotations attached to the just-emitted
+    /// (sq-jocpn) Parse zero or more RDF 1.2 annotations attached to the just-emitted
     /// statement `(s, p, o)`: a reifier `~` (optionally `~ reifierId`) and/or an annotation block
     /// `{| predicateObjectList |}`. Each mints (or reuses) a reifier `R`, emits
     /// `R rdf:reifies <<( s p o )>>`, and — for a block — attaches the predicate-object list to `R`.
@@ -791,7 +791,7 @@ impl Parser<'_, '_> {
         Ok(self.dict.intern_blank(label))
     }
 
-    /// [GPT-5.6] Mint a fresh anonymous blank node id. The label embeds a PROCESS-GLOBAL monotonic
+    /// Mint a fresh anonymous blank node id. The label embeds a PROCESS-GLOBAL monotonic
     /// seed (not just a per-parse counter) so that two chunks parsed independently by the parallel
     /// loader — each a fresh [`Parser`] — never mint the SAME anon label and get wrongly unified by
     /// the label-based dict merge. Its spelling uses legal Turtle `PN_CHARS`, so it is not

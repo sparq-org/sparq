@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-bif.41: integration coverage for the public sidecar naming and
+// sq-bif.41: integration coverage for the public sidecar naming and
 // persistence APIs under the crate's default feature set.
 
 use std::path::PathBuf;

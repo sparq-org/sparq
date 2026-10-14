@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-oy1f.25) End-to-end tests for the JSON-LD 1.1 **Expansion Algorithm**,
+//! (sq-oy1f.25) End-to-end tests for the JSON-LD 1.1 **Expansion Algorithm**,
 //! exercised through the crate's public [`sparq_jsonld::expand`] entry. Fixtures are drawn
 //! from the worked examples of the W3C JSON-LD 1.1 API + syntax specs
 //! (<https://www.w3.org/TR/json-ld11-api/#expansion-algorithms>). No network: expansion runs
@@ -467,7 +467,7 @@ fn type_map_key_precedes_existing_types() {
 
 #[test]
 fn id_coercion_keyword_shaped_scalar_and_arrays_retain_null_id() {
-    // [SONNET-4.6] PR #4132 review: §5.3.2 returns the @id map even when IRI Expansion is null.
+    // PR #4132 review: §5.3.2 returns the @id map even when IRI Expansion is null.
     assert_expands(
         r#"{"@context": {"p": {"@id": "http://ex/p", "@type": "@id"}}, "p": "@kw"}"#,
         r#"[{"http://ex/p": [{"@id": null}]}]"#,
@@ -641,7 +641,7 @@ fn colliding_value_and_language_type() {
 }
 
 // ---------------------------------------------------------------------------------------
-// [FABLE-5] sq-oy1f.37 — expand-lane correctness regressions (W3C expand cases the native
+// sq-oy1f.37 — expand-lane correctness regressions (W3C expand cases the native
 // document-level oracle exposed). Each is NON-VACUOUS: it fails on the pre-fix expander.
 // ---------------------------------------------------------------------------------------
 
@@ -715,7 +715,7 @@ fn free_floating_value_objects_under_graph_are_dropped() {
 }
 
 // ---------------------------------------------------------------------------------------
-// [OPUS-5] sq-gzsky — the W3C `expand` NegativeEvaluationTest lane is now RUN rather than
+// sq-gzsky — the W3C `expand` NegativeEvaluationTest lane is now RUN rather than
 // skipped, which required these seven spec obligations to be enforced. Each test names the
 // suite case it pins; they live here (not only in the conformance lane) because the W3C
 // suite is fetched, gitignored, and absent from a fresh checkout — these run everywhere.
@@ -785,7 +785,7 @@ fn datatype_iri_with_a_space_is_rejected() {
 
 #[test]
 fn datatype_iri_with_a_malformed_percent_escape_is_rejected() {
-    // [SONNET-4.6] (PR #4610 review) §5.1.2 step 15.4 validates the datatype as an IRI, and
+    // (PR #4610 review) §5.1.2 step 15.4 validates the datatype as an IRI, and
     // `pct-encoded = "%" HEXDIG HEXDIG` — a non-hex or truncated escape is not one. The
     // first cut of the check was a character denylist, which accepted all of these.
     for datatype in [
@@ -804,7 +804,7 @@ fn datatype_iri_with_a_malformed_percent_escape_is_rejected() {
 
 #[test]
 fn datatype_iri_with_a_structurally_invalid_authority_is_rejected() {
-    // [SONNET-4.6] (PR #4610 review round 2) §5.1.2 step 15.4 validates the datatype as an
+    // (PR #4610 review round 2) §5.1.2 step 15.4 validates the datatype as an
     // IRI, which is the RFC 3987 `IRI` production — not merely a scheme plus admitted
     // characters. Every string below is built ENTIRELY from characters an IRI may carry, so
     // the round-one code-point check accepted all of them; each is structurally malformed in
@@ -830,7 +830,7 @@ fn datatype_iri_with_a_structurally_invalid_authority_is_rejected() {
 
 #[test]
 fn structurally_valid_authorities_and_authority_less_schemes_are_accepted_datatypes() {
-    // [SONNET-4.6] (PR #4610 review round 2) The complement of the negatives above: adding
+    // (PR #4610 review round 2) The complement of the negatives above: adding
     // the structural grammar must not over-reject. Covers each `ihost` alternative
     // (IP-literal, IPv4address, ireg-name), userinfo/port, and the authority-less schemes
     // (`ipath-rootless`) that carry no `//` at all.

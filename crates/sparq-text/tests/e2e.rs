@@ -171,7 +171,7 @@ fn prepared_composition_ask() {
 
 /// `text:phrase` over a positions-enabled fixture: the adjacent-in-order
 /// tokens match, the same tokens at non-adjacent positions do not, and order
-/// is significant — exercised end-to-end through the engine. [OPUS-4.8]
+/// is significant — exercised end-to-end through the engine.
 #[test]
 fn phrase_matches_adjacent_tokens_only() {
     let data = r#"
@@ -225,7 +225,7 @@ fn phrase_matches_adjacent_tokens_only() {
 }
 
 /// `text:phrase` against the cheap (positionless) default index is a hard,
-/// clearly-worded query error — not a silent empty result. [OPUS-4.8]
+/// clearly-worded query error — not a silent empty result.
 #[test]
 fn phrase_without_positions_errors() {
     let (g, idx) = setup(); // TextIndex::build — no positions.
@@ -242,7 +242,7 @@ fn phrase_without_positions_errors() {
 
 /// `text:near` end-to-end: the proximity/slop variant joins ranked hits to
 /// triples; `text:slop N` widens the gap budget; `text:score` binds the
-/// proximity score; tighter matches rank first under ORDER BY. [OPUS-4.8]
+/// proximity score; tighter matches rank first under ORDER BY.
 #[test]
 fn near_with_slop_and_score() {
     let data = r#"
@@ -305,7 +305,7 @@ fn near_with_slop_and_score() {
 }
 
 /// `text:near` against the cheap (positionless) default index is a hard query
-/// error, like `text:phrase`. [OPUS-4.8]
+/// error, like `text:phrase`.
 #[test]
 fn near_without_positions_errors() {
     let (g, idx) = setup(); // TextIndex::build — no positions.
@@ -330,7 +330,7 @@ fn rewrite_errors() {
             "constant query-string literal",
         ),
         // Unknown text: predicate is a typo guard (`fuzzy` is now feature-gated).
-        // [GPT-5.6] sq-lsp7k.14
+        // sq-lsp7k.14
         (
             r#"SELECT ?t WHERE { ?t <http://sparq.dev/text#fuzzzy> "fox" }"#,
             "unknown magic predicate",
@@ -355,7 +355,7 @@ fn rewrite_errors() {
             r#"SELECT ?t WHERE { ?t <http://sparq.dev/text#phrase> "fox" . ?t <http://sparq.dev/text#score> ?s }"#,
             "not valid for text:phrase",
         ),
-        // text:slop must be a non-negative integer. [OPUS-4.8]
+        // text:slop must be a non-negative integer.
         (
             r#"SELECT ?t WHERE { ?t <http://sparq.dev/text#near> "fox" . ?t <http://sparq.dev/text#slop> "wide" }"#,
             "non-negative integer",
@@ -364,7 +364,7 @@ fn rewrite_errors() {
             r#"SELECT ?t WHERE { ?t <http://sparq.dev/text#near> "fox" . ?t <http://sparq.dev/text#slop> "-1" }"#,
             "non-negative integer",
         ),
-        // text:slop with no text:near on the same variable. [OPUS-4.8]
+        // text:slop with no text:near on the same variable.
         (
             r#"SELECT ?t WHERE { ?t <http://sparq.dev/text#matches> "fox" . ?t <http://sparq.dev/text#slop> 2 }"#,
             "only valid alongside text:near",
@@ -373,7 +373,7 @@ fn rewrite_errors() {
             r#"SELECT ?t WHERE { ?t <http://sparq.dev/text#slop> 2 }"#,
             "no text:near",
         ),
-        // Duplicate text:slop on one text:near. [OPUS-4.8]
+        // Duplicate text:slop on one text:near.
         (
             r#"SELECT ?t WHERE { ?t <http://sparq.dev/text#near> "fox" . ?t <http://sparq.dev/text#slop> 1 . ?t <http://sparq.dev/text#slop> 2 }"#,
             "duplicate text:slop",
