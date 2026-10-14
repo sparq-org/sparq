@@ -793,8 +793,9 @@ opened, closed or commented on in noir-lang/noir; the maintainer does that.
 What changed against the blockers recorded above:
 
 - **`bb` is available** (#5013). CI installs the pinned `bb` in `zk-toolchain.yml`,
-  `bench/zk-compose/scripts/bb_gates_matrix.py` is the committed gate-count harness, and the
-  rebuild measured every gate row it quotes with `bb gates`.
+  `bench/zk-compose/scripts/gate_counts.sh` measures gate counts with it
+  (`bb_gates_matrix.py` only renders the committed snapshot), and the rebuild measured every
+  gate row it quotes with `bb gates`.
 - **The §5.2 corpus is retired as the regression arbiter** (#5686, #5766). Each branch is
   measured on the programs the change reaches: Noir's own `test_programs` (ACIR opcodes,
   master against branch, over `execution_success` and `compile_success_empty`) and a
@@ -809,4 +810,4 @@ What changed against the blockers recorded above:
   the same class of gap, and also removed range checks on unchecked sums that can exceed their
   type; it now bounds such values by the field element they hold.
 
-Rows 4 and 7 (#2865, #2863) stay open until their branches land upstream.
+Rows 4 and 6 (#2865, #2863) stay open until their branches land upstream.
