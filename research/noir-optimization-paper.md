@@ -42,9 +42,15 @@ jeswr's own measurements. The paper's empirical honesty turns on this
 distinction, so §1 records each PR's measurement status explicitly.
 
 One further correction the paper must carry: these are **circuit-size
-(proving-cost) optimisations**. They do **not** touch, and do **not** establish,
-any zero-knowledge privacy or soundness property — the paper makes no ZK-soundness
-claim, and the Noir soundness question is entirely orthogonal to it.
+(proving-cost) optimisations**. They neither change nor make any claim about the
+*cryptographic* privacy or proof-system soundness of the backend. That is not a
+blanket soundness disclaimer: a compiler rewrite is **constraint-soundness-sensitive**.
+A rewrite that drops a needed constraint under-constrains the circuit, so it accepts
+witnesses the original rejected. The program has met this in practice: an overflow
+check elided downstream of an ACIR unchecked sum that exceeds its type
+([`noir-optimization-program.md`](noir-optimization-program.md) §10.14, #4557).
+Every optimisation the paper reports therefore carries an equivalence obligation
+alongside its gate measurement.
 
 ## 1. Inventory of the existing optimization estate (measurement status)
 
@@ -183,8 +189,9 @@ evaluation-with-evidence-that-exists-today → threats → honest-status).
    whole-circuit-compiler design.
 8. **Limitations & honest status.** The drafts are unmerged and awaiting @jeswr +
    upstream review; measurements are work-box (deterministic counts reproducible,
-   wall-clock indicative); these are size opts and make no ZK-soundness/privacy
-   claim; some wins are floor-limited on small circuits.
+   wall-clock indicative); these are size opts and make no ZK privacy or
+   proof-system soundness claim, but each carries a constraint-equivalence
+   obligation; some wins are floor-limited on small circuits.
 9. **Conclusion.**
 
 ## 4. Measurement plan
@@ -305,4 +312,6 @@ maintainer's explicit "LOW PRIORITY, defer until little else to do" on the paren
   treated as canonical, wall-clock/memory as indicative. The upstream CI gates-diff
   remains the external arbiter and is pending for the drafts.
 - **No ZK claim.** These are circuit-*size* (proving-cost) optimisations; they make
-  and require no zero-knowledge privacy or soundness property.
+  no claim about zero-knowledge privacy or the backend's proof-system soundness.
+  Each still carries a constraint-equivalence obligation (§0): a rewrite must not
+  under-constrain the compiled circuit.

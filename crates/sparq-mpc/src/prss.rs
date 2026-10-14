@@ -607,6 +607,14 @@ impl DistributedRandomness for PrssRandomness {
         RandomnessModel::Prss
     }
 
+    fn parties(&self) -> usize {
+        PrssRandomness::parties(self)
+    }
+
+    fn threshold(&self) -> usize {
+        PrssRandomness::threshold(self)
+    }
+
     /// A fresh degree-`t` sharing of the PRSS value at the next counter — each
     /// party's `C(n−1, t)` local PRF evaluations over its own view, **zero
     /// rounds**. The simulation-only value oracle is not evaluated on this path.

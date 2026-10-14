@@ -332,8 +332,8 @@ pub use authenticated::{
 };
 pub use backend::{
     AbortKind, AdversaryModel, BackendInfo, BackendRegistry, CorruptionThreshold,
-    MaliciousSecurity, MpcBackend, OperatorClass, OutputGuarantee, PublicVerifiability,
-    SecurityDescriptor, SecurityRequirement, TrustModel,
+    MaliciousSecurity, MpcBackend, OperatorClass, OutputGuarantee, PreprocessingBudget,
+    PublicVerifiability, SecurityDescriptor, SecurityRequirement, TrustModel,
 };
 // [OPUS-4.8] sq-dwb5: the batched / vector secret-sharing surface + row-binding.
 pub use batched::{per_row_sum, BatchedAuthShares, BatchedShares, RowBinding};

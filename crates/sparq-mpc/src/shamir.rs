@@ -83,6 +83,7 @@ use crate::backend::{
 use crate::field::Fp;
 use crate::holder::Holder;
 use crate::partial::{HolderId, MpcError, PartialResult};
+use crate::randomness::DistributedRandomness;
 use crate::rng::{MpcRng, SecureRng};
 
 /// A single Shamir share: the polynomial evaluated at a party's nonzero point.
@@ -482,95 +483,7 @@ impl ShamirDealer {
     ///
     /// Returns a fresh degree-`t` sharing on the canonical points `x = 1..n`.
     pub fn degree_reduce(&mut self, shares_2t: &[Share]) -> Result<Vec<Share>, MpcError> {
-        // Fail-closed precondition: we need n >= 2t+1 distinct party points so the
-        // degree-2t polynomial is over-determined and 2t+1 recombination points
-        // exist. (Equivalently: the supplied sharing must cover the full party set.)
-        if shares_2t.len() < 2 * self.t + 1 {
-            return Err(MpcError::Protocol(format!(
-                "degree_reduce: need a degree-2t product sharing on n >= 2t+1 = {} parties, \
-                 got {} shares (honest-majority needs n >= 2t+1 to reduce a degree-2t product)",
-                2 * self.t + 1,
-                shares_2t.len()
-            )));
-        }
-        if shares_2t.len() != self.n {
-            return Err(MpcError::Protocol(format!(
-                "degree_reduce: expected the full {}-party sharing, got {} shares",
-                self.n,
-                shares_2t.len()
-            )));
-        }
-        // `[OPUS-4.8]` Strict canonical-point check (Copilot #119, sq-dvuc). The
-        // whole reduction is a FIXED public linear map that ASSUMES the input is
-        // the full n-party degree-2t sharing on the canonical points `x = 1..=n`
-        // *in order*: the recombination λ-weights below are derived from the first
-        // 2t+1 x-coords and then paired BY POSITION with the fresh sub-sharings
-        // (which `share()` always emits on `x = 1..=n` in order). A permuted or
-        // non-canonical input would silently produce a WRONG reduced sharing, so we
-        // fail closed here rather than mis-reduce. (We choose the strict-canonical
-        // contract — matching the docs — over deriving weights from arbitrary x:
-        // it is simplest and the only ordering any in-process backend ever builds.)
-        for (i, s) in shares_2t.iter().enumerate() {
-            let expected_x = i as u64 + 1;
-            if s.x != expected_x {
-                return Err(MpcError::Protocol(format!(
-                    "degree_reduce: input must be the canonical n-party sharing on x = 1..={}, \
-                     in order; share[{i}] is on x = {} (expected {expected_x})",
-                    self.n, s.x
-                )));
-            }
-        }
-
-        // Public recombination vector: the Lagrange-at-0 weights for the first
-        // 2t+1 evaluation points. H(0) = Σ_{i=1}^{2t+1} λ_i · H(x_i), a FIXED
-        // public linear map (depends only on the party points, never on secrets).
-        // After the canonical-point check above, these are exactly `x = 1..=2t+1`.
-        let recomb_points: Vec<u64> = shares_2t[..2 * self.t + 1].iter().map(|s| s.x).collect();
-        let lambdas = lagrange_zero_weights(&recomb_points);
-
-        // Step 2: each of the 2t+1 recombination parties re-shares its degree-2t
-        // share h_i under a FRESH, independent degree-t polynomial. Each re-sharing
-        // is an n-vector of sub-shares on the canonical points x = 1..n.
-        let mut resharings: Vec<Vec<Share>> = Vec::with_capacity(2 * self.t + 1);
-        for s in &shares_2t[..2 * self.t + 1] {
-            resharings.push(self.share(s.y));
-        }
-
-        // Step 3: every party j locally forms Σ_i λ_i · (sub-share i held by j).
-        // The λ_i are public scalars, the sub-sharings are degree-t, so the result
-        // is a degree-t sharing of Σ_i λ_i·h_i = H(0) = a·b.
-        let mut reduced: Vec<Share> = shares_2t
-            .iter()
-            .map(|s| Share {
-                x: s.x,
-                y: Fp::zero(),
-            })
-            .collect();
-        for (i, sub) in resharings.iter().enumerate() {
-            let lambda = lambdas[i];
-            for (out, sub_share) in reduced.iter_mut().zip(sub.iter()) {
-                // `[OPUS-4.8]` Real fail-closed x-alignment check (Copilot #119,
-                // sq-dvuc). The accumulation pairs each output party with the
-                // sub-share at the SAME position, which is only correct when both
-                // run over the canonical points `x = 1..=n` in order. This was a
-                // `debug_assert_eq!`, which is COMPILED OUT in release — so a
-                // position/point mismatch could silently mis-accumulate in release
-                // builds. A real `if` guarantees it in both profiles. (Given the
-                // canonical-point check above and that `share()` always emits
-                // `x = 1..=n`, this is unreachable in practice; it is a defence-in-
-                // depth invariant, not a redundant assertion.)
-                if out.x != sub_share.x {
-                    return Err(MpcError::Protocol(format!(
-                        "degree_reduce: resharing point misalignment — output party x = {} \
-                         paired with sub-share x = {} (resharings must use the canonical \
-                         points x = 1..={} in order)",
-                        out.x, sub_share.x, self.n
-                    )));
-                }
-                out.y = out.y.add(lambda.mul(sub_share.y));
-            }
-        }
-        Ok(reduced)
+        degree_reduce_through(self, shares_2t)
     }
 
     /// [OPUS-4.8] sq-81gd — **test-only INSTRUMENTED degree-reduce that injects a
@@ -1765,6 +1678,137 @@ fn extract_integer_vector(p: &PartialResult) -> Result<Vec<u64>, MpcError> {
         .collect()
 }
 
+/// [`ShamirDealer::degree_reduce`] with every re-sharing drawn through the
+/// [`DistributedRandomness`] seam: each recombination party re-shares its own
+/// degree-`2t` share with [`DistributedRandomness::vss_own_input`]. The single-dealer
+/// simulation draws exactly what `degree_reduce` always drew, so its output is
+/// unchanged; a source that cannot share a party's own value (PRSS today) makes this
+/// fail closed with that source's error, and a re-sharing that is not the canonical
+/// `n`-party sharing on `x = 1..=n` is refused. Same preconditions and security model
+/// as [`ShamirDealer::degree_reduce`]; the caller must pass a source whose
+/// `(parties(), threshold())` match the `(n, t)` that produced `shares_2t`.
+pub fn degree_reduce_through(
+    source: &mut dyn DistributedRandomness,
+    shares_2t: &[Share],
+) -> Result<Vec<Share>, MpcError> {
+    let (n, t) = (source.parties(), source.threshold());
+    // The source's `(n, t)` is caller-supplied metadata: compute the recombination
+    // count without overflow and require the honest-majority bound `n >= 2t+1`
+    // before using either value.
+    let recomb = t
+        .checked_mul(2)
+        .and_then(|v| v.checked_add(1))
+        .filter(|&r| r <= n)
+        .ok_or_else(|| {
+            MpcError::Protocol(format!(
+                "degree_reduce: the randomness source reports n = {n}, t = {t}; \
+                 honest-majority reduction needs n >= 2t+1"
+            ))
+        })?;
+    // Fail-closed precondition: we need n >= 2t+1 distinct party points so the
+    // degree-2t polynomial is over-determined and 2t+1 recombination points
+    // exist. (Equivalently: the supplied sharing must cover the full party set.)
+    if shares_2t.len() < recomb {
+        return Err(MpcError::Protocol(format!(
+            "degree_reduce: need a degree-2t product sharing on n >= 2t+1 = {} parties, \
+             got {} shares (honest-majority needs n >= 2t+1 to reduce a degree-2t product)",
+            recomb,
+            shares_2t.len()
+        )));
+    }
+    if shares_2t.len() != n {
+        return Err(MpcError::Protocol(format!(
+            "degree_reduce: expected the full {}-party sharing, got {} shares",
+            n,
+            shares_2t.len()
+        )));
+    }
+    // `[OPUS-4.8]` Strict canonical-point check (Copilot #119, sq-dvuc). The
+    // whole reduction is a FIXED public linear map that ASSUMES the input is
+    // the full n-party degree-2t sharing on the canonical points `x = 1..=n`
+    // *in order*: the recombination λ-weights below are derived from the first
+    // 2t+1 x-coords and then paired BY POSITION with the fresh sub-sharings
+    // (each checked below to be on `x = 1..=n` in order). A permuted or
+    // non-canonical input would silently produce a WRONG reduced sharing, so we
+    // fail closed here rather than mis-reduce. (We choose the strict-canonical
+    // contract — matching the docs — over deriving weights from arbitrary x:
+    // it is simplest and the only ordering any in-process backend ever builds.)
+    for (i, s) in shares_2t.iter().enumerate() {
+        let expected_x = i as u64 + 1;
+        if s.x != expected_x {
+            return Err(MpcError::Protocol(format!(
+                "degree_reduce: input must be the canonical n-party sharing on x = 1..={}, \
+                 in order; share[{i}] is on x = {} (expected {expected_x})",
+                n, s.x
+            )));
+        }
+    }
+
+    // Public recombination vector: the Lagrange-at-0 weights for the first
+    // 2t+1 evaluation points. H(0) = Σ_{i=1}^{2t+1} λ_i · H(x_i), a FIXED
+    // public linear map (depends only on the party points, never on secrets).
+    // After the canonical-point check above, these are exactly `x = 1..=2t+1`.
+    let recomb_points: Vec<u64> = shares_2t[..recomb].iter().map(|s| s.x).collect();
+    let lambdas = lagrange_zero_weights(&recomb_points);
+
+    // Step 2: each of the 2t+1 recombination parties re-shares its degree-2t
+    // share h_i under a FRESH, independent degree-t polynomial. Each re-sharing
+    // is an n-vector of sub-shares on the canonical points x = 1..n.
+    let mut resharings: Vec<Vec<Share>> = Vec::with_capacity(recomb);
+    for s in &shares_2t[..recomb] {
+        let sub = source.vss_own_input(s.y)?;
+        // Fail closed on a malformed source result: the accumulation below pairs
+        // sub-shares with output parties BY POSITION, so a short (or long) or
+        // non-canonical re-sharing would silently drop or misplace a
+        // contribution. Every re-sharing must be the full n-party sharing on
+        // `x = 1..=n`, in order.
+        if sub.len() != n || sub.iter().enumerate().any(|(j, sh)| sh.x != j as u64 + 1) {
+            return Err(MpcError::Protocol(format!(
+                "degree_reduce: the randomness source returned a re-sharing that is not the \
+                 canonical {n}-party sharing on x = 1..={n} ({} shares)",
+                sub.len()
+            )));
+        }
+        resharings.push(sub);
+    }
+
+    // Step 3: every party j locally forms Σ_i λ_i · (sub-share i held by j).
+    // The λ_i are public scalars, the sub-sharings are degree-t, so the result
+    // is a degree-t sharing of Σ_i λ_i·h_i = H(0) = a·b.
+    let mut reduced: Vec<Share> = shares_2t
+        .iter()
+        .map(|s| Share {
+            x: s.x,
+            y: Fp::zero(),
+        })
+        .collect();
+    for (i, sub) in resharings.iter().enumerate() {
+        let lambda = lambdas[i];
+        for (out, sub_share) in reduced.iter_mut().zip(sub.iter()) {
+            // `[OPUS-4.8]` Real fail-closed x-alignment check (Copilot #119,
+            // sq-dvuc). The accumulation pairs each output party with the
+            // sub-share at the SAME position, which is only correct when both
+            // run over the canonical points `x = 1..=n` in order. This was a
+            // `debug_assert_eq!`, which is COMPILED OUT in release — so a
+            // position/point mismatch could silently mis-accumulate in release
+            // builds. A real `if` guarantees it in both profiles. (Given the
+            // canonical-point checks on the input and on every re-sharing above,
+            // this is unreachable; it is a defence-in-depth invariant, not a
+            // redundant assertion.)
+            if out.x != sub_share.x {
+                return Err(MpcError::Protocol(format!(
+                    "degree_reduce: resharing point misalignment — output party x = {} \
+                     paired with sub-share x = {} (resharings must use the canonical \
+                     points x = 1..={} in order)",
+                    out.x, sub_share.x, n
+                )));
+            }
+            out.y = out.y.add(lambda.mul(sub_share.y));
+        }
+    }
+    Ok(reduced)
+}
+
 #[cfg(test)]
 mod tests {
     //! M3 Shamir tests. The load-bearing ones are:
@@ -1935,6 +1979,171 @@ mod tests {
     }
 
     // ---- BGW degree-reduction round (sq-dvuc) [OPUS-4.8] ------------------
+
+    #[test]
+    fn degree_reduce_through_the_seam_draws_what_the_dealer_always_drew() {
+        // Pinned from `ShamirDealer::degree_reduce` before it was routed through
+        // `degree_reduce_through`: the single-dealer simulation's output is unchanged.
+        let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
+        let mut dealer = b.dealer();
+        let sa = dealer.share(Fp::new(6));
+        let sb = dealer.share(Fp::new(9));
+        let prod = mul_shares_raw(&sa, &sb).unwrap();
+        let reduced = degree_reduce_through(&mut dealer, &prod).unwrap();
+        let ys: Vec<u64> = reduced.iter().map(|s| s.y.value()).collect();
+        assert_eq!(
+            ys,
+            [
+                292090551779030435,
+                1658655645633629760,
+                1793852272350104078,
+                697680431928453389,
+                675983133582371644
+            ]
+        );
+        assert_eq!(b.reconstruct(&reduced).unwrap(), Fp::new(54));
+    }
+
+    #[test]
+    fn degree_reduce_through_a_source_without_own_input_sharing_fails_closed() {
+        // PRSS generates correlated randomness but cannot share a party's own value,
+        // so a reduction drawn through it refuses rather than faking the re-sharing.
+        let b = ShamirBackend::new_seeded(3, 0xD7C).unwrap();
+        let mut dealer = b.dealer();
+        let prod = mul_shares_raw(&dealer.share(Fp::new(2)), &dealer.share(Fp::new(3))).unwrap();
+        let mut prss = crate::prss::PrssRandomness::with_simulated_setup(3).unwrap();
+        assert!(matches!(
+            degree_reduce_through(&mut prss, &prod),
+            Err(MpcError::NotYetImplemented { .. })
+        ));
+    }
+
+    /// How [`MalformedResharingSource`] corrupts each own-input re-sharing.
+    #[derive(Clone, Copy, Debug)]
+    enum Malformation {
+        Short,
+        Long,
+        Permuted,
+        DuplicateX,
+        WrongX,
+    }
+
+    /// A source that delegates to a real dealer but corrupts the SHAPE of every
+    /// own-input re-sharing.
+    struct MalformedResharingSource {
+        inner: ShamirDealer,
+        how: Malformation,
+    }
+    impl DistributedRandomness for MalformedResharingSource {
+        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
+            self.inner.randomness_model()
+        }
+        fn parties(&self) -> usize {
+            DistributedRandomness::parties(&self.inner)
+        }
+        fn threshold(&self) -> usize {
+            DistributedRandomness::threshold(&self.inner)
+        }
+        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_mask()
+        }
+        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_nonzero_mask()
+        }
+        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
+            let mut sub = self.inner.vss_own_input(secret)?;
+            match self.how {
+                Malformation::Short => {
+                    sub.pop();
+                }
+                Malformation::Long => {
+                    let x = sub.len() as u64 + 1;
+                    sub.push(Share { x, y: Fp::zero() });
+                }
+                Malformation::Permuted => sub.swap(0, 1),
+                Malformation::DuplicateX => sub[1].x = sub[0].x,
+                Malformation::WrongX => sub[0].x = 0,
+            }
+            Ok(sub)
+        }
+    }
+
+    #[test]
+    fn degree_reduce_through_rejects_a_malformed_resharing() {
+        // The accumulation pairs sub-shares with parties by position, so a malformed
+        // re-sharing (any shape below) must be refused by the re-sharing check.
+        for how in [
+            Malformation::Short,
+            Malformation::Long,
+            Malformation::Permuted,
+            Malformation::DuplicateX,
+            Malformation::WrongX,
+        ] {
+            let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
+            let mut dealer = b.dealer();
+            let prod =
+                mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
+            let mut source = MalformedResharingSource {
+                inner: b.dealer(),
+                how,
+            };
+            match degree_reduce_through(&mut source, &prod) {
+                Err(MpcError::Protocol(msg)) => assert!(
+                    msg.contains("re-sharing that is not the canonical"),
+                    "{how:?}: refused by the wrong check: {msg}"
+                ),
+                other => panic!("{how:?}: a malformed re-sharing must fail closed, got {other:?}"),
+            }
+        }
+    }
+
+    /// A dealer-backed source that misreports its threshold.
+    struct MisreportedThresholdSource {
+        inner: ShamirDealer,
+        t: usize,
+    }
+    impl DistributedRandomness for MisreportedThresholdSource {
+        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
+            self.inner.randomness_model()
+        }
+        fn parties(&self) -> usize {
+            DistributedRandomness::parties(&self.inner)
+        }
+        fn threshold(&self) -> usize {
+            self.t
+        }
+        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_mask()
+        }
+        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_nonzero_mask()
+        }
+        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
+            self.inner.vss_own_input(secret)
+        }
+    }
+
+    #[test]
+    fn degree_reduce_through_rejects_source_metadata_outside_honest_majority() {
+        // n = 5 allows t <= 2. A larger t, including one whose 2t+1 overflows,
+        // must be refused before any arithmetic or draw relies on it.
+        let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
+        let mut dealer = b.dealer();
+        let prod = mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
+        for t in [3, usize::MAX / 2, usize::MAX] {
+            let mut source = MisreportedThresholdSource {
+                inner: b.dealer(),
+                t,
+            };
+            match degree_reduce_through(&mut source, &prod) {
+                Err(MpcError::Protocol(msg)) => assert!(
+                    msg.contains("needs n >= 2t+1"),
+                    "t={t}: refused by the wrong check: {msg}"
+                ),
+                other => panic!("t={t}: must fail closed, got {other:?}"),
+            }
+        }
+    }
 
     #[test]
     fn degree_reduce_round_trips_single_product() {

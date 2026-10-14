@@ -136,3 +136,32 @@ fn formula_fallback_preserves_limits_and_recovers_after_delete() {
     assert_eq!(g.delete(&asserted), 1);
     assert_matches(&g, RULES, N3Mode::Counting);
 }
+
+/// Every fact of a fallback closure over formula values with variables is one that
+/// `contains` reports (and, with `explain`, one `why` explains), whether the value was
+/// asserted or a rule built it.
+#[test]
+fn fallback_closure_facts_are_readable() {
+    for (rules, data) in [
+        (RULES, FACT),
+        (RULES, ":a :p ({ :c :q ?y })."),
+        // A rule builds the formula value; another rule carries it on.
+        (
+            "@prefix : <http://ex/>. { :a :p :c } => { :b :r { :c :q ?y } }. \
+             { :b :r ?f } => { :d :s ?f }.",
+            ":a :p :c .",
+        ),
+    ] {
+        let src = format!("{rules} {data}");
+        let g = MaterializedN3Graph::new(&src, &[]).unwrap();
+        assert_eq!(g.mode(), N3Mode::Fallback, "{src}");
+        let closure = g.closure();
+        assert_eq!(closure.iter().cloned().collect::<FxHashSet<_>>(), batch(&src));
+        assert!(closure.len() >= 2, "fixture must derive a fact: {src}");
+        for t in &closure {
+            assert!(g.contains(t), "{t:?}");
+            #[cfg(feature = "explain")]
+            assert!(g.why(t).is_some(), "{t:?}");
+        }
+    }
+}
