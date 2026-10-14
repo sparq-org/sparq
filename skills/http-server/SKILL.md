@@ -1688,6 +1688,9 @@ sensitive content into operator logs.
 log keeps the URI *path* verbatim but replaces the *query string* with `?<redacted len=N fp=…>`
 — a length signal + a stable, non-reversible FNV-1a fingerprint (the same construction the audit
 log uses). Logs stay correlation-useful (same query → same `fp`) without exposing content.
+For `/tpf`, only `subject`, `predicate`, `object`, `graph`, and `page` names are retained:
+term values and nonnumeric `page` values get placeholders, while nonempty ASCII-digit
+`page` values remain visible. Unknown fields, including their names, are redacted in full.
 **`--log-full-requests`** (env `SPARQ_LOG_FULL_REQUESTS=1`) opts OUT and logs the URI verbatim,
 as the bare TraceLayer did — the deliberate debug escape hatch. Library: `ServerConfig {
 verbose: true, redact_logs: true /* default */, .. }`.

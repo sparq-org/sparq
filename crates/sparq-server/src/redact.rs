@@ -27,8 +27,8 @@
 //! not user content). When redaction is off (`--log-full-requests` / `SPARQ_LOG_FULL_REQUESTS`
 //! truthy), the URI is logged verbatim, exactly as the bare `TraceLayer` did before — the escape
 //! hatch for operators who deliberately want full request text in a debug session.
-//! For `/tpf`, numeric `page` values remain visible; all other parameter values are redacted
-//! individually, including unknown parameters.
+//! For `/tpf`, numeric `page` values remain visible; term values and nonnumeric `page` values
+//! are redacted individually. Unknown fields are redacted in full, including their names.
 //!
 //! ## Honest boundary — log-CONTENT redaction, not anonymity
 //!
@@ -63,8 +63,9 @@ fn fnv1a_hex(bytes: &[u8]) -> String {
 /// length and a stable non-reversible fingerprint, so the log stays correlation-useful without
 /// exposing content. A target with no `?` is returned unchanged (nothing to redact). A target
 /// with an empty query (`path?`) records `len=0`.
-/// For `/tpf`, only nonempty ASCII-digit `page` values are preserved. All other values
-/// (and fields without `=`) get individual placeholders; no URL decoding is needed.
+/// For `/tpf`, only nonempty ASCII-digit `page` values are preserved. Term values and other
+/// `page` values get individual placeholders. Unknown fields (and fields without `=`) are
+/// redacted in full; no URL decoding is needed.
 pub fn redact_target(target: &str) -> String {
     match target.split_once('?') {
         Some(("/tpf", query)) if !query.is_empty() => {
@@ -78,12 +79,15 @@ pub fn redact_target(target: &str) -> String {
                         {
                             param.to_string()
                         }
-                        Some((key, value)) => format!(
+                        Some((
+                            key @ ("subject" | "predicate" | "object" | "graph" | "page"),
+                            value,
+                        )) => format!(
                             "{key}=<redacted len={} fp={}>",
                             value.len(),
                             fnv1a_hex(value.as_bytes())
                         ),
-                        None => format!(
+                        _ => format!(
                             "<redacted len={} fp={}>",
                             param.len(),
                             fnv1a_hex(param.as_bytes())
@@ -198,6 +202,7 @@ mod tests {
     fn tpf_redacts_each_term_and_keeps_page() {
         for key in ["subject", "predicate", "object", "graph"] {
             for value in [
+                "",
                 "alice@example.com",
                 "%3Chttp%3A%2F%2Fex%2Falice%3E",
                 "%22a%26page%3D9%22",
@@ -216,19 +221,44 @@ mod tests {
     }
 
     #[test]
-    fn tpf_redacts_unknown_params_and_invalid_pages() {
-        for key in ["unknown", "limit", "per-page", "%70age"] {
+    fn tpf_redacts_unknown_fields_in_full() {
+        for field in [
+            "unknown=10",
+            "values=private",
+            "limit=10",
+            "per-page=10",
+            "%70age=10",
+            "%73ubject=private",
+            "alice%40example.com=private",
+            "alice@example.com=private",
+            "odd+name[]=private",
+            "%ZZ=private",
+            "PAGE=10",
+            "=private",
+            "=",
+            "",
+            "private",
+            "unknown=",
+        ] {
+            let marker = format!(
+                "<redacted len={} fp={}>",
+                field.len(),
+                fnv1a_hex(field.as_bytes())
+            );
             assert_eq!(
-                redact_target(&format!("/tpf?{key}=10")),
-                format!("/tpf?{key}=<redacted len=2 fp={}>", fnv1a_hex(b"10"))
+                redact_target(&format!("/tpf?{field}&page=2&{field}")),
+                format!("/tpf?{marker}&page=2&{marker}")
             );
         }
-        for key in ["unknown", "values", "limit", "per-page", "page", "%70age"] {
-            let value = "private%26data";
+    }
+
+    #[test]
+    fn tpf_redacts_invalid_pages() {
+        for value in ["", "private%26data", "-1", "+1", "1.5", "%31", "１２"] {
             assert_eq!(
-                redact_target(&format!("/tpf?{key}={value}&page=2")),
+                redact_target(&format!("/tpf?page={value}&page=2")),
                 format!(
-                    "/tpf?{key}=<redacted len={} fp={}>&page=2",
+                    "/tpf?page=<redacted len={} fp={}>&page=2",
                     value.len(),
                     fnv1a_hex(value.as_bytes())
                 )
