@@ -42,7 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refuse it fail-closed when a NEW entry selects a method. **Breaking:**
   `RegistryEntry::with_method` is renamed `with_already_issued_method` — it still records any
   method as-is, for decoding and already-issued entries, but the name now says so and there is no
-  unqualified spelling to reach for. These host entry points take a `commit::MethodUse`
+  unqualified spelling to reach for. Retiring V1 in a registry stays OPTIONAL: `scheme` is a
+  plain recorded field this crate neither freezes nor signs, so an existing entry is unaffected
+  and any method can still be written through `with_already_issued_method`. These host entry points take a `commit::MethodUse`
   (`NewIssuance` is the default and is refused for a V1 method or constant; `LegacyAlreadyIssued`
   is the written-down opt-in for re-deriving or re-verifying an already-issued commitment, and is
   a CALLER ASSERTION — nothing reads a signature, entry or timestamp to confirm it):
@@ -72,23 +74,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a V1 constant accepted only under `MethodUse::LegacyAlreadyIssued`. A constant no lane
   derives is refused on every member (`DispatchError::UnknownLaneConst`), a known constant on
   another member is `LaneMemberMismatch`, a V1 constant for new issuance is
-  `LegacyLaneConstForIssuance`, and a value-lane `FieldHex` whose text is not the canonical
-  rendering of the element it decodes to is `NonCanonicalFieldHex` (`field_from_hex_str` also
-  accepts uppercase, `0x`-less, short and at-or-above-modulus spellings, which a text comparison
-  would let through). The same function runs at four call sites: the value-lane builders, every
-  value-lane `Prover.toml` renderer, `prove_in_for_method` (which also refuses a TOML not
-  carrying the checked inputs' constant, `DriverError::ProverTomlLaneMismatch`) and stage 0 of
-  `verifier::prefilter_manifest_structure` (`CheckError::LaneMemberMismatch`). The raw
+  `LegacyLaneConstForIssuance`, and a text that is not the canonical rendering of the element it
+  decodes to is `NonCanonicalFieldHex` (`field_from_hex_str` also accepts uppercase, `0x`-less,
+  short and at-or-above-modulus spellings, which a text comparison would let through).
+  Canonicality is checked over exactly the `FieldHex` public inputs of a VALUE-LANE
+  `ProofInputs` — `datatype_const` at the per-member entry, and `operand_enc` plus
+  `datatype_const` at the `ProofInputs`-level `check_lane_member_pairing{,_for_use}`. No other
+  variant's public inputs and nothing in a rendered `Prover.toml` are checked for canonical
+  spelling. The same function runs at four call sites: the value-lane builders, every
+  value-lane `Prover.toml` renderer, `prove_in_for_method` and stage 0 of
+  `verifier::prefilter_manifest_structure` (`CheckError::LaneMemberMismatch`). The
+  `ProofInputs`-level check additionally requires the VARIANT and the declared `id` to name the
+  same member (`DispatchError::ValueLaneVariantIdMismatch`) — without it a non-value-lane
+  variant declaring a value-lane id, e.g. `FilterInt { id: FilterValueDl }`, carried no
+  `datatype_const` to read and so skipped the pairing entirely while the declared id still chose
+  the circuit. `prove_in_for_method` also refuses a `Prover.toml` whose TOP-LEVEL
+  `datatype_const` is not the checked inputs' one (`DriverError::ProverTomlLaneMismatch`); it
+  reads the top-level key by a strict scan that stops at the first `[`, since a whole-file line
+  scan accepted a `datatype_const` nested under a table while the top level — the part that
+  feeds the witness — carried another lane's constant. The raw
   `CircuitProver::{prove, prove_in, gen_witness*}` entries stay method- and lane-agnostic, so a
-  caller rendering its own `Prover.toml` is outside this boundary. `datatype_const` is a public input no member pins, which is
-  why the decision lives here. This is a host boundary plus one structural pre-filter refusal: the
-  value-lane verifier gates stay closed until the verifier authenticates the method and pins
-  member, lane, scale and bound itself (sq-j506).
-- **sparq-zk-compose:** `verifier::prefilter_manifest_structure` refuses a value-lane sub-proof
-  that no query edge binds (`CheckError::UnboundValueLaneSubProof`). `filter_edge_true` discharges
-  a query FILTER only through a `filter_int` edge, so a value-lane sub-proof cannot discharge any
-  obligation in this verifier (that wiring is sq-j506); one appended to an otherwise valid
-  manifest would previously still be reconstructed and verified while discharging nothing.
+  caller rendering its own `Prover.toml` is outside this boundary. `datatype_const` is a public
+  input no member pins, which is why the decision lives here. Under
+  `MethodUse::LegacyAlreadyIssued` the method version and the constant version are NOT
+  cross-checked: a V2 method presented with a V1 lane constant, or the reverse, is accepted, so
+  the use flag buys the pairing and the member, not version agreement. This is a host boundary
+  plus one structural pre-filter refusal: the value-lane verifier gates stay closed until the
+  verifier authenticates the method and pins member, lane, scale and bound itself (sq-j506).
+- **sparq-zk-compose:** `verifier::prefilter_manifest_structure` refuses EVERY value-lane
+  sub-proof (`CheckError::ValueLaneSubProofNotAccepted`). The refusal is unconditional on the
+  sub-proof being a value-lane member and inspects no edge; it is sound to refuse them wholesale
+  because `filter_edge_true` discharges a query FILTER only through a `filter_int` edge, so no
+  value-lane member can discharge an obligation in this verifier (that wiring is sq-j506).
+  **Behaviour change:** such a manifest was previously ACCEPTED, with the sub-proof
+  reconstructed and verified while discharging nothing. When sq-j506 wires the value-lane query
+  binding, this refusal is what it replaces with a real edge check.
 - **sparq-reason:** `MaterializedN3Graph::with_limits` builds the incremental N3 graph under
   a `ClosureLimits` (`new` uses the default). The counting path now sizes each builtin's
   argument list and result before building it and charges a round and fact allowance; past

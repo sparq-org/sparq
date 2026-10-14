@@ -259,7 +259,11 @@ impl RegistryEntry {
     ///
     /// Honest scope: selectability means "not superseded and not a research dial".
     /// It asserts NO cryptographic property; the estate is NOT externally audited
-    /// (CR-G8 / sq-qhy4).
+    /// (CR-G8 / sq-qhy4). Nor does it RETIRE anything already recorded: `scheme`
+    /// is a plain field this crate neither freezes nor signs, so an existing
+    /// entry keeps whatever method it holds and any method can still be written
+    /// through [`Self::with_already_issued_method`]. Retiring a method in a
+    /// deployed registry is the operator's choice, not something enforced here.
     pub fn with_issuance_method(
         self,
         method: crate::commit::CommitmentMethod,

@@ -1179,11 +1179,21 @@ directly.
 *accepted* by the shared integer member, whose relation range-decomposes the handle over the
 whole `u64` domain. `sparq-zk-compose`'s `dispatch::check_lane_member_pairing` therefore
 refuses that pairing structurally, and `verifier::prefilter_manifest_structure` runs the same
-check per sub-proof. Separately, V1 is no longer selectable for new issuance, so every
-fresh-V1 entry point — the registry entry, the whole-graph V1 commit builders, the V1 boolean
-FILTER builder, the method-checked prove entry and the `(method, circuit)` resolver — fails
-closed unless the caller writes down `MethodUse::LegacyAlreadyIssued` for an already-issued
-commitment.
+check per sub-proof. What that check decides, exactly: the `datatype_const` must decode to a
+constant a shipped lane derives FOR that member; its text must be the canonical rendering of
+that element; at the `ProofInputs` level the same canonicality rule covers `operand_enc` too,
+and the variant and the declared `id` must name the same member. That is the whole of it —
+no other variant's public inputs, and nothing inside a rendered `Prover.toml`, is checked for
+canonical spelling, and the SCALE a relying party expects is still not pinned anywhere here.
+Separately, V1 is no longer selectable for new issuance, so every fresh-V1 entry point — the
+registry entry, the whole-graph V1 commit builders, the V1 boolean FILTER builder, the
+method-checked prove entry and the `(method, circuit)` resolver — fails closed unless the
+caller writes down `MethodUse::LegacyAlreadyIssued` for an already-issued commitment. Two
+honest limits on that flag: it is a CALLER ASSERTION (nothing reads a signature, entry or
+timestamp to confirm issuance history), and under it the METHOD version and the CONSTANT
+version are not cross-checked — a V2 method presented with a V1 lane constant is accepted.
+Nor does any of this retire a recorded V1 selection: `zk:scheme` is a plain recorded field
+that this estate neither freezes nor signs.
 
 **PRECONDITION on (a)–(d), stated plainly.** All of it is HOST-side. The value-lane verifier
 gates (`verifier.rs`'s stage-2 binding edges and `filter_edge_true`) stay CLOSED until the
