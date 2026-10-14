@@ -42,9 +42,15 @@ jeswr's own measurements. The paper's empirical honesty turns on this
 distinction, so §1 records each PR's measurement status explicitly.
 
 One further correction the paper must carry: these are **circuit-size
-(proving-cost) optimisations**. They do **not** touch, and do **not** establish,
-any zero-knowledge privacy or soundness property — the paper makes no ZK-soundness
-claim, and the Noir soundness question is entirely orthogonal to it.
+(proving-cost) optimisations**. They neither change nor make any claim about the
+*cryptographic* privacy or proof-system soundness of the backend. That is not a
+blanket soundness disclaimer: a compiler rewrite is **constraint-soundness-sensitive**.
+A rewrite that drops a needed constraint under-constrains the circuit, so it accepts
+witnesses the original rejected. The program has met this in practice: an overflow
+check elided downstream of an ACIR unchecked sum that exceeds its type
+([`noir-optimization-program.md`](noir-optimization-program.md) §10.14, #4557).
+Every optimisation the paper reports therefore carries an equivalence obligation
+alongside its gate measurement.
 
 ## 1. Inventory of the existing optimization estate (measurement status)
 
