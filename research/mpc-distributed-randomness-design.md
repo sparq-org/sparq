@@ -350,12 +350,41 @@ and the crate remains research-grade and externally unaudited (`sq-qhy4` pending
    selectable end-to-end. Deployment acceptance must then be tied to the validated PRSS /
    coin-toss constructions themselves (an unforgeable construction boundary), not to the
    descriptive `RandomnessModel` label a source self-reports.
-   **Status: IN PROGRESS** (#6117). The seam reports `parties()` / `threshold()`, and
-   `degree_reduce` draws its re-sharings through it (`shamir::degree_reduce_through`, via
-   `vss_own_input`); the single-dealer output is unchanged and a PRSS source fails closed.
-   `secure_equal`, `share_private_input` and the oblivious-shuffle control bits still call the
-   dealer. No entry point is gated on `require_deployable()` yet, because it refuses every
-   source today.
+   **Status: IN PROGRESS** (#6117). The seam reports `parties()` / `threshold()`. In every case
+   below the single-dealer simulation draws exactly what it drew before the routing (pinned by
+   seeded tests), and a source that cannot serve a call makes it fail closed with that source's
+   own error.
+
+   *Drawing through the seam:*
+   - `degree_reduce` — each recombination party's re-sharing via `vss_own_input`
+     (`shamir::degree_reduce_through`).
+   - The hidden-value **equality** path (`join::HiddenValueJoin::secure_equal` /
+     `secure_equal_shared`) — both key sharings via `vss_own_input`, the equality mask via
+     `shared_nonzero_mask`.
+   - The whole **comparison / equality-to-bit** chain in `compare`: operand bits via
+     `vss_own_input` (`share_bits`), every chain multiplication's degree reduction via
+     `degree_reduce_through`, and the `secret_is_zero` / square-protocol masks via
+     `shared_nonzero_mask`. So `secure_greater_than`, `secure_threshold`, `secure_equal_to_bit`
+     and `disclose_threshold_verdict` (including the Rabbit full-field decomposition and its
+     in-protocol range proof) all run their randomness over the seam. Their PUBLIC signatures are
+     unchanged: the three operand-taking entry points still take `&mut ShamirDealer` and delegate
+     to in-crate `*_through` functions taking `&mut dyn DistributedRandomness`, and
+     `disclose_threshold_verdict` mints its dealer from the backend as before and hands it to the
+     seam-taking helpers.
+
+   *Still calling the dealer directly:*
+   - `compare::deal_random_solved_bits` (test-only reference generator) — it needs `draw_bit`,
+     which the seam has no method for.
+   - `join::BatchedHiddenInput::shared_keys` — `ShamirDealer::share_batch`; the seam has no
+     batch method.
+   - `hidden_distinct` / `hidden_path` — their local `secret_and` / `secret_or` degree
+     reductions and `distinct_hidden_pairs`' key sharings. Unblocked by the `compare`
+     `*_through` entry points above; a follow-on batch.
+   - The oblivious-shuffle / oblivious-output control bits, the `authenticated` / `auth_compare`
+     / `auth_disclose` MAC-session twins, and the remaining `backend` / `batched` / `robust`
+     input-dealing paths.
+
+   No entry point is gated on `require_deployable()` yet, because it refuses every source today.
 
 ---
 
