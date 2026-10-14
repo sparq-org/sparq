@@ -4,9 +4,10 @@
     check-floor.py <runs-dir> [floor.json]
 
 Modules are the first path segment of a test id (core, auth, index), except notifications/webhook.
-Raise the floor in the same change that makes more tests pass; never lower it to go green. The one
-exception is a test that becomes inapplicable because the server gains the feature it probes the
-absence of: lower the floor by that test, and name it in floor.json.
+Raise the floor in the same change that makes more tests pass; never lower it to go green.
+A test floor.json lists under "supported" probes the absence of a feature this server supports: it
+counts as a pass only when inapplicable, and a pass of it (or its absence from the run) fails the
+check, since that means the feature was lost.
 """
 import glob
 import json
@@ -28,13 +29,24 @@ def main() -> int:
         print(f"no Touchstone report under {runs}", file=sys.stderr)
         return 2
     report = json.load(open(reports[-1]))
+    floor_doc = json.load(open(floor_path))
+    floor, supported = floor_doc["passed"], set(floor_doc.get("supported", []))
+    ok = True
     passed, total = Counter(), Counter()
     for t in report["tests"]:
         m = module(t["id"])
         total[m] += 1
-        passed[m] += t["outcome"] == "passed"
-    floor = json.load(open(floor_path))["passed"]
-    ok = True
+        if t["id"] in supported:
+            held = t["outcome"] == "inapplicable"
+            passed[m] += held
+            if not held:
+                ok = False
+                print(f"  {t['outcome']:9} supported feature lost: {t['id']}")
+        else:
+            passed[m] += t["outcome"] == "passed"
+    for missing in sorted(supported - {t["id"] for t in report["tests"]}):
+        ok = False
+        print(f"  missing   supported feature not run: {missing}")
     for m in sorted(set(total) | set(floor)):
         want = floor.get(m, 0)
         line = f"{m:24} {passed[m]:4} passed of {total[m]:4} (floor {want})"

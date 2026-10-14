@@ -1,7 +1,9 @@
 {
-  "_doc": "Touchstone passes per module that CI must keep (check-floor.py). Raise with the change that earns it. Core is 121 since linkset PUT: Touchstone's linkset-put-405-when-unsupported is inapplicable to a server that supports it.",
+  "_doc": "Touchstone passes per module that CI must keep (check-floor.py). Raise with the change that earns it.",
+  "_supported_doc": "Tests that probe the absence of a feature this server supports. Each counts toward its module's floor only when Touchstone reports it inapplicable; passing means the feature was lost, and fails the check.",
+  "supported": ["core/linksets#linkset-put-405-when-unsupported"],
   "passed": {
-    "core": 121,
+    "core": 122,
     "auth": 31,
     "index": 40,
     "notifications/webhook": 11
