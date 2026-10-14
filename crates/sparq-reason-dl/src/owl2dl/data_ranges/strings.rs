@@ -904,6 +904,19 @@ mod tests {
     }
 
     #[test]
+    fn enumerations_are_charged_before_the_walk() {
+        // The walk would stop at the first byte (not an XML character), so only the
+        // construction budget can give up here.
+        let mut w = vec![0u8];
+        w.extend(std::iter::repeat_n(b'a', TOTAL_DFA_BYTES / TRIE_NODE_BYTES));
+        assert_eq!(count(&F::atom(Atom::Is(w)), Space::Text, 2), None);
+        assert_eq!(
+            count(&F::atom(Atom::Is(vec![0, b'a'])), Space::Text, 2),
+            Some(0)
+        );
+    }
+
+    #[test]
     fn length_bounds_at_the_integer_limit_give_up() {
         assert_eq!(
             count(&F::atom(Atom::Len(0, Some(u64::MAX))), Space::Text, 2),

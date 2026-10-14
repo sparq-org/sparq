@@ -665,6 +665,9 @@ fn values_no_literal_has_answer_unknown() {
     assert_eq!(has_at_least(&one_of([third]), 1), Tri::Unknown);
     let min = Value::Real(RationalKey(Rational::int(i128::MIN)));
     assert_eq!(contains(&dt("integer"), &min), Tri::Yes);
+    let max = Value::Real(RationalKey(Rational::int(i128::MAX)));
+    assert_eq!(contains(&dt("integer"), &max), Tri::Yes);
+    assert_eq!(contains(&dt("long"), &max), Tri::No);
     let negative_den = Value::Real(RationalKey(Rational { num: 1, den: -1 }));
     assert_eq!(contains(&dt("integer"), &negative_den), Tri::Unknown);
     let unreduced = Value::Real(RationalKey(Rational { num: 2, den: 4 }));
