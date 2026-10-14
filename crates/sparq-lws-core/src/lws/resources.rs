@@ -532,14 +532,14 @@ async fn unread_precondition<S: Store + 'static>(
 
 /// Whether `agent` may read `uri`, decided without its lock the way [`authorize_unlocked`] decides:
 /// on what the resource was before a change in flight to it (or one set aside) began, and only once
-/// no change began or ended meanwhile. A resource such a change is creating is left to the checks
-/// under the lock.
+/// no change began or ended meanwhile. A resource such a change is creating was not there before
+/// it, and nothing may be read of it: the write is refused, whoever asks.
 async fn reads_stably<S: Store + 'static>(state: &LwsState<S>, uri: &str, agent: &Agent) -> bool {
     stably(state, uri, || async {
         if !state.visible(uri) || state.locks.changing(uri) {
             return matches!(
                 super::access::aside(state, Action::Read, uri, agent).await,
-                Ok(super::access::Aside::Allowed | super::access::Aside::Missing)
+                Ok(super::access::Aside::Allowed)
             );
         }
         state.allowed(Action::Read, uri, agent).await
