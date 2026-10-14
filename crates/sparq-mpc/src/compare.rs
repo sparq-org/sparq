@@ -237,7 +237,11 @@ fn check_in_range(label: &str, v: Fp) -> Result<(), MpcError> {
 /// `t = ⌊(n−1)/2⌋ ⇒ n >= 2t+1`, so this only fires on a mis-built backend; it
 /// fails with a descriptive error rather than letting `degree_reduce` panic later.
 pub(crate) fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
-    if n < 2 * t + 1 {
+    // Checked, so a misreported `t` cannot wrap `2t+1` past the guard.
+    if t.checked_mul(2)
+        .and_then(|v| v.checked_add(1))
+        .is_none_or(|r| r > n)
+    {
         return Err(MpcError::Protocol(format!(
             "secure comparison needs n >= 2t+1 (each multiplication's degree reduction does); \
              got n = {n}, t = {t}"
@@ -3016,9 +3020,11 @@ mod randomness_seam_tests {
     /// Every number below was captured by running the SAME call on the
     /// PRE-ROUTING code (inline `dealer.share` / `draw_nonzero_fp` /
     /// `degree_reduce`) and printing it. The trailing `draw_fp()` is a WITNESS: it
-    /// pins how many draws — and in what order — the call consumed from the
-    /// masking RNG, so an extra, missing or re-ordered draw fails even when the
-    /// returned sharing happens to agree.
+    /// pins how many draws the call consumed from the masking RNG, so an extra or
+    /// missing draw fails even when the returned sharing happens to agree, and the
+    /// returned sharing pins the reductions' re-sharing randomness. Swapping the
+    /// two operands' input sharings is not caught: a BGW reduction's output
+    /// depends only on the secret and the fresh re-sharing, not on the inputs.
     #[test]
     fn seeded_entry_points_draw_exactly_what_the_dealer_drew_before_the_seam() {
         let mut dealer = ShamirBackend::new_seeded(5, 0x5EED1).unwrap().dealer();
@@ -3231,6 +3237,21 @@ mod randomness_seam_tests {
         fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
             self.inner.vss_own_input(secret)
         }
+    }
+
+    /// The `*_through` paths read `t` off the source, so the party-count guard
+    /// must not let a misreported `t` wrap `2t+1` back under `n`
+    /// (`usize::MAX/2 + 3` wraps to 5).
+    #[test]
+    fn party_count_guard_rejects_a_threshold_that_would_wrap() {
+        for t in [3, usize::MAX / 2, usize::MAX / 2 + 3, usize::MAX] {
+            let err = check_party_count(5, t).unwrap_err();
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("needs n >= 2t+1")),
+                "t = {t}: {err:?}"
+            );
+        }
+        assert!(check_party_count(5, 2).is_ok());
     }
 
     /// `secret_is_zero` masks with `m = v·r` and opens it: with `r = 0` it would

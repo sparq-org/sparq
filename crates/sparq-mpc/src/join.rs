@@ -513,7 +513,11 @@ impl HiddenValueJoin {
     ) -> Result<bool, MpcError> {
         let t = source.threshold();
         // Honest-majority headroom: one multiplication needs 2t+1 <= n parties.
-        if source.parties() < 2 * t + 1 {
+        // Checked, so a misreported `t` cannot wrap `2t+1` past the guard.
+        if t.checked_mul(2)
+            .and_then(|v| v.checked_add(1))
+            .is_none_or(|r| r > source.parties())
+        {
             return Err(MpcError::Protocol(format!(
                 "secure_equal needs n >= 2t+1 (n={}, t={})",
                 source.parties(),
@@ -2407,9 +2411,10 @@ mod randomness_seam_tests {
 
     /// Pinned from the PRE-ROUTING code (`dealer.share` + `draw_nonzero_fp` +
     /// `share` inline). `secure_equal` returns only a bit, so the WITNESS draw
-    /// after the calls is what actually pins the draw count and order: it is the
-    /// next `draw_fp()` from the same dealer, and it moves if the equality path
-    /// consumes the masking RNG differently.
+    /// after the calls is what pins the draw count: it is the next `draw_fp()`
+    /// from the same dealer, and it moves if the equality path consumes more or
+    /// fewer draws. It does not pin the order of the two key sharings, since
+    /// swapping them changes neither the bit nor the count.
     #[test]
     fn seeded_equality_path_draws_exactly_what_the_dealer_drew_before_the_seam() {
         let backend = ShamirBackend::new_seeded(5, 0x5EED7).unwrap();
