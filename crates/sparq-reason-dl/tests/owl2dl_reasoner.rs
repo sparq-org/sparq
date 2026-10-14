@@ -4,10 +4,11 @@
 // ontology per construct). The differential test runs a seeded generator of random SHIQ
 // ontologies and compares consistency, unsatisfiable classes and every entailed named
 // subsumption with answers recorded from an independent OWL 2 DL reasoner
-// (`tests/data/owl2dl_oracle_expected.txt`). To regenerate those answers, dump the corpus with
+// (`tests/data/owl2dl_oracle_expected.txt`); a second, focused corpus has its own answers
+// (`tests/data/owl2dl_oracle_focused_expected.txt`). To regenerate them, dump the corpora with
 // `OWL2DL_ORACLE_DUMP=<dir> cargo test -p sparq-reason-dl --test owl2dl_reasoner oracle`,
-// run the reference reasoner over `<dir>/*.ttl` in seed order, and write its answers in the
-// same line format (see `render`).
+// run the reference reasoner over `<dir>/<corpus>/*.ttl` in seed order, and write its answers
+// in the same line format (see `render`).
 
 use oxrdf::{NamedNode, Term as OTerm};
 use sparq_core::dict::{Dict, Id};
@@ -729,8 +730,7 @@ fn render(d: &Dict, report: &DlReport, names: &BTreeMap<Id, String>) -> String {
     lines.join("\n")
 }
 
-fn expected() -> BTreeMap<u64, String> {
-    let text = include_str!("data/owl2dl_oracle_expected.txt");
+fn expected(text: &str) -> BTreeMap<u64, String> {
     let mut out = BTreeMap::new();
     let mut cur: Option<(u64, Vec<&str>)> = None;
     for line in text.lines() {
@@ -750,21 +750,23 @@ fn expected() -> BTreeMap<u64, String> {
     out
 }
 
-#[test]
-fn oracle_differential() {
+/// Compares `seeds` generated ontologies with the reference answers in `recorded`. With
+/// `OWL2DL_ORACLE_DUMP=<dir>` set, writes the corpus to `<dir>/<corpus>/` instead.
+fn differential(corpus: &str, generate: fn(u64) -> String, seeds: u64, recorded: &str) {
     if let Ok(dir) = std::env::var("OWL2DL_ORACLE_DUMP") {
+        let dir = format!("{dir}/{corpus}");
         std::fs::create_dir_all(&dir).unwrap();
-        for seed in 0..SEEDS {
-            let ttl = format!("{PRE}{}", Gen::ontology(seed));
+        for seed in 0..seeds {
+            let ttl = format!("{PRE}{}", generate(seed));
             std::fs::write(format!("{dir}/seed{seed:04}.ttl"), ttl).unwrap();
         }
         return;
     }
-    let expected = expected();
+    let expected = expected(recorded);
     let mut failures = Vec::new();
     let mut skipped = 0;
-    for seed in 0..SEEDS {
-        let body = Gen::ontology(seed);
+    for seed in 0..seeds {
+        let body = generate(seed);
         let (d, t) = Graph::parse_to_triples(&format!("{PRE}{body}"), "turtle").unwrap();
         let o = extract(&d, &t).unwrap_or_else(|e| panic!("seed {seed}: extract: {e}"));
         let report = check(&d, &o, Budget::default());
@@ -791,12 +793,12 @@ fn oracle_differential() {
         }
     }
     assert!(
-        skipped * 50 < SEEDS,
+        skipped * 50 < seeds,
         "the reference failed on {skipped} seeds"
     );
     assert!(
         failures.is_empty(),
-        "{} of {SEEDS} seeds disagree:\n{}",
+        "{} of {seeds} seeds disagree:\n{}",
         failures.len(),
         failures
             .iter()
@@ -804,5 +806,117 @@ fn oracle_differential() {
             .cloned()
             .collect::<Vec<_>>()
             .join("\n")
+    );
+}
+
+#[test]
+fn oracle_differential() {
+    differential(
+        "shiq",
+        Gen::ontology,
+        SEEDS,
+        include_str!("data/owl2dl_oracle_expected.txt"),
+    );
+}
+
+/// A second corpus aimed at the constructs earlier reviews found answers wrong for:
+/// negative property assertions over transitive roles and role hierarchies, `owl:Thing` and
+/// `owl:Nothing` in axioms, and declared classes no axiom mentions. Each ontology has an
+/// ABox of chained role assertions so transitive paths actually form.
+fn focused(seed: u64) -> String {
+    let mut rng = Rng(seed.wrapping_mul(0xD1B5_4A32_D192_ED03) | 1);
+    let n_classes = 3 + rng.below(5);
+    let n_roles = 1 + rng.below(3);
+    let mut out = String::new();
+    let _ = writeln!(out, "<http://ex/f{seed}> a owl:Ontology .");
+    for i in 0..n_classes {
+        let _ = writeln!(out, ":C{i} a owl:Class .");
+    }
+    for i in 0..n_roles {
+        let _ = writeln!(out, ":r{i} a owl:ObjectProperty .");
+    }
+    let mut transitive = vec![false; n_roles];
+    for (i, t) in transitive.iter_mut().enumerate() {
+        if rng.chance(60) {
+            *t = true;
+            let _ = writeln!(out, ":r{i} a owl:TransitiveProperty .");
+        }
+    }
+    let mut incl = Vec::new();
+    if n_roles > 1 && rng.chance(50) {
+        let (a, b) = (rng.below(n_roles), rng.below(n_roles));
+        if a != b {
+            incl.push((a, b));
+            let _ = writeln!(out, ":r{a} rdfs:subPropertyOf :r{b} .");
+        }
+    }
+    let mut simple: Vec<bool> = transitive.iter().map(|t| !t).collect();
+    for &(a, b) in &incl {
+        if !simple[a] {
+            simple[b] = false;
+        }
+    }
+    // Only the first few classes appear in axioms; the rest are declared and unused.
+    let used = 2 + rng.below(n_classes - 1);
+    let mut g = Gen {
+        rng,
+        n_classes: used,
+        n_roles,
+        simple,
+    };
+    for _ in 0..(1 + g.rng.below(4)) {
+        let line = match g.rng.below(9) {
+            0 => format!("owl:Thing rdfs:subClassOf {} .", g.concept(1)),
+            1 => format!("{} rdfs:subClassOf owl:Nothing .", g.concept(1)),
+            2 => format!(
+                "{} owl:equivalentClass [ a owl:Class ; owl:unionOf ( {} owl:Nothing ) ] .",
+                g.class(),
+                g.concept(1)
+            ),
+            3 => format!("{} owl:disjointWith owl:Thing .", g.class()),
+            _ => {
+                let (a, b) = (g.class(), g.concept(2));
+                format!("{a} rdfs:subClassOf {b} .")
+            }
+        };
+        let _ = writeln!(out, "{line}");
+    }
+    let n_ind = 2 + g.rng.below(4);
+    for i in 0..n_ind {
+        let _ = writeln!(out, ":i{i} a owl:NamedIndividual .");
+    }
+    // A chain i0 r i1 r i2 ..., with some shortcuts and class assertions.
+    for i in 0..n_ind - 1 {
+        let r = g.rng.below(n_roles);
+        let _ = writeln!(out, ":i{i} :r{r} :i{} .", i + 1);
+    }
+    for _ in 0..g.rng.below(3) {
+        let a = g.rng.below(n_ind);
+        let c = g.concept(1);
+        let _ = writeln!(out, ":i{a} a {c} .");
+    }
+    for _ in 0..(1 + g.rng.below(3)) {
+        // Mostly forward along the chain, where a transitive path may entail the pair.
+        let a = g.rng.below(n_ind - 1);
+        let b = if g.rng.chance(75) {
+            a + 1 + g.rng.below(n_ind - 1 - a)
+        } else {
+            g.rng.below(n_ind)
+        };
+        let r = g.rng.below(n_roles);
+        let _ = writeln!(out, "[ a owl:NegativePropertyAssertion ; owl:sourceIndividual :i{a} ; owl:assertionProperty :r{r} ; owl:targetIndividual :i{b} ] .");
+    }
+    out
+}
+
+const FOCUSED_SEEDS: u64 = 200;
+
+#[test]
+fn oracle_differential_focused() {
+    differential(
+        "focused",
+        focused,
+        FOCUSED_SEEDS,
+        include_str!("data/owl2dl_oracle_focused_expected.txt"),
     );
 }
