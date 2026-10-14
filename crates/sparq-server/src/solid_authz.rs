@@ -1533,21 +1533,22 @@ fn trust_authz_decide(
 fn build_store_with_admitted(
     req: &AuthzRequest,
     admitted: &[sparq_trust::AdmittedFact],
-    resource: &str,
+    _resource: &str,
     _full_body: &serde_json::Value,
 ) -> Result<sparq_solid::PodStore, Response> {
     use std::fmt::Write as _;
-    // The ACL graph IRI for this resource (Solid naming convention: resource + ".acl").
-    // Admitted facts emitted into this named graph are seen by the WAC N3 loader
-    // (assemble_input processes all graphs whose name ends in ".acl").
     // POSITIONAL format args throughout (CodeQL rust/unused-variable guard).
-    let _ = resource;
     let mut augmented = req.dataset.clone();
     for fact in admitted {
         // Named-graph position: the document of the fact's subject (a group IRI's group
         // document), the only document whose statements about that node the loader keeps.
+        // Admitted facts describe group membership, so they never go into an access-control
+        // document.
         if let oxrdf::NamedOrBlankNode::NamedNode(group) = &fact.triple.subject {
             let doc = group.as_str().split('#').next().unwrap_or(group.as_str());
+            if doc.ends_with(".acl") || doc.ends_with(".acr") {
+                continue;
+            }
             let _ = writeln!(
                 &mut augmented,
                 "{} {} {} <{}> .",
