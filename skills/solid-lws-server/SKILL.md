@@ -181,7 +181,10 @@ container. Use `If-Match` and `If-None-Match` for conditional mutations.
 Container reads include generated `ldp:contains` triples. A container's `ETag`
 covers its own record and its membership: a tag read in any format is a valid
 `If-Match` for the container until it or its membership changes. Creating a
-container returns its current tag; replacing one returns no `ETag`.
+container returns its current tag; replacing one returns no `ETag`. Generated
+and re-serialised representations list children in IRI order and label blank
+nodes `_:b0`, `_:b1`, … by position, so one state always reads back as the
+same bytes.
 
 Use a trailing slash for containers. A resource and container cannot coexist at
 slash-equivalent paths. ACL resources use the sibling `.acl` convention and

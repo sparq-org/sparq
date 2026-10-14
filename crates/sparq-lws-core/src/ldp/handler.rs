@@ -45,8 +45,8 @@ use crate::authz::{mode_for_operation, AccessMode};
 use crate::error::ServerError;
 use crate::ldp::conditional::{self, evaluate as eval_preconditions};
 use crate::ldp::content::{
-    classify, negotiate_accept_with_profile, parse_to_triples, serialize_triples,
-    serialize_triples_negotiated, validate_rdf, RdfFormat,
+    classify, label_blank_nodes_by_position, negotiate_accept_with_profile, parse_to_triples,
+    serialize_triples, serialize_triples_negotiated, validate_rdf, RdfFormat,
 };
 use crate::ldp::patch::{
     apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update, PatchKind,
@@ -1940,10 +1940,12 @@ async fn render_container<S: Store>(
     // The stored set is carried through VERBATIM (no intra-set de-dup) — exactly as before — so a
     // container body that literally repeats a triple keeps both occurrences (the serialised bytes,
     // and hence the representation ETag, stay identical to the prior linear-scan render).
-    let stored_triples: Vec<Triple> = match stored_format {
+    let mut stored_triples: Vec<Triple> = match stored_format {
         Some(fmt) => parse_to_triples(fmt, stored_body, container_iri).unwrap_or_default(),
         None => Vec::new(),
     };
+    // Fix blank-node labels by position, so one container state always renders to the same bytes.
+    label_blank_nodes_by_position(&mut stored_triples);
 
     // Build the output Vec DIRECTLY — no whole-graph `HashSet<Triple>` clone-dedup. The previous code
     // seeded a `HashSet` from `stored_triples.iter().cloned()` and clone-inserted every generated
@@ -2275,8 +2277,10 @@ fn negotiate_body(
     if negotiated.serves_stored_verbatim(stored_format) {
         return Ok((stored_body.clone(), stored_content_type.to_string()));
     }
-    // Re-serialise into the chosen format + document form.
-    let triples = parse_to_triples(stored_format, stored_body, base_iri)?;
+    // Re-serialise into the chosen format + document form, with blank-node labels fixed by
+    // position so the same stored bytes always re-serialise to the same bytes.
+    let mut triples = parse_to_triples(stored_format, stored_body, base_iri)?;
+    label_blank_nodes_by_position(&mut triples);
     let bytes = serialize_triples_negotiated(negotiated, &triples)?;
     Ok((Bytes::from(bytes), negotiated.content_type()))
 }
@@ -5369,6 +5373,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn re_serialised_reads_with_anonymous_blank_nodes_are_byte_stable() {
+        // A parser invents fresh labels for `[ … ]` and collections on every parse. A container (always
+        // rendered) and a plain resource read in another format must still serve the same bytes for
+        // the same state, in every format, because each carries a strong validator.
+        const BODY: &str =
+            "<> <http://p> [ <http://q> \"x\" ] ; <http://r> ( 1 [ <http://s> 2 ] ) .";
+        let store = store_with_owner_root_acl().await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        for path in ["/alice/c/", "/alice/doc"] {
+            put_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                path.parse().unwrap(),
+                turtle_write_headers(),
+                AxBytes::from(BODY),
+            )
+            .await
+            .expect("store a document with anonymous blank nodes");
+        }
+        for (path, media) in [
+            ("/alice/c/", "text/turtle"),
+            ("/alice/c/", "application/ld+json"),
+            ("/alice/c/", "application/n-triples"),
+            ("/alice/c/", "application/n-quads"),
+            ("/alice/doc", "application/ld+json"),
+            ("/alice/doc", "application/n-triples"),
+        ] {
+            let mut reads = Vec::new();
+            for _ in 0..2 {
+                let mut accept = HeaderMap::new();
+                accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+                let resp = get_with(&state, owner_token(), path, accept).await;
+                assert_eq!(resp.status(), StatusCode::OK, "{path} {media}");
+                let tag = etag_of(&resp);
+                reads.push((tag, body_bytes(resp).await));
+            }
+            assert!(
+                String::from_utf8_lossy(&reads[0].1).contains("_:") || media.contains("json"),
+                "{path} {media}: the body carries blank nodes"
+            );
+            assert_eq!(reads[0], reads[1], "{path} {media}");
+        }
+    }
+
+    #[tokio::test]
     async fn a_new_containers_write_etag_is_a_current_validator() {
         // A container created by POST or PUT is empty, and the ETag its creation returns is current
         // for a conditional write: an If-Match DELETE with it removes the container.
@@ -5693,6 +5742,24 @@ mod tests {
         .await
         .expect_err("a variant of a stale state must fail the precondition");
         assert_eq!(err.status(), StatusCode::PRECONDITION_FAILED);
+    }
+
+    #[test]
+    fn container_state_tags_frame_each_field() {
+        // Moving bytes across the boundary between the stored tag and a child, or between two
+        // children, is a different state.
+        let child = |iri: &str| crate::store::ValidatedChildIri::parse(iri).unwrap();
+        let tag = |stored: &str, children: &[&str]| {
+            let children: Vec<_> = children.iter().map(|c| child(c)).collect();
+            container_state_etag(stored, &children)
+        };
+        // Both lists concatenate to `a:xa:yb:z`.
+        assert_ne!(
+            tag("\"1-a\"", &["a:x", "a:yb:z"]),
+            tag("\"1-a\"", &["a:xa:y", "b:z"])
+        );
+        assert_eq!(tag("\"1-a\"", &[]), tag("\"1-a\"", &[]));
+        assert!(tag("\"1-a\"", &["http://x/a"]).starts_with("\"1-"));
     }
 
     #[test]
