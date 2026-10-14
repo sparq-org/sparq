@@ -1363,7 +1363,7 @@ pub fn bind_posture(addr: &SocketAddr, allow_remote: bool, auth: AuthPosture) ->
                  is not open to anonymous access. NOTE: the token is a single shared secret \
                  (not per-user authz) — deliver it over TLS (terminate at a proxy), and front \
                  it with a real authorization layer (a reverse proxy / gateway or sparq-solid) \
-                 for per-user access control. [OPUS-4.8] sq-cxk5: the /subscriptions WebSocket \
+                 for per-user access control. The /subscriptions WebSocket \
                  AND /subscriptions/sse stream (read surfaces) are gated by --auth-token-read \
                  too — browser WS clients pass the token as a 'Sec-WebSocket-Protocol: \
                  bearer.<token>' subprotocol."
