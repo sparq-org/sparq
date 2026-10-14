@@ -1773,13 +1773,13 @@ pub fn degree_reduce_through(
         // non-canonical re-sharing would silently drop or misplace a
         // contribution. Every re-sharing must be the full n-party sharing on
         // `x = 1..=n`, in order.
-        if sub.len() != n || sub.iter().enumerate().any(|(j, sh)| sh.x != j as u64 + 1) {
-            return Err(MpcError::Protocol(format!(
+        crate::randomness::require_canonical_sharing(&sub, n).map_err(|_| {
+            MpcError::Protocol(format!(
                 "degree_reduce: the randomness source returned a re-sharing that is not the \
                  canonical {n}-party sharing on x = 1..={n} ({} shares)",
                 sub.len()
-            )));
-        }
+            ))
+        })?;
         resharings.push(sub);
     }
 
@@ -2029,108 +2029,32 @@ mod tests {
         ));
     }
 
-    /// How [`MalformedResharingSource`] corrupts each own-input re-sharing.
-    #[derive(Clone, Copy, Debug)]
-    enum Malformation {
-        Short,
-        Long,
-        Permuted,
-        DuplicateX,
-        WrongX,
-    }
-
-    /// A source that delegates to a real dealer but corrupts the SHAPE of every
-    /// own-input re-sharing.
-    struct MalformedResharingSource {
-        inner: ShamirDealer,
-        how: Malformation,
-    }
-    impl DistributedRandomness for MalformedResharingSource {
-        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
-            self.inner.randomness_model()
-        }
-        fn parties(&self) -> usize {
-            DistributedRandomness::parties(&self.inner)
-        }
-        fn threshold(&self) -> usize {
-            DistributedRandomness::threshold(&self.inner)
-        }
-        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_mask()
-        }
-        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_nonzero_mask()
-        }
-        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
-            let mut sub = self.inner.vss_own_input(secret)?;
-            match self.how {
-                Malformation::Short => {
-                    sub.pop();
-                }
-                Malformation::Long => {
-                    let x = sub.len() as u64 + 1;
-                    sub.push(Share { x, y: Fp::zero() });
-                }
-                Malformation::Permuted => sub.swap(0, 1),
-                Malformation::DuplicateX => sub[1].x = sub[0].x,
-                Malformation::WrongX => sub[0].x = 0,
-            }
-            Ok(sub)
-        }
-    }
-
     #[test]
     fn degree_reduce_through_rejects_a_malformed_resharing() {
         // The accumulation pairs sub-shares with parties by position, so a malformed
-        // re-sharing (any shape below) must be refused by the re-sharing check.
-        for how in [
-            Malformation::Short,
-            Malformation::Long,
-            Malformation::Permuted,
-            Malformation::DuplicateX,
-            Malformation::WrongX,
-        ] {
-            let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
-            let mut dealer = b.dealer();
-            let prod =
-                mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
-            let mut source = MalformedResharingSource {
-                inner: b.dealer(),
-                how,
-            };
-            match degree_reduce_through(&mut source, &prod) {
-                Err(MpcError::Protocol(msg)) => assert!(
-                    msg.contains("re-sharing that is not the canonical"),
-                    "{how:?}: refused by the wrong check: {msg}"
-                ),
-                other => panic!("{how:?}: a malformed re-sharing must fail closed, got {other:?}"),
+        // re-sharing (any shape, at any of the 2t+1 recombination positions) must be
+        // refused by the re-sharing check. Each case corrupts exactly ONE re-sharing.
+        use crate::randomness::test_sources::{MalformedSource, SeamMethod, ALL_MALFORMATIONS};
+        for skip in 0..5 {
+            for how in ALL_MALFORMATIONS {
+                let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
+                let mut dealer = b.dealer();
+                let prod =
+                    mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
+                let mut source =
+                    MalformedSource::new(b.dealer(), SeamMethod::VssOwnInput, skip, how);
+                match degree_reduce_through(&mut source, &prod) {
+                    Err(MpcError::Protocol(msg)) => assert!(
+                        msg.contains("re-sharing that is not the canonical"),
+                        "re-sharing {skip}, {how:?}: refused by the wrong check: {msg}"
+                    ),
+                    other => panic!(
+                        "re-sharing {skip}, {how:?}: a malformed re-sharing must fail closed, \
+                         got {other:?}"
+                    ),
+                }
+                assert!(source.fired(), "re-sharing {skip} was never drawn");
             }
-        }
-    }
-
-    /// A dealer-backed source that misreports its threshold.
-    struct MisreportedThresholdSource {
-        inner: ShamirDealer,
-        t: usize,
-    }
-    impl DistributedRandomness for MisreportedThresholdSource {
-        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
-            self.inner.randomness_model()
-        }
-        fn parties(&self) -> usize {
-            DistributedRandomness::parties(&self.inner)
-        }
-        fn threshold(&self) -> usize {
-            self.t
-        }
-        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_mask()
-        }
-        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_nonzero_mask()
-        }
-        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
-            self.inner.vss_own_input(secret)
         }
     }
 
@@ -2150,7 +2074,7 @@ mod tests {
         let mut dealer = b.dealer();
         let prod = mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
         for t in [3, usize::MAX / 2 + 3, usize::MAX / 2, usize::MAX] {
-            let mut source = MisreportedThresholdSource {
+            let mut source = crate::randomness::test_sources::MisreportedThresholdSource {
                 inner: b.dealer(),
                 t,
             };
