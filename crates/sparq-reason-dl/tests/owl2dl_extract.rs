@@ -508,11 +508,11 @@ fn rejects_n_ary_data_restrictions_and_bad_cardinalities() {
     let e = err(&with_decls(
         ":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :p ; owl:maxCardinality -1 ] .",
     ));
-    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    assert_eq!(e.kind, ExtractErrorKind::Unsupported);
     let e = err(&with_decls(
         ":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :p ; owl:maxCardinality \"a\" ] .",
     ));
-    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    assert_eq!(e.kind, ExtractErrorKind::Unsupported);
 }
 
 #[test]
@@ -871,7 +871,10 @@ fn language_range_facets_are_validated() {
             ":d rdfs:range [ a rdfs:Datatype ; owl:onDatatype rdf:PlainLiteral ; owl:withRestrictions ( [ rdf:langRange \"{r}\" ] ) ] ."
         )
     };
-    assert!(violations(&with_decls(&range("en-*"))).is_empty());
+    assert!(violations(&with_decls(&range("en-gb"))).is_empty());
+    assert!(violations(&with_decls(&range("*"))).is_empty());
+    // Extended ranges are not basic ranges (RFC 4647 §2.1).
+    assert!(violations(&with_decls(&range("en-*"))).contains(&ViolationKind::InvalidFacet));
     assert!(violations(&with_decls(&range("en--gb"))).contains(&ViolationKind::InvalidFacet));
 }
 
@@ -1045,4 +1048,247 @@ fn unshared_expressions_are_not_charged() {
         s.push_str(&format!(":A{a} a owl:Class ; rdfs:subClassOf {e} .\n"));
     }
     ok(&s);
+}
+
+// ===================== third review round: one test per finding =====================
+
+fn verdict(body: &str) -> Option<bool> {
+    let (d, _, o) = ok(body);
+    check_dl(&d, &o).verdict()
+}
+
+#[test]
+fn unrepresented_literal_values_are_unchecked_and_garbage_is_still_ill_typed() {
+    // A valid dateTime whose year is beyond i64: not represented, so no verdict.
+    let big = with_decls(":a :d \"99999999999999999999-01-01T00:00:00Z\"^^xsd:dateTime .");
+    assert_eq!(verdict(&big), None);
+    // The same year with an impossible month, day and time is ill-typed.
+    let bad = with_decls(":a :d \"99999999999999999999-13-45T99:99:99\"^^xsd:dateTime .");
+    assert_eq!(violations(&bad), vec![ViolationKind::IllTypedLiteral]);
+    // A value-space bound beyond the represented range is unchecked, not a bad facet.
+    let facet = with_decls(
+        ":d rdfs:range [ a rdfs:Datatype ; owl:onDatatype xsd:integer ; owl:withRestrictions ( [ xsd:minInclusive \"-170141183460469231731687303715884105728\"^^xsd:integer ] ) ] .",
+    );
+    assert_eq!(verdict(&facet), None);
+}
+
+#[test]
+fn a_reserved_iri_cannot_be_defined_as_a_datatype() {
+    let v = violations(&with_decls(
+        "xsd:myType a rdfs:Datatype ; owl:equivalentClass xsd:integer .",
+    ));
+    assert!(v.contains(&ViolationKind::ReservedVocabulary), "{v:?}");
+    // Using a reserved datatype outside the map is reported once, as unknown.
+    let v = violations(&with_decls(":d rdfs:range xsd:date ."));
+    assert_eq!(v, vec![ViolationKind::UnknownDatatype]);
+}
+
+#[test]
+fn a_declared_only_datatype_needs_a_definition() {
+    let v = violations(":dt a rdfs:Datatype .");
+    assert_eq!(v, vec![ViolationKind::UnknownDatatype]);
+    let v = violations(":dt a rdfs:Datatype ; owl:equivalentClass xsd:integer .");
+    assert!(v.is_empty(), "{v:?}");
+}
+
+#[test]
+fn ontology_headers_are_validated() {
+    for body in [
+        "<http://ex/o1> a owl:Ontology . <http://ex/o2> a owl:Ontology .",
+        "<http://ex/o> a owl:Ontology ; owl:versionIRI <http://ex/v1>, <http://ex/v2> .",
+        "[] a owl:Ontology ; owl:versionIRI <http://ex/v1> .",
+        "<http://ex/o> a owl:Ontology ; owl:versionIRI \"1\" .",
+        "<http://ex/o> a owl:Ontology ; owl:imports \"x\" .",
+    ] {
+        assert_eq!(err(body).kind, ExtractErrorKind::Malformed, "{body}");
+    }
+    let (d, _, o) = ok("<http://ex/o> a owl:Ontology ; owl:versionIRI <http://ex/v1> .");
+    assert_eq!(o.iri, Some(ex(&d, "o")));
+    assert_eq!(o.version_iri, Some(ex(&d, "v1")));
+    let v = violations("owl:Thing a owl:Ontology .");
+    assert_eq!(v, vec![ViolationKind::ReservedVocabulary]);
+}
+
+#[test]
+fn rejects_cardinalities_not_written_as_non_negative_integers() {
+    for c in [
+        "\"0\"^^xsd:positiveInteger",
+        "\"40000\"^^xsd:short",
+        "\"2\"^^xsd:byte",
+        "\"2.0\"^^xsd:decimal",
+        "\"-1\"^^xsd:integer",
+        "\"x\"^^xsd:nonNegativeInteger",
+    ] {
+        let e = err(&with_decls(&format!(
+            ":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :p ; owl:maxCardinality {c} ] ."
+        )));
+        assert_eq!(e.kind, ExtractErrorKind::Unsupported, "{c}");
+    }
+    for c in ["2", "\" 2 \"^^xsd:nonNegativeInteger"] {
+        ok(&with_decls(&format!(
+            ":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :p ; owl:maxCardinality {c} ] ."
+        )));
+    }
+}
+
+#[test]
+fn an_axiom_reification_must_name_an_axiom() {
+    let e = err(&with_decls(
+        r#"
+        :A owl:equivalentClass [ owl:unionOf _:l ] .
+        _:l rdf:first :B ; rdf:rest ( :C ) .
+        [ a owl:Axiom ; owl:annotatedSource _:l ; owl:annotatedProperty rdf:first ;
+          owl:annotatedTarget :B ; rdfs:comment "x" ] .
+    "#,
+    ));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+}
+
+#[test]
+fn annotation_assertions_and_n_ary_annotations_can_be_annotated() {
+    let (_, t, o) = ok(r#"
+        :A a owl:Class ; rdfs:comment "c" .
+        [ a owl:Annotation ; owl:annotatedSource :A ; owl:annotatedProperty rdfs:comment ;
+          owl:annotatedTarget "c" ; rdfs:label "l" ] .
+    "#);
+    assert!(
+        o.annotations
+            .iter()
+            .any(|a| matches!(a.target, AnnotationTarget::Axiom(j) if j < t.len())),
+        "{:?}",
+        o.annotations
+    );
+    ok(r#"
+        :a a owl:NamedIndividual . :b a owl:NamedIndividual .
+        _:x a owl:AllDifferent ; owl:members ( :a :b ) ; rdfs:comment "c" .
+        [ a owl:Annotation ; owl:annotatedSource _:x ; owl:annotatedProperty rdfs:comment ;
+          owl:annotatedTarget "c" ; rdfs:label "l" ] .
+    "#);
+}
+
+#[test]
+fn rejects_lists_that_share_a_tail() {
+    let e = err(&with_decls(
+        r#"
+        :A owl:equivalentClass [ owl:unionOf _:l1 ] .
+        :B owl:equivalentClass [ owl:unionOf _:l2 ] .
+        _:l1 rdf:first :B ; rdf:rest _:t .
+        _:l2 rdf:first :A ; rdf:rest _:t .
+        _:t rdf:first :C ; rdf:rest rdf:nil .
+    "#,
+    ));
+    assert_eq!(e.kind, ExtractErrorKind::Malformed);
+    // One list used twice is fine.
+    ok(&with_decls(
+        ":A owl:equivalentClass [ owl:unionOf _:l ] . :B owl:equivalentClass [ owl:unionOf _:l ] . _:l rdf:first :C ; rdf:rest ( :p ) .",
+    ).replace("( :p )", "( :A )"));
+}
+
+#[test]
+fn deprecated_typings_are_deprecated_annotations() {
+    let (d, _, o) = ok(r#"
+        :x rdfs:label "uses owl:deprecated" ; owl:deprecated false .
+        :A a owl:Class, owl:DeprecatedClass .
+        :p a owl:ObjectProperty, owl:DeprecatedProperty .
+    "#);
+    let dep = iri(&d, "http://www.w3.org/2002/07/owl#deprecated");
+    let deprecated: Vec<_> = o
+        .axioms
+        .iter()
+        .filter_map(|r| match &r.axiom {
+            Axiom::AnnotationAssertion(p, s, v) if *p == dep => Some((*s, v.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(deprecated.len(), 3, "{deprecated:?}");
+    // Without owl:deprecated in the dictionary the typing is kept as a note.
+    let (_, _, o) = ok(":A a owl:Class, owl:DeprecatedClass .");
+    assert!(o.notes.iter().any(|n| n.message.contains("deprecated")));
+}
+
+#[test]
+fn assertions_may_use_built_in_properties() {
+    let (d, _, o) = ok(":a :q :b . :a owl:topObjectProperty :b . :a owl:bottomObjectProperty :b . :a owl:bottomDataProperty \"x\" .");
+    let n = logical(&o)
+        .iter()
+        .filter(|a| {
+            matches!(a, Axiom::ObjectPropertyAssertion(OP::Named(p), _, _) | Axiom::DataPropertyAssertion(p, _, _)
+                if iri_of_builtin(&d, *p))
+        })
+        .count();
+    assert_eq!(n, 3);
+    assert_eq!(
+        err(":a owl:topDataProperty \"x\" .").kind,
+        ExtractErrorKind::Unparsed
+    );
+}
+
+fn iri_of_builtin(d: &Dict, p: Id) -> bool {
+    [
+        "topObjectProperty",
+        "bottomObjectProperty",
+        "bottomDataProperty",
+    ]
+    .iter()
+    .any(|l| iri(d, &format!("http://www.w3.org/2002/07/owl#{l}")) == p)
+}
+
+#[test]
+fn rejects_singleton_data_unions_and_intersections() {
+    for c in ["unionOf", "intersectionOf"] {
+        let e = err(&with_decls(&format!(
+            ":d rdfs:range [ a rdfs:Datatype ; owl:{c} ( xsd:integer ) ] ."
+        )));
+        assert_eq!(e.kind, ExtractErrorKind::Malformed, "{c}");
+    }
+}
+
+#[test]
+fn operand_distinctness_ignores_set_order() {
+    let v = violations(&with_decls(
+        "[ owl:unionOf ( :A :B ) ] owl:equivalentClass [ owl:unionOf ( :B :A ) ] .",
+    ));
+    assert_eq!(v, vec![ViolationKind::InsufficientOperands]);
+}
+
+#[test]
+fn shared_lists_are_charged_to_the_expansion_budget() {
+    // n expressions share one n-item list: about n² copies from O(n) triples.
+    let n = 1800;
+    let mut body = String::from(DECLS);
+    body.push_str("_:L0 rdf:first :A ; rdf:rest _:L1 .\n");
+    for i in 1..n {
+        body.push_str(&format!("_:L{i} rdf:first :B ; rdf:rest _:L{} .\n", i + 1));
+    }
+    body.push_str(&format!("_:L{n} rdf:first :C ; rdf:rest rdf:nil .\n"));
+    for i in 0..n {
+        body.push_str(&format!(
+            ":D{i} a owl:Class ; rdfs:subClassOf [ owl:unionOf _:L0 ] .\n"
+        ));
+    }
+    assert_eq!(err(&body).kind, ExtractErrorKind::Unsupported);
+}
+
+#[test]
+fn literal_lexical_forms_are_strict() {
+    for lit in [
+        "\"1/ -2\"^^owl:rational",
+        "\"1 / 3\"^^owl:rational",
+        "\"1/0\"^^owl:rational",
+        "\"a\\u0001b\"^^xsd:string",
+    ] {
+        let v = violations(&with_decls(&format!(":a :d {lit} .")));
+        assert_eq!(v, vec![ViolationKind::IllTypedLiteral], "{lit}");
+    }
+    assert!(violations(&with_decls(":a :d \"1/3\"^^owl:rational .")).is_empty());
+    // Plain literal tags: well-formed BCP 47 is checked; a tag of the right shape that is
+    // not (a grandfathered or malformed extension tag) leaves the verdict open.
+    assert_eq!(
+        verdict(&with_decls(":a :d \"x@en-GB\"^^rdf:PlainLiteral .")),
+        Some(true)
+    );
+    for tag in ["i-klingon", "en-a", "en-gb-gb-gb"] {
+        let body = with_decls(&format!(":a :d \"x@{tag}\"^^rdf:PlainLiteral ."));
+        assert_eq!(verdict(&body), None, "{tag}");
+    }
 }
