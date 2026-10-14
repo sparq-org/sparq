@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import type { NextConfig } from "next";
 
@@ -35,6 +36,41 @@ const basePath =
       ? rawBasePath // '' (root-relative: Pages custom domain + Tauri) or an explicit '/prefix'
       : "/sparq"; // a malformed value falls back to the legacy default
 
+/**
+ * Writes `<distDir>/sparq-entry-files.json`: every client entrypoint (e.g. `app/capabilities/page`,
+ * `main-app`) mapped to the JS and CSS files webpack emits for it, which is what Next ≤15 kept in
+ * app-build-manifest.json.
+ */
+// The slice of webpack's Compiler this plugin uses (webpack ships inside next, untyped here).
+type EntryFilesCompiler = {
+  outputPath: string;
+  hooks: {
+    afterEmit: {
+      tap(
+        name: string,
+        fn: (compilation: {
+          entrypoints: Map<string | undefined, { getFiles(): Iterable<string> }>;
+        }) => void,
+      ): void;
+    };
+  };
+};
+
+class EntryFilesPlugin {
+  apply(compiler: EntryFilesCompiler) {
+    compiler.hooks.afterEmit.tap("sparq-entry-files", (compilation) => {
+      const entries: Record<string, string[]> = {};
+      for (const [name, entrypoint] of compilation.entrypoints) {
+        if (name) entries[name] = [...entrypoint.getFiles()];
+      }
+      writeFileSync(
+        path.join(compiler.outputPath, "sparq-entry-files.json"),
+        JSON.stringify(entries, null, 2),
+      );
+    });
+  }
+}
+
 const nextConfig: NextConfig = {
   // Next 16 `next dev` otherwise writes a Next-managed AGENTS.md into this app; the repo keeps
   // one AGENTS.md at its root.
@@ -71,7 +107,10 @@ const nextConfig: NextConfig = {
   // The @sparq-org/sparq wrapper ships ESM with `.js` import specifiers that resolve
   // to `.ts`/`.tsx` sources in dev; mirror solid-pod-manager's webpack alias so the
   // bundler follows them.
-  webpack: (config) => {
+  webpack: (config, { dev, isServer }) => {
+    // Next 16 no longer writes app-build-manifest.json, whose per-entry file lists the bundle
+    // guard (scripts/check-bundle.mjs) checks. Record the same lists for the client build.
+    if (!dev && !isServer) config.plugins.push(new EntryFilesPlugin());
     config.resolve.extensionAlias = {
       ".js": [".ts", ".tsx", ".js", ".jsx"],
     };

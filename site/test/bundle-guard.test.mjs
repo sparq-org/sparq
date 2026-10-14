@@ -4,16 +4,12 @@
 // config — and assert the analyser flags exactly the right failure. They need no `next build`, so
 // they run in the fast `npm run test:unit` lane (site-e2e); the real `npm run check:bundle` /
 // `postbuild` run the SAME analyser against the actual .next/out artifacts.
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
   analyzeBundle,
-  firstLoadFromClientManifest,
-  readFirstLoadSets,
+  firstLoadFromEntryFiles,
   HEAVY_MODULE_SUFFIXES,
   GUARDED_ROUTES,
 } from "../scripts/check-bundle.mjs";
@@ -174,136 +170,58 @@ test("fzstd is pinned as a heavy module (PRESENCE) and flagged if it leaks into 
   assert.deepEqual(sharedErrors, []);
 });
 
-// Next 16 no longer writes app-build-manifest.json; the first-load set comes from each route's
-// .next/server/app/<route>/page_client-reference-manifest.js. Modules that load the root layout
-// (app-shell code shared with lazy demos) are excluded, matching the old manifest's `/page` entry.
-// A client reference manifest in the shape Next 16 writes: each client module's `chunks`
-// alternates chunk ids and file paths.
-function clientManifest(key, modules) {
-  const clientModules = {};
-  modules.forEach((files, i) => {
-    clientModules[`[project]/m${i}.tsx`] = { id: i, chunks: files.flatMap((f, j) => [`${j}`, f]) };
-  });
-  return { [key]: { clientModules } };
-}
+// Next 16 no longer writes app-build-manifest.json; next.config.ts's EntryFilesPlugin records each
+// client entrypoint's files in .next/sparq-entry-files.json, and the root main files come from
+// build-manifest.json. The root layout is its own entrypoint and stays out, as it did before.
+const ROOT_MAIN = ["static/chunks/webpack-w.js", "static/chunks/main-app-m.js"];
 
-test("firstLoadFromClientManifest unions the page entry's modules and leaves layout modules out", () => {
-  const manifest = clientManifest("/capabilities/page", [
-    ["static/chunks/9568-a.js", "static/chunks/app/capabilities/page-x.js"],
-    ["static/chunks/9568-a.js", "static/chunks/163-b.js", "static/chunks/app/capabilities/page-x.js"],
-    ["static/chunks/6525-shared.js", "static/chunks/app/layout-l.js"],
-  ]);
-  assert.deepEqual(firstLoadFromClientManifest(manifest, "/capabilities/page"), {
-    chunks: [
+test("firstLoadFromEntryFiles is the root main files plus the page entrypoint's JS and CSS", () => {
+  const entryFiles = {
+    "app/capabilities/page": [
       "static/chunks/9568-a.js",
+      "static/css/c.css",
       "static/chunks/app/capabilities/page-x.js",
-      "static/chunks/163-b.js",
     ],
+    "app/layout": ["static/chunks/6525-shared.js", "static/chunks/app/layout-l.js"],
+  };
+  assert.deepEqual(firstLoadFromEntryFiles(entryFiles, ROOT_MAIN, "/capabilities/page"), {
+    chunks: [...ROOT_MAIN, ...entryFiles["app/capabilities/page"]],
     error: null,
   });
 });
 
-test("firstLoadFromClientManifest keeps a heavy chunk the page also shares with the layout", () => {
-  // The page and the layout both load heavy-0: the page's set must still list it.
-  const manifest = clientManifest("/page", [
-    ["static/chunks/heavy-0.js", "static/chunks/app/layout-l.js"],
-    ["static/chunks/heavy-0.js", "static/chunks/app/page-x.js"],
-  ]);
-  const { chunks, error } = firstLoadFromClientManifest(manifest, "/page");
-  assert.equal(error, null);
+test("firstLoadFromEntryFiles flags heavy JS or CSS in the page entrypoint or a root main file", () => {
+  const cases = [
+    { "app/page": ["static/chunks/heavy-0.js", "static/chunks/app/page-x.js"] },
+    { "app/page": ["static/css/heavy.css", "static/chunks/app/page-x.js"] },
+  ];
+  for (const entryFiles of cases) {
+    const inputs = healthyInputs();
+    inputs.loadable["src -> @/components/zk-car-hire"].files.push("static/css/heavy.css");
+    inputs.app.pages["/page"] = firstLoadFromEntryFiles(entryFiles, ROOT_MAIN, "/page").chunks;
+    const { errors } = analyzeBundle(inputs);
+    assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
+  }
   const inputs = healthyInputs();
-  inputs.app.pages["/page"] = chunks;
+  inputs.app.pages["/page"] = firstLoadFromEntryFiles(
+    { "app/page": ["static/chunks/app/page-x.js"] },
+    ["static/chunks/heavy-0.js"],
+    "/page",
+  ).chunks;
   const { errors } = analyzeBundle(inputs);
   assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
 });
 
-test("firstLoadFromClientManifest refuses a manifest with no module loading the page entry", () => {
-  const layoutOnly = clientManifest("/page", [["static/chunks/app/layout-l.js"]]);
-  assert.match(firstLoadFromClientManifest(layoutOnly, "/page").error ?? "", /^FIRST-LOAD: /);
-  const otherPage = clientManifest("/capabilities/page", [["static/chunks/app/try/page-x.js"]]);
-  assert.match(
-    firstLoadFromClientManifest(otherPage, "/capabilities/page").error ?? "",
-    /^FIRST-LOAD: /,
-  );
-  assert.match(firstLoadFromClientManifest({}, "/page").error ?? "", /^FIRST-LOAD: /);
-  assert.match(firstLoadFromClientManifest(undefined, "/page").error ?? "", /^FIRST-LOAD: /);
-});
-
-test("firstLoadFromClientManifest decodes paths and drops a deployment-id query", () => {
-  const manifest = clientManifest("/benchmarks/[type]/page", [
-    [
-      "static/chunks/heavy-0.js?dpl=abc",
-      "static/chunks/app/benchmarks/%5Btype%5D/page-x.js?dpl=abc",
-    ],
-  ]);
-  assert.deepEqual(firstLoadFromClientManifest(manifest, "/benchmarks/[type]/page"), {
-    chunks: ["static/chunks/heavy-0.js", "static/chunks/app/benchmarks/[type]/page-x.js"],
-    error: null,
-  });
-});
-
-test("readFirstLoadSets reads Next 16's client reference manifests from .next/server/app", () => {
-  const nextDir = mkdtempSync(join(tmpdir(), "bundle-guard-"));
-  try {
-    const write = (rel, key, modules) => {
-      const file = join(nextDir, "server", "app", rel);
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(
-        file,
-        `globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});` +
-          `globalThis.__RSC_MANIFEST[${JSON.stringify(key)}]=` +
-          `${JSON.stringify(clientManifest(key, modules)[key])};`,
-      );
-    };
-    // Every module of a page entry carries the same required-chunk list, as Next writes it.
-    writeFileSync(
-      join(nextDir, "build-manifest.json"),
-      JSON.stringify({ rootMainFiles: ["static/chunks/webpack-w.js", "static/chunks/main-app-m.js"] }),
-    );
-    const page = ["static/chunks/9568-a.js", "static/chunks/app/page-x.js"];
-    write("page_client-reference-manifest.js", "/page", [page, page, ["static/chunks/app/layout-l.js"]]);
-    write("capabilities/page_client-reference-manifest.js", "/capabilities/page", [
-      ["static/chunks/app/layout-l.js"],
-    ]);
-    const { pages, errors } = readFirstLoadSets(nextDir);
-    assert.deepEqual(pages, {
-      "/page": ["static/chunks/webpack-w.js", "static/chunks/main-app-m.js", ...page],
-      "/capabilities/page": ["static/chunks/webpack-w.js", "static/chunks/main-app-m.js"],
-    });
-    assert.equal(errors.length, 1);
-    assert.match(errors[0], /^FIRST-LOAD: .*\/capabilities\/page/);
-    // /surface/data-formats has no manifest at all: no set, so analyzeBundle reports the route.
-    const inputs = healthyInputs();
-    inputs.app = { pages };
-    const { errors: analyzed } = analyzeBundle(inputs);
-    // /capabilities is reported once, as FIRST-LOAD above, not again by analyzeBundle.
-    assert.ok(!analyzed.some((e) => e.includes("/capabilities (")), analyzed.join("\n"));
-    assert.ok(
-      analyzed.some((e) => e.startsWith("ISOLATION: no first-load set for guarded route /surface/data-formats")),
-      analyzed.join("\n"),
-    );
-  } finally {
-    rmSync(nextDir, { recursive: true, force: true });
-  }
-});
-
-test("readFirstLoadSets flags a heavy chunk that lands in a root main file", () => {
-  const nextDir = mkdtempSync(join(tmpdir(), "bundle-guard-"));
-  try {
-    writeFileSync(
-      join(nextDir, "build-manifest.json"),
-      JSON.stringify({ rootMainFiles: ["static/chunks/heavy-0.js"] }),
-    );
-    const file = join(nextDir, "server", "app", "page_client-reference-manifest.js");
-    mkdirSync(dirname(file), { recursive: true });
-    const m = clientManifest("/page", [["static/chunks/app/page-x.js"]]);
-    writeFileSync(file, `globalThis.__RSC_MANIFEST={"/page":${JSON.stringify(m["/page"])}};`);
-    const { pages } = readFirstLoadSets(nextDir);
-    const inputs = healthyInputs();
-    inputs.app.pages["/page"] = pages["/page"];
-    const { errors } = analyzeBundle(inputs);
-    assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
-  } finally {
-    rmSync(nextDir, { recursive: true, force: true });
+test("firstLoadFromEntryFiles refuses a missing entrypoint or one without its page chunk", () => {
+  for (const entryFiles of [
+    null,
+    {},
+    { "app/page": [] },
+    { "app/page": ["static/chunks/app/try/page-x.js"] },
+    { "app/layout": ["static/chunks/app/page-x.js"] },
+  ]) {
+    const { chunks, error } = firstLoadFromEntryFiles(entryFiles, ROOT_MAIN, "/page");
+    assert.match(error ?? "", /^FIRST-LOAD: /);
+    assert.deepEqual(chunks, []);
   }
 });

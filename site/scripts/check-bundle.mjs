@@ -21,8 +21,8 @@
 //      back to a STATIC import: its code would fold into the route-entry chunk AND vanish from the
 //      loadable manifest, so a pure "is this chunk in the entry set" test would FALSELY pass.
 //   2. ISOLATION — none of those heavy modules' code-split chunk files appear in the FIRST-LOAD
-//      set of the guarded routes, derived from each route's client reference manifest (see
-//      firstLoadFromClientManifest; Next ≤15 wrote it to the now-removed app-build-manifest.json).
+//      set of the guarded routes (see firstLoadFromEntryFiles: Next ≤15 wrote that set to the
+//      now-removed app-build-manifest.json; next.config.ts's EntryFilesPlugin records it now).
 //   3. CONFIG — images:{unoptimized:true} and basePath prefixing are load-bearing for GitHub
 //      Pages / Tauri (bead item 4). Read straight from the build's OWN resolved artifacts
 //      (routes-manifest.basePath, images-manifest), so the check adapts to BOTH build modes
@@ -31,7 +31,6 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runInNewContext } from "node:vm";
 
 /**
  * Heavy modules that MUST stay code-split OUT of the guarded routes' first-load payload. Keyed by
@@ -142,8 +141,7 @@ export function analyzeBundle({ loadable, app, routes, images, htmlByLabel }) {
     const first = app?.pages?.[manifestKey];
     if (!Array.isArray(first)) {
       errors.push(
-        `ISOLATION: no first-load set for guarded route ${label} (${manifestKey}) — is its ` +
-          `.next/server/app client reference manifest missing?`,
+        `ISOLATION: no first-load set for guarded route ${label} (${manifestKey}).`,
       );
       continue;
     }
@@ -228,81 +226,35 @@ export function findSnapshotLeaks(fingerprint, chunks) {
 }
 
 /**
- * The chunks a route's page entry loads, which is what Next ≤15 listed under app-build-manifest.json
- * `pages["<route>/page"]` minus the root main files (readFirstLoadSets adds those from
- * build-manifest.json). Next 16 dropped that manifest but still writes
- * `.next/server/app/<route>/page_client-reference-manifest.js`, whose `clientModules` give each
- * client module's chunk list; the modules the page entry loads are the ones whose list includes
- * the page's own `static/chunks/app/<route>/page-<hash>.js`. Their union is the page entry's
- * static chunk set. Root-layout modules end in `app/layout-<hash>.js` instead and stay out, as
- * they did from the old `/page` entry. Next writes each path URI-encoded, with a `?dpl=…` token
- * when a deployment id is set; both are undone so the paths compare with
- * react-loadable-manifest.json's. Pure (fs-free).
+ * A guarded route's first-load set: the root main files every route loads (webpack runtime,
+ * main-app and their split chunks, from build-manifest.json `rootMainFiles`) plus the JS and CSS
+ * files of the route's page entrypoint (`app/<route>/page`), which next.config.ts's
+ * EntryFilesPlugin records in `.next/sparq-entry-files.json`. Together they are what Next ≤15
+ * listed under app-build-manifest.json `pages["<route>/page"]`; the root layout is its own
+ * entrypoint and stays out, as it did there. Pure (fs-free).
  *
- * The route's page entry must be found: without it the set is not the page's first load, and an
- * empty set would let the isolation check pass without checking anything.
+ * A missing page entrypoint, or one that does not emit its own `static/chunks/app/<route>/page`
+ * chunk, is an error: the set would not be the page's first load, and an empty one would let the
+ * isolation check pass without checking anything.
  *
- * @param {Record<string, {clientModules?: Record<string, {chunks?: string[]}>}>} manifest
- *   the evaluated `__RSC_MANIFEST` object
- * @param {string} manifestKey  e.g. "/capabilities/page"
+ * @param {Record<string, string[]> | null} entryFiles  sparq-entry-files.json
+ * @param {string[]} rootMainFiles                      build-manifest.json `rootMainFiles`
+ * @param {string} manifestKey                          e.g. "/capabilities/page"
  * @returns {{ chunks: string[], error: string | null }}
  */
-export function firstLoadFromClientManifest(manifest, manifestKey) {
+export function firstLoadFromEntryFiles(entryFiles, rootMainFiles, manifestKey) {
   const route = manifestKey.replace(/\/page$/, "");
-  const escaped = route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pageEntry = new RegExp(`^static/chunks/app${escaped}/page(-[^/]+)?\\.js$`);
-  const chunks = [];
-  for (const { chunks: list = [] } of Object.values(manifest?.[manifestKey]?.clientModules ?? {})) {
-    // `chunks` alternates chunk ids and file paths; keep the paths.
-    const files = list
-      .filter((c) => typeof c === "string" && c.startsWith("static/chunks/"))
-      .map((c) => decodeURIComponent(c.split(/[?#]/)[0]));
-    if (!files.some((f) => pageEntry.test(f))) continue;
-    for (const f of files) if (!chunks.includes(f)) chunks.push(f);
+  const files = entryFiles?.[`app${manifestKey}`] ?? [];
+  const pageChunk = `static/chunks/app${route}/page`;
+  if (!files.some((f) => f.startsWith(`${pageChunk}-`) || f === `${pageChunk}.js`)) {
+    return {
+      chunks: [],
+      error:
+        `FIRST-LOAD: .next/sparq-entry-files.json has no app${manifestKey} entrypoint emitting ` +
+        `${pageChunk}-<hash>.js, so its first-load set cannot be checked.`,
+    };
   }
-  if (chunks.length > 0) return { chunks, error: null };
-  return {
-    chunks,
-    error:
-      `FIRST-LOAD: no client module in the ${manifestKey} client reference manifest loads its ` +
-      `page entry (static/chunks/app${route}/page-<hash>.js), so its first-load set cannot be ` +
-      `checked.`,
-  };
-}
-
-/**
- * Reads each guarded route's `page_client-reference-manifest.js` under `<nextDir>/server/app` and
- * derives its first-load set: the root main files from build-manifest.json plus the page entry's
- * chunks (see firstLoadFromClientManifest). A route whose manifest is missing gets no set, which
- * analyzeBundle reports; a manifest with no module loading the page entry is a FIRST-LOAD error.
- * The manifest is the build's own output, evaluated in an empty vm context.
- *
- * @param {string} nextDir  the site's `.next` directory
- * @returns {{ pages: Record<string, string[]>, errors: string[] }}
- */
-export function readFirstLoadSets(nextDir) {
-  const pages = {};
-  const errors = [];
-  // Every route also loads the root main files (webpack runtime, main-app and their split
-  // chunks), which client reference manifests leave out; app-build-manifest's `/page` held them.
-  const buildManifest = join(nextDir, "build-manifest.json");
-  const rootMainFiles = existsSync(buildManifest)
-    ? (JSON.parse(readFileSync(buildManifest, "utf8")).rootMainFiles ?? [])
-    : [];
-  if (rootMainFiles.length === 0) {
-    errors.push("FIRST-LOAD: .next/build-manifest.json lists no rootMainFiles.");
-  }
-  for (const { manifestKey } of GUARDED_ROUTES) {
-    const path = join(nextDir, "server", "app", `${manifestKey.slice(1)}_client-reference-manifest.js`);
-    if (!existsSync(path)) continue;
-    const context = {};
-    runInNewContext(readFileSync(path, "utf8"), context);
-    const { chunks, error } = firstLoadFromClientManifest(context.__RSC_MANIFEST, manifestKey);
-    if (error) errors.push(error);
-    // Recorded even on error, so analyzeBundle does not report the route a second time.
-    pages[manifestKey] = [...rootMainFiles.filter((f) => !chunks.includes(f)), ...chunks];
-  }
-  return { pages, errors };
+  return { chunks: [...new Set([...rootMainFiles, ...files])], error: null };
 }
 
 /** Read + JSON-parse a build manifest, or return null if it does not exist. */
@@ -345,7 +297,19 @@ function main() {
     htmlByLabel[label] = existsSync(p) ? readFileSync(p, "utf8") : undefined;
   }
 
-  const { pages, errors: loadErrors } = readFirstLoadSets(nextDir);
+  const entryFiles = readJson(join(nextDir, "sparq-entry-files.json"));
+  const rootMainFiles = readJson(join(nextDir, "build-manifest.json"))?.rootMainFiles ?? [];
+  const pages = {};
+  const loadErrors = [];
+  if (rootMainFiles.length === 0) {
+    loadErrors.push("FIRST-LOAD: .next/build-manifest.json lists no rootMainFiles.");
+  }
+  for (const { manifestKey } of GUARDED_ROUTES) {
+    const { chunks, error } = firstLoadFromEntryFiles(entryFiles, rootMainFiles, manifestKey);
+    if (error) loadErrors.push(error);
+    // Recorded even on error, so analyzeBundle does not report the route a second time.
+    pages[manifestKey] = chunks;
+  }
   const { errors, summary } = analyzeBundle({
     loadable,
     app: { pages },

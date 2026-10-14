@@ -757,7 +757,7 @@ record of how it was shaped. The GUI lane (`gui.yml`) is
   (`macos-14`, `macos-15-intel`, `ubuntu-latest`, `ubuntu-24.04-arm`, `windows-latest`) so
   the GUI CI matrix and the release matrix can't drift.
 - **Build + lint + typecheck**: `eslint src` + `tsc` are already the site's gate
-  (`site/package.json:15`); the GUI adds `cargo build` / `cargo clippy` for
+  (`site/package.json` `lint`); the GUI adds `cargo build` / `cargo clippy` for
   `gui/src-tauri/`, inheriting the repo's `-D warnings` bar.
 - **E2E**: Playwright is already wired for the site (`@playwright/test`,
   `site/playwright.config.ts`, the real `site/e2e/zk-prewarm.spec.ts`). Tauri's WebView e2e
