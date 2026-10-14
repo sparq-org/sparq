@@ -639,6 +639,454 @@ fn budget_exhaustion_answers_unknown() {
     );
 }
 
+// ---- data properties and datatypes ----------------------------------------------------------
+
+const DDECL: &str = ":A a owl:Class . :B a owl:Class . :C a owl:Class . :X a owl:Class .
+    :d a owl:DatatypeProperty . :e a owl:DatatypeProperty . :f a owl:DatatypeProperty .
+    :a a owl:NamedIndividual . :b a owl:NamedIndividual .";
+
+fn verdict(body: &str) -> Consistency {
+    run(body).1.consistency
+}
+
+fn dsome(d: &str, r: &str) -> String {
+    format!("[ a owl:Restriction ; owl:onProperty {d} ; owl:someValuesFrom {r} ]")
+}
+
+fn dall(d: &str, r: &str) -> String {
+    format!("[ a owl:Restriction ; owl:onProperty {d} ; owl:allValuesFrom {r} ]")
+}
+
+fn dvalue(d: &str, lit: &str) -> String {
+    format!("[ a owl:Restriction ; owl:onProperty {d} ; owl:hasValue {lit} ]")
+}
+
+fn dmin(n: u32, d: &str, r: &str) -> String {
+    format!(
+        "[ a owl:Restriction ; owl:onProperty {d} ; owl:minQualifiedCardinality \"{n}\"^^xsd:nonNegativeInteger ; owl:onDataRange {r} ]"
+    )
+}
+
+fn dmax(n: u32, d: &str, r: &str) -> String {
+    format!(
+        "[ a owl:Restriction ; owl:onProperty {d} ; owl:maxQualifiedCardinality \"{n}\"^^xsd:nonNegativeInteger ; owl:onDataRange {r} ]"
+    )
+}
+
+/// `xsd:integer` between `lo` and `hi` inclusive.
+fn int_range(lo: i64, hi: i64) -> String {
+    format!(
+        "[ a rdfs:Datatype ; owl:onDatatype xsd:integer ; owl:withRestrictions ( [ xsd:minInclusive {lo} ] [ xsd:maxInclusive {hi} ] ) ]"
+    )
+}
+
+fn one_of(lits: &[&str]) -> String {
+    format!("[ a rdfs:Datatype ; owl:oneOf ( {} ) ]", lits.join(" "))
+}
+
+fn data_unsat(body: &str, class: &str) -> bool {
+    let (d, r) = run(&format!("{DDECL} {body}"));
+    let c = r
+        .classification
+        .unwrap_or_else(|| panic!("no classification: {:?}", r.consistency));
+    c.unsatisfiable.contains(&ex(&d, class))
+}
+
+fn is_datatype_unknown(c: &Consistency) -> bool {
+    matches!(c, Consistency::Unknown(UnknownReason::DatatypeUnknown { source }) if !source.is_empty())
+}
+
+/// The volunteering fixture of issue #7031: qualified cardinality, an inverse, functional
+/// object and data properties, a data range, a union domain and `AllDisjointClasses`.
+const VOLUNTEERING: &str = r#"
+    @prefix vol: <https://w3id.org/odi/volunteering#> .
+    vol:Application a owl:Class . vol:Person a owl:Class . vol:Role a owl:Class .
+    vol:TimeCommitment a owl:Class . vol:Agent a owl:Class .
+    vol:VolunteeringOpportunity a owl:Class . vol:Session a owl:Class .
+    vol:submittedBy a owl:ObjectProperty . vol:hasTimeCommitment a owl:ObjectProperty .
+    vol:offeredBy a owl:ObjectProperty . vol:offersOpportunity a owl:ObjectProperty .
+    vol:hasLocation a owl:ObjectProperty .
+    vol:Application rdfs:subClassOf [ a owl:Restriction ;
+        owl:onProperty vol:submittedBy ; owl:onClass vol:Person ;
+        owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ] .
+    vol:Role rdfs:subClassOf [ a owl:Restriction ;
+        owl:onProperty vol:hasTimeCommitment ; owl:onClass vol:TimeCommitment ;
+        owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ] .
+    vol:offeredBy owl:inverseOf vol:offersOpportunity .
+    vol:forOpportunity a owl:ObjectProperty, owl:FunctionalProperty .
+    vol:minimumAge a owl:DatatypeProperty, owl:FunctionalProperty ; rdfs:range xsd:nonNegativeInteger .
+    vol:hasLocation rdfs:domain [ owl:unionOf ( vol:VolunteeringOpportunity vol:Session ) ] .
+    [ a owl:AllDisjointClasses ; owl:members ( vol:Agent vol:VolunteeringOpportunity vol:Role ) ] .
+    vol:opp a owl:NamedIndividual , vol:VolunteeringOpportunity .
+    vol:org a owl:NamedIndividual , vol:Agent .
+    vol:opp vol:offeredBy vol:org .
+"#;
+
+#[test]
+fn issue_7031_fixture_with_data() {
+    let v = |abox: &str| verdict(&format!("{VOLUNTEERING} {abox}"));
+    assert_eq!(v(""), Consistency::Consistent);
+    assert_eq!(
+        v(r#"vol:opp vol:minimumAge "16"^^xsd:nonNegativeInteger ."#),
+        Consistency::Consistent
+    );
+    // Ill-typed: "sixteen" is not in the lexical space, so it has no value.
+    assert_eq!(
+        v(r#"vol:opp vol:minimumAge "sixteen"^^xsd:nonNegativeInteger ."#),
+        Consistency::Inconsistent
+    );
+    // Well-typed, but outside the range.
+    assert_eq!(
+        v(r#"vol:opp vol:minimumAge "-1"^^xsd:integer ."#),
+        Consistency::Inconsistent
+    );
+    // Two different ages of a functional property.
+    assert_eq!(
+        v(
+            r#"vol:opp vol:minimumAge "16"^^xsd:nonNegativeInteger , "18"^^xsd:nonNegativeInteger ."#
+        ),
+        Consistency::Inconsistent
+    );
+    // The same value, written in two datatypes.
+    assert_eq!(
+        v(r#"vol:opp vol:minimumAge "16"^^xsd:int , "016"^^xsd:integer ."#),
+        Consistency::Consistent
+    );
+    // The union domain meets the disjointness: an Agent with a location is a Session.
+    assert_eq!(
+        v("vol:org vol:hasLocation vol:opp ."),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        v("vol:org vol:hasLocation vol:opp . vol:org a [ owl:complementOf vol:Session ] ."),
+        Consistency::Inconsistent
+    );
+    // Exactly one submitter.
+    assert_eq!(
+        v("vol:app a vol:Application ; vol:submittedBy vol:p1 , vol:p2 . vol:p1 a vol:Person . vol:p2 a vol:Person . vol:p1 owl:differentFrom vol:p2 ."),
+        Consistency::Inconsistent
+    );
+    let (d, t) = Graph::parse_to_triples(&format!("{PRE}{VOLUNTEERING}"), "turtle").unwrap();
+    let o = extract(&d, &t).unwrap();
+    let r = check(&d, &o, Budget::default());
+    assert!(r.classification.is_some(), "{:?}", r.classification_unknown);
+}
+
+#[test]
+fn data_range_and_value_identity() {
+    // `1.0` decimal and `1` integer are one value; `-0` and `0` floats are two.
+    let f = ":d a owl:FunctionalProperty .";
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} {f} :a :d \"1.0\"^^xsd:decimal , \"1\"^^xsd:integer ."
+        )),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} {f} :a :d \"0\"^^xsd:float , \"-0\"^^xsd:float ."
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} {f} :a :d \"1\"^^xsd:float , \"1\"^^xsd:double ."
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} {f} :a :d \"abc\" , \"abc\"^^xsd:string ."
+        )),
+        Consistency::Consistent
+    );
+    // The range applies through a sub-property and an equivalent property.
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :e rdfs:range xsd:integer . :d rdfs:subPropertyOf :f . :f owl:equivalentProperty :e . :a :d \"x\" ."
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :e rdfs:range xsd:integer . :a :d \"x\" ."
+        )),
+        Consistency::Consistent
+    );
+}
+
+#[test]
+fn data_restrictions() {
+    // ∃ over an empty restriction.
+    assert!(data_unsat(
+        &format!(":A rdfs:subClassOf {} .", dsome(":d", &int_range(5, 3))),
+        "A"
+    ));
+    assert!(!data_unsat(
+        &format!(":A rdfs:subClassOf {} .", dsome(":d", &int_range(3, 5))),
+        "A"
+    ));
+    // ≥3 over two values.
+    let two = one_of(&["1", "2"]);
+    assert!(data_unsat(
+        &format!(":A rdfs:subClassOf {} .", dmin(3, ":d", &two)),
+        "A"
+    ));
+    assert!(!data_unsat(
+        &format!(":A rdfs:subClassOf {} .", dmin(2, ":d", &two)),
+        "A"
+    ));
+    assert!(data_unsat(
+        &format!(":A rdfs:subClassOf {} .", dmin(3, ":d", &int_range(1, 2))),
+        "A"
+    ));
+    assert!(!data_unsat(
+        &format!(":A rdfs:subClassOf {} .", dmin(3, ":d", &int_range(1, 3))),
+        "A"
+    ));
+    // ≥n over [1, 2] ∪ {5}.
+    let union = format!(
+        "[ a rdfs:Datatype ; owl:unionOf ( {} {} ) ]",
+        int_range(1, 2),
+        one_of(&["5"])
+    );
+    assert!(!data_unsat(
+        &format!(":A rdfs:subClassOf {} .", dmin(3, ":d", &union)),
+        "A"
+    ));
+    assert!(data_unsat(
+        &format!(":A rdfs:subClassOf {} .", dmin(4, ":d", &union)),
+        "A"
+    ));
+    // ∀ meets ∃ and has-value.
+    assert!(data_unsat(
+        &format!(
+            ":A rdfs:subClassOf {} , {} .",
+            dvalue(":d", "\"7\"^^xsd:integer"),
+            dall(":d", &int_range(0, 3))
+        ),
+        "A"
+    ));
+    assert!(data_unsat(
+        &format!(
+            ":A rdfs:subClassOf {} , {} .",
+            dsome(":d", "xsd:string"),
+            dall(":d", "xsd:integer")
+        ),
+        "A"
+    ));
+    // ≤1 against ≥2 of the same range; ≤1 of a range the successors may leave.
+    assert!(data_unsat(
+        &format!(
+            ":A rdfs:subClassOf {} , {} .",
+            dmax(1, ":d", "xsd:integer"),
+            dmin(2, ":d", "xsd:integer")
+        ),
+        "A"
+    ));
+    assert!(!data_unsat(
+        &format!(
+            ":A rdfs:subClassOf {} , {} .",
+            dmax(1, ":d", "xsd:integer"),
+            dmin(2, ":d", "rdfs:Literal")
+        ),
+        "A"
+    ));
+    let at_most_one = format!(":a a {} .", dmax(1, ":d", "xsd:nonNegativeInteger"));
+    assert_eq!(
+        verdict(&format!("{DDECL} {at_most_one} :a :d -1 , 2 .")),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        verdict(&format!("{DDECL} {at_most_one} :a :d 1 , 2 .")),
+        Consistency::Inconsistent
+    );
+    // The complement of a datatype.
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :a a {} . :a :d 5 .",
+            dall(
+                ":d",
+                "[ a rdfs:Datatype ; owl:datatypeComplementOf xsd:integer ]"
+            )
+        )),
+        Consistency::Inconsistent
+    );
+    // The domain of a data property.
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :d rdfs:domain :A . :A owl:disjointWith :B . :a a :B . :a :d 1 ."
+        )),
+        Consistency::Inconsistent
+    );
+}
+
+#[test]
+fn disjoint_and_negative_data_properties() {
+    let disj = ":d owl:propertyDisjointWith :e .";
+    assert_eq!(
+        verdict(&format!("{DDECL} {disj} :a :d 1 . :a :e \"1\"^^xsd:int .")),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        verdict(&format!("{DDECL} {disj} :a :d 1 . :a :e 2 .")),
+        Consistency::Consistent
+    );
+    assert!(data_unsat(
+        &format!(
+            "{disj} :A rdfs:subClassOf {} , {} .",
+            dvalue(":d", "1"),
+            dvalue(":e", "\"1\"^^xsd:int")
+        ),
+        "A"
+    ));
+    // ≥2 d.[1,2] and ≥1 e.[1,2] with d, e disjoint: three values needed.
+    assert!(data_unsat(
+        &format!(
+            "{disj} :A rdfs:subClassOf {} , {} .",
+            dmin(2, ":d", &int_range(1, 2)),
+            dsome(":e", &int_range(1, 2))
+        ),
+        "A"
+    ));
+    let npa = "[ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ; owl:assertionProperty :d ; owl:targetValue 5 ]";
+    assert_eq!(
+        verdict(&format!("{DDECL} {npa} . :a :d 6 .")),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        verdict(&format!("{DDECL} {npa} . :a :d \"5\"^^xsd:int .")),
+        Consistency::Inconsistent
+    );
+    // The excluded value is forced by a range.
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} {npa} . :a a {} , {} .",
+            dsome(":d", "xsd:integer"),
+            dall(":d", &one_of(&["5"]))
+        )),
+        Consistency::Inconsistent
+    );
+}
+
+#[test]
+fn datatype_definitions_expand() {
+    let adult = ":Adult a rdfs:Datatype ; owl:equivalentClass [ a rdfs:Datatype ; owl:onDatatype xsd:integer ; owl:withRestrictions ( [ xsd:minInclusive 18 ] ) ] .";
+    let base = format!("{DDECL} {adult} :d rdfs:range :Adult .");
+    assert_eq!(
+        verdict(&format!("{base} :a :d 20 .")),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        verdict(&format!("{base} :a :d 10 .")),
+        Consistency::Inconsistent
+    );
+}
+
+#[test]
+fn classification_through_data_ranges() {
+    let body = format!(
+        "{DDECL} :A owl:equivalentClass {} . :B owl:equivalentClass {} .",
+        dsome(":d", &int_range(10, 20)),
+        dsome(":d", &int_range(5, 30))
+    );
+    assert!(entails_sub(&body, "A", "B"));
+    assert!(!entails_sub(&body, "B", "A"));
+}
+
+#[test]
+fn ill_typed_literals_are_inconsistent() {
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :a :d \"sixteen\"^^xsd:nonNegativeInteger ."
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :A rdfs:subClassOf {} .",
+            dvalue(":d", "\"x\"^^xsd:boolean")
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :A rdfs:subClassOf {} .",
+            dsome(":d", &one_of(&["\"1.5\"^^xsd:integer"]))
+        )),
+        Consistency::Inconsistent
+    );
+    // An ill-typed annotation value has no logical meaning.
+    assert_eq!(
+        verdict(&format!("{DDECL} :a rdfs:label \"x\"^^xsd:integer .")),
+        Consistency::Consistent
+    );
+}
+
+#[test]
+fn undecidable_datatype_questions_answer_unknown() {
+    // An XSD pattern with a block escape.
+    let pattern = "[ a rdfs:Datatype ; owl:onDatatype xsd:string ; owl:withRestrictions ( [ xsd:pattern \"\\\\p{IsBasicLatin}+\" ] ) ]";
+    let c = verdict(&format!("{DDECL} :d rdfs:range {pattern} . :a :d \"x\" ."));
+    assert!(is_datatype_unknown(&c), "{c:?}");
+    // A value beyond the represented range.
+    let c = verdict(&format!(
+        "{DDECL} :a :d \"1000000000000000000000000000000000000000000\"^^xsd:integer ."
+    ));
+    assert!(is_datatype_unknown(&c), "{c:?}");
+    // An rdf:XMLLiteral literal (its XML content is not checked).
+    let c = verdict(&format!("{DDECL} :a :d \"<b>x</b>\"^^rdf:XMLLiteral ."));
+    assert!(is_datatype_unknown(&c), "{c:?}");
+    // A component of the `≉` graph that is neither peelable nor a clique: y and w each
+    // differ from z₁ ≠ z₂ but not from each other, all in [1, 2]. (It is unsatisfiable:
+    // z₁, z₂ take both values.) The check must not guess.
+    let path = format!(
+        ":d owl:propertyDisjointWith :e . :f owl:propertyDisjointWith :e . :X rdfs:subClassOf {} , {} , {} .",
+        dmin(2, ":e", &int_range(1, 2)),
+        dsome(":d", &int_range(1, 2)),
+        dsome(":f", &int_range(1, 2))
+    );
+    let (_, r) = run(&format!("{DDECL} {path} :a a :X ."));
+    assert!(is_datatype_unknown(&r.consistency), "{:?}", r.consistency);
+    // Undecided when every other branch clashes; consistent when another branch is a model.
+    let c = verdict(&format!(
+        "{DDECL} {path} :a a [ owl:unionOf ( :X :B ) ] . :a a [ owl:complementOf :B ] ."
+    ));
+    assert!(is_datatype_unknown(&c), "{c:?}");
+    assert_eq!(
+        verdict(&format!("{DDECL} {path} :a a [ owl:unionOf ( :X :B ) ] .")),
+        Consistency::Consistent
+    );
+    // The same structure in a TBox only: consistency is decided, the class is not.
+    let (d, t) = Graph::parse_to_triples(&format!("{PRE}{DDECL} {path}"), "turtle").unwrap();
+    let o = extract(&d, &t).unwrap();
+    let report = check(&d, &o, Budget::default());
+    assert_eq!(report.consistency, Consistency::Consistent);
+    assert!(report.classification.is_none());
+    assert!(matches!(
+        report.classification_unknown,
+        Some(UnknownReason::DatatypeUnknown { .. })
+    ));
+    let r = Reasoner::new(&d, &o, Budget::default()).unwrap();
+    assert_eq!(r.is_satisfiable("http://ex/X"), None);
+}
+
+#[test]
+fn out_of_fragment_data_constructs_answer_unknown() {
+    let out = |body: &str| {
+        let c = verdict(&format!("{DDECL} {body}"));
+        assert!(
+            matches!(c, Consistency::Unknown(UnknownReason::OutOfFragment { .. })),
+            "{body}: {c:?}"
+        );
+    };
+    out(":d rdfs:range :Undefined . :Undefined a rdfs:Datatype .");
+    out(":T a rdfs:Datatype ; owl:equivalentClass :U . :U a rdfs:Datatype ; owl:equivalentClass :T . :d rdfs:range :T .");
+    out(":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topDataProperty ; owl:someValuesFrom xsd:integer ] .");
+    out(":A owl:hasKey ( :d ) .");
+    out(":a :d \"x\"^^<http://ex/unknownDatatype> .");
+}
+
 // ---- differential test against recorded reference answers ---------------------------------
 
 /// xorshift64*: a small deterministic generator, so the corpus is code, not data.

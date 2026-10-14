@@ -14,13 +14,29 @@
 //! `Q ⊑ ∀S.Q ⊓ C` chain), so the tableau never sees a transitive role. The role hierarchy is
 //! not translated to clauses: the tableau materialises super-role facts directly.
 //!
-//! Everything outside the supported fragment (data properties and datatypes, nominals,
-//! property chains, keys, the universal roles) is refused with [`Unsupported`], naming the
-//! axiom's source triples, so the reasoner can answer `Unknown(OutOfFragment)` instead of
-//! a wrong verdict.
+//! Data properties are roles too (never inverted, never transitive) whose edges end in
+//! *concrete* nodes, and each data range becomes a [`DataRangeExpr`] atom
+//! ([`AtomKind::Data`]) that only ever labels concrete nodes and only ever occurs in clause
+//! heads: `∀D.R` is `D(x, y) → R(y)`, `≥n D.R` an at-least atom with an `R` filler, and
+//! `≤n D.R` the clause `D(x, y₀) ∧ … ∧ D(x, yₙ) → ⋁ ¬R(yᵢ) ∨ ⋁ yᵢ ≈ yⱼ` (a concrete node is
+//! either outside `R` or merged; `¬R` is again a data range). `DisjointDataProperties(D E)`
+//! is `D(x, y₀) ∧ E(x, y₁) → y₀ ≉ y₁`, an inequality between *values*. Named datatypes
+//! defined by a `DatatypeDefinition` are expanded (refused when the definitions are cyclic
+//! or a datatype has more than one). The tableau's datatype check decides the labels with
+//! [`super::data_ranges`].
+//!
+//! Everything outside the supported fragment (nominals, property chains, keys, the
+//! universal roles, datatypes outside the datatype map) is refused with [`Unsupported`],
+//! naming the axiom's source triples, so the reasoner can answer `Unknown(OutOfFragment)`
+//! instead of a wrong verdict; a data range or literal the datatype oracle cannot decide is
+//! refused as a datatype question (`Unknown(DatatypeUnknown)`).
 
-use super::model::{Axiom, ClassExpression, EntityKind, Individual, ObjectProperty, Ontology};
-use super::vocab::Vocab;
+use super::data_ranges::{self, DataRangeExpr, Tri};
+use super::datatypes::{self, builtin, Builtin, Value, ValueError};
+use super::model::{
+    Axiom, ClassExpression, DataRange, EntityKind, Individual, Literal, ObjectProperty, Ontology,
+};
+use super::vocab::{iri_of, Vocab, RDF};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
 
@@ -50,12 +66,15 @@ pub(crate) enum AtomKind {
     Class(Id),
     /// A fresh name from the structural transformation (or an ABox marker).
     Fresh,
-    /// The at-least concept `≥n R.F` (`F = None` is `⊤`).
+    /// The at-least concept `≥n R.F` (`F = None` is `⊤`). For a data role `R` the filler
+    /// is a [`AtomKind::Data`] atom and the successors are concrete nodes.
     AtLeast {
         n: u32,
         role: Role,
         filler: Option<Atom>,
     },
+    /// A data range, by index into [`Clauses::data`]. Labels concrete nodes only.
+    Data(u32),
 }
 
 /// A variable of a DL-clause: the central `x` or the `i`-th neighbour.
@@ -74,6 +93,8 @@ pub(crate) enum Head {
     Eq(Var, Var),
     /// `R(x, x)`.
     SelfLoop(Role),
+    /// `u ≉ v` between concrete nodes: their values differ (`DisjointDataProperties`).
+    Ineq(Var, Var),
 }
 
 /// A DL-clause. Every neighbour variable `yᵢ` occurs in at least one role atom, so a match
@@ -112,6 +133,8 @@ pub(crate) struct Abox {
     pub same: Vec<(u32, u32, u32)>,
     /// `a ≉ b` facts.
     pub different: Vec<(u32, u32, u32)>,
+    /// `D(a, v)` facts: the data role, the individual, the `OneOf(v)` atom and the value.
+    pub data: Vec<(Role, u32, Atom, Value, u32)>,
 }
 
 /// A construct outside the fragment the reasoner decides.
@@ -121,6 +144,9 @@ pub struct Unsupported {
     pub construct: &'static str,
     /// The index of the axiom in [`Ontology::axioms`].
     pub axiom: usize,
+    /// `true` when the construct is in the fragment but the datatype oracle cannot decide
+    /// it (a data range or literal it answers Unknown for).
+    pub datatype: bool,
 }
 
 /// The ontology as DL-clauses plus its ABox and role hierarchy.
@@ -137,11 +163,22 @@ pub(crate) struct Clauses {
     pub classes: Vec<(Id, Atom)>,
     /// Told named-class subsumptions `A ⊑ B` (from `SubClassOf` and `EquivalentClasses`).
     pub told: FxHashSet<(Id, Id)>,
+    /// The data ranges of the [`AtomKind::Data`] atoms.
+    pub data: Vec<DataRangeExpr>,
+    /// The axiom (index into [`Ontology::axioms`]) each data range was first read from.
+    pub data_source: Vec<u32>,
+    /// Per role index: whether it is a data property.
+    pub data_roles: Vec<bool>,
 }
 
 impl Clauses {
     pub(crate) fn supers(&self, r: Role) -> &[Role] {
         &self.supers[(2 * r.idx + u32::from(r.inv)) as usize]
+    }
+
+    /// Whether `r` is a data property (its edges end in concrete nodes).
+    pub(crate) fn is_data(&self, r: Role) -> bool {
+        self.data_roles[r.idx as usize]
     }
 }
 
@@ -159,6 +196,17 @@ enum Nnf {
     AtMost(u32, Role, Box<Nnf>),
     SelfLoop(Role),
     NotSelf(Role),
+    /// A data range: the filler of a data role's `All`, `AtLeast` or `AtMost` (never
+    /// `rdfs:Literal`, which is `Top`).
+    Data(DataRangeExpr),
+}
+
+/// The complement of a data range (relative to the data domain).
+fn complement(e: DataRangeExpr) -> DataRangeExpr {
+    match e {
+        DataRangeExpr::Not(x) => *x,
+        e => DataRangeExpr::Not(Box::new(e)),
+    }
 }
 
 fn negate(c: &Nnf) -> Nnf {
@@ -174,6 +222,7 @@ fn negate(c: &Nnf) -> Nnf {
         Nnf::AtMost(n, r, f) => at_least(n + 1, *r, (**f).clone()),
         Nnf::SelfLoop(r) => Nnf::NotSelf(*r),
         Nnf::NotSelf(r) => Nnf::SelfLoop(*r),
+        Nnf::Data(e) => Nnf::Data(complement(e.clone())),
     }
 }
 
@@ -215,7 +264,10 @@ struct Builder<'a> {
     /// The axiom whose clause would exceed [`MAX_CLAUSE_VARS`], if any.
     too_wide: Option<usize>,
     axiom: usize,
-    _dict: &'a Dict,
+    dict: &'a Dict,
+    data_atoms: FxHashMap<DataRangeExpr, Atom>,
+    /// The distinct ranges of each `DatatypeDefinition`, by defined datatype.
+    definitions: FxHashMap<Id, Vec<DataRange>>,
 }
 
 /// The largest cardinality in a number restriction the clausifier translates.
@@ -242,8 +294,18 @@ pub(crate) fn clausify(dict: &Dict, onto: &Ontology) -> Result<Clauses, Unsuppor
         gcis: Vec::new(),
         too_wide: None,
         axiom: 0,
-        _dict: dict,
+        dict,
+        data_atoms: FxHashMap::default(),
+        definitions: FxHashMap::default(),
     };
+    for rec in &onto.axioms {
+        if let Axiom::DatatypeDefinition(dt, r) = &rec.axiom {
+            let defs = b.definitions.entry(*dt).or_default();
+            if !defs.contains(r) {
+                defs.push(r.clone());
+            }
+        }
+    }
     // Role axioms first: the transitivity encoding of `∀` needs the whole hierarchy.
     for (i, rec) in onto.axioms.iter().enumerate() {
         b.axiom = i;
@@ -262,6 +324,7 @@ pub(crate) fn clausify(dict: &Dict, onto: &Ontology) -> Result<Clauses, Unsuppor
             return Err(Unsupported {
                 construct: "an axiom whose clause needs more than MAX_CLAUSE_VARS successors",
                 axiom,
+                datatype: false,
             });
         }
     }
@@ -286,6 +349,15 @@ impl Builder<'_> {
         Unsupported {
             construct,
             axiom: self.axiom,
+            datatype: false,
+        }
+    }
+
+    fn undecidable_data(&self, construct: &'static str) -> Unsupported {
+        Unsupported {
+            construct,
+            axiom: self.axiom,
+            datatype: true,
         }
     }
 
@@ -309,19 +381,159 @@ impl Builder<'_> {
         if id == self.v.top_object_property || id == self.v.bottom_object_property {
             return Err(self.unsupported("owl:topObjectProperty / owl:bottomObjectProperty"));
         }
-        let idx = match self.role_idx.get(&id) {
-            Some(&i) => i,
-            None => {
-                let i = self.out.roles.len() as u32;
-                self.out.roles.push(id);
-                self.role_idx.insert(id, i);
-                i
-            }
-        };
+        let idx = self.role_index(id, false)?;
         Ok(Role {
             idx,
             inv: p.is_inverse(),
         })
+    }
+
+    /// The role of a data property.
+    fn data_role(&mut self, id: Id) -> Result<Role, Unsupported> {
+        if id == self.v.top_data_property || id == self.v.bottom_data_property {
+            return Err(self.unsupported("owl:topDataProperty / owl:bottomDataProperty"));
+        }
+        let idx = self.role_index(id, true)?;
+        Ok(Role { idx, inv: false })
+    }
+
+    fn role_index(&mut self, id: Id, data: bool) -> Result<u32, Unsupported> {
+        match self.role_idx.get(&id) {
+            Some(&i) if self.out.data_roles[i as usize] == data => Ok(i),
+            Some(_) => {
+                Err(self.unsupported("a property used as both an object and a data property"))
+            }
+            None => {
+                let i = self.out.roles.len() as u32;
+                self.out.roles.push(id);
+                self.out.data_roles.push(data);
+                self.role_idx.insert(id, i);
+                Ok(i)
+            }
+        }
+    }
+
+    /// The value of a literal of a data range or assertion. Ill-typed literals make the
+    /// ontology inconsistent and are handled before clausification; here they, values this
+    /// implementation does not represent, datatypes outside the datatype map and
+    /// `rdf:XMLLiteral` (whose XML content is not checked) are refused.
+    fn value(&self, l: &Literal) -> Result<Value, Unsupported> {
+        if l.datatype == format!("{RDF}XMLLiteral") {
+            return Err(self.undecidable_data("an rdf:XMLLiteral literal"));
+        }
+        match datatypes::parse_value(&l.lexical, &l.datatype, l.lang.as_deref()) {
+            Ok(v) => Ok(v),
+            Err(ValueError::Unsupported) => {
+                Err(self.undecidable_data("a literal value beyond the represented range"))
+            }
+            Err(ValueError::IllTyped) => Err(self.undecidable_data("an ill-typed facet value")),
+            Err(ValueError::UnknownDatatype) => {
+                Err(self.unsupported("a literal of a datatype outside the OWL 2 datatype map"))
+            }
+        }
+    }
+
+    /// `dr` as a [`DataRangeExpr`], with defined datatypes expanded. `expanding` holds the
+    /// datatypes whose definitions are being expanded, so a cycle is refused.
+    fn data_expr(
+        &self,
+        dr: &DataRange,
+        expanding: &mut Vec<Id>,
+    ) -> Result<DataRangeExpr, Unsupported> {
+        /// Nested definitions deeper than this are refused (the oracle answers Unknown past
+        /// the same depth anyway).
+        const MAX_EXPANSION: usize = 64;
+        let iri = |id: Id| iri_of(self.dict, id).unwrap_or_default();
+        Ok(match dr {
+            DataRange::TopLiteral => DataRangeExpr::Datatype(Builtin::RdfsLiteral),
+            DataRange::Datatype(id) => {
+                if let Some(b) = builtin(&iri(*id)) {
+                    return Ok(DataRangeExpr::Datatype(b));
+                }
+                let def = match self.definitions.get(id).map(Vec::as_slice) {
+                    Some([def]) => def,
+                    Some(_) => {
+                        return Err(
+                            self.unsupported("a datatype with more than one DatatypeDefinition")
+                        )
+                    }
+                    None => return Err(self.unsupported(
+                        "a datatype outside the OWL 2 datatype map without a DatatypeDefinition",
+                    )),
+                };
+                if expanding.contains(id) {
+                    return Err(self.unsupported("a cyclic DatatypeDefinition"));
+                }
+                if expanding.len() >= MAX_EXPANSION {
+                    return Err(self.undecidable_data("DatatypeDefinitions nested too deeply"));
+                }
+                expanding.push(*id);
+                let e = self.data_expr(def, expanding);
+                expanding.pop();
+                e?
+            }
+            DataRange::IntersectionOf(rs) => DataRangeExpr::And(
+                rs.iter()
+                    .map(|r| self.data_expr(r, expanding))
+                    .collect::<Result<_, _>>()?,
+            ),
+            DataRange::UnionOf(rs) => DataRangeExpr::Or(
+                rs.iter()
+                    .map(|r| self.data_expr(r, expanding))
+                    .collect::<Result<_, _>>()?,
+            ),
+            DataRange::ComplementOf(r) => {
+                DataRangeExpr::Not(Box::new(self.data_expr(r, expanding)?))
+            }
+            DataRange::OneOf(ls) => {
+                DataRangeExpr::OneOf(ls.iter().map(|l| self.value(l)).collect::<Result<_, _>>()?)
+            }
+            DataRange::Restriction(id, facets) => {
+                let Some(b) = builtin(&iri(*id)) else {
+                    return Err(self.unsupported(
+                        "a facet restriction of a datatype outside the OWL 2 datatype map",
+                    ));
+                };
+                let mut fs = Vec::with_capacity(facets.len());
+                for (f, l) in facets {
+                    let Some(f) = datatypes::facet(&iri(*f)) else {
+                        return Err(self.unsupported("a facet outside OWL 2"));
+                    };
+                    fs.push((f, self.value(l)?));
+                }
+                DataRangeExpr::Restriction(b, fs)
+            }
+        })
+    }
+
+    /// A data range as the filler of a data restriction: `Top` for `rdfs:Literal`, otherwise
+    /// [`Nnf::Data`]. A range the datatype oracle cannot decide is refused.
+    fn data_nnf(&self, dr: &DataRange) -> Result<Nnf, Unsupported> {
+        let e = self.data_expr(dr, &mut Vec::new())?;
+        self.data_filler(e)
+    }
+
+    fn data_filler(&self, e: DataRangeExpr) -> Result<Nnf, Unsupported> {
+        if e == DataRangeExpr::Datatype(Builtin::RdfsLiteral) {
+            return Ok(Nnf::Top);
+        }
+        if data_ranges::is_empty(&e) == Tri::Unknown {
+            return Err(self.undecidable_data("a data range the datatype oracle cannot decide"));
+        }
+        Ok(Nnf::Data(e))
+    }
+
+    /// The atom of a data range.
+    fn data_atom(&mut self, e: DataRangeExpr) -> Atom {
+        if let Some(&a) = self.data_atoms.get(&e) {
+            return a;
+        }
+        let i = self.out.data.len() as u32;
+        self.out.data.push(e.clone());
+        self.out.data_source.push(self.src());
+        let a = self.fresh(AtomKind::Data(i));
+        self.data_atoms.insert(e, a);
+        a
     }
 
     fn individual(&mut self, a: &Individual) -> u32 {
@@ -377,6 +589,22 @@ impl Builder<'_> {
                 let r = self.role(p)?;
                 self.transitive.insert(r);
                 self.transitive.insert(r.inverse());
+            }
+            // Every data property is below owl:topDataProperty: nothing to add.
+            Axiom::SubDataPropertyOf(_, e) if *e == self.v.top_data_property => {}
+            Axiom::SubDataPropertyOf(d, e) => {
+                let (r, s) = (self.data_role(*d)?, self.data_role(*e)?);
+                self.include(r, s);
+            }
+            Axiom::EquivalentDataProperties(ds) => {
+                let rs = ds
+                    .iter()
+                    .map(|d| self.data_role(*d))
+                    .collect::<Result<Vec<_>, _>>()?;
+                for w in rs.windows(2) {
+                    self.include(w[0], w[1]);
+                    self.include(w[1], w[0]);
+                }
             }
             _ => {}
         }
@@ -577,16 +805,65 @@ impl Builder<'_> {
                 ]));
             }
             Axiom::HasKey(..) => return Err(self.unsupported("HasKey")),
+            // Read in the first pass (hierarchy) and before it (definitions).
             Axiom::SubDataPropertyOf(..)
             | Axiom::EquivalentDataProperties(_)
-            | Axiom::DisjointDataProperties(_)
-            | Axiom::DataPropertyDomain(..)
-            | Axiom::DataPropertyRange(..)
-            | Axiom::FunctionalDataProperty(_)
-            | Axiom::DatatypeDefinition(..)
-            | Axiom::DataPropertyAssertion(..)
-            | Axiom::NegativeDataPropertyAssertion(..) => {
-                return Err(self.unsupported("data property axiom"))
+            | Axiom::DatatypeDefinition(..) => {}
+            Axiom::DisjointDataProperties(ds) => {
+                let rs = ds
+                    .iter()
+                    .map(|d| self.data_role(*d))
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (i, &r) in rs.iter().enumerate() {
+                    for &s in &rs[i + 1..] {
+                        self.push_clause(Clause {
+                            body_roles: vec![(r, 0), (s, 1)],
+                            n_y: 2,
+                            head: vec![Head::Ineq(Var::Y(0), Var::Y(1))],
+                            ..Clause::default()
+                        });
+                    }
+                }
+            }
+            Axiom::DataPropertyDomain(d, c) => {
+                // `∃D.⊤ ⊑ C`: `D(x, y) → C(x)`.
+                let r = self.data_role(*d)?;
+                let c = self.nnf(c, true)?;
+                self.gci(Nnf::Or(vec![Nnf::All(r, Box::new(Nnf::Bottom)), c]));
+            }
+            Axiom::DataPropertyRange(d, dr) => {
+                let r = self.data_role(*d)?;
+                let f = self.data_nnf(dr)?;
+                self.gci(Nnf::All(r, Box::new(f)));
+            }
+            Axiom::FunctionalDataProperty(d) => {
+                let r = self.data_role(*d)?;
+                self.gci(at_most(1, r, Nnf::Top));
+            }
+            Axiom::DataPropertyAssertion(d, a, l) => {
+                let r = self.data_role(*d)?;
+                let a = self.individual(a);
+                let v = self.value(l)?;
+                let one = DataRangeExpr::OneOf(vec![v.clone()]);
+                if data_ranges::is_empty(&one) == Tri::Unknown {
+                    return Err(
+                        self.undecidable_data("a literal the datatype oracle cannot decide")
+                    );
+                }
+                let atom = self.data_atom(one);
+                let src = self.src();
+                self.out.abox.data.push((r, a, atom, v, src));
+            }
+            Axiom::NegativeDataPropertyAssertion(d, a, l) => {
+                // `Mₐ ⊑ ∀D.¬{v}`, with the marker on `a` only.
+                let r = self.data_role(*d)?;
+                let a = self.individual(a);
+                let v = self.value(l)?;
+                let excluded = self.data_filler(complement(DataRangeExpr::OneOf(vec![v])))?;
+                let ma = self.fresh(AtomKind::Fresh);
+                let src = self.src();
+                self.out.abox.concepts.push((ma, a, src));
+                self.gci(Nnf::Or(vec![Nnf::Not(ma), Nnf::All(r, Box::new(excluded))]));
             }
         }
         Ok(())
@@ -663,13 +940,33 @@ impl Builder<'_> {
             }
             C::OneOf(_) => return Err(self.unsupported("ObjectOneOf")),
             C::HasValue(..) => return Err(self.unsupported("ObjectHasValue")),
-            C::DataSomeValuesFrom(..)
-            | C::DataAllValuesFrom(..)
-            | C::DataHasValue(..)
-            | C::DataMinCardinality(..)
-            | C::DataMaxCardinality(..)
-            | C::DataExactCardinality(..) => {
-                return Err(self.unsupported("data property restriction"))
+            C::DataSomeValuesFrom(d, dr) => {
+                let (r, f) = (self.data_role(*d)?, self.data_nnf(dr)?);
+                at_least(1, r, f)
+            }
+            C::DataAllValuesFrom(d, dr) => {
+                let (r, f) = (self.data_role(*d)?, self.data_nnf(dr)?);
+                Nnf::All(r, Box::new(f))
+            }
+            C::DataHasValue(d, l) => {
+                let r = self.data_role(*d)?;
+                let f = self.data_filler(DataRangeExpr::OneOf(vec![self.value(l)?]))?;
+                at_least(1, r, f)
+            }
+            C::DataMinCardinality(n, d, dr) => {
+                self.cardinality(*n)?;
+                let (r, f) = (self.data_role(*d)?, self.data_nnf(dr)?);
+                at_least(*n, r, f)
+            }
+            C::DataMaxCardinality(n, d, dr) => {
+                self.cardinality(*n)?;
+                let (r, f) = (self.data_role(*d)?, self.data_nnf(dr)?);
+                at_most(*n, r, f)
+            }
+            C::DataExactCardinality(n, d, dr) => {
+                self.cardinality(*n)?;
+                let (r, f) = (self.data_role(*d)?, self.data_nnf(dr)?);
+                Nnf::And(vec![at_least(*n, r, f.clone()), at_most(*n, r, f)])
             }
         };
         Ok(if positive { n } else { negate(&n) })
@@ -749,6 +1046,7 @@ impl Builder<'_> {
                         Nnf::Top => None,
                         Nnf::Bottom => continue,
                         Nnf::Atom(a) => Some(a),
+                        Nnf::Data(e) => Some(self.data_atom(e)),
                         other => Some(self.define(other)),
                     };
                     let a = self.at_least_atom(n, r, filler);
@@ -764,6 +1062,33 @@ impl Builder<'_> {
                         let p = self.transitive_all(r, *f, &trans);
                         cl.head.push(Head::Concept(p, Var::X));
                     }
+                }
+                Nnf::AtMost(n, r, f) if self.out.is_data(r) => {
+                    // `D(x, y₀) ∧ … ∧ D(x, yₙ) → ⋁ ¬R(yᵢ) ∨ ⋁ yᵢ ≈ yⱼ`.
+                    let outside = match *f {
+                        Nnf::Top => None,
+                        Nnf::Bottom => return,
+                        Nnf::Data(e) => Some(self.data_atom(complement(e))),
+                        _ => unreachable!("a data role's filler is a data range"),
+                    };
+                    if u32::from(cl.n_y) + n + 1 > MAX_CLAUSE_VARS {
+                        self.too_wide = Some(self.axiom);
+                        return;
+                    }
+                    let base = cl.n_y;
+                    for i in 0..=n as u16 {
+                        cl.body_roles.push((r, base + i));
+                        if let Some(a) = outside {
+                            cl.head.push(Head::Concept(a, Var::Y(base + i)));
+                        }
+                    }
+                    cl.ordered.extend((1..=n as u16).map(|i| base + i));
+                    for i in 0..=n as u16 {
+                        for j in i + 1..=n as u16 {
+                            cl.head.push(Head::Eq(Var::Y(base + i), Var::Y(base + j)));
+                        }
+                    }
+                    cl.n_y += n as u16 + 1;
                 }
                 Nnf::AtMost(n, r, f) => {
                     let filler = match *f {
@@ -793,6 +1118,7 @@ impl Builder<'_> {
                 }
                 Nnf::SelfLoop(r) => cl.head.push(Head::SelfLoop(r)),
                 Nnf::NotSelf(r) => cl.body_self.push(r),
+                Nnf::Data(_) => unreachable!("a data range is only a data role's filler"),
             }
         }
         self.push_clause(cl);
@@ -812,6 +1138,10 @@ impl Builder<'_> {
             Nnf::Bottom => {}
             Nnf::Atom(a) => cl.head.push(Head::Concept(a, Var::Y(y))),
             Nnf::Not(a) => cl.body_y.push((a, y)),
+            Nnf::Data(e) => {
+                let a = self.data_atom(e);
+                cl.head.push(Head::Concept(a, Var::Y(y)));
+            }
             other => {
                 let q = self.define(other);
                 cl.head.push(Head::Concept(q, Var::Y(y)));

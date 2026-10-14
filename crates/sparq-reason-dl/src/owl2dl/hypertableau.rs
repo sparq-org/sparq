@@ -21,10 +21,35 @@
 //! Every fact carries the set of branch points it depends on; a clash backjumps to the
 //! latest branch point it depends on (dependency-directed backtracking), and state is
 //! restored from an undo trail. Work is bounded by a deterministic step count; running out
-//! is reported as [`Exhausted`], never as a verdict.
+//! is reported as [`Stop::Exhausted`], never as a verdict.
+//!
+//! **Data.** Data property edges end in *concrete* nodes: a separate sort that is never
+//! blocked, never the central node of a clause and has no successors. A concrete node's
+//! label is a set of data ranges, and `≉` between concrete nodes means their values differ
+//! (from the `≥`-rule, from `DisjointDataProperties`, and between the asserted values of an
+//! individual). The **datatype check** runs whenever the concrete part changed, before any
+//! branching, expansion or completion. Over each connected component of the `≉` graph it
+//! asks whether every node can get a value in all its ranges with `≉`-neighbours apart:
+//!
+//! 1. a node whose ranges have no common value is a clash (a node with a `OneOf` range has
+//!    its candidate values enumerated and tested with [`data_ranges::contains`]);
+//! 2. a node with more values than `≉`-neighbours left can always be given a value last, so
+//!    it is peeled off, repeatedly;
+//! 3. what is left is solved exactly: the enumerated nodes by backtracking, and the rest
+//!    must form cliques of nodes with identical labels, decided by
+//!    [`data_ranges::conjunction_satisfiable`] with the clique size (and the values of
+//!    their enumerated neighbours excluded).
+//!
+//! A clash depends on the labels and inequalities of the nodes it involves. Anything else,
+//! or any `Unknown` from the oracle, leaves the branch *undecided*: it is closed like a
+//! clash so the search goes on, and a run whose every branch closed returns
+//! [`Stop::Undecided`] instead of "unsatisfiable" when one of them was undecided. Only a
+//! clash-free, complete branch whose datatype check succeeded is reported satisfiable.
 
 use super::clausify::{Atom, AtomKind, Clauses, Head, Role, Var};
-use rustc_hash::FxHashMap;
+use super::data_ranges::{self, DataRangeExpr, Tri};
+use super::datatypes::Value;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -119,9 +144,16 @@ impl Default for Budget {
     }
 }
 
-/// A run ran out of its [`Budget`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Exhausted;
+/// Why a run gave no verdict.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum Stop {
+    /// The run ran out of its [`Budget`].
+    Exhausted,
+    /// Every branch closed, but at least one only because its datatype check was
+    /// undecided. Carries the axioms (indices into the ontology) of the data ranges
+    /// involved in the first undecided check.
+    Undecided(Vec<u32>),
+}
 
 /// A clause's neighbour variable: its role atoms, its concept atoms, and whether it binds
 /// only nodes after the previous variable's.
@@ -178,6 +210,8 @@ impl ClauseIndex {
 struct NodeData {
     parent: Option<Node>,
     root: bool,
+    /// A data value (the end of a data property edge).
+    concrete: bool,
     active: bool,
     label: FxHashMap<Atom, Dep>,
     /// `adj[n]` = the role expressions `r` with `r(self, n)`.
@@ -233,6 +267,36 @@ pub(crate) struct Tableau<'c> {
     /// against the same step budget so one application cannot run unbounded.
     probes: Cell<u64>,
     budget: Budget,
+    /// `≉` between concrete nodes, as adjacency.
+    cineq: FxHashMap<Node, Vec<Node>>,
+    /// Concrete nodes changed since the last datatype check.
+    touched: Vec<Node>,
+    /// Every concrete node must be rechecked (after backtracking).
+    recheck_all: bool,
+    /// The data labels of the first undecided datatype check, if any.
+    undecided: Option<Vec<Atom>>,
+    /// `conjunction_satisfiable` answers, by (label, count, excluded values).
+    count_memo: FxHashMap<(Vec<Atom>, usize, Vec<Value>), Tri>,
+    /// `contains` answers, by (data atom, value).
+    contains_memo: FxHashMap<(Atom, Value), Tri>,
+}
+
+/// The outcome of the datatype check of one component.
+enum DataOutcome {
+    Sat,
+    Clash(Dep),
+    Undecided(Dep, Vec<Atom>),
+}
+
+/// A concrete node as the datatype check sees it.
+struct CNode {
+    node: Node,
+    /// Its data atoms, sorted.
+    atoms: Vec<Atom>,
+    /// The union of their dependencies.
+    dep: Dep,
+    /// Its candidate values, when one of its ranges is a `OneOf`.
+    cands: Option<Vec<Value>>,
 }
 
 impl<'c> Tableau<'c> {
@@ -254,6 +318,12 @@ impl<'c> Tableau<'c> {
             steps: 0,
             probes: Cell::new(0),
             budget,
+            cineq: FxHashMap::default(),
+            touched: Vec::new(),
+            recheck_all: false,
+            undecided: None,
+            count_memo: FxHashMap::default(),
+            contains_memo: FxHashMap::default(),
         }
     }
 
@@ -284,6 +354,38 @@ impl<'c> Tableau<'c> {
         self.merge(a, b, &Dep::default());
     }
 
+    /// Asserts the data property facts `r(a, v)`, given as (role, individual, the
+    /// `OneOf(v)` atom, v). Each individual gets one concrete node per distinct value, and
+    /// its nodes for different values are unequal.
+    pub(crate) fn assert_data(&mut self, facts: &[(Role, Node, Atom, Value)]) {
+        let mut nodes: FxHashMap<(Node, &Value), Node> = FxHashMap::default();
+        let mut by_ind: FxHashMap<Node, Vec<Node>> = FxHashMap::default();
+        for (r, a, atom, v) in facts {
+            let a = self.canonical(*a);
+            let y = match nodes.get(&(a, v)) {
+                Some(&y) => y,
+                None => {
+                    let y = self.new_node_of(None, true);
+                    self.add_concept(y, *atom, &Dep::default());
+                    nodes.insert((a, v), y);
+                    by_ind.entry(a).or_default().push(y);
+                    y
+                }
+            };
+            self.add_role(*r, a, y, &Dep::default());
+        }
+        let mut inds: Vec<Node> = by_ind.keys().copied().collect();
+        inds.sort_unstable();
+        for a in inds {
+            let ys = by_ind[&a].clone();
+            for (i, &y) in ys.iter().enumerate() {
+                for &z in &ys[i + 1..] {
+                    self.add_ineq(y, z, &Dep::default());
+                }
+            }
+        }
+    }
+
     /// The label of a root node after a satisfiable run: each atom, and whether it holds
     /// without depending on any branch choice.
     pub(crate) fn root_label(&self, n: Node) -> Vec<(Atom, bool)> {
@@ -305,15 +407,18 @@ impl<'c> Tableau<'c> {
     }
 
     /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
-    /// built, `Ok(false)` when every branch closed.
-    pub(crate) fn run(&mut self) -> Result<bool, Exhausted> {
+    /// built, `Ok(false)` when every branch closed on a clash.
+    pub(crate) fn run(&mut self) -> Result<bool, Stop> {
         loop {
             if self.over_budget() || self.nodes.len() > self.budget.max_nodes {
-                return Err(Exhausted);
+                return Err(Stop::Exhausted);
             }
             if let Some(d) = self.clash.take() {
                 if !self.backtrack(d) {
-                    return Ok(false);
+                    return match self.undecided.take() {
+                        None => Ok(false),
+                        Some(atoms) => Err(Stop::Undecided(self.data_axioms(&atoms))),
+                    };
                 }
                 continue;
             }
@@ -322,6 +427,10 @@ impl<'c> Tableau<'c> {
                 if self.nodes[x as usize].active {
                     self.match_node(x);
                 }
+                continue;
+            }
+            if self.recheck_all || !self.touched.is_empty() {
+                self.datatype_check();
                 continue;
             }
             if let Some(inst) = self.pending.pop() {
@@ -362,10 +471,15 @@ impl<'c> Tableau<'c> {
     // ---- facts ------------------------------------------------------------------------
 
     fn new_node(&mut self, parent: Option<Node>) -> Node {
+        self.new_node_of(parent, false)
+    }
+
+    fn new_node_of(&mut self, parent: Option<Node>, concrete: bool) -> Node {
         let n = self.nodes.len() as Node;
         self.nodes.push(NodeData {
             parent,
             root: parent.is_none(),
+            concrete,
             active: true,
             label: FxHashMap::default(),
             adj: FxHashMap::default(),
@@ -374,6 +488,9 @@ impl<'c> Tableau<'c> {
         self.trail.push(Undo::NewNode);
         self.steps += 1;
         self.mark(n);
+        if concrete {
+            self.touched.push(n);
+        }
         n
     }
 
@@ -406,6 +523,9 @@ impl<'c> Tableau<'c> {
             return;
         }
         node.label.insert(a, d.clone());
+        if node.concrete {
+            self.touched.push(n);
+        }
         self.trail.push(Undo::Concept(n, a));
         self.steps += 1;
         if self.forbidden == Some((n, a)) {
@@ -470,6 +590,12 @@ impl<'c> Tableau<'c> {
             return;
         }
         self.ineq.insert(key, d.clone());
+        if self.nodes[a as usize].concrete {
+            self.cineq.entry(a).or_default().push(b);
+            self.cineq.entry(b).or_default().push(a);
+            self.touched.push(a);
+            self.touched.push(b);
+        }
         self.trail.push(Undo::Ineq(key.0, key.1));
         self.steps += 1;
     }
@@ -589,6 +715,10 @@ impl<'c> Tableau<'c> {
     }
 
     fn match_node(&mut self, x: Node) {
+        // Every clause is about an abstract central node (data facts are read from it).
+        if self.nodes[x as usize].concrete {
+            return;
+        }
         let mut found = Vec::new();
         for ci in self.candidates(x) {
             self.match_clause(ci, x, &mut found);
@@ -710,6 +840,10 @@ impl<'c> Tableau<'c> {
                 let x = inst.nodes[0];
                 self.has_role(r, x, x)
             }
+            Head::Ineq(u, v) => {
+                let (a, b) = (Self::var(inst, u), Self::var(inst, v));
+                self.ineq.contains_key(&(a.min(b), a.max(b)))
+            }
         }
     }
 
@@ -728,6 +862,7 @@ impl<'c> Tableau<'c> {
                 let x = inst.nodes[0];
                 self.add_role(r, x, x, d);
             }
+            Head::Ineq(u, v) => self.add_ineq(Self::var(inst, u), Self::var(inst, v), d),
         }
     }
 
@@ -792,6 +927,18 @@ impl<'c> Tableau<'c> {
                 }
                 Undo::Ineq(a, b) => {
                     self.ineq.remove(&(a, b));
+                    if self.nodes[a as usize].concrete {
+                        for (x, y) in [(a, b), (b, a)] {
+                            if let Some(ns) = self.cineq.get_mut(&x) {
+                                if let Some(p) = ns.iter().rposition(|&n| n == y) {
+                                    ns.remove(p);
+                                }
+                                if ns.is_empty() {
+                                    self.cineq.remove(&x);
+                                }
+                            }
+                        }
+                    }
                 }
                 Undo::NewNode => {
                     self.nodes.pop();
@@ -812,6 +959,8 @@ impl<'c> Tableau<'c> {
                 *f = false;
             }
         }
+        self.touched.clear();
+        self.recheck_all = true;
     }
 
     // ---- ≥-rule and blocking -----------------------------------------------------------
@@ -822,7 +971,8 @@ impl<'c> Tableau<'c> {
         let mut seen: FxHashMap<Vec<u32>, Node> = FxHashMap::default();
         for n in 0..len {
             let node = &self.nodes[n];
-            if !node.active || node.root {
+            // Concrete nodes are never blocked and never block.
+            if !node.active || node.root || node.concrete {
                 continue;
             }
             let p = node.parent.expect("blockable nodes have a parent") as usize;
@@ -896,7 +1046,10 @@ impl<'c> Tableau<'c> {
             if !self.nodes[x as usize].active || self.at_least_holds(x, k, role, filler) {
                 continue;
             }
-            let ys: Vec<Node> = (0..k).map(|_| self.new_node(Some(x))).collect();
+            let concrete = self.c.is_data(role);
+            let ys: Vec<Node> = (0..k)
+                .map(|_| self.new_node_of(Some(x), concrete))
+                .collect();
             for &y in &ys {
                 self.add_role(role, x, y, &d);
                 if let Some(f) = filler {
@@ -959,6 +1112,390 @@ impl<'c> Tableau<'c> {
             }
         }
         false
+    }
+
+    // ---- datatype check ----------------------------------------------------------------
+
+    /// The axioms of the data ranges among `atoms`, sorted and de-duplicated.
+    fn data_axioms(&self, atoms: &[Atom]) -> Vec<u32> {
+        let mut out: Vec<u32> = atoms
+            .iter()
+            .filter_map(|&a| match self.c.atoms[a as usize] {
+                AtomKind::Data(i) => Some(self.c.data_source[i as usize]),
+                _ => None,
+            })
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    fn expr(&self, a: Atom) -> &DataRangeExpr {
+        match self.c.atoms[a as usize] {
+            AtomKind::Data(i) => &self.c.data[i as usize],
+            _ => unreachable!("concrete nodes carry data atoms only"),
+        }
+    }
+
+    /// Whether `k` pairwise different values outside `excluded` are in every range of
+    /// `atoms`.
+    fn count(&mut self, atoms: &[Atom], k: usize, excluded: &[Value]) -> Tri {
+        let key = (atoms.to_vec(), k, excluded.to_vec());
+        if let Some(&t) = self.count_memo.get(&key) {
+            self.charge(1);
+            return t;
+        }
+        let exprs: Vec<DataRangeExpr> = atoms.iter().map(|&a| self.expr(a).clone()).collect();
+        self.charge(8 * (atoms.len() + excluded.len() + 1));
+        let t = data_ranges::conjunction_satisfiable(&exprs, &[], k, excluded);
+        self.count_memo.insert(key, t);
+        t
+    }
+
+    fn contains(&mut self, a: Atom, v: &Value) -> Tri {
+        if let Some(&t) = self.contains_memo.get(&(a, v.clone())) {
+            self.charge(1);
+            return t;
+        }
+        self.charge(8);
+        let t = data_ranges::contains(self.expr(a), v);
+        self.contains_memo.insert((a, v.clone()), t);
+        t
+    }
+
+    /// The datatype check over the components of the concrete nodes changed since the last
+    /// check (all of them after backtracking). Sets a clash on the first component without
+    /// values; otherwise, on an undecided component, closes the branch as undecided.
+    fn datatype_check(&mut self) {
+        let seeds: Vec<Node> = if self.recheck_all {
+            (0..self.nodes.len() as Node)
+                .filter(|&n| self.nodes[n as usize].concrete)
+                .collect()
+        } else {
+            std::mem::take(&mut self.touched)
+        };
+        self.touched.clear();
+        self.recheck_all = false;
+        let mut seen: FxHashSet<Node> = FxHashSet::default();
+        let mut undecided: Option<(Dep, Vec<Atom>)> = None;
+        for seed in seeds {
+            if !self.nodes[seed as usize].active || !seen.insert(seed) {
+                continue;
+            }
+            let mut comp = vec![seed];
+            let mut i = 0;
+            while i < comp.len() {
+                let n = comp[i];
+                i += 1;
+                for &m in self.cineq.get(&n).map(Vec::as_slice).unwrap_or(&[]) {
+                    if self.nodes[m as usize].active && seen.insert(m) {
+                        comp.push(m);
+                    }
+                }
+            }
+            self.charge(comp.len());
+            match self.solve_component(&comp) {
+                DataOutcome::Sat => {}
+                DataOutcome::Clash(d) => {
+                    self.set_clash(d);
+                    return;
+                }
+                DataOutcome::Undecided(d, atoms) => {
+                    undecided.get_or_insert((d, atoms));
+                }
+            }
+            if self.over_budget() {
+                // `run` reports the exhaustion before using anything.
+                return;
+            }
+        }
+        if let Some((d, atoms)) = undecided {
+            self.undecided.get_or_insert(atoms);
+            self.set_clash(d);
+        }
+    }
+
+    fn cnode(&mut self, n: Node) -> Result<CNode, DataOutcome> {
+        let mut atoms: Vec<Atom> = self.nodes[n as usize].label.keys().copied().collect();
+        atoms.sort_unstable();
+        let mut dep = Dep::default();
+        for a in &atoms {
+            dep = dep.union(&self.nodes[n as usize].label[a]);
+        }
+        let smallest = atoms
+            .iter()
+            .filter_map(|&a| match self.expr(a) {
+                DataRangeExpr::OneOf(vs) => Some(vs),
+                _ => None,
+            })
+            .min_by_key(|vs| vs.len())
+            .cloned();
+        let cands = match smallest {
+            None => None,
+            Some(mut vs) => {
+                vs.sort();
+                vs.dedup();
+                let mut keep = Vec::with_capacity(vs.len());
+                'value: for v in vs {
+                    for &a in &atoms {
+                        match self.contains(a, &v) {
+                            Tri::Yes => {}
+                            Tri::No => continue 'value,
+                            Tri::Unknown => {
+                                return Err(DataOutcome::Undecided(dep.clone(), atoms.clone()))
+                            }
+                        }
+                    }
+                    keep.push(v);
+                }
+                Some(keep)
+            }
+        };
+        let empty = match &cands {
+            Some(c) => c.is_empty(),
+            None => match self.count(&atoms, 1, &[]) {
+                Tri::Yes => false,
+                Tri::No => true,
+                Tri::Unknown => return Err(DataOutcome::Undecided(dep, atoms)),
+            },
+        };
+        if empty {
+            return Err(DataOutcome::Clash(dep));
+        }
+        Ok(CNode {
+            node: n,
+            atoms,
+            dep,
+            cands,
+        })
+    }
+
+    /// The datatype check of one connected component of the `≉` graph.
+    fn solve_component(&mut self, comp: &[Node]) -> DataOutcome {
+        let mut cs = Vec::with_capacity(comp.len());
+        for &n in comp {
+            match self.cnode(n) {
+                Ok(c) => cs.push(c),
+                Err(out) => return out,
+            }
+        }
+        if cs.len() == 1 {
+            return DataOutcome::Sat;
+        }
+        let pos: FxHashMap<Node, usize> = cs.iter().enumerate().map(|(i, c)| (c.node, i)).collect();
+        let adj: Vec<Vec<usize>> = cs
+            .iter()
+            .map(|c| {
+                let mut v: Vec<usize> = self
+                    .cineq
+                    .get(&c.node)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(|m| pos.get(m).copied())
+                    .collect();
+                v.sort_unstable();
+                v.dedup();
+                v
+            })
+            .collect();
+        // Peel nodes with more values than live neighbours: they get a value last.
+        let mut alive = vec![true; cs.len()];
+        loop {
+            let mut changed = false;
+            for i in 0..cs.len() {
+                if !alive[i] {
+                    continue;
+                }
+                let deg = adj[i].iter().filter(|&&j| alive[j]).count();
+                let big = match &cs[i].cands {
+                    Some(c) => c.len() > deg,
+                    None => {
+                        let atoms = cs[i].atoms.clone();
+                        self.count(&atoms, deg + 1, &[]) == Tri::Yes
+                    }
+                };
+                if big {
+                    alive[i] = false;
+                    changed = true;
+                }
+            }
+            if !changed || self.over_budget() {
+                break;
+            }
+        }
+        let rest: Vec<usize> = (0..cs.len()).filter(|&i| alive[i]).collect();
+        if rest.is_empty() || self.over_budget() {
+            return DataOutcome::Sat;
+        }
+        // The dependencies of what is left: its labels and the inequalities among it.
+        let mut dep = Dep::default();
+        let mut atoms: Vec<Atom> = Vec::new();
+        for &i in &rest {
+            dep = dep.union(&cs[i].dep);
+            atoms.extend_from_slice(&cs[i].atoms);
+            for &j in &adj[i] {
+                if alive[j] && i < j {
+                    let (a, b) = (cs[i].node, cs[j].node);
+                    if let Some(d) = self.ineq.get(&(a.min(b), a.max(b))) {
+                        dep = dep.union(d);
+                    }
+                }
+            }
+        }
+        let enumerated: Vec<usize> = rest
+            .iter()
+            .copied()
+            .filter(|&i| cs[i].cands.is_some())
+            .collect();
+        let open: Vec<usize> = rest
+            .iter()
+            .copied()
+            .filter(|&i| cs[i].cands.is_none())
+            .collect();
+        let mut assigned: Vec<Option<Value>> = vec![None; cs.len()];
+        let mut any_undecided = false;
+        let sat = self.assign(
+            &cs,
+            &adj,
+            &enumerated,
+            0,
+            &mut assigned,
+            &open,
+            &mut any_undecided,
+        );
+        if sat {
+            DataOutcome::Sat
+        } else if any_undecided {
+            atoms.sort_unstable();
+            atoms.dedup();
+            DataOutcome::Undecided(dep, atoms)
+        } else {
+            DataOutcome::Clash(dep)
+        }
+    }
+
+    /// Backtracking over the enumerated nodes `enumerated[k..]`; at each full assignment the
+    /// open nodes are checked. `true` when some assignment works.
+    #[allow(clippy::too_many_arguments)]
+    fn assign(
+        &mut self,
+        cs: &[CNode],
+        adj: &[Vec<usize>],
+        enumerated: &[usize],
+        k: usize,
+        assigned: &mut Vec<Option<Value>>,
+        open: &[usize],
+        any_undecided: &mut bool,
+    ) -> bool {
+        if self.probe() {
+            // Over budget: `run` reports the exhaustion before using the answer.
+            return true;
+        }
+        let Some(&i) = enumerated.get(k) else {
+            return match self.open_nodes(cs, adj, assigned, open) {
+                Tri::Yes => true,
+                Tri::No => false,
+                Tri::Unknown => {
+                    *any_undecided = true;
+                    false
+                }
+            };
+        };
+        let cands = cs[i].cands.as_ref().expect("enumerated");
+        for v in cands {
+            if adj[i].iter().any(|&j| assigned[j].as_ref() == Some(v)) {
+                continue;
+            }
+            assigned[i] = Some(v.clone());
+            let ok = self.assign(cs, adj, enumerated, k + 1, assigned, open, any_undecided);
+            assigned[i] = None;
+            if ok {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether the open (not enumerated) nodes get values, given the values `assigned` to
+    /// the enumerated ones: peel again with those values excluded, then every remaining
+    /// component must be a clique of identical labels and exclusions.
+    fn open_nodes(
+        &mut self,
+        cs: &[CNode],
+        adj: &[Vec<usize>],
+        assigned: &[Option<Value>],
+        open: &[usize],
+    ) -> Tri {
+        if open.is_empty() {
+            return Tri::Yes;
+        }
+        let is_open: FxHashSet<usize> = open.iter().copied().collect();
+        let excluded: FxHashMap<usize, Vec<Value>> = open
+            .iter()
+            .map(|&i| {
+                let mut vs: Vec<Value> =
+                    adj[i].iter().filter_map(|&j| assigned[j].clone()).collect();
+                vs.sort();
+                vs.dedup();
+                (i, vs)
+            })
+            .collect();
+        let mut alive: FxHashSet<usize> = is_open.clone();
+        loop {
+            let mut peeled = Vec::new();
+            let mut order: Vec<usize> = alive.iter().copied().collect();
+            order.sort_unstable();
+            for i in order {
+                let deg = adj[i].iter().filter(|j| alive.contains(j)).count();
+                if self.count(&cs[i].atoms, deg + 1, &excluded[&i]) == Tri::Yes {
+                    peeled.push(i);
+                }
+            }
+            if peeled.is_empty() || self.over_budget() {
+                break;
+            }
+            for i in peeled {
+                alive.remove(&i);
+            }
+        }
+        let mut left: Vec<usize> = alive.iter().copied().collect();
+        left.sort_unstable();
+        let mut done: FxHashSet<usize> = FxHashSet::default();
+        let mut answer = Tri::Yes;
+        for &start in &left {
+            if !done.insert(start) {
+                continue;
+            }
+            let mut clique = vec![start];
+            let mut i = 0;
+            while i < clique.len() {
+                for &j in &adj[clique[i]] {
+                    if alive.contains(&j) && done.insert(j) {
+                        clique.push(j);
+                    }
+                }
+                i += 1;
+            }
+            let first = clique[0];
+            let uniform = clique.iter().all(|&a| {
+                cs[a].atoms == cs[first].atoms
+                    && excluded[&a] == excluded[&first]
+                    && clique
+                        .iter()
+                        .all(|&b| a == b || adj[a].binary_search(&b).is_ok())
+            });
+            if !uniform {
+                answer = Tri::Unknown;
+                continue;
+            }
+            match self.count(&cs[first].atoms, clique.len(), &excluded[&first]) {
+                Tri::Yes => {}
+                Tri::No => return Tri::No,
+                Tri::Unknown => answer = Tri::Unknown,
+            }
+        }
+        answer
     }
 }
 
