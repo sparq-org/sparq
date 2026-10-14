@@ -660,85 +660,20 @@ fn is_language_tag(s: &str) -> bool {
     parts.all(|p| !p.is_empty() && p.len() <= 8 && p.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
-/// A language tag of a plain literal, lower-cased. A tag outside `[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*`
-/// is ill-typed; one inside it that is not a well-formed BCP 47 `langtag` or `privateuse` tag
-/// (RFC 5646 §2.1, e.g. a grandfathered tag) is reported as unsupported, so a check that
-/// depends on it answers Unknown.
-fn lang_tag(tag: &str) -> Result<String, ValueError> {
+/// A language tag, lower-cased. A tag outside `[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*` is
+/// ill-typed; one inside it that is not a well-formed BCP 47 tag (RFC 5646 §2.1
+/// `Language-Tag`, e.g. `en-a`), or with `plain` not a `langtag` (the tags of
+/// `rdf:PlainLiteral`, e.g. `i-klingon`), is reported as unsupported, so a check that depends
+/// on it answers Unknown.
+fn lang_tag(tag: &str, plain: bool) -> Result<String, ValueError> {
     if !is_language_tag(tag) {
         return Err(ValueError::IllTyped);
     }
-    if !is_bcp47(tag) {
-        return Err(ValueError::Unsupported);
+    let tag = tag.to_ascii_lowercase();
+    match super::data_ranges::is_lang_tag(&tag, plain) {
+        Some(true) => Ok(tag),
+        _ => Err(ValueError::Unsupported),
     }
-    Ok(tag.to_ascii_lowercase())
-}
-
-/// RFC 5646 §2.1 well-formedness for `langtag` and `privateuse` (grandfathered tags excluded).
-fn is_bcp47(tag: &str) -> bool {
-    let alpha = |s: &str, lo: usize, hi: usize| {
-        (lo..=hi).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphabetic())
-    };
-    let alnum = |s: &str, lo: usize, hi: usize| {
-        (lo..=hi).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric())
-    };
-    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
-    let parts: Vec<&str> = tag.split('-').collect();
-    let private = |rest: &[&str]| !rest.is_empty() && rest.iter().all(|p| alnum(p, 1, 8));
-    if parts[0].eq_ignore_ascii_case("x") {
-        return private(&parts[1..]);
-    }
-    let mut i = 0;
-    // language = 2*3ALPHA ["-" extlang] / 4ALPHA / 5*8ALPHA
-    let lang = parts[0];
-    if !alpha(lang, 2, 8) {
-        return false;
-    }
-    i += 1;
-    if lang.len() <= 3 {
-        // extlang = 3ALPHA *2("-" 3ALPHA)
-        let mut n = 0;
-        while n < 3 && i < parts.len() && alpha(parts[i], 3, 3) {
-            i += 1;
-            n += 1;
-        }
-    }
-    if i < parts.len() && alpha(parts[i], 4, 4) {
-        i += 1; // script
-    }
-    if i < parts.len() && (alpha(parts[i], 2, 2) || digits(parts[i], 3)) {
-        i += 1; // region
-    }
-    // variant = 5*8alphanum / (DIGIT 3alphanum)
-    while i < parts.len()
-        && (alnum(parts[i], 5, 8)
-            || (parts[i].len() == 4
-                && parts[i].as_bytes()[0].is_ascii_digit()
-                && alnum(parts[i], 4, 4)))
-    {
-        i += 1;
-    }
-    // extension = singleton 1*("-" (2*8alphanum)), singleton = alphanum except x
-    let mut singletons: Vec<u8> = Vec::new();
-    while i < parts.len() && parts[i].len() == 1 && !parts[i].eq_ignore_ascii_case("x") {
-        let c = parts[i].as_bytes()[0].to_ascii_lowercase();
-        if !c.is_ascii_alphanumeric() || singletons.contains(&c) {
-            return false;
-        }
-        singletons.push(c);
-        i += 1;
-        let start = i;
-        while i < parts.len() && alnum(parts[i], 2, 8) {
-            i += 1;
-        }
-        if i == start {
-            return false;
-        }
-    }
-    if i < parts.len() && parts[i].eq_ignore_ascii_case("x") {
-        return private(&parts[i + 1..]);
-    }
-    i == parts.len()
 }
 
 fn hex_value(lex: &str) -> Result<Vec<u8>, ValueError> {
@@ -1053,11 +988,11 @@ pub fn parse_value(lex: &str, datatype: &str, lang: Option<&str>) -> Result<Valu
             if tag.is_empty() {
                 Value::String(text.to_string())
             } else {
-                Value::LangString(text.to_string(), lang_tag(tag)?)
+                Value::LangString(text.to_string(), lang_tag(tag, true)?)
             }
         }
         LangString => match lang {
-            Some(l) => Value::LangString(lex.to_string(), lang_tag(l)?),
+            Some(l) => Value::LangString(lex.to_string(), lang_tag(l, false)?),
             None => return Err(ValueError::IllTyped),
         },
         String => Value::String(lex.to_string()),
@@ -1121,6 +1056,9 @@ pub fn in_value_space(v: &Value, b: Builtin) -> bool {
         (NormalizedString, Value::String(s)) => !s.contains(['\t', '\n', '\r']),
         (Token, Value::String(s)) => collapse(s) == *s,
         (Language, Value::String(s)) => is_language_tag(s),
+        (PlainLiteral, Value::LangString(_, t)) => {
+            super::data_ranges::is_lang_tag(t, true) == Some(true)
+        }
         (NmToken, Value::String(s)) => !s.is_empty() && s.chars().all(is_name_char),
         (Name | NcName, Value::String(s)) => {
             let mut cs = s.chars();
@@ -1139,6 +1077,41 @@ mod tests {
 
     fn val(lex: &str, local: &str) -> Result<Value, ValueError> {
         parse_value(lex, &format!("{XSD}{local}"), None)
+    }
+
+    #[test]
+    fn language_tags_are_well_formed_bcp47() {
+        let lang = |tag| parse_value("hi", &format!("{RDF}langString"), Some(tag));
+        let plain = |lex| parse_value(lex, &format!("{RDF}PlainLiteral"), None);
+        let tagged = |t: &str| Ok(Value::LangString("hi".into(), t.into()));
+        // rdf:langString takes every well-formed tag: grandfathered, private use, and
+        // repeated extension singletons (a validity rule, not a well-formedness one).
+        assert_eq!(lang("i-Klingon"), tagged("i-klingon"));
+        assert_eq!(lang("x-whatever"), tagged("x-whatever"));
+        assert_eq!(lang("en-a-bb-a-cc"), tagged("en-a-bb-a-cc"));
+        assert_eq!(lang("de-CH-1996"), tagged("de-ch-1996"));
+        // Not well-formed (a singleton with no subtag, a five-letter region slot misread):
+        // outside the value space, so unsupported rather than guessed.
+        assert_eq!(lang("en-a"), Err(ValueError::Unsupported));
+        assert_eq!(lang("en-x"), Err(ValueError::Unsupported));
+        assert_eq!(lang("en-gb-oed-x"), Err(ValueError::Unsupported));
+        assert_eq!(lang("en GB"), Err(ValueError::IllTyped));
+        // rdf:PlainLiteral takes `langtag`s only.
+        assert_eq!(plain("hi@en-GB"), tagged("en-gb"));
+        assert_eq!(plain("hi@i-klingon"), Err(ValueError::Unsupported));
+        assert_eq!(plain("hi@x-whatever"), Err(ValueError::Unsupported));
+        assert!(in_value_space(
+            &tagged("en-gb").unwrap(),
+            Builtin::PlainLiteral
+        ));
+        assert!(!in_value_space(
+            &tagged("i-klingon").unwrap(),
+            Builtin::PlainLiteral
+        ));
+        assert!(in_value_space(
+            &tagged("i-klingon").unwrap(),
+            Builtin::LangString
+        ));
     }
 
     #[test]
