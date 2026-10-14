@@ -1775,18 +1775,16 @@ pub(super) fn eval_function_inner<E: Fn(usize) -> Result<Value, String>>(
         F::BNode => {
             if nargs == 0 {
                 // BNODE(): a fresh blank node per call.
-                Value::Term(Term::BlankNode(next_minted_bnode()))
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                Value::Term(Term::BlankNode(minted_bnode(n)))
             } else {
                 // BNODE(str): the label is derived from (solution-row scope, argument),
                 // so equal arguments within ONE solution map to the same blank node and
                 // everything else stays distinct (see ROW_SCOPE).
                 match string_literal(&ev(0)?) {
                     Some(s) => {
-                        let (scope, idx) = ROW_SCOPE.get();
-                        Value::Term(Term::BlankNode(BlankNode::new_unchecked(format!(
-                            "fnb{scope:x}r{idx}h{:016x}",
-                            fx64(&s)
-                        ))))
+                        Value::Term(Term::BlankNode(minted_bnode((ROW_SCOPE.get(), s.as_str()))))
                     }
                     None => Value::Error,
                 }
@@ -2011,53 +2009,7 @@ pub(super) fn eval_function(
     f: &spargebra::algebra::Function,
     args: &[Expression],
 ) -> Result<Value, String> {
-    let v = eval_function_inner(f, args.len(), |i| eval_expr(graph, local, b, row, &args[i]));
-    if matches!(f, spargebra::algebra::Function::BNode) {
-        return Ok(fresh_in_dataset(graph, local, f, args.len(), v?));
-    }
-    v
-}
-
-/// The next `BNODE()` label from the process-wide counter.
-fn next_minted_bnode() -> BlankNode {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    BlankNode::new_unchecked(format!("fnb{n}"))
-}
-
-/// A blank node minted by `BNODE` must be distinct from every blank node in the dataset
-/// (SPARQL 1.1 §17.4.2.9), but term-level comparisons go through the label. A minted label
-/// a stored blank node already uses is replaced: `BNODE()` takes the next counter value;
-/// `BNODE(str)` appends a suffix chosen from the dataset alone, so equal arguments in one
-/// solution still share a node. Other functions pass through.
-pub(super) fn fresh_in_dataset(
-    graph: &Graph,
-    local: &LocalVocab,
-    f: &spargebra::algebra::Function,
-    nargs: usize,
-    v: Value,
-) -> Value {
-    if !matches!(f, spargebra::algebra::Function::BNode) {
-        return v;
-    }
-    let Value::Term(Term::BlankNode(minted)) = v else { return v };
-    let stored = |b: &BlankNode| {
-        let t = Term::BlankNode(b.clone());
-        let in_graph =
-            |g: &Graph| g.id_of(&t).is_some() || g.named.iter().any(|(_, n)| n.id_of(&t).is_some());
-        in_graph(graph) || local.dataset.is_some_and(in_graph)
-    };
-    let mut fresh = minted.clone();
-    let mut k = 0u64;
-    while stored(&fresh) {
-        fresh = if nargs > 0 {
-            k += 1;
-            BlankNode::new_unchecked(format!("{}x{k}", minted.as_str()))
-        } else {
-            next_minted_bnode()
-        };
-    }
-    Value::Term(Term::BlankNode(fresh))
+    eval_function_inner(f, args.len(), |i| eval_expr(graph, local, b, row, &args[i]))
 }
 
 // ── Compiled comparison / arithmetic helpers (sq-7d3dj.4) ───────────────────────────────
@@ -2365,12 +2317,7 @@ pub(super) fn eval_compiled(
             Ok(if errored { Value::Error } else { Value::Bool(false) })
         }
         FunctionCall(f, args) => {
-            let v =
-                eval_function_inner(f, args.len(), |i| eval_compiled(graph, local, b, row, &args[i]));
-            if matches!(f, spargebra::algebra::Function::BNode) {
-                return Ok(fresh_in_dataset(graph, local, f, args.len(), v?));
-            }
-            v
+            eval_function_inner(f, args.len(), |i| eval_compiled(graph, local, b, row, &args[i]))
         }
         Exists(inner) => Ok(Value::Bool(eval_exists(graph, local, b, row, inner)?)),
     }
@@ -2654,14 +2601,41 @@ pub(super) fn resolve_iri(s: &str) -> Option<oxrdf::NamedNode> {
     })
 }
 
+/// The blank node `BNODE` mints for `input` (a `BNODE()` counter value, or a
+/// `BNODE(str)` solution row and argument): `fnb` and a 128-bit keyed hash of `input`
+/// under per-process keys. The keys never leave the process and minted labels reveal
+/// nothing about them, so stored data cannot name a node this process will mint, even
+/// data built from earlier results, and the label depends on nothing in the dataset
+/// (SPARQL 1.1 §17.4.2.9). The keys come from the standard library's hash seeding and,
+/// for targets where that is fixed (`wasm32-unknown-unknown`), from a random blank-node
+/// id, which `oxrdf` draws from the platform's secure randomness.
+fn minted_bnode(input: impl std::hash::Hash + Copy) -> BlankNode {
+    use std::collections::hash_map::RandomState;
+    use std::hash::BuildHasher;
+    static KEYS: std::sync::OnceLock<([RandomState; 2], [u64; 2])> = std::sync::OnceLock::new();
+    let ([k0, k1], salt) = KEYS.get_or_init(|| {
+        let keys: [RandomState; 2] = std::array::from_fn(|_| RandomState::new());
+        let random = BlankNode::default();
+        let salt = [keys[0].hash_one(random.as_str()), keys[1].hash_one(random.as_str())];
+        (keys, salt)
+    });
+    BlankNode::new_unchecked(format!(
+        "fnb{:016x}{:016x}",
+        k0.hash_one((salt, input)),
+        k1.hash_one((salt, input))
+    ))
+}
+
 thread_local! {
     /// The identity of the solution row an expression is being evaluated for:
-    /// (bindings identity — the rows buffer address —, row index). Set by the per-row
+    /// (evaluation — the [`LocalVocab`]'s mint scope —, bindings identity — the rows
+    /// buffer address —, row index). Set by the per-row
     /// evaluation loops (BIND / FILTER); BNODE(str) derives its label from it, so equal
     /// arguments within one solution share a blank node while distinct solutions get
     /// distinct ones. The buffer address is stable across consecutive Extends over the
     /// same Bindings (the SELECT-expression case the per-solution rule exists for).
-    pub(super) static ROW_SCOPE: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
+    pub(super) static ROW_SCOPE: std::cell::Cell<(u64, usize, usize)> =
+        const { std::cell::Cell::new((0, 0, 0)) };
 }
 
 /// The query execution's `NOW()` instant as an `xsd:dateTime` lexical (civil-from-days
@@ -2689,14 +2663,6 @@ pub(super) fn now_lexical() -> String {
     format!("{year:04}-{month:02}-{day:02}T{h:02}:{mi:02}:{s:02}Z")
 }
 
-
-/// 64-bit FxHash of a string (label material for BNODE(str)).
-pub(super) fn fx64(s: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = rustc_hash::FxHasher::default();
-    s.hash(&mut h);
-    h.finish()
-}
 
 /// The string value of a simple literal / xsd:string argument — the only operand type
 /// the hash builtins and BNODE(str) accept; anything else is a type error (`None`).

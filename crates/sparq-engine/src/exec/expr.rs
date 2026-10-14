@@ -494,7 +494,7 @@ pub(super) fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bin
     // Per-row FILTER evaluation is independent and read-only over the graph/bindings, so a
     // large residual (non-pushed-down) filter is evaluated in parallel on native.
     // Row identity for BNODE(str)'s per-solution scoping (see ROW_SCOPE).
-    let scope = b.rows.as_ptr() as usize;
+    let scope = (local.mint_scope.0, b.rows.as_ptr() as usize);
     #[cfg(feature = "parallel")]
     let keep: Vec<bool> = if b.rows.len() >= PAR_THRESHOLD && !budget::evaluation_capacity_active() {
         use rayon::prelude::*;
@@ -525,14 +525,14 @@ pub(super) fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bin
                 #[cfg(not(target_arch = "wasm32"))]
                 let _qn = query_now::worker_install(qn);
                 let _qb = query_base_worker_install(&qb);
-                ROW_SCOPE.set((scope, i));
+                ROW_SCOPE.set((scope.0, scope.1, i));
                 Ok(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics))
             })
             .collect::<Result<Vec<bool>, String>>()?
     } else {
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
-            ROW_SCOPE.set((scope, i));
+            ROW_SCOPE.set((scope.0, scope.1, i));
             keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep
@@ -541,7 +541,7 @@ pub(super) fn apply_filter_scalar(graph: &Graph, local: &LocalVocab, b: &mut Bin
     let keep: Vec<bool> = {
         let mut keep = Vec::with_capacity(b.rows.len());
         for (i, row) in b.rows.iter().enumerate() {
-            ROW_SCOPE.set((scope, i));
+            ROW_SCOPE.set((scope.0, scope.1, i));
             keep.push(effective_boolean(&eval_compiled(graph, local, b, row, &compiled)?, local.ebv_semantics));
         }
         keep

@@ -128,9 +128,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **sparq-engine:** `BNODE()` and `BNODE(str)` no longer mint a blank node whose label a
-  stored blank node already uses, so `sameTerm` can no longer equate a minted node with a
-  dataset node (SPARQL 1.1 §17.4.2.9; #7050).
+- **sparq-engine:** `BNODE()` and `BNODE(str)` labels are now a keyed hash under
+  per-process keys, so stored data, including data built from earlier results, can no
+  longer hold a label a later `BNODE` mints, and `sameTerm` can no longer equate a minted
+  node with a dataset node (SPARQL 1.1 §17.4.2.9; #7050). `BNODE(str)` labels also differ
+  between evaluations.
 - **sparq-policy:** `contains` and `detect_conflicts` now prove containment and certain
   overlap through `odrl:and` / `odrl:or` / `odrl:xone` compound constraints where the
   runtime semantics decide it, instead of always answering `Unknown` / `Possible`; they

@@ -378,12 +378,26 @@ pub struct LocalVocab<'dataset> {
     /// this evaluation's vocabulary, so nested queries and Rayon workers cannot
     /// inherit another evaluation's bindings through thread-local state.
     correlation: FxHashMap<Variable, Term>,
+    /// Distinguishes this evaluation's `BNODE(str)` labels from every other evaluation's,
+    /// including ones whose results an update stored.
+    mint_scope: MintScope,
     /// The active dataset catalog is independent of the active graph.
     /// Nested GRAPH switches graph dictionaries without losing this borrowed
     /// catalog; it is scoped to this evaluation, with no cloning or global state.
     dataset: Option<&'dataset Graph>,
     /// Remove substituted variables before domain-sensitive operators.
     substitute_exists_domains: bool,
+}
+
+/// A process-unique id per [`LocalVocab`], drawn when the vocabulary is created.
+#[derive(Clone, Copy)]
+struct MintScope(u64);
+
+impl Default for MintScope {
+    fn default() -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        MintScope(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    }
 }
 
 impl<'dataset> LocalVocab<'dataset> {
