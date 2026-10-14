@@ -50,7 +50,8 @@ pub enum ProverTomlError {
     /// ([`filter_value_dl_f64_prover_toml`]) and `xsd:decimal`
     /// ([`filter_value_dl_decimal_prover_toml`]) sibling members, and
     /// sq-wz99x: to the `xsd:dateTime` / `xsd:date` member
-    /// ([`filter_value_dl_datetime_prover_toml`]).
+    /// ([`filter_value_dl_datetime_prover_toml`]), and to the `DualLeafV2`
+    /// bit-domain `xsd:boolean` member ([`filter_value_dl_bool_prover_toml`]).
     #[cfg(feature = "dual-leaf")]
     FilterValueDlUseDedicatedFn,
     /// A [`ProofInputs::PathReach`] (bounded-depth property path) was passed to the
@@ -167,6 +168,48 @@ pub fn filter_value_dl_boolean_prover_toml(
         op,
         u64::from(bound),
         &crate::manifest::boolean_datatype_const(),
+        expected,
+        value_hook,
+        lexical_component,
+    )
+}
+
+/// Render the `Prover.toml` body for a `DualLeafV2` BIT-DOMAIN `xsd:boolean`
+/// value-lane FILTER proof. Order MUST match
+/// `zk/compose/filter_value_dl_bool/src/main.nr`: challenge, operand_enc, op,
+/// bound, datatype_const, expected (public), then value_hook, lexical_component
+/// (private).
+///
+/// That order — and every field name — is identical to
+/// [`filter_value_dl_prover_toml`]'s, because the dedicated member's PUBLIC
+/// layout is the integer member's. What differs is the RELATION: the member
+/// constrains the witnessed `value_hook` and this `bound` to `{0, 1}`, so a
+/// handle of `2` is unprovable rather than merely unencodable.
+///
+/// This renderer PINS `datatype_const` to
+/// [`crate::manifest::boolean_lane_const_v2`]`()` (the caller cannot pass another
+/// lane's constant by mistake) and takes `bound` as a `bool`, mapped to the hook
+/// `{0, 1}`. The `DualLeafV1` boolean lane — which shares the integer member —
+/// is [`filter_value_dl_boolean_prover_toml`] and is unchanged.
+///
+/// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
+/// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
+#[cfg(feature = "dual-leaf")]
+pub fn filter_value_dl_bool_prover_toml(
+    challenge: &FieldHex,
+    operand_enc: &FieldHex,
+    op: u32,
+    bound: bool,
+    expected: bool,
+    value_hook: &FieldHex,
+    lexical_component: &FieldHex,
+) -> String {
+    filter_value_dl_prover_toml(
+        challenge,
+        operand_enc,
+        op,
+        u64::from(bound),
+        &crate::manifest::boolean_lane_const_v2(),
         expected,
         value_hook,
         lexical_component,
@@ -804,7 +847,8 @@ pub fn prover_toml_for(
         #[cfg(feature = "dual-leaf")]
         ProofInputs::FilterValueDlF64 { .. }
         | ProofInputs::FilterValueDlDecimal { .. }
-        | ProofInputs::FilterValueDlDateTime { .. } => {
+        | ProofInputs::FilterValueDlDateTime { .. }
+        | ProofInputs::FilterValueDlBool { .. } => {
             return Err(ProverTomlError::FilterValueDlUseDedicatedFn);
         }
         // sq-bwwl / sq-r2s8 (step 4 proving path): hidden cross-credential

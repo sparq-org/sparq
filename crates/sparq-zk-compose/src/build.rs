@@ -533,6 +533,71 @@ pub fn build_filter_value_dl_boolean(
     })
 }
 
+/// A built `DualLeafV2` BIT-DOMAIN `xsd:boolean` value-lane FILTER: the public
+/// [`ProofInputs`] plus the member's two PRIVATE field witnesses.
+///
+/// The witnesses are the dual-leaf components
+/// `sparq_zk::dual_leaf_v2::encode_boolean` produced for the committed literal,
+/// so `inputs.operand_enc` is by construction the leaf those witnesses rebind to
+/// in-circuit.
+#[cfg(feature = "dual-leaf")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltFilterValueDlBool {
+    /// Public inputs for the dedicated [`CircuitId::FilterValueDlBool`] member,
+    /// carrying the V2 boolean lane constant and `bound ∈ {0, 1}`.
+    pub inputs: ProofInputs,
+    /// PRIVATE: the boolean `VALUE_HOOK` (`0` = false, `1` = true) as a field.
+    /// The member constrains it to `{0, 1}`.
+    pub value_hook: FieldHex,
+    /// PRIVATE: the OFF-circuit blake3 lexical hash, carried as a free witness.
+    pub lexical_component: FieldHex,
+}
+
+/// Build a `DualLeafV2` BIT-DOMAIN `xsd:boolean` value-lane FILTER over the
+/// committed literal `literal` under operator `op` against the constant `bound`.
+///
+/// This targets the DEDICATED [`CircuitId::FilterValueDlBool`]
+/// (`filter_value_dl_bool`) with
+/// `datatype_const = `[`crate::manifest::boolean_lane_const_v2`]`()`. The
+/// `DualLeafV1` boolean lane — which shares the integer member — is
+/// [`build_filter_value_dl_boolean`] and is unchanged.
+///
+/// The disclosed verdict is COMPUTED here ([`boolean_verdict`], the host mirror of
+/// the member's `bit_verdict`) rather than taken from the caller, so an honest host
+/// cannot accidentally disclose a verdict the member will refuse to prove; a test
+/// constructing the LYING case builds the [`ProofInputs::FilterValueDlBool`]
+/// variant directly with a flipped `expected`.
+///
+/// Returns the encoder's `Err` unchanged when `literal` is not a canonical
+/// `xsd:boolean` (`"true"`/`"false"`): the §6 fail-closed co-binding rejects the
+/// XSD-legal but non-canonical spellings `"1"`/`"0"` and every non-boolean
+/// datatype, so a desynced leaf is never built here.
+///
+/// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
+/// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
+#[cfg(feature = "dual-leaf")]
+pub fn build_filter_value_dl_bool(
+    literal: &oxrdf::Literal,
+    op: FilterOp,
+    bound: bool,
+) -> Result<BuiltFilterValueDlBool, sparq_zk::dual_leaf::DualLeafError> {
+    let components = sparq_zk::dual_leaf_v2::encode_boolean(literal)?;
+    // The encoder maps ONLY the canonical lexicals, so the hook is exactly {0, 1}.
+    let value = components.value_hook != Fr::from(0u64);
+    Ok(BuiltFilterValueDlBool {
+        inputs: ProofInputs::FilterValueDlBool {
+            id: CircuitId::FilterValueDlBool,
+            operand_enc: hexf(&components.leaf()),
+            op,
+            bound: u64::from(bound),
+            datatype_const: crate::manifest::boolean_lane_const_v2(),
+            expected: boolean_verdict(value, op, bound),
+        },
+        value_hook: hexf(&components.value_hook),
+        lexical_component: hexf(&components.lexical_component),
+    })
+}
+
 /// The SIGN-AWARE scaled comparison verdict for `value <op> bound` over two
 /// `(neg, magnitude)` operands on ONE scaled timeline (sq-wz99x) — the host
 /// mirror of the Noir member's UNCHANGED `signed_scaled_verdict`

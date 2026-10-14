@@ -98,7 +98,8 @@ impl std::error::Error for DispatchError {}
 /// FILTER members for the integer (sq-xojl), double, and decimal datatype classes
 /// (sq-2ezsx) are all value-lane members, as is the dateTime/date member
 /// (sq-wz99x — ONE member for BOTH lanes; the lane lives in the public
-/// `datatype_const`, so it needs no separate classification here).
+/// `datatype_const`, so it needs no separate classification here) and the
+/// bit-domain `xsd:boolean` member.
 fn is_value_lane_member(id: &CircuitId) -> bool {
     matches!(
         id,
@@ -106,6 +107,7 @@ fn is_value_lane_member(id: &CircuitId) -> bool {
             | CircuitId::FilterValueDlF64
             | CircuitId::FilterValueDlDecimal
             | CircuitId::FilterValueDlDateTime
+            | CircuitId::FilterValueDlBool
     )
 }
 
@@ -121,26 +123,34 @@ fn is_identity_op_member(id: &CircuitId) -> bool {
 
 /// Whether the BLAKE3-TOKEN (string-canonical) FILTER / identity members are
 /// legal against `method`. They read the full string-canonical leaf, so they are
-/// legal for `string-canonical` AND for `dual-leaf` (whose `lexical_component`
-/// preserves term identity), but NOT for `value-only` (which dropped the lexical
+/// legal for `string-canonical` AND for BOTH `dual-leaf` versions (whose
+/// `lexical_component` preserves term identity), but NOT for `value-only` (which dropped the lexical
 /// handle entirely, so a token-binding member is unprovable / an identity op is
 /// unanswerable).
 fn string_lane_legal(method: CommitmentMethod) -> bool {
     match method {
-        CommitmentMethod::StringCanonicalV1 | CommitmentMethod::DualLeafV1 => true,
+        CommitmentMethod::StringCanonicalV1
+        | CommitmentMethod::DualLeafV1
+        | CommitmentMethod::DualLeafV2 => true,
         #[cfg(feature = "commitment-value-only")]
         CommitmentMethod::ValueOnlyV1 => false,
     }
 }
 
 /// Whether a VALUE-LANE member is legal against `method`. Value-lane members
-/// need a committed value handle, so they are legal for `dual-leaf` and (the
-/// research dial) `value-only`, but NEVER for `string-canonical` (no value
+/// need a committed value handle, so they are legal for BOTH `dual-leaf` versions
+/// and (the research dial) `value-only`, but NEVER for `string-canonical` (no value
 /// handle exists — the member is unprovable against it).
 fn value_lane_legal(method: CommitmentMethod) -> bool {
     match method {
         CommitmentMethod::StringCanonicalV1 => false,
-        CommitmentMethod::DualLeafV1 => true,
+        // BOTH dual-leaf versions commit a value handle, so the value lane is
+        // STRUCTURALLY legal against either. Legality here is about the leaf
+        // SHAPE, not about which version a new issuance may select — that is
+        // `CommitmentMethod::is_production_selectable`, a separate axis. A V1
+        // graph stays verifiable, so refusing its value lane here would make
+        // already-issued credentials unprovable.
+        CommitmentMethod::DualLeafV1 | CommitmentMethod::DualLeafV2 => true,
         #[cfg(feature = "commitment-value-only")]
         CommitmentMethod::ValueOnlyV1 => true,
     }
@@ -237,6 +247,52 @@ mod tests {
                 &CircuitId::FilterValueDlDateTime
             ),
             Ok(CircuitId::FilterValueDlDateTime)
+        );
+    }
+
+    #[test]
+    fn dual_leaf_v2_admits_every_value_lane_member_exactly_as_v1_does() {
+        // The versioned method commits the same leaf SHAPE, so the legality matrix
+        // is V1's — including the dedicated bit-domain boolean member, which only
+        // V2's boolean lane targets.
+        for id in [
+            CircuitId::FilterValueDl,
+            CircuitId::FilterValueDlF64,
+            CircuitId::FilterValueDlDecimal,
+            CircuitId::FilterValueDlDateTime,
+            CircuitId::FilterValueDlBool,
+        ] {
+            assert_eq!(
+                resolve_circuit(CommitmentMethod::DualLeafV2, &id),
+                Ok(id.clone()),
+                "{} must be legal against dual-leaf v2",
+                id.package()
+            );
+            assert!(
+                resolve_circuit(CommitmentMethod::DualLeafV1, &id).is_ok(),
+                "{} must stay legal against dual-leaf v1 (already-issued graphs)",
+                id.package()
+            );
+            // And neither version's value lane is legal against string-canonical.
+            assert!(matches!(
+                resolve_circuit(CommitmentMethod::StringCanonicalV1, &id),
+                Err(DispatchError::IllegalPair { .. })
+            ));
+        }
+        // The string lane stays legal for V2 too (the lexical component is kept).
+        assert!(resolve_circuit(CommitmentMethod::DualLeafV2, &CircuitId::FilterInt { d: 2 }).is_ok());
+        assert!(resolve_circuit(
+            CommitmentMethod::DualLeafV2,
+            &CircuitId::Scan { k: 1, n: 16, r: 4 }
+        )
+        .is_ok());
+        // V2's recorded scheme IRI routes through the IRI entry too.
+        assert_eq!(
+            resolve_circuit_for_scheme(
+                CommitmentMethod::DualLeafV2.scheme_iri(),
+                &CircuitId::FilterValueDlBool
+            ),
+            Ok(CircuitId::FilterValueDlBool)
         );
     }
 
@@ -361,7 +417,11 @@ mod tests {
         // Every (method, circuit) pair resolves to EITHER Ok OR a typed
         // DispatchError — the resolver is total and never panics / defaults.
         #[allow(unused_mut)]
-        let mut methods = vec![CommitmentMethod::StringCanonicalV1, CommitmentMethod::DualLeafV1];
+        let mut methods = vec![
+            CommitmentMethod::StringCanonicalV1,
+            CommitmentMethod::DualLeafV1,
+            CommitmentMethod::DualLeafV2,
+        ];
         #[cfg(feature = "commitment-value-only")]
         methods.push(CommitmentMethod::ValueOnlyV1);
 
@@ -372,6 +432,7 @@ mod tests {
             CircuitId::FilterValueDlF64,
             CircuitId::FilterValueDlDecimal,
             CircuitId::FilterValueDlDateTime,
+            CircuitId::FilterValueDlBool,
             CircuitId::JoinEq { n_a: 16, n_b: 16 },
         ];
         for m in &methods {
@@ -426,6 +487,9 @@ mod tests {
         // sq-wz99x: the dateTime/date member is value-lane, not identity.
         assert!(is_value_lane_member(&CircuitId::FilterValueDlDateTime));
         assert!(!is_identity_op_member(&CircuitId::FilterValueDlDateTime));
+        // The bit-domain boolean member is value-lane, not identity.
+        assert!(is_value_lane_member(&CircuitId::FilterValueDlBool));
+        assert!(!is_identity_op_member(&CircuitId::FilterValueDlBool));
         assert!(is_identity_op_member(&CircuitId::Scan { k: 1, n: 16, r: 4 }));
         assert!(is_identity_op_member(&CircuitId::JoinEq { n_a: 16, n_b: 16 }));
         assert!(!is_value_lane_member(&CircuitId::Scan { k: 1, n: 16, r: 4 }));

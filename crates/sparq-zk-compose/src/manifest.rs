@@ -827,6 +827,31 @@ pub enum CircuitId {
     // (`dual-leaf`), research-grade, NOT externally audited.
     #[cfg(feature = "dual-leaf")]
     FilterValueDlDateTime,
+    /// `filter_value_dl_bool` — DUAL-LEAF BIT-DOMAIN value-lane FILTER over a
+    /// committed `xsd:boolean`, the dedicated boolean sibling of
+    /// [`Self::FilterValueDl`].
+    ///
+    /// Its PUBLIC layout is byte-for-byte the integer member's, and it
+    /// additionally constrains BOTH the witnessed `VALUE_HOOK` and the public
+    /// `bound` to the bit domain `{0, 1}` in-circuit
+    /// (`hook * (hook - 1) == 0`, `bound * (bound - 1) == 0`). That is why it is a
+    /// SEPARATE member: a handle of `2` is inside [`Self::FilterValueDl`]'s `u64`
+    /// range decomposition but denotes no boolean value, and the integer lane
+    /// legitimately uses the whole `u64` domain, so the constraints could not be
+    /// added to the shared member without moving its gate count and its measured
+    /// evidence.
+    ///
+    /// The `DualLeafV2` boolean lane targets THIS member and pairs it with
+    /// [`boolean_lane_const_v2`]`()`. The `DualLeafV1` boolean lane keeps sharing
+    /// [`Self::FilterValueDl`] ([`crate::build::build_filter_value_dl_boolean`]),
+    /// unchanged. Legality is the same as the other value-lane members' —
+    /// fail-closed via [`crate::dispatch`].
+    ///
+    /// DOCUMENTED RISK: carries the INV-VL downgrade (value↔lexical agreement is
+    /// trusted-issuer-honesty, not machine-enforced; #769 accepted, CR-G8 /
+    /// sq-qhy4). NOT externally audited; no soundness / privacy claim.
+    #[cfg(feature = "dual-leaf")]
+    FilterValueDlBool,
     /// `revoke_unset_d{depth}` — hidden-index status-list inclusion + bit-unset
     /// proof over a depth-`depth` Poseidon2 Merkle tree (sq-3e5 / sq-h2v). The
     /// proof's PUBLIC inputs are `challenge` + the status-list Merkle `root`; the
@@ -992,6 +1017,10 @@ impl CircuitId {
             // `datatype_const`, not the member name.
             #[cfg(feature = "dual-leaf")]
             CircuitId::FilterValueDlDateTime => "filter_value_dl_datetime".to_string(),
+            // The bit-domain xsd:boolean sibling: its own package, because its
+            // relation (and so its gate count) differs from the integer member's.
+            #[cfg(feature = "dual-leaf")]
+            CircuitId::FilterValueDlBool => "filter_value_dl_bool".to_string(),
             CircuitId::RevokeUnset { depth } => format!("revoke_unset_d{depth}"),
             // sq-kndw: the (status-list depth, accepted-set depth) pair
             // names the compiled fully-hidden member, e.g. revoke_hidden_ref_d10_a4.
@@ -1287,6 +1316,42 @@ pub enum ProofInputs {
         /// The disclosed verdict.
         expected: bool,
     },
+    /// filter_value_dl_bool: DUAL-LEAF BIT-DOMAIN value-lane FILTER over a
+    /// committed `xsd:boolean`. These fields are EXACTLY the `pub` parameters of
+    /// the `filter_value_dl_bool` member `main`
+    /// (`zk/compose/filter_value_dl_bool/src/main.nr`), in declaration order
+    /// AFTER the prepended `challenge`:
+    ///
+    /// ```text
+    /// [challenge, operand_enc, op, bound, datatype_const, expected]
+    /// ```
+    ///
+    /// Field-for-field the integer member's layout, by design — so the host
+    /// serialisation and the verifier's public-input reconstruction are the
+    /// integer lane's. What differs is the RELATION: the member constrains the
+    /// witnessed `VALUE_HOOK` and this `bound` to `{0, 1}`.
+    ///
+    /// `operand_enc` is the DUAL-LEAF `Enc` over the boolean handle; the
+    /// `VALUE_HOOK` and `lexical_component` are PRIVATE; `datatype_const` is the
+    /// boolean lane's constant ([`boolean_lane_const_v2`]) and is PUBLIC. Build
+    /// one with [`crate::build::build_filter_value_dl_bool`]. DOCUMENTED RISK:
+    /// INV-VL downgrade (CR-G8 / sq-qhy4); NOT externally audited.
+    #[cfg(feature = "dual-leaf")]
+    #[serde(rename = "filter_value_dl_bool")]
+    FilterValueDlBool {
+        id: CircuitId,
+        /// The hidden column's DUAL-LEAF boolean term encoding (the scan anchor).
+        operand_enc: FieldHex,
+        op: FilterOp,
+        /// The FILTER's constant operand as the boolean hook `0` = `false` /
+        /// `1` = `true`. The member refuses any other value.
+        bound: u64,
+        /// The boolean lane's constant as a field — the public `DATATYPE_CONST`
+        /// folded into `value_component`.
+        datatype_const: FieldHex,
+        /// The disclosed verdict.
+        expected: bool,
+    },
     /// `join_eq_na{n_a}_nb{n_b}`: hidden cross-credential JOIN
     /// (sq-bwwl / sq-fi03, `research/zk-hidden-join-design.md` §2.2/§3.2). These
     /// fields are EXACTLY the `pub` parameters of the `join_eq` member `main`, in
@@ -1404,6 +1469,9 @@ impl ProofInputs {
             // sq-wz99x: dual-leaf dateTime/date value-lane FILTER.
             #[cfg(feature = "dual-leaf")]
             ProofInputs::FilterValueDlDateTime { id, .. } => id,
+            // The bit-domain xsd:boolean sibling of the integer value lane.
+            #[cfg(feature = "dual-leaf")]
+            ProofInputs::FilterValueDlBool { id, .. } => id,
             // sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN.
             ProofInputs::JoinEq { id, .. } => id,
             // sq-3kd2g.6: bounded-depth path reachability.
@@ -1444,6 +1512,33 @@ impl ProofInputs {
 /// (#769 accepted; gap CR-G8 / sq-qhy4). The ZK estate is internally re-audited
 /// but NOT externally audited; nothing here is a soundness or privacy guarantee.
 // sq-5xdlk: boolean value-lane wiring. Opt-in (`dual-leaf`), NOT-yet-sound.
+/// The PUBLIC `datatype_const` of the `DualLeafV2` `xsd:boolean` value lane —
+/// exactly the constant `sparq_zk::dual_leaf_v2::encode_boolean` folds into the
+/// committed leaf's `value_component`.
+///
+/// It is derived in BLAKE3's key-derivation mode over the length-framed
+/// `(xsd:boolean IRI, "bit")` pair (`sparq_zk::dual_leaf_v2::boolean_lane_const`),
+/// so — under BLAKE3's mode domain separation and, after the 248-bit field
+/// reduction, its collision resistance — it differs from the plain datatype fold a
+/// V2 string-lane leaf carries, for every datatype byte string. That is what keeps
+/// a string-lane leaf from opening on this lane.
+///
+/// # Unlike the V1 boolean lane, this one has its OWN member
+///
+/// Pair it with [`CircuitId::FilterValueDlBool`] /
+/// [`ProofInputs::FilterValueDlBool`]; build one with
+/// [`crate::build::build_filter_value_dl_bool`]. That member constrains the
+/// witnessed handle AND the public bound to `{0, 1}` in-circuit, so a handle of
+/// `2` — which the shared integer member's `u64` range decomposition admits — is
+/// refused by the relation rather than only by the host encoder.
+///
+/// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
+/// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
+#[cfg(feature = "dual-leaf")]
+pub fn boolean_lane_const_v2() -> FieldHex {
+    FieldHex(field_to_hex(&sparq_zk::dual_leaf_v2::boolean_lane_const()))
+}
+
 #[cfg(feature = "dual-leaf")]
 pub fn boolean_datatype_const() -> FieldHex {
     FieldHex(field_to_hex(&sparq_zk::dual_leaf::datatype_const(
