@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-v0b8, #796) SHACL Compact Syntax (SCS) PARSER — text → SHACL
+//! (sq-v0b8, #796) SHACL Compact Syntax (SCS) PARSER — text → SHACL
 //! shapes triples.
 //!
 //! This is the *parse* direction of the W3C SHACL Compact Syntax (the
@@ -615,7 +615,7 @@ impl Parser {
                 _ => break,
             }
         }
-        // [GPT-5.6] (sq-0g57x) The document IRI is the empty reference resolved
+        // (sq-0g57x) The document IRI is the empty reference resolved
         // against the final base, so RFC 3986 resolution removes its fragment.
         // Imports were already emitted against the base in effect at each directive.
         let base_term = Term::NamedNode(NamedNode::new_unchecked(self.resolve("")));
@@ -1549,7 +1549,7 @@ mod tests {
 
     #[test]
     fn ontology_subject_resolves_empty_reference_against_effective_base() {
-        // [GPT-5.6] (sq-0g57x) The document production resolves an empty
+        // (sq-0g57x) The document production resolves an empty
         // reference against the final base, which strips any fragment.
         for (source, expected) in [
             ("BASE <#>\n", "urn:x-base:default"),

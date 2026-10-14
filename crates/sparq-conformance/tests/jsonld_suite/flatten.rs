@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.26 — the W3C JSON-LD 1.1 `flatten` lane runner. Moved to
+//! sq-oy1f.26 — the W3C JSON-LD 1.1 `flatten` lane runner. Moved to
 //! the NATIVE DOCUMENT-LEVEL oracle (`sparq_jsonld::flatten()` + `json_ld_equal`),
 //! matching the `expand` lane (sq-kk1mq). The former RDF-equivalence oracle over
 //! the shipping writer is retired here: the native Flattening Algorithm
@@ -7,11 +7,11 @@
 //! document rather than round-tripping through RDF.
 
 use super::common::*;
-// [FABLE-5] sq-oy1f.26 — native flatten() for the document-level flatten oracle.
+// sq-oy1f.26 — native flatten() for the document-level flatten oracle.
 use sparq_jsonld::{flatten as jsonld_flatten, JsonLdOptions, NoopLoader, ProcessingMode};
 use std::path::Path;
 
-/// [FABLE-5] sq-oy1f.26 — run the W3C JSON-LD `flatten` category with the NATIVE
+/// sq-oy1f.26 — run the W3C JSON-LD `flatten` category with the NATIVE
 /// DOCUMENT-LEVEL oracle: call `sparq_jsonld::flatten()` directly on the input
 /// document and deep-compare the result to the suite's expected flattened
 /// document via `json_ld_equal`.

@@ -1,6 +1,6 @@
 //! Flattening Algorithm (JSON-LD 1.1 API §7.1).
 //!
-//! [FABLE-5] (sq-oy1f.26) Flattening turns a JSON-LD document into a single, deterministic
+//! (sq-oy1f.26) Flattening turns a JSON-LD document into a single, deterministic
 //! flat form: one `@graph` array of node objects, each node object labelled and appearing
 //! exactly once, with every value re-parented under its subject (no node nested inside
 //! another node's property — nested nodes become references). It is the normal form the
@@ -41,7 +41,7 @@ use crate::options::JsonLdOptions;
 /// (`{ "@context": …, "@graph": [ … ] }`) is produced by composing the document-level
 /// Compaction Algorithm over this output (bead `sq-oy1f.27`).
 ///
-/// [FABLE-5] (sq-oy1f.26)
+/// (sq-oy1f.26)
 pub fn flatten(
     input: &Json,
     options: &JsonLdOptions,
@@ -55,7 +55,7 @@ pub fn flatten(
 /// that already hold the expanded form (the conformance lane, `from_rdf`) skip re-expansion.
 /// Returns the flattened expanded array.
 ///
-/// [FABLE-5] (sq-oy1f.26)
+/// (sq-oy1f.26)
 pub fn flatten_expanded(expanded: &Json) -> Json {
     // §7.1 step 1–2: build the node map from the expanded input.
     let node_map = generate_node_map(expanded);

@@ -17,6 +17,11 @@ use std::sync::Arc;
 
 pub mod fetch;
 pub mod jose;
+// The outbound-address classifier every SSRF guard in sparq shares, compiled from its one
+// source file in sparq-core. A dependency on sparq-core would pull the store engine into the
+// pure Solid tier (`sparq-lws-core --no-default-features`); the file is standard library only.
+#[path = "../../sparq-core/src/net.rs"]
+mod net;
 
 /// The subject token type of a JWT (RFC 8693 section 3): the self-issued credentials.
 pub const JWT_TOKEN_TYPE: &str = "urn:ietf:params:oauth:token-type:jwt";

@@ -1,6 +1,6 @@
 #![cfg(feature = "paths")]
 
-// [GPT-5.6] sq-lsp7k.3.3 acceptance and mutation-witnessed VIA-pattern coverage.
+// sq-lsp7k.3.3 acceptance and mutation-witnessed VIA-pattern coverage.
 
 use sparq_core::Graph;
 use sparq_engine::query_paths;

@@ -58,6 +58,14 @@ enable authority pruning, build via `.builder(..)` and call `.authorities_comple
 only when you truly enumerate every authority the source mints (a HiBISCuS-style
 capability set / `void:uriSpace` declaration).
 
+Likewise, `.char_sets_complete()` on `SourceDescriptorBuilder` declares that the served
+characteristic sets enumerate **every exact per-subject predicate set**; the descriptor's
+`char_sets_complete()` accessor defaults to `false`. Rule C2 in `sparq-fedplan-mpc` trusts
+this declaration before falling back to the unchanged per-predicate subject-count identity.
+As with authority completeness, a false declaration can drop answers (lose recall): never
+set it on a truncated summary. Both completeness declarations are **builder-only**; neither
+has an RDF parse signal, so `from_void_nt` leaves them false and introduces no new RDF term.
+
 A descriptor may also carry an **optional GenAI retrieval capability**
 (`RetrievalCapability` — declared vector/text retrieval endpoints + a per-request
 cardinality hint), served under the `sret:` vocab (`http://sparq.dev/ns/retrieval#`,
@@ -411,7 +419,8 @@ since:
   cross-group bind-join block primitive (each cell goes through the same strict term renderer;
   a variable cell, a row whose length differs from `vars`, or a bad variable name is a
   `RenderError`; VALUES for endpoints — `DEFAULT_BIND_BLOCK`; `maxMpR` for brTPF; none for
-  plain TPF), mirroring `sparq-engine`'s `pub(crate)` `service.rs` helpers. Pushdown only ever
+  plain TPF), mirroring the same-named helpers in the `sparq-engine-service` crate's `service`
+  module (the SERVICE transport the engine's `service` feature pulls in). Pushdown only ever
   **narrows** a source's result, so it is correctness-preserving; the FILTER model is light
   (the parsed-query FILTER algebra wiring is Phase 5).
 - **Phase 5 streaming operators** (`sq-vtba`) — the streaming counterpart of the Phase-3

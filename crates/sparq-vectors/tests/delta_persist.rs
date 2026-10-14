@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-7e50) Persisted on-disk delta-sidecar (`.spqd`) tests for `VectorStore`:
+//! (sq-7e50) Persisted on-disk delta-sidecar (`.spqd`) tests for `VectorStore`:
 //! result-equivalence of `open_with_delta(base + persisted-delta)` against the in-RAM (base + delta)
 //! view AND against `compact()`; the crash / partial-write guard (a truncated sidecar is detected
 //! and rejected, never UB); and the base-fingerprint-mismatch rejection (the sq-32i5 generation tie

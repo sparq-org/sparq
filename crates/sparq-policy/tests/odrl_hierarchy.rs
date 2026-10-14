@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-wukl — the `odrl:spatial` dimension + region `isPartOf` trees.
+//! sq-wukl — the `odrl:spatial` dimension + region `isPartOf` trees.
 //!
 //! This is the SPATIAL twin of the DPV/purpose-taxonomy subsumption that landed in
 //! sq-z3ve (#503, `tests/odrl_eval.rs`). A `spatial isPartOf <Region>` constraint is

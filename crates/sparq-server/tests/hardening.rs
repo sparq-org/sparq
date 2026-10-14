@@ -3,7 +3,7 @@
 //! hardened router on an ephemeral port and drives it over HTTP, asserting both the HTTP
 //! status semantics and the structured JSON error bodies.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the
@@ -217,7 +217,7 @@ async fn max_results_refuses_with_413() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-ebii) Memory cap (--max-query-rows): coarse working-set row ceiling
+// (sq-ebii) Memory cap (--max-query-rows): coarse working-set row ceiling
 // applied on EVERY query form (not just the SELECT projection), → honest 413.
 // ---------------------------------------------------------------------------
 
@@ -261,7 +261,7 @@ async fn max_query_rows_caps_every_form() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-ebii) The 413 row-cap message names the knob that ACTUALLY tripped on THIS
+// (sq-ebii) The 413 row-cap message names the knob that ACTUALLY tripped on THIS
 // path. On a path that does not fold in --max-results (ASK / GSP-read / UPDATE), a
 // smaller-but-inapplicable --max-results must NOT be mis-named as the cause; the path's real
 // cap is --max-query-rows. (Regression for the engine_error_response path-accuracy fix:
@@ -300,7 +300,7 @@ async fn row_cap_413_names_the_applied_knob_on_non_select_paths() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-ebii) UPDATE timeout: the per-request query timeout now applies to the
+// (sq-ebii) UPDATE timeout: the per-request query timeout now applies to the
 // `application/sparql-update` path too — a never-finishing DELETE/INSERT WHERE → 503,
 // bounded by `timeout + TIMEOUT_GRACE` (the same hard wall-clock cap the read paths use).
 // ---------------------------------------------------------------------------
@@ -339,7 +339,7 @@ async fn update_path_honours_timeout() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-nulp) Writer-queue head-of-line blocking bound: a SEPARATE, shorter
+// (sq-nulp) Writer-queue head-of-line blocking bound: a SEPARATE, shorter
 // --update-where-timeout releases the single sequenced writer from a slow UPDATE's WHERE
 // within that window, EVEN when the (read) --query-timeout is much longer. So a slow update
 // (a) returns its 503 bounded by the short writer deadline, not the long read timeout, and
@@ -412,7 +412,7 @@ async fn update_where_timeout_bounds_head_of_line_blocking() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-ebii) Decompression-ratio cap (--max-decompress-ratio): a high-ratio
+// (sq-ebii) Decompression-ratio cap (--max-decompress-ratio): a high-ratio
 // gzip body (a "zip bomb") on the GSP write path is refused with 413 BEFORE the full
 // decompressed image is held; a benign small gzip body within the ratio decodes fine.
 // ---------------------------------------------------------------------------
@@ -548,7 +548,7 @@ async fn errors_are_structured_json() {
 }
 
 // ---------------------------------------------------------------------------
-// (6) Information-leak guard (sq-cz89 / sq-j9zs / sq-zg0u) [OPUS-4.8]
+// (6) Information-leak guard (sq-cz89 / sq-j9zs / sq-zg0u)
 //
 // On the no-auth-by-default path an error body MUST NOT echo the caller's submitted input,
 // a fragment of the loaded RDF, or a server-side filesystem path. Each test provokes an
@@ -647,7 +647,7 @@ async fn no_echo_execution_error() {
 }
 
 // ---------------------------------------------------------------------------
-// (6b) ASVS-G3 regression guard (sq-kfel, epic sq-toze) [OPUS-4.8]
+// (6b) ASVS-G3 regression guard (sq-kfel, epic sq-toze)
 //
 // "Verify sparq-server engine error strings never leak internal/sensitive info." This block
 // is the durable VERIFY the bead asks for: it pins, per failure CLASS, that an error response
@@ -749,7 +749,7 @@ async fn unauthorized_error_is_clean_and_actionable() {
 }
 
 /// The not-found (404) class: structured shape, an actionable category, and no internals.
-/// [OPUS-4.8] (sq-pj6u) A BARE unmatched route now goes through the router fallback
+/// (sq-pj6u) A BARE unmatched route now goes through the router fallback
 /// (`unmatched_route`), so its body is the CATEGORISED `{"error":"not found"}` envelope —
 /// previously it was axum's catch-all empty 404 that `json_error_bodies` wrapped into the
 /// uncategorised `{"error":""}`. So we now assert the same categorised + clean shape on the
@@ -763,7 +763,7 @@ async fn not_found_error_is_clean() {
     let resp = client().get(format!("{base}/no-such-route")).send().await.unwrap();
     assert_eq!(resp.status(), 404);
     let body = resp.text().await.unwrap();
-    // [OPUS-4.8] (sq-pj6u) Non-empty, categorised `not found` — no longer `{"error":""}`.
+    // (sq-pj6u) Non-empty, categorised `not found` — no longer `{"error":""}`.
     assert_clean_error(&body, "not found");
     assert_ne!(
         body, "{\"error\":\"\"}",
@@ -811,7 +811,7 @@ async fn main_failure_classes_are_clean() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-cmvh (ASVS V14.4) — security response headers on every response
+// sq-cmvh (ASVS V14.4) — security response headers on every response
 // ---------------------------------------------------------------------------
 
 /// The exact hardening header set the server must stamp on every response. Mirrors
@@ -906,7 +906,7 @@ async fn security_headers_on_streamed_response() {
     assert_security_headers(resp.headers());
 }
 
-/// [OPUS-4.8] sq-2bhm (ASVS-G1): the headers must also land on an AUTH-GATED refusal, and the
+/// sq-2bhm (ASVS-G1): the headers must also land on an AUTH-GATED refusal, and the
 /// auth-refusal — a sensitive response — must additionally carry `Cache-Control: no-store` so a
 /// shared cache never retains a 401. Gate the whole surface (write token + `--auth-token-read`)
 /// and hit a read with no token: a `401` that is still fully hardened.
@@ -944,7 +944,7 @@ async fn security_headers_on_auth_gated_response() {
 }
 
 // ---------------------------------------------------------------------------
-// (sq-2gqr) [OPUS-4.8] Slow-loris guard — the connection header-read deadline.
+// (sq-2gqr) Slow-loris guard — the connection header-read deadline.
 //
 // `axum::serve` never installs a timer, so hyper's HTTP/1 header_read_timeout is inert and a
 // client that opens a connection then dribbles (or simply never finishes) its request-header
@@ -962,7 +962,7 @@ use tokio::net::TcpStream;
 /// header-read and body read/idle deadlines, returning the bound address for a raw-socket client.
 async fn spawn_serve(config: ServerConfig) -> SocketAddr {
     let header_read_timeout = config.header_read_timeout;
-    // [OPUS-4.8] sq-lodb: also drive the real slow-body read/idle deadline through the serve loop.
+    // sq-lodb: also drive the real slow-body read/idle deadline through the serve loop.
     let body_read_timeout = config.body_read_timeout;
     let graph = Graph::load_str(DATA, "turtle").unwrap();
     let app = router(AppState::with_config(graph, config));
@@ -982,7 +982,7 @@ async fn spawn_serve(config: ServerConfig) -> SocketAddr {
     addr
 }
 
-/// [GPT-5.6] sq-rejk9: the bespoke TCP loop must preserve axum's peer-address contract just as
+/// sq-rejk9: the bespoke TCP loop must preserve axum's peer-address contract just as
 /// the HTTP/3 dispatch path does. A missing extension makes the extractor reject this request,
 /// while checking the exact source socket prevents a placeholder address from satisfying it.
 #[tokio::test]
@@ -1134,7 +1134,7 @@ async fn serve_loop_handles_complete_request() {
 }
 
 // ---------------------------------------------------------------------------
-// (sq-lodb) [OPUS-4.8] Slow-BODY guard — the request-body read/idle deadline (complement to
+// (sq-lodb) Slow-BODY guard — the request-body read/idle deadline (complement to
 // sq-2gqr's header-read deadline).
 //
 // sq-2gqr's `header_read_timeout` closes the slow-loris HEADER dribble, but once a client has

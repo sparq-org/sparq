@@ -16,7 +16,7 @@
 //!   Auth is **not** reimplemented here. See [`auth`].
 //!
 //! ## Specification estate
-//! What this crate is actually pinned to, and what is still unresolved (issue #4971). [OPUS-5]
+//! What this crate is actually pinned to, and what is still unresolved (issue #4971).
 //! - **DPoP-SK** (<https://jeswr.github.io/dpop-sk-spec/>) — normative for the `pop::sk`
 //!   proof-of-possession tier. An EXPERIMENTAL profile, **not** a ratified standard, so treat its
 //!   guarantees as unreviewed. Its execution-verified Appendix-A worked example is asserted
@@ -64,7 +64,7 @@ pub mod app;
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 #[path = "app_wasm.rs"]
 pub mod app;
-// [GPT-5.6] Compile the portable implementation in native unit tests so the native coverage
+// Compile the portable implementation in native unit tests so the native coverage
 // ratchet directly exercises the exact wasm router source without changing native runtime exports.
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "app_wasm.rs"]

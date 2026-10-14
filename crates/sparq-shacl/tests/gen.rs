@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-55c1 — seeded generator of VALID SHACL shapes + data graphs for
+//! sq-55c1 — seeded generator of VALID SHACL shapes + data graphs for
 //! the differential fuzzer (`diff_fuzz.rs`).
 //!
 //! Deterministic SplitMix64 (the same RNG `sparq-bench/src/fuzz.rs` uses), so any
@@ -16,7 +16,7 @@
 //!   sh:hasValue, sh:minInclusive, sh:maxInclusive, sh:minExclusive,
 //!   sh:maxExclusive.
 //!
-//! [OPUS-4.8] (sq-0hj7) Extended to also generate, as the property shape's value
+//! (sq-0hj7) Extended to also generate, as the property shape's value
 //! component:
 //!   - the **logical components** sh:and / sh:or / sh:not / sh:xone, each over a
 //!     small list of inline member node-shapes that carry one of the simple value
@@ -102,19 +102,19 @@ pub enum Constraint {
     MaxInclusive(i64),
     MinExclusive(i64),
     MaxExclusive(i64),
-    // [OPUS-4.8] (sq-0hj7) Logical components sh:and/or/not/xone over inline
+    // (sq-0hj7) Logical components sh:and/or/not/xone over inline
     // member node-shapes. Each member is an `sh:in (...)` token list (see
     // `Logical::member_lines` / the conform/violate construction below) chosen so
     // ONE value's per-member conformance is independently controllable, so the
     // composite's expected outcome is computable.
     Logical(Logical),
-    // [OPUS-4.8] (sq-0hj7) `sh:node <inline shape>` — a nested node-shape that
+    // (sq-0hj7) `sh:node <inline shape>` — a nested node-shape that
     // applies an inner value constraint to the VALUE NODE. Conform/violate of the
     // composite is exactly conform/violate of the inner constraint, so we delegate.
     Node(Box<Constraint>),
 }
 
-/// [OPUS-4.8] (sq-0hj7) A logical component over inline `sh:in`-token member
+/// (sq-0hj7) A logical component over inline `sh:in`-token member
 /// node-shapes. The member encoding makes one value's per-member conformance
 /// independently controllable so the composite outcome is derivable:
 ///
@@ -237,7 +237,7 @@ impl Constraint {
     /// An object term (Turtle) that SATISFIES this component.
     fn conforming_value(&self, rng: &mut Rng) -> String {
         match self {
-            // [OPUS-4.8] ~1-in-3 of the time draw a boundary-but-still-valid
+            // ~1-in-3 of the time draw a boundary-but-still-valid
             // literal (0, negatives, empty string, …) to widen coverage; these
             // are still lexically valid for the datatype, so they keep CONFORMING
             // to a bare `sh:datatype` constraint while exercising edge values.
@@ -317,7 +317,7 @@ impl Constraint {
 /// value that is lexically valid for the datatype (so it still conforms to a
 /// bare `sh:datatype` constraint — wrong-datatype violations are minted by
 /// `violating_value`). `valid=false` instead picks boundary values (zero,
-/// negatives, the empty string, …) to widen the fuzz coverage. [OPUS-4.8]
+/// negatives, the empty string, …) to widen the fuzz coverage.
 fn typed_literal(dt: &str, rng: &mut Rng, valid: bool) -> String {
     match dt {
         "integer" if !valid => {
@@ -344,7 +344,7 @@ fn typed_literal(dt: &str, rng: &mut Rng, valid: bool) -> String {
     }
 }
 
-/// [OPUS-4.8] (sq-0hj7) The `sh:path` of a property shape: a simple predicate or
+/// (sq-0hj7) The `sh:path` of a property shape: a simple predicate or
 /// one of the complex forms. Each form knows how to (a) render itself as a Turtle
 /// path expression for `sh:path`, and (b) emit the data-graph triple(s) that make
 /// a given `value` reachable from a `subject` along it.
@@ -459,7 +459,7 @@ pub struct Scenario {
 /// One data-graph instance of the target class. The value objects are wired to
 /// the focus subject along each property shape's path during generation (a
 /// complex path emits intermediate triples), so we store the fully-rendered
-/// triple lines rather than `(predicate, object)` pairs. [OPUS-4.8] (sq-0hj7)
+/// triple lines rather than `(predicate, object)` pairs. (sq-0hj7)
 struct Instance {
     subject: String,
     /// Fully-rendered `<s> <p> o .` triple lines (path-aware).
@@ -483,7 +483,7 @@ impl Scenario {
             while !used_preds.insert(pred.clone()) {
                 pred = format!("{EX}p{}_{}", i, rng.below(1000));
             }
-            // [OPUS-4.8] (sq-0hj7) choose a path form first — it constrains which
+            // (sq-0hj7) choose a path form first — it constrains which
             // value-constraint families are sound (e.g. an inverse path needs an
             // IRI-valued constraint, and focus-including paths must stay value-free).
             let path = gen_path(rng, &pred, &mut used_preds);
@@ -586,7 +586,7 @@ impl Scenario {
     }
 }
 
-/// [OPUS-4.8] (sq-0hj7) Choose the `sh:path` form for a property shape. ~5-in-6
+/// (sq-0hj7) Choose the `sh:path` form for a property shape. ~5-in-6
 /// stay simple predicate paths (so cardinality + simple-path-key coverage is
 /// unchanged); ~1-in-6 pick a complex form, drawing fresh distinct predicates for
 /// the multi-predicate forms so the path's predicates don't collide with other
@@ -619,7 +619,7 @@ fn fresh_pred(rng: &mut Rng, used_preds: &mut std::collections::HashSet<String>)
     p
 }
 
-/// [OPUS-4.8] (sq-0hj7) Pick a value constraint that is SOUND for the chosen path
+/// (sq-0hj7) Pick a value constraint that is SOUND for the chosen path
 /// form:
 ///   - simple predicate / sequence / oneOrMore: any in-scope value component
 ///     (the value is the final object, so a literal is fine).
@@ -649,7 +649,7 @@ fn gen_value_for_path(
 
 /// Picks a random in-scope value constraint.
 ///
-/// [OPUS-4.8] `_support` is intentionally unused: every constraint we currently
+/// `_support` is intentionally unused: every constraint we currently
 /// generate fills its data-graph support per-value later in `resolve_value`
 /// (e.g. `sh:class` mints its typed instance there), so nothing is accumulated
 /// up front. The parameter is kept so callers needn't change if a future
@@ -662,7 +662,7 @@ fn gen_constraint(rng: &mut Rng, _support: &mut Vec<String>) -> Option<Constrain
     // 12..=14: the sq-0hj7 logical/node extensions (drawn ~1-in-5 of value cases).
     let choice = rng.below(15);
     Some(match choice {
-        // [GPT-5.6] (sq-qvqk7) Keep rustc 1.88 from inferring unsized `str` here.
+        // (sq-qvqk7) Keep rustc 1.88 from inferring unsized `str` here.
         0 => Constraint::Datatype(rng.pick::<&str>(&["integer", "string", "boolean", "decimal"])),
         1 => Constraint::NodeKind(rng.pick::<&str>(&["sh:IRI", "sh:Literal", "sh:BlankNode"])),
         2 => {
@@ -685,7 +685,7 @@ fn gen_constraint(rng: &mut Rng, _support: &mut Vec<String>) -> Option<Constrain
         9 => Constraint::MaxInclusive(50 + rng.below(50) as i64),
         10 => Constraint::MinExclusive(rng.below(50) as i64),
         11 => Constraint::MaxExclusive(50 + rng.below(50) as i64),
-        // [OPUS-4.8] (sq-0hj7) logical components over inline `sh:in`-token members.
+        // (sq-0hj7) logical components over inline `sh:in`-token members.
         12 | 13 => {
             let op = *rng.pick(&[
                 LogicalOp::And,
@@ -700,7 +700,7 @@ fn gen_constraint(rng: &mut Rng, _support: &mut Vec<String>) -> Option<Constrain
             };
             Constraint::Logical(Logical { op, members })
         }
-        // [OPUS-4.8] (sq-0hj7) sh:node over an inline member shape carrying a
+        // (sq-0hj7) sh:node over an inline member shape carrying a
         // simple leaf value constraint. Restrict the leaf to families whose
         // conform/violate is unambiguous on a value node — reuse a small subset
         // (datatype / nodeKind / in / pattern / numeric range).
@@ -711,7 +711,7 @@ fn gen_constraint(rng: &mut Rng, _support: &mut Vec<String>) -> Option<Constrain
     })
 }
 
-/// [OPUS-4.8] (sq-0hj7) A leaf value constraint suitable INSIDE a `sh:node` member
+/// (sq-0hj7) A leaf value constraint suitable INSIDE a `sh:node` member
 /// shape. We exclude `sh:class` (its conforming value is a typed-instance
 /// placeholder resolved per top-level value, which the nested `resolve_value`
 /// path already handles, but keeping the nested leaf class-free avoids minting
@@ -719,7 +719,7 @@ fn gen_constraint(rng: &mut Rng, _support: &mut Vec<String>) -> Option<Constrain
 /// composites — one level is enough to stress the conformance memo).
 fn gen_leaf_for_node(rng: &mut Rng) -> Constraint {
     match rng.below(7) {
-        // [GPT-5.6] (sq-qvqk7) Keep rustc 1.88 from inferring unsized `str` here.
+        // (sq-qvqk7) Keep rustc 1.88 from inferring unsized `str` here.
         0 => Constraint::Datatype(rng.pick::<&str>(&["integer", "string", "boolean"])),
         1 => Constraint::NodeKind(rng.pick::<&str>(&["sh:IRI", "sh:Literal"])),
         2 => Constraint::Pattern(rng.pick::<&str>(&["^[a-z]+[0-9]+$", "^a.*$"])),
@@ -755,7 +755,7 @@ const PREFIXES: &str = "\
 ";
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-0hj7) Test-support: coverage introspection + a single-case
+// (sq-0hj7) Test-support: coverage introspection + a single-case
 // builder so the per-PR fast lane can prove (a) the new component families are
 // actually generated, and (b) the generator's conform/violate construction is
 // SOUND — i.e. sparq's own report agrees with what the generator intended for

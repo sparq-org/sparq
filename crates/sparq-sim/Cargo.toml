@@ -15,7 +15,7 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
+# sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
 # front page renders on docs.rs (the front page now comes from README.md via include_str!).
 [package.metadata.docs.rs]
 all-features = true
@@ -33,22 +33,22 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 # Deterministic breadth-first structural expansion beyond the existing one-hop signature.
 multi-hop = []
-# [FABLE-5] sq-lsp7k: similarity explanation surface — `Sim::explain_similarity` returns
+# sq-lsp7k: similarity explanation surface — `Sim::explain_similarity` returns
 # the decoded shared signature elements (the weighted-Jaccard intersection) behind a
 # similarity/most_similar score, for reasoning UX ("WHY are these two similar").
 explain = []
-# [FABLE-5] sq-lgw: MinHash/LSH signature sketches — a prebuilt sketch index
+# sq-lgw: MinHash/LSH signature sketches — a prebuilt sketch index
 # (`Sim::sketch_index`) whose candidate generation reads LSH buckets instead of
 # per-element index ranges: the Phase-4 escape hatch for graphs dense enough that
 # `most_similar`'s range-scan generation hits its scaling wall
 # (research/genai-design.md §6). Returned scores stay exact (same re-scoring).
 sketch = []
-# [SONNET-4.6] sq-181 v1.1: T-box-aware signatures — expand rdf:type elements via the
+# sq-181 v1.1: T-box-aware signatures — expand rdf:type elements via the
 # graph's own rdfs:subClassOf transitive closure and predicate elements via
 # rdfs:subPropertyOf. Inferred elements contribute at 0.5× their IDF weight.
 # No new dependencies; the closure is computed from the graph itself.
 tbox = []
-# [SONNET-4.6] sq-181 v1.1: FST-style sorted-dictionary lexical tier — IRI local-name
+# sq-181 v1.1: FST-style sorted-dictionary lexical tier — IRI local-name
 # trigram-Jaccard similarity as a tertiary fallback in `most_similar` when structural
 # and profile fallbacks starve. Builds a sorted (local_name → id) index at
 # `Sim::with_config` time. No new external dependencies.
@@ -61,7 +61,7 @@ sparq-core = { path = "../sparq-core", version = "0.1.6" }
 oxrdf.workspace = true
 rustc-hash.workspace = true
 
-# [OPUS-4.8] (sq-cxji) Test-only: PARSE the `examples/olympics_eval.rs` `--json` emit
+# (sq-cxji) Test-only: PARSE the `examples/olympics_eval.rs` `--json` emit
 # back to assert it is valid, well-shaped JSON. The emit itself stays serde-free
 # (hand-built `format!`, mirroring `mpc_net_bench::cell_json`); serde_json is a
 # dev-dependency so it never enters the crate's published graph.

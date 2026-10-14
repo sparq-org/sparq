@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -14,6 +15,8 @@ SPEC = importlib.util.spec_from_file_location(
 selector = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(selector)
 BASE, HEAD = "a" * 40, "b" * 40
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _workflow_trigger_paths import classifier_globs, trigger_paths  # noqa: E402
 EXACT_INPUTS = ["zk/sparql-evaluator/fixtures/case.json", "crates/sparq-engine/src/exec.rs",
                 "crates/sparq-core/Cargo.toml", "crates/sparq-substrate/src/lib.rs",
                 "crates/sparq-canon/src/lib.rs", "crates/sparq-canon/Cargo.toml",
@@ -113,10 +116,17 @@ class ExactEvaluatorSelection(unittest.TestCase):
         workflow = (Path(__file__).parents[2] / ".github/workflows/zk-exact-evaluator.yml").read_text()
         self.assertIn("  merge_group:\n    types: [checks_requested]", workflow)
         self.assertIn("name: real exact-dataset guest and proof", workflow)
-        self.assertNotIn("    paths:", workflow)
         self.assertIn("Require explicit classification output", workflow)
         self.assertIn("python3 scripts/ci_exact_evaluator_paths.py", workflow)
         self.assertIn("python3 scripts/ci_exact_evaluator_evidence.py", workflow)
+
+    def test_trigger_paths_filters_equal_the_classifier(self):
+        # The filter only spares a runner; it must never drop an input the classifier keeps.
+        workflow = ROOT / ".github/workflows/zk-exact-evaluator.yml"
+        expected = classifier_globs(selector.EXACT_PREFIXES, selector.EXACT_FILES)
+        for event in ("pull_request", "push"):
+            self.assertEqual(trigger_paths(workflow, event), expected, event)
+        self.assertEqual(trigger_paths(workflow, "merge_group"), [])
 
     def test_every_execution_input_is_relevant(self):
         for path in EXACT_INPUTS:

@@ -1,4 +1,4 @@
-// [OPUS-5] sq-34ml — the two NON-RESEARCH M4-v1 prerequisites split out of the
+// sq-34ml — the two NON-RESEARCH M4-v1 prerequisites split out of the
 // sq-bjl Q1 SPIKE: (1) explicit freshness/replay binding for the OUT-OF-CIRCUIT
 // issuer signature, and (2) the federated/multi-source `reconstruct_public_inputs`
 // layout spanning all holders' commitments/rows/attribution.

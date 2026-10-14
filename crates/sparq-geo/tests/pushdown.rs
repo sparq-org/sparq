@@ -293,7 +293,7 @@ fn no_index_installed_is_unchanged() {
 /// [`GeoIndexProvider`] but FORCES the engine onto the per-row `is_indexed`
 /// fallback by overriding `indexed_ids` to `None`. Lets one query be run BOTH
 /// ways (id-level fast path vs per-row slow path) so the differential test proves
-/// they agree byte-for-byte. [OPUS-4.8] sq-7jt80
+/// they agree byte-for-byte. sq-7jt80
 struct NoIdLevelProvider(GeoIndexProvider);
 
 impl SpatialProvider for NoIdLevelProvider {
@@ -453,7 +453,7 @@ fn id_level_path_stays_consistent_after_apply_delta() {
     // byte-identical to the post-hoc + per-row paths. (compare3 builds the index
     // fresh over the post-delta graph; the SEPARATE proof that the INCREMENTAL
     // GeoIndex::apply_delta keeps the id-set equal to a fresh build lives in
-    // tests/index.rs::assert_matches_fresh_build.) [OPUS-4.8] sq-7jt80
+    // tests/index.rs::assert_matches_fresh_build.) sq-7jt80
     let iri = |s: &str| oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(s.to_string()));
     let lit = |s: &str| {
         oxrdf::Term::Literal(oxrdf::Literal::new_typed_literal(

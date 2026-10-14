@@ -1,5 +1,5 @@
 //! The `vec:` magic predicates: vector k-NN search inside plain SPARQL, with
-//! ZERO engine changes. [OPUS-4.8] (sq-k6ex, epic sq-3183)
+//! ZERO engine changes. (sq-k6ex, epic sq-3183)
 //!
 //! ```
 //! use sparq_core::Graph;
@@ -83,7 +83,7 @@
 //!
 //! ## `vec:hybrid` — hybrid retrieval + reranking
 //!
-//! [SONNET-4.6] (sq-lhcot.4) `vec:hybrid` is the in-query surface for **hybrid retrieval**: this
+//! (sq-lhcot.4) `vec:hybrid` is the in-query surface for **hybrid retrieval**: this
 //! crate's dense k-NN fused, by deterministic weighted RRF, with the caller's other retrieval
 //! arms (a lexical/BM25 index, `sparq-sim`'s structural similarity, a business ranking), then
 //! optionally passed through an out-of-process second-stage [`Reranker`](crate::hybrid::Reranker).
@@ -128,7 +128,7 @@
 //! [`hybrid::ablate`](crate::hybrid::ablate) on that corpus.
 
 use crate::ann::{nearest_exact, nearest_exact_tiebreak};
-// [SONNET-4.6] (sq-lhcot.4) The `vec:hybrid` fusion core: named weighted-RRF arms with per-rank
+// (sq-lhcot.4) The `vec:hybrid` fusion core: named weighted-RRF arms with per-rank
 // provenance + the out-of-process second-stage reranker and its fail-open/fail-closed policy. Same
 // `vec-predicate` feature — the module ships with the query surface it exists to serve and adds no
 // dependency.
@@ -140,7 +140,7 @@ use crate::hybrid::{
 use crate::spqv_provenance::Metric;
 use crate::store::VectorStore;
 use crate::vocab;
-// [OPUS-4.8] (sq-z589, epic sq-3183) The approximate backend the `*_approx` entry points search
+// (sq-z589, epic sq-3183) The approximate backend the `*_approx` entry points search
 // the UNFILTERED `vec:` path through — the on-disk Vamana graph. `approx-ann` only (the only
 // feature that compiles an approximate index); with it off the crate carries only the exact path.
 #[cfg(feature = "approx-ann")]
@@ -154,7 +154,7 @@ use sparq_core::dict::{is_inline, Id, NO_ID};
 use sparq_core::Graph;
 use sparq_engine::{PreparedQuery, QueryBudget, QueryResult};
 
-// [OPUS-4.8] (sq-bvmd, epic sq-3183) Filtered-ANN BGP→IdMask wiring: when a `vec:`
+// (sq-bvmd, epic sq-3183) Filtered-ANN BGP→IdMask wiring: when a `vec:`
 // request shares its neighbour variable with ordinary patterns in the SAME BGP, those
 // patterns carve out the eligible graph nodes (the candidate id-set), and the k-NN
 // search is restricted to that set — correct (and, for a selective constraint, faster)
@@ -167,7 +167,7 @@ use sparq_engine::{PreparedQuery, QueryBudget, QueryResult};
 use crate::cost::{nearest_filtered_costed_tiebreak, CostModel};
 #[cfg(feature = "filtered-ann")]
 use crate::filter::IdMask;
-// [OPUS-4.8] (sq-36ol, epic sq-3183) The derived-mask cache: a `vec:` predicate that shares its
+// (sq-36ol, epic sq-3183) The derived-mask cache: a `vec:` predicate that shares its
 // neighbour variable with constraining patterns re-evaluates that sub-BGP (a full SELECT through
 // the engine) on EVERY prepare to build the `IdMask`. Against an unchanged graph the answer is
 // identical every time, so we cache it keyed by (constraining sub-BGP, graph fingerprint) — see
@@ -181,7 +181,7 @@ const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
 const RDF_REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
 const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
 
-/// [OPUS-4.8] (sq-z589, epic sq-3183) The backend the UNFILTERED `vec:` k-NN runs through. The
+/// (sq-z589, epic sq-3183) The backend the UNFILTERED `vec:` k-NN runs through. The
 /// rewrite picks neighbours by this seam, so swapping the exact full scan for an approximate index
 /// is a one-line backend swap with NO other change to the rewrite (parse, list-walk, error checks,
 /// seed-self-exclusion, VALUES inlining and the join all stay identical). Two impls:
@@ -199,7 +199,7 @@ trait UnfilteredSearch {
     /// [`nearest_exact`]: all-zero query → no results).
     fn search(&self, query: &[f32], k: usize) -> Vec<(Id, f32)>;
 
-    /// [SONNET-4.6] (sq-tb9p0) Answer-exact top-`k` with the VG-TIE-1 deterministic boundary
+    /// (sq-tb9p0) Answer-exact top-`k` with the VG-TIE-1 deterministic boundary
     /// tie-break ([`nearest_exact_tiebreak`]) and the seed already excluded, or `Ok(None)` when
     /// this backend cannot honour the rule — an APPROXIMATE backend has recall < 1 and no true
     /// boundary to break ties at, so it keeps the plain [`search`](Self::search) path. `Err` is
@@ -237,7 +237,7 @@ impl UnfilteredSearch for ExactSearch<'_> {
     }
 }
 
-/// [OPUS-4.8] (sq-z589) The approximate on-disk Vamana backend — `approx-ann` only.
+/// (sq-z589) The approximate on-disk Vamana backend — `approx-ann` only.
 #[cfg(feature = "approx-ann")]
 struct ApproxSearch<'a> {
     index: &'a DiskAnnIndex,
@@ -257,7 +257,7 @@ pub fn query_vec(graph: &Graph, sparql: &str, store: &VectorStore) -> Result<Que
     sparq_engine::query_prepared(graph, &prepare_vec(graph, sparql, store)?)
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) [`query_vec`] with the **hybrid** retrieval arms + optional
+/// (sq-lhcot.4) [`query_vec`] with the **hybrid** retrieval arms + optional
 /// second-stage reranker `cfg` supplies, so the query may use `vec:hybrid` (see the module docs).
 /// `vec:nearest`/`vec:search` behave exactly as through [`query_vec`]; a query with no
 /// `vec:hybrid` pattern is unaffected by `cfg`.
@@ -270,7 +270,7 @@ pub fn query_vec_hybrid(
     sparq_engine::query_prepared(graph, &prepare_vec_hybrid(graph, sparql, store, cfg)?)
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) [`query_vec_hybrid`] under a cooperative [`QueryBudget`].
+/// (sq-lhcot.4) [`query_vec_hybrid`] under a cooperative [`QueryBudget`].
 pub fn query_vec_hybrid_with_budget(
     graph: &Graph,
     sparql: &str,
@@ -285,7 +285,7 @@ pub fn query_vec_hybrid_with_budget(
     )
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) The prepare-time twin of [`query_vec_hybrid`]: parse + rewrite
+/// (sq-lhcot.4) The prepare-time twin of [`query_vec_hybrid`]: parse + rewrite
 /// (running the arms and the second stage now, exactly as [`prepare_vec`] runs the k-NN now) into
 /// a [`PreparedQuery`]. Re-prepare after the graph, the store, or any arm's index changes.
 pub fn prepare_vec_hybrid(
@@ -297,7 +297,7 @@ pub fn prepare_vec_hybrid(
     prepare_with(graph, sparql, store, &ExactSearch { store }, Some(cfg))
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) [`rewrite_query`] with the hybrid arms available, so `vec:hybrid`
+/// (sq-lhcot.4) [`rewrite_query`] with the hybrid arms available, so `vec:hybrid`
 /// patterns rewrite too.
 pub fn rewrite_query_hybrid(
     query: Query,
@@ -330,7 +330,7 @@ pub fn prepare_vec(
     prepare_with(graph, sparql, store, &ExactSearch { store }, None)
 }
 
-/// [OPUS-4.8] (sq-z589, epic sq-3183) [`query_vec`] but with the **unfiltered** k-NN run through an
+/// (sq-z589, epic sq-3183) [`query_vec`] but with the **unfiltered** k-NN run through an
 /// approximate on-disk [`DiskAnnIndex`] (Vamana) instead of the exact full scan — for large `.spqv`
 /// stores where the brute-force scan is the bottleneck. Everything else is identical to
 /// [`query_vec`]: parse, rewrite, VALUES inlining, joins, error checks, the seed-self-exclusion, and
@@ -358,7 +358,7 @@ pub fn query_vec_approx(
     sparq_engine::query_prepared(graph, &prepare_vec_approx(graph, sparql, store, index)?)
 }
 
-/// [OPUS-4.8] (sq-z589) [`query_vec_approx`] under a cooperative [`QueryBudget`].
+/// (sq-z589) [`query_vec_approx`] under a cooperative [`QueryBudget`].
 #[cfg(feature = "approx-ann")]
 pub fn query_vec_approx_with_budget(
     graph: &Graph,
@@ -374,7 +374,7 @@ pub fn query_vec_approx_with_budget(
     )
 }
 
-/// [OPUS-4.8] (sq-z589) [`prepare_vec`] but resolving the **unfiltered** `vec:` k-NN through the
+/// (sq-z589) [`prepare_vec`] but resolving the **unfiltered** `vec:` k-NN through the
 /// approximate `index` — the prepare-time twin of [`query_vec_approx`]. See that function for the
 /// recall / staleness caveats.
 #[cfg(feature = "approx-ann")]
@@ -402,7 +402,7 @@ fn prepare_with(
     searcher: &dyn UnfilteredSearch,
     hybrid: Option<&HybridConfig<'_>>,
 ) -> Result<PreparedQuery, String> {
-    // [OPUS-4.8] Opportunistic staleness guard: the store is keyed by `graph`'s
+    // Opportunistic staleness guard: the store is keyed by `graph`'s
     // dictionary ids, so a store built against a DIFFERENT graph would silently
     // mis-resolve neighbours. If the store carries a graph fingerprint, verify
     // it now (hard error on mismatch). Unbound / legacy (version-1) stores carry
@@ -410,7 +410,7 @@ fn prepare_with(
     if store.fingerprint().is_some() {
         store.check_graph(graph)?;
     }
-    // [SONNET-4.6] (sq-tb9p0) VG-MET-1/VG-MET-4 (mainline): the `vec:` query surface evaluates
+    // (sq-tb9p0) VG-MET-1/VG-MET-4 (mainline): the `vec:` query surface evaluates
     // exactly ONE metric — cosine similarity. A store whose persisted v3 provenance declares a
     // DIFFERENT metric must be rejected, not scored: evaluating a cosine ranking over vectors
     // embedded for another metric returns well-formed but meaningless numbers. A legacy v1/v2
@@ -449,7 +449,7 @@ pub fn rewrite_query(query: Query, graph: &Graph, store: &VectorStore) -> Result
 }
 
 /// Threaded form of [`rewrite_query`]: `searcher` is the unfiltered k-NN backend (exact scan or an
-/// approximate index). [OPUS-4.8] (sq-z589)
+/// approximate index). (sq-z589)
 fn rewrite_query_with(
     mut query: Query,
     graph: &Graph,
@@ -516,7 +516,7 @@ enum QueryArg {
 }
 
 /// One `vec:nearest`/`vec:search` request found in a BGP. The `score` variable
-/// is `Some` only for the `vec:search` form. [OPUS-4.8]
+/// is `Some` only for the `vec:search` form.
 struct KnnReq {
     node: Variable,
     score: Option<Variable>,
@@ -524,7 +524,7 @@ struct KnnReq {
     k: usize,
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) The query a `vec:hybrid` request searches by — the two [`QueryArg`]
+/// (sq-lhcot.4) The query a `vec:hybrid` request searches by — the two [`QueryArg`]
 /// forms plus the natural-language one a lexical arm can actually use.
 enum HybridQueryArg {
     /// A node IRI whose stored vector is the dense query (and which is excluded from its own
@@ -537,7 +537,7 @@ enum HybridQueryArg {
     Text(String, String),
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) One `vec:hybrid` request found in a BGP. `score`/`rank`/`prov` are
+/// (sq-lhcot.4) One `vec:hybrid` request found in a BGP. `score`/`rank`/`prov` are
 /// the optional trailing subject-list positions, in that order (a position can only be present if
 /// every earlier one is).
 struct HybridReq {
@@ -566,10 +566,10 @@ fn rewrite_bgp(
 
     let mut rest: Vec<TriplePattern> = Vec::with_capacity(patterns.len());
     let mut reqs: Vec<KnnReq> = Vec::new();
-    // [SONNET-4.6] (sq-lhcot.4) `vec:hybrid` requests are collected separately: they bind a
+    // (sq-lhcot.4) `vec:hybrid` requests are collected separately: they bind a
     // different (wider) row shape and are resolved through the fusion pipeline, not the plain k-NN.
     let mut hybrid_reqs: Vec<HybridReq> = Vec::new();
-    // [OPUS-4.8] Blank-node-subject rdf:first/rdf:rest cells are the lowered
+    // Blank-node-subject rdf:first/rdf:rest cells are the lowered
     // form of `( … )` argument lists. They are only an implementation detail of
     // a `vec:` predicate, so we *defer* the decision to drop them: they are
     // consumed (removed) ONLY if this BGP actually contains a `vec:` request.
@@ -597,7 +597,7 @@ fn rewrite_bgp(
         match iri {
             vocab::NEAREST => reqs.push(parse_nearest(tp, &lists)?),
             vocab::SEARCH => reqs.push(parse_search(tp, &lists)?),
-            // [SONNET-4.6] (sq-lhcot.4) The hybrid arms + reranker live in the caller's
+            // (sq-lhcot.4) The hybrid arms + reranker live in the caller's
             // `HybridConfig`, which only the `*_hybrid` entry points carry. Reaching `vec:hybrid`
             // without one must be a HARD error: silently answering with the dense arm alone would
             // return a well-formed ranking that is not the hybrid ranking the query asked for.
@@ -614,7 +614,7 @@ fn rewrite_bgp(
                 hybrid_reqs.push(parse_hybrid(tp, &lists)?);
             }
             _ => {
-                // [SONNET-4.6] (sq-tb9p0) VG-GOV-3: the VG-VOC-1 hard error states the highest
+                // (sq-tb9p0) VG-GOV-3: the VG-VOC-1 hard error states the highest
                 // vocabulary revision this build implements, so a query written against a NEWER
                 // spec revision's term fails with the version gap named, not just "unknown".
                 return Err(format!(
@@ -635,7 +635,7 @@ fn rewrite_bgp(
         return Ok(GraphPattern::Bgp { patterns: rest });
     }
 
-    // [OPUS-4.8] (sq-bvmd) The ordinary patterns that survive this BGP are also the
+    // (sq-bvmd) The ordinary patterns that survive this BGP are also the
     // patterns that *constrain* each `vec:` neighbour variable: the subjects they admit
     // are the candidate id-set for a filtered ANN search. Derive that set from `rest`
     // BEFORE it is moved into the output (the borrow ends with `mask_constraint`).
@@ -675,7 +675,7 @@ fn rewrite_bgp(
         out = join_values(out, values);
     }
 
-    // [SONNET-4.6] (sq-lhcot.4) The hybrid requests: fuse the dense arm with the caller's arms,
+    // (sq-lhcot.4) The hybrid requests: fuse the dense arm with the caller's arms,
     // optionally rerank, and inline the resulting rows the same way.
     // `hybrid_reqs` is non-empty only when a config was supplied (the match above rejects a
     // `vec:hybrid` pattern without one), so this `if let` can never skip a pending request.
@@ -741,7 +741,7 @@ fn join_values(out: GraphPattern, values: GraphPattern) -> GraphPattern {
 
 /// True for a *synthetic* list-cell triple — a `rdf:first`/`rdf:rest` triple
 /// with a **blank-node subject**, the exact shape spargebra emits when it lowers
-/// a `( … )` collection. [OPUS-4.8] The blank-node-subject restriction is
+/// a `( … )` collection. The blank-node-subject restriction is
 /// load-bearing: it means user-authored collection patterns with variable or
 /// IRI subjects (e.g. `?x rdf:first ?y`) are NOT treated as argument-list cells
 /// and survive into the engine. (Combined with the caller only dropping these
@@ -854,7 +854,7 @@ fn parse_search(tp: &TriplePattern, lists: &ListCells) -> Result<KnnReq, String>
     })
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) Parses `( ?node ?score ?rank ?prov ) vec:hybrid ( <query> <k> )`.
+/// (sq-lhcot.4) Parses `( ?node ?score ?rank ?prov ) vec:hybrid ( <query> <k> )`.
 /// The subject is prefix-optional: a bare `?node`, or a 1- to 4-element list binding
 /// `?node`, `?score`, `?rank`, `?prov` in that order. Every position must be a variable.
 fn parse_hybrid(tp: &TriplePattern, lists: &ListCells) -> Result<HybridReq, String> {
@@ -894,7 +894,7 @@ fn parse_hybrid(tp: &TriplePattern, lists: &ListCells) -> Result<HybridReq, Stri
     })
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) Decodes `vec:hybrid`'s `( <query> <k> )` object argument list.
+/// (sq-lhcot.4) Decodes `vec:hybrid`'s `( <query> <k> )` object argument list.
 fn parse_hybrid_obj_args(
     o: &TermPattern,
     lists: &ListCells,
@@ -909,7 +909,7 @@ fn parse_hybrid_obj_args(
     Ok((parse_hybrid_query_arg(query)?, parse_k(k)?))
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) `<query>` → an entity IRI, a dense query vector (a PLAIN literal of
+/// (sq-lhcot.4) `<query>` → an entity IRI, a dense query vector (a PLAIN literal of
 /// comma-separated floats, as `vec:nearest`), or a natural-language query (a LANGUAGE-TAGGED
 /// literal). The language tag is the disambiguator: it is what distinguishes `"1,2"@en` (the text
 /// "1,2") from `"1,2"` (a 2-dimensional query vector), so neither form can be mistaken for the
@@ -954,7 +954,7 @@ fn parse_query_arg(t: &TermPattern) -> Result<QueryArg, String> {
     }
 }
 
-/// A query-vector literal → its floats. [SONNET-4.6] (sq-lhcot.4) Split out of
+/// A query-vector literal → its floats. (sq-lhcot.4) Split out of
 /// [`parse_query_arg`] so `vec:hybrid` reuses the identical parse (and identical errors) for its
 /// plain-literal form.
 fn parse_vector_literal(l: &Literal) -> Result<Vec<f32>, String> {
@@ -1004,7 +1004,7 @@ fn term_to_ground(t: Term) -> Option<GroundTerm> {
     match t {
         Term::NamedNode(n) => Some(GroundTerm::NamedNode(n)),
         Term::Literal(l) => Some(GroundTerm::Literal(l)),
-        // [GPT-5.6] sq-1ijoc: SPARQL 1.2 VALUES admits ground triple terms;
+        // sq-1ijoc: SPARQL 1.2 VALUES admits ground triple terms;
         // spargebra's conversion recursively rejects any nested blank node.
         Term::Triple(t) => spargebra::term::GroundTriple::try_from(*t)
             .ok()
@@ -1016,12 +1016,12 @@ fn term_to_ground(t: Term) -> Option<GroundTerm> {
 /// Runs the k-NN search for `req` and returns `(neighbour id, cosine score)`
 /// pairs, best first.
 ///
-/// [OPUS-4.8] (sq-z589) The UNFILTERED search runs through `searcher` — the exact full scan
+/// (sq-z589) The UNFILTERED search runs through `searcher` — the exact full scan
 /// ([`ExactSearch`], the default `vec:` behaviour) or an approximate index (`ApproxSearch`, the
 /// `*_approx` entry points). The store is still used to look up the seed vector and (for the
 /// filtered path) to scan the masked candidates.
 ///
-/// [OPUS-4.8] (sq-bvmd) When the `filtered-ann` feature is on, `constraint` is the
+/// (sq-bvmd) When the `filtered-ann` feature is on, `constraint` is the
 /// BGP's surviving ordinary patterns; if any of them constrain `req.node`, the search
 /// is restricted to the candidate id-set those patterns admit (filtered ANN) instead
 /// of scanning the whole store and joining afterwards — and that filtered path goes through the
@@ -1057,7 +1057,7 @@ fn run_knn(
                 // from the pool BEFORE the k boundary is determined and boundary-tie
                 // membership decided by the VG-TIE-1 N-Triples rule — so the filtered
                 // answer equals post-filtering the unfiltered tie-broken retrieval
-                // (VG-FILT-2 in answer-exact mode). [OPUS-4.8] (sq-7hx6) The cost model
+                // (VG-FILT-2 in answer-exact mode). (sq-7hx6) The cost model
                 // picks pre-filter (scan the mask) vs post-filter (scan the whole store +
                 // drop non-members) by the mask's selectivity; BOTH branches return the
                 // identical answer either way.
@@ -1072,7 +1072,7 @@ fn run_knn(
                 )?;
                 return Ok(hits);
             }
-            // [SONNET-4.6] (sq-tb9p0) Answer-exact path: rank with the VG-TIE-1 boundary
+            // (sq-tb9p0) Answer-exact path: rank with the VG-TIE-1 boundary
             // tie-break (seed excluded before ranking, so the boundary is computed over the
             // true candidate pool). A blank-node candidate whose term would decide
             // membership is a fail-closed hard error (`?`), per the embeddable domain.
@@ -1098,7 +1098,7 @@ fn run_knn(
             }
             #[cfg(feature = "filtered-ann")]
             if let Some(mask) = &mask {
-                // [OPUS-4.8] (sq-7hx6) Cost-model choice of pre-filter vs post-filter —
+                // (sq-7hx6) Cost-model choice of pre-filter vs post-filter —
                 // identical answer either way — with boundary-tie membership decided by
                 // the VG-TIE-1 N-Triples rule over the admitted pool (no seed to exclude
                 // in the query-by-vector form).
@@ -1113,7 +1113,7 @@ fn run_knn(
                 )?;
                 return Ok(hits);
             }
-            // [SONNET-4.6] (sq-tb9p0) Answer-exact path with the VG-TIE-1 boundary tie-break;
+            // (sq-tb9p0) Answer-exact path with the VG-TIE-1 boundary tie-break;
             // an approximate backend falls through to its plain search. A blank-node
             // candidate whose term would decide membership is a fail-closed hard error (`?`).
             if let Some(hits) = searcher.search_tied(v, req.k, graph, None)? {
@@ -1124,7 +1124,7 @@ fn run_knn(
     }
 }
 
-/// [SONNET-4.6] (sq-lhcot.4) Resolves one `vec:hybrid` request into its final ranked hits.
+/// (sq-lhcot.4) Resolves one `vec:hybrid` request into its final ranked hits.
 ///
 /// The pipeline is exactly three deterministic stages:
 ///
@@ -1230,7 +1230,7 @@ fn run_hybrid(
     }
 }
 
-/// [OPUS-4.8] (review #4519) Runs the auxiliary arms, validating every id each returns and — with
+/// (review #4519) Runs the auxiliary arms, validating every id each returns and — with
 /// `filtered-ann` — returning each arm's ranking OVER THE ADMISSIBLE CANDIDATES.
 ///
 /// Without `filtered-ann` there is no mask, so this is one pass: ask each arm for `candidates`
@@ -1252,7 +1252,7 @@ fn run_aux_arms(
     Ok(aux)
 }
 
-/// [OPUS-4.8] (review #4519, round 5) The number of inline-integer literal ids — the sub-domain
+/// (review #4519, round 5) The number of inline-integer literal ids — the sub-domain
 /// `[INLINE_BASE, INLINE_BASE + 2^30)` that [`check_arm_ids`] admits alongside the `1..=dict.len()`
 /// stored-term ids. `run_aux_arms`'s paging backstop has to bound that whole domain, so it needs
 /// the size of the inline half. `sparq-core` does not export it, so it is restated here and pinned
@@ -1260,7 +1260,7 @@ fn run_aux_arms(
 #[cfg(feature = "filtered-ann")]
 const INLINE_DOMAIN: usize = 1 << 30;
 
-/// [OPUS-4.8] (review #4519, round 2) Runs the auxiliary arms and restricts each to the
+/// (review #4519, round 2) Runs the auxiliary arms and restricts each to the
 /// BGP-derived candidate mask, **paging an arm deeper when the restriction leaves it short**.
 ///
 /// The mask is an ADMISSIBILITY constraint on the answer, not a dense-arm optimisation: an id the
@@ -1380,7 +1380,7 @@ fn run_aux_arms(
         .collect()
 }
 
-/// [OPUS-4.8] (review #4519) Rejects an auxiliary arm's result whose id is not a term of `graph`'s
+/// (review #4519) Rejects an auxiliary arm's result whose id is not a term of `graph`'s
 /// dictionary — a valid 1-based dictionary id (`1..=dict.len()`) or an inline-integer literal id.
 ///
 /// An arm is a caller closure, so its ids are untrusted: an out-of-process service answering from
@@ -1419,7 +1419,7 @@ fn check_dim(got: usize, want: usize, what: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// [OPUS-4.8] (sq-3tjd, epic sq-3183) Builds the candidate [`IdMask`] for `node` from the
+/// (sq-3tjd, epic sq-3183) Builds the candidate [`IdMask`] for `node` from the
 /// surrounding BGP `constraint` patterns — the dictionary ids of every binding `node` takes
 /// when the **join-connected** constraining sub-BGP is evaluated against `graph`, then
 /// projected back onto `node`.
@@ -1461,7 +1461,7 @@ fn derive_mask(
         return Ok(None);
     }
 
-    // [OPUS-4.8] (sq-36ol) The mask the connected sub-BGP derives is a pure function of (the
+    // (sq-36ol) The mask the connected sub-BGP derives is a pure function of (the
     // sub-BGP, the graph) — re-deriving it for the SAME sub-BGP against the SAME graph always
     // yields the same ids. So cache it keyed by (sub-BGP terms, graph fingerprint). Crucially the
     // sub-BGP here is the **connected component** (sq-3tjd) `connected_component` computed above,
@@ -1506,7 +1506,7 @@ fn derive_mask(
     Ok(Some(mask))
 }
 
-/// [OPUS-4.8] (sq-36ol, epic sq-3183) Cross-prepare cache for the filtered-ANN `IdMask` that
+/// (sq-36ol, epic sq-3183) Cross-prepare cache for the filtered-ANN `IdMask` that
 /// [`derive_mask`] computes from a constraining sub-BGP. Keyed by **(canonical sub-BGP, graph
 /// [`Fingerprint`])**; reused on a hit, invalidated — by construction — on any graph change.
 ///
@@ -1610,7 +1610,7 @@ mod mask_cache {
     }
 }
 
-/// [OPUS-4.8] (sq-3tjd) The connected component of the BGP join-graph containing `node`.
+/// (sq-3tjd) The connected component of the BGP join-graph containing `node`.
 ///
 /// Models the BGP as a graph whose nodes are *variables* and whose edges link the variables
 /// that co-occur in a triple pattern; the component is every pattern reachable from `node`
@@ -1660,7 +1660,7 @@ fn connected_component(node: &Variable, patterns: &[TriplePattern]) -> Vec<Tripl
         .collect()
 }
 
-/// [OPUS-4.8] (sq-3tjd) The variables `tp` mentions, in any term position (subject,
+/// (sq-3tjd) The variables `tp` mentions, in any term position (subject,
 /// predicate, object).
 #[cfg(feature = "filtered-ann")]
 fn pattern_vars(tp: &TriplePattern) -> Vec<Variable> {
@@ -1677,7 +1677,7 @@ fn pattern_vars(tp: &TriplePattern) -> Vec<Variable> {
     out
 }
 
-// [OPUS-4.8] (sq-36ol, epic sq-3183) Unit tests for the derived-mask cache. These reach the
+// (sq-36ol, epic sq-3183) Unit tests for the derived-mask cache. These reach the
 // PRIVATE `mask_cache` (entry count, clear) so they can assert a HIT *reused* rather than
 // re-derived, and that a graph mutation *misses*. The end-to-end public-API behaviour is also
 // covered in tests/filtered_bgp.rs. Gated on both features (the cache only exists with them).
@@ -1686,7 +1686,7 @@ mod mask_cache_tests {
     use super::*;
     use sparq_core::dict::{Id, INLINE_BASE};
 
-    /// [OPUS-4.8] (review #4519, round 5) `INLINE_DOMAIN` restates a `sparq-core` invariant that
+    /// (review #4519, round 5) `INLINE_DOMAIN` restates a `sparq-core` invariant that
     /// crate does not export, and `run_aux_arms`'s paging backstop is only sound if it is exact:
     /// too small and an admissible inline id past the bound is never paged to. Pin it against the
     /// dictionary's own `is_inline` — the last inline id must be inline, the next one must not be.

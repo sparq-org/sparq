@@ -1,4 +1,4 @@
-//! The opt-in CJK character-bigram analyzer ([`Analyzer::CjkNgram`]). [OPUS-4.8] sq-m3ln
+//! The opt-in CJK character-bigram analyzer ([`Analyzer::CjkNgram`]). sq-m3ln
 //!
 //! The default UAX #29 analyzer splits an unspaced Han run per ideograph, so a
 //! multi-char CJK term searches as the AND of its (very common) characters —
@@ -89,7 +89,7 @@ fn ngram_improves_multichar_cjk_precision() {
     // 東 is a one-char run → indexed as the unigram 東). In doc0 "東京都に住む"
     // the 東 is fused into the 東京 bigram, so it is NOT reachable by a bare 東.
     // This is the inherent precision/recall trade of n-gram indexing and is the
-    // exact reason it stays OPT-IN. [OPUS-4.8] sq-m3ln
+    // exact reason it stays OPT-IN. sq-m3ln
     assert_eq!(values(&g, &ng.search("東")), ["京都の東"]);
 }
 

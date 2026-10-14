@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-314: derivation_step module + entailmentRegime end-to-end.
+// sq-314: derivation_step module + entailmentRegime end-to-end.
 //! Derivation steps: the recorded inference that justifies a DERIVED triple under
 //! a non-`Simple` entailment regime (plan §S2.5 with-inference).
 //!
@@ -86,7 +86,7 @@ use crate::manifest::{EntailmentRegime, FieldHex};
 /// entailed triple can be withheld. Half (b) is the part with no precedent
 /// anywhere in the estate: proving that the fixpoint was REACHED, i.e. that no
 /// rule fires producing a new triple.
-// [OPUS-5] sq-rsd3v.7: completeness-under-entailment is UNBUILT and NOT claimed.
+// sq-rsd3v.7: completeness-under-entailment is UNBUILT and NOT claimed.
 pub const COMPLETENESS_UNDER_ENTAILMENT_UNBUILT: [&str; 2] = [
     "in-circuit closure-sweep over the flat full graph",
     "fixpoint-saturation proof (no rule fires producing a new triple)",
@@ -343,7 +343,7 @@ impl DerivationStep {
     /// verifier-computed canonical one and a spelling mismatch there REJECTS;
     /// here a spelling mismatch would ACCEPT, so the safe direction is the
     /// opposite one and normalization is load-bearing.
-    // [OPUS-5] sq-rsd3v.6 (#3265): keep owl:sameAs off the fixed-shape path.
+    // sq-rsd3v.6 (#3265): keep owl:sameAs off the fixed-shape path.
     pub fn mentions_equality_predicate(&self, owl_sameas: &FieldHex) -> bool {
         let same = crate::verifier::normalize_hex(&owl_sameas.0);
         self.antecedents

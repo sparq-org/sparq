@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-qcnn.4 (epic sq-qcnn; DAG node A of research/differential-testing-value-level.md):
+# sq-qcnn.4 (epic sq-qcnn; DAG node A of research/differential-testing-value-level.md):
 # the ENGINE-INDEPENDENT value-normalisation + canonical-result library for the value-level
 # multi-oracle differential fuzzer.
 #
@@ -32,7 +32,7 @@ bigdecimal = "0.4"
 # Parse the neutral wire form each oracle emits (SPARQL Results JSON).
 serde_json = "1"
 
-# [OPUS-5] sq-qcnn.7 — cross-oracle blank-node ISOMORPHISM (src/iso.rs).
+# sq-qcnn.7 — cross-oracle blank-node ISOMORPHISM (src/iso.rs).
 # Blank-node labels are engine-local, so a result carrying one is comparable only up to a
 # bijection; that needs canonical labelling (RDFC-1.0). The SAME independence constraint as
 # above applies: the labelling must NOT be either engine's own canonicaliser — in particular

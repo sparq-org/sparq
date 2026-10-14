@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ddpgx (epic sq-my8wd) — the W3C SPARQL 1.1 `sparql11/service`
+//! sq-ddpgx (epic sq-my8wd) — the W3C SPARQL 1.1 `sparql11/service`
 //! EVALUATION conformance lane, wired as a RATCHETED gate that mirrors the SPARQL /
 //! SHACL / GeoSPARQL / Solid / JSON-LD / D-entailment ratchets in this crate
 //! (crate-local `cargo test` + a pinned pass-count FLOOR that may only RISE,
@@ -68,7 +68,7 @@ mod gated {
     /// (`scoreboard::SUITES`) and read textually by the guard test
     /// `tests/scoreboard_floors.rs`. It may only RISE — never lower it. This is the
     /// ACTUAL current pass count, not an aspirational target.
-    pub const SERVICE_EVAL_FLOOR: usize = 6; // [SONNET-4.6] sq-my8wd.1: +service3 (nested non-SILENT SERVICE now handled)
+    pub const SERVICE_EVAL_FLOOR: usize = 6; // sq-my8wd.1: +service3 (nested non-SILENT SERVICE now handled)
 
     fn rdf_tests_root() -> PathBuf {
         // CARGO_MANIFEST_DIR is crates/sparq-conformance; the data lives at the
@@ -92,7 +92,7 @@ mod gated {
         let out = service_eval::run_service_suite(&root)
             .unwrap_or_else(|e| panic!("service evaluation suite error: {e}"));
 
-        // [OPUS-4.8] The CI ratchet greps this exact `TOTAL service` line (pass count
+        // The CI ratchet greps this exact `TOTAL service` line (pass count
         // in field $3), mirroring the JSON-LD / d-entail lanes' `TOTAL <cat>` shape.
         // Positional `format!`/`println!` args (not inline `{pass}`) per the CodeQL
         // `rust/unused-variable` false-positive guard in the shared agent contract.

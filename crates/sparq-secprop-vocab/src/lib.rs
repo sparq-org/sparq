@@ -151,10 +151,49 @@ pub const SECX_ISSUER_HONESTY: &str = "https://w3id.org/zkp-sparql/sec-prop#Issu
 pub const SECX_DISCRETE_LOG: &str = "https://w3id.org/zkp-sparql/sec-prop#DiscreteLog";
 /// `secx:RandomOracle` — the random-oracle model.
 pub const SECX_RANDOM_ORACLE: &str = "https://w3id.org/zkp-sparql/sec-prop#RandomOracle";
-/// `secx:HonestMajority` — the MPC honest-majority assumption.
+/// `secx:HonestMajority` — the MPC honest-majority assumption **and** the middle
+/// level of the [`SECX_CORRUPTION_THRESHOLD`] dimension (one IRI, two roles —
+/// issue #6186; see that dimension's docs).
 pub const SECX_HONEST_MAJORITY: &str = "https://w3id.org/zkp-sparql/sec-prop#HonestMajority";
-/// `secx:SemiHonest` — the MPC semi-honest-adversary assumption (sparq-mpc's model).
+/// `secx:SemiHonest` — the MPC semi-honest-adversary assumption (sparq-mpc's model)
+/// **and** the weakest level of the [`SECX_ADVERSARY_MODEL`] dimension (one IRI, two
+/// roles — issue #6186; see that dimension's docs).
 pub const SECX_SEMI_HONEST: &str = "https://w3id.org/zkp-sparql/sec-prop#SemiHonest";
+
+// ── [new] MPC adversary model + corruption threshold (§5c; issue #6186) ───────
+//
+// `secx:assumption` is PROVENANCE: the shared admissibility reasoner
+// (`sparq_trust::admissibility`) keys strictly on `(dimension, level)` via
+// `secx:overDimension` + `secx:atLeast`, so an `secx:assumption secx:SemiHonest`
+// annotation alone can never be discharged by an ODRL preference. These two ORDERED
+// dimensions give the same facts a level axis the existing discharge rule handles
+// with no new rule, which is what makes "require malicious security" mechanically
+// exclude a semi-honest protocol.
+//
+// Each axis reuses an EXISTING assumption individual as one of its levels rather
+// than duplicating it: `secx:SemiHonest` is the WEAKEST `AdversaryModel` level and
+// `secx:HonestMajority` is the MIDDLE `CorruptionThreshold` level.
+
+/// `secx:AdversaryModel` dimension — how far a corrupted party may deviate:
+/// [`SECX_MALICIOUS`] ⊐ [`SECX_COVERT`] ⊐ [`SECX_SEMI_HONEST`]. Orthogonal to
+/// [`SECX_CORRUPTION_THRESHOLD`] (how *many* parties may be corrupted).
+pub const SECX_ADVERSARY_MODEL: &str = "https://w3id.org/zkp-sparql/sec-prop#AdversaryModel";
+/// `secx:Malicious` — an actively-deviating adversary (the strongest level).
+pub const SECX_MALICIOUS: &str = "https://w3id.org/zkp-sparql/sec-prop#Malicious";
+/// `secx:Covert` — deviation is caught with a deterrence probability.
+pub const SECX_COVERT: &str = "https://w3id.org/zkp-sparql/sec-prop#Covert";
+
+/// `secx:CorruptionThreshold` dimension — ordered by how much corruption is
+/// **tolerated**, so [`SECX_DISHONEST_MAJORITY`] ⊐ [`SECX_HONEST_MAJORITY`] ⊐
+/// [`SECX_SUPER_HONEST_MAJORITY`] (dishonest-majority is the strongest guarantee).
+/// Orthogonal to [`SECX_ADVERSARY_MODEL`].
+pub const SECX_CORRUPTION_THRESHOLD: &str =
+    "https://w3id.org/zkp-sparql/sec-prop#CorruptionThreshold";
+/// `secx:DishonestMajority` — any `t < n` corrupted (the strongest level).
+pub const SECX_DISHONEST_MAJORITY: &str = "https://w3id.org/zkp-sparql/sec-prop#DishonestMajority";
+/// `secx:SuperHonestMajority` — `t < n/3` corrupted (the weakest level).
+pub const SECX_SUPER_HONEST_MAJORITY: &str =
+    "https://w3id.org/zkp-sparql/sec-prop#SuperHonestMajority";
 
 // ── [his] Unlinkability refinement (strength × scope) ─────────────────────────
 
@@ -397,6 +436,13 @@ pub const ALL_SECPROP_IRIS: &[&str] = &[
     SECX_RANDOM_ORACLE,
     SECX_HONEST_MAJORITY,
     SECX_SEMI_HONEST,
+    // [new] MPC adversary model + corruption threshold (#6186)
+    SECX_ADVERSARY_MODEL,
+    SECX_MALICIOUS,
+    SECX_COVERT,
+    SECX_CORRUPTION_THRESHOLD,
+    SECX_DISHONEST_MAJORITY,
+    SECX_SUPER_HONEST_MAJORITY,
     // [his] Unlinkability refinement
     SECX_UNLINKABILITY_STRENGTH,
     SECX_EVERLASTING_UNLINKABLE,
@@ -590,6 +636,34 @@ mod tests {
                 local,
             );
         }
+    }
+
+    /// The two MPC trust-model dimensions REUSE the existing assumption individuals
+    /// as their levels (issue #6186) rather than minting twins, so the Turtle must
+    /// type both as `skos:Concept` in addition to `secx:Assumption`. Without that
+    /// typing the level would be an untyped term of an ordered dimension.
+    #[test]
+    fn mpc_trust_model_levels_reuse_the_assumption_individuals() {
+        assert!(
+            TTL.contains("secx:SemiHonest a secx:Assumption, skos:Concept"),
+            "secx:SemiHonest must be typed as BOTH an assumption and a level of the \
+             secx:AdversaryModel dimension (#6186) — it is reused, not duplicated",
+        );
+        assert!(
+            TTL.contains("secx:HonestMajority a secx:Assumption, skos:Concept"),
+            "secx:HonestMajority must be typed as BOTH an assumption and a level of \
+             the secx:CorruptionThreshold dimension (#6186)",
+        );
+        // The two dimensions name their reused level in the ordering comment, so a
+        // reader of the published vocabulary sees the dual role.
+        assert!(
+            TTL.contains("Malicious ⊐ Covert ⊐ SemiHonest"),
+            "the secx:AdversaryModel dimension must publish its ⊐ order",
+        );
+        assert!(
+            TTL.contains("DishonestMajority ⊐ HonestMajority ⊐ SuperHonestMajority"),
+            "the secx:CorruptionThreshold dimension must publish its ⊐ order",
+        );
     }
 
     /// The assurance default + the sq-qhy4 audit gate are documented in the Turtle —

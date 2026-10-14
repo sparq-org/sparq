@@ -1,5 +1,5 @@
 //! Edge-case floors for form defaults and shape applicability.
-//! [GPT-5.6] sq-bif.34
+//! sq-bif.34
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
@@ -67,7 +67,7 @@ fn target_class_requires_a_matching_focus_type() {
     assert_eq!(other.fields[0].path, "<http://example.org/name>");
 }
 
-// ---- [OPUS-4.8] sq-vfcxv: predicate-target applicability -------------------
+// ---- sq-vfcxv: predicate-target applicability -------------------
 
 /// `sh:targetSubjectsOf` applies only to nodes that actually carry the
 /// predicate, and reports itself as the switcher rationale.

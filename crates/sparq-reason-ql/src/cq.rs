@@ -1,5 +1,5 @@
-// [OPUS-4.8] sq-t5bne (epic sq-pbz04): the STRICT, FAIL-CLOSED CQ-shape gate.
-// [SONNET-4.6] sq-pbz04.3.1: broaden the sound input fragment — UCQ (B1), literal-object atoms
+// sq-t5bne (epic sq-pbz04): the STRICT, FAIL-CLOSED CQ-shape gate.
+// sq-pbz04.3.1: broaden the sound input fragment — UCQ (B1), literal-object atoms
 // (B2 is in emit.rs), FILTER on distinguished-only vars (B3), constant-only VALUES over
 // distinguished vars (B4), intensional-atom guard (B6).
 //
@@ -135,7 +135,7 @@ pub struct ConjunctiveQuery {
 }
 
 /// A constant-only VALUES block accepted by the B4 broadening: all variables are
-/// distinguished and all cells are fully bound to ground terms (no UNDEF). [SONNET-4.6]
+/// distinguished and all cells are fully bound to ground terms (no UNDEF).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValuesBlock {
     /// The variables bound in this VALUES block (all distinguished, already checked).
@@ -291,13 +291,13 @@ pub fn as_ucq(query: &Query) -> Result<Ucq, CqError> {
 /// union-splitting may produce, before the gate rejects fail-closed. Alternation multiplies
 /// branches (`2^k` for `k` independent 2-way alternations, more for `n`-way), so a bound keeps
 /// a pathological path from blowing up the rewrite. Chosen well above any realistic CQ; a query
-/// exceeding it is out of the sound-and-tractable fragment. [OPUS-4.8] sq-pbz04.3.2
+/// exceeding it is out of the sound-and-tractable fragment. sq-pbz04.3.2
 const MAX_UCQ_BRANCHES: usize = 256;
 
 /// A generator of FRESH non-distinguished variables for property-path sequence intermediates
 /// (B5). Names use the distinctive `__ql_seq_` prefix and are collision-checked against every
 /// variable name in the source query, so a fresh intermediate can never capture a user variable
-/// (nor be projected — it is never added to the distinguished set). [OPUS-4.8] sq-pbz04.3.2
+/// (nor be projected — it is never added to the distinguished set). sq-pbz04.3.2
 struct FreshVars {
     used: HashSet<String>,
     counter: usize,
@@ -324,7 +324,7 @@ impl FreshVars {
 /// Collect every variable NAME appearing anywhere in `p` (all triple/path/values positions and
 /// filter expressions), recursing through the whole pattern tree, so [`FreshVars`] can avoid
 /// capturing any of them. Best-effort-thorough: an unrecognised operator is still traversed via
-/// its child patterns where the shape is known. [OPUS-4.8] sq-pbz04.3.2
+/// its child patterns where the shape is known. sq-pbz04.3.2
 fn collect_body_var_names(p: &GraphPattern, out: &mut HashSet<String>) {
     let push_term = |t: &TermPattern, out: &mut HashSet<String>| {
         if let TermPattern::Variable(v) = t {
@@ -399,7 +399,7 @@ fn collect_body_var_names_owned(p: &GraphPattern) -> HashSet<String> {
 /// Desugar all non-recursive property paths in `body` and split the top-level `UNION` tree, in
 /// ONE pass, into the DNF DISJUNCT LIST — each disjunct a path-free conjunction body (a `Bgp`,
 /// or a `Join`/`Filter`/`Values` tree of them) with NO top-level `Union`. FAIL-CLOSED on
-/// recursive/zero-length/negated path forms. [OPUS-4.8] sq-pbz04.3.2 (design record §5 B5)
+/// recursive/zero-length/negated path forms. sq-pbz04.3.2 (design record §5 B5)
 ///
 /// Distribution identities applied (all SPARQL-algebra equivalences, certain-answer preserving
 /// by the B1 union argument): `Join(A, Union(B,C)) ≡ Union(Join(A,B), Join(A,C))` and
@@ -491,7 +491,7 @@ fn too_many_branches() -> CqError {
 /// sequence intermediate (shared across the two atoms it joins), swaps subject/object for an
 /// inverse, and multiplies alternation into separate disjuncts (branch multiplication). The
 /// recursion-reintroducing forms — `+` (`OneOrMore`), `*` (`ZeroOrMore`), `?` (`ZeroOrOne`) —
-/// and negated property sets (`!p`) are REJECTED fail-closed. [OPUS-4.8] sq-pbz04.3.2
+/// and negated property sets (`!p`) are REJECTED fail-closed. sq-pbz04.3.2
 fn desugar_path(
     subject: &TermPattern,
     path: &PropertyPathExpression,
@@ -639,7 +639,7 @@ fn collect_conjunction(
             collect_conjunction(left, distinguished, atoms, filter_exprs, values_blocks)?;
             collect_conjunction(right, distinguished, atoms, filter_exprs, values_blocks)
         }
-        // B3: FILTER — accept iff ALL variables in the expression are distinguished. [SONNET-4.6]
+        // B3: FILTER — accept iff ALL variables in the expression are distinguished.
         GraphPattern::Filter { expr, inner } => {
             // First collect the inner CQ body.
             collect_conjunction(inner, distinguished, atoms, filter_exprs, values_blocks)?;
@@ -658,7 +658,7 @@ fn collect_conjunction(
             filter_exprs.push(expr.clone());
             Ok(())
         }
-        // B4: VALUES — accept iff all vars are distinguished AND all rows fully bound. [SONNET-4.6]
+        // B4: VALUES — accept iff all vars are distinguished AND all rows fully bound.
         GraphPattern::Values { variables, bindings } => {
             // Guard: all variables must be distinguished.
             for v in variables {
@@ -747,12 +747,12 @@ fn collect_conjunction(
 /// as `OutOfScope("intensional/schema-vocabulary atom")` — the rewriter evaluates over ABox
 /// data only and would silently under-answer a schema-vocabulary query without this guard.
 /// Annotation predicates (rdfs:label/comment/seeAlso/isDefinedBy) are admitted as plain role
-/// atoms (no QL TBox axiom changes their extension). [SONNET-4.6] sq-pbz04.3.1
+/// atoms (no QL TBox axiom changes their extension). sq-pbz04.3.1
 ///
 /// Body blank-node lifting (sq-pbz04.3.6): blank nodes in subject/object positions are now
 /// ADMITTED — they are non-distinguished existentials and are lifted to fresh `Unbound` ids by
 /// the emitter (`emit::cq_to_atoms`). The gate does not reject them; the emitter handles the
-/// mapping with the correct freshness/sharing semantics. [SONNET-4.6] sq-pbz04.3.6
+/// mapping with the correct freshness/sharing semantics. sq-pbz04.3.6
 fn check_atom_shape(tp: &TriplePattern) -> Result<(), CqError> {
     use spargebra::term::NamedNodePattern;
     match &tp.predicate {
@@ -792,7 +792,7 @@ fn check_atom_shape(tp: &TriplePattern) -> Result<(), CqError> {
 /// rdfs:subPropertyOf, rdfs:domain, rdfs:range, and the owl: vocabulary (owl:inverseOf,
 /// owl:equivalentClass, owl:equivalentProperty, owl:disjointWith, owl:propertyDisjointWith,
 /// owl:complementOf, owl:onProperty, owl:someValuesFrom, owl:allValuesFrom, owl:unionOf,
-/// owl:intersectionOf, owl:oneOf, owl:hasValue, and any other owl: predicate). [SONNET-4.6]
+/// owl:intersectionOf, owl:oneOf, owl:hasValue, and any other owl: predicate).
 fn is_intensional_schema_predicate(iri: &str) -> bool {
     const RDFS: &str = "http://www.w3.org/2000/01/rdf-schema#";
     const OWL: &str = "http://www.w3.org/2002/07/owl#";
@@ -803,7 +803,7 @@ fn is_intensional_schema_predicate(iri: &str) -> bool {
         // member, …) is schema vocabulary the rewriter must not evaluate over ABox data.
         !ADMITTED_RDFS.contains(&local)
     } else {
-        // Any owl: predicate is schema vocabulary (B6). [SONNET-4.6]
+        // Any owl: predicate is schema vocabulary (B6).
         iri.starts_with(OWL)
     }
 }
@@ -816,7 +816,7 @@ fn is_quoted_triple(t: &TermPattern) -> bool {
 }
 
 /// Collect all `Variable`s mentioned in a SPARQL expression (shallow recursive walk). Used by
-/// the B3 FILTER guard to verify the filter only mentions distinguished variables. [SONNET-4.6]
+/// the B3 FILTER guard to verify the filter only mentions distinguished variables.
 fn expression_vars(expr: &spargebra::algebra::Expression) -> Vec<Variable> {
     let mut out = Vec::new();
     collect_expr_vars(expr, &mut out);

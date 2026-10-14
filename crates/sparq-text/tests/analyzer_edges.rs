@@ -1,5 +1,5 @@
 //! Tokenizer / analyzer EDGE CASES + the delete-then-readd (delta) no-orphan
-//! invariant. [OPUS-4.8]
+//! invariant.
 //!
 //! These pin behaviours the audit flagged as thin: Unicode normalization (NFC vs
 //! NFD are DISTINCT — the analyzer casefolds but does not normalize), CJK /
@@ -154,7 +154,7 @@ fn punctuation_at_phrase_boundaries() {
     let idx = TextIndex::build_with_positions(&g);
 
     // The punctuation-heavy doc still matches the adjacency, just like the clean one.
-    // [OPUS-4.8] (sq-qmth) Compare by VALUE, not by dict id: `Graph::load_str` takes the
+    // (sq-qmth) Compare by VALUE, not by dict id: `Graph::load_str` takes the
     // SHARDED parallel-merge path on a multi-core host (>=2 rayon threads), which assigns
     // dictionary ids by hash bucket, NOT document order. Sorting `hits` (a `Vec<Id>`) and
     // mapping to values therefore yields a host-dependent order — green locally, RED in CI.
@@ -170,7 +170,7 @@ fn punctuation_at_phrase_boundaries() {
     vals.sort();
     // Expected list is in byte-lexicographic order (how `Vec<String>::sort` orders them):
     // index 5 is space(0x20) < comma(0x2C), so the comma doc sorts LAST; between the two
-    // space docs, 'b'(0x62) < the em-dash's leading UTF-8 byte(0xE2). [OPUS-4.8]
+    // space docs, 'b'(0x62) < the em-dash's leading UTF-8 byte(0xE2).
     assert_eq!(vals, ["quick brown fox", "quick — brown — dog", "quick, brown! fox."]);
 
     // A phrase query with leading/trailing/embedded punctuation tokenizes the

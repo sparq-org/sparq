@@ -1,7 +1,7 @@
 //! Example SPARQL lookups over the ingested PKG graph — the proof-of-value for the
 //! query-skill (sq-2m6zm.3) and the token-A/B (sq-2m6zm.4).
 //!
-//! [OPUS-4.8] sq-2m6zm.2 (epic sq-2m6zm). 🤖 SPARQ agent — PKG ingestion PoC. These
+//! sq-2m6zm.2 (epic sq-2m6zm). 🤖 SPARQ agent — PKG ingestion PoC. These
 //! answer the design's §6 worked questions by returning the **minimal** triples
 //! (binding rows) that satisfy the pattern — `O(answer)` tokens, not `O(corpus)`.
 //! The answers are computed by sparq's own SPARQL engine over the ingested graph; the

@@ -1,6 +1,6 @@
 //! D-entailment (datatype / value-space) materialization — RDF 1.1 Semantics §7-8.
 //!
-//! [OPUS-4.8] sq-e5atd (epic sq-pbz04). OPT-IN, behind the `d-entail` cargo
+//! sq-e5atd (epic sq-pbz04). OPT-IN, behind the `d-entail` cargo
 //! feature — the production materializer never carries it, so the lean default
 //! build (and the wasm bundle, which never depends on this code) is byte-identical.
 //!
@@ -36,7 +36,7 @@
 //!
 //! ## sparq-substrate seam (the shared value-space comparator)
 //!
-//! [FABLE-5] sq-pbz04.6.3 (epic sq-pbz04.6, seam 2 — design record
+//! sq-pbz04.6.3 (epic sq-pbz04.6, seam 2 — design record
 //! `research/d-entailment-datatype-map.md` §4). Datatype recognition
 //! (`is_integer_datatype`) and temporal value parsing (`temporal::Temporal`) come
 //! from `sparq-core`; the integer/decimal canonical-key split + normalization now
@@ -59,7 +59,7 @@
 //!   reject HERE before the unbounded canonical-key path, via the crate-internal
 //!   `xsd_facets` table shared with the RIF front-end (#5337), so the D-entailment
 //!   value space does not depend on the SPARQL numeric parser.
-//! - **`parse_xsd_double` (local double/float parser) MIGRATED in sq-s3b10 [SONNET-4.6].**
+//! - **`parse_xsd_double` (local double/float parser) MIGRATED in sq-s3b10.**
 //!   The local blocklist (`contains("inf")`, case-sensitive) was replaced by the shared
 //!   `sparq_substrate::numeric::parse_xsd_f64` / `parse_xsd_f32`, so dtype.rs and the
 //!   SPARQL evaluator now use IDENTICAL XSD-conformant acceptance. `Infinity` /
@@ -69,7 +69,7 @@
 //!   evaluator, the exact anti-pattern the module-doc warned against. D-entailment
 //!   conformance suite stays green (no W3C test uses those forbidden spellings).
 //! - **The integer/decimal KEY stays `canon_decimal`; it does NOT delegate to
-//!   `Num::cmp_relational` (sq-fvxko, issue #3137) [SONNET-4.6].** That follow-on was
+//!   `Num::cmp_relational` (sq-fvxko, issue #3137).** That follow-on was
 //!   proposed as behaviour-neutral. It is not, in two measured ways — pinned by
 //!   `tests::cmp_relational_delegation_would_change_behaviour`:
 //!   1. **Magnitude.** `as_numeric` routes `xsd:decimal` through `Dec::parse_lexical`,
@@ -96,7 +96,7 @@
 //!
 //! ## Single-table discipline
 //!
-//! [SONNET-4.6] sq-pbz04.6.2: `DTYPE_TABLE` is the **single source of truth** for
+//! sq-pbz04.6.2: `DTYPE_TABLE` is the **single source of truth** for
 //! which XSD datatypes are (a) members of `Recognized::standard()` and (b) carry a
 //! local value mapping.  Before this refactor, `Recognized::standard()`,
 //! `has_value_mapping`, and `d_value_key` maintained three independent lists that
@@ -122,7 +122,7 @@
 //! `xsd:IDREF`/`IDREFS`, `xsd:NOTATION`, and the list types are outside the
 //! RDF-compatible XSD subset (RDF 1.1 Concepts §5.1).
 //!
-//! [SONNET-4.6] sq-pbz04.6.2 — design record: `research/d-entailment-datatype-map.md` §3.2.
+//! sq-pbz04.6.2 — design record: `research/d-entailment-datatype-map.md` §3.2.
 
 use std::sync::OnceLock;
 
@@ -130,12 +130,12 @@ use crate::Vocab;
 use rustc_hash::FxHashSet;
 use sparq_core::dict::{self, Dict, Id, TermParts};
 use sparq_core::{is_integer_datatype, temporal};
-// [FABLE-5] sq-pbz04.6.3 (epic sq-pbz04.6, substrate seam 2): the SHARED value-space
+// sq-pbz04.6.3 (epic sq-pbz04.6, substrate seam 2): the SHARED value-space
 // comparator. The integer/decimal canonical-key parsing + normalization delegate to
 // `sparq_substrate::numeric::split_decimal` (pure-string, unbounded magnitude — the SAME
 // splitter the engine's exact decimal-string compare uses), so the reasoner and the engine
 // cannot diverge on which decimal lexicals are well-formed nor on the canonical form.
-// [SONNET-4.6] sq-s3b10: the double/float lexical parser NOW ALSO delegates to the SHARED
+// sq-s3b10: the double/float lexical parser NOW ALSO delegates to the SHARED
 // `sparq_substrate::numeric::parse_xsd_f64` / `parse_xsd_f32`, so the reasoner and the
 // evaluator use the IDENTICAL XSD-conformant acceptance set — "Infinity"/"-Infinity"/"NAN"/
 // "nan" are REJECTED by both (XSD forbids them; only "INF"/"-INF"/"NaN" are valid specials).
@@ -164,13 +164,13 @@ const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langSt
 /// and this table respectively); `rdf:langString` is not in the XSD namespace so it
 /// cannot appear here, but `has_value_mapping` handles it as a special case.
 ///
-/// [SONNET-4.6] sq-pbz04.6.2: one-table refactor + D2 broadening.
+/// sq-pbz04.6.2: one-table refactor + D2 broadening.
 const DTYPE_TABLE: &[(&str, bool)] = &[
     // ── String family ──────────────────────────────────────────────────────────
     ("string", true),
     ("normalizedString", true),
     ("token", true),
-    // [SONNET-4.6] sq-pbz04.6.2: derived-from-token string types.
+    // sq-pbz04.6.2: derived-from-token string types.
     ("language", true),
     ("Name", true),
     ("NCName", true),
@@ -200,10 +200,10 @@ const DTYPE_TABLE: &[(&str, bool)] = &[
     ("dateTimeStamp", true),
     ("date", true),
     // ── URI ─────────────────────────────────────────────────────────────────────
-    // [SONNET-4.6] sq-pbz04.6.2: anyURI.
+    // sq-pbz04.6.2: anyURI.
     ("anyURI", true),
     // ── Binary ──────────────────────────────────────────────────────────────────
-    // [SONNET-4.6] sq-pbz04.6.2: hexBinary + base64Binary share the Octets key.
+    // sq-pbz04.6.2: hexBinary + base64Binary share the Octets key.
     ("hexBinary", true),
     ("base64Binary", true),
 ];
@@ -246,7 +246,7 @@ impl Recognized {
     /// Only entries with `has_value_mapping = true` are included (behaviour is
     /// identical today — all entries are true — but the filter enforces the API
     /// contract so a future fail-closed entry cannot silently slip through).
-    /// [SONNET-4.6] sq-pbz04.6.2.
+    /// sq-pbz04.6.2.
     pub fn standard() -> Recognized {
         Recognized::new(
             DTYPE_TABLE
@@ -344,7 +344,7 @@ pub fn materialize_d(d: &Recognized, dict: &mut Dict, triples: &mut Vec<[Id; 3]>
 /// An UNRECOGNIZED-shaped IRI returns false (we cannot judge it, so we never type
 /// or clash on it — conservative).
 ///
-/// [SONNET-4.6] sq-pbz04.6.2: refactored to use `DTYPE_TABLE`.
+/// sq-pbz04.6.2: refactored to use `DTYPE_TABLE`.
 pub fn has_value_mapping(dt: &str) -> bool {
     if dt == RDF_LANG_STRING {
         return true;
@@ -375,14 +375,14 @@ pub fn has_value_mapping(dt: &str) -> bool {
 /// XSD 1.1 §3.3.17 defines anyURI as a distinct primitive; no cross-type key-equality
 /// with `xsd:string` is sanctioned.
 ///
-/// [FABLE-5] sq-pbz04.6.3: the integer/decimal canonical key delegates to the shared
+/// sq-pbz04.6.3: the integer/decimal canonical key delegates to the shared
 /// `sparq_substrate::numeric::split_decimal` (see the private `canon_decimal` helper).
-/// [SONNET-4.6] sq-s3b10: the double/float lexical parser NOW DELEGATES to the shared
+/// sq-s3b10: the double/float lexical parser NOW DELEGATES to the shared
 /// `sparq_substrate::numeric::parse_xsd_f64` / `parse_xsd_f32` — the local
 /// `parse_xsd_double` helper is removed; see the module doc's ledger for the tightening.
 /// The integer range facets stay in-crate (`xsd_facets`; facet validation is not delegated).
 ///
-/// [SONNET-4.6] sq-pbz04.6.2: added anyURI, language/Name/NCName/NMTOKEN,
+/// sq-pbz04.6.2: added anyURI, language/Name/NCName/NMTOKEN,
 /// hexBinary/base64Binary.
 pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
     if dt == RDF_LANG_STRING {
@@ -393,7 +393,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
         return Some(DValue::Str(lex.to_string()));
     }
     if dt == format!("{}normalizedString", XSD) {
-        // [SONNET-4.6] sq-pbz04.6.1: normalizedString forbids TAB/LF/CR (XSD 1.1
+        // sq-pbz04.6.1: normalizedString forbids TAB/LF/CR (XSD 1.1
         // §3.3.2). A lexical form containing one is ill-formed → no D-value.
         if lex.contains(['\t', '\n', '\r']) {
             return None;
@@ -401,7 +401,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
         return Some(DValue::Str(lex.to_string()));
     }
     if dt == format!("{}token", XSD) {
-        // [SONNET-4.6] sq-pbz04.6.1: token is the COLLAPSED form of
+        // sq-pbz04.6.1: token is the COLLAPSED form of
         // normalizedString (XSD 1.1 §3.3.3): no TAB/LF/CR, no leading or trailing
         // space, and no internal run of 2+ spaces. Anything else is ill-formed.
         if lex.contains(['\t', '\n', '\r'])
@@ -414,7 +414,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
         return Some(DValue::Str(lex.to_string()));
     }
     // ── Token-derived string types (§3.1 D2) ──────────────────────────────────
-    // [SONNET-4.6] sq-pbz04.6.2: language, Name, NCName, NMTOKEN are all derived
+    // sq-pbz04.6.2: language, Name, NCName, NMTOKEN are all derived
     // from xsd:token by restriction → their values ARE string values → share
     // DValue::Str. Pattern-facet validation is required before accepting.
     if dt == format!("{}language", XSD) {
@@ -472,7 +472,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
         return Some(DValue::Decimal(canon_decimal(lex)?));
     }
     if dt == format!("{}double", XSD) {
-        // [SONNET-4.6] sq-s3b10: delegate to the SHARED substrate parser (XSD-conformant
+        // sq-s3b10: delegate to the SHARED substrate parser (XSD-conformant
         // allowlist) so dtype.rs and the evaluator agree exactly on which double lexicals
         // are well-formed. Tightening: "Infinity"/"-Infinity"/"NAN"/"nan" → None (correct
         // per XSD; only "INF"/"-INF"/"NaN" are valid specials).
@@ -484,7 +484,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
         }));
     }
     if dt == format!("{}float", XSD) {
-        // [SONNET-4.6] sq-s3b10: same tightening as double — delegate to the shared
+        // sq-s3b10: same tightening as double — delegate to the shared
         // substrate parse_xsd_f32 (which in turn calls parse_xsd_f64 → sparq_core).
         let f = parse_xsd_f32(lex)?;
         return Some(DValue::F32(if f.is_nan() {
@@ -518,7 +518,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
         // whitespace-variant forms (e.g. "a  b" vs "a b") get DISTINCT keys here —
         // they are never incorrectly equated, but two canonically-collapsed-equal
         // values may not merge. This is deliberate: collapse is not applied.
-        // [SONNET-4.6] sq-pbz04.6.2.
+        // sq-pbz04.6.2.
         return Some(DValue::Uri(lex.to_string()));
     }
     // ── Binary (§3.1 D2) ──────────────────────────────────────────────────────
@@ -526,7 +526,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
         // XSD 1.1 §3.3.15: value space = "finite-length sequences of binary octets".
         // Lexical space: even-length strings over [0-9A-Fa-f] (case-insensitive).
         // Decoded octet sequence is the canonical key — shared with base64Binary.
-        // [SONNET-4.6] sq-pbz04.6.2.
+        // sq-pbz04.6.2.
         return decode_hex_binary(lex).map(DValue::Octets);
     }
     if dt == format!("{}base64Binary", XSD) {
@@ -534,7 +534,7 @@ pub fn d_value_key(lex: &str, dt: &str) -> Option<DValue> {
         // — IDENTICAL to hexBinary's value space (§3.3.15/§3.3.16). Equal octet
         // sequences are equal D-values ACROSS the two datatypes (the binary analogue
         // of integer ⊂ decimal). XSD allows embedded whitespace in the lexical form.
-        // [SONNET-4.6] sq-pbz04.6.2.
+        // sq-pbz04.6.2.
         return decode_base64_binary(lex).map(DValue::Octets);
     }
     None
@@ -554,7 +554,7 @@ pub fn d_value_eq(lex_a: &str, dt_a: &str, lex_b: &str, dt_b: &str) -> bool {
 /// for the exact value spaces — see the module doc on why the f64 fast path is
 /// unsound for semantic equality.
 ///
-/// [SONNET-4.6] sq-pbz04.6.2: added `Uri` and `Octets` variants.
+/// sq-pbz04.6.2: added `Uri` and `Octets` variants.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum DValue {
     /// Canonical decimal string (sign + minimal int digits + minimal frac digits)
@@ -573,13 +573,13 @@ pub enum DValue {
     Temporal(u64, bool, bool),
     /// URI reference value (`xsd:anyURI`) — codepoint equality, no escaping
     /// normalization. DISJOINT from `Str` (anyURI is a distinct XSD 1.1 primitive).
-    /// [SONNET-4.6] sq-pbz04.6.2.
+    /// sq-pbz04.6.2.
     Uri(String),
     /// Binary octet sequence — shared key for `xsd:hexBinary` and
     /// `xsd:base64Binary`. XSD 1.1 §3.3.15/§3.3.16 define BOTH value spaces as
     /// "finite-length sequences of binary octets", so equal octet sequences are
     /// equal D-values across the two datatypes.
-    /// [SONNET-4.6] sq-pbz04.6.2.
+    /// sq-pbz04.6.2.
     Octets(Vec<u8>),
 }
 
@@ -587,7 +587,7 @@ pub enum DValue {
 /// `None` when ill-formed. `"-0.0"` canonicalizes to `"0"`; `"1.0"` to `"1"`; so
 /// the integer 1 and the decimal 1.0 share the key `"1"`.
 ///
-/// [FABLE-5] sq-pbz04.6.3: the split + normalization delegates to the SHARED
+/// sq-pbz04.6.3: the split + normalization delegates to the SHARED
 /// `sparq_substrate::numeric::split_decimal` (pure string, no `i128` bound — so an
 /// arbitrary-magnitude decimal like a 40-digit lexical still keys, exactly as the
 /// pre-migration hand-rolled version did; the substrate `Dec::parse` path would have
@@ -597,7 +597,7 @@ pub enum DValue {
 /// old hand-rolled splitter did NOT; to keep behaviour byte-identical (a padded decimal
 /// lexical was rejected before), reject any surrounding whitespace up front.
 ///
-/// [SONNET-4.6] sq-fvxko (issue #3137): do NOT "simplify" this into a delegation to
+/// sq-fvxko (issue #3137): do NOT "simplify" this into a delegation to
 /// `Num::cmp_relational`. That comparator loses arbitrary-magnitude decimals, promotes
 /// across the decimal/IEEE-754 boundary D keeps disjoint, and ignores the integer-subtype
 /// range facets — see the module doc's ledger and
@@ -628,14 +628,14 @@ fn canon_decimal(lex: &str) -> Option<String> {
 // facet determines well-formedness. Validators return `true` iff the lexical form
 // is a valid member of the type's lexical space.
 //
-// [SONNET-4.6] sq-pbz04.6.2.
+// sq-pbz04.6.2.
 
 /// Validate `xsd:language` (XSD 1.1 §3.3.6).
 ///
 /// Pattern: `[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*`.  Case-significant: "EN" ≠ "en".
 /// Uses a OnceLock-cached `Regex` (the `regex` crate is already in this crate's
 /// dependency tree for the N3 `string:matches` builtin).
-/// [SONNET-4.6] sq-pbz04.6.2.
+/// sq-pbz04.6.2.
 fn is_valid_language(lex: &str) -> bool {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
@@ -651,7 +651,7 @@ fn is_valid_language(lex: &str) -> bool {
 /// of the NameChar production: `[a-zA-Z0-9._\-:]`.  Full NameChar includes many
 /// non-ASCII Unicode ranges; rejecting those is incomplete-but-sound (may reject
 /// some valid non-ASCII NMTOKENs, but will never ACCEPT an invalid one).
-/// [SONNET-4.6] sq-pbz04.6.2.
+/// sq-pbz04.6.2.
 fn is_valid_xml_nmtoken(lex: &str) -> bool {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
@@ -666,7 +666,7 @@ fn is_valid_xml_nmtoken(lex: &str) -> bool {
 /// subset: NameStartChar = `[a-zA-Z_:]`, NameChar = `[a-zA-Z0-9._\-:]`.  Colons
 /// are allowed (Name permits them; NCName does not).  Non-ASCII valid start/body
 /// chars are rejected — incomplete-but-sound.
-/// [SONNET-4.6] sq-pbz04.6.2.
+/// sq-pbz04.6.2.
 fn is_valid_xml_name(lex: &str) -> bool {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
@@ -681,7 +681,7 @@ fn is_valid_xml_name(lex: &str) -> bool {
 /// implementation uses a conservative ASCII subset: NCNameStartChar = `[a-zA-Z_]`,
 /// NCNameChar = `[a-zA-Z0-9._\-]` (no colon).  Non-ASCII valid start/body chars
 /// are rejected — incomplete-but-sound.
-/// [SONNET-4.6] sq-pbz04.6.2.
+/// sq-pbz04.6.2.
 fn is_valid_xml_ncname(lex: &str) -> bool {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
@@ -696,13 +696,13 @@ fn is_valid_xml_ncname(lex: &str) -> bool {
 // dep required: both are straightforward decoding tasks without the error-recovery
 // or streaming concerns that make a library worthwhile.
 //
-// [SONNET-4.6] sq-pbz04.6.2.
+// sq-pbz04.6.2.
 
 /// Decode an `xsd:hexBinary` lexical form to a byte sequence.
 ///
 /// Lexical space: an even-length string over `[0-9A-Fa-f]` (case-insensitive).
 /// Returns `None` for odd-length strings or strings containing non-hex characters.
-/// [SONNET-4.6] sq-pbz04.6.2.
+/// sq-pbz04.6.2.
 fn decode_hex_binary(lex: &str) -> Option<Vec<u8>> {
     if !lex.len().is_multiple_of(2) {
         return None;
@@ -740,11 +740,11 @@ fn hex_nibble(b: u8) -> Option<u8> {
 /// The cleaned form must be a multiple of 4 characters from the base64 alphabet
 /// (`A-Z`, `a-z`, `0-9`, `+`, `/`) with `=` padding. Returns `None` for ill-formed
 /// input.
-/// [SONNET-4.6] sq-pbz04.6.2.
+/// sq-pbz04.6.2.
 fn decode_base64_binary(lex: &str) -> Option<Vec<u8>> {
     // Strip XML S characters only (SP/TAB/CR/LF per XML 1.0 production S).
     // `is_ascii_whitespace()` would also strip VT (0x0B) and FF (0x0C), which
-    // are NOT XML whitespace; those must be rejected as ill-formed. [SONNET-4.6]
+    // are NOT XML whitespace; those must be rejected as ill-formed.
     let cleaned: Vec<u8> = lex
         .bytes()
         .filter(|b| !matches!(b, b' ' | b'\t' | b'\r' | b'\n'))
@@ -941,7 +941,7 @@ mod tests {
         );
     }
 
-    // [SONNET-4.6] sq-pbz04.6.1: derived-integer magnitude facets. Each of these
+    // sq-pbz04.6.1: derived-integer magnitude facets. Each of these
     // fails on the pre-fix `_ => true` / grouped-sign-only code (non-vacuous).
     #[test]
     fn byte_out_of_range_not_typed() {
@@ -1006,7 +1006,7 @@ mod tests {
         );
     }
 
-    // [SONNET-4.6] sq-pbz04.6.1: string-family lexical-space validation.
+    // sq-pbz04.6.1: string-family lexical-space validation.
     #[test]
     fn token_lexical_space_validated() {
         // " a"^^xsd:token has a leading space — illegal for token
@@ -1069,7 +1069,7 @@ mod tests {
         );
     }
 
-    // ── D2 broadening tests [SONNET-4.6] sq-pbz04.6.2 ─────────────────────────
+    // ── D2 broadening tests sq-pbz04.6.2 ─────────────────────────
 
     /// xsd:anyURI accepts any Unicode string and is disjoint from xsd:string.
     #[test]
@@ -1267,7 +1267,7 @@ mod tests {
         );
         // Non-XML whitespace (FF 0x0C) is NOT XML S and must cause rejection.
         // MUTATION CHECK: revert the filter to is_ascii_whitespace() → this assert
-        // goes RED because FF is then stripped and "YQ==" is accepted. [SONNET-4.6]
+        // goes RED because FF is then stripped and "YQ==" is accepted.
         assert!(
             d_value_key("YQ\x0c==", &format!("{}base64Binary", XSD)).is_none(),
             "form feed (0x0C) is not XML whitespace — must be rejected as ill-formed"
@@ -1292,7 +1292,7 @@ mod tests {
     /// from `decode_base64_binary` causes the corresponding `is_none()` assertion to
     /// fail because the non-canonical form gets accepted and produces `Some(...)`.
     /// Verified by reverting each guard in isolation → test RED → restoring → GREEN.
-    /// [SONNET-4.6] sq-pbz04.6.2 fix.
+    /// sq-pbz04.6.2 fix.
     #[test]
     fn base64_non_canonical_padding_rejected() {
         let b64 = format!("{}base64Binary", XSD);
@@ -1419,7 +1419,7 @@ mod tests {
         assert_eq!(decode_base64_binary("YQ="), None); // not multiple of 4
     }
 
-    // ── [FABLE-5] sq-pbz04.6.3: dtype ≡ substrate differential over the XSD matrix ──
+    // ── sq-pbz04.6.3: dtype ≡ substrate differential over the XSD matrix ──
     //
     // The seam D3 fixes: the integer/decimal canonical key now delegates to
     // `sparq_substrate::numeric::split_decimal`. These tests are the differential
@@ -1553,7 +1553,7 @@ mod tests {
         assert!(!d_value_eq(big, &decimal, neighbour, &decimal));
     }
 
-    /// [SONNET-4.6] sq-fvxko (issue #3137): the REFUSED-delegation guard.
+    /// sq-fvxko (issue #3137): the REFUSED-delegation guard.
     ///
     /// The follow-on proposed replacing the `canon_decimal` numeric arm with a delegation to
     /// `Num::cmp_relational`, claimed behaviour-neutral. It is NOT. This test pins the two
@@ -1630,7 +1630,7 @@ mod tests {
         assert!(d_value_key("1", &decimal).is_some());
     }
 
-    // ── [SONNET-4.6] sq-s3b10: double/float dtype ≡ substrate parse_xsd_f64 parity ──
+    // ── sq-s3b10: double/float dtype ≡ substrate parse_xsd_f64 parity ──
     //
     // Load-bearing invariant: d_value_key for xsd:double / xsd:float now delegates to
     // sparq_substrate::numeric::parse_xsd_f64 / parse_xsd_f32, so the reasoner and the
@@ -1649,7 +1649,7 @@ mod tests {
     use sparq_substrate::numeric::{parse_xsd_f64 as sub_parse_f64, parse_xsd_f32 as sub_parse_f32};
 
     /// Parity table: dtype.rs d_value_key for xsd:double AGREES with the substrate
-    /// parse_xsd_f64 on EVERY XSD-valid and XSD-invalid lexical form. [SONNET-4.6] sq-s3b10.
+    /// parse_xsd_f64 on EVERY XSD-valid and XSD-invalid lexical form. sq-s3b10.
     #[test]
     fn double_dtype_key_parity_with_substrate_parse_xsd_f64() {
         let double = format!("{}double", XSD);
@@ -1706,7 +1706,7 @@ mod tests {
 
     /// Same parity table for xsd:float — dtype.rs d_value_key delegates to parse_xsd_f32
     /// (which itself calls parse_xsd_f64), so it must agree with the substrate on every form.
-    /// [SONNET-4.6] sq-s3b10.
+    /// sq-s3b10.
     #[test]
     fn float_dtype_key_parity_with_substrate_parse_xsd_f32() {
         let float = format!("{}float", XSD);

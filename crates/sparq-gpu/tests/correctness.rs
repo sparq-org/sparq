@@ -216,7 +216,7 @@ fn upload_table_rejects_a_full_table() {
     assert!(r.is_err(), "a full table must be rejected");
 }
 
-/// [OPUS-4.8] sq-goay: randomized differential oracle.
+/// sq-goay: randomized differential oracle.
 ///
 /// The tests above pin each kernel against the CPU reference on ONE fixed
 /// workload. This sweep re-seeds the generator every iteration and varies size,

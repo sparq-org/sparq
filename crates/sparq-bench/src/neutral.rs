@@ -1,5 +1,5 @@
 //! The `oxrdf` → `sparq-difftest` **neutral-term** bridge for the value-level differential
-//! comparators. [OPUS-5] sq-qcnn.5 (epic `sq-qcnn`; DAG node B of
+//! comparators. sq-qcnn.5 (epic `sq-qcnn`; DAG node B of
 //! `research/differential-testing-value-level.md`).
 //!
 //! [`sparq_difftest`] is the ENGINE-INDEPENDENT comparator library (node A, bead `sq-qcnn.4`): it

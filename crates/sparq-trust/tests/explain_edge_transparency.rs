@@ -28,7 +28,7 @@
 //!
 //! Run: `cargo test -p sparq-trust --features cert-graph --test explain_edge_transparency`.
 //!
-//! [FABLE-5] sq-qxcvc (epic sq-6syab program context; design
+//! sq-qxcvc (epic sq-6syab program context; design
 //! `research/trust-expression-spec.md` §3.4). 🤖 SPARQ agent — explain_edge transparency
 //! fixture, written by Claude Fable 5.
 #![cfg(feature = "cert-graph")]

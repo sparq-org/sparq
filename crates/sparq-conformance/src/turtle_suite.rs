@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (B4) The W3C **rdf-turtle** test suite (`rdf/rdf11/rdf-turtle/manifest.ttl` in
+//! (B4) The W3C **rdf-turtle** test suite (`rdf/rdf11/rdf-turtle/manifest.ttl` in
 //! w3c/rdf-tests), run THROUGH THE SPARQ TURTLE PARSER (`sparq_core::Graph::parse_to_triples`),
 //! not oxttl directly and not the N3 parser.
 //!

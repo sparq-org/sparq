@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-tmsd6 — the **SolidLab ODRL-Test-Suite** wired as a conformance
+//! sq-tmsd6 — the **SolidLab ODRL-Test-Suite** wired as a conformance
 //! RATCHET, mirroring the crate-local Solid WAC/ACP decision-parity ratchets in
 //! `sparq-solid` (a `cargo test` runner + a pinned pass-count FLOOR that may only
 //! RISE, registered in the central `sparq_conformance::scoreboard::SUITES`, which
@@ -22,7 +22,7 @@
 //! `odrl:prohibition` rules carrying `odrl:action` / `odrl:target` /
 //! `odrl:assignee` and optional `odrl:constraint` blocks over `odrl:dateTime`
 //! (`odrl:eq|lt|lteq|gt|gteq`) plus `odrl:duty` obligations. The
-//! constraint-matching batch ([OPUS-4.8] sq-euhr3 / sq-k7itg / sq-a0zef) extended
+//! constraint-matching batch (sq-euhr3 / sq-k7itg / sq-a0zef) extended
 //! the supported fragment to also cover: compound `odrl:LogicalConstraint`
 //! (`odrl:and`/`odrl:or`/`odrl:xone`, incl. nesting), `odrl:PartyCollection` /
 //! `odrl:AssetCollection` membership (`odrl:partOf` evidence from the sotw), and the
@@ -61,15 +61,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 // ---- The RATCHET floor. The ACTUAL current pass count at the pinned suite
-// revision (scripts/fetch-odrl-suite.sh); it may only RISE. [SONNET-4.6] sq-z1xv8:
+// revision (scripts/fetch-odrl-suite.sh); it may only RISE. sq-z1xv8:
 // the VALUE lives in the shared `sparq-conformance-floors` crate, which the central
 // scoreboard row (sparq_conformance::scoreboard::SUITES) imports too — one const on
-// both sides, so no mirroring and no textual re-read of this file. [OPUS-4.8]
+// both sides, so no mirroring and no textual re-read of this file.
 //
 /// Pass-count floor for the SolidLab ODRL Test Suite. RATCHET: may only RISE.
 /// At the pinned revision 67 of the 68 self-describing cases pass through the
 /// real `parse_policy_str` + `evaluate` path. The ODRL constraint-matching
-/// conformance batch ([OPUS-4.8] sq-euhr3 / sq-k7itg / sq-a0zef) raised this
+/// conformance batch (sq-euhr3 / sq-k7itg / sq-a0zef) raised this
 /// from 59 to 67 by implementing, through the real evaluate path: `odrl:LogicalConstraint`
 /// (`odrl:and`/`odrl:or`/`odrl:xone`) compound constraints (cases 048/062/065, sq-a0zef);
 /// `odrl:PartyCollection`/`odrl:AssetCollection` membership matching (cases 051/053/055,
@@ -78,7 +78,7 @@ use std::path::{Path, PathBuf};
 /// The single remaining NOT-IMPLEMENTED case is a duty whose discharge state is
 /// unknown/`report:NonSet` (sparq is fail-closed; SolidLab treats a not-violated
 /// duty as active — a documented semantic divergence). Raise this as that lands.
-/// [SONNET-4.6] sq-z1xv8 — the VALUE now lives once in the zero-dependency
+/// sq-z1xv8 — the VALUE now lives once in the zero-dependency
 /// `sparq-conformance-floors` crate, which `sparq-conformance`'s central
 /// `scoreboard::SUITES` reads too, so the enforced floor and the reported floor are
 /// ONE `const` and cannot drift (replacing the old textual re-read of this file).
@@ -122,7 +122,7 @@ struct Score {
 /// Each policy/request/sotw file declares ITS subject (the UUID a test case
 /// references) via the typed subject `?s a <wanted_type>`; we index by that
 /// subject IRI so a test case's UUID resolves to the right file regardless of
-/// filename. [OPUS-4.8]
+/// filename.
 fn index_by_subject(dir: &Path, wanted_type_iri: &str) -> BTreeMap<String, String> {
     let mut idx = BTreeMap::new();
     let entries = match std::fs::read_dir(dir) {
@@ -256,7 +256,7 @@ fn build_request(
     // The `odrl:use` umbrella now follows the ODRL 2.2 action hierarchy — it subsumes
     // its sub-actions (read/write/…) but NOT the ownership-transfer subtree (sell/give),
     // matching the SolidLab oracle (cases 007/008/009 Active; 010/017 Inactive). No
-    // evaluation mode needed. [OPUS-4.8] sq-euhr3.
+    // evaluation mode needed. sq-euhr3.
     let mut req = Request::new(action);
     if let Some(target) = first_iri_object(&rgraph, &perm, &format!("{ODRL_NS}target")) {
         req = req.on(target);
@@ -279,7 +279,7 @@ fn build_request(
     // asserts becomes membership evidence. The request's own party is supplied as a
     // PARTY membership edge and its target as an ASSET membership edge (the same IRI
     // can only be one of the two for a given request, so feeding both channels the
-    // full edge set is harmless — only the matching channel is consulted). [OPUS-4.8]
+    // full edge set is harmless — only the matching channel is consulted).
     // sq-k7itg.
     {
         let q = format!("SELECT ?m ?c WHERE {{ ?m <{ODRL_NS}partOf> ?c }}");
@@ -323,7 +323,7 @@ fn build_request(
 /// (and the request action / sotw duty state). A case routes to the
 /// not-implemented bucket ONLY when it both mismatches the oracle AND carries one
 /// of these — so an UNEXPLAINED mismatch is a genuine FAIL that gates (no silent
-/// "mismatch ⇒ not-implemented"). [OPUS-4.8]
+/// "mismatch ⇒ not-implemented").
 fn unsupported_construct(
     policy_graph: &Graph,
     _request_action: &str,
@@ -334,7 +334,7 @@ fn unsupported_construct(
             .map(|r| !r.rows.is_empty())
             .unwrap_or(false)
     };
-    // [OPUS-4.8] The previously-not-implemented constructs are now SUPPORTED and so
+    // The previously-not-implemented constructs are now SUPPORTED and so
     // are NO LONGER excused here (they must PASS, not route to the bucket):
     //   * `odrl:LogicalConstraint` (`odrl:and`/`odrl:or`/`odrl:xone`) — sq-a0zef.
     //   * `odrl:PartyCollection` / `odrl:AssetCollection` membership — sq-k7itg.
@@ -449,7 +449,7 @@ fn run_case(
 fn odrl_test_suite_decision_parity() {
     let data = suite_data_root();
     if !data.join("test_cases").is_dir() {
-        // [OPUS-4.8] Off/no-fixture state: SELF-SKIP cleanly so `cargo test` is
+        // Off/no-fixture state: SELF-SKIP cleanly so `cargo test` is
         // green without the fetch (the off state is the lean default). The CI
         // lane runs scripts/fetch-odrl-suite.sh first, then enforces the floor.
         eprintln!(
@@ -512,7 +512,7 @@ fn odrl_test_suite_decision_parity() {
 
     // CI-greppable summary line (mirrors the Solid `WAC scenarios pass N / fail M`
     // shape). KEEP this exact format — the CI grep gate matches
-    // `ODRL suite scenarios pass [0-9]+`. [OPUS-4.8]
+    // `ODRL suite scenarios pass [0-9]+`.
     println!(
         "ODRL suite scenarios pass {} / fail {} / not-implemented {} (floor {})",
         score.pass, score.fail, score.not_implemented, ODRL_SUITE_FLOOR

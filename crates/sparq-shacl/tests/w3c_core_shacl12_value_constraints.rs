@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-sx15d, epic sq-waf9o) SHACL 1.2 CORE value-constraint coverage.
+//! (sq-sx15d, epic sq-waf9o) SHACL 1.2 CORE value-constraint coverage.
 //!
 //! Direct, fixture-free tests for the SHACL-1.2 value constraints implemented in
 //! sq-sx15d, mirroring the W3C `shacl12-test-suite` `core/{property,misc,

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-jocpn) The load-bearing correctness harness for the native Turtle parser: a
+//! (sq-jocpn) The load-bearing correctness harness for the native Turtle parser: a
 //! DIFFERENTIAL oracle that parses each fixture with BOTH the native path and oxttl and asserts the
 //! resulting triple SETS are equal up to blank-node isomorphism, plus a malformed-input parity
 //! fixture where BOTH parsers must `Err`. Ground terms (IRIs, literals, labelled blank nodes) must

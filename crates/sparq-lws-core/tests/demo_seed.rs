@@ -218,7 +218,7 @@ async fn demo_seed_authenticated_put_of_playground_acl_is_denied() {
 }
 
 // =====================================================================================
-// [OPUS-5] sq-5ougp review round 3 (gpt-5.6-sol findings 3 + 4): FLAG-ON SCOPE NEGATIVES.
+// sq-5ougp review round 3 (gpt-5.6-sol findings 3 + 4): FLAG-ON SCOPE NEGATIVES.
 //
 // Every flag-ON test above is a POSITIVE: it asserts what the seed grants. Nothing
 // asserted what it must NOT grant, so "a widening that adds a root `/.acl` would be

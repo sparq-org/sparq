@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-9h1r — DE-9IM differential vs the upstream `geo` crate.
+//! sq-9h1r — DE-9IM differential vs the upstream `geo` crate.
 //!
 //! sparq-geo computes the eight simple-features relations via `geo`'s `Relate`
 //! (the DE-9IM IntersectionMatrix) and the Egenhofer / RCC8 families via
@@ -37,7 +37,7 @@
 use geo::{Contains, Intersects};
 use geo_types::{Coord, Geometry, LineString, Point, Polygon};
 use rand::rngs::StdRng;
-// [OPUS-4.8] sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
+// sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
 use rand::{RngExt, SeedableRng};
 use sparq_geo::geof;
 use sparq_geo::{GeoGeometry, Crs};
@@ -157,7 +157,7 @@ fn de9im_differential_vs_geo_predicates() {
         }
 
         // ---- sfContains vs geo::Contains ----------------------------------
-        // [OPUS-4.8] DOCUMENTED DIVERGENCE: the OGC simple-features `contains`
+        // DOCUMENTED DIVERGENCE: the OGC simple-features `contains`
         // (which sparq-geo implements via Relate, pattern `T*****FF*`) requires
         // the operands' INTERIORS to intersect, so a geometry does NOT contain a
         // sub-geometry that lies entirely on its boundary. `geo::Contains` uses a

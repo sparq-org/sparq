@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.28 — the W3C JSON-LD 1.1 `fromRdf` lane runner, flipped to the
+//! sq-oy1f.28 — the W3C JSON-LD 1.1 `fromRdf` lane runner, flipped to the
 //! NATIVE document-level pipeline (`sparq_jsonld::from_rdf`, JSON-LD API §8.1).
 //!
 //! **Oracle (strengthened vs the old engine-writer round-trip lane):**

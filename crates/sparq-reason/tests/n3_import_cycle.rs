@@ -1,6 +1,6 @@
 //! N3 `log:semantics` recursive-import CYCLE-SAFETY (bead sq-0fj4p, survey §A10).
 //!
-//! 🤖 SPARQ agent — sq-0fj4p N3 import-cycle detection [OPUS-4.8].
+//! 🤖 SPARQ agent — sq-0fj4p N3 import-cycle detection.
 //!
 //! N3 is Turing-complete: a `log:semantics` document whose own closure re-imports a document
 //! active up the resolution stack — directly (A->A), indirectly (A->B->A), or via a re-used

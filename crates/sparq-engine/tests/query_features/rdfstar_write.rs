@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-t267 — RDF 1.2 triple-term coverage on the WRITE/INGEST side.
+//! sq-t267 — RDF 1.2 triple-term coverage on the WRITE/INGEST side.
 //!
 //! `exec.rs`'s `rdf_star_*` cluster already proves strong triple-term *read* coverage
 //! (concrete/nested triple terms, triple-term-pattern variable positions, the triple
@@ -381,7 +381,7 @@ fn reifier_triple_term_serialises_to_canonical_form_and_reparses_via_turtle() {
 
 #[test]
 fn ntriples_triple_term_object_reparses_via_nt_loader() {
-    // [OPUS-4.8] (sq-hxgb FIXED) The CONSTRUCT writer EMITS the N-Triples 1.2 triple-term
+    // (sq-hxgb FIXED) The CONSTRUCT writer EMITS the N-Triples 1.2 triple-term
     // object syntax `<<( … )>>`; sparq-core's fast N-Triples loader (`nt::parse_chunk`) now
     // ACCEPTS it in the object position, so a serialise->reload round-trip through the
     // "ntriples" loader yields the identical structural term as the Turtle reload (which

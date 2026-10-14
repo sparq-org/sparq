@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-lsp7k.8, epic sq-lsp7k) The `tabular` subcommand end-to-end: CSV direct
+//! (sq-lsp7k.8, epic sq-lsp7k) The `tabular` subcommand end-to-end: CSV direct
 //! mapping + the R2RML materializing subset over CSV logical tables, driven through the
 //! *built* binary (`CARGO_BIN_EXE_sparq-cli`, the same mechanism as `cli_contract.rs`).
 //!
@@ -258,7 +258,7 @@ fn r2rml_explicit_table_binding() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-5] (sq-u1z86) joins, named graphs, row provenance
+// (sq-u1z86) joins, named graphs, row provenance
 // ---------------------------------------------------------------------------
 
 /// The join fixture is executed through the binary by `r2rml_fixture_suite`; here the same

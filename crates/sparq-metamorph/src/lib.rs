@@ -3,7 +3,7 @@
 //! differential oracle over `sparq-difftest`, a seeded deterministic case generator,
 //! SPARQL-protocol drivers, and the found-bug ledger format.
 //!
-//! [FABLE-5] Bead `sq-gum8.6` (epic `sq-gum8`, paper P2a → draft bead `sq-gum8.7`).
+//! Bead `sq-gum8.6` (epic `sq-gum8`, paper P2a → draft bead `sq-gum8.7`).
 //! Research gap this machinery targets: dedicated logic-bug testing exists for SQL
 //! (SQLancer: TLP, NoREC, PQS), Datalog (queryFuzz, DLSmith), and graph query languages
 //! (GDsmith, Gamera for Cypher/Gremlin), but **not** for SPARQL engines — the closest

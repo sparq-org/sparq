@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-ysv3u — the TRUSTED verified-credential channel behind ACP `acp:vc`.
+//! sq-ysv3u — the TRUSTED verified-credential channel behind ACP `acp:vc`.
 //!
 //! ACP's `acp:vc` gates a matcher on the requesting agent holding a Verifiable Credential
 //! satisfying a stated requirement. sparq-solid deliberately does **not** verify credentials
@@ -116,7 +116,7 @@ impl VerifiedCredentials {
 // ---------------------------------------------------------------------------
 
 /// One `acp:vc` requirement, expressed as what a presented credential must show for the
-/// requirement IRI to be satisfied. [SONNET-4.6] sq-ysv3u, `acp-vc` feature.
+/// requirement IRI to be satisfied. sq-ysv3u, `acp-vc` feature.
 ///
 /// This is the **trust-the-issuer** model: the requirement names an issuer whose word is
 /// taken, a credential type, and zero or more exact-match claims. It is *not* a claim
@@ -181,7 +181,7 @@ impl VcRequirement {
 }
 
 /// Why [`VerifiedCredentials::admit_data_integrity`] refused a presented credential.
-/// [SONNET-4.6] sq-ysv3u, `acp-vc` feature.
+/// sq-ysv3u, `acp-vc` feature.
 #[cfg(feature = "acp-vc")]
 #[cfg_attr(docsrs, doc(cfg(feature = "acp-vc")))]
 #[derive(Debug)]
@@ -378,7 +378,7 @@ fn subject_has_term(
 #[cfg(test)]
 mod tests {
     // The `iter()` accessor is `pub(crate)` (consumed by the loader), so the trusted-channel
-    // behaviour can only be exercised from an in-crate test. [SONNET-4.6] sq-ysv3u.
+    // behaviour can only be exercised from an in-crate test. sq-ysv3u.
     use super::*;
 
     #[test]

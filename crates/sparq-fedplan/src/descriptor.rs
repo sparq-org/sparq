@@ -167,6 +167,9 @@ pub struct SourceDescriptor {
     classes: DescriptorMap<String, ClassPartition>,
     /// Served characteristic sets (for star-join cardinality).
     char_sets: Vec<CharSet>,
+    /// Whether the served characteristic sets enumerate every exact predicate set
+    /// of the source's subjects. Trusted opt-in, like `authorities_complete`.
+    char_sets_complete: bool,
     /// The set of IRI **authorities** this source is known to mint terms under
     /// (scheme-and-host, e.g. `http://dbpedia.org`). Derived from every IRI seen in a
     /// partition (predicates, classes). A pattern's bound-IRI position whose authority
@@ -195,6 +198,7 @@ pub struct SourceDescriptorBuilder {
     predicates: DescriptorMap<String, PredPartition>,
     classes: DescriptorMap<String, ClassPartition>,
     char_sets: Vec<CharSet>,
+    char_sets_complete: bool,
     authorities_complete: bool,
     retrieval: Option<RetrievalCapability>,
 }
@@ -208,6 +212,7 @@ impl SourceDescriptor {
             predicates: DescriptorMap::default(),
             classes: DescriptorMap::default(),
             char_sets: Vec::new(),
+            char_sets_complete: false,
             authorities_complete: false,
             retrieval: None,
         }
@@ -250,6 +255,14 @@ impl SourceDescriptor {
     /// The served characteristic sets.
     pub fn char_sets(&self) -> &[CharSet] {
         &self.char_sets
+    }
+
+    /// Whether the descriptor declares its served characteristic sets complete.
+    ///
+    /// Defaults to false. Like [`Self::authorities_complete`], this declaration is
+    /// trusted: declaring a truncated summary complete can make Rule C2 drop answers.
+    pub fn char_sets_complete(&self) -> bool {
+        self.char_sets_complete
     }
 
     /// The source's declared GenAI retrieval capability, `None` (the default) when the
@@ -371,6 +384,17 @@ impl SourceDescriptorBuilder {
         self
     }
 
+    /// Declares the served characteristic sets complete for this source.
+    ///
+    /// Use only when every exact per-subject predicate set is enumerated. This
+    /// trusted opt-in lets Rule C2 prune without proving completeness from subject
+    /// counts. Like [`Self::authorities_complete`], a false declaration can drop
+    /// answers (lose recall); never call this on a truncated summary.
+    pub fn char_sets_complete(mut self) -> Self {
+        self.char_sets_complete = true;
+        self
+    }
+
     /// Finalises the descriptor, deriving the authority set from every predicate/class
     /// IRI (and any explicitly-declared instance authority — none in this slice).
     pub fn build(self) -> SourceDescriptor {
@@ -391,6 +415,7 @@ impl SourceDescriptorBuilder {
             predicates: self.predicates,
             classes: self.classes,
             char_sets: self.char_sets,
+            char_sets_complete: self.char_sets_complete,
             authorities,
             authorities_complete: self.authorities_complete,
             retrieval: self.retrieval,
@@ -409,6 +434,8 @@ impl SourceDescriptor {
     /// subject/object authority-pruning stays disabled — recall-safe by construction.
     /// To enable it, build via [`SourceDescriptor::builder`] and call
     /// [`SourceDescriptorBuilder::authorities_complete`] with a vetted capability set.
+    /// Characteristic-set completeness also stays undeclared: like authority
+    /// completeness, it is a builder-only opt-in with no RDF parse signal.
     pub fn from_void_nt(id: SourceId, nt: &str) -> Result<SourceDescriptor, String> {
         use oxrdf::{NamedOrBlankNode, Term as OxTerm};
         let v = |local: &str| format!("{VOID_NS}{local}");
@@ -638,7 +665,48 @@ fn is_subset(a: &[String], b: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::{plan_bgp, select_sources, Bgp, PlanOptions, Term, TriplePattern, Var};
+
+    #[test]
+    fn char_sets_completeness_is_an_independent_builder_opt_in() {
+        let default = SourceDescriptor::builder(SourceId::new("http://s/")).build();
+        assert!(!default.char_sets_complete());
+        let complete = SourceDescriptor::builder(SourceId::new("http://s/"))
+            .char_sets_complete()
+            .build();
+        assert!(complete.char_sets_complete());
+        assert!(complete.clone().char_sets_complete());
+        assert!(!complete.authorities_complete());
+        let authorities = SourceDescriptor::builder(SourceId::new("http://s/"))
+            .authorities_complete()
+            .build();
+        assert!(!authorities.char_sets_complete());
+    }
+
+    #[test]
+    fn parsed_char_sets_do_not_declare_completeness() {
+        let nt = r#"_:cs <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://sparq.dev/ns/cs#CharacteristicSet> .
+_:cs <http://sparq.dev/ns/cs#subjects> "5"^^<http://www.w3.org/2001/XMLSchema#integer> .
+_:cs <http://sparq.dev/ns/cs#predicateStat> _:stat .
+_:stat <http://rdfs.org/ns/void#property> <http://ex/p> .
+"#;
+        let parsed = SourceDescriptor::from_void_nt(SourceId::new("http://s/"), nt).unwrap();
+        assert_eq!(parsed.char_sets().len(), 1);
+        assert_eq!(parsed.char_sets()[0].subjects, 5);
+        assert!(!parsed.char_sets_complete());
+        assert!(!parsed.authorities_complete());
+        let built = SourceDescriptor::builder(parsed.id().clone())
+            .char_set(parsed.char_sets()[0].clone())
+            .char_sets_complete()
+            .build();
+        assert!(built.char_sets_complete());
+        assert_eq!(
+            built.char_sets()[0].predicates,
+            parsed.char_sets()[0].predicates
+        );
+        assert_eq!(built.char_sets()[0].subjects, parsed.char_sets()[0].subjects);
+    }
 
     // [OPUS-4.8] sq-qik4: `SourceDescriptorBuilder` is the return type of the PUBLIC
     // `SourceDescriptor::builder` and the link target of `from_void_nt`'s doc, so it must be a

@@ -14,7 +14,7 @@ fn store() -> PodStore {
 }
 
 fn can(s: &mut PodStore, agent: Option<&str>, client: Option<&str>, mode: Mode, graph: &str) -> bool {
-    // WAC has no issuer dimension; the field stays None for these cases. [OPUS-4.8] sq-3jtd.6
+    // WAC has no issuer dimension; the field stays None for these cases. sq-3jtd.6
     s.accessible(&Session { agent, client, issuer: None, now: None }, mode).iter().any(|g| g.as_str() == graph)
 }
 
@@ -91,7 +91,7 @@ fn wac_rematerialization_revokes() {
     assert!(can(&mut s, Some(BOB), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
 }
 
-/// [OPUS-4.8] sq-xor3: the WRITE path mirrors the read matrix. A SPARQL Update is
+/// sq-xor3: the WRITE path mirrors the read matrix. A SPARQL Update is
 /// permitted iff the actor holds write permission on EVERY graph it could touch, checked
 /// (fail-closed) before any mutation. Expected outcomes hand-derived from the fixture's
 /// write grants: ALICE owns Read/Write/Control via the root `acl:default` (inherited but
@@ -125,7 +125,7 @@ fn wac_write_enforcement_matches_grants() {
     assert!(s.update_as(&Session { agent: Some(BOB), client: None, issuer: None, now: None }, &ins(acl)).is_err());
 }
 
-/// [OPUS-4.8] sq-i7k08 — the public `WAC-Allow` header builder ([`PodStore::wac_allow`])
+/// sq-i7k08 — the public `WAC-Allow` header builder ([`PodStore::wac_allow`])
 /// advertises exactly the modes each principal holds on the resource's graph, and is
 /// fail-closed. Exercises the REAL `accessible()` path (not a mock) and pins the
 /// `user="…",public="…"` format against the hand-computed fixture access matrix above.

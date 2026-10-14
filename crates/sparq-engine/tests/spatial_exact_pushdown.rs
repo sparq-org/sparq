@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-lk3aw.4) EXACT-candidate spatial pushdown (`spatial-exact-pushdown`
+//! (sq-lk3aw.4) EXACT-candidate spatial pushdown (`spatial-exact-pushdown`
 //! feature): the soundness proof that skipping the residual `geof:` FILTER for
 //! provider-CERTIFIED rows never changes a query answer.
 //!

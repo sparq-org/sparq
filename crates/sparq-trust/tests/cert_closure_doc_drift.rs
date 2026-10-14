@@ -1,6 +1,6 @@
 //! Drift lock between the certificate-closure semantics note and `EdgeRejection`.
 //!
-//! [GPT-5.6] sq-ry0by. 🤖 SPARQ agent — certificate-closure documentation guard.
+//! sq-ry0by. 🤖 SPARQ agent — certificate-closure documentation guard.
 #![cfg(feature = "cert-graph")]
 
 use std::collections::BTreeSet;

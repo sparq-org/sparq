@@ -16,7 +16,7 @@
 |---|---|---|---|---|---|
 | 1.1 | Data-control compliance established | Implemented & verified (engine); Operator-owned (org data) | 3 | Security policy + coordinated disclosure, STRIDE threat model, full certification estate, code ownership. The *engine's* compliance controls are real and CI-gated; org-level data-control compliance is the operator's. | `SECURITY.md`; `research/threat-model.md`; `compliance/` (this estate); `CODEOWNERS`; `CONTRIBUTING.md` |
 | 1.2 | Ownership established for data | Operator-owned | 2 | sparq carries no business-data-owner concept. The only hook is the named-graph quad model (provenance-by-graph) + VoID/DCAT-style dataset headers the operator may load. | `crates/sparq-engine/src/dataset.rs` (named-graph model); `crates/sparq-introspect/src/lib.rs` (`to_void`) |
-| 1.3 | Sourcing & consumption governed | Implemented & verified (partial) | 3 | Per-graph loading; effective-schema + VoID introspection of what was actually ingested; federated `SERVICE` consumption with a **documented outbound boundary (B4)** and no silent egress. | `crates/sparq-engine/src/service.rs`; `crates/sparq-introspect/src/lib.rs`; `research/threat-model.md` (B4) |
+| 1.3 | Sourcing & consumption governed | Implemented & verified (partial) | 3 | Per-graph loading; effective-schema + VoID introspection of what was actually ingested; federated `SERVICE` consumption with a **documented outbound boundary (B4)** and no silent egress. | `crates/sparq-engine-service/src/service.rs`; `crates/sparq-introspect/src/lib.rs`; `research/threat-model.md` (B4) |
 
 ## Component 2 — Cataloguing & Classification
 

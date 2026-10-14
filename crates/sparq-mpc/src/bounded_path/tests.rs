@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-py8h.1 — DIFFERENTIAL tests for the disclosed-key bounded path.
+// sq-py8h.1 — DIFFERENTIAL tests for the disclosed-key bounded path.
 //! Differential acceptance suite for [`eval_bounded_path_disclosed`].
 //!
 //! THE acceptance criterion (mirrors `differential_three_holder_chain_equals_union`
@@ -100,7 +100,7 @@ fn pair_set(vars: &[Variable], rows: &[Vec<Option<Term>>]) -> BTreeSet<(String, 
             // the engine query or the unroller projection — so fail fast with a
             // clear message rather than masking it as the empty string via
             // `unwrap_or_default()` (which would also risk false set collisions
-            // between distinct unbound rows). `[OPUS-4.8]`
+            // between distinct unbound rows). ``
             let a = r[0]
                 .as_ref()
                 .map(|t| format!("{t:?}"))
@@ -567,7 +567,7 @@ fn min_greater_than_max_is_protocol_error() {
 /// UNROLL-SIZE GUARD: a bounded path whose alternation unroll would exceed
 /// [`MAX_UNROLL_CHAINS`] is rejected with a controlled `MpcError::Protocol` BEFORE
 /// any chain is generated — no panic, no OOM, no `usize`-overflow `with_capacity`.
-/// This pins the DoS guard the reviewer asked for. `[OPUS-4.8]`
+/// This pins the DoS guard the reviewer asked for. ``
 #[test]
 fn over_cap_unroll_is_protocol_error_not_panic() {
     // A 4-way alternation at k = 16 projects to Σ_{ℓ=1..=16} 4^ℓ ≈ 5.7e9 chains,
@@ -611,7 +611,7 @@ fn over_cap_unroll_is_protocol_error_not_panic() {
 }
 
 /// The projected-chain-count closed form matches the design's `Σ_{ℓ=m..=k} a^ℓ`
-/// and reports overflow (rather than wrapping) on an absurd bound. `[OPUS-4.8]`
+/// and reports overflow (rather than wrapping) on an absurd bound. ``
 #[test]
 fn projected_chain_count_matches_closed_form_and_detects_overflow() {
     // Single predicate (a=1): one chain per length → (max - min + 1), minus the

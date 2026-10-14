@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-6tykl.3 / sq-8sve7 — the **semi-naive per-stratum evaluator** (Phase 2).
+//! sq-6tykl.3 / sq-8sve7 — the **semi-naive per-stratum evaluator** (Phase 2).
 //!
 //! Strata run in ascending order; within a stratum, rules iterate to fixpoint with
 //! **semi-naive delta restriction** — the exact round discipline
@@ -310,7 +310,7 @@ fn aggregate_table(dict: &mut Dict, agg: &AggAtom, store: &FactStore) -> Vec<Row
         let cands = candidates(atom, store, None);
         rows = join_rows(&rows, &key_cols, &new_writes, &cands, agg.n_slots, 3);
     }
-    // [GPT-5.6] Distinct full tuples, then aggregate per ON-group. A non-numeric
+    // Distinct full tuples, then aggregate per ON-group. A non-numeric
     // input fails only that body row, matching FILTER's fail-closed posture.
     let distinct: FxHashSet<Row> = rows.into_iter().collect();
     let mut groups: FxHashMap<Vec<Id>, Vec<(Id, Num)>> = FxHashMap::default();
@@ -409,7 +409,7 @@ fn aggregate_table(dict: &mut Dict, agg: &AggAtom, store: &FactStore) -> Vec<Row
 /// `+0.0`).
 // `pub(super)` so the acceptance suite can pin the fold-order rule directly, with the
 // group handed to it in adversarial permutations (the join/hash order is not steerable
-// from the program text). [SONNET-4.6]
+// from the program text).
 pub(super) fn fold_numeric_group(
     dict: &mut Dict,
     func: AggFunc,

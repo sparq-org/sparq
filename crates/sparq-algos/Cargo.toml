@@ -15,11 +15,11 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] Render README.md as the docs.rs front page (lib.rs uses include_str!).
+# Render README.md as the docs.rs front page (lib.rs uses include_str!).
 [package.metadata.docs.rs]
 all-features = true
 
-# [OPUS-4.8] sq-mqvm (epic sq-3183): vendor-parity graph analytics (Neptune ships 25+;
+# sq-mqvm (epic sq-3183): vendor-parity graph analytics (Neptune ships 25+;
 # sparq shipped none). This is a SEPARATE, OPT-IN crate so the core engine carries ZERO
 # analytics code — it consumes ONLY sparq-core's PUBLIC read API (the borrowing triple-id
 # iterator + dict lookups), holds no graph state of its own, and nothing in the workspace
@@ -30,10 +30,10 @@ all-features = true
 
 [features]
 default = []
-# [GPT-5.6] sq-lsp7k.15: exact all-pairs centralities are opt-in because their
+# sq-lsp7k.15: exact all-pairs centralities are opt-in because their
 # O(V * (V + E)) running time and working set are materially heavier than degree.
 centrality-extended = []
-# [GPT-5.6] sq-lsp7k.20: directed SCC and topological-order algorithms stay
+# sq-lsp7k.20: directed SCC and topological-order algorithms stay
 # default-OFF so consumers opt into the additional topology surface explicitly.
 topology = []
 

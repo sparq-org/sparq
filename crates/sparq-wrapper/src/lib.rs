@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-// [GPT-5.6] sq-1rg2q M1: a small, opt-in object view over sparq-core's real Graph.
+// sq-1rg2q M1: a small, opt-in object view over sparq-core's real Graph.
 
 pub mod proposed;
 

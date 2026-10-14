@@ -1,6 +1,6 @@
 //! # Literature-ingestion scaffolding — on FIXTURES, no live calls (GenAI-KB Phase 5)
 //!
-//! [OPUS-4.8] sq-2489d.5 (epic sq-2489d); design record
+//! sq-2489d.5 (epic sq-2489d); design record
 //! `research/provenance-driven-genai-kb.md` §4 (the provenance-stamped literature-
 //! trawling architecture) and §5 Phase 5. 🤖 SPARQ agent — provenance-driven GenAI KB.
 //! Written while Fable unavailable; flag for re-review when Fable returns.
@@ -59,7 +59,7 @@
 pub mod connector;
 /// The live CORE API v3 connector (`parse_core_batch` + the `literature-live` HTTP client).
 /// Pure parse + retry discipline is available under `literature`; the networked socket layer
-/// (`CoreClient`) is behind `literature-live`. [SONNET-4.6] sq-tzars.1
+/// (`CoreClient`) is behind `literature-live`. sq-tzars.1
 #[cfg(feature = "literature")]
 pub mod connector_core;
 #[cfg(feature = "literature")]
@@ -69,7 +69,7 @@ pub mod extract;
 /// machine-tier caps). The pure prompt + parse + cap logic is available under `literature`;
 /// the subprocess seam that actually invokes a sub-agent (`extract_live::CommandRunner`,
 /// default-unset + configurable) is behind `literature-live`. Never driven in CI —
-/// record/replay stays the only test path. [SONNET-4.6] sq-tzars.6
+/// record/replay stays the only test path. sq-tzars.6
 #[cfg(feature = "literature")]
 pub mod extract_live;
 #[cfg(feature = "literature")]
@@ -78,7 +78,7 @@ pub mod ground;
 /// audit bar (written before extraction, enforced by type-state), append-only sidecar
 /// chain, fail-stop caps, and the maintainer-armed live-emit gate (`live_emit_allowed`).
 /// Pure — the networked wiring is the `literature-pilot` binary (`literature-live`).
-/// [FABLE-5] sq-tzars.9
+/// sq-tzars.9
 #[cfg(feature = "literature")]
 pub mod pilot;
 #[cfg(feature = "literature")]

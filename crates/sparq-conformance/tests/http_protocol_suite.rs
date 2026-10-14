@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-jaj38 (epic sq-my8wd) — the W3C SPARQL 1.1 **Protocol** (HTTP layer)
+//! sq-jaj38 (epic sq-my8wd) — the W3C SPARQL 1.1 **Protocol** (HTTP layer)
 //! conformance lane, wired as a RATCHETED gate that mirrors the SPARQL / SHACL / GeoSPARQL /
 //! Solid / JSON-LD / D-entailment / sparql11-service ratchets in this crate (crate-local
 //! `cargo test` + a pinned pass-count FLOOR that may only RISE, registered in the central
@@ -19,7 +19,7 @@
 //!
 //! `HTTP_PROTOCOL_FLOOR` is the MEASURED count of PASS assertions, NOT an aspirational target;
 //! MIRRORED in `scoreboard::SUITES` and read textually by `tests/scoreboard_floors.rs`. It may
-//! only RISE. [OPUS-4.8] sq-406acc: a present-but-unsatisfiable `Accept` now genuinely returns
+//! only RISE. sq-406acc: a present-but-unsatisfiable `Accept` now genuinely returns
 //! 406 (Oxigraph parity) — a PASS, raising the floor 20→21. The remaining documented divergences
 //! (an absent / `*/*` Accept defaults to JSON per the W3C-permitted default; an ASK boolean in
 //! CSV/TSV falls back to a JSON boolean) are recorded as DOCUMENTED DIVERGENCES and are NOT summed
@@ -54,7 +54,7 @@ mod gated {
     /// `tests/scoreboard_floors.rs`. It may only RISE — never lower it. This is the ACTUAL
     /// current pass count, not an aspirational target. Documented protocol DIVERGENCES (e.g.
     /// sparq's absent-Accept JSON default) are reported separately and NOT counted here.
-    /// [OPUS-4.8] sq-406acc: raised 20→21 when the present-but-unsatisfiable-Accept 406 (Oxigraph
+    /// sq-406acc: raised 20→21 when the present-but-unsatisfiable-Accept 406 (Oxigraph
     /// parity, w3c/sparql-protocol#40) flipped from a documented divergence to a genuine PASS.
     pub const HTTP_PROTOCOL_FLOOR: usize = 21;
 
@@ -65,7 +65,7 @@ mod gated {
         let div = report.divergences();
         let failures = report.failures();
 
-        // [OPUS-4.8] The CI ratchet greps this exact `TOTAL http-protocol` line (pass count in
+        // The CI ratchet greps this exact `TOTAL http-protocol` line (pass count in
         // field $3), mirroring the service / JSON-LD / d-entail lanes' `TOTAL <cat>` shape.
         // Positional `format!`/`println!` args (not inline `{pass}`) per the CodeQL
         // `rust/unused-variable` false-positive guard in the shared agent contract.

@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-pbz04.3.2 (epic sq-pbz04 / sq-6tykl):
+// sq-pbz04.3.2 (epic sq-pbz04 / sq-6tykl):
 // Tests for B5 — non-recursive property-path desugaring (`/`, `^`, `|`) ahead of the CQ gate;
 // recursive / zero-length / negated forms stay FAIL-CLOSED.
 //
@@ -559,7 +559,7 @@ mod gated {
         // (sq-sg542) now ANSWERS it — each branch emits the FILTER over ITS OWN sub-union (formerly
         // rejected fail-closed here). Acceptance + structure are pinned here; the full
         // result-equivalence oracle (with a FILTER-capable evaluator) is in
-        // tests/branch_aware_emit.rs. [OPUS-4.8] sq-sg542
+        // tests/branch_aware_emit.rs. sq-sg542
         let query = q(&format!("{PRE} SELECT ?x WHERE {{ ?x :p1|:p2 ?y FILTER(?x != :Bad) }}"));
         let r = rewrite(&query, &fixture_tbox()).expect("alternation + FILTER must now rewrite");
         assert!(

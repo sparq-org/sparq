@@ -534,7 +534,9 @@ impl PodStore {
    targets of `acl:agentGroup` (fragment stripped), `<urn:sparq:auth>` skipped, rest = pod
    content (NOT fed to the reasoner — §2.4).
 2. Serialize acl/acr/group graph triples to N3 source (N-Triples-shaped lines; blank nodes
-   skolemized `urn:skolem:<graph-hash>:<label>` so the merge keeps per-document scoping and
+   skolemized `urn:skolem:graph:<encoded-graph-IRI>:<encoded-label>` (UTF-8 percent-encoded
+   components, preserving only URI-unreserved characters) so identities stay stable
+   across unrelated document writes and the merge keeps per-document scoping and
    `solidx:inDoc` provenance stays sound).
 3. Append synthesized facts (§3.1) + the stratum's rule file; `reason_n3` per stratum,
    re-serializing the closure between ACP strata.

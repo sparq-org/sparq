@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-d3d8 (epic sq-3183): integration tests for the OPT-IN federation
+//! sq-d3d8 (epic sq-3183): integration tests for the OPT-IN federation
 //! discovery descriptors — the W3C VoID document at `GET /.well-known/void` and the SPARQL
 //! 1.1 Service Description served for a `GET /sparql` with no `query` parameter.
 //!
@@ -20,7 +20,7 @@ const DATA: &str = r#"
     ex:carol a ex:Person .
 "#;
 
-/// [OPUS-4.8] sq-optl: a TriG dataset with TWO IRI-named graphs (plus default-graph triples),
+/// sq-optl: a TriG dataset with TWO IRI-named graphs (plus default-graph triples),
 /// for the Service Description's `sd:namedGraph` enumeration test.
 const DATA_NAMED: &str = r#"
     @prefix ex: <http://ex/> .
@@ -34,7 +34,7 @@ async fn spawn(descriptors_on: bool) -> String {
     spawn_with(DATA, "turtle", descriptors_on).await
 }
 
-/// [OPUS-4.8] sq-optl: like [`spawn`] but loads `data` in `format` (so a test can boot a server
+/// sq-optl: like [`spawn`] but loads `data` in `format` (so a test can boot a server
 /// over a named-graph TriG dataset). Uses `load_dataset` — the only loader that PRESERVES named
 /// graphs as separate sub-graphs (`load_str` collapses every quad into the default graph); it
 /// falls back to `load_str` for non-dataset formats, so the Turtle path is unchanged. Keeps the
@@ -144,7 +144,7 @@ async fn void_negotiates_ntriples() {
 
 #[tokio::test]
 async fn void_carries_characteristic_set_stats() {
-    // [OPUS-4.8] sq-mr32 (federation A3/Z2): the served VoID now also carries the
+    // sq-mr32 (federation A3/Z2): the served VoID now also carries the
     // characteristic-set source statistics (sparq `scs:` extension), end-to-end over the
     // real HTTP server — so a federation client polling this node gets per-entity-type
     // predicate co-occurrence + multiplicity, not just bare VoID counts.
@@ -260,7 +260,7 @@ async fn service_description_ntriples() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-qfcb: parse the SD as RDF and assert the MANDATORY structure +
+// sq-qfcb: parse the SD as RDF and assert the MANDATORY structure +
 // that the advertised capabilities match what the server genuinely serves.
 // ---------------------------------------------------------------------------
 
@@ -386,7 +386,7 @@ async fn sd_parses_and_carries_mandatory_terms() {
 
 #[tokio::test]
 async fn sd_advertised_result_formats_match_what_server_serves() {
-    // [OPUS-4.8] sq-qfcb: HONEST advertising — for every SPARQL-results format the SD
+    // sq-qfcb: HONEST advertising — for every SPARQL-results format the SD
     // advertises, a real SELECT with the matching Accept header must come back in that
     // format's Content-Type. (If the SD over-promised, this would fail.)
     let base = spawn(true).await;
@@ -438,7 +438,7 @@ fn objects_of_subject(
 
 #[tokio::test]
 async fn sd_enumerates_named_graphs_end_to_end() {
-    // [OPUS-4.8] sq-optl: boot a server over a TWO-named-graph TriG dataset and walk the SD
+    // sq-optl: boot a server over a TWO-named-graph TriG dataset and walk the SD
     // structure: sd:Service → sd:defaultDataset → sd:namedGraph → sd:NamedGraph → sd:name. The
     // two IRI graph names (ex:people, ex:orgs) must BOTH surface as FROM-NAMED-referenceable
     // names, each with an sd:graph carrying a per-graph void:triples count (people=2, orgs=1).
@@ -508,7 +508,7 @@ async fn sd_enumerates_named_graphs_end_to_end() {
 
 #[tokio::test]
 async fn sd_default_only_dataset_advertises_no_named_graphs() {
-    // [OPUS-4.8] sq-optl: the historical default-only dataset (no named graphs) must advertise
+    // sq-optl: the historical default-only dataset (no named graphs) must advertise
     // NO sd:namedGraph — the enumeration is purely additive and never invents a graph.
     let base = spawn(true).await;
     let triples = fetch_sd_triples(&base).await;
@@ -524,7 +524,7 @@ async fn sd_default_only_dataset_advertises_no_named_graphs() {
 
 #[tokio::test]
 async fn sd_update_language_suppressed_when_write_gated() {
-    // [OPUS-4.8] sq-qfcb: when a write-token gates the write surface, an anonymous client
+    // sq-qfcb: when a write-token gates the write surface, an anonymous client
     // CANNOT run an Update, so the SD must NOT advertise sd:SPARQL11Update.
     let graph = Graph::load_str(DATA, "turtle").unwrap();
     let config = ServerConfig {
@@ -567,7 +567,7 @@ async fn sd_update_language_advertised_when_open() {
 #[tokio::test]
 #[cfg(feature = "geo")]
 async fn sd_advertises_registered_geo_extension_functions() {
-    // [OPUS-4.8] sq-qfcb: with the `geo` feature, the SD must advertise EXACTLY the geof:
+    // sq-qfcb: with the `geo` feature, the SD must advertise EXACTLY the geof:
     // functions the engine actually registered — sourced from the live registry, so the
     // advertisement cannot drift from what runs. Spot-check a few real ones.
     let base = spawn(true).await;
@@ -603,7 +603,7 @@ async fn sd_advertises_registered_geo_extension_functions() {
 #[tokio::test]
 #[cfg(feature = "service")]
 async fn sd_advertises_basic_federated_query_when_service_feature_on() {
-    // [OPUS-4.8] sq-qfcb: with the `service` feature the SERVICE clause is compiled in, so
+    // sq-qfcb: with the `service` feature the SERVICE clause is compiled in, so
     // the SD honestly advertises sd:feature sd:BasicFederatedQuery.
     let base = spawn(true).await;
     let triples = fetch_sd_triples(&base).await;
@@ -630,7 +630,7 @@ async fn sd_omits_basic_federated_query_without_service_feature() {
 
 #[tokio::test]
 async fn sd_omits_prov_lineage_feature_until_node_serves_it() {
-    // [OPUS-4.8] sq-yyy3: `sparq-server` exposes no PROV-O lineage-serving endpoint today, so it
+    // sq-yyy3: `sparq-server` exposes no PROV-O lineage-serving endpoint today, so it
     // must NOT advertise the sparq PROV-O lineage feature — advertising it would over-promise.
     // The descriptor SUPPORTS the feature (Capabilities::provenance ⇒ sd:feature <…/prov#lineage>),
     // but the server keeps the flag false, so the served SD never carries it. This guards the

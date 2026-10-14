@@ -1,4 +1,4 @@
-//! [GPT-5.6] Seeded property tests for Arrow IPC identity over generated query results.
+//! Seeded property tests for Arrow IPC identity over generated query results.
 #![cfg(feature = "ipc")]
 
 use std::collections::BTreeSet;
@@ -10,7 +10,7 @@ use proptest::test_runner::RngSeed;
 use sparq_arrow::{from_ipc_bytes, ipc_variables_from_bytes, to_ipc_bytes};
 use sparq_engine::QueryResult;
 
-// [GPT-5.6] Construct every RDF term variant independently of the IPC implementation,
+// Construct every RDF term variant independently of the IPC implementation,
 // including the literal forms and RDF-star triple terms supported by the Arrow schema.
 fn ground_term() -> impl Strategy<Value = Term> {
     let lexical = "[a-zA-Z0-9 _-]{0,24}";
@@ -67,7 +67,7 @@ proptest! {
         ..ProptestConfig::default()
     })]
 
-    /// [GPT-5.6] Mutation witness: changing a variable position, term, null cell, or row
+    /// Mutation witness: changing a variable position, term, null cell, or row
     /// in either expected value makes the corresponding exact identity assertion fail.
     #[test]
     fn ipc_round_trip_and_schema_reader_are_exact(result in query_result()) {

@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-sjey1 (gh #3220) The MCP **prompts** surface of the base
+//! sq-sjey1 (gh #3220) The MCP **prompts** surface of the base
 //! [`McpServer`](crate::McpServer): a small catalog of canned, dataset-agnostic query
 //! prompts a client can offer its user as a starting point.
 //!

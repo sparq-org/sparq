@@ -3,7 +3,7 @@
 //! NON-STANDARD, OPT-IN extension (the `window-functions` cargo feature). This is
 //! the end-to-end "parse + eval an inline-OVER query" check the bead asks for:
 //! a `ROW_NUMBER()` / `RANK()` over a known `PARTITION BY` / `ORDER BY` yields the
-//! correct sequence. [OPUS-4.8]
+//! correct sequence.
 #![cfg(feature = "window-functions")]
 
 use oxrdf::Term;
@@ -144,7 +144,7 @@ fn ordinary_query_passes_through_unchanged() {
     assert_eq!(viaq.vars.iter().map(|v| v.as_str()).collect::<Vec<_>>(), ["emp"]);
 }
 
-// ---- inline windowed AGGREGATES + frames (sq-imj8) [OPUS-4.8] ----
+// ---- inline windowed AGGREGATES + frames (sq-imj8) ----
 
 #[test]
 fn inline_windowed_sum_per_partition() {
@@ -224,7 +224,7 @@ fn inline_frame_on_ranking_function_is_rejected() {
     assert!(query_over(&g(), q).is_err());
 }
 
-// ---- offset / positional functions inline (LAG / LEAD / NTILE) — sq-hqhc [OPUS-4.8] ----
+// ---- offset / positional functions inline (LAG / LEAD / NTILE) — sq-hqhc ----
 
 /// Find the value in `col` for the row whose `emp` is `emp`, allowing an unbound cell.
 fn opt_for_emp(r: &QueryResult, emp: &str, col: usize) -> Option<i64> {
@@ -297,7 +297,7 @@ fn inline_ntile_buckets() {
     assert_eq!(for_emp(&r, "e", 2), 2);
 }
 
-// ---- named WINDOW clause (sq-hqhc) [OPUS-4.8] ----
+// ---- named WINDOW clause (sq-hqhc) ----
 
 #[test]
 fn named_window_clause_reused_across_items() {

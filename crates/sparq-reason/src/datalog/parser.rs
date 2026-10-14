@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-6tykl.3 — hand-rolled recursive-descent parser for the native
+//! sq-6tykl.3 — hand-rolled recursive-descent parser for the native
 //! stratified-Datalog fragment (see the module docs in [`super`] for the grammar and
 //! the design record `research/stratified-datalog-rules.md` §2 for the dialect
 //! decision). Constants are interned into the caller's [`Dict`] as they are parsed;
@@ -199,7 +199,7 @@ impl Parser<'_> {
             self.skip_ws();
             if self.eat_word("NOT") {
                 self.skip_ws();
-                // [GPT-5.6] `NOT EXISTS { ... }` is an accepted spelling of the
+                // `NOT EXISTS { ... }` is an accepted spelling of the
                 // same grouped existential absence test as `NOT { ... }`.
                 self.eat_word("EXISTS");
                 negated.push(self.negated_group(&mut scope)?);

@@ -1,4 +1,4 @@
-// [FABLE-5] sq-wy3i6 (Phase E4): the parallel-saturation differential + determinism oracles.
+// sq-wy3i6 (Phase E4): the parallel-saturation differential + determinism oracles.
 //
 // INVARIANT UNDER TEST (the bead's acceptance oracle): for every input ontology and EVERY
 // thread count, the feature-ON parallel engine (`Classifier::classify_par` /

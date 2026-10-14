@@ -6,7 +6,7 @@
 //! so the official W3C SPARQL Protocol test suite could be pointed at the running endpoint
 //! (see the crate README for how to run conformance).
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the
@@ -346,7 +346,7 @@ async fn streamed_select_large_multichunk_is_byte_identical() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
-    // [OPUS-4.8] (sq-7d3dj.34.2) A genuinely multi-chunk SELECT-JSON result now STREAMS: the
+    // (sq-7d3dj.34.2) A genuinely multi-chunk SELECT-JSON result now STREAMS: the
     // body is written under chunked transfer-encoding as the engine serialises it (so the
     // first byte is flushed before the whole result is built — TTFB), which means there is no
     // `Content-Length` (the total is not known until the last row). The buffered small-result
@@ -753,7 +753,7 @@ async fn gsp_get_direct_graph_turtle_accept() {
 }
 
 // ---------------------------------------------------------------------------
-// Graph Store HTTP Protocol — WRITE side (sq-gxsj) [OPUS-4.8]
+// Graph Store HTTP Protocol — WRITE side (sq-gxsj)
 //
 // PUT/POST/DELETE on graph resources, routed through the sequenced writer (the same
 // path the application/sparql-update operation uses). Round-trip via GSP read.
@@ -991,7 +991,7 @@ async fn gsp_post_no_selector_creates_fresh_graph() {
 }
 
 /// An unsupported method (not GET/HEAD/PUT/POST/DELETE/PATCH) on a graph resource is a 405 with an
-/// Allow header listing the supported GSP verbs — now INCLUDING PATCH ([OPUS-4.8] sq-hj4n, gh-916:
+/// Allow header listing the supported GSP verbs — now INCLUDING PATCH (sq-hj4n, gh-916:
 /// PATCH is a real GSP method, not a 405). The full PATCH behaviour is exercised in
 /// `tests/gsp_patch.rs`.
 #[tokio::test]
@@ -1012,7 +1012,7 @@ async fn gsp_unsupported_method_is_405_with_allow() {
     );
 }
 
-/// [OPUS-4.8] (sq-hj4n, gh-916) A PATCH on a graph resource is NO LONGER a 405 — it is a real GSP
+/// (sq-hj4n, gh-916) A PATCH on a graph resource is NO LONGER a 405 — it is a real GSP
 /// method. A PATCH with no recognised body Content-Type is a 415 (the PATCH route was reached and
 /// classified the body), proving PATCH is handled rather than method-not-allowed.
 #[tokio::test]
@@ -1039,11 +1039,11 @@ async fn gsp_indirect_requires_graph_selector() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-z33x — SPARQL 1.1 Protocol §2.1.4 / §2.2 dataset-override params
+// sq-z33x — SPARQL 1.1 Protocol §2.1.4 / §2.2 dataset-override params
 // (`default-graph-uri` / `named-graph-uri`; update `using-graph-uri` / `using-named-graph-uri`)
 // ---------------------------------------------------------------------------
 //
-// [OPUS-4.8] The engine DOES support named graphs — `GRAPH` / `FROM` / `FROM NAMED` and
+// The engine DOES support named graphs — `GRAPH` / `FROM` / `FROM NAMED` and
 // cross-graph joins all execute (see `tests/named_graphs.rs`, sq-fh4z). On top of that, the
 // *protocol-level* dataset override — the `default-graph-uri` / `named-graph-uri` request
 // parameters (and the update `using-graph-uri` / `using-named-graph-uri` forms) — now
@@ -1262,7 +1262,7 @@ async fn using_graph_uri_conflict_with_in_update_using_is_400() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-rt6v — RDF/XML body parsing + RDF/XML & prefix-Turtle serialisation
+// sq-rt6v — RDF/XML body parsing + RDF/XML & prefix-Turtle serialisation
 // ---------------------------------------------------------------------------
 
 /// A simple, self-contained RDF/XML document with one triple (uses a registered prefix).

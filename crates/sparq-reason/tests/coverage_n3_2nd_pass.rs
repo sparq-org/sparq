@@ -13,7 +13,7 @@
 //! * `MaterializedN3Graph::is_empty`
 //! * `reason_n3_terms_with_resolver` with an explicit base IRI
 //!
-//! 🤖 SPARQ agent — sq-qcnn.36 2nd-pass [SONNET-4.6].
+//! 🤖 SPARQ agent — sq-qcnn.36 2nd-pass.
 
 use sparq_reason::n3::{reason_n3_terms_with_resolver, Term};
 use sparq_reason::{reason_n3_terms, MaterializedN3Graph, N3Mode};

@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-aq5 — headless wasm32 smoke test for sparq-introspect.
+// sq-aq5 — headless wasm32 smoke test for sparq-introspect.
 //
 // The whole crate is sorted scans over sparq-core's PUBLIC read API — no threads, no
 // syscalls, no wall clock, no network — so the bead's expectation was that it runs on
@@ -122,7 +122,7 @@ fn void_export_runs_on_wasm() {
     assert!(with_cs.contains("http://sparq.dev/ns/cs#CharacteristicSet"));
 }
 
-/// [OPUS-4.8] sq-bde: the SHACL node-shape export (`to_shacl`) runs on wasm and emits a
+/// sq-bde: the SHACL node-shape export (`to_shacl`) runs on wasm and emits a
 /// node shape per characteristic set with property shapes for its predicates.
 #[wasm_bindgen_test]
 fn shacl_export_runs_on_wasm() {

@@ -1,0 +1,24 @@
+@prefix mpc:     <https://sparq.dev/ns/mpc#> .
+@prefix secx:    <https://w3id.org/zkp-sparql/sec-prop#> .
+@prefix rdfs:    <http://www.w3.org/2000/01/rdf-schema#> .
+
+# secprop-illustrative-control.ttl — TEST-ONLY positive control for
+# tests/secprop_admissibility.rs. NOT part of the shipped annotation graph
+# (`sparq_mpc::secprop::annotations_n3()` carries only implemented protocols).
+#
+# sparq-mpc implements NO malicious-secure, dishonest-majority protocol: the SPDZ
+# regime is explicitly NOT entered (design route (b), bead sq-j5ok), and
+# `BackendRegistry::select(&SecurityRequirement::dishonest_majority_malicious())`
+# fail-closed REFUSES rather than downgrading. This block exists so the ORDER on
+# both dimensions has a positive control — a subject a strict preference ADMITS —
+# so the exclusion tests cannot pass vacuously. It is a sparq-local illustrative
+# IRI, named so it is unmistakably not a shipped capability; the same device as
+# `zk:illustrative-source-bbs-2023` in the sparq-zk annotation graph.
+
+mpc:illustrative-spdz-dishonest-majority
+  rdfs:comment "ILLUSTRATIVE ONLY — sparq-mpc does NOT implement this. A hypothetical SPDZ-style malicious, dishonest-majority protocol, present so the secx:AdversaryModel / secx:CorruptionThreshold orders have a positive control in the admissibility tests. Selecting a dishonest-majority-malicious backend from sparq-mpc's registry is refused (MpcError::NoBackendSatisfies); the regime is deferred (bead sq-j5ok)."@en-GB ;
+  secx:hasProperty
+    [ secx:property secx:AdversaryModel ; secx:level secx:Malicious ;
+      secx:assurance secx:Conjectured ] ,
+    [ secx:property secx:CorruptionThreshold ; secx:level secx:DishonestMajority ;
+      secx:assurance secx:Conjectured ] .

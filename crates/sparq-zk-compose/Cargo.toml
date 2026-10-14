@@ -18,9 +18,9 @@ publish = false
 
 [features]
 default = []
-# [GPT-6] Additive private-witness result contract; legacy verifier unchanged.
+# Additive private-witness result contract; legacy verifier unchanged.
 successful-results = []
-# [OPUS-4.8] sq-xojl + sq-cfmv: the DUAL-LEAF value lane — the
+# sq-xojl + sq-cfmv: the DUAL-LEAF value lane — the
 # `CircuitId::FilterValueDl` member id + `ProofInputs::FilterValueDl` public
 # inputs (sq-xojl) AND the fail-closed `(commitment-method × circuit)` dispatch
 # matrix (`dispatch` module, sq-cfmv). OFF by default: the default verifier
@@ -29,12 +29,12 @@ successful-results = []
 # documented INV-VL downgrade (#769 accepted, CR-G8 / sq-qhy4); NOT externally
 # audited. LEAN: adds NO new dependency.
 dual-leaf = ["sparq-zk/dual-leaf"]
-# [OPUS-4.8] sq-cfmv: passthrough of sparq-zk's `value-only` research dial so the
+# sq-cfmv: passthrough of sparq-zk's `value-only` research dial so the
 # dispatch matrix can be exercised against the `ValueOnlyV1` method. OFF by
 # default; a benchmark/research dial only (never production). Enabling it also
 # turns the value-lane on.
 commitment-value-only = ["dual-leaf", "sparq-zk/commitment-value-only"]
-# [FABLE-5]-era / [OPUS-4.8] sq-3kd2g.6: the WAVE-1 EXTENDED-FRAGMENT surface —
+# -era / sq-3kd2g.6: the WAVE-1 EXTENDED-FRAGMENT surface —
 # the bounded-depth property-path circuit-family member id
 # (`CircuitId::PathReach` / `ProofInputs::PathReach`, over `zk/compose/`'s
 # `path_reach_d{d}_k{k}_n{n}` family, sq-3kd2g.2), the per-solution UNION
@@ -49,16 +49,16 @@ commitment-value-only = ["dual-leaf", "sparq-zk/commitment-value-only"]
 extended-fragment = []
 
 [dependencies]
-# [GPT-6] Immutable ACIR cache names and private result term-type openings.
+# Immutable ACIR cache names and private result term-type openings.
 # Already present through sparq-zk; this capability crate has no core consumers.
 blake3 = "1"
 sparq-zk = { path = "../sparq-zk" }
 oxrdf = { workspace = true }
-# [GPT-6] The disclosure planner admits the query through the shared SPARQL AST.
+# The disclosure planner admits the query through the shared SPARQL AST.
 spargebra = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# [OPUS-4.8] sq-aih (audit #4 durability): advisory file locking (`flock`) for the
+# sq-aih (audit #4 durability): advisory file locking (`flock`) for the
 # DURABLE single-use nonce store (`FileSeenNonces`). Cross-process atomic
 # check-and-append. This crate is native-only (it drives nargo/bb subprocesses and
 # nothing in the workspace depends on it), so `libc` never reaches the wasm build.
@@ -66,10 +66,10 @@ libc = { workspace = true }
 
 [dev-dependencies]
 # Deterministic temp dirs for prove/verify e2e.
-# [GPT-6] Test-only corpus artifact identities; already resolved in the workspace.
+# Test-only corpus artifact identities; already resolved in the workspace.
 sha2 = "0.10"
 
-# [GPT-6] Reuses this opt-in crate and its existing lock; no detached benchmark graph.
+# Reuses this opt-in crate and its existing lock; no detached benchmark graph.
 [[example]]
 name = "result_experiment"
 required-features = ["successful-results"]

@@ -7,7 +7,7 @@
 //! - [`content`] — Turtle / JSON-LD classification, RDF validation, re-serialisation, and `Accept`
 //!   content negotiation.
 //! - [`conditional`] — `If-Match` / `If-None-Match` precondition evaluation over the strong ETag.
-//! - [`range`] — single and multipart `Range: bytes=…` request handling (206 / 416). [GPT-5.6]
+//! - [`range`] — single and multipart `Range: bytes=…` request handling (206 / 416).
 //! - [`patch`] — the Solid N3-Patch engine (`text/n3`): insert/delete plus the `solid:where`
 //!   variable solver (basic-graph-pattern matching with the spec's exactly-one-solution rule).
 //! - [`handler`] — the GET / HEAD / PUT / POST / DELETE / PATCH axum handlers over the

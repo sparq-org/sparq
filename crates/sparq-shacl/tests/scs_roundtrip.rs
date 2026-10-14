@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-v0b8, #796) Round-trip test for the SHACL Compact Syntax (SCS)
+//! (sq-v0b8, #796) Round-trip test for the SHACL Compact Syntax (SCS)
 //! PARSER against the vendored W3C `shacl12-cs` corpus.
 //!
 //! For each `<name>.shaclc` / `<name>.ttl` fixture pair under

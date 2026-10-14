@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-oy1f.5) The `dump <file> <in> <out>` re-serializer end-to-end, with a
+//! (sq-oy1f.5) The `dump <file> <in> <out>` re-serializer end-to-end, with a
 //! focus on the new `jsonld-compact` out-format (full W3C JSON-LD 1.1 Compaction against a
 //! caller `@context` passed via `--context <file>`).
 //!
@@ -49,7 +49,7 @@ const TTL: &str = "\
 s:alice s:name \"Alice\" ; s:knows s:bob .
 ";
 
-/// [GPT-5.6] (sq-g3pji) Dataset fixture for textual dump round-trips: two default-graph
+/// (sq-g3pji) Dataset fixture for textual dump round-trips: two default-graph
 /// triples, three in `ex:g1`, and one in `ex:g2`. The blank node ensures the invariant is
 /// about counts rather than serializer-specific blank-node labels.
 const DATASET_TRIG: &str = "\
@@ -248,7 +248,7 @@ fn dump_context_flag_missing_value_errors() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// [OPUS-4.8] (sq-oy1f.4) DEFAULT-ON JSON-LD round-trip — the load-bearing invariant for making
+/// (sq-oy1f.4) DEFAULT-ON JSON-LD round-trip — the load-bearing invariant for making
 /// `jsonld` a default feature of the native CLI: with NO `--features` flag, the binary must both
 /// READ a JSON-LD input document (the `oxjsonld` parser, `sparq-core/jsonld`) and WRITE one back
 /// (the engine's JSON-LD writer, `sparq-engine/serialize-rdf`). This test is gated on the `jsonld`
@@ -281,7 +281,7 @@ fn dump_jsonld_input_roundtrips_default_build() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// [OPUS-4.8] (sq-oy1f.4) The default build also accepts the `application/ld+json` media-type token
+/// (sq-oy1f.4) The default build also accepts the `application/ld+json` media-type token
 /// (and `json-ld`) as an input format alias for the JSON-LD parser — same dispatch as the HTTP
 /// surface. Proves the alias set is wired in the default (no-flag) build.
 #[cfg(feature = "jsonld")]

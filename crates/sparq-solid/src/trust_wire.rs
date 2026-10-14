@@ -42,7 +42,7 @@
 //! `sq-wvne` / `sq-xc4y`). The ZK estate it composes with is externally **UNAUDITED**
 //! (`sq-qhy4`). Full scope: the `sparq-trust` crate docs + README.
 //!
-//! [OPUS-4.8] sq-pfae PoC. 🤖 SPARQ agent — trust-graph authorisation PoC.
+//! sq-pfae PoC. 🤖 SPARQ agent — trust-graph authorisation PoC.
 
 use crate::authindex::{ANY_CLIENT, ANY_ISSUER};
 use crate::{PodStore, AUTH_GRAPH, AUTH_NS};

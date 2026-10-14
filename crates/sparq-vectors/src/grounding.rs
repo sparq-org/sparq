@@ -1,7 +1,7 @@
 //! Flexible **minimal-and-complete grounding** selector + verbaliser (structure-aware
 //! vectorisation **P4**).
 //!
-//! [OPUS-4.8] sq-0wo9e.5 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.5 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §4 "Flexible grounding — modality chosen per request, minimal AND complete"). This module is
 //! the **fourth** additive slice of the structure-aware-vectorisation epic, on top of P0
 //! ([`crate::structure`]: closure-before-vectorise + type-constrained negatives) and P1
@@ -178,7 +178,7 @@ pub enum Grounding {
     TypedSubVector {
         values: Vec<f32>,
         blocks: Vec<Encoder>,
-        /// [OPUS-5] sq-w2af4 — the per-block query-time modality multiplier
+        /// sq-w2af4 — the per-block query-time modality multiplier
         /// ([`Block::fusion_weight`](crate::encode::Block::fusion_weight)), one entry per kept
         /// block, in the same order as `blocks`. It is what the caller feeds to
         /// [`fuse_rrf_weighted`](crate::fuse_rrf_weighted) / [`fuse_scores`](crate::fuse_scores)
@@ -294,7 +294,7 @@ pub fn ground(
 
 /// **Per-node modality weighting** for [`Modality::TypedSubVector`] (design §USE-1 integration
 /// point 3): which predicate feeds each block of the [`SchemaHeader`](crate::encode::SchemaHeader),
-/// and the mined provenance to score it with. [OPUS-5] sq-w2af4.
+/// and the mined provenance to score it with. sq-w2af4.
 ///
 /// `block_predicates[i]` names the predicate feeding `header.blocks()[i]`; a `None` entry — or an
 /// index past the end — leaves that block on the header's graph-global default (fail-open, e.g. a
@@ -432,7 +432,7 @@ fn local_name(iri: &str) -> String {
 /// Truncate `s` at a word or sentence boundary to at most `max` chars (the same budget discipline
 /// as [`verbalize`]).
 fn truncate_chars(s: &str, max: usize) -> String {
-    // [GPT-5.6] Share the exact boundary policy with entity verbalization.
+    // Share the exact boundary policy with entity verbalization.
     truncate_at_word_boundary(s, max)
 }
 
@@ -789,7 +789,7 @@ fn typed_value_key(v: &TypedValue) -> String {
 // ---- typed-sub-vector modality ----------------------------------------------------------------
 
 /// Project `id`'s stored vector to only the blocks in `keep` (empty = all), concatenated in block
-/// order, plus the encoder families kept and each kept block's modality weight ([OPUS-5] sq-w2af4).
+/// order, plus the encoder families kept and each kept block's modality weight (sq-w2af4).
 /// The weight is [`node_block_weight`](crate::provenance::ProvenanceWeights::node_block_weight) —
 /// mined from **`id`'s own** incident edges — when `weighting` supplies a predicate for that block,
 /// and otherwise the header's graph-global
@@ -836,7 +836,7 @@ fn typed_sub_vector(
 }
 
 // ---- integration point 2 (WIRING): assertion-weighted structural-sketch pooling ----------------
-// [OPUS-5] sq-w2af4. sq-oy9ya landed `ProvenanceWeights::pool_weighted` but no in-tree caller ever
+// sq-w2af4. sq-oy9ya landed `ProvenanceWeights::pool_weighted` but no in-tree caller ever
 // pooled anything with it. `sketch_predicate` is that caller: it is the grounding-path
 // structural-sketch pooler for a node's MULTI-VALUED object predicate.
 
@@ -926,7 +926,7 @@ fn render_object(graph: &Graph, id: Id) -> (String, bool) {
         TermParts::Iri { prefix, suffix } => (format!("{}{}", prefix, suffix), false),
         TermParts::Lit { value, .. } => (value.to_string(), true),
         TermParts::Blank(b) => (format!("_:{}", b), false),
-        // BUGFIX [FABLE-5]: this arm returned the EMPTY STRING, silently corrupting every
+        // BUGFIX: this arm returned the EMPTY STRING, silently corrupting every
         // NL-string / subgraph-text grounding whose object is an RDF 1.2 quoted triple. The dict
         // reconstructs the (nested, depth-capped) term and oxrdf's `Display` renders the RDF 1.2
         // `<<( s p o )>>` triple-term syntax.

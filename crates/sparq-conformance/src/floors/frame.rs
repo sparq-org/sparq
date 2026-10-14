@@ -1,7 +1,7 @@
-//! [FABLE-5] sq-oy1f.40 — the W3C JSON-LD 1.1 `frame` lane ratchet floor
+//! sq-oy1f.40 — the W3C JSON-LD 1.1 `frame` lane ratchet floor
 //! (relocated from `tests/jsonld_suite.rs` to this lib-side single source).
 
-/// [FABLE-5] sq-oy1f.29 — `frame` pass floor over the SEPARATE `w3c/json-ld-framing`
+/// sq-oy1f.29 — `frame` pass floor over the SEPARATE `w3c/json-ld-framing`
 /// suite (`scripts/fetch-jsonld-framing-tests.sh`), for the NATIVE document-level
 /// Framing Algorithm (`sparq_jsonld::frame::frame()` — expand → frameExpansion →
 /// node map + `@merged` → frame matching → prune → compact against the frame's
@@ -31,7 +31,7 @@
 /// `@embed: @last` uses an embed-then-demote post-pass equivalent to the reference
 /// processors' remove-embed.
 ///
-/// ## [OPUS-5] sq-gzsky — this floor does NOT rise, and that is the honest answer
+/// ## sq-gzsky — this floor does NOT rise, and that is the honest answer
 ///
 /// Bead sq-gzsky asked to raise `floors::{expand,frame,compact}::FLOOR` off the
 /// sq-hmd7l.22 finding, which recorded frame at **66.3%**. That cell was already STALE

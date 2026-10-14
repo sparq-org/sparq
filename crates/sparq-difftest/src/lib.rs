@@ -56,7 +56,7 @@
 //!
 //! # Admission-decision overlap boundary
 //!
-//! [GPT-5.6] Admission-decision comparisons deliberately do not validate or reconcile a
+//! Admission-decision comparisons deliberately do not validate or reconcile a
 //! producer's contradictory `allow ∩ deny` outcome. In particular, a reference/baseline tuple
 //! present in both sets counts as already allowed for the structural
 //! `candidate.allow \ baseline.allow` check, so that overlap can mask a deny-to-allow escalation.

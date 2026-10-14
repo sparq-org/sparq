@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-quly (#796): the `Store::parseShaclCompact(text, base?)` binding.
+//! sq-quly (#796): the `Store::parseShaclCompact(text, base?)` binding.
 //!
 //! Exposes `sparq-shacl`'s existing SHACL Compact Syntax (SCS) parser
 //! ([`sparq_shacl::parse_scs_to_graph`] — SCS text → a SHACL shapes [`Graph`]) to
@@ -39,7 +39,7 @@ use crate::Store;
 
 #[wasm_bindgen]
 impl Store {
-    /// [OPUS-4.8] sq-quly (#796): parses a **SHACL Compact Syntax (SCS)** document
+    /// sq-quly (#796): parses a **SHACL Compact Syntax (SCS)** document
     /// into the equivalent SHACL **shapes graph** and returns it as a **pretty
     /// Turtle** string.
     ///
@@ -73,7 +73,7 @@ impl Store {
         // REUSE the existing engine-writer path: wrap the shapes graph in a throwaway
         // Store and emit it through `Store::serialize` (the #900/#923 serializer),
         // rather than rolling a second serialiser. Pretty Turtle, 2-space indent,
-        // abbreviate on; `prefixes = None` ([OPUS-4.8] sq-l5kr serialize signature)
+        // abbreviate on; `prefixes = None` (sq-l5kr serialize signature)
         // selects the engine's well-known defaults — the readable default a UI can
         // show straight away, byte-for-byte the prior 4-arg default-prefix output.
         let shapes_store = Store { graph };

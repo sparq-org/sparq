@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-b1hn) RSP-QL bench RUNNER — the self-asserting TSV emitter the
+//! (sq-b1hn) RSP-QL bench RUNNER — the self-asserting TSV emitter the
 //! `bench/rsp/run.sh` per-commit gate consumes.
 //!
 //! sparq-rsp is **clock-free**: the windowed pipeline is a pure function of the
@@ -123,7 +123,7 @@ fn run_single_window_gate(sc: &Scenario, mode: EvalMode, script: &[([Term; 3], u
         EvalMode::Rebuild => "rebuild",
         EvalMode::PersistentDict => "pdict",
         EvalMode::Delta => "delta",
-        // [OPUS-4.8] (sq-j39) Snapshot is observationally identical to Delta
+        // (sq-j39) Snapshot is observationally identical to Delta
         // (same per-window content), and the 4-way equivalence is pinned by the
         // crate tests; the deterministic gate's golden output keeps the original
         // three tags, so Snapshot is not added to the gate's iteration loop.

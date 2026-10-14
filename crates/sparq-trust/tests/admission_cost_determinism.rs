@@ -1,4 +1,4 @@
-//! [GPT-5.6] Mutation witness for deterministic admission-cost evidence (`sq-r78pf`).
+//! Mutation witness for deterministic admission-cost evidence (`sq-r78pf`).
 
 #![cfg(feature = "cert-graph")]
 

@@ -16,7 +16,7 @@
 //! normal gates. This test shells out to `cargo doc` (mirroring the `cargo metadata` shell-out
 //! in `tests/boundary.rs`) so a regression is caught IN THE TEST SUITE, not silently.
 //!
-//! [OPUS-4.8] sq-tiq4 — flagged for Fable re-review when available.
+//! sq-tiq4 — flagged for Fable re-review when available.
 
 use std::path::PathBuf;
 use std::process::Command;

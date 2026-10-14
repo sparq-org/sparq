@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-hlul (step 5 of sq-bwwl, the hidden cross-credential JOIN): the
 //! forge-and-verify REGRESSION SUITE for the hidden join. The adversarial
 //! complement of `join_gates.rs` (the `bind_joins` structural-gate suite): here
@@ -176,7 +176,7 @@ fn commitment_hex(inputs: &ProofInputs) -> FieldHex {
 /// A `join_eq` sub-proof's public inputs (witness-only — empty `proof_hex`), built
 /// directly so the STRUCTURAL forge tests can tamper individual public fields.
 ///
-/// [OPUS-4.8] `join_commitment` is the REAL hiding commitment
+/// `join_commitment` is the REAL hiding commitment
 /// `h3(DOMAIN, join_value_enc(), blinding())` (via the host `join_value_commitment`),
 /// NOT a placeholder. The structural privacy pin asserts this field is the hiding
 /// IMAGE of the join value (and not a bare encoding of it); a constant here would
@@ -213,7 +213,7 @@ fn join_manifest() -> ProofManifest {
         commitment_attestations: vec![attest_full(ca, sa, &sk), attest_full(cb, sb, &sk)],
         attributions: vec![vec![0], vec![0]],
         pattern_scans: vec![],
-        // [OPUS-4.8] sq-en5dx: `graph_a`/`graph_b` are DISTINCT commitments, so the
+        // sq-en5dx: `graph_a`/`graph_b` are DISTINCT commitments, so the
         // shared `?p` is a genuine cross-graph join whose non-bnode obligation the Q6
         // gate now requires (keyed on committed-graph identity). Declare it so these
         // slot/edge forge vectors reach `bind_joins` (the gate under test) instead of

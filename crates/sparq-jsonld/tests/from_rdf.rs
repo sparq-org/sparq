@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.28 — crate-local tests for the native **Deserialize RDF as
+//! sq-oy1f.28 — crate-local tests for the native **Deserialize RDF as
 //! JSON-LD** algorithm (JSON-LD 1.1 API §8.1, `sparq_jsonld::from_rdf`).
 //!
 //! These are hermetic, fixture-free tests over hand-built [`RdfQuad`]s: one direct

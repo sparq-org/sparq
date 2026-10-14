@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-r1ei8: adversarial WAC-scoped dataset tests.
+// sq-r1ei8: adversarial WAC-scoped dataset tests.
 #![cfg(feature = "sparql-endpoint")]
 
 mod common;

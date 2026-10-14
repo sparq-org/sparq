@@ -14,7 +14,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories = ["web-programming::http-server"]
 readme = "README.md"
-# [GPT-5.6] Published to satisfy sparq-server's optional crates.io dependency closure.
+# Published to satisfy sparq-server's optional crates.io dependency closure.
 
 [lib]
 crate-type = ["rlib"]

@@ -1,5 +1,5 @@
 //! **SPARQL 1.1 Protocol drivers for external engines** (`protocol-drivers` feature).
-//! [FABLE-5] sq-gum8.6
+//! sq-gum8.6
 //!
 //! The off-CI bug-hunting campaign points these drivers at live endpoints (Jena/Fuseki,
 //! Virtuoso, Blazegraph, GraphDB, QLever, Oxigraph, MillenniumDB, and sparq's own
@@ -37,7 +37,7 @@
 //! | [`qlever`](EndpointConfig::qlever) | `{base}` (server root) | GET | no path suffix |
 //! | [`millenniumdb`](EndpointConfig::millenniumdb) | `{base}/sparql` | raw-body POST | `application/sparql-query` |
 //!
-//! [OPUS-5] The Blazegraph / GraphDB / QLever / MillenniumDB presets, their quirk
+//! The Blazegraph / GraphDB / QLever / MillenniumDB presets, their quirk
 //! layers, and [`PresetEvidence`] are bead `sq-gum8.10`.
 
 use std::time::Duration;
@@ -113,7 +113,7 @@ pub struct EndpointConfig {
     /// Maximum response body size in bytes. Requests returning more data are truncated
     /// via `ureq`'s body-read limiter and treated as a transport error. Defaults to
     /// 64 MiB — sufficient for any sane SPARQL result set; raise for unusually large
-    /// results in a campaign run (e.g. full-graph dumps). [SONNET-4.6]
+    /// results in a campaign run (e.g. full-graph dumps).
     pub max_body_bytes: u64,
     /// What backs this configuration's conventions — see [`PresetEvidence`].
     pub evidence: PresetEvidence,
@@ -332,7 +332,7 @@ pub fn form_urlencode(value: &str) -> String {
 
 /// Append an already-encoded query-string `params` to `base_url`, using `?` when
 /// `base_url` has no query string yet and `&` when it already has one.  A pre-existing
-/// trailing `?` is treated the same as having a query string (we just append). [SONNET-4.6]
+/// trailing `?` is treated the same as having a query string (we just append).
 fn append_query_string(base_url: &str, params: &str) -> String {
     if base_url.contains('?') {
         format!("{}&{}", base_url, params)
@@ -534,7 +534,6 @@ mod tests {
     }
 
     /// A `query_url` that already carries a query string must get `&` not a second `?`.
-    /// [SONNET-4.6]
     #[test]
     fn build_request_parts_no_double_question_mark_on_pre_existing_query_string() {
         // PostSparqlQuery arm: extra_params appended to a URL that already has '?'

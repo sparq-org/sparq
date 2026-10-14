@@ -1,4 +1,4 @@
-//! [GPT-5.6] (sq-kskgn) Seeded differential coverage for persisted vector deltas.
+//! (sq-kskgn) Seeded differential coverage for persisted vector deltas.
 #![cfg(feature = "delta")]
 
 use sparq_vectors::{nearest_exact, VectorStore};

@@ -40,7 +40,7 @@
 //! gate the stage-1 compose verifier, whose manifest schema and circuit
 //! dispatch cannot express the extensions yet (`sq-3kd2g.6` migrates it).
 
-// [OPUS-4.8] sq-1zf94: `PatternKey`/`SlotPattern` are the SHAPES of a re-derived
+// sq-1zf94: `PatternKey`/`SlotPattern` are the SHAPES of a re-derived
 // pattern's slots — already exposed through the `pub` fields of the values this
 // module returns (`fragment_patterns`, `FragmentBranch.patterns`,
 // `PathReach.subject`/`object`). Re-export them so a downstream verifier
@@ -227,7 +227,7 @@ fn expression_has_exists(e: &Expression) -> bool {
     }
 }
 
-// [OPUS-4.8] FILTER query-binding (audit #5/#6/#10) — extract the query's
+// FILTER query-binding (audit #5/#6/#10) — extract the query's
 // FILTER comparisons and the variable→(pattern,slot) map so the compose
 // verifier can require a matching, slot-bound, verdict-gated filter sub-proof.
 
@@ -340,7 +340,7 @@ fn canonical_u64(lex: &str) -> Option<u64> {
 
 /// Walk a FILTER expression and collect every top-level integer comparison it
 /// imposes. `AND` chains are flattened (each conjunct is its own obligation).
-/// `?v != c` (spargebra `Not(Equal(..))`, [OPUS-4.8]) is recognised as a
+/// `?v != c` (spargebra `Not(Equal(..))`) is recognised as a
 /// `Ne` comparison. Any other FILTER node that is NOT a flat conjunction of
 /// bindable integer comparisons (general negation `!(...)`, disjunction,
 /// arithmetic, `?a op ?b`, function calls, non-integer literals, …) makes the
@@ -361,7 +361,7 @@ fn collect_filter_expr(e: &Expression, out: &mut Vec<QueryFilter>) -> Result<(),
         E::Greater(a, b) => push_cmp(FilterCmp::Gt, a, b, out),
         E::GreaterOrEqual(a, b) => push_cmp(FilterCmp::Ge, a, b, out),
         E::Equal(a, b) => push_cmp(FilterCmp::Eq, a, b, out),
-        // [OPUS-4.8] SPARQL `?v != c` parses to `Not(Equal(..))` in spargebra
+        // SPARQL `?v != c` parses to `Not(Equal(..))` in spargebra
         // (there is no dedicated `NotEqual` node — confirmed against the
         // vendored spargebra `Expression` AST). Recognise `Not(Equal(var,const))`
         // / `Not(Equal(const,var))` and bind it to `FilterCmp::Ne` so valid
@@ -462,7 +462,7 @@ pub fn variable_slots(patterns: &[PatternKey]) -> Vec<(String, usize, usize)> {
 }
 
 // =====================================================================
-// [OPUS-4.8] sq-3kd2g.8 (epic sq-3kd2g / #1591): query-side FILTER/BIND
+// sq-3kd2g.8 (epic sq-3kd2g / #1591): query-side FILTER/BIND
 // expression-tree extraction. Generalizes the single-comparison
 // `FilterCmp`/`QueryFilter` extraction above to a full typed expression
 // tree over the design record (`research/zksparql-fragment-extension.md`)
@@ -1871,7 +1871,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] FILTER query-binding extraction tests (audit #5/#6/#10).
+    // FILTER query-binding extraction tests (audit #5/#6/#10).
 
     fn xint(v: u64) -> String {
         format!(
@@ -1920,7 +1920,7 @@ mod tests {
         );
     }
 
-    // [OPUS-4.8] roborev codex 2207: SPARQL `!=` binds to `FilterCmp::Ne`.
+    // roborev codex 2207: SPARQL `!=` binds to `FilterCmp::Ne`.
     // spargebra has no `NotEqual` node — `?v != c` parses to `Not(Equal(..))`.
     #[test]
     fn extracts_not_equal_filter_in_both_operand_orders() {
@@ -2431,7 +2431,7 @@ mod tests {
     }
 
     // =====================================================================
-    // [OPUS-4.8] sq-3kd2g.8: query-side FILTER/BIND expression-tree
+    // sq-3kd2g.8: query-side FILTER/BIND expression-tree
     // extraction. Two-sided table: every §5.1 IN form produces its EXACT
     // expected tree; every OUT form fails closed. The REJECT side is the
     // security surface — the extractor must never emit an approximated tree

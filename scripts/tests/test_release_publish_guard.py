@@ -274,6 +274,36 @@ class TestReleaseWorkflowStructure(unittest.TestCase):
             "is cut and (with publish = true) the crates are already on crates.io.",
         )
 
+    def test_release_job_tags_the_workspace_version_commit(self) -> None:
+        # The concurrency group can replace the version commit's run with a later push's,
+        # so the job must move HEAD to the version commit before anything guards or tags.
+        def runs(step: dict) -> str:
+            return str(step.get("run") or "")
+
+        matches = [
+            i
+            for i, step in enumerate(self.steps)
+            if "-G'^version = \"' -- Cargo.toml" in runs(step)
+            and 'git checkout --detach "$target"' in runs(step)
+        ]
+        self.assertEqual(len(matches), 1, "no single tag-target checkout step in the release job")
+        step = self.steps[matches[0]]
+        self.assertNotIn("if", step, "the tag-target checkout must be unconditional")
+        self.assertNotIn("continue-on-error", step, "a failed tag-target checkout must fail the job")
+        self.assertIn("set -euo pipefail", runs(step))
+        self.assertLess(matches[0], _guard_step_index(self.steps))
+        self.assertLess(matches[0], _release_plz_step_index(self.steps))
+        checkout = [
+            i
+            for i, s in enumerate(self.steps)
+            if str(s.get("uses") or "").startswith("actions/checkout@")
+        ]
+        self.assertTrue(checkout and checkout[0] < matches[0], "tag-target step runs before checkout")
+        self.assertEqual(
+            self.steps[checkout[0]]["with"]["fetch-depth"], 0,
+            "the tag-target `git log` needs full history",
+        )
+
     def test_guard_step_enforces(self) -> None:
         run = str(self.steps[_guard_step_index(self.steps)]["run"])
         # EQUALITY, not containment. A containment assertion is satisfied by

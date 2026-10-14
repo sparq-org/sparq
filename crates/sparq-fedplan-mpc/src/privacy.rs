@@ -21,7 +21,7 @@
 //! declaration. It makes no soundness/privacy claim; the privacy-bearing phases that consume
 //! it are deferred and audit-gated (sq-9hrn / sq-qhy4). See the crate `README.md`.
 //!
-//! [OPUS-4.8] sq-2q1x.
+//! sq-2q1x.
 
 use std::collections::BTreeMap;
 

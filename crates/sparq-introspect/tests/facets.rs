@@ -153,7 +153,7 @@ fn assert_differential(graph: &Graph) {
 fn distributions_match_sparql_group_by_on_fixture_and_seeded_graph() {
     assert_differential(&fixture());
 
-    // [GPT-5.6] Fixed LCG: deterministic coverage without adding rand to this opt-in crate.
+    // Fixed LCG: deterministic coverage without adding rand to this opt-in crate.
     let mut state = 0x5eed_u64;
     let mut nt = String::new();
     for i in 0..50 {

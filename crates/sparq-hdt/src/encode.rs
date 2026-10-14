@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ashy — DIRECT in-memory HDT encoder: serialise a sparq [`Graph`]
+//! sq-ashy — DIRECT in-memory HDT encoder: serialise a sparq [`Graph`]
 //! to the standard HDT v1.0 layout (FourSectionDictionary with Plain Front Coding +
 //! BitmapTriples, SPO order) WITHOUT a temporary N-Triples round-trip.
 //!
@@ -148,7 +148,7 @@ struct Roles {
 /// Builds the [`FourSectDict`] for `graph` (the dictionary partition + PFC sections)
 /// and returns it alongside the per-triple HDT id list (already SPO, unsorted).
 ///
-/// [OPUS-4.8] sq-ashy (memory restructure): the encoder needs only (a) the four PFC
+/// sq-ashy (memory restructure): the encoder needs only (a) the four PFC
 /// dictionary sections — the DISTINCT rendered terms per role — and (b) the SPO
 /// triple-id stream for BitmapTriples. Neither needs all three rendered strings of
 /// every triple held at once, so this no longer materialises an

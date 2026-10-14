@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-gq28y (issue #1546): end-to-end enforcement of the **spec-conformant
+//! sq-gq28y (issue #1546): end-to-end enforcement of the **spec-conformant
 //! empty-default + union-default-graph opt-in** through the REAL `PodStore` read path, per
 //! the *Access-Controlled SPARQL Query over a Solid Pod* Editor's Draft (`jeswr/solid-sparql-query`).
 //!

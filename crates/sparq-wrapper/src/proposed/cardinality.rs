@@ -5,7 +5,7 @@
 //! against the graph at call time. A [`LiveMappedCollection`] therefore stays
 //! current after its own mutations without being reconstructed.
 
-// [GPT-5.6] sq-1rg2q.3: explicit RDF arities and mutation-safe live mappings.
+// sq-1rg2q.3: explicit RDF arities and mutation-safe live mappings.
 
 use crate::{CardinalityError, Node, Store, StoreError};
 use oxrdf::{NamedNode, Term};

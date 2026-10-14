@@ -1,4 +1,4 @@
-//! [OPUS-5] sq-zgbso.6 (epic sq-zgbso, issue #1582, Phase 4) — the MEASURED SPIKE that
+//! sq-zgbso.6 (epic sq-zgbso, issue #1582, Phase 4) — the MEASURED SPIKE that
 //! decides whether RDFS (and then OWL-RL) should be represented as Notation3 rule text
 //! compiled through the `compiled-rules` evaluator instead of the hand-optimized
 //! id-level materializer in `src/rdfs.rs`.

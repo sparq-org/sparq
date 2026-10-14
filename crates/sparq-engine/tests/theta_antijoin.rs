@@ -1,6 +1,6 @@
 //! Acceptance / witness tests for the correlated (theta) anti-join — the SPARQL
 //! negation idiom `OPTIONAL { … FILTER(F) } FILTER(!bound(?nb))` with an OPTIONAL
-//! condition `F` that references OUTER variables (SP2Bench q06). [FABLE-5]
+//! condition `F` that references OUTER variables (SP2Bench q06).
 //! (bead sq-7d3dj.30.9)
 //!
 //! The load-bearing invariant is BAG-SEMANTICS RESULT-EQUIVALENCE with the fast
@@ -648,7 +648,7 @@ fn randomised_differential() {
         // Every 4th trial ALSO adds a PARTIALLY-BOUND shared var `?tag` (bound on only
         // some documents via an OPTIONAL in A, certain in B) referenced by the residual
         // via `BOUND(?tag)` — the failing class the pre-fix generator could not produce
-        // (left-unbound shared var read by the residual). [FABLE-5]
+        // (left-unbound shared var read by the residual).
         let shared_var = trial % 4 == 0;
         let n_auth = if big { 70 + next(30) as usize } else { 1 + next(4) as usize };
         let mut ttl = String::from("ex:Article rdfs:subClassOf foaf:Document .\n");
@@ -678,7 +678,7 @@ fn randomised_differential() {
             }
             // For the shared-var variant, bind `?tag` on ~2/3 of documents (an IRI). The
             // OPTIONAL in A leaves it UNBOUND on the rest, so the merged condition row
-            // must fill it from the right to reproduce the cold semantics. [FABLE-5]
+            // must fill it from the right to reproduce the cold semantics.
             if shared_var && next(3) != 0 {
                 ttl.push_str(&format!("ex:d{} ex:tag ex:t{} .\n", d, next(3)));
             }
@@ -767,7 +767,7 @@ fn q06_measure_250k() {
 
 // ── budget cooperativeness (sq-qk6ac) ─────────────────────────────────────────
 //
-// [SONNET-4.6] The anti-join's per-left-row VERDICT is a whole probe of `B`, so an
+// The anti-join's per-left-row VERDICT is a whole probe of `B`, so an
 // exhausted budget must stop the verdict loop, not merely truncate the output build
 // afterwards. The serial strategy therefore computes each verdict INSIDE the
 // cooperative build loop (and the parallel fan-out re-checks a captured `Limits`
@@ -869,7 +869,7 @@ fn a_pre_cancelled_query_reports_the_canonical_reason() {
     );
 }
 
-/// [SONNET-4.6] (sq-qk6ac) The ANTI-VACUOUS regression for the PARALLEL verdict gate.
+/// (sq-qk6ac) The ANTI-VACUOUS regression for the PARALLEL verdict gate.
 ///
 /// Every other budget test in this file stays far below `PAR_THRESHOLD` (50_000 left
 /// rows), so they only ever run the SERIAL fused loop — the rayon fan-out and its

@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-hmd7l.13 — LDBC Graphalytics runner for the `sparq-algos` surface.
+//! sq-hmd7l.13 — LDBC Graphalytics runner for the `sparq-algos` surface.
 //!
 //! Reads a dataset in the **LDBC Graphalytics on-disk format** (`<name>.properties` +
 //! a vertex file + an edge file), materialises it as RDF, loads it into a

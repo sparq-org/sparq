@@ -53,7 +53,7 @@ where
     let router = Router::new()
         .route("/", ldp_methods())
         .route("/{*path}", ldp_methods());
-    // [GPT-5.6] sq-r1ei8: this static route and its engine-backed handler are
+    // sq-r1ei8: this static route and its engine-backed handler are
     // both absent from the core wasm tier.
     #[cfg(feature = "sparql-endpoint")]
     let router = router.route(
@@ -92,7 +92,7 @@ mod tests {
         LdpState::new(store, "https://pod.example")
     }
 
-    // [GPT-5.6] Direct native coverage witness for the portable public constructor.
+    // Direct native coverage witness for the portable public constructor.
     #[test]
     fn app_state_new_preserves_ldp_state() {
         let state = AppState::new(ldp_state());
@@ -100,7 +100,7 @@ mod tests {
         assert_eq!(state.ldp.base_url(), "https://pod.example");
     }
 
-    // [GPT-5.6] Direct native coverage witness for the portable public router builder.
+    // Direct native coverage witness for the portable public router builder.
     #[tokio::test]
     async fn build_router_mounts_ldp_methods() {
         let response = build_router(AppState::new(ldp_state()))

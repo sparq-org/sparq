@@ -395,7 +395,7 @@ fn selector_sharing(dealer: &mut ShamirDealer, bit: &MatchBit) -> Result<Vec<Sha
 /// a 1-byte presence flag (`0` = unbound `None`, `1` = bound `Some`), and for a
 /// bound column the term's canonical N-Triples serialization (`Term::to_string`)
 /// as UTF-8, NUL-terminated. The N-Triples form escapes control characters
-/// (including NUL → ` `), so a raw `0x00` never appears inside a term and is
+/// (including NUL → `\u0000`), so a raw `0x00` never appears inside a term and is
 /// an unambiguous field terminator. `[OPUS-4.8]`
 fn encode_payload_row(row: &[Option<Term>]) -> Vec<u8> {
     let mut bytes = Vec::new();

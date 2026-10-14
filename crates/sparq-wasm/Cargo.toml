@@ -18,14 +18,14 @@ sparq-core = { path = "../sparq-core", default-features = false }
 sparq-engine = { path = "../sparq-engine", default-features = false }
 oxrdf.workspace = true
 wasm-bindgen = "0.2"
-# [OPUS-4.8] sq-l5kr: only linked behind the opt-in `serialize-rdf` feature, for the
+# sq-l5kr: only linked behind the opt-in `serialize-rdf` feature, for the
 # `Store::serialize(.., prefixes?)` binding to read a caller-supplied JS `[[prefix, iri], …]`
 # array. `js-sys` is already in the wasm graph (wasm-bindgen / getrandom pull it), so this is
 # NOT a new external dependency; it is wasm-portable (not in the wasm-deps-guard forbidden
 # set). OPTIONAL so the lean default bundle — which has no `serialize` method — links zero of
 # it and stays byte-identical.
 js-sys = { version = "0.3", optional = true }
-# [OPUS-4.8] sq-yqi1 (#162): SHACL validation in the browser, OPT-IN behind the
+# sq-yqi1 (#162): SHACL validation in the browser, OPT-IN behind the
 # `shacl` feature (OFF by default). The DEFAULT bundle carries zero SHACL code, so the
 # lean baseline (and the wasm-deps-guard, which checks the default graph) is unchanged.
 # `default-features = false` on sparq-shacl forwards to its wasm32 sparq-engine dep
@@ -33,7 +33,7 @@ js-sys = { version = "0.3", optional = true }
 # bundle. This is the (a) WASM consumer of #162 — the (c) HTTP endpoint is separate.
 sparq-shacl = { path = "../sparq-shacl", default-features = false, optional = true }
 
-# [OPUS-4.8] sq-1dd5t (#1047): expose RDFC-1.0 (RDF Dataset Canonicalization) to the
+# sq-1dd5t (#1047): expose RDFC-1.0 (RDF Dataset Canonicalization) to the
 # @sparq-org/sparq RDF/JS `Dataset` (toCanonical / equals / contains), OPT-IN behind the
 # `canon` feature (OFF by default). `default-features = false` drops `sparq-core`'s
 # `parallel` (rayon — no wasm threads); the RDFC-1.0 algorithm itself (`rdf-canon`) is
@@ -41,7 +41,7 @@ sparq-shacl = { path = "../sparq-shacl", default-features = false, optional = tr
 # `wasm_bundle_bytes` baseline is byte-identical; the site/published build turns it on.
 sparq-canon = { path = "../sparq-canon", default-features = false, optional = true }
 
-# [SONNET-4.6] sq-q4apb (#2396): SHACL-to-form derivation for the hosted /app web
+# sq-q4apb (#2396): SHACL-to-form derivation for the hosted /app web
 # workbench, OPT-IN behind the `forms` feature (OFF by default). `sparq-forms` is
 # headless + wasm-able by construction (no GUI deps; its sparq-core/sparq-shacl deps
 # are default-features = false, so rayon never enters the wasm32 graph). The binding
@@ -52,7 +52,7 @@ sparq-canon = { path = "../sparq-canon", default-features = false, optional = tr
 sparq-forms = { path = "../sparq-forms", default-features = false, optional = true }
 serde_json = { version = "1", optional = true }
 
-# [FABLE-5] sq-586sh (#890 ask A): the stateless ODRL usage-control evaluator
+# sq-586sh (#890 ask A): the stateless ODRL usage-control evaluator
 # (`sparq-policy`) compiled to wasm32, OPT-IN behind the `policy` feature (OFF by
 # default). PROBE scope: proves wasm32 compat + gives the bundle-delta measurement a
 # reachable parse→evaluate→conflict path behind two EXPERIMENTAL free functions
@@ -66,7 +66,7 @@ serde_json = { version = "1", optional = true }
 # new external dependency enters the wasm graph.
 sparq-policy = { path = "../sparq-policy", default-features = false, optional = true }
 
-# [SONNET-4.6] sq-yz27r (#3251): a DIRECT `oxjsonld` dependency, linked only behind the
+# sq-yz27r (#3251): a DIRECT `oxjsonld` dependency, linked only behind the
 # opt-in `jsonld-contexts` feature. The `jsonld` feature forwards to sparq-core, whose
 # JSON-LD arm drives `oxjsonld` with NO LoadDocumentCallback; installing one needs the
 # parser builder itself (`SliceJsonLdParser::with_load_document_callback`), which
@@ -82,7 +82,7 @@ oxjsonld = { workspace = true, optional = true }
 # `--cfg getrandom_backend="wasm_js"` is set in .cargo/config.toml.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.3", features = ["wasm_js"] }
-# [OPUS-4.8] sq-1dd5t: the `canon` feature pulls `sparq-canon`, whose `rdf-canon` ->
+# sq-1dd5t: the `canon` feature pulls `sparq-canon`, whose `rdf-canon` ->
 # oxrdf-0.2 bridge transitively pulls getrandom 0.2 (via rand 0.8). getrandom 0.2 uses
 # its `js` feature (NOT the 0.3 `wasm_js` cfg) to select the browser backend, so without
 # it the wasm build fails to compile (`the wasm*-unknown-unknown targets are not
@@ -93,7 +93,7 @@ getrandom02 = { package = "getrandom", version = "0.2", features = ["js"], optio
 
 [features]
 default = []
-# [FABLE-5] sq-3ul2n.3: expose the `Store::loadBytes(Uint8Array, format)` /
+# sq-3ul2n.3: expose the `Store::loadBytes(Uint8Array, format)` /
 # `Store::loadBytesWithBase(...)` byte-ingest bindings — a `Uint8Array` (from
 # `response.arrayBuffer()` / `File.arrayBuffer()`) is copied ONCE into linear memory (no
 # UTF-16 JS-string round-trip), validated as UTF-8 fail-closed, and fed the SAME parse path
@@ -101,17 +101,17 @@ default = []
 # loader). OFF by default so the lean `wasm_bundle_bytes` baseline is byte-identical; the
 # published bundle (js `build:wasm`) turns it on (that script change is sq-3ul2n.5, not here).
 bytes-ingest = []
-# [OPUS-4.8] sq-yqi1 (#162): expose `sparq-shacl`'s SHACL Core + SHACL-SPARQL
+# sq-yqi1 (#162): expose `sparq-shacl`'s SHACL Core + SHACL-SPARQL
 # validation as the `Store::validate(data, shapes)` wasm binding (a drop-in for
 # `rdf-validate-shacl` behind PSS's ADR-0014 ShaclValidator seam). OFF by default so
 # the standard browser bundle is byte-identical to before; CI builds the bundle with
 # and without it (and the headless wasm tests run with it on). Does NOT pull
 # SHACL-AF rules — turn on `shacl-af` for those.
 shacl = ["dep:sparq-shacl"]
-# [OPUS-4.8] sq-yqi1: also compile SHACL Advanced Features (sh:rule) into the binding.
+# sq-yqi1: also compile SHACL Advanced Features (sh:rule) into the binding.
 # Implies `shacl`; OFF by default.
 shacl-af = ["shacl", "sparq-shacl/shacl-af"]
-# [OPUS-4.8] sq-quly (#796): expose `sparq-shacl`'s SHACL Compact Syntax (SCS) parser
+# sq-quly (#796): expose `sparq-shacl`'s SHACL Compact Syntax (SCS) parser
 # as the `Store::parseShaclCompact(text, base?)` wasm binding — SCS text → the shapes
 # graph serialised as Turtle. OFF by default so the lean bundle is byte-identical to
 # before. Implies BOTH `shacl` (forwards to `sparq-shacl/scs`, which lives under that
@@ -119,14 +119,14 @@ shacl-af = ["shacl", "sparq-shacl/shacl-af"]
 # writer to emit the shapes graph as Turtle — it rolls no new serializer). The site
 # REPL build (js `build:wasm`) turns it on.
 scs = ["shacl", "serialize-rdf", "sparq-shacl/scs"]
-# [OPUS-4.8] sq-dvyi: JSON-LD ingest in the browser, OPT-IN behind the `jsonld` feature
+# sq-dvyi: JSON-LD ingest in the browser, OPT-IN behind the `jsonld` feature
 # (OFF by default). Forwards to sparq-core's `jsonld` feature so the `oxjsonld` parser is
 # only linked when enabled. The DEFAULT (lean) bundle — the one scripts/ci-bench.sh tracks
 # as wasm_bundle_bytes via `cargo build -p sparq-wasm` (no features) — carries ZERO JSON-LD
 # code and stays under the perf-gate floor. The site REPL build (js `build:wasm`) turns this
 # on so the upload/URL loader keeps the JSON-LD capability.
 jsonld = ["sparq-core/jsonld"]
-# [SONNET-4.6] sq-yz27r (#3251): expose `Store::loadJsonLdWithContexts(text, contexts)` —
+# sq-yz27r (#3251): expose `Store::loadJsonLdWithContexts(text, contexts)` —
 # JSON-LD ingest for a document that names its `@context` by URL (the shape every real
 # Verifiable Credential uses), resolved from a caller-supplied `[[url, documentText], …]`
 # map. Implies `jsonld` and links `oxjsonld` DIRECTLY, because installing a
@@ -135,34 +135,34 @@ jsonld = ["sparq-core/jsonld"]
 # `fetch` is not, so the host fetches and this parses (see src/jsonld_context.rs). OFF by
 # default so the lean `wasm_bundle_bytes` baseline is byte-identical.
 jsonld-contexts = ["jsonld", "dep:oxjsonld", "dep:js-sys"]
-# [OPUS-4.8] sq-0ptd (gh-54): OPT-IN `REGEX` / `REPLACE` in the browser. `sparq-engine`'s
+# sq-0ptd (gh-54): OPT-IN `REGEX` / `REPLACE` in the browser. `sparq-engine`'s
 # `regex` feature is default-ON for native but this crate disables the engine's defaults
 # (to keep the regex automata out of the lean bundle — the `wasm_bundle_bytes` perf-gate
 # floor), so `REGEX`/`REPLACE` are compiled OUT by default. Turn this on to forward to
 # `sparq-engine/regex` and get them back (CONTAINS/STRSTARTS/STRENDS/LCASE/... are always
 # present — they are not behind this feature). OFF by default; the lean bundle is unchanged.
 regex = ["sparq-engine/regex"]
-# [OPUS-4.8] sq-fe1s: expose `sparq-engine`'s pretty Turtle / TriG writers as the
+# sq-fe1s: expose `sparq-engine`'s pretty Turtle / TriG writers as the
 # `Store::serialize(format, …)` wasm binding (so a browser store can emit a readable
 # Turtle/TriG document of its contents, not just the flat N-Triples `queryQuads` returns).
 # Forwards to `sparq-engine/serialize-rdf` (which carries the whole serializer matrix and
 # pulls NO new dependency). OFF by default so the lean `wasm_bundle_bytes` baseline is
 # byte-identical to before; the site REPL build (js `build:wasm`) turns it on.
-# [OPUS-4.8] sq-l5kr: also pulls `js-sys` so the `prefixes?` arg (a caller-supplied
+# sq-l5kr: also pulls `js-sys` so the `prefixes?` arg (a caller-supplied
 # `[[prefix, iri], …]` JS array) can be read; `js-sys` is already in the wasm graph, so this
 # adds no new external dependency, and stays OFF the lean default bundle.
 serialize-rdf = ["sparq-engine/serialize-rdf", "dep:js-sys"]
-# [OPUS-4.8] sq-1dd5t (#1047): expose RDFC-1.0 (RDF Dataset Canonicalization) as the
+# sq-1dd5t (#1047): expose RDFC-1.0 (RDF Dataset Canonicalization) as the
 # `canonicalizeNQuads(nquads)` free function the @sparq-org/sparq RDF/JS `Dataset` uses for
 # blank-node-isomorphism-aware `toCanonical` / `equals` / `contains`. Pulls `sparq-canon`
 # (single-sourced RDFC-1.0 over `rdf-canon`) and the getrandom-0.2 browser-backend shim
 # its oxrdf-0.2 bridge needs on wasm. OFF by default so the lean bundle is byte-identical;
 # the published `@sparq-org/sparq` bundle (js `build:wasm`) turns it on.
 canon = ["dep:sparq-canon", "dep:getrandom02"]
-# [FABLE-5] sq-586sh: the ODRL usage-control wasm32 probe (see the sparq-policy
+# sq-586sh: the ODRL usage-control wasm32 probe (see the sparq-policy
 # dependency note above). OFF by default; NOT enabled by the published bundle build.
 policy = ["dep:sparq-policy"]
-# [SONNET-4.6] sq-q4apb (#2396): expose sparq-forms' SHACL-to-form derivation as the
+# sq-q4apb (#2396): expose sparq-forms' SHACL-to-form derivation as the
 # `Store.deriveForm(data, shapes, focus, format, optionsJson)` binding — the hosted-web
 # half of the GUI forms bridge (gui/app's forms-bridge.ts feature-detects exactly this
 # method; desktop uses the Tauri `derive_form` command instead). Returns the
@@ -170,7 +170,7 @@ policy = ["dep:sparq-policy"]
 # document. OFF by default so the lean `wasm_bundle_bytes` baseline is byte-identical;
 # see the sparq-forms dependency note above for the wasm32-safety rationale.
 forms = ["dep:sparq-forms", "dep:serde_json"]
-# [FABLE-5] sq-3ul2n.11 (#2752): route the wasm SERIAL Turtle path through sparq-core's
+# sq-3ul2n.11 (#2752): route the wasm SERIAL Turtle path through sparq-core's
 # native byte-level Turtle parser (`native-ttl`, sq-jocpn) — the structural fix for the
 # sq-wrn61 single-thread Turtle gap. wasm has no threads, so the chunk-parallel Turtle
 # path that wins natively never runs here and the incumbent oxttl serial parser is the
@@ -183,7 +183,7 @@ forms = ["dep:sparq-forms", "dep:serde_json"]
 # `wasm_bundle_bytes` baseline is byte-identical; the published bundle (js `build:wasm`)
 # turns it on.
 native-ttl = ["sparq-core/native-ttl"]
-# [FABLE-5] sq-ixc3.19: expose the engine's STRUCTURED query plan (sparq-engine's
+# sq-ixc3.19: expose the engine's STRUCTURED query plan (sparq-engine's
 # `explain_json::PlanNode` — the sq-u4lgr/#902 typed EXPLAIN tree) as the
 # `Store::explainPlanJson(sparql)` / `Store::explainPlanAnalyzeJson(sparql)` bindings,
 # returning the camelCase JSON tree (`operator`/`estimated`/`actual`/`nanos`/`qError`/
@@ -196,7 +196,7 @@ native-ttl = ["sparq-core/native-ttl"]
 explain-json = ["sparq-engine/explain-json"]
 
 [dev-dependencies]
-# [OPUS-4.8] sq-9qz6 pt2 — headless wasm test harness. Exercises the #[wasm_bindgen]
+# sq-9qz6 pt2 — headless wasm test harness. Exercises the #[wasm_bindgen]
 # JS-facing API (Store load/query/ask/queryQuads/cursors) in a REAL wasm runtime via
 # `wasm-pack test --node`. Dev-only: it must NOT enter the non-dev wasm graph (the
 # wasm-deps-guard checks `-e no-dev`), and its runner pairs with the crate's
@@ -207,7 +207,7 @@ wasm-bindgen-test = "0.3"
 # Optimise the wasm for size.
 wasm-opt = ["-Oz"]
 
-# [OPUS-4.8] sq-7d3dj.1: the shipped bundle (js `build:wasm{,:lean}`) builds the `release-wasm`
+# sq-7d3dj.1: the shipped bundle (js `build:wasm{,:lean}`) builds the `release-wasm`
 # cargo profile (root Cargo.toml — size-optimised cold parse crates). There is intentionally NO
 # `[package.metadata.wasm-pack.profile.release-wasm]` block: wasm-pack only recognises the built-in
 # `dev`/`profiling`/`release` profile keys and warns "unknown key … ignored" for any custom profile

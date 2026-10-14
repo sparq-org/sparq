@@ -28,8 +28,8 @@ src/write_through.rs, src/update.rs) + tests/incremental_remat.rs. -->
 - A materializer cannot use that escape hatch. A diff needs the new full index, which is the
   thing we are trying not to compute. So pod-scoping the **materializer** genuinely does need
   a soundness argument — and a bare origin partition is **not** it.
-- Two further blockers live in the current code and are prerequisites, not details:
-  **positional skolemization** (§3.1) and the **non-partitionable matcher residue** (§3.2).
+- Two further prerequisites were identified: **stable skolemization** (§3.1, fixed by
+  #5549) and the still **non-partitionable matcher residue** (§3.2).
 - Recommendation (§5): a **dependency-closure scoped materializer** with a mandatory
   fail-safe fallback to a full run, staged behind a profile and two hardening beads. §7
   gives the property test the invariant hangs on; §8 the disjoint child beads.
@@ -209,30 +209,27 @@ choice in §4, and which would also make `matchers_eq` (`authindex.rs:588`) repo
 difference on every scoped write and collapse `reindex_with` straight back to
 `ReindexScope::Full` (`lib.rs:653-654`), destroying the win `sq-b7k7u` bought.
 
-## 3. Two blockers in the current code
+## 3. Skolem stability and matcher residue
 
-### 3.1 Skolemization is positional, and `put_acl` permutes positions
+### 3.1 Stable skolemization (resolved by #5549)
 
-`skolemize` keys on `gix`, the **index** of the graph in `graph.named`
-(`loader.rs:143-148`, enumerated at `:197` and `:258`). `take_named_slot` uses
-`Vec::swap_remove` and the new content is `push`ed (`write_through.rs:249-251`, `:295-298`),
-so a `put_acl`/`delete_acl` at a non-final position **renumbers other documents' skolem
-IRIs**.
+Previously, `skolemize` keyed on the **index** of the graph in `graph.named`.
+`take_named_slot` uses `Vec::swap_remove` and the new content is `push`ed, so an
+unrelated `put_acl`/`delete_acl` could change another document's skolem IRIs.
 
 Those IRIs can reach the auth view: a blank-node `acp:noneOf` matcher — idiomatic in Turtle
 ACRs — surfaces as the object of `auth:exceptMatcher` (`acp-c.n3:104`, `:115`) and as the
-subject of the copied `MATCHER_FACTS`. Today that is merely wasteful (the whole view is
-rebuilt consistently each time), but it means:
+subject of the copied `MATCHER_FACTS`. The whole view was rebuilt consistently, so
+authorization decisions remained correct, but `matchers_eq` detected artificial
+changes and forced full session-cache invalidation. Retained slices also could not
+rely on stable identities for a future scoped materializer.
 
-- **for `sq-b7k7u`, already:** a `put_acl` on such a store churns `matcher_agents` for
-  unrelated documents ⇒ `matchers_eq` false ⇒ full cache clear on every ACL write. A real
-  perf defect in the shipped diff. No current fixture has a blank-node matcher, so it is
-  untested. Filed as a follow-up.
-- **for `sq-nmx4l`:** a splice is impossible while retained slices hold skolem IRIs that the
-  re-derived slice renumbers. **Hard prerequisite.**
-
-Fix: key the skolem on the graph **IRI** (or on a stable per-document id), not on the vector
-index. Cheap, local to `loader.rs`, and independently valuable.
+The loader now uses `urn:skolem:graph:<encoded-graph-IRI>:<encoded-label>`, with each
+component UTF-8 percent-encoded (only URI-unreserved characters remain literal).
+This injective encoding keeps graph/label pairs distinct without a hash dependency.
+The blank-node matcher fixture and loader regression tests cover authorization
+decisions, unchanged skolem IRIs and `matchers_eq`, and preservation of a warmed
+session across unrelated PUT and DELETE operations that move the graph's position.
 
 ### 3.2 Matcher facts are the non-partitionable residue
 

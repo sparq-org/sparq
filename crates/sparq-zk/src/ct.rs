@@ -1,4 +1,4 @@
-// [OPUS-5] sq-j3b9 (follow-up to sq-8jv7, gap CR-G5) — mark for crypto re-review.
+// sq-j3b9 (follow-up to sq-8jv7, gap CR-G5) — mark for crypto re-review.
 //! Scalar-independent Baby-JubJub scalar multiplication for the SECRET-scalar
 //! paths of [`crate::sig`] (issuer/holder key derivation and Schnorr signing).
 //!
@@ -39,7 +39,7 @@
 //! `d` non-square) and `ark-ec` implements the unified `E^e` addition — the same
 //! property `mul_bigint` already relies on for its own accumulator.
 //!
-//! # HONESTY — what this does and does NOT claim [OPUS-5]
+//! # HONESTY — what this does and does NOT claim
 //! **This is NOT a claim that signing is constant-time.** It removes the
 //! secret-scalar-dependent *control flow and loop shape* from the code sparq
 //! owns. Two residuals remain, and neither is closed here:

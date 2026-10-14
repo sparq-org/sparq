@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ncvq.16 — guard that the CENTRAL conformance scoreboard's
+//! sq-ncvq.16 — guard that the CENTRAL conformance scoreboard's
 //! declared ratchet floors stay in lock-step with the floors the runners actually
 //! enforce.
 //!
@@ -12,7 +12,7 @@
 //! can never silently fall out of sync with what CI enforces. If a runner raises
 //! its floor, this test fails until the registry is updated too.
 //!
-//! # [SONNET-4.6] sq-z1xv8 — the textual read is now CRATE-LOCAL ONLY
+//! # sq-z1xv8 — the textual read is now CRATE-LOCAL ONLY
 //!
 //! This guard used to reach OUT of `sparq-conformance` and read sibling crates'
 //! test sources (`sparq-shacl`, `sparq-geo`, `sparq-solid`, `sparq-policy`,
@@ -54,7 +54,7 @@ fn const_floor_in(rel_from_crate: &str, const_name: &str) -> usize {
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     for line in src.lines() {
         let line = line.trim();
-        // [OPUS-4.8] sq-t58w.6 — tolerate an optional `pub ` visibility prefix: some
+        // sq-t58w.6 — tolerate an optional `pub ` visibility prefix: some
         // floor consts are declared `pub const` (so a sibling test module can read
         // them), others bare `const`. Match e.g. `const NT_SYNTAX_FLOOR: usize = 12;`
         // AND `pub const D_ENTAIL_FLOOR: usize = 5;` (ignoring any trailing comment).
@@ -94,7 +94,7 @@ fn const_floor_in(rel_from_crate: &str, const_name: &str) -> usize {
 /// read that escapes the crate dir is the CI test-selection hole sq-z1xv8 closed (see
 /// the module docs).
 const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
-    // [SONNET-4.6] sq-z1xv8 — the ELEVEN foreign-runner ratchets (W3C SHACL core +
+    // sq-z1xv8 — the ELEVEN foreign-runner ratchets (W3C SHACL core +
     // SHACL-SPARQL, both OGC GeoSPARQL lanes, Solid WAC/ACP decision parity + the two
     // differential oracles, the SolidLab ODRL suite, the sparq-text BM25 oracle, the
     // sparq-rsp expressivity oracle) are NO LONGER listed here. Their floor consts
@@ -107,7 +107,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
     // "residual 3". These eleven are the `SHARED_CRATE_FLOORS` set below; the
     // `all_crate_test_suites_are_guarded` test exempts exactly them.
     //
-    // [FABLE-5] sq-oy1f.40 — the SIX W3C JSON-LD 1.1 ratchets (toRdf, fromRdf,
+    // sq-oy1f.40 — the SIX W3C JSON-LD 1.1 ratchets (toRdf, fromRdf,
     // compact, frame, expand, flatten) are NO LONGER listed here. Their floor consts
     // moved LIB-SIDE to `src/floors/<lane>.rs` (`floors::<lane>::FLOOR`) and are
     // IMPORTED directly into the `Suite` rows in `scoreboard::SUITES`
@@ -119,7 +119,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
     // `all_crate_test_suites_are_guarded` test exempts exactly them, so no OTHER
     // crate-test suite can silently escape the textual guard. See
     // `crates/sparq-conformance/src/floors/mod.rs`.
-    // [FABLE-5] sq-tonhr.2 (epic sq-tonhr) — the W3C rdf-n-triples / rdf-n-quads /
+    // sq-tonhr.2 (epic sq-tonhr) — the W3C rdf-n-triples / rdf-n-quads /
     // rdf-trig syntax-suite ratchets. The three floor consts live in this crate's
     // `tests/rdf_line_syntax_ratchet.rs` (default-on, self-skipping without the fetched
     // w3c/rdf-tests data); the guard reads them textually so the central scoreboard's
@@ -139,7 +139,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/rdf_line_syntax_ratchet.rs",
         "TRIG_SYNTAX_FLOOR",
     ),
-    // [OPUS-4.8] sq-e5atd (epic sq-pbz04) — the W3C SPARQL 1.1 D-entailment ratchet.
+    // sq-e5atd (epic sq-pbz04) — the W3C SPARQL 1.1 D-entailment ratchet.
     // `pub const D_ENTAIL_FLOOR` lives in this crate's `tests/d_entail_suite.rs`
     // (behind the opt-in `d-entail` feature, inside the `gated` module — the guard
     // reads it TEXTUALLY, so the `#[cfg]`/module nesting do not affect the match);
@@ -150,7 +150,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/d_entail_suite.rs",
         "D_ENTAIL_FLOOR",
     ),
-    // [FABLE-5] sq-pbz04.5.5 (epic sq-pbz04.5) — the W3C RIF WG Core test-suite
+    // sq-pbz04.5.5 (epic sq-pbz04.5) — the W3C RIF WG Core test-suite
     // CONFORMANCE ratchet. `pub const RIF_WG_CORE_FLOOR` lives in this crate's
     // `tests/rif_wg_core_suite.rs` (behind the opt-in `rif-wg-core` feature, inside the
     // `gated` module — the guard reads it TEXTUALLY, so the `#[cfg]`/module nesting do
@@ -163,7 +163,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/rif_wg_core_suite.rs",
         "RIF_WG_CORE_FLOOR",
     ),
-    // [FABLE-5] sq-pbz04.6.4 (epic sq-pbz04.6) — the sparq D VALUE-SPACE MATRIX arm's
+    // sq-pbz04.6.4 (epic sq-pbz04.6) — the sparq D VALUE-SPACE MATRIX arm's
     // EXTENSION ratchet. `pub const D_VALUE_MATRIX_FLOOR` lives in this crate's
     // `tests/d_entail_suite.rs` (behind the opt-in `d-entail` feature, inside the `gated`
     // module — the guard reads it TEXTUALLY, so the `#[cfg]`/module nesting do not affect
@@ -175,7 +175,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/d_entail_suite.rs",
         "D_VALUE_MATRIX_FLOOR",
     ),
-    // [OPUS-4.8] sq-ddpgx (epic sq-my8wd) — the W3C SPARQL 1.1 sparql11/service
+    // sq-ddpgx (epic sq-my8wd) — the W3C SPARQL 1.1 sparql11/service
     // EVALUATION ratchet. `pub const SERVICE_EVAL_FLOOR` lives in this crate's
     // `tests/service_eval_suite.rs` (behind the opt-in `service` feature, inside the
     // `gated` module — the guard reads it TEXTUALLY, so the `#[cfg]`/module nesting
@@ -186,7 +186,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/service_eval_suite.rs",
         "SERVICE_EVAL_FLOOR",
     ),
-    // [OPUS-4.8] sq-jaj38 (epic sq-my8wd) — the W3C SPARQL 1.1 PROTOCOL (HTTP layer) ratchet.
+    // sq-jaj38 (epic sq-my8wd) — the W3C SPARQL 1.1 PROTOCOL (HTTP layer) ratchet.
     // `pub const HTTP_PROTOCOL_FLOOR` lives in this crate's `tests/http_protocol_suite.rs`
     // (behind the opt-in `http-protocol` feature, inside the `gated` module — the guard reads
     // it TEXTUALLY, so the `#[cfg]`/module nesting do not affect the match); the guard pins the
@@ -196,7 +196,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/http_protocol_suite.rs",
         "HTTP_PROTOCOL_FLOOR",
     ),
-    // [OPUS-4.8] sq-1uuxz (epic sq-my8wd) — the SPARQL 1.1 SERVICE-DESCRIPTION +
+    // sq-1uuxz (epic sq-my8wd) — the SPARQL 1.1 SERVICE-DESCRIPTION +
     // GRAPH-STORE PROTOCOL ratchet. `pub const SD_GSP_FLOOR` lives in this crate's
     // `tests/sd_gsp_suite.rs` (behind the opt-in `federation-descriptors` feature, inside
     // the `gated` module — the guard reads it TEXTUALLY, so the `#[cfg]`/module nesting do
@@ -207,7 +207,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/sd_gsp_suite.rs",
         "SD_GSP_FLOOR",
     ),
-    // [OPUS-4.8] sq-rh4gu (epic sq-pbz04) — the RIF-Core EXPRESSIVITY ratchet. The
+    // sq-rh4gu (epic sq-pbz04) — the RIF-Core EXPRESSIVITY ratchet. The
     // floor const (`pub const RIF_CORE_FLOOR`) lives in THIS crate's
     // `tests/rif_core_suite.rs` (behind the opt-in `rif-core` feature, inside the
     // `gated` module — the guard reads it TEXTUALLY, so the `#[cfg]`/module nesting
@@ -220,7 +220,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/rif_core_suite.rs",
         "RIF_CORE_FLOOR",
     ),
-    // [OPUS-4.8] sq-qo1a9 (epic sq-pbz04, the LAST conformance bead) — the GRADUATED
+    // sq-qo1a9 (epic sq-pbz04, the LAST conformance bead) — the GRADUATED
     // OWL 2 QL (DL-Lite_R) CERTAIN-ANSWER oracle ratchet. The floor const
     // (`pub const QL_DLLITE_FLOOR`) lives in THIS crate's `tests/ql_dllite_suite.rs`
     // (behind the opt-in `ql-experimental` feature, inside the `gated` module — the
@@ -234,7 +234,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/ql_dllite_suite.rs",
         "QL_DLLITE_FLOOR",
     ),
-    // [FABLE-5] sq-pbz04.3.4 (epic sq-pbz04.3) — the OWL 2 QL ENTAILMENT-REGIME
+    // sq-pbz04.3.4 (epic sq-pbz04.3) — the OWL 2 QL ENTAILMENT-REGIME
     // GRADUATED-SUBSET ratchet. The floor const (`pub const QL_ENTAILMENT_FLOOR`)
     // lives in THIS crate's `tests/ql_entailment_floor.rs` (behind the opt-in
     // `ql-experimental` feature, inside the `gated` module — the guard reads it
@@ -248,7 +248,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/ql_entailment_floor.rs",
         "QL_ENTAILMENT_FLOOR",
     ),
-    // [SONNET-4.6] sq-pbz04.2.4 (epic sq-pbz04) — the OWL 2 EL classification ratchet.
+    // sq-pbz04.2.4 (epic sq-pbz04) — the OWL 2 EL classification ratchet.
     // The floor const (`pub const EL_SUITE_FLOOR`) lives in THIS crate's
     // `tests/el_suite.rs` (behind the opt-in `el-suite` feature, inside the `gated`
     // module — the guard reads it TEXTUALLY, so the `#[cfg]`/module nesting do not
@@ -261,7 +261,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/el_suite.rs",
         "EL_SUITE_FLOOR",
     ),
-    // [FABLE-5] sq-pbz04.4.5 (epic sq-pbz04.4) — the OWL 2 DIRECT-SEMANTICS arm's two
+    // sq-pbz04.4.5 (epic sq-pbz04.4) — the OWL 2 DIRECT-SEMANTICS arm's two
     // ratchets. The floor consts (`pub const DL_PROFILE_FLOOR` / `DL_DIRECT_FLOOR`)
     // live in THIS crate's `tests/dl_suite.rs` (behind the opt-in `dl-direct` feature,
     // inside the `gated` module — the guard reads them TEXTUALLY, so the
@@ -281,7 +281,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
         "tests/dl_suite.rs",
         "DL_DIRECT_FLOOR",
     ),
-    // [FABLE-5] the UFO-SN3 finite-world expressibility ratchet. The floor const
+    // the UFO-SN3 finite-world expressibility ratchet. The floor const
     // (`pub const UFO_SN3_FLOOR`) lives top-level in THIS crate's
     // `tests/ufo_sn3_suite.rs` (UNGATED — the lane calls plain `reason_n3` and runs
     // in ordinary `cargo test --workspace`); the guard reads it TEXTUALLY so the
@@ -309,7 +309,7 @@ const CRATE_LOCAL_FLOORS: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// [SONNET-4.6] sq-z1xv8 — the suite labels whose ratchet floor is sourced at COMPILE
+/// sq-z1xv8 — the suite labels whose ratchet floor is sourced at COMPILE
 /// TIME from the SHARED `sparq-conformance-floors` crate, imported into BOTH
 /// `scoreboard::SUITES` and the enforcing runner in its own crate. These eleven do NOT
 /// need — and must NOT have — a textual floor-sync row in `CRATE_LOCAL_FLOORS`: the
@@ -330,7 +330,7 @@ const SHARED_CRATE_FLOORS: &[&str] = &[
     "RSP expressivity / SRBench correctness",
 ];
 
-/// [SONNET-4.6] sq-z1xv8 — the pinned floor VALUES the eleven shared-crate registry
+/// sq-z1xv8 — the pinned floor VALUES the eleven shared-crate registry
 /// rows must carry, as `(label, expected_floor)`. Because the registry imports the
 /// shared `const` directly, drift is impossible — but a silent LOWERING is not: editing
 /// `sparq-conformance-floors` down would drop the registry value with it. A ratchet may
@@ -353,7 +353,7 @@ const SHARED_CRATE_EXPECTED: &[(&str, usize)] = &[
     ("RSP expressivity / SRBench correctness", 317),
 ];
 
-/// [FABLE-5] sq-oy1f.40 — the suite labels whose ratchet floor is sourced at
+/// sq-oy1f.40 — the suite labels whose ratchet floor is sourced at
 /// COMPILE TIME from the LIB-SIDE `sparq_conformance::floors::<lane>::FLOOR` const
 /// (imported into BOTH `scoreboard::SUITES` and the `jsonld_suite` runner). These
 /// six do NOT need a textual floor-sync row in `CRATE_LOCAL_FLOORS`: the registry
@@ -369,7 +369,7 @@ const LIB_SOURCED_FLOORS: &[&str] = &[
     "W3C JSON-LD 1.1 flatten",
 ];
 
-/// [FABLE-5] sq-oy1f.40 — the pinned floor VALUES the six lib-sourced JSON-LD
+/// sq-oy1f.40 — the pinned floor VALUES the six lib-sourced JSON-LD
 /// registry rows must carry, as `(label, expected_floor)`. Because the registry
 /// imports the lib-side `const` directly, this compile-time check catches a silent
 /// LOWERING of any of the six floors (a ratchet may only RISE): if someone edits
@@ -381,33 +381,33 @@ const LIB_SOURCED_FLOORS: &[&str] = &[
 /// hard-coded duplicate of the number in two source files.
 const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     ("W3C JSON-LD 1.1 toRdf", 413),
-    // [FABLE-5] sq-oy1f.28 — raised 51 → 52: the lane flipped from the engine-writer
+    // sq-oy1f.28 — raised 51 → 52: the lane flipped from the engine-writer
     // round-trip oracle to the native document-level `sparq_jsonld::from_rdf` (§8.1)
     // oracle (normative expected-doc comparison + scoped round-trip + REAL negative
     // error-code assertions). Bumped in the SAME commit as src/floors/from_rdf.rs::FLOOR
     // and the ci.yml job name (rise-only; side-by-side in src/floors/from_rdf.rs).
     ("W3C JSON-LD 1.1 fromRdf", 52),
-    // [FABLE-5] sq-oy1f.27 — oracle-correction re-pin 186 → 228: the compact lane
+    // sq-oy1f.27 — oracle-correction re-pin 186 → 228: the compact lane
     // moved from the RDF-writer self-reparse round-trip to the NATIVE document-level
     // Compaction Algorithm compared against the W3C EXPECTED document (see
     // src/floors/compact.rs for the side-by-side). Bumped in the SAME commit as the
     // lib const (rise-only).
-    // [OPUS-5] sq-gzsky — raised 228 → 243: the lane now RUNS the 17
+    // sq-gzsky — raised 228 → 243: the lane now RUNS the 17
     // NegativeEvaluationTests against the manifest's `expectErrorCode` instead of
     // skipping them (a wrong code is a FAIL). Bumped in the SAME commit as the lib
     // const src/floors/compact.rs::FLOOR (rise-only).
     ("W3C JSON-LD 1.1 compact", 243),
-    // [FABLE-5] sq-oy1f.29 — raised 61 → 92: the frame lane moved from the RDF-first
+    // sq-oy1f.29 — raised 61 → 92: the frame lane moved from the RDF-first
     // framer (`graph_to_jsonld_framed`) to the NATIVE Framing pipeline compared against
     // the W3C EXPECTED document under the stronger normative oracle (see
     // src/floors/frame.rs for the side-by-side). Bumped in the SAME commit as the lib
     // const src/floors/frame.rs::FLOOR and the ci.yml grep gate (rise-only).
     ("W3C JSON-LD 1.1 frame", 92),
-    // [SONNET-4.6] sq-oy1f.45 — raised 259 → 276 (expand() correctness: FsLoader
+    // sq-oy1f.45 — raised 259 → 276 (expand() correctness: FsLoader
     // wiring + @id-null retention + IRI-colon scheme check + @nest scoped ctx
     // propagation + @reverse @index + 1.0-mode round-trip guard). Bumped in the
     // SAME commit as src/floors/expand.rs::FLOOR (rise-only).
-    // [OPUS-5] sq-gzsky — raised 276 → 381: the 109-case NegativeEvaluationTest SKIP
+    // sq-gzsky — raised 276 → 381: the 109-case NegativeEvaluationTest SKIP
     // bucket (the WHOLE expand gap) is closed — the lane RUNS them against the
     // manifest's `expectErrorCode` — plus seven spec-faithful sparq-jsonld fixes
     // (@included arrayification, @type+@direction, datatype-IRI + blank-node-datatype
@@ -415,7 +415,7 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     // @container arrays and relative @vocab). Bumped in the SAME commit as
     // src/floors/expand.rs::FLOOR (rise-only).
     ("W3C JSON-LD 1.1 expand", 381),
-    // [FABLE-5] sq-oy1f.26 — oracle-change re-pin (RDF-writer 50 → native flatten() 53).
+    // sq-oy1f.26 — oracle-change re-pin (RDF-writer 50 → native flatten() 53).
     // The native lane composes over expand() and inherits the sq-oy1f.37 expand raises,
     // so merging main flips its 7 inherited fails to passes and it now MEASURES 53 pass /
     // 0 fail on the merged tree — a net RISE above the old writer oracle's 50 (union of
@@ -423,7 +423,7 @@ const LIB_SOURCED_EXPECTED: &[(&str, usize)] = &[
     ("W3C JSON-LD 1.1 flatten", 53),
 ];
 
-/// [FABLE-5] sq-oy1f.40 — the registry's six lib-sourced JSON-LD floors carry the
+/// sq-oy1f.40 — the registry's six lib-sourced JSON-LD floors carry the
 /// pinned values (a ratchet may only RISE; a silent LOWERING of a
 /// `src/floors/<lane>::FLOOR` const drops the registry value and trips this).
 #[test]
@@ -443,7 +443,7 @@ fn lib_sourced_jsonld_floors_are_pinned() {
     }
 }
 
-/// [SONNET-4.6] sq-z1xv8 — the registry's eleven shared-crate floors carry the pinned
+/// sq-z1xv8 — the registry's eleven shared-crate floors carry the pinned
 /// values (a ratchet may only RISE; a silent LOWERING of a
 /// `sparq_conformance_floors::<module>::<FLOOR>` const drops the registry value and
 /// trips this). Also asserts the registry row and the shared const are literally the
@@ -527,7 +527,7 @@ fn shared_crate_floors_are_pinned() {
     }
 }
 
-/// [SONNET-4.6] sq-z1xv8 — the textual guard may only read sources inside THIS crate.
+/// sq-z1xv8 — the textual guard may only read sources inside THIS crate.
 ///
 /// `const_floor_in` resolves against `CARGO_MANIFEST_DIR`, so a row naming `../<other
 /// crate>` would re-open the CI test-selection hole this bead closed: an out-of-crate
@@ -564,7 +564,7 @@ fn central_floors_match_crate_local_sources() {
             .iter()
             .find(|s| s.label == *label)
             .unwrap_or_else(|| panic!("scoreboard registry missing suite {label:?}"));
-        // It must be a crate-test suite (not a binary one). [OPUS-4.8] sq-oy1f.2:
+        // It must be a crate-test suite (not a binary one). sq-oy1f.2:
         // the feature-gated JSON-LD lane is a `FeatureGatedCrateTest` — still a
         // crate-local `cargo test` whose floor lives in source, so it is covered
         // by the same textual floor-sync guard.
@@ -589,7 +589,7 @@ fn central_floors_match_crate_local_sources() {
 /// Every crate-test suite in the registry is covered by a sync check above (so a
 /// new crate-local ratchet added to `SUITES` cannot escape the guard).
 ///
-/// [FABLE-5] sq-oy1f.40 / [SONNET-4.6] sq-z1xv8 — a crate-test suite is guarded by
+/// sq-oy1f.40 / sq-z1xv8 — a crate-test suite is guarded by
 /// EXACTLY ONE of three mechanisms:
 ///
 /// 1. a TEXTUAL floor-sync row in `CRATE_LOCAL_FLOORS` — the runner lives in THIS
@@ -609,7 +609,7 @@ fn central_floors_match_crate_local_sources() {
 #[test]
 fn all_crate_test_suites_are_guarded() {
     for suite in SUITES {
-        // [OPUS-4.8] sq-oy1f.2: cover both the plain and the feature-gated
+        // sq-oy1f.2: cover both the plain and the feature-gated
         // crate-test runners — neither may escape the floor-sync guard.
         if matches!(
             suite.runner,
@@ -662,69 +662,69 @@ fn scoreboard_renders_all_suites() {
     // (sq-t58w.8) now all appear in this central report.
     assert!(md.contains("W3C SHACL core"));
     assert!(md.contains("OGC GeoSPARQL topology compliance"));
-    // [OPUS-4.8] sq-wf9qg — the OGC GeoSPARQL query-rewrite extension ratchet.
+    // sq-wf9qg — the OGC GeoSPARQL query-rewrite extension ratchet.
     assert!(md.contains("OGC GeoSPARQL query-rewrite extension"));
     assert!(md.contains("Solid WAC decision parity"));
     assert!(md.contains("Solid ACP decision parity"));
     assert!(md.contains("Solid WAC differential oracle"));
     assert!(md.contains("Solid ACP differential oracle"));
-    // [OPUS-4.8] sq-oy1f.2 — the W3C JSON-LD 1.1 toRdf + fromRdf ratchets.
+    // sq-oy1f.2 — the W3C JSON-LD 1.1 toRdf + fromRdf ratchets.
     assert!(md.contains("W3C JSON-LD 1.1 toRdf"));
     assert!(md.contains("W3C JSON-LD 1.1 fromRdf"));
-    // [OPUS-4.8] sq-3uos5 — the W3C JSON-LD 1.1 compact ratchet.
+    // sq-3uos5 — the W3C JSON-LD 1.1 compact ratchet.
     assert!(md.contains("W3C JSON-LD 1.1 compact"));
-    // [OPUS-4.8] sq-oy1f — the W3C JSON-LD 1.1 expand + flatten ratchets.
+    // sq-oy1f — the W3C JSON-LD 1.1 expand + flatten ratchets.
     assert!(md.contains("W3C JSON-LD 1.1 expand"));
     assert!(md.contains("W3C JSON-LD 1.1 flatten"));
-    // [OPUS-4.8] sq-tmsd6 — the SolidLab ODRL Test Suite decision-parity ratchet.
+    // sq-tmsd6 — the SolidLab ODRL Test Suite decision-parity ratchet.
     assert!(md.contains("SolidLab ODRL Test Suite"));
-    // [OPUS-4.8] sq-e5atd — the W3C SPARQL 1.1 D-entailment ratchet.
+    // sq-e5atd — the W3C SPARQL 1.1 D-entailment ratchet.
     assert!(md.contains("W3C SPARQL 1.1 D-entailment"));
-    // [FABLE-5] sq-pbz04.5.5 — the W3C RIF WG Core test-suite conformance ratchet (a
+    // sq-pbz04.5.5 — the W3C RIF WG Core test-suite conformance ratchet (a
     // STANDARDS lane, family "W3C RIF" — NOT the sparq-extension RIF-Core expressivity row).
     assert!(md.contains("W3C RIF WG Core test suite"));
-    // [OPUS-4.8] sq-ddpgx — the W3C SPARQL 1.1 sparql11/service evaluation ratchet.
+    // sq-ddpgx — the W3C SPARQL 1.1 sparql11/service evaluation ratchet.
     assert!(md.contains("W3C SPARQL 1.1 sparql11/service evaluation"));
-    // [OPUS-4.8] sq-jaj38 — the W3C SPARQL 1.1 Protocol (HTTP layer) ratchet.
+    // sq-jaj38 — the W3C SPARQL 1.1 Protocol (HTTP layer) ratchet.
     assert!(md.contains("W3C SPARQL 1.1 Protocol (HTTP)"));
-    // [OPUS-4.8] sq-1uuxz — the SPARQL 1.1 Service Description + Graph Store Protocol ratchet.
+    // sq-1uuxz — the SPARQL 1.1 Service Description + Graph Store Protocol ratchet.
     assert!(md.contains("SPARQL 1.1 Service Description + Graph Store Protocol"));
-    // [OPUS-4.8] sq-ripcg — the sparq-text BM25 differential oracle, HONESTLY
+    // sq-ripcg — the sparq-text BM25 differential oracle, HONESTLY
     // rendered as a sparq EXTENSION (not a conformance claim): the row, its
     // `sparq extension` family, and the explicit "NOT conformance" total-line
     // disclaimer must all appear.
     assert!(md.contains("text-search differential oracle"));
     assert!(md.contains("sparq extension"));
     assert!(md.contains("NOT a standards-conformance claim") || md.contains("NOT conformance"));
-    // [OPUS-4.8] sq-mcb3q — the sparq-rsp RSP expressivity / SRBench correctness
+    // sq-mcb3q — the sparq-rsp RSP expressivity / SRBench correctness
     // oracle, HONESTLY rendered as a sparq EXTENSION (not a conformance claim):
     // the row appears, and (now there are TWO extension rows) the total line
     // pluralises to "rows".
     assert!(md.contains("RSP expressivity / SRBench correctness"));
-    // [OPUS-4.8] sq-rh4gu — the RIF-Core expressivity ratchet, HONESTLY rendered as
+    // sq-rh4gu — the RIF-Core expressivity ratchet, HONESTLY rendered as
     // a sparq EXTENSION over the RIF-Core (monotone Horn) subset.
     assert!(md.contains("RIF-Core expressivity (monotone Horn subset)"));
-    // [OPUS-4.8] sq-qo1a9 — the GRADUATED OWL 2 QL (DL-Lite_R) certain-answer oracle,
+    // sq-qo1a9 — the GRADUATED OWL 2 QL (DL-Lite_R) certain-answer oracle,
     // HONESTLY rendered as a sparq EXTENSION (NOT folded into the conformance total).
     assert!(md.contains("OWL 2 QL (DL-Lite_R) certain-answer oracle"));
-    // [FABLE-5] sq-pbz04.3.4 — the OWL 2 QL entailment-regime graduated-subset
+    // sq-pbz04.3.4 — the OWL 2 QL entailment-regime graduated-subset
     // ratchet (the pinned named-case floor), HONESTLY rendered as a sparq EXTENSION
     // (NOT folded into the conformance total).
     assert!(md.contains("OWL 2 QL entailment-regime graduated subset"));
-    // [SONNET-4.6] sq-pbz04.2.4 — the OWL 2 EL classification ratchet, HONESTLY rendered
+    // sq-pbz04.2.4 — the OWL 2 EL classification ratchet, HONESTLY rendered
     // as a sparq EXTENSION (the total line pluralises to "rows", and it is NOT folded
     // into the conformance total).
     assert!(md.contains("OWL 2 EL classification (sparq-reason-el)"));
-    // [FABLE-5] sq-pbz04.4.5 — the two OWL 2 Direct-Semantics arm rows, HONESTLY
+    // sq-pbz04.4.5 — the two OWL 2 Direct-Semantics arm rows, HONESTLY
     // rendered as sparq EXTENSIONS over the scoped fragment (NOT full OWL 2 DL, NOT
     // folded into the conformance total).
     assert!(md.contains("OWL 2 DL profile identification (Direct arm)"));
     assert!(md.contains("OWL 2 Direct-Semantics consistency + entailment (scoped fragment)"));
     assert!(md.contains("NOT full OWL 2 DL"));
-    // [FABLE-5] sq-pbz04.6.4 — the sparq D value-space matrix, HONESTLY rendered as a
+    // sq-pbz04.6.4 — the sparq D value-space matrix, HONESTLY rendered as a
     // sparq EXTENSION (tallied separately from the W3C D-entailment pass count).
     assert!(md.contains("D value-space matrix (integer/decimal/boolean/binary/temporal)"));
-    // [FABLE-5] — the UFO-SN3 finite-world expressibility ratchet, HONESTLY rendered
+    // — the UFO-SN3 finite-world expressibility ratchet, HONESTLY rendered
     // as a sparq EXTENSION (no normative UFO/gUFO conformance suite exists; NOT
     // folded into the conformance total).
     assert!(md.contains("UFO-SN3 finite-world expressibility"));

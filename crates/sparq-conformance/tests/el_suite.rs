@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-pbz04.2.4 (epic sq-pbz04) — the OWL 2 EL entailment-regime
+//! sq-pbz04.2.4 (epic sq-pbz04) — the OWL 2 EL entailment-regime
 //! EXPRESSIVITY ratchet, wired as a crate-local `cargo test` + a pinned pass-count
 //! FLOOR that may only RISE (registered in the central `scoreboard::SUITES` and
 //! guarded by `tests/scoreboard_floors.rs`), mirroring the sibling `d-entail` /
@@ -67,7 +67,7 @@
 //! `tests/scoreboard_floors.rs`, so the central scoreboard's mirrored value can never
 //! silently drift.
 
-// [SONNET-4.6] When the lane feature is OFF the runner is a single self-SKIP test so
+// When the lane feature is OFF the runner is a single self-SKIP test so
 // the default + `--workspace` builds neither link the EL classifier nor go red on a
 // fresh checkout. (cfg gate, not a runtime branch — zero EL code compiles in the
 // default state, the lean-core invariant.)
@@ -86,7 +86,7 @@ mod gated {
     use sparq_conformance::inference::entail::{self, Recognized, Row};
     use sparq_conformance::rdf::MiniGraph;
     use sparq_core::dict::{Dict, Id};
-    // [SONNET-4.6] sq-pbz04.2.10: use BOTH `classify_graph` (TBox rdfs:subClassOf +
+    // sq-pbz04.2.10: use BOTH `classify_graph` (TBox rdfs:subClassOf +
     // rdfs:subPropertyOf closure) AND `realize_graph` (ABox rdf:type / owl:sameAs /
     // owl:differentFrom + whole-ontology inconsistency verdict) so the CI lane exercises
     // the full shipped feature set: classify_graph first (materializes TBox subsumption +
@@ -138,7 +138,7 @@ mod gated {
     ///
     /// The lane-local `el_cr4_derivation_canary` test closes the gap for CR4
     /// existential/conjunction derivation — it is NOT counted into this floor.
-    /// [SONNET-4.6] sq-pbz04.2.4 / sq-pbz04.2.9 (RAISED 50→51) / sq-pbz04.2.10
+    /// sq-pbz04.2.4 / sq-pbz04.2.9 (RAISED 50→51) / sq-pbz04.2.10
     /// (RAISED 51→67: ABox graduation — 8 inconsistency + 8 positive-entailment new
     /// passes via abox+realize_graph; equivalentProperty augmentation graduates
     /// WebOnt-equivalentProperty-003)
@@ -181,8 +181,8 @@ mod gated {
     ///   emits `rdfs:subClassOf` edges, not those axioms) or using `owl:unionOf` (outside
     ///   EL — recorded as a skipped axiom).
     ///
-    /// [SONNET-4.6] sq-pbz04.2.4
-    // [SONNET-4.6] sq-pbz04.2.10: pruned 16 graduated entries (now PASS via abox/realize_graph
+    /// sq-pbz04.2.4
+    // sq-pbz04.2.10: pruned 16 graduated entries (now PASS via abox/realize_graph
     // or augment_equivalent_properties): DisjointClasses-002, New-Feature-BottomObjectProperty-001,
     // New-Feature-Keys-001/-002/-003, New-Feature-NegativeDataPropertyAssertion-001,
     // New-Feature-NegativeObjectPropertyAssertion-001, New-Feature-SelfRestriction-001,
@@ -315,7 +315,7 @@ mod gated {
         closure: Vec<Row>,
         /// Count of named classes found unsatisfiable (`⊑ owl:Nothing`).
         unsatisfiable: usize,
-        /// [SONNET-4.6] sq-pbz04.2.10: whole-ontology inconsistency verdict from
+        /// sq-pbz04.2.10: whole-ontology inconsistency verdict from
         /// `realize_graph` — `true` iff an asserted individual is forced into `⊥`, a
         /// global `⊤ ⊑ ⊥`, an NPA clash, or a sameAs/differentFrom contradiction.
         /// Distinct from `unsatisfiable > 0` (TBox named-class clash): `inconsistent`
@@ -349,7 +349,7 @@ mod gated {
 
         // Accounting buckets.
         let mut pass = 0usize;
-        // [SONNET-4.6] Sub-floor: how many of the `pass` rows are positive-entailment
+        // Sub-floor: how many of the `pass` rows are positive-entailment
         // checks. A neutered classifier (empty saturation) cannot derive the W3C
         // equivalentClass conclusions, so this drops to 0 and the sub-floor fires
         // BEFORE `fails.is_empty()` — guaranteeing the derivation gap is caught even
@@ -447,7 +447,7 @@ mod gated {
 
         let total = pass + divergences.len() + fails.len() + deferred.len();
 
-        // [SONNET-4.6] The grep-able ratchet line — pass count in field $6 (`OWL`, `2`,
+        // The grep-able ratchet line — pass count in field $6 (`OWL`, `2`,
         // `EL`, `ratchet`, `pass`, N, `of`, M, `(floor`, F). Positional `println!` args
         // (not inline `{pass}`) per the CodeQL `rust/unused-variable` false-positive guard.
         println!("\nOWL 2 EL classification conformance (pinned OWL WG export, sq-pbz04.2.4)");
@@ -487,14 +487,14 @@ mod gated {
             }
         }
 
-        // [SONNET-4.6] Positive-entailment sub-floor: at least 9 of the counted passes
+        // Positive-entailment sub-floor: at least 9 of the counted passes
         // must be positive-entailment checks. A neutered classifier (empty saturation)
         // loses all W3C positive-entailment passes, dropping this to 0 and turning
         // THIS assert RED before `fails.is_empty()` gets a chance to fire — so the
         // derivation gap is caught even if all new undocumented fails are added to the
         // divergence list first. See FLOOR COMPOSITION note on EL_SUITE_FLOOR.
-        // [SONNET-4.6] sq-pbz04.2.9: raised from 2 to 3 (WebOnt-equivalentClass-003).
-        // [SONNET-4.6] sq-pbz04.2.10: raised from 3 to 9 — 8 ABox positive-entailment
+        // sq-pbz04.2.9: raised from 2 to 3 (WebOnt-equivalentClass-003).
+        // sq-pbz04.2.10: raised from 3 to 9 — 8 ABox positive-entailment
         // tests now graduate via realize_graph + augment_equivalent_properties (total 11).
         // A floor of 9 requires at least 6 ABox-mechanism passes (beyond the original 3).
         assert!(
@@ -614,7 +614,7 @@ mod gated {
         for kind in case.checks.clone() {
             let outcome = match kind {
                 "consistency" => {
-                    // [SONNET-4.6] sq-pbz04.2.10: a consistent ontology must have NEITHER
+                    // sq-pbz04.2.10: a consistent ontology must have NEITHER
                     // a TBox named-class clash NOR a whole-ontology ABox inconsistency.
                     if classified.unsatisfiable == 0 && !classified.inconsistent {
                         Outcome::Pass
@@ -630,7 +630,7 @@ mod gated {
                     }
                 }
                 "inconsistency" => {
-                    // [SONNET-4.6] sq-pbz04.2.10: the ABox-mechanism layer now detects
+                    // sq-pbz04.2.10: the ABox-mechanism layer now detects
                     // whole-ontology inconsistency via `realize_graph`'s `inconsistent`
                     // verdict (covering ABox clashes the TBox classifier cannot see),
                     // in addition to the TBox-level named-class clash (unsatisfiable > 0).
@@ -651,10 +651,10 @@ mod gated {
                     Some(xml) => match parse_ontology(xml, &base) {
                         Err(e) => Outcome::Fail(format!("conclusion RDF/XML parse error: {}", e)),
                         Ok(conclusion) => {
-                            // [SONNET-4.6] sq-pbz04.2.9 — chain both augmentations:
+                            // sq-pbz04.2.9 — chain both augmentations:
                             // (1) datatype axiomatic set (existing), then (2) the
                             // output-vocabulary equivalentClass completion.
-                            // [SONNET-4.6] sq-pbz04.2.10 — (3) the equivalentProperty
+                            // sq-pbz04.2.10 — (3) the equivalentProperty
                             // mutual-rdfs:subPropertyOf completion (over the sq-pbz04.2.7
                             // role-lattice output + the sq-pbz04.2.10 ABox-expanded closure).
                             let closure = augment_datatypes(&classified.closure, &conclusion, &d);
@@ -698,7 +698,7 @@ mod gated {
 
     /// Runs `realize_graph` on a watchdog thread, catching panics + capping runtime.
     ///
-    /// [SONNET-4.6] sq-pbz04.2.10: uses `realize_graph` (the ABox-aware entry) instead
+    /// sq-pbz04.2.10: uses `realize_graph` (the ABox-aware entry) instead
     /// of `classify_graph` so the lane exercises the full ABox-mechanism layer
     /// (sq-pbz04.2.5–.8). The `AboxReport` carries both `unsatisfiable_classes` (TBox
     /// named-class clashes) and `inconsistent` (whole-ontology ABox verdict); both are
@@ -722,7 +722,7 @@ mod gated {
                     .iter()
                     .map(|[s, p, o]| [dict.intern(s), dict.intern(p), dict.intern(o)])
                     .collect();
-                // [SONNET-4.6] sq-pbz04.2.10: two-step composition —
+                // sq-pbz04.2.10: two-step composition —
                 // Step 1: `classify_graph` materializes the TBox rdfs:subClassOf closure
                 //   (and rdfs:subPropertyOf role-lattice under `rbox`) into `ids`. This
                 //   gives the entailment check access to the full TBox derivations.
@@ -735,7 +735,7 @@ mod gated {
                 // The `unsatisfiable_classes` from step 1 covers named-class TBox clashes;
                 // `abox_report.inconsistent` covers whole-ontology ABox clashes.
                 let tbox_report = classify_graph(&mut dict, &mut ids);
-                // [FABLE-5] sq-wy3i6 (Phase E4, `el-suite-par`): the parallel-saturation
+                // sq-wy3i6 (Phase E4, `el-suite-par`): the parallel-saturation
                 // differential over the REAL W3C EL corpus — `classify_graph_par` at
                 // thread counts 1/2/8 must reproduce the sequential closure EXACTLY
                 // (term-level triple-set equality; a fresh Dict per run, so id spaces
@@ -840,7 +840,7 @@ mod gated {
     /// used for the positive-entailment bnode-homomorphism check (the negative-entailment
     /// path keeps the un-augmented closure, per the fail-closed invariant).
     ///
-    /// [SONNET-4.6] sq-pbz04.2.9
+    /// sq-pbz04.2.9
     fn augment_equivalent_classes(closure: &[Row]) -> Vec<Row> {
         const RDFS_SUBCLASSOF: &str = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
         const OWL_EQUIVALENT_CLASS: &str = "http://www.w3.org/2002/07/owl#equivalentClass";
@@ -895,7 +895,7 @@ mod gated {
     /// path keeps the un-augmented closure, per the fail-closed invariant). Named nodes only
     /// (blank-node role nodes are structural, not named properties).
     ///
-    /// [SONNET-4.6] sq-pbz04.2.10
+    /// sq-pbz04.2.10
     fn augment_equivalent_properties(closure: &[Row]) -> Vec<Row> {
         const RDFS_SUB_PROPERTY_OF: &str = "http://www.w3.org/2000/01/rdf-schema#subPropertyOf";
         const OWL_EQUIVALENT_PROPERTY: &str = "http://www.w3.org/2002/07/owl#equivalentProperty";
@@ -953,7 +953,7 @@ mod gated {
         Ok(rows)
     }
 
-    /// [SONNET-4.6] EL derivation canary — lane-local guard, NOT a W3C test case and
+    /// EL derivation canary — lane-local guard, NOT a W3C test case and
     /// NOT counted into the W3C pass total or `EL_SUITE_FLOOR`.
     ///
     /// Verifies the CR4 existential-traversal rule through the SAME
@@ -999,7 +999,7 @@ mod gated {
         let classified =
             classify_under_watchdog(premise).expect("canary: EL realiser must not panic/timeout");
         // A ⊑ D must appear in the derived closure as a plain rdfs:subClassOf triple.
-        // [SONNET-4.6] CodeQL positional format! args used throughout (rust/unused-variable guard).
+        // CodeQL positional format! args used throughout (rust/unused-variable guard).
         let a = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/A".to_string()));
         let sub_class_of = Term::NamedNode(oxrdf::NamedNode::new_unchecked(
             "http://www.w3.org/2000/01/rdf-schema#subClassOf".to_string(),

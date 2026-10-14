@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-toze.36 (cert gap GX-13) — in-binary container HEALTHCHECK probe.
+//! sq-toze.36 (cert gap GX-13) — in-binary container HEALTHCHECK probe.
 //!
 //! CIS Docker Benchmark §4.6 wants a `HEALTHCHECK` baked into the image so the container
 //! runtime can tell an *unhealthy-but-still-running* process apart from a healthy one. The
@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn non_utf8_status_line_is_unhealthy() {
-        // [OPUS-4.8] sq-4vao: a status line whose bytes are not valid UTF-8 (a hostile or
+        // sq-4vao: a status line whose bytes are not valid UTF-8 (a hostile or
         // corrupt peer) must fail closed at the `from_utf8` guard rather than panic — the
         // `0xFF` byte is an invalid UTF-8 start byte, so the whole line fails to decode.
         assert!(!probe_healthy(b"\xFF\xFE 200 OK\r\n\r\n"));
@@ -179,7 +179,7 @@ mod tests {
         assert!(req.ends_with("\r\n\r\n"));
     }
 
-    // [OPUS-4.8] sq-qcnn.37: tokio tests for the async `run_probe` TCP path — the unhealthy
+    // sq-qcnn.37: tokio tests for the async `run_probe` TCP path — the unhealthy
     // response branch (lines 110–117) and the 4 KiB buffer-cap break (line 104). Both require a
     // real TcpListener mock in the same process. The pure `probe_healthy` classifier is already
     // covered by the sync tests above; these pin the I/O path that surrounds it.

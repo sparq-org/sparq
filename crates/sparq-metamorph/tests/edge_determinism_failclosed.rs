@@ -1,5 +1,5 @@
 //! Edge-contract integration tests for deterministic generation and fail-closed
-//! window reporting. [GPT-5.6] sq-bif.32
+//! window reporting. sq-bif.32
 
 use sparq_metamorph::{generate_case, run_window, InProcessSparq, WindowReport};
 

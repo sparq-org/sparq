@@ -1,6 +1,6 @@
 //! The PKG **natural-language tool** envelope (agent flavor) — sq-ve5dy.
 //!
-//! [OPUS-4.8] sq-ve5dy (epic sq-2m6zm); reframes PKG access (sq-2m6zm.3) as a
+//! sq-ve5dy (epic sq-2m6zm); reframes PKG access (sq-2m6zm.3) as a
 //! *natural-language tool call* the cheap-model sub-agent makes on the expensive
 //! orchestrator's behalf. 🤖 SPARQ agent — dogfooding sparq as a project knowledge
 //! graph. Written while Fable unavailable; flag for re-review when Fable returns.
