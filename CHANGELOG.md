@@ -316,6 +316,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   blank nodes afresh: a witness found by one `log:includes` no longer constrains the next
   one in the premise. (refs #6936, #6943)
 
+- **sparq-reason (N3):** three more N3 outputs no longer depend on hash-set traversal order,
+  so the same input gives byte-identical labels, proofs and `term_key` / `statement_keys` on
+  every run and every target. A `log:conclusion` / `log:supports` closure's DERIVED rows are
+  sorted into a canonical term order instead of the nested closure's fact-set order (a
+  formula's row order is part of its term identity). The rdf:first/rest cell labels minted
+  when a list value is interned (`_l<k>_<n>`) are numbered by interning every reachable list
+  value up front in that same order, instead of from a counter bumped as the rows arrived.
+  And where several bindings derive ONE fact from a conclusion with no existentials, the proof
+  step records the LEAST binding's premises rather than whichever binding arrived first, so
+  `why()` names the same supporting facts every run. The `__bw<n>_` backward-renaming counter
+  is still assigned in evaluation order and stays tracked on #6844. (refs #6844)
+
 - **sparq-reason:** `MaterializedN3Graph::new` / `with_limits` now ignore a `base_facts`
   entry with a variable outside a formula, as `insert` already does, instead of adding it
   to the base.

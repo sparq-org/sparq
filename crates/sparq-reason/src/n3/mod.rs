@@ -1853,6 +1853,9 @@ fn run_closure_in(
     let mut fired: Vec<FxHashSet<String>> = vec![FxHashSet::default(); rules.len()];
     let mut scratch = FiringScratch::default();
     let mut sk_counter = 0usize;
+    // Reused per rule and round by the non-existential proof-mode branch (GH #6844), which
+    // dedups a round's bindings by firing key but carries nothing between rounds.
+    let mut round_keys: FxHashSet<String> = FxHashSet::default();
 
     // TRANSITIVITY fast path: rules of the exact shape `{?x P ?y. ?y P ?z} => {?x P ?z}`
     // (ground predicate, three distinct variables, single conclusion, no existentials, not
@@ -2123,8 +2126,35 @@ fn run_closure_in(
                     }
                 };
                 if concl_blanks.is_empty() {
-                    for b in &bindings {
-                        emit(b, None);
+                    if mode == StepMode::Full {
+                        // A conclusion with no existentials is instantiated the same way by
+                        // every binding that shares its firing key, so several bindings can
+                        // derive ONE fact — and only the first to arrive has its premises
+                        // recorded as that fact's proof step (`facts.insert` is the dedup
+                        // below). Arrival order is the fact and delta hash sets' traversal
+                        // order, so `why()` could name different premises run to run and
+                        // native vs `wasm32`. Collapse each firing key to its LEAST binding
+                        // first, exactly as the existential branch does, so the step is a
+                        // function of the round's bindings (a set) alone (GH #6844). The
+                        // round's own key set is the dedup — a key already fired in an
+                        // earlier round must still be emitted, since the fact it derives may
+                        // have been truncated away, and `facts.contains` filters the rest.
+                        round_keys.clear();
+                        for (_, b) in canonical_new_firings(
+                            bindings,
+                            concl_vars,
+                            &mut round_keys,
+                            true,
+                            &mut scratch,
+                        ) {
+                            emit(&b, None);
+                        }
+                    } else {
+                        // No premises are recorded, so nothing observable depends on which
+                        // binding of a key arrives first: keep the cheaper path.
+                        for b in &bindings {
+                            emit(b, None);
+                        }
                     }
                     continue;
                 }
@@ -2316,6 +2346,11 @@ fn intern_closure<K: KeyMode>(
 /// caller is already carrying (a document blank or a projected query answer
 /// literally spelled `_:_l1` would otherwise MERGE with a generated cell and
 /// emit a semantically wrong graph).
+///
+/// Within that prefix the cells are numbered in the canonical order of the list VALUES
+/// reachable in those rows ([`ListExpander::new`] interns them all up front, in
+/// `serialize::term_cmp` order), so a cell label never depends on the order a fact hash set
+/// yields the rows (GH #6844).
 struct ListExpander {
     heads: FxHashMap<Term, Term>,
     structure: Vec<[Term; 3]>,
@@ -2329,11 +2364,30 @@ impl ListExpander {
     /// expand, since the prefix is fixed at construction.
     fn new<'a>(rows: impl IntoIterator<Item = &'a [Term; 3]>) -> Self {
         let mut seen = FxHashSet::default();
+        let mut lists: Vec<&Term> = Vec::new();
         for r in rows {
-            r.iter().for_each(|t| term_blank_labels(t, &mut seen));
+            r.iter().for_each(|t| {
+                term_blank_labels(t, &mut seen);
+                reachable_lists(t, &mut lists);
+            });
         }
         let prefix = fresh_blank_prefix(&seen, "_l");
-        Self { heads: FxHashMap::default(), structure: Vec::new(), counter: 0, prefix }
+        let mut exp =
+            Self { heads: FxHashMap::default(), structure: Vec::new(), counter: 0, prefix };
+        // Number the cells in the canonical order of the list VALUES, not in the order the
+        // rows happen to arrive: `rows` is usually drained from a fact hash SET, so the
+        // arrival order depends on insertion history and on the hasher's word size (native
+        // vs `wasm32`), and a cell label is a blank-node identity that shows up in `why()`
+        // strings, `term_key`s and `sparq-prov` IRIs. Interning every reachable list up
+        // front in one canonical term order, makes each cell label a function of the SET of
+        // rows (GH #6844). Expanding a row later is then a pure cache hit for its lists, so
+        // nothing in `expand` can renumber them.
+        lists.sort_by(|a, b| serialize::term_cmp(a, b));
+        lists.dedup();
+        for t in lists {
+            exp.expand(t);
+        }
+        exp
     }
     fn expand_rows(&mut self, rows: &[[Term; 3]]) -> (Vec<[Term; 3]>, Vec<[Term; 3]>) {
         let out: Vec<[Term; 3]> = rows.iter().map(|r| self.expand_row(r)).collect();
@@ -2371,6 +2425,21 @@ impl ListExpander {
         }
         self.heads.insert(t.clone(), tail.clone());
         tail
+    }
+}
+
+/// Every list value [`ListExpander::expand`] would intern a chain for while expanding `t`,
+/// appended to `out`: `t` itself when it is a list, plus the lists reachable through list
+/// members and triple-term components. Mirrors `expand`'s own recursion exactly — a list
+/// inside a quoted `{ … }` FORMULA is not expanded, so it is not collected either.
+fn reachable_lists<'a>(t: &'a Term, out: &mut Vec<&'a Term>) {
+    match t {
+        Term::Triple(tr) => tr.iter().for_each(|m| reachable_lists(m, out)),
+        Term::List(ms) => {
+            ms.iter().for_each(|m| reachable_lists(m, out));
+            out.push(t);
+        }
+        _ => {}
     }
 }
 
@@ -4650,6 +4719,15 @@ fn with_formula_closure<R>(
     bw.visited.borrow_mut().docs.remove(&key);
     let mut derived: Vec<[Term; 3]> = closed.all.into_iter().collect();
     parser::own_universals_from(&mut derived, &lift);
+    // `closed.all` is a hash SET: draining it yields the derivations in an order that
+    // depends on the closure's insertion history and on the hasher's word size (native vs
+    // `wasm32`). A formula is an ORDERED vector of rows to the engine, so that order is part
+    // of the result term's identity — its `term_key`, and every `why()` string and
+    // `sparq-prov` IRI built from it. Sort the derivations into `serialize::row_cmp` order,
+    // one canonical total order on terms, so the result
+    // formula is a function of the closure's CONTENTS (a set) and not of its traversal
+    // (GH #6844). The original statements keep the subject formula's own order ahead of them.
+    derived.sort_by(serialize::row_cmp);
     let mut seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
     let mut all: Vec<&[Term; 3]> = ts.iter().collect();
     all.extend(derived.iter().filter(|f| seen.insert(f)));
@@ -9372,6 +9450,178 @@ mod tests {
         let mut want: Vec<String> = (n + 1..=2 * n).map(|k| format!("__sk0_{k}_f")).collect();
         want.sort();
         assert_eq!(f, want);
+    }
+
+    /// GH #6844 variants: `body` written in several orders, and with an unrelated padding
+    /// set that changes the fact sets' capacity and so their traversal order. Every variant
+    /// holds the same statements, so every variant has the same closure as a SET.
+    fn order_variants(prefixes: &str, body: &[String], pad_pred: &str) -> Vec<String> {
+        let pad: String = (0..300).map(|i| format!(":pad{i} {pad_pred} {i} .\n")).collect();
+        let fwd: String = body.concat();
+        let rev: String = body.iter().rev().cloned().collect();
+        let mut mixed = body.to_vec();
+        mixed.rotate_left(body.len() / 3);
+        vec![
+            format!("{prefixes}{fwd}"),
+            format!("{prefixes}{rev}"),
+            format!("{prefixes}{}", mixed.concat()),
+            format!("{prefixes}{pad}{fwd}"),
+            format!("{prefixes}{rev}{pad}"),
+            format!("{prefixes}{pad}{}", mixed.concat()),
+        ]
+    }
+
+    /// The `:q` rows of the `log:conclusion` formula bound to `?c`, IN THE ORDER the result
+    /// formula holds them.
+    fn nested_closure_row_order(src: &str) -> Vec<String> {
+        let c = reason_n3_terms(src, None).expect("reasons");
+        let formula = c
+            .facts
+            .iter()
+            .find_map(|[s, p, o]| match (s, p) {
+                (Term::Iri(si), Term::Iri(pi))
+                    if si == "http://ex/result" && pi == "http://ex/is" =>
+                {
+                    Some(o.clone())
+                }
+                _ => None,
+            })
+            .expect("the rule concluded :result :is <the nested closure>");
+        let Term::Formula(rows) = formula else { panic!("log:conclusion is formula-valued") };
+        rows.iter()
+            .filter(|r| matches!(&r[1], Term::Iri(i) if i == "http://ex/q"))
+            .map(|r| format!("{:?}", r[0]))
+            .collect()
+    }
+
+    #[test]
+    fn nested_closure_rows_do_not_depend_on_traversal_order() {
+        // GH #6844 item 1: `log:conclusion` built its result formula by draining the nested
+        // closure's fact hash SET, so the rows' order — part of a formula term's identity,
+        // and so of its `term_key` and of every `why()` string built from it — followed that
+        // set's traversal.
+        let n = 24;
+        let body: Vec<String> = (0..n).map(|i| format!("        :s{i:02} :p :v .\n")).collect();
+        let runs: Vec<Vec<String>> = order_variants("", &body, ":unrelated")
+            .iter()
+            .map(|inner| {
+                let src = format!(
+                    "@prefix : <http://ex/> .\n\
+                     @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                     {{ {{\n{inner}        {{ ?x :p :v }} => {{ ?x :q :w }} .\n\
+                     }} log:conclusion ?c }} => {{ :result :is ?c }} .\n"
+                );
+                nested_closure_row_order(&src)
+            })
+            .collect();
+        assert_eq!(runs[0].len(), n, "every subject's `:q` row is derived in the closure");
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
+        }
+    }
+
+    /// subject local name -> the list-cell label its `:has` list value's chain head carries.
+    fn list_cell_labels(src: &str, n: usize) -> std::collections::BTreeMap<String, String> {
+        let mut dict = Dict::new();
+        let triples = reason_n3(&mut dict, src).expect("reasons");
+        let has = dict.intern_iri("http://ex/has");
+        // Probe the labels the expander can have minted (one cell per member, so `n` lists
+        // of two members need at most `2 * n`), AFTER the run so an existing label resolves
+        // to the id it was interned under.
+        let cells: Vec<(Id, String)> =
+            (1..=2 * n).map(|k| (dict.intern_blank(&format!("_l0_{k}")), format!("_l0_{k}"))).collect();
+        (0..n)
+            .filter_map(|i| {
+                let s = dict.intern_iri(&format!("http://ex/a{i:02}"));
+                let head = triples.iter().find(|[ts, tp, _]| *ts == s && *tp == has)?[2];
+                let label = cells.iter().find(|(id, _)| *id == head)?.1.clone();
+                Some((format!("a{i:02}"), label))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn list_cell_labels_do_not_depend_on_traversal_order() {
+        // GH #6844 item 3: `ListExpander` numbered its cells from a counter bumped as the
+        // rows arrived, and the rows are drained from the closure's fact hash SET — so a
+        // generated cell's blank label (an RDF node identity, reachable in `why()` output
+        // and in `sparq-prov` IRIs) followed that set's traversal order.
+        let n = 12;
+        let body: Vec<String> =
+            (0..n).map(|i| format!(":a{i:02} :raw ( :m{i:02} :n{i:02} ) .\n")).collect();
+        // The lists reach the expander through a DERIVED fact, so they are carried by the
+        // closure's hash set rather than by the parsed document's statement order.
+        let prefixes = "@prefix : <http://ex/> .\n{ ?a :raw ?l } => { ?a :has ?l } .\n";
+        let runs: Vec<_> = order_variants(prefixes, &body, ":unrelated")
+            .iter()
+            .map(|src| list_cell_labels(src, n))
+            .collect();
+        assert_eq!(runs[0].len(), n, "every subject's list value got a chain head");
+        assert_eq!(
+            runs[0].values().collect::<std::collections::BTreeSet<_>>().len(),
+            n,
+            "distinct list values get distinct chain heads"
+        );
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
+        }
+    }
+
+    /// conclusion key -> the premise keys its ONE proof step records, for every derived fact.
+    fn proof_premises(src: &str) -> std::collections::BTreeMap<String, Vec<[String; 3]>> {
+        let (_, steps) = reason_n3_proof(&mut Dict::new(), src).expect("reasons");
+        steps
+            .iter()
+            .map(|s| (s.conclusion_key.join("|"), s.premise_keys.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn proof_premises_do_not_depend_on_traversal_order() {
+        // GH #6844 item 4: a conclusion with no existentials is instantiated the same way by
+        // every binding sharing its firing key, so several bindings derive ONE fact — and
+        // only the first to ARRIVE had its premises kept as that fact's proof step. Here
+        // `:a<i> :reaches :b<i>` is derivable through either of two intermediates, so which
+        // premises `why()` names followed the delta set's traversal order.
+        let n = 16;
+        // Each statement is its own variant element, so reversing or rotating the document
+        // genuinely reorders the two routes `:a<i> -> :b<i>` against each other.
+        let mut body: Vec<String> = Vec::new();
+        for i in 0..n {
+            for m in ["m", "o", "q"] {
+                body.push(format!(":a{i:02} :link :{m}{i:02} .\n"));
+                body.push(format!(":{m}{i:02} :link :b{i:02} .\n"));
+            }
+        }
+        let prefixes =
+            "@prefix : <http://ex/> .\n{ ?x :link ?y . ?y :link ?z } => { ?x :reaches ?z } .\n";
+        let runs: Vec<_> =
+            order_variants(prefixes, &body, ":link").iter().map(|s| proof_premises(s)).collect();
+        // Exactly one step per `i`: `:a<i> :reaches :b<i>`, derivable under three bindings
+        // (one per intermediate) in one round, so every recorded step is an ambiguous one.
+        assert_eq!(runs[0].len(), n, "one ambiguous step per subject");
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            let diff: Vec<&String> =
+                r.iter().filter(|(k, v)| runs[0].get(*k) != Some(v)).map(|(k, _)| k).collect();
+            assert_eq!(r.len(), runs[0].len(), "variant {i} recorded a different step set");
+            assert!(
+                diff.is_empty(),
+                "variant {i} named different premises for {} of {} steps, e.g. {:?} -> {:?} \
+                 (was {:?})",
+                diff.len(),
+                r.len(),
+                diff[0],
+                r[diff[0]],
+                runs[0][diff[0]],
+            );
+        }
+        // The binding kept is the LEAST of the three, so the proof names `:m00` — the one
+        // route that does not depend on which binding the delta set happened to yield first.
+        let step = &runs[0]["I\"http://ex/a00\"|I\"http://ex/reaches\"|I\"http://ex/b00\""];
+        assert!(
+            step.iter().any(|p| p[2] == "I\"http://ex/m00\"" || p[0] == "I\"http://ex/m00\""),
+            "the least binding's premises are recorded: {step:?}"
+        );
     }
 
     /// A deterministic xorshift64* stream, for the randomized differentials below.
