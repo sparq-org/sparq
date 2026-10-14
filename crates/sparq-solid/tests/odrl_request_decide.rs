@@ -666,6 +666,10 @@ fn graph_management_requests_use_static_grants_only() {
                 <https://ex.dev/ns#title> \"private\" } } ; \
                 INSERT DATA { GRAPH <https://pod.ex/notes/n3> { <urn:x> <urn:y> 1 } }";
     s.update_as(&bob, data).expect("grant and static write combine in a data-only request");
+    s.update_as(&bob, "ADD <https://pod.ex/notes/n3> TO <https://pod.ex/notes/n2>")
+        .expect("ADD is a data change into an existing granted graph");
+    let add_fresh = "ADD <https://pod.ex/notes/n3> TO <https://pod.ex/notes/n9>";
+    assert!(s.update_as(&bob, add_fresh).is_err(), "ADD creates no graph through a grant");
     let mixed = [
         "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 2 } } ; \
          DROP GRAPH <https://pod.ex/notes/n3>",
@@ -682,6 +686,14 @@ fn graph_management_requests_use_static_grants_only() {
         .expect("static Write manages n3");
     s.update_as(&bob, "INSERT DATA { GRAPH <https://pod.ex/notes/n2> { <urn:x> <urn:y> 4 } }")
         .expect("the grant still applies to a later data-only request");
+    assert!(s.decide(&bob, N2, Mode::Write).allow, "a data change through the grant");
+    assert!(!s.decide_removal(&bob, N2).allow, "no removal through the grant");
+    assert!(s.decide_removal(&bob, "https://pod.ex/notes/n3").allow, "static Write removes");
+    let alice = session(Some(ALICE), None);
+    assert!(s.decide_removal(&alice, N2).allow);
+    s.attach_odrl_policy(policy("prohibition", "delete", "", Some(ALICE), Some(N2)).expect("policy"))
+        .expect("attach");
+    assert!(!s.decide_removal(&alice, N2).allow, "a prohibition still applies");
 }
 
 /// `Write` needs `odrl:modify` and `odrl:delete` from one policy; `Append` alone never
@@ -1066,6 +1078,7 @@ fn every_session_entry_point_is_classified() {
         "decide",
         "decide_batch",
         "decide_create",
+        "decide_removal",
         "view_for",
         "query_as",
         "query_json_as",

@@ -40,7 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Write and Append are never granted on a container or a referenced group document, and
   apply only in an update made of `INSERT DATA`, `DELETE DATA` and `DELETE`/`INSERT …
   WHERE`: attached policies grant data changes, not graph management (`CLEAR`, `DROP`,
-  `CREATE`, `LOAD`, `COPY`, `MOVE`). No permission grants a create or Control, and a
+  `CREATE`, `LOAD`, `COPY`, `MOVE`), and `PodStore::decide_removal` (used by the MCP
+  `resource_delete` tool) ignores them. No permission grants a create or Control, and a
   prohibition or an explicit deny still vetoes.
 - **Security-property vocabulary:** two ordered dimensions, `secx:AdversaryModel`
   (Malicious ⊐ Covert ⊐ SemiHonest) and `secx:CorruptionThreshold` (DishonestMajority ⊐

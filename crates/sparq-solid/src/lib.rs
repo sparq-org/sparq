@@ -923,6 +923,15 @@ impl PodStore {
         self.apply_odrl(d, session, resource, mode)
     }
 
+    /// Whether `session` may remove `resource` as a whole (an LDP `DELETE`): `Write` from
+    /// the static view, narrowed by the attached prohibitions. Attached permissions grant
+    /// data changes, not graph management, so unlike [`PodStore::decide`] no attached grant
+    /// counts here, as in a SPARQL update that drops a graph.
+    pub fn decide_removal(&self, session: &Session, resource: &str) -> WacDecision {
+        let d = decide::decide_one(self.acl_index(), &self.auth, session, resource, Mode::Write);
+        self.apply_odrl_with(d, session, resource, Mode::Write, false)
+    }
+
     /// Apply the attached ODRL policies (issue #6743) to a point decision: add the modes
     /// an attached permission grants ([`PodStore::odrl_grants`]), then remove the modes
     /// an attached prohibition denies. Grants apply only to an authoritative (`Resolved`)
