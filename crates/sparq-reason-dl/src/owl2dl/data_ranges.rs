@@ -17,8 +17,7 @@
 //! - **String-like families** (strings with and without a language tag, `xsd:anyURI`,
 //!   `rdf:XMLLiteral`) are boolean formulas over automata for XSD patterns, lengths,
 //!   basic language ranges, well-formed BCP 47 tags and enumerated values; emptiness and
-//!   counting walk the
-//!   product automaton.
+//!   counting walk the product automaton.
 //!
 //! The data domain is the union of the datatype map's value spaces, so `Not` is taken
 //! relative to it.
