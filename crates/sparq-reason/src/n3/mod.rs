@@ -2279,9 +2279,11 @@ fn match_premise_admitted(
                 };
                 let inner: &[[Term; 3]] = match bound {
                     Some((ts, n)) => {
-                        // A spent allowance refuses the run (recorded on it): no match.
+                        // A spent allowance refuses the run (recorded on it): the premise
+                        // evaluation stops here, with no binding.
                         if !bw.work.charge(n, &bw.truncated) {
-                            continue;
+                            next.clear();
+                            break;
                         }
                         ts
                     }
@@ -3169,20 +3171,45 @@ fn formula_statements(ts: &[[Term; 3]]) -> usize {
 }
 
 /// The statements of the stored formula `ts` and of every formula nested in it, when it
-/// holds no variable at any depth (GH #6936); `None` when it holds one. The walk uses an
-/// explicit stack, so a deep term takes no stack per level.
+/// holds no variable at any depth (GH #6936); `None` when it holds one. The walk keeps one
+/// iterator frame per open container, so its scratch grows with the term's depth (already
+/// within the run's term-depth allowance), not with its size, and it takes no call stack
+/// per level.
 fn stored_ground_statements(ts: &[[Term; 3]]) -> Option<usize> {
+    enum Frame<'a> {
+        Statements(std::slice::Iter<'a, [Term; 3]>),
+        Terms(std::slice::Iter<'a, Term>),
+    }
     let mut n = ts.len();
-    let mut stack: Vec<&Term> = ts.iter().flatten().collect();
-    while let Some(t) = stack.pop() {
+    let mut stack = vec![Frame::Statements(ts.iter())];
+    while let Some(top) = stack.last_mut() {
+        let t = match top {
+            Frame::Statements(it) => match it.next() {
+                Some(st) => {
+                    stack.push(Frame::Terms(st.iter()));
+                    continue;
+                }
+                None => {
+                    stack.pop();
+                    continue;
+                }
+            },
+            Frame::Terms(it) => match it.next() {
+                Some(t) => t,
+                None => {
+                    stack.pop();
+                    continue;
+                }
+            },
+        };
         match t {
             Term::Var(_) => return None,
             Term::Formula(rs) => {
                 n = n.saturating_add(rs.len());
-                stack.extend(rs.iter().flatten());
+                stack.push(Frame::Statements(rs.iter()));
             }
-            Term::List(ms) => stack.extend(ms),
-            Term::Triple(tr) => stack.extend(tr.iter()),
+            Term::List(ms) => stack.push(Frame::Terms(ms.iter())),
+            Term::Triple(tr) => stack.push(Frame::Terms(tr.iter())),
             _ => {}
         }
     }
