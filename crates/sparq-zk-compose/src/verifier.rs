@@ -1475,18 +1475,24 @@ pub enum CheckError {
     /// `reason` carries its `Display`.
     #[cfg(feature = "dual-leaf")]
     LaneMemberMismatch { proof: usize, reason: String },
-    /// A value-lane sub-proof that NO query edge binds.
+    /// A value-lane sub-proof, which this verifier does not accept in a manifest
+    /// at all.
     ///
-    /// `filter_edge_true` — the only place a sub-proof discharges a query FILTER
-    /// obligation — accepts `ProofInputs::FilterInt` and nothing else, so a
-    /// value-lane sub-proof cannot discharge any obligation in THIS verifier (the
-    /// value-lane query binding is sq-j506). An extra value-lane sub-proof
-    /// appended to an otherwise valid manifest would therefore be reconstructed
-    /// and verified at stage 3 while discharging nothing, and a relying party
-    /// reading the accepted manifest could take it for a checked FILTER. It is
-    /// refused here instead.
+    /// The refusal is UNCONDITIONAL on the sub-proof being a value-lane member —
+    /// it inspects no edge. The reason it is sound to refuse them wholesale is
+    /// that `filter_edge_true`, the only place a sub-proof discharges a query
+    /// FILTER obligation, accepts `ProofInputs::FilterInt` and nothing else, so no
+    /// value-lane member can discharge an obligation here (the value-lane query
+    /// binding is sq-j506). Before this, such a sub-proof was reconstructed and
+    /// verified at stage 3 while discharging nothing, and a relying party reading
+    /// the accepted manifest could take it for a checked FILTER.
+    ///
+    /// BEHAVIOUR CHANGE: a manifest carrying a value-lane sub-proof used to be
+    /// accepted (discharging nothing) and is now refused. When sq-j506 wires the
+    /// value-lane query binding, this refusal is what that work replaces with a
+    /// real edge check.
     #[cfg(feature = "dual-leaf")]
-    UnboundValueLaneSubProof { proof: usize },
+    ValueLaneSubProofNotAccepted { proof: usize },
     /// A scan sub-proof's per-graph `commitments` are NOT strictly increasing on
     /// the field representative (plan S2.5): two adjacent commitments
     /// are equal or out of order. `scan_check` step 1b enforces
@@ -2100,12 +2106,12 @@ impl std::fmt::Display for CheckError {
                 "sub-proof {proof}: {reason}"
             ),
             #[cfg(feature = "dual-leaf")]
-            CheckError::UnboundValueLaneSubProof { proof } => write!(
+            CheckError::ValueLaneSubProofNotAccepted { proof } => write!(
                 f,
-                "sub-proof {} is a value-lane member that no query edge binds: this \
-                 verifier discharges a query FILTER only through a filter_int edge, so \
-                 a value-lane sub-proof would be verified while discharging nothing \
-                 (value-lane query binding is sq-j506) — refused",
+                "sub-proof {} is a value-lane member, which this verifier does not \
+                 accept: it discharges a query FILTER only through a filter_int edge, \
+                 so a value-lane sub-proof would be verified while discharging nothing \
+                 (the value-lane query binding is sq-j506) — refused",
                 proof
             ),
             CheckError::ScanCommitmentsNotStrictlyIncreasing { proof, at } => write!(
@@ -2669,7 +2675,7 @@ fn prefilter_manifest_structure_impl(
     revocation_policy: &RevocationPolicy,
     skip_query_binding: bool,
 ) -> Result<Vec<JoinEdge>, CheckError> {
-    // --- Stage 0: the LANE<->MEMBER pairing + the unbound-value-lane refusal,
+    // --- Stage 0: the LANE<->MEMBER pairing + the value-lane-sub-proof refusal,
     // before any other reading of the sub-proofs. A lane constant may only ride
     // the member that constrains that lane's handle domain; `datatype_const` is a
     // public input no member pins, so a lane constant on the wrong member, a
@@ -2679,12 +2685,13 @@ fn prefilter_manifest_structure_impl(
     for (i, sp) in manifest.sub_proofs.iter().enumerate() {
         crate::dispatch::check_lane_member_pairing(&sp.inputs)
             .map_err(|e| CheckError::LaneMemberMismatch { proof: i, reason: e.to_string() })?;
-        // And a value-lane sub-proof that no query edge binds is refused rather
-        // than verified-but-undischarging: `filter_edge_true` accepts a
-        // `FilterInt` edge and nothing else, so no value-lane member can satisfy a
-        // query FILTER obligation in this verifier (sq-j506 is that wiring).
+        // And a value-lane sub-proof is refused outright, rather than
+        // verified-but-undischarging. No edge is inspected: `filter_edge_true`
+        // accepts a `FilterInt` edge and nothing else, so NO value-lane member can
+        // satisfy a query FILTER obligation in this verifier (sq-j506 is that
+        // wiring). Such a manifest used to be accepted while discharging nothing.
         if crate::dispatch::value_lane_fields(&sp.inputs).is_some() {
-            return Err(CheckError::UnboundValueLaneSubProof { proof: i });
+            return Err(CheckError::ValueLaneSubProofNotAccepted { proof: i });
         }
     }
 
