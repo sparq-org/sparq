@@ -840,6 +840,41 @@ mod tests {
     }
 
     #[test]
+    fn require_source_matches_refuses_any_n_or_t_mismatch() {
+        use test_sources::MisreportedThresholdSource;
+        let backend = ShamirBackend::new_seeded(5, 0xC0FFEE).unwrap();
+        assert!(require_source_matches(&backend.dealer(), &backend).is_ok());
+        // A dealer-less source with the same (n, t) is accepted: the check is about
+        // composition, not about the regime.
+        let prss = crate::prss::PrssRandomness::with_simulated_setup(5).unwrap();
+        assert!(require_source_matches(&prss, &backend).is_ok());
+
+        let other_n = ShamirBackend::new_seeded(3, 1).unwrap().dealer();
+        let mut refused: Vec<Box<dyn DistributedRandomness>> = vec![Box::new(other_n)];
+        for t in [0, 1, 3, usize::MAX] {
+            refused.push(Box::new(MisreportedThresholdSource {
+                inner: backend.dealer(),
+                t,
+            }));
+        }
+        for source in &refused {
+            match require_source_matches(source.as_ref(), &backend) {
+                Err(MpcError::Protocol(m)) => assert!(
+                    m.contains("but the backend is (n, t) = (5, 2)"),
+                    "n = {}, t = {}: {m}",
+                    source.parties(),
+                    source.threshold()
+                ),
+                other => panic!(
+                    "n = {}, t = {}: must be refused, got {other:?}",
+                    source.parties(),
+                    source.threshold()
+                ),
+            }
+        }
+    }
+
+    #[test]
     fn vss_own_input_reconstructs_to_the_holders_value() {
         let backend = ShamirBackend::new_seeded(5, 11).expect("n >= 2");
         let mut dealer = backend.dealer();

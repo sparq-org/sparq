@@ -431,3 +431,103 @@ fn prss_runs_only_draw_free_exact_k_shapes_and_fails_closed_otherwise() {
         );
     }
 }
+
+/// The per-pair connected-bit sharings of a candidate list, in candidate order.
+fn candidate_bits(candidates: &[crate::oblivious_join::Candidate]) -> Vec<(Vec<String>, Vec<u64>)> {
+    candidates
+        .iter()
+        .map(|c| {
+            let MatchBit::SecretShared(bit) = &c.matched else {
+                panic!("connected-bit must be secret-shared");
+            };
+            (
+                c.payload
+                    .iter()
+                    .map(|t| t.as_ref().unwrap().to_string())
+                    .collect(),
+                bit.iter().map(|s| s.y.value()).collect(),
+            )
+        })
+        .collect()
+}
+
+/// Render revealed slots as `"<a> <b>"` / `"dummy"`, in revealed order.
+fn slot_strings(slots: &[crate::oblivious_join::OutputSlot]) -> Vec<String> {
+    use crate::oblivious_join::OutputSlot;
+    slots
+        .iter()
+        .map(|s| match s {
+            OutputSlot::Row(p) => p
+                .iter()
+                .map(|t| t.as_ref().unwrap().to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+            OutputSlot::Dummy => "dummy".to_string(),
+        })
+        .collect()
+}
+
+const PIN_EDGES: [(&str, &str); 2] = [
+    ("http://ex/a", "http://ex/b"),
+    ("http://ex/b", "http://ex/c"),
+];
+
+/// Captured on the PRE-ROUTING code by logging every dealer draw and re-checked
+/// byte-identical after the routing: the connected-bit sharings pin the values,
+/// the trailing `draw_fp()` WITNESS pins the draw count, and the revealed slot
+/// order pins the public output.
+#[test]
+fn seeded_exact_k_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
+    let backend = ShamirBackend::new_seeded(3, 0x9A7B).unwrap();
+    let (edges, _) = hidden_edges(&PIN_EDGES);
+    let mut dealer = backend.dealer();
+    let candidates = build_candidates(&backend, &mut dealer, &edges, 2).unwrap();
+    let pair = |a: &str, b: &str| vec![format!("<http://ex/{a}>"), format!("<http://ex/{b}>")];
+    assert_eq!(
+        candidate_bits(&candidates),
+        [
+            (
+                pair("a", "b"),
+                vec![200120304358927318, 400240608717854636, 600360913076781954]
+            ),
+            (
+                pair("a", "c"),
+                vec![1085933241605771511, 2171866483211543021, 951956715603620580]
+            ),
+            (
+                pair("b", "b"),
+                vec![1627966387087110708, 950089764960527465, 272213142833944222]
+            ),
+            (
+                pair("b", "c"),
+                vec![501855066999073978, 1003710133998147956, 1505565200997221934]
+            ),
+        ]
+    );
+    assert_eq!(dealer.draw_fp().value(), 641842556892271371);
+    let (slots, _) = eval_exact_k_chain_hidden_slots(&backend, &edges, 2, 5).unwrap();
+    assert_eq!(
+        slot_strings(&slots),
+        [
+            "dummy",
+            "dummy",
+            "<http://ex/a> <http://ex/c>",
+            "dummy",
+            "dummy"
+        ]
+    );
+}
+
+/// The COMPLETE draw sequence of the exactly-2 chain stage (entry count and an
+/// order-sensitive fingerprint over every method and returned `y`), captured on
+/// the pre-routing code.
+#[test]
+fn seeded_exact_k_stage_transcript_is_pinned() {
+    use crate::randomness::test_sources::{fingerprint, RecordingSource};
+    let backend = ShamirBackend::new_seeded(3, 0x9A7B).unwrap();
+    let (edges, _) = hidden_edges(&PIN_EDGES);
+    let mut rec = RecordingSource::new(backend.dealer());
+    eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 5).unwrap();
+    assert_eq!(rec.log.len(), 1920);
+    assert_eq!(fingerprint(&rec.log), 0x1013_9382_581b_a7e3);
+}

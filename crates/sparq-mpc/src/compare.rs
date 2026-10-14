@@ -3088,6 +3088,26 @@ mod randomness_seam_tests {
         assert_eq!(dealer.draw_fp().value(), 520081441683015349);
     }
 
+    /// The COMPLETE draw sequence of one comparison, not just its length: every
+    /// seam call, in order, with every `y` it returned, folded into an
+    /// order-sensitive fingerprint. Captured on the pre-routing code by logging
+    /// every dealer draw (`2 · COMPARE_BITS` operand-bit sharings, then the
+    /// chain's degree-reduction re-sharings). Swapping the two operands' input
+    /// sharings — invisible to the pins above — changes this transcript.
+    #[test]
+    fn seeded_greater_than_transcript_is_pinned() {
+        use crate::randomness::test_sources::{fingerprint, RecordingSource};
+        let mut rec = RecordingSource::new(ShamirBackend::new_seeded(3, 0x7A5C1).unwrap().dealer());
+        let gt = secure_greater_than_through(&mut rec, Fp::new(41), Fp::new(17)).unwrap();
+        assert_eq!(
+            ys(&gt),
+            [1646262514976137506, 986682020738581060, 327101526501024614]
+        );
+        assert_eq!(rec.log.len(), 840);
+        assert!(rec.log.iter().all(|(m, _)| *m == "vss_own_input"));
+        assert_eq!(fingerprint(&rec.log), 0x9420_6bb3_e81f_e45a);
+    }
+
     /// The two helpers whose draw SHAPE changed the most: `share_bits` (now
     /// `vss_own_input` per bit), `secret_is_zero` and `square_protocol_random_bit`
     /// (now one `shared_nonzero_mask` instead of `draw_nonzero_fp` + `share`).

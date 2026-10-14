@@ -355,3 +355,108 @@ fn prss_runs_only_the_draw_free_distinct_and_fails_closed_otherwise() {
         );
     }
 }
+
+/// Render revealed slots as `"<a> <b>"` / `"dummy"`, in revealed order.
+fn slot_strings(slots: &[OutputSlot]) -> Vec<String> {
+    slots
+        .iter()
+        .map(|s| match s {
+            OutputSlot::Row(p) => p
+                .iter()
+                .map(|t| t.as_ref().expect("bound endpoint").to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+            OutputSlot::Dummy => "dummy".to_string(),
+        })
+        .collect()
+}
+
+/// Every number below was captured on the PRE-ROUTING code (the stage calling
+/// the dealer's inherent `share` / `degree_reduce` and the `&mut ShamirDealer`
+/// comparison entry points) by logging every dealer draw, and re-checked
+/// byte-identical after the routing. The keep-bit sharings pin the values, the
+/// trailing `draw_fp()` WITNESS pins how many draws the stage consumed, and the
+/// revealed slot order pins the public output end-to-end.
+#[test]
+fn seeded_distinct_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
+    let backend = ShamirBackend::new_seeded(3, 0xD15C7).unwrap();
+    let pairs = vec![
+        pair(5, 6, "e", "f"),
+        pair(1, 2, "a", "b"),
+        pair(5, 6, "e", "f"),
+    ];
+    let mut dealer = backend.dealer();
+    let (candidates, ce, adj) = build_distinct_candidates(&backend, &mut dealer, &pairs).unwrap();
+    assert_eq!((ce, adj), (3, 2));
+    let keeps: Vec<(Vec<String>, Vec<u64>)> = candidates
+        .iter()
+        .map(|c| {
+            let MatchBit::SecretShared(bit) = &c.matched else {
+                panic!("keep-bit must be secret-shared");
+            };
+            (
+                c.payload
+                    .iter()
+                    .map(|t| t.as_ref().unwrap().to_string())
+                    .collect(),
+                bit.iter().map(|s| s.y.value()).collect(),
+            )
+        })
+        .collect();
+    let ab = vec!["<http://ex/a>".to_string(), "<http://ex/b>".to_string()];
+    let ef = vec!["<http://ex/e>".to_string(), "<http://ex/f>".to_string()];
+    assert_eq!(
+        keeps,
+        [
+            (ab, vec![1, 1, 1]),
+            (
+                ef.clone(),
+                vec![
+                    2136424062827090610,
+                    1967005116440487268,
+                    1797586170053883926
+                ]
+            ),
+            (
+                ef,
+                vec![977037174203969327, 1954074348407938654, 625268513398214030]
+            ),
+        ]
+    );
+    assert_eq!(dealer.draw_fp().value(), 888758199960741934);
+
+    let expected_slots = [
+        "dummy",
+        "dummy",
+        "<http://ex/a> <http://ex/b>",
+        "<http://ex/e> <http://ex/f>",
+    ];
+    let (slots, cost) = distinct_hidden_pairs_slots(&backend, &pairs, 4).unwrap();
+    assert_eq!(slot_strings(&slots), expected_slots);
+    assert_eq!(
+        (cost.sort_compare_exchanges, cost.adjacent_equalities),
+        (3, 2)
+    );
+    let (slots, _) = distinct_hidden_pairs_oblivious(&backend, &pairs, 4).unwrap();
+    assert_eq!(slot_strings(&slots), expected_slots);
+}
+
+/// The COMPLETE draw sequence, not just its length: every seam call the stage
+/// makes, in order, with every `y` it returned, folded into an order-sensitive
+/// fingerprint. Captured on the pre-routing code (same discipline as above). A
+/// reordering, a swapped method or a changed value fails here even when the
+/// witness draw count and the keep bits happen to agree.
+#[test]
+fn seeded_distinct_stage_transcript_is_pinned() {
+    use crate::randomness::test_sources::{fingerprint, RecordingSource};
+    let backend = ShamirBackend::new_seeded(3, 0xD15C7).unwrap();
+    let pairs = vec![
+        pair(5, 6, "e", "f"),
+        pair(1, 2, "a", "b"),
+        pair(5, 6, "e", "f"),
+    ];
+    let mut rec = RecordingSource::new(backend.dealer());
+    distinct_hidden_pairs_slots_through(&mut rec, &backend, &pairs, 4).unwrap();
+    assert_eq!(rec.log.len(), 8418);
+    assert_eq!(fingerprint(&rec.log), 0x5455_9ace_20c7_0f97);
+}

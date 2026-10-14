@@ -574,3 +574,113 @@ fn prss_runs_only_draw_free_bounded_shapes_and_fails_closed_otherwise() {
         "{{1,2}}: PRSS must fail closed, got {outcome:?}"
     );
 }
+
+/// Render revealed slots as `"<a> <b>"` / `"dummy"`, in revealed order.
+fn slot_strings(slots: &[crate::oblivious_join::OutputSlot]) -> Vec<String> {
+    use crate::oblivious_join::OutputSlot;
+    slots
+        .iter()
+        .map(|s| match s {
+            OutputSlot::Row(p) => p
+                .iter()
+                .map(|t| t.as_ref().unwrap().to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+            OutputSlot::Dummy => "dummy".to_string(),
+        })
+        .collect()
+}
+
+/// A 2-cycle `a ⇄ b` under `{0,2}`: the reflexive diagonal, both length-1 edges
+/// and all four length-2 tuples, four of which OR-fold into an existing pair.
+fn pin_edges() -> PredicatedEdges {
+    predicated_edges(&[
+        ("p", "http://ex/a", "http://ex/b"),
+        ("p", "http://ex/b", "http://ex/a"),
+    ])
+}
+
+/// Captured on the PRE-ROUTING code by logging every dealer draw and re-checked
+/// byte-identical after the routing: the connected-bit sharings pin the values,
+/// the trailing `draw_fp()` WITNESS pins the draw count, and the revealed slot
+/// order pins the public output.
+#[test]
+fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
+    let backend = ShamirBackend::new_seeded(3, 0xB0B).unwrap();
+    let edges = pin_edges();
+    let form = HiddenBoundedPath::range("p", 0, 2);
+    let mut dealer = backend.dealer();
+    let candidates = build_bounded_candidates(&backend, &mut dealer, &edges, &form).unwrap();
+    let bits: Vec<(Vec<String>, Vec<u64>)> = candidates
+        .iter()
+        .map(|c| {
+            let MatchBit::SecretShared(bit) = &c.matched else {
+                panic!("connected-bit must be secret-shared");
+            };
+            (
+                c.payload
+                    .iter()
+                    .map(|t| t.as_ref().unwrap().to_string())
+                    .collect(),
+                bit.iter().map(|s| s.y.value()).collect(),
+            )
+        })
+        .collect();
+    let pair = |a: &str, b: &str| vec![format!("<http://ex/{a}>"), format!("<http://ex/{b}>")];
+    assert_eq!(
+        bits,
+        [
+            (
+                pair("a", "a"),
+                vec![319826375870180777, 639652751740361553, 959479127610542329]
+            ),
+            (
+                pair("a", "b"),
+                vec![
+                    2049686828521023477,
+                    1793530647828353002,
+                    1537374467135682527
+                ]
+            ),
+            (
+                pair("b", "a"),
+                vec![1022014675660616802, 2044029351321233603, 760201017768156453]
+            ),
+            (
+                pair("b", "b"),
+                vec![
+                    2039469137268213830,
+                    1773095265322733708,
+                    1506721393377253586
+                ]
+            ),
+        ]
+    );
+    assert_eq!(dealer.draw_fp().value(), 1940071552581823960);
+    let (slots, _) = eval_bounded_path_hidden_slots(&backend, &edges, &form, 5).unwrap();
+    assert_eq!(
+        slot_strings(&slots),
+        [
+            "<http://ex/a> <http://ex/b>",
+            "<http://ex/b> <http://ex/a>",
+            "dummy",
+            "<http://ex/a> <http://ex/a>",
+            "<http://ex/b> <http://ex/b>"
+        ]
+    );
+}
+
+/// The COMPLETE draw sequence of the `{0,2}` union stage (entry count and an
+/// order-sensitive fingerprint over every method and returned `y`), captured on
+/// the pre-routing code.
+#[test]
+fn seeded_bounded_stage_transcript_is_pinned() {
+    use crate::randomness::test_sources::{fingerprint, RecordingSource};
+    let backend = ShamirBackend::new_seeded(3, 0xB0B).unwrap();
+    let edges = pin_edges();
+    let form = HiddenBoundedPath::range("p", 0, 2);
+    let mut rec = RecordingSource::new(backend.dealer());
+    eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 5).unwrap();
+    assert_eq!(rec.log.len(), 1932);
+    assert_eq!(fingerprint(&rec.log), 0x690e_cad1_cdf7_7eb0);
+}
