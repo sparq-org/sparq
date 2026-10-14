@@ -68,8 +68,8 @@ assert!(sparq_fedplan_mpc::bind_plan_to_proof(&claimed, &statement).is_err()); /
   - **Rule C2 — dead same-source star pairing** (the FedUP *quotient-summary/provenance* rule, and the one that fires on the **live** path). If two
     patterns share a **subject**-position join variable and **no** served characteristic set of a source carries both their predicates, assigning *both*
     patterns to that source is dead, along with every combination containing that pairing — while the source stays a valid candidate for each pattern
-    **individually** (a cross-source combination is untouched). It fires **only** behind a per-predicate completeness guard (`Σ_{C ∋ p} subjects ==
-    void:distinctSubjects` over DISTINCT set keys), so a truncated, repeated-key or unknown summary declines.
+    **individually** (a cross-source combination is untouched). It trusts the builder-only `SourceDescriptor::char_sets_complete()` opt-in, otherwise requiring `Σ_{C ∋ p} subjects == void:distinctSubjects`
+    over DISTINCT set keys. Absent the flag, truncated, repeated-key or unknown summaries decline unchanged; falsely declaring completeness can drop answers (lose recall).
 
   The Phase-2 selection passes through **unchanged** (advisory + auditable), reporting `bgp_satisfiable`, the empty-pattern witnesses, the Rule-C2
   `dead_pairings` + `dead_patterns`, the BGP join components, and a combination-dead audit trail; `combination_is_dead(&assignment)` is the per-combination
