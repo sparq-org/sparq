@@ -62,6 +62,32 @@ fn npa_data_only_source_derived_positive_is_inconsistent() {
 }
 
 #[test]
+fn npa_data_invalid_property_does_not_register_source() {
+    // A malformed NPA must not introduce a, even though Thing ⊑ C types every individual.
+    for property in [r#""invalid""#, "_:property", "owl:Thing"] {
+        let (dict, triples) = parse(&format!(
+            "{PRE}
+             owl:Thing rdfs:subClassOf :C .
+             [ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ;
+               owl:assertionProperty {property} ; owl:targetValue 5 ] ."
+        ));
+        let r = realize(&dict, &triples);
+        assert!(!r.is_inconsistent(), "invalid property: {property}");
+        assert!(
+            r.type_assertions()
+                .iter()
+                .all(|&(source, _)| source != iri(&dict, "a")),
+            "a malformed NPA must not realize its source: {property}"
+        );
+        assert_eq!(
+            r.report().skipped_assertions,
+            1,
+            "invalid property: {property}"
+        );
+    }
+}
+
+#[test]
 fn npa_data_only_source_without_derived_positive_is_consistent() {
     // A can be empty, so A ⊑ ∃p.{5} does not force p(a, 5) for this NPA-only source.
     let (dict, triples) = parse(&format!(

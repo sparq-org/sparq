@@ -1551,7 +1551,10 @@ fn decode_abox_e4(
             }
         } else if let Some(&tval) = npa_target_val.get(&node) {
             // Negative DATA property assertion.
-            if is_individual(dict, src) && is_literal(dict, tval) {
+            if is_individual(dict, src)
+                && is_literal(dict, tval)
+                && !is_structural_predicate(dict, prop)
+            {
                 // The source may occur only in this NPA; register it before saturation.
                 let _ = names.nominal(src);
                 extras.npas.push(AboxNpa::Data {
