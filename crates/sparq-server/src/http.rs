@@ -410,8 +410,8 @@ pub struct ServerConfig {
     /// records method, path/endpoint, status, a size signal and timing (it would not be a request
     /// log otherwise). It is also NOT the ZK/MPC privacy story. The request log exists only with
     /// `verbose`; the same switch also redacts, in the warning that records it, the detail an error
-    /// withholds from its client when that detail is drawn from the request or the data, with or
-    /// without `verbose`. See [`crate::redact`].
+    /// withholds from its client when that detail is drawn from the request or the data, wherever
+    /// warnings are logged. See [`crate::redact`].
     pub redact_logs: bool,
     /// (sq-0bxp) **Per-query access audit log** runtime switch (CDMC CD-2 / ISO
     /// 27001 A.8.15 / EU CRA logging). When `true`, every query / update / Graph-Store request
@@ -4431,7 +4431,8 @@ async fn shacl_validate_endpoint(
     };
     // Parse the shapes graph from the body, classified by Content-Type (same matrix as a GSP
     // write body). A no/relative base is fine — shapes graphs name shapes by absolute IRI.
-    let shapes = match parse_shapes_graph(&body, &content_type(&headers), state.config().redact_logs) {
+    let redact = state.config().redact_logs;
+    let shapes = match parse_shapes_graph(&body, &content_type(&headers), redact) {
         Ok(g) => g,
         Err(resp) => return resp,
     };
@@ -5996,7 +5997,8 @@ async fn handle_post(
             }
             // sq-z33x: §2.2 UPDATE dataset override — for the url-encoded form encoding
             // the `using-*` params are carried in the FORM BODY (`s`), not the URL query string.
-            let resp = match rewrite_update(u, &update_dataset_override(s), state.config().redact_logs) {
+            let over = update_dataset_override(s);
+            let resp = match rewrite_update(u, &over, state.config().redact_logs) {
                 Ok(rewritten) => run_update(state, rewritten).await,
                 Err(resp) => resp,
             };
@@ -6342,12 +6344,14 @@ async fn admin_restore(
         ),
         // A fail-closed import error (corrupt / mismatched / non-artifact): the live store is
         // unchanged. It is a client-supplied-body problem, so a 400. The detail is withheld
-        // from the body (it may quote artifact internals); the operator gets it in the log.
-        Ok(Err(e)) => sanitized_error(
+        // from the body (it may quote artifact internals, the uploaded data's terms among them),
+        // and redacted in the log unless the server logs full requests.
+        Ok(Err(e)) => content_error(
             StatusCode::BAD_REQUEST,
             "restore",
             "restore rejected (corrupt or incompatible backup artifact)",
             &e,
+            state.config().redact_logs,
         ),
         Err(_) => json_error(StatusCode::INTERNAL_SERVER_ERROR, "restore worker panicked"),
     }
@@ -7572,7 +7576,7 @@ async fn stream_select_json(
         // The engine reported completion without emitting anything, or the worker died before
         // the first chunk. Nothing is committed, so this is still an honest 500.
         Ok(Some(StreamItem::Done)) | Ok(None) => {
-            return execution_error("query produced no result stream", config.redact_logs)
+            return stream_ended("query produced no result stream")
         }
         Err(()) => return timeout_response(config),
     };
@@ -7612,7 +7616,7 @@ async fn stream_select_json(
         // 500 rather than a truncated 200.
         None => match outcome.reason() {
             Some(reason) => engine_error_response(reason, config, true),
-            None => execution_error("streaming query worker ended before completing the result", config.redact_logs),
+            None => stream_ended("streaming query worker ended before completing the result"),
         },
         Some(StreamItem::Chunk(second)) => {
             if head_only {
@@ -7950,7 +7954,7 @@ async fn graph_stream_response(
         Ok(None) => {
             return match outcome.reason() {
                 Some(reason) => engine_error_response(reason, config, true),
-                None => execution_error("query produced no result stream", config.redact_logs),
+                None => stream_ended("query produced no result stream"),
             }
         }
         Err(()) => return timeout_response(config),
@@ -7965,7 +7969,7 @@ async fn graph_stream_response(
         // answer with the recorded reason (cancel / deadline), or an honest 500 for a panic.
         None if !outcome.is_complete() => match outcome.reason() {
             Some(reason) => engine_error_response(reason, config, true),
-            None => execution_error("streaming query worker ended before completing the result", config.redact_logs),
+            None => stream_ended("streaming query worker ended before completing the result"),
         },
         // One chunk only: answer exactly as the buffered path did, Content-Length and all.
         None => {
@@ -9057,7 +9061,8 @@ async fn gsp_put(state: &AppState, graph: GraphRef, headers: &HeaderMap, body: &
         Ok(b) => b,
         Err(e) => return e.into_response(),
     };
-    let ntriples = match body_to_ntriples(&body, &content_type(headers), base_iri(&graph), state.config().redact_logs) {
+    let redact = state.config().redact_logs;
+    let ntriples = match body_to_ntriples(&body, &content_type(headers), base_iri(&graph), redact) {
         Ok(nt) => nt,
         Err(resp) => return resp,
     };
@@ -9099,7 +9104,8 @@ async fn gsp_post(
         Ok(b) => b,
         Err(e) => return e.into_response(),
     };
-    let ntriples = match body_to_ntriples(&body, &content_type(headers), base_iri(&graph), state.config().redact_logs) {
+    let redact = state.config().redact_logs;
+    let ntriples = match body_to_ntriples(&body, &content_type(headers), base_iri(&graph), redact) {
         Ok(nt) => nt,
         Err(resp) => return resp,
     };
@@ -10136,6 +10142,17 @@ fn execution_error(msg: &str, redact: bool) -> Response {
         "query execution error",
         msg,
         redact,
+    )
+}
+
+/// A streaming query that ended without its result: the detail is the server's own, logged in
+/// full.
+fn stream_ended(why: &str) -> Response {
+    sanitized_error(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "query-execution",
+        "query execution error",
+        why,
     )
 }
 
@@ -11625,7 +11642,8 @@ mod dataset_override_tests {
     #[test]
     fn rewrite_update_passes_through_when_no_override_is_present() {
         let over = update_dataset_override(""); // empty => is_empty() => verbatim
-        let rewritten = rewrite_update("INSERT DATA { <http://ex/s> <http://ex/p> <http://ex/o> }", &over, true).unwrap();
+        let update = "INSERT DATA { <http://ex/s> <http://ex/p> <http://ex/o> }";
+        let rewritten = rewrite_update(update, &over, true).unwrap();
         assert_eq!(rewritten, "INSERT DATA { <http://ex/s> <http://ex/p> <http://ex/o> }");
     }
 

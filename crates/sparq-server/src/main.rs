@@ -150,10 +150,10 @@
 //!   --log-full-requests       [sq-toze.34] OPT OUT of request-log redaction: log the
 //!                             raw request URI (incl. the full `?query=` SPARQL text) verbatim.
 //!                             By DEFAULT the --verbose log redacts the URI query string to a
-//!                             length+fingerprint placeholder (PII/privacy hygiene). With or
-//!                             without --verbose, it also logs in full the request or data
-//!                             detail an error withholds from its client (by default a
-//!                             placeholder).                       [env SPARQ_LOG_FULL_REQUESTS=1]
+//!                             length+fingerprint placeholder (PII/privacy hygiene). It also
+//!                             logs in full the request or data detail an error withholds from
+//!                             its client (by default a placeholder), wherever warnings are
+//!                             logged (--verbose, or --audit-log). [env SPARQ_LOG_FULL_REQUESTS=1]
 //!
 //! Access audit log (opt-in `audit-log` cargo feature — see skills/http-server/SKILL.md
 //! "Access audit log"; CDMC CD-2 / ISO 27001 A.8.15 / EU CRA logging):
@@ -357,7 +357,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // carries the full SPARQL text, possibly PII) to a length+fingerprint placeholder.
             // This flag logs the raw URI verbatim — the deliberate debug escape hatch. Overrides
             // SPARQ_LOG_FULL_REQUESTS. Also logs error details drawn from the request or the data
-            // in full, with or without --verbose.
+            // in full, wherever warnings are logged (--verbose, or --audit-log).
             "--log-full-requests" => config.redact_logs = false,
             // sq-0bxp: opt in to the per-query access audit log (CDMC CD-2). Emits a
             // structured `tracing` record per request under target `sparq_server::audit` (route

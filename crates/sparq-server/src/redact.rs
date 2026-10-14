@@ -30,8 +30,10 @@
 //! For `/tpf`, numeric `page` values remain visible; term values and nonnumeric `page` values
 //! are redacted individually. Unknown fields are redacted in full, including their names.
 //!
-//! The same [`placeholder`](crate::redact::placeholder) stands in, while redaction is on, for the detail an error withholds
-//! from its client when that detail is drawn from the request or the data (`http::content_error`).
+//! The same [`placeholder`](crate::redact::placeholder) stands in, while redaction is on, for
+//! the detail an error withholds from its client when that detail is drawn from the request or
+//! the data (`http::content_error`). Like the request log's, a short detail's fingerprint can be
+//! confirmed by guessing it.
 //!
 //! ## Honest boundary — log-CONTENT redaction, not anonymity
 //!

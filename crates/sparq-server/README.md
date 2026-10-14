@@ -76,7 +76,7 @@ By default: **no auth, loopback-only.** Hardening is opt-in but honest where it 
   carry PII, so the query string becomes a length + non-reversible fingerprint
   (`--log-full-requests` opts out). An error's detail drawn from the request or the data (a
   query or a term a parse error quotes, an engine message quoting data) is logged the same way,
-  with or without `--verbose`; operator detail (a path, an I/O error) is logged in full.
+  wherever warnings are logged (`--verbose`, or `--audit-log`); operator detail (a path, an I/O error) is logged in full.
   **Honest boundary:** this is log-CONTENT redaction, **not**
   anonymity (method/path/status/size/timing are still recorded), and **not** the ZK/MPC privacy
   story (what a *remote party* learns from a *computation*) — purely operator-log hygiene. <!-- privacy-claims-allow: negated/historical mention — explicitly states this is NOT the ZK/MPC privacy story -->
