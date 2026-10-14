@@ -3862,8 +3862,8 @@ fn formula_containment<S: std::borrow::Borrow<[Term; 3]>>(
 /// pattern statement matches a scope statement (or virtual list structure), in match
 /// order, pushed to `out`. Each step of the search is one visit of a pattern statement,
 /// taken from the first budget of `steps`; the unifications it runs share the second
-/// (a unification budget), and one that runs out spends the first, which stops the
-/// search as a cut. The search state is an explicit stack (one entry per matched
+/// (a unification budget). One that runs out spends the first and ends the search at
+/// once, as a cut. The search state is an explicit stack (one entry per matched
 /// pattern statement), so patterns of any width take no stack per statement. Every
 /// binding the search extends is checked against the term-depth limit
 /// ([`within_depth`]) before it is carried to the next statement, so every binding it
@@ -3878,13 +3878,6 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
     (steps, unify): (&mut bounded::StepBudget, &mut bounded::StepBudget),
     bw: &BwCtx,
 ) {
-    // A unification that ran out of steps: no match, and the search stops as a cut.
-    let unified = |r: Option<bool>, steps: &mut bounded::StepBudget| {
-        r.unwrap_or_else(|| {
-            steps.spend();
-            false
-        })
-    };
     /// The order the pattern statements are matched in, as indices into `pat`: as
     /// written, until a statement is deferred behind the others.
     #[derive(Clone)]
@@ -3974,9 +3967,15 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
                                     bounded::list_tail(&ms, &bw.truncated)
                                 };
                                 let mut nb = b.clone();
-                                if val.is_some_and(|val| unified(unify_term_in(&p[2], &val, &mut nb, unify), steps))
-                                    && within_depth(&nb, bw)
-                                {
+                                let matched = match val {
+                                    Some(val) => match unify_term_in(&p[2], &val, &mut nb, unify) {
+                                        Some(matched) => matched,
+                                        // Out of unification steps: the search stops, as a cut.
+                                        None => return steps.spend(),
+                                    },
+                                    None => false,
+                                };
+                                if matched && within_depth(&nb, bw) {
                                     let (at, defers_left) = (at + 1, rest);
                                     visit = Some(Visit {
                                         order,
@@ -4025,9 +4024,12 @@ fn containment_search<S: std::borrow::Borrow<[Term; 3]>>(
             let st: &[Term; 3] = st.borrow();
             scan.next += 1;
             let mut nb = v.b.clone();
+            // Out of unification steps: the search stops, as a cut.
+            let Some(matched) = unify_all(&p[..], &st[..], &mut nb, unify) else {
+                return steps.spend();
+            };
             // A match that bound nothing new extends nothing to check.
-            if unified(unify_all(&p[..], &st[..], &mut nb, unify), steps)
-                && (nb.len() == v.b.len() || within_depth(&nb, bw))
+            if matched && (nb.len() == v.b.len() || within_depth(&nb, bw))
             {
                 visit = Some(Visit {
                     order: v.order.clone(),
