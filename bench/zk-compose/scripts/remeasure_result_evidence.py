@@ -22,13 +22,15 @@ attempts every restore independently if a later replacement fails. If any restor
 it exits non-zero and lists exactly which files need `git checkout -- <file>` recovery.
 An interruption of the process itself (a kill or power loss between renames) can
 still leave a mixed set, which
-`git checkout -- <the four files>` undoes. It refuses to run while the four files have
-staged or unstaged edits against HEAD, so that recovery never discards anything else,
-and unless `--commit` is HEAD. Git runs without inherited GIT_* environment variables.
+`git checkout -- <the four files>` undoes. It refuses to run while the four files or
+gate_counts_latest.json have staged or unstaged edits against HEAD, so that recovery never
+discards anything else and the size gate reads the committed snapshot, and unless `--commit`
+is HEAD. Git runs without inherited GIT_* environment variables.
 `--baseline-commit` names the commit whose evidence is the pre-change baseline (default
 HEAD); the files are read from that commit with `git show`, never from the working tree.
 Each file keeps its destination `prepared_by`, and `apply` refuses a baseline whose
-`prepared_by` differs from it. The result is always
+`prepared_by` differs from it, or that differs from the destination in any field it does
+not re-measure or rewrite. The result is always
 labelled non-canonical; the job manifest and run outputs are not part of the repository,
 so the two-run agreement it records is checked when `apply` runs, not later.
 """
@@ -52,6 +54,9 @@ FIELDS = {
     "result_signed_gates": ("circuit_size", "acir_bytecode_sha256", "abi_sha256"),
     "result_public_gates": ("circuit_size", "acir_bytecode_sha256", "abi_sha256", "gate_log_sha256"),
 }
+# Top-level fields `apply` writes into every file.
+REWRITTEN = ("source_files", "measured_source", "measurement_method", "limitations")
+SNAPSHOT = "bench/zk-compose/gate_counts_latest.json"
 
 
 def digest(data: bytes) -> str:
@@ -144,8 +149,20 @@ def load_commit(commit: str) -> dict[str, dict]:
     return evidence
 
 
+def unrewritten(name: str, data: dict) -> dict:
+    """The part of an evidence file that `apply` copies from the baseline unchanged."""
+    copy = json.loads(json.dumps(data))
+    for key in REWRITTEN:
+        copy.pop(key, None)
+    for record in copy.get("members", {}).values():
+        for field in FIELDS.get(name, ()):
+            record.pop(field, None)
+    return copy
+
+
 def apply(args: argparse.Namespace) -> None:
-    paths = [f"bench/zk-compose/{name}.json" for name in EVIDENCE]
+    # The size gate reads the snapshot from the working tree, so it must match HEAD as well.
+    paths = [f"bench/zk-compose/{name}.json" for name in EVIDENCE] + [SNAPSHOT]
     # The working tree and the index are checked separately: a staged edit that the working tree
     # reverts is invisible to a working-tree comparison alone.
     for label, command in (("unstaged", ["diff", "--quiet", "HEAD", "--", *paths]),
@@ -155,7 +172,8 @@ def apply(args: argparse.Namespace) -> None:
         except SystemExit as error:
             raise SystemExit(f"cannot check evidence cleanliness: {error}") from error
         if clean.returncode == 1:
-            raise SystemExit(f"the evidence files have {label} edits against HEAD; commit or discard them first")
+            raise SystemExit(f"the evidence files or the gate snapshot have {label} edits against HEAD; "
+                             "commit or discard them first")
         if clean.returncode:
             raise SystemExit(f"cannot check evidence cleanliness against HEAD; git diff failed:\n{clean.stderr}")
     head = git("rev-parse", "--verify", "--quiet", "HEAD^{commit}")
@@ -174,7 +192,14 @@ def apply(args: argparse.Namespace) -> None:
     for name, data in evidence.items():
         if data.get("prepared_by") != destination[name].get("prepared_by"):
             raise SystemExit(f"{name}: baseline prepared_by differs from the destination file")
-    snapshot = json.loads((ROOT / "bench/zk-compose/gate_counts_latest.json").read_text())["benchmarks"]
+        # Every other field is copied from the baseline, so a difference here would silently
+        # replace the destination's content.
+        kept, current = unrewritten(name, data), unrewritten(name, destination[name])
+        if kept != current:
+            keys = sorted(key for key in set(kept) | set(current) if kept.get(key) != current.get(key))
+            raise SystemExit(f"{name}: baseline differs from the destination outside the re-measured fields: "
+                             f"{', '.join(keys)}")
+    snapshot = json.loads((ROOT / SNAPSHOT).read_text())["benchmarks"]
     for member, record in evidence["result_v1_compatibility"]["members"].items():
         base, got = record["base"], measured[member]
         if any(got[field] != base[field] for field in ("acir_bytecode_sha256", "abi_sha256", "vk_sha256", "vk_bytes")):

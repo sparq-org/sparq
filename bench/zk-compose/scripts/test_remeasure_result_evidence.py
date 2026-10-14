@@ -188,16 +188,71 @@ class ApplyTests(unittest.TestCase):
                 self.apply()
             replace.assert_not_called()
 
-    def test_baseline_is_read_from_the_named_commit(self):
+    def test_baseline_differing_outside_remeasured_fields_is_refused(self):
         baseline = self.git("rev-parse", "HEAD").stdout.strip()
-        # A later commit changes the destination; the baseline must still come from `baseline`.
+        # A later commit adds a member; applying the older baseline would silently drop it.
         data = json.loads(self.originals[self.paths[1]])
         data["members"] = {"later": {}}
+        self.paths[1].write_text(json.dumps(data))
+        destination = self.paths[1].read_bytes()
+        self.commit("destination")
+        self.args.baseline_commit = baseline
+        with mock.patch.object(remeasure.os, "replace") as replace:
+            with self.assertRaisesRegex(SystemExit, "outside the re-measured fields: members"):
+                self.apply()
+            replace.assert_not_called()
+        self.assertEqual(self.paths[1].read_bytes(), destination)
+
+    def test_baseline_new_top_level_field_at_head_is_refused(self):
+        baseline = self.git("rev-parse", "HEAD").stdout.strip()
+        data = json.loads(self.originals[self.paths[0]])
+        data["note"] = "added after the baseline"
+        self.paths[0].write_text(json.dumps(data))
+        self.commit("destination")
+        self.args.baseline_commit = baseline
+        with self.assertRaisesRegex(SystemExit, "outside the re-measured fields: note"):
+            self.apply()
+
+    def test_baseline_differing_only_in_rewritten_fields_is_accepted(self):
+        baseline = self.git("rev-parse", "HEAD").stdout.strip()
+        data = json.loads(self.originals[self.paths[1]])
+        data["limitations"] = "stale"
         self.paths[1].write_text(json.dumps(data))
         self.commit("destination")
         self.args.baseline_commit = baseline
         self.apply()
-        self.assertEqual(json.loads(self.paths[1].read_text())["members"], {})
+        self.assertNotEqual(json.loads(self.paths[1].read_text())["limitations"], "stale")
+
+    def test_baseline_is_read_from_the_named_commit(self):
+        # The baseline commit's members, not HEAD's, are what the check compares.
+        data = json.loads(self.originals[self.paths[1]])
+        data["members"] = {"earlier": {}}
+        self.paths[1].write_text(json.dumps(data))
+        baseline = self.commit("baseline")
+        self.paths[1].write_bytes(self.originals[self.paths[1]])
+        self.commit("destination")
+        self.args.baseline_commit = baseline
+        with self.assertRaisesRegex(SystemExit, "outside the re-measured fields: members"):
+            self.apply()
+        self.args.baseline_commit = "HEAD"
+        self.apply()
+
+    def test_unstaged_snapshot_edit_is_refused(self):
+        snapshot = self.evidence_dir / "gate_counts_latest.json"
+        snapshot.write_text('{"benchmarks": {"local": {}}}')
+        with mock.patch.object(remeasure.os, "replace") as replace:
+            with self.assertRaisesRegex(SystemExit, "unstaged edits against HEAD"):
+                self.apply()
+            replace.assert_not_called()
+
+    def test_staged_snapshot_edit_is_refused(self):
+        snapshot = self.evidence_dir / "gate_counts_latest.json"
+        original = snapshot.read_bytes()
+        snapshot.write_text('{"benchmarks": {"local": {}}}')
+        self.git("add", "--", str(snapshot))
+        snapshot.write_bytes(original)
+        with self.assertRaisesRegex(SystemExit, "staged edits against HEAD"):
+            self.apply()
 
     def test_baseline_ignores_the_working_tree(self):
         # An untracked baseline substitute next to the evidence is never read.
