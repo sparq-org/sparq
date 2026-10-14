@@ -923,6 +923,15 @@ impl PodStore {
         self.apply_odrl(d, session, resource, mode)
     }
 
+    /// Whether `session` may remove `resource` as a whole (an LDP `DELETE`): `Write` from
+    /// the static view, narrowed by the attached prohibitions. Attached permissions grant
+    /// data changes, not graph management, so unlike [`PodStore::decide`] no attached grant
+    /// counts here, as in a SPARQL update that drops a graph.
+    pub fn decide_removal(&self, session: &Session, resource: &str) -> WacDecision {
+        let d = decide::decide_one(self.acl_index(), &self.auth, session, resource, Mode::Write);
+        self.apply_odrl_with(d, session, resource, Mode::Write, false)
+    }
+
     /// Apply the attached ODRL policies (issue #6743) to a point decision: add the modes
     /// an attached permission grants ([`PodStore::odrl_grants`]), then remove the modes
     /// an attached prohibition denies. Grants apply only to an authoritative (`Resolved`)
@@ -972,11 +981,12 @@ impl PodStore {
     }
 
     /// Whether an attached ODRL permission grants `mode` on `target` for `session`: the
-    /// one grant-eligibility predicate every path uses. Only `Read` is granted, and only
-    /// on a graph that exists now and that the last static WAC/ACP materialization
-    /// covered (so every deny that applies to it is in the view), when the auth view
-    /// does not explicitly deny it. The caller checks that the target's decision is
-    /// authoritative.
+    /// one grant-eligibility predicate every path uses. A grant applies only on a graph
+    /// that exists now and that the last static WAC/ACP materialization covered (so every
+    /// deny that applies to it is in the view), when the auth view does not explicitly
+    /// deny it. `Append` is also granted wherever `Write` is. `Write` and `Append` are never
+    /// granted on a referenced group document, whose members hold static grants. The
+    /// caller checks that the target's decision is authoritative.
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
         self.odrl_grants_present(session, mode, target)
@@ -986,9 +996,20 @@ impl PodStore {
     /// [`PodStore::odrl_grants`] for a `target` the caller knows exists now.
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants_present(&self, session: &Session, mode: Mode, target: &str) -> bool {
+        let grants = |m: Mode| {
+            self.odrl.grants(session, m, target) && !self.auth.denies(session, m, target)
+        };
         self.statically_covered.contains(target)
-            && self.odrl.grants(session, mode, target)
-            && !self.auth.denies(session, mode, target)
+            && (mode == Mode::Read || !self.group_docs().contains(target))
+            && match mode {
+                // `Append` through a `Write` grant needs that grant to stand, an explicit deny
+                // of `Write` included, as well as no deny of `Append` itself.
+                Mode::Append => {
+                    !self.auth.denies(session, Mode::Append, target)
+                        && (grants(Mode::Append) || grants(Mode::Write))
+                }
+                _ => grants(mode),
+            }
     }
 
     /// Commit an authorized update's effects to the graph. A graph the update removes, at any
@@ -1177,9 +1198,9 @@ impl PodStore {
             child_name,
             mode,
         );
-        // The child-name refusal above stays first. A permission never grants a create (it
-        // grants only `Read`); a prohibition on the container or on the child it would mint
-        // can only narrow what is left.
+        // The child-name refusal above stays first. A permission never grants a create (no
+        // grant is applied here, and none covers a container); a prohibition on the
+        // container or on the child it would mint can only narrow what is left.
         let d = self.apply_odrl_with(d, session, container, mode, false);
         self.apply_odrl_with(d, session, &format!("{container}{child_name}"), mode, false)
     }
@@ -1256,7 +1277,7 @@ impl PodStore {
         #[cfg(feature = "odrl-bridge")]
         if !self.odrl.is_empty() {
             let mut set = sets.sorted.to_vec();
-            if mode == Mode::Read && self.odrl.has_permissions() {
+            if mode != Mode::Control && self.odrl.has_permissions() {
                 let have: FxHashSet<&str> = sets.sorted.iter().map(NamedNode::as_str).collect();
                 // Each graph here exists, so the existence half of `odrl_grants` holds.
                 for (name, _) in self.graph.named.iter() {
@@ -1566,7 +1587,13 @@ impl PodStore {
         if let Some(reads) = &reads {
             update::scope_reads(&upd, reads)?;
         }
-        let odrl = |mode: Mode, g: &str, granted: bool| self.odrl_gate(s, mode, g, granted);
+        // Attached policies grant changes to data only: in a request that also manages graphs
+        // (`CLEAR`, `DROP`, `CREATE`, `LOAD`, `COPY`, `MOVE`), every write rests on the static
+        // view, and a prohibition can still remove it.
+        let grants = update::changes_data_only(&upd);
+        let odrl = |mode: Mode, g: &str, granted: bool| {
+            (grants || granted) && self.odrl_gate(s, mode, g, granted)
+        };
         let permit = update::check(&self.graph, &auth, s, &upd, self.group_docs(), &odrl)?;
         // An update made only of INSERT DATA / DELETE DATA has effects its text alone gives,
         // on exactly the graphs the static check just authorized (with the same needs). When it
