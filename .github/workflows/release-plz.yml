@@ -355,6 +355,17 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # release-plz tags HEAD. The concurrency group keeps only the newest pending run, so
+      # when a later push replaces the version commit's run, HEAD is that later commit and
+      # the tag lands past the release (v0.1.6 did). Tag the commit that last changed the
+      # workspace `version = "…"` line in the root Cargo.toml instead, whichever push runs.
+      - name: Check out the last workspace-version commit (tag target)
+        run: |
+          set -euo pipefail
+          target="$(git log -1 --format=%H -G'^version = "' -- Cargo.toml)"
+          test -n "$target"
+          git checkout --detach "$target"
+          echo "tag target: $(git log -1 --format='%h %s')"
       - name: Rust (preinstalled stable)
         # [FABLE-5] CI-economy (2026-07-18 directive): the ubuntu runner image
         # ships a rustup stable toolchain; the SHA-pinned action's `rustup
