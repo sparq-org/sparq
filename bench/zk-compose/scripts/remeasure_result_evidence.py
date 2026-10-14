@@ -19,8 +19,8 @@ embeds the checkout path and is not compared), every v1 ACIR, ABI and key equals
 members and sources change. It validates all four files before replacing any of them and
 restores any it replaced if a later replacement fails; an interruption of the process itself
 (a kill or power loss between renames) can still leave a mixed set, which
-`git checkout -- <the four files>` undoes. It refuses to run while the four files have
-unstaged edits, so that recovery never discards anything else. The result is always
+`git checkout HEAD -- <the four files>` undoes. It refuses to run while the four files
+differ from HEAD (staged or not), so that recovery never discards anything else. The result is always
 labelled non-canonical; the job manifest and run outputs are not part of the repository,
 so the two-run agreement it records is checked when `apply` runs, not later.
 """
@@ -33,6 +33,7 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -166,11 +167,12 @@ def apply(args: argparse.Namespace) -> None:
         if recorded["nargo"] != tools["nargo"] or recorded["bb"] != tools["bb"]:
             raise SystemExit(f"{name}: toolchain differs from the recorded one")
     paths = [f"bench/zk-compose/{name}.json" for name in evidence]
-    if subprocess.run(["git", "diff", "--quiet", "--", *paths], cwd=ROOT).returncode:
-        raise SystemExit("the evidence files have unstaged edits; check them out or stage them first")
+    if subprocess.run(["git", "diff", "--quiet", "HEAD", "--", *paths], cwd=ROOT).returncode:
+        raise SystemExit("the evidence files differ from HEAD; commit or discard those edits first")
     # Every check has passed. Stage all four files, then replace them one by one. Separate
-    # renames are not one atomic update, so if a replacement fails the files already replaced
-    # are restored from their original bytes, and staged temporaries are always removed.
+    # renames are not one atomic update, so if a replacement fails each file already replaced
+    # is restored from its original bytes, independently, and staged temporaries are always
+    # removed.
     originals, staged, replaced = {}, [], []
     try:
         for name, data in evidence.items():
@@ -188,8 +190,14 @@ def apply(args: argparse.Namespace) -> None:
             os.replace(temporary, target)
             replaced.append(target)
     except BaseException:
+        unrestored = []
         for target in replaced:
-            target.write_bytes(originals[target])
+            try:
+                target.write_bytes(originals[target])
+            except OSError:
+                unrestored.append(str(target.relative_to(ROOT)))
+        if unrestored:
+            print("not restored; run git checkout HEAD --", *unrestored, file=sys.stderr)
         raise
     finally:
         for temporary, _ in staged:
