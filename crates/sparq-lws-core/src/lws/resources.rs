@@ -6885,6 +6885,13 @@ mod tests {
             .await;
             assert_eq!(r.status(), StatusCode::PRECONDITION_FAILED, "{stale}");
         }
+        // A year before 1900 is not an HTTP-date (RFC 5322 section 3.3), so it is ignored.
+        let lines = [
+            ("if-unmodified-since", "Sun, 31 Dec 1899 23:59:59 GMT"),
+            text,
+        ];
+        let r = call(&st, "PUT", "/x", &lines, "b").await;
+        assert!(r.status().is_success(), "{}", r.status());
         let tag = hdr(&call(&st, "GET", "/x", &[], "").await, "etag");
         let lines = [("if-match", "\"other\""), ("if-match", tag.as_str()), text];
         let r = call(&st, "PUT", "/x", &lines, "b").await;

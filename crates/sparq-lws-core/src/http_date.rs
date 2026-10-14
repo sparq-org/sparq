@@ -143,10 +143,11 @@ fn parse_asctime_date(value: &str) -> Option<i64> {
 ///
 /// A leap second (`23:59:60`, RFC 5322 §3.3, which HTTP-date inherits) is accepted and counts as the
 /// following midnight, the instant it precedes on the POSIX timeline; `:60` at any other minute is
-/// not a real UTC time and is rejected.
+/// not a real UTC time and is rejected. So is a year before 1900, which RFC 5322 §3.3 rules out.
 fn civil_to_unix(year: i64, month: u32, day: u32, hh: u32, mm: u32, ss: u32) -> Option<(i64, i64)> {
     let leap_second = ss == 60 && hh == 23 && mm == 59;
-    if day == 0
+    if year < 1900
+        || day == 0
         || day > days_in_month(year, month)
         || hh > 23
         || mm > 59
@@ -485,6 +486,24 @@ mod tests {
         assert_eq!(parse_imf_fixdate("Sun, 06 Nov 1994 08:49:60 GMT"), None);
         // Non-ASCII input of plausible shape must not panic (byte-slicing guard) and must fail.
         assert_eq!(parse_imf_fixdate("Sün, 06 Nov 1994 08:49:37 GMT"), None);
+    }
+
+    #[test]
+    fn a_year_before_1900_is_not_an_http_date() {
+        // RFC 5322 §3.3, whose year HTTP-date inherits: 1900 or later, in every form.
+        let now = at(1_700_000_000);
+        for invalid in [
+            "Sun, 31 Dec 1899 23:59:59 GMT",
+            "Sun, 31 Dec 1899 23:59:60 GMT",
+            "Sun Dec 31 23:59:59 1899",
+        ] {
+            assert_eq!(parse(invalid, now), None, "{invalid}");
+        }
+        assert_eq!(
+            parse("Mon, 01 Jan 1900 00:00:00 GMT", now),
+            Some(-2_208_988_800)
+        );
+        assert_eq!(parse("Mon Jan  1 00:00:00 1900", now), Some(-2_208_988_800));
     }
 
     #[test]
