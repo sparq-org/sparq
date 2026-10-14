@@ -2,6 +2,7 @@
 """Fail when the latest Touchstone run passes fewer tests in any module than floor.json records.
 
     check-floor.py <runs-dir> [floor.json]
+    check-floor.py --self-test
 
 Modules are the first path segment of a test id (core, auth, index), except notifications/webhook.
 Raise the floor in the same change that makes more tests pass; never lower it to go green.
@@ -21,19 +22,12 @@ def module(test_id: str) -> str:
     return "notifications/webhook" if path.startswith("notifications/") else path.split("/")[0]
 
 
-def main() -> int:
-    runs = sys.argv[1]
-    floor_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), "floor.json")
-    reports = sorted(glob.glob(os.path.join(runs, "*", "report.json")))
-    if not reports:
-        print(f"no Touchstone report under {runs}", file=sys.stderr)
-        return 2
-    report = json.load(open(reports[-1]))
-    floor_doc = json.load(open(floor_path))
+def check(tests: list, floor_doc: dict) -> tuple:
+    """Whether `tests` (a report's) hold `floor_doc` (floor.json's), and the lines to print."""
     floor, supported = floor_doc["passed"], set(floor_doc.get("supported", []))
-    ok = True
+    ok, out = True, []
     passed, total = Counter(), Counter()
-    for t in report["tests"]:
+    for t in tests:
         m = module(t["id"])
         total[m] += 1
         if t["id"] in supported:
@@ -41,22 +35,66 @@ def main() -> int:
             passed[m] += held
             if not held:
                 ok = False
-                print(f"  {t['outcome']:9} supported feature lost: {t['id']}")
+                out.append(f"  {t['outcome']:9} supported feature lost: {t['id']}")
         else:
             passed[m] += t["outcome"] == "passed"
-    for missing in sorted(supported - {t["id"] for t in report["tests"]}):
+    for missing in sorted(supported - {t["id"] for t in tests}):
         ok = False
-        print(f"  missing   supported feature not run: {missing}")
+        out.append(f"  missing   supported feature not run: {missing}")
     for m in sorted(set(total) | set(floor)):
         want = floor.get(m, 0)
         line = f"{m:24} {passed[m]:4} passed of {total[m]:4} (floor {want})"
         if passed[m] < want:
             ok = False
             line += "  BELOW FLOOR"
-        print(line)
-    for t in report["tests"]:
+        out.append(line)
+    for t in tests:
         if t["outcome"] in ("failed", "cantTell"):
-            print(f"  {t['outcome']:9} {t['level']:6} {t['id']}")
+            out.append(f"  {t['outcome']:9} {t['level']:6} {t['id']}")
+    return ok, out
+
+
+def self_test():
+    probe = "core/linksets#linkset-put-405-when-unsupported"
+    floor_doc = {"supported": [probe], "passed": {"core": 3}}
+
+    def run(probe_outcome, other="passed"):
+        tests = [
+            {"id": "core/a#x", "outcome": "passed", "level": "MUST"},
+            {"id": "core/a#y", "outcome": "passed", "level": "MUST"},
+            {"id": "core/a#z", "outcome": other, "level": "MUST"},
+        ]
+        if probe_outcome is not None:
+            tests.append({"id": probe, "outcome": probe_outcome, "level": "MUST"})
+        return check(tests, floor_doc)[0]
+
+    # The probe counts toward the floor only while it is inapplicable.
+    assert run("inapplicable")
+    # Passing it means the feature was lost, even though the count would hold.
+    assert not run("passed")
+    assert not run("failed")
+    assert not run(None)
+    # An unrelated failure is not hidden by the probe.
+    assert not run("inapplicable", other="failed")
+    assert not run("passed", other="failed")
+    # Without the probe listed, a module is held to its plain pass count.
+    assert not check([{"id": "core/a#x", "outcome": "passed", "level": "MUST"}], {"passed": {"core": 2}})[0]
+    print("check-floor self-test passed")
+
+
+def main() -> int:
+    if sys.argv[1:] == ["--self-test"]:
+        self_test()
+        return 0
+    runs = sys.argv[1]
+    floor_path = sys.argv[2] if len(sys.argv) > 2 else os.path.join(os.path.dirname(__file__), "floor.json")
+    reports = sorted(glob.glob(os.path.join(runs, "*", "report.json")))
+    if not reports:
+        print(f"no Touchstone report under {runs}", file=sys.stderr)
+        return 2
+    report = json.load(open(reports[-1]))
+    ok, out = check(report["tests"], json.load(open(floor_path)))
+    print("\n".join(out))
     return 0 if ok else 1
 
 
