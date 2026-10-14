@@ -273,3 +273,69 @@ fn variable_graph_acl_write_rebuilds_the_auth_view() {
         "alice's grant must be gone on the very next read"
     );
 }
+
+#[test]
+fn variable_graph_acr_write_is_refused_and_leaves_the_view() {
+    // An `.acr` document is an auth-view input by its suffix, like an `.acl`. The ACP rules
+    // grant no SPARQL write on an `.acr` (ACRs change through `put_acl_acp`), so even
+    // ADMIN, who holds Read, Write and Control on the root and its members, is refused a
+    // `GRAPH ?g` write to one, and nothing is rebuilt.
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let acr = "https://pod.ex/.acr";
+    let mut nq = String::from(
+        "<https://pod.ex/notes/n1#it> <https://ex.dev/ns#title> \"hello\" <https://pod.ex/notes/n1> .\n",
+    );
+    let quads = [
+        (acr, "resource", "https://pod.ex/".to_owned()),
+        (acr, "accessControl", "https://pod.ex/.acr#c".to_owned()),
+        (acr, "memberAccessControl", "https://pod.ex/.acr#c".to_owned()),
+        ("https://pod.ex/.acr#c", "apply", "https://pod.ex/.acr#p".to_owned()),
+        ("https://pod.ex/.acr#p", "allow", format!("{ACL}Read")),
+        ("https://pod.ex/.acr#p", "allow", format!("{ACL}Write")),
+        ("https://pod.ex/.acr#p", "allow", format!("{ACL}Control")),
+        ("https://pod.ex/.acr#p", "anyOf", "https://pod.ex/.acr#m".to_owned()),
+        ("https://pod.ex/.acr#m", "agent", ADMIN.to_owned()),
+    ];
+    for (s_, p, o) in quads {
+        nq += &format!("<{s_}> <{ACP}{p}> <{o}> <{acr}> .\n");
+    }
+    let mut s = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("fixture loads"));
+    s.materialize_acp().expect("acp materializes");
+    let gen = s.auth_generation();
+    let refused = s.update_as_acp(
+        &sess(ADMIN),
+        "INSERT { GRAPH ?g { <https://pod.ex/.acr#c> <urn:x> <urn:y> } } \
+         WHERE { VALUES ?g { <https://pod.ex/.acr> } }",
+    );
+    assert!(refused.is_err(), "no SPARQL write to an .acr");
+    assert_eq!(s.auth_generation(), gen, "a refused update rebuilds nothing");
+    let n1 = s.accessible(&sess(ADMIN), Mode::Read).iter().any(|g| g.as_str() == NOTE);
+    assert!(n1, "the ACP view still grants ADMIN");
+}
+
+#[test]
+fn mixed_content_and_acl_update_rebuilds_the_auth_view() {
+    // One successful update that changes a content graph AND the `.acl`: the content
+    // change lands and the rule change is in force on the very next read.
+    let mut s = store();
+    let gen = s.auth_generation();
+    s.update_as(
+        &sess(ADMIN),
+        "DELETE { GRAPH ?acl { <https://pod.ex/.acl#team> \
+            <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> } } \
+         INSERT { GRAPH ?doc { <https://pod.ex/other#it> <https://ex.dev/ns#tag> \"y\" } } \
+         WHERE { VALUES (?acl ?doc) { (<https://pod.ex/.acl> <https://pod.ex/other>) } }",
+    )
+    .expect("admin may write both graphs");
+    assert!(s.auth_generation() > gen, "a mixed update touching an .acl must rebuild the view");
+    let tagged = s
+        .ask_as(
+            &sess(ADMIN),
+            Mode::Read,
+            "ASK { GRAPH <https://pod.ex/other> { ?s <https://ex.dev/ns#tag> \"y\" } }",
+        )
+        .expect("ask evaluates");
+    assert!(tagged, "the content half of the update landed");
+    assert!(!can_read_note(&s, ALICE), "alice's grant must be gone on the very next read");
+}
