@@ -559,8 +559,8 @@ What the server exposes, all discoverable from the storage description
   and on a conditional `POST` Read on the container whose listing it compares (an access request's
   listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
   outcome would have been. A bare `*` asks only whether the target exists and needs no Read (nor
-  reads a listing, so a page past the last is no `404` then). A `PATCH`'s `204` carries the new
-  `ETag`, of a resource or a linkset, only to a writer that may read the result.
+  reads a listing, so a page past the last is no `404` then). A `PUT`'s or `PATCH`'s `204` carries
+  the new `ETag`, of a resource or a linkset, only to a writer that may read the result.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link

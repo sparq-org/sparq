@@ -2437,6 +2437,9 @@ async fn update<S: Store + 'static>(
     if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &rmeta, format) {
         return refused;
     }
+    // The new tag covers the stored content type, which a PUT without `Content-Type` keeps from
+    // before: only a writer that may read the resource is given it.
+    let reader = state.allowed(Action::Read, uri, agent).await;
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
     let (written, _guard, _) = write_with_meta(
@@ -2454,7 +2457,9 @@ async fn update<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     let mut resp = StatusCode::NO_CONTENT.into_response();
-    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
+    if reader {
+        set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
+    }
     if set_linkset {
         set(
             resp.headers_mut(),
@@ -6587,7 +6592,13 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let status = send(erin, "POST", c.clone(), other()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        // A patch's new tag describes content only a reader may learn.
+        // A new tag describes content only a reader may learn: a PUT without `Content-Type` keeps
+        // the stored type, which the tag covers.
+        for (who, sent) in [(&dave, false), (&bob, true)] {
+            let r = handle(&st, &request("PUT", &p, &[], "{}"), who).await;
+            assert_eq!(r.status(), StatusCode::NO_CONTENT);
+            assert_eq!(r.headers().contains_key("etag"), sent, "PUT {who:?}");
+        }
         for (who, sent) in [(&dave, false), (&bob, true)] {
             for (path, body) in [(&p, add), (&meta, link)] {
                 let r = handle(
