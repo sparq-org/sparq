@@ -124,8 +124,8 @@ on it, so the default engine build and the WASM artifact are byte-identical with
 it; a build that does not enable `fedplan-mpc` compiles an empty crate and pulls in neither
 `sparq-fedplan` nor `sparq-mpc`. Neither upstream gains a cross-dependency on the other.
 
-[OPUS-4.8] sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2 / sq-pwr.3 / sq-xkrt — flagged for Fable re-review.
-[OPUS-5] sq-1fo4 — Phase 5, canonicalisation half only."#
+sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2 / sq-pwr.3 / sq-xkrt — flagged for Fable re-review.
+sq-1fo4 — Phase 5, canonicalisation half only."#
 )]
 // Default (feature OFF) build: a concise, link-free crate doc. None of the gated items above
 // exist in this build, so the doc is plain text only (no intra-doc links). sq-2q1x.
@@ -147,8 +147,8 @@ seam API. The crate is a standalone `publish = false` workspace member; `sparq-c
 `sparq-mpc`. The crate performs no MPC and makes no privacy/soundness claim; the remaining
 privacy-bearing phases are deferred and audit-gated (sq-9hrn / sq-qhy4).
 
-[OPUS-4.8] sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2 / sq-pwr.3 / sq-xkrt — flagged for Fable re-review.
-[OPUS-5] sq-1fo4 — Phase 5, canonicalisation half only."#
+sq-2q1x / sq-fix4 / sq-i1wh2 / sq-pwr.2 / sq-pwr.3 / sq-xkrt — flagged for Fable re-review.
+sq-1fo4 — Phase 5, canonicalisation half only."#
 )]
 #![forbid(unsafe_code)]
 // sq-2q1x: crate has zero `unsafe`.
