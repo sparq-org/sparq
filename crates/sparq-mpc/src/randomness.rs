@@ -149,8 +149,8 @@ impl RandomnessModel {
 /// [`randomness_model`](Self::randomness_model) is an honest *description* of the
 /// regime, and [`require_deployable`](Self::require_deployable) is the fail-closed
 /// refusal gate — today it refuses EVERY source (see its docs), and wiring it
-/// through the production call sites is itself a follow-on bead (none are wired
-/// yet).
+/// through the production call sites is itself a follow-on bead (no call site is
+/// gated on it yet, although `degree_reduce` already draws through this trait).
 ///
 /// See `research/mpc-distributed-randomness-design.md` for the full design and
 /// the follow-on implementation beads.

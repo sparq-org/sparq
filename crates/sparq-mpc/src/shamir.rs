@@ -1683,8 +1683,10 @@ fn extract_integer_vector(p: &PartialResult) -> Result<Vec<u64>, MpcError> {
 /// degree-`2t` share with [`DistributedRandomness::vss_own_input`]. The single-dealer
 /// simulation draws exactly what `degree_reduce` always drew, so its output is
 /// unchanged; a source that cannot share a party's own value (PRSS today) makes this
-/// fail closed with that source's error. Same preconditions and security model as
-/// [`ShamirDealer::degree_reduce`].
+/// fail closed with that source's error, and a re-sharing that is not the canonical
+/// `n`-party sharing on `x = 1..=n` is refused. Same preconditions and security model
+/// as [`ShamirDealer::degree_reduce`]; the caller must pass a source whose
+/// `(parties(), threshold())` match the `(n, t)` that produced `shares_2t`.
 pub fn degree_reduce_through(
     source: &mut dyn DistributedRandomness,
     shares_2t: &[Share],
@@ -1713,7 +1715,7 @@ pub fn degree_reduce_through(
     // the full n-party degree-2t sharing on the canonical points `x = 1..=n`
     // *in order*: the recombination λ-weights below are derived from the first
     // 2t+1 x-coords and then paired BY POSITION with the fresh sub-sharings
-    // (which `share()` always emits on `x = 1..=n` in order). A permuted or
+    // (each checked below to be on `x = 1..=n` in order). A permuted or
     // non-canonical input would silently produce a WRONG reduced sharing, so we
     // fail closed here rather than mis-reduce. (We choose the strict-canonical
     // contract — matching the docs — over deriving weights from arbitrary x:
@@ -1777,9 +1779,9 @@ pub fn degree_reduce_through(
             // `debug_assert_eq!`, which is COMPILED OUT in release — so a
             // position/point mismatch could silently mis-accumulate in release
             // builds. A real `if` guarantees it in both profiles. (Given the
-            // canonical-point check above and that `share()` always emits
-            // `x = 1..=n`, this is unreachable in practice; it is a defence-in-
-            // depth invariant, not a redundant assertion.)
+            // canonical-point checks on the input and on every re-sharing above,
+            // this is unreachable; it is a defence-in-depth invariant, not a
+            // redundant assertion.)
             if out.x != sub_share.x {
                 return Err(MpcError::Protocol(format!(
                     "degree_reduce: resharing point misalignment — output party x = {} \
@@ -2003,11 +2005,21 @@ mod tests {
         ));
     }
 
+    /// How [`MalformedResharingSource`] corrupts each own-input re-sharing.
+    #[derive(Clone, Copy, Debug)]
+    enum Malformation {
+        Short,
+        Long,
+        Permuted,
+        DuplicateX,
+        WrongX,
+    }
+
     /// A source that delegates to a real dealer but corrupts the SHAPE of every
-    /// own-input re-sharing (truncated, or moved off the canonical points).
+    /// own-input re-sharing.
     struct MalformedResharingSource {
         inner: ShamirDealer,
-        truncate: bool,
+        how: Malformation,
     }
     impl DistributedRandomness for MalformedResharingSource {
         fn randomness_model(&self) -> crate::randomness::RandomnessModel {
@@ -2027,10 +2039,17 @@ mod tests {
         }
         fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
             let mut sub = self.inner.vss_own_input(secret)?;
-            if self.truncate {
-                sub.pop();
-            } else {
-                sub.swap(0, 1);
+            match self.how {
+                Malformation::Short => {
+                    sub.pop();
+                }
+                Malformation::Long => {
+                    let x = sub.len() as u64 + 1;
+                    sub.push(Share { x, y: Fp::zero() });
+                }
+                Malformation::Permuted => sub.swap(0, 1),
+                Malformation::DuplicateX => sub[1].x = sub[0].x,
+                Malformation::WrongX => sub[0].x = 0,
             }
             Ok(sub)
         }
@@ -2040,21 +2059,27 @@ mod tests {
     fn degree_reduce_through_rejects_a_malformed_resharing() {
         // The accumulation pairs sub-shares with parties by position, so a short or
         // permuted re-sharing must be refused, not silently mis-reduced.
-        for truncate in [true, false] {
+        for how in [
+            Malformation::Short,
+            Malformation::Long,
+            Malformation::Permuted,
+            Malformation::DuplicateX,
+            Malformation::WrongX,
+        ] {
             let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
             let mut dealer = b.dealer();
             let prod =
                 mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
             let mut source = MalformedResharingSource {
                 inner: b.dealer(),
-                truncate,
+                how,
             };
             assert!(
                 matches!(
                     degree_reduce_through(&mut source, &prod),
                     Err(MpcError::Protocol(_))
                 ),
-                "truncate={truncate}: a malformed re-sharing must fail closed"
+                "{how:?}: a malformed re-sharing must fail closed"
             );
         }
     }
