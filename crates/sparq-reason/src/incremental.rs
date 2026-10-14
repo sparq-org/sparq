@@ -1692,6 +1692,8 @@ pub struct MaterializedN3Graph {
     /// implies-data is removed and counting resumes. Keeps `fallback_reason()`'s
     /// `None ⇔ counting active` contract exact for this cause. See review 1868.
     data_rule_fallback: Option<String>,
+    /// Non-sticky: formula values with variables in the current base need batch emission.
+    data_formula_fallback: Option<String>,
     /// NON-sticky fallback cause: the last counting run recorded a cut and the rules
     /// negate, or passed a closure limit, so the checkpoint ([`cut_gate`]) handed the
     /// rebuild to the checked engine. Recomputed every `rematerialize`.
@@ -2180,6 +2182,28 @@ fn n3_simple_term(t: &N3Term) -> bool {
     matches!(t, N3Term::Iri(_) | N3Term::Lit(..) | N3Term::Var(_))
 }
 
+/// Formula-scoped variables are values, as in the batch engine's `ground_triple`.
+/// Variables outside formulas still make an inserted fact uninstantiated.
+fn n3_fact_term(t: &N3Term) -> bool {
+    match t {
+        N3Term::Var(_) => false,
+        N3Term::List(ms) => ms.iter().all(n3_fact_term),
+        N3Term::Triple(tr) => tr.iter().all(n3_fact_term),
+        _ => true,
+    }
+}
+
+/// `n3_emit` requires recursive groundness even for a formula bound by a premise.
+/// Only formulas containing variables need fallback; ground formula values still count.
+fn n3_variable_formula(t: &N3Term) -> bool {
+    match t {
+        N3Term::Formula(_) => !t.is_ground(),
+        N3Term::List(ms) => ms.iter().any(n3_variable_formula),
+        N3Term::Triple(tr) => tr.iter().any(n3_variable_formula),
+        _ => false,
+    }
+}
+
 fn n3_term_vars(t: &N3Term, out: &mut FxHashSet<String>) {
     match t {
         N3Term::Var(v) => {
@@ -2658,6 +2682,7 @@ impl MaterializedN3Graph {
             disqualified,
             data_fallback: None,
             data_rule_fallback: None,
+            data_formula_fallback: None,
             cut_fallback: None,
             base,
             mode: N3Mode::Fallback,
@@ -2742,8 +2767,11 @@ impl MaterializedN3Graph {
 
     /// Does mutating `t` require a full rebuild? (Guard predicates — their truth is baked
     /// into every count — and `log:implies`-family predicates, which the batch engine would
-    /// parse as RULES.)
+    /// parse as RULES, and formula values with variables that counting cannot emit.)
     fn triggers_rebuild(&self, t: &[N3Term; 3]) -> bool {
+        if t.iter().any(n3_variable_formula) {
+            return true;
+        }
         let Some(p) = n3_pred_iri(&t[1]) else { return true };
         if p == n3_iri(N3_LOG, "implies")
             || p == n3_iri(N3_LOG, "isImpliedBy")
@@ -2808,7 +2836,15 @@ impl MaterializedN3Graph {
              over them — outside the counting profile"
                 .to_string()
         });
-        if self.compiled.is_some() && self.data_fallback.is_none() && !data_rules {
+        self.data_formula_fallback = self.base.iter().flatten().any(n3_variable_formula).then(|| {
+            "base contains formula values with variables; counting emission requires recursive \
+             groundness — outside the counting profile".to_string()
+        });
+        if self.compiled.is_some()
+            && self.data_fallback.is_none()
+            && !data_rules
+            && self.data_formula_fallback.is_none()
+        {
             self.cuts = counting_run;
             self.mode = N3Mode::Counting;
             let pending: Vec<[N3Term; 3]> = self.base.iter().cloned().collect();
@@ -3152,14 +3188,15 @@ impl MaterializedN3Graph {
         Ok((added, removed))
     }
 
-    /// Insert base facts (set semantics; non-ground triples are ignored). Counting mode
-    /// updates the closure incrementally; guard-predicate / implies-as-data deltas, and any
-    /// mutation in fallback mode, re-materialize. Returns how many facts joined the base.
+    /// Insert base facts (set semantics; facts with variables outside formulas are ignored).
+    /// Counting mode updates incrementally; guard-predicate / implies-as-data deltas,
+    /// formula values with variables, and any mutation in fallback mode re-materialize.
+    /// Returns how many facts joined the base.
     pub fn insert(&mut self, facts: &[[N3Term; 3]]) -> usize {
         let mut added = Vec::new();
         let mut rebuild = false;
         for f in facts {
-            if !f.iter().all(N3Term::is_ground) {
+            if !f.iter().all(n3_fact_term) {
                 continue;
             }
             // A label `outward` never produces names no node: ignored like a non-ground fact.
@@ -3291,8 +3328,8 @@ impl MaterializedN3Graph {
 
     /// Why the graph is (or would be) in fallback mode: the rule-analysis disqualification, the
     /// sticky runtime data disqualification, or the (non-sticky) presence of `log:implies`-family
-    /// rules-as-data in the base, or (also non-sticky) a counting run that was cut short while
-    /// the rules negate. `None` ⇔ the counting path is active. See review 1868.
+    /// rules-as-data or formula values with variables in the base, or a counting run cut short
+    /// while the rules negate. `None` ⇔ the counting path is active. See review 1868.
     pub fn fallback_reason(&self) -> Option<&str> {
         // [OPUS-4.8] Include the data-rule cause so the documented `None ⇔ counting` contract
         // holds even when fallback is forced by implies-as-data rather than rule analysis.
@@ -3300,6 +3337,7 @@ impl MaterializedN3Graph {
             .as_deref()
             .or(self.disqualified.as_deref())
             .or(self.data_rule_fallback.as_deref())
+            .or(self.data_formula_fallback.as_deref())
             .or(self.cut_fallback.as_deref())
     }
 
