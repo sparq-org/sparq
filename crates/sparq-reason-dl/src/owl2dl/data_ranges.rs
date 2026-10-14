@@ -28,9 +28,7 @@ mod region;
 mod strings;
 mod xsdre;
 
-use super::datatypes::{
-    in_value_space, integer_range, Builtin, Facet, Rational, RationalKey, Value,
-};
+use super::datatypes::{in_value_space, integer_range, Builtin, Facet, RationalKey, Value};
 use cuts::Cuts;
 use rat::Rat;
 use region::{f32_key, f64_key, int_range, Region, Sp};
@@ -142,11 +140,13 @@ const MAX_DEPTH: usize = 64;
 /// tags), or Unknown for a value no literal has (a zero or non-reduced denominator, an
 /// offset beyond ±14:00).
 fn canonical(v: &Value) -> Result<Value, Unknown> {
-    let real = |r: &RationalKey| Rational::new(r.0.num, r.0.den) == Some(r.0);
     Ok(match v {
-        Value::Real(r) if !real(r) => return Err(Unknown),
+        Value::Real(r) if !reduced(r) => return Err(Unknown),
+        // Seconds are decimal (XML Schema 1.1 Part 2 §D.2.1).
         Value::DateTime(d)
-            if !real(&d.seconds) || d.tz.is_some_and(|t| !(-840..=840).contains(&t)) =>
+            if !reduced(&d.seconds)
+                || !d.seconds.0.is_decimal()
+                || d.tz.is_some_and(|t| !(-840..=840).contains(&t)) =>
         {
             return Err(Unknown);
         }
@@ -155,6 +155,18 @@ fn canonical(v: &Value) -> Result<Value, Unknown> {
         Value::LangString(s, t) => Value::LangString(s.clone(), t.to_ascii_lowercase()),
         v => v.clone(),
     })
+}
+
+/// Whether `r` is in lowest terms with a positive denominator, as parsed values are.
+fn reduced(r: &RationalKey) -> bool {
+    let (mut a, mut b) = (r.0.num.unsigned_abs(), r.0.den.unsigned_abs());
+    if r.0.den <= 0 {
+        return false;
+    }
+    while b != 0 {
+        (a, b) = (b, a % b);
+    }
+    a == 1
 }
 
 fn one_of(vs: &[Value]) -> Result<Region, Unknown> {

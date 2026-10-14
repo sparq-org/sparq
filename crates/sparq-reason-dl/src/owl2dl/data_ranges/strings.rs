@@ -267,11 +267,17 @@ pub(crate) fn count(f: &F, space: Space, need: u128) -> Option<u128> {
     // One automaton per atom, except that every enumerated value shares one trie: an atom
     // holds when its automaton accepts, or when the trie ends at the value's node.
     let mut autos = vec![Auto::Dfa(universe(space).ok()?)];
+    // Every automaton, and the trie, counts against one byte budget as it is added.
+    let mut bytes = autos[0].bytes();
     let mut trie = Trie::default();
     let mut tests = Vec::with_capacity(atoms.len());
     for a in &atoms {
         let auto = match a {
             Atom::Is(w) => {
+                bytes = bytes.saturating_add(w.len().saturating_mul(TRIE_NODE_BYTES));
+                if bytes > TOTAL_DFA_BYTES {
+                    return None;
+                }
                 tests.push(Test::Ends(trie.insert(w)));
                 continue;
             }
@@ -286,21 +292,15 @@ pub(crate) fn count(f: &F, space: Space, need: u128) -> Option<u128> {
             Atom::Untagged => Auto::Untagged,
             _ => Auto::Dfa(dfa(a).ok()?),
         };
+        bytes = bytes.saturating_add(auto.bytes());
+        if bytes > TOTAL_DFA_BYTES {
+            return None;
+        }
         tests.push(Test::Accepts(autos.len()));
         autos.push(auto);
     }
     let at_trie = autos.len();
     autos.push(Auto::Trie(Box::new(trie)));
-    let dfa_bytes: usize = autos
-        .iter()
-        .map(|a| match a {
-            Auto::Dfa(d) => d.0.memory_usage(),
-            _ => 0,
-        })
-        .sum();
-    if dfa_bytes > TOTAL_DFA_BYTES {
-        return None;
-    }
     let classes = byte_classes(&autos);
     let start: Vec<u32> = autos.iter().map(Auto::start).collect::<Option<_>>()?;
     let accepting = |state: &[u32]| {
@@ -510,7 +510,18 @@ impl Trie {
 
 const TAGGED: u32 = 1 << 31;
 
+/// An upper bound on the bytes one trie node takes (its map entry and its own map).
+const TRIE_NODE_BYTES: usize = 64;
+
 impl Auto {
+    /// The bytes the automaton holds beyond its own size.
+    fn bytes(&self) -> usize {
+        match self {
+            Auto::Dfa(d) => d.0.memory_usage(),
+            _ => 0,
+        }
+    }
+
     fn start(&self) -> Option<u32> {
         match self {
             Auto::Dfa(d) => Some(d.start()),
@@ -630,7 +641,11 @@ fn cached(key: Key, build: impl FnOnce() -> Result<Hir, ()>) -> Result<Rc<Dfa>, 
         return d;
     }
     let d = build().and_then(Dfa::build).map(Rc::new);
-    let bytes = d.as_ref().map_or(0, |d| d.0.memory_usage());
+    let key_bytes = match &key {
+        Key::Atom(Atom::Pattern(p) | Atom::Lang(p)) => p.len(),
+        _ => 0,
+    };
+    let bytes = key_bytes + d.as_ref().map_or(0, |d| d.0.memory_usage());
     DFAS.with(|m| {
         let (m, total) = &mut *m.borrow_mut();
         if m.len() >= 256 || *total + bytes > TOTAL_DFA_BYTES {

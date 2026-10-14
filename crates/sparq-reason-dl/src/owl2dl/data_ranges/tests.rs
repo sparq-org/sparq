@@ -3,7 +3,7 @@
 //! `Plus and Minus Zero are Distinct`.
 
 use super::*;
-use crate::owl2dl::datatypes::{builtin, in_value_space, parse_value, DateTimeValue};
+use crate::owl2dl::datatypes::{builtin, in_value_space, parse_value, DateTimeValue, Rational};
 use DataRangeExpr as E;
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
@@ -653,6 +653,20 @@ fn values_no_literal_has_answer_unknown() {
         Tri::Unknown
     );
     assert_eq!(contains(&point, &far), Tri::Unknown);
+    let third = Value::DateTime(DateTimeValue {
+        seconds: RationalKey(Rational { num: 1, den: 3 }),
+        tz: None,
+    });
+    assert_eq!(
+        contains(&dt("dateTime"), &third),
+        Tri::Unknown,
+        "seconds are decimal"
+    );
+    assert_eq!(has_at_least(&one_of([third]), 1), Tri::Unknown);
+    let min = Value::Real(RationalKey(Rational::int(i128::MIN)));
+    assert_eq!(contains(&dt("integer"), &min), Tri::Yes);
+    let negative_den = Value::Real(RationalKey(Rational { num: 1, den: -1 }));
+    assert_eq!(contains(&dt("integer"), &negative_den), Tri::Unknown);
     let unreduced = Value::Real(RationalKey(Rational { num: 2, den: 4 }));
     assert_eq!(contains(&dt("decimal"), &unreduced), Tri::Unknown);
     assert_eq!(
@@ -690,4 +704,12 @@ fn large_enumerations_count_quickly() {
         conjunction_satisfiable(std::slice::from_ref(&r), &[], 1, &words),
         Tri::No
     );
+}
+
+#[test]
+fn enumerations_past_the_byte_budget_answer_unknown() {
+    let long: Vec<Value> = (0..100)
+        .map(|i| s(&format!("{i:05}{}", "x".repeat(20_000))))
+        .collect();
+    assert_eq!(has_at_least(&E::OneOf(long), 2), Tri::Unknown);
 }
