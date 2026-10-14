@@ -1,8 +1,8 @@
-// [OPUS-4.8] sq-ka8m (sq-mnv5 residual; design Hole 4): MALICIOUS-SECURE secure
+// [OPUS-4.8] sq-ka8m (sq-mnv5 residual; design Hole 4): TAMPER-EVIDENT secure
 // greater-than over the decompose+compare chain. Every multiplication carries an
 // IT-MAC (sq-km34.3, `MacSession::auth_mul`) and the boolean verdict is MAC-checked
 // (sq-km34.4, `MacSession::mac_check`) BEFORE it is opened.
-//! Honest-majority **malicious-with-abort** secure greater-than — the IT-MAC
+//! Honest-majority **tamper-evident-with-abort** secure greater-than — the IT-MAC
 //! upgrade of the semi-honest [`crate::compare`] comparison chain (Hole 4).
 //!
 //! ## What this closes (design `research/mpc-malicious-security-design.md` Hole 4)
@@ -47,7 +47,7 @@
 //!
 //! ## Security tier (stated precisely, no over-claim)
 //!
-//! **Honest-majority, tamper-evident-with-abort on the opened values, unanimous abort.**
+//! **Honest-majority, tamper-evident-with-abort on the opened values; the abort is local detection, not an agreed unanimous or identifiable abort.**
 //! This is NOT AXIS-1 `Malicious` today, whatever design §3 targets:
 //! [`crate::shamir::MacSession::auth_mul`] carries the output MAC as
 //! `[α·z] = reduce([α·x]·[y])`, so it ADOPTS a value tamper on its second operand
@@ -55,9 +55,12 @@
 //! in [`crate::auth_disclose`]). Every gate of this chain is an `auth_mul`, so an
 //! actively deviating party has a route to a wrong verdict without an abort. Closing it
 //! needs multiplication-gate verification binding BOTH operands in `MacSession`. On the
-//! three-axis registry: AXIS-2 `Abort(Unanimous)` (detect-and-abort, NOT identifiable
-//! abort, NOT GOD), AXIS-3 `HonestMajority` (unchanged; degrades / refuses if
-//! `n ≤ 2t`); AXIS-1 stays at the semi-honest level of [`crate::compare`] until then. It does NOT enter the dishonest-majority SPDZ regime (route (b) /
+//! three-axis registry, `ShamirBackend` still reports `OperatorClass::Comparison` as
+//! [`crate::backend::SecurityDescriptor::semi_honest_only`]: AXIS-1 `SemiHonest`,
+//! AXIS-2 `Abort(Selective)` (a failed MAC-check is detected locally, but nothing
+//! establishes that every honest party agrees to abort, so this is NOT unanimous or
+//! identifiable abort, NOT GOD), AXIS-3 `HonestMajority` (degrades / refuses if
+//! `n ≤ 2t`). It does NOT enter the dishonest-majority SPDZ regime (route (b) /
 //! sq-j5ok). The exact integer operands are NEVER opened — only the 1-bit verdict,
 //! and only after the MAC-check passes. `[OPUS-4.8]`
 
@@ -189,12 +192,14 @@ fn auth_greater_than_bits(
 /// 2. Run the authenticated MSB-first comparator (`auth_greater_than_bits`) — every
 ///    gate a [`MacSession::auth_mul`].
 /// 3. **MAC-check the verdict** ([`MacSession::mac_check`]) BEFORE opening it — a
-///    tamper in any gate of step 2 (a forged share, a wrong `degree_reduce`
-///    re-sharing) makes `σ ≠ 0` and this ABORTS with [`MpcError::MacCheckFailed`].
+///    tamper that leaves the verdict inconsistent with its MAC makes `σ ≠ 0` and
+///    this ABORTS with [`MpcError::MacCheckFailed`]. A value tamper on the second
+///    operand of a step-2 `auth_mul` is adopted, not caught (module security tier).
 /// 4. Open the (now MAC-verified) verdict.
 ///
 /// Both operands must be `< 2^`[`COMPARE_BITS`] (fail-closed). `n >= 2t+1`
-/// (fail-closed). Honest-majority, **malicious-with-abort** (design §3). `[OPUS-4.8]`
+/// (fail-closed). Honest-majority, **tamper-evident-with-abort** (design §3 targets
+/// malicious-with-abort; see the module security tier). `[OPUS-4.8]`
 pub fn malicious_greater_than(backend: &ShamirBackend, a: Fp, b: Fp) -> Result<bool, MpcError> {
     check_party_count(backend.parties(), backend.threshold())?;
     check_in_range("a", a)?;

@@ -627,7 +627,7 @@ a Rabbit-style full-field bit decomposition #cite("RABBIT") covering operand mag
 `2^60`.
 
 #impl-status("implemented")[Verdict-bit-only comparison is implemented; a
-maliciously-secure (MAC-checked) variant exists for the authenticated tier (§7.5, though not externally audited — see sq-qhy4).]  // privacy-claims-allow: authenticated tier is partially built and here qualified as not externally audited (sq-qhy4); not a settled soundness claim
+MAC-checked, tamper-evident variant exists for the authenticated tier (§7.5). It is not maliciously secure, since a value tamper on the second operand of a multiplication is not caught, and it is not externally audited (sq-qhy4).]  // privacy-claims-allow: states the authenticated tier is NOT maliciously secure and not externally audited (sq-qhy4)
 
 == Secure aggregates and threshold verdicts
 

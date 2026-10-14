@@ -74,8 +74,9 @@
 //!
 //! ## Security tier (stated, not over-claimed)
 //!
-//! This foundation is the carrier for **honest-majority, malicious-with-abort**
-//! security (design §3, "the achieved tier"). On its own it changes NO advertised
+//! This foundation is the carrier design §3 targets for **honest-majority,
+//! malicious-with-abort** security; today's paths reach only tamper-evident-with-abort
+//! (see [`crate::auth_compare`]'s security tier). On its own it changes NO advertised
 //! guarantee: it adds the MAC sharing alongside the value sharing and keeps the
 //! linear ops free and correct. The malicious-security PROPERTY materialises only
 //! on a path where the multiplication carries the MAC

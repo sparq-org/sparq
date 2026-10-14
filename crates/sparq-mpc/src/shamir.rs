@@ -861,8 +861,9 @@ impl MacSession<'_> {
     /// `mul_shares_raw` + two `degree_reduce` rounds instead of one (design §5). This
     /// is the documented price of authentication; it does NOT enter a preprocessing
     /// phase (that is route (b) / the dishonest-majority continuation, sq-j5ok).
-    /// Honest-majority, malicious-with-abort (the abort comes from
-    /// [`Self::mac_check`], not from this primitive alone). `[OPUS-4.8]`
+    /// Honest-majority, tamper-evident-with-abort (the abort comes from
+    /// [`Self::mac_check`], not from this primitive alone). NOT malicious-secure: the
+    /// output MAC adopts a value tamper on `y`, the second operand. `[OPUS-4.8]`
     pub fn auth_mul(
         &mut self,
         x: &crate::authenticated::AuthenticatedShare,
