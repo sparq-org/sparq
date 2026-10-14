@@ -1222,7 +1222,7 @@ method-independent message does not verify.
 
 **PRECONDITION on (a)–(d), as it now stands.** All of (a)–(d) is HOST-side. Two of the four
 things the precondition named have since been built verifier-side, and two have not; the gates
-are still CLOSED. What is now ENFORCED:
+are still CLOSED. What is now ENFORCED by the verifier:
 
 - **The commitment method is AUTHENTICATED, not assumed.** `sparq-zk-compose`'s `method_auth`
   recovers it from the issuer signature rather than reading it from the manifest: it builds the
@@ -1237,6 +1237,8 @@ are still CLOSED. What is now ENFORCED:
   accepts `Unbound`, so every already-issued credential verifies exactly as before;
   `require_method_bound()` refuses it; an attested `DualLeafV1` needs the written-down
   `admit_legacy_dual_leaf_v1()` opt-in, and the `value-only` dial is admitted by no policy.
+What is now COMPUTABLE but NOT ENFORCED (no verify path calls it):
+
 - **The member, the lane constant, the SCALE and the bound are PINNED — as a computation.**
   `sparq-zk-compose`'s `value_pin` states, for an authenticated `DualLeafV2` method and a typed
   query FILTER (`sparq_zk::verify::fragment_typed_filters`, which keeps the constant's datatype and

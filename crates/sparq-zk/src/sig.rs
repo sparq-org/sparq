@@ -111,6 +111,7 @@ const SIG_DOMAIN_STATUS_LIST_IRI: u64 = 0x5a4b_5349_475f_4c49; // "ZKSIG_LI"
 const SIG_DOMAIN_SCHEME_IRI: u64 = 0x5a4b_5349_475f_5349; // "ZKSIG_SI"
 const SIG_DOMAIN_COMMITMENT_SALT_SCHEME: u64 = 0x5a4b_5349_475f_4d32; // "ZKSIG_M2"
 const SIG_DOMAIN_COMMITMENT_STATUS_SCHEME: u64 = 0x5a4b_5349_475f_4d33; // "ZKSIG_M3"
+const SIG_DOMAIN_COMMITMENT_HOLDER_SCHEME: u64 = 0x5a4b_5349_475f_4d34; // "ZKSIG_M4"
 const SIG_DOMAIN_HOLDER_POP: u64 = 0x5a4b_5349_475f_4850; // "ZKSIG_HP"
 
 /// Which signature scheme an issuer key/signature uses. v1 ships Schnorr over
@@ -1108,7 +1109,6 @@ pub fn commitment_message_with_holder_and_scheme(
     holder_pk_digest: &Fr,
     scheme_digest: &Fr,
 ) -> Fr {
-    const SIG_DOMAIN_COMMITMENT_HOLDER_SCHEME: u64 = 0x5a4b_5349_475f_4d34; // "ZKSIG_M4"
     poseidon2::hash(&[
         Fr::from(SIG_DOMAIN_COMMITMENT_HOLDER_SCHEME),
         *commitment,
@@ -2779,13 +2779,14 @@ mod tests {
     /// Every `ZKSIG_*` domain tag in this module, with the ASCII label its value
     /// spells. `sig_domain_tags_are_pinned_and_pairwise_distinct` checks the
     /// table; a tag added to the module belongs here too.
-    const ALL_SIG_DOMAIN_TAGS: [(&str, u64, &[u8; 8]); 18] = [
+    const ALL_SIG_DOMAIN_TAGS: [(&str, u64, &[u8; 8]); 19] = [
         ("COMMITMENT", SIG_DOMAIN_COMMITMENT, b"ZKSIG_C1"),
         ("COMMITMENT_SALT", SIG_DOMAIN_COMMITMENT_SALT, b"ZKSIG_C2"),
         ("COMMITMENT_STATUS", SIG_DOMAIN_COMMITMENT_STATUS, b"ZKSIG_C3"),
         ("COMMITMENT_HOLDER", SIG_DOMAIN_COMMITMENT_HOLDER, b"ZKSIG_C4"),
         ("COMMITMENT_SALT_SCHEME", SIG_DOMAIN_COMMITMENT_SALT_SCHEME, b"ZKSIG_M2"),
         ("COMMITMENT_STATUS_SCHEME", SIG_DOMAIN_COMMITMENT_STATUS_SCHEME, b"ZKSIG_M3"),
+        ("COMMITMENT_HOLDER_SCHEME", SIG_DOMAIN_COMMITMENT_HOLDER_SCHEME, b"ZKSIG_M4"),
         ("NONCE", SIG_DOMAIN_NONCE, b"ZKSIG_N1"),
         ("STATUS_REF", SIG_DOMAIN_STATUS_REF, b"ZKSIG_SR"),
         ("STATUS_IDX_COMMIT", SIG_DOMAIN_STATUS_IDX_COMMIT, b"ZKSIG_IC"),

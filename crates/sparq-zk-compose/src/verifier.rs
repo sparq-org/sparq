@@ -9489,6 +9489,91 @@ mod tests {
         );
     }
 
+    /// The hidden-only path applies the relying party's [`MethodPolicy`] to the
+    /// method its `m` names, exactly as the clear path does: an attested V1 `m`
+    /// is refused by default, an unbound `m` is refused under
+    /// `require_method_bound`, and both pass under the matching opt-in.
+    #[test]
+    fn a_hidden_only_commitment_is_held_to_the_method_policy() {
+        use crate::manifest::HiddenIssuerAttestation;
+        use crate::method_auth::MethodPolicy;
+        use sparq_zk::commit::CommitmentMethod;
+        let sk = sparq_zk::sig::SecretKey::from_seed(1);
+        let keys = || KeySet::from_hex_keys([sparq_zk::sig::public_key_to_hex(&sk.public_key())]);
+        let c = Fr::from(100u64);
+        let salt = Fr::from(11u64);
+        let status_ref = status_ref_digest(
+            &status_list_id_to_field(TEST_STATUS_LIST),
+            TEST_STATUS_INDEX,
+            TEST_STATUS_VERSION,
+        );
+        let with = |m: &Fr| {
+            let mut mani = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+            mani.sub_proofs = vec![crate::manifest::SubProof {
+                inputs: flat_scan_with_commit(c),
+                proof_hex: String::new(),
+            }];
+            mani.revocation = Some(test_revocation());
+            mani.hidden_issuer_attestations = vec![HiddenIssuerAttestation {
+                commitment: FieldHex::from_field(&c),
+                depth: 4,
+                key_set_root: fh("0x0"),
+                message: fh(&field_to_hex(m)),
+                salt: Some(fh(&field_to_hex(&salt))),
+                proof_hex: String::new(),
+            }];
+            mani
+        };
+        let covered: std::collections::BTreeSet<String> = [field_to_hex(&c)].into();
+        let bound = |method: CommitmentMethod| {
+            sparq_zk::sig::commitment_message_with_status_and_scheme(
+                &c,
+                &salt,
+                &status_ref,
+                &sparq_zk::sig::scheme_iri_to_field(method.scheme_iri()),
+            )
+        };
+
+        let v1 = with(&bound(CommitmentMethod::DualLeafV1));
+        let err = bind_issuer_attestations(&v1, &keys(), &covered).unwrap_err();
+        assert!(
+            matches!(err, CheckError::MethodNotAdmitted { .. }),
+            "an attested V1 hidden `m` is refused by the default policy, got {err:?}"
+        );
+        assert!(
+            bind_issuer_attestations(
+                &v1,
+                &keys().with_method_policy(MethodPolicy::current().admit_legacy_dual_leaf_v1()),
+                &covered
+            )
+            .is_ok(),
+            "the V1 opt-in admits it"
+        );
+
+        let unbound =
+            with(&sparq_zk::sig::commitment_message_with_status(&c, &salt, &status_ref));
+        assert!(
+            bind_issuer_attestations(&unbound, &keys(), &covered).is_ok(),
+            "the default policy accepts an unbound hidden `m`"
+        );
+        let err = bind_issuer_attestations(
+            &unbound,
+            &keys().with_method_policy(MethodPolicy::current().require_method_bound()),
+            &covered,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, CheckError::MethodNotAuthenticated { .. }),
+            "require_method_bound refuses an unbound hidden `m`, got {err:?}"
+        );
+
+        assert!(
+            bind_issuer_attestations(&with(&bound(CommitmentMethod::DualLeafV2)), &keys(), &covered)
+                .is_ok(),
+            "a V2 hidden `m` is admitted by default"
+        );
+    }
+
     #[test]
     fn signature_mode_names_the_issuer_attestation_path() {
         use crate::manifest::{CommitmentAttestation, HiddenIssuerAttestation};
@@ -10493,7 +10578,8 @@ mod fragment_dispatch_tests {
             &KeySet::empty(),
             &RevocationPolicy::accept_version(1),
             false,
-        );
+        )
+        .map(|p| p.required);
         assert!(
             matches!(flat, Err(CheckError::Sparqzk(VerifyError::UnsupportedFragment(_)))),
             "flat regime rejects UNION at stage-1a, got {flat:?}"
@@ -10503,7 +10589,8 @@ mod fragment_dispatch_tests {
             &KeySet::empty(),
             &RevocationPolicy::accept_version(1),
             true,
-        );
+        )
+        .map(|p| p.required);
         assert!(
             matches!(ext, Ok(ref v) if v.is_empty()),
             "extended regime routes the UNION acceptance through fragment_query, got {ext:?}"
@@ -10532,6 +10619,7 @@ mod fragment_dispatch_tests {
             &RevocationPolicy::accept_version(1),
             true,
         )
+        .map(|p| p.required)
         .unwrap_err();
         assert!(
             matches!(err, CheckError::CircuitIdMismatch { proof: 0, .. }),

@@ -30,8 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CommitmentAttestation::from_registry_entry` bridges a registry entry's already-method-bound
   signature into a manifest. Hardening only, and back-compatible: an attestation over the
   method-unbound `ZKSIG_C3`/`ZKSIG_C4` message authenticates as `Unbound`, the default policy accepts
-  it, and a bad signature still reports `CheckError::InvalidIssuerSignature`, so every existing
-  manifest reaches the verdict it reached before. Not externally audited (sq-qhy4); no soundness or
+  it, and a bad signature still reports `CheckError::InvalidIssuerSignature`, so every manifest
+  that verified before still verifies. Not externally audited (sq-qhy4); no soundness or
   privacy property is claimed.
 - **sparq-zk:** `verify::fragment_typed_filters` re-derives a query's FILTER obligations keeping each
   constant as the typed `oxrdf::Literal` the query spells (`verify::TypedQueryFilter { variable, op,

@@ -940,7 +940,10 @@ mod tests {
             operand_enc: FieldHex("0x1".into()),
             op: FilterOp::Ge,
             bound: 18,
-            datatype_const: FieldHex(field_to_hex(&lane).to_uppercase()),
+            datatype_const: FieldHex({
+                let h = field_to_hex(&lane);
+                format!("0x{}", h[2..].to_uppercase())
+            }),
             expected: true,
         };
         assert_eq!(

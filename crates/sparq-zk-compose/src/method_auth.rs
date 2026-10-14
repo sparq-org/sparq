@@ -8,7 +8,7 @@
 //! manifest's [`crate::manifest::CommitmentAttestation`] carries no scheme
 //! field, and inventing one would make the method a prover-supplied value — the
 //! same shape as the `manifest.key_set` anchor that made audit #3 vacuous
-//! before codex #1 moved the trust anchor outside the proof.
+//! before the trust anchor moved outside the proof.
 //!
 //! So the method is not read anywhere. It is RECOVERED from the signature. The
 //! issuer-signature family already has METHOD-BOUND members — `ZKSIG_M3`
