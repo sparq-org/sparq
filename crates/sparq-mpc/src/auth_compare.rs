@@ -75,7 +75,7 @@ use crate::shamir::{MacSession, ShamirBackend};
 fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
     if n < 2 * t + 1 {
         return Err(MpcError::Protocol(format!(
-            "malicious-secure comparison needs n >= 2t+1 (each authenticated multiplication's \
+            "tamper-evident comparison needs n >= 2t+1 (each authenticated multiplication's \
              degree reduction does, and the MAC-check is honest-majority); got n = {n}, t = {t}"
         )));
     }
@@ -87,7 +87,7 @@ fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
 fn check_in_range(label: &str, v: Fp) -> Result<(), MpcError> {
     if v.value() >= (1u64 << COMPARE_BITS) {
         return Err(MpcError::Protocol(format!(
-            "malicious-secure comparison operand `{label}` = {} is out of range (must be < 2^{} = \
+            "tamper-evident comparison operand `{label}` = {} is out of range (must be < 2^{} = \
              {}); the bit-decomposition would wrap and the verdict would be wrong",
             v.value(),
             COMPARE_BITS,
@@ -289,7 +289,7 @@ fn auth_greater_than_public_bits(
 /// a degree-`t` sharing of a 0/1; this reconstructs it (robust where redundancy
 /// exists, like every other open) and returns the boolean. A non-boolean
 /// reconstruction is refused rather than coerced. This is the ONLY value the
-/// malicious-secure comparison path opens; the operands are never reconstructed.
+/// tamper-evident comparison path opens; the operands are never reconstructed.
 /// `[OPUS-4.8]`
 pub fn open_auth_verdict(
     backend: &ShamirBackend,
@@ -310,7 +310,7 @@ fn verdict_bit(bit: Fp) -> Result<bool, MpcError> {
         Ok(true)
     } else {
         Err(MpcError::Protocol(format!(
-            "malicious-secure comparison verdict reconstructed to a non-boolean field element {} \
+            "tamper-evident comparison verdict reconstructed to a non-boolean field element {} \
              (expected 0 or 1) — refusing to coerce",
             bit.value()
         )))
@@ -360,7 +360,7 @@ mod tests {
                 assert_eq!(
                     got,
                     a > b,
-                    "n={n}: malicious-secure verdict for ({a} > {b}) must match plaintext"
+                    "n={n}: tamper-evident verdict for ({a} > {b}) must match plaintext"
                 );
             }
         }
@@ -386,7 +386,7 @@ mod tests {
                 assert_eq!(
                     got,
                     s > thr,
-                    "n={n}: malicious-secure threshold verdict ({s} > {thr}) must match plaintext"
+                    "n={n}: tamper-evident threshold verdict ({s} > {thr}) must match plaintext"
                 );
             }
         }

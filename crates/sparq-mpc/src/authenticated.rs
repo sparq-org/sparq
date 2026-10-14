@@ -1,12 +1,13 @@
-// [OPUS-4.8] sq-km34.1: IT-MAC authenticated secret sharing — the FOUNDATION for
-// honest-majority malicious-with-abort MPC. Layered over the existing degree-t
+// [OPUS-4.8] sq-km34.1: IT-MAC authenticated secret sharing — the FOUNDATION design
+// §3 builds honest-majority malicious-with-abort MPC on (not delivered today). Layered over the existing degree-t
 // Shamir sharing (`crate::shamir`). This module is the CARRIER (the `[[x]]` pair
 // + the free linear ops); the MAC-carrying multiplication (sq-km34.3,
 // `MacSession::auth_mul`) and the batched MAC-check (sq-km34.4,
 // `MacSession::mac_check`) live in `crate::shamir`, and the registry wiring
 // (sq-km34.7) is a SEPARATE bead that has NOT landed.
 //! Authenticated (IT-MAC) secret sharing over the honest-majority Shamir backend
-//! — the foundation of malicious-with-abort security.
+//! — the foundation malicious-with-abort security would build on; today's paths
+//! are tamper-evident only.
 //!
 //! Design (authoritative): `research/mpc-malicious-security-design.md` §2.1–2.2
 //! (the construction) and §2.3 (free linear ops). Skill `mpc-protocols`:
@@ -486,9 +487,10 @@ pub fn auth_add_constant(
 /// **This helper only propagates MAC shares — it never invokes the batched
 /// `mac_check` (§2.5) itself.** Tamper detection requires the CALLER to include
 /// the result in a successful `mac_check` before opening or otherwise relying on
-/// it. And as everywhere on this chain, the malicious-with-abort security claim
-/// is research-grade: internally re-audited, but EXTERNAL accredited-cryptographer
-/// sign-off is PENDING `sq-qhy4`.
+/// it. Even then the chain is tamper-evident, NOT malicious-with-abort: protocol
+/// verification is incomplete (multiplication gates are not verified on both
+/// operands), and separately EXTERNAL accredited-cryptographer sign-off is PENDING
+/// `sq-qhy4`.
 ///
 /// All addends must be authenticated under the SAME session key `α` and shared on
 /// the identical party-point set (as [`auth_add`] requires). An empty input is a

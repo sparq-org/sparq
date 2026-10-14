@@ -308,7 +308,7 @@ impl ShamirBackend {
     /// it verifies all points lie on one degree-`t` polynomial, CORRECTS up to
     /// `e = ⌊(n−t−1)/2⌋` tampered shares (returning the true secret), and aborts
     /// with [`MpcError::Tampered`] on any inconsistency it cannot repair —
-    /// closing the malicious-security gap (D) at the Shamir layer (parent bead
+    /// addressing the malicious-security gap (D) for share opens at the Shamir layer (parent bead
     /// sq-uu0u). On clean input it returns exactly the same value as plain
     /// Lagrange (no behaviour change). At exactly `t+1` shares (no redundancy)
     /// tampering is information-theoretically undetectable, so it falls back to
@@ -669,9 +669,11 @@ impl ShamirDealer {
     /// kept ONLY inside the returned [`MacSession`] (which exposes no opening path);
     /// `[α]` lives behind the un-openable [`crate::authenticated::MacKey`]. This is
     /// the foundation for honest-majority malicious-with-abort security (design
-    /// `research/mpc-malicious-security-design.md` §2.1–2.2); it is NOT yet
-    /// malicious-secure on its own — the MAC-carrying multiplication (sq-km34.2)
-    /// and the batched MAC-check at open time (sq-km34.4) are separate beads.
+    /// `research/mpc-malicious-security-design.md` §2.1–2.2); it is NOT
+    /// malicious-secure, even combined with the MAC-carrying multiplication
+    /// (sq-km34.2) and the batched MAC-check at open time (sq-km34.4): those give
+    /// tamper evidence on opened values, and multiplication gates are still not
+    /// verified on both operands.
     ///
     /// Consumes a fresh `α` per session: call [`ShamirBackend::dealer`] +
     /// `new_mac_session` once per protocol run so two sessions never reuse a key.

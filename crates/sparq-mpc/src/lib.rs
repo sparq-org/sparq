@@ -102,8 +102,8 @@
 //! bundle carries zero MPC surface (mirrors how `sparq-zk` is isolated).
 #![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
 
-// [OPUS-4.8] sq-km34.1: IT-MAC authenticated secret sharing — the FOUNDATION for
-// honest-majority malicious-with-abort security. `AuthenticatedShare = ([x],[α·x])`
+// [OPUS-4.8] sq-km34.1: IT-MAC authenticated secret sharing — the FOUNDATION design
+// §3 builds honest-majority malicious-with-abort security on (tamper-evident today). `AuthenticatedShare = ([x],[α·x])`
 // layered over the degree-t Shamir sharing, plus the session-global secret-shared
 // MAC key `[α]` (no party knows α; never reconstructed) and the FREE linear ops
 // (add/scale/sub/add-constant applied to both [x] and [α·x]). Foundation only —
@@ -253,8 +253,8 @@ pub mod randomness;
 pub mod prss;
 // [OPUS-4.8] sq-m34i (MPC WI-1): Reed-Solomon consistency-checked + robust
 // (Berlekamp-Welch) reconstruction over Fp — detect-and-abort / correct tampered
-// shares when redundancy is present. Closes malicious-security gap (D) at the
-// Shamir layer (parent bead sq-uu0u). See the module docs for the threat model.
+// shares when redundancy is present. Addresses malicious-security gap (D) for share
+// opens at the Shamir layer (parent bead sq-uu0u). See the module docs for the threat model.
 pub mod robust;
 pub mod shamir;
 // [OPUS-4.8] sq-18lk: oblivious shuffle (Waksman/Benes net) + sort (Batcher
