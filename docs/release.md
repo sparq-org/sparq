@@ -114,7 +114,9 @@ release-plz-generated PR: before the first dependency-first crates.io bootstrap,
 the unpublished inter-crate registry dependencies, including in its temporary package graph.
 While `release-plz.toml` has `git_only = true` and `publish = false`, the Release-PR job
 explicitly skips automatic version calculation. The separate tag job remains active and
-creates the new version's tag after the manual version PR merges.
+creates the new version's tag after the manual version PR merges. It tags the commit that
+last changed `version` in the root `Cargo.toml`, not whatever `main` head its run starts on,
+so a later push cannot move the tag off the version commit.
 After all 12 crates (and the fork) exist, flip `git_only = false` only in the same change that enables
 crates.io OIDC publishing. A generated release-plz PR can resume Cargo versioning then,
 but it is **not merge-ready** until the same PR also aligns every public npm manifest and

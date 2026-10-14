@@ -7,8 +7,8 @@
 //! There is **NO boolean Noir relation**. `filter_value_dl_int` already takes
 //! `datatype_const` as a PUBLIC input and compares over `u64`, and the boolean
 //! value hooks are `{0 = false, 1 = true}` — inside that domain. So the boolean
-//! lane is pure WIRING: the host and the verifier pick
-//! `datatype_const(xsd:boolean)` instead of `datatype_const(xsd:integer)`, and
+//! lane is pure WIRING: the host and the verifier pick the domain-tagged boolean
+//! lane constant instead of `datatype_const(xsd:integer)`, and
 //! everything else — the member, its `main` layout, its compiled artifact, its
 //! gate count — is byte-for-byte the integer lane's. (No new member crate ⇒ no bb
 //! gate re-measure, per the epic-owner design call sq-1s2.1.)
@@ -43,7 +43,7 @@ use sparq_zk::dual_leaf::{
 };
 use sparq_zk::dual_leaf_boolean::{encode_boolean, XSD_BOOLEAN};
 use sparq_zk::encode::TYPE_CODE_LITERAL;
-use sparq_zk::field::{field_from_hex_str, field_to_hex, Fr};
+use sparq_zk::field::{field_from_hash_bytes, field_from_hex_str, field_to_hex, Fr};
 use sparq_zk::poseidon2;
 use sparq_zk_compose::build::{boolean_verdict, build_filter_value_dl_boolean};
 use sparq_zk_compose::dispatch::{resolve_circuit, DispatchError};
@@ -58,6 +58,11 @@ fn typed(lexical: &str, datatype: &str) -> Literal {
 
 fn bool_lit(v: bool) -> Literal {
     typed(if v { "true" } else { "false" }, XSD_BOOLEAN)
+}
+
+/// The string-canonical `h_s` a string-lane leaf carries in its lexical slot.
+fn lexical_of(lit: &Literal) -> Fr {
+    field_from_hash_bytes(blake3::hash(lit.to_string().as_bytes()).as_bytes())
 }
 
 fn fr(hex: &FieldHex) -> Fr {
@@ -115,12 +120,16 @@ fn unpack(inputs: &ProofInputs) -> Public<'_> {
 /// DRIFT GUARD. `manifest::boolean_datatype_const()` is what the compose crate
 /// puts on the wire; `encode_boolean` is what the COMMITTER folded into the leaf.
 /// If those ever diverge, every boolean proof becomes silently unprovable with no
-/// compile-time signal — so pin them to each other AND to `blake3(xsd:boolean)`.
+/// compile-time signal — so pin them to each other AND to the domain-tagged
+/// BLAKE3 key derivation over the `xsd:boolean` IRI.
 #[test]
 fn lane_constant_equals_the_host_encoders_datatype_const() {
     let committed = encode_boolean(&bool_lit(true)).unwrap().datatype_const;
     assert_eq!(fr(&boolean_datatype_const()), committed);
-    assert_eq!(fr(&boolean_datatype_const()), datatype_const(XSD_BOOLEAN));
+    assert_eq!(
+        fr(&boolean_datatype_const()),
+        sparq_zk::dual_leaf_boolean::boolean_datatype_const()
+    );
     // ...and it is NOT the integer lane's constant. This inequality is what the
     // whole separation argument rests on.
     assert_ne!(fr(&boolean_datatype_const()), datatype_const(XSD_INTEGER));
@@ -237,6 +246,52 @@ fn the_zero_hook_pair_is_separated_too() {
     );
 }
 
+/// A whole-graph `DualLeafV1` commitment puts `xsd:boolean` on the string lane,
+/// whose leaf folds `VALUE_NONE` under the bare `blake3(xsd:boolean IRI)`. The
+/// boolean member call must not be able to open that leaf with any hook: the
+/// lane's `datatype_const` has to differ from the constant the string lane folds.
+#[test]
+fn a_string_lane_boolean_leaf_cannot_satisfy_a_boolean_member_call() {
+    let lit = bool_lit(true);
+    let string_lane_leaf = sparq_zk::dual_leaf::encode_literal_dual(&lit).unwrap();
+    let lexical = encode_boolean(&lit).unwrap().lexical_component;
+    assert_ne!(
+        member_rebinds_leaf(
+            Fr::from(sparq_zk::dual_leaf::VALUE_NONE),
+            fr(&boolean_datatype_const()),
+            lexical,
+        ),
+        string_lane_leaf,
+    );
+}
+
+/// A literal of an opaque datatype also takes the string lane and folds
+/// `blake3(datatype IRI)`. Datatype IRIs shaped like a lane tag must not reach the
+/// boolean lane constant, so such a leaf cannot be opened as a boolean either.
+#[test]
+fn an_opaque_datatype_leaf_cannot_satisfy_a_boolean_member_call() {
+    for iri in [
+        format!("{XSD_BOOLEAN}@domain=bit"),
+        format!("{XSD_BOOLEAN}%20domain=bit"),
+        format!("{XSD_BOOLEAN}domain=bit"),
+        // Not an IRI, but a datatype string can reach the fold unvalidated.
+        format!("{XSD_BOOLEAN} domain=bit"),
+    ] {
+        let lit = Literal::new_typed_literal("1", NamedNode::new_unchecked(iri.as_str()));
+        let string_lane_leaf = sparq_zk::dual_leaf::encode_literal_dual(&lit).unwrap();
+        assert_ne!(fr(&boolean_datatype_const()), datatype_const(&iri), "{iri}");
+        assert_ne!(
+            member_rebinds_leaf(
+                Fr::from(sparq_zk::dual_leaf::VALUE_NONE),
+                fr(&boolean_datatype_const()),
+                lexical_of(&lit),
+            ),
+            string_lane_leaf,
+            "{iri}"
+        );
+    }
+}
+
 // =========================================================================
 // 4. The verdict table (EQ/NE + the degenerate false < true orderings)
 // =========================================================================
@@ -322,7 +377,7 @@ fn builder_discloses_the_honest_verdict_for_every_op() {
             (p.op, p.bound, p.datatype_const, p.expected);
         assert_eq!(got_op, op);
         assert_eq!(got_bound, u64::from(bound));
-        assert_eq!(fr(dt), datatype_const(XSD_BOOLEAN));
+        assert_eq!(fr(dt), sparq_zk::dual_leaf_boolean::boolean_datatype_const());
         assert_eq!(got_expected, expected, "{value:?} {op:?} {bound:?}");
     }
 }
@@ -564,5 +619,50 @@ fn in_circuit_boolean_lane_accepts_honest_and_rejects_lies() {
             &built.value_hook, &built.lexical_component,
         ),
         "an xsd:boolean leaf must be unprovable under the integer datatype_const"
+    );
+}
+
+/// In-circuit: the string-lane leaf a whole-graph commitment gives `"true"^^xsd:boolean`
+/// is unprovable on the boolean lane with the `VALUE_NONE` hook, for a verdict that
+/// would hold if that hook were compared as an integer.
+#[test]
+fn in_circuit_string_lane_boolean_leaf_is_rejected() {
+    if !toolchain_available() {
+        eprintln!("nargo absent; skipping the string-lane boolean leaf vector");
+        return;
+    }
+    let lit = bool_lit(true);
+    let leaf = FieldHex(field_to_hex(&sparq_zk::dual_leaf::encode_literal_dual(&lit).unwrap()));
+    let lexical = FieldHex(field_to_hex(&encode_boolean(&lit).unwrap().lexical_component));
+    let hook = FieldHex(field_to_hex(&Fr::from(sparq_zk::dual_leaf::VALUE_NONE)));
+    // `VALUE_NONE > 1` holds over u64, so only the binding can reject this call.
+    assert!(
+        !member_accepts(
+            "bool_string_lane", &leaf, FilterOp::Gt, 1,
+            &boolean_datatype_const(), true, &hook, &lexical,
+        ),
+        "a string-lane boolean leaf must be unprovable on the boolean lane"
+    );
+}
+
+/// In-circuit: an opaque-datatype literal whose datatype IRI is shaped like a lane
+/// tag is unprovable on the boolean lane with the `VALUE_NONE` hook.
+#[test]
+fn in_circuit_opaque_datatype_leaf_is_rejected() {
+    if !toolchain_available() {
+        eprintln!("nargo absent; skipping the opaque-datatype leaf vector");
+        return;
+    }
+    let iri = format!("{XSD_BOOLEAN}@domain=bit");
+    let lit = Literal::new_typed_literal("1", NamedNode::new(iri.as_str()).unwrap());
+    let leaf = FieldHex(field_to_hex(&sparq_zk::dual_leaf::encode_literal_dual(&lit).unwrap()));
+    let lexical = FieldHex(field_to_hex(&lexical_of(&lit)));
+    let hook = FieldHex(field_to_hex(&Fr::from(sparq_zk::dual_leaf::VALUE_NONE)));
+    assert!(
+        !member_accepts(
+            "bool_opaque_datatype", &leaf, FilterOp::Gt, 1,
+            &boolean_datatype_const(), true, &hook, &lexical,
+        ),
+        "an opaque-datatype leaf must be unprovable on the boolean lane"
     );
 }
