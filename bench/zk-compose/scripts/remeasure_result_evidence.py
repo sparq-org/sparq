@@ -162,7 +162,8 @@ def apply(args: argparse.Namespace) -> None:
     measured_commit = git("rev-parse", "--verify", "--quiet", f"{args.commit}^{{commit}}")
     if head.returncode or measured_commit.returncode:
         raise SystemExit(f"cannot resolve HEAD and --commit {args.commit!r}")
-    if head.stdout.strip() != measured_commit.stdout.strip():
+    commit = measured_commit.stdout.strip()
+    if head.stdout.strip() != commit:
         raise SystemExit(f"--commit {args.commit!r} is not HEAD; check out the measured commit first")
     first, second = (json.loads(path.read_text()) for path in (args.first, args.second))
     if without_artifacts(first) != without_artifacts(second):
@@ -192,10 +193,12 @@ def apply(args: argparse.Namespace) -> None:
     moved = {path for path in set(old) | set(new) if old.get(path) != new.get(path)}
     if changed != set(args.expect_member) or moved != set(args.expect_source):
         raise SystemExit(f"unexpected change: members {sorted(changed)}, sources {sorted(moved)}")
-    tree = run(["git", "rev-parse", f"{args.commit}^{{tree}}"], ROOT).strip()
+    tree_lookup = git("rev-parse", "--verify", "--quiet", f"{commit}^{{tree}}")
+    if tree_lookup.returncode:
+        raise SystemExit(f"cannot resolve the tree of {commit}")
     provenance = {
-        "source_commit": args.commit,
-        "source_tree": tree,
+        "source_commit": commit,
+        "source_tree": tree_lookup.stdout.strip(),
         "observed_at_utc": args.observed_at,
         "platform": args.platform,
         "canonical": False,

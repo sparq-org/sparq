@@ -42,12 +42,8 @@ class ApplyTests(unittest.TestCase):
         self.args = argparse.Namespace(first=run_file, second=run_file, job=run_file,
                                        commit="HEAD", observed_at="fixture", platform="fixture",
                                        expect_member=[], expect_source=[], baseline_commit="HEAD")
-        # apply only needs a tree lookup; poison any accidental tool invocation.
-        def tree_lookup(command, cwd):
-            self.assertEqual(command, ["git", "rev-parse", "HEAD^{tree}"])
-            self.assertEqual(cwd, self.root)
-            return "fixture-tree\n"
-        self.enterContext(mock.patch.object(remeasure, "run", side_effect=tree_lookup))
+        # apply runs git directly; poison any accidental tool invocation.
+        self.enterContext(mock.patch.object(remeasure, "run", side_effect=AssertionError("no tools")))
 
     def commit(self, message):
         self.git("add", "--", "bench/zk-compose")
@@ -135,9 +131,12 @@ class ApplyTests(unittest.TestCase):
         self.assert_no_temporaries()
 
     def test_clean_tree_passes(self):
+        head = self.git("rev-parse", "HEAD").stdout.strip()
         self.apply()
         for path in self.paths:
-            self.assertEqual(json.loads(path.read_text())["measured_source"]["source_commit"], "HEAD")
+            source = json.loads(path.read_text())["measured_source"]
+            self.assertEqual(source["source_commit"], head)
+            self.assertEqual(source["source_tree"], self.git("rev-parse", "HEAD^{tree}").stdout.strip())
         self.assertEqual(self.git("diff", "--cached", "--name-only").stdout, "")
         self.assert_no_temporaries()
 
@@ -231,6 +230,24 @@ class ApplyTests(unittest.TestCase):
         self.apply()
         for path in self.paths:
             self.assertEqual(json.loads(path.read_text())["prepared_by"], "fixture")
+
+    def test_commit_alias_is_recorded_as_its_full_id(self):
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        self.args.commit = head[:8]
+        self.apply()
+        for path in self.paths:
+            self.assertEqual(json.loads(path.read_text())["measured_source"]["source_commit"], head)
+
+    def test_tree_lookup_ignores_git_environment(self):
+        other = self.root / "other"
+        other.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=other, check=True)
+        with mock.patch.dict(os.environ, {"GIT_DIR": str(other / ".git")}):
+            self.apply()
+        tree = self.git("rev-parse", "HEAD^{tree}").stdout.strip()
+        for path in self.paths:
+            self.assertEqual(json.loads(path.read_text())["measured_source"]["source_tree"], tree)
+
 
 if __name__ == "__main__":
     unittest.main()
