@@ -308,7 +308,7 @@ impl ShamirBackend {
     /// it verifies all points lie on one degree-`t` polynomial, CORRECTS up to
     /// `e = ⌊(n−t−1)/2⌋` tampered shares (returning the true secret), and aborts
     /// with [`MpcError::Tampered`] on any inconsistency it cannot repair —
-    /// closing the malicious-security gap (D) at the Shamir layer (parent bead
+    /// addressing the malicious-security gap (D) for share opens at the Shamir layer (parent bead
     /// sq-uu0u). On clean input it returns exactly the same value as plain
     /// Lagrange (no behaviour change). At exactly `t+1` shares (no redundancy)
     /// tampering is information-theoretically undetectable, so it falls back to
@@ -669,9 +669,11 @@ impl ShamirDealer {
     /// kept ONLY inside the returned [`MacSession`] (which exposes no opening path);
     /// `[α]` lives behind the un-openable [`crate::authenticated::MacKey`]. This is
     /// the foundation for honest-majority malicious-with-abort security (design
-    /// `research/mpc-malicious-security-design.md` §2.1–2.2); it is NOT yet
-    /// malicious-secure on its own — the MAC-carrying multiplication (sq-km34.2)
-    /// and the batched MAC-check at open time (sq-km34.4) are separate beads.
+    /// `research/mpc-malicious-security-design.md` §2.1–2.2); it is NOT
+    /// malicious-secure, even combined with the MAC-carrying multiplication
+    /// (sq-km34.2) and the batched MAC-check at open time (sq-km34.4): those give
+    /// tamper evidence on opened values, and multiplication gates are still not
+    /// verified on both operands.
     ///
     /// Consumes a fresh `α` per session: call [`ShamirBackend::dealer`] +
     /// `new_mac_session` once per protocol run so two sessions never reuse a key.
@@ -861,8 +863,9 @@ impl MacSession<'_> {
     /// `mul_shares_raw` + two `degree_reduce` rounds instead of one (design §5). This
     /// is the documented price of authentication; it does NOT enter a preprocessing
     /// phase (that is route (b) / the dishonest-majority continuation, sq-j5ok).
-    /// Honest-majority, malicious-with-abort (the abort comes from
-    /// [`Self::mac_check`], not from this primitive alone). `[OPUS-4.8]`
+    /// Honest-majority, tamper-evident-with-abort (the abort comes from
+    /// [`Self::mac_check`], not from this primitive alone). NOT malicious-secure: the
+    /// output MAC adopts a value tamper on `y`, the second operand. `[OPUS-4.8]`
     pub fn auth_mul(
         &mut self,
         x: &crate::authenticated::AuthenticatedShare,
@@ -1017,7 +1020,7 @@ impl MacSession<'_> {
 
     /// [OPUS-4.8] sq-6fv7 — **authenticate an EXISTING degree-`t` value sharing**
     /// `[v]` into `[[v]] = ([v], [α·v])` under this session's key, WITHOUT
-    /// reconstructing `v`. This is the entry the malicious-secure
+    /// reconstructing `v`. This is the entry the IT-MAC (tamper-evident)
     /// [`disclose_threshold_verdict`](crate::compare::disclose_threshold_verdict)
     /// path needs: the federation hands it a plain Shamir sharing of an aggregate
     /// (e.g. the cumulative SUM from [`ShamirBackend::run_secure`]), and to carry it
@@ -1047,7 +1050,7 @@ impl MacSession<'_> {
     /// RNG (the SAME CSPRNG stream the value/MAC sharings are dealt from). The
     /// authenticated square protocol ([`crate::auth_disclose`]) uses it for the
     /// jointly-random `[[a]]` whose `a²` is opened (no party knows `a`). `pub(crate)`
-    /// — an internal protocol accessor, not part of the malicious-secure public API.
+    /// — an internal protocol accessor, not part of the IT-MAC public API.
     pub(crate) fn draw_nonzero_fp(&mut self) -> Fp {
         self.dealer.draw_nonzero_fp()
     }

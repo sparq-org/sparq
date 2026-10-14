@@ -52,9 +52,9 @@ fedclient = [
     # `fedclient` enables `sparq-engine/service`, which pulls the SAME serde_json — so this
     # adds NO new crate to the resolved dependency graph.
     "dep:serde_json",
-    # #3712: the one RFC 3986 query-value encoder (source::pct_encode). Already in the tree
-    # via ureq, so no new crate on a fedclient build.
-    "dep:percent-encoding",
+    # #3712: the workspace's one RFC 3986 percent codec (`sparq_core::percent`), used by the
+    # fragment transport and the discovery probe. Already in the tree via sparq-engine.
+    "dep:sparq-core",
 ]
 # [OPUS-4.8] sq-ij5x (epic sq-dnko, FINAL phase): Phase-7 client-side ADAPTIVE re-planning.
 # OFF by default; IMPLIES `fedclient` (it is the streaming client's execution loop) AND
@@ -87,7 +87,7 @@ rustc-hash = { workspace = true, optional = true }
 # `sparq-engine/service` (enabled by `fedclient`), so the default build is unaffected and the
 # `fedclient` tree gains no new crate. Version pinned to match.
 serde_json = { version = "1", optional = true }
-percent-encoding = { workspace = true, optional = true }
+sparq-core = { path = "../sparq-core", default-features = false, optional = true }
 # [OPUS-4.8] sq-nfxl: the discovery client's blocking HTTP GET (SSRF-guarded). Native-only;
 # the discovery module gates it out of wasm. Mirrors sparq-engine's `service` ureq config so
 # the resolved dependency is the SAME crate/version (no new tree growth on a default build).

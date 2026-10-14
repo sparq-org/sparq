@@ -52,6 +52,22 @@
 //! The value is a **principled refusal** ("no admissible proof") rather than
 //! silently serving a non-conforming one.
 //!
+//! ## The MPC trust-model axes (issues #3275 / #6186)
+//!
+//! `LEVEL_ORDERS` also carries the two ordered MPC dimensions — `secx:AdversaryModel`
+//! (`Malicious ⊐ Covert ⊐ SemiHonest`) and `secx:CorruptionThreshold`
+//! (`DishonestMajority ⊐ HonestMajority ⊐ SuperHonestMajority`, ordered by how much
+//! corruption is *tolerated*) — plus their `secx:requiresAdversaryModel` /
+//! `secx:requiresCorruptionThreshold` leftOperand mappings. `secx:assumption` remains
+//! human-facing PROVENANCE: this reasoner keys strictly on `(dimension, level)`, so an
+//! `secx:assumption secx:SemiHonest` triple alone is never discharged — which is why
+//! the per-protocol levels exist. With `sparq-mpc`'s annotation graph
+//! (`sparq_mpc::secprop::annotations_n3()`, its default-OFF `secprop-annotations`
+//! feature) as the `annotations` argument, `requiresAdversaryModel gteq
+//! secx:Malicious` removes **every** `sparq-mpc` protocol, and `gteq
+//! secx:SemiHonest` admits them. No new rule was needed: the existing discharge rule
+//! handles both dimensions.
+//!
 //! ## Opt-in by construction
 //!
 //! Behind the **default-OFF `secprop-admissibility`** cargo feature (which
@@ -112,6 +128,15 @@ secx:Proven  secx:strongerThan secx:Claimed .\n\
 secx:Claimed secx:strongerThan secx:Conjectured .\n\
 secx:ExternallyAudited  secx:strongerThan secx:InternallyReviewed .\n\
 secx:InternallyReviewed secx:strongerThan secx:Unreviewed .\n\
+# the two MPC trust-model axes (issue #6186). Before them, an MPC protocol's\n\
+# honest-majority / semi-honest posture was recorded only as `secx:assumption`,\n\
+# which this reasoner keys nothing on, so no ODRL preference could exclude a\n\
+# semi-honest protocol. CorruptionThreshold is ordered by how much corruption is\n\
+# TOLERATED, so dishonest-majority is the STRONGEST level.\n\
+secx:Malicious secx:strongerThan secx:Covert .\n\
+secx:Covert    secx:strongerThan secx:SemiHonest .\n\
+secx:DishonestMajority secx:strongerThan secx:HonestMajority .\n\
+secx:HonestMajority    secx:strongerThan secx:SuperHonestMajority .\n\
 \n\
 # === leftOperand → dimension (one fact per ODRL leftOperand; design §4.3.2/§5b) ===\n\
 secx:requiresUnlinkabilityScope secx:overDimension secx:UnlinkabilityScope .\n\
@@ -120,7 +145,9 @@ secx:requiresZeroKnowledge       secx:overDimension secx:ZeroKnowledgeType .\n\
 secx:requiresSoundness           secx:overDimension secx:Soundness .\n\
 secx:requiresSelectiveDisclosure secx:overDimension secx:SelectiveDisclosure .\n\
 secx:requiresSingleUse           secx:overDimension secx:SingleUse .\n\
-secx:requiresAssurance           secx:overDimension secx:AssuranceLevel .\n";
+secx:requiresAssurance           secx:overDimension secx:AssuranceLevel .\n\
+secx:requiresAdversaryModel      secx:overDimension secx:AdversaryModel .\n\
+secx:requiresCorruptionThreshold secx:overDimension secx:CorruptionThreshold .\n";
 
 /// The **order-closure rules** (design §4.3.2): transitively close
 /// `secx:strongerThan`, then lift it to the **reflexive** `secx:atLeast`

@@ -1178,7 +1178,7 @@ pub const SUITES: &[Suite] = &[
             feature: "dl-direct",
         },
         ci_job: "inference-conformance",
-        ratchet_floor: 227,
+        ratchet_floor: 229,
         floor_basis: "definitive expected verdicts through the L4 dispatch, EXACT-pinned \
                       (sparq EXTENSION over the scoped fragment — NOT full OWL 2 DL); \
                       re-pinned by sq-pbz04.4.11 (M1 named-composite fix, net +8); \
@@ -1199,7 +1199,11 @@ pub const SUITES: &[Suite] = &[
                       ontology, so the 43 guard-abstained rows are decided instead of dropped; \
                       paired with an L1 refusal of owl:top/bottomObjectProperty, whose fixed \
                       extensions L1 had been reading away — without it the fall-through exposed \
-                      2 wrong verdicts; fail set unchanged at 5)",
+                      2 wrong verdicts; fail set unchanged at 5); re-pinned by #4762 \
+                      (bottom properties decided as empty roles: +2, 227 -> 229; composition \
+                      136+19+72+2 — New-Feature-BottomObjectProperty-001 and \
+                      New-Feature-BottomDataProperty-001 move from abstention to a correct \
+                      Inconsistent; the top properties stay refused; fail set unchanged at 5)",
         note: "EXTENSION ratchet — the DIRECT-arm consistency / inconsistency / positive- / \
                negative-entailment tests decided by the REAL sparq-reason-dl L4 dispatch \
                (RL guarded / EL guarded / QL deferred / ALCH tableau) under a pinned \
