@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
+  the same parsed input, and as long as the binding values and firing sets are themselves
+  stable, their labels (`__sk<n>_<label>`), and the statement keys and `sparq-prov` entity IRIs
+  of facts carrying them, no longer depend on hash-set traversal order or hasher width (native
+  vs `wasm32`). Bindings that still carry traversal order (for example a `log:collectAllIn`
+  list) can still change those keys (#6844). Existing labels are renumbered, so these keys and
+  IRIs differ from those minted by earlier versions; regenerate stored ones. `why()` proof
+  trees can still vary with traversal order. Ranking each round's existential firings adds a
+  small per-firing cost to rules with existential conclusions (#6843). (#6749)
+
 - **sparq-zk:** `CommitmentMethod::DualLeafV1` is no longer production-selectable
   (`is_production_selectable()` is `false` for it), and `secprop::production_method_iris()` yields the
   V2 scheme IRI in its place. V1 stays recognised, decodable and verifiable for already-issued
@@ -274,6 +284,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- **sparq-reason (N3):** a rule whose existential conclusion contains a quoted formula with
+  variables (e.g. `{ ?x :p :v } => { _:e :q { ?x :r :v } }`) now fires once per distinct
+  binding of those variables. Before, it could fire only once and drop the other bindings'
+  conclusions, so such closures can now be larger and may reach closure limits sooner. (#6749)
 
 - **sparq-reason:** deleting a fact that the rules document itself asserts from a
   `MaterializedN3Graph` now sticks when the graph re-runs the batch engine (fallback mode),

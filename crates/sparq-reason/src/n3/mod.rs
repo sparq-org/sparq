@@ -991,29 +991,14 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     for (ri, rule) in query_parsed.rules.iter().enumerate() {
         let premise = order_premise(&rule.premise);
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
-        let mut fired: FxHashSet<String> = FxHashSet::default();
-        for b in match_premise(&premise, &facts, &bw) {
-            let sk: Option<FxHashMap<String, String>> = if concl_blanks.is_empty() {
-                None
-            } else {
-                let key: String = concl_vars.iter().map(|v| format!("{:?};", b.get(v))).collect();
-                if !fired.insert(key) {
-                    continue; // this firing already instantiated its existentials
-                }
-                sk_counter += 1;
-                Some(
-                    concl_blanks
-                        .iter()
-                        .map(|l| (l.clone(), format!("{}{}_{}_{}", sk_prefix, ri, sk_counter, l)))
-                        .collect(),
-                )
-            };
+        let bindings = match_premise(&premise, &facts, &bw);
+        let mut emit = |b: &Binding, sk: Option<&FxHashMap<String, String>>| {
             for c in &rule.conclusion {
-                let c = match &sk {
+                let c = match sk {
                     Some(map) => rename_blanks(c, map),
                     None => c.clone(),
                 };
-                if let Some(g) = ground_triple(&c, &b, &bw.truncated) {
+                if let Some(g) = ground_triple(&c, b, &bw.truncated) {
                     // A conclusion past the term-depth limit is dropped, as a cut.
                     if bw.settle(bounded::generated(&bw.truncated, &g)) && emitted.insert(g.clone())
                     {
@@ -1021,6 +1006,26 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
                     }
                 }
             }
+        };
+        if concl_blanks.is_empty() {
+            for b in &bindings {
+                emit(b, None);
+            }
+            continue;
+        }
+        // One instantiation per distinct conclusion-relevant binding, numbered in the
+        // canonical order of the firings (GH #6749).
+        let none_fired = FxHashSet::default();
+        let firings = canonical_new_firings(bindings, &concl_vars, &none_fired, false);
+        let base = sk_counter;
+        sk_counter += firings.len();
+        for (rank, _, b) in firings {
+            let n = base + rank + 1;
+            let sk: FxHashMap<String, String> = concl_blanks
+                .iter()
+                .map(|l| (l.clone(), format!("{}{}_{}_{}", sk_prefix, ri, n, l)))
+                .collect();
+            emit(&b, Some(&sk));
         }
     }
     if let Some(e) = bw.nested_error.take().or_else(|| bw.truncated.refusal()) {
@@ -1052,38 +1057,124 @@ pub fn reason_n3_query(dict: &mut Dict, data: &str, query: &str) -> Result<Vec<[
 }
 
 /// A rule conclusion's EXISTENTIALS (its blank labels — instantiated fresh once per firing) and
-/// its VARIABLES (the firing key: one instantiation per distinct conclusion-relevant binding,
-/// so a rule re-evaluated against the same bindings does not mint endless new blanks).
+/// its CONCLUSION-RELEVANT VARIABLES ([`conclusion_relevant_vars`], the firing key: one
+/// instantiation per distinct conclusion-relevant binding, so a rule re-evaluated against the
+/// same bindings does not mint endless new blanks).
 ///
-/// Quoted triples are transparent structure — their blanks are conclusion existentials and
-/// their variables part of the firing key — whereas a quoted `{ … }` formula is an opaque VALUE
-/// whose inner terms are formula-scoped, so it is not descended into.
+/// Quoted triples are transparent structure — their blanks are conclusion existentials —
+/// whereas a quoted `{ … }` formula is an opaque VALUE whose blanks are formula-scoped, so it
+/// is not searched for existentials.
 fn conclusion_existentials(conclusion: &[[Term; 3]]) -> (Vec<String>, Vec<String>) {
-    fn scan(
-        t: &Term,
-        blanks: &mut FxHashSet<String>,
-        vars: &mut std::collections::BTreeSet<String>,
-    ) {
+    fn blanks_of(t: &Term, blanks: &mut FxHashSet<String>) {
         match t {
             Term::Blank(l) => {
                 blanks.insert(l.clone());
             }
-            Term::Var(v) => {
-                vars.insert(v.clone());
-            }
-            Term::List(ms) => ms.iter().for_each(|m| scan(m, blanks, vars)),
-            Term::Triple(t) => t.iter().for_each(|m| scan(m, blanks, vars)),
+            Term::List(ms) => ms.iter().for_each(|m| blanks_of(m, blanks)),
+            Term::Triple(t) => t.iter().for_each(|m| blanks_of(m, blanks)),
             _ => {}
         }
     }
     let mut blanks = FxHashSet::default();
-    let mut vars = std::collections::BTreeSet::new();
     for row in conclusion {
         for t in row {
-            scan(t, &mut blanks, &mut vars);
+            blanks_of(t, &mut blanks);
         }
     }
-    (blanks.into_iter().collect(), vars.into_iter().collect())
+    (blanks.into_iter().collect(), conclusion_relevant_vars(conclusion))
+}
+
+/// Every variable whose binding can change the instantiated conclusion, sorted: exactly the
+/// variables [`ground_triple`] substitutes ([`apply_deep`]), at any depth — inside lists,
+/// quoted triples AND quoted `{ … }` formulas. This is the one definition of the firing key
+/// ([`firing_key`]), so the dedup of firings, their ranking, and the proof-mode choice of
+/// binding cannot disagree about which bindings instantiate the same conclusion. A variable
+/// a binding leaves unbound (a formula's own quantified variable) keys as unbound.
+fn conclusion_relevant_vars(conclusion: &[[Term; 3]]) -> Vec<String> {
+    fn scan(t: &Term, vars: &mut std::collections::BTreeSet<String>) {
+        match t {
+            Term::Var(v) => {
+                vars.insert(v.clone());
+            }
+            Term::List(ms) => ms.iter().for_each(|m| scan(m, vars)),
+            Term::Triple(t) => t.iter().for_each(|m| scan(m, vars)),
+            Term::Formula(rows) => rows.iter().flatten().for_each(|m| scan(m, vars)),
+            _ => {}
+        }
+    }
+    let mut vars = std::collections::BTreeSet::new();
+    conclusion.iter().flatten().for_each(|t| scan(t, &mut vars));
+    vars.into_iter().collect()
+}
+
+/// The firing key of binding `b` for a rule whose conclusion-relevant variables are
+/// `concl_vars` ([`conclusion_relevant_vars`]): one existential instantiation per distinct
+/// key. Two bindings with one key instantiate the same conclusion.
+fn firing_key(b: &Binding, concl_vars: &[String]) -> String {
+    concl_vars.iter().map(|v| format!("{:?};", b.get(v))).collect()
+}
+
+/// The firings among `bindings` that mint existentials for the first time — one per firing
+/// key not yet in `fired` — each with its RANK in the canonical order of those keys
+/// (sorted; GH #6749), returned in arrival order.
+///
+/// Skolem labels are numbered by rank. The bindings arrive in the order the fact and delta
+/// hash sets yield them, which depends on insertion history and on the hasher's word size
+/// (native vs `wasm32`); ranking the round's new firings by key makes the label a function
+/// of the firing and the round's contents, which are sets, not of that order. Distinct keys
+/// get distinct ranks, so labels stay injective. Only the numbering is canonical: the
+/// firings keep their arrival order, so the facts they derive are inserted as before.
+///
+/// Bindings are deduplicated by key before sorting. Of several bindings with one key, the
+/// first to arrive is kept; with `tie_break`, the least by its full canonical encoding is
+/// kept instead, so the premises a proof step records are reproducible too. The key covers
+/// every conclusion-relevant variable, so the conclusion they instantiate — and hence the
+/// closure — is the same either way.
+fn canonical_new_firings(
+    bindings: Vec<Binding>,
+    concl_vars: &[String],
+    fired: &FxHashSet<String>,
+    tie_break: bool,
+) -> Vec<(usize, String, Binding)> {
+    let full_encoding = |b: &Binding| -> Vec<String> {
+        let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
+        f.sort_unstable();
+        f
+    };
+    // One entry per fresh key, in the arrival order of the key's first binding.
+    let mut fresh: Vec<(String, Binding)> = Vec::new();
+    let mut full: Vec<Vec<String>> = Vec::new(); // tie_break only
+    let mut slot: FxHashMap<String, usize> = FxHashMap::default();
+    for b in bindings {
+        let key = firing_key(&b, concl_vars);
+        if fired.contains(&key) {
+            continue;
+        }
+        match slot.get(&key) {
+            None => {
+                slot.insert(key.clone(), fresh.len());
+                if tie_break {
+                    full.push(full_encoding(&b));
+                }
+                fresh.push((key, b));
+            }
+            Some(&i) if tie_break => {
+                let f = full_encoding(&b);
+                if f < full[i] {
+                    full[i] = f;
+                    fresh[i].1 = b;
+                }
+            }
+            Some(_) => {} // a later binding of a key already kept
+        }
+    }
+    let mut order: Vec<usize> = (0..fresh.len()).collect();
+    order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0)); // keys are distinct
+    let mut rank = vec![0; fresh.len()];
+    for (r, &i) in order.iter().enumerate() {
+        rank[i] = r;
+    }
+    fresh.into_iter().zip(rank).map(|((key, b), r)| (r, key, b)).collect()
 }
 
 /// A stratified run's result ([`reason_n3_stratified`]).
@@ -1676,7 +1767,7 @@ fn run_closure_in(
     // firings are then never inspected.
     let premise_meta: Vec<Option<Box<[String]>>> =
         rules.iter().map(|r| premise_universals(&r.premise)).collect();
-    let mut fired: FxHashSet<(usize, String)> = FxHashSet::default();
+    let mut fired: Vec<FxHashSet<String>> = vec![FxHashSet::default(); rules.len()];
     let mut sk_counter = 0usize;
 
     // TRANSITIVITY fast path: rules of the exact shape `{?x P ?y. ?y P ?z} => {?x P ?z}`
@@ -1915,33 +2006,13 @@ fn run_closure_in(
                 if !bw.work.charge(bindings.len().saturating_mul(rule.conclusion.len()), truncated) {
                     continue;
                 }
-                for b in bindings {
-                    // Fresh conclusion existentials: rename the conclusion's blanks
-                    // once per distinct (rule, conclusion-binding) firing.
-                    let sk: Option<FxHashMap<String, String>> = if concl_blanks.is_empty() {
-                        None
-                    } else {
-                        let key: String = concl_vars
-                            .iter()
-                            .map(|v| format!("{:?};", b.get(v)))
-                            .collect();
-                        if !fired.insert((ri, key)) {
-                            continue; // this firing already instantiated its existentials
-                        }
-                        sk_counter += 1;
-                        Some(
-                            concl_blanks
-                                .iter()
-                                .map(|l| (l.clone(), format!("{}{}_{}", sk_prefix, sk_counter, l)))
-                                .collect(),
-                        )
-                    };
+                let mut emit = |b: &Binding, sk: Option<&FxHashMap<String, String>>| {
                     for c in &rule.conclusion {
-                        let c = match &sk {
+                        let c = match sk {
                             Some(map) => rename_blanks(c, map),
                             None => c.clone(),
                         };
-                        if let Some(g) = ground_triple(&c, &b, &bw.truncated) {
+                        if let Some(g) = ground_triple(&c, b, &bw.truncated) {
                             // A conclusion past the term-depth limit is dropped, as a cut.
                             if !facts.contains(&g)
                                 && bw.settle(bounded::generated(&bw.truncated, &g))
@@ -1952,10 +2023,10 @@ fn run_closure_in(
                                     rule.premise
                                         .iter()
                                         .filter_map(|p| match universals {
-                                            None => ground_triple(p, &b, &bw.truncated),
+                                            None => ground_triple(p, b, &bw.truncated),
                                             // The stored facts a premise universal was
                                             // proved from mention a store universal.
-                                            Some(_) => premise_instance(p, &b, &bw.truncated),
+                                            Some(_) => premise_instance(p, b, &bw.truncated),
                                         })
                                         .filter(|t| facts.contains(t))
                                         .collect()
@@ -1966,6 +2037,29 @@ fn run_closure_in(
                             }
                         }
                     }
+                };
+                if concl_blanks.is_empty() {
+                    for b in &bindings {
+                        emit(b, None);
+                    }
+                    continue;
+                }
+                // Fresh conclusion existentials: rename the conclusion's blanks once per
+                // distinct (rule, conclusion-binding) firing, numbered in the canonical order
+                // of this round's new firings so a label never depends on hash-set traversal
+                // order (GH #6749).
+                let tie_break = mode == StepMode::Full;
+                let firings = canonical_new_firings(bindings, concl_vars, &fired[ri], tie_break);
+                let base = sk_counter;
+                sk_counter += firings.len();
+                for (rank, key, b) in firings {
+                    let n = base + rank + 1;
+                    let sk: FxHashMap<String, String> = concl_blanks
+                        .iter()
+                        .map(|l| (l.clone(), format!("{}{}_{}", sk_prefix, n, l)))
+                        .collect();
+                    emit(&b, Some(&sk));
+                    fired[ri].insert(key);
                 }
             }
             let mut new_delta: FxHashSet<[Term; 3]> = FxHashSet::default();
@@ -9040,6 +9134,165 @@ mod tests {
             parent_node, parent_object,
             "the existential must co-refer across its :hasParent and rdf:type triples"
         );
+    }
+
+    /// GH #6749: the documents below hold the same facts; only their order and an unrelated
+    /// padding set (which changes the fact sets' capacity, so their traversal order) differ.
+    fn skolem_order_variants(n: usize) -> Vec<String> {
+        let rules = "{ ?x :p :v } => { ?x :q _:e } .\n{ ?x :q ?e } => { ?e :r _:f } .\n";
+        let subj: Vec<String> = (0..n).map(|i| format!(":s{i:02} :p :v .\n")).collect();
+        let pad: String = (0..300).map(|i| format!(":pad{i} :unrelated {i} .\n")).collect();
+        let head = "@prefix : <http://ex/> .\n";
+        let fwd: String = subj.concat();
+        let rev: String = subj.iter().rev().cloned().collect();
+        let mut mixed = subj.clone();
+        mixed.rotate_left(n / 3);
+        vec![
+            format!("{head}{fwd}{rules}"),
+            format!("{head}{rules}{rev}"),
+            format!("{head}{pad}{}{rules}", mixed.concat()),
+            format!("{head}{rules}{}{pad}", rev),
+        ]
+    }
+
+    /// subject IRI -> (its `:q` existential's label, that existential's `:r` label).
+    fn skolem_labels(src: &str) -> std::collections::BTreeMap<String, (String, String)> {
+        let c = reason_n3_terms(src, None).unwrap();
+        let find = |s: &Term, p: &str| -> Option<String> {
+            c.facts.iter().find_map(|[fs, fp, fo]| match (fp, fo) {
+                (Term::Iri(i), Term::Blank(l)) if i == p && fs == s => Some(l.clone()),
+                _ => None,
+            })
+        };
+        c.facts
+            .iter()
+            .filter_map(|[s, p, _]| match (s, p) {
+                (Term::Iri(si), Term::Iri(pi)) if pi == "http://ex/p" => {
+                    let e = find(s, "http://ex/q")?;
+                    let f = find(&Term::Blank(e.clone()), "http://ex/r")?;
+                    Some((si.clone(), (e, f)))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn skolem_labels_do_not_depend_on_traversal_order() {
+        // GH #6749: a rule existential's label was taken from a counter bumped in the order
+        // the delta hash set yields bindings, so it depended on insertion history and the
+        // hasher's word size. The label must be a function of the firing alone.
+        let n = 24;
+        let runs: Vec<_> = skolem_order_variants(n).iter().map(|d| skolem_labels(d)).collect();
+        assert_eq!(runs[0].len(), n, "every subject fires both existential rules");
+        for r in &runs[1..] {
+            assert_eq!(r, &runs[0], "same facts, different order: same skolem labels");
+        }
+        // Minted in the canonical order of the firings' bindings: rule order within a
+        // round, then the bound terms, so `:s00` takes the first label of its round.
+        let first = &runs[0]["http://ex/s00"];
+        assert_eq!(first.0, "__sk0_1_e");
+        assert_eq!(runs[0]["http://ex/s23"].0, format!("__sk0_{n}_e"));
+        // The second round's firings follow, keyed by the first round's labels.
+        let mut f: Vec<String> = runs[0].values().map(|(_, f)| f.clone()).collect();
+        f.sort();
+        let mut want: Vec<String> = (n + 1..=2 * n).map(|k| format!("__sk0_{k}_f")).collect();
+        want.sort();
+        assert_eq!(f, want);
+    }
+
+    #[test]
+    fn skolem_statement_keys_and_proofs_are_reproducible() {
+        // GH #6749: the identity keys (and so sparq-prov entity IRIs) and the proof steps
+        // carry the skolem labels, so they inherit the labels' order (in)dependence.
+        let render = |src: &str| {
+            let mut dict = Dict::new();
+            let run = reason_n3_proof_run(&mut dict, src).unwrap();
+            let mut keys: Vec<String> = run
+                .closure_keys
+                .iter()
+                .map(|k| k.join(" "))
+                .filter(|k| !k.contains("/unrelated"))
+                .collect();
+            keys.sort();
+            let mut steps: Vec<String> = run
+                .steps
+                .iter()
+                .map(|st| format!("{} {:?} <= {:?}", st.rule, st.conclusion_key, st.premise_keys))
+                .collect();
+            steps.sort();
+            (keys, steps)
+        };
+        let docs = skolem_order_variants(12);
+        let base = render(&docs[0]);
+        for d in &docs[1..] {
+            let r = render(d);
+            assert_eq!(r.0, base.0, "statement keys are order-independent");
+            assert_eq!(r.1, base.1, "proof steps are order-independent");
+        }
+    }
+
+    #[test]
+    fn proof_recording_does_not_change_the_closure() {
+        // Review of GH #6749: a variable substituted inside a concluded `{ … }` formula was
+        // left out of the firing key, so both bindings below shared one (empty) key. Plain
+        // runs kept the first binding to arrive and proof runs the least, so recording a
+        // proof changed the derived formula and `why()` could miss a materialized fact.
+        // Every variable the conclusion substitutes is now in the key: each binding fires.
+        let run = |src: &str, mode: StepMode| {
+            let cuts = Truncation::top_level();
+            let parsed = bounded::parse_n3(src, "", &cuts).unwrap();
+            let (facts, steps, _) =
+                run_closure(parsed, None, None, &cuts, mode, NegationCycles::Reject, None)
+                    .unwrap()
+                    .top_level();
+            let mut all: Vec<String> = facts.all.iter().map(|f| format!("{f:?}")).collect();
+            all.sort();
+            let derived: FxHashSet<String> =
+                steps.iter().map(|(g, _, _)| format!("{g:?}")).collect();
+            (all, derived)
+        };
+        let docs = [
+            "@prefix : <http://ex/> .\n:b :p :v . :a :p :v .\n\
+             { ?x :p :v } => { _:e :q { ?x :r :v } } .\n",
+            "@prefix : <http://ex/> .\n:a :p :v . :b :p :v .\n\
+             { ?x :p :v } => { _:e :q { ?x :r :v } } .\n",
+            // Nested formula, list and quoted triple inside the formula.
+            "@prefix : <http://ex/> .\n:b :p :w . :a :p :w . :c :p :w .\n\
+             { ?x :p ?y } => { _:e :q { :g :h { ( ?x ) :r << ?y :s :t >> } } } .\n",
+        ];
+        for src in docs {
+            let (plain, _) = run(src, StepMode::None);
+            let (proved, derived) = run(src, StepMode::Full);
+            assert_eq!(plain, proved, "proof recording changed the closure of {src}");
+            let input = bounded::parse_n3(src, "", &Truncation::top_level()).unwrap();
+            let n_in = input.facts.len();
+            assert_eq!(derived.len() + n_in, proved.len(), "every derived fact has a step");
+            let n_fired = proved.iter().filter(|f| f.contains("http://ex/q")).count();
+            assert_eq!(n_fired, n_in, "one existential per binding of {src}");
+        }
+    }
+
+    #[test]
+    fn query_existential_labels_do_not_depend_on_traversal_order() {
+        // GH #6749, the `--query` projection's own existentials (`__qsk…`).
+        let q = "@prefix : <http://ex/> .\n{ ?x :p :v } => { ?x :ans _:a } .\n";
+        let label_of = |data: &str| -> std::collections::BTreeMap<String, String> {
+            reason_n3_query_terms(data, q)
+                .unwrap()
+                .into_iter()
+                .filter_map(|[s, _, o]| match (s, o) {
+                    (Term::Iri(s), Term::Blank(l)) => Some((s, l)),
+                    _ => None,
+                })
+                .collect()
+        };
+        let docs = skolem_order_variants(16);
+        let base = label_of(&docs[0]);
+        assert_eq!(base.len(), 16);
+        for d in &docs[1..] {
+            assert_eq!(label_of(d), base, "same data, different order: same query labels");
+        }
     }
 
     // ---- [OPUS-4.8] sq-qcnn.16: coverage gap tests for uncovered builtin paths ----
