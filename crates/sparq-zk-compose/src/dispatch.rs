@@ -17,6 +17,25 @@
 //! identity operator routed at a value-lane member, and an unknown / unsupported
 //! method — it NEVER silently mis-dispatches or defaults.
 //!
+//! It is also the single source of truth for the finer LANE↔MEMBER decision
+//! (§3.1.1 of the same record): WHICH `datatype_const` may ride WHICH value-lane
+//! member. `(method, circuit)` legality is about the leaf SHAPE and so admits a
+//! V1 and a V2 graph's value lane alike, while `datatype_const` is a PUBLIC INPUT
+//! no shipped member pins — so [`check_lane_const_for_member`] carries an
+//! AFFIRMATIVE allow-list over DECODED field elements, and
+//! [`check_lane_member_pairing_for_use`] applies it to built `ProofInputs`. ONE
+//! function, called from the value-lane builders, every value-lane `Prover.toml`
+//! renderer, `driver::CircuitProver::prove_in_for_method` and stage 0 of the
+//! verifier's `prefilter_manifest_structure`.
+//!
+//! Where it is NOT called, stated plainly: `CircuitProver::{prove, prove_in,
+//! gen_witness, gen_witness_tagged}` take a `CircuitId` and a `&str` of TOML and
+//! stay method- and lane-AGNOSTIC, because re-proving and witness-solving an
+//! already-issued graph are legitimate uses and the in-circuit test vectors need
+//! to hand a member a pairing this boundary refuses. A caller that renders its
+//! own TOML and uses those entries is outside the boundary; routing a fresh proof
+//! through `prove_in_for_method` is what puts it inside.
+//!
 //! # Integration status (honest scope)
 //!
 //! This is the matrix + resolver as a self-contained, tested unit. WIRING it
@@ -27,6 +46,13 @@
 //! verifier's view of a graph. Until then the verifier has NO commitment-method
 //! input (it operates on `CircuitId` + `ProofInputs` only — verified), so this
 //! resolver is the component bead 6 consumes, not yet a wired gate.
+//!
+//! The LANE↔MEMBER check is different in exactly this respect: it needs no method
+//! input, because it decides from the `ProofInputs` alone. It therefore DOES run
+//! verifier-side today, as stage 0 of `prefilter_manifest_structure`. That is a
+//! structural refusal, not a value-lane gate: the value-lane binding edges and
+//! `filter_edge_true` stay closed (sq-j506), which is also why the same stage
+//! refuses a value-lane sub-proof no query edge binds.
 //!
 //! # Honesty (load-bearing)
 //!
@@ -68,13 +94,33 @@ pub enum DispatchError {
     /// [`MethodUse::LegacyAlreadyIssued`], which this resolver accepts — so this
     /// variant is only ever raised on the ISSUANCE side.
     MethodNotSelectableForIssuance { method_iri: String, circuit: String },
-    /// A `ProofInputs` paired a lane constant with a member that is not that
-    /// lane's: the `DualLeafV2` `xsd:boolean` lane constant presented on the
-    /// shared integer member [`CircuitId::FilterValueDl`], whose relation
+    /// A `ProofInputs` paired a KNOWN lane constant with a member that is not
+    /// that lane's — e.g. the `DualLeafV2` `xsd:boolean` lane constant presented
+    /// on the shared integer member [`CircuitId::FilterValueDl`], whose relation
     /// range-decomposes its handle to the whole `u64` domain instead of
-    /// constraining it to `{0, 1}`. The V2 boolean lane may only pair with
-    /// [`CircuitId::FilterValueDlBool`].
+    /// constraining it to `{0, 1}`. Raised by
+    /// `check_lane_member_pairing_for_use`, which decides by DECODED field
+    /// equality against the lane table, so a re-spelled constant cannot slip
+    /// past.
     LaneMemberMismatch { circuit: String, lane: String },
+    /// A value-lane `datatype_const` decoded to a field element that is NOT in
+    /// the lane table of ANY member (an unknown, random or degenerate-fold
+    /// constant). The allow-list is AFFIRMATIVE: a constant no shipped lane
+    /// derives is refused on every member rather than carried as an unexamined
+    /// public input.
+    UnknownLaneConst { circuit: String },
+    /// A value-lane `datatype_const` that IS this member's lane constant, but a
+    /// `DualLeafV1` one, presented for NEW issuance. V1 is superseded, so its
+    /// constants are accepted only under `MethodUse::LegacyAlreadyIssued`.
+    LegacyLaneConstForIssuance { circuit: String, lane: String },
+    /// A value-lane public input whose `FieldHex` TEXT is not the canonical
+    /// rendering of the field element it decodes to — an uppercase or
+    /// `0x`-less spelling, a short (leading-zeros-dropped) one, or a 64-nibble
+    /// value at or above the field modulus, all of which
+    /// `sparq_zk::field::field_from_hex_str` otherwise accepts (it pads and
+    /// reduces). Refused so a lane constant cannot be re-spelled past a
+    /// comparison, and carries the offending field's name.
+    NonCanonicalFieldHex { circuit: String, field: String },
 }
 
 impl std::fmt::Display for DispatchError {
@@ -105,6 +151,27 @@ impl std::fmt::Display for DispatchError {
                 "lane/member mismatch: the {} lane constant was presented on circuit {}, \
                  which is not that lane's member (fail-closed dispatch matrix)",
                 lane, circuit
+            ),
+            DispatchError::UnknownLaneConst { circuit } => write!(
+                f,
+                "unknown value-lane datatype_const presented on circuit {}: no shipped \
+                 lane derives it, so it is refused rather than carried (affirmative \
+                 allow-list, fail-closed dispatch matrix)",
+                circuit
+            ),
+            DispatchError::LegacyLaneConstForIssuance { circuit, lane } => write!(
+                f,
+                "the {} lane constant is a dual-leaf v1 constant, so circuit {} cannot \
+                 be routed for a NEW proof under it; re-proving an already-issued graph \
+                 passes MethodUse::LegacyAlreadyIssued (fail-closed dispatch matrix)",
+                lane, circuit
+            ),
+            DispatchError::NonCanonicalFieldHex { circuit, field } => write!(
+                f,
+                "non-canonical field hex in value-lane input {} of circuit {}: the text \
+                 is not the canonical 0x-prefixed 64-nibble lowercase rendering of the \
+                 field element it decodes to (fail-closed dispatch matrix)",
+                field, circuit
             ),
             DispatchError::UnknownMethod { method_iri } => write!(
                 f,
@@ -257,38 +324,289 @@ fn not_selectable(e: &MethodNotSelectable, id: &CircuitId) -> DispatchError {
     }
 }
 
-/// The LANE↔MEMBER pairing check over built public inputs.
+/// The lane table: every `datatype_const` a SHIPPED value lane derives, with the
+/// member it may ride and the commitment-method version that derives it.
 ///
-/// The `DualLeafV2` `xsd:boolean` lane has its OWN member
-/// ([`CircuitId::FilterValueDlBool`]), whose relation constrains the witnessed
-/// handle and the public bound to `{0, 1}`. The shared integer member
-/// [`CircuitId::FilterValueDl`] range-decomposes its handle to the WHOLE `u64`
-/// domain, so presenting the V2 boolean lane constant there would answer a
-/// boolean FILTER under the integer relation. `datatype_const` is a public input
-/// the member itself does not pin to a lane, so the pairing is refused HERE, with
-/// [`DispatchError::LaneMemberMismatch`], before such inputs can be rendered or
-/// proved.
+/// Built once per process. The decimal lanes are enumerated over the fraction-digit
+/// counts the host encoder can produce: `sparq_zk::dual_leaf::canonical_decimal_scaled`
+/// requires a non-empty fraction (`fd >= 1`) and computes `10^fd` with
+/// `checked_pow` on `u64`, so `fd > 19` cannot be encoded at all.
+#[cfg(feature = "dual-leaf")]
+const DECIMAL_SCALE_MAX: u32 = 19;
+
+/// One row of the lane table.
+#[cfg(feature = "dual-leaf")]
+struct LaneRow {
+    /// The lane's `datatype_const` as a DECODED field element — what the pairing
+    /// check compares against, so hex spelling never enters the decision.
+    constant: sparq_zk::field::Fr,
+    /// Neutral diagnostic label, e.g. `"dual-leaf v2 xsd:boolean"`.
+    lane: String,
+    /// The ONE member this lane's constant may ride.
+    member: CircuitId,
+    /// `true` for a `DualLeafV1` constant — accepted only under
+    /// [`MethodUse::LegacyAlreadyIssued`].
+    legacy_v1: bool,
+}
+
+/// The affirmative allow-list, as rows of [`LaneRow`].
 ///
-/// Every other `ProofInputs` variant is accepted unchanged: this check adds one
-/// refusal, it does not re-state the dispatch matrix.
+/// AFFIRMATIVE and BIDIRECTIONAL: a constant is legal on a member iff a row
+/// pairs them. A constant with no row at all is [`DispatchError::UnknownLaneConst`]
+/// on every member, and a constant whose row names another member is
+/// [`DispatchError::LaneMemberMismatch`] — so the dedicated bit-domain boolean
+/// member accepts the V2 boolean constant and NOTHING else, and the shared integer
+/// member does not accept it.
+#[cfg(feature = "dual-leaf")]
+fn lane_table() -> &'static [LaneRow] {
+    use sparq_zk::{dual_leaf, dual_leaf_boolean, dual_leaf_datetime, dual_leaf_v2};
+    static TABLE: std::sync::OnceLock<Vec<LaneRow>> = std::sync::OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            let mut rows = vec![
+                // --- DualLeafV1 (superseded: legacy use only) ---------------
+                LaneRow {
+                    constant: dual_leaf::datatype_const(dual_leaf::XSD_INTEGER),
+                    lane: "dual-leaf v1 xsd:integer".to_string(),
+                    member: CircuitId::FilterValueDl,
+                    legacy_v1: true,
+                },
+                // The V1 xsd:boolean lane SHARES the integer member (it has no
+                // bit-domain relation of its own) — which is exactly why its
+                // constant may ride that member and the V2 one may not.
+                LaneRow {
+                    constant: dual_leaf_boolean::boolean_datatype_const(),
+                    lane: "dual-leaf v1 xsd:boolean".to_string(),
+                    member: CircuitId::FilterValueDl,
+                    legacy_v1: true,
+                },
+                LaneRow {
+                    constant: dual_leaf::datatype_const(dual_leaf::XSD_DOUBLE),
+                    lane: "dual-leaf v1 xsd:double".to_string(),
+                    member: CircuitId::FilterValueDlF64,
+                    legacy_v1: true,
+                },
+                LaneRow {
+                    constant: dual_leaf_datetime::datetime_datatype_const(),
+                    lane: "dual-leaf v1 xsd:dateTime".to_string(),
+                    member: CircuitId::FilterValueDlDateTime,
+                    legacy_v1: true,
+                },
+                LaneRow {
+                    constant: dual_leaf_datetime::date_datatype_const(),
+                    lane: "dual-leaf v1 xsd:date".to_string(),
+                    member: CircuitId::FilterValueDlDateTime,
+                    legacy_v1: true,
+                },
+                // --- DualLeafV2 (the production-selectable version) ---------
+                LaneRow {
+                    constant: dual_leaf_v2::integer_lane_const(),
+                    lane: "dual-leaf v2 xsd:integer".to_string(),
+                    member: CircuitId::FilterValueDl,
+                    legacy_v1: false,
+                },
+                LaneRow {
+                    constant: dual_leaf_v2::double_lane_const(),
+                    lane: "dual-leaf v2 xsd:double".to_string(),
+                    member: CircuitId::FilterValueDlF64,
+                    legacy_v1: false,
+                },
+                LaneRow {
+                    constant: dual_leaf_v2::boolean_lane_const(),
+                    lane: "dual-leaf v2 xsd:boolean".to_string(),
+                    member: CircuitId::FilterValueDlBool,
+                    legacy_v1: false,
+                },
+                LaneRow {
+                    constant: dual_leaf_v2::datetime_lane_const(),
+                    lane: "dual-leaf v2 xsd:dateTime".to_string(),
+                    member: CircuitId::FilterValueDlDateTime,
+                    legacy_v1: false,
+                },
+                LaneRow {
+                    constant: dual_leaf_v2::date_lane_const(),
+                    lane: "dual-leaf v2 xsd:date".to_string(),
+                    member: CircuitId::FilterValueDlDateTime,
+                    legacy_v1: false,
+                },
+            ];
+            // The decimal lanes carry the SCALE in the constant, and the member
+            // id does not carry `fd` (`CircuitId::FilterValueDlDecimal` is a unit
+            // variant), so every encodable scale is a row. The scale a relying
+            // party expects must still be PINNED verifier-side (sq-j506); this
+            // table only decides lane-vs-member.
+            for fd in 1..=DECIMAL_SCALE_MAX {
+                rows.push(LaneRow {
+                    constant: dual_leaf::decimal_datatype_const(fd),
+                    lane: format!("dual-leaf v1 xsd:decimal@scale={}", fd),
+                    member: CircuitId::FilterValueDlDecimal,
+                    legacy_v1: true,
+                });
+                rows.push(LaneRow {
+                    constant: dual_leaf_v2::decimal_lane_const(fd),
+                    lane: format!("dual-leaf v2 xsd:decimal@scale={}", fd),
+                    member: CircuitId::FilterValueDlDecimal,
+                    legacy_v1: false,
+                });
+            }
+            rows
+        })
+        .as_slice()
+}
+
+/// The `(circuit, datatype_const)` fields of a VALUE-LANE `ProofInputs`, or
+/// `None` for every other variant.
+///
+/// One place decides what "a value-lane input" is for the pairing check, so a new
+/// value-lane variant that is not added here does not silently skip it: the
+/// `ProofInputs` match below is exhaustive over the value-lane variants.
+#[cfg(feature = "dual-leaf")]
+pub fn value_lane_fields(inputs: &ProofInputs) -> Option<(&CircuitId, &crate::manifest::FieldHex)> {
+    match inputs {
+        ProofInputs::FilterValueDl { id, datatype_const, .. }
+        | ProofInputs::FilterValueDlF64 { id, datatype_const, .. }
+        | ProofInputs::FilterValueDlDecimal { id, datatype_const, .. }
+        | ProofInputs::FilterValueDlDateTime { id, datatype_const, .. }
+        | ProofInputs::FilterValueDlBool { id, datatype_const, .. } => Some((id, datatype_const)),
+        _ => None,
+    }
+}
+
+/// Every `FieldHex` PUBLIC INPUT of a value-lane `ProofInputs`, with its field
+/// name — the set the canonicality check runs over.
+#[cfg(feature = "dual-leaf")]
+fn value_lane_field_hexes(
+    inputs: &ProofInputs,
+) -> Option<(&CircuitId, Vec<(&'static str, &crate::manifest::FieldHex)>)> {
+    match inputs {
+        ProofInputs::FilterValueDl { id, operand_enc, datatype_const, .. }
+        | ProofInputs::FilterValueDlF64 { id, operand_enc, datatype_const, .. }
+        | ProofInputs::FilterValueDlDecimal { id, operand_enc, datatype_const, .. }
+        | ProofInputs::FilterValueDlDateTime { id, operand_enc, datatype_const, .. }
+        | ProofInputs::FilterValueDlBool { id, operand_enc, datatype_const, .. } => Some((
+            id,
+            vec![("operand_enc", operand_enc), ("datatype_const", datatype_const)],
+        )),
+        _ => None,
+    }
+}
+
+/// The LANE↔MEMBER pairing check for ONE member and ONE `datatype_const` — the
+/// single function every host path and the verifier's pre-filter share.
+///
+/// The decision is made on the DECODED field element, against the crate-private
+/// lane table `lane_table` (whose rows are tabulated in
+/// `research/zk-configurable-commitment-design.md` §3.1.1):
+///
+/// 1. the text must be CANONICAL — exactly `sparq_zk::field::field_to_hex` of the
+///    element it decodes to — else [`DispatchError::NonCanonicalFieldHex`]. This
+///    is load-bearing: `sparq_zk::field::field_from_hex_str` accepts an
+///    uppercase, `0x`-less, short (left-padded) or at-or-above-modulus (reduced)
+///    spelling, so a TEXT comparison would let a re-spelled constant through;
+/// 2. the decoded element must have a row in the table, else
+///    [`DispatchError::UnknownLaneConst`];
+/// 3. that row's member must be THIS member, else
+///    [`DispatchError::LaneMemberMismatch`];
+/// 4. a `DualLeafV1` row under [`MethodUse::NewIssuance`] is
+///    [`DispatchError::LegacyLaneConstForIssuance`].
+///
+/// A NON-value-lane member is accepted unchanged: it takes no `datatype_const`,
+/// so there is no pairing to decide.
 ///
 /// PRECONDITION, stated plainly: this is a HOST-side boundary on what this crate
-/// builds and proves. The value-lane verifier gates (`verifier.rs`'s stage-2
-/// binding edges and `filter_edge_true`) stay closed until the verifier
-/// authenticates the commitment method and pins member, lane, scale and bound
-/// itself; a check here does not make a V2 value-lane proof verifier-enforced.
+/// builds, renders and proves, plus a structural pre-filter refusal verifier-side.
+/// The value-lane verifier GATES (`verifier.rs`'s stage-2 binding edges and
+/// `filter_edge_true`) stay closed until the verifier authenticates the commitment
+/// method and pins member, lane, scale and bound itself; a check here does not
+/// make a value-lane proof verifier-enforced.
+#[cfg(feature = "dual-leaf")]
+pub fn check_lane_const_for_member(
+    circuit: &CircuitId,
+    datatype_const: &crate::manifest::FieldHex,
+    use_: MethodUse,
+) -> Result<(), DispatchError> {
+    if !is_value_lane_member(circuit) {
+        return Ok(());
+    }
+    let decoded = canonical_field(datatype_const).ok_or_else(|| {
+        DispatchError::NonCanonicalFieldHex {
+            circuit: circuit.package(),
+            field: "datatype_const".to_string(),
+        }
+    })?;
+    let Some(row) = lane_table().iter().find(|r| r.constant == decoded) else {
+        return Err(DispatchError::UnknownLaneConst { circuit: circuit.package() });
+    };
+    if &row.member != circuit {
+        return Err(DispatchError::LaneMemberMismatch {
+            circuit: circuit.package(),
+            lane: row.lane.clone(),
+        });
+    }
+    if row.legacy_v1 && use_ == MethodUse::NewIssuance {
+        return Err(DispatchError::LegacyLaneConstForIssuance {
+            circuit: circuit.package(),
+            lane: row.lane.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// Decode a `FieldHex` and accept it ONLY if its text is the canonical rendering
+/// of the decoded element (`0x` + 64 lowercase nibbles, no reduction applied).
+/// `None` for a malformed, re-spelled or at-or-above-modulus text.
+#[cfg(feature = "dual-leaf")]
+fn canonical_field(h: &crate::manifest::FieldHex) -> Option<sparq_zk::field::Fr> {
+    let f = h.to_field()?;
+    (sparq_zk::field::field_to_hex(&f) == h.0).then_some(f)
+}
+
+/// The LANE↔MEMBER pairing check over built public inputs, in the VERIFICATION /
+/// legacy view — [`check_lane_member_pairing_for_use`] with
+/// [`MethodUse::LegacyAlreadyIssued`], so an already-issued `DualLeafV1`
+/// value-lane proof keeps resolving.
 pub fn check_lane_member_pairing(inputs: &ProofInputs) -> Result<(), DispatchError> {
     #[cfg(feature = "dual-leaf")]
-    if let ProofInputs::FilterValueDl { id, datatype_const, .. } = inputs {
-        if *datatype_const == crate::manifest::boolean_lane_const_v2() {
-            return Err(DispatchError::LaneMemberMismatch {
+    return check_lane_member_pairing_for_use(inputs, MethodUse::LegacyAlreadyIssued);
+    #[cfg(not(feature = "dual-leaf"))]
+    {
+        let _ = inputs;
+        Ok(())
+    }
+}
+
+/// The LANE↔MEMBER pairing check over built public inputs, with the
+/// method-selectability axis made explicit.
+///
+/// Runs the canonicality check over EVERY `FieldHex` public input of a value-lane
+/// variant (`operand_enc` and `datatype_const`), then
+/// [`check_lane_const_for_member`] for the pairing itself. Every NON-value-lane
+/// `ProofInputs` variant is accepted unchanged: this adds refusals on the value
+/// lane, it does not re-state the dispatch matrix.
+///
+/// `MethodUse::LegacyAlreadyIssued` is a CALLER ASSERTION that the graph was
+/// already issued under that method. Nothing here proves issuance history — it is
+/// not read from a signature, a registry entry or a timestamp — so it narrows what
+/// a host path will build or route, and does not attest what happened.
+#[cfg(feature = "dual-leaf")]
+pub fn check_lane_member_pairing_for_use(
+    inputs: &ProofInputs,
+    use_: MethodUse,
+) -> Result<(), DispatchError> {
+    let Some((id, fields)) = value_lane_field_hexes(inputs) else {
+        return Ok(());
+    };
+    for (name, h) in fields {
+        if canonical_field(h).is_none() {
+            return Err(DispatchError::NonCanonicalFieldHex {
                 circuit: id.package(),
-                lane: "dual-leaf v2 xsd:boolean".to_string(),
+                field: name.to_string(),
             });
         }
     }
-    let _ = inputs;
-    Ok(())
+    let (id, datatype_const) =
+        value_lane_fields(inputs).expect("a value-lane variant carries both fields");
+    check_lane_const_for_member(id, datatype_const, use_)
 }
 
 /// Fail-closed resolution from a recorded `zk:scheme` IRI (rather than a parsed

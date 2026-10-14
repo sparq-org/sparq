@@ -531,15 +531,21 @@ pub fn build_filter_value_dl_boolean(
     let components = sparq_zk::dual_leaf_boolean::encode_boolean(literal)?;
     // The encoder maps ONLY the canonical lexicals, so the hook is exactly {0, 1}.
     let value = components.value_hook != Fr::from(0u64);
+    let inputs = ProofInputs::FilterValueDl {
+        id: CircuitId::FilterValueDl,
+        operand_enc: hexf(&components.leaf()),
+        op,
+        bound: u64::from(bound),
+        datatype_const: crate::manifest::boolean_datatype_const(),
+        expected: boolean_verdict(value, op, bound),
+    };
+    // Nothing leaves a value-lane builder unchecked: the assembled inputs go
+    // through the ONE pairing function the renderers, the prover and the
+    // verifier's pre-filter also use, under the caller's `use_`.
+    crate::dispatch::check_lane_member_pairing_for_use(&inputs, use_)
+        .map_err(BuildValueDlV1Error::Pairing)?;
     Ok(BuiltFilterValueDlBoolean {
-        inputs: ProofInputs::FilterValueDl {
-            id: CircuitId::FilterValueDl,
-            operand_enc: hexf(&components.leaf()),
-            op,
-            bound: u64::from(bound),
-            datatype_const: crate::manifest::boolean_datatype_const(),
-            expected: boolean_verdict(value, op, bound),
-        },
+        inputs,
         value_hook: hexf(&components.value_hook),
         lexical_component: hexf(&components.lexical_component),
     })
@@ -557,6 +563,10 @@ pub enum BuildValueDlV1Error {
     MethodNotSelectable(sparq_zk::commit::MethodNotSelectable),
     /// The host encoder refused the literal (the §6 fail-closed co-binding).
     Encode(sparq_zk::dual_leaf::DualLeafError),
+    /// The assembled public inputs did not pass the LANE↔MEMBER pairing check
+    /// (`crate::dispatch::check_lane_member_pairing_for_use`) — the builder
+    /// re-checks its own output rather than trusting its assembly.
+    Pairing(crate::dispatch::DispatchError),
 }
 
 #[cfg(feature = "dual-leaf")]
@@ -572,6 +582,7 @@ impl std::fmt::Display for BuildValueDlV1Error {
         match self {
             BuildValueDlV1Error::MethodNotSelectable(e) => write!(f, "{}", e),
             BuildValueDlV1Error::Encode(e) => write!(f, "{}", e),
+            BuildValueDlV1Error::Pairing(e) => write!(f, "{}", e),
         }
     }
 }
@@ -630,15 +641,25 @@ pub fn build_filter_value_dl_bool(
     let components = sparq_zk::dual_leaf_v2::encode_boolean(literal)?;
     // The encoder maps ONLY the canonical lexicals, so the hook is exactly {0, 1}.
     let value = components.value_hook != Fr::from(0u64);
+    let inputs = ProofInputs::FilterValueDlBool {
+        id: CircuitId::FilterValueDlBool,
+        operand_enc: hexf(&components.leaf()),
+        op,
+        bound: u64::from(bound),
+        datatype_const: crate::manifest::boolean_lane_const_v2(),
+        expected: boolean_verdict(value, op, bound),
+    };
+    // Self-check, as the V1 builder does — under `NewIssuance`, because this
+    // builder is the V2 (production-selectable) path. `expect` is sound here and
+    // is pinned by a test: the pairing is a function of the id and the PINNED V2
+    // lane constant, neither of which a caller supplies.
+    crate::dispatch::check_lane_member_pairing_for_use(
+        &inputs,
+        sparq_zk::commit::MethodUse::NewIssuance,
+    )
+    .expect("the pinned V2 boolean lane constant pairs with its own member");
     Ok(BuiltFilterValueDlBool {
-        inputs: ProofInputs::FilterValueDlBool {
-            id: CircuitId::FilterValueDlBool,
-            operand_enc: hexf(&components.leaf()),
-            op,
-            bound: u64::from(bound),
-            datatype_const: crate::manifest::boolean_lane_const_v2(),
-            expected: boolean_verdict(value, op, bound),
-        },
+        inputs,
         value_hook: hexf(&components.value_hook),
         lexical_component: hexf(&components.lexical_component),
     })
@@ -755,7 +776,8 @@ pub fn build_filter_value_dl_datetime(
     literal: &oxrdf::Literal,
     op: FilterOp,
     bound: &oxrdf::Literal,
-) -> Result<BuiltFilterValueDlDateTime, sparq_zk::dual_leaf::DualLeafError> {
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<BuiltFilterValueDlDateTime, BuildValueDlV1Error> {
     let value = sparq_zk::dual_leaf_datetime::encode_datetime(literal)?;
     let bound_components = sparq_zk::dual_leaf_datetime::encode_datetime(bound)?;
     build_dl_datetime_common(
@@ -765,6 +787,7 @@ pub fn build_filter_value_dl_datetime(
         value,
         bound_components,
         crate::manifest::datetime_datatype_const(),
+        use_,
     )
 }
 
@@ -785,7 +808,8 @@ pub fn build_filter_value_dl_date(
     literal: &oxrdf::Literal,
     op: FilterOp,
     bound: &oxrdf::Literal,
-) -> Result<BuiltFilterValueDlDateTime, sparq_zk::dual_leaf::DualLeafError> {
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<BuiltFilterValueDlDateTime, BuildValueDlV1Error> {
     let value = sparq_zk::dual_leaf_datetime::encode_date(literal)?;
     let bound_components = sparq_zk::dual_leaf_datetime::encode_date(bound)?;
     build_dl_datetime_common(
@@ -795,12 +819,14 @@ pub fn build_filter_value_dl_date(
         value,
         bound_components,
         crate::manifest::date_datatype_const(),
+        use_,
     )
 }
 
 /// The lane-agnostic remainder shared by the dateTime and date builders — ONE
 /// member, ONE assembly; only the `datatype_const` differs (sq-wz99x, §13.5).
 #[cfg(feature = "dual-leaf")]
+#[allow(clippy::too_many_arguments)]
 fn build_dl_datetime_common(
     literal: &oxrdf::Literal,
     bound: &oxrdf::Literal,
@@ -808,7 +834,8 @@ fn build_dl_datetime_common(
     value: sparq_zk::dual_leaf::DualLeafComponents,
     bound_components: sparq_zk::dual_leaf::DualLeafComponents,
     datatype_const: FieldHex,
-) -> Result<BuiltFilterValueDlDateTime, sparq_zk::dual_leaf::DualLeafError> {
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<BuiltFilterValueDlDateTime, BuildValueDlV1Error> {
     // The encoder's §13.4 predicate already rejects a magnitude overflowing u64,
     // so this split cannot fail on encoder output — surface it fail-closed anyway
     // rather than unwrapping an invariant the type system does not carry.
@@ -817,16 +844,19 @@ fn build_dl_datetime_common(
     })?;
     let (bound_neg, bound_mag) = split_signed_hook(&bound_components.value_hook)
         .ok_or_else(|| sparq_zk::dual_leaf::DualLeafError::NonCanonicalValue(bound.to_string()))?;
+    let inputs = ProofInputs::FilterValueDlDateTime {
+        id: CircuitId::FilterValueDlDateTime,
+        operand_enc: hexf(&value.leaf()),
+        op,
+        bound_neg,
+        bound_scaled_epoch: bound_mag,
+        datatype_const,
+        expected: signed_epoch_verdict(value_neg, value_mag, bound_neg, bound_mag, op),
+    };
+    crate::dispatch::check_lane_member_pairing_for_use(&inputs, use_)
+        .map_err(BuildValueDlV1Error::Pairing)?;
     Ok(BuiltFilterValueDlDateTime {
-        inputs: ProofInputs::FilterValueDlDateTime {
-            id: CircuitId::FilterValueDlDateTime,
-            operand_enc: hexf(&value.leaf()),
-            op,
-            bound_neg,
-            bound_scaled_epoch: bound_mag,
-            datatype_const,
-            expected: signed_epoch_verdict(value_neg, value_mag, bound_neg, bound_mag, op),
-        },
+        inputs,
         value_neg,
         // The member takes the MAGNITUDE privately and re-folds the sign itself.
         value_hook_scaled: hexf(&Fr::from(value_mag)),

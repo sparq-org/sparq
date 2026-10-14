@@ -587,6 +587,43 @@ mod tests {
             .is_ok());
     }
 
+    /// `checked_for` is the two-use form of that boundary, checked DIRECTLY here:
+    /// `NewIssuance` is exactly `checked_for_issuance` for every method in this
+    /// build, `LegacyAlreadyIssued` accepts every recognised method (so an
+    /// already-issued commitment stays re-derivable), and `NewIssuance` is the
+    /// `Default`, which is what makes forgetting the argument fail closed.
+    #[test]
+    fn checked_for_is_issuance_checked_and_legacy_permissive() {
+        #[allow(unused_mut)]
+        let mut methods = vec![
+            CommitmentMethod::StringCanonicalV1,
+            CommitmentMethod::DualLeafV1,
+            CommitmentMethod::DualLeafV2,
+        ];
+        #[cfg(feature = "commitment-value-only")]
+        methods.push(CommitmentMethod::ValueOnlyV1);
+
+        for m in methods {
+            assert_eq!(
+                m.checked_for(MethodUse::NewIssuance).is_ok(),
+                m.checked_for_issuance().is_ok(),
+                "NewIssuance must be exactly the issuance check for {}",
+                m.scheme_iri()
+            );
+            assert_eq!(
+                m.checked_for(MethodUse::LegacyAlreadyIssued),
+                Ok(m),
+                "the legacy use must accept the recognised method {}",
+                m.scheme_iri()
+            );
+        }
+        // The superseded version is the case that separates the two uses.
+        assert!(CommitmentMethod::DualLeafV1
+            .checked_for(MethodUse::NewIssuance)
+            .is_err());
+        assert_eq!(MethodUse::default(), MethodUse::NewIssuance);
+    }
+
     // value-only is the research dial: gated OFF by default. With the feature ON it
     // exists but is NEVER production-selectable and loses term identity (removes
     // INV-VL is trivially true — there is no lexical component at all). §10 default (2).

@@ -43,6 +43,12 @@ pub enum DriverError {
     /// [`CircuitProver::prove_in_for_method`].
     #[cfg(feature = "dual-leaf")]
     Dispatch(crate::dispatch::DispatchError),
+    /// The rendered `Prover.toml` handed to the method-checked prove entry does
+    /// not carry the `datatype_const` of the `ProofInputs` it was given, so the
+    /// witness would bind a different lane from the one the checked inputs
+    /// declare. Refused before any subprocess runs.
+    #[cfg(feature = "dual-leaf")]
+    ProverTomlLaneMismatch { circuit: String },
 }
 
 impl std::fmt::Display for DriverError {
@@ -57,6 +63,13 @@ impl std::fmt::Display for DriverError {
             DriverError::Io(e) => write!(f, "io error: {e}"),
             #[cfg(feature = "dual-leaf")]
             DriverError::Dispatch(e) => write!(f, "dispatch refused the proof: {}", e),
+            #[cfg(feature = "dual-leaf")]
+            DriverError::ProverTomlLaneMismatch { circuit } => write!(
+                f,
+                "the Prover.toml does not carry the checked datatype_const of the \
+                 {} inputs it was given: refused before witness generation",
+                circuit
+            ),
         }
     }
 }
@@ -552,9 +565,22 @@ impl CircuitProver {
     }
 
     /// As [`Self::prove_in`], but routed through the `(method, circuit, use)`
-    /// dispatch FIRST, so a prove under a method that is not selectable for new
-    /// issuance is refused with [`DriverError::Dispatch`] before any `nargo`/`bb`
-    /// subprocess runs.
+    /// dispatch AND the LANE↔MEMBER pairing of the INPUTS first, so a refused
+    /// proof never reaches a `nargo`/`bb` subprocess. Three refusals, in order:
+    ///
+    /// 1. the method is not selectable for this `use_`
+    ///    ([`DriverError::Dispatch`], from `resolve_circuit_for_use`);
+    /// 2. `inputs` pair a lane constant with the wrong member, carry an unknown
+    ///    constant, carry a non-canonical `FieldHex`, or carry a `DualLeafV1`
+    ///    constant under [`MethodUse::NewIssuance`]
+    ///    ([`DriverError::Dispatch`], from
+    ///    `crate::dispatch::check_lane_member_pairing_for_use`) — so a V2 method
+    ///    enum paired with a V1-constant input is refused here, not proved;
+    /// 3. the rendered `prover_toml` does not carry the `datatype_const` of
+    ///    those checked `inputs`
+    ///    ([`DriverError::ProverTomlLaneMismatch`]) — the TOML is the bytes the
+    ///    witness is generated from, so checking the inputs alone would leave the
+    ///    actual lane unchecked.
     ///
     /// [`Self::prove_in`] itself stays method-AGNOSTIC: it takes a `CircuitId` and
     /// nothing else, and re-proving an already-issued graph is a legitimate use
@@ -565,14 +591,22 @@ impl CircuitProver {
     pub fn prove_in_for_method(
         &self,
         method: CommitmentMethod,
-        id: &CircuitId,
+        inputs: &crate::manifest::ProofInputs,
         prover_toml: &str,
         out_dir: &Path,
         tag: &str,
         use_: MethodUse,
     ) -> Result<ProofArtifacts, DriverError> {
-        let id = crate::dispatch::resolve_circuit_for_use(method, id, use_)
+        let id = crate::dispatch::resolve_circuit_for_use(method, inputs.circuit_id(), use_)
             .map_err(DriverError::Dispatch)?;
+        crate::dispatch::check_lane_member_pairing_for_use(inputs, use_)
+            .map_err(DriverError::Dispatch)?;
+        if let Some((_, datatype_const)) = crate::dispatch::value_lane_fields(inputs) {
+            let expected = format!("datatype_const = \"{}\"", datatype_const.0);
+            if !prover_toml.lines().any(|l| l.trim() == expected) {
+                return Err(DriverError::ProverTomlLaneMismatch { circuit: id.package() });
+            }
+        }
         self.prove_in(&id, prover_toml, out_dir, tag)
     }
 
