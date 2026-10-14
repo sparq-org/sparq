@@ -29,9 +29,9 @@ categories.workspace = true
 description = "MPC over federated SPARQL (RQ2): per-holder local sub-evaluation + invariant trait boundaries for the MPC primitive, global-IRI join, and collaborative attested-source proof. Native-only research scaffold; crypto deferred."
 publish = false
 
-# NOTHING in the workspace depends on this crate. In particular sparq-wasm does
-# NOT, so the browser bundle is untouched. (Verified by `cargo tree -p
-# sparq-wasm`.) The only real dependency is the SPARQL engine, used for the
+# The only reverse dependency is sparq-fedplan-mpc, behind its default-OFF
+# `fedplan-mpc` feature. sparq-wasm does NOT depend on this crate, so the browser
+# bundle is untouched (verify with `cargo tree -p sparq-wasm`). The only real dependency is the SPARQL engine, used for the
 # invariant "each holder evaluates locally over its own graphs" core.
 
 [features]

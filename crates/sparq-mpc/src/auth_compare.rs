@@ -36,21 +36,28 @@
 //! Then, **before the verdict is opened**, run ONE batched random-challenge MAC-check
 //! ([`crate::shamir::MacSession::mac_check`], §2.5) over the verdict (and any other
 //! value the verdict's integrity depends on): open a leakage-free
-//! `σ = Σ χ_j·[m_{y_j}] − (Σ χ_j·y_j)·[α]` and **abort iff `σ ≠ 0`**. A tamper in ANY
-//! gate of the chain changes some value `y_j` away from the value whose MAC was
-//! authenticated; the deviating party cannot fix the MAC consistently without knowing
-//! the secret `α`, so the check fires with probability `≈ 1 − 2^{−61}` over `F_p`.
+//! `σ = Σ χ_j·[m_{y_j}] − (Σ χ_j·y_j)·[α]` and **abort iff `σ ≠ 0`**. A tamper that
+//! leaves some checked value `y_j` inconsistent with its MAC cannot be fixed up without
+//! knowing the secret `α`, so the check fires with probability `≈ 1 − 2^{−61}` over
+//! `F_p`. This does NOT cover every gate: `auth_mul` adopts a value tamper on its
+//! SECOND operand (see the security tier below).
 //! Crucially this works at the minimal `n = 2t+1` — soundness comes from the secret
 //! `α`, not from RS over-determination (design §2.5, the reason RS could not close
 //! Hole 1 / Hole 4 but the MAC can).
 //!
 //! ## Security tier (stated precisely, no over-claim)
 //!
-//! **Honest-majority, malicious-with-abort, unanimous abort** (design §3). On the
-//! three-axis registry: AXIS-1 `Malicious` (the upgrade — [`crate::compare`] is
-//! `SemiHonest`), AXIS-2 `Abort(Unanimous)` (detect-and-abort, NOT identifiable
+//! **Honest-majority, tamper-evident-with-abort on the opened values, unanimous abort.**
+//! This is NOT AXIS-1 `Malicious` today, whatever design §3 targets:
+//! [`crate::shamir::MacSession::auth_mul`] carries the output MAC as
+//! `[α·z] = reduce([α·x]·[y])`, so it ADOPTS a value tamper on its second operand
+//! (witness `mac_check_adopts_a_second_operand_tamper_but_catches_a_first_operand_one`
+//! in [`crate::auth_disclose`]). Every gate of this chain is an `auth_mul`, so an
+//! actively deviating party has a route to a wrong verdict without an abort. Closing it
+//! needs multiplication-gate verification binding BOTH operands in `MacSession`. On the
+//! three-axis registry: AXIS-2 `Abort(Unanimous)` (detect-and-abort, NOT identifiable
 //! abort, NOT GOD), AXIS-3 `HonestMajority` (unchanged; degrades / refuses if
-//! `n ≤ 2t`). It does NOT enter the dishonest-majority SPDZ regime (route (b) /
+//! `n ≤ 2t`); AXIS-1 stays at the semi-honest level of [`crate::compare`] until then. It does NOT enter the dishonest-majority SPDZ regime (route (b) /
 //! sq-j5ok). The exact integer operands are NEVER opened — only the 1-bit verdict,
 //! and only after the MAC-check passes. `[OPUS-4.8]`
 
@@ -165,7 +172,8 @@ fn auth_greater_than_bits(
     Ok(gt)
 }
 
-/// **Malicious-secure secure greater-than over two SECRET operands**, opening only
+/// **Tamper-evident secure greater-than over two SECRET operands** (not yet
+/// malicious-secure; see the module security tier), opening only
 /// the verdict bit — and **only after a batched IT-MAC check passes**.
 ///
 /// Returns the boolean `a > b` (1 if `a > b`, else 0). The operands `a`, `b` are
@@ -210,7 +218,8 @@ pub fn malicious_greater_than(backend: &ShamirBackend, a: Fp, b: Fp) -> Result<b
     verdict_bit(opened[0])
 }
 
-/// **Malicious-secure secure greater-than against a PUBLIC threshold** — the £100k
+/// **Tamper-evident secure greater-than against a PUBLIC threshold** (not yet
+/// malicious-secure; see the module security tier) — the £100k
 /// flatmate path. Returns `secret > threshold`, MAC-checked before open.
 ///
 /// The threshold is public, so its bits are public CONSTANTS and the per-bit products
