@@ -149,6 +149,60 @@ pub enum ReadPrecondition {
     NotModified,
 }
 
+/// The entity-tag list a precondition header carries across all of its field lines, which combine
+/// as one comma-separated list (RFC 9110 §5.3), or `None` when the header is absent. A line that is
+/// not visible ASCII contributes no tag but keeps the header present, so it can never be ignored
+/// into a pass.
+pub(crate) fn tag_header(
+    headers: &http::HeaderMap,
+    name: http::HeaderName,
+) -> Option<std::borrow::Cow<'_, str>> {
+    let mut lines = headers
+        .get_all(name)
+        .iter()
+        .map(|v| v.to_str().unwrap_or(""));
+    let first = lines.next()?;
+    let rest: Vec<&str> = lines.collect();
+    if rest.is_empty() {
+        return Some(std::borrow::Cow::Borrowed(first));
+    }
+    Some(std::borrow::Cow::Owned(
+        std::iter::once(first)
+            .chain(rest)
+            .collect::<Vec<_>>()
+            .join(", "),
+    ))
+}
+
+/// Evaluate RFC 9110 §13.2.2 steps 1 and 2 for a GET/HEAD: `If-Match`, or without it
+/// `If-Unmodified-Since`, before the read's own [`evaluate_read`]. `If-Match` uses EXACT strong
+/// comparison against the selected representation's tag (§8.8.3.2), variant suffix included, so a
+/// tag of another negotiated representation of the same state fails (a client must not combine
+/// pieces of two representations); `*` passes, the resource existing. `If-Unmodified-Since` fails
+/// when `last_modified` is after the date and is ignored without a time (a container listing).
+pub fn evaluate_read_guard(
+    if_match: Option<&str>,
+    if_unmodified_since: Option<&str>,
+    current_etag: &str,
+    last_modified: Option<SystemTime>,
+) -> Precondition {
+    if let Some(im) = if_match {
+        let ok = is_wildcard(im) || tag_list(im).any(|t| t.matches_strong(current_etag));
+        return if ok {
+            Precondition::Proceed
+        } else {
+            Precondition::Failed
+        };
+    }
+    match (
+        unmodified_since_applies(None, if_unmodified_since),
+        last_modified.and_then(system_time_to_unix),
+    ) {
+        (Some(date), Some(lm)) if lm > date => Precondition::Failed,
+        _ => Precondition::Proceed,
+    }
+}
+
 /// Evaluate the READ preconditions (`If-None-Match`, then `If-Modified-Since`) of a GET/HEAD against
 /// the resource's CURRENT validators (RFC 9110 §13).
 ///
@@ -272,6 +326,12 @@ impl InboundTag<'_> {
             Some(cur) => state_part(self.opaque) == state_part(cur),
             None => false,
         }
+    }
+
+    /// STRONG comparison, EXACT opaque tags (for the READ path's `If-Match`): both validators strong
+    /// and the opaque tags equal, variant suffix included.
+    fn matches_strong(&self, current_strong: &str) -> bool {
+        !self.weak && parse_current(current_strong) == Some(self.opaque)
     }
 
     /// WEAK comparison, EXACT opaque tags (for the READ path's `If-None-Match`): the inbound tag

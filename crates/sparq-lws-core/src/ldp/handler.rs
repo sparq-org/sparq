@@ -649,7 +649,7 @@ impl<S: Store> LdpState<S> {
             || Self::conditional_carries_etag(headers, header::IF_NONE_MATCH)
             || (!target_iri.ends_with('/')
                 && conditional::unmodified_since_applies(
-                    header_str(headers, header::IF_MATCH),
+                    conditional::tag_header(headers, header::IF_MATCH).as_deref(),
                     crate::http_date::single_line(headers, header::IF_UNMODIFIED_SINCE),
                 )
                 .is_some());
@@ -743,13 +743,7 @@ impl<S: Store> LdpState<S> {
     /// bearing (fail-closed), keeping it subject to the V4 Read-gate. Used only by
     /// [`guard_conditional_requires_read`](Self::guard_conditional_requires_read).
     fn conditional_carries_etag(headers: &HeaderMap, name: HeaderName) -> bool {
-        match headers.get(&name) {
-            None => false,
-            Some(v) => match v.to_str() {
-                Ok(s) => !crate::ldp::conditional::is_wildcard(s),
-                Err(_) => true,
-            },
-        }
+        conditional::tag_header(headers, name).is_some_and(|v| !conditional::is_wildcard(&v))
     }
 
     /// The nearest EXISTING container at or above `target` (its parent, then grandparent, … up to the
@@ -1032,15 +1026,14 @@ async fn serve_read_once<S: Store>(
     // `If-None-Match` is looked at. The comparison is the one a write makes (the state part of the
     // tag), so a tag read in any format holds for the state it was read from; a container's listing
     // has no recorded time, so it ignores `If-Unmodified-Since` here as on writes.
-    conditional::require(conditional::evaluate_write(
-        header_str(req_headers, header::IF_MATCH),
-        None,
+    conditional::require(conditional::evaluate_read_guard(
+        conditional::tag_header(req_headers, header::IF_MATCH).as_deref(),
         crate::http_date::single_line(req_headers, header::IF_UNMODIFIED_SINCE),
-        Some(&etag),
+        &etag,
         effective_last_modified,
     ))?;
     if conditional::evaluate_read(
-        header_str(req_headers, header::IF_NONE_MATCH),
+        conditional::tag_header(req_headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(req_headers, header::IF_MODIFIED_SINCE),
         &etag,
         effective_last_modified,
@@ -1211,8 +1204,8 @@ pub async fn put_handler<S: Store>(
     )
     .await?;
     conditional::require(conditional::evaluate_write(
-        header_str(&headers, header::IF_MATCH),
-        header_str(&headers, header::IF_NONE_MATCH),
+        conditional::tag_header(&headers, header::IF_MATCH).as_deref(),
+        conditional::tag_header(&headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.as_ref().and_then(|m| m.last_modified)),
@@ -1539,8 +1532,8 @@ pub async fn delete_handler<S: Store>(
     let current_etag =
         write_validator(&state, &target, &headers, Some(current.etag.as_str())).await?;
     conditional::require(conditional::evaluate_write(
-        header_str(&headers, header::IF_MATCH),
-        header_str(&headers, header::IF_NONE_MATCH),
+        conditional::tag_header(&headers, header::IF_MATCH).as_deref(),
+        conditional::tag_header(&headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.last_modified),
@@ -1723,8 +1716,8 @@ pub async fn patch_handler<S: Store>(
     )
     .await?;
     conditional::require(conditional::evaluate_write(
-        header_str(&headers, header::IF_MATCH),
-        header_str(&headers, header::IF_NONE_MATCH),
+        conditional::tag_header(&headers, header::IF_MATCH).as_deref(),
+        conditional::tag_header(&headers, header::IF_NONE_MATCH).as_deref(),
         crate::http_date::single_line(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
@@ -2146,7 +2139,9 @@ async fn write_validator<S: Store>(
     };
     let names_a_tag = [header::IF_MATCH, header::IF_NONE_MATCH]
         .into_iter()
-        .any(|h| header_str(headers, h).is_some_and(|v| !conditional::is_wildcard(v)));
+        .any(|h| {
+            conditional::tag_header(headers, h).is_some_and(|v| !conditional::is_wildcard(&v))
+        });
     if !target.is_container || !names_a_tag {
         return Ok(Some(stored.to_string()));
     }
@@ -5258,13 +5253,26 @@ mod tests {
         precondition: HeaderName,
         tag: &str,
     ) -> Response {
+        owner_conditional_lines(state, verb, path, precondition, &[tag]).await
+    }
+
+    /// As [`owner_conditional_write`], with the precondition sent as one field line per entry.
+    async fn owner_conditional_lines(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        path: &str,
+        precondition: HeaderName,
+        lines: &[&str],
+    ) -> Response {
         let uri: axum::http::Uri = path.parse().unwrap();
         let (s, t) = (State(state.clone()), Extension(owner_token()));
         let mut headers = match verb {
             "PATCH" => n3_patch_headers(),
             _ => turtle_write_headers(),
         };
-        headers.insert(precondition, HeaderValue::from_str(tag).unwrap());
+        for line in lines {
+            headers.append(precondition.clone(), HeaderValue::from_str(line).unwrap());
+        }
         let patch = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
                      _:p solid:inserts { <#it> <http://p> \"v\" . }.\n";
         match verb {
@@ -5372,7 +5380,8 @@ mod tests {
     }
 
     /// RFC 9110 §13.2.2: `If-Match` and `If-Unmodified-Since` are evaluated on reads too, before
-    /// `If-None-Match`. A tag of the current state (read in any format) passes; another is a 412.
+    /// `If-None-Match`. `If-Match` compares the selected representation's tag exactly (§8.8.3.2):
+    /// the tag of another format of the same state is a 412. Field lines combine into one list.
     #[tokio::test]
     async fn reads_evaluate_if_match_and_if_unmodified_since() {
         let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
@@ -5398,7 +5407,26 @@ mod tests {
                     StatusCode::PRECONDITION_FAILED,
                 ),
                 (with(&[(header::IF_MATCH, &tag)]), StatusCode::OK),
-                (with(&[(header::IF_MATCH, &jsonld_tag)]), StatusCode::OK),
+                (
+                    with(&[(header::IF_MATCH, &jsonld_tag)]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                (
+                    with(&[(header::IF_MATCH, &format!("W/{tag}"))]),
+                    StatusCode::PRECONDITION_FAILED,
+                ),
+                // A list split over two field lines is one list.
+                (
+                    with(&[(header::IF_MATCH, "\"other\""), (header::IF_MATCH, &tag)]),
+                    StatusCode::OK,
+                ),
+                (
+                    with(&[
+                        (header::IF_NONE_MATCH, "\"other\""),
+                        (header::IF_NONE_MATCH, &tag),
+                    ]),
+                    StatusCode::NOT_MODIFIED,
+                ),
                 (with(&[(header::IF_MATCH, "*")]), StatusCode::OK),
                 (
                     with(&[(header::IF_UNMODIFIED_SINCE, stale)]),
@@ -6490,6 +6518,28 @@ mod tests {
 
     /// A date header sent on more than one field line is not one HTTP-date, so it is ignored
     /// (RFC 9110 §13.1.4) rather than read from its first line: two stale lines do not refuse the write.
+    /// A precondition's entity-tag list may be split over several field lines (RFC 9110 §5.3): a
+    /// write whose current tag is on the second `If-Match` line proceeds, and one whose current tag
+    /// is on the second `If-None-Match` line is refused.
+    #[tokio::test]
+    async fn write_tag_lists_combine_their_field_lines() {
+        for verb in ["PUT", "PATCH", "DELETE"] {
+            for (name, ok) in [(header::IF_MATCH, true), (header::IF_NONE_MATCH, false)] {
+                let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+                let tag =
+                    etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+                let lines = ["\"other\"", tag.as_str()];
+                let got = owner_conditional_lines(&state, verb, "/alice/doc", name.clone(), &lines)
+                    .await
+                    .status();
+                assert_eq!(got.is_success(), ok, "{verb} {name}: {got}");
+                if !ok {
+                    assert_eq!(got, StatusCode::PRECONDITION_FAILED, "{verb} {name}");
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn a_repeated_if_unmodified_since_is_ignored() {
         let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
