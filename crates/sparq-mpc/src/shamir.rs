@@ -1678,7 +1678,6 @@ fn extract_integer_vector(p: &PartialResult) -> Result<Vec<u64>, MpcError> {
         .collect()
 }
 
-
 /// [`ShamirDealer::degree_reduce`] with every re-sharing drawn through the
 /// [`DistributedRandomness`] seam: each recombination party re-shares its own
 /// degree-`2t` share with [`DistributedRandomness::vss_own_input`]. The single-dealer
@@ -1742,7 +1741,20 @@ pub fn degree_reduce_through(
     // is an n-vector of sub-shares on the canonical points x = 1..n.
     let mut resharings: Vec<Vec<Share>> = Vec::with_capacity(2 * t + 1);
     for s in &shares_2t[..2 * t + 1] {
-        resharings.push(source.vss_own_input(s.y)?);
+        let sub = source.vss_own_input(s.y)?;
+        // Fail closed on a malformed source result: the accumulation below pairs
+        // sub-shares with output parties BY POSITION, so a short (or long) or
+        // non-canonical re-sharing would silently drop or misplace a
+        // contribution. Every re-sharing must be the full n-party sharing on
+        // `x = 1..=n`, in order.
+        if sub.len() != n || sub.iter().enumerate().any(|(j, sh)| sh.x != j as u64 + 1) {
+            return Err(MpcError::Protocol(format!(
+                "degree_reduce: the randomness source returned a re-sharing that is not the \
+                 canonical {n}-party sharing on x = 1..={n} ({} shares)",
+                sub.len()
+            )));
+        }
+        resharings.push(sub);
     }
 
     // Step 3: every party j locally forms Σ_i λ_i · (sub-share i held by j).
@@ -1989,6 +2001,62 @@ mod tests {
             degree_reduce_through(&mut prss, &prod),
             Err(MpcError::NotYetImplemented { .. })
         ));
+    }
+
+    /// A source that delegates to a real dealer but corrupts the SHAPE of every
+    /// own-input re-sharing (truncated, or moved off the canonical points).
+    struct MalformedResharingSource {
+        inner: ShamirDealer,
+        truncate: bool,
+    }
+    impl DistributedRandomness for MalformedResharingSource {
+        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
+            self.inner.randomness_model()
+        }
+        fn parties(&self) -> usize {
+            DistributedRandomness::parties(&self.inner)
+        }
+        fn threshold(&self) -> usize {
+            DistributedRandomness::threshold(&self.inner)
+        }
+        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_mask()
+        }
+        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_nonzero_mask()
+        }
+        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
+            let mut sub = self.inner.vss_own_input(secret)?;
+            if self.truncate {
+                sub.pop();
+            } else {
+                sub.swap(0, 1);
+            }
+            Ok(sub)
+        }
+    }
+
+    #[test]
+    fn degree_reduce_through_rejects_a_malformed_resharing() {
+        // The accumulation pairs sub-shares with parties by position, so a short or
+        // permuted re-sharing must be refused, not silently mis-reduced.
+        for truncate in [true, false] {
+            let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
+            let mut dealer = b.dealer();
+            let prod =
+                mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
+            let mut source = MalformedResharingSource {
+                inner: b.dealer(),
+                truncate,
+            };
+            assert!(
+                matches!(
+                    degree_reduce_through(&mut source, &prod),
+                    Err(MpcError::Protocol(_))
+                ),
+                "truncate={truncate}: a malformed re-sharing must fail closed"
+            );
+        }
     }
 
     #[test]
