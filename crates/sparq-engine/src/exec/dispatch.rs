@@ -1055,20 +1055,22 @@ pub(super) fn cached_anchor_ids(
 
 /// (sq-jnb1e) Per-pushdown cache of anchor PREDICATE-INCIDENCE sets, keyed by the
 /// anchor membership set (identified by the anchor's prepared id-pattern + join position) and
-/// the probe's canonical JOIN position (0=subject, 2=object; a predicate never joins). The
+/// the probe's canonical JOIN position (0=subject, 2=object; a predicate never joins) and
+/// its id-pattern (encoding the extra bound position and id, if any). The
 /// value is `Some(set)` where `set` is exactly the predicates that relate SOME anchor member
 /// at that position, or `None` when the set could not be computed (budget / overlay / no built
 /// permutation) — cached so the two q09 branches never recompute the same incidence.
 #[cfg(feature = "cs-anchor-incidence")]
-pub(super) type IncidenceCache = FxHashMap<(IdPattern, usize, usize), Option<std::rc::Rc<FxHashSet<Id>>>>;
+pub(super) type IncidenceCache = FxHashMap<(IdPattern, usize, usize, IdPattern), Option<std::rc::Rc<FxHashSet<Id>>>>;
 
 /// (sq-jnb1e) The set of predicates that relate ANY anchor member at the probe's
 /// canonical join position `probe_jpos` (0=subject or 2=object) — a characteristic-set-style
 /// incidence summary. Computed by ONE range-restricted scan over the anchor's id window: the
-/// permutation sorted by `probe_jpos` groups triples by that column, so restricting to
+/// permutation sorted by `probe_jpos` after the probe's bound prefix groups matching triples
+/// by that column, so restricting to
 /// `[a_min, a_max]` (every anchor member lies in that window) and, for each row whose join
 /// value is an actual anchor member, recording its predicate, yields exactly
-/// `{ predicate(t) : t is a triple with t[probe_jpos] ∈ anchor }`.
+/// `{ predicate(t) : t matches probe_ip and t[probe_jpos] ∈ anchor }`.
 ///
 /// SOUNDNESS. This set is EXACT on the base index: a predicate P is in it iff some triple uses
 /// P with an anchor member at `probe_jpos`, i.e. iff the (anchor ⋈ probe-on-P) branch is
@@ -1088,6 +1090,7 @@ pub(super) fn anchor_probe_incidence(
     graph: &Graph,
     anchor: &AnchorSet,
     probe_jpos: usize,
+    probe_ip: &IdPattern,
 ) -> Option<FxHashSet<Id>> {
     // Conservative invalidation: a delta-overlay means the base-index incidence may be stale
     // (an inserted triple could add a predicate; a deleted one could remove the last member
@@ -1096,23 +1099,20 @@ pub(super) fn anchor_probe_incidence(
     if graph.store.has_overlay() {
         return None;
     }
-    if probe_jpos == 1 || anchor.sorted.is_empty() {
+    if probe_jpos == 1 || probe_ip[1].is_some() || probe_ip[probe_jpos].is_some() || anchor.sorted.is_empty() {
         return None;
     }
     let (a_min, a_max) = (anchor.sorted[0], anchor.sorted[anchor.sorted.len() - 1]);
-    // A permutation whose FIRST column is `probe_jpos` so the anchor id window is one
-    // contiguous range and the predicate sits at a fixed column. Bind nothing; sort by the
-    // join column. `scan_sorted` picks such a perm when built; if the chosen perm is not
-    // actually led by `probe_jpos`, we cannot range-restrict soundly — decline.
-    let all_unbound: IdPattern = [None, None, None];
-    let scan = graph.store.scan_sorted(&all_unbound, probe_jpos);
+    // Bind the extra position, if any, BEFORE sorting by the join column. Incidence must
+    // describe the same constrained triples as the probe, not other triples of a predicate.
+    let scan = graph.store.scan_sorted(probe_ip, probe_jpos);
     let order = scan.perm.order();
-    if order[0] != probe_jpos {
+    let jk = probe_ip.iter().filter(|v| v.is_some()).count();
+    if order[jk] != probe_jpos {
         return None;
     }
     // Predicate lives at whichever column of this perm is canonical position 1.
     let pk = order.iter().position(|&c| c == 1)?;
-    let jk = 0usize; // join column is the leading column (== probe_jpos)
     let rows = scan.rows.as_ref();
     // Restrict to the anchor id window `[a_min, a_max]` with two binary searches: rows outside
     // it can never carry an anchor member at the join column, so they cannot contribute a
@@ -1134,9 +1134,10 @@ pub(super) fn anchor_probe_incidence(
     Some(inc)
 }
 
-/// (sq-jnb1e) The predicate-incidence set for `(anchor, probe_jpos)`, memoised in
+/// (sq-jnb1e) The predicate-incidence set for `(anchor, probe_jpos, probe_ip)`, memoised in
 /// `cache`. Keyed by the anchor identity (`anchor_ip` + `anchor_jpos`) and the probe join
-/// position, so q09's two branches share one computation per position. The cached value is an
+/// position and the extra bound (position, id), so only equally constrained branches share
+/// a computation. The cached value is an
 /// `Option` (a computed-and-failed decline is cached too, so a second branch on the same
 /// position does not retry a scan that already declined).
 #[cfg(feature = "cs-anchor-incidence")]
@@ -1146,13 +1147,14 @@ pub(super) fn cached_incidence(
     anchor_jpos: usize,
     anchor: &AnchorSet,
     probe_jpos: usize,
+    probe_ip: &IdPattern,
     cache: &mut IncidenceCache,
 ) -> Option<std::rc::Rc<FxHashSet<Id>>> {
-    let key = (*anchor_ip, anchor_jpos, probe_jpos);
+    let key = (*anchor_ip, anchor_jpos, probe_jpos, *probe_ip);
     if let Some(v) = cache.get(&key) {
         return v.clone();
     }
-    let computed = anchor_probe_incidence(graph, anchor, probe_jpos).map(std::rc::Rc::new);
+    let computed = anchor_probe_incidence(graph, anchor, probe_jpos, probe_ip).map(std::rc::Rc::new);
     cache.insert(key, computed.clone());
     computed
 }
@@ -1310,36 +1312,33 @@ pub(super) fn probe_anchor_distinct(
     // join variable (bounding the per-block existence scan). `scan_sorted(ppos)` only
     // pins the FIRST unbound column, so choose the exact permutation ourselves.
     let third = 3 - ppos - jpos;
-    let want = perm_for_order([ppos, jpos, third]).ok_or("no such permutation")?;
+    let (order, kp, jk) = ([ppos, jpos, third], 0usize, 1usize);
+    // Conditioned predicate probes need the constant first, then predicate and join value.
+    // Preserve the feature-off fallback and the layout of unconstrained probes.
+    #[cfg(feature = "cs-anchor-incidence")]
+    let (order, kp, jk) = if anchor_incidence::enabled() && ppos == 1 && probe_ip[third].is_some() {
+        ([third, ppos, jpos], 1usize, 2usize)
+    } else {
+        (order, kp, jk)
+    };
+    let want = perm_for_order(order).ok_or("no such permutation")?;
     let scan = match graph.store.scan_perm(probe_ip, want) {
         Some(s) => s,
         // Permutation not built (e.g. the compact wasm index) or the pattern's bound
         // positions are not a prefix in it → decline (fall back to the full path).
         None => return Ok(None),
     };
-    // `want.order() == [ppos, jpos, third]`, so P is column 0 and J is column 1, but only
-    // when every bound position precedes them; `scan_perm` guarantees the bound prefix, and
-    // both P and J are variables here, so this holds.
-    let (kp, jk) = (0usize, 1usize);
+    // `scan_perm` guarantees the bound prefix; P and J follow it in that order.
     debug_assert_eq!(scan.perm.order()[kp], ppos);
     debug_assert_eq!(scan.perm.order()[jk], jpos);
     let rows = scan.rows.as_ref();
-    // (sq-jnb1e) OPT-IN characteristic-set anchor-incidence prune. When the probe
-    // pattern constrains ONLY the projected predicate and the join variable (every other
-    // position free — the q09 shape `?subject ?predicate ?person` / `?person ?predicate
-    // ?object`), a candidate predicate `pv_id` qualifies iff it relates SOME anchor member at
-    // the join position — exactly the precomputed incidence set. A `pv_id` NOT in that set is
-    // pruned by an O(1) membership test instead of the clip+gallop block scan. The prune is
-    // sound ONLY when the probe has no OTHER bound position (else a predicate could relate an
-    // anchor member on a DIFFERENT triple than the one satisfying the bound constraint); we
-    // decline the incidence set otherwise and every candidate takes the exact scan.
+    // (sq-jnb1e, sq-3m7qw) OPT-IN predicate incidence, conditioned on the probe's extra
+    // bound position. Only triples satisfying that constraint contribute to the set, so an
+    // absent predicate provably has no hit. Non-predicate projections use the exact scan.
     #[cfg(feature = "cs-anchor-incidence")]
     let incidence: Option<std::rc::Rc<FxHashSet<Id>>> = {
-        // "Bound only P and J" ⇔ the probe id-pattern binds no position (both P and J are
-        // variables, so a bound slot would be the third position).
-        let probe_only_pj = probe_ip.iter().all(|s| s.is_none());
-        if anchor_incidence::enabled() && probe_only_pj {
-            let inc = cached_incidence(graph, anchor_ip, anchor_jpos, &a, jpos, incidence_cache);
+        if anchor_incidence::enabled() && ppos == 1 {
+            let inc = cached_incidence(graph, anchor_ip, anchor_jpos, &a, jpos, probe_ip, incidence_cache);
             if inc.is_some() {
                 anchor_incidence::note_built();
             }

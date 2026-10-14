@@ -1072,9 +1072,12 @@ SPARQL Update `USING` identity behavior.
   RESULT-IDENTICAL: the incidence set is EXACT on the base index, so it only ever prunes a
   provably-empty existence check; a P in the set still takes the exact block scan, and the answer is
   bit-for-bit the feature-off answer (differential on-vs-off in `tests/distinct_pushdown.rs`, incl. a
-  randomised straddle, a large no-hit-block prune, and answer-safety corners). It fires only when the
-  probe constrains **only** the projected predicate and the join variable (else it declines to the exact
-  scan), and **conservatively DECLINES on a graph with a pending-update overlay** (the derived set is built
+  randomised straddle, a large no-hit-block prune, and answer-safety corners). Predicate projections
+  also support an extra bound subject or object: incidence is conditioned on that (position, id),
+  and only matching triples contribute. Sets are built lazily per distinct anchor/probe branch key;
+  for B keys and P distinct graph predicates, cache memory is O(B * P) ids plus O(B) entries, released
+  after the pushdown. Non-predicate projections use the exact scan. The prune
+  **conservatively DECLINES on a graph with a pending-update overlay** (the derived set is built
   against the base index; incremental maintenance is out of scope), so a query after an UPDATE simply
   falls back to the exact scan. Off, zero incidence code compiles and no new deps. Payoff on the canonical
   perf host is a measurable hypothesis, not a baked-in number.
