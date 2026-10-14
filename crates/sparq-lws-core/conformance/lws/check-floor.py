@@ -56,7 +56,7 @@ def check(tests: list, floor_doc: dict) -> tuple:
 
 def self_test():
     probe = "core/linksets#linkset-put-405-when-unsupported"
-    floor_doc = {"supported": [probe], "passed": {"core": 3}}
+    floor_doc = {"supported": [probe], "passed": {"core": 4}}
 
     def run(probe_outcome, other="passed"):
         tests = [
