@@ -39,9 +39,14 @@ assert!(jsonld.starts_with('['));
 - **N-Quads** — `write_nquads`, N-Triples term syntax (oxrdf `Display`, byte-stable) with
   the graph column.
 - **JSON-LD 1.1** — a native, dependency-free writer (`graph_to_jsonld` / `write_jsonld`)
-  emitting the **expanded**, **flattened**, or **compacted** document form
-  (`JsonLdForm`), plus **framing** (`write_jsonld_framed`) and indented `*_pretty` output.
-  Its `Json` AST is single-sourced in the zero-dependency `sparq-jsonld` crate.
+  emitting the **expanded**, **flattened**, or prefix-only **compacted** document form
+  (`JsonLdForm`), plus indented `*_pretty` output. Full W3C **Compaction**
+  (`write_jsonld_compact`) and **Framing** (`write_jsonld_framed`) are thin `from_rdf ∘ compact`
+  / `from_rdf ∘ frame` adapters over the zero-dependency `sparq-jsonld` crate's document-level
+  pipeline — the same algorithms its W3C `compact` / `frame` conformance lanes measure — under
+  the deny-by-default `NoopLoader`, so a remote `@context` IRI is never fetched. Both stay
+  total: a `@context` or frame the processor rejects yields the lossless expanded document.
+  The `Json` AST is single-sourced in `sparq-jsonld` too.
 - **`serialize-rdf`** *(feature, off by default)* — gates the whole matrix. When off, the
   crate compiles **empty** and pulls in **zero** dependencies, so the default and wasm
   builds of `sparq-engine` are byte-identical to before the split.

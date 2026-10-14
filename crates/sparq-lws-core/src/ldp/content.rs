@@ -17,27 +17,52 @@
 //! echoes it ([`NegotiatedFormat::content_type`]) and [`serialize_triples_negotiated`] emits the
 //! requested document form — `expanded` byte-identically (the serialiser's default output IS the
 //! expanded form), `compacted` via a local context-free compaction step that keeps the SSRF
-//! posture (nothing is ever fetched). Still M2-next: N-Triples/N-Quads/N3 read formats.
+//! posture (nothing is ever fetched). Reads can also be served as N-Triples and N-Quads (a
+//! default-graph serialisation, so the N-Quads body carries no graph labels); writes still accept
+//! only Turtle and JSON-LD ([`classify`]). N3 is not offered: there is no N3 serialiser, and the
+//! Turtle 1.2 output can carry triple terms that N3 cannot express, so an `Accept: text/n3` read
+//! falls back to Turtle like any other unproducible type.
 
 use oxjsonld::{JsonLdParser, JsonLdSerializer};
 use oxrdf::{GraphNameRef, QuadRef, Triple};
-use oxttl::{TurtleParser, TurtleSerializer};
+use oxttl::{
+    NQuadsParser, NQuadsSerializer, NTriplesParser, NTriplesSerializer, TurtleParser,
+    TurtleSerializer,
+};
 
 use crate::error::ServerError;
 
 /// A supported RDF media type.
+///
+/// Turtle and JSON-LD are the stored (writable) formats; N-Triples and N-Quads are read-only
+/// representations that [`negotiate_accept_with_profile`] can choose and [`serialize_triples`] can
+/// produce, but that [`classify`] never accepts for a write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RdfFormat {
     Turtle,
     JsonLd,
+    NTriples,
+    NQuads,
 }
 
 impl RdfFormat {
+    /// Every format a read can be served in, in tie-break preference order: when two formats
+    /// share the best `q` and neither is the stored format, the earlier one wins. Turtle and
+    /// JSON-LD come first so `*/*` and `application/*` keep choosing what they always did.
+    pub const READABLE: [RdfFormat; 4] = [
+        RdfFormat::Turtle,
+        RdfFormat::JsonLd,
+        RdfFormat::NTriples,
+        RdfFormat::NQuads,
+    ];
+
     /// The canonical media type string.
     pub fn media_type(self) -> &'static str {
         match self {
             RdfFormat::Turtle => "text/turtle",
             RdfFormat::JsonLd => "application/ld+json",
+            RdfFormat::NTriples => "application/n-triples",
+            RdfFormat::NQuads => "application/n-quads",
         }
     }
 }
@@ -115,6 +140,28 @@ pub fn parse_to_triples(
             }
             Ok(triples)
         }
+        RdfFormat::NTriples => {
+            // N-Triples has no relative IRIs, so there is no base to resolve against.
+            let mut triples = Vec::new();
+            for triple in NTriplesParser::new().for_slice(body) {
+                let t = triple
+                    .map_err(|e| ServerError::BadRequest(format!("invalid N-Triples: {e}")))?;
+                triples.push(t);
+            }
+            Ok(triples)
+        }
+        RdfFormat::NQuads => {
+            let mut triples = Vec::new();
+            for quad in NQuadsParser::new().for_slice(body) {
+                let q =
+                    quad.map_err(|e| ServerError::BadRequest(format!("invalid N-Quads: {e}")))?;
+                // A resource is a single (default) graph; ignore any named-graph quads.
+                if q.graph_name == oxrdf::GraphName::DefaultGraph {
+                    triples.push(Triple::new(q.subject, q.predicate, q.object));
+                }
+            }
+            Ok(triples)
+        }
     }
 }
 
@@ -148,6 +195,29 @@ pub fn serialize_triples(format: RdfFormat, triples: &[Triple]) -> Result<Vec<u8
             }
             ser.finish()
                 .map_err(|e| ServerError::Storage(format!("json-ld serialise: {e}")))
+        }
+        RdfFormat::NTriples => {
+            let mut ser = NTriplesSerializer::new().for_writer(Vec::new());
+            for t in triples {
+                ser.serialize_triple(t)
+                    .map_err(|e| ServerError::Storage(format!("n-triples serialise: {e}")))?;
+            }
+            Ok(ser.finish())
+        }
+        RdfFormat::NQuads => {
+            // A resource is one default graph, so every line is a triple with no graph label.
+            let mut ser = NQuadsSerializer::new().for_writer(Vec::new());
+            for t in triples {
+                let q = QuadRef::new(
+                    t.subject.as_ref(),
+                    t.predicate.as_ref(),
+                    t.object.as_ref(),
+                    GraphNameRef::DefaultGraph,
+                );
+                ser.serialize_quad(q)
+                    .map_err(|e| ServerError::Storage(format!("n-quads serialise: {e}")))?;
+            }
+            Ok(ser.finish())
         }
     }
 }
@@ -256,11 +326,7 @@ fn compact_value(value: serde_json::Value) -> serde_json::Value {
         return value;
     };
     if map.len() == 1 && map.contains_key("@value") {
-        return map
-            .into_iter()
-            .next()
-            .map(|(_, v)| v)
-            .unwrap_or_default();
+        return map.into_iter().next().map(|(_, v)| v).unwrap_or_default();
     }
     serde_json::Value::Object(map)
 }
@@ -334,11 +400,7 @@ impl NegotiatedFormat {
     /// registration — so a client can see which document form the server actually honoured.
     pub fn content_type(&self) -> String {
         match self.jsonld_profile {
-            Some(profile) => format!(
-                "{};profile=\"{}\"",
-                self.format.media_type(),
-                profile.iri()
-            ),
+            Some(profile) => format!("{};profile=\"{}\"", self.format.media_type(), profile.iri()),
             None => self.format.media_type().to_string(),
         }
     }
@@ -366,24 +428,27 @@ impl NegotiatedFormat {
             (RdfFormat::Turtle, _) => "ttl",
             (RdfFormat::JsonLd, Some(JsonLdProfileParam::Compacted)) => "jsonld-c",
             (RdfFormat::JsonLd, _) => "jsonld",
+            (RdfFormat::NTriples, _) => "nt",
+            (RdfFormat::NQuads, _) => "nq",
         }
     }
 }
 
 /// Negotiate the response RDF format from an `Accept` header against the formats this server can
-/// produce (Turtle + JSON-LD). Thin wrapper over [`negotiate_accept_with_profile`] (the single
+/// produce ([`RdfFormat::READABLE`]). Thin wrapper over [`negotiate_accept_with_profile`] (the single
 /// `Accept` decision point) that drops the JSON-LD profile detail.
 pub fn negotiate_accept(accept: Option<&str>, stored: RdfFormat) -> Option<RdfFormat> {
     negotiate_accept_with_profile(accept, stored).map(|n| n.format)
 }
 
 /// Negotiate the response RDF format (and JSON-LD document form) from an `Accept` header against
-/// the formats this server can produce (Turtle + JSON-LD).
+/// the formats this server can produce ([`RdfFormat::READABLE`]: Turtle, JSON-LD, N-Triples, N-Quads).
 ///
 /// - An ABSENT `Accept` means "no preference": the resource's stored format (`stored`) — the most
-///   faithful, zero-cost response (as does `*/*`, which covers both producible types).
+///   faithful, zero-cost response (as does `*/*`, which covers every producible type).
 /// - Quality values (`q=`) are honoured: the highest-q acceptable type wins; a q-tie prefers the
-///   stored format (cheapest); range ties break in the header's order.
+///   stored format (cheapest), then the [`RdfFormat::READABLE`] order (so `application/*` still
+///   means JSON-LD).
 /// - The `application/ld+json` `profile` parameter is honoured deterministically: the profile of
 ///   the best-q explicit `ld+json` range is surfaced (first-listed range wins q-ties), reduced to
 ///   the first honoured document form in its value.
@@ -394,8 +459,8 @@ pub fn negotiate_accept(accept: Option<&str>, stored: RdfFormat) -> Option<RdfFo
 ///   producible type it covered (all applicable ranges at `q=0`) — serving a representation the
 ///   client q=0-refused would violate RFC 7231 §5.3.1.
 ///
-/// This is a deliberately small, dependency-free `Accept` parser sufficient for the two RDF media
-/// types the server serves; it is NOT a general RFC 7231 content-negotiation engine (in
+/// This is a deliberately small, dependency-free `Accept` parser sufficient for the RDF media types
+/// the server serves; it is NOT a general RFC 7231 content-negotiation engine (in
 /// particular, parameters are split on `;`, so a quoted parameter value containing `;` — which no
 /// registered profile IRI does — would mis-parse).
 pub fn negotiate_accept_with_profile(
@@ -410,15 +475,15 @@ pub fn negotiate_accept_with_profile(
         });
     };
 
-    // Track the best q for each producible type, plus the matching type-range wildcards. A `text/*`
-    // range can only cover Turtle (`text/turtle`); an `application/*` range only JSON-LD
-    // (`application/ld+json`); `*/*` covers both. Each is kept separately so a `text/*` request never
-    // yields JSON-LD (the bug roborev flagged).
-    let mut q_turtle: Option<f32> = None;
-    let mut q_jsonld: Option<f32> = None;
-    let mut q_text_star: Option<f32> = None; // covers Turtle only
-    let mut q_app_star: Option<f32> = None; // covers JSON-LD only
-    let mut q_any: Option<f32> = None; // covers both
+    // Track the best q for each producible type (indexed like `RdfFormat::READABLE`), plus the
+    // type-range wildcards. A `text/*` range covers only Turtle; an `application/*` range covers
+    // JSON-LD, N-Triples and N-Quads; `*/*` covers all four. Each is kept separately so a `text/*`
+    // request never yields an `application/*` type (the bug roborev flagged).
+    let mut q_explicit: [Option<f32>; RdfFormat::READABLE.len()] =
+        [None; RdfFormat::READABLE.len()];
+    let mut q_text_star: Option<f32> = None;
+    let mut q_app_star: Option<f32> = None;
+    let mut q_any: Option<f32> = None;
 
     // The profile carried by the BEST explicit `application/ld+json` range seen so far. Updated
     // only on a STRICTLY greater q, so the first-listed range wins q-ties — deterministic, and
@@ -448,24 +513,29 @@ pub fn negotiate_accept_with_profile(
             }
         }
         match media.as_str() {
-            "text/turtle" => bump(&mut q_turtle, q),
-            "application/ld+json" => {
-                if q_jsonld.is_none_or(|cur| q > cur) {
-                    jsonld_profile = profile;
-                }
-                bump(&mut q_jsonld, q);
-            }
             "text/*" => bump(&mut q_text_star, q),
             "application/*" => bump(&mut q_app_star, q),
             "*/*" => bump(&mut q_any, q),
-            _ => {}
+            other => {
+                let Some(i) = RdfFormat::READABLE
+                    .iter()
+                    .position(|f| f.media_type() == other)
+                else {
+                    continue;
+                };
+                if RdfFormat::READABLE[i] == RdfFormat::JsonLd
+                    && q_explicit[i].is_none_or(|cur| q > cur)
+                {
+                    jsonld_profile = profile;
+                }
+                bump(&mut q_explicit[i], q);
+            }
         }
     }
 
     // A header that named/covered NO producible type — blank, or only unrecognised media types
     // (`text/html`, `application/xml`, …). Solid default: degrade to Turtle, don't fail the read.
-    if q_turtle.is_none()
-        && q_jsonld.is_none()
+    if q_explicit.iter().all(Option::is_none)
         && q_text_star.is_none()
         && q_app_star.is_none()
         && q_any.is_none()
@@ -478,26 +548,33 @@ pub fn negotiate_accept_with_profile(
 
     // Resolve each concrete type's effective weight: an explicit q wins; else the most specific
     // applicable wildcard (`type/*`), else `*/*`. A type with no applicable range is not accepted.
-    let turtle = q_turtle.or(q_text_star).or(q_any).unwrap_or(0.0);
-    let jsonld = q_jsonld.or(q_app_star).or(q_any).unwrap_or(0.0);
-
-    if turtle <= 0.0 && jsonld <= 0.0 {
+    let weight = |i: usize| {
+        let type_star = match RdfFormat::READABLE[i] {
+            RdfFormat::Turtle => q_text_star,
+            RdfFormat::JsonLd | RdfFormat::NTriples | RdfFormat::NQuads => q_app_star,
+        };
+        q_explicit[i].or(type_star).or(q_any).unwrap_or(0.0)
+    };
+    let weights: [f32; RdfFormat::READABLE.len()] = std::array::from_fn(weight);
+    let best = weights.iter().copied().fold(0.0_f32, f32::max);
+    if best <= 0.0 {
         return None; // 406 — the client EXPLICITLY refused (q=0) every covered producible type.
     }
-    // Highest q wins; on a tie prefer the resource's stored format (cheapest, most faithful).
-    let format = match stored {
-        RdfFormat::Turtle if turtle >= jsonld => RdfFormat::Turtle,
-        RdfFormat::JsonLd if jsonld >= turtle => RdfFormat::JsonLd,
-        _ if turtle >= jsonld => RdfFormat::Turtle,
-        _ => RdfFormat::JsonLd,
+    // Highest q wins; on a tie prefer the resource's stored format (cheapest, most faithful), then
+    // the `READABLE` order.
+    let stored_index = RdfFormat::READABLE.iter().position(|f| *f == stored);
+    let index = match stored_index {
+        Some(i) if weights[i] >= best => i,
+        _ => weights.iter().position(|w| *w >= best).unwrap_or(0),
     };
+    let format = RdfFormat::READABLE[index];
     Some(NegotiatedFormat {
         format,
         // The profile is only meaningful for a JSON-LD response, and only when JSON-LD won via an
         // explicit `application/ld+json` range (a wildcard win carries no honoured profile).
         jsonld_profile: match format {
             RdfFormat::JsonLd => jsonld_profile,
-            RdfFormat::Turtle => None,
+            RdfFormat::Turtle | RdfFormat::NTriples | RdfFormat::NQuads => None,
         },
     })
 }
@@ -622,8 +699,9 @@ mod tests {
     }
 
     #[test]
-    fn application_star_covers_only_jsonld() {
+    fn application_star_prefers_jsonld_and_never_yields_turtle() {
         // `application/*` maps to JSON-LD, never Turtle — even when the stored format is Turtle.
+        // It also covers N-Triples and N-Quads, but JSON-LD comes first in `READABLE`.
         assert_eq!(
             negotiate_accept(Some("application/*"), RdfFormat::Turtle),
             Some(RdfFormat::JsonLd)
@@ -656,6 +734,143 @@ mod tests {
             ),
             Some(RdfFormat::JsonLd)
         );
+    }
+
+    #[test]
+    fn explicit_ntriples_and_nquads_are_negotiated() {
+        for stored in [RdfFormat::Turtle, RdfFormat::JsonLd] {
+            assert_eq!(
+                negotiate_accept(Some("application/n-triples"), stored),
+                Some(RdfFormat::NTriples)
+            );
+            assert_eq!(
+                negotiate_accept(Some("Application/N-Quads; charset=utf-8"), stored),
+                Some(RdfFormat::NQuads)
+            );
+        }
+        // q-values rank them like any other type.
+        assert_eq!(
+            negotiate_accept(
+                Some("text/turtle;q=0.5, application/n-quads;q=0.8, application/n-triples;q=0.7"),
+                RdfFormat::Turtle
+            ),
+            Some(RdfFormat::NQuads)
+        );
+        // Equal q with no stored-format candidate: the READABLE order decides.
+        assert_eq!(
+            negotiate_accept(
+                Some("application/n-quads, application/n-triples"),
+                RdfFormat::Turtle
+            ),
+            Some(RdfFormat::NTriples)
+        );
+        // `application/*` reaches N-Triples once JSON-LD is refused, instead of a 406.
+        assert_eq!(
+            negotiate_accept(
+                Some("application/*, application/ld+json;q=0"),
+                RdfFormat::Turtle
+            ),
+            Some(RdfFormat::NTriples)
+        );
+        // `text/*` still covers only Turtle.
+        assert_eq!(
+            negotiate_accept(Some("text/*, application/n-triples;q=0"), RdfFormat::JsonLd),
+            Some(RdfFormat::Turtle)
+        );
+        // Refusing everything a header covers is still a 406.
+        assert_eq!(
+            negotiate_accept(
+                Some("application/n-triples;q=0, application/n-quads;q=0"),
+                RdfFormat::Turtle
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn n3_is_not_offered_and_falls_back_to_turtle() {
+        assert_eq!(
+            negotiate_accept(Some("text/n3"), RdfFormat::JsonLd),
+            Some(RdfFormat::Turtle)
+        );
+    }
+
+    #[test]
+    fn classify_does_not_accept_the_read_only_formats() {
+        for media in ["application/n-triples", "application/n-quads", "text/n3"] {
+            assert!(
+                matches!(
+                    classify(Some(media)),
+                    Err(ServerError::UnsupportedMediaType(_))
+                ),
+                "{media}"
+            );
+        }
+    }
+
+    #[test]
+    fn ntriples_and_nquads_round_trip_the_triples() {
+        const DOC: &str = "@prefix ex: <https://pod.example/ns#> .\n\
+            <https://pod.example/alice/data#me> ex:name \"Alice\"@en ; ex:knows _:b ; \
+            ex:age 42 ; ex:says <<( <https://pod.example/s> ex:p ex:o )>> .";
+        let triples = parse_to_triples(RdfFormat::Turtle, DOC.as_bytes(), IRI).unwrap();
+        let canonical = |t: &[Triple]| {
+            let mut ts: Vec<String> = t.iter().map(ToString::to_string).collect();
+            ts.sort();
+            ts
+        };
+        for format in [RdfFormat::NTriples, RdfFormat::NQuads] {
+            let bytes = serialize_triples(format, &triples).unwrap();
+            let text = String::from_utf8(bytes.clone()).unwrap();
+            assert_eq!(text.lines().count(), triples.len(), "{format:?}: {text}");
+            let back = parse_to_triples(format, &bytes, IRI).unwrap();
+            // Blank-node labels are fresh per serialisation, so compare with them masked.
+            let mask = |v: Vec<String>| -> Vec<String> {
+                v.into_iter()
+                    .map(|l| {
+                        l.split(' ')
+                            .map(|w| if w.starts_with("_:") { "_:" } else { w })
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .collect()
+            };
+            assert_eq!(
+                mask(canonical(&back)),
+                mask(canonical(&triples)),
+                "{format:?}"
+            );
+        }
+        // N-Quads parsing keeps only the default graph, like JSON-LD.
+        let nq = "<https://pod.example/a> <https://pod.example/p> \"d\" .\n\
+            <https://pod.example/a> <https://pod.example/p> \"n\" <https://pod.example/g> .\n";
+        assert_eq!(
+            parse_to_triples(RdfFormat::NQuads, nq.as_bytes(), IRI)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn every_readable_format_has_a_distinct_variant_suffix() {
+        let suffixes: Vec<&str> = RdfFormat::READABLE
+            .iter()
+            .map(|&format| {
+                NegotiatedFormat {
+                    format,
+                    jsonld_profile: None,
+                }
+                .variant_suffix()
+            })
+            .chain(std::iter::once(
+                jsonld_with_profile("http://www.w3.org/ns/json-ld#compacted").variant_suffix(),
+            ))
+            .collect();
+        let mut unique = suffixes.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), suffixes.len(), "{suffixes:?}");
     }
 
     #[test]

@@ -23,6 +23,7 @@
 use crate::model::{Axiom, ClassExpression, ObjectPropertyExpression, Ontology};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{is_inline, Dict, Id, TermParts, NO_ID};
+use std::cell::Cell;
 
 const OWL: &str = "http://www.w3.org/2002/07/owl#";
 const RDF: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#";
@@ -106,10 +107,48 @@ const MAX_CE_DEPTH: usize = 512;
 /// fragment, a datatype / data-property construct, a malformed list or class expression, or a
 /// triple that cannot be classified without a declaration.
 pub fn extract(dict: &Dict, triples: &[[Id; 3]]) -> Result<Ontology, ExtractError> {
+    extract_with(dict, triples, false).map(|(onto, _)| onto)
+}
+
+/// The reasoning-side variant of [`extract`] (#4762): identical, except that the EMPTY
+/// built-in roles `owl:bottomObjectProperty` / `owl:bottomDataProperty` are not refused at
+/// the positions where their fixed meaning can be written down in ALCH without them:
+///
+/// - `∃⊥.C` (object or data, any well-formed filler) is rewritten to `⊥`;
+/// - `∀⊥.C` is rewritten to `⊤`;
+/// - an assertion `a ⊥ b` / `a ⊥ "v"` becomes `ClassAssertion(⊥, a)` (it can never hold);
+/// - `⊥ rdfs:subPropertyOf r` is dropped (true in every interpretation).
+///
+/// Each rewrite is an equivalence under the Direct Semantics (the extension of a bottom
+/// property is `∅` in EVERY interpretation), so the resulting ontology has exactly the
+/// models of the input. Every other position stays refused exactly as in [`extract`]: the
+/// bottom property as a SUPER-property (it would force `r` empty — no ALCH encoding),
+/// `rdfs:domain`/`rdfs:range` on it, cardinality restrictions over it, and every use of the
+/// TOP properties. The returned flag is `true` when at least one rewrite fired.
+///
+/// The public [`extract`] keeps refusing: it is the SYNTACTIC view (the profile checker and
+/// the renderer read it), and a rewrite changes the syntactic shape — e.g. `∀⊥.C` is not
+/// OWL 2 EL but its rewrite `⊤` is — so certifying profile membership from it would be wrong.
+/// Only the dispatcher uses this variant, and it sends a rewritten ontology straight to the
+/// ALCH tableau, never to a profile reasoner that would re-read the raw triples.
+#[cfg(feature = "dispatch")]
+pub(crate) fn extract_rewriting_bottom(
+    dict: &Dict,
+    triples: &[[Id; 3]],
+) -> Result<(Ontology, bool), ExtractError> {
+    extract_with(dict, triples, true)
+}
+
+/// Shared body of [`extract`] / `extract_rewriting_bottom`.
+fn extract_with(
+    dict: &Dict,
+    triples: &[[Id; 3]],
+    rewrite_bottom: bool,
+) -> Result<(Ontology, bool), ExtractError> {
     let v = Vocab::intern(dict);
     // [OPUS-4.8] Fix 1 + Fix 3: Index::build now returns Err on a branching list,
     // duplicate backbone value, or cross-type punned declaration.
-    let idx = Index::build(triples, &v)?;
+    let idx = Index::build(triples, &v, rewrite_bottom)?;
 
     // [OPUS-4.8] sq-pbz04.4.12 — M4 fail-closed validation:
     // Orphan/cyclic list cells and unconsumed class-expression backbones are NOT inert.
@@ -177,7 +216,7 @@ pub fn extract(dict: &Dict, triples: &[[Id; 3]]) -> Result<Ontology, ExtractErro
     // values; a contradicting second value is already an error from `Index::build`).
     emit_named_composite_equiv(dict, &v, &idx, &mut onto)?;
 
-    Ok(onto)
+    Ok((onto, idx.bottom_rewritten.get()))
 }
 
 /// Emits one `EquivalentClasses(Class(A), expr)` axiom for every NAMED class IRI that
@@ -535,6 +574,19 @@ fn classify_triple(
         return Ok(());
     }
     if p == v.sub_property_of {
+        // #4762: `⊥ ⊑ r` holds in every interpretation (the sub-property's extension is ∅),
+        // so it is dropped — after checking the super-property is itself a property L1
+        // accepts (a top property or a malformed operand is still refused). `r ⊑ ⊥` (bottom
+        // as the SUPER) is NOT rewritten: it forces `r` empty, which ALCH cannot state, so
+        // `decode_object_property` refuses it below.
+        if idx.rewrite_bottom && s == v.bottom_object_property {
+            bottom_property_usable(dict, idx, s)?;
+            if o != v.bottom_object_property {
+                decode_object_property(dict, idx, o)?;
+            }
+            idx.bottom_rewritten.set(true);
+            return Ok(());
+        }
         let sub = decode_object_property(dict, idx, s)?;
         let sup = decode_object_property(dict, idx, o)?;
         onto.axioms.push(Axiom::SubObjectPropertyOf { sub, sup });
@@ -587,6 +639,18 @@ fn classify_triple(
         return Ok(());
     }
 
+    // --- #4762: an assertion over the empty data property `owl:bottomDataProperty` can
+    //     never hold — `ClassAssertion(⊥, s)` has exactly the same (no) models. Only a
+    //     literal value is accepted; anything else is ill-typed and refused.
+    if idx.rewrite_bottom && p == v.bottom_data_property {
+        if !is_literal(dict, o) {
+            return Err(ExtractError::DataConstruct(
+                "owl:bottomDataProperty asserted with a non-literal value".to_string(),
+            ));
+        }
+        return bottom_assertion(dict, idx, s, p, onto);
+    }
+
     // --- Declared datatype properties — a data assertion, out of the concrete-domain-free
     //     ALCH fragment ----------------------------------------------------------------
     if idx.data_props.contains(&p) {
@@ -594,6 +658,24 @@ fn classify_triple(
             "assertion using data property {}",
             term_iri(dict, p)
         )));
+    }
+
+    // --- #4762: a role assertion over the empty role `owl:bottomObjectProperty` can never
+    //     hold — `ClassAssertion(⊥, s)` has exactly the same (no) models. The object must be
+    //     an individual (a literal is ill-typed and refused).
+    if idx.rewrite_bottom && p == v.bottom_object_property {
+        if is_literal(dict, o) {
+            return Err(ExtractError::DataConstruct(
+                "owl:bottomObjectProperty asserted with a literal value".to_string(),
+            ));
+        }
+        if idx.structural_nodes.contains(&o) || is_triple_term(dict, o) {
+            return Err(ExtractError::MalformedClassExpression(
+                "owl:bottomObjectProperty assertion whose object is not an individual"
+                    .to_string(),
+            ));
+        }
+        return bottom_assertion(dict, idx, s, p, onto);
     }
 
     // --- Role assertion: a property known to be an object property, over two individuals --
@@ -710,6 +792,51 @@ fn role_assertion(
         source: s,
         target: o,
     });
+    Ok(())
+}
+
+/// #4762: records `s p o` over an EMPTY built-in property `p` (`owl:bottomObjectProperty` /
+/// `owl:bottomDataProperty`; the caller has type-checked `o`) as `ClassAssertion(⊥, s)` —
+/// both are false in every interpretation, so the ontology's models are unchanged (none).
+fn bottom_assertion(
+    dict: &Dict,
+    idx: &Index,
+    s: Id,
+    p: Id,
+    onto: &mut Ontology,
+) -> Result<(), ExtractError> {
+    bottom_property_usable(dict, idx, p)?;
+    if is_literal(dict, s) || is_triple_term(dict, s) || idx.structural_nodes.contains(&s) {
+        return Err(ExtractError::MalformedClassExpression(format!(
+            "assertion over {} whose subject is not an individual",
+            term_iri(dict, p)
+        )));
+    }
+    onto.axioms.push(Axiom::ClassAssertion {
+        class: ClassExpression::Nothing,
+        individual: s,
+    });
+    idx.bottom_rewritten.set(true);
+    Ok(())
+}
+
+/// #4762: the same per-IRI guards [`decode_object_property`] applies before reading a
+/// property, for a bottom built-in about to be rewritten: a bottom IRI that is also the
+/// subject of `owl:inverseOf` or is declared as more than one property type is refused,
+/// never rewritten.
+fn bottom_property_usable(dict: &Dict, idx: &Index, id: Id) -> Result<(), ExtractError> {
+    if idx.inverse_of.contains(&id) {
+        return Err(ExtractError::OutOfFragment(format!(
+            "inverse object property expression {}",
+            term_iri(dict, id)
+        )));
+    }
+    if idx.punned_props.contains(&id) {
+        return Err(ExtractError::Unclassifiable(format!(
+            "property IRI {} is declared as multiple property types (ambiguous classification)",
+            term_iri(dict, id)
+        )));
+    }
     Ok(())
 }
 
@@ -887,9 +1014,49 @@ fn decode_restriction(
             term_iri(dict, id)
         ))
     })?;
-    let property = decode_object_property(dict, idx, prop)?;
     let some = idx.some_values_from.get(&id).copied();
     let all = idx.all_values_from.get(&id).copied();
+    // #4762: a restriction over an EMPTY built-in property. `∃⊥.C` has the empty extension
+    // and `∀⊥.C` the universal one in every interpretation, whatever `C` is — but the filler
+    // must still be well-formed (a class expression L1 accepts for the object property, a
+    // datatype IRI for the data property), so a malformed or out-of-fragment filler is
+    // refused exactly as it would be under a named property.
+    if idx.rewrite_bottom
+        && (prop == v.bottom_object_property || prop == v.bottom_data_property)
+    {
+        bottom_property_usable(dict, idx, prop)?;
+        let (filler, existential) = match (some, all) {
+            (Some(f), None) => (f, true),
+            (None, Some(f)) => (f, false),
+            (Some(_), Some(_)) => {
+                return Err(ExtractError::MalformedClassExpression(format!(
+                    "restriction {} has both someValuesFrom and allValuesFrom",
+                    term_iri(dict, id)
+                )))
+            }
+            (None, None) => {
+                return Err(ExtractError::MalformedClassExpression(format!(
+                    "restriction {} missing its someValuesFrom/allValuesFrom filler",
+                    term_iri(dict, id)
+                )))
+            }
+        };
+        if prop == v.bottom_object_property {
+            decode_class_inner(dict, v, idx, filler, visiting, depth + 1)?;
+        } else if !is_owl2_datatype_map_iri(dict, filler) {
+            return Err(ExtractError::DataConstruct(format!(
+                "owl:bottomDataProperty restriction {} whose filler is not a datatype IRI",
+                term_iri(dict, id)
+            )));
+        }
+        idx.bottom_rewritten.set(true);
+        return Ok(if existential {
+            ClassExpression::Nothing
+        } else {
+            ClassExpression::Thing
+        });
+    }
+    let property = decode_object_property(dict, idx, prop)?;
     match (some, all) {
         (Some(_), Some(_)) => Err(ExtractError::MalformedClassExpression(format!(
             "restriction {} has both someValuesFrom and allValuesFrom",
@@ -1093,6 +1260,10 @@ struct Vocab {
     range: Id,
     thing: Id,
     nothing: Id,
+    /// `owl:bottomObjectProperty` / `owl:bottomDataProperty` — the empty built-in roles,
+    /// rewritten away by `extract_rewriting_bottom` (#4762).
+    bottom_object_property: Id,
+    bottom_data_property: Id,
     rdf_nil: Id,
     /// Class-expression / list backbone predicates (inert on their own; consumed in-context).
     backbone: FxHashSet<Id>,
@@ -1304,6 +1475,8 @@ impl Vocab {
             range: look(format!("{}range", RDFS)),
             thing: owl("Thing"),
             nothing: owl("Nothing"),
+            bottom_object_property: owl("bottomObjectProperty"),
+            bottom_data_property: owl("bottomDataProperty"),
             rdf_nil: look(format!("{}nil", RDF)),
             backbone,
             annotation,
@@ -1363,14 +1536,38 @@ struct Index {
     /// ObjectProperty) — a punning clash that makes their use in triples Unclassifiable.
     /// [OPUS-4.8] Fix 3.
     punned_props: FxHashSet<Id>,
+    /// #4762: whether this extraction may rewrite the empty built-in roles (set only by
+    /// `extract_rewriting_bottom`; [`extract`] leaves it `false` and refuses them).
+    rewrite_bottom: bool,
+    /// #4762: set when a bottom-property rewrite fired.
+    bottom_rewritten: Cell<bool>,
 }
 
 impl Index {
     // [OPUS-4.8] Fix 1 + Fix 3: returns Err on a branching list / duplicate backbone
     // value (different value for same functional-position predicate on same node), or on a
     // cross-type punned declaration. Identical re-assertion (same value) is silently allowed.
-    fn build(triples: &[[Id; 3]], v: &Vocab) -> Result<Index, ExtractError> {
-        let mut idx = Index::default();
+    fn build(triples: &[[Id; 3]], v: &Vocab, rewrite_bottom: bool) -> Result<Index, ExtractError> {
+        let mut idx = Index {
+            rewrite_bottom,
+            ..Index::default()
+        };
+        // #4762: when the empty built-in roles are to be rewritten, seed their INTRINSIC
+        // property types first (`owl:bottomObjectProperty` is an object property,
+        // `owl:bottomDataProperty` a data property), so ANY incompatible declaration or use —
+        // in a restriction or an assertion, in either triple order — lands in
+        // `punned_props` and is refused, rather than being read as an annotation or as the
+        // other property kind. Only the rewriting extraction seeds; the public `extract`
+        // (which refuses the bottom properties outright) and every input that does not
+        // mention them are untouched.
+        if rewrite_bottom {
+            if v.bottom_object_property != NO_ID {
+                idx.object_props.insert(v.bottom_object_property);
+            }
+            if v.bottom_data_property != NO_ID {
+                idx.data_props.insert(v.bottom_data_property);
+            }
+        }
         for &[s, p, o] in triples {
             if p == v.on_property {
                 // owl:onProperty is functional on a restriction node — exactly one value.
@@ -1389,10 +1586,22 @@ impl Index {
                 // Symmetric to the declaration arms: records the pun so the verdict is
                 // order-independent (RDF graphs are sets; declaration before usage must
                 // produce the same Unclassifiable refusal as usage before declaration).
-                if idx.annotation_props.contains(&o) || idx.data_props.contains(&o) {
-                    idx.punned_props.insert(o);
+                if o == v.bottom_data_property {
+                    // #4762: `owl:bottomDataProperty` is a DATA property by definition, so a
+                    // restriction on it types it as one — keeping an explicit
+                    // `owl:bottomDataProperty a owl:DatatypeProperty` declaration consistent,
+                    // while an `owl:ObjectProperty` / `owl:AnnotationProperty` declaration
+                    // is still a pun (refused), in either triple order.
+                    if idx.annotation_props.contains(&o) || idx.object_props.contains(&o) {
+                        idx.punned_props.insert(o);
+                    }
+                    idx.data_props.insert(o);
+                } else {
+                    if idx.annotation_props.contains(&o) || idx.data_props.contains(&o) {
+                        idx.punned_props.insert(o);
+                    }
+                    idx.object_props.insert(o); // usage-based typing
                 }
-                idx.object_props.insert(o); // usage-based typing
             } else if p == v.some_values_from {
                 if let Some(prev) = idx.some_values_from.insert(s, o) {
                     if prev != o {
@@ -1571,6 +1780,35 @@ const NON_XSD_DATATYPE_IRIS: &[&str] = &[
     "http://www.w3.org/2002/07/owl#real",
     "http://www.w3.org/2002/07/owl#rational",
 ];
+
+/// The OWL 2 datatype map (OWL 2 Structural Specification §4): `rdfs:Literal`, the
+/// [`NON_XSD_DATATYPE_IRIS`] entries, and exactly these XSD datatypes. Used where a filler
+/// must BE a datatype (a `owl:bottomDataProperty` restriction, #4762) — unlike
+/// [`datatype_iri_name`], which refuses the whole `xsd:` namespace and so also matches
+/// non-datatype IRIs such as the facet `xsd:minInclusive`.
+const XSD_DATATYPE_MAP_LOCALS: &[&str] = &[
+    "decimal", "integer", "nonNegativeInteger", "nonPositiveInteger", "positiveInteger",
+    "negativeInteger", "long", "int", "short", "byte", "unsignedLong", "unsignedInt",
+    "unsignedShort", "unsignedByte", "double", "float", "string", "normalizedString", "token",
+    "language", "Name", "NCName", "NMTOKEN", "boolean", "hexBinary", "base64Binary", "anyURI",
+    "dateTime", "dateTimeStamp",
+];
+
+/// `true` iff `id` is an IRI in the OWL 2 datatype map ([`XSD_DATATYPE_MAP_LOCALS`] +
+/// [`NON_XSD_DATATYPE_IRIS`]).
+fn is_owl2_datatype_map_iri(dict: &Dict, id: Id) -> bool {
+    if is_inline(id) {
+        return false;
+    }
+    let TermParts::Iri { prefix, suffix } = dict.term_parts(id) else {
+        return false;
+    };
+    let iri = format!("{}{}", prefix, suffix);
+    match iri.strip_prefix(XSD) {
+        Some(local) => XSD_DATATYPE_MAP_LOCALS.contains(&local),
+        None => NON_XSD_DATATYPE_IRIS.contains(&iri.as_str()),
+    }
+}
 
 /// `Some(display)` when `id` names a well-known OWL 2 datatype-map datatype (an `xsd:*` IRI or
 /// one of the [`NON_XSD_DATATYPE_IRIS`]). A bare datatype IRI carries CONCRETE-DOMAIN meaning

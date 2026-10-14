@@ -1364,3 +1364,17 @@ fn accept_named_intersection_with_use_site() {
         o.axioms
     );
 }
+
+/// #4762: the PUBLIC `extract` is the syntactic view (profile checker, renderer) and keeps
+/// refusing the bottom built-ins at every position — only `DirectChecker` rewrites them.
+#[test]
+fn public_extract_still_refuses_bottom_properties() {
+    for body in [
+        ":i a [ owl:onProperty owl:bottomObjectProperty ; owl:allValuesFrom :C ] .",
+        "owl:bottomObjectProperty rdfs:subPropertyOf :r .",
+        "owl:bottomObjectProperty a owl:ObjectProperty . :a owl:bottomObjectProperty :b .",
+    ] {
+        let (d, t) = parse(body);
+        assert!(extract(&d, &t).is_err(), "expected a refusal for {:?}", body);
+    }
+}

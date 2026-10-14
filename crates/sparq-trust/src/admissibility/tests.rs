@@ -52,6 +52,57 @@ fn at_least_is_reflexive_and_down_closed() {
     assert!(!has(&c, PER, SECX_AT_LEAST, CROSS), "Per is NOT atLeast Cross");
 }
 
+const MALICIOUS: &str = "https://w3id.org/zkp-sparql/sec-prop#Malicious";
+const COVERT: &str = "https://w3id.org/zkp-sparql/sec-prop#Covert";
+const SEMI_HONEST: &str = "https://w3id.org/zkp-sparql/sec-prop#SemiHonest";
+const DISHONEST_MAJORITY: &str = "https://w3id.org/zkp-sparql/sec-prop#DishonestMajority";
+const HONEST_MAJORITY: &str = "https://w3id.org/zkp-sparql/sec-prop#HonestMajority";
+const SUPER_HONEST_MAJORITY: &str = "https://w3id.org/zkp-sparql/sec-prop#SuperHonestMajority";
+
+/// The two MPC trust-model chains (issue #6186) are real `secx:atLeast` orders, in
+/// the ASYMMETRIC direction: `Covert atLeast SemiHonest` but NOT the reverse, and
+/// `DishonestMajority atLeast HonestMajority` but NOT the reverse (the threshold axis
+/// is ordered by how much corruption is TOLERATED). The asymmetry is the whole point:
+/// it is what makes a strict preference EXCLUDE a weaker protocol instead of
+/// vacuously admitting it.
+#[test]
+fn mpc_trust_model_orders_are_asymmetric() {
+    let c = closure_iris("");
+
+    // AdversaryModel: Malicious ⊐ Covert ⊐ SemiHonest.
+    assert!(has(&c, COVERT, SECX_AT_LEAST, SEMI_HONEST), "Covert atLeast SemiHonest");
+    assert!(
+        !has(&c, SEMI_HONEST, SECX_AT_LEAST, COVERT),
+        "SemiHonest must NOT be atLeast Covert"
+    );
+    assert!(
+        has(&c, MALICIOUS, SECX_AT_LEAST, SEMI_HONEST),
+        "Malicious atLeast SemiHonest (transitive)"
+    );
+    assert!(
+        !has(&c, SEMI_HONEST, SECX_AT_LEAST, MALICIOUS),
+        "SemiHonest must NOT be atLeast Malicious — a semi-honest protocol cannot \
+         discharge `requiresAdversaryModel gteq Malicious`"
+    );
+    assert!(has(&c, SEMI_HONEST, SECX_AT_LEAST, SEMI_HONEST), "reflexive on SemiHonest");
+
+    // CorruptionThreshold: DishonestMajority ⊐ HonestMajority ⊐ SuperHonestMajority.
+    assert!(
+        has(&c, DISHONEST_MAJORITY, SECX_AT_LEAST, HONEST_MAJORITY),
+        "DishonestMajority atLeast HonestMajority"
+    );
+    assert!(
+        !has(&c, HONEST_MAJORITY, SECX_AT_LEAST, DISHONEST_MAJORITY),
+        "HonestMajority must NOT be atLeast DishonestMajority — an honest-majority \
+         protocol cannot discharge `requiresCorruptionThreshold gteq DishonestMajority`"
+    );
+    assert!(
+        has(&c, DISHONEST_MAJORITY, SECX_AT_LEAST, SUPER_HONEST_MAJORITY),
+        "DishonestMajority atLeast SuperHonestMajority (transitive)"
+    );
+    assert!(has(&c, HONEST_MAJORITY, SECX_AT_LEAST, HONEST_MAJORITY), "reflexive");
+}
+
 /// The discharge rule fires exactly when the held level is `atLeast` the
 /// required one — equal level (reflexive) and stronger level both satisfy; a
 /// weaker held level does NOT.
