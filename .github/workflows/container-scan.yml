@@ -35,8 +35,9 @@ on:
 permissions:
   contents: read
 
+# The event is in the key so a scheduled run and a push to main never cancel each other.
 concurrency:
-  group: container-scan-${{ github.ref }}
+  group: container-scan-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 jobs:
   # ---- Dockerfile lint (fast, deterministic) ----
