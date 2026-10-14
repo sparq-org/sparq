@@ -108,6 +108,16 @@ also supply the already-established role kind for declaration-free conclusion as
 unknown conclusion predicates still fail closed. **Deferred** (each rejected, never
 mis-mapped): inverses, cardinality, nominals, `sameAs`, datatypes, keys — see the design record.
 
+**Datatype map (`datatypes`, always on):** the OWL 2 datatype map (Structural Specification §4)
+as a standalone module, ready for a `(D)` extension: `in_value_space` (does a literal's lexical
+form denote a value of its datatype), `facet_applies` (is a facet–value pair in a datatype's
+facet space), and `DataRange::{is_empty, is_subset_of, contains}` over `DataIntersectionOf` /
+`DataUnionOf` / `DataComplementOf` / `DataOneOf` / `DatatypeRestriction`. Answers are `Tri`:
+`True`/`False` are exact (rationals with no float fallback, discrete floats with distinct `±0`,
+time instants with the ±14:00 rule, automata for XSD patterns, lengths and language ranges);
+`Unknown` covers datatypes outside the map, `rdf:XMLLiteral` values, pattern block escapes, and
+string searches past a fixed budget. The tableau does not use it yet.
+
 ## 📚 Learn more
 
 - **How-to** — [`skills/inference/SKILL.md`](../../skills/inference/SKILL.md) (Direct-Semantics section).

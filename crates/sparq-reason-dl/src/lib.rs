@@ -19,6 +19,7 @@
 //! branch by pulling sparq-reason-ql's `ql-consistency` DL-Lite_R checker; without it the
 //! QL branch abstains (`QlConsistencyPending`).
 
+pub mod datatypes;
 pub mod extract;
 pub mod model;
 

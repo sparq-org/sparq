@@ -681,6 +681,26 @@ named reason and unlock path in the deferral ledger: `sparq-conformance/tests/dl
 (`DOCUMENTED_DIVERGENCES`, `DL_DIRECT_ABSTAINED`, `DL_PROFILE_ABSTAINED`) and the design
 record `research/owl2-direct-semantics-scoping.md`.
 
+### OWL 2 datatype map (`sparq_reason_dl::datatypes`)
+
+The data-range half of a future `(D)` extension, usable on its own today:
+
+```rust
+use sparq_reason_dl::datatypes::{DataRange, Literal, Tri};
+let xsd = |l: &str| format!("http://www.w3.org/2001/XMLSchema#{l}");
+// No float lies strictly between 0 and the least positive subnormal.
+let gap = DataRange::Restriction(xsd("float"), vec![
+    (xsd("minExclusive"), Literal::typed("0.0", xsd("float"))),
+    (xsd("maxExclusive"), Literal::typed("1.401298464324817e-45", xsd("float"))),
+]);
+assert_eq!(gap.is_empty(), Tri::True);
+```
+
+`is_subset_of` and `contains` work the same way. `DataComplementOf` is relative to the map's
+data domain, so expand custom `DatatypeDefinition`s before asking. `Unknown` means not
+implemented (datatypes outside the map, `rdf:XMLLiteral` values, `\p{Is…}` block escapes,
+string searches past the automaton budget), never a guess.
+
 ## Common recipes
 
 **1. OWL 2 RL closure + inconsistency report.** OWL includes RDFS; run the clash check on the materialized result.
