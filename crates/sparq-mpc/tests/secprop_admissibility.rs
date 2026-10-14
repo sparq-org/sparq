@@ -16,17 +16,17 @@
 //! 3. the **relaxed** preference (`gteq secx:SemiHonest` / `gteq
 //!    secx:HonestMajority`) **admits** them — so the gate is demonstrably not
 //!    vacuously empty;
-//! 4. the strict preference **admits** the illustrative malicious /
-//!    dishonest-majority subject — so the exclusions in (1)/(2) are the ORDER
-//!    talking, not a missing annotation.
+//! 4. the strict preference **admits** a malicious / dishonest-majority subject
+//!    from a TEST-ONLY fixture — so the exclusions in (1)/(2) are the ORDER
+//!    talking, not a missing annotation;
+//! 5. `requiresAssurance gteq secx:Claimed` admits every protocol and
+//!    `gteq secx:Proven` rejects every one.
 //!
 //! Runs only with BOTH `secprop-annotations` (this crate's graph) and the
 //! `sparq-trust/secprop-admissibility` reasoner the dev-dependency pins on.
 #![cfg(feature = "secprop-annotations")]
 
-use sparq_mpc::secprop::{
-    annotations_n3, ANNOTATED_PROTOCOLS, ILLUSTRATIVE_SPDZ_DISHONEST_MAJORITY,
-};
+use sparq_mpc::secprop::{annotations_n3, ANNOTATED_PROTOCOLS};
 use sparq_trust::admissible;
 
 /// A preference requiring MALICIOUS security. `mpc:cAdv` / `mpc:cThr` are the
@@ -47,6 +47,20 @@ const RELAXED_POLICY: &str = "\
 
 const R_ADV: &str = "https://sparq.dev/ns/mpc#rAdv";
 const R_THR: &str = "https://sparq.dev/ns/mpc#rThr";
+
+/// The TEST-ONLY positive control: a malicious / dishonest-majority subject that
+/// sparq-mpc does NOT implement. It never ships in `annotations_n3()`.
+const ILLUSTRATIVE_CONTROL_TTL: &str = include_str!("fixtures/secprop-illustrative-control.ttl");
+const ILLUSTRATIVE_SPDZ_DISHONEST_MAJORITY: &str =
+    "https://sparq.dev/ns/mpc#illustrative-spdz-dishonest-majority";
+
+/// Assurance preferences over the method-wide `secx:AssuranceLevel` claim.
+const ASSURANCE_POLICY: &str = "\
+<https://sparq.dev/ns/mpc#aClaimed> odrl:leftOperand secx:requiresAssurance ; odrl:operator odrl:gteq ; odrl:rightOperand secx:Claimed .\n\
+<https://sparq.dev/ns/mpc#aProven> odrl:leftOperand secx:requiresAssurance ; odrl:operator odrl:gteq ; odrl:rightOperand secx:Proven .\n";
+
+const A_CLAIMED: &str = "https://sparq.dev/ns/mpc#aClaimed";
+const A_PROVEN: &str = "https://sparq.dev/ns/mpc#aProven";
 
 /// INVARIANT 1 + 2: a preference requiring malicious security excludes EVERY
 /// sparq-mpc protocol, and so does one requiring a dishonest-majority threshold.
@@ -90,8 +104,8 @@ fn the_relaxed_preference_admits_every_mpc_protocol() {
     }
 }
 
-/// INVARIANT 4: the STRICT preference admits the illustrative malicious /
-/// dishonest-majority subject. The positive control — without it, the exclusions
+/// INVARIANT 4: the STRICT preference admits the TEST-ONLY malicious /
+/// dishonest-majority control subject. The positive control — without it, the exclusions
 /// above would also pass if the annotation graph were empty or the dimensions
 /// unregistered.
 #[test]
@@ -100,7 +114,7 @@ fn the_strict_preference_admits_the_illustrative_malicious_subject() {
         ILLUSTRATIVE_SPDZ_DISHONEST_MAJORITY,
         &[C_ADV, C_THR],
         STRICT_POLICY,
-        annotations_n3(),
+        &format!("{}\n{}", annotations_n3(), ILLUSTRATIVE_CONTROL_TTL),
     )
     .expect("reasoning failed");
     assert!(
@@ -134,4 +148,28 @@ fn both_strict_constraints_are_reported_unsatisfied() {
         "both the adversary-model and the corruption-threshold constraint must be \
          reported unsatisfied"
     );
+}
+
+/// INVARIANT 5: the method-wide `secx:AssuranceLevel` claim discharges a
+/// `requiresAssurance` preference: `gteq Claimed` admits every protocol, `gteq
+/// Proven` rejects every one (nothing is externally signed off, sq-qhy4).
+#[test]
+fn claimed_assurance_admits_and_proven_rejects_every_mpc_protocol() {
+    for &m in ANNOTATED_PROTOCOLS {
+        let a = admissible(m, &[A_CLAIMED], ASSURANCE_POLICY, annotations_n3())
+            .expect("reasoning failed");
+        assert!(
+            a.admissible,
+            "{} must satisfy `requiresAssurance gteq Claimed`; unsatisfied={:?}",
+            m, a.unsatisfied
+        );
+        let a = admissible(m, &[A_PROVEN], ASSURANCE_POLICY, annotations_n3())
+            .expect("reasoning failed");
+        assert!(
+            !a.admissible,
+            "{} must NOT satisfy `requiresAssurance gteq Proven`",
+            m
+        );
+        assert_eq!(a.unsatisfied, vec![A_PROVEN.to_string()]);
+    }
 }

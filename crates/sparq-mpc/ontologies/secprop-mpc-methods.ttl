@@ -9,7 +9,9 @@
 # and secx:CorruptionThreshold (DishonestMajority ⊐ HonestMajority ⊐
 # SuperHonestMajority). One annotation block per protocol IRI; each
 # `secx:hasProperty` is a reified (property, level, assurance, audit-status,
-# assumption) claim.
+# assumption) claim. Each protocol also carries a method-wide
+# `secx:AssuranceLevel` claim (`secx:Claimed`), so a `secx:requiresAssurance`
+# preference is discharged for it the same way the sparq-zk adapter derives one.
 #
 # WHY A LEVEL AND NOT JUST AN ASSUMPTION (#6186). `secx:assumption` is human-facing
 # PROVENANCE: the shared N3 admissibility reasoner
@@ -61,7 +63,9 @@ mpc:shamir-honest-majority-v1
       secx:assumption secx:SemiHonest ] ,
     [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
-      secx:assumption secx:HonestMajority ] .
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
 
 # ════════════════════════════════════════════════════════════════════════════
 # mpc:secure-compare-v1 — the semi-honest secure comparison / threshold
@@ -79,7 +83,9 @@ mpc:secure-compare-v1
       secx:assumption secx:SemiHonest ] ,
     [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
-      secx:assumption secx:HonestMajority ] .
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
 
 # ════════════════════════════════════════════════════════════════════════════
 # mpc:hidden-value-join-v1 — the hidden-value join / circuit-PSI core
@@ -96,7 +102,9 @@ mpc:hidden-value-join-v1
       secx:assumption secx:SemiHonest ] ,
     [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
-      secx:assumption secx:HonestMajority ] .
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
 
 # ════════════════════════════════════════════════════════════════════════════
 # mpc:auth-compare-v1 — the IT-MAC comparison chain (src/auth_compare.rs
@@ -115,7 +123,9 @@ mpc:auth-compare-v1
       secx:assumption secx:SemiHonest ] ,
     [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
-      secx:assumption secx:HonestMajority ] .
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
 
 # ════════════════════════════════════════════════════════════════════════════
 # mpc:auth-disclose-threshold-v1 — the IT-MAC threshold disclosure over an EXISTING
@@ -132,7 +142,9 @@ mpc:auth-disclose-threshold-v1
       secx:assumption secx:SemiHonest ] ,
     [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
-      secx:assumption secx:HonestMajority ] .
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .
 
 # ════════════════════════════════════════════════════════════════════════════
 # mpc:federated-pipeline-v1 — the end-to-end federated driver (src/pipeline.rs).
@@ -148,22 +160,6 @@ mpc:federated-pipeline-v1
       secx:assumption secx:SemiHonest ] ,
     [ secx:property secx:CorruptionThreshold ; secx:level secx:HonestMajority ;
       secx:assurance secx:Claimed ; secx:auditStatus secx:ExternalSignOffPending ;
-      secx:assumption secx:HonestMajority ] .
-
-# ─── ILLUSTRATIVE subject (NOT a sparq-mpc protocol) ──────────────────────────
-# sparq-mpc implements NO malicious-secure, dishonest-majority protocol: the SPDZ
-# regime is explicitly NOT entered (design route (b), bead sq-j5ok), and
-# `BackendRegistry::select(&SecurityRequirement::dishonest_majority_malicious())`
-# fail-closed REFUSES rather than downgrading. This block exists so the ORDER on
-# both dimensions has a positive control — a subject a strict preference ADMITS —
-# so the exclusion tests cannot pass vacuously. It is a sparq-local illustrative
-# IRI, named so it is unmistakably not a shipped capability; the same device as
-# `zk:illustrative-source-bbs-2023` in the sparq-zk annotation graph.
-
-mpc:illustrative-spdz-dishonest-majority
-  rdfs:comment "ILLUSTRATIVE ONLY — sparq-mpc does NOT implement this. A hypothetical SPDZ-style malicious, dishonest-majority protocol, present so the secx:AdversaryModel / secx:CorruptionThreshold orders have a positive control in the admissibility tests. Selecting a dishonest-majority-malicious backend from sparq-mpc's registry is refused (MpcError::NoBackendSatisfies); the regime is deferred (bead sq-j5ok)."@en-GB ;
-  secx:hasProperty
-    [ secx:property secx:AdversaryModel ; secx:level secx:Malicious ;
-      secx:assurance secx:Conjectured ] ,
-    [ secx:property secx:CorruptionThreshold ; secx:level secx:DishonestMajority ;
-      secx:assurance secx:Conjectured ] .
+      secx:assumption secx:HonestMajority ] ,
+    [ secx:property secx:AssuranceLevel ; secx:level secx:Claimed ;
+      secx:auditStatus secx:ExternalSignOffPending ] .

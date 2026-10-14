@@ -66,15 +66,9 @@ pub const AUTH_DISCLOSE_THRESHOLD_V1: &str = "https://sparq.dev/ns/mpc#auth-disc
 /// `mpc:federated-pipeline-v1` — the end-to-end federated driver
 /// ([`crate::pipeline`]).
 pub const FEDERATED_PIPELINE_V1: &str = "https://sparq.dev/ns/mpc#federated-pipeline-v1";
-/// `mpc:illustrative-spdz-dishonest-majority` — an **ILLUSTRATIVE** subject sparq-mpc
-/// does NOT implement (the SPDZ regime is deferred, bead `sq-j5ok`, and the registry
-/// fail-closed refuses a dishonest-majority-malicious requirement). It exists so the
-/// two orders have a positive control in the admissibility tests.
-pub const ILLUSTRATIVE_SPDZ_DISHONEST_MAJORITY: &str =
-    "https://sparq.dev/ns/mpc#illustrative-spdz-dishonest-majority";
-
 /// Every **sparq-mpc protocol** the annotation graph covers, in declaration order.
-/// The illustrative non-protocol subject is deliberately NOT a member.
+/// The graph has no other subject: [`annotations_n3`] describes implemented
+/// protocols only.
 pub const ANNOTATED_PROTOCOLS: &[&str] = &[
     SHAMIR_HONEST_MAJORITY_V1,
     SECURE_COMPARE_V1,
@@ -113,8 +107,9 @@ pub fn annotations_n3() -> &'static str {
 mod tests {
     use super::*;
     use sparq_secprop_vocab::{
-        ALL_SECPROP_IRIS, SECX_ADVERSARY_MODEL, SECX_CORRUPTION_THRESHOLD, SECX_COVERT,
-        SECX_HONEST_MAJORITY, SECX_MALICIOUS, SECX_PROVEN, SECX_SEMI_HONEST, SEC_PROP_NS,
+        ALL_SECPROP_IRIS, SECX_ADVERSARY_MODEL, SECX_ASSURANCE_LEVEL, SECX_CORRUPTION_THRESHOLD,
+        SECX_COVERT, SECX_HONEST_MAJORITY, SECX_MALICIOUS, SECX_PROVEN, SECX_SEMI_HONEST,
+        SEC_PROP_NS,
     };
 
     /// `annotations_n3` returns the compiled-in graph (the one public fn here).
@@ -122,25 +117,38 @@ mod tests {
     fn annotations_n3_returns_the_bundled_graph() {
         let g = annotations_n3();
         assert!(g.starts_with("# secprop-mpc-methods.ttl"));
-        assert!(g.contains("@prefix mpc:"), "the graph must be self-contained");
-        assert!(g.contains("@prefix secx:"), "the graph must be self-contained");
+        assert!(
+            g.contains("@prefix mpc:"),
+            "the graph must be self-contained"
+        );
+        assert!(
+            g.contains("@prefix secx:"),
+            "the graph must be self-contained"
+        );
     }
 
     /// Every protocol in [`ANNOTATED_PROTOCOLS`] is a subject of the graph, annotated
-    /// on BOTH ordered MPC dimensions — the completeness rule. A protocol with only
+    /// on BOTH ordered MPC dimensions and with a method-wide `secx:AssuranceLevel`
+    /// — the completeness rule. A protocol with only
     /// one of the two axes would be silently admitted by a preference over the other.
     #[test]
     fn every_protocol_is_annotated_on_both_dimensions() {
         let g = annotations_n3();
         for &p in ANNOTATED_PROTOCOLS {
-            let local = p.strip_prefix(MPC_NS).expect("protocol IRI is in the mpc: namespace");
+            let local = p
+                .strip_prefix(MPC_NS)
+                .expect("protocol IRI is in the mpc: namespace");
             let block = g
                 .split(&format!("\nmpc:{}\n", local))
                 .nth(1)
                 .unwrap_or_else(|| panic!("no annotation block for mpc:{}", local));
             // The block runs to the first blank line after its terminating ` .`.
             let block = block.split("\n\n").next().unwrap();
-            for dim in [SECX_ADVERSARY_MODEL, SECX_CORRUPTION_THRESHOLD] {
+            for dim in [
+                SECX_ADVERSARY_MODEL,
+                SECX_CORRUPTION_THRESHOLD,
+                SECX_ASSURANCE_LEVEL,
+            ] {
                 let local_dim = dim.strip_prefix(SEC_PROP_NS).unwrap();
                 assert!(
                     block.contains(&format!("secx:property secx:{} ", local_dim)),
@@ -205,20 +213,19 @@ mod tests {
         }
     }
 
-    /// The illustrative subject is clearly marked as NOT a sparq-mpc protocol, so it
-    /// cannot be mistaken for a shipped capability.
+    /// The shipped graph's subjects are EXACTLY [`ANNOTATED_PROTOCOLS`]: no
+    /// illustrative or unimplemented subject can reach the admissibility reasoner
+    /// through [`annotations_n3`] (a positive control lives in a test fixture).
     #[test]
-    fn the_illustrative_subject_is_marked_as_not_implemented() {
-        let g = annotations_n3();
-        assert!(!ANNOTATED_PROTOCOLS.contains(&ILLUSTRATIVE_SPDZ_DISHONEST_MAJORITY));
-        let local = ILLUSTRATIVE_SPDZ_DISHONEST_MAJORITY
-            .strip_prefix(MPC_NS)
-            .unwrap();
-        let block = g.split(&format!("\nmpc:{}\n", local)).nth(1).unwrap();
-        assert!(
-            block.contains("ILLUSTRATIVE ONLY") && block.contains("does NOT implement"),
-            "the illustrative subject must say sparq-mpc does not implement it",
-        );
+    fn annotations_n3_names_only_implemented_protocols() {
+        let subjects: Vec<String> = annotations_n3()
+            .lines()
+            .filter_map(|l| l.strip_prefix("mpc:"))
+            .map(|local| format!("{}{}", MPC_NS, local.trim_end()))
+            .collect();
+        let want: Vec<String> = ANNOTATED_PROTOCOLS.iter().map(|p| p.to_string()).collect();
+        assert_eq!(subjects, want);
+        assert!(!annotations_n3().to_lowercase().contains("illustrative"));
     }
 
     /// Dimension/level IRI drift guard: every `secx:` term the graph references is a

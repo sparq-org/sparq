@@ -325,9 +325,10 @@ modules included: their integrity coverage is partial (see the `auth_disclose` t
 so the hardening is recorded in `rdfs:comment`, not as a level. None is annotated `secx:Covert` either (that needs a stated deterrence probability, which no
 module claims). Every assertion is at most `secx:Claimed` with `secx:ExternalSignOffPending`
 (`sq-qhy4`). `proof.rs` is deliberately **not** a subject: every method returns `NotYetImplemented`, so
-it runs no protocol. The graph also carries one clearly-labelled **illustrative** malicious /
-dishonest-majority subject that sparq-mpc does **not** implement, present only so the orders have a
-positive control in the tests.
+it runs no protocol. Each protocol also carries a method-wide `secx:AssuranceLevel` of `secx:Claimed`,
+so `requiresAssurance gteq Claimed` admits them and `gteq Proven` rejects them. `annotations_n3()`
+names implemented protocols only; the malicious / dishonest-majority positive control the tests use
+lives in a test fixture and never ships.
 
 ### 7. Handle deferred crypto honestly
 The collaborative proof and the hidden-key path of `DisclosedKeyJoin` are gated; match the error rather than assuming success.
