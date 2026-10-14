@@ -202,11 +202,13 @@ fn write_diagram_label(s: &mut String, label: &str, mermaid: bool) {
                 }
                 s.push_str(if mermaid { "<br/>" } else { "\\n" });
             }
-            '"' | '[' | ']' | '<' | '>' | '&' | '#' | '\\' | '`' if mermaid => {
+            '"' | '[' | ']' | '<' | '>' | '&' | '#' | '\\' | '`' | '%' | '{' | '}' if mermaid => {
                 // Mermaid decimal entities also protect literal entity prefixes
-                // and backticks (which could otherwise select Markdown labels).
+                // and backticks, plus directives/comments processed before labels.
                 let _ = write!(s, "#{};", u32::from(c));
             }
+            // Graphviz decodes HTML entities even inside quoted plain-text labels.
+            '&' => s.push_str("&#38;"),
             '"' => s.push_str("\\\""),
             '\\' => s.push_str("\\\\"),
             _ => s.push(c),
@@ -660,6 +662,91 @@ mod tests {
                 "}\n",
             )
         );
+    }
+
+    #[test]
+    fn diagram_mermaid_preprocessing_escaping() {
+        let plan = diagram_node(
+            "%%{init: {\"theme\": \"dark\"}}%%\n%% comment\n---\nconfig: {}\n---",
+            vec![],
+        );
+        // No raw directive introducers or label line breaks reach preprocessing.
+        // Front matter stays inside the label, after the flowchart header.
+        assert_eq!(
+            plan.to_mermaid(),
+            concat!(
+                "flowchart TD\n",
+                "  n0[\"#37;#37;#123;init: #123;#34;theme#34;: #34;dark#34;#125;#125;#37;#37;",
+                "<br/>#37;#37; comment<br/>---<br/>config: #123;#125;<br/>---\"]\n",
+            )
+        );
+    }
+
+    #[test]
+    fn diagram_dot_entity_escaping() {
+        let plan = diagram_node("<http://ex/?a=&amp;&b=&lt;&c=&#38;&d=&>", vec![]);
+        assert_eq!(
+            plan.to_dot(),
+            concat!(
+                "digraph Plan {\n",
+                "  n0[label=\"<http://ex/?a=&#38;amp;&#38;b=&#38;lt;&#38;c=&#38;#38;&#38;d=&#38;>\"];\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn diagram_dot_rendered_label_round_trips() {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        let mut dot = match Command::new("dot")
+            .arg("-Tsvg")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(dot) => dot,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("skipping rendered label check: Graphviz dot is not installed");
+                return;
+            }
+            Err(error) => panic!("failed to start Graphviz dot: {error}"),
+        };
+        let label = "Scan [<http://ex/名?a=&amp;&b=&lt;&c=&#38;&d=&>] \"x\" \\N \\n\n%%{init: {}}%%\n%% comment";
+        dot.stdin
+            .take()
+            .unwrap()
+            .write_all(diagram_node(label, vec![]).to_dot().as_bytes())
+            .unwrap();
+        let output = dot.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let svg = String::from_utf8(output.stdout).unwrap();
+        // Decode the SVG text elements once, leaving entity-looking label text intact.
+        let rendered = svg
+            .split("<text ")
+            .skip(1)
+            .map(|element| {
+                element
+                    .split_once('>')
+                    .unwrap()
+                    .1
+                    .split_once("</text>")
+                    .unwrap()
+                    .0
+                    .replace("&quot;", "\"")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&amp;", "&")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(rendered, label);
     }
 
     #[test]
