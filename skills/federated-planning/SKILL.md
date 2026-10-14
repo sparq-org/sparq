@@ -58,6 +58,14 @@ enable authority pruning, build via `.builder(..)` and call `.authorities_comple
 only when you truly enumerate every authority the source mints (a HiBISCuS-style
 capability set / `void:uriSpace` declaration).
 
+Likewise, `.char_sets_complete()` on `SourceDescriptorBuilder` declares that the served
+characteristic sets enumerate **every exact per-subject predicate set**; the descriptor's
+`char_sets_complete()` accessor defaults to `false`. Rule C2 in `sparq-fedplan-mpc` trusts
+this declaration before falling back to the unchanged per-predicate subject-count identity.
+As with authority completeness, a false declaration can drop answers (lose recall): never
+set it on a truncated summary. Both completeness declarations are **builder-only**; neither
+has an RDF parse signal, so `from_void_nt` leaves them false and introduces no new RDF term.
+
 A descriptor may also carry an **optional GenAI retrieval capability**
 (`RetrievalCapability` — declared vector/text retrieval endpoints + a per-request
 cardinality hint), served under the `sret:` vocab (`http://sparq.dev/ns/retrieval#`,
