@@ -60,6 +60,7 @@
 //! construction (design record §5 item 5) — a label is never the evidence.
 
 use crate::field::Fp;
+use crate::oblivious::{SecretColumn, ShuffleCost};
 use crate::partial::MpcError;
 use crate::shamir::{ShamirBackend, ShamirDealer, Share};
 
@@ -152,8 +153,9 @@ impl RandomnessModel {
 /// through the production call sites is itself a follow-on bead (no call site is
 /// gated on it yet, although `degree_reduce`, the hidden-value equality path, the
 /// whole comparison chain, the hidden DISTINCT / property-path stages, the
-/// private-input sharing and the batched join's key sharing already draw through
-/// this trait).
+/// private-input sharing, the batched join's key sharing and the oblivious output
+/// stage (its selector / tag / payload-limb sharings and its shuffle) already draw
+/// through this trait).
 ///
 /// See `research/mpc-distributed-randomness-design.md` for the full design and
 /// the follow-on implementation beads.
@@ -187,10 +189,11 @@ pub trait DistributedRandomness {
     /// ([`crate::join::HiddenValueJoin`]), the [`crate::compare`] chain, the
     /// [`crate::hidden_distinct`] / [`crate::hidden_path`] stages, the
     /// [`crate::shamir::ShamirBackend`] private-input sharing and
-    /// [`crate::join::BatchedHiddenInput::shared_keys`] draw through the seam; the
-    /// oblivious output stage (selector / tag sharings and the shuffle), the
-    /// authenticated (IT-MAC) twins, `transport`, `bench` and `draw_bit` still call
-    /// the dealer directly.
+    /// [`crate::join::BatchedHiddenInput::shared_keys`] and the oblivious output
+    /// stage ([`crate::oblivious_join`]'s selector / tag / payload-limb sharings
+    /// and its shuffle, via [`oblivious_shuffle`](Self::oblivious_shuffle)) draw
+    /// through the seam; the authenticated (IT-MAC) twins, `transport`, `bench`
+    /// and `draw_bit` still call the dealer directly.
     /// Provided as a default so every implementor inherits the same refusal.
     fn require_deployable(&self) -> Result<(), MpcError> {
         let model = self.randomness_model();
@@ -253,6 +256,32 @@ pub trait DistributedRandomness {
     /// guarantee MUST gate on [`require_deployable`](Self::require_deployable) —
     /// a necessary, not sufficient, check.
     fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError>;
+
+    /// **Oblivious shuffle** of a secret-shared column: return a re-ordering of
+    /// `col`'s entries under a permutation the source chooses, together with the
+    /// MODELLED cost ([`ShuffleCost`]). This is the randomness-side half of
+    /// [`crate::oblivious::shuffle`]: the permutation is correlated randomness
+    /// like any mask, so WHO draws it belongs behind this seam.
+    ///
+    /// **Structural contract only.** Every implementor returns a column of the
+    /// same entry count whose entries have the same widths, and whose entries are
+    /// the input's entries re-ordered — nothing else is promised here. In
+    /// particular:
+    ///
+    /// - *Who knows the permutation* is NOT part of this contract. The
+    ///   [`RandomnessModel::TrustedDealerSim`] implementor samples the permutation
+    ///   centrally and therefore *knows* it; a dealer-less implementor is
+    ///   designed so no `≤ t` parties do. A caller that needs the permutation
+    ///   hidden MUST gate on [`require_deployable`](Self::require_deployable) — a
+    ///   necessary, not sufficient, check.
+    /// - *Nothing is verified.* No implementor proves that what it returned is a
+    ///   permutation of the input at all, so a deviating party can corrupt or
+    ///   reorder entries undetected. Semi-honest only; the consumer-side
+    ///   `checked_oblivious_shuffle` adds a SHAPE check and nothing more.
+    fn oblivious_shuffle(
+        &mut self,
+        col: SecretColumn,
+    ) -> Result<(SecretColumn, ShuffleCost), MpcError>;
 }
 
 /// The CURRENT single-trusted-dealer **SIMULATION** implements the seam.
@@ -298,6 +327,17 @@ impl DistributedRandomness for ShamirDealer {
         // would have the holder share its own input with a distributed
         // consistency check.
         Ok(self.share(secret))
+    }
+
+    fn oblivious_shuffle(
+        &mut self,
+        col: SecretColumn,
+    ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+        // Simulation artefact: the dealer samples AND knows the permutation (it
+        // drew it from its own masking RNG), then routes it through the
+        // Waksman network with CLEARTEXT control bits. A dealer-less source
+        // derives the permutation from randomness no `<= t` parties hold.
+        crate::oblivious::shuffle(self, col)
     }
 }
 
@@ -379,6 +419,50 @@ pub(crate) fn checked_shared_nonzero_mask(
     Ok(shares)
 }
 
+/// [`DistributedRandomness::oblivious_shuffle`] followed by a **SHAPE** check on
+/// the returned column: the same number of entries as the input, and the same
+/// multiset of entry widths.
+///
+/// The consumer of a shuffled column splits every entry back into fixed-width
+/// slices by position ([`crate::oblivious_join`] splits `[tag | limb₁ | … ]`),
+/// so an entry that lost or gained a share, or a column that lost or gained an
+/// entry, would silently mis-decode a row. The source is caller-supplied, so its
+/// output shape is checked here rather than trusted and a mismatch is refused
+/// with [`MpcError::Protocol`].
+///
+/// **Shape only — this is not a correctness check.** It does NOT verify that the
+/// output is a permutation of the input, that any entry's shares still lie on the
+/// polynomial they came from, or that the permutation is uniform or hidden. The
+/// width multiset is compared order-independently precisely because a shuffle is
+/// *expected* to re-order entries; a source that returned the input unchanged, or
+/// returned entries built from unrelated shares of the right widths, passes.
+pub(crate) fn checked_oblivious_shuffle(
+    source: &mut dyn DistributedRandomness,
+    col: SecretColumn,
+) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+    let mut before: Vec<usize> = col.iter().map(|e| e.len()).collect();
+    let (shuffled, cost) = source.oblivious_shuffle(col)?;
+    let mut after: Vec<usize> = shuffled.iter().map(|e| e.len()).collect();
+    if before.len() != after.len() {
+        return Err(MpcError::Protocol(format!(
+            "the randomness source returned a shuffled column of {} entries, but it was \
+             handed {}",
+            after.len(),
+            before.len()
+        )));
+    }
+    before.sort_unstable();
+    after.sort_unstable();
+    if before != after {
+        return Err(MpcError::Protocol(format!(
+            "the randomness source returned a shuffled column whose entry widths {:?} are \
+             not a re-ordering of the widths {:?} it was handed",
+            after, before
+        )));
+    }
+    Ok((shuffled, cost))
+}
+
 /// Test-only [`DistributedRandomness`] sources shared by the seam tests of every
 /// module that draws through the seam: a source that corrupts exactly one
 /// targeted draw, one that misreports its threshold, and one that records the
@@ -393,6 +477,7 @@ pub(crate) mod test_sources {
         SharedMask,
         SharedNonzeroMask,
         VssOwnInput,
+        ObliviousShuffle,
     }
 
     impl SeamMethod {
@@ -401,6 +486,7 @@ pub(crate) mod test_sources {
                 SeamMethod::SharedMask => "shared_mask",
                 SeamMethod::SharedNonzeroMask => "shared_nonzero_mask",
                 SeamMethod::VssOwnInput => "vss_own_input",
+                SeamMethod::ObliviousShuffle => "oblivious_shuffle",
             }
         }
     }
@@ -517,6 +603,121 @@ pub(crate) mod test_sources {
             let drawn = self.inner.vss_own_input(secret);
             self.maybe_corrupt(SeamMethod::VssOwnInput, drawn)
         }
+        /// Passed through untouched: [`Malformation`] corrupts a single
+        /// `Vec<Share>` sharing, which is the wrong shape for a shuffled column —
+        /// [`MalformedShuffleSource`] is the column-shaped twin.
+        fn oblivious_shuffle(
+            &mut self,
+            col: SecretColumn,
+        ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+            self.inner.oblivious_shuffle(col)
+        }
+    }
+
+    /// How [`MalformedShuffleSource`] corrupts the SHAPE of the shuffled column.
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) enum ShuffleMalformation {
+        /// Drop an entry — the column comes back one row short.
+        DropEntry,
+        /// Append an entry — the column comes back one row long.
+        AddEntry,
+        /// Truncate one entry — that row comes back one share narrow.
+        NarrowFirst,
+        /// Extend one entry — that row comes back one share wide.
+        WidenFirst,
+    }
+
+    /// Every [`ShuffleMalformation`], for tests that sweep them all.
+    pub(crate) const ALL_SHUFFLE_MALFORMATIONS: [ShuffleMalformation; 4] = [
+        ShuffleMalformation::DropEntry,
+        ShuffleMalformation::AddEntry,
+        ShuffleMalformation::NarrowFirst,
+        ShuffleMalformation::WidenFirst,
+    ];
+
+    /// The substring of [`checked_oblivious_shuffle`]'s two refusals, for
+    /// asserting that a malformed shuffle was refused by the shape check itself
+    /// and not by something downstream.
+    pub(crate) const SHUFFLE_SHAPE_REFUSAL: &str = "returned a shuffled column";
+
+    /// Delegates to a real dealer but corrupts the SHAPE of the shuffled column
+    /// it returns. Every other draw is passed through untouched.
+    pub(crate) struct MalformedShuffleSource {
+        inner: ShamirDealer,
+        how: ShuffleMalformation,
+        fired: bool,
+    }
+
+    impl MalformedShuffleSource {
+        pub(crate) fn new(inner: ShamirDealer, how: ShuffleMalformation) -> Self {
+            MalformedShuffleSource {
+                inner,
+                how,
+                fired: false,
+            }
+        }
+
+        /// Whether the shuffle happened (and its column was corrupted).
+        pub(crate) fn fired(&self) -> bool {
+            self.fired
+        }
+    }
+
+    impl DistributedRandomness for MalformedShuffleSource {
+        fn randomness_model(&self) -> RandomnessModel {
+            self.inner.randomness_model()
+        }
+        fn parties(&self) -> usize {
+            DistributedRandomness::parties(&self.inner)
+        }
+        fn threshold(&self) -> usize {
+            DistributedRandomness::threshold(&self.inner)
+        }
+        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_mask()
+        }
+        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_nonzero_mask()
+        }
+        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
+            self.inner.vss_own_input(secret)
+        }
+        fn oblivious_shuffle(
+            &mut self,
+            col: SecretColumn,
+        ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+            let (mut shuffled, cost) = self.inner.oblivious_shuffle(col)?;
+            self.fired = true;
+            match self.how {
+                ShuffleMalformation::DropEntry => {
+                    shuffled.pop();
+                }
+                ShuffleMalformation::AddEntry => {
+                    let width = shuffled.last().map(|e| e.len()).unwrap_or(0);
+                    shuffled.push(vec![
+                        Share {
+                            x: 1,
+                            y: Fp::zero()
+                        };
+                        width
+                    ]);
+                }
+                ShuffleMalformation::NarrowFirst => {
+                    if let Some(entry) = shuffled.first_mut() {
+                        entry.pop();
+                    }
+                }
+                ShuffleMalformation::WidenFirst => {
+                    if let Some(entry) = shuffled.first_mut() {
+                        entry.push(Share {
+                            x: 1,
+                            y: Fp::zero(),
+                        });
+                    }
+                }
+            }
+            Ok((shuffled, cost))
+        }
     }
 
     /// A dealer-backed source that misreports its threshold as `t`.
@@ -543,6 +744,12 @@ pub(crate) mod test_sources {
         }
         fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
             self.inner.vss_own_input(secret)
+        }
+        fn oblivious_shuffle(
+            &mut self,
+            col: SecretColumn,
+        ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+            self.inner.oblivious_shuffle(col)
         }
     }
 
@@ -597,6 +804,21 @@ pub(crate) mod test_sources {
         fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
             let drawn = self.inner.vss_own_input(secret);
             self.record(SeamMethod::VssOwnInput, drawn)
+        }
+        /// Records the shuffled column's shares, entry by entry in the order the
+        /// shuffle returned them, flattened into one entry of the transcript — so
+        /// the digest moves if the permutation, any entry's shares, or the entry
+        /// order changes.
+        fn oblivious_shuffle(
+            &mut self,
+            col: SecretColumn,
+        ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+            let (shuffled, cost) = self.inner.oblivious_shuffle(col)?;
+            self.log.push((
+                SeamMethod::ObliviousShuffle.name(),
+                shuffled.iter().flatten().map(|s| s.y.value()).collect(),
+            ));
+            Ok((shuffled, cost))
         }
     }
 
@@ -709,6 +931,15 @@ mod tests {
         }
         fn vss_own_input(&mut self, _secret: Fp) -> Result<Vec<Share>, MpcError> {
             Err(MpcError::not_yet("dealer-less VSS", "sq-yyro follow-on"))
+        }
+        fn oblivious_shuffle(
+            &mut self,
+            _col: SecretColumn,
+        ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+            Err(MpcError::not_yet(
+                "PRSS oblivious_shuffle",
+                "sq-yyro follow-on",
+            ))
         }
     }
 

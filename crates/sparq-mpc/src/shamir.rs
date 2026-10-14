@@ -1526,11 +1526,13 @@ impl MpcBackend for ShamirBackend {
     /// single-dealer simulation that is exactly the plain `share` it always was,
     /// so the shares are unchanged. It is UNCHECKED plain sharing, not VSS.
     fn share_private_input(&self, holder: &Holder) -> Result<Vec<Self::Share>, MpcError> {
-        // A fresh sharing requires fresh, INDEPENDENT randomness. Mint a fresh
-        // dealer (production: a fresh OS-seeded CSPRNG — sq-1vt) rather than
-        // cloning RNG state, so per-input sharings never reuse a keystream. The
-        // trait stays `&self`; the dealer's randomness is per-input by design.
-        self.share_private_input_through(&mut self.dealer(), holder)
+        // Evaluate the holder's fragment FIRST, then mint the dealer: a fragment
+        // that fails must not have opened a live masking-randomness session on the
+        // way in. A fresh sharing requires fresh, INDEPENDENT randomness, so the
+        // dealer is minted per input (production: a fresh OS-seeded CSPRNG —
+        // sq-1vt) rather than cloning RNG state; the trait stays `&self`.
+        let v = self.private_input_value(holder)?;
+        self.share_values_through(&mut self.dealer(), &[Fp::new(v)])
     }
 
     /// [OPUS-4.8] sq-dwb5 — **batched / vector** secret-sharing of a holder's
@@ -1560,7 +1562,9 @@ impl MpcBackend for ShamirBackend {
         holder: &Holder,
         fragment: &str,
     ) -> Result<Vec<Self::Share>, MpcError> {
-        self.share_private_inputs_through(&mut self.dealer(), holder, fragment)
+        // Fragment first, dealer second — see [`Self::share_private_input`].
+        let values = self.private_input_values(holder, fragment)?;
+        self.share_values_through(&mut self.dealer(), &values)
     }
 
     /// Run the secure computation over the shared inputs. For the v1 aggregate
@@ -1614,40 +1618,71 @@ impl ShamirBackend {
     /// canonical `n`-party sharing; a source that cannot share a holder's own input
     /// (PRSS today) fails closed with its own error. Shape checks only — no VSS /
     /// consistency guarantee is added.
+    ///
+    /// **Test harness.** The production method mints its own dealer *after*
+    /// evaluating the holder's fragment, so it shares through
+    /// [`Self::share_values_through`] directly rather than through here; this entry
+    /// point exists so a test can substitute an arbitrary source for the same
+    /// path.
+    #[cfg(test)]
     pub(crate) fn share_private_input_through(
         &self,
         source: &mut dyn DistributedRandomness,
         holder: &Holder,
     ) -> Result<Vec<ShareVec>, MpcError> {
-        require_source_matches(source, self)?;
-        // The private contribution is named by a convention fragment: a single
-        // integer the holder agrees to *secret-share* (not disclose). We use the
-        // dedicated private-salary fragment.
+        let v = self.private_input_value(holder)?;
+        self.share_values_through(source, &[Fp::new(v)])
+    }
+
+    /// The holder's single private contribution, in the clear, before any
+    /// randomness is drawn. The private contribution is named by a convention
+    /// fragment: a single integer the holder agrees to *secret-share* (not
+    /// disclose). We use the dedicated private-salary fragment.
+    fn private_input_value(&self, holder: &Holder) -> Result<u64, MpcError> {
         let private = holder.evaluate_local(PRIVATE_SALARY_FRAGMENT)?;
-        let v = extract_single_integer(&private)?;
-        Ok(vec![checked_vss_own_input(source, self.n, Fp::new(v))?])
+        extract_single_integer(&private)
+    }
+
+    /// The holder's private contribution VECTOR, in the clear and in the
+    /// documented positional (value-sorted) row order, before any randomness is
+    /// drawn.
+    fn private_input_values(&self, holder: &Holder, fragment: &str) -> Result<Vec<Fp>, MpcError> {
+        let private = holder.evaluate_local(fragment)?;
+        let mut values = extract_integer_vector(&private)?;
+        // Positional row-binding: a deterministic order so two holders' batches
+        // line up by index regardless of local row order (the documented contract).
+        values.sort_unstable();
+        Ok(values.into_iter().map(Fp::new).collect())
+    }
+
+    /// One [`DistributedRandomness::vss_own_input`] per value, in order, each
+    /// refused unless it is the canonical sharing for this backend's `n`. Refuses
+    /// a source whose `(n, t)` differs from this backend's before any draw.
+    fn share_values_through(
+        &self,
+        source: &mut dyn DistributedRandomness,
+        values: &[Fp],
+    ) -> Result<Vec<ShareVec>, MpcError> {
+        require_source_matches(source, self)?;
+        values
+            .iter()
+            .map(|v| checked_vss_own_input(source, self.n, *v))
+            .collect()
     }
 
     /// [`MpcBackend::share_private_inputs`] with every row shared through `source`
     /// ([`DistributedRandomness::vss_own_input`]), one call per row in the
     /// value-sorted row order. Same refusals as
-    /// [`Self::share_private_input_through`].
+    /// [`Self::share_private_input_through`], and the same test-harness note.
+    #[cfg(test)]
     pub(crate) fn share_private_inputs_through(
         &self,
         source: &mut dyn DistributedRandomness,
         holder: &Holder,
         fragment: &str,
     ) -> Result<Vec<ShareVec>, MpcError> {
-        require_source_matches(source, self)?;
-        let private = holder.evaluate_local(fragment)?;
-        let mut values = extract_integer_vector(&private)?;
-        // Positional row-binding: a deterministic order so two holders' batches
-        // line up by index regardless of local row order (the documented contract).
-        values.sort_unstable();
-        values
-            .into_iter()
-            .map(|v| checked_vss_own_input(source, self.n, Fp::new(v)))
-            .collect()
+        let values = self.private_input_values(holder, fragment)?;
+        self.share_values_through(source, &values)
     }
 }
 

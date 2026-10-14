@@ -119,6 +119,7 @@
 use crate::chacha::ChaCha20Csprng;
 use crate::field::Fp;
 use crate::partial::MpcError;
+use crate::oblivious::{SecretColumn, ShuffleCost};
 use crate::randomness::{DistributedRandomness, RandomnessModel};
 use crate::rng::MpcRng;
 use crate::shamir::Share;
@@ -658,6 +659,23 @@ impl DistributedRandomness for PrssRandomness {
             "dealer-less VSS input sharing (PRSS generates correlated randomness, \
              it does not verifiably share a holder's own input)",
             "sq-yyro follow-on: research/mpc-distributed-randomness-design.md §3 / §5 item 3",
+        ))
+    }
+
+    /// **Honestly refused for now.** A dealer-less shuffle cannot sample the
+    /// permutation centrally the way the single-dealer simulation does, and
+    /// faking it with a public or locally-sampled permutation would hand the
+    /// adversary exactly the ordering the shuffle exists to hide. The
+    /// composed-resharing construction on the replicated seeds is a follow-on;
+    /// until it lands this returns [`MpcError::NotYetImplemented`].
+    fn oblivious_shuffle(
+        &mut self,
+        _col: SecretColumn,
+    ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+        Err(MpcError::not_yet(
+            "dealer-less oblivious shuffle on PRSS (the permutation must come from \
+             randomness no <= t parties hold, not from a central sampler)",
+            "sq-yyro follow-on: research/mpc-distributed-randomness-design.md §2.1",
         ))
     }
 }
