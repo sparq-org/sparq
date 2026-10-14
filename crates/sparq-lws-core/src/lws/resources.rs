@@ -4670,6 +4670,10 @@ async fn linkset<S: Store + 'static>(
             if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
                 return r;
             }
+            // As for a resource ([`patch`]): a writer that may not read the linkset is refused,
+            // not told why, when even a blind patch cannot apply to it.
+            let reader = state.allowed(Action::Read, uri, agent).await;
+            let unread = |refused: Response| if reader { refused } else { state.deny(agent) };
             let base = linkset_base(uri);
             // The patch holds its numbers as their text, so the linkset is read the same way,
             // and written back with every number restored. A linkset holds no numbers, so one a
@@ -4690,10 +4694,10 @@ async fn linkset<S: Store + 'static>(
             // what a target past the budget costs.
             let legacy = !admissible(&document, base.len());
             if legacy && !patch.only_removes() {
-                return problem(
+                return unread(problem(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     Some("the linkset is more than a linkset may hold: only remove and test operations apply to it until it is within"),
-                );
+                ));
             }
             let budget = if legacy {
                 LINKSET_COST_BUDGET.max(patch_cost(&held))
@@ -4702,7 +4706,7 @@ async fn linkset<S: Store + 'static>(
             };
             let mut patched = match patch.apply_in_memory(&held, budget) {
                 Ok(v) => v,
-                Err(r) => return r,
+                Err(r) => return unread(r),
             };
             // Its strings are restored in place; a number (which a linkset never holds) refuses
             // it. Nothing is written out and parsed again.
@@ -4723,7 +4727,7 @@ async fn linkset<S: Store + 'static>(
                 patched,
                 locks,
                 // The tag describes the linkset as patched, which only a reader may learn.
-                if state.allowed(Action::Read, uri, agent).await {
+                if reader {
                     LinksetValidator::Sent
                 } else {
                     LinksetValidator::Withheld
@@ -10564,9 +10568,18 @@ mod tests {
         let status = patch(dave.clone(), list.clone(), blind.clone()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(
-            patch(bob, list, blind).await,
+            patch(bob.clone(), list, blind).await,
             StatusCode::UNPROCESSABLE_ENTITY
         );
+        // A linkset is patched under the same rule.
+        let meta = format!("{doc}{META_SUFFIX}");
+        for there in ["/linkset/0", "/linkset/9"] {
+            let ops = json!([{"op": "remove", "path": there}]);
+            let status = patch(dave.clone(), meta.clone(), ops).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{there}");
+        }
+        let status = patch(bob, meta, json!([{"op": "remove", "path": "/linkset/9"}])).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]
