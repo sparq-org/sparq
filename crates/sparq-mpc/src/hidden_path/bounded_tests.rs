@@ -470,3 +470,107 @@ fn bounded_empty_edges_is_empty() {
     let got0 = secure_bounded(&backend, &edges, &HiddenBoundedPath::range(P, 0, 3), 8);
     assert!(got0.is_empty());
 }
+
+// ---- sq-yyro / issue #6117: the union stage draws through the seam ----
+
+/// The disclosed `(a, b)` IRI pairs among the revealed slots (dummies dropped).
+fn slot_pairs(slots: &[crate::oblivious_join::OutputSlot]) -> BTreeSet<(String, String)> {
+    use crate::oblivious_join::OutputSlot;
+    slots
+        .iter()
+        .filter_map(|s| match s {
+            OutputSlot::Row(p) => match (&p[0], &p[1]) {
+                (Some(Term::NamedNode(a)), Some(Term::NamedNode(b))) => {
+                    Some((a.as_str().to_string(), b.as_str().to_string()))
+                }
+                other => panic!("endpoints must be bound IRIs, got {other:?}"),
+            },
+            OutputSlot::Dummy => None,
+        })
+        .collect()
+}
+
+/// A source whose `(n, t)` differs from the backend's is refused before any draw.
+#[test]
+fn bounded_through_refuses_a_source_that_does_not_match_the_backend() {
+    use crate::randomness::test_sources::MisreportedThresholdSource;
+    let backend = ShamirBackend::new_seeded(3, 0xB0C).unwrap();
+    let edges = predicated_edges(&[(P, "http://ex/a", "http://ex/b")]);
+    let form = HiddenBoundedPath::optional(P);
+    let mut lying = MisreportedThresholdSource {
+        inner: backend.dealer(),
+        t: 0,
+    };
+    let mut other = ShamirBackend::new_seeded(5, 0xB0C).unwrap().dealer();
+    for source in [
+        &mut lying as &mut dyn crate::randomness::DistributedRandomness,
+        &mut other,
+    ] {
+        match eval_bounded_path_hidden_slots_through(source, &backend, &edges, &form, 3) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+            other => panic!("a mismatched source must be refused, got {other:?}"),
+        }
+    }
+}
+
+/// A malformed draw in the union's OR-fold is refused by the degree-reduction
+/// re-sharing check. `{0,1}` over a self-loop `a → a` folds the length-1 chain
+/// into the reflexive `(a, a)`: one OR, i.e. one degree reduction, so the very
+/// first own-input draw is that reduction's first re-sharing.
+#[test]
+fn malformed_draws_in_the_or_fold_are_refused() {
+    use crate::randomness::test_sources::{MalformedSource, SeamMethod, ALL_MALFORMATIONS};
+    let backend = ShamirBackend::new_seeded(3, 0xB0D).unwrap();
+    let edges = predicated_edges(&[(P, "http://ex/a", "http://ex/a")]);
+    let form = HiddenBoundedPath::optional(P);
+    for how in ALL_MALFORMATIONS {
+        let mut src = MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, 0, how);
+        match eval_bounded_path_hidden_slots_through(&mut src, &backend, &edges, &form, 2) {
+            Err(MpcError::Protocol(m)) => {
+                assert!(
+                    m.contains("re-sharing that is not the canonical"),
+                    "{how:?}: {m}"
+                )
+            }
+            other => panic!("{how:?}: must fail closed, got {other:?}"),
+        }
+        assert!(src.fired());
+    }
+}
+
+/// Under PRSS only the draw-free shape runs: `{0,1}` with no self-loop adds the
+/// constant reflexive diagonal and the length-1 edges with no hop equality and no
+/// colliding pair to OR-fold, so it draws nothing from the source. `{1,2}` needs a
+/// hop equality (a holder's own input shared), which PRSS refuses — it fails
+/// closed with `NotYetImplemented`.
+#[test]
+fn prss_runs_only_draw_free_bounded_shapes_and_fails_closed_otherwise() {
+    use crate::prss::PrssRandomness;
+    let backend = ShamirBackend::new_seeded(3, 0xB0E).unwrap();
+    let mut prss = PrssRandomness::with_simulated_setup(3).unwrap();
+    let triples = [
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ];
+    let edges = predicated_edges(&triples);
+    let optional = HiddenBoundedPath::optional(P);
+    let (slots, _) =
+        eval_bounded_path_hidden_slots_through(&mut prss, &backend, &edges, &optional, 6).unwrap();
+    assert_eq!(slots.len(), 6);
+    assert_eq!(
+        slot_pairs(&slots),
+        secure_bounded(&backend, &edges, &optional, 6)
+    );
+
+    let outcome = eval_bounded_path_hidden_slots_through(
+        &mut prss,
+        &backend,
+        &edges,
+        &HiddenBoundedPath::range(P, 1, 2),
+        8,
+    );
+    assert!(
+        matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
+        "{{1,2}}: PRSS must fail closed, got {outcome:?}"
+    );
+}

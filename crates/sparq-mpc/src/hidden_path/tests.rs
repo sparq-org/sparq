@@ -326,3 +326,108 @@ fn result_is_shuffle_seed_invariant() {
         assert_eq!(got, want, "seed {seed}: result changed");
     }
 }
+
+// ---- sq-yyro / issue #6117: the chain stage draws through the seam ----
+
+/// The disclosed `(a, b)` IRI pairs among the revealed slots (dummies dropped).
+fn slot_pairs(slots: &[crate::oblivious_join::OutputSlot]) -> BTreeSet<(String, String)> {
+    use crate::oblivious_join::OutputSlot;
+    slots
+        .iter()
+        .filter_map(|s| match s {
+            OutputSlot::Row(p) => match (&p[0], &p[1]) {
+                (Some(Term::NamedNode(a)), Some(Term::NamedNode(b))) => {
+                    Some((a.as_str().to_string(), b.as_str().to_string()))
+                }
+                other => panic!("endpoints must be bound IRIs, got {other:?}"),
+            },
+            OutputSlot::Dummy => None,
+        })
+        .collect()
+}
+
+/// A source whose `(n, t)` differs from the backend's is refused before any draw.
+#[test]
+fn exact_k_through_refuses_a_source_that_does_not_match_the_backend() {
+    use crate::randomness::test_sources::MisreportedThresholdSource;
+    let backend = ShamirBackend::new_seeded(3, 0x9A7C).unwrap();
+    let (edges, _) = hidden_edges(&[("http://ex/a", "http://ex/b")]);
+    let mut lying = MisreportedThresholdSource {
+        inner: backend.dealer(),
+        t: 0,
+    };
+    let mut other = ShamirBackend::new_seeded(5, 0x9A7C).unwrap().dealer();
+    for source in [
+        &mut lying as &mut dyn crate::randomness::DistributedRandomness,
+        &mut other,
+    ] {
+        match eval_exact_k_chain_hidden_slots_through(source, &backend, &edges, 1, 1) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+            other => panic!("a mismatched source must be refused, got {other:?}"),
+        }
+    }
+}
+
+/// A malformed draw anywhere in the chain is refused by the check at its
+/// consumption site: the first own-input draw is a hop equality's operand bit
+/// (shape-checked in `compare`), and the first draw after the two operands'
+/// `2 · COMPARE_BITS` bits is a degree-reduction re-sharing.
+#[test]
+fn malformed_draws_in_the_chain_are_refused() {
+    use crate::compare::COMPARE_BITS;
+    use crate::randomness::test_sources::{
+        MalformedSource, SeamMethod, ALL_MALFORMATIONS, SHAPE_REFUSAL,
+    };
+    let backend = ShamirBackend::new_seeded(3, 0x9A7D).unwrap();
+    let (edges, _) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    for (skip, expected) in [
+        (0, SHAPE_REFUSAL),
+        (2 * COMPARE_BITS, "re-sharing that is not the canonical"),
+    ] {
+        for how in ALL_MALFORMATIONS {
+            let mut src =
+                MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, skip, how);
+            match eval_exact_k_chain_hidden_slots_through(&mut src, &backend, &edges, 2, 4) {
+                Err(MpcError::Protocol(m)) => assert!(m.contains(expected), "{skip}, {how:?}: {m}"),
+                other => panic!("{skip}, {how:?}: must fail closed, got {other:?}"),
+            }
+            assert!(src.fired());
+        }
+    }
+}
+
+/// Under PRSS only the draw-free shape runs: `k = 1` over edges with distinct
+/// endpoint pairs needs no hop equality and no OR-fold, so it draws nothing from
+/// the source and returns the edges. `k = 2` (a hop equality) and `k = 1` with
+/// parallel edges (an OR-fold, i.e. a degree reduction) both need a holder's own
+/// input shared, which PRSS refuses — they fail closed with `NotYetImplemented`.
+#[test]
+fn prss_runs_only_draw_free_exact_k_shapes_and_fails_closed_otherwise() {
+    use crate::prss::PrssRandomness;
+    let backend = ShamirBackend::new_seeded(3, 0x9A7E).unwrap();
+    let mut prss = PrssRandomness::with_simulated_setup(3).unwrap();
+    let pairs = [
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ];
+    let (edges, _) = hidden_edges(&pairs);
+    let (slots, _) =
+        eval_exact_k_chain_hidden_slots_through(&mut prss, &backend, &edges, 1, 3).unwrap();
+    assert_eq!(slots.len(), 3);
+    assert_eq!(slot_pairs(&slots), plaintext_exact_k(&pairs, 1));
+
+    let (parallel, _) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/a", "http://ex/b"),
+    ]);
+    for (edges, k) in [(&edges, 2), (&parallel, 1)] {
+        let outcome = eval_exact_k_chain_hidden_slots_through(&mut prss, &backend, edges, k, 4);
+        assert!(
+            matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
+            "k = {k}: PRSS must fail closed, got {outcome:?}"
+        );
+    }
+}
