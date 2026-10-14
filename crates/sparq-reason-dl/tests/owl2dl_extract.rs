@@ -1511,6 +1511,52 @@ fn repeated_datatype_definitions_are_one_definition() {
 }
 
 #[test]
+fn annotated_repeated_datatype_definitions_are_unchecked() {
+    // Two structurally equal ranges, each annotated: whether the axioms are equal depends
+    // on the whole annotation structure (nested annotations included), which is not
+    // compared, so the verdict is unknown rather than a guess either way.
+    let def = |b: &str| format!("_:{b} a rdfs:Datatype ; owl:datatypeComplementOf xsd:string .");
+    let ann = |b: &str, ax: &str, inner: &str| {
+        format!(
+            "_:{ax} a owl:Axiom ; owl:annotatedSource :dt ; owl:annotatedProperty owl:equivalentClass ; owl:annotatedTarget _:{b} ; rdfs:comment \"c\" . \
+             _:{ax}n a owl:Annotation ; owl:annotatedSource _:{ax} ; owl:annotatedProperty rdfs:comment ; owl:annotatedTarget \"c\" ; rdfs:label \"{inner}\" ."
+        )
+    };
+    let body = format!(
+        ":dt a rdfs:Datatype ; owl:equivalentClass _:b1, _:b2 . {} {} {} {}",
+        def("b1"),
+        def("b2"),
+        ann("b1", "x1", "one"),
+        ann("b2", "x2", "two"),
+    );
+    let r = report(&body);
+    assert!(r.violations.is_empty(), "{:?}", r.violations);
+    assert!(
+        r.unchecked
+            .iter()
+            .any(|u| u.rule.contains("annotated datatype definitions")),
+        "{:?}",
+        r.unchecked
+    );
+    // Annotated on one side only (supporting triples listed first): still unchecked.
+    let body = format!(
+        "{} {} :dt a rdfs:Datatype ; owl:equivalentClass _:b2, _:b1 . {}",
+        def("b2"),
+        def("b1"),
+        ann("b1", "x1", "one"),
+    );
+    let r = report(&body);
+    assert!(r.violations.is_empty(), "{:?}", r.violations);
+    assert!(
+        r.unchecked
+            .iter()
+            .any(|u| u.rule.contains("annotated datatype definitions")),
+        "{:?}",
+        r.unchecked
+    );
+}
+
+#[test]
 fn regularity_does_not_order_hierarchy_edges() {
     // a∘e ⊑ b and c∘f ⊑ d need a, e < b and c, f < d; b ⊑ c and d ⊑ a forbid only the
     // reverse pairs. A strict order exists.

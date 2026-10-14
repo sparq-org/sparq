@@ -479,17 +479,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The annotations on axiom `ai` (by its main triple), as (property, value) pairs.
-    fn axiom_annotations(&self, ai: usize) -> Vec<(Id, AnnotationValue)> {
-        let Some(&main) = self.onto.axioms[ai].source.first() else {
-            return Vec::new();
-        };
+    /// Whether any annotation may target axiom `ai` (one whose target is any of its input
+    /// triples, an over-approximation of its main triple).
+    fn is_annotated(&self, ai: usize) -> bool {
+        let source = &self.onto.axioms[ai].source;
         self.onto
             .annotations
             .iter()
-            .filter(|a| a.target == AnnotationTarget::Axiom(main))
-            .map(|a| (a.property, a.value.clone()))
-            .collect()
+            .any(|a| matches!(a.target, AnnotationTarget::Axiom(t) if source.contains(&t)))
     }
 
     fn sources(&self, axioms: &[usize]) -> Vec<usize> {
@@ -856,20 +853,34 @@ impl<'a> Checker<'a> {
     fn datatypes(&mut self) {
         let mut declared_dt: FxHashSet<Id> = FxHashSet::default();
         let mut definitions: FxHashMap<Id, Vec<usize>> = FxHashMap::default();
-        let mut seen_defs: FxHashMap<Id, Vec<DefinitionKey>> = FxHashMap::default();
+        // Each definition's canonical range, and whether it carries annotations.
+        let mut seen_defs: FxHashMap<Id, Vec<(DataRange, bool)>> = FxHashMap::default();
+        let mut not_checked: Vec<(&'static str, Vec<usize>)> = Vec::new();
         for (ai, rec) in self.onto.axioms.iter().enumerate() {
             match &rec.axiom {
                 Axiom::Declaration(EntityKind::Datatype, id) => {
                     declared_dt.insert(*id);
                 }
                 Axiom::DatatypeDefinition(id, dr) => {
-                    // The axioms form a set under structural equivalence: a repeated
-                    // definition (same range, same annotations) is one definition.
-                    let key = (canonical_range(dr), self.axiom_annotations(ai));
+                    // The axioms form a set under structural equivalence: an unannotated
+                    // repeat of a definition is the same definition. Whether annotated
+                    // definitions with equal ranges are equal depends on their full
+                    // annotation structure, which is not compared: that case is unchecked.
+                    let range = canonical_range(dr);
+                    let annotated = self.is_annotated(ai);
                     let reps = seen_defs.entry(*id).or_default();
-                    if !reps.iter().any(|(r, a)| *r == key.0 && same_set(a, &key.1)) {
-                        reps.push(key);
-                        definitions.entry(*id).or_default().push(ai);
+                    match reps.iter().find(|(r, _)| *r == range) {
+                        Some(&(_, other)) if !annotated && !other => {}
+                        Some(_) => {
+                            not_checked.push((
+                                "structural equality of annotated datatype definitions",
+                                self.onto.axioms[ai].source.clone(),
+                            ));
+                        }
+                        None => {
+                            reps.push((range, annotated));
+                            definitions.entry(*id).or_default().push(ai);
+                        }
                     }
                 }
                 _ => {}
@@ -877,7 +888,6 @@ impl<'a> Checker<'a> {
         }
         // The flag marks a violation an unloaded import could repair.
         let mut found: Vec<(ViolationKind, String, Vec<usize>, bool)> = Vec::new();
-        let mut not_checked: Vec<(&'static str, Vec<usize>)> = Vec::new();
         let xml_literal = format!("{RDF}XMLLiteral");
         // Every literal of the ontology, with the triples it came from.
         let mut literals: Vec<(Literal, &[usize])> = Vec::new();
@@ -1174,14 +1184,6 @@ fn canonical_class(c: &ClassExpression) -> ClassExpression {
         C::DataExactCardinality(n, p, r) => C::DataExactCardinality(*n, *p, canonical_range(r)),
         other => other.clone(),
     }
-}
-
-/// A datatype definition up to structural equivalence: its canonical range and annotations.
-type DefinitionKey = (DataRange, Vec<(Id, AnnotationValue)>);
-
-/// `true` when `a` and `b` hold the same elements.
-fn same_set<T: PartialEq>(a: &[T], b: &[T]) -> bool {
-    a.iter().all(|x| b.contains(x)) && b.iter().all(|x| a.contains(x))
 }
 
 /// `true` when `c` contains a cardinality restriction anywhere.
