@@ -30,6 +30,11 @@
 //! For `/tpf`, numeric `page` values remain visible; term values and nonnumeric `page` values
 //! are redacted individually. Unknown fields are redacted in full, including their names.
 //!
+//! The same [`placeholder`](crate::redact::placeholder) stands in, while redaction is on, for
+//! the detail an error withholds from its client when that detail is drawn from the request or
+//! the data (`http::content_error`). Like the request log's, a short detail's fingerprint can be
+//! confirmed by guessing it.
+//!
 //! ## Honest boundary — log-CONTENT redaction, not anonymity
 //!
 //! This redacts the *content* of the request as it appears in the log. It does **not** anonymise
@@ -82,31 +87,27 @@ pub fn redact_target(target: &str) -> String {
                         Some((
                             key @ ("subject" | "predicate" | "object" | "graph" | "page"),
                             value,
-                        )) => format!(
-                            "{key}=<redacted len={} fp={}>",
-                            value.len(),
-                            fnv1a_hex(value.as_bytes())
-                        ),
-                        _ => format!(
-                            "<redacted len={} fp={}>",
-                            param.len(),
-                            fnv1a_hex(param.as_bytes())
-                        ),
+                        )) => format!("{key}={}", placeholder(value)),
+                        _ => placeholder(param),
                     }
                 })
                 .collect::<Vec<_>>()
                 .join("&");
             format!("/tpf?{params}")
         }
-        Some((path, query)) => {
-            format!(
-                "{path}?<redacted len={} fp={}>",
-                query.len(),
-                fnv1a_hex(query.as_bytes())
-            )
-        }
+        Some((path, query)) => format!("{path}?{}", placeholder(query)),
         None => target.to_string(),
     }
+}
+
+/// The `<redacted len=N fp=…>` placeholder logged in place of `content`: its byte length and a
+/// stable non-reversible fingerprint, never its text.
+pub fn placeholder(content: &str) -> String {
+    format!(
+        "<redacted len={} fp={}>",
+        content.len(),
+        fnv1a_hex(content.as_bytes())
+    )
 }
 
 #[cfg(feature = "server")]

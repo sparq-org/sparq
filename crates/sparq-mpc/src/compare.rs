@@ -123,7 +123,9 @@
 
 use crate::field::Fp;
 use crate::partial::{HolderId, MpcError, PartialResult};
-use crate::randomness::DistributedRandomness;
+use crate::randomness::{
+    checked_shared_nonzero_mask, checked_vss_own_input, DistributedRandomness,
+};
 use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
 
 /// Bit-width the comparison decomposes operands into. `p = 2^61 − 1`, so a value
@@ -272,12 +274,18 @@ fn const_sharing(n: usize, c: Fp) -> Vec<Share> {
 /// method *is* `share`, so the drawn Shamir coefficients and their order are
 /// unchanged; a source that cannot verifiably share a holder's own input (PRSS
 /// today) makes this fail closed instead of silently dealing an unverified sharing.
-fn share_bits(source: &mut dyn DistributedRandomness, v: Fp) -> Result<Vec<Vec<Share>>, MpcError> {
+/// Each returned sharing is shape-checked against the caller's validated party
+/// count `n` ([`crate::randomness::require_canonical_sharing`]).
+fn share_bits(
+    source: &mut dyn DistributedRandomness,
+    n: usize,
+    v: Fp,
+) -> Result<Vec<Vec<Share>>, MpcError> {
     let raw = v.value();
     (0..COMPARE_BITS)
         .map(|k| {
             let bit = (raw >> k) & 1;
-            source.vss_own_input(Fp::new(bit))
+            checked_vss_own_input(source, n, Fp::new(bit))
         })
         .collect()
 }
@@ -514,12 +522,15 @@ fn deal_random_solved_bits(dealer: &mut ShamirDealer) -> (Vec<Share>, Vec<Vec<Sh
 fn square_protocol_random_bit(
     source: &mut dyn DistributedRandomness,
 ) -> Result<Vec<Share>, MpcError> {
-    let t = source.threshold();
+    // The source's (n, t) is caller-supplied metadata: read it once and guard it
+    // (checked, so a misreported `t` cannot wrap the degree-`2t` open below).
+    let (n, t) = (source.parties(), source.threshold());
+    check_party_count(n, t)?;
     // A few retries to absorb the negligible `c == 0` event; in practice the first
     // attempt always succeeds (Pr[a == 0] = 1/p ≈ 2^{-61}).
     for _attempt in 0..64 {
         // 1. Jointly-random NONZERO [a] — no party knows a; never reconstructed.
-        let a = source.shared_nonzero_mask()?;
+        let a = checked_shared_nonzero_mask(source, n)?;
         // 2. Open ONLY c = a² (degree-2t product). This is the single disclosure,
         //    and it is independent of the sign bit of a.
         let a_sq_2t = shamir::mul_shares_raw(&a, &a)?;
@@ -1054,12 +1065,14 @@ fn verify_value_in_range_rabbit(
 /// went into `v`. The nonzero mask is essential: a zero mask would open `m = 0`
 /// even for `v != 0` (a false "in-range"). Honest-majority, semi-honest.
 fn secret_is_zero(source: &mut dyn DistributedRandomness, v: &[Share]) -> Result<bool, MpcError> {
-    let t = source.threshold();
+    // Read the source's (n, t) once and guard it before any arithmetic uses `t`.
+    let (n, t) = (source.parties(), source.threshold());
+    check_party_count(n, t)?;
     // Fresh NONZERO mask through the randomness seam — the single-dealer
     // simulation draws it from its masking CSPRNG (sq-1vt). Nonzero is
     // load-bearing and is the seam method's structural contract: m = v·0 = 0
     // would falsely report v == 0.
-    let mask = source.shared_nonzero_mask()?;
+    let mask = checked_shared_nonzero_mask(source, n)?;
     let m_shares = shamir::mul_shares_raw(v, &mask)?;
     // Open the degree-2t product through the SAME robust path as every other open
     // (mirrors `HiddenValueJoin::secure_equal`); m == 0 ⇔ v == 0. `v` itself is
@@ -1195,11 +1208,12 @@ pub(crate) fn secure_greater_than_through(
     a: Fp,
     b: Fp,
 ) -> Result<Vec<Share>, MpcError> {
-    check_party_count(source.parties(), source.threshold())?;
+    let n = source.parties();
+    check_party_count(n, source.threshold())?;
     check_in_range("a", a)?;
     check_in_range("b", b)?;
-    let a_bits = share_bits(source, a)?;
-    let b_bits = share_bits(source, b)?;
+    let a_bits = share_bits(source, n, a)?;
+    let b_bits = share_bits(source, n, b)?;
     greater_than_bits(source, &a_bits, &b_bits)
 }
 
@@ -1234,10 +1248,11 @@ pub(crate) fn secure_threshold_through(
     secret: Fp,
     threshold: Fp,
 ) -> Result<Vec<Share>, MpcError> {
-    check_party_count(source.parties(), source.threshold())?;
+    let n = source.parties();
+    check_party_count(n, source.threshold())?;
     check_in_range("secret", secret)?;
     check_in_range("threshold", threshold)?;
-    let a_bits = share_bits(source, secret)?;
+    let a_bits = share_bits(source, n, secret)?;
     greater_than_public_bits(source, &a_bits, threshold.value())
 }
 
@@ -1297,11 +1312,12 @@ pub(crate) fn secure_equal_to_bit_through(
     a: Fp,
     b: Fp,
 ) -> Result<Vec<Share>, MpcError> {
-    check_party_count(source.parties(), source.threshold())?;
+    let n = source.parties();
+    check_party_count(n, source.threshold())?;
     check_in_range("a", a)?;
     check_in_range("b", b)?;
-    let a_bits = share_bits(source, a)?;
-    let b_bits = share_bits(source, b)?;
+    let a_bits = share_bits(source, n, a)?;
+    let b_bits = share_bits(source, n, b)?;
     equal_to_bit_from_bits(source, &a_bits, &b_bits)
 }
 
@@ -3072,6 +3088,26 @@ mod randomness_seam_tests {
         assert_eq!(dealer.draw_fp().value(), 520081441683015349);
     }
 
+    /// The COMPLETE draw sequence of one comparison, not just its length: every
+    /// seam call, in order, with every `y` it returned, folded into an
+    /// order-sensitive fingerprint. Captured on the pre-routing code by logging
+    /// every dealer draw (`2 · COMPARE_BITS` operand-bit sharings, then the
+    /// chain's degree-reduction re-sharings). Swapping the two operands' input
+    /// sharings — invisible to the pins above — changes this transcript.
+    #[test]
+    fn seeded_greater_than_transcript_is_pinned() {
+        use crate::randomness::test_sources::{fingerprint, RecordingSource};
+        let mut rec = RecordingSource::new(ShamirBackend::new_seeded(3, 0x7A5C1).unwrap().dealer());
+        let gt = secure_greater_than_through(&mut rec, Fp::new(41), Fp::new(17)).unwrap();
+        assert_eq!(
+            ys(&gt),
+            [1646262514976137506, 986682020738581060, 327101526501024614]
+        );
+        assert_eq!(rec.log.len(), 840);
+        assert!(rec.log.iter().all(|(m, _)| *m == "vss_own_input"));
+        assert_eq!(fingerprint(&rec.log), 0x9420_6bb3_e81f_e45a);
+    }
+
     /// The two helpers whose draw SHAPE changed the most: `share_bits` (now
     /// `vss_own_input` per bit), `secret_is_zero` and `square_protocol_random_bit`
     /// (now one `shared_nonzero_mask` instead of `draw_nonzero_fp` + `share`).
@@ -3099,7 +3135,7 @@ mod randomness_seam_tests {
         assert_eq!(dealer.draw_fp().value(), 314803855971477989);
 
         let mut dealer = ShamirBackend::new_seeded(5, 0x5EED8).unwrap().dealer();
-        let bits = share_bits(&mut dealer, Fp::new(0xABCD)).unwrap();
+        let bits = share_bits(&mut dealer, 5, Fp::new(0xABCD)).unwrap();
         assert_eq!(bits.len(), COMPARE_BITS);
         assert_eq!(
             ys(&bits[0]),
@@ -3193,7 +3229,7 @@ mod randomness_seam_tests {
     fn prss_fails_closed_where_the_chain_must_share_a_holders_own_input() {
         let mut prss = PrssRandomness::with_simulated_setup(5).unwrap();
         assert!(matches!(
-            share_bits(&mut prss, Fp::new(5)),
+            share_bits(&mut prss, 5, Fp::new(5)),
             Err(MpcError::NotYetImplemented { .. })
         ));
         for outcome in [
@@ -3254,6 +3290,103 @@ mod randomness_seam_tests {
             );
         }
         assert!(check_party_count(5, 2).is_ok());
+    }
+
+    /// The source-reported `t` feeds the degree-`2t` opens in both mask helpers,
+    /// so each must guard it (checked) before using it — a `t` that would wrap
+    /// `2t+1` back under `n` must be refused, not used.
+    #[test]
+    fn mask_helpers_refuse_a_misreported_threshold() {
+        use crate::randomness::test_sources::MisreportedThresholdSource;
+        let backend = ShamirBackend::new_seeded(5, 0xE9A3).unwrap();
+        let v = backend.dealer().share(Fp::new(4));
+        for t in [3, usize::MAX / 2, usize::MAX / 2 + 3, usize::MAX] {
+            let mut source = MisreportedThresholdSource {
+                inner: backend.dealer(),
+                t,
+            };
+            match secret_is_zero(&mut source, &v) {
+                Err(MpcError::Protocol(m)) => assert!(m.contains("needs n >= 2t+1"), "t={t}: {m}"),
+                other => panic!("t={t}: secret_is_zero must refuse, got {other:?}"),
+            }
+            match square_protocol_random_bit(&mut source) {
+                Err(MpcError::Protocol(m)) => assert!(m.contains("needs n >= 2t+1"), "t={t}: {m}"),
+                other => panic!("t={t}: square_protocol_random_bit must refuse, got {other:?}"),
+            }
+        }
+    }
+
+    /// Every sharing the comparison chain draws from the seam is shape-checked
+    /// where it is consumed. Each case corrupts exactly ONE draw, aimed at one
+    /// consumption site, and must be refused by the shape check itself (not by a
+    /// later, unrelated check).
+    #[test]
+    fn malformed_draws_are_refused_at_every_compare_consumption_site() {
+        use crate::randomness::test_sources::{
+            MalformedSource, SeamMethod, ALL_MALFORMATIONS, SHAPE_REFUSAL,
+        };
+        type Site = fn(&mut MalformedSource) -> Result<(), MpcError>;
+        let backend = ShamirBackend::new_seeded(3, 0xE9A4).unwrap();
+        let v = backend.dealer().share(Fp::new(4));
+        // (label, targeted method, skip, call). For the two-operand entry points
+        // the first COMPARE_BITS own-input draws are `a`'s bits, the next
+        // COMPARE_BITS are `b`'s, and only then do the chain's re-sharings start.
+        let sites: Vec<(&str, SeamMethod, usize, Site)> = vec![
+            ("gt: a's first bit", SeamMethod::VssOwnInput, 0, |s| {
+                secure_greater_than_through(s, Fp::new(41), Fp::new(17)).map(drop)
+            }),
+            (
+                "gt: b's last bit",
+                SeamMethod::VssOwnInput,
+                2 * COMPARE_BITS - 1,
+                |s| secure_greater_than_through(s, Fp::new(41), Fp::new(17)).map(drop),
+            ),
+            (
+                "threshold: secret's last bit",
+                SeamMethod::VssOwnInput,
+                COMPARE_BITS - 1,
+                |s| secure_threshold_through(s, Fp::new(41), Fp::new(17)).map(drop),
+            ),
+            (
+                "eq: b's first bit",
+                SeamMethod::VssOwnInput,
+                COMPARE_BITS,
+                |s| secure_equal_to_bit_through(s, Fp::new(41), Fp::new(41)).map(drop),
+            ),
+            (
+                "square-protocol mask",
+                SeamMethod::SharedNonzeroMask,
+                0,
+                |s| square_protocol_random_bit(s).map(drop),
+            ),
+        ];
+        for (label, method, skip, call) in sites {
+            for how in ALL_MALFORMATIONS {
+                let mut src = MalformedSource::new(backend.dealer(), method, skip, how);
+                match call(&mut src) {
+                    Err(MpcError::Protocol(m)) => {
+                        assert!(
+                            m.contains(SHAPE_REFUSAL),
+                            "{label}, {how:?}: wrong check: {m}"
+                        )
+                    }
+                    other => panic!("{label}, {how:?}: must fail closed, got {other:?}"),
+                }
+                assert!(src.fired(), "{label}: the targeted draw never happened");
+            }
+        }
+        // secret_is_zero's mask (it takes an operand, so it is driven directly).
+        for how in ALL_MALFORMATIONS {
+            let mut src =
+                MalformedSource::new(backend.dealer(), SeamMethod::SharedNonzeroMask, 0, how);
+            match secret_is_zero(&mut src, &v) {
+                Err(MpcError::Protocol(m)) => {
+                    assert!(m.contains(SHAPE_REFUSAL), "zero-test mask, {how:?}: {m}")
+                }
+                other => panic!("zero-test mask, {how:?}: must fail closed, got {other:?}"),
+            }
+            assert!(src.fired());
+        }
     }
 
     /// `secret_is_zero` masks with `m = v·r` and opens it: with `r = 0` it would

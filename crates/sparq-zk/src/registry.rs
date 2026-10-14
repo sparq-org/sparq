@@ -135,7 +135,12 @@ pub struct RegistryEntry {
     /// `C(G)`, the per-graph commitment.
     pub commitment: Fr,
     /// Commitment scheme id (`zk:poseidon2-rdfc10-v1` for this pipeline).
-    pub scheme: NamedNode,
+    ///
+    /// PRIVATE and fixed at construction: read it with [`Self::scheme`] or
+    /// [`Self::method`]. A signed entry's signature covers it (see
+    /// [`Self::verify_commitment_signature`]), so it is set once by the
+    /// constructor that also signs, and nothing writes it afterwards.
+    scheme: NamedNode,
     /// Issuer cryptosuite id, when known.
     pub cryptosuite: Option<NamedNode>,
     /// **Provenance** (sq-9c5e): the W3C Data-Integrity cryptosuite the *source*
@@ -177,12 +182,28 @@ pub struct RegistryEntry {
 }
 
 impl RegistryEntry {
-    /// Minimal entry for a freshly committed graph.
+    /// Minimal UNSIGNED entry for a freshly committed graph, recording the
+    /// default `string-canonical` method
+    /// ([`CommitmentMethod::StringCanonicalV1`](crate::commit::CommitmentMethod::StringCanonicalV1)).
+    /// An entry under another method is built by [`Self::new_for_issuance`],
+    /// [`Self::new_already_issued`], [`Self::issued`] or
+    /// [`Self::issued_with_status`] — the method is chosen at construction and
+    /// is not writable afterwards.
     pub fn new(document: NamedNode, commitment: Fr, salt: Fr) -> Self {
+        Self::with_scheme(
+            document,
+            commitment,
+            salt,
+            NamedNode::new_unchecked(ZK_SCHEME_POSEIDON2_RDFC10_V1),
+        )
+    }
+
+    /// The one place an entry's `scheme` is written.
+    fn with_scheme(document: NamedNode, commitment: Fr, salt: Fr, scheme: NamedNode) -> Self {
         RegistryEntry {
             document,
             commitment,
-            scheme: NamedNode::new_unchecked(ZK_SCHEME_POSEIDON2_RDFC10_V1),
+            scheme,
             cryptosuite: None,
             source_cryptosuite: None,
             issuer_key: None,
@@ -198,6 +219,12 @@ impl RegistryEntry {
         }
     }
 
+    /// The recorded `zk:scheme` IRI. Read-only: the field is fixed when the
+    /// entry is constructed (or decoded by [`read_registry`]).
+    pub fn scheme(&self) -> &NamedNode {
+        &self.scheme
+    }
+
     /// The [`CommitmentMethod`](crate::commit::CommitmentMethod) this entry's
     /// `zk:scheme` IRI selects, or `None` if the recorded scheme is one this build
     /// does not understand.
@@ -206,50 +233,42 @@ impl RegistryEntry {
     /// `zk:scheme` — including the `value-only` research-dial IRI when the
     /// `commitment-value-only` feature is OFF — returns `None`, never a default. A
     /// verifier that requires a known method MUST reject an entry whose
-    /// [`Self::method`] is `None` rather than assume `string-canonical`. The method
-    /// is **in-circuit-affecting**, so a later `(method, circuit)` dispatch matrix
-    /// (sq-cfmv) consumes this to refuse an illegal pairing.
+    /// [`Self::method`] is `None` rather than assume `string-canonical`; the
+    /// signature checks here already do. The method is **in-circuit-affecting**,
+    /// so the `(method, circuit)` dispatch matrix (sq-cfmv) consumes it to refuse
+    /// an illegal pairing.
     // sq-zzxt: commitment-method selection over the `zk:scheme` slot.
     pub fn method(&self) -> Option<crate::commit::CommitmentMethod> {
         crate::commit::CommitmentMethod::from_scheme_iri(self.scheme.as_str())
     }
 
-    /// Records a [`CommitmentMethod`](crate::commit::CommitmentMethod) on this entry
-    /// **as-is**, by writing its distinct `zk:scheme` IRI into the `scheme` slot
-    /// (config plumbing).
+    /// An UNSIGNED entry recording `method` **as-is**, for a graph committed
+    /// EARLIER — decoding, rebuilding an entry for an already-issued graph, and
+    /// tests. It accepts a method that is no longer selectable for new issuance.
     ///
-    /// The NAME is the boundary: this records whatever method it is handed,
-    /// including one that is no longer selectable for new issuance, so it serves
-    /// DECODING and ALREADY-ISSUED entries — rebuilding an entry for a graph that
-    /// was committed earlier, round-tripping a recorded scheme, and tests. A NEW
-    /// issuance uses [`Self::with_issuance_method`], which refuses a
-    /// non-selectable method. There is no unqualified `with_method` to reach for
-    /// by accident.
+    /// "Already issued" is a CALLER ASSERTION: nothing here reads a signature, a
+    /// timestamp or any other evidence of issuance history. What the name buys is
+    /// that legacy acceptance is written down at the call site; a NEW entry uses
+    /// [`Self::new_for_issuance`] (unsigned) or [`Self::issued`] (signed), which
+    /// refuse a non-selectable method.
     ///
-    /// "Already issued" is a CALLER ASSERTION. Nothing here reads a signature, a
-    /// timestamp or any other evidence of issuance history, so this name states
-    /// the caller's intent; it does not attest it.
-    ///
-    /// Note this is **config only**: it does NOT re-commit the graph under a
-    /// different leaf shape (that is the audit-gated `sq-j506` host-encoding bead);
-    /// it records the selection so the method is an explicit, recorded property
-    /// rather than the silent hard-wired `string-canonical` default.
+    /// This is **config only**: it does NOT re-commit the graph under a different
+    /// leaf shape; it records the method so it is an explicit property of the
+    /// entry rather than a silent default.
     // sq-zzxt.
-    #[must_use]
-    pub fn with_already_issued_method(
-        mut self,
+    pub fn new_already_issued(
+        document: NamedNode,
+        commitment: Fr,
+        salt: Fr,
         method: crate::commit::CommitmentMethod,
     ) -> Self {
-        self.scheme = method.scheme_node();
-        self
+        Self::with_scheme(document, commitment, salt, method.scheme_node())
     }
 
-    /// Records a [`CommitmentMethod`](crate::commit::CommitmentMethod) for a **new
-    /// issuance**, refusing one that is not selectable.
-    ///
-    /// The issuance-side counterpart of [`Self::with_already_issued_method`]: it runs
-    /// [`CommitmentMethod::checked_for_issuance`](crate::commit::CommitmentMethod::checked_for_issuance)
-    /// first, so a superseded method (`dual-leaf` v1) or a research-only dial
+    /// An UNSIGNED entry recording `method` for a **new issuance**, refusing one
+    /// that is not selectable
+    /// ([`CommitmentMethod::checked_for_issuance`](crate::commit::CommitmentMethod::checked_for_issuance)):
+    /// a superseded method (`dual-leaf` v1) or a research-only dial
     /// (`value-only`) is a
     /// [`MethodNotSelectable`](crate::commit::MethodNotSelectable) error rather
     /// than a silently recorded scheme. Decoding and verification stay ungated —
@@ -259,16 +278,54 @@ impl RegistryEntry {
     ///
     /// Honest scope: selectability means "not superseded and not a research dial".
     /// It asserts NO cryptographic property; the estate is NOT externally audited
-    /// (CR-G8 / sq-qhy4). Nor does it RETIRE anything already recorded: `scheme`
-    /// is a plain field this crate neither freezes nor signs, so an existing
-    /// entry keeps whatever method it holds and any method can still be written
-    /// through [`Self::with_already_issued_method`]. Retiring a method in a
-    /// deployed registry is the operator's choice, not something enforced here.
-    pub fn with_issuance_method(
-        self,
+    /// (CR-G8 / sq-qhy4).
+    pub fn new_for_issuance(
+        document: NamedNode,
+        commitment: Fr,
+        salt: Fr,
         method: crate::commit::CommitmentMethod,
     ) -> Result<Self, crate::commit::MethodNotSelectable> {
-        Ok(self.with_already_issued_method(method.checked_for_issuance()?))
+        Ok(Self::new_already_issued(
+            document,
+            commitment,
+            salt,
+            method.checked_for_issuance()?,
+        ))
+    }
+
+    /// The message an issuer signs for this entry — salt-bound, and status-bound
+    /// when `status_ref` is given — with the recorded METHOD in it, for EVERY
+    /// method including `string-canonical`:
+    /// [`crate::sig::commitment_message_with_scheme`] /
+    /// [`crate::sig::commitment_message_with_status_and_scheme`] over the
+    /// [`crate::sig::scheme_iri_to_field`] digest of the scheme IRI. So a
+    /// signature verifies only under the method it was issued with. `None` for a
+    /// scheme this build does not recognise.
+    fn method_bound_message(&self, status_ref: Option<&Fr>) -> Option<Fr> {
+        let scheme = crate::sig::scheme_iri_to_field(self.method()?.scheme_iri());
+        Some(match status_ref {
+            None => {
+                crate::sig::commitment_message_with_scheme(&self.commitment, &self.salt, &scheme)
+            }
+            Some(r) => crate::sig::commitment_message_with_status_and_scheme(
+                &self.commitment,
+                &self.salt,
+                r,
+                &scheme,
+            ),
+        })
+    }
+
+    /// The status-reference digest this entry's status-bound signature covers,
+    /// or `None` when any of the three status fields is absent.
+    fn status_ref(&self) -> Option<Fr> {
+        let (Some(sl), Some(idx), Some(ver)) =
+            (&self.status_list, self.status_list_index, self.status_list_version)
+        else {
+            return None;
+        };
+        let list_id = crate::sig::status_list_id_to_field(sl.as_str());
+        Some(crate::sig::status_ref_digest(&list_id, idx, ver))
     }
 
     /// Records the **source** W3C Data-Integrity cryptosuite (`zk:sourceCryptosuite`)
@@ -299,26 +356,46 @@ impl RegistryEntry {
     /// signing fix added `sign_commitment` but issuance still took a caller RNG;
     /// this routes issuance through it.) The random-nonce `sig::sign` is now
     /// test-only — no public API takes a caller RNG.
+    ///
+    /// # The method is chosen here and signed
+    /// `method` is checked with
+    /// [`CommitmentMethod::checked_for_issuance`](crate::commit::CommitmentMethod::checked_for_issuance)
+    /// first (a superseded or research-only method is a
+    /// [`MethodNotSelectable`](crate::commit::MethodNotSelectable) error and
+    /// nothing is signed), then recorded on the entry and carried in the signed
+    /// message (see [`Self::verify_commitment_signature`]), so the signature is
+    /// over the method as well as the commitment and salt.
     // audit #3; codex 2216 MEDIUM: deterministic-nonce issuance, no caller RNG.
     pub fn issued(
         document: NamedNode,
         commitment: Fr,
         salt: Fr,
+        method: crate::commit::CommitmentMethod,
         sk: &crate::sig::SecretKey,
-    ) -> Self {
-        let pk = sk.public_key();
-        // Deterministic (sk, m) nonce — see `SecretKey::sign_commitment` /
-        // `sign_deterministic`. No RNG state crosses the API boundary.
-        // audit #9: bind the per-graph salt into the signed object so
-        // the salt is issuer-attested and salt reuse is detectable verifier-side.
-        let sig_hex = sk.sign_commitment_with_salt(&commitment, &salt);
-        let mut e = RegistryEntry::new(document, commitment, salt);
-        e.cryptosuite = Some(NamedNode::new_unchecked(
+    ) -> Result<Self, crate::commit::MethodNotSelectable> {
+        let mut e = RegistryEntry::new_for_issuance(document, commitment, salt, method)?;
+        // audit #9: the per-graph salt is in the signed object, so it is
+        // issuer-attested and salt reuse is detectable verifier-side; the method
+        // is in it too. A recognised method always yields a message.
+        let m = e
+            .method_bound_message(None)
+            .expect("a method that passed checked_for_issuance is recognised");
+        e.sign_with(&m, sk);
+        Ok(e)
+    }
+
+    /// Record the cryptosuite, issuer key and a deterministic-nonce signature
+    /// over `m` — the shared tail of [`Self::issued`] and
+    /// [`Self::issued_with_status`].
+    fn sign_with(&mut self, m: &Fr, sk: &crate::sig::SecretKey) {
+        // Deterministic (sk, m) nonce — see `sig::sign_deterministic`. No RNG
+        // state crosses the API boundary.
+        let sig = crate::sig::sign_deterministic(sk, m);
+        self.cryptosuite = Some(NamedNode::new_unchecked(
             crate::sig::SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri(),
         ));
-        e.issuer_public_key = Some(crate::sig::public_key_to_hex(&pk));
-        e.commitment_signature = Some(sig_hex);
-        e
+        self.issuer_public_key = Some(crate::sig::public_key_to_hex(&sk.public_key()));
+        self.commitment_signature = Some(crate::sig::signature_to_hex(&sig));
     }
 
     /// An attested entry whose signature ALSO binds the credential's status-list
@@ -328,7 +405,8 @@ impl RegistryEntry {
     /// So the reference (which list, which index, which version) is
     /// issuer-attested and cannot be omitted or forged by the prover on the
     /// verify path. Same deterministic `(sk, m)` nonce discipline as
-    /// [`Self::issued`].
+    /// [`Self::issued`], and the same method handling: `method` is checked for
+    /// issuance first and is carried in the signed message.
     // audit #12: status-bound issuance.
     // clippy: each arg is a distinct cryptographic input to a signing constructor;
     // bundling into a params struct would only obscure the call sites.
@@ -337,51 +415,48 @@ impl RegistryEntry {
         document: NamedNode,
         commitment: Fr,
         salt: Fr,
+        method: crate::commit::CommitmentMethod,
         status_list: NamedNode,
         index: u64,
         version: u64,
         status: Status,
         sk: &crate::sig::SecretKey,
-    ) -> Self {
-        let pk = sk.public_key();
-        let list_id = crate::sig::status_list_id_to_field(status_list.as_str());
-        let status_ref = crate::sig::status_ref_digest(&list_id, index, version);
-        let sig_hex = sk.sign_commitment_with_status(&commitment, &salt, &status_ref);
-        let mut e = RegistryEntry::new(document, commitment, salt);
-        e.cryptosuite = Some(NamedNode::new_unchecked(
-            crate::sig::SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri(),
-        ));
-        e.issuer_public_key = Some(crate::sig::public_key_to_hex(&pk));
-        e.commitment_signature = Some(sig_hex);
+    ) -> Result<Self, crate::commit::MethodNotSelectable> {
+        let mut e = RegistryEntry::new_for_issuance(document, commitment, salt, method)?;
         e.status_list = Some(status_list);
         e.status_list_index = Some(index);
         e.status_list_version = Some(version);
         e.status = status;
-        e
+        let status_ref = e.status_ref().expect("the three status fields were just set");
+        let m = e
+            .method_bound_message(Some(&status_ref))
+            .expect("a method that passed checked_for_issuance is recognised");
+        e.sign_with(&m, sk);
+        Ok(e)
     }
 
     /// Verify that this entry's recorded signature is a valid STATUS-BOUND issuer
     /// signature (audit #12): over `(commitment, salt, status_ref_digest)` where
     /// the digest folds `H(status_list)`, `status_list_index`, and
-    /// `status_list_version`. Fail-closed: a missing key/signature/cryptosuite/
-    /// status-list/index/version, an unknown cryptosuite, or malformed hex all
-    /// return `false`. The caller must ALSO check the key is in the disclosed
-    /// key-set `K` and validate liveness (status bit + freshness) separately.
+    /// `status_list_version`, and over the recorded METHOD exactly as
+    /// [`Self::verify_commitment_signature`] describes. Fail-closed: a missing
+    /// key/signature/cryptosuite/status-list/index/version, an unrecognised
+    /// `zk:scheme`, an unknown cryptosuite, or malformed hex all return `false`.
+    /// The caller must ALSO check the key is in the disclosed key-set `K` and
+    /// validate liveness (status bit + freshness) separately.
     // audit #12.
     pub fn verify_commitment_signature_with_status(&self) -> bool {
-        let (Some(pk_hex), Some(sig_hex), Some(cs), Some(sl), Some(idx), Some(ver)) = (
+        let (Some(pk_hex), Some(sig_hex), Some(cs), Some(status_ref)) = (
             &self.issuer_public_key,
             &self.commitment_signature,
             &self.cryptosuite,
-            &self.status_list,
-            self.status_list_index,
-            self.status_list_version,
+            self.status_ref(),
         ) else {
             return false;
         };
-        let list_id = crate::sig::status_list_id_to_field(sl.as_str());
-        let status_ref = crate::sig::status_ref_digest(&list_id, idx, ver);
-        let msg = crate::sig::commitment_message_with_status(&self.commitment, &self.salt, &status_ref);
+        let Some(msg) = self.method_bound_message(Some(&status_ref)) else {
+            return false;
+        };
         // sq-1hsl: route through the pluggable OFF-circuit signature
         // seam. `verify_commitment_with_scheme` resolves the cryptosuite to its
         // `IssuerSignatureScheme` and fails closed on an unknown cryptosuite or
@@ -393,9 +468,16 @@ impl RegistryEntry {
     /// Verify that this entry's recorded signature is a valid issuer signature
     /// over its commitment under its recorded public key + cryptosuite — the
     /// verifier-side attestation gate (audit #3). Fail-closed: a missing key,
-    /// missing signature, unknown cryptosuite, or malformed hex all return
-    /// `false`. NB this checks the signature is INTERNALLY valid; the caller
-    /// must ALSO check the key is a member of the disclosed key-set `K`.
+    /// missing signature, unrecognised `zk:scheme`, unknown cryptosuite, or
+    /// malformed hex all return `false`. NB this checks the signature is
+    /// INTERNALLY valid; the caller must ALSO check the key is a member of the
+    /// disclosed key-set `K`.
+    ///
+    /// The recorded METHOD is part of what is verified: the message is
+    /// recomputed from the entry's own `zk:scheme`, so an entry whose scheme
+    /// differs from the one it was signed under does not verify. The message is
+    /// the method-bound one for every method, `string-canonical` included; the
+    /// method-independent salt-bound message is never accepted here.
     // audit #3.
     pub fn verify_commitment_signature(&self) -> bool {
         let (Some(pk_hex), Some(sig_hex), Some(cs)) =
@@ -403,9 +485,11 @@ impl RegistryEntry {
         else {
             return false;
         };
-        // audit #9: issuance via `issued` signs the SALT-BOUND
-        // message, so verification recomputes it over `(commitment, salt)`.
-        let msg = crate::sig::commitment_message_with_salt(&self.commitment, &self.salt);
+        // audit #9: issuance via `issued` signs the SALT-BOUND message (with
+        // the method in it), so verification recomputes it from the entry.
+        let Some(msg) = self.method_bound_message(None) else {
+            return false;
+        };
         // sq-1hsl: route through the pluggable OFF-circuit signature
         // seam. Only the v1 scheme is verifiable in-tree; an unknown cryptosuite
         // (no resolved `IssuerSignatureScheme`) or malformed key/signature hex
@@ -720,8 +804,10 @@ mod tests {
             NamedNode::new("https://dmv.example/vc/lic-7").unwrap(),
             commitment,
             salt,
+            crate::commit::CommitmentMethod::StringCanonicalV1,
             &sk,
-        );
+        )
+        .unwrap();
         assert!(e.verify_commitment_signature(), "fresh issued entry verifies");
         // Round-trips through the store unchanged (key + sig survive).
         let mut g = Graph::load_str("", "turtle").unwrap();
@@ -746,12 +832,14 @@ mod tests {
             NamedNode::new("https://dmv.example/vc/lic-st").unwrap(),
             commitment,
             salt,
+            crate::commit::CommitmentMethod::StringCanonicalV1,
             sl.clone(),
             94,
             7,
             Status::Active,
             &sk,
-        );
+        )
+        .unwrap();
         assert!(e.verify_commitment_signature_with_status(), "fresh status-bound entry verifies");
         // Round-trips through the store.
         let mut g = Graph::load_str("", "turtle").unwrap();
@@ -782,8 +870,10 @@ mod tests {
             NamedNode::new("https://dmv.example/vc/lic-8").unwrap(),
             Fr::from(1000u64),
             salt_from_bytes(&[4u8; 32]),
+            crate::commit::CommitmentMethod::StringCanonicalV1,
             &sk,
-        );
+        )
+        .unwrap();
         e.commitment = Fr::from(1001u64); // recommit over a different (truncated) graph
         assert!(!e.verify_commitment_signature(), "tampered commitment must not verify");
     }
@@ -803,8 +893,9 @@ mod tests {
 
         // (a) Determinism: two issuances of the same (sk, commitment) match.
         let c = Fr::from(0xabc123u64);
-        let e1 = RegistryEntry::issued(doc.clone(), c, salt, &sk);
-        let e2 = RegistryEntry::issued(doc.clone(), c, salt, &sk);
+        let sc = crate::commit::CommitmentMethod::StringCanonicalV1;
+        let e1 = RegistryEntry::issued(doc.clone(), c, salt, sc, &sk).unwrap();
+        let e2 = RegistryEntry::issued(doc.clone(), c, salt, sc, &sk).unwrap();
         assert_eq!(
             e1.commitment_signature, e2.commitment_signature,
             "issuance must be deterministic (no caller RNG => byte-stable signature)"
@@ -813,7 +904,7 @@ mod tests {
 
         // (b) Nonce safety: distinct commitments => distinct nonces R. If R were
         // reused, sk would be recoverable; deterministic (sk, m) nonces forbid it.
-        let other = RegistryEntry::issued(doc, c + Fr::from(1u64), salt, &sk);
+        let other = RegistryEntry::issued(doc, c + Fr::from(1u64), salt, sc, &sk).unwrap();
         let sig1 = signature_from_hex(e1.commitment_signature.as_ref().unwrap()).unwrap();
         let sig_other = signature_from_hex(other.commitment_signature.as_ref().unwrap()).unwrap();
         assert_ne!(
@@ -898,20 +989,20 @@ mod tests {
             salt_from_bytes(&[1u8; 32]),
         );
         // The byte-unchanged default: a fresh entry records string-canonical.
-        assert_eq!(e.scheme.as_str(), ZK_SCHEME_POSEIDON2_RDFC10_V1);
+        assert_eq!(e.scheme().as_str(), ZK_SCHEME_POSEIDON2_RDFC10_V1);
         assert_eq!(e.method(), Some(CommitmentMethod::StringCanonicalV1));
     }
 
     #[test]
-    fn with_already_issued_method_records_and_round_trips_through_store() {
+    fn new_already_issued_records_and_round_trips_through_store() {
         use crate::commit::CommitmentMethod;
-        let e = RegistryEntry::new(
+        let e = RegistryEntry::new_already_issued(
             NamedNode::new("https://dmv.example/vc/m-dual").unwrap(),
             Fr::from(7u64),
             salt_from_bytes(&[2u8; 32]),
-        )
-        .with_already_issued_method(CommitmentMethod::DualLeafV1);
-        assert_eq!(e.scheme.as_str(), ZK_SCHEME_POSEIDON2_DUALLEAF_V1);
+            CommitmentMethod::DualLeafV1,
+        );
+        assert_eq!(e.scheme().as_str(), ZK_SCHEME_POSEIDON2_DUALLEAF_V1);
         assert_eq!(e.method(), Some(CommitmentMethod::DualLeafV1));
 
         // The method survives a round-trip through the registry graph (the scheme
@@ -923,53 +1014,277 @@ mod tests {
         assert_eq!(back[0].method(), Some(CommitmentMethod::DualLeafV1));
     }
 
-    /// The ISSUANCE boundary is checked, not advisory: `with_issuance_method`
-    /// refuses a superseded or research-only method, while `with_already_issued_method` still
-    /// records one for decoding / legacy entries — and an entry so recorded is
-    /// still READ back by `method()`, so verification of an already-issued graph
-    /// is unaffected.
+    /// The ISSUANCE boundary is checked, not advisory: `new_for_issuance`
+    /// refuses a superseded or research-only method, while `new_already_issued`
+    /// still records one for decoding / legacy entries — and an entry so recorded
+    /// is still READ back by `method()`, so verification of an already-issued
+    /// graph is unaffected.
     #[test]
-    fn with_issuance_method_refuses_a_non_selectable_method() {
+    fn new_for_issuance_refuses_a_non_selectable_method() {
         use crate::commit::CommitmentMethod;
-        let entry = || {
-            RegistryEntry::new(
-                NamedNode::new("https://dmv.example/vc/m-issuance").unwrap(),
-                Fr::from(9u64),
-                salt_from_bytes(&[3u8; 32]),
-            )
+        let doc = || NamedNode::new("https://dmv.example/vc/m-issuance").unwrap();
+        let fresh = |m| RegistryEntry::new_for_issuance(doc(), Fr::from(9u64), salt_from_bytes(&[3u8; 32]), m);
+        let legacy = |m| {
+            RegistryEntry::new_already_issued(doc(), Fr::from(9u64), salt_from_bytes(&[3u8; 32]), m)
         };
 
-        // Selectable: recorded exactly as `with_already_issued_method` would.
-        let v2 = entry()
-            .with_issuance_method(CommitmentMethod::DualLeafV2)
-            .expect("V2 is selectable for new issuance");
+        // Selectable: recorded exactly as `new_already_issued` would.
+        let v2 = fresh(CommitmentMethod::DualLeafV2).expect("V2 is selectable for new issuance");
         assert_eq!(v2.method(), Some(CommitmentMethod::DualLeafV2));
-        assert_eq!(
-            v2.scheme.as_str(),
-            entry().with_already_issued_method(CommitmentMethod::DualLeafV2).scheme.as_str()
-        );
-        assert!(entry()
-            .with_issuance_method(CommitmentMethod::StringCanonicalV1)
-            .is_ok());
+        assert_eq!(v2, legacy(CommitmentMethod::DualLeafV2));
+        assert!(fresh(CommitmentMethod::StringCanonicalV1).is_ok());
 
         // Superseded: refused, and the error names the IRI it did not write.
-        let err = entry()
-            .with_issuance_method(CommitmentMethod::DualLeafV1)
-            .expect_err("V1 must not be selectable for new issuance");
+        let err = fresh(CommitmentMethod::DualLeafV1).expect_err("V1 must not be selectable for new issuance");
         assert_eq!(err.method(), CommitmentMethod::DualLeafV1);
         assert_eq!(err.scheme_iri(), ZK_SCHEME_POSEIDON2_DUALLEAF_V1);
 
         // ...but recording V1 as-is still works and still READS BACK, which is
         // what keeps an already-issued V1 graph verifiable.
-        let legacy = entry().with_already_issued_method(CommitmentMethod::DualLeafV1);
-        assert_eq!(legacy.scheme.as_str(), ZK_SCHEME_POSEIDON2_DUALLEAF_V1);
-        assert_eq!(legacy.method(), Some(CommitmentMethod::DualLeafV1));
+        let v1 = legacy(CommitmentMethod::DualLeafV1);
+        assert_eq!(v1.scheme().as_str(), ZK_SCHEME_POSEIDON2_DUALLEAF_V1);
+        assert_eq!(v1.method(), Some(CommitmentMethod::DualLeafV1));
 
         // The research dial is refused too, when it is compiled in at all.
         #[cfg(feature = "commitment-value-only")]
-        assert!(entry()
-            .with_issuance_method(CommitmentMethod::ValueOnlyV1)
-            .is_err());
+        assert!(fresh(CommitmentMethod::ValueOnlyV1).is_err());
+    }
+
+    /// The signing constructors take the method and run the same issuance
+    /// check: a non-selectable method is refused and nothing is signed.
+    #[test]
+    fn issued_constructors_refuse_a_non_selectable_method() {
+        use crate::commit::CommitmentMethod;
+        use crate::sig::SecretKey;
+        let sk = SecretKey::from_seed(41);
+        let doc = NamedNode::new("https://dmv.example/vc/m-refused").unwrap();
+        let salt = salt_from_bytes(&[6u8; 32]);
+        let err = RegistryEntry::issued(doc.clone(), Fr::from(5u64), salt, CommitmentMethod::DualLeafV1, &sk)
+            .expect_err("a superseded method must not be signed for a new entry");
+        assert_eq!(err.method(), CommitmentMethod::DualLeafV1);
+        let err = RegistryEntry::issued_with_status(
+            doc.clone(),
+            Fr::from(5u64),
+            salt,
+            CommitmentMethod::DualLeafV1,
+            NamedNode::new("https://dmv.example/status/1").unwrap(),
+            1,
+            1,
+            Status::Active,
+            &sk,
+        )
+        .expect_err("a superseded method must not be signed for a new status-bound entry");
+        assert_eq!(err.method(), CommitmentMethod::DualLeafV1);
+        #[cfg(feature = "commitment-value-only")]
+        assert!(RegistryEntry::issued(doc, Fr::from(5u64), salt, CommitmentMethod::ValueOnlyV1, &sk).is_err());
+    }
+
+    /// Rewrite an entry's `zk:scheme` triple in the store and read it back — the
+    /// only way to change a recorded method from outside this module.
+    fn with_scheme_rewritten_in_store(e: &RegistryEntry, scheme_iri: &str) -> RegistryEntry {
+        let mut dict = Dict::new();
+        let mut ids = Vec::new();
+        for [s, p, o] in e.to_triples() {
+            let o = match &p {
+                Term::NamedNode(n) if n.as_str() == ZK_SCHEME => {
+                    Term::NamedNode(NamedNode::new_unchecked(scheme_iri))
+                }
+                _ => o,
+            };
+            ids.push([dict.intern(&s), dict.intern(&p), dict.intern(&o)]);
+        }
+        let mut g = Graph::load_str("", "turtle").unwrap();
+        g.named.push((
+            Term::NamedNode(NamedNode::new_unchecked(ZK_GRAPH)),
+            Graph::from_parts(dict, ids),
+        ));
+        let mut back = read_registry(&g);
+        assert_eq!(back.len(), 1);
+        let back = back.remove(0);
+        assert_eq!(back.scheme().as_str(), scheme_iri);
+        back
+    }
+
+    fn every_scheme_iri() -> Vec<&'static str> {
+        vec![
+            ZK_SCHEME_POSEIDON2_RDFC10_V1,
+            ZK_SCHEME_POSEIDON2_DUALLEAF_V1,
+            ZK_SCHEME_POSEIDON2_DUALLEAF_V2,
+            ZK_SCHEME_POSEIDON2_VALUEHOOK_V1,
+            "https://sparq.dev/ns/zk#poseidon2-bogus-v9",
+        ]
+    }
+
+    /// The signature binds the method: for every method an entry can be issued
+    /// under, rewriting the recorded `zk:scheme` to ANY other IRI makes both
+    /// signature checks fail, and leaving it alone keeps them passing.
+    #[test]
+    fn rewriting_the_recorded_scheme_invalidates_the_signature() {
+        use crate::commit::CommitmentMethod;
+        use crate::sig::SecretKey;
+        let sk = SecretKey::from_seed(77);
+        let salt = salt_from_bytes(&[8u8; 32]);
+        let list = NamedNode::new("https://dmv.example/status/7").unwrap();
+        for method in [CommitmentMethod::StringCanonicalV1, CommitmentMethod::DualLeafV2] {
+            let plain = RegistryEntry::issued(
+                NamedNode::new("https://dmv.example/vc/m-bind").unwrap(),
+                Fr::from(0x5eedu64),
+                salt,
+                method,
+                &sk,
+            )
+            .unwrap();
+            let bound = RegistryEntry::issued_with_status(
+                NamedNode::new("https://dmv.example/vc/m-bind-st").unwrap(),
+                Fr::from(0x5eedu64),
+                salt,
+                method,
+                list.clone(),
+                3,
+                4,
+                Status::Active,
+                &sk,
+            )
+            .unwrap();
+            assert_eq!(plain.method(), Some(method));
+            for iri in every_scheme_iri() {
+                let same = iri == method.scheme_iri();
+                assert_eq!(
+                    with_scheme_rewritten_in_store(&plain, iri).verify_commitment_signature(),
+                    same,
+                    "{} signed, {} recorded",
+                    method.scheme_iri(),
+                    iri
+                );
+                assert_eq!(
+                    with_scheme_rewritten_in_store(&bound, iri)
+                        .verify_commitment_signature_with_status(),
+                    same,
+                    "{} signed (status-bound), {} recorded",
+                    method.scheme_iri(),
+                    iri
+                );
+            }
+        }
+    }
+
+    /// Every method, `string-canonical` included, signs the method-bound
+    /// message: a fresh signature verifies over it and not over the
+    /// method-independent salt-bound / status-bound message.
+    #[test]
+    fn every_method_signs_the_method_bound_message() {
+        use crate::commit::CommitmentMethod;
+        use crate::sig::{
+            commitment_message_with_salt, commitment_message_with_scheme,
+            commitment_message_with_status, commitment_message_with_status_and_scheme,
+            scheme_iri_to_field, SecretKey,
+        };
+        let sk = SecretKey::from_seed(78);
+        let (c, salt) = (Fr::from(0xfeedu64), salt_from_bytes(&[9u8; 32]));
+        let doc = NamedNode::new("https://dmv.example/vc/m-compat").unwrap();
+        let list = NamedNode::new("https://dmv.example/status/9").unwrap();
+        let verifies_over = |e: &RegistryEntry, m: &Fr| {
+            crate::sig::verify_commitment_with_scheme(
+                e.cryptosuite.as_ref().unwrap().as_str(),
+                e.issuer_public_key.as_ref().unwrap(),
+                m,
+                e.commitment_signature.as_ref().unwrap(),
+            )
+        };
+        for method in [CommitmentMethod::StringCanonicalV1, CommitmentMethod::DualLeafV2] {
+            let scheme = scheme_iri_to_field(method.scheme_iri());
+            let plain = RegistryEntry::issued(doc.clone(), c, salt, method, &sk).unwrap();
+            let bound = RegistryEntry::issued_with_status(
+                doc.clone(),
+                c,
+                salt,
+                method,
+                list.clone(),
+                1,
+                2,
+                Status::Active,
+                &sk,
+            )
+            .unwrap();
+            let r = bound.status_ref().unwrap();
+            assert!(verifies_over(&plain, &commitment_message_with_scheme(&c, &salt, &scheme)));
+            assert!(verifies_over(
+                &bound,
+                &commitment_message_with_status_and_scheme(&c, &salt, &r, &scheme)
+            ));
+            assert!(!verifies_over(&plain, &commitment_message_with_salt(&c, &salt)));
+            assert!(!verifies_over(&bound, &commitment_message_with_status(&c, &salt, &r)));
+        }
+    }
+
+    const LEGACY_FIXTURE: &str =
+        include_str!("../tests/fixtures/legacy_registry/base-5e7e008e.nq");
+
+    /// The entries of the base-issuance fixture, by the `# name` line heading
+    /// each block, decoded through [`read_registry`].
+    fn legacy_fixture() -> Vec<(String, RegistryEntry)> {
+        let mut out = Vec::new();
+        for block in LEGACY_FIXTURE.split("# ").filter(|b| !b.trim().is_empty()) {
+            let (name, quads) = block.split_once('\n').unwrap();
+            let g = Graph::load_dataset(quads, "nquads").unwrap();
+            let mut entries = read_registry(&g);
+            assert_eq!(entries.len(), 1, "{name}");
+            out.push((name.trim().to_string(), entries.remove(0)));
+        }
+        assert_eq!(out.len(), 4);
+        out
+    }
+
+    fn legacy_fixture_entry(name: &str) -> RegistryEntry {
+        legacy_fixture().into_iter().find(|(n, _)| n == name).unwrap().1
+    }
+
+    /// Every entry signed by the issuance path before the signature covered
+    /// the method fails verification: the `dual-leaf` v1 entries as issued and
+    /// relabelled `string-canonical`, and the honest `string-canonical` entries
+    /// under every scheme. Each fixture signature is still a valid signature over
+    /// the method-independent message, so it is the refusal of that message, not
+    /// a corrupt fixture, that makes them fail.
+    #[test]
+    fn every_entry_signed_before_the_method_binding_fails_verification() {
+        use crate::sig::{commitment_message_with_salt, commitment_message_with_status};
+        let fixture = legacy_fixture();
+        for (name, e) in &fixture {
+            let m = match e.status_ref() {
+                None => commitment_message_with_salt(&e.commitment, &e.salt),
+                Some(r) => commitment_message_with_status(&e.commitment, &e.salt, &r),
+            };
+            assert!(
+                crate::sig::verify_commitment_with_scheme(
+                    e.cryptosuite.as_ref().unwrap().as_str(),
+                    e.issuer_public_key.as_ref().unwrap(),
+                    &m,
+                    e.commitment_signature.as_ref().unwrap(),
+                ),
+                "{name}: fixture signature is valid over the legacy message"
+            );
+            for iri in every_scheme_iri() {
+                let r = with_scheme_rewritten_in_store(e, iri);
+                let ok = if e.status_ref().is_some() {
+                    r.verify_commitment_signature_with_status()
+                } else {
+                    r.verify_commitment_signature()
+                };
+                assert!(!ok, "{name} recorded as {iri} must not verify");
+            }
+        }
+        // The cases named explicitly, on the entries exactly as decoded.
+        assert!(!legacy_fixture_entry("dual-leaf-v1-plain").verify_commitment_signature());
+        assert!(!legacy_fixture_entry("dual-leaf-v1-status")
+            .verify_commitment_signature_with_status());
+        assert!(!legacy_fixture_entry("string-canonical-plain").verify_commitment_signature());
+        assert!(!legacy_fixture_entry("string-canonical-status")
+            .verify_commitment_signature_with_status());
+        assert!(!with_scheme_rewritten_in_store(
+            &legacy_fixture_entry("dual-leaf-v1-plain"),
+            ZK_SCHEME_POSEIDON2_RDFC10_V1
+        )
+        .verify_commitment_signature());
     }
 
     #[test]
@@ -983,5 +1298,19 @@ mod tests {
         );
         e.scheme = NamedNode::new_unchecked("https://sparq.dev/ns/zk#poseidon2-bogus-v9");
         assert_eq!(e.method(), None);
+        // ...and an entry under an unrecognised scheme does not verify, even with
+        // an otherwise valid signature: the signed message cannot be recomputed.
+        let sk = crate::sig::SecretKey::from_seed(13);
+        let mut signed = RegistryEntry::issued(
+            NamedNode::new("https://dmv.example/vc/m-bogus-signed").unwrap(),
+            Fr::from(3u64),
+            salt_from_bytes(&[4u8; 32]),
+            crate::commit::CommitmentMethod::StringCanonicalV1,
+            &sk,
+        )
+        .unwrap();
+        assert!(signed.verify_commitment_signature());
+        signed.scheme = NamedNode::new_unchecked("https://sparq.dev/ns/zk#poseidon2-bogus-v9");
+        assert!(!signed.verify_commitment_signature());
     }
 }

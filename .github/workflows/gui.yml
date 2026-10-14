@@ -467,13 +467,13 @@ jobs:
       # Do not let one platform's failure cancel the others — each row is independent
       # diagnostic signal while the leg is advisory.
       fail-fast: false
+      # A pull request builds the x64 Linux row only; the macOS, Windows and arm64 rows run on
+      # the push to main (and on dispatch). They are advisory, so a PR never waited on them, and
+      # they were most of this workflow's runner time.
       matrix:
-        include:
-          - { os: macos-14, label: arm64-darwin }
-          - { os: macos-15-intel, label: x64-darwin }
-          - { os: ubuntu-latest, label: x64-linux }
-          - { os: ubuntu-24.04-arm, label: arm64-linux }
-          - { os: windows-latest, label: win-x64 }
+        include: ${{ fromJSON(github.event_name == 'pull_request'
+          && '[{"os":"ubuntu-latest","label":"x64-linux"}]'
+          || '[{"os":"macos-14","label":"arm64-darwin"},{"os":"macos-15-intel","label":"x64-darwin"},{"os":"ubuntu-latest","label":"x64-linux"},{"os":"ubuntu-24.04-arm","label":"arm64-linux"},{"os":"windows-latest","label":"win-x64"}]') }}
     defaults:
       run:
         working-directory: gui/src-tauri

@@ -2500,67 +2500,27 @@ fn derive_id(inputs: &ProofInputs) -> Option<CircuitId> {
             };
             derive_filter_decimal_id(id, fd)
         }
-        // sq-xojl: DUAL-LEAF value-lane FILTER. DIGIT-COUNT-FREE — the
-        // member id carries no `d`/`md`/`(id,fd)` parameter (the per-digit family
-        // collapses), so the derive only confirms the declared id is the single
-        // `FilterValueDl` member. The full CircuitId is what the public-input
-        // reconstruction + canonical-vk recompute pin. The fail-closed legality of
-        // this member against the recorded COMMITMENT METHOD (it is LEGAL only for
-        // the dual-leaf methods `DualLeafV1` / `DualLeafV2` and the `ValueOnlyV1`
-        // research dial, never `string-canonical`)
-        // is the dispatch matrix `crate::dispatch::resolve_circuit` (sq-cfmv) — the
-        // host-encoding wiring that gives the verifier the method is sq-j506, gated
-        // behind sq-qhy4. Here the derive only confirms the member identity.
+        // The DUAL-LEAF value-lane FILTERs (sq-xojl integer, sq-2ezsx double +
+        // decimal, sq-wz99x dateTime/date, and the bit-domain boolean). Each is
+        // DIGIT-COUNT-FREE — a member id with no `d`/`md`/`(id,fd)` parameter
+        // (the decimal scale and the dateTime/date lane live in the public
+        // `datatype_const`, not the id) — so the derivation is the variant→member
+        // table `value_lane::ValueLane::member`, the SAME definition the typed
+        // checked prove entry derives its member from, plus the requirement that
+        // the declared id IS that member. The full CircuitId is what the
+        // public-input reconstruction + canonical-vk recompute pin, so declaring
+        // another member (e.g. the integer member for boolean inputs, which share
+        // a public layout but NOT a relation) cannot byte-match a real proof. The
+        // fail-closed `(method × circuit)` legality is `crate::dispatch` (sq-cfmv);
+        // the host wiring that gives the verifier the method is sq-j506.
         #[cfg(feature = "dual-leaf")]
-        ProofInputs::FilterValueDl { .. } => match inputs.circuit_id() {
-            CircuitId::FilterValueDl => Some(CircuitId::FilterValueDl),
-            _ => None,
-        },
-        // sq-2ezsx: the DUAL-LEAF double + decimal value-lane FILTERs.
-        // Like the integer member they are DIGIT-COUNT-FREE (the per-digit family
-        // collapses; the decimal class is even scale-agnostic — the scale lives in
-        // the public `datatype_const`, not the member id), so the derive only
-        // confirms the declared id is the single member of its datatype class. The
-        // full CircuitId is what the reconstruction + canonical-vk pin. The
-        // fail-closed `(method × circuit)` legality is `crate::dispatch` (sq-cfmv).
-        #[cfg(feature = "dual-leaf")]
-        ProofInputs::FilterValueDlF64 { .. } => match inputs.circuit_id() {
-            CircuitId::FilterValueDlF64 => Some(CircuitId::FilterValueDlF64),
-            _ => None,
-        },
-        #[cfg(feature = "dual-leaf")]
-        ProofInputs::FilterValueDlDecimal { .. } => match inputs.circuit_id() {
-            CircuitId::FilterValueDlDecimal => Some(CircuitId::FilterValueDlDecimal),
-            _ => None,
-        },
-        // sq-wz99x: the DUAL-LEAF dateTime/date value-lane FILTER. Also
-        // DIGIT-COUNT-FREE, and additionally LANE-FREE: ONE member serves BOTH the
-        // `xsd:dateTime` and `xsd:date` classes, because the lane (and the
-        // sub-second scale `FS`) lives in the PUBLIC `datatype_const`, not the
-        // member id. So the derive only confirms the declared id is that single
-        // member; WHICH lane a proof is for is pinned by the public-input
-        // reconstruction below — `datatype_const` is a public input, so a lane swap
-        // changes the reconstructed vector and cannot byte-match the proof. The
-        // fail-closed `(method × circuit)` legality is `crate::dispatch` (sq-cfmv).
-        #[cfg(feature = "dual-leaf")]
-        ProofInputs::FilterValueDlDateTime { .. } => match inputs.circuit_id() {
-            CircuitId::FilterValueDlDateTime => Some(CircuitId::FilterValueDlDateTime),
-            _ => None,
-        },
-        // The DUAL-LEAF BIT-DOMAIN xsd:boolean value-lane FILTER. Its own member,
-        // so — like the other value-lane members — the derive only confirms the
-        // declared id IS that member; the full CircuitId is what the public-input
-        // reconstruction + canonical-vk recompute pin. Declaring the integer
-        // member while carrying boolean inputs (or the reverse) therefore cannot
-        // byte-match a real proof, which matters here because the two members
-        // share a public layout but NOT a relation: only this one constrains the
-        // handle and the bound to {0, 1}. The fail-closed `(method × circuit)`
-        // legality is `crate::dispatch`.
-        #[cfg(feature = "dual-leaf")]
-        ProofInputs::FilterValueDlBool { .. } => match inputs.circuit_id() {
-            CircuitId::FilterValueDlBool => Some(CircuitId::FilterValueDlBool),
-            _ => None,
-        },
+        ProofInputs::FilterValueDl { .. }
+        | ProofInputs::FilterValueDlF64 { .. }
+        | ProofInputs::FilterValueDlDecimal { .. }
+        | ProofInputs::FilterValueDlDateTime { .. }
+        | ProofInputs::FilterValueDlBool { .. } => {
+            crate::value_lane::derive_value_lane_member(inputs)
+        }
         // sq-bwwl / sq-fi03 (step 3): hidden cross-credential JOIN. The
         // two graph sizes are PRIVATE (the witnessed graph contents are not public
         // inputs — only the commitments are), so — exactly as scan trusts the

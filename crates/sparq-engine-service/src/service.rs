@@ -299,53 +299,54 @@ pub(crate) fn parse_results_into_read<R: std::io::BufRead, F: RowSink>(
 /// query (and the remote's VALUES-join fan-out) bounded.
 pub(crate) const DEFAULT_BIND_BLOCK: usize = 50;
 
+/// Thread-local `usize` tuning knobs for SERVICE evaluation. A scope override wins over
+/// the knob's env var; both are read off the hot path, once per evaluation.
 #[cfg(feature = "service")]
-mod bind_block {
+mod knob {
     use std::cell::Cell;
+    use std::thread::LocalKey;
+
+    pub(super) type Knob = LocalKey<Cell<Option<usize>>>;
 
     thread_local! {
-        // `None` => use the env / built-in default. A scope installs an override.
-        static OVERRIDE: Cell<Option<usize>> = const { Cell::new(None) };
+        pub(super) static BIND_BLOCK: Cell<Option<usize>> = const { Cell::new(None) };
+        pub(super) static REMOTE_CAP: Cell<Option<usize>> = const { Cell::new(None) };
     }
 
-    /// RAII override of the bind-join block size for the current scope.
-    pub(crate) struct Guard(Option<usize>);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            OVERRIDE.with(|o| o.set(self.0.take()));
-        }
-    }
-
-    pub(crate) fn install(n: usize) -> Guard {
-        // A zero block size would mean "never batch" — clamp to 1 so a tuple still
-        // gets pushed one-per-request rather than silently disabling correctness.
-        let n = n.max(1);
-        Guard(OVERRIDE.with(|o| o.replace(Some(n))))
-    }
-
-    /// The active block size: an installed scope override wins; otherwise the
-    /// `SPARQ_SERVICE_BIND_BLOCK` env var (parsed once is unnecessary — this is off
-    /// the hot path, called once per bound-join); otherwise the built-in default.
-    pub(crate) fn current() -> usize {
-        if let Some(n) = OVERRIDE.with(|o| o.get()) {
-            return n;
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Ok(s) = std::env::var("SPARQ_SERVICE_BIND_BLOCK") {
-            if let Ok(n) = s.trim().parse::<usize>() {
-                if n >= 1 {
-                    return n;
-                }
+    /// Runs `f` with `knob` set to `n`, restoring the previous value on return or unwind.
+    pub(super) fn scoped<R>(knob: &'static Knob, n: usize, f: impl FnOnce() -> R) -> R {
+        struct Restore(&'static Knob, Option<usize>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                self.0.with(|c| c.set(self.1));
             }
         }
-        super::DEFAULT_BIND_BLOCK
+        let _restore = Restore(knob, knob.with(|c| c.replace(Some(n))));
+        f()
+    }
+
+    /// The scope override in `knob`, else `env` parsed as a `usize`, else `None`.
+    pub(super) fn get(knob: &'static Knob, env: &str) -> Option<usize> {
+        knob.with(Cell::get).or_else(|| {
+            #[cfg(not(target_arch = "wasm32"))]
+            return std::env::var(env).ok()?.trim().parse().ok();
+            #[cfg(target_arch = "wasm32")]
+            {
+                let _ = env;
+                None
+            }
+        })
     }
 }
 
 /// The bind-join block size in force for the current scope. (sq-sjkj)
 #[cfg(feature = "service")]
 pub fn bind_block_size() -> usize {
-    bind_block::current()
+    // A zero block size would mean "never batch", so it falls back to the default
+    // (a scope override is clamped to at least 1 below).
+    knob::get(&knob::BIND_BLOCK, "SPARQ_SERVICE_BIND_BLOCK")
+        .filter(|&n| n >= 1)
+        .unwrap_or(DEFAULT_BIND_BLOCK)
 }
 
 /// Runs `f` with `n` as the SERVICE bind-join block size (how many distinct binding
@@ -367,8 +368,7 @@ pub fn bind_block_size() -> usize {
 /// ```
 #[cfg(feature = "service")]
 pub fn with_service_bound_join_block_size<R>(n: usize, f: impl FnOnce() -> R) -> R {
-    let _guard = bind_block::install(n);
-    f()
+    knob::scoped(&knob::BIND_BLOCK, n.max(1), f)
 }
 
 // ---------------------------------------------------------------------------
@@ -408,52 +408,11 @@ pub fn with_service_bound_join_block_size<R>(n: usize, f: impl FnOnce() -> R) ->
 /// generic (it names no endpoint) so it is safe to surface to the client.
 pub const SERVICE_REMOTE_CAP_MARKER: &str = "SERVICE remote-request cap exceeded";
 
-#[cfg(feature = "service")]
-mod remote_cap {
-    use std::cell::Cell;
-
-    thread_local! {
-        // `None` => no scope override; consult the env var, else the built-in (OFF).
-        static OVERRIDE: Cell<Option<Option<usize>>> = const { Cell::new(None) };
-    }
-
-    /// RAII override of the remote-request cap for the current scope.
-    pub(crate) struct Guard(Option<Option<usize>>);
-    impl Drop for Guard {
-        fn drop(&mut self) {
-            OVERRIDE.with(|o| o.set(self.0.take()));
-        }
-    }
-
-    /// Installs `cap` (`Some(n)` = cap at `n`; `None` = explicitly UNCAPPED for this
-    /// scope, overriding any env var) and returns a guard that restores the previous
-    /// override on drop/unwind.
-    pub(crate) fn install(cap: Option<usize>) -> Guard {
-        Guard(OVERRIDE.with(|o| o.replace(Some(cap))))
-    }
-
-    /// The active cap: an installed scope override wins (including an explicit `None`
-    /// "uncapped"); otherwise the `SPARQ_SERVICE_REMOTE_CAP` env var; otherwise OFF
-    /// (`None` = no cap). Off the hot path — called once per `SERVICE ?ep` evaluation.
-    pub(crate) fn current() -> Option<usize> {
-        if let Some(scope) = OVERRIDE.with(|o| o.get()) {
-            return scope;
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Ok(s) = std::env::var("SPARQ_SERVICE_REMOTE_CAP") {
-            if let Ok(n) = s.trim().parse::<usize>() {
-                return Some(n);
-            }
-        }
-        None
-    }
-}
-
 /// The per-query SERVICE remote-request cap in force for the current scope, or `None`
 /// when no cap is active (the default). (sq-b93pv)
 #[cfg(feature = "service")]
 pub fn remote_request_cap() -> Option<usize> {
-    remote_cap::current()
+    knob::get(&knob::REMOTE_CAP, "SPARQ_SERVICE_REMOTE_CAP")
 }
 
 /// Runs `f` with a ceiling of `n` distinct remote endpoints per `SERVICE ?ep`
@@ -487,8 +446,7 @@ pub fn remote_request_cap() -> Option<usize> {
 /// ```
 #[cfg(feature = "service")]
 pub fn with_service_remote_request_cap<R>(n: usize, f: impl FnOnce() -> R) -> R {
-    let _guard = remote_cap::install(Some(n));
-    f()
+    knob::scoped(&knob::REMOTE_CAP, n, f)
 }
 
 /// Renders a `VALUES` block that binds `vars` to each tuple in `tuples`, in the

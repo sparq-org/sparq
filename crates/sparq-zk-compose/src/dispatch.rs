@@ -24,17 +24,20 @@
 //! no shipped member pins — so [`check_lane_const_for_member`] carries an
 //! AFFIRMATIVE allow-list over DECODED field elements, and
 //! [`check_lane_member_pairing_for_use`] applies it to built `ProofInputs`. ONE
-//! function, called from the value-lane builders, every value-lane `Prover.toml`
-//! renderer, `driver::CircuitProver::prove_in_for_method` and stage 0 of the
-//! verifier's `prefilter_manifest_structure`.
+//! table, consulted by the value-lane builders, every value-lane `Prover.toml`
+//! renderer (the ordinary ones and the `crate::legacy_v1` ones), the typed
+//! checked prove entry `driver::CircuitProver::prove_value_lane` and stage 0 of
+//! the verifier's `prefilter_manifest_structure`.
 //!
-//! Where it is NOT called, stated plainly: `CircuitProver::{prove, prove_in,
-//! gen_witness, gen_witness_tagged}` take a `CircuitId` and a `&str` of TOML and
-//! stay method- and lane-AGNOSTIC, because re-proving and witness-solving an
-//! already-issued graph are legitimate uses and the in-circuit test vectors need
-//! to hand a member a pairing this boundary refuses. A caller that renders its
-//! own TOML and uses those entries is outside the boundary; routing a fresh proof
-//! through `prove_in_for_method` is what puts it inside.
+//! The checked prove entry takes typed `crate::value_lane::ValueLaneProof`
+//! inputs, derives the member from the lane (the same
+//! `crate::value_lane::ValueLane::member` the verifier's id derivation uses), and
+//! renders the `Prover.toml` itself from validated fields — it accepts no TOML
+//! from its caller. The raw `CircuitProver::{prove, prove_in, gen_witness,
+//! gen_witness_tagged}` take a `CircuitId` and a `&str` of TOML and are
+//! deliberately UNGATED building blocks: re-proving and witness-solving are
+//! legitimate uses and the in-circuit test vectors need to hand a member a
+//! pairing this boundary refuses.
 //!
 //! # Integration status (honest scope)
 //!
@@ -122,14 +125,29 @@ pub enum DispatchError {
     /// with the same rule the verifier's `derive_circuit_id` applies: the variant
     /// and the id must name the SAME member.
     ValueLaneVariantIdMismatch { circuit: String, variant: String },
-    /// A value-lane public input whose `FieldHex` TEXT is not the canonical
-    /// rendering of the field element it decodes to — an uppercase or
-    /// `0x`-less spelling, a short (leading-zeros-dropped) one, or a 64-nibble
-    /// value at or above the field modulus, all of which
-    /// `sparq_zk::field::field_from_hex_str` otherwise accepts (it pads and
-    /// reduces). Refused so a lane constant cannot be re-spelled past a
-    /// comparison, and carries the offending field's name.
+    /// A value-lane `FieldHex` whose TEXT is not the canonical rendering of the
+    /// field element it decodes to — an uppercase or `0x`-less spelling, a short
+    /// (leading-zeros-dropped) one, a 64-nibble value at or above the field
+    /// modulus, all of which `sparq_zk::field::field_from_hex_str` otherwise
+    /// accepts (it pads and reduces), or text that is not hex at all. Raised for
+    /// the public inputs of a value-lane `ProofInputs`, and — by the renderers
+    /// and the checked prove entry — for every `FieldHex` that is written into a
+    /// `Prover.toml` (the challenge and the private witnesses included). Carries
+    /// the offending field's name.
     NonCanonicalFieldHex { circuit: String, field: String },
+    /// A `crate::legacy_v1` entry point was handed a lane constant that is not a
+    /// `DualLeafV1` constant. The legacy names render and build V1 lanes only;
+    /// the ordinary names are the V2 ones.
+    NotALegacyV1LaneConst { circuit: String, lane: String },
+    /// The checked prove entry was handed a dual-leaf METHOD whose version does
+    /// not match the version of the lane constant it carries — a `DualLeafV2`
+    /// method with a V1 constant, or the reverse.
+    MethodLaneVersionMismatch { method_iri: String, circuit: String, lane: String },
+    /// Typed value-lane inputs could not be assembled from a `ProofInputs` and a
+    /// witness: the witness has the other shape (a `(value_hook,
+    /// lexical_component)` pair for a signed lane, or the reverse), or a
+    /// bit-domain boolean bound is outside `{0, 1}`.
+    MalformedValueLaneInputs { circuit: String, reason: String },
 }
 
 impl std::fmt::Display for DispatchError {
@@ -188,6 +206,25 @@ impl std::fmt::Display for DispatchError {
                  is not the canonical 0x-prefixed 64-nibble lowercase rendering of the \
                  field element it decodes to (fail-closed dispatch matrix)",
                 field, circuit
+            ),
+            DispatchError::NotALegacyV1LaneConst { circuit, lane } => write!(
+                f,
+                "the {} lane constant is not a dual-leaf v1 constant, so the legacy_v1 \
+                 entry for circuit {} refuses it; the ordinary entry points build and \
+                 render the v2 lanes",
+                lane, circuit
+            ),
+            DispatchError::MethodLaneVersionMismatch { method_iri, circuit, lane } => write!(
+                f,
+                "commitment method {} does not derive the {} lane constant presented \
+                 on circuit {}: the method version and the lane constant version must \
+                 agree (fail-closed dispatch matrix)",
+                method_iri, lane, circuit
+            ),
+            DispatchError::MalformedValueLaneInputs { circuit, reason } => write!(
+                f,
+                "malformed value-lane inputs for circuit {}: {}",
+                circuit, reason
             ),
             DispatchError::UnknownMethod { method_iri } => write!(
                 f,
@@ -488,35 +525,9 @@ pub fn value_lane_fields(inputs: &ProofInputs) -> Option<(&CircuitId, &crate::ma
     }
 }
 
-/// The member a value-lane `ProofInputs` VARIANT must declare, with the variant's
-/// own name — `None` for every non-value-lane variant.
-///
-/// One member per variant, so the variant↔id agreement is an equality rather than
-/// a judgement. This is the host-side twin of the verifier's `derive_circuit_id`
-/// arms, which likewise accept only the one id that matches the variant.
-#[cfg(feature = "dual-leaf")]
-fn value_lane_variant_member(inputs: &ProofInputs) -> Option<(&'static str, CircuitId)> {
-    match inputs {
-        ProofInputs::FilterValueDl { .. } => Some(("FilterValueDl", CircuitId::FilterValueDl)),
-        ProofInputs::FilterValueDlF64 { .. } => {
-            Some(("FilterValueDlF64", CircuitId::FilterValueDlF64))
-        }
-        ProofInputs::FilterValueDlDecimal { .. } => {
-            Some(("FilterValueDlDecimal", CircuitId::FilterValueDlDecimal))
-        }
-        ProofInputs::FilterValueDlDateTime { .. } => {
-            Some(("FilterValueDlDateTime", CircuitId::FilterValueDlDateTime))
-        }
-        ProofInputs::FilterValueDlBool { .. } => {
-            Some(("FilterValueDlBool", CircuitId::FilterValueDlBool))
-        }
-        _ => None,
-    }
-}
-
 /// The variant name of a NON-value-lane `ProofInputs`, for the mismatch message.
 #[cfg(feature = "dual-leaf")]
-fn non_value_lane_variant_name(inputs: &ProofInputs) -> &'static str {
+pub(crate) fn non_value_lane_variant_name(inputs: &ProofInputs) -> &'static str {
     match inputs {
         ProofInputs::Scan { .. } => "Scan",
         ProofInputs::FilterInt { .. } => "FilterInt",
@@ -586,6 +597,24 @@ pub fn check_lane_const_for_member(
     if !is_value_lane_member(circuit) {
         return Ok(());
     }
+    let row = lane_row(circuit, datatype_const)?;
+    if row.legacy_v1 && use_ == MethodUse::NewIssuance {
+        return Err(DispatchError::LegacyLaneConstForIssuance {
+            circuit: circuit.package(),
+            lane: row.lane.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// The lane-table row of `datatype_const` on the value-lane member `circuit`:
+/// the text must be canonical, the decoded element must have a row, and that
+/// row's member must be `circuit`. The shared first half of every lane decision.
+#[cfg(feature = "dual-leaf")]
+fn lane_row(
+    circuit: &CircuitId,
+    datatype_const: &crate::manifest::FieldHex,
+) -> Result<&'static LaneRow, DispatchError> {
     let decoded = canonical_field(datatype_const).ok_or_else(|| {
         DispatchError::NonCanonicalFieldHex {
             circuit: circuit.package(),
@@ -601,8 +630,21 @@ pub fn check_lane_const_for_member(
             lane: row.lane.clone(),
         });
     }
-    if row.legacy_v1 && use_ == MethodUse::NewIssuance {
-        return Err(DispatchError::LegacyLaneConstForIssuance {
+    Ok(row)
+}
+
+/// The `crate::legacy_v1` form of [`check_lane_const_for_member`]: the constant
+/// must ride `circuit` AND be a `DualLeafV1` constant, else
+/// [`DispatchError::NotALegacyV1LaneConst`]. The legacy names exist so V1 output
+/// is asked for by name; they render nothing else.
+#[cfg(feature = "dual-leaf")]
+pub(crate) fn check_legacy_v1_lane_const(
+    circuit: &CircuitId,
+    datatype_const: &crate::manifest::FieldHex,
+) -> Result<(), DispatchError> {
+    let row = lane_row(circuit, datatype_const)?;
+    if !row.legacy_v1 {
+        return Err(DispatchError::NotALegacyV1LaneConst {
             circuit: circuit.package(),
             lane: row.lane.clone(),
         });
@@ -610,13 +652,67 @@ pub fn check_lane_const_for_member(
     Ok(())
 }
 
+/// The checked prove entry's version agreement: a `DualLeafV1` method needs a V1
+/// lane constant and a `DualLeafV2` method a V2 one, else
+/// [`DispatchError::MethodLaneVersionMismatch`]. Other methods carry no
+/// dual-leaf version and are decided by the dispatch matrix alone. In
+/// particular `ValueOnlyV1` (only under the `commitment-value-only` research
+/// feature, and never selectable for new issuance) is admitted on the value-lane
+/// members by the matrix, so under `MethodUse::LegacyAlreadyIssued` it accepts
+/// a V1 or a V2 lane constant: no value-only leaf encoding exists to say which
+/// version it would carry.
+#[cfg(feature = "dual-leaf")]
+pub(crate) fn check_method_lane_version(
+    method: CommitmentMethod,
+    circuit: &CircuitId,
+    datatype_const: &crate::manifest::FieldHex,
+) -> Result<(), DispatchError> {
+    let row = lane_row(circuit, datatype_const)?;
+    let agrees = match method {
+        CommitmentMethod::DualLeafV1 => row.legacy_v1,
+        CommitmentMethod::DualLeafV2 => !row.legacy_v1,
+        _ => true,
+    };
+    if agrees {
+        Ok(())
+    } else {
+        Err(DispatchError::MethodLaneVersionMismatch {
+            method_iri: method.scheme_iri().to_string(),
+            circuit: circuit.package(),
+            lane: row.lane.clone(),
+        })
+    }
+}
+
 /// Decode a `FieldHex` and accept it ONLY if its text is the canonical rendering
 /// of the decoded element (`0x` + 64 lowercase nibbles, no reduction applied).
-/// `None` for a malformed, re-spelled or at-or-above-modulus text.
+/// `None` for a malformed, re-spelled or at-or-above-modulus text. The same
+/// decoder serves the lane decision, the `ProofInputs`-level check, the
+/// renderers and the checked prove entry.
 #[cfg(feature = "dual-leaf")]
-fn canonical_field(h: &crate::manifest::FieldHex) -> Option<sparq_zk::field::Fr> {
+pub(crate) fn canonical_field(h: &crate::manifest::FieldHex) -> Option<sparq_zk::field::Fr> {
     let f = h.to_field()?;
     (sparq_zk::field::field_to_hex(&f) == h.0).then_some(f)
+}
+
+/// Refuse the first of `fields` whose text is not canonical, naming it. Every
+/// value-lane `FieldHex` that is written into a `Prover.toml` passes through
+/// here first, so the only text a renderer interpolates is `0x` followed by 64
+/// lowercase hex nibbles — nothing that could close a TOML string.
+#[cfg(feature = "dual-leaf")]
+pub(crate) fn require_canonical(
+    circuit: &CircuitId,
+    fields: &[(&'static str, &crate::manifest::FieldHex)],
+) -> Result<(), DispatchError> {
+    for (name, h) in fields {
+        if canonical_field(h).is_none() {
+            return Err(DispatchError::NonCanonicalFieldHex {
+                circuit: circuit.package(),
+                field: (*name).to_string(),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The LANE↔MEMBER pairing check over built public inputs, in the VERIFICATION /
@@ -645,20 +741,24 @@ pub fn check_lane_member_pairing(inputs: &ProofInputs) -> Result<(), DispatchErr
 ///    ([`DispatchError::NonCanonicalFieldHex`]);
 /// 3. [`check_lane_const_for_member`] for the pairing itself.
 ///
-/// The canonicality rule reaches exactly those two fields. A non-value-lane
-/// variant's `FieldHex` inputs are NOT checked (the existing fixtures spell them
-/// short), and nothing inside a rendered `Prover.toml` is checked here at all.
-/// Every NON-value-lane `ProofInputs` variant that declares its own member is
-/// accepted unchanged: this adds refusals on the value lane, it does not re-state
-/// the dispatch matrix.
+/// At this level the canonicality rule reaches exactly those two fields; the
+/// renderers and the checked prove entry extend it to every `FieldHex` they
+/// write (challenge and private witnesses). A non-value-lane variant's
+/// `FieldHex` inputs are NOT checked (the existing fixtures spell them short).
+/// A NON-value-lane `ProofInputs` variant is accepted unchanged whenever its
+/// declared id is NOT a value-lane member — whatever non-value-lane id that is.
+/// Agreement between a non-value-lane variant and its own id (e.g. `FilterInt`
+/// with a `Scan` id) is NOT decided here; that is the verifier's id derivation.
+/// This check adds refusals on the value lane only, and does not re-state the
+/// dispatch matrix.
 ///
 /// `MethodUse::LegacyAlreadyIssued` is a CALLER ASSERTION that the graph was
 /// already issued under that method. Nothing here proves issuance history — it is
 /// not read from a signature, a registry entry or a timestamp — so it narrows what
-/// a host path will build or route, and does not attest what happened. Under it,
-/// the METHOD version and the CONSTANT version are not cross-checked either: a V2
-/// method presented with a V1 lane constant is accepted, because re-proving an
-/// already-issued V1 graph is exactly that shape.
+/// a host path will build or route, and does not attest what happened. This
+/// function takes no method, so it does not compare a method version with the
+/// constant version; the typed checked prove entry, which does take the method,
+/// adds that agreement check.
 #[cfg(feature = "dual-leaf")]
 pub fn check_lane_member_pairing_for_use(
     inputs: &ProofInputs,
@@ -669,12 +769,12 @@ pub fn check_lane_member_pairing_for_use(
     // `datatype_const` to read, so the whole check below was skipped while the
     // declared id still chose the circuit downstream.
     let declared = inputs.circuit_id();
-    match value_lane_variant_member(inputs) {
-        Some((variant, member)) => {
-            if declared != &member {
+    match crate::value_lane::ValueLane::of_inputs(inputs) {
+        Some(lane) => {
+            if crate::value_lane::derive_value_lane_member(inputs).is_none() {
                 return Err(DispatchError::ValueLaneVariantIdMismatch {
                     circuit: declared.package(),
-                    variant: variant.to_string(),
+                    variant: lane.variant_name().to_string(),
                 });
             }
         }
@@ -691,14 +791,7 @@ pub fn check_lane_member_pairing_for_use(
     let Some((id, fields)) = value_lane_field_hexes(inputs) else {
         return Ok(());
     };
-    for (name, h) in fields {
-        if canonical_field(h).is_none() {
-            return Err(DispatchError::NonCanonicalFieldHex {
-                circuit: id.package(),
-                field: name.to_string(),
-            });
-        }
-    }
+    require_canonical(id, &fields)?;
     let (id, datatype_const) =
         value_lane_fields(inputs).expect("a value-lane variant carries both fields");
     check_lane_const_for_member(id, datatype_const, use_)

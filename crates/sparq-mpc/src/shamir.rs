@@ -83,7 +83,7 @@ use crate::backend::{
 use crate::field::Fp;
 use crate::holder::Holder;
 use crate::partial::{HolderId, MpcError, PartialResult};
-use crate::randomness::DistributedRandomness;
+use crate::randomness::{checked_vss_own_input, require_source_matches, DistributedRandomness};
 use crate::rng::{MpcRng, SecureRng};
 
 /// A single Shamir share: the polynomial evaluated at a party's nonzero point.
@@ -1520,18 +1520,17 @@ impl MpcBackend for ShamirBackend {
     /// as the disclosed flow — `evaluate_local` — but the value is shared rather
     /// than disclosed. The fragment must project exactly one integer-valued
     /// column in one row; otherwise it is a protocol error, not a guess.)
+    ///
+    /// The sharing is drawn through the [`DistributedRandomness`] seam
+    /// ([`DistributedRandomness::vss_own_input`] on a fresh dealer); for the
+    /// single-dealer simulation that is exactly the plain `share` it always was,
+    /// so the shares are unchanged. It is UNCHECKED plain sharing, not VSS.
     fn share_private_input(&self, holder: &Holder) -> Result<Vec<Self::Share>, MpcError> {
-        // The private contribution is named by a convention fragment: a single
-        // integer the holder agrees to *secret-share* (not disclose). We use the
-        // dedicated private-salary fragment.
-        let private = holder.evaluate_local(PRIVATE_SALARY_FRAGMENT)?;
-        let v = extract_single_integer(&private)?;
         // A fresh sharing requires fresh, INDEPENDENT randomness. Mint a fresh
         // dealer (production: a fresh OS-seeded CSPRNG — sq-1vt) rather than
         // cloning RNG state, so per-input sharings never reuse a keystream. The
         // trait stays `&self`; the dealer's randomness is per-input by design.
-        let mut dealer = self.dealer();
-        Ok(vec![dealer.share(Fp::new(v))])
+        self.share_private_input_through(&mut self.dealer(), holder)
     }
 
     /// [OPUS-4.8] sq-dwb5 — **batched / vector** secret-sharing of a holder's
@@ -1552,20 +1551,16 @@ impl MpcBackend for ShamirBackend {
     ///
     /// One fresh dealer (fresh OS-seeded CSPRNG in production, sq-1vt) shares the
     /// whole batch, so every row gets an independent masking polynomial without
-    /// reusing a keystream across rows.
+    /// reusing a keystream across rows. Each row is drawn through the
+    /// [`DistributedRandomness`] seam ([`DistributedRandomness::vss_own_input`]),
+    /// in row order — for the single-dealer simulation exactly the
+    /// [`ShamirDealer::share_batch`] it always was, so the shares are unchanged.
     fn share_private_inputs(
         &self,
         holder: &Holder,
         fragment: &str,
     ) -> Result<Vec<Self::Share>, MpcError> {
-        let private = holder.evaluate_local(fragment)?;
-        let mut values = extract_integer_vector(&private)?;
-        // Positional row-binding: a deterministic order so two holders' batches
-        // line up by index regardless of local row order (the documented contract).
-        values.sort_unstable();
-        let fps: Vec<Fp> = values.into_iter().map(Fp::new).collect();
-        let mut dealer = self.dealer();
-        Ok(dealer.share_batch(&fps))
+        self.share_private_inputs_through(&mut self.dealer(), holder, fragment)
     }
 
     /// Run the secure computation over the shared inputs. For the v1 aggregate
@@ -1609,6 +1604,50 @@ impl MpcBackend for ShamirBackend {
                 ),
             ))]],
         })
+    }
+}
+
+impl ShamirBackend {
+    /// [`MpcBackend::share_private_input`] with the holder's input shared through
+    /// `source` ([`DistributedRandomness::vss_own_input`]). Refuses a source whose
+    /// `(n, t)` differs from this backend's, and a sharing that is not the
+    /// canonical `n`-party sharing; a source that cannot share a holder's own input
+    /// (PRSS today) fails closed with its own error. Shape checks only — no VSS /
+    /// consistency guarantee is added.
+    pub(crate) fn share_private_input_through(
+        &self,
+        source: &mut dyn DistributedRandomness,
+        holder: &Holder,
+    ) -> Result<Vec<ShareVec>, MpcError> {
+        require_source_matches(source, self)?;
+        // The private contribution is named by a convention fragment: a single
+        // integer the holder agrees to *secret-share* (not disclose). We use the
+        // dedicated private-salary fragment.
+        let private = holder.evaluate_local(PRIVATE_SALARY_FRAGMENT)?;
+        let v = extract_single_integer(&private)?;
+        Ok(vec![checked_vss_own_input(source, self.n, Fp::new(v))?])
+    }
+
+    /// [`MpcBackend::share_private_inputs`] with every row shared through `source`
+    /// ([`DistributedRandomness::vss_own_input`]), one call per row in the
+    /// value-sorted row order. Same refusals as
+    /// [`Self::share_private_input_through`].
+    pub(crate) fn share_private_inputs_through(
+        &self,
+        source: &mut dyn DistributedRandomness,
+        holder: &Holder,
+        fragment: &str,
+    ) -> Result<Vec<ShareVec>, MpcError> {
+        require_source_matches(source, self)?;
+        let private = holder.evaluate_local(fragment)?;
+        let mut values = extract_integer_vector(&private)?;
+        // Positional row-binding: a deterministic order so two holders' batches
+        // line up by index regardless of local row order (the documented contract).
+        values.sort_unstable();
+        values
+            .into_iter()
+            .map(|v| checked_vss_own_input(source, self.n, Fp::new(v)))
+            .collect()
     }
 }
 
@@ -1773,13 +1812,13 @@ pub fn degree_reduce_through(
         // non-canonical re-sharing would silently drop or misplace a
         // contribution. Every re-sharing must be the full n-party sharing on
         // `x = 1..=n`, in order.
-        if sub.len() != n || sub.iter().enumerate().any(|(j, sh)| sh.x != j as u64 + 1) {
-            return Err(MpcError::Protocol(format!(
+        crate::randomness::require_canonical_sharing(&sub, n).map_err(|_| {
+            MpcError::Protocol(format!(
                 "degree_reduce: the randomness source returned a re-sharing that is not the \
                  canonical {n}-party sharing on x = 1..={n} ({} shares)",
                 sub.len()
-            )));
-        }
+            ))
+        })?;
         resharings.push(sub);
     }
 
@@ -2029,108 +2068,32 @@ mod tests {
         ));
     }
 
-    /// How [`MalformedResharingSource`] corrupts each own-input re-sharing.
-    #[derive(Clone, Copy, Debug)]
-    enum Malformation {
-        Short,
-        Long,
-        Permuted,
-        DuplicateX,
-        WrongX,
-    }
-
-    /// A source that delegates to a real dealer but corrupts the SHAPE of every
-    /// own-input re-sharing.
-    struct MalformedResharingSource {
-        inner: ShamirDealer,
-        how: Malformation,
-    }
-    impl DistributedRandomness for MalformedResharingSource {
-        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
-            self.inner.randomness_model()
-        }
-        fn parties(&self) -> usize {
-            DistributedRandomness::parties(&self.inner)
-        }
-        fn threshold(&self) -> usize {
-            DistributedRandomness::threshold(&self.inner)
-        }
-        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_mask()
-        }
-        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_nonzero_mask()
-        }
-        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
-            let mut sub = self.inner.vss_own_input(secret)?;
-            match self.how {
-                Malformation::Short => {
-                    sub.pop();
-                }
-                Malformation::Long => {
-                    let x = sub.len() as u64 + 1;
-                    sub.push(Share { x, y: Fp::zero() });
-                }
-                Malformation::Permuted => sub.swap(0, 1),
-                Malformation::DuplicateX => sub[1].x = sub[0].x,
-                Malformation::WrongX => sub[0].x = 0,
-            }
-            Ok(sub)
-        }
-    }
-
     #[test]
     fn degree_reduce_through_rejects_a_malformed_resharing() {
         // The accumulation pairs sub-shares with parties by position, so a malformed
-        // re-sharing (any shape below) must be refused by the re-sharing check.
-        for how in [
-            Malformation::Short,
-            Malformation::Long,
-            Malformation::Permuted,
-            Malformation::DuplicateX,
-            Malformation::WrongX,
-        ] {
-            let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
-            let mut dealer = b.dealer();
-            let prod =
-                mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
-            let mut source = MalformedResharingSource {
-                inner: b.dealer(),
-                how,
-            };
-            match degree_reduce_through(&mut source, &prod) {
-                Err(MpcError::Protocol(msg)) => assert!(
-                    msg.contains("re-sharing that is not the canonical"),
-                    "{how:?}: refused by the wrong check: {msg}"
-                ),
-                other => panic!("{how:?}: a malformed re-sharing must fail closed, got {other:?}"),
+        // re-sharing (any shape, at any of the 2t+1 recombination positions) must be
+        // refused by the re-sharing check. Each case corrupts exactly ONE re-sharing.
+        use crate::randomness::test_sources::{MalformedSource, SeamMethod, ALL_MALFORMATIONS};
+        for skip in 0..5 {
+            for how in ALL_MALFORMATIONS {
+                let b = ShamirBackend::new_seeded(5, 0xD7C).unwrap();
+                let mut dealer = b.dealer();
+                let prod =
+                    mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
+                let mut source =
+                    MalformedSource::new(b.dealer(), SeamMethod::VssOwnInput, skip, how);
+                match degree_reduce_through(&mut source, &prod) {
+                    Err(MpcError::Protocol(msg)) => assert!(
+                        msg.contains("re-sharing that is not the canonical"),
+                        "re-sharing {skip}, {how:?}: refused by the wrong check: {msg}"
+                    ),
+                    other => panic!(
+                        "re-sharing {skip}, {how:?}: a malformed re-sharing must fail closed, \
+                         got {other:?}"
+                    ),
+                }
+                assert!(source.fired(), "re-sharing {skip} was never drawn");
             }
-        }
-    }
-
-    /// A dealer-backed source that misreports its threshold.
-    struct MisreportedThresholdSource {
-        inner: ShamirDealer,
-        t: usize,
-    }
-    impl DistributedRandomness for MisreportedThresholdSource {
-        fn randomness_model(&self) -> crate::randomness::RandomnessModel {
-            self.inner.randomness_model()
-        }
-        fn parties(&self) -> usize {
-            DistributedRandomness::parties(&self.inner)
-        }
-        fn threshold(&self) -> usize {
-            self.t
-        }
-        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_mask()
-        }
-        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
-            self.inner.shared_nonzero_mask()
-        }
-        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
-            self.inner.vss_own_input(secret)
         }
     }
 
@@ -2150,7 +2113,7 @@ mod tests {
         let mut dealer = b.dealer();
         let prod = mul_shares_raw(&dealer.share(Fp::new(6)), &dealer.share(Fp::new(9))).unwrap();
         for t in [3, usize::MAX / 2 + 3, usize::MAX / 2, usize::MAX] {
-            let mut source = MisreportedThresholdSource {
+            let mut source = crate::randomness::test_sources::MisreportedThresholdSource {
                 inner: b.dealer(),
                 t,
             };
@@ -2951,5 +2914,255 @@ mod tests {
         let mut session = dealer.new_mac_session();
         assert!(session.mac_check_and_open(&[]).unwrap().is_empty());
         assert_eq!(session.sigma_opens_for_test(), 0);
+    }
+}
+
+#[cfg(test)]
+mod input_randomness_seam_tests {
+    //! Issue #6117 — `ShamirBackend`'s `share_private_input` /
+    //! `share_private_inputs` share each holder's own input through
+    //! [`DistributedRandomness::vss_own_input`] instead of the dealer's inherent
+    //! `share` / `share_batch`. These tests pin that the single-dealer simulation
+    //! draws exactly what it drew before the routing, that every drawn sharing is
+    //! shape-checked, that a mismatched source is refused, and that PRSS fails
+    //! closed wherever a holder's own input must be shared.
+    use super::*;
+    use crate::prss::PrssRandomness;
+    use crate::randomness::test_sources::{
+        fingerprint, MalformedSource, MisreportedThresholdSource, RecordingSource, SeamMethod,
+        ALL_MALFORMATIONS, SHAPE_REFUSAL,
+    };
+
+    const PFX: &str =
+        "@prefix ex: <http://ex/> . @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .\n";
+
+    /// The refusal [`require_source_matches`] raises (distinct from the
+    /// `degree_reduce` source-metadata wording).
+    const MISMATCH_REFUSAL: &str = "its sharings would not compose with the backend's";
+
+    fn ys(shares: &[Share]) -> Vec<u64> {
+        shares.iter().map(|s| s.y.value()).collect()
+    }
+
+    /// One holder with a single private salary.
+    fn alice() -> Holder {
+        Holder::from_rdf(
+            "alice",
+            &format!("{PFX} ex:alice ex:salary \"30000\"^^xsd:integer ."),
+            "turtle",
+        )
+        .unwrap()
+    }
+
+    /// One holder with a three-row private salary column, written out of order.
+    fn carol() -> Holder {
+        Holder::from_rdf(
+            "carol",
+            &format!(
+                "{PFX} ex:c1 ex:salary \"3000\"^^xsd:integer . \
+                 ex:c2 ex:salary \"1000\"^^xsd:integer . \
+                 ex:c3 ex:salary \"2000\"^^xsd:integer ."
+            ),
+            "turtle",
+        )
+        .unwrap()
+    }
+
+    const ALICE_SHARES: [u64; 5] = [
+        1606465044617305249,
+        1533016203182391891,
+        2085496484908983877,
+        958062880583387256,
+        456558399419295979,
+    ];
+
+    const CAROL_SHARES: [[u64; 5]; 3] = [
+        [
+            1922808052408219915,
+            1327709945659297389,
+            520548688966927373,
+            1807167291544803818,
+            575879734965538822,
+        ],
+        [
+            829040081727767092,
+            755772935678597082,
+            2086041571066185921,
+            208159969463145707,
+            2039657158510558293,
+        ],
+        [
+            6742955469608262,
+            2216350876204757014,
+            2017137743778061354,
+            1714946567403215233,
+            1309777347080218651,
+        ],
+    ];
+
+    /// Pinned from the PRE-ROUTING code (`dealer.share` / `dealer.share_batch`),
+    /// captured by logging every dealer draw on the unmodified code. The public
+    /// entry points pin the returned sharings; the `*_through` calls on an
+    /// explicit dealer add a WITNESS `draw_fp()` that pins how many draws the
+    /// sharing consumed (captured by replaying the logged draw sequence on a
+    /// fresh dealer from the same seed).
+    #[test]
+    fn seeded_private_inputs_draw_exactly_what_the_dealer_drew_before_the_seam() {
+        let b = ShamirBackend::new_seeded(5, 0x5A1A1).unwrap();
+        let single = b.share_private_input(&alice()).unwrap();
+        assert_eq!(single.len(), 1);
+        assert_eq!(ys(&single[0]), ALICE_SHARES);
+        assert_eq!(b.reconstruct(&single[0]).unwrap(), Fp::new(30_000));
+        let mut dealer = b.dealer();
+        let through = b
+            .share_private_input_through(&mut dealer, &alice())
+            .unwrap();
+        assert_eq!(through, single);
+        assert_eq!(dealer.draw_fp().value(), 1946019565462006310);
+
+        let b = ShamirBackend::new_seeded(5, 0x5A1A2).unwrap();
+        let batch = b
+            .share_private_inputs(&carol(), PRIVATE_SALARY_FRAGMENT)
+            .unwrap();
+        assert_eq!(
+            batch.iter().map(|s| ys(s)).collect::<Vec<_>>(),
+            CAROL_SHARES
+        );
+        let mut dealer = b.dealer();
+        let through = b
+            .share_private_inputs_through(&mut dealer, &carol(), PRIVATE_SALARY_FRAGMENT)
+            .unwrap();
+        assert_eq!(through, batch);
+        assert_eq!(dealer.draw_fp().value(), 96461686898578364);
+    }
+
+    /// The COMPLETE draw transcript — every seam call, in order, with every `y`
+    /// it returned — folded into the order-sensitive fingerprint. Captured on the
+    /// pre-routing code by mapping each logged `share` to a `vss_own_input`
+    /// entry. Re-ordering the rows' sharings changes it.
+    #[test]
+    fn seeded_private_input_transcripts_are_pinned() {
+        let b = ShamirBackend::new_seeded(5, 0x5A1A1).unwrap();
+        let mut rec = RecordingSource::new(b.dealer());
+        b.share_private_input_through(&mut rec, &alice()).unwrap();
+        assert_eq!(rec.log.len(), 1);
+        assert!(rec.log.iter().all(|(m, _)| *m == "vss_own_input"));
+        assert_eq!(fingerprint(&rec.log), 0x4e1b_bde1_ce5c_0f02);
+
+        let b = ShamirBackend::new_seeded(5, 0x5A1A2).unwrap();
+        let mut rec = RecordingSource::new(b.dealer());
+        b.share_private_inputs_through(&mut rec, &carol(), PRIVATE_SALARY_FRAGMENT)
+            .unwrap();
+        assert_eq!(rec.log.len(), 3);
+        assert!(rec.log.iter().all(|(m, _)| *m == "vss_own_input"));
+        assert_eq!(fingerprint(&rec.log), 0x21f0_fc40_e0c0_941c);
+    }
+
+    /// Every input sharing is shape-checked where it is consumed: corrupting
+    /// exactly ONE `vss_own_input` draw (the single input, or any one of the three
+    /// rows) must be refused by the shape check itself.
+    #[test]
+    fn malformed_input_sharings_are_refused_at_every_consumption_site() {
+        let b = ShamirBackend::new_seeded(5, 0x5A1A3).unwrap();
+        for how in ALL_MALFORMATIONS {
+            for (label, skip, batched) in [
+                ("single input", 0, false),
+                ("row 0", 0, true),
+                ("row 1", 1, true),
+                ("row 2", 2, true),
+            ] {
+                let mut src = MalformedSource::new(b.dealer(), SeamMethod::VssOwnInput, skip, how);
+                let outcome = if batched {
+                    b.share_private_inputs_through(&mut src, &carol(), PRIVATE_SALARY_FRAGMENT)
+                } else {
+                    b.share_private_input_through(&mut src, &alice())
+                };
+                match outcome {
+                    Err(MpcError::Protocol(m)) => {
+                        assert!(
+                            m.contains(SHAPE_REFUSAL),
+                            "{label}, {how:?}: wrong check: {m}"
+                        )
+                    }
+                    other => panic!("{label}, {how:?}: must fail closed, got {other:?}"),
+                }
+                assert!(src.fired(), "{label}: the targeted draw never happened");
+            }
+        }
+    }
+
+    /// A source whose `(n, t)` differs from the backend's is refused up front.
+    /// The misreported-threshold case is the load-bearing one: its sharings have
+    /// the canonical SHAPE, so only the source-match check can catch it.
+    #[test]
+    fn a_mismatched_source_is_refused_before_any_draw() {
+        let b = ShamirBackend::new_seeded(5, 0x5A1A4).unwrap();
+        for t in [0, 1, 3] {
+            for batched in [false, true] {
+                let mut src = MisreportedThresholdSource {
+                    inner: b.dealer(),
+                    t,
+                };
+                let outcome = if batched {
+                    b.share_private_inputs_through(&mut src, &carol(), PRIVATE_SALARY_FRAGMENT)
+                } else {
+                    b.share_private_input_through(&mut src, &alice())
+                };
+                match outcome {
+                    Err(MpcError::Protocol(m)) => assert!(
+                        m.contains(MISMATCH_REFUSAL),
+                        "t={t}, batched={batched}: wrong check: {m}"
+                    ),
+                    other => panic!("t={t}, batched={batched}: must fail closed, got {other:?}"),
+                }
+            }
+        }
+        // A source for a different party count is refused before it is drawn from.
+        let other = ShamirBackend::new_seeded(3, 0x5A1A4).unwrap();
+        for batched in [false, true] {
+            let mut rec = RecordingSource::new(other.dealer());
+            let outcome = if batched {
+                b.share_private_inputs_through(&mut rec, &carol(), PRIVATE_SALARY_FRAGMENT)
+            } else {
+                b.share_private_input_through(&mut rec, &alice())
+            };
+            assert!(
+                matches!(&outcome, Err(MpcError::Protocol(m)) if m.contains(MISMATCH_REFUSAL)),
+                "batched={batched}: got {outcome:?}"
+            );
+            assert!(
+                rec.log.is_empty(),
+                "batched={batched}: drew before refusing"
+            );
+        }
+    }
+
+    /// PRSS generates correlated randomness; it does not verifiably share a
+    /// holder's own input. Every non-empty input sharing must therefore fail
+    /// closed with PRSS's own `NotYetImplemented` — never an unverified sharing —
+    /// while an empty batch (no row to share) is the one draw-free shape.
+    #[test]
+    fn prss_fails_closed_on_private_input_sharing() {
+        let b = ShamirBackend::new(5).unwrap();
+        let mut prss = PrssRandomness::with_simulated_setup(5).unwrap();
+        assert!(matches!(
+            b.share_private_input_through(&mut prss, &alice()),
+            Err(MpcError::NotYetImplemented { .. })
+        ));
+        assert!(matches!(
+            b.share_private_inputs_through(&mut prss, &carol(), PRIVATE_SALARY_FRAGMENT),
+            Err(MpcError::NotYetImplemented { .. })
+        ));
+        let none = Holder::from_rdf(
+            "none",
+            &format!("{PFX} ex:n ex:name \"nobody\" ."),
+            "turtle",
+        )
+        .unwrap();
+        assert_eq!(
+            b.share_private_inputs_through(&mut prss, &none, PRIVATE_SALARY_FRAGMENT)
+                .unwrap(),
+            Vec::<ShareVec>::new()
+        );
     }
 }

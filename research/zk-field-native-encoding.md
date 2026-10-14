@@ -1182,18 +1182,36 @@ refuses that pairing structurally, and `verifier::prefilter_manifest_structure` 
 check per sub-proof. What that check decides, exactly: the `datatype_const` must decode to a
 constant a shipped lane derives FOR that member; its text must be the canonical rendering of
 that element; at the `ProofInputs` level the same canonicality rule covers `operand_enc` too,
-and the variant and the declared `id` must name the same member. That is the whole of it —
-no other variant's public inputs, and nothing inside a rendered `Prover.toml`, is checked for
-canonical spelling, and the SCALE a relying party expects is still not pinned anywhere here.
-Separately, V1 is no longer selectable for new issuance, so every fresh-V1 entry point — the
-registry entry, the whole-graph V1 commit builders, the V1 boolean FILTER builder, the
-method-checked prove entry and the `(method, circuit)` resolver — fails closed unless the
-caller writes down `MethodUse::LegacyAlreadyIssued` for an already-issued commitment. Two
-honest limits on that flag: it is a CALLER ASSERTION (nothing reads a signature, entry or
-timestamp to confirm issuance history), and under it the METHOD version and the CONSTANT
-version are not cross-checked — a V2 method presented with a V1 lane constant is accepted.
-Nor does any of this retire a recorded V1 selection: `zk:scheme` is a plain recorded field
-that this estate neither freezes nor signs.
+and the variant and the declared `id` must name the same member, with the member derived from
+the variant by the one function the verifier's id derivation also uses
+(`value_lane::derive_value_lane_member`). Every value-lane `Prover.toml` renderer checks the
+canonical spelling of every field element it writes with the same decoder. The SCALE a
+relying party expects is still not pinned anywhere here.
+
+The prove side has one checked entry, `CircuitProver::prove_value_lane`. It takes a typed
+`value_lane::ValueLaneProof` (one variant per lane) rather than a circuit id and caller TOML:
+the member is derived from the lane, and the `Prover.toml` is rendered inside the entry after
+the `(method, member, use)` dispatch, the canonical check of every written field, the
+lane↔member allow-list and a method/constant version agreement (a `DualLeafV1` method needs a
+V1 constant, a `DualLeafV2` method a V2 one). The raw `CircuitProver::{prove, prove_in,
+gen_witness*}` entries stay ungated and are documented as such.
+
+V1 is no longer selectable for new issuance. The gated fresh-V1 entry points — the
+whole-graph V1 commit builders, the checked prove entry and the `(method, circuit)` resolver —
+fail closed unless the caller writes down `MethodUse::LegacyAlreadyIssued` for an
+already-issued commitment. The registry takes no `MethodUse`: its issuance constructors
+(`new_for_issuance`, `issued`, `issued_with_status`) refuse a non-selectable method outright,
+and an already-issued method is recorded only through the separately named
+`new_already_issued`. The V1 value-lane builders, renderers and constants are reachable only
+by name under `legacy_v1`, while the ordinary names produce V2 only. Two honest limits: the
+flag and the legacy names are CALLER ASSERTIONS (nothing reads a signature, entry or
+timestamp to confirm issuance history), and the version agreement is enforced by the checked
+prove entry, not by `check_lane_member_pairing_for_use` on its own. Nor does any of this
+retire a recorded V1 selection; it does make the selection tamper-evident: the registry's
+`scheme` is set only at construction, and the issuer signature covers the recorded method for
+every method (the signed message binds the scheme IRI), so an entry whose `zk:scheme`
+changed after signing fails verification. A registry signature over the earlier
+method-independent message does not verify.
 
 **PRECONDITION on (a)–(d), stated plainly.** All of it is HOST-side. The value-lane verifier
 gates (`verifier.rs`'s stage-2 binding edges and `filter_edge_true`) stay CLOSED until the
