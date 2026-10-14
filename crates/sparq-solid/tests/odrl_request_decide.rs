@@ -1339,13 +1339,15 @@ fn a_rejected_acl_withholds_every_grant_source_from_what_it_governs() {
         let pol_acl =
             policy("permission", "read", "", Some(UNSEEN), Some(&n2_acl)).expect("policy");
         let bridged_acl = Request::new(format!("{ODRL}read")).on(&n2_acl).by(UNSEEN);
-        let out = s.materialize_odrl_permission(&pol_acl, &bridged_acl);
-        if out.granted {
-            assert!(
-                usable || !s.decide(&dave, &n2_acl, Mode::Read).allow,
-                "{label}: a grant on n2's access-control document"
-            );
-        }
+        assert!(
+            s.materialize_odrl_permission(&pol_acl, &bridged_acl).granted,
+            "{label}: the bridge installs the grant"
+        );
+        assert_eq!(
+            s.decide(&dave, &n2_acl, Mode::Read).allow,
+            usable,
+            "{label}: the bridged grant on n2's access-control document"
+        );
         assert!(reads(&s, &session(Some(ALICE), None), N1), "{label}: n1 is still governed by its ACL");
     }
 }
