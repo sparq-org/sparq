@@ -811,9 +811,9 @@ cargo build -p sparq-cli --features serialize-rdf
   **toRdf** through the `jsonld` parser (oxjsonld), and **fromRdf**, **expand**, **flatten**,
   **compact** + **frame** through the **native `sparq-jsonld` document pipeline**
   (`sparq_jsonld::from_rdf()` sq-oy1f.28 / `expand()` sq-kk1mq / `flatten()` sq-oy1f.26 /
-  `compact::compact()` sq-oy1f.27 / `frame::frame()` sq-oy1f.29). **toRdf** is compared by a
-  re-parse RDF-dataset round-trip against the INPUT (`reparse(out) ≡ in`, the oxjsonld
-  self-reparse oracle); the five native lanes are compared **document-to-document**
+  `compact::compact()` sq-oy1f.27 / `frame::frame()` sq-oy1f.29). **toRdf** compares the parsed
+  dataset against the suite's NORMATIVE expected N-Quads by canonical RDF-dataset equality
+  (a negative case passes when the parse fails); the five native lanes are compared **document-to-document**
   against the suite's NORMATIVE expected output via the `json_ld_equal` comparator (key order
   insignificant; array order significant only inside `@list` and a `@json` payload) — these
   are JSON-LD normal forms / a SELECT+RESHAPE (they drop/merge/prune/fill), so the oracle anchors on
