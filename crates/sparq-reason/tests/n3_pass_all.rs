@@ -268,14 +268,16 @@ fn a_for_all_universal_gets_one_name_across_facts_and_rules() {
 }
 
 /// GH #6701 review round 4 (1): a formula re-created from TEXT by `log:parsedAsN3` holds
-/// the parser's own `__ua.<iri>` universal. The pass-all output must hold that same term,
-/// or re-reasoning flips `log:notEqualTo` and derives `:bad`.
+/// the parsed formula's own universal (`__uf.0.<iri>`, GH #6851 review), the same term as
+/// the inline `{ @forAll :x. … }`. The pass-all output must hold that same term, or
+/// re-reasoning flips `log:notEqualTo` and derives `:bad`.
 #[test]
 fn a_universal_compares_equal_to_one_parsed_from_a_literal_after_a_round_trip() {
     let src = r#"@prefix : <http://ex/>.
 @prefix log: <http://www.w3.org/2000/10/swap/log#>.
 @forAll :x.
-:a :p { :x :q :z }.
+:a :p { @forAll :x. :x :q :z }.
+:b :p { :x :q :z }.
 {
   :a :p ?f.
   "@prefix : <http://ex/>. @forAll :x. :x :q :z." log:parsedAsN3 ?g.

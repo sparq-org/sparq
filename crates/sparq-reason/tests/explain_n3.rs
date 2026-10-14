@@ -214,18 +214,25 @@ fn id_level_bridge_from_reason_n3_proof() {
 /// local name — that wrote `{ :x :q ?x }` as `{ ?x :q ?x }`, a formula requiring the two to
 /// be equal. The display has no document line to declare it under, so it spells the
 /// universal as a plain variable that differs from every variable of the fact (`?x_2`);
-/// the KEY carries the universal itself. Declared at document level or in the formula, it
-/// is the same one variable (GH #6754), so both read the same.
+/// the KEY carries the universal itself. A formula-level declaration binds in its formula
+/// (GH #6754), so the display declares it there, exactly as written.
 #[test]
 fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
     // The variable predicate keeps the graph on the fallback path, whose `why` re-derives
     // through the batch engine (the counting path does not currently derive through a
     // formula that carries a variable — a separate issue).
-    for src in [
-        "@prefix : <http://ex/>. :a :p { @forAll :x. :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n",
-        "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n",
+    for (src, formula, key) in [
+        (
+            "@prefix : <http://ex/>. :a :p { @forAll :x. :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n",
+            "{ @forAll <http://ex/x> . <http://ex/x> <http://ex/q> ?x . }",
+            "__uf.0.http://ex/x",
+        ),
+        (
+            "@prefix : <http://ex/>. @forAll :x. :a :p { :x :q ?x }.\n{ :a ?p ?f } => { :b :r ?f }.\n",
+            "{ ?x_2 <http://ex/q> ?x . }",
+            "__ua.http://ex/x",
+        ),
     ] {
-        let formula = "{ ?x_2 <http://ex/q> ?x . }";
         let closure = reason_n3_terms(src, None).expect("oracle").facts;
         let asserted = closure.iter().find(|f| f[0] == ex("a")).expect("the asserted formula fact");
         let derived = closure.iter().find(|f| f[0] == ex("b")).expect("the derived fact");
@@ -234,7 +241,7 @@ fn why_keeps_a_for_all_universal_distinct_from_a_source_variable() {
 
         let proof = g.why(asserted).expect("asserted fact explains");
         assert_eq!(proof.conclusion()[2], formula, "{}", proof.to_text());
-        assert!(proof.nodes()[0].key[2].contains("__ua.http://ex/x"), "{:?}", proof.nodes()[0].key);
+        assert!(proof.nodes()[0].key[2].contains(key), "{:?}", proof.nodes()[0].key);
 
         let proof = g.why(derived).expect("derived fact explains");
         let nodes = proof.nodes();
