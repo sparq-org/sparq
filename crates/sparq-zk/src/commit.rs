@@ -183,6 +183,28 @@ impl CommitmentMethod {
         }
     }
 
+    /// The CHECKED new-issuance boundary: `Ok(self)` when
+    /// [`Self::is_production_selectable`] holds, otherwise
+    /// [`MethodNotSelectable`].
+    ///
+    /// `is_production_selectable` only REPORTS the posture, so a caller can ignore
+    /// it; this turns the same rule into a refusal an issuance path cannot skip by
+    /// accident. It gates NEW issuance ONLY: decoding, verification and reading a
+    /// recorded method (`from_scheme_iri`, [`crate::registry::RegistryEntry::method`],
+    /// the `(method x circuit)` dispatch matrix) are deliberately NOT gated, so an
+    /// already-issued `DualLeafV1` or `value-only` graph keeps verifying.
+    ///
+    /// Honest scope, unchanged: passing this check means the method is not a
+    /// research-only dial and not superseded. It asserts NO cryptographic property
+    /// — the estate is NOT externally audited (CR-G8 / sq-qhy4).
+    pub const fn checked_for_issuance(self) -> Result<Self, MethodNotSelectable> {
+        if self.is_production_selectable() {
+            Ok(self)
+        } else {
+            Err(MethodNotSelectable { method: self })
+        }
+    }
+
     /// Whether this method removes the in-circuit INV-VL invariant (value =
     /// parse(committed lexical)) for the value-FILTER lane — i.e. whether
     /// value<->lexical agreement rests on trusted-issuer honesty rather than a
@@ -199,6 +221,44 @@ impl CommitmentMethod {
         }
     }
 }
+
+/// A [`CommitmentMethod`] that is NOT selectable for new issuance, returned by
+/// [`CommitmentMethod::checked_for_issuance`] and
+/// [`crate::registry::RegistryEntry::with_issuance_method`].
+///
+/// It carries the refused method, so a caller can report the recorded
+/// `zk:scheme` IRI it would have written. A method is refused because it is a
+/// research-only dial (`value-only`) or because it is SUPERSEDED (`dual-leaf`
+/// v1); neither refusal is a statement about the method's audited security.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MethodNotSelectable {
+    method: CommitmentMethod,
+}
+
+impl MethodNotSelectable {
+    /// The refused method.
+    pub const fn method(&self) -> CommitmentMethod {
+        self.method
+    }
+
+    /// The refused method's `zk:scheme` IRI — what an issuance path would have
+    /// recorded.
+    pub fn scheme_iri(&self) -> &'static str {
+        self.method.scheme_iri()
+    }
+}
+
+impl std::fmt::Display for MethodNotSelectable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "commitment method {} is not selectable for new issuance (superseded or a research-only dial); it stays recognised and verifiable for already-issued graphs",
+            self.method.scheme_iri()
+        )
+    }
+}
+
+impl std::error::Error for MethodNotSelectable {}
 
 impl Default for CommitmentMethod {
     fn default() -> Self {
@@ -445,6 +505,45 @@ mod tests {
             CommitmentMethod::DualLeafV1.scheme_iri(),
             "https://sparq.dev/ns/zk#poseidon2-dualleaf-v1"
         );
+    }
+
+    /// The CHECKED boundary, not merely the advisory report: every
+    /// non-selectable method is an `Err` from `checked_for_issuance`, every
+    /// selectable one round-trips, and the error names the scheme IRI it refused
+    /// to record.
+    #[test]
+    fn checked_for_issuance_refuses_every_non_selectable_method() {
+        let mut selectable = 0;
+        let mut refused = 0;
+        for m in commitment_methods_in_build() {
+            match m.checked_for_issuance() {
+                Ok(got) => {
+                    assert!(m.is_production_selectable(), "{:?} passed the check", m);
+                    assert_eq!(got, m, "the check must pass the method through unchanged");
+                    selectable += 1;
+                }
+                Err(e) => {
+                    assert!(!m.is_production_selectable(), "{:?} was refused", m);
+                    assert_eq!(e.method(), m);
+                    assert_eq!(e.scheme_iri(), m.scheme_iri());
+                    assert!(
+                        e.to_string().contains(m.scheme_iri()),
+                        "the error must name the refused scheme IRI: {}",
+                        e
+                    );
+                    refused += 1;
+                }
+            }
+        }
+        // Both arms are exercised in every feature state: string-canonical and V2
+        // pass, V1 is refused.
+        assert!(selectable >= 2, "expected string-canonical and V2 to pass");
+        assert!(refused >= 1, "expected at least the superseded V1 to be refused");
+        assert!(CommitmentMethod::DualLeafV2.checked_for_issuance().is_ok());
+        assert!(CommitmentMethod::DualLeafV1.checked_for_issuance().is_err());
+        assert!(CommitmentMethod::StringCanonicalV1
+            .checked_for_issuance()
+            .is_ok());
     }
 
     // value-only is the research dial: gated OFF by default. With the feature ON it
