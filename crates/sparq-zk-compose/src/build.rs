@@ -510,12 +510,24 @@ pub struct BuiltFilterValueDlBoolean {
 /// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
 /// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
 // sq-5xdlk: boolean value-lane host wiring. Opt-in, NOT-yet-sound.
+///
+/// `use_` is the CHECKED method boundary: this builder builds a `DualLeafV1`
+/// proof, and V1 is SUPERSEDED, so
+/// [`sparq_zk::commit::MethodUse::NewIssuance`] is REFUSED with
+/// [`BuildValueDlV1Error::MethodNotSelectable`]. Building a proof over an
+/// ALREADY-ISSUED V1 graph passes
+/// [`sparq_zk::commit::MethodUse::LegacyAlreadyIssued`] and is accepted. A new
+/// boolean-lane proof uses [`build_filter_value_dl_bool`] (the V2 member).
 #[cfg(feature = "dual-leaf")]
 pub fn build_filter_value_dl_boolean(
     literal: &oxrdf::Literal,
     op: FilterOp,
     bound: bool,
-) -> Result<BuiltFilterValueDlBoolean, sparq_zk::dual_leaf::DualLeafError> {
+    use_: sparq_zk::commit::MethodUse,
+) -> Result<BuiltFilterValueDlBoolean, BuildValueDlV1Error> {
+    sparq_zk::commit::CommitmentMethod::DualLeafV1
+        .checked_for(use_)
+        .map_err(BuildValueDlV1Error::MethodNotSelectable)?;
     let components = sparq_zk::dual_leaf_boolean::encode_boolean(literal)?;
     // The encoder maps ONLY the canonical lexicals, so the hook is exactly {0, 1}.
     let value = components.value_hook != Fr::from(0u64);
@@ -532,6 +544,40 @@ pub fn build_filter_value_dl_boolean(
         lexical_component: hexf(&components.lexical_component),
     })
 }
+
+/// Why a `DualLeafV1` value-lane builder refused.
+///
+/// Two independent reasons, kept apart so a caller can tell a LITERAL it cannot
+/// encode from a METHOD it may not select for a new proof.
+#[cfg(feature = "dual-leaf")]
+#[derive(Debug, PartialEq, Eq)]
+pub enum BuildValueDlV1Error {
+    /// `DualLeafV1` is superseded and not selectable for new issuance, and the
+    /// caller asked for `MethodUse::NewIssuance`.
+    MethodNotSelectable(sparq_zk::commit::MethodNotSelectable),
+    /// The host encoder refused the literal (the §6 fail-closed co-binding).
+    Encode(sparq_zk::dual_leaf::DualLeafError),
+}
+
+#[cfg(feature = "dual-leaf")]
+impl From<sparq_zk::dual_leaf::DualLeafError> for BuildValueDlV1Error {
+    fn from(e: sparq_zk::dual_leaf::DualLeafError) -> Self {
+        BuildValueDlV1Error::Encode(e)
+    }
+}
+
+#[cfg(feature = "dual-leaf")]
+impl std::fmt::Display for BuildValueDlV1Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BuildValueDlV1Error::MethodNotSelectable(e) => write!(f, "{}", e),
+            BuildValueDlV1Error::Encode(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+#[cfg(feature = "dual-leaf")]
+impl std::error::Error for BuildValueDlV1Error {}
 
 /// A built `DualLeafV2` BIT-DOMAIN `xsd:boolean` value-lane FILTER: the public
 /// [`ProofInputs`] plus the member's two PRIVATE field witnesses.

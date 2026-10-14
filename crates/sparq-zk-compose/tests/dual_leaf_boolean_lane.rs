@@ -45,7 +45,8 @@ use sparq_zk::dual_leaf_boolean::{encode_boolean, XSD_BOOLEAN};
 use sparq_zk::encode::TYPE_CODE_LITERAL;
 use sparq_zk::field::{field_from_hash_bytes, field_from_hex_str, field_to_hex, Fr};
 use sparq_zk::poseidon2;
-use sparq_zk_compose::build::{boolean_verdict, build_filter_value_dl_boolean};
+use sparq_zk::commit::MethodUse;
+use sparq_zk_compose::build::{boolean_verdict, build_filter_value_dl_boolean, BuildValueDlV1Error};
 use sparq_zk_compose::dispatch::{resolve_circuit, DispatchError};
 use sparq_zk_compose::manifest::{
     boolean_datatype_const, CircuitId, FieldHex, FilterOp, ProofInputs,
@@ -148,7 +149,7 @@ fn encode_boolean_witnesses_rebind_to_the_committed_operand_enc() {
     for value in [false, true] {
         let lit = bool_lit(value);
         let committed = encode_boolean(&lit).unwrap();
-        let built = build_filter_value_dl_boolean(&lit, FilterOp::Eq, true).unwrap();
+        let built = build_filter_value_dl_boolean(&lit, FilterOp::Eq, true, MethodUse::LegacyAlreadyIssued).unwrap();
         let p = unpack(&built.inputs);
         let (id, operand_enc, dt) = (p.id, p.operand_enc, p.datatype_const);
 
@@ -371,7 +372,7 @@ fn boolean_verdict_is_the_integer_relation_over_the_hooks() {
 #[test]
 fn builder_discloses_the_honest_verdict_for_every_op() {
     for (value, op, bound, expected) in VERDICTS {
-        let built = build_filter_value_dl_boolean(&bool_lit(value), op, bound).unwrap();
+        let built = build_filter_value_dl_boolean(&bool_lit(value), op, bound, MethodUse::LegacyAlreadyIssued).unwrap();
         let p = unpack(&built.inputs);
         let (got_op, got_bound, dt, got_expected) =
             (p.op, p.bound, p.datatype_const, p.expected);
@@ -393,17 +394,17 @@ fn builder_discloses_the_honest_verdict_for_every_op() {
 fn non_canonical_and_non_boolean_literals_are_fail_closed_at_the_builder() {
     for lex in ["1", "0", "True", " true"] {
         assert!(matches!(
-            build_filter_value_dl_boolean(&typed(lex, XSD_BOOLEAN), FilterOp::Eq, true),
-            Err(DualLeafError::NonCanonicalValue(_)),
+            build_filter_value_dl_boolean(&typed(lex, XSD_BOOLEAN), FilterOp::Eq, true, MethodUse::LegacyAlreadyIssued),
+            Err(BuildValueDlV1Error::Encode(DualLeafError::NonCanonicalValue(_))),
         ));
     }
     assert!(matches!(
-        build_filter_value_dl_boolean(&typed("1", XSD_INTEGER), FilterOp::Eq, true),
-        Err(DualLeafError::NotValueLane(_)),
+        build_filter_value_dl_boolean(&typed("1", XSD_INTEGER), FilterOp::Eq, true, MethodUse::LegacyAlreadyIssued),
+        Err(BuildValueDlV1Error::Encode(DualLeafError::NotValueLane(_))),
     ));
     assert!(matches!(
-        build_filter_value_dl_boolean(&Literal::new_simple_literal("true"), FilterOp::Eq, true),
-        Err(DualLeafError::NotValueLane(_)),
+        build_filter_value_dl_boolean(&Literal::new_simple_literal("true"), FilterOp::Eq, true, MethodUse::LegacyAlreadyIssued),
+        Err(BuildValueDlV1Error::Encode(DualLeafError::NotValueLane(_))),
     ));
 }
 
@@ -412,7 +413,7 @@ fn non_canonical_and_non_boolean_literals_are_fail_closed_at_the_builder() {
 /// (which committed no value handle) still refuses it.
 #[test]
 fn boolean_lane_inherits_the_value_lane_dispatch_legality() {
-    let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Eq, true).unwrap();
+    let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Eq, true, MethodUse::LegacyAlreadyIssued).unwrap();
     let id = unpack(&built.inputs).id.clone();
     assert_eq!(resolve_circuit(CommitmentMethod::DualLeafV1, &id), Ok(id.clone()));
     assert!(matches!(
@@ -430,7 +431,7 @@ fn boolean_lane_inherits_the_value_lane_dispatch_legality() {
 /// when handed those values — the layout cannot drift from the shared `main`.
 #[test]
 fn boolean_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
-    let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Ge, false).unwrap();
+    let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Ge, false, MethodUse::LegacyAlreadyIssued).unwrap();
     let p = unpack(&built.inputs);
     let (operand_enc, op, bound, dt, expected) =
         (p.operand_enc, p.op, p.bound, p.datatype_const, p.expected);
@@ -487,7 +488,7 @@ fn boolean_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
 /// `bound = true` renders the hook `1` (the other half of the `{0,1}` mapping).
 #[test]
 fn boolean_prover_toml_renders_the_true_bound_hook() {
-    let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Eq, true).unwrap();
+    let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Eq, true, MethodUse::LegacyAlreadyIssued).unwrap();
     let p = unpack(&built.inputs);
     let (operand_enc, op, expected) = (p.operand_enc, p.op, p.expected);
     let toml = filter_value_dl_boolean_prover_toml(
@@ -506,7 +507,7 @@ fn boolean_prover_toml_renders_the_true_bound_hook() {
 /// boolean lane introduces no new wire tag — that is the point of the reuse).
 #[test]
 fn boolean_lane_inputs_round_trip_on_the_shared_wire_tag() {
-    let built = build_filter_value_dl_boolean(&bool_lit(false), FilterOp::Ne, true).unwrap();
+    let built = build_filter_value_dl_boolean(&bool_lit(false), FilterOp::Ne, true, MethodUse::LegacyAlreadyIssued).unwrap();
     let json = serde_json::to_string(&built.inputs).unwrap();
     assert!(json.contains("\"circuit\":\"filter_value_dl\""));
     assert!(json.contains(&boolean_datatype_const().0));
@@ -565,7 +566,7 @@ fn in_circuit_boolean_lane_accepts_honest_and_rejects_lies() {
         eprintln!("nargo absent; skipping sq-5xdlk in-circuit boolean-lane vectors");
         return;
     }
-    let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Gt, false).unwrap();
+    let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Gt, false, MethodUse::LegacyAlreadyIssued).unwrap();
     let p = unpack(&built.inputs);
     let (operand_enc, op, bound, dt, expected) =
         (p.operand_enc, p.op, p.bound, p.datatype_const, p.expected);

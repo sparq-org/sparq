@@ -38,8 +38,8 @@
 //! with no value handle; no identity op at a value member); it asserts NO
 //! cryptographic soundness or privacy property.
 
-use crate::manifest::CircuitId;
-use sparq_zk::commit::CommitmentMethod;
+use crate::manifest::{CircuitId, ProofInputs};
+use sparq_zk::commit::{CommitmentMethod, MethodNotSelectable, MethodUse};
 
 /// Why a `(method, circuit)` pair was rejected. Every variant is a FAIL-CLOSED
 /// refusal — the resolver never falls through to a default circuit.
@@ -62,6 +62,19 @@ pub enum DispatchError {
     /// (the `value-only` IRI when its feature is OFF, or a bogus IRI). Rejected,
     /// never defaulted (the closed-enum, fail-closed discipline).
     UnknownMethod { method_iri: String },
+    /// A NEW proof was being routed under a method that is not selectable for new
+    /// issuance (a superseded version or a research-only dial). Re-verifying an
+    /// ALREADY-ISSUED proof is a different use and passes
+    /// [`MethodUse::LegacyAlreadyIssued`], which this resolver accepts — so this
+    /// variant is only ever raised on the ISSUANCE side.
+    MethodNotSelectableForIssuance { method_iri: String, circuit: String },
+    /// A `ProofInputs` paired a lane constant with a member that is not that
+    /// lane's: the `DualLeafV2` `xsd:boolean` lane constant presented on the
+    /// shared integer member [`CircuitId::FilterValueDl`], whose relation
+    /// range-decomposes its handle to the whole `u64` domain instead of
+    /// constraining it to `{0, 1}`. The V2 boolean lane may only pair with
+    /// [`CircuitId::FilterValueDlBool`].
+    LaneMemberMismatch { circuit: String, lane: String },
 }
 
 impl std::fmt::Display for DispatchError {
@@ -79,6 +92,19 @@ impl std::fmt::Display for DispatchError {
                  is many-to-one on the term, so identity ops MUST read the lexical \
                  component (reject-list (v), fail-closed)",
                 circuit
+            ),
+            DispatchError::MethodNotSelectableForIssuance { method_iri, circuit } => write!(
+                f,
+                "commitment method {} is not selectable for new issuance, so circuit {} \
+                 cannot be routed for a NEW proof under it; re-verifying an already-issued \
+                 proof passes MethodUse::LegacyAlreadyIssued (fail-closed dispatch matrix)",
+                method_iri, circuit
+            ),
+            DispatchError::LaneMemberMismatch { circuit, lane } => write!(
+                f,
+                "lane/member mismatch: the {} lane constant was presented on circuit {}, \
+                 which is not that lane's member (fail-closed dispatch matrix)",
+                lane, circuit
             ),
             DispatchError::UnknownMethod { method_iri } => write!(
                 f,
@@ -172,6 +198,12 @@ fn value_lane_legal(method: CommitmentMethod) -> bool {
 ///
 /// It NEVER returns a circuit for an illegal pair and NEVER defaults — an
 /// unsupported combination is an error, not a silent mis-dispatch.
+///
+/// This entry is the VERIFICATION / legacy view: it asks only whether the leaf
+/// shape admits the member, so an already-issued graph under a superseded method
+/// keeps resolving. A path building a NEW proof calls
+/// [`resolve_circuit_for_use`] with [`MethodUse::NewIssuance`] instead, which
+/// adds the method-selectability refusal.
 pub fn resolve_circuit(
     method: CommitmentMethod,
     id: &CircuitId,
@@ -198,6 +230,65 @@ pub fn resolve_circuit(
             circuit: id.package(),
         })
     }
+}
+
+/// [`resolve_circuit`] with the method-selectability axis made explicit.
+///
+/// `MethodUse::LegacyAlreadyIssued` is exactly [`resolve_circuit`].
+/// `MethodUse::NewIssuance` additionally refuses a method that is not selectable
+/// for new issuance with [`DispatchError::MethodNotSelectableForIssuance`] — so a
+/// path that routes a FRESH proof cannot pick up a superseded method by accident,
+/// while re-verification keeps working.
+pub fn resolve_circuit_for_use(
+    method: CommitmentMethod,
+    id: &CircuitId,
+    use_: MethodUse,
+) -> Result<CircuitId, DispatchError> {
+    if let Err(e) = method.checked_for(use_) {
+        return Err(not_selectable(&e, id));
+    }
+    resolve_circuit(method, id)
+}
+
+fn not_selectable(e: &MethodNotSelectable, id: &CircuitId) -> DispatchError {
+    DispatchError::MethodNotSelectableForIssuance {
+        method_iri: e.scheme_iri().to_string(),
+        circuit: id.package(),
+    }
+}
+
+/// The LANE↔MEMBER pairing check over built public inputs.
+///
+/// The `DualLeafV2` `xsd:boolean` lane has its OWN member
+/// ([`CircuitId::FilterValueDlBool`]), whose relation constrains the witnessed
+/// handle and the public bound to `{0, 1}`. The shared integer member
+/// [`CircuitId::FilterValueDl`] range-decomposes its handle to the WHOLE `u64`
+/// domain, so presenting the V2 boolean lane constant there would answer a
+/// boolean FILTER under the integer relation. `datatype_const` is a public input
+/// the member itself does not pin to a lane, so the pairing is refused HERE, with
+/// [`DispatchError::LaneMemberMismatch`], before such inputs can be rendered or
+/// proved.
+///
+/// Every other `ProofInputs` variant is accepted unchanged: this check adds one
+/// refusal, it does not re-state the dispatch matrix.
+///
+/// PRECONDITION, stated plainly: this is a HOST-side boundary on what this crate
+/// builds and proves. The value-lane verifier gates (`verifier.rs`'s stage-2
+/// binding edges and `filter_edge_true`) stay closed until the verifier
+/// authenticates the commitment method and pins member, lane, scale and bound
+/// itself; a check here does not make a V2 value-lane proof verifier-enforced.
+pub fn check_lane_member_pairing(inputs: &ProofInputs) -> Result<(), DispatchError> {
+    #[cfg(feature = "dual-leaf")]
+    if let ProofInputs::FilterValueDl { id, datatype_const, .. } = inputs {
+        if *datatype_const == crate::manifest::boolean_lane_const_v2() {
+            return Err(DispatchError::LaneMemberMismatch {
+                circuit: id.package(),
+                lane: "dual-leaf v2 xsd:boolean".to_string(),
+            });
+        }
+    }
+    let _ = inputs;
+    Ok(())
 }
 
 /// Fail-closed resolution from a recorded `zk:scheme` IRI (rather than a parsed

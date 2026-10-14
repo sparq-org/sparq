@@ -1463,6 +1463,15 @@ pub enum CheckError {
     /// `CircuitId.k` bits (no default/pad-to-false). `expected` = k.
     // codex 2221 MEDIUM: attribution must be present + exactly k bits.
     AttributionMalformed { proof: usize, expected: usize, got: usize },
+    /// A value-lane sub-proof paired a lane constant with a member that is not
+    /// that lane's — the `DualLeafV2` `xsd:boolean` lane constant presented on the
+    /// shared integer member, whose relation range-decomposes its handle to the
+    /// whole `u64` domain instead of constraining it to `{0, 1}`. Refused here
+    /// because `datatype_const` is a public input no member pins to a lane. The
+    /// refusal is `crate::dispatch::check_lane_member_pairing`'s, raised per
+    /// sub-proof.
+    #[cfg(feature = "dual-leaf")]
+    LaneMemberMismatch { proof: usize, reason: String },
     /// A scan sub-proof's per-graph `commitments` are NOT strictly increasing on
     /// the field representative (plan S2.5): two adjacent commitments
     /// are equal or out of order. `scan_check` step 1b enforces
@@ -2070,6 +2079,11 @@ impl std::fmt::Display for CheckError {
                 f,
                 "scan sub-proof {proof}: attribution must be present and exactly {expected} bits (CircuitId.k), got {got} (audit #8 / codex 2221 MEDIUM: an omitted/short attribution makes the cross-graph under-declaration check vacuous)"
             ),
+            #[cfg(feature = "dual-leaf")]
+            CheckError::LaneMemberMismatch { proof, reason } => write!(
+                f,
+                "sub-proof {proof}: {reason}"
+            ),
             CheckError::ScanCommitmentsNotStrictlyIncreasing { proof, at } => write!(
                 f,
                 "scan sub-proof {proof}: per-graph commitments are not strictly increasing at index {at} (commitments[{at}] <= commitments[{at_prev}]) (plan S2.5 / sq-vxq8: distinct-graph strict ordering — a duplicate or out-of-order commitment is the duplicate-inclusion / COUNT forgery, e.g. the same credential included twice to claim 'I hold >=2 tickets')",
@@ -2631,6 +2645,18 @@ fn prefilter_manifest_structure_impl(
     revocation_policy: &RevocationPolicy,
     skip_query_binding: bool,
 ) -> Result<Vec<JoinEdge>, CheckError> {
+    // --- Stage 0: the LANE<->MEMBER pairing, before any other reading of the
+    // sub-proofs. A lane constant may only ride the member that constrains that
+    // lane's handle domain; `datatype_const` is a public input no member pins, so
+    // a `DualLeafV2` boolean lane constant presented on the shared integer member
+    // (whose relation range-decomposes the handle over the whole `u64` domain) is
+    // refused here rather than answered under the integer relation. ---
+    #[cfg(feature = "dual-leaf")]
+    for (i, sp) in manifest.sub_proofs.iter().enumerate() {
+        crate::dispatch::check_lane_member_pairing(&sp.inputs)
+            .map_err(|e| CheckError::LaneMemberMismatch { proof: i, reason: e.to_string() })?;
+    }
+
     // --- Stage 1a: query-fragment gate + (flat stage-1 only) cross-graph
     // obligations. ---
     let required = if skip_query_binding {

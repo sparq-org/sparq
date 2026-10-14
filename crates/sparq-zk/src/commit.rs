@@ -93,7 +93,9 @@ pub enum CommitmentMethod {
     /// dual-leaf scheme — value-lane constants derived in BLAKE3's
     /// key-derivation mode over length-framed `(datatype, params)`, a no-value
     /// sentinel asserted outside the reachable value-handle band (the
-    /// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement),
+    /// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement, on
+    /// the HOST side — no Noir global or assert names that sentinel yet, so the
+    /// in-circuit half of the requirement stays open),
     /// and a bit-domain boolean member. The dual-leaf method a NEW issuance
     /// selects ([`Self::is_production_selectable`] is `true` only for this one,
     /// of the two dual-leaf versions). It carries exactly the same INV-VL
@@ -205,6 +207,22 @@ impl CommitmentMethod {
         }
     }
 
+    /// The same boundary, parameterised by WHY the method is being selected
+    /// ([`MethodUse`]): `MethodUse::NewIssuance` is
+    /// [`Self::checked_for_issuance`], and `MethodUse::LegacyAlreadyIssued` is
+    /// the EXPLICIT opt-in a caller makes when it re-derives or re-verifies an
+    /// ALREADY-ISSUED commitment under a superseded method, which accepts every
+    /// recognised method.
+    ///
+    /// The point of the parameter is that legacy acceptance has to be WRITTEN
+    /// DOWN at the call site instead of being the silent default.
+    pub const fn checked_for(self, use_: MethodUse) -> Result<Self, MethodNotSelectable> {
+        match use_ {
+            MethodUse::NewIssuance => self.checked_for_issuance(),
+            MethodUse::LegacyAlreadyIssued => Ok(self),
+        }
+    }
+
     /// Whether this method removes the in-circuit INV-VL invariant (value =
     /// parse(committed lexical)) for the value-FILTER lane — i.e. whether
     /// value<->lexical agreement rests on trusted-issuer honesty rather than a
@@ -230,6 +248,29 @@ impl CommitmentMethod {
 /// `zk:scheme` IRI it would have written. A method is refused because it is a
 /// research-only dial (`value-only`) or because it is SUPERSEDED (`dual-leaf`
 /// v1); neither refusal is a statement about the method's audited security.
+/// WHY a caller is selecting a commitment method — the axis
+/// [`CommitmentMethod::checked_for`] gates on.
+///
+/// `NewIssuance` is the DEFAULT: a path that mints a fresh commitment, builds a
+/// fresh proof or records a method on a new registry entry may use only a
+/// production-selectable method. `LegacyAlreadyIssued` is the explicit opt-in for
+/// re-deriving or re-verifying a commitment that was ALREADY ISSUED under a
+/// superseded method, which stays recognised and verifiable.
+///
+/// Neither value asserts a cryptographic property; see
+/// [`CommitmentMethod::is_production_selectable`] for the honest scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MethodUse {
+    /// A fresh commitment, proof or registry entry. Superseded methods and
+    /// research-only dials are REFUSED.
+    #[default]
+    NewIssuance,
+    /// Re-deriving or re-verifying an ALREADY-ISSUED commitment under the method
+    /// it was issued with. Accepts every recognised method, including a
+    /// superseded one.
+    LegacyAlreadyIssued,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MethodNotSelectable {
     method: CommitmentMethod,

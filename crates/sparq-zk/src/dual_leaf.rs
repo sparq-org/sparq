@@ -88,6 +88,7 @@
 //! prevent.
 
 use crate::canon::{self, CanonError, CanonicalGraph};
+use crate::commit::{CommitmentMethod, MethodNotSelectable, MethodUse};
 use crate::encode::{TYPE_CODE_BLANK_NODE, TYPE_CODE_IRI, TYPE_CODE_LITERAL};
 use crate::field::{field_from_hash_bytes, Fr};
 use crate::poseidon2;
@@ -609,6 +610,11 @@ pub enum DualCommitError {
     /// predicate. **Fail-closed for the WHOLE graph** — never a silent
     /// string-lane downgrade of the offending literal.
     Leaf(DualLeafError),
+    /// The caller asked for a FRESH `DualLeafV1` commitment. V1 is superseded and
+    /// not production-selectable, so a new-issuance call is refused; re-deriving
+    /// an already-issued V1 commitment opts in with
+    /// [`crate::commit::MethodUse::LegacyAlreadyIssued`].
+    MethodNotSelectable(MethodNotSelectable),
 }
 
 impl std::fmt::Display for DualCommitError {
@@ -617,6 +623,7 @@ impl std::fmt::Display for DualCommitError {
             DualCommitError::Canon(e) => write!(f, "{e}"),
             DualCommitError::UncommittableTerm(t) => write!(f, "uncommittable term: {t}"),
             DualCommitError::Leaf(e) => write!(f, "dual-leaf value lane rejected a literal: {e}"),
+            DualCommitError::MethodNotSelectable(e) => write!(f, "{}", e),
         }
     }
 }
@@ -657,20 +664,39 @@ pub struct DualGraphCommitment {
 /// The ordering contract is `commit.rs`'s, unchanged: RDFC10-canonicalize, then
 /// one leaf per canonical triple in canonical N-Quads order (index = leaf
 /// index), then ONE flat Poseidon2 sponge over the leaf sequence.
+///
+/// `use_` is the CHECKED method boundary: `DualLeafV1` is SUPERSEDED, so
+/// [`crate::commit::MethodUse::NewIssuance`] is REFUSED with
+/// [`DualCommitError::MethodNotSelectable`]. Re-deriving an ALREADY-ISSUED V1
+/// commitment (to re-verify it, or to re-check a stored commitment) passes
+/// [`crate::commit::MethodUse::LegacyAlreadyIssued`] and is accepted — the opt-in
+/// is written down at the call site. New issuance uses
+/// `crate::dual_leaf_v2::commit_triples_v2`.
 pub fn commit_triples_dual(
     triples: &[Triple],
     salt: Fr,
+    use_: MethodUse,
 ) -> Result<DualGraphCommitment, DualCommitError> {
+    check_v1_selectable(use_)?;
     commit_canonical_dual(canon::canonicalize_triples(triples)?, salt)
+}
+
+/// The V1 method boundary shared by this module's whole-graph builders.
+fn check_v1_selectable(use_: MethodUse) -> Result<(), DualCommitError> {
+    CommitmentMethod::DualLeafV1.checked_for(use_).map(|_| ()).map_err(DualCommitError::MethodNotSelectable)
 }
 
 /// Commits the content of a `sparq_core::Graph` under `salt` using the
 /// `DualLeafV1` leaf shape — the DualLeafV1 mirror of
 /// `commit::commit_graph_content`.
+///
+/// Same CHECKED method boundary as [`commit_triples_dual`].
 pub fn commit_graph_dual(
     g: &sparq_core::Graph,
     salt: Fr,
+    use_: MethodUse,
 ) -> Result<DualGraphCommitment, DualCommitError> {
+    check_v1_selectable(use_)?;
     commit_canonical_dual(canon::canonicalize_graph_content(g)?, salt)
 }
 
@@ -1294,7 +1320,7 @@ mod tests {
             NamedNode::new("http://ex/p").unwrap(),
             Term::Literal(bad.clone()),
         )];
-        let err = commit_triples_dual(&triples, salt).unwrap_err();
+        let err = commit_triples_dual(&triples, salt, MethodUse::LegacyAlreadyIssued).unwrap_err();
         assert!(
             matches!(err, DualCommitError::Leaf(DualLeafError::NonCanonicalValue(_))),
             "expected a fail-closed value-lane rejection, got {err}"
@@ -1315,7 +1341,7 @@ mod tests {
             NamedNode::new("http://ex/p").unwrap(),
             Term::Literal(int_lit("5")),
         )];
-        assert!(commit_triples_dual(&ok, salt).is_ok());
+        assert!(commit_triples_dual(&ok, salt, MethodUse::LegacyAlreadyIssued).is_ok());
     }
 
     #[test]
@@ -1325,7 +1351,7 @@ mod tests {
         // over the leaf sequence. Only the per-term leaf SHAPE differs.
         let salt = salt_from_bytes(&[7u8; 32]);
         let g = graph_triples();
-        let dual = commit_triples_dual(&g, salt).unwrap();
+        let dual = commit_triples_dual(&g, salt, MethodUse::LegacyAlreadyIssued).unwrap();
         let string_canonical = crate::commit::commit_triples(&g, salt).unwrap();
 
         assert_eq!(dual.canonical.lines, string_canonical.canonical.lines);
@@ -1353,11 +1379,37 @@ mod tests {
         // separates graphs exactly as in the string-canonical pipeline.
         let mut reversed = g.clone();
         reversed.reverse();
-        assert_eq!(commit_triples_dual(&reversed, salt).unwrap().commitment, dual.commitment);
+        assert_eq!(commit_triples_dual(&reversed, salt, MethodUse::LegacyAlreadyIssued).unwrap().commitment, dual.commitment);
         assert_ne!(
-            commit_triples_dual(&g, salt_from_bytes(&[8u8; 32])).unwrap().commitment,
+            commit_triples_dual(&g, salt_from_bytes(&[8u8; 32]), MethodUse::LegacyAlreadyIssued).unwrap().commitment,
             dual.commitment
         );
+    }
+
+    #[test]
+    fn a_fresh_v1_whole_graph_commitment_is_refused_and_a_legacy_one_is_not() {
+        let g = vec![Triple::new(
+            NamedNode::new("http://ex/s").unwrap(),
+            NamedNode::new("http://ex/p").unwrap(),
+            int_lit("7"),
+        )];
+        let salt = salt_from_bytes(&[3u8; 32]);
+        let err = commit_triples_dual(&g, salt, MethodUse::NewIssuance).unwrap_err();
+        let DualCommitError::MethodNotSelectable(e) = err else {
+            panic!("new issuance must be refused at the method boundary, got {:?}", err);
+        };
+        assert_eq!(e.method(), CommitmentMethod::DualLeafV1);
+        assert!(e.to_string().contains(CommitmentMethod::DualLeafV1.scheme_iri()));
+        // Re-deriving an already-issued commitment opts in explicitly and works,
+        // and the two calls would otherwise be the same commitment.
+        assert!(commit_triples_dual(&g, salt, MethodUse::LegacyAlreadyIssued).is_ok());
+        let store = sparq_core::Graph::load_str(
+            "<http://ex/s> <http://ex/p> \"7\"^^<http://www.w3.org/2001/XMLSchema#integer> .\n",
+            "ntriples",
+        )
+        .unwrap();
+        assert!(commit_graph_dual(&store, salt, MethodUse::NewIssuance).is_err());
+        assert!(commit_graph_dual(&store, salt, MethodUse::LegacyAlreadyIssued).is_ok());
     }
 
     #[test]
@@ -1369,9 +1421,10 @@ mod tests {
             "turtle",
         )
         .unwrap();
-        let from_store = commit_graph_dual(&g, salt).unwrap();
+        let from_store = commit_graph_dual(&g, salt, MethodUse::LegacyAlreadyIssued).unwrap();
         let from_triples =
-            commit_triples_dual(&crate::canon::graph_triples(&g).unwrap(), salt).unwrap();
+            commit_triples_dual(&crate::canon::graph_triples(&g).unwrap(), salt, MethodUse::LegacyAlreadyIssued)
+                .unwrap();
         assert_eq!(from_store.commitment, from_triples.commitment);
         assert_eq!(from_store.leaves, from_triples.leaves);
         assert_eq!(from_store.canonical.lines, from_triples.canonical.lines);

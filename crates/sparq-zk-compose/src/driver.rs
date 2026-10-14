@@ -13,6 +13,8 @@
 //! - `bb verify -p proof -i public_inputs -k vk` exits 0 on success.
 
 use crate::manifest::CircuitId;
+#[cfg(feature = "dual-leaf")]
+use sparq_zk::commit::{CommitmentMethod, MethodUse};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -35,6 +37,12 @@ pub enum DriverError {
         stderr: String,
     },
     Io(std::io::Error),
+    /// The `(method, circuit, use)` dispatch refused before any subprocess ran —
+    /// e.g. a FRESH proof routed under a method that is not selectable for new
+    /// issuance. Raised only by the method-checked prove entry
+    /// [`CircuitProver::prove_in_for_method`].
+    #[cfg(feature = "dual-leaf")]
+    Dispatch(crate::dispatch::DispatchError),
 }
 
 impl std::fmt::Display for DriverError {
@@ -47,6 +55,8 @@ impl std::fmt::Display for DriverError {
                 write!(f, "`{tool}` failed:\n{stderr}")
             }
             DriverError::Io(e) => write!(f, "io error: {e}"),
+            #[cfg(feature = "dual-leaf")]
+            DriverError::Dispatch(e) => write!(f, "dispatch refused the proof: {}", e),
         }
     }
 }
@@ -539,6 +549,31 @@ impl CircuitProver {
         tag: &str,
     ) -> Result<ProofArtifacts, DriverError> {
         self.prove_package(&id.package(), prover_toml, out_dir, tag)
+    }
+
+    /// As [`Self::prove_in`], but routed through the `(method, circuit, use)`
+    /// dispatch FIRST, so a prove under a method that is not selectable for new
+    /// issuance is refused with [`DriverError::Dispatch`] before any `nargo`/`bb`
+    /// subprocess runs.
+    ///
+    /// [`Self::prove_in`] itself stays method-AGNOSTIC: it takes a `CircuitId` and
+    /// nothing else, and re-proving an already-issued graph is a legitimate use
+    /// (pass [`MethodUse::LegacyAlreadyIssued`] here for that). This entry is the
+    /// one an issuance path uses, so the method check happens in the prover rather
+    /// than only in the builder that produced the inputs.
+    #[cfg(feature = "dual-leaf")]
+    pub fn prove_in_for_method(
+        &self,
+        method: CommitmentMethod,
+        id: &CircuitId,
+        prover_toml: &str,
+        out_dir: &Path,
+        tag: &str,
+        use_: MethodUse,
+    ) -> Result<ProofArtifacts, DriverError> {
+        let id = crate::dispatch::resolve_circuit_for_use(method, id, use_)
+            .map_err(DriverError::Dispatch)?;
+        self.prove_in(&id, prover_toml, out_dir, tag)
     }
 
     // Shares the explicit noir-recursive (ZK) backend with legacy members.

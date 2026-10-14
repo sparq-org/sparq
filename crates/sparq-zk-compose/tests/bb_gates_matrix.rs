@@ -475,7 +475,7 @@ fn matrix_spans_every_method_and_the_headline_comparison() {
 #[test]
 fn committed_legality_matches_resolve_circuit() {
     use sparq_zk::commit::CommitmentMethod;
-    use sparq_zk_compose::dispatch::{resolve_circuit, DispatchError};
+    use sparq_zk_compose::dispatch::resolve_circuit;
     use sparq_zk_compose::manifest::CircuitId;
 
     let (_snapshot, matrix) = load();
@@ -515,12 +515,11 @@ fn committed_legality_matches_resolve_circuit() {
         let Some(id) = circuit_for(member) else { continue };
         for (key, method) in &methods {
             let Some(cell) = c.configs.get(*key) else { continue };
-            let resolved_legal = match resolve_circuit(*method, &id) {
-                Ok(_) => true,
-                Err(DispatchError::IllegalPair { .. })
-                | Err(DispatchError::IdentityOpAtValueLane { .. })
-                | Err(DispatchError::UnknownMethod { .. }) => false,
-            };
+            // Every refusal is a refusal; the matrix records legality, not which
+            // of the resolver's reasons applied. (`resolve_circuit` is the
+            // legacy/verification view, so it never raises the issuance-only or
+            // lane/member variants here.)
+            let resolved_legal = resolve_circuit(*method, &id).is_ok();
             if resolved_legal != cell.legal {
                 errors.push(format!(
                     "{member} × {key}: committed legal={} but resolve_circuit says {resolved_legal}",

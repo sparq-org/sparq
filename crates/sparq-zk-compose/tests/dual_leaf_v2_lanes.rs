@@ -36,17 +36,26 @@
 #![cfg(feature = "dual-leaf")]
 
 use oxrdf::{Literal, NamedNode};
-use sparq_zk::commit::CommitmentMethod;
+use sparq_zk::commit::{CommitmentMethod, MethodUse};
 use sparq_zk::dual_leaf::{DualLeafError, LANG_NONE, XSD_DECIMAL, XSD_DOUBLE, XSD_INTEGER};
 use sparq_zk::dual_leaf_boolean::XSD_BOOLEAN;
 use sparq_zk::dual_leaf_v2;
 use sparq_zk::encode::TYPE_CODE_LITERAL;
 use sparq_zk::field::{field_from_hash_bytes, field_from_hex_str, field_to_hex, Fr};
 use sparq_zk::poseidon2;
-use sparq_zk_compose::build::{boolean_verdict, build_filter_value_dl_bool};
-use sparq_zk_compose::dispatch::{resolve_circuit, DispatchError};
+use sparq_zk_compose::build::{
+    boolean_verdict, build_filter_value_dl_bool, build_filter_value_dl_boolean, BuildValueDlV1Error,
+};
+use sparq_zk_compose::driver::{CircuitProver, DriverError};
+use sparq_zk_compose::dispatch::{
+    check_lane_member_pairing, resolve_circuit, resolve_circuit_for_use, DispatchError,
+};
 use sparq_zk_compose::manifest::{
     boolean_datatype_const, boolean_lane_const_v2, CircuitId, FieldHex, FilterOp, ProofInputs,
+    ProofManifest,
+};
+use sparq_zk_compose::verifier::{
+    prefilter_manifest_structure, CheckError, KeySet, RevocationPolicy,
 };
 use sparq_zk_compose::toml::{filter_value_dl_bool_prover_toml, filter_value_dl_prover_toml};
 
@@ -1009,4 +1018,176 @@ fn the_sign_folded_members_cannot_express_an_out_of_band_handle() {
             assert_ne!(folded, sentinel);
         }
     }
+}
+
+// =========================================================================
+// 8. The issuance boundary and the lane↔member pairing
+// =========================================================================
+
+/// A FRESH proof may not be routed under the superseded V1 method, while
+/// re-verifying an already-issued one still resolves — the two uses differ only
+/// by the `MethodUse` the caller writes down.
+#[test]
+fn routing_a_fresh_proof_under_v1_is_refused_and_a_legacy_one_resolves() {
+    for id in [CircuitId::FilterValueDl, CircuitId::FilterValueDlBool] {
+        let err = resolve_circuit_for_use(
+            CommitmentMethod::DualLeafV1,
+            &id,
+            MethodUse::NewIssuance,
+        )
+        .expect_err("a fresh proof under a superseded method must be refused");
+        assert!(matches!(
+            err,
+            DispatchError::MethodNotSelectableForIssuance { .. }
+        ));
+        assert!(err.to_string().contains(CommitmentMethod::DualLeafV1.scheme_iri()));
+        // The legacy use is the plain legality matrix, unchanged.
+        assert_eq!(
+            resolve_circuit_for_use(
+                CommitmentMethod::DualLeafV1,
+                &id,
+                MethodUse::LegacyAlreadyIssued
+            ),
+            resolve_circuit(CommitmentMethod::DualLeafV1, &id)
+        );
+        // And V2 is selectable for new issuance.
+        assert_eq!(
+            resolve_circuit_for_use(CommitmentMethod::DualLeafV2, &id, MethodUse::NewIssuance),
+            Ok(id.clone())
+        );
+    }
+}
+
+/// The V1 boolean-lane BUILDER is behind the same boundary: a fresh build is
+/// refused, a legacy one builds, and the refusal is distinguishable from the
+/// encoder's own fail-closed rejection.
+#[test]
+fn building_a_fresh_v1_boolean_filter_is_refused_at_the_method_boundary() {
+    let lit = typed("true", XSD_BOOLEAN);
+    let err = build_filter_value_dl_boolean(&lit, FilterOp::Eq, true, MethodUse::NewIssuance)
+        .expect_err("a fresh V1 build must be refused");
+    let BuildValueDlV1Error::MethodNotSelectable(e) = err else {
+        panic!("the refusal must name the method, not the literal");
+    };
+    assert_eq!(e.method(), CommitmentMethod::DualLeafV1);
+    assert!(
+        build_filter_value_dl_boolean(&lit, FilterOp::Eq, true, MethodUse::LegacyAlreadyIssued)
+            .is_ok()
+    );
+}
+
+/// A V2 boolean lane constant may ONLY ride the bit-constrained member. On the
+/// shared integer member — whose relation range-decomposes the handle over the
+/// whole `u64` domain — the pairing is refused, by the host boundary and by the
+/// verifier's structural pre-filter. `datatype_const` is a public input the member
+/// does not pin, which is exactly why the refusal lives here.
+#[test]
+fn the_v2_boolean_lane_constant_is_refused_on_the_shared_integer_member() {
+    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
+        .expect("the V2 boolean builder accepts a canonical literal");
+    let ProofInputs::FilterValueDlBool { operand_enc, op, bound, datatype_const, expected, .. } =
+        built.inputs.clone()
+    else {
+        panic!("the V2 boolean builder emits its own variant");
+    };
+    assert_eq!(datatype_const, boolean_lane_const_v2());
+    // The honest pairing passes.
+    assert_eq!(check_lane_member_pairing(&built.inputs), Ok(()));
+
+    // The same lane constant re-presented on the integer member is refused.
+    let crossed = ProofInputs::FilterValueDl {
+        id: CircuitId::FilterValueDl,
+        operand_enc,
+        op,
+        bound,
+        datatype_const,
+        expected,
+    };
+    let err = check_lane_member_pairing(&crossed).expect_err("the crossed pairing must refuse");
+    assert!(matches!(err, DispatchError::LaneMemberMismatch { .. }));
+    assert!(err.to_string().contains("filter_value_dl_int"));
+
+    // The integer lane's own constant on the integer member stays legal, so the
+    // check refuses the pairing and not the member.
+    let integer_lane = ProofInputs::FilterValueDl {
+        id: CircuitId::FilterValueDl,
+        operand_enc: FieldHex(field_to_hex(&Fr::from(1u64))),
+        op,
+        bound,
+        datatype_const: FieldHex(field_to_hex(&dual_leaf_v2::integer_lane_const())),
+        expected,
+    };
+    assert_eq!(check_lane_member_pairing(&integer_lane), Ok(()));
+}
+
+/// The verifier's structural pre-filter carries the SAME pairing refusal, before
+/// it reads the sub-proofs for anything else — so a manifest presenting the V2
+/// boolean lane constant on the shared integer member is rejected by a relying
+/// party, not only by this crate's builders.
+#[test]
+fn the_verifier_prefilter_rejects_the_crossed_lane_member_pairing() {
+    let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true)
+        .expect("the V2 boolean builder accepts a canonical literal");
+    let ProofInputs::FilterValueDlBool { operand_enc, op, bound, datatype_const, expected, .. } =
+        built.inputs
+    else {
+        panic!("the V2 boolean builder emits its own variant");
+    };
+    let crossed = ProofInputs::FilterValueDl {
+        id: CircuitId::FilterValueDl,
+        operand_enc,
+        op,
+        bound,
+        datatype_const,
+        expected,
+    };
+    let manifest = manifest_with(vec![crossed]);
+    match prefilter_manifest_structure(&manifest, &KeySet::empty(), &RevocationPolicy::accept_version(1)) {
+        Err(CheckError::LaneMemberMismatch { proof, reason }) => {
+            assert_eq!(proof, 0);
+            assert!(reason.contains("filter_value_dl_int"), "{}", reason);
+        }
+        other => panic!("expected a lane/member refusal, got {:?}", other),
+    }
+}
+
+fn manifest_with(inputs: Vec<ProofInputs>) -> ProofManifest {
+    let sub_proofs: Vec<String> = inputs
+        .iter()
+        .map(|i| {
+            format!(
+                "{{\"inputs\":{},\"proof_hex\":\"\"}}",
+                serde_json::to_string(i).expect("inputs serialize")
+            )
+        })
+        .collect();
+    let json = format!(
+        "{{\"type\":\"urn:sparq:zk:ProofManifest\",\"query\":\"SELECT ?s WHERE {{ ?s <http://ex/p> ?o }}\",\"attributions\":[],\"entailment_regime\":\"simple\",\"binding\":{{\"mode\":\"challenge\",\"challenge\":\"0x2a\"}},\"sub_proofs\":[{}]}}",
+        sub_proofs.join(",")
+    );
+    ProofManifest::from_json(&json).expect("the minimal manifest parses")
+}
+
+/// The method-checked prove entry refuses a FRESH proof under the superseded
+/// method BEFORE it spawns `nargo`/`bb` — so the boundary holds on the proving
+/// path too, not only in the builder. No toolchain needed: the refusal happens
+/// first, which is the point.
+#[test]
+fn the_method_checked_prove_entry_refuses_a_fresh_v1_proof_before_spawning() {
+    let prover = CircuitProver::from_crate_root();
+    let out = std::env::temp_dir().join("sparq_zk_v1_issuance_boundary");
+    let err = prover
+        .prove_in_for_method(
+            CommitmentMethod::DualLeafV1,
+            &CircuitId::FilterValueDl,
+            "",
+            &out,
+            "boundary",
+            MethodUse::NewIssuance,
+        )
+        .expect_err("a fresh V1 proof must be refused");
+    assert!(matches!(err, DriverError::Dispatch(_)), "{:?}", err);
+    assert!(err.to_string().contains(CommitmentMethod::DualLeafV1.scheme_iri()));
+    // The refusal came before any subprocess, so nothing was written.
+    assert!(!out.exists(), "the refusal must precede any scratch directory");
 }
