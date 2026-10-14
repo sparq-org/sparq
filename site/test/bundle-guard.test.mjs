@@ -9,8 +9,7 @@ import assert from "node:assert/strict";
 
 import {
   analyzeBundle,
-  firstLoadFromHtml,
-  htmlFirstLoad,
+  firstLoadFromClientManifest,
   HEAVY_MODULE_SUFFIXES,
   GUARDED_ROUTES,
 } from "../scripts/check-bundle.mjs";
@@ -174,84 +173,54 @@ test("fzstd is pinned as a heavy module (PRESENCE) and flagged if it leaks into 
 // Next 16 no longer writes app-build-manifest.json; main() rebuilds the page-entry set from the
 // exported HTML. The root layout's group (app-shell code shared with lazy demos) is excluded,
 // matching the old manifest's `/page` entry; everything after the layout chunk is kept.
-const SCRIPT = (p) => `<script src="/sparq/_next/static/chunks/${p}" async=""></script>`;
+// A client reference manifest in the shape Next 16 writes: each client module's `chunks`
+// alternates chunk ids and file paths.
+function clientManifest(key, modules) {
+  const clientModules = {};
+  modules.forEach((files, i) => {
+    clientModules[`[project]/m${i}.tsx`] = { id: i, chunks: files.flatMap((f, j) => [`${j}`, f]) };
+  });
+  return { [key]: { clientModules } };
+}
 
-test("firstLoadFromHtml keeps only the page segment after the root layout chunk", () => {
-  const html = [
-    SCRIPT("main-app-1.js"),
-    SCRIPT("6525-shared.js"),
-    SCRIPT("app/layout-abc.js"),
-    SCRIPT("9287-pagedep.js"),
-    SCRIPT("app/surface/data-formats/page-def.js"),
-    SCRIPT("webpack-2.js"),
-    // Inline RSC payload text is not a script tag and must not be picked up.
-    '<script>self.__next_f.push([1,"static/chunks/not-a-tag.js"])</script>',
-  ].join("");
-  assert.deepEqual(firstLoadFromHtml(html), [
-    "static/chunks/9287-pagedep.js",
-    "static/chunks/app/surface/data-formats/page-def.js",
-    "static/chunks/webpack-2.js",
+test("firstLoadFromClientManifest unions the page entry's modules and leaves layout modules out", () => {
+  const manifest = clientManifest("/capabilities/page", [
+    ["static/chunks/9568-a.js", "static/chunks/app/capabilities/page-x.js"],
+    ["static/chunks/9568-a.js", "static/chunks/163-b.js", "static/chunks/app/capabilities/page-x.js"],
+    ["static/chunks/6525-shared.js", "static/chunks/app/layout-l.js"],
   ]);
+  assert.deepEqual(firstLoadFromClientManifest(manifest, "/capabilities/page"), {
+    chunks: [
+      "static/chunks/9568-a.js",
+      "static/chunks/app/capabilities/page-x.js",
+      "static/chunks/163-b.js",
+    ],
+    error: null,
+  });
 });
 
-test("firstLoadFromHtml flags a heavy chunk statically pulled into the page segment", () => {
-  const html = SCRIPT("app/layout-abc.js") + SCRIPT("heavy-0.js") + SCRIPT("app/page-x.js");
-  const inputs = healthyInputs();
-  inputs.app.pages["/page"] = firstLoadFromHtml(html);
-  const { errors } = analyzeBundle(inputs);
-  assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
-});
-
-test("firstLoadFromHtml with no layout chunk keeps every script chunk", () => {
-  const html = SCRIPT("a.js") + SCRIPT("b.js") + SCRIPT("a.js");
-  assert.deepEqual(firstLoadFromHtml(html), ["static/chunks/a.js", "static/chunks/b.js"]);
-});
-
-test("htmlFirstLoad refuses HTML with no script tag for the route's page entry", () => {
-  const stylesheetOnly = '<link rel="stylesheet" href="/sparq/_next/static/css/app.css">';
-  assert.match(htmlFirstLoad(stylesheetOnly, "/page").error ?? "", /^FIRST-LOAD: /);
-  const otherPage = SCRIPT("app/layout-abc.js") + SCRIPT("app/try/page-x.js");
-  assert.match(htmlFirstLoad(otherPage, "/capabilities/page").error ?? "", /^FIRST-LOAD: /);
-  const own = SCRIPT("app/layout-abc.js") + SCRIPT("app/capabilities/page-x.js");
-  assert.equal(htmlFirstLoad(own, "/capabilities/page").error, null);
-});
-
-test("firstLoadFromHtml normalises query-bearing script URLs, so a heavy chunk is still caught", () => {
-  const html =
-    '<script src="/sparq/_next/static/chunks/app/layout-abc.js?v=1"></script>' +
-    "<script src='/sparq/_next/static/chunks/heavy-0.js?dpl=abc#x'></script>" +
-    '<script src="/sparq/_next/static/chunks/app/page-x.js?v=1"></script>';
-  const { chunks, error } = htmlFirstLoad(html, "/page");
+test("firstLoadFromClientManifest keeps a heavy chunk the page also shares with the layout", () => {
+  // The page and the layout both load heavy-0: the page's set must still list it.
+  const manifest = clientManifest("/page", [
+    ["static/chunks/heavy-0.js", "static/chunks/app/layout-l.js"],
+    ["static/chunks/heavy-0.js", "static/chunks/app/page-x.js"],
+  ]);
+  const { chunks, error } = firstLoadFromClientManifest(manifest, "/page");
   assert.equal(error, null);
-  assert.deepEqual(chunks, ["static/chunks/heavy-0.js", "static/chunks/app/page-x.js"]);
   const inputs = healthyInputs();
   inputs.app.pages["/page"] = chunks;
   const { errors } = analyzeBundle(inputs);
   assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
 });
 
-for (const [name, link] of [
-  ["preload", (href) => `<link rel="preload" href="${href}" as="script">`],
-  ["modulepreload", (href) => `<link rel="modulepreload" href="${href}?v=1">`],
-]) {
-  test(`firstLoadFromHtml counts a heavy chunk named only by a head ${name}`, () => {
-    const html =
-      `<head>${link("/sparq/_next/static/chunks/heavy-0.js")}</head>` +
-      SCRIPT("app/layout-abc.js") +
-      SCRIPT("app/page-x.js");
-    const { chunks, error } = htmlFirstLoad(html, "/page");
-    assert.equal(error, null);
-    assert.ok(chunks.includes("static/chunks/heavy-0.js"), chunks.join(", "));
-    const inputs = healthyInputs();
-    inputs.app.pages["/page"] = chunks;
-    const { errors } = analyzeBundle(inputs);
-    assert.ok(errors.some((e) => e.startsWith("ISOLATION: / ")), errors.join("\n"));
-  });
-}
-
-test("htmlFirstLoad does not accept a page entry that is only preloaded", () => {
-  const html =
-    '<link rel="modulepreload" href="/sparq/_next/static/chunks/app/page-x.js">' +
-    SCRIPT("app/layout-abc.js");
-  assert.match(htmlFirstLoad(html, "/page").error ?? "", /^FIRST-LOAD: /);
+test("firstLoadFromClientManifest refuses a manifest with no module loading the page entry", () => {
+  const layoutOnly = clientManifest("/page", [["static/chunks/app/layout-l.js"]]);
+  assert.match(firstLoadFromClientManifest(layoutOnly, "/page").error ?? "", /^FIRST-LOAD: /);
+  const otherPage = clientManifest("/capabilities/page", [["static/chunks/app/try/page-x.js"]]);
+  assert.match(
+    firstLoadFromClientManifest(otherPage, "/capabilities/page").error ?? "",
+    /^FIRST-LOAD: /,
+  );
+  assert.match(firstLoadFromClientManifest({}, "/page").error ?? "", /^FIRST-LOAD: /);
+  assert.match(firstLoadFromClientManifest(undefined, "/page").error ?? "", /^FIRST-LOAD: /);
 });

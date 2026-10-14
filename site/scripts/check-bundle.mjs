@@ -23,7 +23,7 @@
 //   2. ISOLATION — none of those heavy modules' code-split chunk files appear in the FIRST-LOAD
 //      set of the guarded routes. Next ≤15 wrote that set to app-build-manifest.json `pages`;
 //      Next 16 no longer emits that manifest, so main() derives the same page-entry set from the
-//      route's exported HTML script tags (see firstLoadFromHtml).
+//      route's client reference manifest (see firstLoadFromClientManifest).
 //   3. CONFIG — images:{unoptimized:true} and basePath prefixing are load-bearing for GitHub
 //      Pages / Tauri (bead item 4). Read straight from the build's OWN resolved artifacts
 //      (routes-manifest.basePath, images-manifest), so the check adapts to BOTH build modes
@@ -32,6 +32,7 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 
 /**
  * Heavy modules that MUST stay code-split OUT of the guarded routes' first-load payload. Keyed by
@@ -93,7 +94,7 @@ export const GUARDED_ROUTES = [
  *
  * @param {object} p
  * @param {Record<string, {files?: string[]} | string[]>} p.loadable  react-loadable-manifest.json
- * @param {{ pages: Record<string, string[]> }} p.app                 app-build-manifest.json
+ * @param {{ pages: Record<string, string[]> }} p.app                 first-load set per route
  * @param {{ basePath?: string }} p.routes                            routes-manifest.json
  * @param {{ images?: { unoptimized?: boolean } }} p.images           images-manifest.json
  * @param {Record<string, string | undefined>} p.htmlByLabel          exported HTML keyed by route label
@@ -143,7 +144,7 @@ export function analyzeBundle({ loadable, app, routes, images, htmlByLabel }) {
     if (!Array.isArray(first)) {
       errors.push(
         `ISOLATION: no first-load entry for guarded route ${label} (${manifestKey}) in ` +
-          `app-build-manifest.json — did the build write it?`,
+          `the build's manifests — did the build write it?`,
       );
       continue;
     }
@@ -228,82 +229,40 @@ export function findSnapshotLeaks(fingerprint, chunks) {
 }
 
 /**
- * The page entry's first-load JS for an exported route, in the shape Next ≤15 wrote to
- * app-build-manifest.json `pages["<route>/page"]`. Next 16 dropped that manifest; the exported
- * HTML carries the same information as its `<script src>` tags, emitted in segment order:
- * framework/runtime chunks, then the root layout's chunks ending in `app/layout-<hash>.js`, then
- * the page's own chunks ending in `app/<route>/page-<hash>.js`. The old `/page` entry never held
- * the root layout's chunks (they lived under `/layout`), so the layout group is dropped here too:
- * app-shell code the layout ships on every route (e.g. the sonner Toaster, which the lazy demos
- * also import) is not a lazy-demo leak. Paths are normalised to the `static/chunks/…` form
- * react-loadable-manifest.json uses. Pure (fs-free).
+ * The page entry's first-load JS for a route, in the shape Next ≤15 wrote to
+ * app-build-manifest.json `pages["<route>/page"]`. Next 16 dropped that manifest but still writes
+ * `.next/server/app/<route>/page_client-reference-manifest.js`, whose `clientModules` give each
+ * client module's chunk list; the modules the page entry loads are the ones whose list includes
+ * the page's own `static/chunks/app/<route>/page-<hash>.js`. Their union is the page entry's
+ * static chunk set. Root-layout modules end in `app/layout-<hash>.js` instead and stay out, as
+ * they did from the old `/page` entry. Pure (fs-free).
  *
- * @param {string} html  exported HTML document
- * @returns {string[]}    chunk paths, e.g. ["static/chunks/app/page-<hash>.js"]
- */
-export function firstLoadFromHtml(html) {
-  const scripts = [];
-  for (const m of html.matchAll(/<script\b[^>]*\bsrc=["']([^"']*)["']/g)) {
-    const chunk = chunkPath(m[1]);
-    if (chunk && !scripts.includes(chunk)) scripts.push(chunk);
-  }
-  const layoutEnd = scripts.findIndex((c) => /^static\/chunks\/app\/layout-[^/]+\.js$/.test(c));
-  const chunks = layoutEnd === -1 ? scripts : scripts.slice(layoutEnd + 1);
-  // A chunk the document preloads is fetched on entry too, wherever the tag sits, so it is
-  // never dropped with the layout group.
-  for (const chunk of preloadedChunks(html)) if (!chunks.includes(chunk)) chunks.push(chunk);
-  return chunks;
-}
-
-/** Whether a `<script src>` tag in the document names `chunk`. */
-function scriptTagged(html, chunk) {
-  return [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']*)["']/g)].some(
-    (m) => chunkPath(m[1]) === chunk,
-  );
-}
-
-/** `static/chunks/…js` from a script URL, ignoring any query string or fragment. */
-function chunkPath(url) {
-  return url.split(/[?#]/)[0].match(/\/_next\/(static\/chunks\/.+\.js)$/)?.[1];
-}
-
-/** Chunks named by `<link rel="preload" as="script">` or `<link rel="modulepreload">`. */
-function preloadedChunks(html) {
-  const chunks = [];
-  for (const [tag] of html.matchAll(/<link\b[^>]*>/gi)) {
-    const rel = tag.match(/\brel=["']([^"']*)["']/i)?.[1].toLowerCase().split(/\s+/) ?? [];
-    const as = tag.match(/\bas=["']([^"']*)["']/i)?.[1].toLowerCase();
-    if (!rel.includes("modulepreload") && !(rel.includes("preload") && as === "script")) continue;
-    const href = tag.match(/\bhref=["']([^"']*)["']/i)?.[1];
-    const chunk = href && chunkPath(href);
-    if (chunk && !chunks.includes(chunk)) chunks.push(chunk);
-  }
-  return chunks;
-}
-
-/**
- * The HTML-derived first-load set for a guarded route, or an error when the extraction did not
- * find the route's own page entry (`static/chunks/app/<route>/page[-<hash>].js`). Without that
- * entry the set is not the page's first load, and an empty or partial set would let the
- * isolation check pass without checking anything.
+ * The route's page entry must be found: without it the set is not the page's first load, and an
+ * empty set would let the isolation check pass without checking anything.
  *
- * @param {string} html         exported HTML document
+ * @param {Record<string, {clientModules?: Record<string, {chunks?: string[]}>}>} manifest
+ *   the evaluated `__RSC_MANIFEST` object
  * @param {string} manifestKey  e.g. "/capabilities/page"
  * @returns {{ chunks: string[], error: string | null }}
  */
-export function htmlFirstLoad(html, manifestKey) {
-  const chunks = firstLoadFromHtml(html);
-  const preloadOnly = new Set(preloadedChunks(html));
-  const route = manifestKey.replace(/\/page$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const entry = new RegExp(`^static/chunks/app${route}/page(-[^/]+)?\\.js$`);
-  const scripted = (c) => !preloadOnly.has(c) || scriptTagged(html, c);
-  if (chunks.some((c) => entry.test(c) && scripted(c))) return { chunks, error: null };
+export function firstLoadFromClientManifest(manifest, manifestKey) {
+  const route = manifestKey.replace(/\/page$/, "");
+  const escaped = route.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pageEntry = new RegExp(`^static/chunks/app${escaped}/page(-[^/]+)?\\.js$`);
+  const chunks = [];
+  for (const { chunks: list = [] } of Object.values(manifest?.[manifestKey]?.clientModules ?? {})) {
+    // `chunks` alternates chunk ids and file paths; keep the paths.
+    const files = list.filter((c) => typeof c === "string" && c.startsWith("static/chunks/"));
+    if (!files.some((f) => pageEntry.test(f))) continue;
+    for (const f of files) if (!chunks.includes(f)) chunks.push(f);
+  }
+  if (chunks.length > 0) return { chunks, error: null };
   return {
     chunks,
     error:
-      `FIRST-LOAD: the exported HTML for ${manifestKey} has no script tag for its page entry ` +
-      `(static/chunks/app${manifestKey.replace(/\/page$/, "")}/page-<hash>.js), so its ` +
-      `first-load set cannot be checked.`,
+      `FIRST-LOAD: no client module in the ${manifestKey} client reference manifest loads its ` +
+      `page entry (static/chunks/app${route}/page-<hash>.js), so its first-load set cannot be ` +
+      `checked.`,
   };
 }
 
@@ -348,17 +307,22 @@ function main() {
   }
 
   // Next ≤15 wrote the per-route page-entry set to app-build-manifest.json; Next 16 dropped that
-  // manifest, so derive the same set from the exported HTML's script tags.
+  // manifest, so derive the same set from each route's client reference manifest.
   const extractErrors = [];
   const app = readJson(join(nextDir, "app-build-manifest.json")) ?? {
     pages: Object.fromEntries(
-      GUARDED_ROUTES.filter(({ label }) => htmlByLabel[label] != null).map(
-        ({ manifestKey, label }) => {
-          const { chunks, error } = htmlFirstLoad(htmlByLabel[label], manifestKey);
-          if (error) extractErrors.push(error);
-          return [manifestKey, chunks];
-        },
-      ),
+      GUARDED_ROUTES.map(({ manifestKey }) => {
+        const path = join(nextDir, "server", "app", `${manifestKey.slice(1)}_client-reference-manifest.js`);
+        if (!existsSync(path)) {
+          extractErrors.push(`FIRST-LOAD: ${path} is missing — run \`npm run build\` first.`);
+          return [manifestKey, undefined];
+        }
+        const context = {};
+        runInNewContext(readFileSync(path, "utf8"), context);
+        const { chunks, error } = firstLoadFromClientManifest(context.__RSC_MANIFEST, manifestKey);
+        if (error) extractErrors.push(error);
+        return [manifestKey, chunks];
+      }),
     ),
   };
 

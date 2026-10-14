@@ -9,16 +9,12 @@ const eslintConfig = defineConfig([
   ...nextTs,
   {
     // eslint-config-next 16 pulls in eslint-plugin-react-hooks 7, whose `recommended` set adds
-    // the React Compiler diagnostics as errors. The Next 15 config enforced only rules-of-hooks
-    // + exhaustive-deps; the compiler rules below are the ones existing components trip, and
-    // satisfying them means restructuring effects/refs (a behaviour change, not a dependency
-    // bump). They stay off here so the Next 16 move is lint-neutral; the remaining compiler
-    // rules are already clean and stay on as a ratchet.
+    // the React Compiler diagnostics as errors. The rules below are the ones existing components
+    // in this app trip; fixing them means restructuring effects/refs (a behaviour change), tracked
+    // in #6986. Every other compiler rule is clean here and stays on.
     rules: {
       "react-hooks/set-state-in-effect": "off",
       "react-hooks/refs": "off",
-      "react-hooks/static-components": "off",
-      "react-hooks/preserve-manual-memoization": "off",
       "react-hooks/purity": "off",
     },
   },
