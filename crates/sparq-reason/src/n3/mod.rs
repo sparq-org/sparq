@@ -6638,6 +6638,61 @@ mod tests {
         }
     }
 
+    /// #6847: nested closures succeed within the stack allowance and fail closed past it.
+    #[test]
+    fn nested_conclusion_boundary_on_a_two_mib_stack() {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(|| {
+                // Each closure holds 8 of the run's 128 stack units. Rule heads repeat
+                // an asserted fact, so each document closes without a second round.
+                let doc = |i: usize, depth: usize| {
+                    let fact = format!("<http://ex/doc{i}> <http://ex/is> <http://ex/present> .");
+                    if i == depth {
+                        return fact;
+                    }
+                    format!(
+                        "{fact}\n\
+                         @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                         {{ <http://doc/{}> log:semantics ?f . ?f log:conclusion ?c }} \
+                         => {{ {fact} }} .",
+                        i + 1,
+                    )
+                };
+                let run = move |depth: usize| {
+                    let fetched = std::rc::Rc::new(std::cell::Cell::new(0));
+                    let count = std::rc::Rc::clone(&fetched);
+                    let resolver = move |iri: &str| {
+                        let i: usize = iri.strip_prefix("http://doc/")?.parse().ok()?;
+                        count.set(count.get() + 1);
+                        Some(doc(i, depth))
+                    };
+                    let (result, cut) = closure_and_cut(&doc(0, depth), Some(&resolver));
+                    (result, cut, fetched.get())
+                };
+                let (allowed, cut, fetched) = run(16);
+                assert_eq!(
+                    allowed.expect("16 nested closures fit the allowance"),
+                    vec![[
+                        Term::Iri("http://ex/doc0".into()),
+                        Term::Iri("http://ex/is".into()),
+                        Term::Iri("http://ex/present".into()),
+                    ]],
+                );
+                assert_eq!(cut, None);
+                assert_eq!(fetched, 16, "the control reaches every nested closure once");
+
+                let (refused, cut, fetched) = run(17);
+                let error = refused.expect_err("17 nested closures exceed the allowance");
+                assert!(error.contains("nested closures passed the run's stack allowance"), "{error}");
+                assert_eq!(cut, Some("nested closures passed the run's stack allowance"));
+                assert_eq!(fetched, 17, "the refusal reaches the first disallowed closure");
+            })
+            .expect("spawn a 2 MiB stack thread")
+            .join()
+            .unwrap_or_else(|e| std::panic::resume_unwind(e));
+    }
+
     /// #6732: matching a formula of many statements against another, or checking that
     /// one includes them, takes no stack per statement: thousands of statements match
     /// on a 2 MiB stack.
