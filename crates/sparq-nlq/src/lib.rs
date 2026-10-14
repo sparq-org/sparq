@@ -1,8 +1,8 @@
-// [OPUS-4.8] sq-jxl0: single-source the crate overview from README.md so crates.io
+// sq-jxl0: single-source the crate overview from README.md so crates.io
 // (package.readme) and the docs.rs front page render identical content. The README's
 // quickstart fences are `no_run` doctests (they open a fixture file / the `live` API).
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use std::cell::RefCell;
 use std::path::Path;
@@ -18,7 +18,7 @@ pub use sparq_engine::{QueryBudget, QueryResult};
 #[cfg(feature = "live")]
 pub mod live;
 
-// [OPUS-4.8] sq-2m6zm.6 (PKG NL-tool PRODUCT flavor): the configurable, provider-agnostic
+// sq-2m6zm.6 (PKG NL-tool PRODUCT flavor): the configurable, provider-agnostic
 // OpenAI-compatible endpoint client behind the opt-in `nlq-endpoint` feature. Off by
 // default so the lean loop carries no HTTP client; the productized counterpart of the
 // agent-flavor win (sq-zbyo7) for external users who bring their own cheap-model endpoint.
@@ -27,7 +27,7 @@ pub mod endpoint;
 
 pub mod constrain;
 pub mod eval;
-// [SONNET-4.6] sq-j1wv: prompt/data-injection + budget hardening. NOT feature-gated — a
+// sq-j1wv: prompt/data-injection + budget hardening. NOT feature-gated — a
 // security control that ships off is not a control, it adds no dependency, and every
 // transform is a no-op on benign text (so no recorded fixture moves).
 pub mod guard;
@@ -37,14 +37,14 @@ pub mod link;
 #[cfg(feature = "query-policy")]
 pub mod policy;
 
-// [OPUS-4.8] sq-2489d.1 (GenAI-KB Phase 1): the cross-cutting provenance-join primitive
+// sq-2489d.1 (GenAI-KB Phase 1): the cross-cutting provenance-join primitive
 // and the PKG-native citation renderer, behind the opt-in `citations` feature so the lean
 // NL→SPARQL loop carries zero provenance machinery in the default build.
 #[cfg(feature = "citations")]
 pub mod cite;
 #[cfg(feature = "citations")]
 pub mod provenance;
-// [OPUS-4.8] sq-2489d.2 (GenAI-KB Phase 2): answer-qualification (hedge + abstention) over
+// sq-2489d.2 (GenAI-KB Phase 2): answer-qualification (hedge + abstention) over
 // the SAME provenance join — reads `pkg:assurance`/`pkg:confidence` into a weakest-link
 // verb hedge + verbal band + a `min_confidence` abstention floor. Gated on `citations`
 // because it consumes the Phase-1 provenance primitive (no second join machinery).
@@ -224,7 +224,7 @@ pub struct NlqConfig {
     /// the same LLM WITHOUT grounding — "the grounding must pay for itself").
     /// Construction still runs the introspection scan (it is cheap and the field
     /// is read at prompt time), so one [`Nlq`] can be reconfigured grounded vs
-    /// ungrounded; the eval harness drives both off the same graph. [OPUS-4.8] sq-05rv
+    /// ungrounded; the eval harness drives both off the same graph. sq-05rv
     pub ground: bool,
     /// Entity & relation linking ([`link`]): resolve the question's proper nouns to
     /// concrete IRIs in this store and surface them (with structurally-similar siblings
@@ -233,7 +233,7 @@ pub struct NlqConfig {
     /// changes the prompt string (and therefore any recorded [`ReplayLlm`] fixture must
     /// be re-recorded); only takes effect when [`ground`](Self::ground) is also `true`.
     /// Construction builds the linker (one scan per present label predicate) so it can be
-    /// toggled per `ask` without rebuilding the [`Nlq`]. [OPUS-4.8] sq-uw40
+    /// toggled per `ask` without rebuilding the [`Nlq`]. sq-uw40
     pub link_entities: bool,
     /// How many structurally-similar siblings ([`sparq_sim::Sim::most_similar`]) to
     /// attach to each linked entity (0 disables the expansion, linking labels only).
@@ -256,7 +256,6 @@ pub struct NlqConfig {
     /// *extension of* the linking section, so it is only read when
     /// [`link_entities`](Self::link_entities) is also `true`; enabling it costs one
     /// object-sorted scan at construction and a bounded index of short literals.
-    /// [SONNET-4.6]
     pub link_values: bool,
     /// N2 **dictionary-grounded constraint** ([`constrain`], `sq-9yjp`). When `true`,
     /// a query that parses is additionally checked against the **live dictionary**
@@ -277,7 +276,7 @@ pub struct NlqConfig {
     /// and must not be "repaired". So it stays opt-in, the same way [`ground`](Self::ground)
     /// is a knob: the exec-accuracy harness measures raw model accuracy with it off,
     /// and a caller who wants tighter grounding (accepting that empty-answer questions
-    /// then need it off) sets it `true`. [OPUS-4.8] sq-9yjp
+    /// then need it off) sets it `true`. sq-9yjp
     pub check_dictionary: bool,
     /// **Answer-qualification knob** (GenAI-KB Phase 2, `sq-2489d.2`; `--features
     /// citations`). When `Some`, [`Nlq::ask_qualified`] folds the answer's supporting
@@ -287,7 +286,7 @@ pub struct NlqConfig {
     /// purely additive and read-only, exactly like `citations`. Gated on the `citations`
     /// feature because it reuses the Phase-1 provenance join (no second join machinery).
     /// Does NOT change the prompt string, so it is fixture-compatible — unlike
-    /// [`link_entities`](Self::link_entities), flipping it needs no re-record. [OPUS-4.8]
+    /// [`link_entities`](Self::link_entities), flipping it needs no re-record.
     #[cfg(feature = "citations")]
     pub qualify: Option<qualify::QualifyConfig>,
     /// **Injection + budget hardening** ([`guard`], `sq-j1wv`). Caps the question
@@ -296,7 +295,6 @@ pub struct NlqConfig {
     /// On by default and fixture-compatible: every transform is a no-op on benign
     /// text, so an unchanged prompt stays byte-identical. See
     /// `research/nlq-threat-model.md` for what this does and does **not** contain.
-    /// [SONNET-4.6]
     pub guard: guard::GuardConfig,
 }
 
@@ -328,20 +326,20 @@ impl Default for NlqConfig {
             ],
             ground: true,
             // Linking off by default: it changes the prompt string (re-record fixtures
-            // before flipping it on a recorded dataset). [OPUS-4.8] sq-uw40
+            // before flipping it on a recorded dataset). sq-uw40
             link_entities: false,
             link_expand_k: 3,
             max_links: 8,
             // Value linking off by default for the same reason as entity linking: it adds
-            // a prompt block, so a recorded fixture must be re-recorded. [SONNET-4.6] sq-na0q
+            // a prompt block, so a recorded fixture must be re-recorded. sq-na0q
             link_values: false,
             check_dictionary: false,
             // Qualification off by default: additive + fixture-compatible, opt in when you
-            // want hedged/abstaining answers over a provenance-bearing graph. [OPUS-4.8]
+            // want hedged/abstaining answers over a provenance-bearing graph.
             #[cfg(feature = "citations")]
             qualify: None,
             // Hardening ON by default (sq-j1wv): benign input is untouched, so the
-            // hardened posture costs nothing to keep. [SONNET-4.6]
+            // hardened posture costs nothing to keep.
             guard: guard::GuardConfig::default(),
         }
     }
@@ -365,11 +363,11 @@ pub enum TurnOutcome {
     /// N2 dictionary constraint (`sq-9yjp`): the query parsed and executed, but used a
     /// predicate / class IRI absent from the live dictionary (so it matched no
     /// triples). Carries the ungrounded terms; the repair message lists them with
-    /// nearest-namespace suggestions. [OPUS-4.8]
+    /// nearest-namespace suggestions.
     UngroundedTerms(Vec<constrain::UnknownTerm>),
     /// Hardening (`sq-j1wv`): the query parsed but used a construct the loop refuses to
     /// execute — today, `SERVICE` federation. Carries what was refused; the repair
-    /// message names each one. The query was **not** executed. [SONNET-4.6]
+    /// message names each one. The query was **not** executed.
     Forbidden(Vec<guard::Forbidden>),
 }
 
@@ -411,7 +409,7 @@ impl std::fmt::Debug for Answer {
     }
 }
 
-// [OPUS-4.8] sq-2489d.1 (GenAI-KB Phase 1, Use 3): render citations for an answer from
+// sq-2489d.1 (GenAI-KB Phase 1, Use 3): render citations for an answer from
 // in-graph provenance. Gated behind `citations`; takes the `&Graph` the answer was
 // produced over (the `Answer` is graph-lifetime-free by design, so the caller passes it
 // back in — the same graph it called `ask` on).
@@ -491,7 +489,7 @@ impl<'g> Nlq<'g> {
         // The summary is DATA-derived (it renders sampled values from the graph), so it
         // is untrusted text spliced into the prompt: neutralize fences and stray control
         // characters, keeping the deck's line structure. No-op on ordinary data.
-        // [SONNET-4.6] sq-j1wv
+        // sq-j1wv
         let schema_summary = guard::sanitize_block(
             &Introspection::build(graph).to_text_summary(config.summary_budget_chars),
         )
@@ -525,7 +523,7 @@ impl<'g> Nlq<'g> {
     ///
     /// The question is sanitized ([`guard::flatten_untrusted`]) before it is spliced in,
     /// so it cannot open a code fence or forge a prompt line; benign questions are
-    /// unchanged, so a recorded fixture keeps replaying. [SONNET-4.6] sq-j1wv
+    /// unchanged, so a recorded fixture keeps replaying. sq-j1wv
     pub fn prompt_for(&self, question: &str) -> String {
         let question = guard::flatten_untrusted(question);
         let question = question.as_ref();
@@ -550,7 +548,7 @@ impl<'g> Nlq<'g> {
             p.push('\n');
             // Index-grounded entity/relation linking (sparq-sim), appended to the schema
             // deck when enabled. Adds nothing — and leaves the prompt byte-identical — if
-            // the question linked nothing. [OPUS-4.8] sq-uw40
+            // the question linked nothing. sq-uw40
             if let Some(linker) = &self.linker {
                 if let Some(section) = linker.link(question).to_prompt_section() {
                     p.push_str(&section);
@@ -588,7 +586,7 @@ impl<'g> Nlq<'g> {
     /// error is derived from it — so each is fence-neutralized and capped at
     /// [`guard::GuardConfig::max_echo_chars`] (truncation is marked, never silent).
     /// The failed query keeps its newlines: it is meant to be read back as SPARQL.
-    /// [SONNET-4.6] sq-j1wv
+    /// sq-j1wv
     pub fn repair_prompt_for(&self, question: &str, failed_sparql: &str, error: &str) -> String {
         let max_echo = self.config.guard.max_echo_chars;
         let failed_sparql = guard::neutralize_fences(failed_sparql);
@@ -624,7 +622,7 @@ impl<'g> Nlq<'g> {
     ///
     /// The question is checked against [`guard::GuardConfig`] **first**: an over-long
     /// question is rejected with an empty transcript, before a single token is spent.
-    /// [SONNET-4.6] sq-j1wv
+    /// sq-j1wv
     pub fn ask(&self, question: &str) -> Result<Answer, NlqError> {
         let question = match guard::check_question(question, &self.config.guard) {
             Ok(q) => q,
@@ -672,7 +670,7 @@ impl<'g> Nlq<'g> {
                             // CONSEQUENCES the loop will not accept (outbound SERVICE
                             // federation) before the engine ever sees the query.
                             // Mutation needs no check: `parse_query` cannot yield one.
-                            // [SONNET-4.6]
+                            //
                             let forbidden =
                                 guard::forbidden_constructs(&parsed, &self.config.guard);
                             // N2 dictionary constraint (`sq-9yjp`): a query whose
@@ -745,7 +743,7 @@ impl<'g> Nlq<'g> {
     /// [`NlqConfig::qualify`] (or [`qualify::QualifyConfig::default`] when that is `None`,
     /// so the call always yields a qualification). The hedge/abstention is **post-hoc and
     /// read-only** — it never alters the query, the execution, or the transcript, so it
-    /// composes cleanly with the existing loop and the recorded fixtures. [OPUS-4.8]
+    /// composes cleanly with the existing loop and the recorded fixtures.
     #[cfg(feature = "citations")]
     pub fn ask_qualified(&self, question: &str) -> Result<QualifiedAnswer, NlqError> {
         let answer = self.ask(question)?;
@@ -760,7 +758,7 @@ impl<'g> Nlq<'g> {
 
 /// An [`Answer`] paired with its provenance-derived [`qualify::AnswerQualification`]
 /// (GenAI-KB Phase 2, `sq-2489d.2`). Returned by [`Nlq::ask_qualified`]; the
-/// `qualification` reflects asserted assurance — **not** a calibrated confidence. [OPUS-4.8]
+/// `qualification` reflects asserted assurance — **not** a calibrated confidence.
 #[cfg(feature = "citations")]
 #[derive(Debug)]
 pub struct QualifiedAnswer {
@@ -849,7 +847,7 @@ mod tests {
     /// An EMPTY fenced block yields `None` (the `(!q.is_empty())` guard in `extract_fenced`),
     /// not an empty string the loop would then mis-report as `NoSparql`-via-parse. An
     /// UNCLOSED fence (opener, no closing ```` ``` ````) likewise yields `None` — the
-    /// `body_end` search fails. Neither path is exercised by the happy-path tests. [OPUS-4.8]
+    /// `body_end` search fails. Neither path is exercised by the happy-path tests.
     #[test]
     fn extract_returns_none_for_empty_or_unclosed_fence() {
         // Empty `sparql` fence body → None (not Some("")).
@@ -867,7 +865,7 @@ mod tests {
 
     /// Bare-text extraction is case-insensitive on the leading keyword and accepts `ASK`,
     /// `SELECT`, and `PREFIX` starts — but rejects other leading words. Guards the
-    /// `to_ascii_uppercase().starts_with(...)` branch. [OPUS-4.8]
+    /// `to_ascii_uppercase().starts_with(...)` branch.
     #[test]
     fn extract_bare_text_is_case_insensitive_and_keyword_gated() {
         assert_eq!(
@@ -886,7 +884,7 @@ mod tests {
     /// `RecordingLlm` records ONLY successful calls — the documented invariant ("Failed
     /// calls are not recorded; a fixture replays the happy path"). A failing inner call
     /// propagates the error and leaves the recording empty, so a saved fixture never carries
-    /// a recorded failure. [OPUS-4.8]
+    /// a recorded failure.
     #[test]
     fn recording_llm_does_not_record_failed_calls() {
         let rec = RecordingLlm::new(FnLlm(|p: &str| {
@@ -914,7 +912,7 @@ mod tests {
 
     /// `ReplayLlm::from_json` over the empty fixture `[]` is `is_empty()`, `len()==0`, and
     /// every lookup misses with the diagnosable re-record error. Also: a malformed fixture
-    /// surfaces an `invalid replay fixture` error rather than panicking. [OPUS-4.8]
+    /// surfaces an `invalid replay fixture` error rather than panicking.
     #[test]
     fn replay_llm_empty_and_malformed_fixtures() {
         let empty = ReplayLlm::from_json("[]").expect("empty array is a valid fixture");

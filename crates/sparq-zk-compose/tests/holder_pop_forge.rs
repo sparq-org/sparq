@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-ncz0 (HolderPoP T4): the comprehensive forge-and-verify REGRESSION SUITE
 //! for the issuer-attested credential↔holder-bound HolderPoP closure (T1+T2+T3,
 //! all merged on main).

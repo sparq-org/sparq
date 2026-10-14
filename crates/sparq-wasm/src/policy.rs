@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-586sh (PSS consolidation ask A, issue #890): the opt-in ODRL
+//! sq-586sh (PSS consolidation ask A, issue #890): the opt-in ODRL
 //! usage-control **probe** binding — `sparq-policy` compiled to wasm32.
 //!
 //! PROBE SCOPE, deliberately minimal: this module exists to (a) prove

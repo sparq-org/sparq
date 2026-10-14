@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-wys) Manifest-driven runner for the W3C SHACL-SPARQL
+//! (sq-wys) Manifest-driven runner for the W3C SHACL-SPARQL
 //! `sparql/component/*` sub-suite — custom SPARQL-based constraint COMPONENTS
 //! (SHACL §6: `sh:parameter` + `sh:validator`/`sh:nodeValidator`/
 //! `sh:propertyValidator`).
@@ -32,7 +32,7 @@ const SH: &str = "http://www.w3.org/ns/shacl#";
 const OWL_IMPORTS: &str = "http://www.w3.org/2002/07/owl#imports";
 const DASH: &str = "http://datashapes.org/dash";
 
-/// [OPUS-4.8] Pass-count floor for the `sh:sparql` COMPONENT sub-suite at the
+/// Pass-count floor for the `sh:sparql` COMPONENT sub-suite at the
 /// pinned suite commit (`sq-wys`). A ratchet: it may only RISE. The three
 /// `sht:approved` entries (validator-001, optional-001,
 /// propertyValidator-select-001) all pass; `nodeValidator-001` is `sht:proposed`

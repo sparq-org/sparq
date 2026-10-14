@@ -10,7 +10,7 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
-# [FABLE-5] sq-tag1q.7.2: intentional partial surface — this bead lands the canonical
+# sq-tag1q.7.2: intentional partial surface — this bead lands the canonical
 # codec + durable journal layer of the SPARQL-CRDT design
 # (research/sparql-crdt-gpt56-2026-07.md §6/§8). The replicated dot-store state +
 # merge algebra and the evaluate-at-origin SPARQL Update compiler are sibling beads

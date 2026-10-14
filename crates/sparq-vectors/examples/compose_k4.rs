@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-3pb7f (FO-LLM-bridge Phase 3, epic sq-mztg8; design
+//! sq-3pb7f (FO-LLM-bridge Phase 3, epic sq-mztg8; design
 //! `research/fo-llm-bridge.md` §4.3 kill-criterion **K4**): the **K4 question-battery
 //! generator** for the read-path URI-hiding **accuracy** A/B.
 //!

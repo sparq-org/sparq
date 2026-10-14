@@ -1,4 +1,4 @@
-//! ODRL `odrl:conflict` conflict-resolution-strategy admissibility. [OPUS-4.8] sq-ihqbl.
+//! ODRL `odrl:conflict` conflict-resolution-strategy admissibility. sq-ihqbl.
 //!
 //! The bridge implements exactly one ODRL conflict strategy — `odrl:prohibit`
 //! (deny-overrides). [`conflict_admissibility`] is the fail-closed guard that decides

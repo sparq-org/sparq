@@ -17,7 +17,7 @@
 //!
 //! Over a graph with **no** provenance the renderer emits no citation for that subject
 //! and records it in [`CitedAnswer::no_source_recorded`] — the honest "no source
-//! recorded", **never a guess** (the Phase-1 acceptance bar). [OPUS-4.8]
+//! recorded", **never a guess** (the Phase-1 acceptance bar).
 
 use oxrdf::NamedNode;
 use sparq_core::Graph;
@@ -307,7 +307,7 @@ ex:bare a pkg:Finding ;
     /// across the two citations (not reset per subject) — the `render` contract: "one
     /// `Citation` per distinct source link" / "a Finding derived from two sources cites
     /// both". This is the multi-source branch of the `for link in &rec.sources` loop, which
-    /// no single-source fixture exercises. [OPUS-4.8]
+    /// no single-source fixture exercises.
     #[test]
     fn subject_with_two_sources_cites_both_with_continuing_numbers() {
         let g = Graph::load_str(
@@ -356,7 +356,7 @@ ex:bare a pkg:Finding ;
 
     /// Citation numbering is a stable, document-wide index across distinct subjects — the
     /// property a downstream `[n]` marker relies on. Asserts the markers render `[1]`/`[2]`
-    /// and each footnote leads with its own marker. [OPUS-4.8]
+    /// and each footnote leads with its own marker.
     #[test]
     fn numbering_is_document_wide_and_marker_leads_footnote() {
         let g = graph();
@@ -370,7 +370,7 @@ ex:bare a pkg:Finding ;
 
     /// `render` over an EMPTY record list yields a citation-free answer with an empty
     /// footnote block and a vacuous resolution rate of 1.0 — the degenerate input that
-    /// `cite_result` over an empty result table produces. [OPUS-4.8]
+    /// `cite_result` over an empty result table produces.
     #[test]
     fn render_of_no_records_is_empty_and_vacuously_resolved() {
         let g = graph();

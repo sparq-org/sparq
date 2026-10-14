@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-hmd7l.8 (epic sq-hmd7l) — real-ontology OWL 2 EL classification bench.
+//! sq-hmd7l.8 (epic sq-hmd7l) — real-ontology OWL 2 EL classification bench.
 //!
 //! The crate's other bench (`snomed_go_scale_bench`) is a SYNTHETIC, closed-form scaling
 //! probe. This example instead classifies an ONTOLOGY FILE end-to-end (parse → extract →

@@ -1,6 +1,6 @@
 //! Framing Algorithm (JSON-LD 1.1 Framing §3) — matching, value patterns, `@embed`.
 //!
-//! [FABLE-5] (sq-oy1f.29) The document-level **Framing** operation over the native
+//! (sq-oy1f.29) The document-level **Framing** operation over the native
 //! expanded-document pipeline (design record §3.1–3.2): the input is expanded
 //! ([`crate::expand::expand`]), the frame is expanded in `frameExpansion` mode, the input's
 //! node map is generated ([`crate::node_map::generate_node_map`]) and — unless
@@ -59,7 +59,7 @@ use std::collections::{BTreeMap, BTreeSet};
 /// `explicit` / `omitDefault` / `requireAll`). Construct with [`FrameOptions::default`];
 /// `None` fields resolve per the active [`ProcessingMode`].
 ///
-/// [FABLE-5] (sq-oy1f.29)
+/// (sq-oy1f.29)
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct FrameOptions {
@@ -105,7 +105,7 @@ impl FrameOptions {
 /// [`JsonLdError`] raised by expansion, context processing, compaction, or frame
 /// validation (`invalid frame`, `invalid @embed value`).
 ///
-/// [FABLE-5] (sq-oy1f.29)
+/// (sq-oy1f.29)
 pub fn frame(
     input: &Json,
     frame_doc: &Json,
@@ -281,7 +281,7 @@ pub fn compact_framed(
 /// [`JsonLdOptions::frame_expansion`] set (an array holding one frame object; an empty
 /// array is treated as the match-everything `{}` frame).
 ///
-/// [FABLE-5] (sq-oy1f.29)
+/// (sq-oy1f.29)
 pub fn frame_expanded(
     expanded_input: &Json,
     expanded_frame: &Json,

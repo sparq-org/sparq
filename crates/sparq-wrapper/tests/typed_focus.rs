@@ -1,4 +1,4 @@
-// [FABLE-5] sq-1rg2q.2: typed focus kinds + bound node factories (rdfjs/wrapper #83-#87).
+// sq-1rg2q.2: typed focus kinds + bound node factories (rdfjs/wrapper #83-#87).
 #![cfg(feature = "proposed-typed-focus")]
 
 use oxrdf::{BlankNode, Literal, NamedNode, Term, Triple};

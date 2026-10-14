@@ -1,4 +1,4 @@
-//! [GPT-6 Astra] Deletion projection behavior, ownership, and invalidation (#4246).
+//! Deletion projection behavior, ownership, and invalidation (#4246).
 
 use super::{Id, Overlay, Perm, TripleStore, BUILT};
 use std::borrow::Cow;
@@ -348,7 +348,7 @@ fn deleted_cache_graph_snapshot_retains_warm_generation() {
     }
 }
 
-// [GPT-6 Astra] Default-off must preserve main's representation and linear-count
+// Default-off must preserve main's representation and linear-count
 // behavior, not merely return the same rows after allocating a hidden projection.
 #[cfg(not(feature = "overlay-deleted-projections"))]
 #[test]

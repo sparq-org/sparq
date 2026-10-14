@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-c5f: gate-count regression gate.
 //!
 //! Records the ACIR/UltraHonk gate count (`bb gates -s ultra_honk` →
@@ -21,7 +21,7 @@
 //! so the regression gate runs in the normal suite when the toolchain is
 //! present.
 //!
-//! [FABLE-5] sq-7pifo: because it is non-`#[ignore]`d it is SKIPPED by the
+//! sq-7pifo: because it is non-`#[ignore]`d it is SKIPPED by the
 //! zk-toolchain lane's `cargo test -- --ignored` step, and the default ci.yml
 //! lanes have no `nargo`/`bb` so it self-skips there — i.e. it ran in NO CI lane
 //! and its baselines went silently stale (the sq-25mgo fix grew filter_f64 well
@@ -54,7 +54,7 @@ struct Snapshot {
     /// NOT gate-count-baselined (a `bin` that drives library tests, not a deployed
     /// proving circuit). Map of package name → reason.
     /// `snapshot_covers_top_level_circuits` requires every top-level `bin` circuit
-    /// to be either a `members` baseline or listed here. [OPUS-4.8] sq-5reoy: this
+    /// to be either a `members` baseline or listed here. sq-5reoy: this
     /// is currently empty — the only former entry (the xpath unit-test harness)
     /// moved to the `sparq-org/noir_XPath` face repo when the `zk/xpath` tree was
     /// externalized (#1599), leaving `zk/compose` as the sole in-tree circuit family.
@@ -339,7 +339,7 @@ fn bench_json_matches_snapshot() {
     );
 }
 
-/// [OPUS-4.8] sq-ncvq.8 (Gate G5) — extend the gate-count snapshot coverage
+/// sq-ncvq.8 (Gate G5) — extend the gate-count snapshot coverage
 /// beyond `zk/compose/` to EVERY top-level `zk/` proving circuit. A "proving
 /// circuit" is a `bin`-type Noir package (it has a `main`, so it has a
 /// `circuit_size`); `lib` packages and `[workspace]` roots are not proven and
@@ -352,14 +352,14 @@ fn bench_json_matches_snapshot() {
 /// entry (with a documented reason). So a deployable circuit cannot silently
 /// ship without a gate-count baseline.
 ///
-/// [OPUS-4.8] sq-5reoy: after the `zk/ieee754` and `zk/xpath` trees were
+/// sq-5reoy: after the `zk/ieee754` and `zk/xpath` trees were
 /// externalized to the `sparq-org/noir_IEEE754` / `sparq-org/noir_XPath` face
 /// repos (#1599), `zk/compose/` is the only in-tree circuit family, so there are
 /// no top-level `bin` packages outside it and `exempt_circuits` is empty (the
 /// former `xpath_unit_tests` harness is now covered by the face repo's CI).
 /// Runs WITHOUT the toolchain — it only reads `Nargo.toml`s + the snapshot.
 ///
-/// [OPUS-4.8] sq-ncvq.10 doc-sync: this test is the "Enforced by: **G5**" cell of
+/// sq-ncvq.10 doc-sync: this test is the "Enforced by: **G5**" cell of
 /// the "ZK verifier / circuits" row in the AGENTS.md "Post-batch re-evaluation
 /// checklist" table (alongside the reactive `flow-on:new-zk-circuit-gatecount`
 /// rule). That table row and this docstring are the two halves of the same rule —

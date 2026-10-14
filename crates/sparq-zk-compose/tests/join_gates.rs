@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-sfsi: the `bind_joins` verifier-gate soundness suite (step 4 of sq-bwwl,
 //! the hidden cross-credential JOIN). The adversarial complement to the join
 //! manifest schema (sq-fi03): construct a join manifest that violates EXACTLY one
@@ -47,7 +47,7 @@ use sparq_zk::commit::{commit_triples, GraphCommitment};
 use sparq_zk::encode::salt_from_bytes;
 use sparq_zk::field::Fr;
 use sparq_zk::sig::{public_key_to_hex, SecretKey, SignatureScheme};
-// [OPUS-4.8] sq-en5dx: the Q6 obligation error surfaced by `recheck` through
+// sq-en5dx: the Q6 obligation error surfaced by `recheck` through
 // `CheckError::Sparqzk` when a cross-scan join omits its non-bnode obligation.
 use sparq_zk::verify::VerifyError;
 use sparq_zk_compose::build::{build_join, build_scan, Pattern, Slot};
@@ -148,7 +148,7 @@ fn graph_b() -> GraphCommitment {
 /// A SECOND credential answering pattern A (`?a <ex/knows> ?p`), from a different
 /// committed graph (distinct salt => distinct commitment). Used to construct a
 /// multi-scan-per-pattern manifest: TWO scans legitimately answer pattern A, the
-/// same triple pattern satisfied by two different credentials. [OPUS-4.8] sq-sfsi.
+/// same triple pattern satisfied by two different credentials. sq-sfsi.
 fn graph_a2() -> GraphCommitment {
     let g = vec![Triple::new(
         NamedOrBlankNode::NamedNode(iri("http://ex/a2")),
@@ -278,7 +278,7 @@ fn honest_join_passes_structural_bind_joins() {
     prefilter(&m).expect("honest cross-scan join must pass the structural bind_joins gate");
 }
 
-/// [OPUS-4.8] sq-y2wy: `ProofManifest::canonicalize` sorts the edge vectors, and
+/// sq-y2wy: `ProofManifest::canonicalize` sorts the edge vectors, and
 /// the STRUCTURAL gate (`bind_joins` + the binding-edge stage) still ACCEPTS the
 /// canonicalised manifest — proving edge-vector sorting preserves the edges' scan
 /// references (each edge is self-contained; the verifier resolves by the edge's
@@ -367,7 +367,7 @@ fn multi_scan_manifest() -> ProofManifest {
 /// A join edge pointing at the SECOND of two scans answering a pattern passes the
 /// structural `bind_joins` gate. With the old first-match `position(..)` this was
 /// WRONGLY rejected (`scan_for_pattern(pattern_a)` resolved to scan-0, not the
-/// referenced scan-1). The membership-based fix accepts it. [OPUS-4.8] sq-sfsi.
+/// referenced scan-1). The membership-based fix accepts it. sq-sfsi.
 #[test]
 fn multi_scan_join_edge_points_at_second_scan_passes() {
     let m = multi_scan_manifest();
@@ -382,7 +382,7 @@ fn multi_scan_join_edge_points_at_second_scan_passes() {
 /// no pattern answered by the referenced scan with `?p` at SLOT_A => REJECT
 /// (`JoinSlotMismatch`). Confirms the fix did not weaken the binding: the edge
 /// still must reference a scan that genuinely answers the right pattern at the
-/// right slot, not merely SOME scan answering the pattern. [OPUS-4.8] sq-sfsi.
+/// right slot, not merely SOME scan answering the pattern. sq-sfsi.
 #[test]
 fn multi_scan_join_edge_points_at_non_answering_scan_rejected() {
     let mut m = multi_scan_manifest();
@@ -545,7 +545,7 @@ fn drop_edge_falls_back_to_disclosed_path() {
 /// regardless of the salts. NON-VACUITY: revert the `global_attributions` namespace
 /// fix and `[[0], [0]]` collapses again ⇒ no obligation required ⇒ this manifest
 /// passes the structural prefilter ⇒ the `MissingObligation` match below fails and
-/// this test fails. [OPUS-4.8]
+/// this test fails.
 #[test]
 fn finding_a_cross_scan_alias_forge_rejected_by_q6() {
     let mut m = join_manifest();
@@ -570,7 +570,7 @@ fn finding_a_cross_scan_alias_forge_rejected_by_q6() {
 
 // === N-WAY CHAIN: shared-commitment composition (design §2.4) ================
 //
-// [OPUS-4.8] sq-r2s8: a query variable joined across MORE THAN TWO patterns is
+// sq-r2s8: a query variable joined across MORE THAN TWO patterns is
 // composed from several pairwise `join_eq` sub-proofs. The composition is sound
 // only if every pairwise proof binds the SAME hiding `join_commitment` (one
 // blinder), so `a_val == b_val` per hop + the shared commitment compose into a
@@ -682,7 +682,7 @@ fn chain_manifest(shared_commitment: bool) -> ProofManifest {
 
 /// A 3-way join chain over `?p` whose two pairwise join_eq sub-proofs bind the SAME
 /// hiding commitment passes the structural `bind_joins` gate — the honest N-way
-/// composition (design §2.4). [OPUS-4.8] sq-r2s8.
+/// composition (design §2.4). sq-r2s8.
 #[test]
 fn nway_chain_shared_commitment_passes() {
     let m = chain_manifest(true);
@@ -695,7 +695,7 @@ fn nway_chain_shared_commitment_passes() {
 /// is REJECTED (`JoinCommitmentChainMismatch`): the hops may have proved equalities
 /// over different values, so the claimed N-way join is unproven. This is the
 /// soundness obligation N-way composition adds over independent pairwise joins.
-/// [OPUS-4.8] sq-r2s8.
+/// sq-r2s8.
 #[test]
 fn nway_chain_divergent_commitment_rejected() {
     let m = chain_manifest(false);
@@ -780,7 +780,7 @@ fn forge_join_scan_a_not_scan_rejected() {
 
 // === ACCEPT (FULL bb path) — REAL join_eq proof end-to-end ===================
 //
-// [OPUS-4.8] sq-r2s8: the join_eq PROVING path (`build_join` + `prover_toml_for`'s
+// sq-r2s8: the join_eq PROVING path (`build_join` + `prover_toml_for`'s
 // JoinEq arm) now produces a real bb proof, so this test — previously
 // `#[ignore]`'d as `full_bb_join_accept_deferred` because no real join_eq proof
 // could be generated — now generates one and asserts it VERIFIES end-to-end

@@ -1,6 +1,6 @@
 //! Context Processing Algorithm + Create Term Definition (JSON-LD 1.1 API §4).
 //!
-//! [OPUS-4.8] (sq-oy1f.24) Folds a chain of local/remote `@context` definitions into an
+//! (sq-oy1f.24) Folds a chain of local/remote `@context` definitions into an
 //! [`ActiveContext`], handling keyword aliases, `@protected` term protection,
 //! `@propagate`, `@import`, `@version`, and the `@vocab`/`@base`/`@language`/`@direction`
 //! defaults. Remote contexts (`@context` strings and `@import`) are dereferenced **only**
@@ -109,7 +109,7 @@ impl ActiveContext {
     /// pre-checked syntactically at Create Term Definition time, so applying it here still
     /// runs the full validating Context Processing pass.
     ///
-    /// [OPUS-4.8] (sq-oy1f.25)
+    /// (sq-oy1f.25)
     pub(crate) fn process_scoped(
         &self,
         local_context: &Json,
@@ -310,7 +310,7 @@ pub(crate) fn process_inner(
             if v.is_null() {
                 result.vocabulary_mapping = None;
             } else if let Json::Str(s) = v {
-                // [OPUS-5] sq-gzsky — §4.1.2 step 5.8 tests the RAW value: "if value is
+                // sq-gzsky — §4.1.2 step 5.8 tests the RAW value: "if value is
                 // neither an IRI nor a blank node identifier, an invalid vocab mapping
                 // error". A RELATIVE reference (including the empty string) resolved
                 // against `@base` / the current `@vocab` is the JSON-LD 1.1 relaxation
@@ -564,7 +564,7 @@ pub(crate) fn create_term_definition(
             // in 1.1 to disallow inconsistent compact-IRI redefinitions.  In JSON-LD 1.0
             // mode the check is skipped (W3C expand/0026 maps rdf:type→@type and
             // expand/0071 remaps v:term→v:somethingElse — both VALID in 1.0).
-            // [OPUS-5] sq-gzsky — the check is NOT skipped when the IRI mapping is a
+            // sq-gzsky — the check is NOT skipped when the IRI mapping is a
             // keyword. That the round-trip predicate cannot hold for a keyword is exactly
             // what §4.2.2 step 14.3.3 is FOR in 1.1: an IRI-shaped term may not be
             // remapped onto a keyword. W3C expand/er43 (`rdf:type` → `@type`, 1.1) pins the
@@ -573,7 +573,7 @@ pub(crate) fn create_term_definition(
             // actually draws (the check is absent from the JSON-LD 1.0 algorithm — it was
             // added in 1.1 to disallow inconsistent compact-IRI redefinitions; expand/0071
             // remaps `v:term`→`v:somethingElse`, also VALID in 1.0).
-            // [FABLE-5] (sq-oy1f.27) The round-trip check applies to a term containing
+            // (sq-oy1f.27) The round-trip check applies to a term containing
             // a colon "anywhere but as the first or last character" (§4.2.2 step
             // 14.3.3) — a term ENDING in a colon (the `"prefix:"` declaration form,
             // W3C compact/p003-p004) is a regular term, not a compact-IRI form.
@@ -697,7 +697,7 @@ fn create_reverse_definition(
             _ => return Err(JsonLdError::new(E::InvalidReverseProperty)),
         };
     }
-    // [SONNET-4.6] sq-oy1f.45 — §4.2.2 step 18: `@index` applies to `@container @index`
+    // sq-oy1f.45 — §4.2.2 step 18: `@index` applies to `@container @index`
     // terms including reverse properties (W3C expand/0131: a `@reverse` + `@container @index`
     // + `@index "predicate"` combination).  The non-reverse path processes `@index` inside
     // `finish_definition`, but `create_reverse_definition` returns early before reaching
@@ -816,7 +816,7 @@ fn finish_definition(
         let Json::Str(ns) = n else {
             return Err(JsonLdError::new(E::InvalidNestValue));
         };
-        // [OPUS-4.8] (sq-oy1f.24) Per JSON-LD 1.1 Create Term Definition, an `@nest` value
+        // (sq-oy1f.24) Per JSON-LD 1.1 Create Term Definition, an `@nest` value
         // must not be a keyword *or have keyword form* other than `@nest` itself — a token
         // like `@bogus` (keyword-form but unrecognised) is still an invalid @nest value.
         if ns != "@nest" && has_keyword_form(ns) {
@@ -900,7 +900,7 @@ fn normalize_container(c: &Json) -> Option<Vec<String>> {
 /// `@list`/`@set`/`@index`.
 ///
 /// `raw_is_string` reports whether the `@container` entry was written as a bare string
-/// rather than an array. [OPUS-5] sq-gzsky — §4.2.2 step 21.2 rejects a container value
+/// rather than an array. sq-gzsky — §4.2.2 step 21.2 rejects a container value
 /// that "is @graph, @id, or @type, **or is otherwise not a string**" in `json-ld-1.0`
 /// processing mode, so `"@container": ["@set"]` is an `invalid container mapping` in 1.0
 /// even though the single member `@set` is itself 1.0-legal (W3C expand/es01,

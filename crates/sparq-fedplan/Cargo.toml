@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-a35t (epic sq-3183): OPT-IN cost-based federated source selection +
+# sq-a35t (epic sq-3183): OPT-IN cost-based federated source selection +
 # bind-vs-hash join planning. Plans over already-fetched source DESCRIPTORS (served
 # VoID + mined characteristic-set stats) — pure, deterministic, NO network I/O.
 [package]
@@ -23,9 +23,9 @@ readme = "README.md"
 # default build and the wasm artifact are byte-identical with or without it. The
 # capability is therefore OFF BY DEFAULT at the dependency level — the leanest gating,
 # with zero core overhead when absent.
-# [OPUS-4.8] sq-a35t, branch feat-fedplan-cost-selection.
+# sq-a35t, branch feat-fedplan-cost-selection.
 
-# [SONNET-4.6] sq-my8wd.3: Render README.md as the docs.rs front page.
+# sq-my8wd.3: Render README.md as the docs.rs front page.
 [package.metadata.docs.rs]
 all-features = true
 
@@ -34,10 +34,10 @@ all-features = true
 # pays zero for it unless `fedplan` is enabled. OFF by default.
 default = []
 fedplan = []
-# [GPT-5.6] sq-ioeih: opt-in descriptor-map hasher A/B. Enabling the A/B arm
+# sq-ioeih: opt-in descriptor-map hasher A/B. Enabling the A/B arm
 # also enables the planner it measures; the default build remains unchanged.
 foldhash-maps = ["fedplan", "dep:foldhash"]
-# [OPUS-4.8] sq-7s4z: live adaptive mid-execution re-planning. OFF by default; IMPLIES
+# sq-7s4z: live adaptive mid-execution re-planning. OFF by default; IMPLIES
 # `fedplan` (it re-invokes the static planner on the remaining plan). A build that does not
 # enable it compiles zero adaptive code — the adaptive module is `#[cfg]`-gated out.
 adaptive-replan = ["fedplan"]
@@ -51,7 +51,7 @@ oxttl = { workspace = true }
 rustc-hash = { workspace = true }
 foldhash = { version = "0.2.0", optional = true }
 
-# [SONNET-4.6] sq-my8wd.3: criterion for the select_sources + plan_bgp micro-bench
+# sq-my8wd.3: criterion for the select_sources + plan_bgp micro-bench
 # (dev-only, never reaches the lean default or wasm build). Pinned at "0.5" to match
 # the workspace bench pattern (sparq-substrate). Transitive deps (anes, ciborium*,
 # oorandom) are already covered by upstream imports (bytecode-alliance / google /
@@ -61,14 +61,14 @@ criterion = { version = "0.8", features = ["html_reports"] }
 # Round-trip a descriptor parsed from the served N-Triples form.
 oxttl = { workspace = true }
 
-# [SONNET-4.6] sq-my8wd.3: The micro-bench exercises select_sources + plan_bgp
+# sq-my8wd.3: The micro-bench exercises select_sources + plan_bgp
 # over a 3-source, 3-pattern BGP at varying scales. Feature-gated on `fedplan`.
 [[bench]]
 name = "fedplan"
 harness = false
 required-features = ["fedplan"]
 
-# [FABLE-5] sq-vw3ax.13: the site federation-capability capture harness runs the real
+# sq-vw3ax.13: the site federation-capability capture harness runs the real
 # select_sources + plan_bgp over a declared fixture and prints verbatim output for
 # site/src/lib/federation.ts (the anti-fabrication discipline of sq-dwdm / sq-3was).
 # Registering the requirement keeps `cargo build --all-targets` (default features)

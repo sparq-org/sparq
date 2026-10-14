@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-1s2.3 (FL1 follow-up): the CircuitProver -> capture seam for the
+// sq-1s2.3 (FL1 follow-up): the CircuitProver -> capture seam for the
 // fuller /showcase/zk-car-hire captured ProofManifest.
 //
 // ## NOT a soundness claim (load-bearing honesty)

@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-oy1f.26 — crate-local integration test for the native
+//! sq-oy1f.26 — crate-local integration test for the native
 //! **Flattening Algorithm** (JSON-LD 1.1 API §7.1) over the official W3C
 //! `w3c/json-ld-api` `flatten` test suite.
 //!
@@ -111,7 +111,7 @@ fn type_contains(e: &Json, needle: &str) -> bool {
 fn doc_base(e: &Entry) -> String {
     e.base_override
         .clone()
-        // [FABLE-5] positional format arg (CodeQL rust/unused-variable false-positive guard).
+        // positional format arg (CodeQL rust/unused-variable false-positive guard).
         .unwrap_or_else(|| format!("{}{}", SUITE_BASE, e.input))
 }
 
@@ -139,7 +139,7 @@ fn oracle_json_payload_array_order_is_significant() {
     ));
 }
 
-/// [GPT-5.6] `flatten_expanded` is a normaliser: representative expanded inputs reach a
+/// `flatten_expanded` is a normaliser: representative expanded inputs reach a
 /// fixed point after one pass, while a nested input demonstrates that the first pass does
 /// real normalisation work.
 #[test]

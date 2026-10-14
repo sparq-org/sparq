@@ -1,5 +1,5 @@
 #![doc = include_str!("../README.md")]
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-t5bne: crate has zero `unsafe`.
+#![forbid(unsafe_code)] // sq-t5bne: crate has zero `unsafe`.
 
 //! See the crate README (rendered above) for the capability overview and the honest scope.
 //!
@@ -429,7 +429,7 @@ mod tests {
         assert_eq!(r.report.disjuncts, 1, "no TBox => UCQ is just the input CQ");
     }
 
-    // [SONNET-4.6] sq-pbz04.3.1 — UCQ rewrite (B1): a top-level UNION rewrites each branch.
+    // sq-pbz04.3.1 — UCQ rewrite (B1): a top-level UNION rewrites each branch.
     #[test]
     fn ucq_input_rewrites_both_branches() {
         let t = tbox(&[&format!(
@@ -448,7 +448,7 @@ mod tests {
         );
     }
 
-    // [SONNET-4.6] sq-pbz04.3.1 — intensional-atom guard (B6): rdfs:subClassOf as atom predicate
+    // sq-pbz04.3.1 — intensional-atom guard (B6): rdfs:subClassOf as atom predicate
     // must be rejected even though it is a valid IRI constant.
     #[test]
     fn intensional_atom_rejected() {
@@ -470,11 +470,11 @@ mod tests {
     // branch emits ITS OWN filter/values over ITS OWN sub-union. Full result-equivalence + the
     // leak-in-both-directions probes live in tests/branch_aware_emit.rs (with a faithful UCQ
     // evaluator); these unit tests pin ACCEPTANCE + emitted structure via both entry points.
-    // [OPUS-4.8] sq-sg542
+    // sq-sg542
 
     /// `SELECT ?x { { ?x a :A FILTER(?x != :Bad) } UNION { ?x a :B } }` — branch[0] carries a
     /// FILTER. The branch-aware emitter wraps it around branch[0]'s sub-union ONLY, so branch[1]
-    /// is unconstrained. Accepted + answered (formerly OutOfScope). [OPUS-4.8] sq-sg542
+    /// is unconstrained. Accepted + answered (formerly OutOfScope). sq-sg542
     #[test]
     fn union_with_branch_filter_now_answered() {
         let query = q(&format!(
@@ -507,7 +507,7 @@ mod tests {
 
     /// Branch[1]-filter variant: `SELECT ?x { { ?x a :A } UNION { ?x a :B FILTER(?x != :Bad) } }`.
     /// Branch[1]'s FILTER used to be silently dropped by the single-passthrough emitter; it is now
-    /// applied to branch[1]'s sub-union only. Accepted + answered. [OPUS-4.8] sq-sg542
+    /// applied to branch[1]'s sub-union only. Accepted + answered. sq-sg542
     #[test]
     fn union_with_branch1_filter_now_answered() {
         let query = q(&format!(
@@ -533,7 +533,7 @@ mod tests {
 
     /// `SELECT ?x { { ?x a :A } UNION { ?x a :B VALUES ?x { :C } } }` — branch[1] carries a
     /// VALUES block. It used to be silently dropped by the single-passthrough emitter; the
-    /// branch-aware emitter joins it onto branch[1]'s sub-union only. Accepted. [OPUS-4.8] sq-sg542
+    /// branch-aware emitter joins it onto branch[1]'s sub-union only. Accepted. sq-sg542
     #[test]
     fn union_with_branch_values_now_answered() {
         let query = q(&format!(
@@ -565,7 +565,7 @@ mod tests {
 
     /// The SOUND case: a single-branch CQ with a FILTER on the distinguished variable
     /// must still be accepted, and the rewritten query must return the original answers.
-    /// (branch[0] IS the whole query, so hoisting its filter is correct.) [SONNET-4.6]
+    /// (branch[0] IS the whole query, so hoisting its filter is correct.)
     #[test]
     fn single_branch_filter_still_accepted_and_sound() {
         // No TBox — identity UCQ (1 disjunct). The FILTER is passed through.

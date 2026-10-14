@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-ysv3u (issue #2935) — the OPT-IN `acp-vc` trust-the-issuer backend:
+//! sq-ysv3u (issue #2935) — the OPT-IN `acp-vc` trust-the-issuer backend:
 //! verify a presented credential's W3C Data Integrity proof with `sparq-vc`, then let the
 //! resulting holding satisfy an ACP `acp:vc` matcher end-to-end.
 //!

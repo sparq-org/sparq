@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-hmd7l.10 (epic sq-hmd7l) — ORE-style OWL DL harness for sparq-reason-dl.
+//! sq-hmd7l.10 (epic sq-hmd7l) — ORE-style OWL DL harness for sparq-reason-dl.
 //!
 //! 🤖 SPARQ agent. First benchmark for the DL surface (`tableau.rs` / `profile.rs`).
 //! HONEST FRAMING: sparq-reason-dl is a scoped ALCH profile-checker/tableau, NOT a full

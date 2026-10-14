@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-t58w.6 — the **single reusable source** for the WAC/ACP parity corpus.
+//! sq-t58w.6 — the **single reusable source** for the WAC/ACP parity corpus.
 //!
 //! The scenario corpus (the `AclBuilder`/`AcrBuilder`-emitted `.acl`/`.acr` data + the
 //! `Expect` decision tables, 13 WAC + 13 ACP) lived inline in `conformance_wac.rs` /
@@ -34,7 +34,7 @@ pub use wac::wac_corpus;
 /// The agreed scenario floors (the guard the parity tests assert and the differential
 /// oracle inherits): 13 WAC + 13 ACP minimal-per-construct scenarios.
 ///
-/// [SONNET-4.6] sq-z1xv8 — the VALUES now live once in the zero-dependency
+/// sq-z1xv8 — the VALUES now live once in the zero-dependency
 /// `sparq-conformance-floors` crate, which `sparq-conformance`'s central
 /// `scoreboard::SUITES` reads too, so the enforced floors and the reported floors are
 /// ONE pair of `const`s and cannot drift (replacing the old textual re-read of this

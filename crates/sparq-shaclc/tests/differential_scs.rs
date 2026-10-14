@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-tonhr.6 COEXISTENCE differential — the generated parser vs
+//! sq-tonhr.6 COEXISTENCE differential — the generated parser vs
 //! `sparq-shacl`'s hand-rolled standard-SCS parser (`scs` feature) on every
 //! fixture BOTH accept: identical triple sets up to bnode relabelling.
 //!

@@ -405,7 +405,7 @@ pub fn n3_proof_tree_for_key(
     Some(p.b.finish(root))
 }
 
-// [OPUS-4.8] Test module kept LAST in the file (clippy::items_after_test_module):
+// Test module kept LAST in the file (clippy::items_after_test_module):
 // `n3_proof_tree` above is `explain`-feature-gated, so it is only compiled with
 // `--features explain` — which the default-feature CI clippy never builds. When this
 // opt-in feature IS compiled, an item after `mod tests` trips the lint; keeping the

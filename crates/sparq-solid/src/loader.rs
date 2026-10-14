@@ -1,7 +1,7 @@
 //! Reasoning-input assembly: reflect the named-graph structure into facts and hand the
 //! ACCESS-CONTROL graphs (only!) to the reasoner.
 //!
-//! [SONNET-4.6] sq-zgbso.4: [`assemble_facts`] is the SINGLE traversal both fact-entry
+//! sq-zgbso.4: [`assemble_facts`] is the SINGLE traversal both fact-entry
 //! paths share. It yields ground `[Term; 3]` triples (blank nodes already skolemized);
 //! [`assemble_input_ids`] interns those straight into the caller's [`Dict`] for the
 //! id-level compiled evaluator — no N3 text is produced or re-parsed — and the
@@ -14,7 +14,7 @@
 //! documents referenced via `acl:agentGroup` (fragment stripped), and the synthesized
 //! structural facts below.
 //!
-//! [OPUS-4.8] sq-3jtd.5: the `.acl`/`.acr`/group graphs ARE emitted verbatim, so they are a
+//! sq-3jtd.5: the `.acl`/`.acr`/group graphs ARE emitted verbatim, so they are a
 //! second smuggling surface. The reasoner's derivation-internal vocabulary — the `solidx:`
 //! namespace (`solidx:creator|owner|appliesToResource|isResource|isWebId|…`) — must only be
 //! produced by THIS loader (from trusted structural metadata + the caller-supplied
@@ -39,7 +39,7 @@ const ACL_AGENT_GROUP: &str = "http://www.w3.org/ns/auth/acl#agentGroup";
 const ACL_ORIGIN: &str = "http://www.w3.org/ns/auth/acl#origin";
 const ACP_AGENT: &str = "http://www.w3.org/ns/solid/acp#agent";
 const ACP_CLIENT: &str = "http://www.w3.org/ns/solid/acp#client";
-// [OPUS-4.8] sq-3jtd.6: acp:issuer is a pair/triple-principal ingredient too, so its
+// sq-3jtd.6: acp:issuer is a pair/triple-principal ingredient too, so its
 // values go through the same reserved-encoding validation as agents/clients/origins.
 const ACP_ISSUER: &str = "http://www.w3.org/ns/solid/acp#issuer";
 const VCARD_MEMBER: &str = "http://www.w3.org/2006/vcard/ns#hasMember";
@@ -67,7 +67,7 @@ fn validate_principal_iri(iri: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// [OPUS-4.8] sq-3jtd.5: Predicates in the `solidx:` namespace are the reasoner's
+/// sq-3jtd.5: Predicates in the `solidx:` namespace are the reasoner's
 /// DERIVATION-INTERNAL vocabulary (`solidx:creator`, `solidx:owner`,
 /// `solidx:appliesToResource`, `solidx:isResource`, `solidx:inDoc`, `solidx:isWebId`,
 /// `solidx:provForResource`, …). Those facts are synthesized by THIS loader from
@@ -174,12 +174,12 @@ fn xsd_true() -> Term {
 /// Errors if any agent/client/origin/creator/owner/credential-holder value collides with
 /// the reserved principal encoding (see [`validate_principal_iri`]).
 ///
-/// [OPUS-4.8] sq-3jtd.5: `provenance` is the trusted channel for `acp:CreatorAgent` /
+/// sq-3jtd.5: `provenance` is the trusted channel for `acp:CreatorAgent` /
 /// `acp:OwnerAgent`. Its `<r> solidx:creator|owner <webid>` facts are synthesized HERE,
 /// from the caller-supplied map ONLY — never read from the resource graphs (design doc
 /// §2.4). For WAC (no creator/owner vocabulary) `provenance` is ignored.
 ///
-/// [SONNET-4.6] sq-ysv3u: `credentials` is the exactly analogous trusted channel for ACP
+/// sq-ysv3u: `credentials` is the exactly analogous trusted channel for ACP
 /// `acp:vc`. Its `<webid> solidx:holdsVc <requirement>` facts are synthesized HERE and
 /// nowhere else. WAC has no credential vocabulary, so `credentials` is ignored for it.
 pub(crate) fn assemble_facts(
@@ -253,7 +253,7 @@ pub(crate) fn assemble_facts(
     for (iri, sub) in &control_graphs {
         let mut in_doc: FxHashSet<Term> = FxHashSet::default();
         for t in graph_triples(sub) {
-            // [OPUS-4.8] sq-3jtd.5: hard-reject any forged derivation-internal fact
+            // sq-3jtd.5: hard-reject any forged derivation-internal fact
             // (`solidx:creator|owner|appliesToResource|…`) smuggled into the control
             // document — only the loader/rules may produce `solidx:` facts.
             if is_reserved_derivation_predicate(&t) {
@@ -277,7 +277,7 @@ pub(crate) fn assemble_facts(
                 continue;
             }
             for t in graph_triples(sub) {
-                // [OPUS-4.8] sq-3jtd.5: same derivation-internal guard for group
+                // sq-3jtd.5: same derivation-internal guard for group
                 // documents — a forged `solidx:` fact here would feed the reasoner too.
                 if is_reserved_derivation_predicate(&t) {
                     continue;
@@ -299,7 +299,7 @@ pub(crate) fn assemble_facts(
     for iri in &principal_iris {
         validate_principal_iri(iri)?;
     }
-    // [OPUS-4.8] sq-3jtd.5: TRUSTED creator/owner facts (ACP only). Emitted ONLY from the
+    // sq-3jtd.5: TRUSTED creator/owner facts (ACP only). Emitted ONLY from the
     // caller-supplied provenance map — never from pod content (design doc §2.4). The
     // WebIDs go through the SAME reserved-encoding validation as agents/clients/issuers
     // (they become candidate agents in the rules) and are marked isWebId so the
@@ -321,7 +321,7 @@ pub(crate) fn assemble_facts(
                 out.push([named(resource), named(&format!("{SOLIDX_NS}owner")), named(o)]);
             }
         }
-        // [SONNET-4.6] sq-ysv3u: TRUSTED `acp:vc` holdings (ACP only), on exactly the same
+        // sq-ysv3u: TRUSTED `acp:vc` holdings (ACP only), on exactly the same
         // footing as the creator/owner facts above — emitted ONLY from the caller-supplied
         // map, never from pod or `.acr` content (design doc §2.4; the solidx: guard at the
         // top of this pass drops any forged `holdsVc` smuggled into a control document).
@@ -340,7 +340,7 @@ pub(crate) fn assemble_facts(
 }
 
 /// The reasoning input as `[Id; 3]` facts interned DIRECTLY into `dict` — the id-level
-/// fact entry of the compiled evaluator ([SONNET-4.6] sq-zgbso.4).
+/// fact entry of the compiled evaluator (sq-zgbso.4).
 ///
 /// Same fact set as the `assemble_input` text entry by construction (both are thin
 /// adapters over [`assemble_facts`]), with the serialize → re-parse round trip gone: terms
@@ -360,7 +360,7 @@ pub(crate) fn assemble_input_ids(
 }
 
 /// The reasoning input as N3 source — the DEV-ONLY differential reference path
-/// ([SONNET-4.6] sq-zgbso.4). The production materializer feeds
+/// (sq-zgbso.4). The production materializer feeds
 /// [`assemble_input_ids`] to the compiled evaluator; this serialization exists so the
 /// in-crate equivalence tests can run the same facts through the text engine
 /// (`sparq_reason::reason_n3`) and compare the resulting auth views.
@@ -462,13 +462,13 @@ fn collect_agents(
 }
 
 /// The origin (`scheme://authority`) of an IRI — the coarse pod boundary used to bucket
-/// the auth index + session cache for an ACL-write invalidation ([OPUS-4.8] sq-b7k7u).
+/// the auth index + session cache for an ACL-write invalidation (sq-b7k7u).
 /// `https://pod.ex/a/b` → `https://pod.ex`; an authority with no path (`https://pod.ex`)
 /// is its own origin. An IRI with no `://` (e.g. `urn:…`) returns the whole IRI — a
 /// self-contained fallback bucket only ever invalidated by a FULL re-materialization.
 ///
 /// Soundness of scoping on this key: `reindex_with`'s **diff-based** invalidation
-/// ([SONNET-4.6] sq-b7k7u fix) diffs old vs new `AuthIndex` per-origin and invalidates
+/// (sq-b7k7u fix) diffs old vs new `AuthIndex` per-origin and invalidates
 /// exactly the origins whose buckets changed — so a cross-origin dependency (WAC
 /// agentGroup membership, foreign-subject grant, ACP cross-document indirection) is
 /// caught automatically, without relying on any confinement argument about where grants
@@ -744,7 +744,7 @@ mod tests {
 
     #[test]
     fn iri_origin_is_scheme_authority() {
-        // [OPUS-4.8] sq-b7k7u: origin = scheme://authority, stable across the whole subtree.
+        // sq-b7k7u: origin = scheme://authority, stable across the whole subtree.
         assert_eq!(iri_origin("https://pod.ex/a/b/doc.ttl"), "https://pod.ex");
         assert_eq!(iri_origin("https://pod.ex/.acl"), "https://pod.ex");
         assert_eq!(iri_origin("https://pod.ex/"), "https://pod.ex");

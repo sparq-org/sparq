@@ -642,7 +642,7 @@ mod tests {
         assert!(plan.contains("cross product"), "{plan}");
     }
 
-    // [SONNET-4.6] sq-qcnn.35 — direct unit tests for previously uncovered paths.
+    // sq-qcnn.35 — direct unit tests for previously uncovered paths.
 
     /// `fmt_nanos` covers all four scale branches (ns / µs / ms / s).
     /// This function is private so it can only be tested from inside this module.

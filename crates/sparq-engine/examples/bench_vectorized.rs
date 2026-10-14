@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-pntvh.1) M4 **Phase 1** native micro-benchmark for the vectorized
+//! (sq-pntvh.1) M4 **Phase 1** native micro-benchmark for the vectorized
 //! (columnar / vector-at-a-time) FILTER + aggregate hot paths, over a synthetic numeric
 //! column — the perf BASELINE every later M4 phase measures its speedup against
 //! (`research/vector-at-a-time-m4.md` §5.1, §6 Phase 1).

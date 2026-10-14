@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-gr8mb / survey §A3) Exact-bitmap semi-join reducer on dense `u32` ids.
+//! (sq-gr8mb / survey §A3) Exact-bitmap semi-join reducer on dense `u32` ids.
 //!
 //! A binary BGP join materialises its left side, then scans the next pattern and
 //! merge/hash-joins on the connecting variable. A scan row survives that join **iff**
@@ -131,7 +131,7 @@ impl KeyFilter {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-5zf8i / survey §A4) Yannakakis bottom-up full-semijoin PREPASS.
+// (sq-5zf8i / survey §A4) Yannakakis bottom-up full-semijoin PREPASS.
 //
 // The A3 reducer above filters one scan against the *already-materialised* join
 // result during the binary-join loop (a top-down, per-step prefilter). The
@@ -339,7 +339,7 @@ mod tests {
         assert!(!is_dense_dict_id(dict::INLINE_BASE)); // first inline integer id
     }
 
-    // ---- [OPUS-4.8] (sq-5zf8i / §A4) join-tree builder ---------------------
+    // ---- (sq-5zf8i / §A4) join-tree builder ---------------------
     // Yannakakis-ONLY: these exercise `build_join_tree`/`TreeNode`, both gated to the
     // `yannakakis` feature, so the tests must be too — otherwise the `semijoin-bitmap`-only
     // test build would reference items that don't exist.

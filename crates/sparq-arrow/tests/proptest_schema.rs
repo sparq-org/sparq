@@ -10,7 +10,7 @@ use proptest::prelude::*;
 use sparq_arrow::{term_schema, to_record_batch};
 use sparq_engine::QueryResult;
 
-// [GPT-5.6] Keep generation independent of the exporter: each variant is built through
+// Keep generation independent of the exporter: each variant is built through
 // oxrdf's checked constructors, while validity expectations come from the input cells.
 fn ground_term() -> impl Strategy<Value = Term> {
     prop_oneof![

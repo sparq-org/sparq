@@ -1,4 +1,4 @@
-// [OPUS-4.8] Prime-field arithmetic for Shamir secret sharing (M3).
+// Prime-field arithmetic for Shamir secret sharing (M3).
 //! Arithmetic in the prime field `F_p` underpinning Shamir secret sharing.
 //!
 //! Architecture refs: §3.1 (secret-sharing families), §4.3 step 4 (the secure
@@ -33,7 +33,7 @@
 /// The field modulus `p = 2^61 - 1` (a Mersenne prime).
 pub const P: u64 = (1u64 << 61) - 1;
 
-/// [OPUS-4.8] sq-mnv5 — the Tonelli–Shanks shortcut exponent `(p + 1) / 4`, valid
+/// sq-mnv5 — the Tonelli–Shanks shortcut exponent `(p + 1) / 4`, valid
 /// because `p ≡ 3 (mod 4)` (concretely `p = 2^61 − 1 ≡ 7 (mod 8)`). For any
 /// quadratic residue `c`, `c^((p+1)/4)` is a square root of `c` — i.e. `d² = c`.
 /// This is the public, in-circuit-cheap square-root the random-bit sub-protocol
@@ -45,7 +45,7 @@ pub const SQRT_EXP: u64 = (P + 1) / 4;
 
 /// An element of `F_p`, always kept canonical in `[0, P)`.
 ///
-/// [OPUS-4.8] sq-u8a8: derives [`zeroize::Zeroize`] so a secret-bearing `Fp`
+/// sq-u8a8: derives [`zeroize::Zeroize`] so a secret-bearing `Fp`
 /// (a Shamir share value, the cleartext MAC key `α`, a masking coefficient) can
 /// be scrubbed from memory by the containers that own it. `Fp` is `Copy`, so it
 /// cannot itself implement `Drop`/`ZeroizeOnDrop`; the zeroize-on-drop happens in
@@ -57,7 +57,7 @@ pub struct Fp(u64);
 // Inherent `add`/`sub`/`mul`/`neg` are deliberate: field arithmetic reads
 // clearest as `a.add(b)` in the share/interpolation code, and `Fp` is an
 // internal crate type (not a public numeric tower), so shadowing the std op
-// trait names carries no confusion risk for callers. [OPUS-4.8]
+// trait names carries no confusion risk for callers.
 #[allow(clippy::should_implement_trait)]
 impl Fp {
     /// Embed a `u64` into the field (reducing mod `p`).
@@ -124,7 +124,7 @@ impl Fp {
     /// Panics if `self` is zero (zero has no inverse) — callers (Lagrange
     /// interpolation) only ever invert non-zero differences of distinct points.
     ///
-    /// [OPUS-4.8] sq-7ltf: this routes through [`Fp::pow_ct`] (a fixed-iteration,
+    /// sq-7ltf: this routes through [`Fp::pow_ct`] (a fixed-iteration,
     /// branchless square-and-multiply), so the inverse is **constant-time in the
     /// inverted value `self`** by construction — there is no data-dependent
     /// multiply branch on the base. The exponent (`P − 2`) is a public constant,
@@ -141,7 +141,7 @@ impl Fp {
 
     /// **Variable-time** modular exponentiation by square-and-multiply.
     ///
-    /// [OPUS-4.8] sq-7ltf: this is the classic data-dependent square-and-multiply
+    /// sq-7ltf: this is the classic data-dependent square-and-multiply
     /// — `if exp & 1 == 1 { acc = acc.mul(base) }` branches on the **exponent's
     /// bits**, so its timing leaks the exponent's bit pattern / Hamming weight.
     ///
@@ -174,7 +174,7 @@ impl Fp {
 
     /// Fixed-iteration, branchless modular exponentiation.
     ///
-    /// [OPUS-4.8] sq-7ltf: a square-and-multiply that runs a **fixed 64
+    /// sq-7ltf: a square-and-multiply that runs a **fixed 64
     /// iterations** (one per `u64` exponent bit) and selects the conditional
     /// multiply with [`subtle::ConditionallySelectable`] instead of an `if`. There is no
     /// data-dependent branch on the base value, so the routine is **constant-time
@@ -205,7 +205,7 @@ impl Fp {
         acc
     }
 
-    /// [OPUS-4.8] sq-u8a8: constant-time equality on the canonical representative,
+    /// sq-u8a8: constant-time equality on the canonical representative,
     /// via [`subtle::ConstantTimeEq`]. Because every `Fp` is kept canonical in
     /// `[0, P)`, comparing the `u64` values in constant time is equivalent to
     /// `self == other` but does not leak (through timing) whether the two values
@@ -224,7 +224,7 @@ impl Fp {
         self.0.ct_eq(&other.0)
     }
 
-    /// [OPUS-4.8] sq-mnv5 — a square root of `self` for the `p ≡ 3 (mod 4)`
+    /// sq-mnv5 — a square root of `self` for the `p ≡ 3 (mod 4)`
     /// shortcut: `self^((p+1)/4)`. If `self` is a quadratic residue this returns a
     /// `d` with `d² = self` (one of the two roots `±d`); if `self` is a
     /// NON-residue the identity does not hold, so the caller MUST verify
@@ -244,7 +244,7 @@ impl Fp {
     }
 }
 
-/// [OPUS-4.8] sq-7ltf: constant-time conditional select on the canonical
+/// sq-7ltf: constant-time conditional select on the canonical
 /// representative. Because every `Fp` is kept canonical in `[0, P)`, selecting
 /// between two canonical `u64` values yields a canonical `Fp`; the underlying
 /// `u64::conditional_select` (from `subtle`) is branchless. This is the
@@ -315,7 +315,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-u8a8: the constant-time equality primitive returns the SAME
+    // sq-u8a8: the constant-time equality primitive returns the SAME
     // boolean as the plain `==` on a spread of representative inputs (equal,
     // unequal, boundary values). This is the "CT-eq agrees with the prior `==`"
     // gate from the bead — proving the hygiene primitive does not change any
@@ -337,7 +337,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-u8a8: a compile-and-behaviour check that `Fp` implements
+    // sq-u8a8: a compile-and-behaviour check that `Fp` implements
     // `Zeroize` and that scrubbing leaves the additive identity (so a secret-
     // bearing `Fp` owned by a container can be wiped).
     #[test]
@@ -348,7 +348,7 @@ mod tests {
         assert_eq!(x, Fp::zero(), "zeroized Fp must be the additive identity");
     }
 
-    // [OPUS-4.8] sq-7ltf: the constant-time (branchless, fixed-iteration)
+    // sq-7ltf: the constant-time (branchless, fixed-iteration)
     // exponentiation `pow_ct` must compute the SAME field element as the
     // variable-time square-and-multiply `pow_vartime` for a spread of bases and
     // exponents (including the inversion exponent `P-2`, zero, one, and large
@@ -370,7 +370,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-7ltf: `inv` (which now routes through `pow_ct`) still produces
+    // sq-7ltf: `inv` (which now routes through `pow_ct`) still produces
     // a true multiplicative inverse for boundary and random-ish values.
     #[test]
     fn inv_via_pow_ct_is_multiplicative_inverse() {
@@ -380,7 +380,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-mnv5: the `p ≡ 3 (mod 4)` square-root shortcut. For every
+    // sq-mnv5: the `p ≡ 3 (mod 4)` square-root shortcut. For every
     // quadratic RESIDUE c = a², `c.sqrt_residue()` must square back to c (d² == c),
     // and the precondition p ≡ 3 (mod 4) — which the shortcut relies on — holds for
     // p = 2^61 − 1. The random-bit sub-protocol only ever calls this on c = a².

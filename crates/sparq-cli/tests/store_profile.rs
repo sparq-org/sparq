@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-7d3dj.32.2.1) Contract tests for `SPARQ_STORE_PROFILE` — the runtime in-RAM
+//! (sq-7d3dj.32.2.1) Contract tests for `SPARQ_STORE_PROFILE` — the runtime in-RAM
 //! store-profile selection on sparq-cli's shared load path — and the re-landed `memstat`
 //! subcommand.
 //!

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ro6if (PSS #1415 / #1478) — `served-conformance-report`: emits the
+//! sq-ro6if (PSS #1415 / #1478) — `served-conformance-report`: emits the
 //! MACHINE-READABLE served-surface SPARQL 1.1 Protocol conformance report as JSON.
 //!
 //! PUBLICATION ONLY. This binary runs NO new conformance tests: it re-runs the two
@@ -38,7 +38,7 @@
 //!   cargo run --release -p sparq-conformance \
 //!     --features http-protocol,federation-descriptors \
 //!     --bin served-conformance-report -- --out served-conformance.json
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use std::process::ExitCode;
 

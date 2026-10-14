@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-6qw3: the opt-in `Reasoner::why(...)` derivation proof tree.
+//! sq-6qw3: the opt-in `Reasoner::why(...)` derivation proof tree.
 //!
 //! Behind the non-default `explain` feature (which turns on `sparq-reason`'s `explain`
 //! feature), so the standard reason bundle carries zero proof-tree code. Exposes
@@ -56,7 +56,7 @@ fn proof_to_json(proof: Option<ProofTree>) -> String {
     }
 }
 
-/// [FABLE-5] sq-ixc3.20 — the native body of [`Reasoner::why_n3`]. Native (`String` error) so
+/// sq-ixc3.20 — the native body of [`Reasoner::why_n3`]. Native (`String` error) so
 /// the crate's unit tests drive it end to end; the `#[wasm_bindgen]` wrapper below is a trivial
 /// error-mapping shim (the same split `n3_new_ntriples` / `n3_query_ntriples` use).
 ///
@@ -81,7 +81,7 @@ fn why_n3_impl(n3: &str, s: &str, p: &str, o: &str) -> Result<String, String> {
 
 #[wasm_bindgen]
 impl Reasoner {
-    /// [OPUS-4.8] sq-6qw3: returns ONE derivation of the triple `(s, p, o)` from the asserted
+    /// sq-6qw3: returns ONE derivation of the triple `(s, p, o)` from the asserted
     /// base of `data` under `profile`, as a proof-tree JSON document — or the JSON literal
     /// `null` if the triple is not entailed (not in the closure). `s`/`p`/`o` are N-Triples
     /// term strings (e.g. `"<http://ex/Socrates>"`, `"<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"`,
@@ -123,7 +123,7 @@ impl Reasoner {
                 let g = MaterializedOwlGraph::new(&mut dict, &base);
                 g.why_with(&dict, triple, opts)
             }
-            // [OPUS-4.8] sq-e5atd: D-entailment is a value-space materialiser (the rdfD1
+            // sq-e5atd: D-entailment is a value-space materialiser (the rdfD1
             // datatype-typing closure with typed literal equality), not a rule-based
             // forward-chainer that records a premises-before-conclusion derivation DAG, so
             // there is no `why` proof tree for it. `Profile::D` only exists when the bundle is
@@ -142,7 +142,7 @@ impl Reasoner {
         Ok(proof_to_json(proof))
     }
 
-    /// [FABLE-5] sq-ixc3.20: returns ONE derivation of the triple `(s, p, o)` under the N3
+    /// sq-ixc3.20: returns ONE derivation of the triple `(s, p, o)` under the N3
     /// RULES + facts document `n3` (the same combined `rules + base facts` document
     /// [`Reasoner::reason_n3`](crate::Reasoner::reason_n3) consumes), as a proof-tree JSON
     /// document — or the JSON literal `null` if the triple is not in the N3 closure.
@@ -246,7 +246,7 @@ mod tests {
         assert_eq!(Profile::parse("owl-rl"), Some(Profile::OwlRl));
     }
 
-    // [FABLE-5] sq-ixc3.20 — `whyN3` (the native `why_n3_impl` body the wasm shim wraps).
+    // sq-ixc3.20 — `whyN3` (the native `why_n3_impl` body the wasm shim wraps).
 
     /// A two-rule N3 document whose closure needs a MULTI-STEP derivation (the second rule is
     /// recursive: it consumes its own conclusions), mirroring the GUI's combined

@@ -1,6 +1,6 @@
 //! `--extra-graph` loader tests — the FO-KM benchmark seam (epic sq-mztg8, Metric 1).
 //!
-//! [OPUS-4.8] 🤖 SPARQ agent. Proves the two load-bearing invariants of the
+//! 🤖 SPARQ agent. Proves the two load-bearing invariants of the
 //! `load_pkg_with_extra` / `load_pkg_closed_with_extra` helpers the `pkg-query
 //! --extra-graph` flag uses:
 //!

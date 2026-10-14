@@ -3,7 +3,7 @@
 use sparq_core::Graph;
 use std::collections::BTreeSet;
 
-/// [GPT-5.6] Small deterministic generator kept local so this test adds no dependency.
+/// Small deterministic generator kept local so this test adds no dependency.
 struct Lcg(u64);
 
 impl Lcg {

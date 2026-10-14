@@ -18,7 +18,7 @@ fn can(s: &mut PodStore, agent: Option<&str>, client: Option<&str>, mode: Mode, 
     s.accessible(&Session { agent, client, issuer: None, now: None }, mode).iter().any(|g| g.as_str() == graph)
 }
 
-/// [OPUS-4.8] sq-3jtd.6: as [`can`] but with the issuer dimension supplied.
+/// sq-3jtd.6: as [`can`] but with the issuer dimension supplied.
 fn can_iss(
     s: &mut PodStore,
     agent: Option<&str>,
@@ -91,7 +91,7 @@ fn acp_rematerialization_picks_up_policy_change() {
     assert!(!can(&mut s, Some(BOB), None, Mode::Write, "https://pod.ex/team2/c3/g0/d0.ttl"));
 }
 
-/// [OPUS-4.8] sq-xor3: ACP write-path enforcement. `update_as_acp` gates a SPARQL Update
+/// sq-xor3: ACP write-path enforcement. `update_as_acp` gates a SPARQL Update
 /// against `acl:Write` (cumulative ACP allow ∖ deny) before mutating. Expected from the
 /// ACP fixture: ALICE has Read/Write/Control everywhere (cumulative root owner policy);
 /// team2's `acp:allow Read,Write` anyOf {bob,carol} gives BOB+CAROL write; DAVE has none.
@@ -139,7 +139,7 @@ fn graph_len(store: &PodStore, name: &str) -> usize {
         .unwrap_or(0)
 }
 
-/// [FABLE-5] sq-yhlf0: the ACP twin of the budgeted write path. `update_as_acp_with_budget`
+/// sq-yhlf0: the ACP twin of the budgeted write path. `update_as_acp_with_budget`
 /// must enforce the SAME ACP grants as `update_as_acp` and, on top of that, abort when the
 /// caller's budget is exhausted — leaving the store untouched. (The WAC side's fuller matrix
 /// lives in tests/update.rs; this pins that the ACP entry point is wired to the same path
@@ -186,7 +186,7 @@ fn acp_budgeted_write_enforces_grants_and_the_budget() {
     );
 }
 
-// ── [OPUS-4.8] sq-3jtd.6: acp:issuer support — the (agent, client, issuer) principal ──
+// ── sq-3jtd.6: acp:issuer support — the (agent, client, issuer) principal ──
 //
 // The issuer dimension is the exact twin of the client dimension (design doc §3.6): an
 // ACP Matcher can constrain on the OIDC issuer that vouched for the requester's WebID.
@@ -349,7 +349,7 @@ fn acp_issuer_reserved_encoding_rejected() {
     assert!(s.materialize_acp().is_err(), "reserved-space issuer IRI rejected at materialization");
 }
 
-// ── [OPUS-4.8] sq-3jtd.5: acp:CreatorAgent / acp:OwnerAgent support ───────────────────
+// ── sq-3jtd.5: acp:CreatorAgent / acp:OwnerAgent support ───────────────────
 //
 // An ACP Matcher can constrain on `acp:agent acp:CreatorAgent` / `acp:OwnerAgent`: it
 // accepts the context agent iff that agent is the *creator* (resp. *owner*) of the
@@ -500,7 +500,7 @@ fn acp_creator_agent_deny_overrides() {
 /// NOTE: this only covers the *resource-graph* vector (content graphs are never fed to the
 /// reasoner). The strictly harder vector — a forged `solidx:` fact placed inside the `.acr`
 /// CONTROL document, which IS fed verbatim — is covered by the `acp_forged_*_in_acr_document`
-/// tests below ([OPUS-4.8] sq-3jtd.5), which need the `is_reserved_derivation_predicate`
+/// tests below (sq-3jtd.5), which need the `is_reserved_derivation_predicate`
 /// filter; this test alone passes even without it.
 #[test]
 fn acp_creator_fact_from_resource_graph_is_ignored() {
@@ -606,7 +606,7 @@ fn acp_creator_agent_with_client_constraint() {
     );
 }
 
-/// [OPUS-4.8] sq-az1b — allOf { CreatorAgent } { concrete WebID } where the WebID == the
+/// sq-az1b — allOf { CreatorAgent } { concrete WebID } where the WebID == the
 /// resource's creator. The bead asked whether this "degenerate" composition is supported;
 /// it IS, with no special-casing: the provenance candidate's agent dimension is the creator
 /// WebID, and the sibling concrete-agent matcher's accept-set is exactly that one WebID, so
@@ -642,7 +642,7 @@ fn acp_creator_agent_allof_with_matching_concrete_agent_is_supported() {
     assert!(!can(&mut s, Some(BOB), None, r, CRE_DOC2), "bob (named, but not creator of d1) denied d1");
 }
 
-/// [OPUS-4.8] sq-az1b — the genuinely contradictory shape: allOf { CreatorAgent } { concrete
+/// sq-az1b — the genuinely contradictory shape: allOf { CreatorAgent } { concrete
 /// WebID } where the WebID is a FIXED agent that is NOT the creator. The two matchers demand
 /// the agent be BOTH the creator AND a different fixed WebID — unsatisfiable for any agent,
 /// so NOBODY is granted. This is correct-by-soundness (an empty intersection), not a missing
@@ -700,7 +700,7 @@ fn acp_creator_reserved_encoding_rejected() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-3jtd.5 — ADVERSARIAL: forged derivation-internal `solidx:` facts
+// sq-3jtd.5 — ADVERSARIAL: forged derivation-internal `solidx:` facts
 // smuggled INSIDE the `.acr` access-control document (not the resource graph) must
 // NEVER reach the reasoner. These exploit the real attack surface that
 // `acp_creator_fact_from_resource_graph_is_ignored` does NOT cover: that test placed

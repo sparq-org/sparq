@@ -15,7 +15,7 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] docs.rs: build with ALL features (engine + reproject) so the full
+# docs.rs: build with ALL features (engine + reproject) so the full
 # API — including the `reproject` module — appears on the rendered front page,
 # and pass `--cfg docsrs` so any `#[doc(cfg(...))]` feature badges render.
 [package.metadata.docs.rs]
@@ -52,10 +52,10 @@ rustdoc-args = ["--cfg", "docsrs"]
 # entry points keep their exact W3C-conformant behaviour (a `geo:sfWithin` triple
 # matches only ASSERTED triples there) — the rewrite is a strict opt-in superset,
 # never a change to default SPARQL semantics. Implies `engine` (the rewrite hands a
-# rewritten `spargebra::Query` to the engine). [OPUS-4.8] sq-wf9qg
+# rewritten `spargebra::Query` to the engine). sq-wf9qg
 # `topology_index` (opt-in, OFF by default): exact DE-9IM refinement for constant-region
 # containment scans. The R-tree first finds the AABB superset, then a prepared constant
-# region filters it to the exact winning geometry literals. [GPT-5.6] sq-jrdds
+# region filters it to the exact winning geometry literals. sq-jrdds
 # `geof_accessors` (opt-in, OFF by default): registers the GeoSPARQL 1.1 non-topological
 # ACCESSOR query functions — geof:dimension / coordinateDimension / spatialDimension
 # (xsd:integer), geof:isSimple (xsd:boolean), geof:geometryType (the OGC sf: geometry-class
@@ -64,13 +64,13 @@ rustdoc-args = ["--cfg", "docsrs"]
 # layer leaves undefined (an EMPTY geometry's dimensions / sf: class, a
 # GEOMETRYCOLLECTION's sf: class) is an honest GeoError::Unsupported-mapped expression
 # error, never a fabricated integer/boolean. Implies `engine` (registration happens in
-# the registry). [FABLE-5] sq-lsp7k
+# the registry). sq-lsp7k
 default = ["engine"]
 engine = ["dep:sparq-engine", "dep:spargebra"]
 geof_accessors = ["engine"]
 geosparql_rewrite = ["engine"]
 reproject = ["dep:proj4rs"]
-# [FABLE-5] (sq-lk3aw.4) topology_index also lights the ENGINE's exact-candidate seam
+# (sq-lk3aw.4) topology_index also lights the ENGINE's exact-candidate seam
 # (weak feature: only when the optional sparq-engine dep is in the graph), so
 # `GeoIndexProvider::candidates_exact` can certify the exact set and the engine can
 # skip the residual DE-9IM FILTER for certified rows. Without `engine`, the pure
@@ -85,7 +85,7 @@ topology_index = ["sparq-engine?/spatial-exact-pushdown"]
 # ellipsoids, projected defs whose easting/northing axis order the registry
 # WKT cannot prove) — see `reproject` module docs. OFF by default: the
 # registry is a few MiB of static strings most deployments never need.
-# [FABLE-5]
+#
 epsg_full = ["reproject", "dep:crs-definitions"]
 
 [dependencies]
@@ -95,7 +95,7 @@ sparq-core = { path = "../sparq-core", version = "0.1.6" }
 # Behind the `engine` feature (the dependency direction is sparq-geo -> sparq-engine;
 # the engine itself stays geometry-free, and so does the wasm bundle).
 sparq-engine = { path = "../sparq-engine", version = "0.1.6", optional = true }
-# [OPUS-4.8] sq-9g58: the SPARQL algebra the GeoSPARQL query-rewrite extension
+# sq-9g58: the SPARQL algebra the GeoSPARQL query-rewrite extension
 # (src/rewrite.rs) transforms. Behind the `engine` feature only — the rewrite
 # hands a rewritten `spargebra::Query` to `sparq_engine::PreparedQuery`, so the
 # engine is already in the graph; the pure geometry library is unaffected. Same
@@ -112,7 +112,7 @@ geo-types = "0.7"
 # only nodes/overlays polygons. This is the SAME engine `geo 0.33` already
 # uses for polygon overlay (it depends on i_overlay 4.5.x), so adding it as a
 # direct dependency pulls in no new transitive crates. `default-features =
-# false` mirrors geo's own usage and keeps the lockfile stable. [OPUS-4.8]
+# false` mirrors geo's own usage and keeps the lockfile stable.
 i_overlay = { version = "7.0.0", default-features = false }
 # R-tree (bulk-loaded STR) over geometry bounding boxes.
 rstar = "0.13"
@@ -121,7 +121,7 @@ rstar = "0.13"
 # uses (Point/LineString/Polygon/Multi*). `default-features = false` keeps it to
 # the pull-parser with no serde. The transitive oxigraph stack (oxrdfxml /
 # sparesults) still pins quick-xml 0.37, so this 0.41 requirement currently
-# resolves as a second copy in the lockfile until those upstreams bump. [OPUS-4.8]
+# resolves as a second copy in the lockfile until those upstreams bump.
 # Bumped 0.40 -> 0.41 for RUSTSEC-2026-0194 (quadratic duplicate-attribute check)
 # and RUSTSEC-2026-0195 (unbounded NsReader namespace-declaration allocation); both
 # transitive 0.37.5 copies are scoped-ignored in deny.toml until oxigraph bumps.
@@ -134,40 +134,40 @@ proj4rs = { version = "0.1", optional = true }
 # are compiled in alongside `proj4` because they carry the AXIS metadata the
 # proj4 strings lack — the axis-order gate in `full_epsg_definition` accepts a
 # projected registry entry only when its WKT proves easting/northing order.
-# [FABLE-5]
+#
 crs-definitions = { version = "0.5.0", default-features = false, features = ["proj4", "wkt"], optional = true }
 # Fast hash maps for the geometry-node -> feature mapping during index build.
 rustc-hash.workspace = true
 
 [dev-dependencies]
-# [SONNET-4.6] sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
+# sq-z1xv8 — the shared ratchet-floor constants. DEV-ONLY (zero-dep,
 # `publish = false`): the conformance ratchet floor this crate's test runner enforces is
 # the SAME `const` sparq-conformance's central scoreboard reports, so the two cannot
 # drift, and the dep edge puts this crate in the floors crate's reverse-dependency
 # closure (which is what makes CI test-selection sound for the floor — it replaces the
 # guard test's old runtime read of this file's source).
 sparq-conformance-floors = { path = "../sparq-conformance-floors" }
-# [GPT-5.6] Random accepted WKT geometries for parse/serialize fixpoint coverage.
+# Random accepted WKT geometries for parse/serialize fixpoint coverage.
 proptest = "1"
 # Deterministic random geometries for property tests + the benchmark example.
-# [OPUS-4.8] sq-8xug: rand-ecosystem 0.10. `random_range` moved from the `Rng`
+# sq-8xug: rand-ecosystem 0.10. `random_range` moved from the `Rng`
 # trait to `RngExt` in 0.10, so the test/example imports use the prelude.
 rand = "0.10"
-# [OPUS-4.8] sq-5ts8: TEST-ONLY. The GeoSPARQL RDFS/OWL Feature/Geometry class
+# sq-5ts8: TEST-ONLY. The GeoSPARQL RDFS/OWL Feature/Geometry class
 # entailment conformance fixture (tests/entailment.rs) drives the generic
 # RDFS / OWL-RL closure over the GeoSPARQL ontology axioms — engine support for
 # the entailment requirements is `sparq-reason`'s rule set, not new geo code, so
 # the dependency is dev-only and the shipped crate is unaffected. `default-features
 # = false` drops the rayon `parallel` feature the closure does not need here.
 sparq-reason = { path = "../sparq-reason", version = "0.1.6", default-features = false }
-# [SONNET-4.6] sq-ql2iy: TEST/EXAMPLE-ONLY feature addition. The GeoSPARQL
+# sq-ql2iy: TEST/EXAMPLE-ONLY feature addition. The GeoSPARQL
 # Compliance Benchmark ships its dataset as RDF/XML only, so the
 # `gsb_compliance` example needs `sparq-core`'s opt-in `rdfxml` loader. Declared
 # here rather than on the `[dependencies]` entry so the SHIPPED crate — and the
 # wasm bundle downstream of it — still links no `oxrdfxml`.
 sparq-core = { path = "../sparq-core", version = "0.1.6", features = ["rdfxml"] }
 
-# [SONNET-4.6] sq-ql2iy — the 206-query GeoSPARQL Compliance Benchmark runner.
+# sq-ql2iy — the 206-query GeoSPARQL Compliance Benchmark runner.
 # Needs the opt-in query-rewrite entry point (the QRW requirements R28–R30) and
 # the opt-in accessor functions (part of requirement R19), so it is skipped by a
 # default `cargo build --examples` and compiled under `--all-features`.

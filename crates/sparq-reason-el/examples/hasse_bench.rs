@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-s2nob: EL transitive-reduction (Hasse) scale micro-benchmark — a self-asserting,
+//! sq-s2nob: EL transitive-reduction (Hasse) scale micro-benchmark — a self-asserting,
 //! deterministic workload for Phase E3. Run (the `hasse` feature is required):
 //!
 //!     cargo run -p sparq-reason-el --features hasse --example hasse_bench --release [N]

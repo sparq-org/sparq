@@ -2,7 +2,7 @@
 //! *before* the order-preserving numeric encoder, so `1000 m` and `1 km` share a code
 //! (structure-aware vectorisation **P2**).
 //!
-//! [OPUS-4.8] sq-0wo9e.3 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
+//! sq-0wo9e.3 (epic sq-0wo9e; design `research/structure-aware-vectorisation.md`
 //! §2 row "QUDT / unit annotations → UNIT-NORMALISE-BEFORE-MAGNITUDE" + §3.1 numeric encoder).
 //! Part of the **second** structure-aware slice (P2), on top of P1
 //! ([`crate::encode`]: the typed-literal encoders). It is **opt-in** (the same `structure` cargo

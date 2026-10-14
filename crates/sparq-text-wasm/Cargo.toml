@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-jbe6 (W-text): the tier-b WASM bundle for sparq-text.
+# sq-jbe6 (W-text): the tier-b WASM bundle for sparq-text.
 #
 # A SEPARATE, lazy-loaded bundle (NOT folded into the lean `sparq-wasm` bundle): it
 # carries the owned BM25 inverted index + the `text:` magic-predicate rewrite
@@ -42,7 +42,7 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 default = []
 
 [dev-dependencies]
-# [OPUS-4.8] sq-jbe6 — headless wasm test harness, mirroring sparq-wasm/sparq-reason-wasm:
+# sq-jbe6 — headless wasm test harness, mirroring sparq-wasm/sparq-reason-wasm:
 # exercises the #[wasm_bindgen] JS-facing API in a REAL wasm runtime via
 # `wasm-pack test --node`. Dev-only: it must NOT enter the non-dev wasm graph.
 wasm-bindgen-test = "0.3"
@@ -51,7 +51,7 @@ wasm-bindgen-test = "0.3"
 # Optimise the wasm for size; the index-build path is the bundle's memory risk (the bead
 # flags it) — a tiny demo corpus keeps it bounded.
 wasm-opt = ["-Oz"]
-# [SONNET-4.6] sq-7d3dj.15 — `js build:text-wasm` now passes `--profile release-wasm`
+# sq-7d3dj.15 — `js build:text-wasm` now passes `--profile release-wasm`
 # (NOT `--release`). wasm-pack only recognises the built-in `dev`/`profiling`/`release` profile
 # keys; the above `release` block is IGNORED for `--profile release-wasm` and wasm-opt uses its
 # default `-O` instead. The size win comes from the cargo `release-wasm` profile (opt-level "z"

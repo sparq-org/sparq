@@ -1,5 +1,5 @@
 //! End-to-end **exec-accuracy** harness for sparq-nlq (`research/genai-design.md` §4,
-//! `sparq-nlq` row) — bead sq-05rv. [OPUS-4.8]
+//! `sparq-nlq` row) — bead sq-05rv.
 //!
 //! Where `olympics_eval.rs` gates the engine-side plumbing (parse/execute/repair with
 //! exact row counts), THIS file grades the design doc's headline accuracy claim the

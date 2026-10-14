@@ -1,4 +1,4 @@
-//! [GPT-5.6] Exit-code contracts for previously uncovered CLI usage and I/O failures.
+//! Exit-code contracts for previously uncovered CLI usage and I/O failures.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -113,7 +113,7 @@ fn reason_too_few_arguments_exits_2() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// [OPUS-5] (sq-2ch27) The feature-OFF half of the `--reason el` contract: a build without the
+/// (sq-2ch27) The feature-OFF half of the `--reason el` contract: a build without the
 /// opt-in `el` feature must FAIL LOUDLY naming the feature, never silently fall back to `owl`
 /// (which is sound but INCOMPLETE for class classification). The feature-ON half lives in
 /// `el_cli.rs`. Gated `not(feature = "el")` so the `sparq-cli (el)` matrix leg does not run it.
@@ -130,7 +130,7 @@ fn reason_el_without_the_feature_exits_2() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// [OPUS-5] (sq-2ch27) …and the `classify` subcommand is simply ABSENT without the feature, so
+/// (sq-2ch27) …and the `classify` subcommand is simply ABSENT without the feature, so
 /// it falls through to the top-level usage block (exit 2) rather than a half-wired stub.
 #[cfg(not(feature = "el"))]
 #[test]
@@ -138,7 +138,7 @@ fn classify_subcommand_absent_without_the_feature() {
     assert_contract(&["classify"], 2, "usage:\n  sparq-cli query");
 }
 
-/// [SONNET-4.6] (sq-p4zci) The feature-OFF half of the `--reason datalog:<rules.dlog>` contract:
+/// (sq-p4zci) The feature-OFF half of the `--reason datalog:<rules.dlog>` contract:
 /// a build without the opt-in `datalog` feature must FAIL LOUDLY naming the feature. There is no
 /// fall-back profile at all here — RDFS/OWL-RL are monotone, so quietly running one of them
 /// would drop negation as failure and aggregation and change the answer set. The feature-ON half
@@ -157,7 +157,7 @@ fn reason_datalog_without_the_feature_exits_2() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// [SONNET-4.6] (sq-p4zci) A bare `datalog` with no rules file is a USAGE error naming the
+/// (sq-p4zci) A bare `datalog` with no rules file is a USAGE error naming the
 /// syntax, in BOTH feature states — the rules-file argument is not optional, and falling through
 /// to the profile parser would report the far less useful "unknown reasoning profile". The
 /// argument check runs before the feature check, so this assertion is feature-independent.

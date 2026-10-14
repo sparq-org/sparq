@@ -1,4 +1,4 @@
-//! [OPUS-4.8] Accuracy + persistence gate for the on-disk Vamana index ([`DiskAnnIndex`]):
+//! Accuracy + persistence gate for the on-disk Vamana index ([`DiskAnnIndex`]):
 //!
 //! 1. **recall@10 vs exact brute force** ≥ 0.90 on the same 50k synthetic set the HNSW gate
 //!    (`tests/recall.rs`) uses — a persisted graph must find the true neighbours;
@@ -7,7 +7,7 @@
 //! 3. **parity with the in-RAM searchers** on tiny separable clusters, and the degenerate
 //!    all-zero-query contract shared with `nearest_exact` / `VectorIndex`.
 //!
-//! [OPUS-4.8] (sq-k5qq) Strictly-additive machine-readable emit: set `SPARQ_VECTORS_JSON`
+//! (sq-k5qq) Strictly-additive machine-readable emit: set `SPARQ_VECTORS_JSON`
 //! to a path and the recall gate ALSO writes its deterministic recall + advisory build/query
 //! timings there as a stable, DEPENDENCY-FREE JSON document (mirroring
 //! `crates/sparq-mpc/examples/mpc_net_bench.rs::cell_json`). These tests run under `cargo test`
@@ -16,14 +16,14 @@
 //! NON-CANONICAL (this dev box) and nothing is committed. serde_json is a TEST-only dev-dep.
 
 use sparq_vectors::{nearest_exact, DiskAnnIndex, PqConfig, VamanaConfig, VectorStore};
-// [OPUS-4.8] (sq-ip3a) HNSW is the approximate backend — `approx-ann` only (the disk-vs-HNSW
+// (sq-ip3a) HNSW is the approximate backend — `approx-ann` only (the disk-vs-HNSW
 // parity test below is gated to match).
 #[cfg(feature = "approx-ann")]
 use sparq_vectors::VectorIndex;
 use std::time::Instant;
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-k5qq) SPARQ_VECTORS_JSON=<path> machine-readable results emit.
+// (sq-k5qq) SPARQ_VECTORS_JSON=<path> machine-readable results emit.
 // Dependency-free `format!`-built JSON, the same idiom as tests/throughput.rs.
 // ---------------------------------------------------------------------------
 
@@ -145,7 +145,7 @@ fn diskann_recall_at_10_vs_brute_force_on_50k() {
     eprintln!("DiskANN recall@{K} over {QUERIES} queries on {N}x{DIM}: {recall:.4}");
     assert!(recall >= 0.90, "recall@{K} gate failed: {recall:.4} < 0.90");
 
-    // [OPUS-4.8] (sq-k5qq) Strictly-additive: writes only when SPARQ_VECTORS_JSON is set;
+    // (sq-k5qq) Strictly-additive: writes only when SPARQ_VECTORS_JSON is set;
     // the stderr line above is unchanged either way. `recall` is the deterministic gate value.
     let doc = results_json(
         "sparq-vectors diskann recall",
@@ -166,7 +166,7 @@ fn diskann_recall_at_10_vs_brute_force_on_50k() {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-k5qq) The dependency-free emit must round-trip through a REAL
+// (sq-k5qq) The dependency-free emit must round-trip through a REAL
 // serde_json parse — this runs in BOTH feature states (no approx-ann gate).
 // ---------------------------------------------------------------------------
 #[test]
@@ -333,7 +333,7 @@ fn empty_and_singleton_graphs_roundtrip() {
     }
 }
 
-// [OPUS-4.8] (sq-qamd) PQ candidate cache wired into the DiskANN search path: build with a PQ
+// (sq-qamd) PQ candidate cache wired into the DiskANN search path: build with a PQ
 // section, confirm it persists + reloads, the codes drive the beam (RAM-only ranking) and the
 // final beam is re-ranked off the mmap so the reported cosine is EXACT, and recall stays high.
 
@@ -490,7 +490,7 @@ fn open_rejects_corrupt_and_wrong_magic() {
     let _ = std::fs::remove_file(&path);
 }
 
-// [FABLE-5] (sq-98c) `open_from_bytes` — the filesystem-less / wasm read path (memmap2 is
+// (sq-98c) `open_from_bytes` — the filesystem-less / wasm read path (memmap2 is
 // target-gated out of wasm32 builds; on wasm the graph arrives as fetched/embedded bytes).
 // The owned backing must be RESULT-IDENTICAL to the memory map: same neighbours, same scores,
 // same metadata. This also exercises the f32-alignment `debug_assert` in `node_vector` over
@@ -528,7 +528,7 @@ fn open_from_bytes_returns_identical_neighbours_to_mmap_open() {
     let _ = std::fs::remove_file(&graph_path);
 }
 
-// [FABLE-5] (sq-98c) The PQ candidate cache (trailing `.spqg` section) must also parse + serve
+// (sq-98c) The PQ candidate cache (trailing `.spqg` section) must also parse + serve
 // identically from owned bytes — the section offsets are relative, not map-page-dependent.
 #[test]
 fn open_from_bytes_serves_the_pq_index_identically() {
@@ -559,7 +559,7 @@ fn open_from_bytes_serves_the_pq_index_identically() {
     let _ = std::fs::remove_file(&graph_path);
 }
 
-// [FABLE-5] (sq-98c) Validation is identical to `open`: bad magic / truncation reject up front.
+// (sq-98c) Validation is identical to `open`: bad magic / truncation reject up front.
 #[test]
 fn open_from_bytes_rejects_corrupt_and_wrong_magic() {
     assert!(DiskAnnIndex::open_from_bytes(b"NOPExxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".to_vec()).is_err());

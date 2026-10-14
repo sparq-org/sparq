@@ -19,9 +19,9 @@ use std::rc::Rc;
 
 const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
-/// The datatype of every dictionary inline id ([FABLE-5] sq-7d3dj.33.4).
+/// The datatype of every dictionary inline id (sq-7d3dj.33.4).
 const XSD_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#integer";
-/// [OPUS-4.8] (sq-0mjfd) The RDF-1.2 reification predicate: a reifier `?r` reifies
+/// (sq-0mjfd) The RDF-1.2 reification predicate: a reifier `?r` reifies
 /// a triple-term via `?r rdf:reifies <<( s p o )>>`. Used by `sh:reifierShape`.
 const RDF_REIFIES: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies";
 
@@ -29,29 +29,29 @@ const RDF_REIFIES: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies";
 use std::cell::Cell;
 #[cfg(test)]
 thread_local! {
-    /// [OPUS-4.8] (sq-7d3dj.33.1) Test-only: when set, `prime_sparql_batch` skips
+    /// (sq-7d3dj.33.1) Test-only: when set, `prime_sparql_batch` skips
     /// priming so `validate` takes the per-focus path — lets the in-crate
     /// differential test diff the batched report against the per-focus one.
     static FORCE_NO_BATCH: Cell<bool> = const { Cell::new(false) };
-    /// [FABLE-5] (sq-7d3dj.33.4) Test-only: when set, `validate_shape_at` never
+    /// (sq-7d3dj.33.4) Test-only: when set, `validate_shape_at` never
     /// resolves a focus-node id, so value nodes are computed by the Term-level
     /// path walk and every constraint takes the Term-level route — lets the
     /// in-crate differential tests diff the id-fast-path report against the
     /// original Term-level one.
     static FORCE_NO_IDFAST: Cell<bool> = const { Cell::new(false) };
-    /// [FABLE-5] (sq-7d3dj.33.4) Test-only: counts (shape, focus) validations that
+    /// (sq-7d3dj.33.4) Test-only: counts (shape, focus) validations that
     /// took the id-level value-node walk, so the differential tests can assert
     /// the fast path actually FIRED (non-vacuity — with a never-firing fast path
     /// the report diff would be trivially, meaninglessly equal).
     static IDFAST_WALKS: Cell<u64> = const { Cell::new(0) };
-    /// [FABLE-5] (sq-j9hls) Test-only: counts the id-level checks taken by the
+    /// (sq-j9hls) Test-only: counts the id-level checks taken by the
     /// EXTENDED surfaces (sh:class / comparand paths / sh:closed / focus-target
     /// enumeration / sh:hasValue / sh:in / sh:uniqueLang) — the same non-vacuity
     /// role `IDFAST_WALKS` plays for the value-node walk.
     static IDFAST_EXT: Cell<u64> = const { Cell::new(0) };
 }
 
-/// [FABLE-5] (sq-j9hls) Ticks the extended-surface non-vacuity counter (no-op
+/// (sq-j9hls) Ticks the extended-surface non-vacuity counter (no-op
 /// outside tests). Called once per id-level route taken by an extended arm.
 #[cfg(test)]
 fn tick_idfast_ext() {
@@ -61,21 +61,21 @@ fn tick_idfast_ext() {
 #[inline]
 fn tick_idfast_ext() {}
 
-/// [FABLE-5] (sq-j9hls) Test-only: the number of extended-surface id-level checks
+/// (sq-j9hls) Test-only: the number of extended-surface id-level checks
 /// taken on this thread (see `IDFAST_EXT`).
 #[cfg(test)]
 pub(crate) fn idfast_ext_checks() -> u64 {
     IDFAST_EXT.with(Cell::get)
 }
 
-/// [FABLE-5] (sq-7d3dj.33.4) Test-only: the number of id-level value-node walks
+/// (sq-7d3dj.33.4) Test-only: the number of id-level value-node walks
 /// taken on this thread (see `IDFAST_WALKS`).
 #[cfg(test)]
 pub(crate) fn idfast_walks() -> u64 {
     IDFAST_WALKS.with(Cell::get)
 }
 
-/// [OPUS-4.8] (sq-7d3dj.33.1) Test-only helper: run `f` (typically a `validate`
+/// (sq-7d3dj.33.1) Test-only helper: run `f` (typically a `validate`
 /// closure) with `sh:sparql` focus-node batching forced OFF, restoring the prior
 /// state afterwards. Used by the batched-vs-per-focus report-equivalence test.
 #[cfg(test)]
@@ -87,7 +87,7 @@ pub(crate) fn with_sparql_batching_disabled<R>(f: impl FnOnce() -> R) -> R {
     r
 }
 
-/// [FABLE-5] (sq-7d3dj.33.4) Test-only helper: run `f` with the id-level
+/// (sq-7d3dj.33.4) Test-only helper: run `f` with the id-level
 /// core-constraint fast path forced OFF (Term-level walk everywhere), restoring
 /// the prior state afterwards. Used by the id-fastpath report-equivalence tests.
 #[cfg(test)]
@@ -111,7 +111,7 @@ pub(crate) fn validate_graph(
     let mut v = Validator::new(data, shapes);
     let mut out = Vec::new();
     for &sid in &shapes.targeted {
-        // [OPUS-4.8] (sq-7d3dj.33.1) Enumerate this shape's focus nodes ONCE, then
+        // (sq-7d3dj.33.1) Enumerate this shape's focus nodes ONCE, then
         // batch-evaluate its `sh:sparql` constraints over the whole focus set in a
         // single query each (instead of re-running the full query per focus node —
         // the O(N_focus × full-query) quadratic root cause). `validate_shape` then
@@ -119,7 +119,7 @@ pub(crate) fn validate_graph(
         // nested/data-graph focus falls back to the per-focus path unchanged.
         let foci = v.focus_nodes(sid);
         v.prime_sparql_batch(sid, &foci);
-        // [SONNET-4.6] (sq-7d3dj.33.5) If the shape has a SPARQL node expression
+        // (sq-7d3dj.33.5) If the shape has a SPARQL node expression
         // (`sh:values [ sh:select … ]` / `[ sh:sparqlExpr … ]`), batch-evaluate it
         // over ALL focus nodes in one query execution and cache the result map so
         // `validate_shape` drains it per focus instead of re-running per focus node.
@@ -134,7 +134,7 @@ pub(crate) fn validate_graph(
         v.sparql_batch.clear();
         v.node_expr_cache = None;
     }
-    // [OPUS-4.8] (sq-rnkdh) SHACL 1.2 `sh:shape` data-graph targets: a triple
+    // (sq-rnkdh) SHACL 1.2 `sh:shape` data-graph targets: a triple
     // `?n sh:shape ?S` in the DATA graph makes `?n` a focus node of shape `?S`.
     // Unlike the shapes-graph targets above this is discovered per-data-graph, so
     // it is handled here rather than as a per-shape `Target`.
@@ -142,7 +142,7 @@ pub(crate) fn validate_graph(
     (out, v.diagnostics)
 }
 
-/// [OPUS-4.8] (sq-rnkdh) The number of DISTINCT focus nodes the model's targets
+/// (sq-rnkdh) The number of DISTINCT focus nodes the model's targets
 /// select over `data` — the deterministic target-selection statistic exposed as
 /// [`crate::count_focus_nodes`]. Built on the same [`Validator::focus_nodes`]
 /// enumeration the real validation walk uses (plus the `sh:shape` data-graph
@@ -164,7 +164,7 @@ pub(crate) fn count_focus_nodes(data: &Graph, shapes: &ShapesModel) -> usize {
     crate::view::dedup(all).len()
 }
 
-/// [OPUS-4.8] (sq-d1dw, `shacl-af`) True iff `node` conforms to the shape `sid`
+/// (sq-d1dw, `shacl-af`) True iff `node` conforms to the shape `sid`
 /// over `data` — i.e. validating `node` against that shape (as a standalone
 /// focus node, ignoring the shape's own targets) produces no results. The
 /// SHACL-AF rules module uses this to evaluate `sh:condition` gating: a rule
@@ -177,7 +177,7 @@ pub(crate) fn conforms_node(data: &Graph, shapes: &ShapesModel, sid: usize, node
     v.conforms(node, sid)
 }
 
-/// [FABLE-5] (sq-7d3dj.33.4) The value nodes of one (shape, focus) validation, in
+/// (sq-7d3dj.33.4) The value nodes of one (shape, focus) validation, in
 /// either representation. The id form comes from the compiled-path walk and lets
 /// the id-capable constraint arms check values without materialising terms;
 /// [`ValueNodes::materialize`] converts in place (order-preserving) the first
@@ -203,7 +203,7 @@ impl ValueNodes {
     }
 }
 
-/// [FABLE-5] (sq-j9hls) The id-level `rdfs:subClassOf` closure of one class: the
+/// (sq-j9hls) The id-level `rdfs:subClassOf` closure of one class: the
 /// class id plus every descendant present in the data dictionary. `order` keeps
 /// the BFS discovery order (the `sh:targetClass` instance enumeration must match
 /// the Term-level order exactly); `set` answers the per-value instance check.
@@ -234,24 +234,24 @@ struct Validator<'a> {
     /// fresh, EMPTY cache pool, so each `is_match` rebuilt the lazy-DFA cache from
     /// scratch (the profiled `Pool::get_slow → create_cache` hot spot on the
     /// `datatype_range` workload); sharing one `Regex` through an `Rc` keeps its
-    /// warm cache pool across all focus nodes. [FABLE-5] (sq-7d3dj.33.4)
+    /// warm cache pool across all focus nodes. (sq-7d3dj.33.4)
     regexes: FxHashMap<String, Option<Rc<regex::Regex>>>,
-    /// [OPUS-4.8] (sq-vg3y) Per-shape target-node cache for `sh:uniqueValuesFor`
+    /// (sq-vg3y) Per-shape target-node cache for `sh:uniqueValuesFor`
     /// (the constraint needs every target node of the shape, but is evaluated once
     /// per focus node — compute the target scan once).
     uvf_targets: FxHashMap<usize, Vec<Term>>,
-    /// [OPUS-4.8] (sq-lz99x) Non-fatal author-time diagnostics for constraints
+    /// (sq-lz99x) Non-fatal author-time diagnostics for constraints
     /// that were SKIPPED because they could not be evaluated (currently: an
     /// uncompilable `sh:pattern` regex). De-duplicated per (shape, pattern, flags)
     /// so a skip is reported once, not once per value/focus node.
     diagnostics: Vec<ShapeDiagnostic>,
-    /// [OPUS-4.8] (sq-pb0wm) The per-constraint-statement RDF-1.2 reified-annotation
+    /// (sq-pb0wm) The per-constraint-statement RDF-1.2 reified-annotation
     /// override active for the component CURRENTLY being evaluated, set by
     /// `validate_shape` around each `eval_component` call. `result()` reads it to
     /// apply a per-occurrence `sh:message` / `sh:severity` (SHACL 1.2). `None` when
     /// the current constraint carries no annotation (the common case).
     active_meta: Option<ComponentMeta>,
-    /// [OPUS-4.8] (sq-7d3dj.33.1) Batched `sh:sparql` results, keyed by
+    /// (sq-7d3dj.33.1) Batched `sh:sparql` results, keyed by
     /// `(shape id, sparql-constraint index)` → (focus node → its results). Primed
     /// by [`Validator::prime_sparql_batch`] once per targeted shape (over ALL its
     /// focus nodes in one execution) and drained per focus by
@@ -259,47 +259,47 @@ struct Validator<'a> {
     /// A `(sid, idx)` absent here (a non-batchable constraint, or a shape validated
     /// outside the top-level targeted loop) falls back to the per-focus path.
     sparql_batch: FxHashMap<(usize, usize), FxHashMap<Term, Vec<ValidationResult>>>,
-    /// [SONNET-4.6] (sq-7d3dj.33.5) Pre-computed node-expression value-node map.
+    /// (sq-7d3dj.33.5) Pre-computed node-expression value-node map.
     /// Set to `Some((sid, map))` by [`validate_graph`] before iterating over a
     /// shape's focus nodes when the shape carries `sh:values [ sh:select … ]` /
     /// `[ sh:sparqlExpr … ]`, then cleared to `None` after the loop. This allows
     /// [`validate_shape`] to drain from the pre-computed map instead of re-running
     /// the SPARQL query per focus node (the O(N_focus) root cause).
     node_expr_cache: Option<(usize, FxHashMap<Term, Vec<Term>>)>,
-    /// [FABLE-5] (sq-7d3dj.33.4) Per-shape compiled id-level paths (index = shape
+    /// (sq-7d3dj.33.4) Per-shape compiled id-level paths (index = shape
     /// id; `None` = the shape has no `sh:path`). Compiled once per validation run
     /// so the per-focus walk never re-hashes a predicate IRI string.
     compiled_paths: Vec<Option<PathIds>>,
-    /// [FABLE-5] (sq-7d3dj.33.4) Id-keyed layer over [`Self::memo`]: `(focus id,
+    /// (sq-7d3dj.33.4) Id-keyed layer over [`Self::memo`]: `(focus id,
     /// shape) → bool` conformance, so the hot `sh:node` route (`conforms_id`)
     /// resolves a memo hit from a u32 hash without materialising the focus term.
     /// An entry is stored ONLY when the Term-keyed memo stored one (the same
     /// context-free rule — see [`Validator::conforms`]).
     memo_ids: Vec<FxHashMap<Id, bool>>,
-    /// [FABLE-5] (sq-j9hls) Predicate ids of `rdf:type` / `rdfs:subClassOf` in
+    /// (sq-j9hls) Predicate ids of `rdf:type` / `rdfs:subClassOf` in
     /// the data dictionary (`None` = absent → no typed instances / no subclass
     /// edges), resolved once so the id-level class-instance checks and the
     /// `sh:targetClass` enumeration never re-hash the two IRIs.
     rdf_type_id: Option<Id>,
     subclass_of_id: Option<Id>,
-    /// [FABLE-5] (sq-j9hls) Per-class id-level subclass closures, cached per
+    /// (sq-j9hls) Per-class id-level subclass closures, cached per
     /// class TERM (a shape set names few distinct classes; each closure is built
     /// once per validation run and shared by every focus/value check against it).
     class_closures: FxHashMap<Term, Rc<ClassClosure>>,
-    /// [FABLE-5] (sq-j9hls) Compiled id-level COMPARAND paths (`sh:equals` /
+    /// (sq-j9hls) Compiled id-level COMPARAND paths (`sh:equals` /
     /// `sh:disjoint` / `sh:lessThan(OrEquals)` / `sh:subsetOf`), indexed by shape
     /// id and keyed by component index — compiled once per validation run exactly
     /// like [`Self::compiled_paths`], so the per-focus comparand walk never
     /// re-hashes a predicate IRI string.
     compiled_comparands: Vec<FxHashMap<usize, PathIds>>,
-    /// [FABLE-5] (sq-j9hls) Dictionary ids of shapes-graph constants
+    /// (sq-j9hls) Dictionary ids of shapes-graph constants
     /// (`sh:hasValue` / `sh:in` members), memoised per term (`None` = absent
     /// from the data dictionary — such a constant can exactly-equal no data id).
     term_ids: FxHashMap<Term, Option<Id>>,
 }
 
 impl<'a> Validator<'a> {
-    /// [FABLE-5] (sq-7d3dj.33.4) The one construction site (was triplicated across
+    /// (sq-7d3dj.33.4) The one construction site (was triplicated across
     /// `validate_graph` / `count_focus_nodes` / `conforms_node`): builds the empty
     /// caches and eagerly compiles every shape's `sh:path` to its id-level form
     /// (cheap — shapes graphs are small; the data graph never mutates under `'a`).
@@ -310,7 +310,7 @@ impl<'a> Validator<'a> {
             .iter()
             .map(|s| s.path.as_ref().map(|p| p.compile(&view)))
             .collect();
-        // [FABLE-5] (sq-j9hls) Comparand paths, compiled under the same cheap
+        // (sq-j9hls) Comparand paths, compiled under the same cheap
         // eager rule as `compiled_paths` (shapes graphs are small).
         let compiled_comparands = shapes
             .shapes
@@ -360,7 +360,7 @@ impl<'a> Validator<'a> {
         let mut out = Vec::new();
         // Read the model through the validator's own `&'a` reference (independent
         // of the `&mut self` per-target work below) — no `targets.clone()` needed.
-        // [FABLE-5] (sq-7d3dj.33.4)
+        // (sq-7d3dj.33.4)
         let shapes: &'a ShapesModel = self.shapes;
         for t in &shapes.shapes[sid].targets {
             match t {
@@ -371,10 +371,10 @@ impl<'a> Validator<'a> {
                 }
                 Target::SubjectsOf(p) => out.extend(self.data.subjects_of(p)),
                 Target::ObjectsOf(p) => out.extend(self.data.objects_of(p)),
-                // [OPUS-4.8] (sq-rnkdh) SHACL 1.2 `sh:targetWhere [ <shape> ]`:
+                // (sq-rnkdh) SHACL 1.2 `sh:targetWhere [ <shape> ]`:
                 // every data-graph node that CONFORMS to the inline (object) shape.
                 Target::Where(inner) => out.extend(self.target_where_nodes(*inner)),
-                // [OPUS-4.8] (sq-rnkdh) SHACL 1.2 `sh:targetNode [ sh:select … ]`:
+                // (sq-rnkdh) SHACL 1.2 `sh:targetNode [ sh:select … ]`:
                 // the output nodes of the SPARQL node expression.
                 Target::Sparql(idx) => out.extend(self.target_sparql_nodes(*idx)),
             }
@@ -382,7 +382,7 @@ impl<'a> Validator<'a> {
         crate::view::dedup(out)
     }
 
-    /// [OPUS-4.8] (sq-rnkdh) The `sh:targetWhere` focus nodes: every node that
+    /// (sq-rnkdh) The `sh:targetWhere` focus nodes: every node that
     /// appears in the data graph (as a subject OR object of any triple) and
     /// CONFORMS to the inline shape `inner`. This mirrors the SHACL-1.2 target
     /// definition ("all nodes from the data graph that conform to the given
@@ -403,7 +403,7 @@ impl<'a> Validator<'a> {
             .collect()
     }
 
-    /// [OPUS-4.8] (sq-rnkdh) The output nodes of a SPARQL-valued target node
+    /// (sq-rnkdh) The output nodes of a SPARQL-valued target node
     /// expression (`sh:targetNode [ sh:select … ]`): the node expression is run
     /// with no specific `$this` (there is no focus node yet — a target query
     /// SELECTs the focus nodes), so `$this` is left unbound and the bindings of the
@@ -412,7 +412,7 @@ impl<'a> Validator<'a> {
         self.shapes.select_exprs[idx].eval_target(self.data.graph())
     }
 
-    /// [OPUS-4.8] (sq-rnkdh) SHACL 1.2 `sh:shape` data-graph targets: for every
+    /// (sq-rnkdh) SHACL 1.2 `sh:shape` data-graph targets: for every
     /// triple `?n sh:shape ?S` in the DATA graph, `?n` is validated against the
     /// shape `?S` (resolved in the shapes model — a shape not present in the model
     /// is skipped). This is the data-driven dual of `sh:targetNode`: the link lives
@@ -448,7 +448,7 @@ impl<'a> Validator<'a> {
         self.conforms_at(node, None, sid)
     }
 
-    /// [FABLE-5] (sq-7d3dj.33.4) [`Self::conforms`] with an optional focus-id hint
+    /// (sq-7d3dj.33.4) [`Self::conforms`] with an optional focus-id hint
     /// forwarded to [`Self::validate_shape_at`] (see there); the recursion-guard /
     /// memo logic is unchanged.
     fn conforms_at(&mut self, node: &Term, node_id: Option<Option<Id>>, sid: usize) -> bool {
@@ -477,7 +477,7 @@ impl<'a> Validator<'a> {
         ok
     }
 
-    /// [FABLE-5] (sq-7d3dj.33.4) Id-keyed [`Self::conforms`] — the hot `sh:node`
+    /// (sq-7d3dj.33.4) Id-keyed [`Self::conforms`] — the hot `sh:node`
     /// route. A [`Self::memo_ids`] hit answers from a u32 hash with NO term
     /// materialisation; a miss materialises the term once, runs the Term-level
     /// `conforms` (which owns the recursion guard + memo rule), and mirrors the
@@ -495,7 +495,7 @@ impl<'a> Validator<'a> {
         ok
     }
 
-    // ---- extended id-level surfaces ([FABLE-5] sq-j9hls) -------------------------
+    // ---- extended id-level surfaces (sq-j9hls) -------------------------
 
     /// The cached id-level subclass closure of `class` (see [`ClassClosure`]).
     /// BFS over `subjects_ids(rdfs:subClassOf, c)` — the same scans, in the same
@@ -679,7 +679,7 @@ impl<'a> Validator<'a> {
         }
     }
 
-    /// [OPUS-4.8] (sq-f8gu) Validate `node` against shape `sid` and RETURN the
+    /// (sq-f8gu) Validate `node` against shape `sid` and RETURN the
     /// results produced (rather than the `conforms` boolean), under the same
     /// recursion guard. Used to collect `sh:memberShape` per-member `sh:detail`
     /// sub-results. Re-entry of an in-progress `(node, shape)` pair yields no
@@ -700,7 +700,7 @@ impl<'a> Validator<'a> {
         self.validate_shape_at(sid, focus, None, out);
     }
 
-    /// [FABLE-5] (sq-7d3dj.33.4) [`Self::validate_shape`] with an optional focus-id
+    /// (sq-7d3dj.33.4) [`Self::validate_shape`] with an optional focus-id
     /// hint: `Some(fid)` means the caller already resolved `focus` against the data
     /// dictionary (`fid = None` ⇒ absent). With a resolved id, value nodes are
     /// computed by the compiled id-level path walk and the id-capable constraint
@@ -716,13 +716,13 @@ impl<'a> Validator<'a> {
     ) {
         // Read the model through the validator's own `&'a` reference — independent
         // of the `&mut self` below, so the previous per-focus-node deep clones of
-        // `components` / `component_meta` are gone. [FABLE-5] (sq-7d3dj.33.4)
+        // `components` / `component_meta` are gone. (sq-7d3dj.33.4)
         let shapes: &'a ShapesModel = self.shapes;
         let shape = &shapes.shapes[sid];
         if shape.deactivated {
             return;
         }
-        // [FABLE-5] (sq-1jemy) Make nested shape evaluation TRANSPARENT to the
+        // (sq-1jemy) Make nested shape evaluation TRANSPARENT to the
         // caller's per-statement annotation override. Every recursing composite
         // (`sh:node` / `sh:not` / `sh:and|or|xone` / qualified / member /
         // reifier-shape / `sh:property`) re-enters this function via
@@ -749,14 +749,14 @@ impl<'a> Validator<'a> {
             Some(f) => f,
             None => self.data.id_of(focus),
         };
-        // [OPUS-4.8] (sq-rnkdh) SHACL 1.2 SPARQL-valued value nodes: when the shape
+        // (sq-rnkdh) SHACL 1.2 SPARQL-valued value nodes: when the shape
         // carries `sh:values [ sh:select … ]` / `[ sh:sparqlExpr … ]`, the value
         // nodes are COMPUTED by the node expression (`$this` = focus node) instead
         // of derived by traversing `sh:path`. The reported `sh:resultPath` is still
         // the shape's path (set in `result`), so only the value-node SET changes.
         let mut values: ValueNodes = match shape.value_expr {
             Some(idx) => {
-                // [SONNET-4.6] (sq-7d3dj.33.5) Use the pre-computed batch map when
+                // (sq-7d3dj.33.5) Use the pre-computed batch map when
                 // available (set by `validate_graph` before the focused shape loop);
                 // fall back to per-focus eval for nested/data-graph shapes.
                 let cached = self.node_expr_cache.as_ref().and_then(|(csid, map)| {
@@ -786,7 +786,7 @@ impl<'a> Validator<'a> {
                 None => ValueNodes::Terms(vec![focus.clone()]),
             },
         };
-        // [OPUS-4.8] (sq-pb0wm) Per-constraint-statement RDF-1.2 reified-annotation
+        // (sq-pb0wm) Per-constraint-statement RDF-1.2 reified-annotation
         // overrides, PARALLEL to `components`. A `{| sh:deactivated true |}` on a
         // single constraint statement suppresses ONLY that occurrence (the shape
         // keeps validating its other constraints); a `{| sh:message … |}` /
@@ -798,7 +798,7 @@ impl<'a> Validator<'a> {
             // Index access with a default fallback: a component WITHOUT a parallel
             // meta entry (should never happen — the vectors are kept index-aligned)
             // is treated as un-annotated rather than silently skipped (a `zip` would
-            // truncate the longer vector and lose the trailing component). [OPUS-4.8] (sq-pb0wm)
+            // truncate the longer vector and lose the trailing component). (sq-pb0wm)
             let meta = shape.component_meta.get(i);
             if meta.is_some_and(ComponentMeta::is_deactivated) {
                 continue; // this constraint occurrence is deactivated (sq-pb0wm)
@@ -812,13 +812,13 @@ impl<'a> Validator<'a> {
             self.eval_component(sid, focus, fid, i, &mut values, comp, out);
             self.active_meta = None;
         }
-        // [FABLE-5] (sq-1jemy) Hand the caller's per-statement override back
+        // (sq-1jemy) Hand the caller's per-statement override back
         // (see the take() above): the composite arm that recursed into this
         // frame reads it in `result()` after we return.
         self.active_meta = caller_meta;
     }
 
-    /// A result owned by shape `sid` for `focus`. [OPUS-4.8] (sq-pb0wm) When a
+    /// A result owned by shape `sid` for `focus`. (sq-pb0wm) When a
     /// per-constraint-statement override is active (`self.active_meta`, set by
     /// `validate_shape` for the component being evaluated), its `sh:message` /
     /// `sh:severity` REPLACE the shape-level message / severity for this result —
@@ -858,7 +858,7 @@ impl<'a> Validator<'a> {
         }
     }
 
-    /// [OPUS-4.8] (sq-0mjfd) The reifiers of the asserted triple
+    /// (sq-0mjfd) The reifiers of the asserted triple
     /// `(subject, predicate, object)` — the subjects of
     /// `?r rdf:reifies <<(subject predicate object)>>` (the RDF-1.2
     /// reified-annotation `{| … |}` form; the parser stores the triple-term as a
@@ -884,7 +884,7 @@ impl<'a> Validator<'a> {
             .collect()
     }
 
-    /// `fid`/`comp_idx` ([FABLE-5] sq-j9hls): the resolved focus id (`None` ⇒
+    /// `fid`/`comp_idx` (sq-j9hls): the resolved focus id (`None` ⇒
     /// every extended fast route is OFF — the Term-level original runs) and this
     /// component's index in the shape (the compiled-comparand key).
     #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
@@ -899,7 +899,7 @@ impl<'a> Validator<'a> {
         out: &mut Vec<ValidationResult>,
     ) {
         let g = self.data;
-        // ---- id-level fast arms ([FABLE-5] sq-7d3dj.33.4, extended sq-j9hls) --
+        // ---- id-level fast arms (sq-7d3dj.33.4, extended sq-j9hls) --
         // While the value nodes are still ids (from the compiled-path walk), the
         // hot Core components check them without materialising a single term —
         // only a VIOLATING value materialises, for its report entry. Every arm
@@ -1032,7 +1032,7 @@ impl<'a> Validator<'a> {
                     }
                     return;
                 }
-                // ---- extended arms ([FABLE-5] sq-j9hls) ----------------------
+                // ---- extended arms (sq-j9hls) ----------------------
                 Component::Class(cls) => {
                     tick_idfast_ext();
                     let closure = self.class_closure(cls);
@@ -1211,7 +1211,7 @@ impl<'a> Validator<'a> {
         let values: &[Term] = values.materialize(&g);
         match comp {
             Component::Class(cls) => {
-                // [FABLE-5] (sq-j9hls) With a resolved focus id, decide via the
+                // (sq-j9hls) With a resolved focus id, decide via the
                 // cached id-level closure (Term-form values arise for node shapes
                 // — the value IS the focus — and for `sh:values` expressions).
                 // Both routes resolve `v` through the same dictionary hash, so
@@ -1238,11 +1238,11 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-sx15d) `sh:class ( ex:A ex:B )` (SHACL 1.2): a value
+            // (sq-sx15d) `sh:class ( ex:A ex:B )` (SHACL 1.2): a value
             // conforms iff it is a SHACL instance of ANY listed class (the
             // subclass-aware `is_instance_of` is reused per listed class).
             Component::ClassIn(classes) => {
-                // [FABLE-5] (sq-j9hls) Same id-level closure route as `sh:class`.
+                // (sq-j9hls) Same id-level closure route as `sh:class`.
                 let closures: Option<Vec<Rc<ClassClosure>>> = fid.map(|_| {
                     tick_idfast_ext();
                     classes.iter().map(|c| self.class_closure(c)).collect()
@@ -1270,7 +1270,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-vg3y) A value conforms iff it is a literal whose
+            // (sq-vg3y) A value conforms iff it is a literal whose
             // (well-formed) datatype is ANY of the allowed datatypes — the single
             // IRI is a singleton set, the SHACL-1.2 list form is the disjunction.
             Component::Datatype(dts) => {
@@ -1292,7 +1292,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-vg3y) A value conforms iff its node kind matches ANY of
+            // (sq-vg3y) A value conforms iff its node kind matches ANY of
             // the allowed kinds (single IRI = singleton; SHACL-1.2 list = disjunction).
             Component::NodeKind(kinds) => {
                 for v in values {
@@ -1399,7 +1399,7 @@ impl<'a> Validator<'a> {
                 }
             }
             Component::Pattern { source, flags } => {
-                // [OPUS-4.8] (sq-lz99x) An uncompilable `sh:pattern` (e.g. an
+                // (sq-lz99x) An uncompilable `sh:pattern` (e.g. an
                 // unbalanced bracket, or a `(?!...)` lookahead the Rust `regex`
                 // crate does not support — neither does the XML Schema regex
                 // flavour the W3C spec ties `sh:pattern` to) yields no regex.
@@ -1447,7 +1447,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-0mjfd) `sh:uniqueLang true` — no language may repeat
+            // (sq-0mjfd) `sh:uniqueLang true` — no language may repeat
             // across the value set. The key includes the BASE DIRECTION (RDF-1.2
             // `rdf:dirLangString`, `@ar--ltr`): `"X"@ar`, `"Y"@ar--ltr` and
             // `"Z"@ar--rtl` are THREE distinct keys, so a value set with one of each
@@ -1457,7 +1457,7 @@ impl<'a> Validator<'a> {
                 for v in values {
                     if let Term::Literal(l) = v {
                         if let Some(lang) = l.language() {
-                            // [OPUS-4.8] positional format args (rust/unused-variable CodeQL FP).
+                            // positional format args (rust/unused-variable CodeQL FP).
                             let key = match l.direction() {
                                 Some(dir) => format!("{}--{}", lang.to_lowercase(), dir),
                                 None => lang.to_lowercase(),
@@ -1482,7 +1482,7 @@ impl<'a> Validator<'a> {
                     ));
                 }
             }
-            // [OPUS-4.8] (sq-sx15d) `sh:equals` — the comparand is a SHACL property
+            // (sq-sx15d) `sh:equals` — the comparand is a SHACL property
             // PATH (SHACL 1.2; a bare predicate IRI is a trivial path). The value
             // sets must be equal: one result per path value absent from the
             // comparand set, and one per comparand value absent from the path set.
@@ -1511,7 +1511,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-sx15d) `sh:disjoint` — the comparand is a PATH (SHACL
+            // (sq-sx15d) `sh:disjoint` — the comparand is a PATH (SHACL
             // 1.2). A path value shared with the comparand value set is a result.
             Component::Disjoint(p) => {
                 let others = self.comparand_terms(sid, comp_idx, fid, p, focus);
@@ -1529,9 +1529,9 @@ impl<'a> Validator<'a> {
             }
             // One result per FAILING PAIR (value, other) — the suite expects e.g.
             // `1 < "a"` and `1 < "b"` to report `sh:value 1` twice.
-            // [OPUS-4.8] (sq-sx15d) the comparand is a PATH (SHACL 1.2).
+            // (sq-sx15d) the comparand is a PATH (SHACL 1.2).
             Component::LessThan(p) => {
-                // [FABLE-5] (sq-j9hls) The pair comparison needs terms either
+                // (sq-j9hls) The pair comparison needs terms either
                 // way, so only the comparand WALK is id-level here.
                 let others = self.comparand_terms(sid, comp_idx, fid, p, focus);
                 for v in values {
@@ -1567,7 +1567,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-sx15d) `sh:subsetOf` (SHACL 1.2) — the value set of the
+            // (sq-sx15d) `sh:subsetOf` (SHACL 1.2) — the value set of the
             // shape's path must be a SUBSET of the comparand path's value set. One
             // result per path value absent from the comparand set.
             Component::SubsetOf(p) => {
@@ -1584,7 +1584,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-sx15d) `sh:someValue` (SHACL 1.2) — EXISTENTIAL: at
+            // (sq-sx15d) `sh:someValue` (SHACL 1.2) — EXISTENTIAL: at
             // least one value node must conform to the nested shape. One result on
             // the focus/path (NO sh:value) when NONE conform. An empty value set
             // also fails (no value can satisfy the existential).
@@ -1599,7 +1599,7 @@ impl<'a> Validator<'a> {
                     ));
                 }
             }
-            // [OPUS-4.8] (sq-sx15d) `sh:singleLine true` (SHACL 1.2) — each string
+            // (sq-sx15d) `sh:singleLine true` (SHACL 1.2) — each string
             // value must contain no line-break character (LF / CR / FF / VT). A
             // non-string value contributes its lexical form; a blank node has none
             // and conforms vacuously (no string to break).
@@ -1618,7 +1618,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-sx15d) `sh:rootClass` (SHACL 1.2) — each value node must
+            // (sq-sx15d) `sh:rootClass` (SHACL 1.2) — each value node must
             // be the named class or a transitive `rdfs:subClassOf`-descendant of it
             // (reuses the `sh:class` subclass closure).
             Component::RootClass(cls) => {
@@ -1701,7 +1701,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-0mjfd) `sh:reifierShape` (SHACL 1.2): for each value
+            // (sq-0mjfd) `sh:reifierShape` (SHACL 1.2): for each value
             // `v`, the reifiers of the asserted triple `(focus, predicate, v)` must
             // conform to the referenced shape; `required` additionally demands a
             // reifier exist. The predicate is the shape's path when it is a single
@@ -1739,7 +1739,7 @@ impl<'a> Validator<'a> {
             }
             Component::Property(child) => {
                 for v in values {
-                    // [OPUS-4.8] Guard the direct validate_shape recursion against cyclic
+                    // Guard the direct validate_shape recursion against cyclic
                     // sh:property references (e.g. A sh:property B / B sh:property A): without the
                     // (focus, shape) re-entry check this overflows the stack. Re-entry into a
                     // (value, child) pair already on the stack counts as conforming (SHACL leaves
@@ -1771,7 +1771,7 @@ impl<'a> Validator<'a> {
                     .count() as u64;
                 if let Some(min) = min {
                     if count < *min {
-                        // [SONNET-4.6] (sq-7os4t) A Qualified component merges
+                        // (sq-7os4t) A Qualified component merges
                         // several parameter statements. Select the annotation on
                         // the statement that caused this particular result.
                         let meta = self.shapes.shapes[sid]
@@ -1825,7 +1825,7 @@ impl<'a> Validator<'a> {
                 // sh:property/sh:path predicates), so compute it once. `sh:closed
                 // sh:ByTypes`: the allowed set is recomputed PER value node from its
                 // rdf:type(s) (SHACL-1.2 §4.8.1 collectProperties), so defer it.
-                // [OPUS-4.8] (sq-vg3y) added the ByTypes branch.
+                // (sq-vg3y) added the ByTypes branch.
                 let fixed_allowed: Option<Vec<String>> = if *by_types {
                     None
                 } else {
@@ -1837,7 +1837,7 @@ impl<'a> Validator<'a> {
                     }
                     Some(allowed)
                 };
-                // [FABLE-5] (sq-j9hls) With a resolved focus id and a FIXED
+                // (sq-j9hls) With a resolved focus id and a FIXED
                 // allowed set, scan each value's (predicate, object) pairs at
                 // the id level — an allowed IRI absent from the data dictionary
                 // can never appear as a data predicate, so id-set membership ⟺
@@ -1903,7 +1903,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-vg3y) `sh:memberShape` (SHACL-1.2): each value node must
+            // (sq-vg3y) `sh:memberShape` (SHACL-1.2): each value node must
             // be a well-formed SHACL list whose members all conform to `member`. A
             // non-list (or member non-conformance) is ONE top-level result on the
             // value node. (sq-f8gu) That top-level result carries one `sh:detail`
@@ -1940,7 +1940,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-vg3y) `sh:uniqueMembers true` (SHACL-1.2): each value
+            // (sq-vg3y) `sh:uniqueMembers true` (SHACL-1.2): each value
             // node must be a SHACL list whose members are pairwise distinct. A
             // non-list, or a list with duplicate members, is one result on v.
             // (sq-f8gu) A duplicate-bearing list carries one `sh:detail` sub-result
@@ -1984,7 +1984,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-vg3y) `sh:maxListLength` / `sh:minListLength` (SHACL-1.2):
+            // (sq-vg3y) `sh:maxListLength` / `sh:minListLength` (SHACL-1.2):
             // each value node must be a SHACL list with at most / at least N members.
             Component::MaxListLength(n) => {
                 for v in values {
@@ -2020,7 +2020,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-vg3y) `sh:uniqueValuesFor` (SHACL-1.2): the values of the
+            // (sq-vg3y) `sh:uniqueValuesFor` (SHACL-1.2): the values of the
             // listed properties of a value node must be unique across ALL target
             // nodes of the shape. For each value node V that shares the exact same
             // value-set (for every listed property) with another target node Other,
@@ -2029,7 +2029,7 @@ impl<'a> Validator<'a> {
             Component::UniqueValuesFor(props) => {
                 self.eval_unique_values_for(sid, focus, values, props, out)
             }
-            // [OPUS-4.8] sh:sparql — SPARQL-based constraints (SHACL §5.2). The
+            // sh:sparql — SPARQL-based constraints (SHACL §5.2). The
             // sh:select runs against the data graph with $this pre-bound to the
             // focus node; every returned solution is one violation. Note this
             // evaluates over the FOCUS NODE (not the path value nodes): a sh:sparql
@@ -2037,7 +2037,7 @@ impl<'a> Validator<'a> {
             // re-traversing sh:path inside the SELECT), which matches the spec —
             // the constraint is responsible for its own value selection.
             Component::Sparql(idx) => self.eval_sparql(sid, focus, *idx, out),
-            // [OPUS-4.8] SHACL §6: a SPARQL-based constraint COMPONENT that
+            // SHACL §6: a SPARQL-based constraint COMPONENT that
             // activated on this shape. ASK validators run per value node
             // (ASK=false → violation); SELECT validators run per focus node
             // (each solution → violation). Parameters are pre-bound as $paramName.
@@ -2054,7 +2054,7 @@ impl<'a> Validator<'a> {
                 path_validator.map(|i| &self.shapes.path_validators[i]),
                 out,
             ),
-            // [OPUS-4.8] (sq-mk9n, `shacl-af`) `sh:expression`
+            // (sq-mk9n, `shacl-af`) `sh:expression`
             // (`sh:ExpressionConstraintComponent`): a value node is violated when
             // the node expression does NOT evaluate to `{ true }` for that value.
             #[cfg(feature = "shacl-af")]
@@ -2074,7 +2074,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // [OPUS-4.8] (sq-3w6n, `shacl-af`) `sh:nodeByExpression`
+            // (sq-3w6n, `shacl-af`) `sh:nodeByExpression`
             // (`sh:NodeByExpressionConstraintComponent`): for each value node `v`,
             // the node expression is evaluated against `v` as focus to a set of
             // node-shape terms; `v` is violated when it does NOT conform to one of
@@ -2122,7 +2122,7 @@ impl<'a> Validator<'a> {
         }
     }
 
-    /// [OPUS-4.8] (sq-7d3dj.33.1) Stamps one `sh:sparql` solution's per-result
+    /// (sq-7d3dj.33.1) Stamps one `sh:sparql` solution's per-result
     /// [`crate::sparql::ResultFields`] with the shape-owned fields (source
     /// shape/constraint/component, severity, messages). Shared by the per-focus
     /// [`Self::eval_sparql`] fallback and the batched [`Self::prime_sparql_batch`] so
@@ -2136,7 +2136,7 @@ impl<'a> Validator<'a> {
     ) -> ValidationResult {
         let shape = &self.shapes.shapes[sid];
         let constraint = &self.shapes.sparql[idx];
-        // [OPUS-4.8] (sq-rnkdh) A constraint-level `sh:severity` on the
+        // (sq-rnkdh) A constraint-level `sh:severity` on the
         // `sh:SPARQLConstraint` node OVERRIDES the shape's default severity (SHACL
         // 1.2 `sparql/node/sparql-001`); otherwise inherit the shape's severity.
         let severity = constraint
@@ -2150,7 +2150,7 @@ impl<'a> Validator<'a> {
             path: fields.path.or_else(|| shape.path.clone()),
             value: fields.value,
             source_shape: shape.node.clone(),
-            // [OPUS-4.8] (sq-mue75) stamp the originating `sh:SPARQLConstraint` node
+            // (sq-mue75) stamp the originating `sh:SPARQLConstraint` node
             // onto each result as `sh:sourceConstraint` (SHACL §5.2.2).
             source_constraint: Some(constraint.node.clone()),
             source_component: sh("SPARQLConstraintComponent"),
@@ -2161,7 +2161,7 @@ impl<'a> Validator<'a> {
         }
     }
 
-    /// [OPUS-4.8] (sq-7d3dj.33.1) Batch-evaluates shape `sid`'s `sh:sparql`
+    /// (sq-7d3dj.33.1) Batch-evaluates shape `sid`'s `sh:sparql`
     /// constraints over ALL its focus nodes in ONE execution each, priming
     /// [`Self::sparql_batch`] for the per-focus drain in [`Self::eval_sparql`]. This
     /// replaces the O(N_focus × full-query) per-focus re-execution with O(1) queries
@@ -2171,7 +2171,7 @@ impl<'a> Validator<'a> {
     /// `crate::sparql::PreparedSparql::is_batchable`) is left unprimed and falls back
     /// to the per-focus path unchanged.
     fn prime_sparql_batch(&mut self, sid: usize, foci: &[Term]) {
-        // [OPUS-4.8] (sq-7d3dj.33.1) Test-only knob so the in-crate differential test
+        // (sq-7d3dj.33.1) Test-only knob so the in-crate differential test
         // can force the per-focus path and diff its report against the batched one.
         #[cfg(test)]
         if FORCE_NO_BATCH.with(Cell::get) {
@@ -2219,7 +2219,7 @@ impl<'a> Validator<'a> {
         idx: usize,
         out: &mut Vec<ValidationResult>,
     ) {
-        // [OPUS-4.8] (sq-7d3dj.33.1) Fast path: drain the results this focus already
+        // (sq-7d3dj.33.1) Fast path: drain the results this focus already
         // received when the shape's constraints were batch-evaluated (the common
         // top-level targeted case). Every focus covered by the batch has an entry —
         // even with zero violations — so a `Some(_)` here means "already computed",
@@ -2249,7 +2249,7 @@ impl<'a> Validator<'a> {
         );
     }
 
-    /// [OPUS-4.8] SHACL §6 evaluation for one activated SPARQL-based constraint
+    /// SHACL §6 evaluation for one activated SPARQL-based constraint
     /// component occurrence. The validator (kind-specific or generic) runs with
     /// `$this`, the bound parameter VALUES (`$paramName`) and (on a property
     /// shape) `$PATH` pre-bound; ASK validators additionally run per VALUE NODE
@@ -2269,7 +2269,7 @@ impl<'a> Validator<'a> {
         let comp: &ComponentDef = &self.shapes.components[cidx];
         let shape = &self.shapes.shapes[sid];
         let is_property_shape = shape.path.is_some();
-        // [OPUS-4.8] `$PATH` pre-binding (SHACL §6.3): a property shape whose
+        // `$PATH` pre-binding (SHACL §6.3): a property shape whose
         // chosen validator references `$PATH` carries a per-shape re-parsed
         // validator (built at model-build time, with the shape's property-path
         // expression substituted). Prefer it; otherwise use the shared one.
@@ -2374,7 +2374,7 @@ impl<'a> Validator<'a> {
         }
     }
 
-    /// [OPUS-4.8] (sq-vg3y) The allowed-predicate set P for `sh:closed sh:ByTypes`
+    /// (sq-vg3y) The allowed-predicate set P for `sh:closed sh:ByTypes`
     /// at value node `v` (SHACL-1.2 §4.8.1 `collectProperties`): the IRI properties
     /// reachable via `sh:property/sh:path` from every shape that the value node's
     /// `rdf:type`s pull in — transitively through `rdfs:subClassOf`, inbound
@@ -2401,7 +2401,7 @@ impl<'a> Validator<'a> {
         allowed.into_iter().collect()
     }
 
-    /// [OPUS-4.8] (sq-vg3y) `sh:uniqueValuesFor` evaluation: for each value node V
+    /// (sq-vg3y) `sh:uniqueValuesFor` evaluation: for each value node V
     /// (with at least one value across the listed properties), report each OTHER
     /// target node of this shape that has the exact same per-property value sets as
     /// V (with that other node as `sh:value`, V's focus as `sh:focusNode`).
@@ -2493,7 +2493,7 @@ impl<'a> Validator<'a> {
             .clone()
     }
 
-    /// [OPUS-4.8] (sq-lz99x) Records a diagnostic for an uncompilable
+    /// (sq-lz99x) Records a diagnostic for an uncompilable
     /// `sh:pattern` that was SKIPPED, de-duplicated per (shape, pattern, flags) so
     /// it is reported once regardless of how many focus nodes / values the shape
     /// has. The recorded message carries the `regex` crate's own compile error
@@ -2534,13 +2534,13 @@ impl<'a> Validator<'a> {
     }
 }
 
-/// [OPUS-4.8] (sq-lz99x) Builds the final regex source for a `sh:pattern` /
+/// (sq-lz99x) Builds the final regex source for a `sh:pattern` /
 /// `sh:flags` pair: the supported XPath-regex flags (`i`/`m`/`s`/`x`/`U`) are
 /// turned into a leading inline `(?...)` group. Shared by [`Validator::regex_for`]
 /// (compile + match) and [`Validator::note_pattern_skipped`] (recompute the error)
 /// so both see byte-identical input.
 ///
-/// [FABLE-5] (sq-8ro) XPath-regex divergences from the Rust `regex` crate are
+/// (sq-8ro) XPath-regex divergences from the Rust `regex` crate are
 /// translated here: the XPath F&O `q` flag (literal-pattern mode — only `i` keeps
 /// its effect alongside it, mirroring the engine's `build_regex`), and the
 /// XPath/XSD `\i` / `\I` / `\c` / `\C` name-character classes (see
@@ -2589,7 +2589,7 @@ const XML_NAME_CHAR: &str = concat!(
     r"\-.0-9\x{B7}\x{300}-\x{36F}\x{203F}-\x{2040}"
 );
 
-/// [FABLE-5] (sq-8ro) Translates the XPath/XSD multi-character escapes the Rust
+/// (sq-8ro) Translates the XPath/XSD multi-character escapes the Rust
 /// `regex` crate does not recognise — `\i` (XML `NameStartChar`), `\c` (XML
 /// `NameChar`) and their complements `\I` / `\C` — into bracketed character
 /// classes. The replacement is a bracketed class even INSIDE `[...]`: the Rust
@@ -2639,7 +2639,7 @@ fn translate_xpath_escapes(source: &str) -> String {
     out
 }
 
-/// [OPUS-4.8] (sq-f8gu) The DISTINCT members of `members` that appear more than
+/// (sq-f8gu) The DISTINCT members of `members` that appear more than
 /// once (each duplicated value listed once, in first-seen order). Uses exact
 /// `Term` equality — the same notion `view::dedup` uses for the `sh:uniqueMembers`
 /// constraint itself — so the per-duplicate `sh:detail` sub-results agree exactly
@@ -2656,7 +2656,7 @@ fn duplicate_members(members: &[Term]) -> Vec<Term> {
     out
 }
 
-/// [OPUS-4.8] (sq-vg3y) True iff value node `v` matches the single `sh:nodeKind`
+/// (sq-vg3y) True iff value node `v` matches the single `sh:nodeKind`
 /// IRI `kind` (SHACL §4.6.1): an IRI matches sh:IRI / sh:BlankNodeOrIRI /
 /// sh:IRIOrLiteral; a blank node matches sh:BlankNode / sh:BlankNodeOrIRI /
 /// sh:BlankNodeOrLiteral; a literal matches sh:Literal / sh:BlankNodeOrLiteral /
@@ -2674,7 +2674,7 @@ fn node_kind_matches(v: &Term, kind: &str) -> bool {
     }
 }
 
-/// [OPUS-4.8] (sq-vg3y) A default message for a set-valued `sh:datatype` /
+/// (sq-vg3y) A default message for a set-valued `sh:datatype` /
 /// `sh:nodeKind` constraint (`label` = "datatype" / "node kind"): the single IRI
 /// reads naturally, the list form reads "any of <…> <…>".
 fn iri_set_message(label: &str, iris: &[String]) -> String {
@@ -2691,7 +2691,7 @@ fn iri_set_message(label: &str, iris: &[String]) -> String {
     }
 }
 
-/// [OPUS-4.8] (sq-vg3y) The `sh:uniqueValuesFor` signature of a node: for each
+/// (sq-vg3y) The `sh:uniqueValuesFor` signature of a node: for each
 /// listed property (IN ORDER), the SORTED, deduplicated set of its data-graph
 /// values (rendered as terms). Two nodes share a key iff their signatures are
 /// equal — exact term match, so `"04"^^xsd:byte` ≠ `"4"^^xsd:integer`.
@@ -2711,7 +2711,7 @@ fn value_signature(data: &GraphView, node: &Term, props: &[String]) -> Vec<Vec<S
         .collect()
 }
 
-/// [OPUS-4.8] (sq-sx15d) A line-break character for `sh:singleLine`: line feed
+/// (sq-sx15d) A line-break character for `sh:singleLine`: line feed
 /// (U+000A), carriage return (U+000D), form feed (U+000C) or vertical tab
 /// (U+000B). The W3C `singleLine-001` test exercises all four.
 fn is_line_break(c: char) -> bool {
@@ -2728,7 +2728,7 @@ fn string_repr(t: &Term) -> Option<String> {
     }
 }
 
-// ---- id-level twins of the value-check helpers ([FABLE-5] sq-7d3dj.33.4) ------
+// ---- id-level twins of the value-check helpers (sq-7d3dj.33.4) ------
 // Each mirrors its Term-level twin decision-for-decision over the dictionary's
 // zero-copy record parts, so the id fast arms in `eval_component` report exactly
 // what the Term-level arms would (differential-tested in `lib.rs::idfast_*`).
@@ -2964,7 +2964,7 @@ fn timestamp(value: &str, dt: &str) -> Option<(f64, bool)> {
             .unwrap_or(rest.len());
         let time_part = &rest[..tz_at];
         rest = &rest[tz_at..];
-        // [OPUS-4.8] xsd:dateTime / dateTimeStamp REQUIRE a time after the 'T'; the old code left
+        // xsd:dateTime / dateTimeStamp REQUIRE a time after the 'T'; the old code left
         // secs=0 for an empty time part, accepting "2024-01-01T" / "2024-01-01TZ". Reject it. 1616.
         if time_part.is_empty() {
             return None;
@@ -2977,7 +2977,7 @@ fn timestamp(value: &str, dt: &str) -> Option<(f64, bool)> {
         if it.next().is_some() {
             return None;
         }
-        // [OPUS-4.8] Range-check the fields: hour 0..=24 (24 only as 24:00:00), minute/second
+        // Range-check the fields: hour 0..=24 (24 only as 24:00:00), minute/second
         // 0..=59. The old code accepted out-of-range values like 99:99:99. 1616.
         if h > 24.0 || mi > 59.0 || s >= 60.0 || (h == 24.0 && (mi != 0.0 || s != 0.0)) {
             return None;
@@ -2986,7 +2986,7 @@ fn timestamp(value: &str, dt: &str) -> Option<(f64, bool)> {
     }
     let tz_offset_secs = parse_tz(rest)?;
     let has_tz = !rest.is_empty();
-    // [OPUS-4.8] xsd:dateTimeStamp requires an explicit timezone; a timezone-less value is NOT in
+    // xsd:dateTimeStamp requires an explicit timezone; a timezone-less value is NOT in
     // its lexical space (this is the sole lexical difference from xsd:dateTime). See review 1616.
     if local == "dateTimeStamp" && !has_tz {
         return None;
@@ -3022,7 +3022,7 @@ fn parse_tz(s: &str) -> Option<f64> {
         _ => return None,
     };
     let mut it = rest.split(':');
-    // [OPUS-4.8] Enforce the fixed ±hh:mm shape and the XSD timezone range (≤ ±14:00). The old
+    // Enforce the fixed ±hh:mm shape and the XSD timezone range (≤ ±14:00). The old
     // bare f64 parse accepted "+9:5", "+99:99", etc. 1616.
     let h = parse_time_field(it.next()?, 2)?;
     let m = parse_time_field(it.next()?, 2)?;
@@ -3032,7 +3032,7 @@ fn parse_tz(s: &str) -> Option<f64> {
     Some(sign * (h * 3600.0 + m * 60.0))
 }
 
-/// [OPUS-4.8] Parse a fixed-width all-digit time field (hh / mm) of exactly `width` digits.
+/// Parse a fixed-width all-digit time field (hh / mm) of exactly `width` digits.
 /// Rejects signs, whitespace, and wrong widths the bare f64 parse would otherwise accept. 1616.
 fn parse_time_field(s: &str, width: usize) -> Option<f64> {
     if s.len() != width || !s.bytes().all(|b| b.is_ascii_digit()) {
@@ -3041,7 +3041,7 @@ fn parse_time_field(s: &str, width: usize) -> Option<f64> {
     s.parse().ok()
 }
 
-/// [OPUS-4.8] Parse the seconds field `ss` or `ss.sss…`: two leading digits, an optional fraction
+/// Parse the seconds field `ss` or `ss.sss…`: two leading digits, an optional fraction
 /// of one-or-more digits. Returns the numeric value (range-checked by the caller). 1616.
 fn parse_seconds_field(s: &str) -> Option<f64> {
     let (int_part, frac_ok) = match s.split_once('.') {
@@ -3063,7 +3063,7 @@ fn parse_date(s: &str) -> Option<(i64, u32, u32)> {
     let ys = it.next()?;
     let ms = it.next()?;
     let ds = it.next()?;
-    // [OPUS-4.8] XSD lexical space is fixed-width: yyyy (≥4 digits), mm, dd, all ASCII digits.
+    // XSD lexical space is fixed-width: yyyy (≥4 digits), mm, dd, all ASCII digits.
     // The plain f64/u32 parse below accepts e.g. "+04" or whitespace; enforce the shape. 1616.
     if ys.len() < 4
         || !ys.bytes().all(|b| b.is_ascii_digit())
@@ -3077,7 +3077,7 @@ fn parse_date(s: &str) -> Option<(i64, u32, u32)> {
     let y: i64 = ys.parse().ok()?;
     let m: u32 = ms.parse().ok()?;
     let d: u32 = ds.parse().ok()?;
-    // [OPUS-4.8] Reject impossible calendar days (e.g. 2024-02-30, 2023-02-29, 2024-04-31): the
+    // Reject impossible calendar days (e.g. 2024-02-30, 2023-02-29, 2024-04-31): the
     // old check only rejected d>31, so February 30th and April 31st passed as well-formed. 1616.
     if it.next().is_some() || m == 0 || m > 12 || d == 0 || d > days_in_month(y, m) {
         return None;
@@ -3085,7 +3085,7 @@ fn parse_date(s: &str) -> Option<(i64, u32, u32)> {
     Some((if neg { -y } else { y }, m, d))
 }
 
-/// [OPUS-4.8] Days in a (proleptic-Gregorian) month, accounting for leap years. The `y` is the
+/// Days in a (proleptic-Gregorian) month, accounting for leap years. The `y` is the
 /// signed calendar year as written (sign applied by the caller); leap rules are sign-symmetric for
 /// the purpose of day-count here. See review 1616.
 fn days_in_month(y: i64, m: u32) -> u32 {
@@ -3111,7 +3111,7 @@ fn well_formed(l: &Literal) -> bool {
     well_formed_parts(l.value(), l.datatype().as_str(), l.language().is_some())
 }
 
-/// [FABLE-5] (sq-7d3dj.33.4) The body of [`well_formed`] over raw literal parts,
+/// (sq-7d3dj.33.4) The body of [`well_formed`] over raw literal parts,
 /// so the id-level datatype arm can check a stored literal's zero-copy record
 /// (`Dict::term_parts`) without constructing an `oxrdf::Literal`. `has_lang`
 /// covers both a plain language tag and a `lang--dir` RDF 1.2 slot (only
@@ -3209,7 +3209,7 @@ mod tests {
         assert!(!well_formed(&lit("2024-13-01", "date")));
         assert!(well_formed(&lit("2024-02-29T12:00:00Z", "dateTime")));
 
-        // [OPUS-4.8] Stricter XSD date/time lexical validation (review 1616):
+        // Stricter XSD date/time lexical validation (review 1616):
         // impossible calendar days are rejected.
         assert!(
             !well_formed(&lit("2023-02-29", "date")),

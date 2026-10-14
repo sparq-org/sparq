@@ -6,7 +6,7 @@ mod term_render;
 
 use term_render::render_n3;
 
-// [GPT-5.6] sq-bif.40: pin literal-arm precedence and catch-all edge behavior.
+// sq-bif.40: pin literal-arm precedence and catch-all edge behavior.
 #[test]
 fn language_takes_precedence_over_datatype() {
     assert_eq!(

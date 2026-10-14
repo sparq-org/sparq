@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-lsp7k.5.2: end-to-end tests for the double-opt-in `POST /facets` endpoint.
+//! sq-lsp7k.5.2: end-to-end tests for the double-opt-in `POST /facets` endpoint.
 //!
 //! The suite drives the real axum route and `sparq-introspect` scan path over a pinned server
 //! snapshot. It witnesses the runtime-off 404, exact class-filtered facet counts, malformed-JSON

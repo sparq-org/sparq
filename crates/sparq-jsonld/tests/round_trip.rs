@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-gcs5q — the **round-trip validation** half of survey §C3
+//! sq-gcs5q — the **round-trip validation** half of survey §C3
 //! ("expand → compact reconstructs the same RDF").
 //!
 //! The rest of §C3 — the `expand` and `flatten` conformance lanes plus their
@@ -58,7 +58,7 @@ fn assert_lossless(case: &str, input: &str, ctx: &str, opts: &JsonLdOptions) {
 
     assert!(
         json_ld_equal(&reexpanded, &expanded),
-        // [SONNET-4.6] positional format args (CodeQL rust/unused-variable false-positive guard).
+        // positional format args (CodeQL rust/unused-variable false-positive guard).
         "{}: compaction lost information\n  expanded:   {}\n  compacted:  {}\n  re-expanded:{}",
         case,
         render(&expanded),
@@ -554,7 +554,7 @@ fn flatten_survives_a_compaction_round_trip() {
 
         assert!(
             json_ld_equal(&reflattened, &flat),
-            // [SONNET-4.6] positional format args (CodeQL false-positive guard).
+            // positional format args (CodeQL false-positive guard).
             "{}: flatten → compact → flatten lost information\n  flat:       {}\n  compacted:  {}\n  reflattened:{}",
             case,
             render(&flat),

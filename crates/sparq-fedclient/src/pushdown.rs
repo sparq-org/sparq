@@ -67,7 +67,7 @@
 //!   yet parse a query's `ORDER BY` into keys (Phase 5) — `push_group` takes the keys as an
 //!   argument so the lowering is testable now.
 //
-// [OPUS-4.8] sq-7byx (epic sq-dnko): Phase-4 capability-aware pushdown — exclusive-group
+// sq-7byx (epic sq-dnko): Phase-4 capability-aware pushdown — exclusive-group
 // decomposition + maximal sub-algebra builder + the exact common-variable check + the
 // bind-join block primitive. Phase 4 owns this module; Phase 5 owns operators.rs/stream.rs.
 // Flagged for Fable re-review when available.
@@ -82,7 +82,7 @@ use sparq_fedplan::{Bgp, PatternSources, Term, TriplePattern};
 /// tuples are pushed into one remote request. Mirrors `sparq-engine`'s
 /// `service.rs::DEFAULT_BIND_BLOCK` (`pub(crate)`, not importable) — ~50, FedX's default
 /// bound-join batch: large enough to amortise the round-trip, small enough to keep the
-/// injected query bounded. [OPUS-4.8] sq-7byx.
+/// injected query bounded. sq-7byx.
 pub const DEFAULT_BIND_BLOCK: usize = 50;
 
 /// The bind-join block size a source's [`Capability`] supports — the maximum number of
@@ -96,7 +96,7 @@ pub const DEFAULT_BIND_BLOCK: usize = 50;
 ///   silently disabling the bind-join;
 /// * [`BindJoin::None`] → `0` (plain TPF has no bind-join — every join is client-side).
 ///
-/// [OPUS-4.8] sq-7byx.
+/// sq-7byx.
 pub fn bind_block_size(cap: &Capability) -> usize {
     match cap.bind_join {
         BindJoin::Values => DEFAULT_BIND_BLOCK,
@@ -116,7 +116,7 @@ pub fn bind_block_size(cap: &Capability) -> usize {
 /// is exactly one `VALUES` clause whatever the inputs hold; anything else is a
 /// [`RenderError`], on which a caller keeps the bind join local instead of failing the query.
 /// `vars` empty or `tuples` empty yields an empty string (no block to push).
-/// [OPUS-4.8] sq-7byx.
+/// sq-7byx.
 pub fn render_values_block(vars: &[String], tuples: &[Vec<Term>]) -> Result<String, RenderError> {
     use std::fmt::Write as _;
     if vars.is_empty() || tuples.is_empty() {
@@ -168,7 +168,7 @@ pub fn render_values_block(vars: &[String], tuples: &[Vec<Term>]) -> Result<Stri
 }
 
 /// One `ORDER BY` key pushed to a source: a variable, ascending or descending.
-/// [OPUS-4.8] sq-7byx.
+/// sq-7byx.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OrderKey {
     /// The variable name, without the leading `?`. Must be a SPARQL `VARNAME`.
@@ -207,7 +207,7 @@ impl OrderKey {
 /// parsed query's FILTER algebra (and decomposes a conjunction / disjunction) into a slice of
 /// these. Phase 4 owns the **per-conjunct pushability decision** over this model: a conjunct
 /// is pushed only when the source's class covers `needs` AND it passes the common-variable
-/// check ([`common_variable_check`]). [OPUS-4.8] sq-7byx.
+/// check ([`common_variable_check`]). sq-7byx.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filter {
     /// The variable names this conjunct references (without the leading `?`). All must be
@@ -302,7 +302,7 @@ fn expression_vars(e: &spargebra::algebra::Expression, out: &mut Vec<String>) ->
 
 /// Whether a source whose capability advertises `have` can evaluate a conjunct that
 /// `needs` a given class. The order is `None < Equality < Full`: a source covers a conjunct
-/// iff its class is at least the conjunct's. [OPUS-4.8] sq-7byx.
+/// iff its class is at least the conjunct's. sq-7byx.
 fn class_covers(have: FilterClass, needs: FilterClass) -> bool {
     fn rank(c: FilterClass) -> u8 {
         match c {
@@ -321,7 +321,7 @@ fn class_covers(have: FilterClass, needs: FilterClass) -> bool {
 /// a full endpoint) — the most precise query the source can answer for that sub-pattern.
 ///
 /// `patterns` are BGP pattern indices, ascending (deterministic). `source` is the single
-/// retained source index (into the descriptor / adapter slice). [OPUS-4.8] sq-7byx.
+/// retained source index (into the descriptor / adapter slice). sq-7byx.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExclusiveGroup {
     /// The single source index every pattern in this group is exclusively matched by.
@@ -346,7 +346,7 @@ pub struct ExclusiveGroup {
 /// a pattern into a group it does not exclusively belong to.
 ///
 /// Determinism: groups are returned sorted by their smallest pattern index, and each group's
-/// `patterns` ascending. [OPUS-4.8] sq-7byx.
+/// `patterns` ascending. sq-7byx.
 pub fn exclusive_groups(selection: &[PatternSources], bgp: &Bgp) -> Vec<ExclusiveGroup> {
     // The exclusive patterns and their single source.
     let mut exclusive: Vec<(usize, usize)> = Vec::new(); // (pattern_index, source_index)
@@ -409,7 +409,7 @@ pub fn exclusive_groups(selection: &[PatternSources], bgp: &Bgp) -> Vec<Exclusiv
 
 /// The variables a group's patterns produce (bound terms in any position), de-duplicated,
 /// in pattern-then-position order. These are the variables a pushed FILTER conjunct may
-/// reference and the maximum a projection can keep. [OPUS-4.8] sq-7byx.
+/// reference and the maximum a projection can keep. sq-7byx.
 pub fn group_vars(group: &ExclusiveGroup, bgp: &Bgp) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for &pi in &group.patterns {
@@ -438,7 +438,7 @@ pub fn group_vars(group: &ExclusiveGroup, bgp: &Bgp) -> Vec<String> {
 /// (unbound) value than local evaluation and could drop a solution the local plan keeps — so
 /// such a conjunct is **not** pushed; it is kept local on the residual. Returns `true` iff
 /// the conjunct is safe to push by this check alone (the caller separately checks the source
-/// covers the conjunct's [`FilterClass`]). [OPUS-4.8] sq-7byx.
+/// covers the conjunct's [`FilterClass`]). sq-7byx.
 pub fn common_variable_check(filter: &Filter, group_vars: &[String]) -> bool {
     filter.vars.iter().all(|v| group_vars.iter().any(|g| g == v))
 }
@@ -447,7 +447,7 @@ pub fn common_variable_check(filter: &Filter, group_vars: &[String]) -> bool {
 
 /// The outcome of pushing one exclusive group to its source: the [`SubQuery`] to send, plus
 /// the honest record of which FILTER conjuncts were pushed and which were kept local (the
-/// residual the local engine must still evaluate). [OPUS-4.8] sq-7byx.
+/// residual the local engine must still evaluate). sq-7byx.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PushedGroup {
     /// The maximal sub-query the source is asked (projection + pushed filters + order/limit).
@@ -488,7 +488,7 @@ pub struct PushedGroup {
 /// Returns `None` when the group is empty, names a pattern index out of range for the BGP,
 /// has a pattern position that cannot be written as one SPARQL term (see
 /// [`crate::planner::RenderError`]), or has an order key whose variable is not a SPARQL
-/// `VARNAME`: fail closed rather than emit a partial or altered query. [OPUS-4.8] sq-7byx.
+/// `VARNAME`: fail closed rather than emit a partial or altered query. sq-7byx.
 pub fn push_group(
     group: &ExclusiveGroup,
     bgp: &Bgp,
@@ -1043,7 +1043,7 @@ mod tests {
         assert_eq!(render_values_block(&["j".to_string()], &[]).unwrap(), "");
     }
 
-    // [OPUS-4.8] sq-qcnn.22: Additional direct unit tests for coverage ratchet
+    // sq-qcnn.22: Additional direct unit tests for coverage ratchet
     #[test]
     fn group_vars_collects_in_position_order_dedup() {
         // Verify group_vars collects variables in s→p→o position order with dedup.
@@ -1116,7 +1116,7 @@ mod tests {
         };
         let cap = Capability::endpoint();
         // output_vars includes both s (cross-group join key) and o1 (final projection var).
-        // push_group projects exactly the group vars present in output_vars. [OPUS-4.8] sq-qcnn.22
+        // push_group projects exactly the group vars present in output_vars. sq-qcnn.22
         let pushed = push_group(
             &group,
             &bgp,

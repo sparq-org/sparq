@@ -7,7 +7,7 @@
 
 use oxrdf::{Literal, NamedNode, Term};
 use rand::rngs::StdRng;
-// [OPUS-4.8] sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
+// sq-8xug: `random_range` moved from `Rng` to `RngExt` in rand 0.10.
 use rand::{RngExt, SeedableRng};
 use sparq_core::Graph;
 use sparq_text::TextIndex;

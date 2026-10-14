@@ -1,6 +1,6 @@
 //! Dogfood the PKG SHACL guardrails with sparq's own SHACL engine (sparq-shacl).
 //!
-//! [OPUS-4.8] sq-2m6zm.1 (epic sq-2m6zm). 🤖 SPARQ agent — dogfooding sparq as a
+//! sq-2m6zm.1 (epic sq-2m6zm). 🤖 SPARQ agent — dogfooding sparq as a
 //! project knowledge graph. This is the FIRST real test of sparq on its own
 //! knowledge: load the PKG ontology + a hand-written instance file (valid Findings/
 //! Tasks + deliberately INVALID ones) and run the shapes, confirming the valid nodes

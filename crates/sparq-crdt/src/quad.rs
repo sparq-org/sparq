@@ -1,7 +1,7 @@
 //! Canonical, blank-node-free N-Quads quad lines — the `quad` field of the
 //! envelope (`CRDT-WIRE-2`) and of snapshot store entries.
 //!
-//! [FABLE-5] Canonical form is defined operationally: the line must be
+//! Canonical form is defined operationally: the line must be
 //! byte-identical to re-serialising its parsed terms through the same
 //! `oxrdf` Display path `sparq-canon` uses (default graph as a 3-term line —
 //! `GraphName`'s own Display renders the default graph as the word `DEFAULT`,

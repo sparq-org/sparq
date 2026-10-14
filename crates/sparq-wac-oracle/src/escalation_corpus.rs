@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-39kps — **POST-`Slug` `.acl` escalation corpus** (dotted / encoded /
+//! sq-39kps — **POST-`Slug` `.acl` escalation corpus** (dotted / encoded /
 //! percent / unicode / trailing-dot variants) as DATA plus a DECISION-layer assertion
 //! harness.
 //!

@@ -40,16 +40,16 @@ impl Format {
 
 /// The negotiated RDF graph serialisation for CONSTRUCT / DESCRIBE + Graph Store reads.
 /// `Turtle` is now a real prefix-compacting Turtle document, and `RdfXml` is a genuine
-/// RDF/XML document ([OPUS-4.8] sq-rt6v) — distinct serialisations, not all-N-Triples.
+/// RDF/XML document (sq-rt6v) — distinct serialisations, not all-N-Triples.
 /// Negotiation picks the format (and its `Content-Type`) from the `Accept` header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphFormat {
     NTriples,
     Turtle,
-    /// `application/rdf+xml` — RDF/XML. [OPUS-4.8] sq-rt6v.
+    /// `application/rdf+xml` — RDF/XML. sq-rt6v.
     RdfXml,
     /// `application/ld+json` — JSON-LD 1.1 (the engine's flattened serialisation).
-    /// [OPUS-4.8] sq-oy1f.1. OPT-IN: only a participant in negotiation when the server is
+    /// sq-oy1f.1. OPT-IN: only a participant in negotiation when the server is
     /// built with the `jsonld` feature (which links the engine's `serialize-rdf` writer);
     /// without it the variant does not exist, so `application/ld+json` is unrecognised and
     /// negotiation never selects it (it falls through to the default, exactly like any other
@@ -63,10 +63,10 @@ impl GraphFormat {
         match self {
             GraphFormat::NTriples => "application/n-triples; charset=utf-8",
             GraphFormat::Turtle => "text/turtle; charset=utf-8",
-            // [OPUS-4.8] sq-rt6v: RDF/XML registers `charset=utf-8` like the others; the
+            // sq-rt6v: RDF/XML registers `charset=utf-8` like the others; the
             // document's own XML declaration also pins UTF-8.
             GraphFormat::RdfXml => "application/rdf+xml; charset=utf-8",
-            // [OPUS-4.8] sq-oy1f.1: JSON-LD is UTF-8 JSON; the IANA `application/ld+json`
+            // sq-oy1f.1: JSON-LD is UTF-8 JSON; the IANA `application/ld+json`
             // registration carries no charset parameter (JSON is UTF-8 by RFC 8259), but we
             // annotate it like the others so a strict client never mis-decodes.
             #[cfg(feature = "jsonld")]
@@ -76,14 +76,14 @@ impl GraphFormat {
 }
 
 /// Negotiates the CONSTRUCT/DESCRIBE + GSP-read graph serialisation from an `Accept` header:
-/// `text/turtle`, `application/n-triples` and — [OPUS-4.8] sq-rt6v — `application/rdf+xml`
+/// `text/turtle`, `application/n-triples` and — sq-rt6v — `application/rdf+xml`
 /// (q-value aware), default N-Triples.
 pub fn negotiate_graph(accept: Option<&str>) -> GraphFormat {
     negotiate_graph_or_406(accept).unwrap_or(GraphFormat::NTriples)
 }
 
 /// Negotiates the CONSTRUCT/DESCRIBE + GSP-read graph serialisation with Oxigraph-parity
-/// strictness ([OPUS-4.8] sq-406acc) — the RDF-graph analogue of [`negotiate_or_406`].
+/// strictness (sq-406acc) — the RDF-graph analogue of [`negotiate_or_406`].
 ///
 /// Returns `Ok(format)` when a supported RDF media type (or a wildcard) is named, or when the
 /// `Accept` header is ABSENT / empty (the permitted N-Triples default); returns
@@ -100,11 +100,11 @@ pub fn negotiate_graph_or_406(accept: Option<&str>) -> Result<GraphFormat, NotAc
         let (fmt, spec) = match media.as_str() {
             "application/n-triples" => (Some(GraphFormat::NTriples), 2),
             "text/turtle" => (Some(GraphFormat::Turtle), 2),
-            // [OPUS-4.8] sq-rt6v: RDF/XML (and the older `application/xml`/`text/xml` aliases
+            // sq-rt6v: RDF/XML (and the older `application/xml`/`text/xml` aliases
             // some clients send for RDF/XML — kept lower-specificity so an exact match wins).
             "application/rdf+xml" => (Some(GraphFormat::RdfXml), 2),
             "application/xml" | "text/xml" => (Some(GraphFormat::RdfXml), 1),
-            // [OPUS-4.8] sq-oy1f.1: JSON-LD, OPT-IN behind the `jsonld` feature. When the
+            // sq-oy1f.1: JSON-LD, OPT-IN behind the `jsonld` feature. When the
             // feature is off this arm is compiled out, so `application/ld+json` matches no arm
             // and falls through to the default (N-Triples) like any unsupported type.
             #[cfg(feature = "jsonld")]
@@ -146,7 +146,7 @@ fn media_ranges(accept: &str) -> impl Iterator<Item = (String, f32)> + '_ {
 }
 
 /// A present-but-unsatisfiable `Accept` header — the HTTP layer maps this to `406 Not
-/// Acceptable`. [OPUS-4.8] sq-406acc: returned only by the `*_or_406` negotiators when an
+/// Acceptable`. sq-406acc: returned only by the `*_or_406` negotiators when an
 /// `Accept` header is PRESENT and non-empty yet names no supported media range and no wildcard.
 /// An absent / empty / `*/*` `Accept` is NEVER a `NotAcceptable` (the W3C SPARQL Protocol
 /// permits a default representation when `Accept` is absent), so the existing default-to-JSON /
@@ -158,12 +158,12 @@ pub struct NotAcceptable;
 ///
 /// This is the LENIENT entry point used by surfaces that never 406 (it always yields a concrete
 /// format, defaulting to JSON). The HTTP query path uses [`negotiate_or_406`] instead — see that
-/// function for the Oxigraph-parity strict behaviour ([OPUS-4.8] sq-406acc).
+/// function for the Oxigraph-parity strict behaviour (sq-406acc).
 pub fn negotiate(accept: Option<&str>) -> Format {
     negotiate_or_406(accept).unwrap_or(Format::Json)
 }
 
-/// Negotiates the SELECT/ASK result format with Oxigraph-parity strictness ([OPUS-4.8] sq-406acc).
+/// Negotiates the SELECT/ASK result format with Oxigraph-parity strictness (sq-406acc).
 ///
 /// Returns:
 /// * `Ok(format)` — a usable format was selected: either an explicitly-named supported type,
@@ -257,7 +257,7 @@ mod tests {
         assert_eq!(negotiate(Some("text/csv, */*")), Format::Csv);
     }
 
-    // [OPUS-4.8] sq-406acc: the Oxigraph-parity strict negotiator. An ABSENT / empty / `*/*`
+    // sq-406acc: the Oxigraph-parity strict negotiator. An ABSENT / empty / `*/*`
     // Accept keeps the JSON default (Ok); a PRESENT-but-unsatisfiable Accept is `NotAcceptable`
     // (the HTTP layer maps it to 406), instead of the lenient `negotiate`'s JSON fallback.
     #[test]
@@ -313,7 +313,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-406acc: the graph (CONSTRUCT/DESCRIBE) analogue.
+    // sq-406acc: the graph (CONSTRUCT/DESCRIBE) analogue.
     #[test]
     fn graph_or_406_absent_or_wildcard_keeps_ntriples_default() {
         assert_eq!(negotiate_graph_or_406(None), Ok(GraphFormat::NTriples));
@@ -354,7 +354,7 @@ mod tests {
         );
         // exact beats wildcard; unsupported falls back to N-Triples.
         assert_eq!(negotiate_graph(Some("text/turtle, */*")), GraphFormat::Turtle);
-        // [OPUS-4.8] sq-rt6v: RDF/XML is now a first-class graph format.
+        // sq-rt6v: RDF/XML is now a first-class graph format.
         assert_eq!(negotiate_graph(Some("application/rdf+xml")), GraphFormat::RdfXml);
         // The `application/xml`/`text/xml` aliases also map to RDF/XML, but at lower
         // specificity, so an exact `application/rdf+xml` (or turtle/n-triples) wins a tie.
@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(negotiate_graph(Some("application/pdf")), GraphFormat::NTriples);
     }
 
-    // [OPUS-4.8] sq-oy1f.1: JSON-LD negotiation is only compiled with the `jsonld` feature.
+    // sq-oy1f.1: JSON-LD negotiation is only compiled with the `jsonld` feature.
     #[cfg(feature = "jsonld")]
     #[test]
     fn graph_format_jsonld() {
@@ -387,7 +387,7 @@ mod tests {
         assert_eq!(negotiate_graph(Some("application/ld+json, */*")), GraphFormat::JsonLd);
     }
 
-    // [OPUS-4.8] sq-oy1f.1: WITHOUT the feature, `application/ld+json` is just another
+    // sq-oy1f.1: WITHOUT the feature, `application/ld+json` is just another
     // unsupported type — negotiation must fall through to the default (N-Triples).
     #[cfg(not(feature = "jsonld"))]
     #[test]

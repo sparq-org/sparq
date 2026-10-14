@@ -1,6 +1,6 @@
 //! A reader for the neutral wire form each oracle emits — **SPARQL 1.1 Results JSON** — into the
 //! neutral `{var → term}` model. Engine-independent (it parses the standard serialisation, not any
-//! engine's in-memory types). [OPUS-4.8] sq-qcnn.4
+//! engine's in-memory types). sq-qcnn.4
 //!
 //! `SELECT` results become [`QueryResults::Solutions`]; `ASK` results become
 //! [`QueryResults::Boolean`]. Graph results (`CONSTRUCT`/`DESCRIBE`, which are N-Triples not JSON and
@@ -57,7 +57,7 @@ pub fn parse_results_json(s: &str) -> Result<QueryResults, ParseError> {
         };
     }
 
-    // SELECT: head.vars + results.bindings. [OPUS-4.8] sq-qcnn.4 — parse `head.vars`
+    // SELECT: head.vars + results.bindings. sq-qcnn.4 — parse `head.vars`
     // STRICTLY (reject, do not silently default): a SELECT Results-JSON must carry
     // `head.vars` as an array of strings (SPARQL 1.1 §Query Results JSON). Silently
     // defaulting a missing/ill-typed header to `[]`, or dropping a non-string element,
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed_head_vars() {
-        // [OPUS-4.8] sq-qcnn.4 — a SELECT result (no top-level "boolean") must carry a
+        // sq-qcnn.4 — a SELECT result (no top-level "boolean") must carry a
         // well-formed `head.vars`: rejecting malformed headers rather than defaulting to `[]`
         // keeps a broken oracle output from being compared as if it had no projected vars.
         // (a) head.vars entirely absent.

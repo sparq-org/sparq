@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-r5bv, gh-50) **The stable HTTP error/status contract** — what a sparq-server
+//! (sq-r5bv, gh-50) **The stable HTTP error/status contract** — what a sparq-server
 //! client can rely on when classifying a response, and in particular **which statuses are
 //! transient (retry may succeed) vs permanent (retrying the identical request cannot help)**.
 //!
@@ -45,9 +45,9 @@
 //! | `400 Bad Request` | malformed query / malformed UPDATE / malformed RDF body / malformed TPF pattern / `GET /sparql` with no `query` / unparsable `?generation` / not-yet-published generation | **permanent** | fix the request; do **not** retry as-is |
 //! | `401 Unauthorized` | a write (or, with `--auth-token-read`, a read) without a valid Bearer token; carries `WWW-Authenticate: Bearer` + `Cache-Control: no-store`; **byte-identical for a missing vs a wrong token** | **permanent** | obtain/correct the token; do **not** retry as-is |
 //! | `403 Forbidden` | (`service` feature) a non-`SILENT` `SERVICE` to a host the egress **allowlist** / default-deny SSRF policy refused (`--service-allow` / `SPARQ_SERVICE_ALLOW`, `sq-4w18`/`sq-iu0c`) -- a **policy** refusal, NOT a server fault | **permanent** | the endpoint is off the server's egress allowlist; do **not** retry -- ask the operator to allowlist it (or use `SERVICE SILENT` to tolerate the refusal) |
-//! | `404 Not Found` | unknown route / GSP `DELETE` of a named graph that does not exist (a GSP `GET` of an absent named graph serves the EMPTY graph -- `200`, empty body -- it does not `404`; pinned by `tests/protocol.rs` + `tests/wire_contract.rs`) [FABLE-5] sq-fdurb | **permanent** | -- |
+//! | `404 Not Found` | unknown route / GSP `DELETE` of a named graph that does not exist (a GSP `GET` of an absent named graph serves the EMPTY graph -- `200`, empty body -- it does not `404`; pinned by `tests/protocol.rs` + `tests/wire_contract.rs`) sq-fdurb | **permanent** | -- |
 //! | `405 Method Not Allowed` | method not allowed on the route; carries `Allow` | **permanent** | use a listed method |
-//! | `406 Not Acceptable` | a PRESENT, non-empty `Accept` naming no supported result media type and no wildcard (both result classes: SELECT/ASK and CONSTRUCT/DESCRIBE; absent / empty / `*/*` keeps the default, never a `406`) [FABLE-5] sq-fdurb | **permanent** | send a supported `Accept` (or none) |
+//! | `406 Not Acceptable` | a PRESENT, non-empty `Accept` naming no supported result media type and no wildcard (both result classes: SELECT/ASK and CONSTRUCT/DESCRIBE; absent / empty / `*/*` keeps the default, never a `406`) sq-fdurb | **permanent** | send a supported `Accept` (or none) |
 //! | `410 Gone` | `?generation=N` aged out of the retention window -- default build (`sq-ci2d6`): the generation ring's **concurrency-retention window** (the last K generations older than current, always kept); WIDER under the opt-in `time-travel` feature | **permanent** | the snapshot is gone; re-read the current generation and restart pagination -- do not retry that pin |
 //! | `413 Payload Too Large` | request **body** over `--max-body-bytes`; **result** over `--max-results` / `--max-query-rows` (row) / `--max-query-bytes` (byte-accounted, `sq-s5is`) working-set cap; gzip body over the `--max-decompress-ratio` zip-bomb cap | **permanent for the identical request** | narrow the query (e.g. add `LIMIT` / project fewer variables) or shrink the body -- retrying the same request fails identically |
 //! | `415 Unsupported Media Type` | POST query/update with an unsupported `Content-Type` | **permanent** | send a supported content type |
@@ -100,7 +100,7 @@
 //!   (query, GSP-read and UPDATE), so a slow request cannot hang a client past the deadline.
 //!
 //! See also: `docs/http-wire-contract.md` (the versioned v1 HTTP wire contract this table is
-//! part of, pinned end-to-end by `tests/wire_contract.rs` -- [FABLE-5] sq-fdurb, gh-1416),
+//! part of, pinned end-to-end by `tests/wire_contract.rs` -- sq-fdurb, gh-1416),
 //! the README "Security posture" (auth, bind, header and error-leak posture),
 //! `skills/http-server/SKILL.md` (the full endpoint + hardening reference), and the inline
 //! `engine_error_response` / `update_rejection_response` / `timeout_response` mappers in

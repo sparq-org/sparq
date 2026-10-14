@@ -1,4 +1,4 @@
-//! [GPT-6] Default host gate for measured compatibility evidence, without nargo or bb.
+//! Default host gate for measured compatibility evidence, without nargo or bb.
 
 use std::path::Path;
 use std::process::Command;

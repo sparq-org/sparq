@@ -1,5 +1,5 @@
 #![cfg(feature = "http2")]
-//! [GPT-5.6] sq-oprna.6: real TLS/ALPN HTTP/2 negotiation and HTTP/1.1 fallback.
+//! sq-oprna.6: real TLS/ALPN HTTP/2 negotiation and HTTP/1.1 fallback.
 
 use std::{
     error::Error,

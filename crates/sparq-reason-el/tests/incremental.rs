@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-clsv6 (Phase E5, `incremental`): the acceptance oracle for incremental
+// sq-clsv6 (Phase E5, `incremental`): the acceptance oracle for incremental
 // classification under TBox edits — "the incremental result matches a full re-classification
 // (ELK-differential) on an edited-TBox fixture".
 //

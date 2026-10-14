@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ky2a — corruption / fuzz oracle for the memory-mapped on-disk store
+//! sq-ky2a — corruption / fuzz oracle for the memory-mapped on-disk store
 //! loader (trust boundary B5 in `research/threat-model.md`: "hostile on-disk index →
 //! unsafe mmap loader").
 //!
@@ -77,7 +77,7 @@ fn exercise(g: &Graph) -> Vec<[String; 3]> {
     dump
 }
 
-/// [FABLE-5] sq-7d3dj.32.2.7 — which compressed on-disk block-stream format a build emits.
+/// sq-7d3dj.32.2.7 — which compressed on-disk block-stream format a build emits.
 /// `V1` is the shipped `SPQCPRM1`; `V2` is `SPQCPRM2` (only reachable behind the `spqcprm2`
 /// feature). The oracle sweeps ALL of them so the mmap loader's memory-safety contract is
 /// proven on the V2 magic + frame-of-reference reader too, not just V1.
@@ -96,7 +96,7 @@ fn build_store(dir: &Path, mode: SaveMode) -> Vec<[String; 3]> {
     match mode {
         SaveMode::Raw => g.save(dir).expect("save"),
         SaveMode::CompressedV1 => g.save_compressed(dir).expect("save_compressed"),
-        // [FABLE-5] sq-7d3dj.32.2.7 — force V2 emission on THIS thread only (no env mutation),
+        // sq-7d3dj.32.2.7 — force V2 emission on THIS thread only (no env mutation),
         // so the saved perms carry the SPQCPRM2 magic and decode through `decode_block_v2_at`.
         #[cfg(feature = "spqcprm2")]
         SaveMode::CompressedV2 => sparq_core::compress::with_emit_format(
@@ -138,7 +138,7 @@ fn store_files(dir: &Path) -> Vec<std::path::PathBuf> {
         "perm5.bin",
         "numerics-v3.bin",
         "temporals-v4.bin",
-        // [OPUS-4.8] sq-f5jh: `predstats.bin` is an untrusted on-disk file too — its u64
+        // sq-f5jh: `predstats.bin` is an untrusted on-disk file too — its u64
         // record-count drove an unbounded `FxHashMap::reserve` (OOM-abort DoS) before the
         // cap in `TripleStore::load_pred_stats`. Sweeping it here keeps that cap exercised.
         "predstats.bin",
@@ -289,7 +289,7 @@ fn mmap_loader_survives_corruption_compressed() {
     corruption_sweep(SaveMode::CompressedV1);
 }
 
-/// [FABLE-5] sq-7d3dj.32.2.7 — the SAME memory-safety oracle over a `SPQCPRM2` (V2) saved store:
+/// sq-7d3dj.32.2.7 — the SAME memory-safety oracle over a `SPQCPRM2` (V2) saved store:
 /// the V2 magic auto-detect + the frame-of-reference `decode_block_v2_at` reader must survive
 /// every truncation / byte-flip with a clean `Err` or a fully-materialising graph — never a
 /// panic / OOB / abort. This proves the migration did not open a new UB surface in the loader.
@@ -344,7 +344,7 @@ fn dict_blob_non_utf8_is_rejected_not_ub() {
     assert!(saw_rejection, "no blob corruption was rejected — the oracle is vacuous");
 }
 
-/// [OPUS-4.8] sq-cvug — a graph containing RDF 1.2 quoted/triple terms `<<( s p o )>>` so
+/// sq-cvug — a graph containing RDF 1.2 quoted/triple terms `<<( s p o )>>` so
 /// the store holds tag-3 records whose components cross-reference other dictionary ids. The
 /// byte-flip sweeps above never synthesise these from the plain `sample_graph` (no triple
 /// terms in it), so this focused test drives the triple-term reconstruction path directly.

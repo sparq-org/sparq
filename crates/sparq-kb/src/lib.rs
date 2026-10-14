@@ -1,6 +1,6 @@
 //! # sparq-kb — the Project-Knowledge-Graph (PKG) ontology + SHACL guardrails
 //!
-//! [OPUS-4.8] sq-2m6zm.1 (epic sq-2m6zm); design record
+//! sq-2m6zm.1 (epic sq-2m6zm); design record
 //! `research/dogfooding-sparq-knowledge-graph.md` (PR #1063). 🤖 SPARQ agent —
 //! dogfooding sparq as a project knowledge graph. Written while Fable unavailable;
 //! flag for re-review when Fable returns.
@@ -71,7 +71,7 @@ pub const PKG_INSTANCES: &str = include_str!("../ingest/pkg-instances.ttl");
 /// and the certification-edge closure model's deciding record is cited. Every
 /// ingested statement CARRIES its caveat — this tier introduces no unqualified
 /// ZK/privacy claim. Loaded into the queryable PKG by `query::load_pkg` alongside
-/// [`PKG_INSTANCES`]. [FABLE-5]
+/// [`PKG_INSTANCES`].
 pub const PKG_TRUST_GRAPH_FINDINGS: &str = include_str!("../ingest/trust-graph-findings.ttl");
 
 /// Validation helpers over `sparq-shacl`. OPT-IN behind the default-OFF `validate`
@@ -138,12 +138,12 @@ pub mod query {
     pub mod canned;
     /// The PKG **natural-language tool** envelope (agent flavor, sq-ve5dy): run a query
     /// and return the executed SPARQL + resolved IRIs + grounding confidence so the
-    /// caller can verify the answer was computed, not guessed. [OPUS-4.8] sq-ve5dy
+    /// caller can verify the answer was computed, not guessed. sq-ve5dy
     pub mod nl_tool;
     /// Citation renderer for PKG-native canned-query answers (sq-2489d.11):
     /// renders `prov:wasDerivedFrom` source citations beside `FINDING_PROVENANCE`
     /// rows and reports citation-resolution-rate + fabricated-citation count.
-    /// [SONNET-4.6] sq-2489d.11
+    /// sq-2489d.11
     pub mod citations;
 
     /// Load the PKG ontology + the ingested instances (including the trust-graph
@@ -163,7 +163,7 @@ pub mod query {
     /// needed. This is the seam the FO-KM benchmark (epic sq-mztg8, Metric 1) uses to
     /// load a foundational-ontology overlay TTL alongside the PKG before querying — the
     /// overlay's `rdfs:subClassOf` axioms then participate in `close`'s OWL-RL / RDFS
-    /// closure so the FO-typed facts are entailed. [OPUS-4.8]
+    /// closure so the FO-typed facts are entailed.
     pub fn load_pkg_with_extra(extra_docs: &[&str]) -> Result<Graph, String> {
         let combined = combine_pkg_docs(extra_docs);
         Graph::load_str(&combined, "turtle")
@@ -173,7 +173,7 @@ pub mod query {
     /// (`sq-7utko`) + any `extra_docs` into one Turtle source. Shared by the plain
     /// and (under `close`) the closure loaders so both paths see exactly the same
     /// document set. Each document declares its own `@prefix` lines, so the
-    /// concatenation is prefix-safe. [FABLE-5]
+    /// concatenation is prefix-safe.
     fn combine_pkg_docs(extra_docs: &[&str]) -> String {
         let mut combined = format!(
             "{}\n{}\n{}",
@@ -200,7 +200,7 @@ pub mod query {
     /// / symmetric direction sees edges that were only asserted the other way round.
     /// OPT-IN behind the default-OFF `close` feature (pulls in `sparq-reason`).
     ///
-    /// [OPUS-4.8] sq-2m6zm.3
+    /// sq-2m6zm.3
     #[cfg(feature = "close")]
     pub mod close {
         use sparq_core::Graph;
@@ -223,7 +223,7 @@ pub mod query {
         /// FO-typed `rdf:type` facts (e.g. `?task a fo:Process`) are **entailed** and
         /// directly queryable — the very thing the no-FO arm (which loads no overlay)
         /// cannot answer. Each extra document must declare its own `@prefix` lines (see
-        /// [`super::load_pkg_with_extra`]). [OPUS-4.8]
+        /// [`super::load_pkg_with_extra`]).
         pub fn load_pkg_closed_with_extra(
             profile: Profile,
             extra_docs: &[&str],

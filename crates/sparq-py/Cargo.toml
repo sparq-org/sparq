@@ -22,7 +22,7 @@ homepage.workspace = true
 
 [lib]
 # The cdylib IS the Python *import* module (maturin renames it to sparq.<abi3>.so).
-# The lib name matches the `#[pymodule] fn sparq`. [OPUS-4.8] sq-8slf: the PyPI
+# The lib name matches the `#[pymodule] fn sparq`. sq-8slf: the PyPI
 # *distribution* name is `sparq-rdf` (pyproject `[project] name`), which differs from
 # this import name; pyproject `[tool.maturin] module-name = "sparq"` pins the import
 # name so maturin does not derive `sparq_rdf` from the distribution name.
@@ -47,7 +47,7 @@ pyo3-build-config = "0.29"
 pyo3 = { version = "0.29", features = ["abi3-py39", "extension-module"] }
 # `mmap` enables Graph::save / Graph::open (the out-of-core persisted-index path).
 sparq-core = { path = "../sparq-core", features = ["mmap"] }
-# [SONNET-4.6] sq-11664: enable the same planner/optimizer feature trio the CLI ships
+# sq-11664: enable the same planner/optimizer feature trio the CLI ships
 # (crates/sparq-cli/Cargo.toml) so the pip wheel executes the same rewritten plans the
 # CLI and the canonical benchmarks measure (sq-hmd7l.18 finding: wheel was 'rewrite-dark',
 # up to ~100× slower than engine-internal on rewrite-dependent queries, e.g. q03c).
@@ -69,7 +69,7 @@ oxrdf.workspace = true
 # Used only to classify the query form in `Graph.ask` (ASK runs the engine's
 # native early-exiting entry point; SELECT is answered via the lazy count).
 spargebra.workspace = true
-# [OPUS-4.8] sq-lt1ml (gh-910): opt-in Arrow export. Only behind the `arrow` feature,
+# sq-lt1ml (gh-910): opt-in Arrow export. Only behind the `arrow` feature,
 # so the lean wheel pulls ZERO Arrow code. `sparq-arrow/arrow` gives the QueryResult ->
 # RecordBatch projection (one struct column per variable); `arrow-array`/`arrow-schema`
 # with their `ffi` feature give the C Data Interface (`FFI_ArrowArrayStream`) we hand to
@@ -80,7 +80,7 @@ arrow-array = { version = "59", features = ["ffi"], optional = true }
 arrow-schema = { version = "59", features = ["ffi"], optional = true }
 
 [features]
-# [OPUS-4.8] sq-oy1f.20: JSON-LD is DEFAULT-ON in the Python wheel — the maintainer-
+# sq-oy1f.20: JSON-LD is DEFAULT-ON in the Python wheel — the maintainer-
 # directed exception to sparq's opt-in-by-default principle for the user-prioritised
 # JSON-LD epic (sq-oy1f), mirroring the native CLI + server (sq-oy1f.4). The Python
 # wheel has no bundle-size floor (unlike the lean wasm bundle, where JSON-LD stays
@@ -91,7 +91,7 @@ arrow-schema = { version = "59", features = ["ffi"], optional = true }
 # are untouched. Toggleable: `cargo build -p sparq-py --no-default-features` (and a
 # `--no-default-features` wheel) drops the oxjsonld parser; then `format="jsonld"`
 # fails closed (sparq-core rejects the unknown format rather than mis-parsing it).
-# [SONNET-4.6] sq-11664: the three planner/optimizer features the CLI ships are now
+# sq-11664: the three planner/optimizer features the CLI ships are now
 # DEFAULT-ON for the wheel too (leaf/binary-crate rationale — sparq-engine LIBRARY
 # defaults stay OFF). Toggleable: `maturin build --no-default-features` (or
 # `--no-default-features --features jsonld`) produces a rewrite-dark wheel for
@@ -99,7 +99,7 @@ arrow-schema = { version = "59", features = ["ffi"], optional = true }
 # in the default set) is a no-op on the default wheel.
 default = ["jsonld", "dp-planner", "algebra-rewrite", "antijoin-static-decline"]
 jsonld = ["sparq-core/jsonld"]
-# [SONNET-4.6] sq-11664: forwarding features for the planner trio. Each forwards the
+# sq-11664: forwarding features for the planner trio. Each forwards the
 # corresponding `sparq-engine` opt-in; the engine LIBRARY default stays OFF (only this
 # leaf crate's Cargo.toml edge opts it in for the wheel).
 # `algebra-rewrite` — pre-execution FILTER(?v = <iri>) constant-substitution + !bound
@@ -112,7 +112,7 @@ dp-planner = ["sparq-engine/dp-planner"]
 # anti-join evaluation order (sq-7d3dj.30.20); bag-result-equivalent, zero new deps,
 # no `unsafe`.
 antijoin-static-decline = ["sparq-engine/antijoin-static-decline"]
-# [OPUS-4.8] sq-lt1ml (gh-910): `Graph.query_arrow(sparql) -> pyarrow.Table`. OFF by
+# sq-lt1ml (gh-910): `Graph.query_arrow(sparql) -> pyarrow.Table`. OFF by
 # default — the lean wheel pays nothing (no Arrow dependency, no extra code compiled).
 # A wheel built with `--features arrow` (the `arrow` PyPI extra is wired through this
 # cargo feature) gains the Arrow columnar export. Pulls sparq-arrow's RecordBatch

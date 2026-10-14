@@ -22,7 +22,7 @@
 //! Like [`live`](crate::live), no test makes a live network call: the unit + integration
 //! tests drive [`EndpointLlm`] against a loopback `TcpListener` stub returning a canned
 //! chat-completion response, so the REAL request/response/parse path is exercised
-//! offline. [OPUS-4.8]
+//! offline.
 
 use crate::Llm;
 
@@ -212,7 +212,7 @@ mod tests {
 
     /// The `EndpointConfig` builder chain sets each field and leaves the others at their
     /// defaults — the config invariant the loopback-stub integration tests assume but never
-    /// assert on `with_max_tokens` / `with_timeout`. [OPUS-4.8]
+    /// assert on `with_max_tokens` / `with_timeout`.
     #[test]
     fn config_builder_chain_sets_each_field() {
         let cfg = EndpointConfig::new("http://h/v1", "m")
@@ -234,7 +234,7 @@ mod tests {
 
     /// The request URL is `{base_url}/chat/completions` with at most one separating slash —
     /// a trailing slash on the base is trimmed (no doubled `//chat`), an absent one is
-    /// added. Guards the `trim_end_matches('/')` join. [OPUS-4.8]
+    /// added. Guards the `trim_end_matches('/')` join.
     #[test]
     fn request_url_join_normalises_trailing_slash() {
         let no_slash = EndpointLlm::new(EndpointConfig::new("http://h/v1", "m")).unwrap();
@@ -251,7 +251,7 @@ mod tests {
 
     /// `non_empty_env` distinguishes "unset" and "empty" from a real value, mapping both
     /// failure modes to the same actionable error naming the variable. Uses a unique
-    /// variable name so it does not race the integration-suite env tests. [OPUS-4.8]
+    /// variable name so it does not race the integration-suite env tests.
     #[test]
     fn non_empty_env_rejects_unset_and_empty() {
         // Serialize every env-mutating test in this binary against ONE process-wide lock:
@@ -259,7 +259,7 @@ mod tests {
         // and race any concurrent `getenv`/`setenv` from another thread — UB even though
         // the probe key below is unique to this test), and cargo runs this binary's unit
         // tests on a thread pool. Mirrors the `ENV_LOCK` guard in `tests/endpoint_stub.rs`.
-        // [OPUS-4.8]
+        //
         static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 

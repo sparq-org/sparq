@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-z2z18) SIFT1M ef_search sweep for sparq-vectors HNSW.
+//! (sq-z2z18) SIFT1M ef_search sweep for sparq-vectors HNSW.
 //!
 //! Reads pre-extracted SIFT1M base vectors and query vectors from raw binary files.
 //! For each ef level in [16, 32, 64, 128, 256]:

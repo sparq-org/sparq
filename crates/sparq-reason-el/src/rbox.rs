@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-xetf7: RBox (role-box) saturation — CR10 (role inclusion) + CR11 (role
+// sq-xetf7: RBox (role-box) saturation — CR10 (role inclusion) + CR11 (role
 // composition), the EL+ role automaton the spike's Phase E2 adds on top of the E1 CR1-CR5
 // concept calculus (research/owl2-el-ql-reasoning-spike.md §5).
 //
@@ -130,7 +130,7 @@ impl RoleBox {
         self.has_compositions
     }
 
-    /// [SONNET-4.6] sq-pbz04.2.7: yields every NON-REFLEXIVE `(sub, sup)` role-inclusion pair
+    /// sq-pbz04.2.7: yields every NON-REFLEXIVE `(sub, sup)` role-inclusion pair
     /// from the already-computed told-inclusion closure — every `(r, s)` where `r != s` and
     /// `s ∈ super_of[r]`. This is a READOFF of the closure built by [`RoleBox::build`]; no new
     /// saturation is performed. The pairs cover the full reflexive-transitive closure minus the
@@ -150,7 +150,7 @@ impl RoleBox {
     }
 }
 
-/// [SONNET-4.6] sq-oj06v: TOLD-RBox regularity check (cycle-with-composition detection), the E2
+/// sq-oj06v: TOLD-RBox regularity check (cycle-with-composition detection), the E2
 /// follow-up honesty gate. The OWL 2 global restrictions require the RBox to be REGULAR: a
 /// strict order `<` on roles must admit every told chain axiom `r1 ∘ … ∘ rn ⊑ s` in one of the
 /// allowed forms — a `owl:topObjectProperty` superproperty (`s = top`, no constraint — the
@@ -285,7 +285,7 @@ mod tests {
         assert!(!rb.has_compositions());
     }
 
-    // [SONNET-4.6] sq-pbz04.2.7: unit tests for `inclusion_pairs` (the role-lattice readoff).
+    // sq-pbz04.2.7: unit tests for `inclusion_pairs` (the role-lattice readoff).
 
     #[test]
     fn inclusion_pairs_chain_closure() {
@@ -325,7 +325,7 @@ mod tests {
         );
     }
 
-    // [SONNET-4.6] sq-oj06v: told-RBox regularity check (cycle-with-composition detection).
+    // sq-oj06v: told-RBox regularity check (cycle-with-composition detection).
 
     #[test]
     fn regular_hierarchy_transitivity_and_chain() {

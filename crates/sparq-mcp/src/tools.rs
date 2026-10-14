@@ -2,7 +2,7 @@
 //! client receives from `tools/list`, plus the dispatch from a `tools/call` to the
 //! sparq engine.
 //!
-//! [OPUS-4.8] (sq-0z43i, gh #909) Every tool is a thin wrapper over an existing
+//! (sq-0z43i, gh #909) Every tool is a thin wrapper over an existing
 //! sparq read API — there is no new query/engine logic here:
 //! - `query` → `sparq_engine::query_json` (SELECT/ASK; SPARQL 1.1 JSON results).
 //! - `construct` → `sparq_engine::construct_ntriples` (CONSTRUCT/DESCRIBE; N-Triples).
@@ -10,7 +10,7 @@
 //!   `to_text_summary(...)` (classes, predicates, prefixes, characteristic sets).
 //! - `shapes` → `crate::shapes::class_shape(...)` (the data-grounded predicate/datatype/
 //!   cardinality constraints for one class IRI; structured grounding for a client LLM —
-//!   no server-side model). [OPUS-4.8] sq-zak4f
+//!   no server-side model). sq-zak4f
 //! - `stats` → graph triple count + introspection totals.
 //! - `classes` → per-class instance and predicate counts.
 //! - `prefixes` → namespace declarations + per-namespace distinct-IRI term counts.
@@ -19,10 +19,10 @@
 //!   caller-supplied shapes; read-only and absent from the default tool surface.
 //! - `describe_form` (feature `shacl`, OFF by default) → `sparq_forms::derive_form`
 //!   over caller-supplied shapes for one focus node; returns the `FormDescription`
-//!   JSON verbatim. Read-only. [FABLE-5] sq-lsp7k.1.6
+//!   JSON verbatim. Read-only. sq-lsp7k.1.6
 //! - `ask` (feature `nlq`, OFF by default) → `crate::nlq` (server-side NL→SPARQL→execute
 //!   via `sparq-nlq`; embeds a configurable LLM call, degrades cleanly when none is
-//!   configured). [OPUS-4.8] sq-jxjgr
+//!   configured). sq-jxjgr
 //! - `update` (gated, OFF by default) → `sparq_engine::update_in_place_atomic`.
 
 use serde_json::{json, Value};
@@ -131,7 +131,6 @@ pub const INTROSPECT: ToolSpec = ToolSpec {
 /// The `shapes` tool: the data-grounded predicate/datatype/cardinality constraints for
 /// one class IRI, as structured JSON for a CLIENT LLM to ground NL→SPARQL on. No
 /// server-side model — this is the lean, structured grounding aid (`sq-zak4f`).
-/// [OPUS-4.8]
 pub const SHAPES: ToolSpec = ToolSpec {
     name: "shapes",
     description: "Given a class/type IRI, return the data-grounded SHACL-style shape of \
@@ -178,7 +177,7 @@ pub const STATS: ToolSpec = ToolSpec {
     },
 };
 
-/// [GPT-5.6] sq-cekgj: class profiles ranked by instance count.
+/// sq-cekgj: class profiles ranked by instance count.
 pub const CLASSES: ToolSpec = ToolSpec {
     name: "classes",
     description: "Return the classes detected in the loaded graph: each class IRI, its \
@@ -195,7 +194,7 @@ pub const CLASSES: ToolSpec = ToolSpec {
     },
 };
 
-/// [GPT-5.6] sq-kx5b0: namespace declarations ranked by distinct-IRI term count.
+/// sq-kx5b0: namespace declarations ranked by distinct-IRI term count.
 pub const PREFIXES: ToolSpec = ToolSpec {
     name: "prefixes",
     description: "Return namespace declarations detected in the loaded graph: each known \
@@ -211,7 +210,7 @@ pub const PREFIXES: ToolSpec = ToolSpec {
     },
 };
 
-/// [GPT-5.6] sq-2kkym: the `void` tool, a W3C VoID dataset descriptor in N-Triples.
+/// sq-2kkym: the `void` tool, a W3C VoID dataset descriptor in N-Triples.
 pub const VOID: ToolSpec = ToolSpec {
     name: "void",
     description: "Return a W3C VoID dataset descriptor as N-Triples: exact dataset \
@@ -267,7 +266,7 @@ pub const UPDATE: ToolSpec = ToolSpec {
 /// SPARQL + an honest rendering of the result rows (and, with `nlq/citations`, in-graph
 /// citations) — NOT a free-form prose paragraph the model could fabricate. The structured
 /// `shapes` / `introspect` tools are the no-LLM default; this trades a model call for the
-/// convenience of not writing SPARQL yourself. [OPUS-4.8]
+/// convenience of not writing SPARQL yourself.
 #[cfg(feature = "nlq")]
 pub const ASK: ToolSpec = ToolSpec {
     name: "ask",
@@ -300,7 +299,6 @@ pub const ASK: ToolSpec = ToolSpec {
 /// The `nl_query` tool: server-side natural-language → SPARQL **translation**, behind the
 /// same opt-in `nlq` feature (`sq-sj1f9`). The description's load-bearing job is to stop an
 /// agent reading the output as an ANSWER: nothing was executed, so no rows are implied.
-/// [SONNET-4.6]
 #[cfg(feature = "nlq")]
 pub const NL_QUERY: ToolSpec = ToolSpec {
     name: "nl_query",
@@ -333,7 +331,7 @@ pub const NL_QUERY: ToolSpec = ToolSpec {
 };
 
 /// The `template_list` tool (feature `templates`): the registered named-template
-/// definitions, so an agent can ground a `template_invoke` call. [FABLE-5] sq-lsp7k.10
+/// definitions, so an agent can ground a `template_invoke` call. sq-lsp7k.10
 #[cfg(feature = "templates")]
 pub const TEMPLATE_LIST: ToolSpec = ToolSpec {
     name: "template_list",
@@ -352,7 +350,7 @@ pub const TEMPLATE_LIST: ToolSpec = ToolSpec {
 };
 
 /// The `template_invoke` tool (feature `templates`): typed, fail-closed invocation of a
-/// registered template — the safe alternative to free-form UPDATE for agents. [FABLE-5]
+/// registered template — the safe alternative to free-form UPDATE for agents.
 /// sq-lsp7k.10
 #[cfg(feature = "templates")]
 pub const TEMPLATE_INVOKE: ToolSpec = ToolSpec {
@@ -392,7 +390,7 @@ pub const TEMPLATE_INVOKE: ToolSpec = ToolSpec {
 };
 
 /// The `text_search` tool (feature `text`): BM25 full-text search over the graph's
-/// string literals via the sparq-text index. [FABLE-5] sq-lsp7k.10
+/// string literals via the sparq-text index. sq-lsp7k.10
 #[cfg(feature = "text")]
 pub const TEXT_SEARCH: ToolSpec = ToolSpec {
     name: "text_search",
@@ -432,7 +430,7 @@ pub const TEXT_SEARCH: ToolSpec = ToolSpec {
 };
 
 /// The `validate` tool (feature `shacl`): validate the served graph against a
-/// caller-supplied SHACL shapes graph without mutating either graph. [GPT-5.6]
+/// caller-supplied SHACL shapes graph without mutating either graph.
 #[cfg(feature = "shacl")]
 pub const VALIDATE: ToolSpec = ToolSpec {
     name: "validate",
@@ -464,7 +462,7 @@ pub const VALIDATE: ToolSpec = ToolSpec {
 /// The `describe_form` tool (feature `shacl`): derive a shape-aware form description
 /// for one focus node of the served graph against a caller-supplied SHACL shapes
 /// graph, returning `sparq_forms::derive_form`'s `FormDescription` JSON verbatim.
-/// [FABLE-5] sq-lsp7k.1.6
+/// sq-lsp7k.1.6
 #[cfg(feature = "shacl")]
 pub const DESCRIBE_FORM: ToolSpec = ToolSpec {
     name: "describe_form",
@@ -538,7 +536,7 @@ pub fn advertised(server: &McpServer) -> Vec<&'static ToolSpec> {
         tools.push(&ASK);
         tools.push(&NL_QUERY);
     }
-    // [FABLE-5] sq-lsp7k.10: the template tools are advertised only when the embedder
+    // sq-lsp7k.10: the template tools are advertised only when the embedder
     // registered at least one template (a template-less server does not advertise an
     // unusable tool — the `ask` degrade-cleanly pattern). An UPDATE template is listed
     // even on a read-only server (the agent can see it exists) but its invocation is
@@ -548,15 +546,15 @@ pub fn advertised(server: &McpServer) -> Vec<&'static ToolSpec> {
         tools.push(&TEMPLATE_LIST);
         tools.push(&TEMPLATE_INVOKE);
     }
-    // [FABLE-5] sq-lsp7k.10: full-text search is self-contained (the index builds lazily
+    // sq-lsp7k.10: full-text search is self-contained (the index builds lazily
     // from the loaded graph), so the feature alone advertises it.
     #[cfg(feature = "text")]
     tools.push(&TEXT_SEARCH);
-    // [GPT-5.6] sq-lsp7k.22: validation is self-contained and read-only, so the
+    // sq-lsp7k.22: validation is self-contained and read-only, so the
     // opt-in feature alone is the complete advertisement gate.
     #[cfg(feature = "shacl")]
     tools.push(&VALIDATE);
-    // [FABLE-5] sq-lsp7k.1.6: form derivation shares the validator's caller-supplied
+    // sq-lsp7k.1.6: form derivation shares the validator's caller-supplied
     // shapes surface, so the same opt-in feature advertises both read-only tools.
     #[cfg(feature = "shacl")]
     tools.push(&DESCRIBE_FORM);

@@ -1,4 +1,4 @@
-// [OPUS-5] sq-u5y1f (issue #3235) — follow-up to sq-9c5e / sq-txg1y.
+// sq-u5y1f (issue #3235) — follow-up to sq-9c5e / sq-txg1y.
 //! The **selective-disclosure ingest seam** for `bbs-2023` / `ecdsa-sd-2023`
 //! (design `research/zk-configurable-commitment-design.md` §5.3).
 //!

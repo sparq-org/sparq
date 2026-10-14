@@ -1,10 +1,10 @@
-//! [OPUS-4.8] sq-jxjgr: the server-side natural-language tools — behind the opt-in
+//! sq-jxjgr: the server-side natural-language tools — behind the opt-in
 //! `nlq` feature, OFF by default.
 //!
 //! Two tools share this module and the same backend resolution:
 //! - [`ask`] — the full loop: NL→SPARQL→validate→**execute**, returning the executed query
 //!   plus the real result rows;
-//! - [`nl_query`] — **translate only** ([SONNET-4.6] sq-sj1f9): the same grounding, and
+//! - [`nl_query`] — **translate only** (sq-sj1f9): the same grounding, and
 //!   the same pre-execution checks — the question guard, a `spargebra` parse, and the
 //!   forbidden-construct refusal — stopping before execution so the caller reviews the
 //!   query and decides whether to run it (via the `query` tool). Cheaper and reviewable;
@@ -123,7 +123,7 @@ pub fn ask(graph: &Graph, question: &str, budget: &QueryBudget) -> Result<String
 /// validated SPARQL query — **without executing it**. Fails closed (the same "not
 /// configured" error as [`ask`]) when no backend is set. The real translation lives in
 /// [`run_nl_query`] so it is testable with a scripted backend (no network).
-/// [SONNET-4.6] sq-sj1f9
+/// sq-sj1f9
 pub fn nl_query(graph: &Graph, question: &str) -> Result<String, String> {
     let llm = resolve_backend()?;
     run_nl_query(graph, question, llm)
@@ -381,7 +381,7 @@ mod tests {
     /// Serializes the tests that clear the backend-selecting environment variables.
     /// `std::env` is process-global, so two such tests running on different threads would
     /// otherwise interleave a remove with a restore and see the wrong backend state.
-    /// [SONNET-4.6] sq-sj1f9
+    /// sq-sj1f9
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// The environment variables that select an LLM backend, cleared by the fail-closed
@@ -515,7 +515,7 @@ ex:bob   rdf:type ex:Person ; ex:name "Bob" .
     }
 
     // ---------------------------------------------------------------------
-    // `nl_query` — translate only. [SONNET-4.6] sq-sj1f9
+    // `nl_query` — translate only. sq-sj1f9
     // ---------------------------------------------------------------------
 
     #[test]

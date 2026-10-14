@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-u16eq — the pod-backed MCP server (feature `solid`, OFF by default):
+//! sq-u16eq — the pod-backed MCP server (feature `solid`, OFF by default):
 //! LDP container/resource CRUD tools over a `sparq_solid::PodStore`, per the MCP-Solid
 //! proposal draft (`site/specs/mcp-solid.typ` §6.4 / §7.3 / §9.3, sq-tag1q.1).
 //!
@@ -21,12 +21,12 @@
 //!   from IRI-path guessing (draft §6.4) — and filtered to the members the session may
 //!   read, so an unreadable member is not disclosed (gh #5287).
 //! - `introspect`, `shapes`, `stats` (Class R) — the schema/statistics tools, mined from
-//!   the session's authorized projection rather than the whole pod. [SONNET-4.6] sq-8n6iv
+//!   the session's authorized projection rather than the whole pod. sq-8n6iv
 //! - `update`, `resource_put`, `resource_delete`, `container_create` (Class U) — all
 //!   gated behind the SAME off-by-default write enablement as the base server's
 //!   `update` tool ([`SolidServerConfig::allow_update`], draft §7.1).
 //!
-//! # Session-scoped aggregates — [SONNET-4.6] sq-8n6iv
+//! # Session-scoped aggregates — sq-8n6iv
 //!
 //! [`crate::McpServer`]'s `introspect` / `shapes` / `stats` tools mine the WHOLE served
 //! graph. Handing a whole-pod schema or a whole-pod triple count to one principal is an
@@ -47,7 +47,7 @@
 //!
 //! # The `resources` surface + notifications (Class N, draft §8 / §10)
 //!
-//! [SONNET-4.6] sq-cmjmr — the pod server declares the MCP **`resources`** capability
+//! sq-cmjmr — the pod server declares the MCP **`resources`** capability
 //! with **`subscribe: true`** and binds it to Solid Notifications Protocol semantics:
 //!
 //! - `resources/list` — the pod documents THIS session may read, one MCP resource per
@@ -99,7 +99,7 @@
 //!
 //! # Content negotiation (draft §6.4)
 //!
-//! [SONNET-4.6] sq-wbsf5 — `resource_get` takes an optional `accept` and serves the
+//! sq-wbsf5 — `resource_get` takes an optional `accept` and serves the
 //! representation it names, from the SAME triples in both cases:
 //!
 //! - `application/n-triples` — the default when `accept` is absent, so an existing caller
@@ -121,7 +121,7 @@
 //!
 //! # Non-RDF (binary) resources — SCOPED OUT, deliberately
 //!
-//! [SONNET-4.6] sq-wbsf5 — LDP has non-RDF sources (an image, a PDF); **this server has
+//! sq-wbsf5 — LDP has non-RDF sources (an image, a PDF); **this server has
 //! none, by decision, not by omission**, and both write and read paths say so:
 //! `resource_put` refuses any non-RDF `content_type` naming the scope-out, and no non-RDF
 //! resource can exist to be read (nothing else can create one). The reasons:
@@ -143,11 +143,11 @@
 //! # Honest v1 limits
 //!
 //! - RDF sources only: `content_type` must be Turtle or N-Triples (or JSON-LD when the
-//!   opt-in `jsonld` feature is enabled) — see the non-RDF scope-out above. [GPT-5.6]
+//!   opt-in `jsonld` feature is enabled) — see the non-RDF scope-out above.
 //! - The SPARQL `update` tool delegates to the session-checked
 //!   `PodStore::update_as_with_budget` / `update_as_acp_with_budget`, so it applies the
 //!   per-graph write permission check AND the same wall-clock/row budget the read tools
-//!   enforce ([FABLE-5] sq-yhlf0). The budget reaches the one evaluation an update
+//!   enforce (sq-yhlf0). The budget reaches the one evaluation an update
 //!   performs, its `DELETE`/`INSERT … WHERE`. It does NOT bound the remaining operations, and capping the
 //!   request body does not bound all of them either: `INSERT`/`DELETE DATA` carry their
 //!   triples inline (a body cap DOES bound those, and an embedder serving untrusted callers
@@ -251,7 +251,7 @@ impl Default for SolidServerConfig {
 pub struct SolidMcpServer {
     store: PodStore,
     config: SolidServerConfig,
-    /// [SONNET-4.6] sq-cmjmr — the topics this session subscribed to plus the queue of
+    /// sq-cmjmr — the topics this session subscribed to plus the queue of
     /// content-free notifications awaiting [`SolidMcpServer::take_notifications`]. Bound
     /// to this server (⇒ to this one authenticated session), so a subscription can never
     /// outlive or escape its authorization context.
@@ -341,7 +341,7 @@ pub const CONTAINER_LIST: ToolSpec = ToolSpec {
 };
 
 /// The pod `introspect` tool: the effective schema of the session's AUTHORIZED
-/// documents only (never the whole pod). [SONNET-4.6] sq-8n6iv
+/// documents only (never the whole pod). sq-8n6iv
 pub const POD_INTROSPECT: ToolSpec = ToolSpec {
     name: "introspect",
     description: "Return the effective schema of the pod documents THIS SESSION MAY \
@@ -375,7 +375,7 @@ pub const POD_INTROSPECT: ToolSpec = ToolSpec {
 };
 
 /// The pod `shapes` tool: one class's data-grounded shape over the AUTHORIZED
-/// documents only. [SONNET-4.6] sq-8n6iv
+/// documents only. sq-8n6iv
 pub const POD_SHAPES: ToolSpec = ToolSpec {
     name: "shapes",
     description: "Given a class/type IRI, return the data-grounded shape of that class \
@@ -403,7 +403,7 @@ pub const POD_SHAPES: ToolSpec = ToolSpec {
     },
 };
 
-/// The pod `stats` tool: totals over the AUTHORIZED documents only. [SONNET-4.6] sq-8n6iv
+/// The pod `stats` tool: totals over the AUTHORIZED documents only. sq-8n6iv
 pub const POD_STATS: ToolSpec = ToolSpec {
     name: "stats",
     description: "Return summary statistics — total triples, distinct subjects, typed \
@@ -549,13 +549,13 @@ fn rdf_format(content_type: &str) -> Option<&'static str> {
         "text/turtle" | "turtle" | "ttl" => Some("turtle"),
         "application/n-triples" | "ntriples" | "n-triples" | "nt" => Some("ntriples"),
         #[cfg(feature = "jsonld")]
-        "application/ld+json" | "jsonld" | "json-ld" => Some("jsonld"), // [GPT-5.6]
+        "application/ld+json" | "jsonld" | "json-ld" => Some("jsonld"), //
         _ => None,
     }
 }
 
 /// The media types `resource_put` will INGEST, for the refusal message. RDF sources only
-/// — non-RDF (binary) bodies are scoped out, see the module docs. [SONNET-4.6] sq-wbsf5
+/// — non-RDF (binary) bodies are scoped out, see the module docs. sq-wbsf5
 #[cfg(not(feature = "jsonld"))]
 const INGESTED_MEDIA_TYPES: &str = "text/turtle, application/n-triples";
 #[cfg(feature = "jsonld")]
@@ -564,12 +564,12 @@ const INGESTED_MEDIA_TYPES: &str = "text/turtle, application/n-triples, applicat
 /// The media types `resource_get` will SERVE, for the refusal message. Hand-kept in step
 /// with the arms of `negotiate`; `negotiate_refuses_an_unservable_accept_naming_what_is_served`
 /// asserts the refusal names both, so a representation added without updating this string
-/// is caught by the tests rather than shipped as a wrong advertisement. [SONNET-4.6] sq-wbsf5
+/// is caught by the tests rather than shipped as a wrong advertisement. sq-wbsf5
 const SERVED_MEDIA_TYPES: &str = "application/n-triples, text/turtle";
 
 /// The representation `resource_get` serves, chosen by [`negotiate`] from the caller's
 /// `accept`. Both variants render the SAME triples from the SAME read path — the choice
-/// is syntax only, never content. [SONNET-4.6] sq-wbsf5
+/// is syntax only, never content. sq-wbsf5
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Representation {
     /// `application/n-triples` — the default when no `accept` is supplied.
@@ -617,7 +617,7 @@ fn negotiate(accept: Option<&str>) -> Result<Representation, String> {
 /// documents compact to `prefix:local`. Purely cosmetic and purely additive: a
 /// non-matching IRI simply renders in full, so the set can never make output wrong —
 /// only more or less compact. Kept short and stable on purpose (there is no per-request
-/// prefix input to negotiate against). [SONNET-4.6] sq-wbsf5
+/// prefix input to negotiate against). sq-wbsf5
 const TURTLE_PREFIXES: &[(&str, &str)] = &[
     ("rdf", "http://www.w3.org/1999/02/22-rdf-syntax-ns#"),
     ("rdfs", "http://www.w3.org/2000/01/rdf-schema#"),
@@ -691,7 +691,7 @@ fn valid_target(url: &str) -> Result<NamedNode, String> {
 }
 
 /// Extract the required string `uri` of a `resources/*` request, or the JSON-RPC
-/// invalid-params error naming the method. [SONNET-4.6] sq-cmjmr
+/// invalid-params error naming the method. sq-cmjmr
 fn resource_uri_param<'a>(params: &'a Value, method: &str) -> Result<&'a str, RpcError> {
     params.get("uri").and_then(Value::as_str).ok_or_else(|| {
         RpcError::new(
@@ -823,7 +823,7 @@ impl SolidMcpServer {
         match req.method.as_str() {
             "initialize" => Ok(json!({
                 "protocolVersion": crate::server::negotiate_protocol_version(&req.params),
-                // [SONNET-4.6] sq-cmjmr: `resources` with `subscribe: true` — pod
+                // sq-cmjmr: `resources` with `subscribe: true` — pod
                 // documents are MCP resources and a client may subscribe to one.
                 // `listChanged` stays FALSE: this server never pushes an unsolicited
                 // list-changed notification, and declaring a capability it does not
@@ -877,7 +877,7 @@ impl SolidMcpServer {
             ));
         }
 
-        // [SONNET-4.6] sq-cmjmr: snapshot every subscribed topic BEFORE a mutating tool
+        // sq-cmjmr: snapshot every subscribed topic BEFORE a mutating tool
         // runs, so the change it causes is detected uniformly — including the SPARQL
         // `update` tool, which does not report which documents it touched. Costs nothing
         // when nothing is subscribed. The read-authorization snapshot is taken at the same
@@ -966,7 +966,7 @@ impl SolidMcpServer {
 
     /// One pod document rendered in the negotiated `representation`, behind the read gate.
     /// Both syntaxes come from the SAME `document_triples` call, so negotiation can only
-    /// change the spelling, never the content. [SONNET-4.6] sq-wbsf5
+    /// change the spelling, never the content. sq-wbsf5
     fn document_as(&self, url: &str, representation: Representation) -> Result<String, String> {
         let triples = self.document_triples(url)?;
         match representation {
@@ -1177,13 +1177,13 @@ impl SolidMcpServer {
     /// alongside the response. Each message carries only the topic IRI and the
     /// ActivityStreams 2.0 activity type — the payload is content-free by construction
     /// (draft §10). Only topics that passed the read check at delivery time appear.
-    /// [SONNET-4.6] sq-cmjmr
+    /// sq-cmjmr
     pub fn take_notifications(&mut self) -> Vec<String> {
         self.subs.take()
     }
 
     /// The topic IRIs this session currently subscribes to, sorted (for embedders and
-    /// tests). [SONNET-4.6] sq-cmjmr
+    /// tests). sq-cmjmr
     pub fn subscribed_topics(&self) -> Vec<String> {
         self.subs.topics()
     }
@@ -1207,7 +1207,7 @@ impl SolidMcpServer {
     /// The subscribed topics this session may read RIGHT NOW, checked against each topic
     /// ITSELF (never an ancestor). Snapshotted alongside [`Self::digest_subscribed`] so a
     /// `Delete` delivery can be held to the topic's own pre-deletion policy — the policy
-    /// that vanishes with the resource. [SONNET-4.6] sq-cmjmr
+    /// that vanishes with the resource. sq-cmjmr
     fn readable_subscribed(&self) -> BTreeSet<String> {
         let mut readable = BTreeSet::new();
         if self.subs.is_empty() {
@@ -1353,7 +1353,7 @@ impl SolidMcpServer {
     /// touched graph needs this session's write permission, fail-closed) under the SAME
     /// per-call [budget](Self::budget) the read tools enforce, so a tool-issued update's
     /// SPARQL *evaluation* is bounded exactly as a tool-issued query is (draft §9.4).
-    /// [FABLE-5] sq-yhlf0.
+    /// sq-yhlf0.
     ///
     /// The budget bounds the one place an update evaluates SPARQL, its
     /// `DELETE`/`INSERT … WHERE`. It
@@ -1762,7 +1762,7 @@ mod unit {
 
     #[test]
     fn negotiate_defaults_to_ntriples_and_maps_turtle() {
-        // [SONNET-4.6] sq-wbsf5 — absent `accept` must keep the v1 default, or every
+        // sq-wbsf5 — absent `accept` must keep the v1 default, or every
         // existing caller silently changes syntax.
         assert_eq!(negotiate(None), Ok(Representation::NTriples));
         assert_eq!(
@@ -1851,7 +1851,7 @@ mod unit {
     #[cfg(feature = "jsonld")]
     #[test]
     fn resource_put_ingests_jsonld_into_the_named_resource_graph() {
-        // [GPT-5.6] The root ACL grants Alice write access inherited by the new
+        // The root ACL grants Alice write access inherited by the new
         // resource, so this exercises resource_put's parse-first path rather than
         // calling Graph::load_str in isolation.
         let fixture = r#"
@@ -1931,7 +1931,7 @@ mod unit {
     /// A two-principal pod: alice reads `pub/`, bob reads `priv/` — and neither can
     /// read the other's document. Both documents use a DIFFERENT class and predicate,
     /// so any aggregate that spilled across the boundary is visible as a name, not just
-    /// as a count. [SONNET-4.6] sq-8n6iv
+    /// as a count. sq-8n6iv
     fn split_pod() -> PodStore {
         let nq = r#"
 <https://pod.ex/pub/d#it> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://ex.dev/ns#Public> <https://pod.ex/pub/d> .
@@ -1960,7 +1960,7 @@ mod unit {
 
     #[test]
     fn authorized_projection_holds_exactly_the_readable_documents() {
-        // [SONNET-4.6] sq-8n6iv — THE aggregate boundary: the projection every schema
+        // sq-8n6iv — THE aggregate boundary: the projection every schema
         // and statistics tool is mined from must contain alice's document and nothing
         // of bob's. Widening it to `store.graph` flips this red.
         let alice = split_server(Some("https://alice.ex/card#me"));

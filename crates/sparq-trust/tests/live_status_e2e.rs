@@ -15,7 +15,7 @@
 //! This suite is `#![cfg(feature = "status-list")]`, so it ONLY compiles/runs with the
 //! feature ON (wired as the trailing `sparq-trust (status-list)` leg in feature-matrix.yml).
 //!
-//! [OPUS-4.8] sq-pfae.7 (issue #940 / gh-940). 🤖 SPARQ agent — trust-graph live-status gate.
+//! sq-pfae.7 (issue #940 / gh-940). 🤖 SPARQ agent — trust-graph live-status gate.
 #![cfg(feature = "status-list")]
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};

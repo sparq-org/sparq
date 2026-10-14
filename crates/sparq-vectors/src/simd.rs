@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-lfo84) **Explicit-SIMD distance kernels** for the ANN hot loop.
+//! (sq-lfo84) **Explicit-SIMD distance kernels** for the ANN hot loop.
 //!
 //! The HNSW graph build (`instant-distance`) and search evaluate the squared-Euclidean
 //! distance between unit vectors *millions* of times; that inner loop is the dominant cost of
@@ -26,7 +26,7 @@
 //! suite green with the kernel never executed. `active_kernel` states the dispatch decision
 //! once so a test can assert WHICH kernel ran, and `simd::tests` fails closed on an x86_64 host
 //! that would leave `l2_sq_avx2` unexecuted (`SPARQ_VECTORS_REQUIRE_SIMD` overrides the arming).
-//! [SONNET-4.6] #5065. The NEON half is #5028, closed out-of-tree instead: the
+//! #5065. The NEON half is #5028, closed out-of-tree instead: the
 //! `.github/workflows/vectors-aarch64.yml` lane supplies a real aarch64 host and fails closed on
 //! a missing `asimd`. There is no in-tree NEON equivalent of the x86_64 guard below.
 
@@ -318,7 +318,7 @@ mod tests {
         }
     }
 
-    /// [SONNET-4.6] #5065 — NON-VACUITY GUARD for the x86_64 AVX2+FMA kernel.
+    /// #5065 — NON-VACUITY GUARD for the x86_64 AVX2+FMA kernel.
     ///
     /// The guards above are arch-generic: they check the dispatcher against an f64 reference,
     /// and `l2_sq_scalar` satisfies them exactly as well as `l2_sq_avx2` does. So on a host

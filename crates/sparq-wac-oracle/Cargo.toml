@@ -1,4 +1,4 @@
-# [FABLE-5] sq-t999y — server-independent WAC/ACP decision test-vector oracle.
+# sq-t999y — server-independent WAC/ACP decision test-vector oracle.
 #
 # DEV-ONLY corpus crate: `publish = false`. Nothing in the shipping graph depends on
 # it (opt-in crate architecture — sparq-core/sparq-engine untouched); it is a leaf
@@ -24,7 +24,7 @@ readme = "README.md"
 # dependency of NOTHING in the workspace, so the deps stay off every default build path.
 sparq-core = { path = "../sparq-core", default-features = false }
 sparq-solid = { path = "../sparq-solid", default-features = false }
-# [SONNET-4.6] sq-x1ayt — the ODRL policy source for the time-windowed conditional-grant
+# sq-x1ayt — the ODRL policy source for the time-windowed conditional-grant
 # rows. OPTIONAL + behind the `odrl-bridge` feature (OFF by default): the live-clock
 # `auth:notBefore`/`auth:notAfter` window is produced ONLY by sparq-solid's ODRL bridge
 # (ACP has no native time vocabulary), so the default oracle build carries zero ODRL
@@ -32,12 +32,12 @@ sparq-solid = { path = "../sparq-solid", default-features = false }
 sparq-policy = { path = "../sparq-policy", default-features = false, optional = true }
 
 [features]
-# [SONNET-4.6] sq-x1ayt: the `window_corpus` module — decision rows whose verdict turns
+# sq-x1ayt: the `window_corpus` module — decision rows whose verdict turns
 # on `Session::now` against a persisted `auth:notBefore`/`auth:notAfter` window. Enables
 # sparq-solid's own `odrl-bridge` feature, which is what mints the windowed grant.
 odrl-bridge = ["dep:sparq-policy", "sparq-solid/odrl-bridge"]
 
-# [FABLE-5] sq-39kps — register the `kani` cfg so the `#[cfg(kani)]` domain-coverage
+# sq-39kps — register the `kani` cfg so the `#[cfg(kani)]` domain-coverage
 # self-check in `escalation_corpus.rs` does not trip `-D warnings` (unexpected_cfgs) on
 # the NORMAL build. `cargo kani` sets this cfg itself; under a normal build the harness is
 # stripped. Mirrors crates/sparq-core/Cargo.toml.

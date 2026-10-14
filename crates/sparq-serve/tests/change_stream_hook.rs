@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-bdaw5) `ChangeLog::into_commit_hook` × `Writer::spawn_with_commit_hook`
+//! (sq-bdaw5) `ChangeLog::into_commit_hook` × `Writer::spawn_with_commit_hook`
 //! against the PRODUCTION types (`Graph` snapshots, `GraphApplier`, SPARQL Updates):
 //! commits made through the sequenced writer are recorded into the durable CDC log ON
 //! THE WRITER THREAD — no caller-side lock, one record per published generation — and a

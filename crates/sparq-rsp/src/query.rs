@@ -135,7 +135,7 @@ pub struct ContinuousQuery {
     /// Previous window's full result, in engine row order —
     /// the ISTREAM/DSTREAM diff base. Unused (empty) under RSTREAM.
     prev_rows: Vec<Vec<Option<Term>>>,
-    /// [SONNET-4.6] sq-xqu: the per-window-evaluation resource budget
+    /// sq-xqu: the per-window-evaluation resource budget
     /// (unlimited by default).
     budget: BudgetSpec,
 }
@@ -170,7 +170,7 @@ impl ContinuousQuery {
         self
     }
 
-    /// [SONNET-4.6] sq-xqu: sets the per-window-evaluation resource budget
+    /// sq-xqu: sets the per-window-evaluation resource budget
     /// (builder style). The budget is applied to EVERY window evaluation, and
     /// every limit in it is COOPERATIVE: `max_rows`, `max_bytes` and the
     /// `cancel` flag are observed at the executor's coarse polling sites, so
@@ -191,7 +191,7 @@ impl ContinuousQuery {
         self
     }
 
-    /// [SONNET-4.6] sq-xqu: installs a REFRESHED deadline for EACH window
+    /// sq-xqu: installs a REFRESHED deadline for EACH window
     /// evaluation (builder style): at every window evaluation start the
     /// effective budget's deadline becomes the EARLIER of the budget's own
     /// absolute deadline (if any) and `now + timeout`, so one pathological
@@ -238,7 +238,7 @@ impl ContinuousQuery {
         self.eval.spec()
     }
 
-    /// [OPUS-4.8] Observability hook: the number of distinct non-inline terms
+    /// Observability hook: the number of distinct non-inline terms
     /// currently held by the persistent dictionary (`None` outside
     /// [`EvalMode::PersistentDict`]). This is the quantity dictionary
     /// compaction bounds — for a long-running query over an unbounded
@@ -283,7 +283,7 @@ impl ContinuousQuery {
         let prev_rows = &mut self.prev_rows;
         let budget = &self.budget;
         self.eval.eval_closed(flush, &mut |start, end, graph| {
-            // [SONNET-4.6] sq-xqu: one effective budget per window evaluation
+            // sq-xqu: one effective budget per window evaluation
             // (the per-window timeout's deadline is measured from NOW).
             let result =
                 sparq_engine::query_prepared_with_budget(graph, prepared, &budget.window_budget())?;
@@ -332,7 +332,7 @@ pub struct ContinuousConstruct {
     r2s: R2S,
     /// Previous window's constructed graph (the ISTREAM/DSTREAM diff base).
     prev: Vec<Triple>,
-    /// [SONNET-4.6] sq-xqu: the per-window-evaluation resource budget
+    /// sq-xqu: the per-window-evaluation resource budget
     /// (unlimited by default).
     budget: BudgetSpec,
 }
@@ -362,7 +362,7 @@ impl ContinuousConstruct {
         self
     }
 
-    /// [SONNET-4.6] sq-xqu: sets the per-window-evaluation resource budget
+    /// sq-xqu: sets the per-window-evaluation resource budget
     /// (builder style). Semantics as
     /// [`ContinuousQuery::with_budget`](crate::ContinuousQuery::with_budget):
     /// applied to every window evaluation; a tripped budget is the evaluation
@@ -372,7 +372,7 @@ impl ContinuousConstruct {
         self
     }
 
-    /// [SONNET-4.6] sq-xqu: installs a refreshed deadline for EACH window
+    /// sq-xqu: installs a refreshed deadline for EACH window
     /// evaluation (tightened to at most `now + timeout` per window).
     /// Semantics as
     /// [`ContinuousQuery::with_window_timeout`](crate::ContinuousQuery::with_window_timeout);
@@ -454,7 +454,7 @@ pub struct ContinuousAsk {
     /// Parsed once at registration; executed per window via the prepared seam.
     prepared: PreparedQuery,
     eval: WindowEval,
-    /// [SONNET-4.6] sq-xqu: the per-window-evaluation resource budget
+    /// sq-xqu: the per-window-evaluation resource budget
     /// (unlimited by default).
     budget: BudgetSpec,
 }
@@ -476,7 +476,7 @@ impl ContinuousAsk {
         })
     }
 
-    /// [SONNET-4.6] sq-xqu: sets the per-window-evaluation resource budget
+    /// sq-xqu: sets the per-window-evaluation resource budget
     /// (builder style). Semantics as
     /// [`ContinuousQuery::with_budget`](crate::ContinuousQuery::with_budget):
     /// applied to every window evaluation; a tripped budget is the evaluation
@@ -486,7 +486,7 @@ impl ContinuousAsk {
         self
     }
 
-    /// [SONNET-4.6] sq-xqu: installs a refreshed deadline for EACH window
+    /// sq-xqu: installs a refreshed deadline for EACH window
     /// evaluation (tightened to at most `now + timeout` per window).
     /// Semantics as
     /// [`ContinuousQuery::with_window_timeout`](crate::ContinuousQuery::with_window_timeout);
@@ -550,7 +550,7 @@ impl ContinuousAsk {
 /// Applies ISTREAM/DSTREAM to a SELECT result: exact term-level multiset diff
 /// of the current window's full result against the previous window's, then
 /// advances the diff base.
-// [SONNET-4.6] sq-2n1q3.3: made pub(crate) so ContinuousMultiQuery can reuse it.
+// sq-2n1q3.3: made pub(crate) so ContinuousMultiQuery can reuse it.
 pub(crate) fn diff_rows(
     r2s: R2S,
     cur_rows: Vec<Vec<Option<Term>>>,
@@ -607,7 +607,7 @@ mod tests {
         vec![Some(Literal::new_simple_literal(value).into()), None]
     }
 
-    /// [SONNET-4.6] sq-ifv: cancellation is keyed by complete terms and retains
+    /// sq-ifv: cancellation is keyed by complete terms and retains
     /// the multiplicity and input order of rows that do not cancel.
     #[test]
     fn select_diff_uses_exact_term_rows() {

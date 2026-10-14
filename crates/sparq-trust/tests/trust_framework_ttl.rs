@@ -9,7 +9,7 @@
 //!
 //! Behind the default-OFF `framework-vocab` feature, exactly like the module it guards.
 //!
-//! [FABLE-5] sq-6syab.2 (issue #1592). 🤖 SPARQ agent — trust-expression
+//! sq-6syab.2 (issue #1592). 🤖 SPARQ agent — trust-expression
 //! certification-scope layer.
 #![cfg(feature = "framework-vocab")]
 

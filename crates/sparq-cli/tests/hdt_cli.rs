@@ -13,7 +13,7 @@ fn fixture() -> PathBuf {
 
 const COUNT_ALL: &str = "SELECT ?s ?p ?o WHERE { ?s ?p ?o }";
 
-/// [OPUS-4.8] (sq-w6ri) The default `query` SELECT path (no `--count`) renders a readable
+/// (sq-w6ri) The default `query` SELECT path (no `--count`) renders a readable
 /// ASCII table footed by `(<N> row(s))` — the canonical wording documented in
 /// `cli_contract.rs` (sq-l4ki). The snikmeta fixture has 328 triples, so a `SELECT ?s ?p ?o`
 /// yields 328 rows. The constant asserts the *full parenthesized* footer `(328 row(s))` —

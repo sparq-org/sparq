@@ -14,7 +14,7 @@
 //!   communities within a connected component (a connected component can contain several
 //!   label-propagation communities). It is a heuristic, made deterministic here by a fixed
 //!   visiting order and an ascending-id tie-break, so repeated runs on the same graph give
-//!   the same partition. [OPUS-4.8] sq-lqty: the "fixed visiting order" is the node index
+//!   the same partition. sq-lqty: the "fixed visiting order" is the node index
 //!   order, which [`NodeGraph`] now assigns CANONICALLY (ascending term), so the partition
 //!   is also identical across hosts — it no longer depends on the dictionary-id order that
 //!   the parallel loader assigns thread-count-dependently.

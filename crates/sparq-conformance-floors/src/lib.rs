@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-z1xv8 — the **shared ratchet-floor constants** for every
+//! sq-z1xv8 — the **shared ratchet-floor constants** for every
 //! conformance / sparq-extension ratchet whose enforcing test runner lives in a
 //! DIFFERENT crate from the central scoreboard that reports it.
 //!

@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-lsp7k.15: exact and mutation-witness oracles for extended centrality.
+//! sq-lsp7k.15: exact and mutation-witness oracles for extended centrality.
 
 #![cfg(feature = "centrality-extended")]
 

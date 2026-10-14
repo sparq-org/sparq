@@ -287,7 +287,7 @@ fn verbalize_id(graph: &Graph, id: Id, cfg: &EntityTextConfig) -> Option<String>
     }
 }
 
-/// [GPT-5.6] Returns `s` unchanged when it fits; otherwise cuts at the last word or sentence
+/// Returns `s` unchanged when it fits; otherwise cuts at the last word or sentence
 /// boundary within `max_chars`. The returned string never exceeds the character budget and never
 /// ends partway through a whitespace-delimited token.
 pub(crate) fn truncate_at_word_boundary(s: &str, max_chars: usize) -> String {
@@ -543,7 +543,7 @@ mod tests {
 
     #[test]
     fn verbalize_truncation_uses_a_word_boundary_within_budget() {
-        // [GPT-5.6] A raw eight-character cut would produce "alpha be".
+        // A raw eight-character cut would produce "alpha be".
         let truncated = truncate_at_word_boundary("alpha beta gamma", 8);
         assert_eq!(truncated, "alpha");
         assert!(truncated.chars().count() <= 8);

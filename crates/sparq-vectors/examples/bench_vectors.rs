@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-v02y, design §3.3) Vector / ANN benchmark runner — the G1 TSV-emitting
+//! (sq-v02y, design §3.3) Vector / ANN benchmark runner — the G1 TSV-emitting
 //! runner for `bench/vector/`, the ANN analogue of `sparq-cli bench` / `bench_shacl` /
 //! `bench_text`. It is the SAME measurement the crate's gate tests (`tests/recall.rs`,
 //! `tests/diskann.rs`, `tests/quant.rs`) already assert — recall@10 vs the `nearest_exact`

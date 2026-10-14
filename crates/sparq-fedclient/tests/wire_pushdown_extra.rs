@@ -19,7 +19,7 @@
 //!
 //! Gated on `fedclient`; the default build compiles this file to nothing.
 //!
-//! [OPUS-4.8] sq-bif.2 — flagged for Fable re-review when available.
+//! sq-bif.2 — flagged for Fable re-review when available.
 
 #![cfg(feature = "fedclient")]
 

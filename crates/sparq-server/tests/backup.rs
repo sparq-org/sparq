@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-o5bi) Integration tests for ONLINE consistent-snapshot backup + restore —
+//! (sq-o5bi) Integration tests for ONLINE consistent-snapshot backup + restore —
 //! the `backup` feature's `POST /admin/backup` + `POST /admin/restore` admin routes and the
 //! restore-on-start path (`ServerConfig::restore`).
 //!
@@ -317,7 +317,7 @@ async fn backup_delta(
     (status, resp.bytes().await.unwrap().to_vec())
 }
 
-/// [OPUS-4.8] (sq-bu1a) PITR ROUND TRIP via the real HTTP delta route: take a BASE backup at
+/// (sq-bu1a) PITR ROUND TRIP via the real HTTP delta route: take a BASE backup at
 /// generation 0, move the store forward, export a DELTA(0→current) over HTTP, then restore the
 /// base + replay the delta — the recovered store equals the moved-on source.
 #[tokio::test]
@@ -399,7 +399,7 @@ async fn pitr_base_plus_http_delta_recovers_the_moved_on_store() {
     );
 }
 
-/// [OPUS-4.8] (sq-bu1a) FAIL-CLOSED: `restore_from_with_deltas` rejects a corrupt delta and the
+/// (sq-bu1a) FAIL-CLOSED: `restore_from_with_deltas` rejects a corrupt delta and the
 /// base install never happens (the whole op is atomic — import + replay before any swap).
 #[tokio::test]
 async fn pitr_rejects_corrupt_delta_in_chain() {
@@ -427,7 +427,7 @@ async fn pitr_rejects_corrupt_delta_in_chain() {
     assert!(res.is_err(), "a corrupt delta must fail the whole restore closed");
 }
 
-/// [OPUS-4.8] (sq-bu1a) The delta route is WRITE-gated, POST-only, and 400s a missing/invalid
+/// (sq-bu1a) The delta route is WRITE-gated, POST-only, and 400s a missing/invalid
 /// `from`; an aged-out `from` is 410 Gone (mirroring time-travel).
 #[tokio::test]
 async fn delta_route_is_gated_and_validates_from() {
@@ -588,7 +588,7 @@ async fn make_artifact(cl: &reqwest::Client) -> Vec<u8> {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-ft7u) RESTORE-INTO-LIVE-DURABLE-STORE (--persist write-through).
+// (sq-ft7u) RESTORE-INTO-LIVE-DURABLE-STORE (--persist write-through).
 //
 // The load-bearing proof: a restore opted into write-through (?persist=true) on a --persist
 // server is written THROUGH to the durable directory, so it SURVIVES A RESTART (reopen the same
@@ -789,7 +789,7 @@ async fn restore_persist_on_in_memory_server_is_409() {
 }
 
 // ---------------------------------------------------------------------------
-// [FABLE-5] (sq-fy8ci) SINGLE-FLIGHT restore guard.
+// (sq-fy8ci) SINGLE-FLIGHT restore guard.
 //
 // Two concurrent restores used to be silently serialized by the single writer thread
 // (individually crash-safe, last-writer-wins, no signal to the operator). The guard makes the

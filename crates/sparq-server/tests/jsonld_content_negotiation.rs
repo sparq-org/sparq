@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-oy1f.1 — Server JSON-LD content negotiation integration tests.
+//! sq-oy1f.1 — Server JSON-LD content negotiation integration tests.
 //!
 //! Spins the real axum server in-process and drives it over HTTP with `reqwest`, exercising
 //! BOTH directions of the `application/ld+json` wiring and the negotiation/contract corners:
@@ -11,7 +11,7 @@
 //!   * the q-value-aware negotiation contract: a JSON-LD `Accept` beats a lower-q sibling, a
 //!     `q=0` rejects it, an `Accept` that is satisfiable (a supported type or a `*/*` wildcard)
 //!     gets the negotiated/default representation, and an unsupported write `Content-Type` is a
-//!     `415`. [OPUS-4.8] sq-406acc: a PRESENT Accept naming ONLY an unproducible type and no
+//!     `415`. sq-406acc: a PRESENT Accept naming ONLY an unproducible type and no
 //!     wildcard is now `406 Not Acceptable` (Oxigraph parity), not a silent fallback.
 //!
 //! The positive tests compile with the `jsonld` feature — which, as of sq-oy1f.4, is in the
@@ -22,7 +22,7 @@
 //! application/ld+json` query — naming a type the build cannot produce, with no wildcard — is a
 //! `406 Not Acceptable` (Oxigraph parity), while `application/ld+json, */*` still falls back.
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the
@@ -281,7 +281,7 @@ async fn gsp_put_jsonld_is_415_without_feature() {
     );
 }
 
-/// [OPUS-4.8] sq-406acc: without the `jsonld` feature, an `Accept: application/ld+json` CONSTRUCT
+/// sq-406acc: without the `jsonld` feature, an `Accept: application/ld+json` CONSTRUCT
 /// is now `406 Not Acceptable` — the build genuinely cannot produce JSON-LD, so a request that
 /// accepts ONLY `application/ld+json` (no wildcard) is unsatisfiable, exactly as Oxigraph would
 /// 406 it (w3c/sparql-protocol#40). Previously sparq silently fell back to N-Triples; the
@@ -305,7 +305,7 @@ async fn construct_accept_jsonld_is_406_without_feature() {
     );
 }
 
-/// [OPUS-4.8] sq-406acc: the converse — without the feature, `Accept: application/ld+json, */*`
+/// sq-406acc: the converse — without the feature, `Accept: application/ld+json, */*`
 /// is STILL satisfiable (the wildcard is matchable), so the CONSTRUCT falls back to the
 /// N-Triples default with 200, never a 406. Confirms the strictness only bites a wholly
 /// unsatisfiable Accept, not one that also names a wildcard.

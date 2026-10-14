@@ -1,5 +1,5 @@
 //! SERVICE bind-join (VALUES pushdown) — differential + request-reduction tests.
-//! [OPUS-4.8] (bead sq-sjkj — research candidate C1)
+//! (bead sq-sjkj — research candidate C1)
 //!
 //! The whole correctness claim of the bound-join is: pushing the left side's bound
 //! join variables into the remote query as a `VALUES` block yields results IDENTICAL

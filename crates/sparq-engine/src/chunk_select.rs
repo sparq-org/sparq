@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-y5ew5) Hybrid tri-mask FILTER kernel for **general decoded columns**.
+//! (sq-y5ew5) Hybrid tri-mask FILTER kernel for **general decoded columns**.
 //!
 //! Phase 3 (`columnar_filter`) required every id in the filter column to be an
 //! inline integer — a conservative gate that ensured the f64 verdict was always
@@ -164,7 +164,7 @@ mod tests {
     use crate::chunk::VecCmp;
 
     /// `tri_mask_select` over a column with no NaN and no tie: every lane is either a
-    /// confident pass or a confident fail. Delegated list must be empty. [SONNET-4.6]
+    /// confident pass or a confident fail. Delegated list must be empty.
     #[test]
     fn no_nan_no_tie_all_confident() {
         let decoded = [1.0f64, 3.0, 5.0, 7.0, 9.0];
@@ -175,7 +175,7 @@ mod tests {
     }
 
     /// NaN sentinel lanes are classified Unknown and go into `delegated`, never
-    /// into `confident_passes`. [SONNET-4.6]
+    /// into `confident_passes`.
     #[test]
     fn nan_lanes_go_to_delegated() {
         let decoded = [1.0f64, f64::NAN, 5.0, f64::NAN, 9.0];
@@ -188,7 +188,7 @@ mod tests {
 
     /// Tie lanes (lane value == constant as f64) go into `delegated`, even when the
     /// comparison `cmp.test(x)` would return true for them (e.g. `Le` or `Eq`). The
-    /// exact comparison must be delegated to the scalar path. [SONNET-4.6]
+    /// exact comparison must be delegated to the scalar path.
     #[test]
     fn tie_lanes_go_to_delegated() {
         // Threshold is 5.0; lanes with value 5.0 are ties.
@@ -200,7 +200,7 @@ mod tests {
     }
 
     /// For `Eq` operator: non-tie lanes whose value != c are confident fails (not in
-    /// confident_passes); the tie lane is delegated. [SONNET-4.6]
+    /// confident_passes); the tie lane is delegated.
     #[test]
     fn eq_operator_tie_is_delegated_nonties_are_confident_fail() {
         let decoded = [1.0f64, 5.0, 9.0];
@@ -211,7 +211,7 @@ mod tests {
     }
 
     /// `+0.0 == -0.0` under IEEE-754 means a lane value of +0.0 is a tie when the
-    /// constant is -0.0 (and vice versa). Both must go to delegated. [SONNET-4.6]
+    /// constant is -0.0 (and vice versa). Both must go to delegated.
     #[test]
     fn pos_neg_zero_are_ties() {
         let decoded = [1.0f64, 0.0f64]; // +0.0
@@ -222,19 +222,19 @@ mod tests {
         assert_eq!(r.delegated, vec![1]);
     }
 
-    /// `merge_ascending` of two ascending lists produces one ascending list. [SONNET-4.6]
+    /// `merge_ascending` of two ascending lists produces one ascending list.
     #[test]
     fn merge_ascending_interleaves_correctly() {
         assert_eq!(merge_ascending(&[0, 3, 6], &[1, 2, 5]), vec![0, 1, 2, 3, 5, 6]);
         assert_eq!(merge_ascending(&[], &[1, 2, 3]), vec![1, 2, 3]);
         assert_eq!(merge_ascending(&[1, 2, 3], &[]), vec![1, 2, 3]);
-        // Both-empty case: annotate types so the compiler can resolve the generic. [SONNET-4.6]
+        // Both-empty case: annotate types so the compiler can resolve the generic.
         let e: [usize; 0] = [];
         assert_eq!(merge_ascending(&e, &e), Vec::<usize>::new());
     }
 
     /// A column with mixed NaN, tie, and confident lanes round-trips through the full
-    /// tri-mask classification correctly. [SONNET-4.6]
+    /// tri-mask classification correctly.
     #[test]
     fn mixed_column_full_classification() {
         // Threshold = 5.0
@@ -260,7 +260,7 @@ mod tests {
     /// After scalar delegation with the exact-lexical recheck, the row survives.
     ///
     /// This test proves the classification kernel is correct; the end-to-end survival
-    /// is asserted by `T2_tie_exactness_witness` in the integration test file. [SONNET-4.6]
+    /// is asserted by `T2_tie_exactness_witness` in the integration test file.
     #[test]
     fn tie_exactness_2_to_53_classified_as_tie() {
         // 2^53 = 9007199254740992 (the lane value)

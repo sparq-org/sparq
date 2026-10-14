@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-lsp7k.10: MCP integration tests for the opt-in `templates`
+//! sq-lsp7k.10: MCP integration tests for the opt-in `templates`
 //! (`template_list` / `template_invoke`) and `text` (`text_search`) tool surfaces —
 //! the bead's acceptance test: a real MCP round-trip invoking a named parameterized
 //! template AND a full-text search, through the actual dispatch core

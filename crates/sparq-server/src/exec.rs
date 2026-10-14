@@ -32,7 +32,7 @@ pub struct Prepared {
     /// Retained for the CONSTRUCT / DESCRIBE / EXPLAIN string entry points (off the hot
     /// floor path) and for the dataset-override rewrite assertions in the unit tests.
     pub runnable: String,
-    /// [OPUS-4.8] (sq-7d3dj.34.1) The query PARSED ONCE here, ready to hand to the engine's
+    /// (sq-7d3dj.34.1) The query PARSED ONCE here, ready to hand to the engine's
     /// `*_prepared` entry points without a second parse. `prepare` already runs the full
     /// `spargebra` parse to classify the form and (when a protocol dataset override is present)
     /// rewrite the dataset clause; carrying the resulting algebra lets the SELECT / ASK floor
@@ -47,11 +47,11 @@ pub enum PrepareError {
     /// The query string did not parse — HTTP 400.
     Malformed(String),
     /// A SPARQL-Protocol `default-graph-uri` / `named-graph-uri` value was not a valid
-    /// absolute IRI — HTTP 400 (the protocol parameter is caller input). [OPUS-4.8] sq-z33x.
+    /// absolute IRI — HTTP 400 (the protocol parameter is caller input). sq-z33x.
     BadGraphUri(String),
 }
 
-/// [OPUS-4.8] sq-z33x: the SPARQL 1.1 Protocol §2.1.4 dataset-override carried OUT-OF-BAND on
+/// sq-z33x: the SPARQL 1.1 Protocol §2.1.4 dataset-override carried OUT-OF-BAND on
 /// the request (the repeated `default-graph-uri` / `named-graph-uri` parameters), as opposed
 /// to an in-query `FROM` / `FROM NAMED` clause. Per the protocol, when this override is present
 /// it DEFINES the RDF Dataset the query runs against — and if the query string ALSO carries a
@@ -77,7 +77,7 @@ impl DatasetOverride {
     /// `named` is `Some` iff at least one `named-graph-uri` was given: a `default-graph-uri`-only
     /// override yields `FROM …` with NO named graphs (so `GRAPH ?g` enumerates nothing), and a
     /// `named-graph-uri`-only override yields `FROM NAMED …` with an EMPTY default graph — exactly
-    /// the engine's dataset-clause semantics (`sparq_engine` `build_active`). [OPUS-4.8] sq-z33x.
+    /// the engine's dataset-clause semantics (`sparq_engine` `build_active`). sq-z33x.
     fn to_query_dataset(&self) -> Result<QueryDataset, PrepareError> {
         let default = self
             .default
@@ -125,7 +125,7 @@ pub fn prepare(sparql: &str) -> Result<Prepared, PrepareError> {
 /// `FROM` / `FROM NAMED`), and `runnable` is re-serialised from the rewritten algebra so the
 /// engine — which re-parses `runnable` — sees the synthesized clause. When `over` is empty the
 /// query is returned verbatim (the no-op common path: no rewrite, no re-serialisation).
-/// [OPUS-4.8] sq-z33x.
+/// sq-z33x.
 pub fn prepare_with_dataset(
     sparql: &str,
     over: &DatasetOverride,
@@ -147,7 +147,7 @@ pub fn prepare_with_dataset(
         let announcements = version.iter().map(|label| format!("VERSION \"{label}\"\n")).collect::<String>();
         format!("{announcements}{parsed}")
     };
-    // [OPUS-4.8] (sq-7d3dj.34.1) Carry the algebra we JUST parsed (the original query, or — under
+    // (sq-7d3dj.34.1) Carry the algebra we JUST parsed (the original query, or — under
     // a dataset override — the rewritten one, which `runnable` was serialised FROM, so the two
     // denote the same query) so the SELECT / ASK floor path executes it prepared, without the
     // engine re-parsing `runnable`.
@@ -161,7 +161,7 @@ pub fn prepare_with_dataset(
 }
 
 /// Overwrites the dataset specification of a parsed query (every form carries the same
-/// `Option<QueryDataset>` field). [OPUS-4.8] sq-z33x.
+/// `Option<QueryDataset>` field). sq-z33x.
 fn set_query_dataset(q: &mut Query, dataset: QueryDataset) {
     match q {
         Query::Select { dataset: d, .. }
@@ -171,7 +171,7 @@ fn set_query_dataset(q: &mut Query, dataset: QueryDataset) {
     }
 }
 
-/// [OPUS-4.8] sq-z33x: the SPARQL 1.1 Protocol §2.2 UPDATE dataset override carried OUT-OF-BAND
+/// sq-z33x: the SPARQL 1.1 Protocol §2.2 UPDATE dataset override carried OUT-OF-BAND
 /// (the repeated `using-graph-uri` / `using-named-graph-uri` parameters). Per the protocol these
 /// re-scope the WHERE clause of every operation as if a `USING <g>` / `USING NAMED <g>` clause had
 /// been written — BUT it is an error to supply them alongside an update that already carries an
@@ -210,7 +210,7 @@ impl UsingOverride {
     }
 }
 
-/// A failure applying the UPDATE dataset override — both map to an HTTP 400. [OPUS-4.8] sq-z33x.
+/// A failure applying the UPDATE dataset override — both map to an HTTP 400. sq-z33x.
 #[derive(Debug)]
 pub enum UpdateDatasetError {
     /// The update did not parse.
@@ -232,7 +232,7 @@ pub enum UpdateDatasetError {
 ///   operation (data-only operations — `INSERT DATA`, `LOAD`, `CLEAR`, … — have no WHERE clause to
 ///   re-scope and are left untouched), and the rewritten update is re-serialised for the engine.
 ///
-/// [OPUS-4.8] sq-z33x.
+/// sq-z33x.
 pub fn apply_update_dataset(
     update: &str,
     over: &UsingOverride,
@@ -324,7 +324,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // [OPUS-4.8] sq-z33x — SPARQL 1.1 Protocol §2.1.4 dataset override
+    // sq-z33x — SPARQL 1.1 Protocol §2.1.4 dataset override
     // ---------------------------------------------------------------------------
 
     #[test]
@@ -456,7 +456,7 @@ mod tests {
     }
 
     // ---------------------------------------------------------------------------
-    // [OPUS-4.8] sq-z33x — SPARQL 1.1 Protocol §2.2 UPDATE dataset override
+    // sq-z33x — SPARQL 1.1 Protocol §2.2 UPDATE dataset override
     // ---------------------------------------------------------------------------
 
     #[test]

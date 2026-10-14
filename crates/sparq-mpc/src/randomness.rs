@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-yyro: the DEALER-LESS correlated-randomness seam — PRSS /
+// sq-yyro: the DEALER-LESS correlated-randomness seam — PRSS /
 // honest-majority coin-toss / dealer-less VSS. Design + seam only; NO dealer-less
 // crypto ships here. See research/mpc-distributed-randomness-design.md.
 //! Distributed / dealer-less correlated randomness — the seam that will replace

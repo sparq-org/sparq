@@ -1,7 +1,7 @@
 //! Durable envelope journal + snapshots (research §6.2/§8 `journal`,
 //! proposal `CRDT-JOURNAL-1/2`).
 //!
-//! [FABLE-5] On-disk layout: one append-only log file of checksummed,
+//! On-disk layout: one append-only log file of checksummed,
 //! length-prefixed records:
 //!
 //! ```text

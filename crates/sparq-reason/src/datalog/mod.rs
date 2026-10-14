@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-6tykl.3 (epic sq-6tykl, RDFox-parity BIG ROCK) — **stratified Datalog
+//! sq-6tykl.3 (epic sq-6tykl, RDFox-parity BIG ROCK) — **stratified Datalog
 //! rules** with negation-as-failure and aggregation, behind the opt-in `datalog` feature.
 //!
 //! The stratified-Datalog program (design record
@@ -10,7 +10,7 @@
 //! COUNT/SUM/MIN/MAX/AVG(?v) AS ?c` atoms (Phase 2b, sq-citho) and a minimal numeric
 //! `FILTER`, plus **incremental maintenance under insert/delete across strata**
 //! (Phase 3, sq-4foq0 — see [`MaterializedProgram`]: DRed for positive strata,
-//! rederivation at stratum boundaries for `NOT`/`AGGREGATE` strata). [GPT-5.6]
+//! rederivation at stratum boundaries for `NOT`/`AGGREGATE` strata).
 //! Phase 4 (sq-a7bmo) adds grouped `NOT`, projected `COUNT(DISTINCT ?v)`, the full
 //! numeric tower for `FILTER`, and conservative variable-predicate atoms. Surface
 //! wiring stays beaded from the design record; the external-engine differential arm
@@ -141,7 +141,7 @@ pub(crate) struct AggAtom {
     pub(crate) n_slots: usize,
 }
 
-/// [GPT-5.6] Aggregate functions supported by the native Datalog dialect.
+/// Aggregate functions supported by the native Datalog dialect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AggFunc {
     Count,

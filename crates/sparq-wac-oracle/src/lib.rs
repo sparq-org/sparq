@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-t999y — **server-independent WAC/ACP decision test-vectors** plus a
+//! sq-t999y — **server-independent WAC/ACP decision test-vectors** plus a
 //! runner that asserts `sparq-solid`'s per-resource decision surface
 //! ([`PodStore::decide`] / [`PodStore::decide_batch`]) matches every vector.
 //!
@@ -45,12 +45,12 @@
 
 #![forbid(unsafe_code)]
 
-// [FABLE-5] sq-39kps — POST-`Slug` `.acl` escalation corpus (a self-contained
+// sq-39kps — POST-`Slug` `.acl` escalation corpus (a self-contained
 // decision-layer adversarial acceptance bar for the future POST chokepoint guard,
 // bead sq-gg0qq.5). Disjoint from the B1 vectors above.
 pub mod escalation_corpus;
 
-// [SONNET-4.6] sq-x1ayt — time-windowed conditional-grant rows (the `Session::now`
+// sq-x1ayt — time-windowed conditional-grant rows (the `Session::now`
 // dimension). Behind the opt-in `odrl-bridge` feature: the live-clock window is minted
 // ONLY by sparq-solid's ODRL bridge (ACP has no time vocabulary), so the default build
 // keeps zero ODRL code and deps.

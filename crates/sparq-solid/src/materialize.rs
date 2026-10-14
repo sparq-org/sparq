@@ -6,7 +6,7 @@
 //! input facts → 1 stratum. ACP runs accepts (A) → rejections (B) → grants (C), each
 //! stratum's closure carried forward in memory as the next one's facts.
 //!
-//! [SONNET-4.6] sq-zgbso.4: evaluation runs on the **id-level compiled evaluator**
+//! sq-zgbso.4: evaluation runs on the **id-level compiled evaluator**
 //! (`sparq_reason::n3::compiled`, epic sq-zgbso / issue #1582). The rule text is parsed
 //! and lowered to the compiled IR ONCE per process ([`wac_rules`] / [`acp_rules`]), and
 //! the facts enter as `[Id; 3]` straight from the source `Graph`'s terms
@@ -28,7 +28,7 @@ use std::sync::OnceLock;
 // `std::time::Instant` is unusable on `wasm32-unknown-unknown` — `Instant::now()`
 // panics there (no monotonic clock). The wall-clock plumbing for `stats.millis` is
 // purely informational, so it is `cfg`-gated off and reported as `0.0` on wasm32
-// rather than trapping at runtime (sq-7agop). [OPUS-4.8]
+// rather than trapping at runtime (sq-7agop).
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
 
@@ -73,7 +73,7 @@ fn acp_rules() -> Result<&'static [CompiledRuleSet; 3], String> {
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const EXCEPT_MATCHER: &str = "https://sparq.dev/ns/auth#exceptMatcher";
 /// solidx facts copied into the auth view for matchers referenced by conditional
-/// grants (the session layer evaluates `exceptMatcher`s from these). [OPUS-4.8]
+/// grants (the session layer evaluates `exceptMatcher`s from these).
 /// sq-3jtd.6 adds `acceptsIssuerP` — the noneOf exception check is three-dimensional.
 const MATCHER_FACTS: [&str; 3] = [
     "https://sparq.dev/ns/solidx#acceptsAgentP",
@@ -211,7 +211,7 @@ pub fn materialize_acp(graph: &mut Graph) -> Result<MaterializeStats, String> {
 
 /// Materialize the ACP auth view from the `.acr` graphs PLUS the TRUSTED per-resource
 /// creator/owner facts in `provenance`, resolving `acp:CreatorAgent` / `acp:OwnerAgent`
-/// matchers ([OPUS-4.8] sq-3jtd.5).
+/// matchers (sq-3jtd.5).
 ///
 /// The free-function form of [`crate::PodStore::materialize_acp_with`]. Identical to
 /// [`materialize_acp`] (one three-stratum `reason_n3_stratified` run) except the loader also
@@ -237,7 +237,7 @@ pub fn materialize_acp_with(
 
 /// Materialize the ACP auth view from the `.acr` graphs PLUS the TRUSTED creator/owner facts
 /// in `provenance` AND the TRUSTED verified-credential holdings in `credentials`, resolving
-/// `acp:vc` matchers ([SONNET-4.6] sq-ysv3u).
+/// `acp:vc` matchers (sq-ysv3u).
 ///
 /// The free-function form of [`crate::PodStore::materialize_acp_with_credentials`], and the
 /// credential twin of [`materialize_acp_with`]: the loader additionally synthesizes
@@ -288,7 +288,7 @@ pub fn materialize_acp_with_credentials(
 /// Wall-clock milliseconds since `t0`, or `0.0` on `wasm32-unknown-unknown` where
 /// `std::time::Instant` is unavailable (sq-7agop). `stats.millis` is purely
 /// informational (logging / benchmarking), so wasm32 simply reports no timing
-/// rather than trapping. [OPUS-4.8]
+/// rather than trapping.
 #[cfg(not(target_arch = "wasm32"))]
 fn elapsed_millis(t0: Instant) -> f64 {
     t0.elapsed().as_secs_f64() * 1e3
@@ -341,7 +341,7 @@ fn install_auth_view(graph: &mut Graph, dict: &Dict, closure: &[[sparq_core::dic
     stats
 }
 
-/// [SONNET-4.6] sq-zgbso.4 — the RESULT-EQUIVALENCE oracle for the compiled flip.
+/// sq-zgbso.4 — the RESULT-EQUIVALENCE oracle for the compiled flip.
 ///
 /// The text engine (`sparq_reason::reason_n3` over N3-serialized facts + rule text) is
 /// kept alive here, and ONLY here, as the differential reference: these tests assert the

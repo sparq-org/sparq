@@ -1,7 +1,7 @@
 //! Read-path **URI-hiding compose** step + a closed **NL→NL A/B** harness
 //! (FO-LLM-bridge **Phase 3**).
 //!
-//! [OPUS-4.8] sq-mztg8.1 (epic sq-mztg8; design `research/fo-llm-bridge.md` §2.3 / §3.3
+//! sq-mztg8.1 (epic sq-mztg8; design `research/fo-llm-bridge.md` §2.3 / §3.3
 //! "Hide the ontology + URIs" + §6 Phase 3). This module is the **compose** half of the
 //! read-path facade: it takes the answer-row bindings of a query over the PKG and presents
 //! them to the agent as a **label/grounded view instead of raw IRIs**, behind the

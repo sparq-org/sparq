@@ -1,6 +1,6 @@
 //! **Found-bug ledger** — the machine-checked record format for bugs the campaign
 //! finds, with a REQUIRED upstream issue link and developer-confirmation status per
-//! entry. [FABLE-5] sq-gum8.6
+//! entry. sq-gum8.6
 //!
 //! The ledger is the paper's evidence artifact: a bug only counts once it is filed
 //! upstream and its confirmation state is tracked honestly (the SQLancer/GDsmith

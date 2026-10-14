@@ -1,6 +1,6 @@
 //! SHACL conformance gate over the **ingested** PKG graph (sq-2m6zm.2).
 //!
-//! [OPUS-4.8] sq-2m6zm.2 (epic sq-2m6zm). 🤖 SPARQ agent — PKG ingestion PoC. The
+//! sq-2m6zm.2 (epic sq-2m6zm). 🤖 SPARQ agent — PKG ingestion PoC. The
 //! ingested graph (`ingest/pkg-instances.ttl`: the mechanical bd→Task projection +
 //! the skills-front-matter Sources/Techniques + the hand-authored AGENTS.md Findings)
 //! is run through sparq's own SHACL engine against the §2.4/§4.4 write-time

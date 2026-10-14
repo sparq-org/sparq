@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-96hp1 (survey §A2 / `research/data-structures.md` §B1) — OPT-IN
+//! sq-96hp1 (survey §A2 / `research/data-structures.md` §B1) — OPT-IN
 //! Elias-Fano column codecs with **compressed seek**: `next_geq(target)` answered *directly on
 //! the compressed representation*, without decoding a block first.
 //!
@@ -773,7 +773,7 @@ mod tests {
         }
     }
 
-    /// [SONNET-4.6] sq-96hp1 — the MEASUREMENT this bead is gated on: plain-EF and
+    /// sq-96hp1 — the MEASUREMENT this bead is gated on: plain-EF and
     /// Partitioned-EF versus the incumbent decode-then-search varint block codec, on four
     /// column shapes, reporting seek latency, scan throughput, bytes resident and bits/value.
     ///

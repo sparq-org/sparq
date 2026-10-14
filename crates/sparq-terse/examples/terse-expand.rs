@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-bzign (epic sq-2m6zm, Phase 5 A/B). 🤖 SPARQ agent — the deterministic
+//! sq-bzign (epic sq-2m6zm, Phase 5 A/B). 🤖 SPARQ agent — the deterministic
 //! transpile-and-echo tool the Phase-5 A/B harness (`bench/terse/`) and a sub-agent both call.
 //!
 //! It takes a terse query (arm B `K:<name>` keywords, or arm C `K:` + `V("phrase")`), loads the

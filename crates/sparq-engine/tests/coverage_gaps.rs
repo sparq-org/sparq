@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-qcnn.35 — Targeted coverage tests for exec.rs paths not
+//! sq-qcnn.35 — Targeted coverage tests for exec.rs paths not
 //! exercised by the existing suite: XSD constructor casts (eval_cast), SPARQL 1.2
 //! language-direction builtins (hasLang/hasLangDir/LANGDIR/STRLANGDIR), and
 //! isBlank. Each test directly invokes the public query() entry-point with
@@ -1074,7 +1074,7 @@ fn ucase_directional_literal() {
 
 /// `Divide` arm of `eval_expr` — line 7465. Division of decimal literals returns
 /// a decimal result via `arith(…, ArithOp::Div)`.
-// [SONNET-4.6]
+//
 #[test]
 fn divide_operator() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1089,7 +1089,7 @@ fn divide_operator() {
 
 /// `UnaryPlus` arm of `eval_expr` — line 7466. `+?n` just returns the argument
 /// unchanged (it is a no-op in SPARQL, but the parser emits the `UnaryPlus` node).
-// [SONNET-4.6]
+//
 #[test]
 fn unary_plus_operator() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1107,7 +1107,7 @@ fn unary_plus_operator() {
 
 /// `Bound(v)` where the variable IS bound — exercises the `true` arm of line 7473.
 /// The query uses `VALUES` to guarantee the binding in every row.
-// [SONNET-4.6]
+//
 #[test]
 fn bound_bound_variable() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1122,7 +1122,7 @@ fn bound_bound_variable() {
 
 /// `If(cond, t, f)` where the condition is `false` — exercises line 7479's
 /// `Some(false) => eval_expr(…, f)` branch.
-// [SONNET-4.6]
+//
 #[test]
 fn if_false_arm() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1142,7 +1142,7 @@ fn if_false_arm() {
 /// `Coalesce(es)` where every argument errors — exercises line 7492 which returns
 /// `Value::Unbound` (= the `SELECT` projection yields an unbound cell). Uses
 /// `SUBJECT("hello")` which returns `Value::Error` for a non-triple argument.
-// [SONNET-4.6]
+//
 #[test]
 fn coalesce_all_error() {
     // SUBJECT("hello") → Value::Error; COALESCE falls off the end → Value::Unbound
@@ -1154,7 +1154,7 @@ fn coalesce_all_error() {
 // ─── F::Lang on computed numeric / bool (line 8256) ─────────────────────────
 
 /// `LANG(1 + 1)` — the argument is a computed `Value::Num`; the `Value::Num(_) |
-/// Value::Bool(_)` arm at line 8256 returns the empty string literal. [SONNET-4.6]
+/// Value::Bool(_)` arm at line 8256 returns the empty string literal.
 #[test]
 fn lang_computed_num() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1169,7 +1169,7 @@ fn lang_computed_num() {
 // ─── F::Datatype on computed numeric (line 8263) ─────────────────────────────
 
 /// `DATATYPE(1 + 1)` — `Value::Num(n)` arm at line 8263 returns the numeric's
-/// promoted XSD datatype IRI. [SONNET-4.6]
+/// promoted XSD datatype IRI.
 #[test]
 fn datatype_computed_num() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1187,7 +1187,7 @@ fn datatype_computed_num() {
 // ─── F::Datatype on computed bool (line 8264) ────────────────────────────────
 
 /// `DATATYPE(1 = 1)` — `Value::Bool(_)` arm at line 8264 returns xsd:boolean.
-// [SONNET-4.6]
+//
 #[test]
 fn datatype_computed_bool() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1205,7 +1205,7 @@ fn datatype_computed_bool() {
 
 /// `SUBSTR(42, 1)` — the first argument is an integer literal, not a string
 /// literal; `str_lit` returns `None`, hitting the `None => return Ok(Value::Error)`
-/// branch at line 8310. [SONNET-4.6]
+/// branch at line 8310.
 #[test]
 fn substr_non_string_error() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1219,7 +1219,7 @@ fn substr_non_string_error() {
 // ─── F::StrLang with invalid language tag (line 8370) ────────────────────────
 
 /// `STRLANG("x", "NOT VALID!!!")` — `Literal::new_language_tagged_literal` returns
-/// `Err` for an ill-formed language tag, hitting line 8370. [SONNET-4.6]
+/// `Err` for an ill-formed language tag, hitting line 8370.
 #[test]
 fn strlang_invalid_lang_tag() {
     // An exclamation mark is not a valid BCP-47 subtag character.
@@ -1230,7 +1230,7 @@ fn strlang_invalid_lang_tag() {
 // ─── F::BNode with non-string arg (line 8429) ────────────────────────────────
 
 /// `BNODE(42)` — the scoped-BNODE variant calls `str_lit`; a non-string argument
-/// returns `None`, hitting line 8429 → `Value::Error`. [SONNET-4.6]
+/// returns `None`, hitting line 8429 → `Value::Error`.
 #[test]
 fn bnode_non_string_error() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1244,7 +1244,7 @@ fn bnode_non_string_error() {
 // ─── as_bool_val: numeric literal path (line 7405) ────────────────────────────
 
 /// `FILTER` on a numeric literal non-zero value exercises `as_bool_val`'s
-/// `parse_xsd_f64` branch at line 7405. [SONNET-4.6]
+/// `parse_xsd_f64` branch at line 7405.
 #[test]
 fn as_bool_val_numeric_literal() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1260,7 +1260,7 @@ fn as_bool_val_numeric_literal() {
 
 /// A `FILTER` on a dateTime literal (`as_bool_val` other-datatype arm → `None` →
 /// filter error → row dropped) exercises line 7409. Uses `count_rows()` because
-/// `sel()` panics on zero rows. [SONNET-4.6]
+/// `sel()` panics on zero rows.
 #[test]
 fn as_bool_val_other_datatype() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1275,7 +1275,7 @@ fn as_bool_val_other_datatype() {
 // ─── eval_numeric: local vocab numeric cache path (line 7615) ────────────────
 
 /// A comparison of a BIND-computed value vs a constant exercises `eval_numeric`'s
-/// `local.numeric(id)` path at line 7615 (the `is_local(id)` branch). [SONNET-4.6]
+/// `local.numeric(id)` path at line 7615 (the `is_local(id)` branch).
 #[test]
 fn eval_numeric_local_vocab_path() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1294,7 +1294,7 @@ fn eval_numeric_local_vocab_path() {
 
 /// Exercises the `Add`, `Subtract`, `Multiply`, `Divide`, `UnaryPlus` arms of
 /// `eval_numeric` (lines 7621-7625) by nesting arithmetic inside a comparison
-/// filter so `cmp_expr` delegates to `eval_numeric` for both sides. [SONNET-4.6]
+/// filter so `cmp_expr` delegates to `eval_numeric` for both sides.
 #[test]
 fn eval_numeric_arithmetic_ops() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1334,7 +1334,7 @@ fn eval_numeric_arithmetic_ops() {
 // ─── F::IsNumeric on computed numeric (line 8347) ────────────────────────────
 
 /// `ISNUMERIC(1+1)` — the `Value::Num(_)` arm at line 8347 returns `true`.
-// [SONNET-4.6]
+//
 #[test]
 fn is_numeric_computed_num() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1348,7 +1348,7 @@ fn is_numeric_computed_num() {
 // ─── F::IsTriple / F::Subject / F::Predicate / F::Object (lines 8501-8520) ───
 
 /// RDF-star built-ins: `ISTRIPLE`, `SUBJECT`, `PREDICATE`, `OBJECT` on a triple
-/// term created by `TRIPLE(s, p, o)`. Exercises lines 8486-8520. [SONNET-4.6]
+/// term created by `TRIPLE(s, p, o)`. Exercises lines 8486-8520.
 #[test]
 fn rdf_star_triple_builtins() {
     // TRIPLE(s, p, o) on IRIs; then extract parts
@@ -1381,7 +1381,7 @@ fn rdf_star_triple_builtins() {
 
 // ─── F::IsTriple on non-triple → false (line 8504) ───────────────────────────
 
-/// `ISTRIPLE("hello")` — the catch-all arm at line 8504 returns `false`. [SONNET-4.6]
+/// `ISTRIPLE("hello")` — the catch-all arm at line 8504 returns `false`.
 #[test]
 fn is_triple_non_triple() {
     let result = sel(r#"SELECT (ISTRIPLE("hello") AS ?v) WHERE {}"#);
@@ -1391,7 +1391,7 @@ fn is_triple_non_triple() {
 // ─── F::Subject / Predicate / Object on non-triple → Error (line 8511/8515/8519)
 
 /// `SUBJECT("hello")` — subject/predicate/object on a non-triple → `Value::Error`
-/// → no binding projected. Lines 8511, 8515, 8519. [SONNET-4.6]
+/// → no binding projected. Lines 8511, 8515, 8519.
 #[test]
 fn rdf_star_accessor_non_triple_error() {
     let subj = sel(r#"SELECT (SUBJECT("hello") AS ?v) WHERE {}"#);
@@ -1407,7 +1407,7 @@ fn rdf_star_accessor_non_triple_error() {
 // ─── F::Regex — exec.rs lines 8461-8470 + build_regex 9009-9024 ───────────────
 
 /// Basic `REGEX("abc", "b")` → true. Exercises the F::Regex match arm and
-/// `build_regex`. [SONNET-4.6]
+/// `build_regex`.
 #[test]
 #[cfg(feature = "regex")]
 fn regex_basic_match() {
@@ -1416,7 +1416,7 @@ fn regex_basic_match() {
 }
 
 /// `REGEX("ABC", "abc", "i")` — the `i` case-insensitive flag path in
-/// `build_regex` (line 9016). [SONNET-4.6]
+/// `build_regex` (line 9016).
 #[test]
 #[cfg(feature = "regex")]
 fn regex_case_insensitive() {
@@ -1424,7 +1424,7 @@ fn regex_case_insensitive() {
     assert_eq!(r, Some("\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string()));
 }
 
-/// `REGEX("abc", "z")` → false (no match). [SONNET-4.6]
+/// `REGEX("abc", "z")` → false (no match).
 #[test]
 #[cfg(feature = "regex")]
 fn regex_no_match() {
@@ -1433,7 +1433,7 @@ fn regex_no_match() {
 }
 
 /// `REGEX("abc", "[invalid[")` — invalid regex → `build_regex` returns `None` →
-/// `Value::Error` → no binding (line 8469). [SONNET-4.6]
+/// `Value::Error` → no binding (line 8469).
 #[test]
 #[cfg(feature = "regex")]
 fn regex_invalid_pattern() {
@@ -1442,7 +1442,7 @@ fn regex_invalid_pattern() {
 }
 
 /// `REGEX` with unknown flag — `build_regex` checks all chars and returns `None`
-/// on an unrecognised flag character (line 9010-9011). [SONNET-4.6]
+/// on an unrecognised flag character (line 9010-9011).
 #[test]
 #[cfg(feature = "regex")]
 fn regex_unknown_flag() {
@@ -1454,7 +1454,7 @@ fn regex_unknown_flag() {
 // ─── F::Replace — exec.rs lines 8473-8482 ────────────────────────────────────
 
 /// Basic `REPLACE("hello world", "world", "earth")` — exercises the Replace arm
-/// and build_regex (lines 8473-8480). [SONNET-4.6]
+/// and build_regex (lines 8473-8480).
 #[test]
 #[cfg(feature = "regex")]
 fn replace_basic() {
@@ -1463,7 +1463,7 @@ fn replace_basic() {
 }
 
 /// `REPLACE("ABC", "b", "X", "i")` — case-insensitive replace with flag
-/// (line 8478). [SONNET-4.6]
+/// (line 8478).
 #[test]
 #[cfg(feature = "regex")]
 fn replace_with_flag() {
@@ -1472,7 +1472,7 @@ fn replace_with_flag() {
 }
 
 /// `REPLACE("abc", "[bad[", "x")` — invalid regex → `build_regex` returns `None`
-/// → `Value::Error` (line 8481). [SONNET-4.6]
+/// → `Value::Error` (line 8481).
 #[test]
 #[cfg(feature = "regex")]
 fn replace_invalid_pattern() {
@@ -1483,7 +1483,7 @@ fn replace_invalid_pattern() {
 // ─── F::Md5 / Sha1 / Sha256 — exec.rs lines 8394-8402, digest_hex 8940-8952 ──
 
 /// `MD5("abc")` — exercises digest_hex + F::Md5 (lines 8394, 8940-8949).
-// [SONNET-4.6]
+//
 #[test]
 #[cfg(feature = "digest")]
 fn md5_basic() {
@@ -1492,7 +1492,7 @@ fn md5_basic() {
     assert_eq!(r, Some("\"900150983cd24fb0d6963f7d28e17f72\"".to_string()));
 }
 
-/// `SHA1("abc")` — exercises F::Sha1 (line 8396) and digest_hex. [SONNET-4.6]
+/// `SHA1("abc")` — exercises F::Sha1 (line 8396) and digest_hex.
 #[test]
 #[cfg(feature = "digest")]
 fn sha1_basic() {
@@ -1501,7 +1501,7 @@ fn sha1_basic() {
     assert_eq!(r, Some("\"a9993e364706816aba3e25717850c26c9cd0d89d\"".to_string()));
 }
 
-/// `SHA256("abc")` — exercises F::Sha256 (line 8398) and digest_hex. [SONNET-4.6]
+/// `SHA256("abc")` — exercises F::Sha256 (line 8398) and digest_hex.
 #[test]
 #[cfg(feature = "digest")]
 fn sha256_basic() {
@@ -1511,7 +1511,7 @@ fn sha256_basic() {
     assert_eq!(r.unwrap().len(), "\"\"".len() + 64, "SHA256 output is 64 hex chars");
 }
 
-/// `SHA384("abc")` — exercises F::Sha384 (line 8400). [SONNET-4.6]
+/// `SHA384("abc")` — exercises F::Sha384 (line 8400).
 #[test]
 #[cfg(feature = "digest")]
 fn sha384_basic() {
@@ -1520,7 +1520,7 @@ fn sha384_basic() {
     assert_eq!(r.unwrap().len(), "\"\"".len() + 96, "SHA384 output is 96 hex chars");
 }
 
-/// `SHA512("abc")` — exercises F::Sha512 (line 8402). [SONNET-4.6]
+/// `SHA512("abc")` — exercises F::Sha512 (line 8402).
 #[test]
 #[cfg(feature = "digest")]
 fn sha512_basic() {
@@ -1530,7 +1530,7 @@ fn sha512_basic() {
 }
 
 /// `MD5(42)` — non-string arg → `digest_hex` returns `Value::Error` (line 8951).
-// [SONNET-4.6]
+//
 #[test]
 #[cfg(feature = "digest")]
 fn md5_non_string_error() {
@@ -1545,7 +1545,7 @@ fn md5_non_string_error() {
 // ─── F::EncodeForUri — exec.rs line 8333, encode_for_uri 9028-9038 ────────────
 
 /// `ENCODE_FOR_URI("hello world")` → spaces become `%20` (line 8333 + encode_for_uri).
-// [SONNET-4.6]
+//
 #[test]
 fn encode_for_uri_basic() {
     let r = sel(r#"SELECT (ENCODE_FOR_URI("hello world") AS ?v) WHERE {}"#);
@@ -1554,28 +1554,28 @@ fn encode_for_uri_basic() {
 
 // ─── F::LangMatches — exec.rs lines 8380-8390 ────────────────────────────────
 
-/// `LANGMATCHES("en-US", "en")` → true (subtag match). [SONNET-4.6]
+/// `LANGMATCHES("en-US", "en")` → true (subtag match).
 #[test]
 fn langmatches_subtag() {
     let r = sel(r#"SELECT (LANGMATCHES("en-US", "en") AS ?v) WHERE {}"#);
     assert_eq!(r, Some("\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string()));
 }
 
-/// `LANGMATCHES("en", "*")` → true (any non-empty tag). [SONNET-4.6]
+/// `LANGMATCHES("en", "*")` → true (any non-empty tag).
 #[test]
 fn langmatches_star() {
     let r = sel(r#"SELECT (LANGMATCHES("en", "*") AS ?v) WHERE {}"#);
     assert_eq!(r, Some("\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string()));
 }
 
-/// `LANGMATCHES("", "*")` → false (empty tag is not any). [SONNET-4.6]
+/// `LANGMATCHES("", "*")` → false (empty tag is not any).
 #[test]
 fn langmatches_empty_tag_star() {
     let r = sel(r#"SELECT (LANGMATCHES("", "*") AS ?v) WHERE {}"#);
     assert_eq!(r, Some("\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string()));
 }
 
-/// `LANGMATCHES("de", "en")` → false (different language). [SONNET-4.6]
+/// `LANGMATCHES("de", "en")` → false (different language).
 #[test]
 fn langmatches_no_match() {
     let r = sel(r#"SELECT (LANGMATCHES("de", "en") AS ?v) WHERE {}"#);
@@ -1584,21 +1584,21 @@ fn langmatches_no_match() {
 
 // ─── F::Contains / F::StrStarts / F::StrEnds — lines 8287-8289 ───────────────
 
-/// `CONTAINS("hello", "ell")` → true. [SONNET-4.6]
+/// `CONTAINS("hello", "ell")` → true.
 #[test]
 fn contains_match() {
     let r = sel(r#"SELECT (CONTAINS("hello", "ell") AS ?v) WHERE {}"#);
     assert_eq!(r, Some("\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string()));
 }
 
-/// `STRSTARTS("hello", "hel")` → true. [SONNET-4.6]
+/// `STRSTARTS("hello", "hel")` → true.
 #[test]
 fn strstarts_match() {
     let r = sel(r#"SELECT (STRSTARTS("hello", "hel") AS ?v) WHERE {}"#);
     assert_eq!(r, Some("\"true\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string()));
 }
 
-/// `STRENDS("hello", "llo")` → true. [SONNET-4.6]
+/// `STRENDS("hello", "llo")` → true.
 #[test]
 fn strends_match() {
     let r = sel(r#"SELECT (STRENDS("hello", "llo") AS ?v) WHERE {}"#);
@@ -1607,28 +1607,28 @@ fn strends_match() {
 
 // ─── F::StrBefore / F::StrAfter — lines 8293-8305 ────────────────────────────
 
-/// `STRBEFORE("hello world", "world")` → "hello ". [SONNET-4.6]
+/// `STRBEFORE("hello world", "world")` → "hello ".
 #[test]
 fn strbefore_match() {
     let r = sel(r#"SELECT (STRBEFORE("hello world", "world") AS ?v) WHERE {}"#);
     assert_eq!(r, Some("\"hello \"".to_string()));
 }
 
-/// `STRBEFORE("hello", "xyz")` → empty string (no match → simple empty). [SONNET-4.6]
+/// `STRBEFORE("hello", "xyz")` → empty string (no match → simple empty).
 #[test]
 fn strbefore_no_match() {
     let r = sel(r#"SELECT (STRBEFORE("hello", "xyz") AS ?v) WHERE {}"#);
     assert_eq!(r, Some("\"\"".to_string()));
 }
 
-/// `STRAFTER("hello world", "hello ")` → "world". [SONNET-4.6]
+/// `STRAFTER("hello world", "hello ")` → "world".
 #[test]
 fn strafter_match() {
     let r = sel(r#"SELECT (STRAFTER("hello world", "hello ") AS ?v) WHERE {}"#);
     assert_eq!(r, Some("\"world\"".to_string()));
 }
 
-/// `STRAFTER("hello", "xyz")` → empty string (no match). [SONNET-4.6]
+/// `STRAFTER("hello", "xyz")` → empty string (no match).
 #[test]
 fn strafter_no_match() {
     let r = sel(r#"SELECT (STRAFTER("hello", "xyz") AS ?v) WHERE {}"#);
@@ -1639,7 +1639,7 @@ fn strafter_no_match() {
 
 /// `CONCAT("hello", " ", "world")` → "hello world". Tests the multi-arg path and
 /// the `lang = Some(match lang { None => l, ... })` accumulation (lines 8276-8280).
-// [SONNET-4.6]
+//
 #[test]
 fn concat_simple_strings() {
     let r = sel(r#"SELECT (CONCAT("hello", " ", "world") AS ?v) WHERE {}"#);
@@ -1647,7 +1647,7 @@ fn concat_simple_strings() {
 }
 
 /// `CONCAT("a"@en, "b"@en)` → "ab"@en — same language tag preserved. Tests the
-/// `Some(prev) if prev == l => prev` arm at line 8278. [SONNET-4.6]
+/// `Some(prev) if prev == l => prev` arm at line 8278.
 #[test]
 fn concat_same_lang_tag_preserved() {
     let r = sel(r#"SELECT (CONCAT("a"@en, "b"@en) AS ?v) WHERE {}"#);
@@ -1655,7 +1655,7 @@ fn concat_same_lang_tag_preserved() {
 }
 
 /// `CONCAT("a"@en, "b"@fr)` → "ab" (plain — different tags drop tag). Tests the
-/// `Some(_) => None` arm at line 8279. [SONNET-4.6]
+/// `Some(_) => None` arm at line 8279.
 #[test]
 fn concat_mixed_lang_tags_dropped() {
     let r = sel(r#"SELECT (CONCAT("a"@en, "b"@fr) AS ?v) WHERE {}"#);
@@ -1665,7 +1665,7 @@ fn concat_mixed_lang_tags_dropped() {
 // ─── In(a, list) → false / error arms — exec.rs lines 7494-7509 ─────────────
 
 /// `1 IN (2, 3)` → false (no match, no error). Exercises the `Value::Bool(false)`
-/// return at line 7509. [SONNET-4.6]
+/// return at line 7509.
 #[test]
 fn in_expr_false() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1676,7 +1676,7 @@ fn in_expr_false() {
     assert_eq!(r, Some("\"false\"^^<http://www.w3.org/2001/XMLSchema#boolean>".to_string()));
 }
 
-/// `1 IN (1, 2)` → true (first element matches). Exercises line 7504. [SONNET-4.6]
+/// `1 IN (1, 2)` → true (first element matches). Exercises line 7504.
 #[test]
 fn in_expr_true() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1688,7 +1688,7 @@ fn in_expr_true() {
 }
 
 /// `1 IN (?x, 2)` where `?x` is unbound → `values_equal` returns `None` →
-/// `errored = true` → `Value::Error` (line 7506, 7509). [SONNET-4.6]
+/// `errored = true` → `Value::Error` (line 7506, 7509).
 #[test]
 fn in_expr_comparison_error() {
     // ?x is unbound from the OPTIONAL (no triple matches); values_equal(1, Unbound) = None
@@ -1705,7 +1705,7 @@ fn in_expr_comparison_error() {
 
 // ─── F::NOW / F::Rand / F::StrUuid — exec.rs lines 8437-8450 ────────────────
 
-/// `NOW()` returns an xsd:dateTime. Exercises F::Now (line 8437). [SONNET-4.6]
+/// `NOW()` returns an xsd:dateTime. Exercises F::Now (line 8437).
 #[test]
 fn now_returns_datetime() {
     let r = sel(r#"SELECT (NOW() AS ?v) WHERE {}"#);
@@ -1719,7 +1719,7 @@ fn now_returns_datetime() {
 }
 
 /// `RAND()` returns an xsd:double in [0, 1). Exercises F::Rand (line 8439).
-// [SONNET-4.6]
+//
 #[test]
 fn rand_returns_double() {
     let r = sel(r#"SELECT (RAND() AS ?v) WHERE {}"#);
@@ -1733,7 +1733,7 @@ fn rand_returns_double() {
 }
 
 /// `STRUUID()` returns a simple literal UUID string. Exercises F::StrUuid (line 8450).
-// [SONNET-4.6]
+//
 #[test]
 fn struuid_returns_string() {
     let r = sel(r#"SELECT (STRUUID() AS ?v) WHERE {}"#);
@@ -1746,7 +1746,7 @@ fn struuid_returns_string() {
     assert_eq!(inner.len(), 36, "UUID should be 36 chars: {}", inner);
 }
 
-/// `UUID()` returns an IRI. Exercises F::Uuid (line 8445). [SONNET-4.6]
+/// `UUID()` returns an IRI. Exercises F::Uuid (line 8445).
 #[test]
 fn uuid_returns_iri() {
     let r = sel(r#"SELECT (UUID() AS ?v) WHERE {}"#);
@@ -1762,7 +1762,7 @@ fn uuid_returns_iri() {
 // ─── F::Tz / F::Timezone error paths (no-tz datetime) ─────────────────────────
 
 /// `TZ("2024-01-01T00:00:00")` — datetime without timezone → TZ returns empty string
-/// (line 8969-8971). [SONNET-4.6]
+/// (line 8969-8971).
 #[test]
 fn tz_no_timezone() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1775,7 +1775,7 @@ fn tz_no_timezone() {
 }
 
 /// `TIMEZONE("2024-01-01T00:00:00")` — datetime without timezone → TIMEZONE errors
-/// (tz_to_duration returns None for empty tz, line 8978-8979). [SONNET-4.6]
+/// (tz_to_duration returns None for empty tz, line 8978-8979).
 #[test]
 fn timezone_no_timezone_error() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1788,7 +1788,7 @@ fn timezone_no_timezone_error() {
 }
 
 /// `TIMEZONE("2024-01-01T00:00:00Z")` — `Z` timezone → tz_to_duration returns
-/// "PT0S" (line 8982). [SONNET-4.6]
+/// "PT0S" (line 8982).
 #[test]
 fn timezone_utc_z() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1804,7 +1804,7 @@ fn timezone_utc_z() {
 // ─── F::LangDir computed_num / IRI branch (lines 8538-8539) ──────────────────
 
 /// `LANGDIR(1+1)` — computed numeric → the `Value::Num(_) | Value::Bool(_)` arm
-/// at line 8538 returns the empty simple string. [SONNET-4.6]
+/// at line 8538 returns the empty simple string.
 #[test]
 fn langdir_computed_num() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1818,7 +1818,7 @@ fn langdir_computed_num() {
 // ─── F::StrLangDir invalid direction (line 8549) ─────────────────────────────
 
 /// `STRLANGDIR("x", "en", "upward")` — invalid direction (not "ltr"/"rtl") →
-/// `Value::Error` (line 8549). [SONNET-4.6]
+/// `Value::Error` (line 8549).
 #[test]
 fn strlangdir_invalid_direction() {
     let r = sel(r#"SELECT (STRLANGDIR("x", "en", "upward") AS ?v) WHERE {}"#);
@@ -1828,7 +1828,7 @@ fn strlangdir_invalid_direction() {
 // ─── F::Str on computed values (line 8238) ───────────────────────────────────
 
 /// `STR(1+1)` — `value_str` on a computed numeric → string form. Line 8238.
-// [SONNET-4.6]
+//
 #[test]
 fn str_computed_num() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1842,7 +1842,7 @@ fn str_computed_num() {
 // ─── F::Abs / Ceil / Floor / Round on decimal (lines 8353-8356) ──────────────
 
 /// `ABS(-2.5)`, `CEIL(-2.5)`, `FLOOR(-2.5)`, `ROUND(-2.5)` — exercises all four
-/// numeric rounding functions (lines 8353-8356). [SONNET-4.6]
+/// numeric rounding functions (lines 8353-8356).
 #[test]
 fn abs_ceil_floor_round() {
     let pfx = "PREFIX xsd: <http://www.w3.org/2001/XMLSchema#> ";
@@ -1873,7 +1873,7 @@ fn abs_ceil_floor_round() {
 }
 
 // ─── lib.rs: ASK paths through query() ───────────────────────────────────────
-// [SONNET-4.6] sq-qcnn.35 – covers query_prepared_with_budget ASK match arm
+// sq-qcnn.35 – covers query_prepared_with_budget ASK match arm
 // (lib.rs lines 734-738): true → unit row, false → empty row-set.
 
 /// ASK { } on an empty graph is satisfiable (the empty pattern always has a solution).
@@ -1897,7 +1897,7 @@ fn query_ask_false_returns_no_rows() {
 }
 
 // ─── lib.rs: ASK paths through query_json() ──────────────────────────────────
-// [SONNET-4.6] sq-qcnn.35 – covers query_json_prepared_with_budget ASK arm
+// sq-qcnn.35 – covers query_json_prepared_with_budget ASK arm
 // (lib.rs line 806-807): emits the SPARQL 1.1 JSON boolean form.
 
 /// query_json() on an ASK query that is true emits the boolean JSON form.
@@ -1917,7 +1917,7 @@ fn query_json_ask_false_boolean_form() {
 }
 
 // ─── lib.rs: ASK through query_json_chunks_with_budget() ─────────────────────
-// [SONNET-4.6] sq-qcnn.35 – covers the ASK arm inside
+// sq-qcnn.35 – covers the ASK arm inside
 // query_json_chunks_with_budget (lib.rs lines 831-832).
 
 /// query_json_chunks_with_budget() for an ASK query returns the boolean chunk.
@@ -1931,7 +1931,7 @@ fn query_json_chunks_ask_true_produces_boolean_chunk() {
 }
 
 // ─── lib.rs: ASK through count() ─────────────────────────────────────────────
-// [SONNET-4.6] sq-qcnn.35 – covers count_prepared_with_budget ASK arm
+// sq-qcnn.35 – covers count_prepared_with_budget ASK arm
 // (lib.rs line 865): count(ASK true) = 1, count(ASK false) = 0.
 
 /// count() of a true ASK query returns 1 (the unit-row encoding).
@@ -1951,7 +1951,7 @@ fn count_ask_false_is_zero() {
 }
 
 // ─── json.rs: fast-path JSON writers via query_json() ────────────────────────
-// [SONNET-4.6] sq-qcnn.35 – these tests use query_json() which goes through
+// sq-qcnn.35 – these tests use query_json() which goes through
 // the id-level JSON fast-path in exec.rs (eval_select_json → write_id_json).
 // That path calls parts_to_json / inline_int_json in json.rs for dictionary
 // terms — covering branches that to_sparql_json_rows (the materialised path)
@@ -2011,7 +2011,7 @@ fn query_json_integer_zero_in_result() {
 }
 
 // ─── json.rs: to_sparql_json_rows with Triple term ───────────────────────────
-// [SONNET-4.6] sq-qcnn.35 – exercises term_to_json Triple arm with a blank-node
+// sq-qcnn.35 – exercises term_to_json Triple arm with a blank-node
 // subject (json.rs line 179).
 
 /// to_sparql_json_rows() with a Term::Triple whose subject is a blank node
@@ -2041,7 +2041,7 @@ fn to_sparql_json_rows_triple_with_blank_node_subject() {
 }
 
 // ─── update.rs: CLEAR / DROP graph-target variants ───────────────────────────
-// [SONNET-4.6] sq-qcnn.35 – exercises CLEAR NAMED, CLEAR ALL, DROP DEFAULT,
+// sq-qcnn.35 – exercises CLEAR NAMED, CLEAR ALL, DROP DEFAULT,
 // DROP NAMED arms in apply_op (update.rs lines 446, 447-449, 455, 460).
 
 /// CLEAR NAMED empties all named graphs (update.rs line 446).
@@ -2106,7 +2106,7 @@ fn update_drop_named_removes_named_graphs() {
 }
 
 // ─── exec.rs trace_label arms via explain_analyze ────────────────────────────
-// [SONNET-4.6] sq-qcnn.35 — trace_label(Path), trace_label(Graph),
+// sq-qcnn.35 — trace_label(Path), trace_label(Graph),
 // trace_label(Project) are unreachable from eval_modified but ARE reached when
 // eval_graph_pattern is called on those patterns as a Join child under an
 // active trace::install(). explain_analyze installs the trace.
@@ -2182,7 +2182,7 @@ fn explain_analyze_sub_select_in_join_covers_trace_label_project() {
 }
 
 // ─── exec.rs GRAPH ?g {?g ...} path — lines 2159-2163 ────────────────────────
-// [SONNET-4.6] sq-qcnn.35 — When `GRAPH ?g { ?g :p ?o }` is evaluated and the
+// sq-qcnn.35 — When `GRAPH ?g { ?g :p ?o }` is evaluated and the
 // inner pattern evaluation also produces a column for ?g (because ?g appears
 // inside the inner pattern), the Some(c) arm at line 2159 is taken.
 
@@ -2217,7 +2217,7 @@ fn graph_var_used_inside_pattern_covers_retain_branch() {
 }
 
 // ─── exec.rs temporal filter count — lines 1847-1856 ────────────────────────
-// [SONNET-4.6] sq-qcnn.35 — count_single_filtered with a ScanCmp::Temp
+// sq-qcnn.35 — count_single_filtered with a ScanCmp::Temp
 // comparison runs the temporal-filter count closure.
 
 /// COUNT(*) with a sargable dateTime FILTER on a single pattern triggers
@@ -2246,7 +2246,7 @@ fn count_with_datetime_filter_covers_temporal_scan_cmp() {
 }
 
 // ─── exec.rs multi-cmp fallback count — lines 1857-1864 ─────────────────────
-// [SONNET-4.6] sq-qcnn.35 — count_single_filtered with 2 sargable filters
+// sq-qcnn.35 — count_single_filtered with 2 sargable filters
 // (neither the Num-single nor the Temp-single arm) hits `_ =>` (lines 1857-1864).
 
 /// COUNT(*) with two sargable numeric FILTERs on one pattern triggers
@@ -2278,7 +2278,7 @@ fn count_with_two_filters_covers_multi_cmp_fallback() {
 }
 
 // ─── exec.rs star-count sorted_vals Some branch — lines 1771-1781 ────────────
-// [SONNET-4.6] sq-qcnn.35 — GroupStream::new sets sorted_vals=Some when the
+// sq-qcnn.35 — GroupStream::new sets sorted_vals=Some when the
 // chosen permutation does not deliver sort_col as the first free column. For a
 // pattern with predicate=fixed and center-var at subject position (v_pos=0),
 // choose_sorted finds no direct-order permutation and falls back to POS, whose
@@ -2315,7 +2315,7 @@ fn count_star_shape_with_fixed_predicate_covers_sorted_vals_fallback() {
 }
 
 // ─── exec.rs Value::Bool path in value_to_id — lines 9130-9134 ───────────────
-// [SONNET-4.6] sq-qcnn.35 — group_aggregate evaluates MAX(BOUND(?p)) which
+// sq-qcnn.35 — group_aggregate evaluates MAX(BOUND(?p)) which
 // returns Value::Bool(true). value_to_id is called in the sequential aggregate
 // path (line 6248), hitting the Value::Bool arm.
 
@@ -2368,7 +2368,7 @@ fn aggregate_max_bound_with_bool_in_dict_covers_fast_return() {
 }
 
 // ─── exec.rs UnaryPlus / UnaryMinus in eval_exact_lexical — lines 7694-7699 ──
-// [SONNET-4.6] sq-qcnn.35 — eval_exact_lexical is called when cmp_expr / equal_expr
+// sq-qcnn.35 — eval_exact_lexical is called when cmp_expr / equal_expr
 // needs a precise lexical for two numeric values that f64 rounds to equal. The
 // UnaryPlus and UnaryMinus arms are hit when the expression is +?var or -?var.
 
@@ -2414,7 +2414,7 @@ fn filter_unary_minus_negative_input_covers_some_branch() {
 /// (e.g. `SELECT (COUNT(*) AS ?c) WHERE { ... }`). spargebra emits a
 /// `GraphPattern::Group { variables: [], ... }` node; render_pattern() takes
 /// the Group arm and the `variables.is_empty()` sub-branch returns "<all>"
-/// (explain.rs line 232). [SONNET-4.6] sq-qcnn.35
+/// (explain.rs line 232). sq-qcnn.35
 #[test]
 fn explain_aggregate_no_group_by_covers_all_string_branch() {
     let g = Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "turtle").unwrap();
@@ -2426,7 +2426,7 @@ fn explain_aggregate_no_group_by_covers_all_string_branch() {
 /// explain() on a query whose WHERE clause is `FILTER(true)` with no triple
 /// patterns. After flatten_conjunction, patterns=[] and filters=[expr].
 /// The empty-patterns branch writes the BGP-empty header, then iterates the
-/// filters (explain.rs lines 258-259). [SONNET-4.6] sq-qcnn.35
+/// filters (explain.rs lines 258-259). sq-qcnn.35
 #[test]
 fn explain_empty_bgp_with_filter_covers_filter_loop() {
     let g = empty();
@@ -2441,7 +2441,7 @@ fn explain_empty_bgp_with_filter_covers_filter_loop() {
 /// SPARQL Update: CLEAR NAMED via the immutable `update()` path (which goes
 /// through `apply_op` → `apply_update_rebuild`, NOT `update_in_place_core`).
 /// Covers update.rs line 446: `GraphTarget::NamedGraphs` arm in `apply_op`'s
-/// Clear branch. [SONNET-4.6] sq-qcnn.35
+/// Clear branch. sq-qcnn.35
 #[test]
 fn update_immutable_clear_named_covers_apply_op_named_graphs_arm() {
     let mut g = Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "turtle").unwrap();
@@ -2460,7 +2460,7 @@ fn update_immutable_clear_named_covers_apply_op_named_graphs_arm() {
 
 /// SPARQL Update: DROP DEFAULT via the immutable `update()` path.
 /// Covers update.rs line 455: `GraphTarget::DefaultGraph` arm in `apply_op`'s
-/// Drop branch. [SONNET-4.6] sq-qcnn.35
+/// Drop branch. sq-qcnn.35
 #[test]
 fn update_immutable_drop_default_covers_apply_op_default_arm() {
     let g = Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "turtle").unwrap();
@@ -2474,7 +2474,7 @@ fn update_immutable_drop_default_covers_apply_op_default_arm() {
 
 /// SPARQL Update: DROP NAMED via the immutable `update()` path.
 /// Covers update.rs line 460: `GraphTarget::NamedGraphs` arm in `apply_op`'s
-/// Drop branch. [SONNET-4.6] sq-qcnn.35
+/// Drop branch. sq-qcnn.35
 #[test]
 fn update_immutable_drop_named_covers_apply_op_drop_named_arm() {
     let mut g = Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "turtle").unwrap();
@@ -2493,7 +2493,7 @@ fn update_immutable_drop_named_covers_apply_op_drop_named_arm() {
 /// SPARQL Update: DELETE WHERE with an OPTIONAL clause where the optional
 /// binding (?o) is unbound. The delete template has ?o in object position;
 /// gtp_subst(&dp.object, &get) returns None → the `else { continue }` branch
-/// skips this row (update.rs line 312). [SONNET-4.6] sq-qcnn.35
+/// skips this row (update.rs line 312). sq-qcnn.35
 #[test]
 fn update_delete_unbound_optional_covers_continue_branch() {
     let ttl = "<http://ex/s> <http://ex/p> <http://ex/x> .";
@@ -2514,7 +2514,7 @@ fn update_delete_unbound_optional_covers_continue_branch() {
 /// CONSTRUCT { ?s <http://ex/p> ?o } WHERE { ?s <http://ex/p> ?o } over data
 /// that has a blank-node subject. The WHERE clause binds ?s to a blank node,
 /// so subject_term() takes the Term::BlankNode(b) arm (construct.rs line 205).
-/// [SONNET-4.6] sq-qcnn.35
+/// sq-qcnn.35
 #[test]
 fn construct_with_bnode_subject_covers_subject_term_bnode_arm() {
     // Turtle blank-node shorthand _:b produces a blank-node subject.
@@ -2537,7 +2537,7 @@ fn construct_with_bnode_subject_covers_subject_term_bnode_arm() {
 /// DESCRIBE ?v WHERE { <http://ex/s> <http://ex/p> ?v } over data where the
 /// object is a plain literal. The SELECT solution has a literal cell; cbd()
 /// must skip it via the _ => {} arm (construct.rs line 267).
-/// [SONNET-4.6] sq-qcnn.35
+/// sq-qcnn.35
 #[test]
 fn describe_with_literal_result_covers_cbd_literal_skip_arm() {
     let g = Graph::load_str("<http://ex/s> <http://ex/p> \"hello\" .", "turtle").unwrap();
@@ -2558,7 +2558,7 @@ fn describe_with_literal_result_covers_cbd_literal_skip_arm() {
 /// `ask_prepared()` covers lib.rs lines 755-756 (the function was never called
 /// before). A PreparedQuery is built from an ASK query string; ask_prepared
 /// delegates to ask_prepared_with_budget with an unlimited budget.
-/// [SONNET-4.6] sq-qcnn.35
+/// sq-qcnn.35
 #[test]
 fn ask_prepared_covers_uncalled_function() {
     let g = Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "turtle").unwrap();
@@ -2570,7 +2570,7 @@ fn ask_prepared_covers_uncalled_function() {
 /// `query_view()` covers lib.rs view functions (with_view, query_view,
 /// query_view_with_budget — all with count=0 before this test). Uses an
 /// empty named set (view restricted to no named graphs).
-/// [SONNET-4.6] sq-qcnn.35
+/// sq-qcnn.35
 #[test]
 fn query_view_covers_view_api_functions() {
     use sparq_engine::{DatasetView, DefaultGraphMode, FxHashSet};
@@ -2586,7 +2586,7 @@ fn query_view_covers_view_api_functions() {
 }
 
 /// `ask_view()` covers lib.rs ask_view and ask_view_with_budget (both with
-/// count=0 before this test). [SONNET-4.6] sq-qcnn.35
+/// count=0 before this test). sq-qcnn.35
 #[test]
 fn ask_view_covers_ask_view_function() {
     use sparq_engine::{DatasetView, DefaultGraphMode, FxHashSet};

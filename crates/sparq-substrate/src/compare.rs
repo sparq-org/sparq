@@ -67,7 +67,7 @@ pub enum TermClass {
 
 /// The within-[`Literal`](TermClass::Literal)-class **KIND rank** of the total order —
 /// the fixed precedence [`compare_terms`] applies BETWEEN literal kinds, before any
-/// within-kind value comparison. [FABLE-5] sq-wjl8i
+/// within-kind value comparison. sq-wjl8i
 ///
 /// SPARQL 1.1 §15.1 fixes the cross-CLASS order (unbound < blank < IRI < literal) and,
 /// via the `<` operator, the within-kind orders (numerics by value, strings lexically,
@@ -120,7 +120,7 @@ pub trait CompareTerm: Sized {
     /// The literal's [`LiteralKind`] — the within-Literal-class precedence bucket of
     /// the kind-first total order. Only consulted when BOTH terms are
     /// [`TermClass::Literal`]; the value for non-literal terms is irrelevant (return
-    /// [`LiteralKind::Other`]). [FABLE-5] sq-wjl8i
+    /// [`LiteralKind::Other`]). sq-wjl8i
     ///
     /// # Contract (what keeps the total order lawful)
     ///
@@ -179,7 +179,7 @@ pub trait CompareTerm: Sized {
     /// float/double operand promotes the pair to f64, so `2^53+1 = 2^53E0` is true
     /// there); this total order deliberately REFINES those promoted ties — every strict
     /// promoted verdict is preserved (rounding is monotonic), only ties are split.
-    /// [OPUS-4.8] sq-rikm7 / [FABLE-5] sq-wjl8i
+    /// sq-rikm7 / sq-wjl8i
     fn exact_cmp(&self, other: &Self) -> Option<Ordering>;
 
     /// The **strict** value comparison for same-family typed literals the numeric arm
@@ -191,7 +191,7 @@ pub trait CompareTerm: Sized {
     /// This is the engine's `value_compare_strict`; it stays engine-resident because it
     /// is also driven by the relational `<` / `>` operators and is coupled to `oxrdf`.
     ///
-    /// # Contract: TOTALITY within the temporal kinds — [SONNET-4.6] sq-2k5py
+    /// # Contract: TOTALITY within the temporal kinds — sq-2k5py
     ///
     /// For a pair that BOTH classify as [`DateTime`](LiteralKind::DateTime) (or both as
     /// [`Date`](LiteralKind::Date)) this must return `Some`: the temporal kinds admit **no**
@@ -232,7 +232,7 @@ pub trait CompareTerm: Sized {
 /// **kind-first** (see below); triple terms component-wise (subject, then predicate,
 /// then object) recursively under this order.
 ///
-/// # The kind-first literal order — [FABLE-5] sq-wjl8i
+/// # The kind-first literal order — sq-wjl8i
 ///
 /// Within the literal class, terms first rank by [`LiteralKind`] (numeric < boolean <
 /// dateTime < date < string < language-tagged < other); ONLY same-kind pairs compare by
@@ -250,7 +250,7 @@ pub trait CompareTerm: Sized {
 /// **not**: mixing timeline-decided and lexical-decided pairs in one kind is intransitive
 /// exactly as the cross-kind fallback was, so
 /// [`strict_cmp`](CompareTerm::strict_cmp) is contracted to be TOTAL there (its
-/// "TOTALITY within the temporal kinds" section carries the witness). [SONNET-4.6] sq-2k5py
+/// "TOTALITY within the temporal kinds" section carries the witness). sq-2k5py
 ///
 /// Where SPARQL 1.1 §15.1 / the `<` operator define an order (the cross-class ranks;
 /// numeric, string, boolean, dateTime same-kind pairs) this order agrees with the spec;
@@ -294,7 +294,7 @@ pub fn compare_terms<T: CompareTerm>(x: &T, y: &T) -> Option<Ordering> {
             // KIND-FIRST: cross-kind pairs rank by LiteralKind, NEVER by a value or
             // lexical coercion — a cross-kind lexical fallback is intransitive against
             // the within-kind value orders (witness 2 of sq-wjl8i: lexically
-            // "10" < "11" < "2" while numerically 10 > 2). [FABLE-5] sq-wjl8i
+            // "10" < "11" < "2" while numerically 10 > 2). sq-wjl8i
             let (ka, kb) = (x.literal_kind(), y.literal_kind());
             if ka != kb {
                 return Some(ka.cmp(&kb));
@@ -311,7 +311,7 @@ pub fn compare_terms<T: CompareTerm>(x: &T, y: &T) -> Option<Ordering> {
                         // high-precision decimals, AND the mixed exact/inexact pair
                         // (witness 1 of sq-wjl8i). An undecidable recheck keeps the tie.
                         // Perf-neutral: exact work happens only on a tie.
-                        // [OPUS-4.8] sq-rikm7 / [FABLE-5] sq-wjl8i
+                        // sq-rikm7 / sq-wjl8i
                         Some(Ordering::Equal) => x.exact_cmp(y).unwrap_or(Ordering::Equal),
                         Some(o) => o,
                         // NaN (the only `partial_cmp` None): totalise with NaN FIRST —
@@ -332,7 +332,7 @@ pub fn compare_terms<T: CompareTerm>(x: &T, y: &T) -> Option<Ordering> {
             // deterministic lexical fallback. The fallback is reachable only for the
             // lexical-everywhere kinds: for the DateTime/Date kinds `strict_cmp` is
             // contracted TOTAL, because a kind mixing timeline-decided and lexical-decided
-            // pairs is intransitive. [SONNET-4.6] sq-2k5py
+            // pairs is intransitive. sq-2k5py
             if let Some(o) = x.strict_cmp(y) {
                 return Some(o);
             }
@@ -341,7 +341,7 @@ pub fn compare_terms<T: CompareTerm>(x: &T, y: &T) -> Option<Ordering> {
     }
 }
 
-// [FABLE-5] sq-sqtk2.4 / sq-wjl8i (epic sq-sqtk2, property B-1 of
+// sq-sqtk2.4 / sq-wjl8i (epic sq-sqtk2, property B-1 of
 // `research/mechanized-proof-program.md` §3.2/§5): Kani bounded-proof harnesses for the
 // ORDER LAWS of [`compare_terms`] — the laws `ORDER BY`'s `sort_by` validity rests on (an
 // inconsistent comparator makes Rust's sort panic or produce garbage). The sq-sqtk2.4 wave
@@ -515,7 +515,7 @@ mod kani_proofs {
     /// the MIXED exact/inexact comparison (every table double is half-integral, so 2× is
     /// exact; pinned by `domain_x2_doubles_are_exact`). The engine's real mixed-tier
     /// tie-break (`Num::cmp_total` → the exact decimal-string comparison) is modelled as
-    /// the i128 order of the doubled values. [FABLE-5] sq-wjl8i
+    /// the i128 order of the doubled values. sq-wjl8i
     const DBL_X2: [i128; 6] = [
         -18_014_398_509_481_984, // -(2^54)
         0,                       // -0.0 — exactly equal to +0.0
@@ -582,7 +582,7 @@ mod kani_proofs {
 
         /// TWICE the term's exact rational value, as an exact `i128` — the model's
         /// exact-rational tier for `exact_cmp` (see `DBL_X2`). `None` for NaN and
-        /// non-numerics. [FABLE-5] sq-wjl8i
+        /// non-numerics. sq-wjl8i
         fn x2(&self) -> Option<i128> {
             match self {
                 M::Int(i) => Some(2 * INTS[usize::from(*i)]),
@@ -663,7 +663,7 @@ mod kani_proofs {
             // strict family is `Strict`. (The engine also decides plain-string pairs here —
             // lexically, identical to the fallback the model routes them through.)
             //
-            // [SONNET-4.6] sq-2k5py — HONESTY BOUNDARY: the `Strict` (DateTime-kind) arm is
+            // sq-2k5py — HONESTY BOUNDARY: the `Strict` (DateTime-kind) arm is
             // TOTAL, which is now the documented `strict_cmp` CONTRACT rather than a
             // modelling convenience. These harnesses therefore prove transitivity for a
             // CONTRACT-CONFORMING implementation; they do NOT model the partial (relational)
@@ -1037,7 +1037,7 @@ mod kani_proofs {
     /// range) are the equal-but-lexically-distinct pair the double-transitivity harness
     /// relies on to catch a ties-fall-to-string-form mutation. If this fails, a re-scope
     /// has silenced the domain's interesting inputs and the harnesses above it are weaker
-    /// than documented. [FABLE-5] sq-sqtk2.4
+    /// than documented. sq-sqtk2.4
     #[kani::proof]
     #[kani::unwind(3)]
     fn domain_cf_numeric_is_collapse_free_with_signed_zero_pair() {
@@ -1086,7 +1086,7 @@ mod kani_proofs {
     /// the mixed-tier recheck, NaN first, strict, lexical). Revert the kind-rank rule
     /// for any one cross-kind pair (fall back to the lexical form) and this goes red on
     /// the `10 / "11" / 2` cycle; revert the exact mixed-tier recheck and it goes red on
-    /// the `2^53 / double(2^53) / 2^53+1` collapse triple. [FABLE-5] sq-wjl8i
+    /// the `2^53 / double(2^53) / 2^53+1` collapse triple. sq-wjl8i
     #[kani::proof]
     #[kani::unwind(12)]
     fn transitivity_mixed_literal_kinds_incl_nan() {
@@ -1127,7 +1127,7 @@ mod kani_proofs {
     /// its `DBLS` value — the fidelity condition under which the model's i128
     /// `exact_cmp` is the exact-rational order the engine's `Num::cmp_total` computes.
     /// The signed-zero pair collapsing to one x2 value (0) is deliberate: `-0.0` and
-    /// `0.0` are exactly equal rationals. [FABLE-5] sq-wjl8i
+    /// `0.0` are exactly equal rationals. sq-wjl8i
     #[kani::proof]
     #[kani::unwind(8)]
     fn domain_x2_doubles_are_exact() {
@@ -1209,7 +1209,7 @@ mod tests {
         /// AND its EXACT value as a scaled integer `mant * 10^-scale`, so the f64-collapse
         /// recheck arm is exercised: two of these can share an `f` yet differ exactly —
         /// modelling an `xsd:integer` beyond 2^53 (`scale` 0) and a high-precision
-        /// `xsd:decimal` (`scale > 0`). [OPUS-4.8] sq-rikm7
+        /// `xsd:decimal` (`scale > 0`). sq-rikm7
         ExactNum { f: f64, mant: i128, scale: u32 },
         /// A plain-string literal (orders by string form; `strict_cmp` decides equal
         /// strings, else `None` → string fallback).
@@ -1223,7 +1223,7 @@ mod tests {
 
     /// Test-model mirror of the engine's exact mixed-tier tie-break (`Num::cmp_total` →
     /// the exact decimal-string comparison): `mant × 10^-scale` against the f64's exact
-    /// decimal expansion, pure string arithmetic. [FABLE-5] sq-wjl8i
+    /// decimal expansion, pure string arithmetic. sq-wjl8i
     fn cmp_exact_vs_f64(mant: i128, scale: u32, f: f64) -> Ordering {
         if f.is_nan() {
             return Ordering::Greater; // NaN sorts first: every exact value is above it
@@ -1329,7 +1329,7 @@ mod tests {
             match (self, other) {
                 // Align both scaled integers to the common (max) scale, then compare the
                 // mantissas exactly (mirrors the substrate `Dec::cmp` the engine's numeric
-                // tower uses). [OPUS-4.8] sq-rikm7
+                // tower uses). sq-rikm7
                 (T::ExactNum { mant: am, scale: asc, .. }, T::ExactNum { mant: bm, scale: bsc, .. }) => {
                     let scale = (*asc).max(*bsc);
                     let a = am.checked_mul(10i128.checked_pow(scale - asc)?)?;
@@ -1468,7 +1468,7 @@ mod tests {
 
     #[test]
     fn cross_kind_literals_rank_by_kind_never_lexically() {
-        // [FABLE-5] sq-wjl8i: a numeric vs a string literal ranks by LiteralKind
+        // sq-wjl8i: a numeric vs a string literal ranks by LiteralKind
         // (Numeric < String) — NEVER by the lexical form. "0" < "1" lexically would
         // put the string first; the kind rank keeps every numeric below every string.
         assert_eq!(compare_terms(&T::NumLit(1.0), &T::StrLit("0".into())), Some(Ordering::Less));
@@ -1515,7 +1515,7 @@ mod tests {
     // `kani_proofs` module's `witness_*` harnesses. Before the sq-wjl8i fix they were
     // `#[ignore]`d and asserted the ORDER LAWS that failed; the comparator is now a total
     // order, so they run in every `cargo test` and pin the fixed verdicts (the exact
-    // triples that used to be intransitive). [SONNET-4.6] / [FABLE-5]
+    // triples that used to be intransitive). /
 
     /// FIXED witness 1 — the mixed exact/inexact numeric pair at the 2^53 collapse
     /// boundary now orders EXACTLY (every finite double is an exact rational): the
@@ -1523,7 +1523,7 @@ mod tests {
     /// collapsed neighbour, so the triple `(2^53, double(2^53), 2^53+1)` — formerly
     /// `Equal / Equal / Less`, an intransitive equality — is now `Equal / Less / Less`.
     /// `ORDER BY` / `MIN` / `MAX` over a column mixing integers and doubles near 2^53
-    /// is permutation-stable again. [FABLE-5] sq-wjl8i
+    /// is permutation-stable again. sq-wjl8i
     #[test]
     fn witness1_mixed_exact_inexact_at_2p53_now_transitive() {
         let two53: f64 = 9_007_199_254_740_992.0;
@@ -1544,7 +1544,7 @@ mod tests {
     /// `"10" < "11" < "2"` can no longer contradict the numeric `10 > 2`: the triple
     /// `(10, "11", 2)` — formerly `Less / Less / Greater`, an intransitive strict
     /// order — is now consistent (`2 < 10 < "11"`). Any ORDER BY column mixing numerics
-    /// and plain strings sorts consistently again. [FABLE-5] sq-wjl8i
+    /// and plain strings sorts consistently again. sq-wjl8i
     #[test]
     fn witness2_numeric_vs_string_now_ranked_by_kind() {
         let x = T::ExactNum { f: 10.0, mant: 10, scale: 0 };
@@ -1558,7 +1558,7 @@ mod tests {
     /// FIXED witness 3 — NaN no longer makes the comparator partial: it is totalised
     /// FIRST among numerics (before `-INF`) and equal to itself, so a caller mapping
     /// `None` to `Equal` can no longer place NaN "equal" to every numeric. Within-class
-    /// totality holds NaN included. [FABLE-5] sq-wjl8i (and the sq-ma9fb doc drift:
+    /// totality holds NaN included. sq-wjl8i (and the sq-ma9fb doc drift:
     /// `None` is no longer returned for NaN).
     #[test]
     fn witness3_nan_now_totalised_first_among_numerics() {
@@ -1579,7 +1579,7 @@ mod tests {
     /// reproduces the OLD relational (PARTIAL) comparison, whose indeterminate mixed-presence
     /// window returned `None` and so dropped the pair to the lexical fallback; `true` is the
     /// contracted TOTAL order (`sparq_core::temporal::Timeline::cmp_tl_total`: instant, then
-    /// presence). [SONNET-4.6] sq-2k5py
+    /// presence). sq-2k5py
     #[derive(Clone, Debug)]
     struct TzLit {
         instant: i64,
@@ -1626,7 +1626,7 @@ mod tests {
     /// timeline-decided and lexical-decided pairs. Two zoned dateTimes in OPPOSITE offsets are
     /// the SAME instant (timeline-Equal) while the tz-less `13:00:00` sits lexically
     /// BETWEEN them: `x ~ y` yet `x < z` and `z < y`, an inconsistent comparator — the same intransitivity SHAPE as the sq-wjl8i witnesses. Honouring the
-    /// totality contract (instant, then timezone presence) removes it. [SONNET-4.6] sq-2k5py
+    /// totality contract (instant, then timezone presence) removes it. sq-2k5py
     #[test]
     fn witness4_datetime_kind_indeterminate_window_needs_a_total_strict_cmp() {
         // 13:00 UTC as "12:00:00-01:00" (zoned), as "14:00:00+01:00" (zoned), and the

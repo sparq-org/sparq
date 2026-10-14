@@ -11,7 +11,7 @@
 //! A broadening case the code lets through is a PRIVILEGE-ESCALATION bug, not a test to
 //! weaken. Run: `cargo test -p sparq-trust --features cert-graph --test certification_graph_e2e`.
 //!
-//! [OPUS-4.8] sq-pfae.15 (epic sq-pfae, issue #940). Written while Fable unavailable — flag
+//! sq-pfae.15 (epic sq-pfae, issue #940). Written while Fable unavailable — flag
 //! for re-review when Fable returns. 🤖 SPARQ agent — certification-edge closure adversarial matrix.
 #![cfg(feature = "cert-graph")]
 

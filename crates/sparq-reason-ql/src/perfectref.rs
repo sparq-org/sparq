@@ -1,6 +1,6 @@
-// [OPUS-4.8] sq-t5bne (epic sq-pbz04): PerfectRef — the OWL 2 QL (DL-Lite_R) query-rewriting
+// sq-t5bne (epic sq-pbz04): PerfectRef — the OWL 2 QL (DL-Lite_R) query-rewriting
 // core (Calvanese, De Giacomo, Lembo, Lenzerini, Rosati, JAR 39(3) 2007).
-// [SONNET-4.6] sq-pbz04.3.1: B2 literal-object atoms — `Term::Literal` variant added.
+// sq-pbz04.3.1: B2 literal-object atoms — `Term::Literal` variant added.
 // A literal is treated exactly like `Const` for the applicability condition: it is never
 // `_`-eligible (a literal constant is never an unbound position), never unifiable with a
 // generated witness, and two distinct literals are never equal. Role inclusions carry the
@@ -34,7 +34,7 @@ use rustc_hash::FxHashSet;
 
 /// A term in a rewritten CQ atom.
 ///
-/// [SONNET-4.6] sq-pbz04.3.1: `Lit` variant added for B2 (literal-object role atoms).
+/// sq-pbz04.3.1: `Lit` variant added for B2 (literal-object role atoms).
 /// A `Lit` is treated exactly like `Const` for the applicability condition — it is never
 /// `_`-eligible and is rigid in the MGU (two distinct literals do not unify, a literal cannot
 /// bind to a non-literal). Role inclusions carry the literal unchanged.
@@ -56,7 +56,7 @@ pub enum Term {
     /// An RDF literal constant in a role-atom object position (B2, sq-pbz04.3.1). Stored as
     /// `(lexical_value, datatype_iri, Option<language_tag>)` — all plain `String` so `Term`
     /// derives `Eq`/`Hash`/`Ord`. Treated as a rigid constant — never `_`-eligible, never
-    /// unifiable with a generated witness, distinct literals never equal. [SONNET-4.6]
+    /// unifiable with a generated witness, distinct literals never equal.
     Lit(String, String, Option<String>),
 }
 
@@ -140,7 +140,7 @@ fn is_bound_var(cq: &Cq, name: &str) -> bool {
 
 /// A term position is "_-eligible" (may be consumed by an existential-introducing inclusion) iff
 /// it is an `Unbound`, OR a `Var` that is neither distinguished nor shared (so it is morally a
-/// `_`). Constants and literals are never eligible. [SONNET-4.6] sq-pbz04.3.1: `Literal` added.
+/// `_`). Constants and literals are never eligible. sq-pbz04.3.1: `Literal` added.
 fn underscore_eligible(cq: &Cq, t: &Term) -> bool {
     match t {
         Term::Unbound(_) => true,
@@ -192,7 +192,7 @@ fn push_cq(cq: Cq, seen: &mut FxHashSet<Cq>, worklist: &mut Vec<Cq>) {
 }
 
 /// Seed the fresh-id counter above any `Unbound` already present (there are none in a parsed
-/// query, but keep the API total). `Literal` terms carry no id. [SONNET-4.6] sq-pbz04.3.1.
+/// query, but keep the API total). `Literal` terms carry no id. sq-pbz04.3.1.
 fn seed_fresh(atoms: &[Atom]) -> u32 {
     let mut max = 0u32;
     let mut bump = |t: &Term| {
@@ -431,7 +431,7 @@ impl Subst {
 }
 
 /// The key a (possibly bindable) term occupies, or `None` for a rigid constant.
-/// `Literal` is treated like `Const` — rigid, no key. [SONNET-4.6] sq-pbz04.3.1.
+/// `Literal` is treated like `Const` — rigid, no key. sq-pbz04.3.1.
 fn key_of(t: &Term) -> Option<Key> {
     match t {
         Term::Var(v) => Some(Key::Var(v.clone())),
@@ -485,7 +485,7 @@ fn unify_terms(x: &Term, y: &Term, subst: &mut Subst, answer: &FxHashSet<&str>) 
 
 /// A term is RIGID under the MGU iff it is a constant (IRI or literal) OR a distinguished
 /// (answer) variable. Rigid terms may not be rebound; two distinct rigid terms do not unify.
-/// [SONNET-4.6] sq-pbz04.3.1: `Literal` added as rigid (like `Const`).
+/// sq-pbz04.3.1: `Literal` added as rigid (like `Const`).
 fn is_rigid(t: &Term, answer: &FxHashSet<&str>) -> bool {
     match t {
         Term::Const(_) => true,
