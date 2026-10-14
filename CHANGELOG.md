@@ -42,7 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list) can still change those keys (#6844). Existing labels are renumbered, so these keys and
   IRIs differ from those minted by earlier versions; regenerate stored ones. `why()` proof
   trees can still vary with traversal order. Ranking each round's existential firings adds a
-  small per-firing cost to rules with existential conclusions (#6843). (#6749)
+  per-firing cost to rules with existential conclusions, since recovered (#6843). (#6749)
+
+- **sparq-reason (N3):** the per-round ranking that makes existential skolem labels
+  deterministic (#6749) now orders a round's firing keys by a packed prefix of the keys rather
+  than by comparing whole keys, and a binding whose firing already minted its existentials no
+  longer allocates its key. The labels, the statement keys and the proof steps are unchanged,
+  byte for byte; only the cost of arriving at them is lower. Measured against the pre-#6749
+  path on an existential-heavy closure, a wide-firing-key closure and a proof-mode run.
+  (#6843)
 
 - **sparq-zk:** `CommitmentMethod::DualLeafV1` is no longer production-selectable
   (`is_production_selectable()` is `false` for it), and `secprop::production_method_iris()` yields the

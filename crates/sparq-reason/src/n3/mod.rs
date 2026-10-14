@@ -988,6 +988,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     let mut out: Vec<[Term; 3]> = Vec::new();
     let mut emitted: FxHashSet<[Term; 3]> = FxHashSet::default();
     let mut sk_counter = 0usize;
+    let mut scratch = FiringScratch::default();
     for (ri, rule) in query_parsed.rules.iter().enumerate() {
         let premise = order_premise(&rule.premise);
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
@@ -1015,11 +1016,12 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
         }
         // One instantiation per distinct conclusion-relevant binding, numbered in the
         // canonical order of the firings (GH #6749).
-        let none_fired = FxHashSet::default();
-        let firings = canonical_new_firings(bindings, &concl_vars, &none_fired, false);
+        let mut none_fired = FxHashSet::default();
+        let firings =
+            canonical_new_firings(bindings, &concl_vars, &mut none_fired, false, &mut scratch);
         let base = sk_counter;
         sk_counter += firings.len();
-        for (rank, _, b) in firings {
+        for (rank, b) in firings {
             let n = base + rank + 1;
             let sk: FxHashMap<String, String> = concl_blanks
                 .iter()
@@ -1108,15 +1110,31 @@ fn conclusion_relevant_vars(conclusion: &[[Term; 3]]) -> Vec<String> {
 }
 
 /// The firing key of binding `b` for a rule whose conclusion-relevant variables are
-/// `concl_vars` ([`conclusion_relevant_vars`]): one existential instantiation per distinct
-/// key. Two bindings with one key instantiate the same conclusion.
-fn firing_key(b: &Binding, concl_vars: &[String]) -> String {
-    concl_vars.iter().map(|v| format!("{:?};", b.get(v))).collect()
+/// `concl_vars` ([`conclusion_relevant_vars`]), written into `out` (cleared first): one
+/// existential instantiation per distinct key. Two bindings with one key instantiate the same
+/// conclusion. The buffer is the caller's so that keying a binding whose firing has already
+/// minted its existentials — the common case once a rule is saturated — allocates nothing.
+fn firing_key(b: &Binding, concl_vars: &[String], out: &mut String) {
+    use std::fmt::Write;
+    out.clear();
+    for v in concl_vars {
+        // Infallible: `String`'s `fmt::Write` never errors.
+        let _ = write!(out, "{:?};", b.get(v));
+    }
+}
+
+/// Buffers [`canonical_new_firings`] reuses across a run's rules and rounds (GH #6843): the
+/// firing-key buffer, this round's fresh keys, and the permutation that ranks them.
+#[derive(Default)]
+struct FiringScratch {
+    key: String,
+    keys: Vec<String>,
+    order: Vec<u64>,
 }
 
 /// The firings among `bindings` that mint existentials for the first time — one per firing
-/// key not yet in `fired` — each with its RANK in the canonical order of those keys
-/// (sorted; GH #6749), returned in arrival order.
+/// key not yet in `fired`, which this call extends with them — each with its RANK in the
+/// canonical order of those keys (sorted; GH #6749), returned in arrival order.
 ///
 /// Skolem labels are numbered by rank. The bindings arrive in the order the fact and delta
 /// hash sets yield them, which depends on insertion history and on the hasher's word size
@@ -1125,56 +1143,121 @@ fn firing_key(b: &Binding, concl_vars: &[String]) -> String {
 /// get distinct ranks, so labels stay injective. Only the numbering is canonical: the
 /// firings keep their arrival order, so the facts they derive are inserted as before.
 ///
-/// Bindings are deduplicated by key before sorting. Of several bindings with one key, the
-/// first to arrive is kept; with `tie_break`, the least by its full canonical encoding is
-/// kept instead, so the premises a proof step records are reproducible too. The key covers
-/// every conclusion-relevant variable, so the conclusion they instantiate — and hence the
-/// closure — is the same either way.
+/// Bindings are deduplicated by key before sorting — `fired` itself is the dedup, so a key
+/// seen twice in one round is as settled as one carried over from an earlier round. Of
+/// several bindings with one key, the first to arrive is kept; with `tie_break`, the least by
+/// its full canonical encoding is kept instead, so the premises a proof step records are
+/// reproducible too. The key covers every conclusion-relevant variable, so the conclusion
+/// they instantiate — and hence the closure — is the same either way.
 fn canonical_new_firings(
     bindings: Vec<Binding>,
     concl_vars: &[String],
-    fired: &FxHashSet<String>,
+    fired: &mut FxHashSet<String>,
     tie_break: bool,
-) -> Vec<(usize, String, Binding)> {
+    scratch: &mut FiringScratch,
+) -> Vec<(usize, Binding)> {
     let full_encoding = |b: &Binding| -> Vec<String> {
         let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
         f.sort_unstable();
         f
     };
-    // One entry per fresh key, in the arrival order of the key's first binding.
-    let mut fresh: Vec<(String, Binding)> = Vec::new();
-    let mut full: Vec<Vec<String>> = Vec::new(); // tie_break only
+    let FiringScratch { key, keys, order } = scratch;
+    keys.clear();
+    // One entry per fresh key, in the arrival order of the key's first binding; the ranks
+    // are filled in below.
+    let mut out: Vec<(usize, Binding)> = Vec::new();
+    // `tie_break` only, parallel to `out`: the kept binding's full encoding, computed when a
+    // second binding with the same key arrives and there is something to compare against.
+    let mut full: Vec<Option<Vec<String>>> = Vec::new();
     let mut slot: FxHashMap<String, usize> = FxHashMap::default();
     for b in bindings {
-        let key = firing_key(&b, concl_vars);
-        if fired.contains(&key) {
+        firing_key(&b, concl_vars, key);
+        if tie_break {
+            if let Some(&i) = slot.get(key.as_str()) {
+                let f = full_encoding(&b);
+                if full[i].is_none() {
+                    full[i] = Some(full_encoding(&out[i].1));
+                }
+                if full[i].as_ref().is_some_and(|kept| &f < kept) {
+                    full[i] = Some(f);
+                    out[i].1 = b;
+                }
+                continue; // a later binding of a key already kept
+            }
+        }
+        if fired.contains(key.as_str()) {
             continue;
         }
-        match slot.get(&key) {
-            None => {
-                slot.insert(key.clone(), fresh.len());
-                if tie_break {
-                    full.push(full_encoding(&b));
-                }
-                fresh.push((key, b));
-            }
-            Some(&i) if tie_break => {
-                let f = full_encoding(&b);
-                if f < full[i] {
-                    full[i] = f;
-                    fresh[i].1 = b;
-                }
-            }
-            Some(_) => {} // a later binding of a key already kept
+        fired.insert(key.clone());
+        if tie_break {
+            slot.insert(key.clone(), out.len());
+            full.push(None);
+        }
+        keys.push(key.clone());
+        out.push((0, b));
+    }
+    if out.len() > 1 {
+        let index = rank_keys(keys, order);
+        for (r, &e) in order.iter().enumerate() {
+            out[(e & index) as usize].0 = r;
         }
     }
-    let mut order: Vec<usize> = (0..fresh.len()).collect();
-    order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0)); // keys are distinct
-    let mut rank = vec![0; fresh.len()];
-    for (r, &i) in order.iter().enumerate() {
-        rank[i] = r;
+    out
+}
+
+/// Fills `order` with `keys`' indexes in ASCENDING key order, packed into the low bits of a
+/// sort word — the permutation that numbers a round's firings (GH #6749). Returns the mask
+/// that reads an index back out.
+///
+/// Equivalent to sorting the indexes by `keys[i]`, and cheaper on the keys this path sees
+/// (GH #6843). A round's keys are one conclusion-variable shape filled in, so they usually
+/// share a long prefix (`Some(Iri("http://…`) that a comparison sort re-reads on every
+/// comparison. This instead strips whatever prefix they do have in common once and sorts
+/// plain `u64`s carrying the leading bytes of what is left, which usually decides every key
+/// outright:
+///
+/// - the common prefix is common, so it orders nothing, and dropping it leaves the keys'
+///   relative order unchanged;
+/// - a key's word is the next bytes zero-padded, big-endian, keeping only the bits above the
+///   index; 0 is below every byte and truncating low bits is monotone, so `k < k'` implies
+///   `word(k) <= word(k')` — a strictly smaller word is a strictly smaller key, whatever the
+///   keys' lengths and whatever bytes (`\0` included) they hold;
+/// - so sorting by word and then re-sorting each equal-word run by its whole key is exactly
+///   ascending key order. Keys are distinct, so that order is total, and the index in the low
+///   bits only separates equal words, never decides a rank.
+fn rank_keys(keys: &[String], order: &mut Vec<u64>) -> u64 {
+    debug_assert!(keys.len() > 1, "a round with one key needs no ranking");
+    let index = u64::MAX >> (keys.len() as u64).leading_zeros(); // >= keys.len() - 1
+    let common = keys[1..]
+        .iter()
+        .fold(keys[0].len(), |p, k| common_prefix(&keys[0].as_bytes()[..p], k.as_bytes()));
+    let word = |k: &String| {
+        let mut w = [0u8; 8];
+        let tail = &k.as_bytes()[common..];
+        let n = tail.len().min(8);
+        w[..n].copy_from_slice(&tail[..n]);
+        u64::from_be_bytes(w) & !index
+    };
+    order.clear();
+    order.extend(keys.iter().enumerate().map(|(i, k)| word(k) | i as u64));
+    order.sort_unstable();
+    // Re-sort the runs the packed words left tied (for most rounds, there are none).
+    let mut i = 0;
+    while i < order.len() {
+        let w = order[i] & !index;
+        let end = i + order[i..].iter().take_while(|e| *e & !index == w).count();
+        if end - i > 1 {
+            let key = |e: &u64| &keys[(e & index) as usize];
+            order[i..end].sort_unstable_by(|a, b| key(a).cmp(key(b)));
+        }
+        i = end;
     }
-    fresh.into_iter().zip(rank).map(|((key, b), r)| (r, key, b)).collect()
+    index
+}
+
+/// The length of `a` and `b`'s common prefix.
+fn common_prefix(a: &[u8], b: &[u8]) -> usize {
+    a.iter().zip(b).take_while(|(x, y)| x == y).count()
 }
 
 /// A stratified run's result ([`reason_n3_stratified`]).
@@ -1768,6 +1851,7 @@ fn run_closure_in(
     let premise_meta: Vec<Option<Box<[String]>>> =
         rules.iter().map(|r| premise_universals(&r.premise)).collect();
     let mut fired: Vec<FxHashSet<String>> = vec![FxHashSet::default(); rules.len()];
+    let mut scratch = FiringScratch::default();
     let mut sk_counter = 0usize;
 
     // TRANSITIVITY fast path: rules of the exact shape `{?x P ?y. ?y P ?z} => {?x P ?z}`
@@ -2049,17 +2133,22 @@ fn run_closure_in(
                 // of this round's new firings so a label never depends on hash-set traversal
                 // order (GH #6749).
                 let tie_break = mode == StepMode::Full;
-                let firings = canonical_new_firings(bindings, concl_vars, &fired[ri], tie_break);
+                let firings = canonical_new_firings(
+                    bindings,
+                    concl_vars,
+                    &mut fired[ri],
+                    tie_break,
+                    &mut scratch,
+                );
                 let base = sk_counter;
                 sk_counter += firings.len();
-                for (rank, key, b) in firings {
+                for (rank, b) in firings {
                     let n = base + rank + 1;
                     let sk: FxHashMap<String, String> = concl_blanks
                         .iter()
                         .map(|l| (l.clone(), format!("{}{}_{}", sk_prefix, n, l)))
                         .collect();
                     emit(&b, Some(&sk));
-                    fired[ri].insert(key);
                 }
             }
             let mut new_delta: FxHashSet<[Term; 3]> = FxHashSet::default();
@@ -9199,6 +9288,259 @@ mod tests {
         let mut want: Vec<String> = (n + 1..=2 * n).map(|k| format!("__sk0_{k}_f")).collect();
         want.sort();
         assert_eq!(f, want);
+    }
+
+    /// A deterministic xorshift64* stream, for the randomized differentials below.
+    fn rng(seed: u64) -> impl FnMut(u64) -> u64 {
+        let mut x = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+        move |m| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % m.max(1)
+        }
+    }
+
+    /// The STRAIGHTFORWARD ordering GH #6838 shipped, kept as the reference the optimized
+    /// ranking (GH #6843) is differentially tested against: one entry per firing key not yet
+    /// in `fired`, in arrival order, ranked by sorting those keys.
+    fn reference_new_firings(
+        bindings: Vec<Binding>,
+        concl_vars: &[String],
+        fired: &mut FxHashSet<String>,
+        tie_break: bool,
+    ) -> Vec<(usize, Binding)> {
+        let full_encoding = |b: &Binding| -> Vec<String> {
+            let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
+            f.sort_unstable();
+            f
+        };
+        let mut fresh: Vec<(String, Binding)> = Vec::new();
+        let mut full: Vec<Vec<String>> = Vec::new();
+        let mut slot: FxHashMap<String, usize> = FxHashMap::default();
+        for b in bindings {
+            let mut key = String::new();
+            firing_key(&b, concl_vars, &mut key);
+            if fired.contains(&key) {
+                continue;
+            }
+            match slot.get(&key) {
+                None => {
+                    slot.insert(key.clone(), fresh.len());
+                    full.push(full_encoding(&b));
+                    fresh.push((key, b));
+                }
+                Some(&i) if tie_break => {
+                    let f = full_encoding(&b);
+                    if f < full[i] {
+                        full[i] = f;
+                        fresh[i].1 = b;
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        let mut order: Vec<usize> = (0..fresh.len()).collect();
+        order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0));
+        let mut rank = vec![0; fresh.len()];
+        for (r, &i) in order.iter().enumerate() {
+            rank[i] = r;
+        }
+        for (key, _) in &fresh {
+            fired.insert(key.clone());
+        }
+        fresh.into_iter().zip(rank).map(|((_, b), r)| (r, b)).collect()
+    }
+
+    /// Random bindings over `concl_vars` plus an extra variable (so proof-mode tie-breaking
+    /// has something to break on), with a small term alphabet so keys repeat, share long
+    /// prefixes, and sometimes prefix one another.
+    fn random_bindings(seed: u64, concl_vars: &[String], n: usize) -> Vec<Binding> {
+        let mut r = rng(seed);
+        let term = |i: u64| -> Term {
+            match i % 5 {
+                // Long shared prefixes, and `…s1` is a prefix of `…s1x`: the packed sort
+                // word cannot separate these on its leading bytes alone.
+                0 => Term::Iri(format!("http://example.org/a/very/long/shared/path/s{}", i / 5)),
+                1 => Term::Iri(format!("http://example.org/a/very/long/shared/path/s{}x", i / 5)),
+                2 => Term::Blank(format!("b{}", i / 5)),
+                // A literal whose Debug escapes a control character, so the key holds `\u{0}`
+                // rather than a raw NUL.
+                3 => Term::Lit(format!("l\u{0}{}", i / 5), "http://x/dt".into(), None),
+                _ => Term::List(vec![Term::Iri(format!("http://x/{}", i / 5))]),
+            }
+        };
+        (0..n)
+            .map(|_| {
+                let mut b = Binding::new();
+                for v in concl_vars {
+                    if r(8) > 0 {
+                        // Sometimes leave a variable unbound: it keys as unbound.
+                        b.insert(v.clone(), term(r(14)));
+                    }
+                }
+                b.insert("other".to_string(), term(r(14)));
+                b
+            })
+            .collect()
+    }
+
+    #[test]
+    fn canonical_new_firings_matches_the_reference_ordering() {
+        // GH #6843: the optimized ranking must agree with GH #6838's straightforward
+        // "sort the round's new keys" ordering on every input — same firings, same ranks,
+        // same bindings kept, same `fired` set — in BOTH strategy branches (`tie_break` is
+        // the proof-mode branch). Randomized over rule shapes, binding counts and the
+        // carried-over `fired` set.
+        let mut covered = (0, 0, 0); // rounds compared, ranked rounds, tie-broken rounds
+        for seed in 0..600u64 {
+            let mut r = rng(seed ^ 0x5151);
+            let tie_break = seed % 2 == 0;
+            let nvars = 1 + r(3) as usize;
+            let concl_vars: Vec<String> = (0..nvars).map(|i| format!("v{i}")).collect();
+            let mut mine: FxHashSet<String> = FxHashSet::default();
+            let mut theirs: FxHashSet<String> = FxHashSet::default();
+            let mut scratch = FiringScratch::default();
+            // Several rounds, so keys carried over in `fired` are exercised too.
+            for round in 0..3 {
+                let bindings = random_bindings(seed * 7 + round, &concl_vars, r(12) as usize);
+                let want =
+                    reference_new_firings(bindings.clone(), &concl_vars, &mut theirs, tie_break);
+                let got = canonical_new_firings(
+                    bindings,
+                    &concl_vars,
+                    &mut mine,
+                    tie_break,
+                    &mut scratch,
+                );
+                let fmt = |f: &[(usize, Binding)]| -> Vec<String> {
+                    f.iter()
+                        .map(|(rank, b)| {
+                            let mut e: Vec<String> =
+                                b.iter().map(|(v, t)| format!("{v:?}={t:?}")).collect();
+                            e.sort();
+                            format!("{rank}:{}", e.join(","))
+                        })
+                        .collect()
+                };
+                assert_eq!(
+                    fmt(&got),
+                    fmt(&want),
+                    "seed {seed} round {round} tie_break={tie_break}"
+                );
+                let mut m: Vec<&String> = mine.iter().collect();
+                let mut t: Vec<&String> = theirs.iter().collect();
+                m.sort();
+                t.sort();
+                assert_eq!(m, t, "fired keys diverged (seed {seed} round {round})");
+                covered.0 += 1;
+                covered.1 += usize::from(got.len() > 1);
+                covered.2 += usize::from(tie_break && got.len() < 12);
+            }
+        }
+        // The differential is worthless if the inputs never reach the ranking or the
+        // tie-break; pin that they do.
+        assert!(covered.1 > 500, "rounds that actually rank: {}", covered.1);
+        assert!(covered.2 > 500, "rounds that dedup under tie_break: {}", covered.2);
+    }
+
+    #[test]
+    fn rank_keys_matches_sorting_the_keys() {
+        // GH #6843: the packed-word ranking, against the plain comparison sort it replaces,
+        // on the cases its correctness argument turns on — a long common prefix, keys that
+        // differ only past the packed bytes, a key that is a prefix of another, and keys
+        // holding an escaped NUL.
+        let long = "Some(Iri(\"http://example.org/a/very/long/shared/path/s";
+        let mut sets: Vec<Vec<String>> = vec![
+            vec![format!("{long}1\"));"), format!("{long}10\"));"), format!("{long}2\"));")],
+            vec!["ab".into(), "a".into(), "abc".into(), "b".into()],
+            vec!["a\\u{0}b".into(), "ab".into(), "a".into()],
+            // Identical for 24 bytes past the common prefix: every key lands in one run.
+            (0..9).map(|i| format!("{long}aaaaaaaaaaaaaaaaaaaaaaaa{i}")).collect(),
+        ];
+        let mut r = rng(0xabc);
+        for _ in 0..200 {
+            let n = 2 + r(20) as usize;
+            let mut keys: Vec<String> = (0..n)
+                .map(|_| match r(3) {
+                    0 => format!("{long}{}\"));", r(40)),
+                    1 => format!("{}", r(1000)),
+                    _ => format!("Some(Lit(\"l\\u{{0}}{}\"));", r(40)),
+                })
+                .collect();
+            keys.sort();
+            keys.dedup(); // the ranking's contract: the round's keys are distinct
+            if keys.len() > 1 {
+                sets.push(keys);
+            }
+        }
+        for keys in sets {
+            let mut want: Vec<usize> = (0..keys.len()).collect();
+            want.sort_by(|&x, &y| keys[x].cmp(&keys[y]));
+            let mut order = Vec::new();
+            let index = rank_keys(&keys, &mut order);
+            let got: Vec<usize> = order.iter().map(|e| (e & index) as usize).collect();
+            assert_eq!(got, want, "ranking {keys:?}");
+        }
+    }
+
+    #[test]
+    fn random_existential_rule_sets_label_order_independently() {
+        // GH #6749/#6843: the closure-level half of the differential — over random
+        // existential rule sets, reordering a document (which changes the fact sets'
+        // traversal order) must change neither the closure nor one skolem label.
+        let mut labelled = 0;
+        for seed in 0..120u64 {
+            let mut r = rng(seed ^ 0x77);
+            let mut rules = String::new();
+            for i in 0..1 + r(3) {
+                let (p, q) = (r(3), r(3));
+                rules.push_str(&match r(3) {
+                    0 => format!("{{ ?x :p{p} ?y }} => {{ ?x :c{i} _:e. _:e :k ?y }} .\n"),
+                    1 => format!(
+                        "{{ ?x :p{p} ?y. ?y :p{q} ?z }} => {{ ?x :c{i} _:e. _:e :k ?z, ?y }} .\n"
+                    ),
+                    _ => format!("{{ ?x :p{p} ?y }} => {{ _:e :c{i} ?x. _:f :k _:e }} .\n"),
+                });
+            }
+            let facts: Vec<String> = (0..4 + r(14))
+                .map(|_| {
+                    let (a, b, p) = (r(6), r(6), r(3));
+                    if r(5) == 0 {
+                        format!(":s{a} :p{p} \"l{b}\" .\n")
+                    } else {
+                        format!(":s{a} :p{p} :s{b} .\n")
+                    }
+                })
+                .collect();
+            let head = "@prefix : <http://ex/> .\n";
+            let pad: String = (0..200).map(|i| format!(":pad{i} :unrelated {i} .\n")).collect();
+            let rev: String = facts.iter().rev().cloned().collect();
+            let docs = [
+                format!("{head}{}{rules}", facts.concat()),
+                format!("{head}{rules}{rev}"),
+                format!("{head}{pad}{rules}{}", facts.concat()),
+            ];
+            let render = |src: &str| -> Vec<String> {
+                let c = reason_n3_terms(src, None).unwrap();
+                let mut f: Vec<String> = c
+                    .facts
+                    .iter()
+                    .map(|t| format!("{t:?}"))
+                    .filter(|f| !f.contains("/unrelated"))
+                    .collect();
+                f.sort();
+                f
+            };
+            let base = render(&docs[0]);
+            if base.iter().any(|f| f.contains("__sk")) {
+                labelled += 1;
+            }
+            for d in &docs[1..] {
+                assert_eq!(render(d), base, "seed {seed}: reordering changed the closure");
+            }
+        }
+        assert!(labelled > 80, "documents that minted a skolem: {labelled}");
     }
 
     #[test]
