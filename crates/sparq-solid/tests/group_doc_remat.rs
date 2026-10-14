@@ -1,7 +1,8 @@
 //! issue #55 — a permitted write to a GROUP DOCUMENT auto-re-materializes.
 //!
 //! `PodStore::update_as` already re-materializes the auth view after a permitted write to
-//! an `.acl`/`.acr` document, and after any variable-graph or `CLEAR`/`DROP ALL` update.
+//! an `.acl`/`.acr` document, and after any `CLEAR`/`DROP ALL` update. A `GRAPH ?g` update
+//! re-materializes only when a resolved target is an auth-view input (issue #3384).
 //! The remaining hole was the *statically targeted* write to a WAC **group document** — a
 //! graph named by some authorization's `acl:agentGroup`. Such a document has no naming
 //! convention (`https://pod.ex/groups` looks like any other resource), so the write path
@@ -43,8 +44,9 @@ fn sess(agent: &str) -> Session<'_> {
     Session { agent: Some(agent), client: None, issuer: None, now: None }
 }
 
-/// A pod whose root `.acl` gives ADMIN Read+Write+Control over everything and gives the
-/// members of `<https://pod.ex/groups#team>` Read — with ALICE the sole initial member.
+/// A pod whose root `.acl` gives ADMIN Read+Write+Control over everything (the root and its
+/// own `.acl` included) and gives the members of `<https://pod.ex/groups#team>` Read — with
+/// ALICE the sole initial member.
 fn store() -> PodStore {
     let nq = concat!(
         // Content.
@@ -57,6 +59,8 @@ fn store() -> PodStore {
         "<https://pod.ex/.acl#owner> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> \
             <http://www.w3.org/ns/auth/acl#Authorization> <https://pod.ex/.acl> .\n",
         "<https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#default> \
+            <https://pod.ex/> <https://pod.ex/.acl> .\n",
+        "<https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#accessTo> \
             <https://pod.ex/> <https://pod.ex/.acl> .\n",
         "<https://pod.ex/.acl#owner> <http://www.w3.org/ns/auth/acl#agent> \
             <https://admin.ex/card#me> <https://pod.ex/.acl> .\n",
@@ -169,5 +173,103 @@ fn group_doc_write_still_requires_write_permission() {
     assert!(
         can_read_note(&s, ALICE),
         "the denied write left the store — and so alice's grant — untouched"
+    );
+}
+
+#[test]
+fn ordinary_resource_write_does_not_rebuild_the_auth_view() {
+    // The trigger-count half of the negative control above: a static write to a graph that
+    // is neither an `.acl`/`.acr` nor a referenced group document leaves the view alone.
+    let mut s = store();
+    let gen = s.auth_generation();
+    s.update_as(
+        &sess(ADMIN),
+        "INSERT DATA { GRAPH <https://pod.ex/other> { \
+            <https://pod.ex/other#it> <https://ex.dev/ns#tag> \"x\" } }",
+    )
+    .expect("admin may write an ordinary resource");
+    assert_eq!(
+        s.auth_generation(),
+        gen,
+        "a content-only write must not rebuild the view"
+    );
+}
+
+#[test]
+fn variable_graph_content_write_does_not_rebuild_the_auth_view() {
+    // issue #3384: a `GRAPH ?g` update whose resolved targets are all plain content graphs
+    // is authorized per resolved graph and does not re-materialize.
+    let mut s = store();
+    let gen = s.auth_generation();
+    s.update_as(
+        &sess(ADMIN),
+        "DELETE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } } \
+         INSERT { GRAPH ?g { ?s <https://ex.dev/ns#title> \"renamed\" } } \
+         WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?t } }",
+    )
+    .expect("admin may rewrite content graphs");
+    let renamed = s
+        .ask_as(
+            &sess(ADMIN),
+            Mode::Read,
+            "ASK { GRAPH ?g { ?s <https://ex.dev/ns#title> \"renamed\" } }",
+        )
+        .expect("ask evaluates");
+    assert!(renamed, "the update must have rewritten the content graphs");
+    assert_eq!(
+        s.auth_generation(),
+        gen,
+        "content-only GRAPH ?g targets must not rebuild the view"
+    );
+    assert!(
+        can_read_note(&s, ALICE),
+        "alice keeps her group-derived grant"
+    );
+}
+
+#[test]
+fn variable_graph_group_doc_write_rebuilds_the_auth_view() {
+    // The same `GRAPH ?g` shape resolving to the referenced group document must still
+    // re-materialize: the revoke is visible on the very next read.
+    let mut s = store();
+    let gen = s.auth_generation();
+    s.update_as(
+        &sess(ADMIN),
+        &format!(
+            "DELETE {{ GRAPH ?g {{ ?grp <{HAS_MEMBER}> <{ALICE}> }} }} \
+             WHERE {{ GRAPH ?g {{ ?grp <{HAS_MEMBER}> <{ALICE}> }} }}"
+        ),
+    )
+    .expect("admin may write the group document");
+    assert!(
+        s.auth_generation() > gen,
+        "a GRAPH ?g write to a group document must rebuild the view"
+    );
+    assert!(
+        !can_read_note(&s, ALICE),
+        "alice's grant must be gone on the very next read"
+    );
+}
+
+#[test]
+fn variable_graph_acl_write_rebuilds_the_auth_view() {
+    // And resolving to an `.acl` document: dropping the team's Read mode revokes alice.
+    // `?g` is bound by `VALUES`, so the WHERE reads no graph.
+    let mut s = store();
+    let gen = s.auth_generation();
+    s.update_as(
+        &sess(ADMIN),
+        "DELETE { GRAPH ?g { <https://pod.ex/.acl#team> \
+            <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> } } \
+         WHERE { VALUES ?g { <https://pod.ex/.acl> } }",
+    )
+    .expect("admin (Control) may write the .acl");
+    assert!(
+        s.auth_generation() > gen,
+        "a GRAPH ?g write to an .acl must rebuild the view"
+    );
+    assert!(
+        !can_read_note(&s, ALICE),
+        "alice's grant must be gone on the very next read"
     );
 }
