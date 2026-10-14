@@ -5932,8 +5932,18 @@ mod tests {
                         }
                         if conditional.is_some_and(|(_, template)| template.contains("{etag}")) {
                             let fresh = dropbox_with_writer().await;
-                            let (wrong_status, _) =
+                            let fresh_before = container_etag(&fresh).await;
+                            let (wrong_status, wrong_text) =
                                 v5_request(&fresh, verb, path, conditional, WRONG, token).await;
+                            let fresh_after = container_etag(&fresh).await;
+                            for etag in [&fresh_before, &fresh_after] {
+                                assert!(
+                                    !wrong_text.contains(etag.as_str()),
+                                    "{verb} {path} as {label} ({conditional:?}, non-matching) \
+                                     answered {wrong_status} with the container ETag {etag}:\n\
+                                     {wrong_text}"
+                                );
+                            }
                             assert_eq!(
                                 status, wrong_status,
                                 "{verb} {path} as {label} ({conditional:?}): the status shows \
