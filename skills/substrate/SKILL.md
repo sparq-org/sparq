@@ -23,7 +23,7 @@ re-exported inline-integer id helpers `inline_id_of_int`, `is_inline`, and `NO_I
 
 ```toml
 [dependencies]
-sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["rows"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.6", features = ["rows"] }
 ```
 
 ```rust,ignore
@@ -104,7 +104,7 @@ A second, related `xsd:float` defect lived in a different crate and is now fixed
 
 ```toml
 [dependencies]
-sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["numeric"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.6", features = ["numeric"] }
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 ```
 
@@ -167,7 +167,7 @@ closes most of the `hash_probe` descriptor-projection overhead the #1810 delta m
 
 ```toml
 [dependencies]
-sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["join"] }  # implies "rows"
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.6", features = ["join"] }  # implies "rows"
 ```
 
 ```rust,ignore
@@ -212,7 +212,7 @@ ORDER BY total order refines promoted ties and positions NaN.
 
 ```toml
 [dependencies]
-sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.4", features = ["compare"] }
+sparq-substrate = { git = "https://github.com/sparq-org/sparq", tag = "v0.1.6", features = ["compare"] }
 ```
 
 **Machine-checked order laws (Kani, sq-sqtk2.4 + sq-wjl8i).** `src/compare.rs` hosts a
@@ -305,7 +305,7 @@ neutral vs the pre-move engine baseline (W3C SPARQL conformance floor bit-identi
 numeric/compare micro-benches within noise). Phase-5 reasoner adoption (consuming `join` from
 `sparq-reason` / `sparq-reason-el`) is tracked separately._
 
-### Borrowed numeric operands (GPT-6)
+### Borrowed numeric operands
 
 `numeric::Num::of_parts(value, datatype)` is the allocation-free parser shared
 by `Num::of_literal` and the reasoner comparator. Both validate numeric lexical

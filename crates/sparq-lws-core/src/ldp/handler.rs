@@ -901,7 +901,7 @@ async fn serve_read_once<S: Store>(
             accept,
         )
         .await?;
-        let etag = representation_etag(&body);
+        let etag = representation_etag(&content_type, &body);
         (Some((body, content_type)), etag)
     } else {
         let etag = negotiated_validator(&resource.meta.etag, &resource.meta.content_type, accept)?;
@@ -2023,18 +2023,27 @@ async fn render_container<S: Store>(
     Ok((Bytes::from(bytes), negotiated.content_type()))
 }
 
-/// A STRONG ETag computed from a rendered representation's BYTES — `"<len>-<hash>"`.
+/// A STRONG ETag computed from a rendered representation's media type and BYTES — `"<len>-<hash>"`.
 ///
 /// Used for a container response, whose body is generated from live membership (not stored bytes), so
 /// the validator must track the actual representation: it changes whenever the serialised body changes
-/// (a child added/removed, or the negotiated format differs). The same body computed for GET and HEAD
-/// yields the same validator, so the two methods agree. This is a non-cryptographic content hash
-/// (FNV-1a over the bytes), sufficient for a cache validator — collisions across distinct
-/// representations are vanishingly unlikely and the length prefix further disambiguates.
-fn representation_etag(body: &[u8]) -> String {
-    // FNV-1a 64-bit over the serialised representation.
+/// (a child added/removed) or the negotiated `Content-Type` differs. The media type is hashed too
+/// because two formats can render identical bytes (N-Triples and default-graph N-Quads always do, and
+/// a one-triple Turtle body can match them), and a validator must never 304 a request for one of them
+/// with the other's tag. The same body computed for GET and HEAD yields the same validator, so the two
+/// methods agree. This is a non-cryptographic content hash (FNV-1a), sufficient for a cache validator
+/// — collisions across distinct representations are vanishingly unlikely and the length prefix
+/// further disambiguates.
+fn representation_etag(content_type: &str, body: &[u8]) -> String {
+    // FNV-1a 64-bit over the media type, a 0xFF separator (never part of a header value), and the
+    // serialised representation.
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for &b in body {
+    let bytes = content_type
+        .as_bytes()
+        .iter()
+        .chain(std::iter::once(&0xFF))
+        .chain(body);
+    for &b in bytes {
         hash ^= b as u64;
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
@@ -5103,6 +5112,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn container_validators_are_distinct_across_formats_with_identical_bytes() {
+        // #4879 review: N-Triples and default-graph N-Quads render identical bytes, and a one-triple
+        // Turtle listing can too, so the container validator must carry the format: each format's
+        // tag 304s only a request for that same format, on GET and HEAD alike.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let formats = [
+            "text/turtle",
+            "application/n-triples",
+            "application/n-quads",
+        ];
+        let mut tags = Vec::new();
+        for media in formats {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let resp = get_with(&state, owner_token(), "/alice/", accept).await;
+            assert_eq!(resp.status(), StatusCode::OK, "{media}");
+            tags.push(etag_of(&resp));
+        }
+        for (i, held) in tags.iter().enumerate() {
+            for (j, media) in formats.iter().enumerate() {
+                for verb in ["GET", "HEAD"] {
+                    let mut cond = HeaderMap::new();
+                    cond.insert(header::ACCEPT, HeaderValue::from_static(media));
+                    cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(held).unwrap());
+                    let uri: axum::http::Uri = "/alice/".parse().unwrap();
+                    let (s, t) = (State(state.clone()), Extension(owner_token()));
+                    let resp = match verb {
+                        "GET" => get_handler(s, t, uri, cond).await,
+                        _ => head_handler(s, t, uri, cond).await,
+                    }
+                    .unwrap();
+                    let expected = if i == j {
+                        StatusCode::NOT_MODIFIED
+                    } else {
+                        StatusCode::OK
+                    };
+                    assert_eq!(
+                        resp.status(),
+                        expected,
+                        "{verb} {media} holding the {} tag",
+                        formats[i]
+                    );
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn unauthorized_caller_gets_denial_not_304_no_existence_leak() {
         // A stranger with NO read access must get the auth failure (403 authenticated), NOT a 304 —
         // a 304 would leak that the resource exists to a caller who cannot read it. Auth runs BEFORE
@@ -5133,6 +5190,57 @@ mod tests {
 
     const COND_DOC: &str =
         "<https://pod.example/alice/doc#me> <http://xmlns.com/foaf/0.1/name> \"X\" .";
+
+    #[tokio::test]
+    async fn relabelling_the_same_bytes_changes_the_etag() {
+        // The Content-Type is part of the representation: re-storing identical bytes under another
+        // media type must mint a new validator, so the old tag no longer passes If-Match and a
+        // conditional GET holding it is not a 304.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let turtle_tag =
+            etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        let mut plain = HeaderMap::new();
+        plain.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+        put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/doc".parse().unwrap(),
+            plain.clone(),
+            AxBytes::from(COND_DOC),
+        )
+        .await
+        .expect("relabel as text/plain");
+        let plain_read = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+        assert_eq!(
+            plain_read.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/plain"
+        );
+        let plain_tag = etag_of(&plain_read);
+        assert_ne!(plain_tag, turtle_tag);
+
+        let mut cond = HeaderMap::new();
+        cond.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_str(&turtle_tag).unwrap(),
+        );
+        let resp = get_with(&state, owner_token(), "/alice/doc", cond).await;
+        assert_eq!(resp.status(), StatusCode::OK, "the Turtle tag must not 304");
+
+        plain.insert(
+            header::IF_MATCH,
+            HeaderValue::from_str(&turtle_tag).unwrap(),
+        );
+        let stale = put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/alice/doc".parse().unwrap(),
+            plain,
+            AxBytes::from(COND_DOC),
+        )
+        .await
+        .unwrap_or_else(IntoResponse::into_response);
+        assert_eq!(stale.status(), StatusCode::PRECONDITION_FAILED);
+    }
 
     #[tokio::test]
     async fn get_stored_tag_with_accept_jsonld_is_200_not_304() {
@@ -5288,6 +5396,69 @@ mod tests {
         assert_eq!(
             negotiated_validator(stored, "text/turtle", Some("application/ld+json")).unwrap(),
             "\"5-abc123+jsonld\""
+        );
+    }
+
+    #[tokio::test]
+    async fn get_ntriples_and_nquads_are_served_with_their_own_validators() {
+        // #4879: an explicit N-Triples or N-Quads Accept is served in that format (no longer the
+        // Turtle fallback), with a validator distinct from every other representation that 304s
+        // only for its own type.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let turtle_tag =
+            etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+        let expected = format!("{COND_DOC}\n");
+        let mut tags = vec![turtle_tag];
+        for media in ["application/n-triples", "application/n-quads"] {
+            let mut accept = HeaderMap::new();
+            accept.insert(header::ACCEPT, HeaderValue::from_static(media));
+            let resp = get_with(&state, owner_token(), "/alice/doc", accept.clone()).await;
+            assert_eq!(resp.status(), StatusCode::OK, "{media}");
+            assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), media);
+            let tag = etag_of(&resp);
+            assert!(
+                !tags.contains(&tag),
+                "{media} reuses another representation's tag"
+            );
+            // A single default-graph triple: the N-Quads line carries no graph label, so both
+            // bodies are the one canonical line.
+            assert_eq!(body_bytes(resp).await, expected.as_bytes(), "{media}");
+
+            let mut cond = accept;
+            cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(&tag).unwrap());
+            let not_mod = get_with(&state, owner_token(), "/alice/doc", cond).await;
+            assert_eq!(not_mod.status(), StatusCode::NOT_MODIFIED, "{media}");
+            for other in &tags {
+                let mut cond = HeaderMap::new();
+                cond.insert(header::ACCEPT, HeaderValue::from_static(media));
+                cond.insert(header::IF_NONE_MATCH, HeaderValue::from_str(other).unwrap());
+                let resp = get_with(&state, owner_token(), "/alice/doc", cond).await;
+                assert_eq!(resp.status(), StatusCode::OK, "{media} 304'd for {other}");
+            }
+            tags.push(tag);
+        }
+    }
+
+    #[tokio::test]
+    async fn get_container_as_ntriples_lists_its_children() {
+        // #4879: the container listing path negotiates the same formats as a plain resource.
+        let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+        let mut accept = HeaderMap::new();
+        accept.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("application/n-triples"),
+        );
+        let resp = get_with(&state, owner_token(), "/alice/", accept).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/n-triples"
+        );
+        let body = String::from_utf8(body_bytes(resp).await.to_vec()).unwrap();
+        assert!(
+            body.lines().any(|l| l
+                == "<https://pod.example/alice/> <http://www.w3.org/ns/ldp#contains> <https://pod.example/alice/doc> ."),
+            "{body}"
         );
     }
 
@@ -5763,6 +5934,219 @@ mod tests {
             alice_get.etag.is_some(),
             "the authorized reader DOES receive the container ETag"
         );
+    }
+
+    /// Every header value and the body of one response, as text, so a test can check that a value
+    /// appears NOWHERE in it, not just in the `ETag` header.
+    async fn response_text(result: Result<Response, ServerError>) -> (u16, String) {
+        let resp = result.unwrap_or_else(IntoResponse::into_response);
+        let status = resp.status().as_u16();
+        let mut text: String = resp
+            .headers()
+            .iter()
+            .map(|(name, value)| format!("{name}: {}\n", String::from_utf8_lossy(value.as_bytes())))
+            .collect();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        text.push_str(&String::from_utf8_lossy(&body));
+        (status, text)
+    }
+
+    /// The container's current membership ETag, as its reader Alice sees it, without the quotes.
+    async fn container_etag(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+    ) -> String {
+        let alice = VerifiedToken {
+            web_id: Some(ALICE.into()),
+            ..VerifiedToken::default()
+        };
+        let got = run_verb(state, "GET", "/alice/c/", alice).await;
+        assert_eq!(got.status, 200, "Alice reads her container: {got:?}");
+        let etag = got.etag.expect("a reader receives the container ETag");
+        etag.trim_start_matches("W/").trim_matches('"').to_string()
+    }
+
+    /// A writer who can change the container's members but can never read the container: Append and
+    /// Write on `/alice/c/` itself, and Write (only) inherited by its members. Added to the dropbox
+    /// fixture so the successful PUT, PATCH, POST and DELETE paths run for a non-reader.
+    const V5_WRITER: &str = "https://pod.example/writer/profile/card#me";
+
+    async fn dropbox_with_writer(
+    ) -> Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>> {
+        let state = dropbox_with_secret().await;
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#alice> a acl:Authorization;
+         acl:agent <{ALICE}>;
+         acl:accessTo <https://pod.example/alice/c/>;
+         acl:default <https://pod.example/alice/c/>;
+         acl:mode acl:Read, acl:Write, acl:Control.
+<#bob> a acl:Authorization;
+       acl:agent <{BOB}>;
+       acl:accessTo <https://pod.example/alice/c/>;
+       acl:mode acl:Append.
+<#writer> a acl:Authorization;
+          acl:agent <{V5_WRITER}>;
+          acl:accessTo <https://pod.example/alice/c/>;
+          acl:mode acl:Append, acl:Write.
+<#writer-members> a acl:Authorization;
+                  acl:agent <{V5_WRITER}>;
+                  acl:default <https://pod.example/alice/c/>;
+                  acl:mode acl:Write."#
+        );
+        state
+            .store
+            .write(
+                "https://pod.example/alice/c/.acl",
+                AxBytes::from(acl),
+                "text/turtle",
+            )
+            .await
+            .expect("seed container acl with the writer");
+        state
+    }
+
+    /// One request of the V5 matrix, with `{etag}` in a conditional header replaced by `etag`.
+    async fn v5_request(
+        state: &Arc<LdpState<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>>,
+        verb: &str,
+        path: &str,
+        conditional: Option<(&'static str, &str)>,
+        etag: &str,
+        token: VerifiedToken,
+    ) -> (u16, String) {
+        let mut headers = match verb {
+            "PUT" | "POST" => turtle_headers(),
+            "PATCH" => n3_patch_headers(),
+            _ => HeaderMap::new(),
+        };
+        if let Some((name, template)) = conditional {
+            let value = HeaderValue::from_str(&template.replace("{etag}", etag)).unwrap();
+            headers.insert(HeaderName::from_static(name), value);
+        }
+        let uri: axum::http::Uri = path.parse().unwrap();
+        let (s, t) = (State(state.clone()), Extension(token));
+        let result = match verb {
+            "GET" => get_handler(s, t, uri, headers).await,
+            "HEAD" => head_handler(s, t, uri, headers).await,
+            "OPTIONS" => options_handler(s, t, uri).await,
+            "PUT" => put_handler(s, t, uri, headers, request_body_bytes()).await,
+            "POST" => post_handler(s, t, uri, headers, request_body_bytes()).await,
+            "PATCH" => {
+                let patch = insert_only_patch("https://pod.example/alice/c/x#me");
+                patch_handler(s, t, uri, headers, patch).await
+            }
+            "DELETE" => delete_handler(s, t, uri, headers).await,
+            _ => unreachable!(),
+        };
+        response_text(result).await
+    }
+
+    /// V5 as an invariant rather than one path: whatever a non-reader sends, to the container, its
+    /// members, its `.acl` or paths that do not exist, and with or without conditional headers naming
+    /// the ETag, no response carries the container's membership ETag anywhere (header or body),
+    /// neither the value before the request nor the one after it. And the STATUS never depends on
+    /// whether a validator matches it: each conditional request is replayed, on a fresh copy of the
+    /// pod, with a validator of the same shape that cannot match, and must get the same status. The
+    /// non-readers include a writer, so the successful write paths run too (checked by positive
+    /// controls). A new response path that emits the tag, or answers differently when it is guessed,
+    /// fails here.
+    #[tokio::test]
+    async fn v5_no_response_path_shows_a_non_reader_the_container_etag() {
+        const WRONG: &str = "0-00000000";
+        let writer = || VerifiedToken {
+            web_id: Some(V5_WRITER.into()),
+            ..VerifiedToken::default()
+        };
+        let conditionals: [Option<(&'static str, &str)>; 11] = [
+            None,
+            Some(("if-match", "\"{etag}\"")),
+            Some(("if-match", "W/\"{etag}\"")),
+            Some(("if-match", "\"x\", \"{etag}\"")),
+            Some(("if-match", "*")),
+            Some(("if-none-match", "\"{etag}\"")),
+            Some(("if-none-match", "W/\"{etag}\"")),
+            Some(("if-none-match", "\"x\", \"{etag}\"")),
+            Some(("if-none-match", "*")),
+            Some(("if-modified-since", "Thu, 01 Jan 1970 00:00:00 GMT")),
+            Some(("if-unmodified-since", "Thu, 01 Jan 1970 00:00:00 GMT")),
+        ];
+        let paths = [
+            "/alice/c/",
+            EXISTING,
+            MISSING,
+            "/alice/c/.acl",
+            "/alice/c/ghost.acl",
+            "/alice/nope/",
+            "/",
+        ];
+        let mut writer_statuses = std::collections::BTreeMap::new();
+        for path in paths {
+            for verb in ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"] {
+                for conditional in conditionals {
+                    for (label, token) in
+                        [("anonymous", anon()), ("bob", bob()), ("writer", writer())]
+                    {
+                        let state = dropbox_with_writer().await;
+                        let before = container_etag(&state).await;
+                        let (status, text) =
+                            v5_request(&state, verb, path, conditional, &before, token.clone())
+                                .await;
+                        let after = container_etag(&state).await;
+                        for etag in [&before, &after] {
+                            assert!(
+                                !text.contains(etag.as_str()),
+                                "{verb} {path} as {label} ({conditional:?}) answered {status} \
+                                 with the container ETag {etag}:\n{text}"
+                            );
+                        }
+                        if conditional.is_some_and(|(_, template)| template.contains("{etag}")) {
+                            let fresh = dropbox_with_writer().await;
+                            let fresh_before = container_etag(&fresh).await;
+                            let (wrong_status, wrong_text) =
+                                v5_request(&fresh, verb, path, conditional, WRONG, token).await;
+                            let fresh_after = container_etag(&fresh).await;
+                            for etag in [&fresh_before, &fresh_after] {
+                                assert!(
+                                    !wrong_text.contains(etag.as_str()),
+                                    "{verb} {path} as {label} ({conditional:?}, non-matching) \
+                                     answered {wrong_status} with the container ETag {etag}:\n\
+                                     {wrong_text}"
+                                );
+                            }
+                            assert_eq!(
+                                status, wrong_status,
+                                "{verb} {path} as {label} ({conditional:?}): the status shows \
+                                 whether the validator is the container ETag"
+                            );
+                        }
+                        if label == "writer" && conditional.is_none() {
+                            writer_statuses.insert((verb, path), status);
+                        }
+                    }
+                }
+            }
+        }
+        // Positive controls: the writer's unconditional writes really succeed, so the matrix above
+        // covered the successful PUT (replace and create), PATCH, POST and DELETE responses, while
+        // the container itself stays unreadable to them.
+        for (verb, path, expected) in [
+            ("PUT", EXISTING, 2),
+            ("PUT", MISSING, 2),
+            ("PATCH", EXISTING, 2),
+            ("POST", "/alice/c/", 2),
+            ("DELETE", EXISTING, 2),
+            ("GET", "/alice/c/", 4),
+            ("HEAD", "/alice/c/", 4),
+        ] {
+            let status = writer_statuses[&(verb, path)];
+            assert_eq!(
+                status / 100,
+                expected,
+                "writer {verb} {path} answered {status}"
+            );
+        }
     }
 
     // =====================================================================================

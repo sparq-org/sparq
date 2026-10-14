@@ -36,6 +36,35 @@ impl Default for Json {
 }
 
 impl Json {
+    /// Constructs a JSON `null`.
+    pub(crate) fn null() -> Json {
+        Json::Raw("null".to_string())
+    }
+
+    /// True iff this is a JSON `null`.
+    pub(crate) fn is_null(&self) -> bool {
+        matches!(self, Json::Raw(r) if r == "null")
+    }
+
+    /// True iff this is a string, number, or boolean (not `null`).
+    pub(crate) fn is_scalar(&self) -> bool {
+        match self {
+            Json::Str(_) => true,
+            Json::Raw(r) => r != "null",
+            _ => false,
+        }
+    }
+
+    /// True iff this is a map with an `@list` entry; other entries are allowed.
+    pub(crate) fn is_list_object(&self) -> bool {
+        self.get("@list").is_some()
+    }
+
+    /// True iff this is a map with an `@value` entry; other entries are allowed.
+    pub(crate) fn is_value_object(&self) -> bool {
+        self.get("@value").is_some()
+    }
+
     /// Constructs an empty JSON object.
     pub fn obj() -> Json {
         Json::Obj(Vec::new())
@@ -489,6 +518,36 @@ fn json_escape(s: &str, out: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn null_and_object_predicates() {
+        // Expected columns: null, scalar, list object, value object.
+        for (input, expected) in [
+            ("null", [true, false, false, false]),
+            ("42", [false, true, false, false]),
+            ("true", [false, true, false, false]),
+            ("false", [false, true, false, false]),
+            (r#""null""#, [false, true, false, false]),
+            ("[]", [false, false, false, false]),
+            ("{}", [false, false, false, false]),
+            (r#"{"@list":[]}"#, [false, false, true, false]),
+            (r#"{"@value":null}"#, [false, false, false, true]),
+            (r#"{"@value":1,"extra":2}"#, [false, false, false, true]),
+            (r#"{"@list":null,"extra":2}"#, [false, false, true, false]),
+            (r#"{"value":1,"list":[]}"#, [false, false, false, false]),
+            (r#"{"@list":[],"@value":1}"#, [false, false, true, true]),
+        ] {
+            let value = Json::parse(input).unwrap();
+            assert_eq!(value == Json::null(), expected[0], "{input}");
+            let actual = [
+                value.is_null(),
+                value.is_scalar(),
+                value.is_list_object(),
+                value.is_value_object(),
+            ];
+            assert_eq!(actual, expected, "{input}");
+        }
+    }
 
     #[test]
     fn default_is_empty_object() {
