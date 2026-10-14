@@ -445,7 +445,9 @@ fn boolean_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
         expected,
         &built.value_hook,
         &built.lexical_component,
-    );
+        MethodUse::LegacyAlreadyIssued,
+    )
+    .expect("the V1 boolean constant rides the shared member under the legacy use");
     let shared = filter_value_dl_prover_toml(
         &challenge,
         operand_enc,
@@ -455,8 +457,22 @@ fn boolean_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
         expected,
         &built.value_hook,
         &built.lexical_component,
-    );
+        MethodUse::LegacyAlreadyIssued,
+    )
+    .expect("the same values through the shared renderer");
     assert_eq!(boolean, shared);
+    // Both are V1 renders, so both are refused for a NEW issuance.
+    assert!(filter_value_dl_boolean_prover_toml(
+        &challenge,
+        operand_enc,
+        op.code(),
+        false,
+        expected,
+        &built.value_hook,
+        &built.lexical_component,
+        MethodUse::NewIssuance,
+    )
+    .is_err());
 
     let lines: Vec<&str> = boolean.lines().collect();
     assert!(lines[0].starts_with("challenge = "));
@@ -481,7 +497,9 @@ fn boolean_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout() {
         expected,
         &built.value_hook,
         &built.lexical_component,
-    );
+        MethodUse::LegacyAlreadyIssued,
+    )
+    .expect("the V1 integer constant also rides the shared member, legacy use");
     assert_ne!(boolean, integer_lane);
 }
 
@@ -499,7 +517,9 @@ fn boolean_prover_toml_renders_the_true_bound_hook() {
         expected,
         &built.value_hook,
         &built.lexical_component,
-    );
+        MethodUse::LegacyAlreadyIssued,
+    )
+    .expect("the V1 boolean constant rides the shared member under the legacy use");
     assert!(toml.contains("bound = \"1\"\n"));
 }
 
@@ -527,6 +547,40 @@ fn toolchain_available() -> bool {
         .unwrap_or(false)
 }
 
+/// The value-lane `Prover.toml` layout, rendered LOCALLY.
+///
+/// The library renderer now refuses a `(member, datatype_const)` pairing the lane
+/// table does not allow. The IN-CIRCUIT vectors below must be able to hand the
+/// member a pairing that boundary refuses — claim (c) below is exactly such a
+/// vector — so they render the bytes here. The field order is the member `main`'s,
+/// and `boolean_prover_toml_pins_the_lane_constant_and_keeps_the_member_layout`
+/// pins the library renderer's own bytes for an ALLOWED pairing.
+#[allow(clippy::too_many_arguments)]
+fn raw_value_lane_toml(
+    challenge: &FieldHex,
+    operand_enc: &FieldHex,
+    op: u32,
+    bound: u64,
+    datatype_const: &FieldHex,
+    expected: bool,
+    value_hook: &FieldHex,
+    lexical_component: &FieldHex,
+) -> String {
+    format!(
+        "challenge = \"{}\"\noperand_enc = \"{}\"\nop = \"{}\"\nbound = \"{}\"\n\
+         datatype_const = \"{}\"\nexpected = {}\nvalue_hook = \"{}\"\n\
+         lexical_component = \"{}\"\n",
+        challenge.0,
+        operand_enc.0,
+        op,
+        bound,
+        datatype_const.0,
+        expected,
+        value_hook.0,
+        lexical_component.0,
+    )
+}
+
 /// Solve `filter_value_dl_int`'s witness for the given public/private assignment.
 /// `Ok` ⇔ the relation is SATISFIABLE ⇔ the member ACCEPTS.
 #[allow(clippy::too_many_arguments)]
@@ -540,7 +594,7 @@ fn member_accepts(
     value_hook: &FieldHex,
     lexical_component: &FieldHex,
 ) -> bool {
-    let toml = filter_value_dl_prover_toml(
+    let toml = raw_value_lane_toml(
         &FieldHex("0x01".to_string()),
         operand_enc,
         op.code(),
