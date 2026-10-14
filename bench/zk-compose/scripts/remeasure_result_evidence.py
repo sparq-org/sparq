@@ -5,18 +5,12 @@
 source, so a change to those sources needs a fresh measurement. Save the pre-change
 evidence, then measure and apply (replace placeholders; stop if any command fails):
 
-    baseline_root=$(mktemp -d)
-    mkdir -p "$baseline_root/bench/zk-compose"
-    for name in result_v1_compatibility result_capacity_gates result_signed_gates result_public_gates; do
-        git show <pre-change-commit>:bench/zk-compose/$name.json > "$baseline_root/bench/zk-compose/$name.json"
-    done
     git archive <commit> | tar -x -C run1        # and again into run2
     remeasure_result_evidence.py measure run1 run1.json
     remeasure_result_evidence.py measure run2 run2.json
     remeasure_result_evidence.py apply run1.json run2.json --job job.json \\
         --commit <commit> --observed-at <utc> --platform <host> \\
-        --baseline-root "$baseline_root" --expect-member <member> ... --expect-source <path> ...
-    rm -r "$baseline_root"
+        --baseline-commit <pre-change-commit> --expect-member <member> ... --expect-source <path> ...
 
 `measure` compiles every member with the pinned nargo, hashes its ACIR bytecode, ABI and
 artifact, runs `bb gates -s ultra_honk`, and for the v1 members writes the noir-recursive
@@ -30,9 +24,10 @@ An interruption of the process itself (a kill or power loss between renames) can
 still leave a mixed set, which
 `git checkout -- <the four files>` undoes. It refuses to run while the four files have
 staged or unstaged edits against HEAD, so that recovery never discards anything else.
-`--baseline-root` reads pre-change evidence saved with `git show` under that directory's
-bench/zk-compose; it defaults to this checkout. It never writes the baseline directory
-when a separate directory is supplied. The result is always
+`--baseline-commit` names the commit whose evidence is the pre-change baseline (default
+HEAD); the files are read from that commit with `git show`, never from the working tree.
+Each file keeps its destination `prepared_by`, and `apply` refuses a baseline whose
+`prepared_by` differs from it. The result is always
 labelled non-canonical; the job manifest and run outputs are not part of the repository,
 so the two-run agreement it records is checked when `apply` runs, not later.
 """
@@ -123,22 +118,51 @@ def without_artifacts(run_result: dict) -> dict:
     return copy
 
 
+def git(*arguments: str) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(["git", *arguments], cwd=ROOT, capture_output=True, text=True)
+    except OSError as error:
+        raise SystemExit(f"cannot run git: {error}") from error
+
+
+def load_commit(commit: str) -> dict[str, dict]:
+    """Read the evidence files as committed at `commit`, never from the working tree."""
+    resolved = git("rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}")
+    if resolved.returncode:
+        raise SystemExit(f"cannot resolve baseline commit {commit!r}")
+    sha = resolved.stdout.strip()
+    evidence = {}
+    for name in EVIDENCE:
+        shown = git("show", f"{sha}:bench/zk-compose/{name}.json")
+        if shown.returncode:
+            raise SystemExit(f"cannot read {name}.json at baseline commit {sha}:\n{shown.stderr}")
+        evidence[name] = json.loads(shown.stdout)
+    return evidence
+
+
 def apply(args: argparse.Namespace) -> None:
     paths = [f"bench/zk-compose/{name}.json" for name in EVIDENCE]
-    try:
-        clean = subprocess.run(["git", "diff", "--quiet", "HEAD", "--", *paths], cwd=ROOT,
-                               capture_output=True, text=True)
-    except OSError as error:
-        raise SystemExit(f"cannot check evidence cleanliness: {error}") from error
-    if clean.returncode == 1:
-        raise SystemExit("the evidence files have staged or unstaged edits against HEAD; commit or discard them first")
-    if clean.returncode:
-        raise SystemExit(f"cannot check evidence cleanliness against HEAD; git diff failed:\n{clean.stderr}")
+    # The working tree and the index are checked separately: a staged edit that the working tree
+    # reverts is invisible to a working-tree comparison alone.
+    for label, command in (("unstaged", ["diff", "--quiet", "HEAD", "--", *paths]),
+                           ("staged", ["diff", "--quiet", "--cached", "HEAD", "--", *paths])):
+        try:
+            clean = git(*command)
+        except SystemExit as error:
+            raise SystemExit(f"cannot check evidence cleanliness: {error}") from error
+        if clean.returncode == 1:
+            raise SystemExit(f"the evidence files have {label} edits against HEAD; commit or discard them first")
+        if clean.returncode:
+            raise SystemExit(f"cannot check evidence cleanliness against HEAD; git diff failed:\n{clean.stderr}")
     first, second = (json.loads(path.read_text()) for path in (args.first, args.second))
     if without_artifacts(first) != without_artifacts(second):
         raise SystemExit("the two runs disagree")
     measured = first["members"]
-    evidence = load(args.baseline_root)
+    evidence = load_commit(args.baseline_commit)
+    destination = load(ROOT)
+    for name, data in evidence.items():
+        if data.get("prepared_by") != destination[name].get("prepared_by"):
+            raise SystemExit(f"{name}: baseline prepared_by differs from the destination file")
     snapshot = json.loads((ROOT / "bench/zk-compose/gate_counts_latest.json").read_text())["benchmarks"]
     for member, record in evidence["result_v1_compatibility"]["members"].items():
         base, got = record["base"], measured[member]
@@ -237,8 +261,8 @@ def main() -> None:
     step = commands.add_parser("apply")
     step.add_argument("first", type=Path)
     step.add_argument("second", type=Path, help="independent run; its hash is the handoff")
-    step.add_argument("--baseline-root", type=Path, default=ROOT,
-                      help="root containing pre-change bench/zk-compose evidence (default: this checkout)")
+    step.add_argument("--baseline-commit", default="HEAD",
+                      help="commit whose bench/zk-compose evidence is the pre-change baseline (default: HEAD)")
     step.add_argument("--job", type=Path, required=True, help="job manifest; its hash is job_sha256")
     step.add_argument("--commit", required=True)
     step.add_argument("--observed-at", required=True)

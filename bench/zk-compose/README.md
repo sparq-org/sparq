@@ -52,29 +52,18 @@ records identify GPT-6 and their exact measurement provenance separately.
 
 ## Re-measure result evidence
 
-Keep the four destination evidence files clean against `HEAD`, including the
-index. To compare against pre-change evidence, read it into a temporary directory
-with `git show`; do not check out historical files into the index. From the repo
-root, replace `<pre-change-commit>` with the revision containing that evidence:
+Keep the four destination evidence files clean against `HEAD`, in both the
+working tree and the index. Follow the two clean-archive `measure` runs and the
+`apply` command in
+[`remeasure_result_evidence.py`](scripts/remeasure_result_evidence.py)'s docstring.
+Pass `--baseline-commit <pre-change-commit>` to `apply` to name the commit whose
+evidence is the pre-change baseline (it defaults to `HEAD`). `apply` reads those
+files from that commit with `git show`, never from the working tree, and refuses
+a baseline whose `prepared_by` differs from the destination file's.
 
-```sh
-baseline_root=$(mktemp -d)
-mkdir -p "$baseline_root/bench/zk-compose"
-for name in result_v1_compatibility result_capacity_gates result_signed_gates result_public_gates; do
-    git show <pre-change-commit>:bench/zk-compose/$name.json > "$baseline_root/bench/zk-compose/$name.json"
-done
-```
-
-Follow the two clean-archive `measure` runs and the `apply` command in
-[`remeasure_result_evidence.py`](scripts/remeasure_result_evidence.py)'s docstring,
-passing `--baseline-root "$baseline_root"` to `apply`. The option selects the
-directory containing the pre-change `bench/zk-compose` files; it defaults to
-the current checkout. The separate baseline directory is only read. Remove it
-with `rm -r "$baseline_root"` once finished. Stop if any `git show` fails.
-
-`apply` refuses staged or unstaged destination edits and fails closed if Git
-cannot check against `HEAD`. On replacement failure, it attempts every restore
-independently and cleans up temporary output files. If a restore fails, it exits
+`apply` refuses staged or unstaged destination edits, checking each separately,
+and fails closed if Git cannot check against `HEAD`. On replacement failure, it
+attempts every restore independently and cleans up temporary output files. If a restore fails, it exits
 non-zero and lists the affected files with `git checkout -- <file>` recovery
 commands to run from the repository root.
 
