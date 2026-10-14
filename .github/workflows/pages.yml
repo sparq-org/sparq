@@ -224,6 +224,12 @@ jobs:
           npm ci
           npm run build   # prebuild copies js/wasm → site/public/wasm + builds papers, then next build → out/ (root-relative, basePath '')
 
+      # #7031 — the self-hosted ESM entry out/wasm/sparq.js lazily imports the OWL 2 DL bundle
+      # (checkOwlDl) as a sibling; fail the deploy if that bundle is not beside it.
+      - name: Check the hosted OWL 2 DL bundle sits beside /wasm/sparq.js
+        working-directory: site
+        run: node scripts/check-hosted-dl.mjs out/wasm
+
       # sq-vnd0i — build the DISTINCT operational GUI frontend (gui/app) as its hosted
       # "Try the GUI live" web target and OVERLAY it at /app/ on the SAME Pages artifact.
       #
