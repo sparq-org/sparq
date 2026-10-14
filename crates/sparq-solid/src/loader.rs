@@ -14,15 +14,13 @@
 //! documents referenced via `acl:agentGroup` (fragment stripped), and the synthesized
 //! structural facts below.
 //!
-//! sq-3jtd.5: the `.acl`/`.acr`/group graphs ARE emitted verbatim, so they are a
-//! second smuggling surface. The reasoner's derivation-internal vocabulary — the `solidx:`
-//! namespace (`solidx:creator|owner|appliesToResource|isResource|isWebId|…`) — must only be
-//! produced by THIS loader (from trusted structural metadata + the caller-supplied
-//! `AccessProvenance`) or derived by the rules; a forged `solidx:` fact inside a control
-//! document would otherwise grant access (cross-resource privilege escalation / policy
-//! redirection). So [`is_reserved_derivation_predicate`] hard-rejects any control-graph or
-//! group-document triple whose predicate is in `solidx:` space — the analogue of the
-//! `urn:sparq:` reserved-principal guard ([`validate_principal_iri`]).
+//! The `.acl`/`.acr`/group graphs are emitted as they are, so each must speak only for
+//! itself. [`admits`] keeps a document's triple only when it describes one of the
+//! document's own nodes, names no minted `urn:skolem:` IRI, and uses none of the view's
+//! `auth:`/`solidx:` vocabulary (which only this loader and the rules produce). A document
+//! with any other triple contributes nothing, and the resources it governs fail closed
+//! (see [`assemble_facts`]). Principal values in the view's reserved spaces are refused
+//! ([`validate_principal_iri`]).
 
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_NS, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
@@ -56,12 +54,22 @@ const VCARD_MEMBER: &str = "http://www.w3.org/2006/vcard/ns#hasMember";
 pub(crate) const RESERVED_PREFIX: &str = "urn:sparq:";
 const PAIR_DELIMITER: &str = "&client=";
 
+/// Whether `iri` is outside every principal the view mints itself: the reserved pair
+/// encoding, and the `auth:`/`solidx:` names (`auth:Public`, `auth:AnyClient`, …) the
+/// rules and the index use for wildcard principals.
+fn external_principal(iri: &str) -> bool {
+    !iri.starts_with(RESERVED_PREFIX)
+        && !iri.starts_with(AUTH_NS)
+        && !iri.starts_with(SOLIDX_NS)
+        && !iri.contains(PAIR_DELIMITER)
+}
+
 fn validate_principal_iri(iri: &str) -> Result<(), String> {
-    if iri.starts_with(RESERVED_PREFIX) || iri.contains(PAIR_DELIMITER) {
+    if !external_principal(iri) {
         return Err(format!(
             "agent/client/origin IRI <{iri}> is not allowed: \
-             `{RESERVED_PREFIX}` and the literal `{PAIR_DELIMITER}` are reserved by the \
-             pair-principal encoding"
+             `{RESERVED_PREFIX}`, `{AUTH_NS}`, `{SOLIDX_NS}` and the literal \
+             `{PAIR_DELIMITER}` are reserved for the principals the view mints"
         ));
     }
     Ok(())
@@ -100,23 +108,43 @@ fn is_reserved_derivation_predicate(t: &[Term; 3]) -> bool {
 
 const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 
-/// Whether the document `graph_iri` may state triple `t`: a document describes only its
-/// own nodes, i.e. a blank node or an IRI whose fragment-stripped document is
-/// `graph_iri` itself. It can still reference any IRI as an object, which is how an ACR
-/// applies a policy defined in another document or an ACL names a group, but statements
-/// about a node defined elsewhere come only from that node's own document.
 /// The IRI prefix [`skolemize`] mints for document blank nodes. Loaded data may not
-/// supply it: a document naming such an IRI would denote another document's blank node.
+/// supply it, as a term or as a graph name: either would denote another document's blank
+/// node.
 const SKOLEM_PREFIX: &str = "urn:skolem:";
 
 fn names_skolem_iri(t: &[Term; 3]) -> bool {
-    t.iter()
-        .any(|x| matches!(x, Term::NamedNode(n) if n.as_str().starts_with(SKOLEM_PREFIX)))
+    t.iter().any(term_names_skolem_iri)
 }
 
-/// Whether document `graph_iri` may state triple `t`: kept only when it describes
-/// one of the document's own nodes (a blank node, or an IRI in the document) and names
-/// no minted skolem IRI.
+/// Whether `x` names a minted skolem IRI anywhere: as itself, as a literal's datatype, or
+/// inside a triple term.
+fn term_names_skolem_iri(x: &Term) -> bool {
+    let skolem = |n: &NamedNode| n.as_str().starts_with(SKOLEM_PREFIX);
+    match x {
+        Term::NamedNode(n) => skolem(n),
+        Term::BlankNode(_) => false,
+        Term::Literal(l) => l.datatype().as_str().starts_with(SKOLEM_PREFIX),
+        Term::Triple(tt) => {
+            term_names_skolem_iri(&tt.subject.clone().into())
+                || skolem(&tt.predicate)
+                || term_names_skolem_iri(&tt.object)
+        }
+    }
+}
+
+/// Whether document `graph_iri` may state triple `t`: a document describes only its own
+/// nodes, i.e. a blank node or an IRI whose fragment-stripped document is `graph_iri`
+/// itself, names no minted skolem IRI, and uses none of the view's vocabulary. It can
+/// still reference any IRI as an object, which is how an ACR applies a policy defined in
+/// another document or an ACL names a group, but statements about a node defined
+/// elsewhere come only from that node's own document. A document with any triple it may
+/// not state contributes nothing (see [`assemble_facts`]).
+///
+/// A reference is still a dependency: an ACR applying a policy from another document, or
+/// an ACL naming a group document, trusts whoever may edit that document, as in Solid.
+/// Pointing at a document is the owner's choice; what this check removes is a document
+/// describing nodes it does not define.
 fn admits(t: &[Term; 3], graph_iri: &str) -> bool {
     !is_reserved_derivation_predicate(t) && !names_skolem_iri(t) && speaks_for(t, graph_iri)
 }
@@ -127,6 +155,39 @@ fn speaks_for(t: &[Term; 3], graph_iri: &str) -> bool {
         Term::NamedNode(s) => group_doc_of(s.as_str()) == graph_iri,
         _ => false,
     }
+}
+
+/// The control documents that contribute nothing: each with a triple it may not state
+/// ([`admits`]) and, for ACP, each that references a node of a rejected document, to a
+/// fixpoint.
+fn rejected_documents<'a>(
+    control_graphs: &[(&'a str, Vec<[Term; 3]>)],
+    system: System,
+) -> FxHashSet<&'a str> {
+    let mut rejected: FxHashSet<&str> = control_graphs
+        .iter()
+        .filter(|(iri, triples)| !triples.iter().all(|t| admits(t, iri)))
+        .map(|(iri, _)| *iri)
+        .collect();
+    if system == System::Acp {
+        loop {
+            let refers = |triples: &[[Term; 3]], rejected: &FxHashSet<&str>| {
+                triples.iter().any(|t| {
+                    matches!(&t[2], Term::NamedNode(o) if rejected.contains(group_doc_of(o.as_str())))
+                })
+            };
+            let more: Vec<&str> = control_graphs
+                .iter()
+                .filter(|(iri, triples)| !rejected.contains(iri) && refers(triples, &rejected))
+                .map(|(iri, _)| *iri)
+                .collect();
+            if more.is_empty() {
+                break;
+            }
+            rejected.extend(more);
+        }
+    }
+    rejected
 }
 
 /// Drop ALL named graphs in the reserved IRI space — including a pre-existing
@@ -141,10 +202,10 @@ pub(crate) fn strip_reserved_graphs(graph: &mut Graph) {
 }
 
 /// Whether a session-supplied agent/client value may participate in principal
-/// expansion: anything in the reserved space or containing the pair delimiter could
-/// IMPERSONATE a minted pair principal — fail closed.
+/// expansion: anything in the reserved space, in the view's own vocabulary, or containing
+/// the pair delimiter could IMPERSONATE a principal the view mints — fail closed.
 pub(crate) fn session_value_allowed(v: &str) -> bool {
-    !v.starts_with(RESERVED_PREFIX) && !v.contains(PAIR_DELIMITER)
+    external_principal(v)
 }
 /// `acp:agent` objects that are NOT concrete WebIDs.
 const SPECIAL_AGENTS: [&str; 5] = [
@@ -242,7 +303,7 @@ pub(crate) fn assemble_facts(
     // 1) resources: every non-control, non-auth graph + every structural container
     //    prefix (containers exist as inheritance anchors even without their own graph).
     let mut resources: FxHashSet<String> = FxHashSet::default();
-    let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
+    let mut control_graphs: Vec<(&str, Vec<[Term; 3]>)> = Vec::new(); // (name, triples)
     for (name, sub) in &graph.named {
         let Some(iri) = graph_iri(name) else { continue };
         // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
@@ -250,7 +311,7 @@ pub(crate) fn assemble_facts(
         // dataset, but assembly must not DEPEND on that having run first — the
         // materializer defers every mutation until after this fallible pass so an error
         // leaves the previous auth view in place (roborev 5005).
-        if iri.starts_with(RESERVED_PREFIX) {
+        if iri.starts_with(RESERVED_PREFIX) || iri.starts_with(SKOLEM_PREFIX) {
             continue;
         }
         let control_of = iri.strip_suffix(ACL_SUFFIX).or_else(|| iri.strip_suffix(ACR_SUFFIX));
@@ -263,7 +324,7 @@ pub(crate) fn assemble_facts(
         }
         if control_of.is_some() {
             if iri.ends_with(suffix) {
-                control_graphs.push((iri, sub));
+                control_graphs.push((iri, graph_triples(sub)));
             }
             continue;
         }
@@ -277,15 +338,34 @@ pub(crate) fn assemble_facts(
             cur = parent;
         }
     }
+    // A control document with a triple it may not state contributes nothing. For ACP,
+    // whose policies also deny, so does every ACR that references a node of a rejected
+    // document (transitively), and the resources a rejected ACR governs, with everything
+    // below them, get no grants at all: a deny or exception it held can never be lost
+    // while an allow elsewhere still applies. A rejected WAC ACL keeps governing its
+    // resource with no authorizations, so no ancestor's default takes over.
+    let rejected = rejected_documents(&control_graphs, system);
+    let blocked: Vec<&str> = if system == System::Acp {
+        rejected.iter().map(|iri| &iri[..iri.len() - suffix.len()]).collect()
+    } else {
+        Vec::new()
+    };
+    let is_blocked = |r: &str| {
+        blocked.iter().any(|b| r == *b || (b.ends_with('/') && r.starts_with(b)))
+    };
     for r in &resources {
-        out.push([named(r), is_resource.clone(), xsd_true()]);
+        if !is_blocked(r) {
+            out.push([named(r), is_resource.clone(), xsd_true()]);
+        }
     }
 
     // 2) control-document linkage by naming convention: <R + ".acl"> controls <R>.
     //    The .acl/.acr graphs are themselves resources too (Control gates them).
     for (iri, _) in &control_graphs {
         let r = &iri[..iri.len() - suffix.len()];
-        out.push([named(r), owns.clone(), named(iri)]);
+        if !is_blocked(r) {
+            out.push([named(r), owns.clone(), named(iri)]);
+        }
     }
 
     // 3) the access-control graphs' triples (skolemized) + inDoc provenance + WebIDs,
@@ -293,19 +373,16 @@ pub(crate) fn assemble_facts(
     let mut group_docs: FxHashSet<String> = FxHashSet::default();
     let mut webids: FxHashSet<String> = FxHashSet::default();
     let mut principal_iris: FxHashSet<String> = FxHashSet::default();
-    for (iri, sub) in &control_graphs {
+    for (iri, triples) in &control_graphs {
+        if rejected.contains(iri) {
+            continue;
+        }
         let mut in_doc: FxHashSet<Term> = FxHashSet::default();
-        for t in graph_triples(sub) {
-            // sq-3jtd.5: hard-reject any forged derivation-internal fact
-            // (`solidx:creator|owner|appliesToResource|…`) smuggled into the control
-            // document — only the loader/rules may produce `solidx:` facts.
-            if !admits(&t, iri) {
-                continue;
-            }
+        for t in triples {
             let s = skolemize(&t[0], iri);
             in_doc.insert(s.clone());
             out.push([s, skolemize(&t[1], iri), skolemize(&t[2], iri)]);
-            collect_agents(&t, &mut webids, &mut group_docs, &mut principal_iris);
+            collect_agents(t, &mut webids, &mut group_docs, &mut principal_iris);
         }
         for s in in_doc {
             out.push([s, in_doc_p.clone(), named(iri)]);
@@ -316,15 +393,18 @@ pub(crate) fn assemble_facts(
             let Some(iri) = graph_iri(name) else { continue };
             // Same reserved-space skip as the resource pass above: a forged
             // `<urn:sparq:…>` graph named by an `acl:agentGroup` must never be read.
-            if iri.starts_with(RESERVED_PREFIX) || !group_docs.contains(iri) {
+            if iri.starts_with(RESERVED_PREFIX)
+                || iri.starts_with(SKOLEM_PREFIX)
+                || !group_docs.contains(iri)
+            {
                 continue;
             }
-            for t in graph_triples(sub) {
-                // sq-3jtd.5: same derivation-internal guard for group
-                // documents — a forged `solidx:` fact here would feed the reasoner too.
-                if !admits(&t, iri) {
-                    continue;
-                }
+            // A group document with a triple it may not state lists no members.
+            let triples = graph_triples(sub);
+            if !triples.iter().all(|t| admits(t, iri)) {
+                continue;
+            }
+            for t in triples {
                 out.push([
                     skolemize(&t[0], iri),
                     skolemize(&t[1], iri),
@@ -804,51 +884,52 @@ mod tests {
 
     /// Document triples in the view vocabulary (an `auth:` predicate, or an `rdf:type`
     /// naming an `auth:`/`solidx:` class) never reach the reasoner, for either system.
+    /// Each statement is about the document's own node, so only the vocabulary check
+    /// rejects it, and each is tried on its own.
     #[test]
     fn view_vocabulary_in_documents_is_dropped() {
-        let other = "https://other.ex/card#me";
         let target = "https://pod.ex/secret";
-        let auth = |local: &str| format!("<{AUTH_NS}{local}>");
         let rdf_type = "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>";
         let docs = [
             (System::Wac, "https://other.ex/.acl"),
             (System::Acp, "https://other.ex/.acr"),
         ];
         for (system, doc) in docs {
-            let nq = format!(
-                "<https://pod.ex/secret#it> <https://ex.dev/ns#title> \"t\" <{target}> .\n\
-                 <https://other.ex/doc#it> <https://ex.dev/ns#title> \"t\" \
-                 <https://other.ex/doc> .\n\
-                 <{other}> {read} <{target}> <{doc}> .\n\
-                 <{other}> {write} <{target}> <{doc}> .\n\
-                 <https://other.ex/.acl#g> {rdf_type} {cond} <{doc}> .\n\
-                 <https://other.ex/.acl#g> {rdf_type} <{solidx}Thing> <{doc}> .\n",
-                read = auth("read"),
-                write = auth("write"),
-                cond = auth("ConditionalGrant"),
-                solidx = crate::SOLIDX_NS,
-            );
-            let graph = Graph::load_dataset(&nq, "nquads").unwrap();
-            let (prov, creds) = (AccessProvenance::new(), VerifiedCredentials::new());
-            let facts = assemble_facts(&graph, system, &prov, &creds).unwrap();
-            let in_view =
-                |x: &Term| matches!(x, Term::NamedNode(n) if n.as_str().starts_with(AUTH_NS));
-            let leaked: Vec<_> = facts.iter().filter(|t| t.iter().any(in_view)).collect();
-            assert!(leaked.is_empty(), "{leaked:?}");
+            let me = format!("{doc}#me");
+            let statements = [
+                format!("<{me}> <{AUTH_NS}read> <{target}>"),
+                format!("<{me}> <{AUTH_NS}write> <{target}>"),
+                format!("<{doc}#g> {rdf_type} <{AUTH_NS}ConditionalGrant>"),
+                format!("<{doc}#g> {rdf_type} <{solidx}Thing>", solidx = crate::SOLIDX_NS),
+            ];
+            for statement in &statements {
+                let nq = format!(
+                    "<https://pod.ex/secret#it> <https://ex.dev/ns#title> \"t\" <{target}> .\n\
+                     <https://other.ex/doc#it> <https://ex.dev/ns#title> \"t\" \
+                     <https://other.ex/doc> .\n\
+                     {statement} <{doc}> .\n"
+                );
+                let graph = Graph::load_dataset(&nq, "nquads").unwrap();
+                let (prov, creds) = (AccessProvenance::new(), VerifiedCredentials::new());
+                let facts = assemble_facts(&graph, system, &prov, &creds).unwrap();
+                let own = |x: &Term| matches!(x, Term::NamedNode(n) if n.as_str().starts_with(doc));
+                let leaked: Vec<_> = facts.iter().filter(|t| own(&t[0])).collect();
+                assert!(leaked.is_empty(), "{statement}: {leaked:?}");
 
-            let mut store = PodStore::new(graph);
-            match system {
-                System::Wac => store.materialize_wac().unwrap(),
-                System::Acp => store.materialize_acp().unwrap(),
-            };
-            let session = Session {
-                agent: Some(other),
-                client: None,
-                issuer: None,
-                now: None,
-            };
-            for mode in [Mode::Read, Mode::Write] {
-                assert!(store.accessible(&session, mode).is_empty(), "{mode:?}");
+                let mut store = PodStore::new(graph);
+                match system {
+                    System::Wac => store.materialize_wac().unwrap(),
+                    System::Acp => store.materialize_acp().unwrap(),
+                };
+                let session = Session {
+                    agent: Some(&me),
+                    client: None,
+                    issuer: None,
+                    now: None,
+                };
+                for mode in [Mode::Read, Mode::Write] {
+                    assert!(store.accessible(&session, mode).is_empty(), "{statement}: {mode:?}");
+                }
             }
         }
     }
@@ -1103,5 +1184,165 @@ mod tests {
             can_read(alice),
             "the blank-node authorization itself still applies"
         );
+    }
+
+    /// A minted skolem IRI is recognised wherever a triple names it: as a datatype or
+    /// inside a triple term, not only as a top-level node.
+    #[test]
+    fn skolem_names_are_found_in_datatypes_and_triple_terms() {
+        use super::names_skolem_iri;
+        use oxrdf::Triple;
+        let minted = NamedNode::new_unchecked("urn:skolem:graph:x:b");
+        let plain = NamedNode::new_unchecked("https://pod.ex/doc#a");
+        let typed = Term::Literal(Literal::new_typed_literal("v", minted.clone()));
+        let nested = Term::Triple(Box::new(Triple::new(
+            minted.clone(),
+            plain.clone(),
+            Term::from(plain.clone()),
+        )));
+        let deep = Term::Triple(Box::new(Triple::new(plain.clone(), plain.clone(), typed.clone())));
+        for (object, names) in [(typed, true), (nested, true), (deep, true), (Term::from(plain.clone()), false)] {
+            let t = [Term::from(plain.clone()), Term::from(plain.clone()), object];
+            assert_eq!(names_skolem_iri(&t), names, "{t:?}");
+        }
+    }
+
+    /// A rejected document never leaves an allow standing without the restrictions it
+    /// carried. ACP: a resource whose ACR is rejected, or whose ACR applies a policy from
+    /// a rejected document, gets no grants, and no ancestor's member policy takes over.
+    /// WAC: a rejected ACL still governs its resource, so no ancestor default applies.
+    #[test]
+    fn rejected_documents_fail_closed() {
+        const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+        const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+        use super::RDF_TYPE;
+        let (alice, mallory) = ("https://alice.ex/me", "https://mallory.ex/me");
+        let secret = "https://pod.ex/c/secret";
+        let data = format!("<{secret}#it> <https://ex.dev/ns#t> \"t\" <{secret}> .\n");
+        let reads = |nq: &str, system: System, agent: &str| {
+            let mut store = PodStore::new(Graph::load_dataset(nq, "nquads").unwrap());
+            match system {
+                System::Wac => store.materialize_wac().unwrap(),
+                System::Acp => store.materialize_acp().unwrap(),
+            };
+            let s = Session { agent: Some(agent), client: None, issuer: None, now: None };
+            store.accessible(&s, Mode::Read).iter().any(|r| r.as_str() == secret)
+        };
+        let stray = "<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\"";
+
+        // ACP: the root grants everyone Read on members; secret's ACR denies mallory.
+        let root = "https://pod.ex/.acr";
+        let acr = format!("{secret}.acr");
+        let shared = "https://shared.ex/p.acr";
+        let acp_root = format!(
+            "{data}\
+             <{root}> <{ACP}memberAccessControl> <{root}#c> <{root}> .\n\
+             <{root}#c> <{ACP}apply> <{root}#all> <{root}> .\n\
+             <{root}#all> <{ACP}allow> <{ACL}Read> <{root}> .\n\
+             <{root}#all> <{ACP}anyOf> <{root}#pub> <{root}> .\n\
+             <{root}#pub> <{ACP}agent> <{ACP}PublicAgent> <{root}> .\n"
+        );
+        let own_deny = format!(
+            "<{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .\n\
+             <{acr}#c> <{ACP}apply> <{acr}#deny> <{acr}> .\n\
+             <{acr}#deny> <{ACP}deny> <{ACL}Read> <{acr}> .\n\
+             <{acr}#deny> <{ACP}allOf> <{acr}#m> <{acr}> .\n\
+             <{acr}#m> <{ACP}agent> <{mallory}> <{acr}> .\n"
+        );
+        let base = format!("{acp_root}{own_deny}");
+        assert!(reads(&base, System::Acp, alice), "control: alice reads");
+        assert!(!reads(&base, System::Acp, mallory), "control: the deny applies");
+        let nq = format!("{base}{stray} <{acr}> .\n");
+        assert!(!reads(&nq, System::Acp, mallory), "ACP: a rejected ACR's deny is not lost");
+        assert!(!reads(&nq, System::Acp, alice), "ACP: a rejected ACR grants nothing");
+        // The ACR defines a deny under another document's name: the definition cannot
+        // count, and neither can the rest of the ACR.
+        let inline = format!(
+            "{acp_root}\
+             <{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .\n\
+             <{acr}#c> <{ACP}apply> <{shared}#deny> <{acr}> .\n\
+             <{shared}#deny> <{ACP}deny> <{ACL}Read> <{acr}> .\n\
+             <{shared}#deny> <{ACP}allOf> <{acr}#m> <{acr}> .\n\
+             <{acr}#m> <{ACP}agent> <{mallory}> <{acr}> .\n"
+        );
+        assert!(!reads(&inline, System::Acp, mallory), "ACP: an inline foreign deny is not lost");
+        let via_shared = format!(
+            "{acp_root}\
+             <{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .\n\
+             <{acr}#c> <{ACP}apply> <{shared}#deny> <{acr}> .\n\
+             <{shared}#deny> <{ACP}deny> <{ACL}Read> <{shared}> .\n\
+             <{shared}#deny> <{ACP}allOf> <{shared}#m> <{shared}> .\n\
+             <{shared}#m> <{ACP}agent> <{mallory}> <{shared}> .\n"
+        );
+        assert!(!reads(&via_shared, System::Acp, mallory), "control: the shared deny applies");
+        let nq = format!("{via_shared}{stray} <{shared}> .\n");
+        assert!(!reads(&nq, System::Acp, mallory), "ACP: a rejected shared deny is not lost");
+        assert!(!reads(&nq, System::Acp, alice), "ACP: its referrer grants nothing");
+
+        // WAC: the root ACL's default grants everyone Read; secret's own ACL grants alice.
+        let wac = format!(
+            "{data}\
+             <https://pod.ex/.acl#all> <{RDF_TYPE}> <{ACL}Authorization> <https://pod.ex/.acl> .\n\
+             <https://pod.ex/.acl#all> <{ACL}default> <https://pod.ex/> <https://pod.ex/.acl> .\n\
+             <https://pod.ex/.acl#all> <{ACL}agentClass> <http://xmlns.com/foaf/0.1/Agent> <https://pod.ex/.acl> .\n\
+             <https://pod.ex/.acl#all> <{ACL}mode> <{ACL}Read> <https://pod.ex/.acl> .\n\
+             <{secret}.acl#a> <{RDF_TYPE}> <{ACL}Authorization> <{secret}.acl> .\n\
+             <{secret}.acl#a> <{ACL}accessTo> <{secret}> <{secret}.acl> .\n\
+             <{secret}.acl#a> <{ACL}agent> <{alice}> <{secret}.acl> .\n\
+             <{secret}.acl#a> <{ACL}mode> <{ACL}Read> <{secret}.acl> .\n"
+        );
+        assert!(reads(&wac, System::Wac, alice), "control: alice reads");
+        assert!(!reads(&wac, System::Wac, mallory), "control: the own ACL governs");
+        let nq = format!("{wac}{stray} <{secret}.acl> .\n");
+        assert!(!reads(&nq, System::Wac, mallory), "WAC: no ancestor default takes over");
+        assert!(!reads(&nq, System::Wac, alice), "WAC: a rejected ACL grants nothing");
+    }
+
+    /// The view's own principal names are not principals a document or a session can
+    /// supply: a document naming one is refused like the reserved pair encoding, and a
+    /// session claiming one gets nothing.
+    #[test]
+    fn internal_names_are_not_principals() {
+        const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+        use super::RDF_TYPE;
+        let doc = "https://pod.ex/n1";
+        let acl = |agent: &str| {
+            format!(
+                "<{doc}#it> <https://ex.dev/ns#t> \"t\" <{doc}> .\n\
+                 <{doc}.acl#a> <{RDF_TYPE}> <{ACL}Authorization> <{doc}.acl> .\n\
+                 <{doc}.acl#a> <{ACL}accessTo> <{doc}> <{doc}.acl> .\n\
+                 <{doc}.acl#a> <{ACL}agent> <{agent}> <{doc}.acl> .\n\
+                 <{doc}.acl#a> <{ACL}mode> <{ACL}Read> <{doc}.acl> .\n"
+            )
+        };
+        for internal in [crate::authindex::AUTHENTICATED, crate::authindex::ANY_CLIENT] {
+            let mut store = PodStore::new(Graph::load_dataset(&acl(internal), "nquads").unwrap());
+            assert!(store.materialize_wac().is_err(), "{internal} named as an agent");
+        }
+        let alice = "https://alice.ex/me";
+        let mut store = PodStore::new(Graph::load_dataset(&acl(alice), "nquads").unwrap());
+        store.materialize_wac().unwrap();
+        let reads = |agent: &str, client: Option<&str>| {
+            let s = Session { agent: Some(agent), client, issuer: None, now: None };
+            !store.accessible(&s, Mode::Read).is_empty()
+        };
+        assert!(reads(alice, None), "control: alice reads");
+        assert!(!reads(crate::authindex::AUTHENTICATED, None), "an internal agent gets nothing");
+        assert!(!reads(alice, Some(crate::authindex::ANY_CLIENT)), "an internal client gets nothing");
+    }
+
+    /// An authoritative ACL replace resolves relative IRIs against the document itself.
+    #[test]
+    fn put_acl_resolves_relative_iris_against_the_document() {
+        let doc = "https://pod.ex/n1";
+        let nq = format!("<{doc}#it> <https://ex.dev/ns#t> \"t\" <{doc}> .\n");
+        let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").unwrap());
+        store.materialize_wac().unwrap();
+        let body = "@prefix acl: <http://www.w3.org/ns/auth/acl#> .\n\
+                    <#a> a acl:Authorization ; acl:accessTo <n1> ;\n\
+                    acl:agent <https://alice.ex/me> ; acl:mode acl:Read .\n";
+        store.put_acl("https://pod.ex/n1.acl", body, "turtle").unwrap();
+        let s = Session { agent: Some("https://alice.ex/me"), client: None, issuer: None, now: None };
+        assert!(store.accessible(&s, Mode::Read).iter().any(|r| r.as_str() == doc));
     }
 }

@@ -1508,11 +1508,10 @@ fn trust_authz_decide(
 /// (sq-pfae.17) Build a `PodStore` with admitted trust facts injected into the
 /// dataset. Admitted facts are emitted into TWO positions so they reach the WAC/ACP materialiser:
 ///
-/// 1. **Named-graph position** (`resource + ".acl"` graph) — the WAC loader ONLY reads named
-///    graphs ending in `.acl`/`.acr`; injecting into that graph makes the facts visible to the
-///    N3 reasoner. The convention `resource + ".acl"` matches Solid's ACL-by-naming-convention:
-///    every resource `R` is governed by `R.acl` (or its nearest ancestor), and the loader emits
-///    `<R> solidx:ownAcl <R.acl>` from a present `<R.acl>` graph.
+/// 1. **Named-graph position** (the subject's document, e.g. `<https://ex/g>` for a fact about
+///    `<https://ex/g#team>`) — the WAC loader reads a group document named by an
+///    `acl:agentGroup` reference and keeps only its statements about its own nodes, so a
+///    membership fact about group `G` reaches the reasoner from `G`'s document.
 ///
 /// 2. **Default-graph position** (no graph IRI) — belt-and-braces; the engine SPARQL query path
 ///    (`query_as` / `view_for`) sees the default graph alongside named graphs so trust-injected
@@ -1542,18 +1541,22 @@ fn build_store_with_admitted(
     // Admitted facts emitted into this named graph are seen by the WAC N3 loader
     // (assemble_input processes all graphs whose name ends in ".acl").
     // POSITIONAL format args throughout (CodeQL rust/unused-variable guard).
-    let acl_graph = format!("{}.acl", resource);
+    let _ = resource;
     let mut augmented = req.dataset.clone();
     for fact in admitted {
-        // Named-graph position: reaches the WAC N3 reasoner via the .acl graph path.
-        let _ = writeln!(
-            &mut augmented,
-            "{} {} {} <{}> .",
-            fact.triple.subject,
-            fact.triple.predicate,
-            fact.triple.object,
-            acl_graph,
-        );
+        // Named-graph position: the document of the fact's subject (a group IRI's group
+        // document), the only document whose statements about that node the loader keeps.
+        if let oxrdf::NamedOrBlankNode::NamedNode(group) = &fact.triple.subject {
+            let doc = group.as_str().split('#').next().unwrap_or(group.as_str());
+            let _ = writeln!(
+                &mut augmented,
+                "{} {} {} <{}> .",
+                fact.triple.subject,
+                fact.triple.predicate,
+                fact.triple.object,
+                doc,
+            );
+        }
         // Default-graph position: reachable via SPARQL query on the full dataset.
         let _ = writeln!(
             &mut augmented,

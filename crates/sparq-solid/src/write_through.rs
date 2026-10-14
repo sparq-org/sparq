@@ -239,7 +239,7 @@ impl PodStore {
         let name = NamedNode::new(acl_iri)
             .map_err(|e| format!("put_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
         // PARSE FIRST — a malformed document is rejected before anything mutates.
-        let new_graph = Graph::load_str(content, format).map_err(|e| {
+        let new_graph = Graph::load_str_with_base(content, format, acl_iri).map_err(|e| {
             format!(
                 "put_acl denied: ACL content for <{}> did not parse as {}: {}",
                 acl_iri, format, e

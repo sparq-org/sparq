@@ -178,9 +178,10 @@ Until one of those lands, case (C) stays open and **stays in the dependency clos
 §5.2 keeps the shared-subject edge, and §8 P3 is respecified accordingly.
 
 **Update (October 2026).** The loader now applies a simpler rule than either shape: a
-control or group document's triple is kept only when its subject is a blank node or an
-IRI within that document, and no triple may name a minted `urn:skolem:` IRI
-(`loader.rs` `admits`). A foreign document can therefore no
+control or group document contributes only if every triple's subject is a blank node or
+an IRI within that document and no triple names a minted `urn:skolem:` IRI (`loader.rs`
+`admits`); otherwise it contributes nothing, and for ACP the resources it governs, and
+those whose ACRs reference it, get no grants. A foreign document can therefore no
 longer add properties to `<o.ex/.acl#a1>`, so (C) cannot arise and §7 (7) holds by
 construction. References across documents are objects and are unaffected, so (A) and (B)
 stand as described.
