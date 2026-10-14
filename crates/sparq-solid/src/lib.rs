@@ -487,11 +487,13 @@ impl PodStore {
     /// other pod's cached view (issue #1571). The public method keeps the full-clear default.
     /// sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
-        let stats = materialize_wac(&mut self.graph)?;
+        let mut stats = materialize_wac(&mut self.graph)?;
+        let mut clock = materialize::Clock::start();
         self.record_static_coverage();
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
+        stats.index_millis = clock.lap();
         Ok(stats)
     }
 
@@ -651,11 +653,13 @@ impl PodStore {
         credentials: &VerifiedCredentials,
         scope: ReindexScope,
     ) -> Result<MaterializeStats, String> {
-        let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
+        let mut stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
+        let mut clock = materialize::Clock::start();
         self.record_static_coverage();
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
+        stats.index_millis = clock.lap();
         Ok(stats)
     }
 

@@ -102,8 +102,18 @@ pub struct MaterializeStats {
     /// number of distinct ground triples the stratum's fixpoint had derived, input
     /// facts included. Informational only.
     pub strata_facts: Vec<usize>,
-    /// Wall-clock total.
+    /// Wall-clock total of the free function: the sum of the three phases below.
     pub millis: f64,
+    /// Wall-clock time to load the rules and assemble the reasoning input from the dataset.
+    pub assemble_millis: f64,
+    /// Wall-clock time of the reasoning fixpoint (every stratum).
+    pub reason_millis: f64,
+    /// Wall-clock time to filter the closure and install it as `<urn:sparq:auth>`.
+    pub install_millis: f64,
+    /// Wall-clock time the [`crate::PodStore`] methods spend after the install: recording
+    /// static coverage, replaying bridged grants and rebuilding the session index. `0.0`
+    /// from the free functions, which build no index.
+    pub index_millis: f64,
 }
 
 /// Materialize the WAC auth view (single stratum) and install it as `<urn:sparq:auth>`.
@@ -150,24 +160,25 @@ pub struct MaterializeStats {
 /// # Ok::<(), String>(())
 /// ```
 pub fn materialize_wac(graph: &mut Graph) -> Result<MaterializeStats, String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    let t0 = Instant::now();
     // Every fallible step runs BEFORE the first mutation of `graph`, so an `Err` leaves
     // the dataset — including any previously materialized `<urn:sparq:auth>` view —
     // byte-for-byte untouched, as the contract above promises. Assembly ignores the
     // reserved graph space itself, so it does not depend on the strip having run.
+    let mut clock = Clock::start();
     let rules = wac_rules()?;
     let mut dict = Dict::new();
     // WAC has no creator/owner vocabulary; provenance is ignored (the loader skips it).
     let facts = assemble_input_ids(&mut dict, graph, System::Wac, &AccessProvenance::new(), &VerifiedCredentials::new())?;
+    let assemble_millis = clock.lap();
     let closure = eval(&mut dict, &facts, rules)?;
+    let reason_millis = clock.lap();
     strip_reserved_graphs(graph);
     let mut stats = install_auth_view(graph, &dict, &closure);
+    stats.install_millis = clock.lap();
     stats.strata_facts = vec![closure.len()];
-    stats.millis = elapsed_millis(
-        #[cfg(not(target_arch = "wasm32"))]
-        t0,
-    );
+    stats.assemble_millis = assemble_millis;
+    stats.reason_millis = reason_millis;
+    stats.millis = assemble_millis + reason_millis + stats.install_millis;
     Ok(stats)
 }
 
@@ -259,12 +270,12 @@ pub fn materialize_acp_with_credentials(
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
 ) -> Result<MaterializeStats, String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    let t0 = Instant::now();
     // Fallible work first, mutation last — see [`materialize_wac`].
+    let mut clock = Clock::start();
     let rules = acp_rules()?;
     let mut dict = Dict::new();
     let facts = assemble_input_ids(&mut dict, graph, System::Acp, provenance, credentials)?;
+    let assemble_millis = clock.lap();
     // Chain the three strata entirely at the id level, in ONE dictionary: each stratum's
     // closure is the next one's fact set, so a negated predicate is complete before the
     // stratum that negates it runs (design doc §3.5) and nothing round-trips through text.
@@ -274,29 +285,49 @@ pub fn materialize_acp_with_credentials(
         closure = eval(&mut dict, &closure, stratum)?;
         strata_facts.push(closure.len());
     }
+    let reason_millis = clock.lap();
 
     strip_reserved_graphs(graph);
     let mut stats = install_auth_view(graph, &dict, &closure);
+    stats.install_millis = clock.lap();
     stats.strata_facts = strata_facts;
-    stats.millis = elapsed_millis(
-        #[cfg(not(target_arch = "wasm32"))]
-        t0,
-    );
+    stats.assemble_millis = assemble_millis;
+    stats.reason_millis = reason_millis;
+    stats.millis = assemble_millis + reason_millis + stats.install_millis;
     Ok(stats)
 }
 
-/// Wall-clock milliseconds since `t0`, or `0.0` on `wasm32-unknown-unknown` where
-/// `std::time::Instant` is unavailable (sq-7agop). `stats.millis` is purely
-/// informational (logging / benchmarking), so wasm32 simply reports no timing
-/// rather than trapping.
-#[cfg(not(target_arch = "wasm32"))]
-fn elapsed_millis(t0: Instant) -> f64 {
-    t0.elapsed().as_secs_f64() * 1e3
+/// A lap timer for the [`MaterializeStats`] phases. Every lap reads `0.0` on
+/// `wasm32-unknown-unknown`, where `std::time::Instant` is unavailable (sq-7agop): the
+/// timings are purely informational (logging / benchmarking), so wasm32 simply reports no
+/// timing rather than trapping.
+pub(crate) struct Clock {
+    #[cfg(not(target_arch = "wasm32"))]
+    last: Instant,
 }
 
-#[cfg(target_arch = "wasm32")]
-fn elapsed_millis() -> f64 {
-    0.0
+impl Clock {
+    pub(crate) fn start() -> Self {
+        Clock {
+            #[cfg(not(target_arch = "wasm32"))]
+            last: Instant::now(),
+        }
+    }
+
+    /// Milliseconds since the start or the previous lap.
+    pub(crate) fn lap(&mut self) -> f64 {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let now = Instant::now();
+            let ms = (now - self.last).as_secs_f64() * 1e3;
+            self.last = now;
+            ms
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            0.0
+        }
+    }
 }
 
 /// Whether a closure triple belongs in the auth view: `auth:*` predicates, `rdf:type`
@@ -507,6 +538,24 @@ mod tests {
     /// assembly / principal validation) runs BEFORE `strip_reserved_graphs` deletes the
     /// old `<urn:sparq:auth>` — strip-first would fail OPEN into a dataset whose
     /// authorization view had silently vanished. Both materializers are checked.
+    /// `millis` is the sum of the three phases, and only a `PodStore` method times an index
+    /// rebuild.
+    #[test]
+    fn the_phase_timings_add_up() {
+        for acp in [false, true] {
+            let nq = if acp { crate::acp_fixture() } else { crate::wac_fixture() };
+            let mut graph = Graph::load_dataset(&nq, "nquads").expect("fixture loads");
+            let s = if acp { materialize_acp(&mut graph) } else { materialize_wac(&mut graph) }
+                .expect("materializes");
+            assert_eq!(s.millis, s.assemble_millis + s.reason_millis + s.install_millis);
+            assert!(s.reason_millis > 0.0 && s.index_millis == 0.0, "{s:?}");
+            let mut store = crate::PodStore::new(graph);
+            let s = if acp { store.materialize_acp() } else { store.materialize_wac() }
+                .expect("materializes");
+            assert!(s.index_millis > 0.0, "{s:?}");
+        }
+    }
+
     #[test]
     fn a_failed_rematerialization_leaves_the_previous_auth_view_in_place() {
         let mut graph = Graph::load_dataset(&crate::wac_fixture(), "nquads").expect("fixture loads");
