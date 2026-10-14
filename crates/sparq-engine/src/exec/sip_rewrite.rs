@@ -300,6 +300,69 @@ pub(super) fn nnp_var_ref(p: &NamedNodePattern) -> Option<&Variable> {
     }
 }
 
+/// Seeds flat BGP scans by exact term ids, retaining their variable columns.
+/// Stored blank nodes must never become `TermPattern::BlankNode`: those are
+/// existential query variables. Unsupported algebra stays on the cold path.
+pub(super) fn eval_term_seeded_bgp(
+    graph: &Graph,
+    pattern: &GraphPattern,
+    sub: &FxHashMap<Variable, Term>,
+) -> Result<Option<Bindings>, String> {
+    let GraphPattern::Bgp { patterns } = pattern else { return Ok(None) };
+    // Structural triple-term matching needs its own decomposition and scopes.
+    if patterns.iter().any(|tp| {
+        matches!(tp.subject, TermPattern::Triple(_)) || matches!(tp.object, TermPattern::Triple(_))
+    }) {
+        return Ok(None);
+    }
+    budget::check(0)?;
+    let empty = || Bindings::unsorted(collect_vars(patterns), Vec::new());
+    if view::default_is_empty() && !patterns.is_empty() {
+        return Ok(Some(empty()));
+    }
+    let mut prepared = prepare_bgp(graph, patterns)?;
+    for p in &mut prepared {
+        if p.unsatisfiable {
+            return Ok(Some(empty()));
+        }
+        for (slot, variable) in p.pos_vars.iter().enumerate() {
+            if let Some(term) = variable.as_ref().and_then(|v| sub.get(v)) {
+                let Some(id) = graph.id_of(term) else { return Ok(Some(empty())) };
+                p.id_pat[slot] = Some(id);
+            }
+        }
+        p.est = graph.store.estimate(&p.id_pat);
+    }
+    prepared.sort_by_key(|p| p.est);
+    let mut result = Bindings::unsorted(Vec::new(), vec![Row::new()]);
+    for p in prepared {
+        budget::check(result.rows.len())?;
+        let connecting: Vec<_> = p.pos_vars.iter().enumerate()
+            .filter_map(|(slot, v)| {
+                v.as_ref().and_then(|v| result.col(v).map(|col| (col, slot)))
+            }).collect();
+        if connecting.len() == 1 && distinct_pattern_vars(&p.pos_vars) {
+            let (col, slot) = connecting[0];
+            result = bind_join(graph, result, &p.id_pat, &p.pos_vars, col, slot, None);
+        } else {
+            let rhs = scan_to_bindings(
+                graph, &p.id_pat, &p.pos_vars, None, None, None,
+                #[cfg(feature = "semijoin-bitmap")]
+                None,
+            );
+            result = join_bindings(result, rhs);
+        }
+        if result.rows.is_empty() {
+            break;
+        }
+    }
+    let previous = budget::set_width(result.vars.len());
+    let checked = budget::check(result.rows.len());
+    budget::restore_width(previous);
+    checked?;
+    Ok(Some(result))
+}
+
 /// Restricts positive patterns by IRI bindings without crossing scopes.
 /// Both ordinary SIP and the theta anti-join seed path use this admission rule.
 /// Other algebra uses ordinary evaluation: constant replacement is not selection
