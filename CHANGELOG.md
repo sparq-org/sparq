@@ -50,14 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `commitment_message_with_status_and_scheme`, which bind `sig::scheme_iri_to_field(scheme)`,
   and `verify_commitment_signature{,_with_status}` recompute that message from the recorded
   scheme, so an entry whose `zk:scheme` was changed after signing fails verification and an
-  unrecognised scheme fails closed. **Breaking:** the method-independent
-  `sig::commitment_message_with_salt` / `commitment_message_with_status` message is accepted for
-  a registry entry only when the entry is pinned in `registry::LEGACY_METHOD_UNBOUND_ENTRIES` by
-  its `RegistryEntry::canonical_digest()` (every recorded field, the scheme included). The
-  inventory lists the signed string-canonical entries in this repository (the two in
-  `crates/sparq-zk/tests/fixtures/legacy_registry/`); no released artifact links the registry
-  issuance code, so there is no opt-in for unpinned entries, and any other entry signed before
-  this change no longer verifies. The manifest attestation path
+  unrecognised scheme fails closed. **Breaking — behaviour change:** a registry entry is never verified over the
+  method-independent `sig::commitment_message_with_salt` / `commitment_message_with_status`
+  message, so a registry signature made before this change does not verify. No such entry
+  shipped: `sparq-zk` is unpublished, and no released artifact calls the registry issuance
+  code. The manifest attestation path
   (`verifier`'s issuer-signature check) is a separate message and is unchanged. Retiring V1 in a
   deployed registry stays the operator's choice: an existing entry keeps its method. These host
   entry points take a `commit::MethodUse` (`NewIssuance` is the default and is refused for a V1
@@ -83,7 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   V2 only: `build::{build_filter_value_dl_datetime, build_filter_value_dl_date}` now encode the
   V2 dateTime/date lanes (returning `DualLeafError`), and every ordinary value-lane
   `toml::filter_value_dl*_prover_toml` drops its `MethodUse` argument, returns
-  `Result<String, DispatchError>` and refuses a V1 constant. V1 proofs keep verifying.
+  `Result<String, DispatchError>` and refuses a V1 constant. Verification-side V1 support is
+  unchanged: raw `bb` verification of a V1 proof, `dispatch::resolve_circuit`, the verifier's
+  id derivation and the `LegacyAlreadyIssued` pairing view all still accept V1 (the manifest
+  pre-filter refuses every value-lane sub-proof, V1 or V2, as before).
 - **sparq-zk-compose:** **Breaking — one typed checked prove entry.**
   `driver::CircuitProver::prove_value_lane(method, use_, challenge, &value_lane::ValueLaneProof,
   out_dir, tag)` replaces `prove_in_for_method` (removed, with
@@ -91,8 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   circuit id and no TOML: the new `value_lane` module's `ValueLaneProof` (one typed variant per
   lane, built with `ValueLaneProof::from_inputs(&ProofInputs, LaneWitness)` or a builder's
   `lane_proof()`) carries the public inputs and private witnesses, the member is derived from the
-  lane by `value_lane::derive_value_lane_member` — the same function the verifier's id derivation
-  uses — and the `Prover.toml` is rendered inside the entry by
+  lane by `ValueLane::member` (through `ValueLaneProof::circuit_id`), the table
+  `value_lane::derive_value_lane_member` and the verifier's id derivation also read, and the `Prover.toml` is rendered inside the entry by
   `ValueLaneProof::checked_prover_toml` after the `(method, member, use)` dispatch, the
   canonical-`FieldHex` check over every written field (challenge and private witnesses
   included), the lane↔member allow-list and the method/constant version agreement
@@ -130,7 +130,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   boundary. `datatype_const` is a public input no member pins, which is why the decision lives
   here. `check_lane_member_pairing_for_use` alone does not cross-check the method version
   against the constant version under `MethodUse::LegacyAlreadyIssued`; `prove_value_lane` does
-  (a `DualLeafV1` method needs a V1 constant and a `DualLeafV2` method a V2 one). This is a host
+  (a `DualLeafV1` method needs a V1 constant and a `DualLeafV2` method a V2 one; the
+  research-only `ValueOnlyV1`, reachable only under `LegacyAlreadyIssued`, has no dual-leaf
+  version and accepts either). This is a host
   boundary plus one structural pre-filter refusal: the value-lane verifier gates stay closed
   until the verifier authenticates the method and pins member, lane, scale and bound itself
   (sq-j506).

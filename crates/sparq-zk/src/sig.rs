@@ -983,9 +983,9 @@ pub fn scheme_iri_to_field(scheme_iri: &str) -> Fr {
 /// [`commitment_message_with_salt`]'s `(C(G), salt_G)` plus the method's
 /// [`scheme_iri_to_field`] digest, under a distinct domain tag (`ZKSIG_M2`), so
 /// an entry signed under one method does not verify under any other
-/// (`crate::registry::RegistryEntry`). The method-independent
-/// [`commitment_message_with_salt`] is accepted for a registry entry only when
-/// that entry is pinned in `crate::registry::LEGACY_METHOD_UNBOUND_ENTRIES`.
+/// (`crate::registry::RegistryEntry`). A registry entry is never verified over
+/// the method-independent [`commitment_message_with_salt`]; that message and
+/// [`commitment_message_with_status`] remain the manifest attestation's.
 pub fn commitment_message_with_scheme(commitment: &Fr, salt: &Fr, scheme_digest: &Fr) -> Fr {
     const SIG_DOMAIN_COMMITMENT_SALT_SCHEME: u64 = 0x5a4b_5349_475f_4d32; // "ZKSIG_M2"
     poseidon2::hash(&[

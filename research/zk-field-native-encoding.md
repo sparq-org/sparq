@@ -1196,21 +1196,22 @@ lane↔member allow-list and a method/constant version agreement (a `DualLeafV1`
 V1 constant, a `DualLeafV2` method a V2 one). The raw `CircuitProver::{prove, prove_in,
 gen_witness*}` entries stay ungated and are documented as such.
 
-V1 is no longer selectable for new issuance. The gated fresh-V1 entry points — the checked
-registry constructors, the whole-graph V1 commit builders, the checked prove entry and the
-`(method, circuit)` resolver — fail closed unless the caller writes down
-`MethodUse::LegacyAlreadyIssued` for an already-issued commitment, and the V1 value-lane
-builders, renderers and constants are reachable only by name under `legacy_v1`, while the
-ordinary names produce V2 only. Two honest limits: the flag and the legacy name are CALLER
-ASSERTIONS (nothing reads a signature, entry or timestamp to confirm issuance history), and
-the version agreement is enforced by the checked prove entry, not by
-`check_lane_member_pairing_for_use` on its own. Nor does any of this retire a recorded V1
-selection; it does make the selection tamper-evident: the registry's `scheme` is set only at
-construction, and the issuer signature covers the recorded method for every method (the
-signed message binds the scheme IRI), so an entry whose `zk:scheme` changed after signing
-fails verification. The earlier method-independent message is accepted only for an entry
-pinned, by a digest over every recorded field, in `registry::LEGACY_METHOD_UNBOUND_ENTRIES`,
-which lists the signed legacy entries in this repository.
+V1 is no longer selectable for new issuance. The gated fresh-V1 entry points — the
+whole-graph V1 commit builders, the checked prove entry and the `(method, circuit)` resolver —
+fail closed unless the caller writes down `MethodUse::LegacyAlreadyIssued` for an
+already-issued commitment. The registry takes no `MethodUse`: its issuance constructors
+(`new_for_issuance`, `issued`, `issued_with_status`) refuse a non-selectable method outright,
+and an already-issued method is recorded only through the separately named
+`new_already_issued`. The V1 value-lane builders, renderers and constants are reachable only
+by name under `legacy_v1`, while the ordinary names produce V2 only. Two honest limits: the
+flag and the legacy names are CALLER ASSERTIONS (nothing reads a signature, entry or
+timestamp to confirm issuance history), and the version agreement is enforced by the checked
+prove entry, not by `check_lane_member_pairing_for_use` on its own. Nor does any of this
+retire a recorded V1 selection; it does make the selection tamper-evident: the registry's
+`scheme` is set only at construction, and the issuer signature covers the recorded method for
+every method (the signed message binds the scheme IRI), so an entry whose `zk:scheme`
+changed after signing fails verification. A registry signature over the earlier
+method-independent message does not verify.
 
 **PRECONDITION on (a)–(d), stated plainly.** All of it is HOST-side. The value-lane verifier
 gates (`verifier.rs`'s stage-2 binding edges and `filter_edge_true`) stay CLOSED until the

@@ -1486,11 +1486,11 @@ fn the_checked_prove_entry_refuses_a_v2_method_carrying_a_v1_lane_constant() {
     assert!(!out.exists(), "the refusal must precede any scratch directory");
 }
 
-/// The texts a caller might try to pass through a value-lane `FieldHex` so that
-/// the rendered `Prover.toml` carries something its fields did not produce: a
-/// second top-level key, a nested table, an unquoted value, plus the spellings
-/// the permissive parser accepts (uppercase, short, `0x`-less).
-fn hostile_spellings() -> Vec<(&'static str, String)> {
+/// Non-canonical texts for a value-lane `FieldHex`: texts that would add TOML
+/// structure the fields did not produce (a second top-level key, a nested
+/// table, a trailing newline), plus the spellings the permissive parser accepts
+/// (uppercase, short, `0x`-less).
+fn non_canonical_spellings() -> Vec<(&'static str, String)> {
     let v1 = boolean_datatype_const().0;
     // An element whose canonical text has hex LETTERS, so its uppercase
     // spelling actually differs from it.
@@ -1515,14 +1515,14 @@ fn hostile_spellings() -> Vec<(&'static str, String)> {
 #[test]
 fn caller_text_cannot_reach_the_rendered_prover_toml() {
     let prover = CircuitProver::from_crate_root();
-    let out = unique_out_dir("hostile_field_text");
+    let out = unique_out_dir("non_canonical_field_text");
     let built = build_filter_value_dl_bool(&typed("true", XSD_BOOLEAN), FilterOp::Eq, true).unwrap();
     let honest = built.lane_proof().unwrap();
     let ValueLaneProof::Boolean(base) = honest.clone() else {
         panic!("the V2 boolean build is a boolean lane")
     };
     let int_base = integer_lane(hexf(&dual_leaf_v2::integer_lane_const()));
-    for (label, text) in hostile_spellings() {
+    for (label, text) in non_canonical_spellings() {
         let h = FieldHex(text);
         let mut cases: Vec<(&str, FieldHex, ValueLaneProof)> = Vec::new();
         cases.push(("challenge", h.clone(), honest.clone()));
@@ -1547,7 +1547,7 @@ fn caller_text_cannot_reach_the_rendered_prover_toml() {
                     &challenge,
                     &proof,
                     &out,
-                    "hostile",
+                    "non_canonical",
                 )
                 .expect_err("non-canonical field text must be refused");
             match err {

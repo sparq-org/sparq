@@ -655,7 +655,12 @@ pub(crate) fn check_legacy_v1_lane_const(
 /// The checked prove entry's version agreement: a `DualLeafV1` method needs a V1
 /// lane constant and a `DualLeafV2` method a V2 one, else
 /// [`DispatchError::MethodLaneVersionMismatch`]. Other methods carry no
-/// dual-leaf version and are decided by the dispatch matrix alone.
+/// dual-leaf version and are decided by the dispatch matrix alone. In
+/// particular `ValueOnlyV1` (only under the `commitment-value-only` research
+/// feature, and never selectable for new issuance) is admitted on the value-lane
+/// members by the matrix, so under `MethodUse::LegacyAlreadyIssued` it accepts
+/// a V1 or a V2 lane constant: no value-only leaf encoding exists to say which
+/// version it would carry.
 #[cfg(feature = "dual-leaf")]
 pub(crate) fn check_method_lane_version(
     method: CommitmentMethod,

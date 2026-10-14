@@ -120,7 +120,7 @@ fn unpack(inputs: &ProofInputs) -> Public<'_> {
 // 1. The lane constant — the compose-side pick MUST equal the host encoder's
 // =========================================================================
 
-/// DRIFT GUARD. `manifest::boolean_datatype_const()` is what the compose crate
+/// DRIFT GUARD. `legacy_v1::boolean_datatype_const()` is what the compose crate
 /// puts on the wire; `encode_boolean` is what the COMMITTER folded into the leaf.
 /// If those ever diverge, every boolean proof becomes silently unprovable with no
 /// compile-time signal — so pin them to each other AND to the BLAKE3

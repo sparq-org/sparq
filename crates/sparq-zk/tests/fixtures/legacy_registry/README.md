@@ -4,16 +4,18 @@
 issuance path of commit `5e7e008e`, before the issuer signature covered the
 commitment method. Each block starts with a `# name` line.
 
-| Block | Method recorded | Default verification today |
-| --- | --- | --- |
-| `string-canonical-plain` | `string-canonical` | verifies (pinned) |
-| `string-canonical-status` | `string-canonical` | verifies (pinned) |
-| `dual-leaf-v1-plain` | `dual-leaf` v1 | refused, also when relabelled |
-| `dual-leaf-v1-status` | `dual-leaf` v1 | refused, also when relabelled |
+| Block | Method recorded |
+| --- | --- |
+| `string-canonical-plain` | `string-canonical` |
+| `string-canonical-status` | `string-canonical` |
+| `dual-leaf-v1-plain` | `dual-leaf` v1 |
+| `dual-leaf-v1-status` | `dual-leaf` v1 |
 
-The two `string-canonical` blocks are the entries pinned in
-`registry::LEGACY_METHOD_UNBOUND_ENTRIES`; the `registry` unit tests check the
-pinned digests against this file.
+Every entry here fails verification today, as recorded and under any other
+`zk:scheme` (including a `dual-leaf` v1 entry relabelled `string-canonical`),
+because a registry signature is verified only over the method-bound message.
+The `registry` unit tests check this, and also that each signature is still
+valid over the method-independent message it was made over.
 
 ## How the bytes were made
 
