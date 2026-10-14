@@ -1886,3 +1886,81 @@ fn acp_creator_follows_resources_created_and_deleted_through_the_server() {
         "d1 created again has no creator"
     );
 }
+
+/// Containers created through the server record their creator too, intermediate ones
+/// included, and deleting a container forgets it even while graphs stored under it keep it
+/// in place as an anchor.
+#[test]
+fn acp_container_creator_follows_the_container() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    const BOB: &str = "https://bob.ex/card#me";
+    let docs = "https://pod.ex/docs/.acr";
+    let d0 = "https://pod.ex/docs/d0";
+    let nq = format!(
+        "<{d0}#it> <https://ex.dev/ns#k> \"v\" <{d0}> .
+<{docs}> <{ACP}accessControl> <{docs}#own> <{docs}> .
+<{docs}#own> <{ACP}apply> <{docs}#writer> <{docs}> .
+<{docs}#own> <{ACP}apply> <{docs}#lister> <{docs}> .
+<{docs}#lister> <{ACP}allow> <{ACL}Read> <{docs}> .
+<{docs}#lister> <{ACP}anyOf> <{docs}#mb> <{docs}> .
+<{docs}> <{ACP}memberAccessControl> <{docs}#c> <{docs}> .
+<{docs}#c> <{ACP}apply> <{docs}#writer> <{docs}> .
+<{docs}#c> <{ACP}apply> <{docs}#creator> <{docs}> .
+<{docs}#writer> <{ACP}allow> <{ACL}Write> <{docs}> .
+<{docs}#writer> <{ACP}anyOf> <{docs}#mb> <{docs}> .
+<{docs}#mb> <{ACP}agent> <{BOB}> <{docs}> .
+<{docs}#creator> <{ACP}allow> <{ACL}Read> <{docs}> .
+<{docs}#creator> <{ACP}allOf> <{docs}#mc> <{docs}> .
+<{docs}#mc> <{ACP}agent> <{ACP}CreatorAgent> <{docs}> .
+"
+    );
+    let store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("fixture parses"));
+    let config = SolidServerConfig {
+        agent: Some(BOB.to_string()),
+        acp: true,
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
+    let bob_reads = |s: &SolidMcpServer, url: &str| {
+        let bob = sparq_solid::Session {
+            agent: Some(BOB),
+            client: None,
+            issuer: None,
+            now: None,
+        };
+        s.store().decide(&bob, url, sparq_solid::Mode::Read).allow
+    };
+    let (text, is_err) = tool(&mut s, "container_create", json!({"url": "https://pod.ex/docs/c/"}));
+    assert!(!is_err, "bob creates /docs/c/: {text}");
+    assert!(bob_reads(&s, "https://pod.ex/docs/c/"), "bob created /docs/c/");
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({"url": "https://pod.ex/docs/a/b", "content": "<https://pod.ex/docs/a/b#it> <https://ex.dev/ns#k> \"b\" .", "content_type": "text/turtle"}),
+    );
+    assert!(!is_err, "bob writes /docs/a/b: {text}");
+    assert!(bob_reads(&s, "https://pod.ex/docs/a/"), "bob created /docs/a/ on the way");
+
+    // A graph under /docs/c/ that its containment listing does not name keeps /docs/c/ in
+    // place as an anchor once the container's own document is deleted.
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({"url": "https://pod.ex/docs/c/x", "content": "<https://pod.ex/docs/c/x#it> <https://ex.dev/ns#k> \"x\" .", "content_type": "text/turtle"}),
+    );
+    assert!(!is_err, "bob writes /docs/c/x: {text}");
+    let (text, is_err) = tool(
+        &mut s,
+        "update",
+        json!({"sparql": "DELETE DATA { GRAPH <https://pod.ex/docs/c/> { <https://pod.ex/docs/c/> <http://www.w3.org/ns/ldp#contains> <https://pod.ex/docs/c/x> } }"}),
+    );
+    assert!(!is_err, "bob edits the listing of /docs/c/: {text}");
+    let (text, is_err) = tool(&mut s, "resource_delete", json!({"url": "https://pod.ex/docs/c/"}));
+    assert!(!is_err, "bob deletes /docs/c/: {text}");
+    assert!(
+        !bob_reads(&s, "https://pod.ex/docs/c/"),
+        "the deleted container's creator is forgotten"
+    );
+}

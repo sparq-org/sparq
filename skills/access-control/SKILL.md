@@ -125,7 +125,12 @@ Materialize the authorization view from the access-control documents, then enfor
   and owner of a resource that no longer exists (an update's `DROP`, or any rebuild that
   finds it gone), so the same IRI created again inherits neither.
   `store.record_creator(resource, webid)` adds a creator to the stored context for a
-  caller that creates resources through the store (the MCP server does, under ACP).
+  caller that creates resources through the store (the MCP server does, under ACP);
+  `store.acp_provenance()` / `store.replace_acp_provenance(p)` read and swap the stored
+  provenance without a rebuild, so such a caller can forget a resource it deletes
+  (`AccessProvenance::forget`) and restore the previous map when it rolls a change back.
+  A resource removed by editing `store.graph` directly is forgotten at the next rebuild,
+  so rebuild before creating it again.
 - `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
   (sq-ysv3u, issue #2935) the same, ALSO resolving **`acp:vc`** matchers.
   `VerifiedCredentials::hold(agent_webid, requirement_iri)` asserts that the TRUSTED caller

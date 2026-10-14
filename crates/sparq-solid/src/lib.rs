@@ -301,6 +301,14 @@ pub struct PodStore {
     acp_context: (AccessProvenance, VerifiedCredentials),
 }
 
+/// Whether `resource` exists in a store holding the named graphs `names`: a graph of that
+/// name or, for a container, a graph under it (a container is an inheritance anchor even
+/// without a graph of its own).
+fn resource_exists(names: &FxHashSet<&str>, resource: &str) -> bool {
+    names.contains(resource)
+        || (resource.ends_with('/') && names.iter().any(|g| g.starts_with(resource)))
+}
+
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
 /// cache owns `String` copies) plus the [`Mode`]. sq-3jtd.6 added the issuer
 /// slot; sq-0q7n added the clock (`now`) slot so a time-windowed conditional
@@ -547,8 +555,8 @@ impl PodStore {
         &mut self,
         scope: ReindexScope,
     ) -> Result<MaterializeStats, String> {
-        let (mut provenance, credentials) = self.acp_context.clone();
-        provenance.retain(|r| self.resource_exists(r));
+        let provenance = Self::existing_provenance(&self.graph, &self.acp_context.0);
+        let credentials = self.acp_context.1.clone();
         self.materialize_acp_with_scoped(&provenance, &credentials, scope)
     }
 
@@ -561,16 +569,32 @@ impl PodStore {
         self.acp_context.0.set_creator(resource, creator);
     }
 
-    /// Whether `resource` exists now: a stored graph of that name or, for a container, a
-    /// stored graph under it.
-    fn resource_exists(&self, resource: &str) -> bool {
-        self.graph.named.iter().any(|(n, _)| match n {
-            Term::NamedNode(g) => {
-                let g = g.as_str();
-                g == resource || (resource.ends_with('/') && g.starts_with(resource))
-            }
-            _ => false,
-        })
+    /// The creator/owner provenance in the stored ACP context.
+    pub fn acp_provenance(&self) -> &AccessProvenance {
+        &self.acp_context.0
+    }
+
+    /// Replace the creator/owner provenance in the stored ACP context, returning the previous
+    /// one, without rebuilding the view: it takes effect at the next ACP materialization. For
+    /// a caller that changes resources through the store and must restore the provenance
+    /// when it rolls a change back (such as the MCP server).
+    pub fn replace_acp_provenance(&mut self, provenance: AccessProvenance) -> AccessProvenance {
+        std::mem::replace(&mut self.acp_context.0, provenance)
+    }
+
+    /// `provenance` without the resources `graph` no longer holds (see [`resource_exists`]).
+    fn existing_provenance(graph: &Graph, provenance: &AccessProvenance) -> AccessProvenance {
+        let names: FxHashSet<&str> = graph
+            .named
+            .iter()
+            .filter_map(|(n, _)| match n {
+                Term::NamedNode(g) => Some(g.as_str()),
+                _ => None,
+            })
+            .collect();
+        let mut kept = provenance.clone();
+        kept.retain(|r| resource_exists(&names, r));
+        kept
     }
 
     /// (Re-)materialize the ACP auth view using TRUSTED per-resource creator/owner facts,
@@ -1065,26 +1089,30 @@ impl PodStore {
     /// this update or a later one) is covered only once a static materialization runs again.
     fn apply_update(&mut self, effects: &[sparq_engine::UpdateEffect]) -> Result<(), String> {
         self.forget_removed_coverage(effects);
-        self.forget_removed_provenance(effects);
-        let applied = sparq_engine::apply_effects(&mut self.graph, effects);
-        let mut provenance = std::mem::take(&mut self.acp_context.0);
-        provenance.retain(|r| self.resource_exists(r));
-        self.acp_context.0 = provenance;
-        applied
+        sparq_engine::apply_effects(&mut self.graph, effects)?;
+        self.acp_context.0 = Self::provenance_after(&self.graph, &self.acp_context.0, effects);
+        Ok(())
     }
 
-    /// Forget the creator and owner of every graph `effects` drops, so a graph of that name
-    /// created again, in this update or a later one, has none.
-    fn forget_removed_provenance(&mut self, effects: &[sparq_engine::UpdateEffect]) {
+    /// `provenance` after an update with `effects` left `graph`: without the creator and
+    /// owner of every graph the update drops (so a graph of that name it creates again has
+    /// none) and of every resource `graph` no longer holds.
+    fn provenance_after(
+        graph: &Graph,
+        provenance: &AccessProvenance,
+        effects: &[sparq_engine::UpdateEffect],
+    ) -> AccessProvenance {
         use spargebra::algebra::GraphTarget;
+        let mut kept = Self::existing_provenance(graph, provenance);
         for effect in effects {
             let sparq_engine::UpdateEffect::Drop(target) = effect else { continue };
             match target {
-                GraphTarget::NamedNode(n) => self.acp_context.0.forget(n.as_str()),
-                GraphTarget::NamedGraphs | GraphTarget::AllGraphs => self.acp_context.0.clear(),
+                GraphTarget::NamedNode(n) => kept.forget(n.as_str()),
+                GraphTarget::NamedGraphs | GraphTarget::AllGraphs => kept.clear(),
                 GraphTarget::DefaultGraph => {}
             }
         }
+        kept
     }
 
     /// Drop from the static coverage every graph `effects` removes.
@@ -1740,11 +1768,9 @@ impl PodStore {
         // the whole store's view down.
         if rules_changed {
             let rebuilt = if acp {
-                materialize_acp_with_credentials(
-                    &mut candidate,
-                    &self.acp_context.0,
-                    &self.acp_context.1,
-                )
+                let provenance =
+                    Self::provenance_after(&candidate, &self.acp_context.0, &effects);
+                materialize_acp_with_credentials(&mut candidate, &provenance, &self.acp_context.1)
             } else {
                 materialize_wac(&mut candidate)
             };
