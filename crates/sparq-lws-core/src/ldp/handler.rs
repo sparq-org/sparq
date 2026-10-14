@@ -1195,7 +1195,7 @@ pub async fn put_handler<S: Store>(
         header_str(&headers, header::IF_NONE_MATCH),
         header_str(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag,
-        current.as_ref().and_then(|m| m.last_modified),
+        write_precondition_time(&target, current.as_ref().and_then(|m| m.last_modified)),
     ))?;
 
     let parent = parent_container(&target);
@@ -1515,7 +1515,7 @@ pub async fn delete_handler<S: Store>(
         header_str(&headers, header::IF_NONE_MATCH),
         header_str(&headers, header::IF_UNMODIFIED_SINCE),
         Some(current.etag.as_str()),
-        current.last_modified,
+        write_precondition_time(&target, current.last_modified),
     ))?;
 
     // An AUXILIARY `.acl` resource is NOT a contained child (it is created via `store.write`, never via
@@ -1693,7 +1693,7 @@ pub async fn patch_handler<S: Store>(
         header_str(&headers, header::IF_NONE_MATCH),
         header_str(&headers, header::IF_UNMODIFIED_SINCE),
         current_etag.as_deref(),
-        current.as_ref().and_then(|r| r.meta.last_modified),
+        write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
 
     // Determine the existing triples + the stored format (default Turtle for a new resource).
@@ -2423,6 +2423,19 @@ fn is_storage_root(iri: &str, base_url: &str) -> bool {
 }
 
 /// Read a header value as `&str`, or `None` if absent / not valid UTF-8.
+/// The modification time a write's `If-Unmodified-Since` compares against: a plain resource's
+/// recorded time, but NEVER a container's. A container's listing changes with its membership without
+/// touching the container record's own time (the same reason the read path neither advertises nor
+/// compares it), so that time is stale and could let a write through after the container changed.
+/// `None` makes the evaluator ignore the header, as RFC 9110 §13.1.4 permits when there is no
+/// reliable modification date.
+fn write_precondition_time(
+    target: &crate::ldp::target::LdpTarget,
+    recorded: Option<std::time::SystemTime>,
+) -> Option<std::time::SystemTime> {
+    if target.is_container { None } else { recorded }
+}
+
 fn header_str(headers: &HeaderMap, name: HeaderName) -> Option<&str> {
     headers.get(name).and_then(|v| v.to_str().ok())
 }
@@ -5702,8 +5715,32 @@ mod tests {
     #[tokio::test]
     async fn if_unmodified_since_guards_put_patch_and_delete() {
         // RFC 9110 §13.1.4: a write proceeds only if the target has not changed after the date. The
-        // resource's own Last-Modified passes; a date before it fails with 412 and changes nothing.
+        // resource's own Last-Modified passes; a date before it, in any of the three HTTP-date forms,
+        // fails with 412 and changes nothing; an invalid date is ignored.
+        const STALE: [&str; 3] = [
+            "Thu, 01 Jan 1970 00:00:00 GMT",
+            "Sunday, 06-Nov-94 08:49:37 GMT",
+            "Sun Nov  6 08:49:37 1994",
+        ];
         for verb in ["PUT", "PATCH", "DELETE"] {
+            for stale_date in STALE {
+                let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+                let etag =
+                    etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+                let stale = write_if_unmodified_since(&state, verb, stale_date).await;
+                assert_eq!(
+                    stale,
+                    StatusCode::PRECONDITION_FAILED,
+                    "{verb} {stale_date}"
+                );
+                let after = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
+                assert_eq!(
+                    etag_of(&after),
+                    etag,
+                    "{verb}: a 412 must not change the resource"
+                );
+            }
+
             let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
             let read = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
             let last_modified = read
@@ -5713,51 +5750,67 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .to_string();
-            let etag = etag_of(&read);
+            let current = write_if_unmodified_since(&state, verb, &last_modified).await;
+            assert!(current.is_success(), "{verb} at Last-Modified: {current}");
 
-            let stale =
-                write_if_unmodified_since(&state, verb, "Thu, 01 Jan 1970 00:00:00 GMT").await;
-            assert_eq!(stale, StatusCode::PRECONDITION_FAILED, "{verb}");
-            let after = get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await;
-            assert_eq!(
-                etag_of(&after),
-                etag,
-                "{verb}: a 412 must not change the resource"
-            );
+            let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+            let invalid = write_if_unmodified_since(&state, verb, "last week").await;
+            assert!(invalid.is_success(), "{verb}: an invalid date is ignored");
+        }
+    }
 
-            // A matching If-Match takes precedence: the same stale date is then ignored.
-            let fresh = state_with_owner_resource("/alice/doc", COND_DOC).await;
-            let fresh_etag =
-                etag_of(&get_with(&fresh, owner_token(), "/alice/doc", HeaderMap::new()).await);
-            let mut both = HeaderMap::new();
-            both.insert(
-                header::IF_MATCH,
-                HeaderValue::from_str(&fresh_etag).unwrap(),
-            );
-            both.insert(
+    #[tokio::test]
+    async fn if_match_takes_precedence_over_if_unmodified_since_on_writes() {
+        for verb in ["PUT", "PATCH", "DELETE"] {
+            let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
+            let etag =
+                etag_of(&get_with(&state, owner_token(), "/alice/doc", HeaderMap::new()).await);
+            let mut headers = match verb {
+                "PUT" => turtle_write_headers(),
+                "PATCH" => n3_patch_headers(),
+                _ => HeaderMap::new(),
+            };
+            headers.insert(header::IF_MATCH, HeaderValue::from_str(&etag).unwrap());
+            headers.insert(
                 header::IF_UNMODIFIED_SINCE,
                 HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"),
             );
-            let delete = delete_handler(
-                State(fresh),
-                Extension(owner_token()),
-                "/alice/doc".parse().unwrap(),
-                both,
-            )
-            .await
-            .unwrap_or_else(IntoResponse::into_response);
-            assert!(delete.status().is_success(), "If-Match takes precedence");
-
-            let current = write_if_unmodified_since(&state, verb, &last_modified).await;
-            assert!(current.is_success(), "{verb} at Last-Modified: {current}");
+            let (s, t) = (State(state.clone()), Extension(owner_token()));
+            let uri: axum::http::Uri = "/alice/doc".parse().unwrap();
+            let result = match verb {
+                "PUT" => put_handler(s, t, uri, headers, body_doc()).await,
+                "PATCH" => {
+                    let patch = insert_only_patch("https://pod.example/alice/doc#me");
+                    patch_handler(s, t, uri, headers, patch).await
+                }
+                _ => delete_handler(s, t, uri, headers).await,
+            };
+            let status = result.unwrap_or_else(IntoResponse::into_response).status();
+            assert!(status.is_success(), "{verb}: {status}");
         }
+    }
+
+    #[tokio::test]
+    async fn if_unmodified_since_is_ignored_for_a_container() {
+        // A container's record time does not move when its membership does, so it is no basis for
+        // the comparison: even a date long before it lets the write through.
         let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
-        assert!(
-            write_if_unmodified_since(&state, "PUT", "last week")
-                .await
-                .is_success(),
-            "an invalid date is ignored"
+        let mut headers = turtle_write_headers();
+        headers.insert(
+            header::IF_UNMODIFIED_SINCE,
+            HeaderValue::from_static("Thu, 01 Jan 1970 00:00:00 GMT"),
         );
+        let status = put_handler(
+            State(state),
+            Extension(owner_token()),
+            "/alice/".parse().unwrap(),
+            headers,
+            AxBytes::new(),
+        )
+        .await
+        .unwrap_or_else(IntoResponse::into_response)
+        .status();
+        assert!(status.is_success(), "{status}");
     }
 
     #[tokio::test]

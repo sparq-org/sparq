@@ -216,7 +216,134 @@ pub(crate) fn unmodified_since_applies(
     if if_match.is_some() {
         return None;
     }
-    if_unmodified_since.and_then(parse_http_date)
+    if_unmodified_since.and_then(|v| parse_any_http_date(v, crate::clock::now()))
+}
+
+/// Parse any of the three HTTP-date forms a recipient MUST accept (RFC 9110 §5.6.7): IMF-fixdate
+/// ([`parse_http_date`]), the obsolete RFC 850 form `Sunday, 06-Nov-94 08:49:37 GMT`, and the
+/// obsolete asctime form `Sun Nov  6 08:49:37 1994` (UTC). Each form is fixed-width and checked
+/// strictly, calendar and weekday included.
+///
+/// Used where ignoring a valid date would be UNSAFE: a write's `If-Unmodified-Since` that failed to
+/// parse would let a lost update through. (The read path keeps the IMF-only parser, where an ignored
+/// date only costs a cache miss.) An RFC 850 two-digit year that would be more than 50 years after
+/// `now` is taken as the most recent past year with those digits, as §5.6.7 requires.
+fn parse_any_http_date(value: &str, now: SystemTime) -> Option<i64> {
+    parse_http_date(value)
+        .or_else(|| parse_rfc850_date(value, now))
+        .or_else(|| parse_asctime_date(value))
+}
+
+/// `Sunday, 06-Nov-94 08:49:37 GMT`: a full day-name, then a fixed-width 22-byte tail.
+fn parse_rfc850_date(value: &str, now: SystemTime) -> Option<i64> {
+    let v = value.trim();
+    if !v.is_ascii() {
+        return None;
+    }
+    let (day_name, rest) = v.split_once(", ")?;
+    let b = rest.as_bytes();
+    if b.len() != 22
+        || b[2] != b'-'
+        || b[6] != b'-'
+        || b[9] != b' '
+        || b[12] != b':'
+        || b[15] != b':'
+        || &b[18..22] != b" GMT"
+    {
+        return None;
+    }
+    let day = two_digits(b, 0)?;
+    let month = month_from_abbrev(&rest[3..6])?;
+    let yy = i64::from(two_digits(b, 7)?);
+    let current_year =
+        system_time_to_unix(now).map_or(1970, |secs| civil_year(secs.div_euclid(86_400)));
+    let mut year = current_year - current_year.rem_euclid(100) + yy;
+    if year > current_year + 50 {
+        year -= 100;
+    }
+    let (secs, days) = civil_to_unix(
+        year,
+        month,
+        day,
+        two_digits(b, 10)?,
+        two_digits(b, 13)?,
+        two_digits(b, 16)?,
+    )?;
+    let short = day_name_for(days);
+    (day_name.len() > 3 && day_name.starts_with(short) && full_day_name(short) == day_name)
+        .then_some(secs)
+}
+
+/// `Sun Nov  6 08:49:37 1994`: 24 bytes, the day of month space-padded to two characters.
+fn parse_asctime_date(value: &str) -> Option<i64> {
+    let v = value.trim();
+    if !v.is_ascii() {
+        return None;
+    }
+    let b = v.as_bytes();
+    if b.len() != 24
+        || b[3] != b' '
+        || b[7] != b' '
+        || b[10] != b' '
+        || b[13] != b':'
+        || b[16] != b':'
+        || b[19] != b' '
+    {
+        return None;
+    }
+    let month = month_from_abbrev(&v[4..7])?;
+    let day = match (b[8], b[9]) {
+        (b' ', d) if d.is_ascii_digit() => u32::from(d - b'0'),
+        (b' ', _) => return None,
+        _ => two_digits(b, 8)?,
+    };
+    let (secs, days) = civil_to_unix(
+        four_digits(b, 20)?,
+        month,
+        day,
+        two_digits(b, 11)?,
+        two_digits(b, 14)?,
+        two_digits(b, 17)?,
+    )?;
+    (day_name_for(days) == &v[0..3]).then_some(secs)
+}
+
+/// Validate a civil UTC date-time and return (seconds, days) since the Unix epoch.
+fn civil_to_unix(year: i64, month: u32, day: u32, hh: u32, mm: u32, ss: u32) -> Option<(i64, i64)> {
+    if day == 0 || day > days_in_month(year, month) || hh > 23 || mm > 59 || ss > 59 {
+        return None;
+    }
+    let days = days_from_civil(year, month, day);
+    Some((
+        days * 86_400 + i64::from(hh) * 3_600 + i64::from(mm) * 60 + i64::from(ss),
+        days,
+    ))
+}
+
+/// The proleptic Gregorian year containing `days` since the Unix epoch.
+fn civil_year(days: i64) -> i64 {
+    // Walk from an estimate: at most one step either way.
+    let mut year = 1970 + days.div_euclid(365);
+    while days_from_civil(year, 1, 1) > days {
+        year -= 1;
+    }
+    while days_from_civil(year + 1, 1, 1) <= days {
+        year += 1;
+    }
+    year
+}
+
+/// The RFC 850 full day-name for an IMF-fixdate abbreviation.
+fn full_day_name(short: &str) -> &'static str {
+    match short {
+        "Mon" => "Monday",
+        "Tue" => "Tuesday",
+        "Wed" => "Wednesday",
+        "Thu" => "Thursday",
+        "Fri" => "Friday",
+        "Sat" => "Saturday",
+        _ => "Sunday",
+    }
 }
 
 /// Whether a header value is the wildcard `*` (after trimming). `pub(crate)` so the V4
@@ -588,6 +715,49 @@ mod tests {
     }
 
     #[test]
+    fn obsolete_http_date_forms_are_accepted_for_writes() {
+        // RFC 9110 §5.6.7's own example, in all three forms.
+        let now = at(1_800_000_000); // 2027
+        for v in [
+            "Sun, 06 Nov 1994 08:49:37 GMT",
+            "Sunday, 06-Nov-94 08:49:37 GMT",
+            "Sun Nov  6 08:49:37 1994",
+        ] {
+            assert_eq!(parse_any_http_date(v, now), Some(784_111_777), "{v}");
+        }
+        assert_eq!(
+            parse_any_http_date("Thu Jan  1 00:33:20 1970", now),
+            Some(2000)
+        );
+        // asctime allows a zero-padded day as well as a space-padded one.
+        assert_eq!(
+            parse_any_http_date("Sun Nov 06 08:49:37 1994", now),
+            Some(784_111_777)
+        );
+        // Wrong weekdays, a missing pad, a short day-name and an impossible date are rejected.
+        for v in [
+            "Monday, 06-Nov-94 08:49:37 GMT",
+            "Sun, 06-Nov-94 08:49:37 GMT",
+            "Mon Nov  6 08:49:37 1994",
+            "Sun Nov 6 08:49:37 1994",
+            "Thursday, 31-Nov-94 08:49:37 GMT",
+        ] {
+            assert_eq!(parse_any_http_date(v, now), None, "{v}");
+        }
+        // Two-digit years more than 50 years ahead belong to the previous century.
+        let in_2027 = parse_any_http_date("Wednesday, 01-Jan-76 00:00:00 GMT", now).unwrap();
+        assert_eq!(
+            in_2027,
+            parse_http_date("Wed, 01 Jan 2076 00:00:00 GMT").unwrap()
+        );
+        let late = at(4_102_444_800); // 2100-01-01
+        assert_eq!(
+            parse_any_http_date("Saturday, 06-Nov-94 08:49:37 GMT", late),
+            parse_http_date("Sat, 06 Nov 2094 08:49:37 GMT")
+        );
+    }
+
+    #[test]
     fn if_none_match_still_applies_after_if_unmodified_since() {
         let date = Some("Thu, 01 Jan 1970 00:33:20 GMT");
         assert_eq!(
@@ -790,7 +960,7 @@ mod tests {
         // Day zero / day beyond the month's true length.
         assert_eq!(parse_http_date("Wed, 00 Nov 1994 08:49:37 GMT"), None);
         assert_eq!(parse_http_date("Thu, 31 Nov 1994 08:49:37 GMT"), None); // Nov has 30 days
-                                                                            // Feb 29 exists only in a leap year.
+        // Feb 29 exists only in a leap year.
         assert_eq!(parse_http_date("Mon, 29 Feb 1999 00:00:00 GMT"), None);
         assert_eq!(parse_http_date("Tue, 29 Feb 1900 00:00:00 GMT"), None); // century, not leap
         assert_eq!(
