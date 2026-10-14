@@ -310,7 +310,14 @@ impl ValueLaneProof {
         let wrong_shape = "the witness shape is not this lane's";
         Ok(match (inputs, witness) {
             (
-                ProofInputs::FilterValueDl { operand_enc, op, bound, datatype_const, expected, .. },
+                ProofInputs::FilterValueDl {
+                    operand_enc,
+                    op,
+                    bound,
+                    datatype_const,
+                    expected,
+                    ..
+                },
                 LaneWitness::Hook(witness),
             ) => ValueLaneProof::Integer(IntegerLane {
                 operand_enc: operand_enc.clone(),
@@ -321,7 +328,14 @@ impl ValueLaneProof {
                 witness,
             }),
             (
-                ProofInputs::FilterValueDlF64 { operand_enc, op, b_bits, datatype_const, expected, .. },
+                ProofInputs::FilterValueDlF64 {
+                    operand_enc,
+                    op,
+                    b_bits,
+                    datatype_const,
+                    expected,
+                    ..
+                },
                 LaneWitness::Hook(witness),
             ) => ValueLaneProof::Double(DoubleLane {
                 operand_enc: operand_enc.clone(),
@@ -372,7 +386,14 @@ impl ValueLaneProof {
                 witness,
             }),
             (
-                ProofInputs::FilterValueDlBool { id, operand_enc, op, bound, datatype_const, expected },
+                ProofInputs::FilterValueDlBool {
+                    id,
+                    operand_enc,
+                    op,
+                    bound,
+                    datatype_const,
+                    expected,
+                },
                 LaneWitness::Hook(witness),
             ) => {
                 let bound = match bound {
@@ -394,20 +415,32 @@ impl ValueLaneProof {
     }
 
     /// Every `FieldHex` this proof writes into its `Prover.toml`, named.
-    fn field_hexes<'a>(
-        &'a self,
-        challenge: &'a FieldHex,
-    ) -> Vec<(&'static str, &'a FieldHex)> {
+    fn field_hexes<'a>(&'a self, challenge: &'a FieldHex) -> Vec<(&'static str, &'a FieldHex)> {
         let mut v = vec![("challenge", challenge)];
         match self {
-            ValueLaneProof::Integer(IntegerLane { operand_enc, datatype_const, witness, .. })
-            | ValueLaneProof::Double(DoubleLane { operand_enc, datatype_const, witness, .. }) => {
+            ValueLaneProof::Integer(IntegerLane {
+                operand_enc,
+                datatype_const,
+                witness,
+                ..
+            })
+            | ValueLaneProof::Double(DoubleLane {
+                operand_enc,
+                datatype_const,
+                witness,
+                ..
+            }) => {
                 v.push(("operand_enc", operand_enc));
                 v.push(("datatype_const", datatype_const));
                 v.push(("value_hook", &witness.value_hook));
                 v.push(("lexical_component", &witness.lexical_component));
             }
-            ValueLaneProof::Decimal(DecimalLane { operand_enc, datatype_const, witness, .. })
+            ValueLaneProof::Decimal(DecimalLane {
+                operand_enc,
+                datatype_const,
+                witness,
+                ..
+            })
             | ValueLaneProof::DateTime(DateTimeLane {
                 operand_enc,
                 datatype_const,
@@ -419,7 +452,11 @@ impl ValueLaneProof {
                 v.push(("value_hook_scaled", &witness.value_hook_scaled));
                 v.push(("lexical_component", &witness.lexical_component));
             }
-            ValueLaneProof::Boolean(BooleanLane { operand_enc, witness, .. }) => {
+            ValueLaneProof::Boolean(BooleanLane {
+                operand_enc,
+                witness,
+                ..
+            }) => {
                 v.push(("operand_enc", operand_enc));
                 v.push(("value_hook", &witness.value_hook));
                 v.push(("lexical_component", &witness.lexical_component));
@@ -534,13 +571,21 @@ mod tests {
     /// and the variant a typed proof emits cannot drift apart.
     #[test]
     fn the_variant_member_table_is_one_to_one_and_round_trips() {
-        let members: std::collections::HashSet<String> =
-            ValueLane::ALL.iter().map(|l| l.member().package()).collect();
+        let members: std::collections::HashSet<String> = ValueLane::ALL
+            .iter()
+            .map(|l| l.member().package())
+            .collect();
         assert_eq!(members.len(), ValueLane::ALL.len());
         let h = || FieldHex::from_field(&sparq_zk::field::Fr::from(1u64));
-        let hook = || HookWitness { value_hook: h(), lexical_component: h() };
-        let signed =
-            || SignedWitness { value_neg: false, value_hook_scaled: h(), lexical_component: h() };
+        let hook = || HookWitness {
+            value_hook: h(),
+            lexical_component: h(),
+        };
+        let signed = || SignedWitness {
+            value_neg: false,
+            value_hook_scaled: h(),
+            lexical_component: h(),
+        };
         let proofs = [
             ValueLaneProof::Integer(IntegerLane {
                 operand_enc: h(),

@@ -21,9 +21,7 @@
 //! `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement. NOT
 //! externally audited; no soundness or privacy claim.
 
-use crate::build::{
-    assemble_dl_datetime, boolean_verdict, hexf, BuiltFilterValueDlDateTime,
-};
+use crate::build::{assemble_dl_datetime, boolean_verdict, hexf, BuiltFilterValueDlDateTime};
 use crate::dispatch::DispatchError;
 use crate::manifest::{CircuitId, FieldHex, FilterOp, ProofInputs};
 use crate::toml::{render_hook_checked, render_signed_checked, RenderVersion};
@@ -42,7 +40,9 @@ use sparq_zk::field::{field_to_hex, Fr};
 /// audited soundness claim. The V2 boolean lane has a dedicated bit-domain
 /// member ([`crate::manifest::boolean_lane_const_v2`]).
 pub fn boolean_datatype_const() -> FieldHex {
-    FieldHex(field_to_hex(&sparq_zk::dual_leaf_boolean::boolean_datatype_const()))
+    FieldHex(field_to_hex(
+        &sparq_zk::dual_leaf_boolean::boolean_datatype_const(),
+    ))
 }
 
 /// The PUBLIC `datatype_const` of the `DualLeafV1` `xsd:dateTime` value lane
@@ -50,7 +50,9 @@ pub fn boolean_datatype_const() -> FieldHex {
 /// `sparq_zk::dual_leaf_datetime::encode_datetime` folds into the committed leaf.
 /// It carries the lane-fixed sub-second scale `FS` (the B4 bind).
 pub fn datetime_datatype_const() -> FieldHex {
-    FieldHex(field_to_hex(&sparq_zk::dual_leaf_datetime::datetime_datatype_const()))
+    FieldHex(field_to_hex(
+        &sparq_zk::dual_leaf_datetime::datetime_datatype_const(),
+    ))
 }
 
 /// The PUBLIC `datatype_const` of the `DualLeafV1` `xsd:date` value lane
@@ -59,7 +61,9 @@ pub fn datetime_datatype_const() -> FieldHex {
 /// numerically equal to the dateTime hook of its starting instant, so this
 /// constant is the only thing keeping the two terms apart.
 pub fn date_datatype_const() -> FieldHex {
-    FieldHex(field_to_hex(&sparq_zk::dual_leaf_datetime::date_datatype_const()))
+    FieldHex(field_to_hex(
+        &sparq_zk::dual_leaf_datetime::date_datatype_const(),
+    ))
 }
 
 /// Why a `DualLeafV1` value-lane builder refused.
