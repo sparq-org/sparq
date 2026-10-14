@@ -157,10 +157,18 @@ fn canonical(v: &Value) -> Result<Value, Unknown> {
     })
 }
 
-/// Whether `r` is in lowest terms with a positive denominator, as parsed values are.
+/// Whether `r` is in lowest terms with a positive denominator, as parsed values are, and
+/// `Rational`'s comparison (which forms `num - floor * den`) cannot overflow on it.
 fn reduced(r: &RationalKey) -> bool {
     let (mut a, mut b) = (r.0.num.unsigned_abs(), r.0.den.unsigned_abs());
-    if r.0.den <= 0 {
+    if r.0.den <= 0
+        || r.0
+            .num
+            .div_euclid(r.0.den)
+            .checked_mul(r.0.den)
+            .and_then(|p| r.0.num.checked_sub(p))
+            .is_none()
+    {
         return false;
     }
     while b != 0 {

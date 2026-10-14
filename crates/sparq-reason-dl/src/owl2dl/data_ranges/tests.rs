@@ -668,6 +668,16 @@ fn values_no_literal_has_answer_unknown() {
     let max = Value::Real(RationalKey(Rational::int(i128::MAX)));
     assert_eq!(contains(&dt("integer"), &max), Tri::Yes);
     assert_eq!(contains(&dt("long"), &max), Tri::No);
+    // Reduced, but `Rational`'s comparison would overflow on it.
+    let edge = Value::Real(RationalKey(Rational {
+        num: i128::MIN + 1,
+        den: 3,
+    }));
+    assert_eq!(
+        has_at_least(&one_of([edge.clone(), v("1/3", "owl:rational")]), 2),
+        Tri::Unknown
+    );
+    assert_eq!(contains(&dt("owl:rational"), &edge), Tri::Unknown);
     let negative_den = Value::Real(RationalKey(Rational { num: 1, den: -1 }));
     assert_eq!(contains(&dt("integer"), &negative_den), Tri::Unknown);
     let unreduced = Value::Real(RationalKey(Rational { num: 2, den: 4 }));
@@ -705,6 +715,19 @@ fn large_enumerations_count_quickly() {
     assert_eq!(has_at_least(&r, 3001), Tri::No);
     assert_eq!(
         conjunction_satisfiable(std::slice::from_ref(&r), &[], 1, &words),
+        Tri::No
+    );
+}
+
+#[test]
+fn long_patterns_answer_unknown() {
+    let p = "a".repeat(5000);
+    assert_eq!(
+        is_empty(&restrict("string", &[("pattern", s(&p))])),
+        Tri::Unknown
+    );
+    assert_eq!(
+        is_empty(&restrict("string", &[("pattern", s(&"a".repeat(4000)))])),
         Tri::No
     );
 }

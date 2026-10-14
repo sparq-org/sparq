@@ -26,6 +26,9 @@ const CELL_BUDGET: usize = 2 << 20;
 const DFA_SIZE_LIMIT: usize = 16 << 20;
 /// Bytes all the automata of one check, and all cached automata, may occupy.
 const TOTAL_DFA_BYTES: usize = 64 << 20;
+/// Longer patterns answer Unknown, bounding what parsing allocates before the automaton
+/// limits apply.
+const MAX_PATTERN_BYTES: usize = 4096;
 /// The byte between a string and its language tag.
 const SEP: u8 = 0xFF;
 
@@ -197,6 +200,9 @@ pub(crate) fn encode(s: &str, tag: Option<&str>) -> Vec<u8> {
 /// Whether `pattern` is an XSD regular expression this module can evaluate: `Some(true)`
 /// yes, `Some(false)` not an XSD regular expression, `None` valid but not implemented.
 pub(crate) fn pattern_status(pattern: &str) -> Option<bool> {
+    if pattern.len() > MAX_PATTERN_BYTES {
+        return None;
+    }
     match xsdre::parse(pattern) {
         Ok(_) => Some(true),
         Err(PatternError::Invalid) => Some(false),
@@ -648,6 +654,9 @@ fn cached(key: Key, build: impl FnOnce() -> Result<Hir, ()>) -> Result<Rc<Dfa>, 
     let bytes = key_bytes + d.as_ref().map_or(0, |d| d.0.memory_usage());
     DFAS.with(|m| {
         let (m, total) = &mut *m.borrow_mut();
+        if bytes > TOTAL_DFA_BYTES / 4 {
+            return;
+        }
         if m.len() >= 256 || *total + bytes > TOTAL_DFA_BYTES {
             m.clear();
             *total = 0;
