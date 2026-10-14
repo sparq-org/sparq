@@ -7,7 +7,7 @@
 import type * as RDF from '@rdfjs/types';
 import { Bindings } from './bindings.js';
 import { decompressToString, type CompressionCodec } from './decompress.js';
-import { checkOwlDl, type OwlDlOptions, type OwlDlResult } from './owl-dl.js';
+import { checkOwlDl, normaliseOwlDlOptions, type OwlDlOptions, type OwlDlResult } from './owl-dl.js';
 import {
   detectQueryForm,
   parseNTriples,
@@ -548,9 +548,11 @@ export class SparqStore implements RDF.StringSparqlQueryable<RDF.BindingsResultS
    * is a subset). Named graphs are not included. Lazily loads the separate DL wasm bundle on
    * first use.
    */
-  checkOwlDl(abox?: string, options: Omit<OwlDlOptions, 'format'> = {}): Promise<OwlDlResult> {
+  async checkOwlDl(abox?: string, options?: Omit<OwlDlOptions, 'format'>): Promise<OwlDlResult> {
+    // Same strict validation as the free function, but `format` is not an option here.
+    normaliseOwlDlOptions(options, ['budget']);
     const tbox = this.serialize('turtle', { pretty: false });
-    return checkOwlDl(tbox, abox, { budget: options.budget, format: 'turtle' });
+    return checkOwlDl(tbox, abox, { ...options, format: 'turtle' });
   }
 
   /**

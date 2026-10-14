@@ -157,3 +157,29 @@ test('SparqStore.prototype.checkOwlDl uses the default graph as the TBox', async
     store.free();
   }
 });
+
+test('malformed options are a TypeError, never a silent default', async () => {
+  const bad = [
+    null,
+    [],
+    'turtle',
+    { budegt: { maxSteps: 1 } },
+    { format: 'jsonld' },
+    { format: 1 },
+    { budget: 5 },
+    { budget: null },
+    { budget: [] },
+    { budget: { maxStep: 1 } },
+    { budget: { maxSteps: '1' } },
+  ];
+  for (const options of bad) {
+    await assert.rejects(checkOwlDl(TBOX, undefined, options), TypeError, JSON.stringify(options));
+  }
+  const store = await SparqStore.fromString(TBOX, 'turtle');
+  for (const options of [...bad, { format: 'turtle' }]) {
+    await assert.rejects(store.checkOwlDl(undefined, options), TypeError, JSON.stringify(options));
+  }
+  // Well-formed options still work through both entry points.
+  assert.equal((await checkOwlDl(TBOX, undefined, { format: 'turtle', budget: {} })).consistent, true);
+  assert.equal((await store.checkOwlDl(undefined, { budget: { maxNodes: 100000 } })).consistent, true);
+});

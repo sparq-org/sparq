@@ -26,8 +26,11 @@ read as an OWL 2 ontology by the fail-closed reverse RDF mapping, then the OWL 2
 check, consistency (TBox + ABox) and, for a consistent ontology, classification run.
 
 It **rejects** (a thrown `Error`/`TypeError`) only on a parse error (message starts with
-`TBox parse error` / `ABox parse error`), malformed options (a budget limit that is not a
-non-negative integer), or if the DL bundle cannot be loaded. A graph the OWL mapping refuses
+`TBox parse error` / `ABox parse error`), malformed options (a `TypeError`: options or `budget` that
+are not plain objects, an unknown key, a `format` other than `turtle` / `ntriples` / `nquads` /
+`trig`, a `format` passed to `SparqStore.checkOwlDl`, or a budget limit that is not a
+non-negative integer — never a silent fall-back to the defaults), or if the DL bundle cannot be
+loaded. A graph the OWL mapping refuses
 is **not** a rejection: it resolves with `consistent: "unknown"` and the refusal as `reason`.
 
 ## Lazy loading

@@ -137,6 +137,47 @@ function budgetLimit(name: string, value: unknown): number | undefined {
   return value;
 }
 
+const FORMATS = ['turtle', 'ntriples', 'nquads', 'trig'];
+
+function plainObject(value: unknown, what: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`checkOwlDl: ${what} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function onlyKeys(obj: Record<string, unknown>, allowed: readonly string[], what: string): void {
+  for (const key of Object.keys(obj)) {
+    if (!allowed.includes(key)) {
+      throw new TypeError(`checkOwlDl: unknown ${what} key ${JSON.stringify(key)} (expected ${allowed.join(', ')})`);
+    }
+  }
+}
+
+/**
+ * Validates `options` strictly (an object with only the `allowed` keys; a known `format`; a
+ * `budget` object with only non-negative integer limits) and returns the JSON the bundle takes,
+ * so a malformed configuration is a `TypeError`, never a silent fallback to the defaults.
+ * @internal
+ */
+export function normaliseOwlDlOptions(
+  options: unknown,
+  allowed: readonly string[] = ['format', 'budget'],
+): { format: string; optionsJson: string | undefined } {
+  if (options === undefined) return { format: 'turtle', optionsJson: undefined };
+  const opts = plainObject(options, 'options');
+  onlyKeys(opts, allowed, 'options');
+  const format = opts.format ?? 'turtle';
+  if (typeof format !== 'string' || !FORMATS.includes(format)) {
+    throw new TypeError(`checkOwlDl: options.format must be one of ${FORMATS.join(', ')}`);
+  }
+  if (opts.budget === undefined) return { format, optionsJson: undefined };
+  const b = plainObject(opts.budget, 'options.budget');
+  onlyKeys(b, ['maxSteps', 'maxNodes'], 'options.budget');
+  const budget = { maxSteps: budgetLimit('maxSteps', b.maxSteps), maxNodes: budgetLimit('maxNodes', b.maxNodes) };
+  return { format, optionsJson: JSON.stringify({ budget }) };
+}
+
 /**
  * Checks an OWL 2 ontology: parses `tbox` and the optional `abox` (merged into one graph; the
  * ABox is just more assertions, and blank nodes never join across the two documents), reads
@@ -151,16 +192,12 @@ function budgetLimit(name: string, value: unknown): number | undefined {
  * Rejects on a parse error, on malformed options, or if the DL bundle cannot be loaded. A graph
  * the OWL mapping refuses is NOT a rejection: it resolves with `consistent: "unknown"`.
  */
-export async function checkOwlDl(tbox: string, abox?: string, options: OwlDlOptions = {}): Promise<OwlDlResult> {
+export async function checkOwlDl(tbox: string, abox?: string, options?: OwlDlOptions): Promise<OwlDlResult> {
   if (typeof tbox !== 'string') throw new TypeError('checkOwlDl: tbox must be a string');
   if (abox !== undefined && abox !== null && typeof abox !== 'string') {
     throw new TypeError('checkOwlDl: abox must be a string when given');
   }
-  const format = options.format ?? 'turtle';
-  const budget = options.budget
-    ? { maxSteps: budgetLimit('maxSteps', options.budget.maxSteps), maxNodes: budgetLimit('maxNodes', options.budget.maxNodes) }
-    : undefined;
-  const optionsJson = budget ? JSON.stringify({ budget }) : undefined;
+  const { format, optionsJson } = normaliseOwlDlOptions(options);
   const mod = await loadDl();
   return JSON.parse(mod.checkOwlDl(tbox, abox ?? undefined, format, optionsJson)) as OwlDlResult;
 }
