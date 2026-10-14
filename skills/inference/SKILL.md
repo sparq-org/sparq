@@ -746,6 +746,19 @@ violation gives `Unknown(NotInDl)`, an exhausted step budget gives
 `Unknown(ResourceBudget)`, and unloaded imports turn `Consistent` into
 `Unknown(ImportsNotLoaded)` with no classification. It never guesses a verdict. Its answers are checked against
 HermiT on a seeded corpus (`tests/owl2dl_reasoner.rs`).
+`owl2dl::data_ranges` answers the datatype questions the tableau asks of a data range
+(`DataRangeExpr`: a datatype, a facet restriction, `OneOf`, `And`, `Or`, `Not`):
+`is_empty`, `contains`, `has_at_least(r, n)` for data cardinalities, and
+`conjunction_satisfiable(pos, neg, distinct, values)`, which asks whether `distinct`
+pairwise different values exist inside every range of `pos`, outside every range of `neg`
+and outside `values`. Each answer is a `Tri`: `Yes` and `No` are exact (rational bounds
+without rounding, discrete floats with `-0` and `+0` distinct, the ±14:00 rule for
+`xsd:dateTime`, strings of XML characters, and automata for XSD patterns, lengths, basic
+language ranges and BCP 47 tags, `langtag`s only for `rdf:PlainLiteral`), and `Unknown` covers particular `rdf:XMLLiteral`
+values (their XML content is not checked), a facet outside the datatype's facet space
+(including an order bound outside its value space), a value no literal has, data ranges nested more than 64 deep, an XSD pattern this implementation does
+not support (block escapes such as `\p{IsBasicLatin}`, or groups nested more than 64 deep),
+and string searches over a fixed automaton budget (states, edges and automaton bytes).
 
 ## Common recipes
 
