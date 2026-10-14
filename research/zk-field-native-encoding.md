@@ -215,7 +215,9 @@ load-bearing.
 | `xsd:string`, `rdf:langString`, opaque | `VALUE_NONE` (no handle) | — | the §3.2 fallback; lexical lane only |
 
 `DATATYPE_CONST` / `LANG_CONST` are `blake3(datatype IRI)` / `blake3(lang)` off-circuit
-at ingest, and **precomputed field constants** in-circuit for the known FILTER
+at ingest (lane constants that fold a parameter, such as the decimal scale, the
+dateTime epoch scale or the boolean lane's key-derived constant, differ; see the
+`dual_leaf` module docs), and **precomputed field constants** in-circuit for the known FILTER
 datatypes — the substitution that removes the in-circuit blake3 (§4).
 
 ### 3.4 Why the lexical_component cannot be dropped

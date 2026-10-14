@@ -489,10 +489,9 @@ pub fn lang_const(language: &str) -> Fr {
 /// folds `blake3(datatype IRI)`. A value-lane member range-checks the hook to
 /// `u64`, so a lane constant must never equal that fold for any datatype IRI.
 /// The boolean lane's constant
-/// (`dual_leaf_boolean::boolean_datatype_const`, `blake3("<iri> domain=bit")`)
-/// hashes a tag containing a space, which no IRI can contain, so no string-lane
-/// leaf can be opened on it whatever hook the member accepts. The
-/// `xsd:dateTime`/`xsd:date` lanes fold `blake3("<iri>@epochscale=3")`.
+/// (`dual_leaf_boolean::boolean_datatype_const`) is derived in BLAKE3's
+/// key-derivation mode, a domain separate from the plain fold, so no string-lane
+/// leaf can be opened on it whatever hook the member accepts.
 pub fn is_hookable_datatype(datatype_iri: &str) -> bool {
     matches!(datatype_iri, XSD_INTEGER | XSD_DECIMAL | XSD_DOUBLE)
 }

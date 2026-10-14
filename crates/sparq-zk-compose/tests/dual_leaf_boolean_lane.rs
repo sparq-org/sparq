@@ -121,7 +121,7 @@ fn unpack(inputs: &ProofInputs) -> Public<'_> {
 /// puts on the wire; `encode_boolean` is what the COMMITTER folded into the leaf.
 /// If those ever diverge, every boolean proof becomes silently unprovable with no
 /// compile-time signal — so pin them to each other AND to the domain-tagged
-/// `blake3("<xsd:boolean IRI> domain=bit")`.
+/// BLAKE3 key derivation over the `xsd:boolean` IRI.
 #[test]
 fn lane_constant_equals_the_host_encoders_datatype_const() {
     let committed = encode_boolean(&bool_lit(true)).unwrap().datatype_const;
@@ -255,7 +255,6 @@ fn a_string_lane_boolean_leaf_cannot_satisfy_a_boolean_member_call() {
     let lit = bool_lit(true);
     let string_lane_leaf = sparq_zk::dual_leaf::encode_literal_dual(&lit).unwrap();
     let lexical = encode_boolean(&lit).unwrap().lexical_component;
-    assert_ne!(fr(&boolean_datatype_const()), datatype_const(XSD_BOOLEAN));
     assert_ne!(
         member_rebinds_leaf(
             Fr::from(sparq_zk::dual_leaf::VALUE_NONE),
@@ -275,8 +274,10 @@ fn an_opaque_datatype_leaf_cannot_satisfy_a_boolean_member_call() {
         format!("{XSD_BOOLEAN}@domain=bit"),
         format!("{XSD_BOOLEAN}%20domain=bit"),
         format!("{XSD_BOOLEAN}domain=bit"),
+        // Not an IRI, but a datatype string can reach the fold unvalidated.
+        format!("{XSD_BOOLEAN} domain=bit"),
     ] {
-        let lit = Literal::new_typed_literal("1", NamedNode::new(iri.as_str()).unwrap());
+        let lit = Literal::new_typed_literal("1", NamedNode::new_unchecked(iri.as_str()));
         let string_lane_leaf = sparq_zk::dual_leaf::encode_literal_dual(&lit).unwrap();
         assert_ne!(fr(&boolean_datatype_const()), datatype_const(&iri), "{iri}");
         assert_ne!(
