@@ -113,6 +113,15 @@ pub enum DispatchError {
     /// `DualLeafV1` one, presented for NEW issuance. V1 is superseded, so its
     /// constants are accepted only under `MethodUse::LegacyAlreadyIssued`.
     LegacyLaneConstForIssuance { circuit: String, lane: String },
+    /// A `ProofInputs` whose VARIANT and declared `id` disagree: a value-lane
+    /// variant carrying another member's id, or — the case that mattered — a
+    /// NON-value-lane variant (e.g. `FilterInt`) declaring a value-lane member
+    /// id. The second shape used to skip the pairing check entirely, because the
+    /// check reads the `datatype_const` off the variant and a `FilterInt` has
+    /// none, while the declared id is what later picks the circuit. Refused here
+    /// with the same rule the verifier's `derive_circuit_id` applies: the variant
+    /// and the id must name the SAME member.
+    ValueLaneVariantIdMismatch { circuit: String, variant: String },
     /// A value-lane public input whose `FieldHex` TEXT is not the canonical
     /// rendering of the field element it decodes to — an uppercase or
     /// `0x`-less spelling, a short (leading-zeros-dropped) one, or a 64-nibble
@@ -165,6 +174,13 @@ impl std::fmt::Display for DispatchError {
                  be routed for a NEW proof under it; re-proving an already-issued graph \
                  passes MethodUse::LegacyAlreadyIssued (fail-closed dispatch matrix)",
                 lane, circuit
+            ),
+            DispatchError::ValueLaneVariantIdMismatch { circuit, variant } => write!(
+                f,
+                "value-lane variant/id mismatch: ProofInputs::{} declares circuit {}, \
+                 but a variant and its id must name the same member (fail-closed \
+                 dispatch matrix)",
+                variant, circuit
             ),
             DispatchError::NonCanonicalFieldHex { circuit, field } => write!(
                 f,
@@ -472,6 +488,48 @@ pub fn value_lane_fields(inputs: &ProofInputs) -> Option<(&CircuitId, &crate::ma
     }
 }
 
+/// The member a value-lane `ProofInputs` VARIANT must declare, with the variant's
+/// own name — `None` for every non-value-lane variant.
+///
+/// One member per variant, so the variant↔id agreement is an equality rather than
+/// a judgement. This is the host-side twin of the verifier's `derive_circuit_id`
+/// arms, which likewise accept only the one id that matches the variant.
+#[cfg(feature = "dual-leaf")]
+fn value_lane_variant_member(inputs: &ProofInputs) -> Option<(&'static str, CircuitId)> {
+    match inputs {
+        ProofInputs::FilterValueDl { .. } => Some(("FilterValueDl", CircuitId::FilterValueDl)),
+        ProofInputs::FilterValueDlF64 { .. } => {
+            Some(("FilterValueDlF64", CircuitId::FilterValueDlF64))
+        }
+        ProofInputs::FilterValueDlDecimal { .. } => {
+            Some(("FilterValueDlDecimal", CircuitId::FilterValueDlDecimal))
+        }
+        ProofInputs::FilterValueDlDateTime { .. } => {
+            Some(("FilterValueDlDateTime", CircuitId::FilterValueDlDateTime))
+        }
+        ProofInputs::FilterValueDlBool { .. } => {
+            Some(("FilterValueDlBool", CircuitId::FilterValueDlBool))
+        }
+        _ => None,
+    }
+}
+
+/// The variant name of a NON-value-lane `ProofInputs`, for the mismatch message.
+#[cfg(feature = "dual-leaf")]
+fn non_value_lane_variant_name(inputs: &ProofInputs) -> &'static str {
+    match inputs {
+        ProofInputs::Scan { .. } => "Scan",
+        ProofInputs::FilterInt { .. } => "FilterInt",
+        ProofInputs::FilterF64 { .. } => "FilterF64",
+        ProofInputs::FilterSignedInt { .. } => "FilterSignedInt",
+        ProofInputs::FilterDecimal { .. } => "FilterDecimal",
+        ProofInputs::JoinEq { .. } => "JoinEq",
+        #[cfg(feature = "extended-fragment")]
+        ProofInputs::PathReach { .. } => "PathReach",
+        _ => "<value-lane>",
+    }
+}
+
 /// Every `FieldHex` PUBLIC INPUT of a value-lane `ProofInputs`, with its field
 /// name — the set the canonicality check runs over.
 #[cfg(feature = "dual-leaf")]
@@ -578,21 +636,58 @@ pub fn check_lane_member_pairing(inputs: &ProofInputs) -> Result<(), DispatchErr
 /// The LANE↔MEMBER pairing check over built public inputs, with the
 /// method-selectability axis made explicit.
 ///
-/// Runs the canonicality check over EVERY `FieldHex` public input of a value-lane
-/// variant (`operand_enc` and `datatype_const`), then
-/// [`check_lane_const_for_member`] for the pairing itself. Every NON-value-lane
-/// `ProofInputs` variant is accepted unchanged: this adds refusals on the value
-/// lane, it does not re-state the dispatch matrix.
+/// Three refusals, in this order:
+///
+/// 1. the VARIANT and the declared `id` must name the same member
+///    ([`DispatchError::ValueLaneVariantIdMismatch`]);
+/// 2. the two `FieldHex` public inputs of a value-lane variant — `operand_enc`
+///    and `datatype_const` — must be canonically spelled
+///    ([`DispatchError::NonCanonicalFieldHex`]);
+/// 3. [`check_lane_const_for_member`] for the pairing itself.
+///
+/// The canonicality rule reaches exactly those two fields. A non-value-lane
+/// variant's `FieldHex` inputs are NOT checked (the existing fixtures spell them
+/// short), and nothing inside a rendered `Prover.toml` is checked here at all.
+/// Every NON-value-lane `ProofInputs` variant that declares its own member is
+/// accepted unchanged: this adds refusals on the value lane, it does not re-state
+/// the dispatch matrix.
 ///
 /// `MethodUse::LegacyAlreadyIssued` is a CALLER ASSERTION that the graph was
 /// already issued under that method. Nothing here proves issuance history — it is
 /// not read from a signature, a registry entry or a timestamp — so it narrows what
-/// a host path will build or route, and does not attest what happened.
+/// a host path will build or route, and does not attest what happened. Under it,
+/// the METHOD version and the CONSTANT version are not cross-checked either: a V2
+/// method presented with a V1 lane constant is accepted, because re-proving an
+/// already-issued V1 graph is exactly that shape.
 #[cfg(feature = "dual-leaf")]
 pub fn check_lane_member_pairing_for_use(
     inputs: &ProofInputs,
     use_: MethodUse,
 ) -> Result<(), DispatchError> {
+    // The VARIANT and the declared id must name the same member, BEFORE anything
+    // reads one of them. Without this, `FilterInt { id: FilterValueDl, .. }` has no
+    // `datatype_const` to read, so the whole check below was skipped while the
+    // declared id still chose the circuit downstream.
+    let declared = inputs.circuit_id();
+    match value_lane_variant_member(inputs) {
+        Some((variant, member)) => {
+            if declared != &member {
+                return Err(DispatchError::ValueLaneVariantIdMismatch {
+                    circuit: declared.package(),
+                    variant: variant.to_string(),
+                });
+            }
+        }
+        None => {
+            if is_value_lane_member(declared) {
+                return Err(DispatchError::ValueLaneVariantIdMismatch {
+                    circuit: declared.package(),
+                    variant: non_value_lane_variant_name(inputs).to_string(),
+                });
+            }
+            return Ok(());
+        }
+    }
     let Some((id, fields)) = value_lane_field_hexes(inputs) else {
         return Ok(());
     };

@@ -25,6 +25,46 @@ pub use metrics::{
 };
 use metrics::{Collector, StageTimer};
 
+/// The TOP-LEVEL `datatype_const` value of a rendered `Prover.toml`, or `None`.
+///
+/// A strict, dependency-free scan (this crate has no `toml` dependency, and the
+/// renderers emit a flat file): lines are read until the first one whose trimmed
+/// text begins with `[`, since a table or array-of-tables header ends the
+/// top-level section. Exactly ONE top-level `datatype_const = "<text>"` is
+/// accepted; zero or several give `None`, which the caller treats as a refusal.
+///
+/// The whole-file line scan this replaces accepted a `datatype_const` line that
+/// sat under a `[table]` header while the top level carried a different one, so
+/// the lane actually fed to the witness went unchecked.
+#[cfg(feature = "dual-leaf")]
+fn top_level_datatype_const(prover_toml: &str) -> Option<String> {
+    let mut found: Option<String> = None;
+    for line in prover_toml.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            break;
+        }
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "datatype_const" {
+            continue;
+        }
+        let value = value.trim();
+        let text = value.strip_prefix('"').and_then(|v| v.strip_suffix('"'))?;
+        if found.is_some() {
+            // Two top-level spellings of the same key: ambiguous, so refuse
+            // rather than pick one.
+            return None;
+        }
+        found = Some(text.to_string());
+    }
+    found
+}
+
 /// Driver / proving error.
 #[derive(Debug)]
 pub enum DriverError {
@@ -576,11 +616,18 @@ impl CircuitProver {
     ///    ([`DriverError::Dispatch`], from
     ///    `crate::dispatch::check_lane_member_pairing_for_use`) — so a V2 method
     ///    enum paired with a V1-constant input is refused here, not proved;
-    /// 3. the rendered `prover_toml` does not carry the `datatype_const` of
-    ///    those checked `inputs`
+    /// 3. the rendered `prover_toml`'s TOP-LEVEL `datatype_const` is not the one
+    ///    on those checked `inputs`
     ///    ([`DriverError::ProverTomlLaneMismatch`]) — the TOML is the bytes the
     ///    witness is generated from, so checking the inputs alone would leave the
-    ///    actual lane unchecked.
+    ///    actual lane unchecked. `top_level_datatype_const` decides this, and
+    ///    reads only the top level: a key nested under a table satisfied the
+    ///    whole-file line scan this replaced.
+    ///
+    /// What it does NOT check: the rest of the TOML. The challenge, the operand,
+    /// the bound, the verdict and the private witnesses are not compared against
+    /// `inputs`, so this refuses a cross-LANE rendering, not every disagreement
+    /// between the inputs and the bytes.
     ///
     /// [`Self::prove_in`] itself stays method-AGNOSTIC: it takes a `CircuitId` and
     /// nothing else, and re-proving an already-issued graph is a legitimate use
@@ -602,8 +649,7 @@ impl CircuitProver {
         crate::dispatch::check_lane_member_pairing_for_use(inputs, use_)
             .map_err(DriverError::Dispatch)?;
         if let Some((_, datatype_const)) = crate::dispatch::value_lane_fields(inputs) {
-            let expected = format!("datatype_const = \"{}\"", datatype_const.0);
-            if !prover_toml.lines().any(|l| l.trim() == expected) {
+            if top_level_datatype_const(prover_toml).as_deref() != Some(&datatype_const.0) {
                 return Err(DriverError::ProverTomlLaneMismatch { circuit: id.package() });
             }
         }
