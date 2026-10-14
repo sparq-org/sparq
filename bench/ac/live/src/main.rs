@@ -134,10 +134,9 @@ impl LiveReport {
 //      `odrl_request_for` are it: acbench N-Triples -> `sparq_policy::Policy`, and
 //      an acbench `Request` -> `sparq_policy::Request`.
 //
-// WHAT THE TRANSLATION IS ALLOWED TO DO (soundness argument). Every rewrite below is
-// either exactly faithful to the ODRL oracle or strictly NARROWING, so the lane can
-// under-share but can never over-share — which is what makes the HARD fail-closed
-// over-share check meaningful:
+// WHAT THE TRANSLATION IS ALLOWED TO DO. Rewrites preserve or narrow the generated
+// policies. Membership evidence comes from generated group data; oracle decisions
+// remain an independent comparator for the HARD fail-closed over-share check:
 //
 //   * action IRI  — `acl#Read` -> `odrl:read`, `acl#Write` -> `odrl:modify`, anything
 //     else kept verbatim. Exactly one action survives per rule, because
@@ -156,13 +155,14 @@ impl LiveReport {
 //     `Audience::Authenticated` as "the agent IRI is non-empty", and every request the
 //     generators emit carries a concrete WebID.
 //
+//   * group assignees — the generator exports resolved group members independently of
+//     oracle decisions. Name each compiled collection by its group source IRI and
+//     supply explicit `odrl:partOf` evidence on each request. This keeps two groups
+//     on the same resource distinct despite the compiler reusing `#odrl-party`.
+//
 // WHAT IT DELIBERATELY DOES NOT DO (each shows up as advisory UNDER-share, never as an
 // over-share, and each is reported honestly in the lane's advisory line):
 //
-//   * `Audience::Group` compiles to an `odrl:PartyCollection` assignee. Matching it
-//     needs `party odrl:partOf collection` evidence, which only the ORACLE's group
-//     rule knows — supplying it would make the lane test the oracle against itself.
-//     No evidence is supplied, so group intents grant nothing.
 //   * `Scope::Subtree` targets the container, so a request on a descendant needs
 //     `asset odrl:partOf container` evidence — same tautology argument, same choice.
 //   * `Condition::Temporal` / `Purpose` / `Count` need context the acbench `Request`
@@ -170,6 +170,9 @@ impl LiveReport {
 //     No context is supplied, so a constrained rule is unprovable and denies.
 //     `Audience::ClientRestricted` IS covered: the request's own declared client is
 //     supplied as the `odrl:systemDevice` context value.
+//
+// The bridge also refuses to persist non-lasting permits, including grants that
+// depend on membership evidence. Those evaluator allows remain live-lane advisories.
 //
 // ANTI-VACUITY. Because the ODRL store carries NO WAC/ACP policy triples at all, every
 // row the lane observes is provably a bridged ODRL grant. The lane FAILS (it does not
@@ -316,11 +319,12 @@ fn translated_action(actions: &[String]) -> Option<String> {
 /// `sparq_policy::parse_policy` reads faithfully.
 ///
 /// See the translation contract at the top of this file for the soundness argument —
-/// every rewrite here is faithful to the ODRL oracle or strictly narrowing.
+/// rewrites preserve or narrow the generated policies.
 fn normalize_odrl_ntriples(nquads: &[String]) -> String {
     let action_pred = format!("{}action", ODRL_NS);
     let target_pred = format!("{}target", ODRL_NS);
     let assignee_pred = format!("{}assignee", ODRL_NS);
+    let source_pred = format!("{ODRL_NS}source");
     let permission_pred = format!("{}permission", ODRL_NS);
     let prohibition_pred = format!("{}prohibition", ODRL_NS);
     let all_party = format!("<{}All>", ODRL_NS);
@@ -332,6 +336,7 @@ fn normalize_odrl_ntriples(nquads: &[String]) -> String {
     let mut rule_nodes: Vec<String> = Vec::new();
     let mut rule_actions: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut targets: Vec<(String, String)> = Vec::new();
+    let mut group_sources: BTreeMap<String, String> = BTreeMap::new();
     for line in nquads {
         let Some((subject, predicate, object)) = split_ntriple(line) else { continue };
         if predicate == permission_pred || predicate == prohibition_pred {
@@ -344,6 +349,8 @@ fn normalize_odrl_ntriples(nquads: &[String]) -> String {
             rule_actions.entry(subject.to_string()).or_default().push(object.to_string());
         } else if predicate == target_pred {
             targets.push((subject.to_string(), object.to_string()));
+        } else if predicate == source_pred && object_iri(object).is_some() {
+            group_sources.insert(subject.to_string(), object.to_string());
         }
     }
 
@@ -362,7 +369,7 @@ fn normalize_odrl_ntriples(nquads: &[String]) -> String {
     // Pass 2: emit everything except the action lines and the widening assignees.
     let mut out: Vec<String> = Vec::new();
     for line in nquads {
-        let Some((_, predicate, object)) = split_ntriple(line) else {
+        let Some((subject, predicate, object)) = split_ntriple(line) else {
             out.push(line.clone());
             continue;
         };
@@ -371,6 +378,12 @@ fn normalize_odrl_ntriples(nquads: &[String]) -> String {
         }
         if predicate == assignee_pred && (object == all_party || object == all_authenticated) {
             continue; // `odrl:All`/`odrl:AllAuthenticated` -> unrestricted assignee
+        }
+        if predicate == assignee_pred {
+            if let Some(source) = object_iri(object).and_then(|iri| group_sources.get(iri)) {
+                out.push(format!("<{subject}> <{predicate}> {source} ."));
+                continue;
+            }
         }
         out.push(line.clone());
     }
@@ -441,6 +454,29 @@ fn odrl_request_for(ed: &ExpectedDecision) -> sparq_policy::Request {
     request
 }
 
+/// Supply evidence only for collections referenced by the policy being evaluated.
+/// Unrelated evidence would also make a named-agent grant non-lasting in the bridge.
+fn with_group_memberships(
+    request: sparq_policy::Request,
+    policy: &sparq_policy::ValidatedPolicy,
+    group_memberships: &BTreeMap<String, BTreeSet<String>>,
+) -> sparq_policy::Request {
+    let agent = request.party.clone().unwrap_or_default();
+    request.with_party_memberships(
+        policy
+            .permissions
+            .iter()
+            .chain(&policy.prohibitions)
+            .filter_map(|rule| rule.assignee.as_ref())
+            .filter(|group| {
+                group_memberships
+                    .get(*group)
+                    .is_some_and(|members| members.contains(&agent))
+            })
+            .map(|group| (agent.clone(), group.clone())),
+    )
+}
+
 /// Build a FRESH `PodStore` holding ONLY the per-resource data graphs, then materialize
 /// every ODRL policy against `request` (issue #4415 blocker 2 — materialization
 /// isolation). Returns the store and the number of policies that materialized a grant.
@@ -451,13 +487,15 @@ fn odrl_store_for_request(
     data_nquads: &str,
     policies: &[sparq_policy::ValidatedPolicy],
     request: &sparq_policy::Request,
+    group_memberships: &BTreeMap<String, BTreeSet<String>>,
 ) -> Result<(PodStore, usize), String> {
     let graph = Graph::load_dataset(data_nquads, "nquads")
         .map_err(|e| format!("ODRL PodStore load error: {}", e))?;
     let mut store = PodStore::new(graph);
     let mut granted = 0usize;
     for policy in policies {
-        if store.materialize_odrl_policy(policy, request).granted {
+        let request = with_group_memberships(request.clone(), policy, group_memberships);
+        if store.materialize_odrl_policy(policy, &request).granted {
             granted += 1;
         }
     }
@@ -491,14 +529,15 @@ fn odrl_session(ed: &ExpectedDecision) -> Session<'_> {
 /// that grants nothing would otherwise pass trivially — the exact failure mode the ACP
 /// defect-1 fix above was written for.
 ///
-/// **Under-share (ADVISORY):** oracle=Allow with no rows. Expected for group /
-/// subtree / condition-carrying intents, which the translation deliberately declines to
-/// supply world-state evidence for (see the translation contract above).
+/// **Under-share (ADVISORY):** oracle=Allow with no rows. Expected for
+/// subtree / condition-carrying intents with missing context, and for membership-based
+/// grants that the bridge cannot persist (see the translation contract above).
 fn run_w2_odrl_live(
     uc: &str,
     intents: &[IntentRow],
     policy: &[sparq_acbench::CompiledPolicy],
     expected_decisions: &[ExpectedDecision],
+    group_memberships: &BTreeMap<String, BTreeSet<String>>,
 ) -> Outcome {
     let filtered: Vec<&ExpectedDecision> = expected_decisions
         .iter()
@@ -538,7 +577,7 @@ fn run_w2_odrl_live(
     let mut under_share_advisory = 0usize;
 
     for ed in &filtered {
-        let (store, granted) = match odrl_store_for_request(&data_nquads, &policies, &odrl_request_for(ed)) {
+        let (store, granted) = match odrl_store_for_request(&data_nquads, &policies, &odrl_request_for(ed), group_memberships) {
             Ok(v) => v,
             Err(e) => return Outcome::Failed { mismatch: format!("W2 live {uc}/ODRL: {e}") },
         };
@@ -596,8 +635,8 @@ fn run_w2_odrl_live(
         println!(
             "# advisory: {uc}/ODRL W2-live under-share {under_share_advisory}/{checked}, \
              {allowed_with_rows} bridged allow(s) \
-             (oracle=Allow, engine=Deny — group / subtree / condition intents supply no \
-             world-state evidence by design, issue #4415)"
+             (oracle=Allow, engine=Deny — missing subtree / condition context or a non-lasting \
+             grant that the bridge cannot persist)"
         );
     }
     Outcome::Passed { decisions: checked, wall_us_indicative: wall_us }
@@ -619,6 +658,7 @@ fn run_w4_odrl_live(
     intents: &[IntentRow],
     policy: &[sparq_acbench::CompiledPolicy],
     expected_decisions: &[ExpectedDecision],
+    group_memberships: &BTreeMap<String, BTreeSet<String>>,
     n_threads: usize,
 ) -> Outcome {
     let filtered: Vec<&ExpectedDecision> = expected_decisions
@@ -661,6 +701,7 @@ fn run_w4_odrl_live(
     for ed in &filtered {
         let request = odrl_request_for(ed);
         for p in &policies {
+            let request = with_group_memberships(request.clone(), p, group_memberships);
             store.materialize_odrl_policy(p, &request);
         }
     }
@@ -832,9 +873,10 @@ fn run_w2_live(
     intents: &[IntentRow],
     policy: &[sparq_acbench::CompiledPolicy],
     expected_decisions: &[ExpectedDecision],
+    group_memberships: &BTreeMap<String, BTreeSet<String>>,
 ) -> Outcome {
     if *model == AcModel::Odrl {
-        return run_w2_odrl_live(uc, intents, policy, expected_decisions);
+        return run_w2_odrl_live(uc, intents, policy, expected_decisions, group_memberships);
     }
     let ml = model_label(model);
     let filtered: Vec<&ExpectedDecision> =
@@ -963,10 +1005,11 @@ fn run_w4_concurrent(
     intents: &[IntentRow],
     policy: &[sparq_acbench::CompiledPolicy],
     expected_decisions: &[ExpectedDecision],
+    group_memberships: &BTreeMap<String, BTreeSet<String>>,
     n_threads: usize,
 ) -> Outcome {
     if *model == AcModel::Odrl {
-        return run_w4_odrl_live(uc, intents, policy, expected_decisions, n_threads);
+        return run_w4_odrl_live(uc, intents, policy, expected_decisions, group_memberships, n_threads);
     }
     let ml = model_label(model);
 
@@ -1124,6 +1167,7 @@ fn anti_vacuity_check() -> Result<(), String> {
 // ── Use-case dataset wrappers ─────────────────────────────────────────────────────────
 
 struct LiveDataset {
+    group_memberships: BTreeMap<String, BTreeSet<String>>,
     intents: Vec<IntentRow>,
     wac_policy: Vec<sparq_acbench::CompiledPolicy>,
     acp_policy: Vec<sparq_acbench::CompiledPolicy>,
@@ -1134,6 +1178,7 @@ struct LiveDataset {
 impl LiveDataset {
     fn from_personal(ds: personal::PersonalDataset) -> Self {
         Self {
+            group_memberships: ds.group_memberships,
             intents: ds.intents,
             wac_policy: ds.wac_policy,
             acp_policy: ds.acp_policy,
@@ -1144,6 +1189,7 @@ impl LiveDataset {
 
     fn from_project_mgmt(ds: project_mgmt::ProjectMgmtDataset) -> Self {
         Self {
+            group_memberships: ds.group_memberships,
             intents: ds.intents,
             wac_policy: ds.wac_policy,
             acp_policy: ds.acp_policy,
@@ -1154,6 +1200,7 @@ impl LiveDataset {
 
     fn from_financial(ds: financial::FinancialDataset) -> Self {
         Self {
+            group_memberships: BTreeMap::new(),
             intents: ds.intents,
             wac_policy: ds.wac_policy,
             acp_policy: ds.acp_policy,
@@ -1164,6 +1211,7 @@ impl LiveDataset {
 
     fn from_consortium(ds: consortium::ConsortiumDataset) -> Self {
         Self {
+            group_memberships: ds.group_memberships,
             intents: ds.intents,
             wac_policy: ds.wac_policy,
             acp_policy: ds.acp_policy,
@@ -1284,6 +1332,7 @@ fn main() -> ExitCode {
                 &ds.intents,
                 policy,
                 &ds.expected_decisions,
+                &ds.group_memberships,
             );
             emit(uc, "W2-live", ml, &w2);
             bump(&mut summary, uc, &w2);
@@ -1296,6 +1345,7 @@ fn main() -> ExitCode {
                 &ds.intents,
                 policy,
                 &ds.expected_decisions,
+                &ds.group_memberships,
                 n_threads,
             );
             emit(uc, "W4-live", ml, &w4);
@@ -2019,7 +2069,7 @@ mod tests {
         // alice is the assignee -> the bridge must materialize a grant and she sees rows.
         let alice = odrl_test_decision("https://alice.ex/card#me", "https://pod.ex/res2", Decision::Allow);
         let (store, granted) =
-            odrl_store_for_request(&data, &policies, &odrl_request_for(&alice)).expect("store");
+            odrl_store_for_request(&data, &policies, &odrl_request_for(&alice), &BTreeMap::new()).expect("store");
         assert_eq!(granted, 1, "alice's ODRL permission must materialize exactly one grant");
         let rows = store
             .query_as(&odrl_session(&alice), Mode::Read, &graph_probe("https://pod.ex/res2"))
@@ -2034,7 +2084,7 @@ mod tests {
         // bob is not the assignee -> nothing materializes and he sees nothing.
         let bob = odrl_test_decision("https://bob.ex/card#me", "https://pod.ex/res2", Decision::Deny);
         let (store, granted) =
-            odrl_store_for_request(&data, &policies, &odrl_request_for(&bob)).expect("store");
+            odrl_store_for_request(&data, &policies, &odrl_request_for(&bob), &BTreeMap::new()).expect("store");
         assert_eq!(granted, 0, "bob's request must materialize no grant (fail-closed)");
         assert!(
             store
@@ -2058,7 +2108,7 @@ mod tests {
         let data = resource_data_nquads(&[row]).join("\n");
         let alice = odrl_test_decision("https://alice.ex/card#me", "https://pod.ex/res3", Decision::Deny);
         // Zero policies -> zero bridged grants.
-        let (store, granted) = odrl_store_for_request(&data, &[], &odrl_request_for(&alice)).expect("store");
+        let (store, granted) = odrl_store_for_request(&data, &[], &odrl_request_for(&alice), &BTreeMap::new()).expect("store");
         assert_eq!(granted, 0);
         assert!(
             store
@@ -2085,7 +2135,7 @@ mod tests {
         let data = resource_data_nquads(&[row]).join("\n");
         let alice = odrl_test_decision("https://alice.ex/card#me", "https://pod.ex/res4", Decision::Deny);
         let (_, granted) =
-            odrl_store_for_request(&data, &policies, &odrl_request_for(&alice)).expect("store");
+            odrl_store_for_request(&data, &policies, &odrl_request_for(&alice), &BTreeMap::new()).expect("store");
         assert_eq!(
             granted, 0,
             "a write-only ODRL permission must not materialize a READ grant"
@@ -2114,7 +2164,7 @@ mod tests {
         let with_rows = allows
             .iter()
             .filter(|ed| {
-                let (store, _) = odrl_store_for_request(&data, &policies, &odrl_request_for(ed))
+                let (store, _) = odrl_store_for_request(&data, &policies, &odrl_request_for(ed), &ds.group_memberships)
                     .expect("store");
                 store
                     .query_as(&odrl_session(ed), Mode::Read, &graph_probe(&ed.request.resource))
@@ -2137,12 +2187,114 @@ mod tests {
         let ds = personal::generate(&params);
         let expected =
             ds.expected_decisions.iter().filter(|e| e.model == AcModel::Odrl).count();
-        match run_w2_odrl_live("personal", &ds.intents, &ds.odrl_policy, &ds.expected_decisions) {
+        match run_w2_odrl_live("personal", &ds.intents, &ds.odrl_policy, &ds.expected_decisions, &ds.group_memberships) {
             Outcome::Passed { decisions, .. } => assert_eq!(
                 decisions, expected,
                 "the ODRL W2 lane must check every ODRL expected decision"
             ),
             other => panic!("personal/ODRL W2 lane must pass; got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn group_evidence_does_not_cross_rules_on_the_same_resource() {
+        let resource = "https://pod.ex/group-rules";
+        let mut write = odrl_test_intent(Audience::Group("urn:group:writers".into()), resource);
+        write.mode = AccessMode {
+            read: false,
+            write: true,
+            control: false,
+        };
+        let read = odrl_test_intent(Audience::Group("urn:group:readers".into()), resource);
+        let intents = [write, read];
+        let compiled: Vec<_> = intents.iter().map(compile_odrl).collect();
+        let (policies, unparseable) = odrl_policies_for(&compiled);
+        assert_eq!(unparseable, 0);
+        let memberships = BTreeMap::from([
+            (
+                "urn:group:writers".into(),
+                BTreeSet::from(["urn:writer".into()]),
+            ),
+            (
+                "urn:group:readers".into(),
+                BTreeSet::from(["urn:reader".into()]),
+            ),
+        ]);
+        for (agent, allowed) in [("urn:writer", false), ("urn:reader", true)] {
+            let ed = odrl_test_decision(agent, resource, Decision::Deny);
+            let request = odrl_request_for(&ed);
+            let decision = policies.iter().any(|policy| {
+                let request = with_group_memberships(request.clone(), policy, &memberships);
+                sparq_policy::evaluate(policy, &request).allow
+            });
+            assert_eq!(decision, allowed, "read access for {agent}");
+        }
+    }
+
+    #[test]
+    fn consortium_member_requires_exported_evidence_and_non_members_are_denied() {
+        let ds = LiveDataset::from_consortium(consortium::generate(&GenParams::smoke()));
+        let (policies, unparseable) = odrl_policies_for(&ds.odrl_policy);
+        assert_eq!(unparseable, 0);
+        // This seeded embargo request was an under-share advisory. Supply the U4
+        // clock to isolate membership from the separate temporal evidence gap.
+        let member = ds
+            .expected_decisions
+            .iter()
+            .find(|ed| {
+                ed.model == AcModel::Odrl
+                    && ed.request.agent == "https://consortium.example/agents/inst0-m0"
+                    && ed.request.resource == "https://consortium.example/inst0/datasets/ds0"
+            })
+            .expect("seeded U4 member request during embargo");
+        assert_eq!(member.decision, Decision::Allow);
+        let allowed = |ed: &ExpectedDecision, memberships: &BTreeMap<String, BTreeSet<String>>| {
+            let request = odrl_request_for(ed).at("2026-01-01T00:00:00Z");
+            policies.iter().any(|policy| {
+                let request = with_group_memberships(request.clone(), policy, memberships);
+                sparq_policy::evaluate(policy, &request).allow
+            })
+        };
+        assert!(!allowed(member, &BTreeMap::new()));
+        assert!(allowed(member, &ds.group_memberships));
+        for agent in [
+            "https://consortium.example/agents/inst0-m999",
+            "https://consortium.example/agents/inst1-m0",
+        ] {
+            let mut outsider = member.clone();
+            outsider.request.agent = agent.to_owned();
+            assert!(!allowed(&outsider, &ds.group_memberships));
+        }
+    }
+
+    #[test]
+    fn group_datasets_odrl_smoke_checks_every_request() {
+        let params = GenParams::smoke();
+        for (name, ds) in [
+            (
+                "consortium",
+                LiveDataset::from_consortium(consortium::generate(&params)),
+            ),
+            (
+                "project_mgmt",
+                LiveDataset::from_project_mgmt(project_mgmt::generate(&params)),
+            ),
+        ] {
+            let expected = ds
+                .expected_decisions
+                .iter()
+                .filter(|ed| ed.model == AcModel::Odrl)
+                .count();
+            match run_w2_odrl_live(
+                name,
+                &ds.intents,
+                &ds.odrl_policy,
+                &ds.expected_decisions,
+                &ds.group_memberships,
+            ) {
+                Outcome::Passed { decisions, .. } => assert_eq!(decisions, expected),
+                other => panic!("{name}/ODRL W2 lane must pass; got {other:?}"),
+            }
         }
     }
 
@@ -2180,7 +2332,7 @@ mod tests {
         let good = [compile_odrl(&row)];
         assert_eq!(odrl_policies_for(&good).1, 0, "the permission alone must translate");
         assert!(
-            matches!(run_w2_odrl_live("t", &intents, &good, &decisions), Outcome::Passed { .. }),
+            matches!(run_w2_odrl_live("t", &intents, &good, &decisions, &BTreeMap::new()), Outcome::Passed { .. }),
             "control: the allow-only corpus must pass, else this test proves nothing"
         );
 
@@ -2191,7 +2343,7 @@ mod tests {
         assert_eq!(unparseable, 1, "the malformed prohibition must fail to parse");
         assert!(!policies.is_empty(), "the permission must still translate (drop-one, not all)");
 
-        match run_w2_odrl_live("t", &intents, &bad, &decisions) {
+        match run_w2_odrl_live("t", &intents, &bad, &decisions, &BTreeMap::new()) {
             Outcome::Failed { mismatch } => assert!(
                 mismatch.contains("could not be translated"),
                 "W2 must fail with the fail-closed translation message; got {mismatch}"
@@ -2200,7 +2352,7 @@ mod tests {
                 "W2 must FAIL when a prohibition is dropped (dropping it can widen access); got {other:?}"
             ),
         }
-        match run_w4_odrl_live("t", &intents, &bad, &decisions, 2) {
+        match run_w4_odrl_live("t", &intents, &bad, &decisions, &BTreeMap::new(), 2) {
             Outcome::Failed { mismatch } => assert!(
                 mismatch.contains("could not be translated"),
                 "W4 must fail with the fail-closed translation message; got {mismatch}"

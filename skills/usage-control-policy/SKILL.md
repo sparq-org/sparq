@@ -100,6 +100,16 @@ assert!(evaluate(&policy, &req).allow); // a sub-region of the named region gran
 
 `Request::new(action_iri)` then chain `.on(target)`, `.by(party)`, `.with(left_operand_iri, Value)` for each context dimension (`dateTime`, `purpose`, `recipient`, `count`, `spatial`, …), `.with_purpose_subsumption(narrower, broader)` / `.with_purpose_taxonomy([(n, b), …])` per asserted subsumption edge (the DPV-purpose taxonomy / spatial region trees, above — one closure for both taxonomic dimensions), `.with_party_membership(party, collection)` / `.with_asset_membership(asset, collection)` (and bulk `…_memberships([…])`) per ODRL collection-membership edge (above), and `.discharge(duty_action_iri)` per discharged duty. `Value` is `Iri` | `Str` | `Num(f64)` | `DateTime(String)`. For purpose specifically, prefer the first-class `.for_purpose(Value)` (sugar over `.with(ODRL_PURPOSE, ..)`; read it back via `req.purpose()`); for the evaluation time prefer `.at(instant)` (sugar over `.with(ODRL_DATETIME, Value::DateTime(..))`; read it back via `req.request_time()`).
 
+For the internal `sparq-acbench` corpus, `PersonalDataset`, `ProjectMgmtDataset`, and
+`ConsortiumDataset` export `group_memberships: BTreeMap<String, BTreeSet<String>>`
+(group IRI → resolved agent IRIs, including nested members). The live ODRL driver names
+collections by their group source IRIs; the ODRE exporter maps groups to its distinct
+per-rule `PartyCollection` IRIs. Both supply edges through `with_party_memberships`;
+neither evaluator infers membership. Financial
+advisory groups currently have no generated membership roll, so supply no group edges.
+The live lane still lacks temporal context for embargo requests, and its bridge refuses
+to persist membership-dependent grants even when the evaluator allows them.
+
 ## The `odrl:use` umbrella + ODRL action hierarchy — sq-euhr3
 
 `odrl:use` is the ODRL "umbrella" action, but it does **not** subsume *every* action — only those the [ODRL 2.2 vocabulary](https://www.w3.org/TR/odrl-vocab/) places `odrl:includedIn use` (39 actions transitively: `read`, `display`, `print`, `play`, `modify`, `delete`, `aggregate`, `reproduce`, …). The one disjoint top-level branch is the ownership-`transfer` subtree — `odrl:sell` and `odrl:give` are `includedIn odrl:transfer`, **not** `use` — so a `use` permission grants a `read`/`write` request but is **inactive** for a `sell`/`give`/`transfer` request.
