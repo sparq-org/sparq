@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-ncvq.16 — `sparq-conformance-scoreboard`: emits the CONSOLIDATED
+//! sq-ncvq.16 — `sparq-conformance-scoreboard`: emits the CONSOLIDATED
 //! conformance scoreboard (stdout + `conformance-scoreboard.md`).
 //!
 //! ONE artifact listing every conformance suite the project ratchets — W3C
@@ -13,7 +13,7 @@
 //! ([`sparq_conformance::scoreboard::SUITES`]); it does NOT re-run the suites or
 //! need any fetched test data. Always exits 0 (except on a write error).
 //!
-//! [FABLE-5] sq-gum8.14 — `--json FILE` additionally writes the MACHINE-READABLE
+//! sq-gum8.14 — `--json FILE` additionally writes the MACHINE-READABLE
 //! JSON scoreboard ([`sparq_conformance::scoreboard::scoreboard_json`]), the
 //! committed `bench/conformance-scoreboard.generated.json` artifact that the
 //! drift-guard test (`tests/scoreboard_export.rs`) byte-compares against a fresh
@@ -22,7 +22,7 @@
 //!   cargo run -p sparq-conformance --bin sparq-conformance-scoreboard -- \
 //!     --report /tmp/conformance-scoreboard.md \
 //!     --json bench/conformance-scoreboard.generated.json
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 use sparq_conformance::scoreboard;
 use std::path::PathBuf;

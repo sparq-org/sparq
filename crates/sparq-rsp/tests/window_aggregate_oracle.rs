@@ -1,6 +1,6 @@
 #![cfg(feature = "window-aggregate")]
 
-// [GPT-5.6] sq-lsp7k.27: hand-derived deterministic aggregate oracle.
+// sq-lsp7k.27: hand-derived deterministic aggregate oracle.
 
 use oxrdf::{Literal, NamedNode, Term, Variable};
 use sparq_rsp::{window_aggregate, Agg, WindowResult};
@@ -124,7 +124,7 @@ fn column_selection_and_row_order_do_not_change_the_oracle() {
 
 #[test]
 fn average_uses_only_numeric_bindings() {
-    // [GPT-5.6] sq-xf3b8: value-pinned oracle witnesses the divisor and unbound skip.
+    // sq-xf3b8: value-pinned oracle witnesses the divisor and unbound skip.
     let numeric = result(
         &["x"],
         vec![vec![number(2)], vec![number(4)], vec![number(6)]],
@@ -137,7 +137,7 @@ fn average_uses_only_numeric_bindings() {
 
 #[test]
 fn median_handles_odd_even_empty_and_unbound_numeric_sets() {
-    // [GPT-5.6] sq-sfle1: pinned values witness both middle-selection branches.
+    // sq-sfle1: pinned values witness both middle-selection branches.
     let odd = result(
         &["x"],
         vec![vec![number(10)], vec![number(20)], vec![number(30)]],

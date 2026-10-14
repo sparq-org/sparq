@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-d9lzx — runnable END-TO-END demo of the certification-edge trust-graph
+//! sq-d9lzx — runnable END-TO-END demo of the certification-edge trust-graph
 //! closure (`derive_effective_rules`, the default-OFF `cert-graph` feature): *framework
 //! certifies issuer → attenuated effective rule → admissible fact class*, plus the two
 //! headline FAIL-CLOSED rejects an integrator/WG reviewer should see deny with their own

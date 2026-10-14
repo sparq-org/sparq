@@ -149,7 +149,7 @@ impl Timeline {
     ///
     /// This position for the indeterminate window is a documented sparq EXTENSION, not a
     /// spec claim: SPARQL 1.1 §15.1 leaves it open, and the relational semantics are
-    /// unchanged. [SONNET-4.6] sq-2k5py
+    /// unchanged. sq-2k5py
     #[inline]
     pub fn cmp_tl_total(a: Timeline, b: Timeline) -> Ordering {
         cmp_instants_total(a.instant(), a.tz.is_some(), b.instant(), b.tz.is_some())
@@ -173,7 +173,7 @@ fn cmp_instants(ai: f64, a_tz: bool, bi: f64, b_tz: bool) -> Option<Ordering> {
 /// The TOTAL-order extension of `cmp_instants`: the XPath partial order where it
 /// decides, else the instant order with timezone PRESENCE (floating < zoned) as the
 /// tiebreak. See [`Timeline::cmp_tl_total`] for the rationale and the intransitivity
-/// witness this closes. [SONNET-4.6] sq-2k5py
+/// witness this closes. sq-2k5py
 #[inline]
 fn cmp_instants_total(ai: f64, a_tz: bool, bi: f64, b_tz: bool) -> Ordering {
     match cmp_instants(ai, a_tz, bi, b_tz) {
@@ -319,7 +319,7 @@ impl Temporal {
     /// This is the ONE definition the three lock-step call sites (the ORDER BY sort-cell
     /// comparator, the id-level MIN/MAX fold, and the `CompareTerm::strict_cmp` seam the
     /// substrate's total order drives) share, so they cannot drift apart again.
-    /// [SONNET-4.6] sq-2k5py
+    /// sq-2k5py
     #[inline]
     pub fn cmp_t_total(a: Temporal, b: Temporal) -> Ordering {
         match (a.kind, b.kind) {
@@ -397,7 +397,7 @@ mod tests {
         assert!(Temporal::of_lit("42", "http://www.w3.org/2001/XMLSchema#integer").is_none());
     }
 
-    // [SONNET-4.6] sq-2k5py — the TOTAL-order extension over the indeterminate window: a
+    // sq-2k5py — the TOTAL-order extension over the indeterminate window: a
     // direct test per new public fn (`Timeline::cmp_tl_total` / `Temporal::cmp_t_total`)
     // plus the intransitivity WITNESS the extension exists to close.
 
@@ -471,7 +471,7 @@ mod tests {
         assert_eq!(Temporal::cmp_t_total(d("2024-03-15"), d("2024-03-15Z")), Less);
     }
 
-    // [OPUS-4.8] sq-bif — the tests below close real gaps in this module's default surface:
+    // sq-bif — the tests below close real gaps in this module's default surface:
     // `Timeline::cmp_tl` (the direct timeline-comparison API — previously only `Temporal::cmp_t`
     // was exercised), `parse_date`'s timezone-OFFSET branch (only the `Z` branch was covered),
     // the `parse_tz` / `parse_civil_date` parsers' boundary + rejection behaviour, the

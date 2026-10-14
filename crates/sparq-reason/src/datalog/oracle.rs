@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-6tykl.3 — the **independent reference evaluator** for the
+//! sq-6tykl.3 — the **independent reference evaluator** for the
 //! differential suite (test-only). Deliberately shares NOTHING with the production
 //! evaluator's machinery: no substrate join kernels, no predicate index, no binding
 //! rows — just textbook naive stratified evaluation by recursive substitution
@@ -260,7 +260,7 @@ fn agg_table(dict: &mut Dict, agg: &AggAtom, store: &FxHashSet<[Id; 3]>) -> Vec<
     out
 }
 
-/// [GPT-5.6] Independent oracle number: integral fixtures stay exact in `i128`;
+/// Independent oracle number: integral fixtures stay exact in `i128`;
 /// every other XSD numeric is compared/folded through a separately parsed `f64`.
 #[derive(Clone, Copy)]
 enum OracleNum {

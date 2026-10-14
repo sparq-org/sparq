@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! Read-your-writes token tests (Wave A3, adr-horizontal-scaling §4.3 collapsed
 //! to one node). `Writer::submit` returns the generation number that contains the
 //! update; that number is the session token a client round-trips.
@@ -37,7 +37,7 @@ impl ApplyUpdates for LogApplier {
         Ok(())
     }
     fn seal(&mut self, working: Log) -> Result<Log, String> {
-        Ok(working) // [OPUS-4.8] (sq-vpx4) no durable side: seal is infallible
+        Ok(working) // (sq-vpx4) no durable side: seal is infallible
     }
 }
 
@@ -211,7 +211,7 @@ fn satisfied_token_pin_never_regresses_under_concurrent_writes() {
     // by the time the tight 50k-iteration spin ends — the reader thread can monopolise
     // its core and starve the writer. Wait (bounded) for the advance we know is coming
     // rather than racing it; the monotonicity invariant above is what this test really
-    // guards, and it held on every iteration. [OPUS-4.8]
+    // guards, and it held on every iteration.
     let deadline = Instant::now() + Duration::from_secs(10);
     while ring.current().number() <= 1 && Instant::now() < deadline {
         std::thread::yield_now();

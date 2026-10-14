@@ -17,7 +17,7 @@
 //! Run: `cargo run -p sparq-sim --example olympics_eval --release`
 //! Data path: `$SPARQ_OLYMPICS_NT` or `bench/qlever-olympics/olympics.nt` at the repo root.
 //!
-//! [OPUS-4.8] (sq-cxji) `--json <path>` writes the SAME measurements STDOUT prints —
+//! (sq-cxji) `--json <path>` writes the SAME measurements STDOUT prints —
 //! the deterministic accuracy metrics (per-mode AUC, overall precision@10, pair/seed
 //! counts) plus the advisory `most_similar` latency distribution — as a stable,
 //! DEPENDENCY-FREE JSON document, mirroring the `format!`-JSON convention of
@@ -70,7 +70,7 @@ fn data_path() -> Option<std::path::PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-cxji) --json <path> machine-readable results emit
+// (sq-cxji) --json <path> machine-readable results emit
 // ---------------------------------------------------------------------------
 
 /// Extracts `--json <path>` (and its value) from argv, returning argv WITHOUT the
@@ -345,7 +345,7 @@ fn main() {
     metrics.latency_p95_ms = pct(0.95);
     metrics.latency_max_ms = *latencies.last().unwrap();
 
-    // [OPUS-4.8] (sq-cxji) Strictly-additive JSON emit: only when `--json <path>` was
+    // (sq-cxji) Strictly-additive JSON emit: only when `--json <path>` was
     // given. STDOUT above is the unchanged human report.
     if let Some(path) = json_path {
         let doc = results_json(&metrics);
@@ -388,7 +388,7 @@ fn auc(pos: &[f64], neg: &[f64]) -> f64 {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] (sq-cxji) --json emit tests
+// (sq-cxji) --json emit tests
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {

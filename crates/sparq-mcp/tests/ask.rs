@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-jxjgr: the opt-in server-side NL `ask` tool, exercised through the REAL
+//! sq-jxjgr: the opt-in server-side NL `ask` tool, exercised through the REAL
 //! MCP dispatch (`McpServer::handle_message`). This suite ONLY compiles/runs with the
 //! `nlq` feature (`#![cfg(feature = "nlq")]`), so it covers the feature-ON state.
 //!

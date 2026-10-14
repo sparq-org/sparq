@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-bif.33 — pin the public loud-failure and pass-through contracts.
+// sq-bif.33 — pin the public loud-failure and pass-through contracts.
 
 use sparq_terse::{terse_to_sparql, TerseError, LEGEND_VERSION};
 

@@ -1,5 +1,5 @@
 //! End-to-end: sparq-reason `why()` proof tree → PROV-O lineage RDF.
-//! [OPUS-4.8] sq-m3i0 — reasoner-materialization lineage.
+//! sq-m3i0 — reasoner-materialization lineage.
 #![cfg(feature = "reason")]
 
 use std::collections::{HashMap, HashSet};
@@ -155,7 +155,7 @@ fn lineage_is_valid_rdf_and_round_trips() {
 
 #[test]
 fn prov_ntriples_matches_the_lineage_graph_and_parses() {
-    // [GPT-5.6] sq-8jn86: the exact string oracle witnesses the serializer call;
+    // sq-8jn86: the exact string oracle witnesses the serializer call;
     // replacing the wrapper body with an empty or differently rendered value fails.
     let (g, dict, fact) = dog_setup();
     let proof = g.why(&dict, fact).unwrap();
@@ -333,7 +333,7 @@ fn asserted_fact_proof_is_a_lone_entity() {
 
 // ── sq-bif.4: reasoner-materialization correctness-suite additions — axiom leaves,
 // OWL transitive (multi-premise) lineage, clock-config, content-addressing across
-// rule kinds. [OPUS-4.8] ─────────────────────────────────────────────────────────
+// rule kinds. ─────────────────────────────────────────────────────────
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 const OWL: &str = "http://www.w3.org/2002/07/owl#";
@@ -576,7 +576,7 @@ fn single_asserted_leaf_proof_is_minimal() {
 /// - `fact:93b6c887c862aec9` = same over `<http://ex/Dog subClassOf http://ex/Animal>` leaf
 /// - `rule:7b2aac0f7dbc51bf` = `fnv1a("rdfs9")` mixed with the conclusion triple
 ///
-/// [OPUS-4.8] sq-qcnn.20
+/// sq-qcnn.20
 #[test]
 fn exact_content_addressed_iris_for_dog_setup_proof() {
     let (g, dict, fact) = dog_setup();
@@ -629,14 +629,14 @@ fn exact_content_addressed_iris_for_dog_setup_proof() {
     }));
 }
 
-// ── sq-qcnn.39: mutation-kill additions — exact prov triple counts. [SONNET-4.6] ─────
+// ── sq-qcnn.39: mutation-kill additions — exact prov triple counts. ─────
 
 /// `prov_from_proof` on the `dog_setup` proof (3 nodes: 2 asserted leaves plus
 /// 1 derived conclusion via rdfs9/cax-sco, no clock, no agent) must emit exactly 10
 /// triples: 2 leaf entity-types, 1 derived entity-type, 1 activity-type, 1 label,
 /// 1 wasGeneratedBy, 2 prov:used, 2 prov:wasDerivedFrom.
 /// Pinning the count kills any mutation that drops a single `push()` call.
-/// [SONNET-4.6] sq-qcnn.39
+/// sq-qcnn.39
 #[test]
 fn dog_setup_prov_graph_exact_triple_count() {
     let (g, dict, fact) = dog_setup();
@@ -660,7 +660,7 @@ fn dog_setup_prov_graph_exact_triple_count() {
 /// `prov:generatedAtTime` triple. For the dog_setup proof (1 rule firing), that adds
 /// 1 triple: total = 11. With an agent, another `wasAssociatedWith` triple: total = 12.
 /// Pinning these counts catches mutations that skip the clock or agent branches.
-/// [SONNET-4.6] sq-qcnn.39
+/// sq-qcnn.39
 #[test]
 fn dog_setup_prov_graph_with_clock_and_agent_exact_count() {
     fn fixed() -> std::time::SystemTime {

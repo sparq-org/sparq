@@ -1,6 +1,6 @@
 //! Mutation-witnessed fuzzy lookup acceptance tests. Removing the deletion
 //! signatures, exact-distance verifier, distance ordering, or rewrite arm makes
-//! at least one concrete assertion fail. [GPT-5.6] sq-lsp7k.14
+//! at least one concrete assertion fail. sq-lsp7k.14
 #![cfg(feature = "fuzzy")]
 
 use sparq_core::Graph;

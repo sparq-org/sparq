@@ -15,7 +15,7 @@
 //! RDFC-1.0 has pathological-input blow-ups (plan §8): the HNDQ-call-limit
 //! guard is kept at `sparq_canon`'s default, and limit hits surface as
 //! [`CanonError::Canonicalization`] — ingest fails closed on poison graphs.
-//! [OPUS-4.8] sq-0qip.
+//! sq-0qip.
 
 // Re-export the public canonicalization surface so `sparq_zk::canon::*` paths
 // (used by `commit`, `ingest`, `trace`, and `sparq-zk-compose`) keep working

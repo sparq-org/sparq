@@ -50,7 +50,7 @@
 //! kept at its default; limit hits surface as [`CanonError::Canonicalization`]
 //! so a caller can fail closed on poison graphs.
 //!
-//! [OPUS-4.8] sq-0qip — surfaced from `sparq-zk::canon` (Fable unavailable; flag
+//! sq-0qip — surfaced from `sparq-zk::canon` (Fable unavailable; flag
 //! for re-review when Fable returns).
 //!
 //! ## Opt-in NON-STANDARD RDF-1.2 triple-term profile (`rdf12-triple-terms`)
@@ -78,7 +78,7 @@
 //! a triple term, and otherwise delegates. With every triple term ground
 //! (blank-node-free — the common credential/VC case), none of the non-standard
 //! nested-bnode HNDQ-descent semantics are reachable: the run is exactly the
-//! RDFC-1.0 algorithm with triple terms as opaque constants. [FABLE-5] sq-iaxd.
+//! RDFC-1.0 algorithm with triple terms as opaque constants. sq-iaxd.
 
 #![forbid(unsafe_code)]
 
@@ -93,7 +93,7 @@ pub use bounded::{
 };
 
 // ---------------------------------------------------------------------------
-// Text-in / text-out API ([OPUS-4.8] sq-1dd5t). A self-contained N-Quads
+// Text-in / text-out API (sq-1dd5t). A self-contained N-Quads
 // document is the interchange form RDFC-1.0 is defined over, so a `&str` ->
 // `String` entry point is the natural seam for callers that already hold
 // serialized RDF (the @sparq-org/sparq RDF/JS `Dataset` wasm binding) and do not
@@ -189,7 +189,7 @@ pub use digest::Digest;
 /// bound. Real credential/VC data nests one or two levels; 128 is far above
 /// any non-adversarial input. The standard (feature-off) paths reject every
 /// triple term outright with [`CanonError::TripleTerm`] before any descent, so
-/// the bound only ever fires in the opt-in profile. [FABLE-5] sq-x3oj2.
+/// the bound only ever fires in the opt-in profile. sq-x3oj2.
 pub const MAX_TRIPLE_TERM_DEPTH: usize = 128;
 
 /// Canonicalization failure (RDFC-1.0 over sparq's term model).
@@ -197,7 +197,7 @@ pub const MAX_TRIPLE_TERM_DEPTH: usize = 128;
 /// `#[non_exhaustive]`: variants have been added ungated as the crate grew
 /// ([`CanonError::NestedBlankNode`], [`CanonError::TripleTermDepthExceeded`] —
 /// per the [`CanonError::TripleTerm`] precedent), so downstream `match`es keep
-/// a wildcard arm rather than assuming the set is closed. [FABLE-5] sq-x3oj2.
+/// a wildcard arm rather than assuming the set is closed. sq-x3oj2.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum CanonError {
@@ -211,7 +211,7 @@ pub enum CanonError {
     /// entry points (`canonicalize_rdf12_ground_terms` and siblings), which
     /// require every triple term to be blank-node-free and fail closed
     /// otherwise. Use the full `canonicalize_rdf12` descent to relabel nested
-    /// blank nodes instead. [FABLE-5] sq-iaxd.
+    /// blank nodes instead. sq-iaxd.
     NestedBlankNode,
     /// An RDF 1.2 triple term nests deeper than [`MAX_TRIPLE_TERM_DEPTH`].
     /// Returned only by the opt-in `rdf12-triple-terms` profile's entry points
@@ -219,7 +219,7 @@ pub enum CanonError {
     /// before any recursive descent — deeply-nested adversarial input fails
     /// closed instead of risking a stack overflow. The variant itself is always
     /// present (not feature-gated), per the `NestedBlankNode` precedent.
-    /// [FABLE-5] sq-x3oj2.
+    /// sq-x3oj2.
     TripleTermDepthExceeded,
     /// An RDF 1.2 directional-language literal (`"…"@lang--ltr` / `--rtl`,
     /// [`oxrdf::BaseDirection`]) reached a **standard** (`rdf-canon`-backed)
@@ -354,7 +354,7 @@ pub fn canonicalize_quads_with<D: Digest>(dataset: &[Quad]) -> Result<String, Ca
 ///
 /// `D` selects only the final digest algorithm; canonicalization retains the
 /// RDFC-1.0 default hash profile. Every canonical byte is hashed, including the
-/// final trailing newline when the dataset is non-empty. [GPT-5.6] sq-ddws7.
+/// final trailing newline when the dataset is non-empty. sq-ddws7.
 pub fn digest_quads_with<D: Digest>(dataset: &[Quad]) -> Result<Vec<u8>, CanonError> {
     let c = canonicalize_quads(dataset)?;
     let mut h = D::new();
@@ -481,7 +481,7 @@ fn serialize_quads_default(dataset: &[Quad]) -> Result<String, CanonError> {
     Ok(doc)
 }
 
-/// [GPT-5.6] sq-occip: serialize directly into one reusable buffer. `String`'s
+/// sq-occip: serialize directly into one reusable buffer. `String`'s
 /// `fmt::Write` implementation is infallible, so the expectation cannot fire.
 #[cfg(feature = "bridge-lowcopy")]
 fn serialize_quads(dataset: &[Quad]) -> Result<String, CanonError> {
@@ -603,7 +603,7 @@ mod tests {
         NamedNode::new(s).unwrap()
     }
 
-    /// [GPT-5.6] sq-occip: witnesses that the opt-in writer preserves every
+    /// sq-occip: witnesses that the opt-in writer preserves every
     /// interchange byte and therefore the canonical result, including blank
     /// nodes, escaped literals, default graphs, and named graphs.
     #[cfg(feature = "bridge-lowcopy")]
@@ -633,10 +633,10 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] sq-qcnn.14 — direct unit tests per public fn, asserting exact values.
+    // sq-qcnn.14 — direct unit tests per public fn, asserting exact values.
     // One test per uncovered public fn; each assert is non-vacuous (flip a value → red).
 
-    /// [FABLE-5] sq-t8z0r / GH #1903 (randomized-fuzz finding): an RDF dataset is a
+    /// sq-t8z0r / GH #1903 (randomized-fuzz finding): an RDF dataset is a
     /// SET of quads, so a duplicated input line is deduplicated by RDFC-1.0
     /// canonicalization — 3 parsed lines (one repeated) canonicalize to 2 quads.
     /// Documents the set semantics the fuzz-harness invariant must respect.
@@ -955,7 +955,7 @@ mod tests {
         ));
     }
 
-    /// [OPUS-4.8] sq-1dd5t: the text-in/text-out `canonicalize_nquads` entry point
+    /// sq-1dd5t: the text-in/text-out `canonicalize_nquads` entry point
     /// (what the @sparq-org/sparq RDF/JS `Dataset` wasm binding calls). Two N-Quads
     /// documents that are RDF-isomorphic but differ in blank-node labels AND quad
     /// order canonicalize to byte-identical output; a label-only diff that is NOT
@@ -994,7 +994,7 @@ mod tests {
         assert_eq!(canonicalize_nquads("\n\n").unwrap(), "");
     }
 
-    /// [FABLE-5] sq-iaxd: `CanonError::NestedBlankNode` is an ungated variant
+    /// sq-iaxd: `CanonError::NestedBlankNode` is an ungated variant
     /// (only *constructed* by the opt-in `rdf12-triple-terms` ground-terms
     /// wrappers), so its `Display` must render in the default feature state
     /// too. Pins the message's two load-bearing halves: the condition and the
@@ -1012,7 +1012,7 @@ mod tests {
         );
     }
 
-    /// [FABLE-5] sq-x3oj2: `CanonError::TripleTermDepthExceeded` is likewise an
+    /// sq-x3oj2: `CanonError::TripleTermDepthExceeded` is likewise an
     /// ungated variant (only *constructed* by the opt-in `rdf12-triple-terms`
     /// profile's iterative depth pre-check), so its `Display` must render in
     /// the default feature state too — and must carry the actual crate-wide

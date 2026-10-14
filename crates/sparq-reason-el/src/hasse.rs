@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-s2nob: Phase E3 — transitive reduction to the DIRECT-subsumer Hasse diagram,
+// sq-s2nob: Phase E3 — transitive reduction to the DIRECT-subsumer Hasse diagram,
 // with equivalence-class collapse and a membership-indexed reduction step.
 //
 // The E1/E2 saturator ([`crate::classify`]) produces, for every named class C, the COMPLETE set

@@ -15,7 +15,7 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [FABLE-5] sq-lsp7k.1.1 (forms F1): OPT-IN crate (the sparq-shacl isolation pattern) —
+# sq-lsp7k.1.1 (forms F1): OPT-IN crate (the sparq-shacl isolation pattern) —
 # nothing in the default workspace depends on it, so sparq-core/sparq-engine carry zero
 # forms code, deps, or runtime cost. Headless + wasm-able BY CONSTRUCTION: no GUI deps,
 # and the sparq-core/sparq-shacl deps come in with default-features = false so the

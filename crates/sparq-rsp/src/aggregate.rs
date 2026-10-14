@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-lsp7k.27: deterministic scalar aggregates over closed windows.
+//! sq-lsp7k.27: deterministic scalar aggregates over closed windows.
 
 use oxrdf::Term;
 
@@ -12,12 +12,12 @@ pub enum Agg {
     /// Sum of the selected variable's numeric literal bindings.
     Sum,
     /// Arithmetic mean of the selected variable's numeric literal bindings.
-    // [GPT-5.6] sq-xf3b8: keep AVG on the same deterministic numeric fold as SUM.
+    // sq-xf3b8: keep AVG on the same deterministic numeric fold as SUM.
     Avg,
     /// Minimum of the selected variable's numeric literal bindings.
     Min,
     /// Median of the selected variable's numeric literal bindings.
-    // [GPT-5.6] sq-sfle1: fold the sorted numeric input at its middle value(s).
+    // sq-sfle1: fold the sorted numeric input at its middle value(s).
     Median,
     /// Maximum of the selected variable's numeric literal bindings.
     Max,

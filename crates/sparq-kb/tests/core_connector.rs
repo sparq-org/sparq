@@ -2,7 +2,7 @@
 //! `core-batch.json` fixture + the paging/retry logic over an injected fake transport, with
 //! ZERO network. Gated on `literature-live` (which implies `literature`), matching the
 //! acceptance command `cargo test -p sparq-kb --features literature,literature-live`.
-//! [SONNET-4.6] 🤖 SPARQ agent — research-KB live ingestion.
+//! 🤖 SPARQ agent — research-KB live ingestion.
 #![cfg(feature = "literature-live")]
 
 use std::cell::RefCell;

@@ -1,6 +1,6 @@
 //! Serialize RDF as JSON-LD — RDF dataset → expanded document (JSON-LD 1.1 API §8.1).
 //!
-//! [FABLE-5] (sq-oy1f.28) The native **Deserialize RDF as JSON-LD** algorithm
+//! (sq-oy1f.28) The native **Deserialize RDF as JSON-LD** algorithm
 //! (<https://www.w3.org/TR/json-ld11-api/#deserialize-rdf-as-json-ld-algorithm>): the
 //! entry point [`from_rdf`] converts an RDF dataset (a slice of [`RdfQuad`]s over the
 //! crate-local, dependency-free [`RdfTerm`] model) into the equivalent **expanded**
@@ -85,7 +85,7 @@ const DEFAULT_GRAPH: &str = "@default";
 
 /// An RDF term in the crate-local, dependency-free model consumed by [`from_rdf`].
 ///
-/// [FABLE-5] (sq-oy1f.28) The crate carries **zero mandatory dependencies** (design
+/// (sq-oy1f.28) The crate carries **zero mandatory dependencies** (design
 /// record §3.1), so it models the RDF term algebra itself rather than borrowing a
 /// store's types; callers convert from their own quad model (the conformance lane
 /// converts from `oxrdf`, the engine cutover bead `sq-oy1f.41` from `sparq-core`).

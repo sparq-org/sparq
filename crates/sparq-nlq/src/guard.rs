@@ -261,7 +261,7 @@ pub fn check_question<'q>(
 ///
 // A plain code span, NOT an intra-doc link: `policy` is `#[cfg(feature = "query-policy")]`,
 // so `[`crate::policy`]` is unresolved under default features and the workspace rustdoc
-// `-D warnings` gate reds. [SONNET-4.6]
+// `-D warnings` gate reds.
 /// This is an **algebra**-level decision, like `crate::policy`: it inspects typed
 /// parser output, so it cannot be fooled by a `SERVICE` hidden in a comment, a string
 /// literal, or a prefixed name. Order is stable (first appearance); duplicates on the

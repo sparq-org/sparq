@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-lsp7k.10) OPT-IN **named parameterized SPARQL template** REST surface —
+//! (sq-lsp7k.10) OPT-IN **named parameterized SPARQL template** REST surface —
 //! the GraphDB "SPARQL templates" (smart updates) / Stardog "stored queries" parity
 //! feature: server-stored, IRI-identified query/UPDATE templates with typed parameter
 //! binding, managed over REST and invoked with a JSON argument object instead of

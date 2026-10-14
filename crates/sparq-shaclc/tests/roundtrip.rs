@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-tonhr.6 — write direction: parse → print → re-parse is
+//! sq-tonhr.6 — write direction: parse → print → re-parse is
 //! graph-isomorphic to BOTH the original parse and the independent oxttl
 //! `.ttl` oracle, on the whole corpus, in every applicable profile; and
 //! non-expressible graphs return the typed residual verdict (all-or-nothing

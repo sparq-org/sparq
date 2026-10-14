@@ -1,6 +1,6 @@
 //! End-to-end tests for the `vec:` magic predicates (sq-k6ex): real SPARQL
 //! queries with `vec:nearest` / `vec:search` evaluated against a tiny in-memory
-//! `.spqv` vector store, asserting the expected neighbours. [OPUS-4.8]
+//! `.spqv` vector store, asserting the expected neighbours.
 #![cfg(feature = "vec-predicate")]
 
 use oxrdf::{NamedNode, Term, Triple};
@@ -125,7 +125,7 @@ fn nearest_joins_to_surrounding_bgp() {
     );
 }
 
-/// [GPT-5.6] sq-1ijoc: RDF 1.2 ground triple terms returned by vector search
+/// sq-1ijoc: RDF 1.2 ground triple terms returned by vector search
 /// must survive the rewrite's inline VALUES table, including nested terms.
 #[test]
 fn nearest_returns_nested_ground_triple_term() {
@@ -257,7 +257,7 @@ fn no_vec_predicate_passes_through() {
     assert_eq!(iris(&r, 0), vec!["http://ex/a".to_string()], "{r:?}");
 }
 
-/// [OPUS-4.8] Regression: a query that legitimately uses the RDF collection
+/// Regression: a query that legitimately uses the RDF collection
 /// vocabulary (`rdf:first`/`rdf:rest`) but NO `vec:` predicate must pass through
 /// unchanged — the rewrite must not strip those triples (it previously did,
 /// unconditionally). Here we query an actual `rdf:first` cell and expect the
@@ -284,7 +284,7 @@ fn rdf_collection_without_vec_predicate_is_preserved() {
     assert_eq!(iris(&r, 0), vec!["http://ex/elem".to_string()], "{r:?}");
 }
 
-/// [SONNET-4.6] (sq-tb9p0) VG-GOV-3: the VG-VOC-1 unrecognised-predicate hard error states the
+/// (sq-tb9p0) VG-GOV-3: the VG-VOC-1 unrecognised-predicate hard error states the
 /// highest `vec:` vocabulary revision this build implements, so a query written against a newer
 /// spec revision fails with the version gap named.
 #[test]
@@ -306,7 +306,7 @@ fn unknown_vec_predicate_error_reports_the_vocabulary_revision() {
     );
 }
 
-/// [SONNET-4.6] (sq-tb9p0) VG-TIE-1 through the mainline `vec:` surface: when candidates tie on
+/// (sq-tb9p0) VG-TIE-1 through the mainline `vec:` surface: when candidates tie on
 /// score at the k boundary, top-k MEMBERSHIP is decided by ascending Unicode-codepoint order of
 /// the candidates' canonical N-Triples serialisations — reproducible across implementations,
 /// unlike the internal dictionary-id order. The tie group mixes an IRI with two inlined numeric
@@ -365,7 +365,7 @@ fn boundary_score_tie_membership_is_by_ntriples_codepoint_order() {
     );
 }
 
-/// [SONNET-4.6] (#2445 review) The VG-TIE-1 embeddable-domain guard through the mainline `vec:`
+/// (#2445 review) The VG-TIE-1 embeddable-domain guard through the mainline `vec:`
 /// surface: a blank-node candidate has a document-local N-Triples label — no tie-break key that
 /// is stable across implementations — so when its term (not its score alone) would decide top-k
 /// membership, the query MUST fail closed with a hard error, never rank the label. The blank
@@ -413,7 +413,7 @@ fn blank_node_candidate_at_the_boundary_is_a_hard_query_error() {
     assert_eq!(iris(&r, 0), vec!["http://ex/top".to_string()], "{r:?}");
 }
 
-/// [SONNET-4.6] (sq-vv2l0) VG-DEG-3 of `site/specs/sparql-vector-genai.typ`: `k = 0` yields ZERO
+/// (sq-vv2l0) VG-DEG-3 of `site/specs/sparql-vector-genai.typ`: `k = 0` yields ZERO
 /// solutions and is NOT an error. `k` is typed as a non-negative integer (VG-TYP-2), so `0` parses
 /// and reaches the search; both answer-exact entry points truncate/return empty at `k = 0`. The
 /// spec's degenerate cases are only meaningful if the empty answer is a normal answer.
@@ -434,7 +434,7 @@ fn k_zero_yields_zero_solutions_and_is_not_an_error() {
     }
 }
 
-/// [SONNET-4.6] (sq-vv2l0) VG-GRM-2/VG-ERR-2: a non-variable SCORE position in `vec:search` is a
+/// (sq-vv2l0) VG-GRM-2/VG-ERR-2: a non-variable SCORE position in `vec:search` is a
 /// hard query error, exactly as a non-variable neighbour position is — both subject elements go
 /// through the same bare-variable requirement. Pins the branch the spec previously left
 /// unconfirmed: an author who writes a constant where the score binding belongs gets a loud
@@ -464,7 +464,7 @@ fn non_variable_score_position_is_a_hard_query_error() {
     }
 }
 
-/// [SONNET-4.6] (sq-tb9p0) VG-TIE-1 through the FILTERED `vec:` execution path — the branch the
+/// (sq-tb9p0) VG-TIE-1 through the FILTERED `vec:` execution path — the branch the
 /// unfiltered tie test above cannot reach (a constrained neighbour variable returns through the
 /// cost-model'd filtered search, not `search_tied`). VG-FILT-2 makes this load-bearing: in
 /// answer-exact mode the filtered top-k MUST equal post-filtering the unfiltered (tie-broken)
@@ -579,7 +579,7 @@ mod filtered_boundary_tiebreak {
     }
 }
 
-/// [SONNET-4.6] (sq-tb9p0) VG-MET-4 through the mainline `vec:` surface: a store whose persisted
+/// (sq-tb9p0) VG-MET-4 through the mainline `vec:` surface: a store whose persisted
 /// provenance declares a non-cosine metric is REJECTED by the cosine-only query surface — a hard
 /// error, not well-formed meaningless scores. Needs `spqv-provenance` to bind a provenance.
 #[cfg(feature = "spqv-provenance")]

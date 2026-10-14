@@ -1,5 +1,5 @@
 //! Focused, ISOLATED unit tests for `src/incremental_explain.rs` — the
-//! delta-with-explanation path ([OPUS-4.8] sq-bif.11).
+//! delta-with-explanation path (sq-bif.11).
 //!
 //! Before this file `incremental_explain.rs` (~1188 LOC) had no focused coverage: it was
 //! exercised only transitively by the big randomized differential sweeps in

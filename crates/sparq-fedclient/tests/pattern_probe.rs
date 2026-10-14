@@ -1,4 +1,4 @@
-//! Recall-safety and effectiveness witnesses for pattern-level probing. [GPT-5.6] sq-fx5id.
+//! Recall-safety and effectiveness witnesses for pattern-level probing. sq-fx5id.
 
 #![cfg(feature = "pattern_probe")]
 

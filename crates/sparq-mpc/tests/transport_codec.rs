@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-bif.15 — isolated codec glue tests for the MPC network-tier
+// sq-bif.15 — isolated codec glue tests for the MPC network-tier
 // transport (`crate::transport`). TEST-COVERAGE bead: exercises the EXISTING
 // hand-written wire codec (no production logic changed). The tests are
 // transport-AGNOSTIC — they drive the real `Channel` (encode -> length-prefix

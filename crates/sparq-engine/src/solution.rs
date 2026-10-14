@@ -1,4 +1,4 @@
-//! Oxigraph-shaped per-solution view over a [`QueryResult`] (sq-xj29q). [OPUS-4.8]
+//! Oxigraph-shaped per-solution view over a [`QueryResult`] (sq-xj29q).
 //!
 //! sparq stores SELECT results in a **columnar** [`QueryResult`] — a shared `vars`
 //! header plus a `Vec<Vec<Option<Term>>>` of rows. That layout is what the engine,

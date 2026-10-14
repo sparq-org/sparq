@@ -1,4 +1,4 @@
-//! [OPUS-5] (sq-l6zks, gh-3216) The **external-broker sink seam** over the durable
+//! (sq-l6zks, gh-3216) The **external-broker sink seam** over the durable
 //! [`change_stream`](crate::change_stream) — a [`ChangeSink`] trait, a stable broker-message
 //! encoding, a resumable [`BrokerRelay`] pump, and one in-tree, dependency-free
 //! [`NatsSink`] (core-NATS publish). This is the SEPARATE, HEAVIER opt-in the change-stream
@@ -101,7 +101,7 @@ pub enum SinkError {
 impl fmt::Display for SinkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            // [OPUS-5] positional format args (CodeQL rust/unused-variable false-positive),
+            // positional format args (CodeQL rust/unused-variable false-positive),
             // matching the rest of the crate.
             SinkError::Io(e) => write!(f, "change-sink I/O error: {}", e),
             SinkError::Log(e) => write!(f, "change-sink log error: {}", e),

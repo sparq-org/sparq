@@ -1,4 +1,4 @@
-// [SONNET-4.6] sq-wubkf: bounded linear-memory accounting + per-request admission control.
+// sq-wubkf: bounded linear-memory accounting + per-request admission control.
 //! Bounded linear-memory accounting for the wasm pod.
 //!
 //! # The failure this removes
@@ -165,7 +165,7 @@ unsafe impl GlobalAlloc for BoundedAlloc {
     }
 }
 
-// [SONNET-4.6] sq-wubkf: the accounting is only meaningful when this crate owns the process
+// sq-wubkf: the accounting is only meaningful when this crate owns the process
 // allocator, which it does exactly on `wasm32`, where it is the leaf bundle. On any other target
 // the crate is a compile-only shim and the host binary owns its own allocator.
 #[cfg(target_arch = "wasm32")]

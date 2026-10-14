@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-xqfg (HolderPoP T5): in-circuit holder-PoK host-side helpers.
+// sq-xqfg (HolderPoP T5): in-circuit holder-PoK host-side helpers.
 //! Host-side witness + `Prover.toml` machinery for the in-circuit **holder
 //! Proof-of-Possession** proof (sq-xqfg, design `research/zk-holder-pop-design.md`
 //! §2.B/B2, §3.4). The in-circuit relation is
@@ -75,7 +75,7 @@ pub fn holder_pok_prover_toml(challenge: &Fr, witness: &HolderPokWitness) -> Str
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-3c00 (HolderPoP hidden-holder-SET tier): host-side Merkle
+// sq-3c00 (HolderPoP hidden-holder-SET tier): host-side Merkle
 // commitment + membership witness for the `holder_set_d{depth}` member. The
 // in-circuit relation is `holder.nr::hidden_holder_set`; this is its Rust mirror,
 // the analogue of [`crate::issuer`]'s `key_set_root` / `key_membership_witness`
@@ -175,7 +175,7 @@ pub fn holder_set_membership_witness(
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-8k3h: SPARSE holder-set commitment for a VERY LARGE registry.
+// sq-8k3h: SPARSE holder-set commitment for a VERY LARGE registry.
 //
 // `holder_set_root` / `holder_set_membership_witness` above are DENSE: they
 // materialise all `2^depth` slots, so the host work is `O(2^depth)` and the depth
@@ -385,7 +385,7 @@ mod tests {
         assert!(challenge_pos < digest_pos && digest_pos < hsk_pos);
     }
 
-    // ----- [OPUS-4.8] sq-3c00: hidden-holder-SET host helpers -----
+    // ----- sq-3c00: hidden-holder-SET host helpers -----
 
     fn holder_set(seeds: &[u64]) -> Vec<PublicKey> {
         seeds.iter().map(|s| SecretKey::from_seed(*s).public_key()).collect()
@@ -506,7 +506,7 @@ mod tests {
     }
 
     // ============================================================
-    // [OPUS-4.8] sq-8k3h: SPARSE holder-set builder cross-checks.
+    // sq-8k3h: SPARSE holder-set builder cross-checks.
     // The sparse builders MUST produce a root + authentication path BIT-IDENTICAL
     // to the dense holder-set builders, so a sparse-built witness verifies under the
     // same depth-generic `holder_set_d{depth}` member — the soundness contract for

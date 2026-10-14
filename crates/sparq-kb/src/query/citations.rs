@@ -36,7 +36,7 @@
 //! # }
 //! ```
 //!
-//! [SONNET-4.6] sq-2489d.11. 🤖 SPARQ agent — citation renderer for the PKG-native tier.
+//! sq-2489d.11. 🤖 SPARQ agent — citation renderer for the PKG-native tier.
 
 use oxrdf::Term;
 use sparq_core::Graph;

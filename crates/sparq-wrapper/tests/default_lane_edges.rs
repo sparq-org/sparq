@@ -1,4 +1,4 @@
-// [GPT-5.6] sq-bif.39: default-lane empty-traversal contract witnesses.
+// sq-bif.39: default-lane empty-traversal contract witnesses.
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;

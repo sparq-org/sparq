@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-gq28y (issue #1546): run the VENDORED upstream **query-semantics
+//! sq-gq28y (issue #1546): run the VENDORED upstream **query-semantics
 //! conformance suite** of the *Access-Controlled SPARQL Query over a Solid Pod* Editor's
 //! Draft (`jeswr/solid-sparql-query`) against the real `PodStore` read path, and assert
 //! sparq passes EVERY case.

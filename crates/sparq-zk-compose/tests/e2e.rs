@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! End-to-end + tamper tests for sparq-zk-compose.
 //!
 //! Fast tests (default): manifest serde round-trip, structural verification,
@@ -31,13 +31,13 @@ use sparq_zk_compose::manifest::{
     HiddenIndexRevocation, HiddenIssuerAttestation, ProofInputs, ProofManifest, RevocationStatus,
     StatusListSnapshot, SubProof,
 };
-// [OPUS-4.8] sq-3e5 + sq-h2v: hidden-index revocation host helpers.
-// [OPUS-5] sq-kndw: + the fully-hidden (IRI + version) revocation host helpers.
+// sq-3e5 + sq-h2v: hidden-index revocation host helpers.
+// sq-kndw: + the fully-hidden (IRI + version) revocation host helpers.
 use sparq_zk_compose::revocation::{
     accepted_set_root, hidden_ref_witness, merkle_root, merkle_witness,
     revoke_hidden_ref_prover_toml, revoke_prover_toml,
 };
-// [OPUS-4.8] sq-z9l: hidden-issuer-attestation host helpers.
+// sq-z9l: hidden-issuer-attestation host helpers.
 use sparq_zk_compose::issuer::{
     hidden_issuer_prover_toml, key_membership_witness, key_set_root, HiddenIssuerWitness,
 };
@@ -47,13 +47,13 @@ use sparq_zk_compose::verifier::{
     HolderBindingPolicy, HolderRegistry, InMemorySeenNonces, KeySet, RevocationPolicy, VerifierNonce,
 };
 use sparq_zk::field::Fr;
-// [OPUS-4.8] sq-z8s7 (HolderPoP T3 / B1): holder-key digest + parse for the
+// sq-z8s7 (HolderPoP T3 / B1): holder-key digest + parse for the
 // clear-key holder-binding tests.
 use sparq_zk::sig::{
     holder_key_digest, public_key_from_hex, public_key_to_hex, SecretKey, SignatureScheme,
 };
 
-// [OPUS-4.8] audit #12: revocation/freshness plumbing. The fixtures bind a
+// audit #12: revocation/freshness plumbing. The fixtures bind a
 // status-list reference (list `http://ex/status/1`, index 3, version 1) under the
 // issuer signature. The relying party's policy accepts version 1 (`fresh_policy`)
 // AND carries the AUTHORITATIVE snapshot (re-audit Option B): the liveness bit is
@@ -62,7 +62,7 @@ use sparq_zk::sig::{
 // gate under test; the #12-specific forges set the AUTHORITATIVE bit / drop the
 // field / stale the version / disagree the prover snapshot.
 //
-// [OPUS-4.8] audit #12 re-audit: the bitstring is now an EXTERNAL relying-party
+// audit #12 re-audit: the bitstring is now an EXTERNAL relying-party
 // input (in the policy), authenticated out of band like the trusted key-set K —
 // it is NEVER read from `manifest.status_snapshots` for the bit decision. The
 // `revoked` flag in these fixtures therefore lives in the POLICY snapshot.
@@ -88,7 +88,7 @@ fn fresh_policy() -> RevocationPolicy {
 /// status bit SET (revoked). The verifier reads ITS OWN (this) snapshot's bit, so
 /// a credential is rejected as revoked here NO MATTER what snapshot the prover
 /// attaches. This is the re-audit forge anchor.
-// [OPUS-4.8] audit #12 re-audit: authoritative REVOKED snapshot in the policy.
+// audit #12 re-audit: authoritative REVOKED snapshot in the policy.
 fn revoked_policy() -> RevocationPolicy {
     RevocationPolicy::accept_version(FIXTURE_STATUS_VERSION).with_snapshot(fixture_snapshot(true))
 }
@@ -117,7 +117,7 @@ fn fixture_revocation() -> RevocationStatus {
     }
 }
 
-// [OPUS-4.8] audit #3 codex #1: the EXTERNAL relying-party trust anchor K. Tests
+// audit #3 codex #1: the EXTERNAL relying-party trust anchor K. Tests
 // build it from the issuer keys the *relying party* decides to trust — NOT from
 // the manifest. `trusted_k(&sk)` trusts exactly that one issuer; `empty_k()`
 // trusts none (the fail-closed default). The #3 negative tests pass a K that
@@ -134,7 +134,7 @@ fn empty_k() -> KeySet {
 }
 
 // --- audit #4: verifier-issued nonce + single-use plumbing ----------------
-// [OPUS-4.8] The honest happy-path challenge in these tests is 0x2a, so the
+// The honest happy-path challenge in these tests is 0x2a, so the
 // verifier nonce is the field 0x2a (it is what the proof committed as field 0
 // AND what manifest.binding declares). `nonce_for("0x2a")` mints it; each
 // verify_manifest call gets a FRESH single-use store unless a test deliberately
@@ -147,7 +147,7 @@ fn nonce_for(hex: &str) -> VerifierNonce {
 }
 
 // --- issuer-signature test plumbing (audit #3) ----------------------------
-// [OPUS-4.8] A fixed deterministic test issuer key + helpers that attest a
+// A fixed deterministic test issuer key + helpers that attest a
 // committed graph, so every manifest carrying a scan can present a valid,
 // in-key-set issuer attestation over its commitment(s). Tests that probe a
 // DIFFERENT gate (#1/#2/#5/#6/#10) attach a valid attestation so they reach the
@@ -162,15 +162,15 @@ fn attest(commitment: Fr, sk: &SecretKey) -> CommitmentAttestation {
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment(&commitment), // [OPUS-4.8] codex #4: deterministic nonce
+        signature: sk.sign_commitment(&commitment), // codex #4: deterministic nonce
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
-        salt: None, // [OPUS-4.8] audit #9: salt-unbound legacy attestation
-        status: None, // [OPUS-4.8] audit #12: status-unbound legacy attestation
-        holder: None, // [OPUS-4.8] sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
+        salt: None, // audit #9: salt-unbound legacy attestation
+        status: None, // audit #12: status-unbound legacy attestation
+        holder: None, // sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
     }
 }
 
-/// [OPUS-4.8] audit #9/#12: a SALT- AND STATUS-BOUND attestation — the issuer
+/// audit #9/#12: a SALT- AND STATUS-BOUND attestation — the issuer
 /// signs `(commitment, salt, status_ref_digest)` where the status digest folds
 /// `H(FIXTURE_STATUS_LIST)`, the fixture index, and version. The manifest
 /// discloses `salt` AND (separately) the matching `RevocationStatus`, so the
@@ -188,7 +188,7 @@ fn attest_with_salt(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttes
     )
 }
 
-/// [OPUS-4.8] audit #12: a salt- AND status-bound attestation over an explicit
+/// audit #12: a salt- AND status-bound attestation over an explicit
 /// status-list reference (list IRI + index + version). The issuer signs the
 /// status-bound message and the attestation carries the signed
 /// `AttestedStatusRef` so the verifier cross-checks the disclosed
@@ -215,7 +215,7 @@ fn attest_with_status(
             index_commitment: None,
             ref_commitment: None,
         }),
-        holder: None, // [OPUS-4.8] sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
+        holder: None, // sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
     }
 }
 
@@ -241,7 +241,7 @@ fn scan_commitments(m: &ProofManifest) -> Vec<Fr> {
 /// the #3 + #9 attestation gate, so a test can reach whatever OTHER gate it is
 /// probing.
 ///
-/// [OPUS-4.8] codex 2221 HIGH: a scan-covering attestation MUST be salt-bound,
+/// codex 2221 HIGH: a scan-covering attestation MUST be salt-bound,
 /// so this signs `commitment_message_with_salt(C(G), salt)`. The single-graph
 /// fixtures that call this all commit under one fixed salt, passed here. (A
 /// distinct salt per graph would defeat the salt-uniqueness check; the
@@ -260,7 +260,7 @@ fn attest_all(m: &mut ProofManifest, sk: &SecretKey, salt: Fr) {
     }
 }
 
-/// [OPUS-4.8] sq-ayv: a salt- AND COMMITTED-STATUS-bound attestation — the issuer
+/// sq-ayv: a salt- AND COMMITTED-STATUS-bound attestation — the issuer
 /// signs `(commitment, salt, status_ref_commit_digest(H(list), index_commitment,
 /// version))`, binding a HIDING commitment to the index instead of the clear
 /// index. The attestation's `AttestedStatusRef` carries `index_commitment` (NOT a
@@ -287,7 +287,7 @@ fn attest_with_status_commit(
             index_commitment: Some(FieldHex::from_field(index_commitment)),
             ref_commitment: None,
         }),
-        holder: None, // [OPUS-4.8] sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
+        holder: None, // sq-h8rg (HolderPoP T2): non-holder-bound (bearer)
     }
 }
 
@@ -403,7 +403,7 @@ fn sample_manifest() -> ProofManifest {
         binding: BindingMode::Challenge {
             challenge: FieldHex("0x2a".into()),
         },
-        // [OPUS-4.8] audit #12: issuer-bound revocation reference + a fresh,
+        // audit #12: issuer-bound revocation reference + a fresh,
         // non-revoked disclosed snapshot, so the sample manifest passes the
         // revocation gate (tests that probe #12 strip/forge/stale/revoke this).
         revocation: Some(fixture_revocation()),
@@ -424,7 +424,7 @@ fn sample_manifest() -> ProofManifest {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    // [OPUS-4.8] audit #3/#9/#12: attest the scan commitment (salt- AND
+    // audit #3/#9/#12: attest the scan commitment (salt- AND
     // status-bound) so the sample manifest passes the issuer-signature +
     // revocation gates (tests that probe those strip/forge this).
     attest_all(&mut m, &test_issuer_sk(1), salt);
@@ -508,7 +508,7 @@ fn witness_gen_filter_int_satisfiable() {
         eprintln!("nargo/bb absent; skipping witness-gen test");
         return;
     }
-    // [OPUS-4.8] tag-isolated witness gen: previously this relied on targeting a
+    // tag-isolated witness gen: previously this relied on targeting a
     // member (filter_int_d4) no other concurrent test touches, because the
     // witness path was shared per package. The driver now isolates the
     // prover-input toml + witness by tag, so concurrency is safe regardless of
@@ -537,7 +537,7 @@ fn witness_gen_filter_int_rejects_false_verdict() {
         return;
     }
     // 17 >= 18 is false; claim true -> witness generation must fail.
-    // [OPUS-4.8] tag-isolated: this targets filter_int_d1, shared with the
+    // tag-isolated: this targets filter_int_d1, shared with the
     // forge/full-prove tests, so it MUST NOT use the shared witness path.
     let operand_enc = encode_int_literal(17);
     let (filter, digits) =
@@ -552,7 +552,7 @@ fn witness_gen_filter_int_rejects_false_verdict() {
     );
 }
 
-// [OPUS-4.8] roborev codex 2207: end-to-end `!=` (FilterCmp/FilterOp::Ne).
+// roborev codex 2207: end-to-end `!=` (FilterCmp/FilterOp::Ne).
 // The verifier-side parser now binds SPARQL `?v != c` (spargebra
 // `Not(Equal(..))`) to `Ne`; these confirm the `Ne` op code drives the real
 // `filter_int` circuit's `!eq` verdict branch through the engine seam.
@@ -621,7 +621,7 @@ fn witness_gen_scan_satisfiable() {
     ).unwrap();
     let prover = CircuitProver::from_crate_root();
     prover.compile(&id).expect("compiles");
-    // [OPUS-4.8] tag-isolated witness gen.
+    // tag-isolated witness gen.
     prover
         .gen_witness_tagged(&id, &toml, "wg_scan")
         .expect("scan witness satisfiable");
@@ -645,7 +645,7 @@ fn full_prove_verify_filter_int_d1() {
 
     let prover = CircuitProver::from_crate_root();
     let out = scratch("full_d1");
-    // [OPUS-4.8] tag-isolated prove (shares filter_int_d1 with the forge tests).
+    // tag-isolated prove (shares filter_int_d1 with the forge tests).
     let art = prover.prove_in(&id, &toml, &out, "full_d1").expect("prove succeeds");
     assert!(!art.proof.is_empty());
     let ok = prover.verify(&art, &out.join("verify")).expect("verify runs");
@@ -661,7 +661,7 @@ fn full_prove_verify_filter_int_d1() {
     assert!(!rejected, "tampered proof must be rejected");
 }
 
-/// [OPUS-4.8] roborev codex 2207: NON-ignored full prove+verify of a `Ne`
+/// roborev codex 2207: NON-ignored full prove+verify of a `Ne`
 /// FILTER on the smallest member. Confirms `FilterOp::Ne` drives an honest
 /// proof that bb actually verifies (the "binds + verifies" positive for the
 /// newly-bound `!=` fragment), and that a flipped proof byte is rejected.
@@ -723,7 +723,7 @@ fn full_manifest_prove_verify_scan() {
     ).unwrap();
     let prover = CircuitProver::from_crate_root();
     let out = scratch("manifest_scan");
-    // [OPUS-4.8] tag-isolated prove.
+    // tag-isolated prove.
     let art = prover.prove_in(&id, &toml, &out, "manifest_scan").unwrap();
 
     let mut manifest = ProofManifest {
@@ -739,7 +739,7 @@ fn full_manifest_prove_verify_scan() {
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
         binding: BindingMode::Challenge { challenge },
-        // [OPUS-4.8] audit #12: issuer-bound, non-revoked, fresh.
+        // audit #12: issuer-bound, non-revoked, fresh.
         revocation: Some(fixture_revocation()),
         status_snapshots: vec![fixture_snapshot(false)],
         sub_proofs: vec![SubProof {
@@ -753,8 +753,8 @@ fn full_manifest_prove_verify_scan() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    attest_all(&mut manifest, &test_issuer_sk(1), salt); // [OPUS-4.8] audit #3/#9/#12 (salt+status-bound)
-    // [OPUS-4.8] audit #4: the verifier issues the nonce that the proof committed
+    attest_all(&mut manifest, &test_issuer_sk(1), salt); // audit #3/#9/#12 (salt+status-bound)
+    // audit #4: the verifier issues the nonce that the proof committed
     // (0x2a) and a fresh single-use store; the happy path verifies.
     verify_manifest(
         &manifest,
@@ -773,7 +773,7 @@ fn full_manifest_prove_verify_scan() {
 
 // --- forge-and-verify NEGATIVE tests (audit #1/#2) ------------------------
 //
-// [OPUS-4.8] These are the binding-soundness tests the audit + test-bench
+// These are the binding-soundness tests the audit + test-bench
 // design (§5.1) require: construct a GENUINE bb proof of statement A, then lie
 // in the manifest (declare statement B, or bundle a non-canonical vk) while
 // leaving proof_hex pointing at the real proof, and assert verify_manifest
@@ -800,7 +800,7 @@ fn honest_filter_d1(
     let (id, toml) = prover_toml_for(&filter, challenge, &[], &[], &digits, None, None).unwrap();
     assert_eq!(id, CircuitId::FilterInt { d: 1 });
     let out = scratch(tag);
-    // [OPUS-4.8] tag-isolated prove: every forge test targets filter_int_d1, so
+    // tag-isolated prove: every forge test targets filter_int_d1, so
     // under default parallel `cargo test` they'd otherwise race on the shared
     // Prover.toml / witness and prove the WRONG statement (roborev job 2180).
     let art = prover.prove_in(&id, &toml, &out, tag).expect("prove succeeds");
@@ -864,7 +864,7 @@ fn filter_manifest(
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
         binding: BindingMode::Challenge { challenge },
-        // [OPUS-4.8] audit #12: non-revoked, fresh, issuer-bound — so the #1/#2/#4
+        // audit #12: non-revoked, fresh, issuer-bound — so the #1/#2/#4
         // forge tests reach the gate they probe (not the revocation gate).
         revocation: Some(fixture_revocation()),
         status_snapshots: vec![fixture_snapshot(false)],
@@ -879,7 +879,7 @@ fn filter_manifest(
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    // [OPUS-4.8] audit #3/#9/#12: attest the honest scan (salt- AND status-bound)
+    // audit #3/#9/#12: attest the honest scan (salt- AND status-bound)
     // so the #1/#2 forge tests reach the crypto gate (the FILTER forge they
     // probe), not the #3/#12 attestation/revocation gate. The scan comes from
     // `honest_age_scan`, which commits under salt byte 7 — so the attestation
@@ -1032,7 +1032,7 @@ fn forge_reject_challenge_rebind() {
 
 // --- audit #4: replay / freshness / single-use end-to-end tests -----------
 //
-// [OPUS-4.8] The three forges the test-bench design requires for #4. They run a
+// The three forges the test-bench design requires for #4. They run a
 // REAL bb prove (toolchain-gated) so the binding is exercised cryptographically:
 // (a) a captured manifest replayed under a NEW verifier nonce => REJECT (the
 //     proof committed the OLD nonce; the byte-compare against the new nonce
@@ -1226,7 +1226,7 @@ fn nonce_binding_mismatch_rejected() {
             derivation_steps: vec![],
             // Binding declares 0x2a...
             binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
-            // [OPUS-4.8] audit #12: non-revoked, fresh, so the prefilter (incl. the
+            // audit #12: non-revoked, fresh, so the prefilter (incl. the
             // revocation gate) passes and the nonce/binding check is reached.
             revocation: Some(fixture_revocation()),
             status_snapshots: vec![fixture_snapshot(false)],
@@ -1294,7 +1294,7 @@ fn nonce_binding_mismatch_rejected() {
 
 // --- sq-cwq: HolderPop proof-of-possession (implemented + fail-closed) ---------
 //
-// [OPUS-4.8] sq-cwq. The HolderPop binding used to be a placeholder: verify_manifest
+// sq-cwq. The HolderPop binding used to be a placeholder: verify_manifest
 // extracted its `challenge` exactly like a bare Challenge and IGNORED the holder
 // field — a HolderPop binding was SILENTLY ACCEPTED with no proof of possession.
 // It is now a real challenge-bound Schnorr PoP, fail-closed: an empty holder
@@ -1488,7 +1488,7 @@ fn holder_pop_unknown_cryptosuite_rejected() {
 
 // --- sq-z8s7 (HolderPoP T3 / B1): issuer-attested clear-key holder binding ----
 //
-// [OPUS-4.8] sq-z8s7 (T3 / B1). The sq-cwq HolderPop above binds the presenter to
+// sq-z8s7 (T3 / B1). The sq-cwq HolderPop above binds the presenter to
 // the verifier's NONCE but NOT to the CREDENTIAL the issuer issued, so trusted
 // holder A could present trusted holder B's credential (the trusted-holder gap,
 // `research/zk-holder-pop-design.md` §0). B1 closes it at the clear-key tier:
@@ -1708,7 +1708,7 @@ fn holder_binding_a_presents_b_rejected() {
 /// `identity_holder_key_digest_rejected`), so a `HolderPop` presenting it cannot be
 /// honoured. Hardcoded (the compressed encoding is a stable constant) to avoid
 /// pulling the raw ark curve types into this crate's deps.
-// [OPUS-4.8] sq-z8s7 (HolderPoP T3 / B1): identity-key compressed encoding.
+// sq-z8s7 (HolderPoP T3 / B1): identity-key compressed encoding.
 const IDENTITY_HOLDER_HEX: &str =
     "0100000000000000000000000000000000000000000000000000000000000000";
 
@@ -2238,7 +2238,7 @@ fn attacker_filter_d1_artifacts(
 
 // --- query-correctness FILTER-binding NEGATIVE tests (audit #5/#6/#7/#10) -----
 //
-// [OPUS-4.8] These exercise the VERIFIER-SIDE query-correctness binding added in
+// These exercise the VERIFIER-SIDE query-correctness binding added in
 // this phase. The bb public-input vector already cryptographically binds the
 // scan pattern constants and the FILTER op/bound/expected/operand_enc (audit #1,
 // landed on main); this stage checks those bound values MATCH the query the
@@ -2568,7 +2568,7 @@ fn filter_binding_happy_path_structure() {
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
         binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
-        // [OPUS-4.8] audit #12: non-revoked, fresh, issuer-bound.
+        // audit #12: non-revoked, fresh, issuer-bound.
         revocation: Some(fixture_revocation()),
         status_snapshots: vec![fixture_snapshot(false)],
         sub_proofs: vec![
@@ -2582,7 +2582,7 @@ fn filter_binding_happy_path_structure() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    // [OPUS-4.8] audit #3/#9/#12: attest the scan (salt- AND status-bound).
+    // audit #3/#9/#12: attest the scan (salt- AND status-bound).
     // `scan_inputs_for` commits under salt byte 9, so the attestation salt must
     // match.
     attest_all(&mut m, &test_issuer_sk(1), salt_from_bytes(&[9u8; 32]));
@@ -2693,7 +2693,7 @@ fn filter_two_rows_both_gated_verifies() {
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
         binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
-        // [OPUS-4.8] audit #12: non-revoked, fresh, issuer-bound.
+        // audit #12: non-revoked, fresh, issuer-bound.
         revocation: Some(fixture_revocation()),
         status_snapshots: vec![fixture_snapshot(false)],
         sub_proofs: vec![
@@ -2711,7 +2711,7 @@ fn filter_two_rows_both_gated_verifies() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    // [OPUS-4.8] audit #3/#9: attest the scan (salt-bound). `scan_inputs_for`
+    // audit #3/#9: attest the scan (salt-bound). `scan_inputs_for`
     // commits under salt byte 9.
     attest_all(&mut m, &test_issuer_sk(1), salt_from_bytes(&[9u8; 32]));
     prefilter_manifest_structure(&m, &trusted_k(&test_issuer_sk(1)), &fresh_policy())
@@ -2832,7 +2832,7 @@ fn filter_same_slot_in_two_patterns_needs_one_edge() {
 
 // --- WITHIN-pattern repeated variable (`{ ?v <p> ?v }`) -------------------
 //
-// [OPUS-5] #5240 (follow-up raised while fixing audit L-1 / sq-q9r5e). The
+// #5240 (follow-up raised while fixing audit L-1 / sq-q9r5e). The
 // cross-pattern analogues of "a variable used twice must bind ONE term" are
 // covered — `recheck`/`join_obligations` for the disclosed path and `bind_joins`
 // for the hidden path — but both iterate pattern PAIRS (`i < j`) over per-pattern
@@ -2940,7 +2940,7 @@ fn distinct_pattern_vars_are_unaffected_by_the_repeated_slot_gate() {
 
 // --- explicit pattern→scan mapping (`manifest.pattern_scans`) -------------
 //
-// [OPUS-5] sq-q9r5e follow-up. The sq-q9r5e fix closed audit L-1 by demanding
+// sq-q9r5e follow-up. The sq-q9r5e fix closed audit L-1 by demanding
 // the FILTER be discharged at EVERY slot the filtered variable occupies across
 // EVERY pattern a scan MATCHES BY CONSTANTS. That is an over-demand where two
 // query patterns share a constant layout — but narrowing it to a prover-DECLARED
@@ -3367,7 +3367,7 @@ fn pattern_scans_absent_in_json_means_no_declaration() {
 
 // --- issuer-signature / key-set NEGATIVE tests (audit #3) -----------------
 //
-// [OPUS-4.8] The forge-and-verify suite the brief + test-bench design (§5.1 #3)
+// The forge-and-verify suite the brief + test-bench design (§5.1 #3)
 // require. These are STRUCTURAL (no bb): stage 2d inspects the declared
 // commitments[] + commitment_attestations + key_set, all of which are also
 // byte-bound into the proof's public inputs by the audit #1 reconstruction.
@@ -3406,7 +3406,7 @@ fn scan_only_manifest(graph: &[Triple], salt_byte: u8) -> (ProofManifest, Fr, Fr
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
         binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
-        // [OPUS-4.8] audit #12: a non-revoked, fresh, issuer-bound reference so a
+        // audit #12: a non-revoked, fresh, issuer-bound reference so a
         // status-bound attestation (`attest_with_salt`) reaches the signature
         // gate the #3 tests probe. Tests that probe an EARLIER gate (unsigned,
         // key-not-in-K, salt-missing) still hit it first; the #12 forges override
@@ -3437,7 +3437,7 @@ fn issuer_reject_unsigned_commitment() {
     }
 }
 
-/// [OPUS-4.8] sq-xxg (FAIL-CLOSED, never-neither): a scan commitment covered by
+/// sq-xxg (FAIL-CLOSED, never-neither): a scan commitment covered by
 /// NEITHER a clear attestation NOR a hidden-issuer entry is REJECTED as unattested
 /// — even when the relying party ENABLED the hidden-issuer path. The hidden path
 /// only RELAXES the clear-attestation requirement for commitments a hidden entry
@@ -3458,7 +3458,7 @@ fn issuer_xxg_neither_clear_nor_hidden_rejected() {
     }
 }
 
-/// [OPUS-4.8] sq-xxg (clear-attestation OPTIONAL when hidden covers it): a scan
+/// sq-xxg (clear-attestation OPTIONAL when hidden covers it): a scan
 /// commitment with NO clear attestation but WITH a hidden-issuer entry over it
 /// (and the hidden path enabled) passes the STRUCTURAL clear-attestation gate —
 /// the `UnattestedCommitment` rejection is NOT raised. (The hidden proof's own
@@ -3640,7 +3640,7 @@ fn issuer_reject_unknown_cryptosuite() {
 
 // --- codex #1: the PROVER-CONTROLLED-TRUST-ANCHOR forge (the soundness hole) --
 //
-// [OPUS-4.8] This is the test the prior round was MISSING. Before the fix the
+// This is the test the prior round was MISSING. Before the fix the
 // verifier read `manifest.key_set` (PROVER-supplied) as the trusted issuer set,
 // so a malicious prover could: (1) generate its OWN issuer key, (2) sign a
 // forged commitment with it, (3) self-list that key in `manifest.key_set`, and
@@ -3718,7 +3718,7 @@ fn issuer_accept_when_external_k_trusts_the_key() {
 
 // --- codex 2216 LOW: declared-key_set consistency -------------------------
 //
-// [OPUS-4.8] When the prover DECLARES a narrowed `manifest.key_set` (non-empty),
+// When the prover DECLARES a narrowed `manifest.key_set` (non-empty),
 // an accepted attestation key must ALSO be a member of it. The accept decision
 // stays anchored on the EXTERNAL K (an attestation key is always required to be
 // in K); this rule additionally forbids advertising a tighter issuer set than
@@ -3785,7 +3785,7 @@ fn issuer_accept_empty_declared_keyset_skips_consistency_check() {
 fn issuer_attestation_serde_round_trip() {
     let (mut m, c, _salt) = scan_only_manifest(&credential_graph(), 7);
     let sk = test_issuer_sk(1);
-    // [OPUS-4.8] keep a salt-LESS attestation here on purpose: this is a pure
+    // keep a salt-LESS attestation here on purpose: this is a pure
     // JSON round-trip (no verify), so it still exercises that the legacy
     // `salt: None` shape serdes correctly even though the verifier now rejects it
     // on a scan-covering path (codex 2221 HIGH).
@@ -3800,7 +3800,7 @@ fn issuer_attestation_serde_round_trip() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] audit #8: per-row source-graph attribution binding.
+// audit #8: per-row source-graph attribution binding.
 // ===========================================================================
 //
 // The hole (issue #8): the Q6 cross-graph-bnode-join obligation gate decided
@@ -3876,7 +3876,7 @@ fn cross_graph_manifest(
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
         binding: BindingMode::Challenge { challenge: FieldHex("0x2a".into()) },
-        // [OPUS-4.8] audit #12: a non-revoked, fresh, issuer-bound reference for
+        // audit #12: a non-revoked, fresh, issuer-bound reference for
         // BOTH graphs (both attestations bind the same fixture index/version), so
         // tests reach the gate they probe (#8 attribution / #9 salt / #3 sig).
         revocation: Some(fixture_revocation()),
@@ -3976,7 +3976,7 @@ fn attribution_over_declared_is_accepted() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] audit #9: cross-graph bnode salt separation.
+// audit #9: cross-graph bnode salt separation.
 // ===========================================================================
 //
 // The hole (issue #9): the Q6 "bnodes from different graphs are distinct by
@@ -4020,7 +4020,7 @@ fn salt_reuse_across_distinct_graphs_rejected() {
     }
 }
 
-/// [OPUS-4.8] codex 2223 LOW: an UNRELATED extra attestation that reuses a salt
+/// codex 2223 LOW: an UNRELATED extra attestation that reuses a salt
 /// must NOT false-reject an otherwise-valid proof. The #9 salt-uniqueness
 /// property only concerns committed graphs a VERIFIED SCAN actually drew from;
 /// an attestation over a commitment NO scan references is out of scope.
@@ -4049,7 +4049,7 @@ fn unrelated_extra_attestation_reusing_salt_does_not_reject() {
         .expect("an unrelated extra attestation reusing a salt must not false-reject");
 }
 
-/// [OPUS-4.8] codex 2223 LOW companion: the scoping does NOT weaken the real #9
+/// codex 2223 LOW companion: the scoping does NOT weaken the real #9
 /// guard — a salt reused across TWO SCAN-REFERENCED commitments still rejects.
 /// Two distinct committed graphs, each answering a query pattern (so BOTH are
 /// scan-referenced), share one salt ⇒ REJECT with `SaltReused`. (This is the
@@ -4114,7 +4114,7 @@ fn distinct_salts_verify() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] codex 2221 HIGH/MEDIUM: fail-closed on omittable security fields.
+// codex 2221 HIGH/MEDIUM: fail-closed on omittable security fields.
 // ===========================================================================
 //
 // Two "optional field ⇒ the new check is skipped" holes:
@@ -4202,7 +4202,7 @@ fn forge_wrong_length_attribution_rejected() {
     }
 }
 
-/// [OPUS-4.8] PROBE (ignored): re-dump the real bb `public_inputs` for the new
+/// PROBE (ignored): re-dump the real bb `public_inputs` for the new
 /// scan_k1_n16_r4 layout (now carrying `attribution[k]`) so the
 /// `reconstruct_scan_matches_real_bb_public_inputs` unit-test constant stays an
 /// honest empirical anchor. Run with `--ignored` when the toolchain is present;
@@ -4234,7 +4234,7 @@ fn probe_scan_public_inputs_hex() {
     eprintln!("SCAN_INPUTS_JSON={}", serde_json::to_string(&scan.inputs).unwrap());
 }
 
-/// [OPUS-4.8] sq-f9tl (NEW-1): PROBE (ignored) that dumps the real bb
+/// sq-f9tl (NEW-1): PROBE (ignored) that dumps the real bb
 /// `public_inputs` for a `filter_f64_d{d}` member, so the
 /// `reconstruct_filter_f64_matches_real_bb_public_inputs` unit-test constant in
 /// `verifier.rs` is an EMPIRICAL anchor (not self-referential layout reasoning).
@@ -4266,7 +4266,7 @@ fn probe_filter_f64_public_inputs_hex() {
     eprintln!("FILTER_F64_INPUTS_JSON={}", serde_json::to_string(&inputs).unwrap());
 }
 
-/// [OPUS-4.8] sq-7lrq: PROBE (ignored) that dumps the real bb `public_inputs` for a
+/// sq-7lrq: PROBE (ignored) that dumps the real bb `public_inputs` for a
 /// `filter_signed_int_d{md}` member, so the
 /// `reconstruct_filter_signed_int_matches_real_bb_public_inputs` unit-test constant
 /// in `verifier.rs` is an EMPIRICAL anchor (not self-referential layout reasoning),
@@ -4296,7 +4296,7 @@ fn probe_filter_signed_int_public_inputs_hex() {
     eprintln!("FILTER_SIGNED_INT_INPUTS_JSON={}", serde_json::to_string(&inputs).unwrap());
 }
 
-/// [OPUS-4.8] sq-7lrq: PROBE (ignored) that dumps the real bb `public_inputs` for a
+/// sq-7lrq: PROBE (ignored) that dumps the real bb `public_inputs` for a
 /// `filter_decimal_i{id}_f{fd}` member, the empirical anchor for the
 /// `reconstruct_filter_decimal_matches_real_bb_public_inputs` unit test. Run with
 /// `--ignored` when the toolchain is present; paste the printed hex into the test.
@@ -4326,7 +4326,7 @@ fn probe_filter_decimal_public_inputs_hex() {
     eprintln!("FILTER_DECIMAL_INPUTS_JSON={}", serde_json::to_string(&inputs).unwrap());
 }
 
-/// [OPUS-4.8] sq-f9tl (NEW-1): PROBE (ignored) that dumps the real bb
+/// sq-f9tl (NEW-1): PROBE (ignored) that dumps the real bb
 /// `public_inputs` for a k=2 scan member (`scan_k2_n16_r8`), the other family the
 /// re-audit (NEW-1) flagged as un-anchored. Two named-graph credentials (k=2), each
 /// carrying 3 matching `ex:age` triples (see `multi_age` / `0..3` below) => 6 active
@@ -4380,7 +4380,7 @@ fn probe_scan_k2_public_inputs_hex() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] audit #12: revocation / freshness (forge-and-verify).
+// audit #12: revocation / freshness (forge-and-verify).
 // ===========================================================================
 //
 // The hole (issue #12): revocation was entirely unimplemented — `verify_manifest`
@@ -4396,7 +4396,7 @@ fn probe_scan_k2_public_inputs_hex() {
 // the credential's status bit must be UNSET, and the version must be within the
 // relying party's freshness window.
 //
-// [OPUS-4.8] RE-AUDIT FIX (Option B): the issuer signature binds the REFERENCE
+// RE-AUDIT FIX (Option B): the issuer signature binds the REFERENCE
 // but NOT the bit VALUES, so the status bitstring is read from the relying party's
 // OWN AUTHORITATIVE snapshot (external, in `RevocationPolicy`) — never the
 // prover's `manifest.status_snapshots`. See the dedicated re-audit section below.
@@ -4619,7 +4619,7 @@ fn revocation_non_revoked_fresh_verifies_structurally() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] audit #12 RE-AUDIT (Option B): authenticated status bits.
+// audit #12 RE-AUDIT (Option B): authenticated status bits.
 // ===========================================================================
 //
 // The re-audit hole (confirmed BROKEN before this fix): `StatusListSnapshot.bits`
@@ -4823,7 +4823,7 @@ fn revocation_full_prove_verify_non_revoked_verifies() {
 /// fires on the AUTHORITATIVE (relying-party) snapshot. Confirms revocation is
 /// enforced END-TO-END, not just structurally.
 ///
-/// [OPUS-4.8] audit #12 re-audit: this is the EXACT re-audit break end-to-end —
+/// audit #12 re-audit: this is the EXACT re-audit break end-to-end —
 /// the prover attaches a FORGED all-zero (active) `manifest.status_snapshots`
 /// alongside a genuine issuer-signed reference, but the relying party's
 /// AUTHORITATIVE snapshot (in `revoked_policy`) has the bit SET, so the verifier
@@ -4866,7 +4866,7 @@ fn revocation_full_prove_verify_revoked_rejected() {
 // sq-3e5 + sq-h2v: HIDDEN-INDEX revocation (bit-unset) proof.
 // ===========================================================================
 //
-// [OPUS-4.8] These exercise the privacy upgrade: prove the credential's status
+// These exercise the privacy upgrade: prove the credential's status
 // bit at its HIDDEN index is unset, disclosing neither the index nor the other
 // bits. The proof binds to the relying party's OWN authoritative Merkle root
 // (the audit-#12 re-audit trust anchor is preserved); the clear-index path is
@@ -4939,7 +4939,7 @@ fn hidden_scan_manifest(prover: &CircuitProver, tag: &str) -> (ProofManifest, Fr
         entailment_regime: EntailmentRegime::Simple,
         derivation_steps: vec![],
         binding: BindingMode::Challenge { challenge },
-        // [OPUS-4.8] sq-ayv: COMMITTED-index reference — the clear index is
+        // sq-ayv: COMMITTED-index reference — the clear index is
         // withheld; revocation is checked via the hidden-index proof cross-bound
         // to this commitment.
         revocation: Some(fixture_revocation_committed(&fixture_index_commitment())),
@@ -4975,7 +4975,7 @@ fn fixture_index_commitment() -> Fr {
 /// Prove the `revoke_unset_d10` circuit for `index` against the depth-10 tree of
 /// `snapshot`, returning the assembled [`HiddenIndexRevocation`] manifest field.
 /// `challenge` is the verifier nonce the proof commits as public field 0.
-/// [OPUS-4.8] sq-ayv: the proof now cross-binds a hiding index commitment
+/// sq-ayv: the proof now cross-binds a hiding index commitment
 /// (recomputed in-circuit from `index` + `blinding`); the assembled field carries
 /// it so the verifier can byte-match it against the issuer-signed commitment.
 fn prove_hidden_revocation(
@@ -5001,7 +5001,7 @@ fn prove_hidden_revocation(
     }
 }
 
-/// [OPUS-4.8] sq-ayv (FAIL-CLOSED, never-skip-revocation): a COMMITTED-index
+/// sq-ayv (FAIL-CLOSED, never-skip-revocation): a COMMITTED-index
 /// reference (clear index withheld) with a valid committed attestation but NO
 /// `manifest.hidden_revocation` proof is REJECTED — the committed-index path moves
 /// the liveness decision to the hidden-index proof, so without it revocation would
@@ -5052,7 +5052,7 @@ fn committed_index_without_hidden_revocation_rejected() {
     }
 }
 
-/// [OPUS-4.8] sq-ayv: a committed attestation whose DISCLOSED `index_commitment`
+/// sq-ayv: a committed attestation whose DISCLOSED `index_commitment`
 /// differs from the ISSUER-SIGNED one is REJECTED — the recomputed status-commit
 /// digest then differs and the issuer signature fails. (Structural, no bb.)
 #[test]
@@ -5104,7 +5104,7 @@ fn committed_index_disclosed_commitment_mismatch_rejected() {
     }
 }
 
-/// HAPPY PATH: an UNREVOKED hidden index verifies end-to-end. [OPUS-4.8] sq-ayv:
+/// HAPPY PATH: an UNREVOKED hidden index verifies end-to-end. sq-ayv:
 /// the proof's public inputs are (challenge, root, index_commitment) -- the clear
 /// INDEX is NOT disclosed in any public input NOR in the manifest (committed-index
 /// mode: `RevocationStatus.index` is withheld), closing the residual index leak.
@@ -5259,7 +5259,7 @@ fn hidden_revocation_forged_root_rejected() {
 }
 
 // ===========================================================================
-// [OPUS-5] sq-kndw (#2992, the deferred remainder of sq-6qe): FULLY-HIDDEN
+// sq-kndw (#2992, the deferred remainder of sq-6qe): FULLY-HIDDEN
 // REVOCATION. The privacy upgrade over the sq-ayv committed-index path: the
 // status-list IRI and the VERSION are hidden too, so a presentation discloses
 // NOTHING holder-identifying about its revocation status -- only that SOME
@@ -6036,7 +6036,7 @@ fn explicit_min_version_drives_freshness_and_curation_together() {
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-z9l: HIDDEN-ISSUER ATTESTATION (in-circuit Schnorr-over-
+// sq-z9l: HIDDEN-ISSUER ATTESTATION (in-circuit Schnorr-over-
 // Baby-JubJub + hidden-key set membership). The privacy upgrade over the
 // clear-key bind_issuer_attestations: prove a scan-covering commitment was
 // signed by SOME issuer in the committed key set K, WITHOUT disclosing which.
@@ -6162,7 +6162,7 @@ fn prove_hidden_issuer(
         depth: HI_DEPTH,
         key_set_root: FieldHex::from_field(&auth_root),
         message: FieldHex::from_field(&m),
-        // [OPUS-4.8] sq-xxg: carry the salt so this attestation is self-contained
+        // sq-xxg: carry the salt so this attestation is self-contained
         // and usable on the HIDDEN-ONLY path (no clear attestation to read it from).
         salt: Some(FieldHex::from_field(salt)),
         proof_hex: encode_artifacts(&art),
@@ -6288,7 +6288,7 @@ fn hi_scan_manifest_no_clear_attestation(
     (manifest, c, salt)
 }
 
-/// [OPUS-4.8] sq-xxg HAPPY PATH (HIDDEN-ONLY): a presentation that provides ONLY
+/// sq-xxg HAPPY PATH (HIDDEN-ONLY): a presentation that provides ONLY
 /// the hidden-issuer proof for a commitment — NO clear `commitment_attestations`
 /// entry, NO declared `key_set` — verifies end-to-end. The clear issuer key is
 /// ABSENT from the manifest; the commitment is attested solely by the in-circuit
@@ -6517,7 +6517,7 @@ fn hidden_issuer_not_enabled_rejected() {
 
 // --- sq-q7e + sq-tat: MANIFEST-COMPOSABLE xsd:double FILTER ---------------------
 //
-// [OPUS-4.8] sq-q7e / sq-tat (duplicates). filter_f64 was a v1 BUILDING BLOCK
+// sq-q7e / sq-tat (duplicates). filter_f64 was a v1 BUILDING BLOCK
 // that could not be assembled into a proof manifest (its `a_bits` was prover-free
 // and there was no `ProofInputs::FilterF64` variant). It is now manifest-composable
 // over the INTEGER-VALUED double fragment: the operand is bound to the committed
@@ -6609,7 +6609,7 @@ fn filter_f64_operand_binding_rejects_substituted_value() {
     );
 }
 
-/// [OPUS-4.8] sq-7lrq (soundness, composable path): the COMPOSABLE signed-int host
+/// sq-7lrq (soundness, composable path): the COMPOSABLE signed-int host
 /// emitter (`build_filter_signed_int` -> `prover_toml_for`'s FilterSignedInt arm)
 /// produces a witness that PROVES for an honest verdict and is UNprovable for the
 /// flipped verdict. This anchors the NEW manifest-composable wiring against the same
@@ -6647,7 +6647,7 @@ fn filter_signed_int_composable_witness_honest_proves_lie_rejected() {
     );
 }
 
-/// [OPUS-4.8] sq-7lrq (soundness, composable path): the COMPOSABLE decimal host
+/// sq-7lrq (soundness, composable path): the COMPOSABLE decimal host
 /// emitter (`build_filter_decimal` -> `prover_toml_for`'s FilterDecimal arm) proves
 /// an honest verdict and rejects the flipped verdict, anchoring the new
 /// manifest-composable wiring against the real decimal token binding.
@@ -6794,7 +6794,7 @@ fn filter_f64_out_of_family_errors_cleanly() {
 
 // --- sq-314: entailment regime + derivation steps, end-to-end -----------------
 //
-// [OPUS-4.8] sq-314. `entailment_regime` used to be FREE METADATA (the verifier
+// sq-314. `entailment_regime` used to be FREE METADATA (the verifier
 // never checked it). It is now ENFORCED: a regime the relying party's
 // EntailmentPolicy rejects, a Simple manifest carrying inference steps, a
 // non-Simple regime with no/ungrounded steps, all REJECT (fail-closed). These
@@ -7029,7 +7029,7 @@ fn entailment_simple_accepted_progresses_past_gate() {
 
 // --- sq-rsd3v.7: completeness-under-entailment is UNBUILT — the enforced deferral -
 //
-// [OPUS-5] sq-rsd3v.7. SOUNDNESS of derivation ("every derived triple IS entailed",
+// sq-rsd3v.7. SOUNDNESS of derivation ("every derived triple IS entailed",
 // sq-314 above + the in-circuit relation sq-rsd3v.2) and COMPLETENESS under
 // entailment ("no entailed answer is MISSING") are two obligations that must never
 // be conflated. Completeness needs BOTH an in-circuit closure-sweep over the flat

@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-bu7zs — self-relative throughput harness for the sparq-specific terse
+//! sq-bu7zs — self-relative throughput harness for the sparq-specific terse
 //! keyword layer. There is no external peer format: the JSON envelope therefore records
 //! `NOT-COMPARABLE` instead of implying a competitor result.
 //!

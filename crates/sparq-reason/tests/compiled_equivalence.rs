@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-zgbso.3 — the compiled-rules RESULT-EQUIVALENCE oracle (bead invariant):
+//! sq-zgbso.3 — the compiled-rules RESULT-EQUIVALENCE oracle (bead invariant):
 //! on the sparq-solid WAC/ACP rule corpus + the sq-zgbso.1 ODRL spike rules, the id-level
 //! compiled evaluator's closure equals the `reason_n3` closure AS A SET over the same
 //! rules + facts — failing loudly with the full symmetric difference on any divergence.

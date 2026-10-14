@@ -1,4 +1,4 @@
-// [OPUS-4.8] CollaborativeProof / Attestation — the ZKP boundary (deferred).
+// CollaborativeProof / Attestation — the ZKP boundary (deferred).
 //! The collaborative ZK proof + distributed attestation boundary.
 //!
 //! Architecture refs: §4.3 step 5 (the provers jointly emit ONE proof binding
@@ -56,7 +56,7 @@
 //! Accordingly every method here returns [`MpcError::NotYetImplemented`] naming
 //! the gate. No method fakes a signature, a commitment opening, or a proof.
 //!
-//! ## The buildable M4-v1 interim vs the Q1 spike [OPUS-5]
+//! ## The buildable M4-v1 interim vs the Q1 spike
 //!
 //! `research/mpc-m4-distributed-sig-feasibility.md` §2 separates the *unsolved*
 //! Q1 join above from an honestly BUILDABLE interim — verifier-side attestation
@@ -180,7 +180,7 @@ impl Proof {
     /// the typed `NotYetImplemented` before reading it), but the trait still needs
     /// a value to pass. This exists ONLY so the `no_fake_crypto` adversarial table
     /// (sq-nuok) can call `verify` and assert it fails closed. It implies NO byte
-    /// layout — the proof type is deliberately field-less at M0. [OPUS-4.8]
+    /// layout — the proof type is deliberately field-less at M0.
     #[cfg(test)]
     pub(crate) fn test_stub() -> Self {
         Proof { _private: () }
@@ -206,7 +206,7 @@ mod tests {
     impl MpcBackend for StubBackend {
         type Share = ();
         fn info(&self) -> BackendInfo {
-            // [OPUS-4.8] sq-mq8q — honest-majority, semi-honest-only stub via the
+            // sq-mq8q — honest-majority, semi-honest-only stub via the
             // three-axis descriptor; `BackendInfo::new` derives the back-compat
             // `trust_model = HonestMajority` / `malicious_security = SemiHonestOnly`
             // projection (semi-honest adversary + no-detection selective abort).

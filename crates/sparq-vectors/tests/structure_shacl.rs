@@ -1,7 +1,7 @@
 //! End-to-end tests for the structure-aware-vectorisation **P2** surface (sq-0wo9e.3): the SHACL/OWL
 //! prior extractor + the QUDT unit-normaliser, exercised through the REAL cross-module path — a
 //! parsed `sparq-shacl` shapes model feeds the codebook + cardinality priors, and unit-normalised
-//! magnitudes feed the P1 order-preserving numeric encoder. [OPUS-4.8]
+//! magnitudes feed the P1 order-preserving numeric encoder.
 #![cfg(feature = "structure-shacl")]
 
 use oxrdf::{NamedNode, Term};

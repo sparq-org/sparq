@@ -340,7 +340,7 @@ where
 
     let mut router = Router::new().merge(subscribe).merge(public_notify);
 
-    // [GPT-5.6] sq-r1ei8: the query surface is a distinct protected route so
+    // sq-r1ei8: the query surface is a distinct protected route so
     // the LDP public-read shortcut cannot reinterpret `/sparql` as a resource.
     // It still uses the identical authentication and CORS layers, and its
     // handler performs WAC independently for every assembled resource.

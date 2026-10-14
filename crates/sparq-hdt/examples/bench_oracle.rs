@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-lrp9) HDT benchmark ORACLE — the self-asserting TSV-emitting
+//! (sq-lrp9) HDT benchmark ORACLE — the self-asserting TSV-emitting
 //! runner `bench/hdt/run.sh` calls (the sparq-hdt analogue of FTS's `bench_text`
 //! and RSP's `rsp_oracle`; the crate is isolated — not a `sparq-cli` dependency —
 //! so the runner is a crate EXAMPLE).
@@ -48,7 +48,7 @@ fn main() {
     // ---- 1. DETERMINISTIC gate: the vendored real-world snikmeta.hdt ---------------------
     // A real archive (NOT produced by our writer) so the gate pins the decode of a
     // hdt-cpp/java-shaped FourSectDict+BitmapTriples layout, not just a round-trip.
-    // [SONNET-4.6] sq-45zbg — the deterministic suite keeps the fixture default,
+    // sq-45zbg — the deterministic suite keeps the fixture default,
     // while same-box gathers may supply a scale-representative rdf2hdt archive.
     let hdt_path = std::env::args_os()
         .nth(1)
@@ -103,7 +103,7 @@ fn main() {
         "snikmeta_direct_eq_upstream\t{direct_eq_upstream}\tcount"
     );
 
-    // (d) [FABLE-5] sq-hmd7l.33 — TIMED decode of the SAME vendored archive, min-of-RUNS:
+    // (d) sq-hmd7l.33 — TIMED decode of the SAME vendored archive, min-of-RUNS:
     //     the sparq cell of the same-box HDT decode comparison (scripts/bench/
     //     hdt-same-box.sh → `snikmeta_decode_s` → the ingest's normalizeHdt). Timing row
     //     (unit `s`), NEVER asserted by bench/hdt/run.sh (which gates only `count` rows);

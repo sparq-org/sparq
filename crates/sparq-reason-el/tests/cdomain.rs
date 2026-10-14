@@ -1,4 +1,4 @@
-// [FABLE-5] sq-pbz04.2.2: CR7–CR9 (concrete domains) correctness fixtures — faceted
+// sq-pbz04.2.2: CR7–CR9 (concrete domains) correctness fixtures — faceted
 // `owl:onDatatype`/`owl:withRestrictions` satisfiability, `DataHasValue`/singleton
 // `DataOneOf` point ranges, and the honest-deferral boundary, all decided on the shared
 // `sparq_substrate::numeric` exact tier.
@@ -362,7 +362,7 @@ fn mixed_structure_nodes_are_refused_not_strengthened() {
     assert_closure(&ttl, &["A", "C", "D"], &[]);
 }
 
-// [FABLE-5] sq-pbz04.2.2 soundness fix (Opus adversarial verify on PR #1434): the strictness
+// sq-pbz04.2.2 soundness fix (Opus adversarial verify on PR #1434): the strictness
 // guard originally only refused the intersectionOf-family structure (on_prop/svf/hasValue/
 // intersectionOf/oneOf), NOT the other NON_EL markers — a range node ALSO carrying
 // owl:unionOf / owl:allValuesFrom / owl:datatypeComplementOf / … was rescued as range-ONLY,
@@ -459,7 +459,7 @@ fn union_marked_range_is_not_strengthened_through_an_existential() {
     assert_closure(&ttl, &["C", "D", "E", "G", "H"], &[]);
 }
 
-// [SONNET-4.6] sq-pbz04.2.2 non-vacuous regression tests for the cd_foreign_marker guards on
+// sq-pbz04.2.2 non-vacuous regression tests for the cd_foreign_marker guards on
 // the DataHasValue path (extract.rs:451) and the DataOneOf path (extract.rs:412, inside
 // `structure()`). The four existing tests above only exercise faceted-range nodes; these two
 // confirm that LITERAL-hasValue and singleton-oneOf nodes carrying a foreign marker (unionOf)

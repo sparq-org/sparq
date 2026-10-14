@@ -1,6 +1,6 @@
 //! Context processing — the active context, term definitions, and the inverse context.
 //!
-//! [OPUS-4.8] (sq-oy1f.24) / [SONNET-4.6] (sq-90mu3) The document-level **Context
+//! (sq-oy1f.24) / (sq-90mu3) The document-level **Context
 //! Processing** layer of the W3C JSON-LD 1.1 pipeline (design record
 //! `research/jsonld-1.1-design.md` §3.1). The public surface is:
 //!
@@ -197,7 +197,7 @@ pub struct ActiveContext {
     // IRI mapping, i.e. the term expands to null / is dropped); an absent key means the
     // term is undefined.
     //
-    // [FABLE-5] (sq-hmd7l.42) Behind an `Arc` so `ActiveContext::clone` is O(1): the
+    // (sq-hmd7l.42) Behind an `Arc` so `ActiveContext::clone` is O(1): the
     // Expansion Algorithm clones the active context per node object (§5.1.2 steps 7–11)
     // and Context Processing clones it per fold (§4.1.2 step 1), which on a context-heavy
     // document (~100 term definitions) made the deep `BTreeMap` clone >50% of expand time
@@ -218,7 +218,7 @@ pub struct ActiveContext {
     pub(crate) default_base_direction: Option<Direction>,
     // The previous context, retained for `@propagate: false` reversion during expansion.
     // `Arc` (not `Box`) so cloning an active context never deep-copies the chain
-    // ([FABLE-5] sq-hmd7l.42); the previous context is only ever replaced, never mutated
+    // (sq-hmd7l.42); the previous context is only ever replaced, never mutated
     // in place.
     pub(crate) previous_context: Option<Arc<ActiveContext>>,
 }
@@ -280,7 +280,7 @@ impl ActiveContext {
         self.term_definitions.values().any(TermDefinition::is_protected)
     }
 
-    /// Mutable access to the term-definition map, copy-on-write ([FABLE-5] sq-hmd7l.42).
+    /// Mutable access to the term-definition map, copy-on-write (sq-hmd7l.42).
     ///
     /// The map sits behind an `Arc` so [`Clone`] is O(1); this deep-copies the map iff it
     /// is currently shared with another active context (`Arc::make_mut`), so a burst of
@@ -292,7 +292,7 @@ impl ActiveContext {
 
 /// The set of JSON-LD 1.1 keywords recognised by the processing algorithms.
 ///
-/// [FABLE-5] sq-oy1f.29 — the Framing keywords (`@default`, `@embed`, `@explicit`,
+/// sq-oy1f.29 — the Framing keywords (`@default`, `@embed`, `@explicit`,
 /// `@omitDefault`, `@preserve`, `@requireAll`) ARE keywords of the grammar
 /// (json-ld11-framing "Syntax Tokens and Keywords"). Without them here, Expansion
 /// step 13.3 dropped them as free terms before the `frameExpansion` keyword arm
@@ -441,7 +441,7 @@ mod tests {
         assert!(!has_keyword_form("foo"));
     }
 
-    /// [FABLE-5] (sq-hmd7l.42) The COW contract behind the O(1) clone: a clone SHARES the
+    /// (sq-hmd7l.42) The COW contract behind the O(1) clone: a clone SHARES the
     /// term-definition map (no deep copy — this is the perf fix), and a subsequent
     /// mutation of either side copies-on-write instead of aliasing through to the other.
     #[test]

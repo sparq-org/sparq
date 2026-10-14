@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-yqi1 (#162): the `Store::validate(data, shapes)` SHACL binding.
+//! sq-yqi1 (#162): the `Store::validate(data, shapes)` SHACL binding.
 //!
 //! Exposes `sparq-shacl`'s existing public validation API
 //! ([`sparq_shacl::validate`] — SHACL Core + SHACL-SPARQL §5.2) to JS/WASM
@@ -14,7 +14,7 @@
 //!   and are re-parsed per call. The `rdf-validate-shacl` drop-in.
 //! - [`Store::validate_store`] (`validateStore`) — **store-backed**: validates
 //!   the triples ALREADY loaded in the receiver, so only the shapes document is
-//!   parsed per call ([SONNET-4.6] gh-2520).
+//!   parsed per call (gh-2520).
 //!
 //! This module compiles ONLY under the opt-in `shacl` feature, so the default
 //! browser bundle carries zero SHACL code.
@@ -55,7 +55,7 @@ use crate::Store;
 
 #[wasm_bindgen]
 impl Store {
-    /// [OPUS-4.8] sq-yqi1 (#162): validates an RDF **data graph** against a SHACL
+    /// sq-yqi1 (#162): validates an RDF **data graph** against a SHACL
     /// **shapes graph**, returning a SHACL validation report as a JSON string.
     ///
     /// Both arguments are RDF documents in the same syntaxes [`Store::load`]
@@ -90,7 +90,7 @@ impl Store {
         Ok(report.to_js_json())
     }
 
-    /// [SONNET-4.6] gh-2520: validates the triples **already loaded in this
+    /// gh-2520: validates the triples **already loaded in this
     /// store** against a SHACL shapes document, returning the same JSON report
     /// [`validate`](Self::validate) does.
     ///
@@ -246,7 +246,7 @@ mod tests {
         assert!(!json.contains(r#""message":null"#), "{json}");
     }
 
-    /// [SONNET-4.6] gh-2520: `validateStore` validates the store's OWN triples —
+    /// gh-2520: `validateStore` validates the store's OWN triples —
     /// the load-bearing difference from the stateless `validate`, whose data
     /// argument ignores the receiver. The `Ok` arm never touches `JsError::new`,
     /// so the binding itself runs natively here (the `Err` arm — a malformed

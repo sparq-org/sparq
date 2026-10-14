@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-2fms: federation-level OWA / omission negative suite. Written
+// sq-2fms: federation-level OWA / omission negative suite. Written
 // while Fable unavailable — re-review on return.
 //! Federation-level Open-World-Assumption (OWA) / omission negative suite
 //! (sq-2fms).

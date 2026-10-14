@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-mcb3q (epic sq-2n1q3) — RSP EXPRESSIVITY / SRBench CORRECTNESS
+//! sq-mcb3q (epic sq-2n1q3) — RSP EXPRESSIVITY / SRBench CORRECTNESS
 //! oracle for `sparq-rsp`, wired into the central conformance scoreboard as a
 //! sparq-EXTENSION ratchet (NOT a W3C/standards conformance claim).
 //!
@@ -47,11 +47,11 @@
 //! the crate's `RspqlQuery` scope docs): named-window VARIABLES (`WINDOW ?w`),
 //! `ROWS` count windows in the TEXTUAL surface grammar, and relative `NOW-PT…TO…`
 //! window bounds. ISTREAM/DSTREAM over a multi-window join was a documented gap
-//! but is now implemented ([SONNET-4.6] sq-2n1q3.3) and ratcheted in
+//! but is now implemented (sq-2n1q3.3) and ratcheted in
 //! `axis_multi_window_r2s`. The floor counts only what is actually executed and
 //! checked.
 //!
-//! [SONNET-4.6] sq-z1xv8 — the floor is no longer MIRRORED anywhere. It is the one
+//! sq-z1xv8 — the floor is no longer MIRRORED anywhere. It is the one
 //! `sparq_conformance_floors::rsp::EXPRESSIVITY_FLOOR` const, which the central
 //! `sparq_conformance::scoreboard::SUITES` row imports too, so the enforced and the
 //! reported floor cannot drift by construction (previously the conformance crate's
@@ -77,15 +77,15 @@ use sparq_rsp::{
 /// in lock-step because both sides read the SAME shared const (sq-z1xv8), not a
 /// copy. HONESTLY a sparq EXTENSION ratchet, NOT a
 /// standards conformance claim (no normative RSP / SRBench test suite exists).
-/// [SONNET-4.6] sq-2n1q3.1 — raised from 149 (sq-mcb3q baseline) by:
+/// sq-2n1q3.1 — raised from 149 (sq-mcb3q baseline) by:
 ///   +76 sliding_narrow_sum scenario (RANGE 10 STEP 5, 9 windows × 4 EvalModes)
 ///   +24 count-window EvalMode crosscheck (4 modes × 6 assertions each)
 ///   +54 R2S EvalMode crosscheck (RSTREAM/ISTREAM/DSTREAM × 3 extra modes × 6 assertions)
-/// [SONNET-4.6] sq-2n1q3.3 — raised from 303 by:
+/// sq-2n1q3.3 — raised from 303 by:
 ///   +10 ISTREAM/DSTREAM over the SRBench multi-window join (axis_multi_window_r2s)
 ///   +4  3-window join correctness + no-output-until-all-windows-populated property
 ///       (axis_three_window_joins)
-/// [SONNET-4.6] sq-z1xv8 — the VALUE now lives once in the zero-dependency
+/// sq-z1xv8 — the VALUE now lives once in the zero-dependency
 /// `sparq-conformance-floors` crate, which `sparq-conformance`'s central
 /// `scoreboard::SUITES` reads too, so the enforced floor and the reported floor are
 /// ONE `const` and cannot drift (replacing the old textual re-read of this file).
@@ -98,7 +98,7 @@ const RSP_EXPRESSIVITY_FLOOR: usize = sparq_conformance_floors::rsp::EXPRESSIVIT
 /// docs. Kept as data so the gaps are legible in one place; the runner asserts
 /// each is genuinely rejected/unsupported rather than silently producing a wrong
 /// answer.
-/// [SONNET-4.6] sq-2n1q3.3: removed "ISTREAM/DSTREAM over a multi-window join"
+/// sq-2n1q3.3: removed "ISTREAM/DSTREAM over a multi-window join"
 /// — that gap is now implemented and ratcheted in `axis_multi_window_r2s`.
 const NOT_RATCHETED: &[&str] = &[
     "named-window VARIABLES in the textual grammar (FROM NAMED WINDOW ?w / WINDOW ?w {…})",
@@ -260,7 +260,7 @@ fn scenarios() -> Vec<(&'static str, WindowSpec, &'static str)> {
         ),
         // Sliding narrow SUM (RANGE 10 STEP 5 → 50%-overlap, shorter window than
         // step < range): 9 windows over the weather_script, exercises the DENSER
-        // sliding case with a global SUM aggregate. [SONNET-4.6] sq-2n1q3.1
+        // sliding case with a global SUM aggregate. sq-2n1q3.1
         (
             "sliding_narrow_sum",
             WindowSpec::time(10, 5),
@@ -449,7 +449,7 @@ fn intern_name(iri: &str) -> Option<&'static str> {
 // ISTREAM / DSTREAM window sequence as PersistentDict on the active_script.
 // Proves the R2S diff is EvalMode-agnostic (the diff is applied at the query
 // layer, after graph materialisation, so all four modes must agree).
-// [SONNET-4.6] sq-2n1q3.1
+// sq-2n1q3.1
 
 fn axis_r2s_evalmode_crosscheck(tally: &mut Tally) {
     let script = active_script();
@@ -472,7 +472,7 @@ fn axis_r2s_evalmode_crosscheck(tally: &mut Tally) {
             );
             // Use get() so a short `result` (regression) compares [] vs the
             // reference window through tally rather than panicking on index.
-            // [SONNET-4.6] sq-2n1q3.1 robustness
+            // sq-2n1q3.1 robustness
             for (i, ref_win) in reference.iter().enumerate() {
                 tally.eq(
                     result.get(i).map(|w| subjects(w)).unwrap_or_default(),
@@ -530,7 +530,7 @@ fn count_val(cell: &Option<Term>) -> Option<i64> {
 // Assert the per-slot COUNT(*) values (ramp-up then plateau at capacity) and
 // cross-check all four EvalModes agree on every slot — proves the count-window
 // eviction policy (CQL last-N semantics) is EvalMode-agnostic.
-// [SONNET-4.6] sq-2n1q3.1
+// sq-2n1q3.1
 
 fn axis_count_window_evalmode_crosscheck(tally: &mut Tally) {
     let spec = WindowSpec::count(3);
@@ -563,7 +563,7 @@ fn axis_count_window_evalmode_crosscheck(tally: &mut Tally) {
         );
         // Use get() so a short `r` (regression with fewer slots) records -1 vs
         // want through tally rather than panicking on index.
-        // [SONNET-4.6] sq-2n1q3.1 robustness
+        // sq-2n1q3.1 robustness
         for (i, &want) in expected_counts.iter().enumerate() {
             let got = r
                 .get(i)
@@ -785,7 +785,7 @@ FROM NAMED WINDOW <http://ex/w1> ON <http://ex/obs> RANGE 10 STEP 10";
 
     // The NOT_RATCHETED list is non-empty + legible (the gaps are recorded, not
     // hidden): one assertion that the documented-gap register is populated.
-    // [SONNET-4.6] sq-2n1q3.3: updated from >= 4 to >= 3 after the
+    // sq-2n1q3.3: updated from >= 4 to >= 3 after the
     // ISTREAM/DSTREAM-over-join gap was implemented and removed from the list.
     tally.ok(
         NOT_RATCHETED.len() >= 3,
@@ -795,7 +795,7 @@ FROM NAMED WINDOW <http://ex/w1> ON <http://ex/obs> RANGE 10 STEP 10";
 
 // ======================== AXIS 6: ISTREAM/DSTREAM over a multi-window join
 //
-// [SONNET-4.6] sq-2n1q3.3 — The SRBench join script (obs ⋈ meta, 4 synchronized
+// sq-2n1q3.3 — The SRBench join script (obs ⋈ meta, 4 synchronized
 // ticks) run with ISTREAM and DSTREAM R2S operators. Each tick's diff is
 // hand-derived from the RSTREAM row sets (already verified in axis_multi_window_joins)
 // independently of the diff implementation. Proves the multiset diff is applied
@@ -832,7 +832,7 @@ SELECT ?st ?state ?v WHERE {
 FROM NAMED WINDOW <http://ex/wo> ON <http://ex/obs>  RANGE 10 STEP 10
 FROM NAMED WINDOW <http://ex/wm> ON <http://ex/meta> RANGE 10 STEP 10";
     let r_i = run_multi(q_istream, &script);
-    // [SONNET-4.6] sq-2n1q3.3 — positional format args (CodeQL guard).
+    // sq-2n1q3.3 — positional format args (CodeQL guard).
     tally.eq(r_i.len(), 4, "multi-window ISTREAM: four synchronized ticks");
     // w0: first tick — prev empty, so cur ∖ prev = all 3 joined rows.
     tally.eq(r_i[0].rows.len(), 3, "multi-window ISTREAM w0: 3 new rows (prev empty)");
@@ -866,7 +866,7 @@ FROM NAMED WINDOW <http://ex/wm> ON <http://ex/meta> RANGE 10 STEP 10";
 
 // ======================== AXIS 7: 3-window join correctness
 //
-// [SONNET-4.6] sq-2n1q3.3 — Three windows over three distinct streams, all with
+// sq-2n1q3.3 — Three windows over three distinct streams, all with
 // the same tumbling RANGE 10 STEP 10.  Pins the correct join rows for a window
 // where all three streams contribute, and asserts the no-output-until-all-windows-
 // populated property (the authoritative oracle for the invariant).
@@ -940,16 +940,16 @@ fn rsp_srbench_expressivity_ratchet() {
     let mut tally = Tally::default();
     axis_window_types_x_evalmode(&mut tally);
     axis_r2s_operators(&mut tally);
-    axis_r2s_evalmode_crosscheck(&mut tally); // [SONNET-4.6] sq-2n1q3.1
+    axis_r2s_evalmode_crosscheck(&mut tally); // sq-2n1q3.1
     axis_count_windows(&mut tally);
-    axis_count_window_evalmode_crosscheck(&mut tally); // [SONNET-4.6] sq-2n1q3.1
+    axis_count_window_evalmode_crosscheck(&mut tally); // sq-2n1q3.1
     axis_multi_window_joins(&mut tally);
-    axis_multi_window_r2s(&mut tally);       // [SONNET-4.6] sq-2n1q3.3
-    axis_three_window_joins(&mut tally);     // [SONNET-4.6] sq-2n1q3.3
+    axis_multi_window_r2s(&mut tally);       // sq-2n1q3.3
+    axis_three_window_joins(&mut tally);     // sq-2n1q3.3
     axis_documented_gaps(&mut tally);
 
     // The line CI re-checks (mirrors the BM25 oracle's `assertions N (floor F)`).
-    // [OPUS-4.8] sq-mcb3q / [SONNET-4.6] sq-2n1q3.1 — positional format args (CodeQL).
+    // sq-mcb3q / sq-2n1q3.1 — positional format args (CodeQL).
     println!(
         "RSP expressivity / SRBench correctness assertions {} (floor {})",
         tally.n, RSP_EXPRESSIVITY_FLOOR

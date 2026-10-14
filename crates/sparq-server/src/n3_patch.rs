@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-hj4n, gh-916) OPT-IN Solid-style **N3-Patch** parsing for the Graph-Store-
+//! (sq-hj4n, gh-916) OPT-IN Solid-style **N3-Patch** parsing for the Graph-Store-
 //! Protocol `PATCH` method.
 //!
 //! 🤖 SPARQ agent — feature-gated capability (`n3-patch`, default OFF).

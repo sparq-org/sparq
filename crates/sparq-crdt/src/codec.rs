@@ -2,7 +2,7 @@
 //! crate: strict unpadded base64url, shortest-form decimal counters, RFC 8785
 //! (JCS) string escaping, and strict [`serde_json::Value`] walkers.
 //!
-//! [FABLE-5] The canonical byte form of every document is defined **only** by
+//! The canonical byte form of every document is defined **only** by
 //! the writers in this crate (object keys sorted, no whitespace, all scalars
 //! strings). `serde_json` is used purely as a strict *reader*; decoding then
 //! re-encodes through these writers and byte-compares against the input, so a

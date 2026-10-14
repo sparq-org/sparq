@@ -1,4 +1,4 @@
-// [OPUS-5.5] beadzkp-13.5: one exact pinned-version field matcher, shared by the
+// beadzkp-13.5: one exact pinned-version field matcher, shared by the
 // `successful-results` library paths and `examples/result_experiment.rs` (via `#[path]`).
 //! Internal exact `--version` field matcher for the pinned Noir/Barretenberg toolchain.
 //!

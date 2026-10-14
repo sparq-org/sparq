@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-88c6 — validate the **hybrid-RRF claim on the real olympics fixture**.
+//! sq-88c6 — validate the **hybrid-RRF claim on the real olympics fixture**.
 //!
 //! The fusion helper ([`hybrid_search`]) and its small-graph end-to-end test live in
 //! `tests/hybrid.rs` (a hand-crafted 5-entity graph). The bead also asks to validate the
@@ -16,7 +16,7 @@
 //! SKIPS (passes, with a note on stderr) when `bench/qlever-olympics/olympics.nt` is absent —
 //! the file is a downloaded benchmark fixture, not checked in. Override with `SPARQ_OLYMPICS_NT`.
 
-// [OPUS-4.8] (sq-ip3a) HNSW (VectorIndex) is the approximate backend — gated behind `approx-ann`.
+// (sq-ip3a) HNSW (VectorIndex) is the approximate backend — gated behind `approx-ann`.
 #![cfg(feature = "approx-ann")]
 
 use oxrdf::{NamedNode, Term};

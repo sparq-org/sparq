@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-jbe6 — headless wasm smoke test of the JS-facing sparq-text-wasm API.
+// sq-jbe6 — headless wasm smoke test of the JS-facing sparq-text-wasm API.
 //
 // The crate's `#[cfg(test)] mod tests` in src/ runs on the NATIVE target only, so it
 // exercises the engine + index functions the wrappers delegate to — NOT the actual

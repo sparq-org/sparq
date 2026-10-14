@@ -1,7 +1,7 @@
 //! Parse and subject-presence validation for the sparq-authored `sig-impl:`
 //! extension graph.
 //!
-//! [SONNET-4.6] Issue #2832, PR #4198 review round 2.
+//! Issue #2832, PR #4198 review round 2.
 #![cfg(feature = "secprop-vocab")]
 
 use oxrdf::NamedOrBlankNode;

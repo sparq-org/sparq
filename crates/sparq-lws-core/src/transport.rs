@@ -205,7 +205,7 @@ pub const DEFAULT_HEADER_READ_TIMEOUT_SECS: u64 = 15;
 /// Maximum number of HTTP/1 request header fields accepted by the transport parser. Requests above
 /// this fail closed with `431 Request Header Fields Too Large` before the service sees a body.
 ///
-/// [GPT-5.6] This is set explicitly instead of relying on hyper's current default, so dependency
+/// This is set explicitly instead of relying on hyper's current default, so dependency
 /// upgrades cannot silently remove or relax the header-count guard.
 pub const MAX_REQUEST_HEADER_COUNT: usize = 100;
 
@@ -213,7 +213,7 @@ pub const MAX_REQUEST_HEADER_COUNT: usize = 100;
 /// request-line + header bytes retained for a connection; an incomplete head that exceeds the bound
 /// is rejected before request/body dispatch.
 ///
-/// [GPT-5.6] Hyper requires this value to be at least 8 KiB. The chosen ceiling remains generous for
+/// Hyper requires this value to be at least 8 KiB. The chosen ceiling remains generous for
 /// normal HTTP metadata while making the allocation bound explicit and dependency-version independent.
 pub const MAX_REQUEST_HEADER_BYTES: usize = 64 * 1024;
 

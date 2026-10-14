@@ -1,4 +1,4 @@
-//! `xsd:dateTime` / `xsd:date` / `xsd:duration` value comparison, independent of sparq. [OPUS-4.8]
+//! `xsd:dateTime` / `xsd:date` / `xsd:duration` value comparison, independent of sparq.
 //! sq-qcnn.4
 //!
 //! Everything here is built from a proleptic-Gregorian day count (Howard Hinnant's `days_from_civil`)
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn dt_compare_is_symmetric_under_argument_reversal() {
-        // [GPT-5.6] sq-dfoik: exercise every timezone pairing and both mixed-pair outcomes.
+        // sq-dfoik: exercise every timezone pairing and both mixed-pair outcomes.
         let cases = [
             (
                 "both timezoned",

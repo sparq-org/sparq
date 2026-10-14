@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-qcnn.18 — Direct unit tests for sparq-rsp window boundaries,
+// sq-qcnn.18 — Direct unit tests for sparq-rsp window boundaries,
 // exact-value assertions, panic guards, accessors, and RSP-QL parser error paths.
 //
 // Design contract (sq-qcnn test-quality plan):
@@ -42,7 +42,7 @@ fn objs(w: &Window) -> Vec<String> {
 // A. TRIPLE-STREAM DIRECT TESTS — len/is_empty/items/push_item
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// [OPUS-4.8] sq-qcnn.18: TripleStream::new() starts empty; len() and is_empty()
+// sq-qcnn.18: TripleStream::new() starts empty; len() and is_empty()
 // both reflect the correct count before and after push; items() returns the
 // pushed slice; push_item() appends a pre-wrapped TimestampedTriple.
 #[test]
@@ -74,28 +74,28 @@ fn triple_stream_len_is_empty_items_push_item() {
 // B. WINDOWSPEC PANIC GUARDS (direct, each in its own #[should_panic] fn)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// [OPUS-4.8] sq-qcnn.18: time(0, 1) panics — zero range is meaningless.
+// sq-qcnn.18: time(0, 1) panics — zero range is meaningless.
 #[test]
 #[should_panic(expected = "window RANGE must be > 0")]
 fn window_spec_time_range_zero_panics() {
     let _ = WindowSpec::time(0, 1);
 }
 
-// [OPUS-4.8] sq-qcnn.18: time(1, 0) panics — zero step loops forever.
+// sq-qcnn.18: time(1, 0) panics — zero step loops forever.
 #[test]
 #[should_panic(expected = "window STEP must be > 0")]
 fn window_spec_time_step_zero_panics() {
     let _ = WindowSpec::time(1, 0);
 }
 
-// [OPUS-4.8] sq-qcnn.18: count(0) panics — zero-row window is meaningless.
+// sq-qcnn.18: count(0) panics — zero-row window is meaningless.
 #[test]
 #[should_panic(expected = "window ROWS must be > 0")]
 fn window_spec_count_zero_rows_panics() {
     let _ = WindowSpec::count(0);
 }
 
-// [OPUS-4.8] sq-qcnn.18: with_max_delay on a count window panics (lateness
+// sq-qcnn.18: with_max_delay on a count window panics (lateness
 // tolerance is a time-window concept — no watermark on count windows).
 #[test]
 #[should_panic(expected = "max_delay applies to time windows only")]
@@ -103,7 +103,7 @@ fn with_max_delay_on_count_window_panics() {
     let _ = WindowSpec::count(3).with_max_delay(5);
 }
 
-// [OPUS-4.8] sq-qcnn.18: with_slide on a time window panics (STEP drives time
+// sq-qcnn.18: with_slide on a time window panics (STEP drives time
 // windows; SLIDE drives count windows).
 #[test]
 #[should_panic(expected = "slide applies to count windows only")]
@@ -111,7 +111,7 @@ fn with_slide_on_time_window_panics() {
     let _ = WindowSpec::time(10, 10).with_slide(2);
 }
 
-// [OPUS-4.8] sq-qcnn.18: with_slide(0) panics — zero slide would loop.
+// sq-qcnn.18: with_slide(0) panics — zero slide would loop.
 #[test]
 #[should_panic(expected = "window SLIDE must be > 0")]
 fn with_slide_zero_panics() {
@@ -122,7 +122,7 @@ fn with_slide_zero_panics() {
 // C. WINDOWED-STREAM ACCESSOR + ADVANCE DIRECT TESTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// [OPUS-4.8] sq-qcnn.18: WindowedStream::spec() round-trips the WindowSpec it
+// sq-qcnn.18: WindowedStream::spec() round-trips the WindowSpec it
 // was built with — a simple accessor that shows up as uncovered when the spec
 // is only accessed internally.
 #[test]
@@ -136,7 +136,7 @@ fn windowed_stream_spec_accessor() {
     assert_eq!(ws2.spec(), cspec);
 }
 
-// [OPUS-4.8] sq-qcnn.18: advance() is the shared-clock heartbeat for multi-
+// sq-qcnn.18: advance() is the shared-clock heartbeat for multi-
 // window joins — it drives the watermark forward WITHOUT inserting a triple.
 // Test: advance to a timestamp that crosses a window boundary; the window
 // closes and is empty (no triples were pushed). Then push a triple after the
@@ -164,7 +164,7 @@ fn advance_closes_empty_window_without_inserting() {
     assert_eq!(ws.late_dropped(), 0);
 }
 
-// [OPUS-4.8] sq-qcnn.18: advance() on a COUNT window is a no-op (count windows
+// sq-qcnn.18: advance() on a COUNT window is a no-op (count windows
 // have no time axis). Verify it does not close anything and does not panic.
 #[test]
 fn advance_is_noop_on_count_window() {
@@ -179,7 +179,7 @@ fn advance_is_noop_on_count_window() {
 // D. WINDOW-BOUNDARY EXACT-VALUE MUTATION KILLERS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// [OPUS-4.8] sq-qcnn.18: the watermark-driven close condition is
+// sq-qcnn.18: the watermark-driven close condition is
 //   `watermark >= start + range` (equivalent: `!(watermark < start + range)`).
 // A `<` → `<=` mutation would fire the close one tick TOO EARLY (at
 // watermark = start+range - 1 instead of start+range). Pin the exact tick.
@@ -204,7 +204,7 @@ fn close_fires_exactly_at_watermark_equal_to_end_not_before() {
     assert_eq!(objs(&rest[0]), ["c"]);
 }
 
-// [OPUS-4.8] sq-qcnn.18: With max_delay > 0 the watermark is max_ts - max_delay.
+// sq-qcnn.18: With max_delay > 0 the watermark is max_ts - max_delay.
 // Close fires when watermark (= max_ts - max_delay) >= end (= range).
 // A `<`→`<=` mutant would close one tick early.
 // Pin: RANGE 10 STEP 10 max_delay 3. end=10. Close when max_ts - 3 >= 10,
@@ -228,7 +228,7 @@ fn close_with_max_delay_fires_at_exact_boundary() {
     assert!(!obj_set.contains(&"c".to_string()), "c (ts=13) is in [10,20)");
 }
 
-// [OPUS-4.8] sq-qcnn.18: gap-detection boundary (step > range).
+// sq-qcnn.18: gap-detection boundary (step > range).
 // `rel - k_max * step < range` determines if a timestamp lands in a window.
 // When ts == range (= 5 with RANGE 5 STEP 10), rel=5, k_max=0, 5-0=5 which
 // is NOT < 5 → ts=5 is a GAP (no window covers it). A `<` → `<=` mutant
@@ -248,7 +248,7 @@ fn gap_boundary_ts_equal_to_range_is_not_in_window() {
     assert_eq!(ws.late_dropped(), 0, "gap timestamps are NOT counted late");
 }
 
-// [OPUS-4.8] sq-qcnn.18: too-late detection. A triple is late when its LAST
+// sq-qcnn.18: too-late detection. A triple is late when its LAST
 // covering window (k_max) has already advanced past next_close. The check is
 // `k_max < next_close` (where next_close is the index of the oldest unclosed
 // window). A `<`→`<=` mutant would drop triples in the CURRENT open window
@@ -273,7 +273,7 @@ fn triple_at_open_window_boundary_is_not_late() {
 // E. CONTINUOUS-QUERY ACCESSOR TESTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// [OPUS-4.8] sq-qcnn.18: Accessor methods on all three continuous-query types.
+// sq-qcnn.18: Accessor methods on all three continuous-query types.
 // These are SIMPLE GETTERS that tests often reach only indirectly (via push/flush
 // callbacks) or not at all — the #1250 direct-test discipline requires one direct
 // call per public fn.
@@ -320,7 +320,7 @@ fn continuous_construct_with_mode_roundtrip() {
     let mut out = Vec::new();
     let mut q2 = q;
     q2.flush(|r| out.push(r)).unwrap(); // no-op (nothing pushed), must not panic
-    assert!(out.is_empty(), "flush() with no pushes must emit nothing, got {:?} windows", out.len()); // [OPUS-4.8]
+    assert!(out.is_empty(), "flush() with no pushes must emit nothing, got {:?} windows", out.len()); //
 }
 
 #[test]
@@ -376,7 +376,7 @@ SELECT ?o WHERE {
 FROM NAMED WINDOW <http://ex/w1> ON <http://ex/s1> RANGE 10 STEP 10
 FROM NAMED WINDOW <http://ex/w2> ON <http://ex/s2> RANGE 10 STEP 10";
 
-// [OPUS-4.8] sq-qcnn.18: All ContinuousMultiQuery accessors are called directly.
+// sq-qcnn.18: All ContinuousMultiQuery accessors are called directly.
 #[test]
 fn continuous_multi_query_accessors() {
     let q = ContinuousMultiQuery::register(Q2).unwrap();
@@ -392,7 +392,7 @@ fn continuous_multi_query_accessors() {
     assert_eq!(q.r2s(), R2S::DStream);
 }
 
-// [OPUS-4.8] sq-qcnn.18: from_rspql rejects non-SELECT embedded queries.
+// sq-qcnn.18: from_rspql rejects non-SELECT embedded queries.
 #[test]
 fn multi_query_rejects_non_select_sparql() {
     // ASK body: WINDOW gets rewritten to GRAPH but the result is parsed as ASK,
@@ -407,7 +407,7 @@ FROM NAMED WINDOW <http://ex/w2> ON <http://ex/s2> RANGE 10";
     }
 }
 
-// [OPUS-4.8] sq-qcnn.18: from_rspql rejects fewer than 2 windows.
+// sq-qcnn.18: from_rspql rejects fewer than 2 windows.
 #[test]
 fn multi_query_rejects_single_window() {
     let one = "\
@@ -419,7 +419,7 @@ FROM NAMED WINDOW <http://ex/w1> ON <http://ex/s1> RANGE 10";
     }
 }
 
-// [OPUS-4.8] sq-qcnn.18: a WINDOW IRI referenced in the WHERE but not declared
+// sq-qcnn.18: a WINDOW IRI referenced in the WHERE but not declared
 // with FROM NAMED WINDOW is an error.
 #[test]
 fn multi_query_rejects_undeclared_window_reference() {
@@ -441,7 +441,7 @@ FROM NAMED WINDOW <http://ex/w2> ON <http://ex/s2> RANGE 10";
 // G. RSP-QL PARSER ERROR PATHS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// [OPUS-4.8] sq-qcnn.18: parse_duration_token rejects unsupported ISO-8601 units
+// sq-qcnn.18: parse_duration_token rejects unsupported ISO-8601 units
 // (years and months have no fixed second count).
 #[test]
 fn rspql_rejects_year_and_month_durations() {
@@ -456,7 +456,7 @@ fn rspql_rejects_year_and_month_durations() {
     assert!(RspqlQuery::parse(month_q).is_err(), "P2M (months) should be rejected");
 }
 
-// [OPUS-4.8] sq-qcnn.18: parse_duration_token rejects bad time-unit chars.
+// sq-qcnn.18: parse_duration_token rejects bad time-unit chars.
 #[test]
 fn rspql_rejects_bad_time_unit_in_duration() {
     let bad_unit = "SELECT * WHERE { WINDOW <http://ex/w1> { ?s ?p ?o } WINDOW <http://ex/w2> { ?s ?q ?r } }\n\
@@ -465,7 +465,7 @@ fn rspql_rejects_bad_time_unit_in_duration() {
     assert!(RspqlQuery::parse(bad_unit).is_err(), "PT10X has unknown unit X");
 }
 
-// [OPUS-4.8] sq-qcnn.18: take_duration rejects an empty string after RANGE/STEP.
+// sq-qcnn.18: take_duration rejects an empty string after RANGE/STEP.
 #[test]
 fn rspql_rejects_empty_duration() {
     // The `{` immediately after RANGE is an empty duration token.
@@ -475,7 +475,7 @@ fn rspql_rejects_empty_duration() {
     assert!(RspqlQuery::parse(empty_dur).is_err(), "empty duration should be rejected");
 }
 
-// [OPUS-4.8] sq-qcnn.18: parse_window_spec rejects an unterminated bracket.
+// sq-qcnn.18: parse_window_spec rejects an unterminated bracket.
 #[test]
 fn rspql_rejects_unterminated_bracket() {
     let unclosed = "SELECT * WHERE { WINDOW <http://ex/w1> { ?s ?p ?o } WINDOW <http://ex/w2> { ?s ?q ?r } }\n\
@@ -484,7 +484,7 @@ fn rspql_rejects_unterminated_bracket() {
     assert!(RspqlQuery::parse(unclosed).is_err(), "unclosed [ should be rejected");
 }
 
-// [OPUS-4.8] sq-qcnn.18: REGISTER header with no AS keyword is rejected.
+// sq-qcnn.18: REGISTER header with no AS keyword is rejected.
 #[test]
 fn rspql_rejects_register_without_as() {
     let no_as = "REGISTER <http://ex/out>\n\
@@ -493,7 +493,7 @@ fn rspql_rejects_register_without_as() {
     assert!(RspqlQuery::parse(no_as).is_err());
 }
 
-// [OPUS-4.8] sq-qcnn.18: REGISTER DSTREAM / REGISTER RSTREAM keywords parse
+// sq-qcnn.18: REGISTER DSTREAM / REGISTER RSTREAM keywords parse
 // correctly (the parser accepts the full R2S keyword set: STREAM, RSTREAM,
 // ISTREAM, DSTREAM).
 #[test]
@@ -516,7 +516,7 @@ fn rspql_register_dstream_and_rstream_keywords() {
     assert_eq!(stream.r2s, R2S::RStream);
 }
 
-// [OPUS-4.8] sq-qcnn.18: ISO-8601 days (P1D) and combined minutes+seconds
+// sq-qcnn.18: ISO-8601 days (P1D) and combined minutes+seconds
 // (PT1M30S) parse to the correct second counts.
 #[test]
 fn rspql_iso8601_days_and_combined_duration() {
@@ -540,7 +540,7 @@ fn rspql_iso8601_days_and_combined_duration() {
     assert_eq!(p3.windows[0].spec, WindowSpec::time(7_200, 3_600));
 }
 
-// [OPUS-4.8] sq-qcnn.18: FROM NAMED WINDOW with a missing window IRI is rejected.
+// sq-qcnn.18: FROM NAMED WINDOW with a missing window IRI is rejected.
 #[test]
 fn rspql_rejects_missing_window_iri() {
     let bad = "SELECT * WHERE { WINDOW <http://ex/w1> { ?s ?p ?o } WINDOW <http://ex/w2> { ?s ?q ?r } }\n\
@@ -549,7 +549,7 @@ fn rspql_rejects_missing_window_iri() {
     assert!(RspqlQuery::parse(bad).is_err());
 }
 
-// [OPUS-4.8] sq-qcnn.18: FROM NAMED WINDOW with a missing ON / stream IRI is rejected.
+// sq-qcnn.18: FROM NAMED WINDOW with a missing ON / stream IRI is rejected.
 #[test]
 fn rspql_rejects_missing_stream_iri() {
     let bad = "SELECT * WHERE { WINDOW <http://ex/w1> { ?s ?p ?o } WINDOW <http://ex/w2> { ?s ?q ?r } }\n\
@@ -558,7 +558,7 @@ fn rspql_rejects_missing_stream_iri() {
     assert!(RspqlQuery::parse(bad).is_err());
 }
 
-// [OPUS-4.8] sq-qcnn.18: a WINDOW keyword INSIDE a quoted string is NOT rewritten
+// sq-qcnn.18: a WINDOW keyword INSIDE a quoted string is NOT rewritten
 // to GRAPH (the scanner skips string literals). This pins that the string-scanner
 // path is exercised and does not corrupt the output.
 #[test]
@@ -577,7 +577,7 @@ fn rspql_window_inside_string_literal_is_not_rewritten() {
     assert_eq!(parsed.sparql.matches("GRAPH").count(), 2, "got: {}", parsed.sparql);
 }
 
-// [OPUS-4.8] sq-qcnn.18: single-quote string literals are also scanned correctly.
+// sq-qcnn.18: single-quote string literals are also scanned correctly.
 #[test]
 fn rspql_window_inside_single_quote_string_not_rewritten() {
     let q = "PREFIX ex: <http://ex/>\n\
@@ -592,7 +592,7 @@ fn rspql_window_inside_single_quote_string_not_rewritten() {
     assert_eq!(parsed.sparql.matches("GRAPH").count(), 2);
 }
 
-// [OPUS-4.8] sq-qcnn.18: parse_duration_token with a 'not a duration' prefix
+// sq-qcnn.18: parse_duration_token with a 'not a duration' prefix
 // (no 'P' prefix for ISO-8601 and not a bare integer).
 #[test]
 fn rspql_rejects_non_duration_token() {
@@ -606,7 +606,7 @@ fn rspql_rejects_non_duration_token() {
 // H. RSTREAM / ISTREAM / DSTREAM EXACT-VALUE DELTA TESTS
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// [OPUS-4.8] sq-qcnn.18: multiset_minus semantics — a row appearing N times in
+// sq-qcnn.18: multiset_minus semantics — a row appearing N times in
 // the current window but only M < N times in the previous is emitted N-M times.
 // This pins the budget-decrement path inside multiset_minus directly.
 #[test]
@@ -645,7 +645,7 @@ fn istream_dstream_multiset_exact_counts() {
     assert_eq!(dstream, vec![0, 1], "dstream exact counts: {dstream:?}");
 }
 
-// [OPUS-4.8] sq-qcnn.18: CONSTRUCT R2S DSTREAM — set-difference test.
+// sq-qcnn.18: CONSTRUCT R2S DSTREAM — set-difference test.
 // set_minus fn is exercised through ContinuousConstruct::with_r2s(R2S::DStream).
 // Pin that the exact triple set diff is computed (not just "non-empty result").
 #[test]

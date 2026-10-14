@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-ql2iy — the GeoSPARQL Compliance Benchmark (GSB) runner.
+//! sq-ql2iy — the GeoSPARQL Compliance Benchmark (GSB) runner.
 //!
 //! Runs sparq through the **206-query GeoSPARQL Compliance Benchmark**
 //! (Jovanovik, Homburg, Spasić — *A GeoSPARQL Compliance Benchmark*, ISPRS IJGI

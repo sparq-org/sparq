@@ -94,10 +94,10 @@
 //! call is a no-op that returns `direct_rules` verbatim, and the `policy_version`
 //! hash is unchanged (no certification entries are folded in).
 //!
-//! [OPUS-4.8] sq-pfae.5 P4 storage/authoring model (issue #940). Written while Fable
+//! sq-pfae.5 P4 storage/authoring model (issue #940). Written while Fable
 //! unavailable — flag for re-review when Fable returns. 🤖 SPARQ agent — trust-graph
 //! authorisation PoC.
-//! [SONNET-4.6] sq-pfae.16 — cert-graph composition into TrustStore. 🤖 SPARQ agent.
+//! sq-pfae.16 — cert-graph composition into TrustStore. 🤖 SPARQ agent.
 
 use crate::admit::{scope_covers, PresentedCredential};
 use crate::policy::{ControlGate, TrustRule};

@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 # The wrapped `hdt` crate's MSRV is 1.87. Historically this was ABOVE the workspace
 # floor (then 1.85), so it was declared per-crate to keep the rest of the workspace's
-# floor lower. The workspace floor is now 1.88 ([OPUS-4.8] sq-qmth — driven by
+# floor lower. The workspace floor is now 1.88 (sq-qmth — driven by
 # geo@0.33.1), i.e. AT/ABOVE this, so this pin is now redundant; it is kept explicit
 # (and the crate stays excluded from the `msrv` CI job) only to keep sparq-hdt's own
 # documented floor visible and decoupled from future workspace-floor changes.
@@ -17,24 +17,24 @@ keywords.workspace = true
 categories.workspace = true
 readme = "README.md"
 
-# [OPUS-4.8] sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
+# sq-jxl0: wire docs.rs to build all-features + the `docsrs` cfg so the README
 # front page and every feature-gated item (`write`, `zlib-ng`) render on docs.rs.
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
-# [OPUS-4.8] sq-2te / [GPT-5] sq-2l1: HDT WRITE support (`save`: sparq `Graph` ->
+# sq-2te / sq-2l1: HDT WRITE support (`save`: sparq `Graph` ->
 # `.hdt`). Opt-in because the upstream crate gates `Hdt::read_nt` (N-Triples ->
 # FourSectDict PFC + BitmapTriples) behind its experimental `nt` feature. Reading
 # stays default and N-Triples-parser-free; only writers pay for it.
 [features]
 write = ["hdt/nt"]
-# [GPT-5.6] sq-lsp7k.24: opt-in triple-pattern filtering at the one-shot HDT
+# sq-lsp7k.24: opt-in triple-pattern filtering at the one-shot HDT
 # decode seam. `oxrdf` is already present through `sparq-core`; naming it as an
 # optional direct dependency exposes the RDF term types without changing the
 # default dependency graph.
 load-filter = ["dep:oxrdf"]
-# [OPUS-4.8] (sq-i3xc, lever H5) `zlib-ng`: opt-in, OFF by default, NATIVE-ONLY faster
+# (sq-i3xc, lever H5) `zlib-ng`: opt-in, OFF by default, NATIVE-ONLY faster
 # gzip backend (zlib-ng C library via flate2) for `.hdt.gz` inflate — a measured 1.5–3×
 # at ~zero code change. SAFE because sparq-hdt is native-only and never in the sparq-wasm
 # graph (`cargo tree -p sparq-wasm -e normal` shows no sparq-hdt), so the C dep can never
@@ -51,7 +51,7 @@ zlib-ng = ["flate2/zlib-ng"]
 # sections, BitmapTriples). It reads the de-facto standard layout emitted by
 # hdt-cpp / hdt-java: FourSectionDictionary (Plain Front Coding) + BitmapTriples in
 # SPO order. `default-features = false` drops its sophia adapter — we translate at
-# the id level, not through sophia terms. [GPT-5] sq-2l1: hdt 0.7 moves to qwt 0.4,
+# the id level, not through sophia terms. sq-2l1: hdt 0.7 moves to qwt 0.4,
 # whose aarch64 prefetch path uses stable inline assembly instead of a nightly-only
 # intrinsic.
 
@@ -68,18 +68,18 @@ hdt = { version = "0.7", default-features = false }
 # The default backend (miniz_oxide) is pure Rust; flate2 is already used
 # elsewhere in the workspace (sparq-cli, and previously this crate's dev-deps).
 flate2 = "1"
-# [OPUS-4.8] H5: extra compressed-HDT containers publishers ship. Both decode in a
+# H5: extra compressed-HDT containers publishers ship. Both decode in a
 # STREAMING fashion (the decompressed `.hdt` is never fully materialized), matching
 # the existing gzip path; selection is by MAGIC BYTES, not file name.
 #   zstd  — `.hdt.zst` (magic 28 B5 2F FD). `zstd::stream::read::Decoder`.
 #   bzip2 — `.hdt.bz2` (magic "BZh").       `bzip2::read::MultiBzDecoder`.
 zstd = "0.13"
 bzip2 = "0.6"
-# [OPUS-4.8] CRC8/CRC32-C verification in the direct decoder (decode.rs). Same
+# CRC8/CRC32-C verification in the direct decoder (decode.rs). Same
 # crate (and the same CRC params) the wrapped `hdt` reader uses for the bitmap /
 # sequence sections, so the direct path validates byte-for-byte identically.
 crc = "3"
-# [OPUS-4.8] sq-s506 (lever H6): decode the four PFC dictionary sections
+# sq-s506 (lever H6): decode the four PFC dictionary sections
 # (shared / subjects / objects / predicates) concurrently on the rayon pool. Native
 # only — sparq-hdt is never in the sparq-wasm graph (`cargo tree -p sparq-wasm` shows
 # no sparq-hdt), so this can never reach the wasm bundle. Always-on (not feature
@@ -92,7 +92,7 @@ rayon = { workspace = true }
 # (`Hdt::read_nt`), used ONLY to build .hdt round-trip fixtures / benchmark inputs
 # from N-Triples ground truth in-process.
 hdt = { version = "0.7", default-features = false, features = ["nt"] }
-# [OPUS-4.8] sq-117n: per-test unique, auto-cleaned scratch dirs. The roundtrip
+# sq-117n: per-test unique, auto-cleaned scratch dirs. The roundtrip
 # tests build `.hdt` archives by writing an N-Triples file to disk and reading it
 # back with `Hdt::read_nt`; using FIXED `CARGO_TARGET_TMPDIR` subdir names let
 # sibling tests race on the same `src.nt` (three rejection-oracle tests shared one
@@ -100,10 +100,10 @@ hdt = { version = "0.7", default-features = false, features = ["nt"] }
 # under `cargo test` parallelism. `tempfile::tempdir()` hands each invocation a
 # unique directory (auto-removed on drop), so no two tests can ever collide.
 tempfile = "3"
-# [GPT-5.6] sq-agrtc: generate bounded, duplicate-heavy RDF fixtures that witness
+# sq-agrtc: generate bounded, duplicate-heavy RDF fixtures that witness
 # HDT dictionary decode equivalence across explicit rayon thread counts.
 proptest = "1"
-# [OPUS-4.8] (sq-cxji) Test-only: PARSE the `examples/bench_load.rs` `--json` emit back
+# (sq-cxji) Test-only: PARSE the `examples/bench_load.rs` `--json` emit back
 # to assert it is valid, well-shaped JSON. The emit itself stays serde-free (hand-built
 # `format!`, mirroring `mpc_net_bench::cell_json`); serde_json is a dev-dependency so it
 # never enters the crate's published graph.

@@ -1,4 +1,4 @@
-//! [SONNET-4.6] (sq-5xgxe, gh #3218) The `sparq-mcp` binary: load an RDF dataset and
+//! (sq-5xgxe, gh #3218) The `sparq-mcp` binary: load an RDF dataset and
 //! serve it as MCP agent tools over the standard stdio transport (line-delimited
 //! JSON-RPC 2.0 on this process's stdin/stdout), which is how an MCP client launches
 //! and talks to a server subprocess.

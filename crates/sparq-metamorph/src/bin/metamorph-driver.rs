@@ -1,5 +1,5 @@
 //! Thin CLI over [`sparq_metamorph::run_window`] — the nightly metamorphic CI lane's
-//! entry point (`.github/workflows/metamorph.yml`, bead `sq-3dyje.9`). [FABLE-5]
+//! entry point (`.github/workflows/metamorph.yml`, bead `sq-3dyje.9`).
 //!
 //! ```text
 //! metamorph-driver <seed-start> <seed-count> [--inject-filter-drops-row]

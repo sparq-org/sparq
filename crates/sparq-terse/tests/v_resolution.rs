@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-leg8n — integration tests for `V("phrase")` lexical-first concept
+//! sq-leg8n — integration tests for `V("phrase")` lexical-first concept
 //! resolution behind the §6 soundness envelope (design research
 //! `llm-ergonomic-sparql-surface.md`). These exercise the REAL resolution path against a
 //! real `sparq-core` Graph + a real `sparq-vectors` store — not a mock — and assert the
@@ -134,7 +134,7 @@ fn passthrough_with_no_v_is_byte_identical() {
 
 #[test]
 fn keyword_layer_and_v_resolution_compose() {
-    // [OPUS-4.8] sq-vfeme — lever 1 (K:<name>) and lever 3 (V("phrase")) compose through the
+    // sq-vfeme — lever 1 (K:<name>) and lever 3 (V("phrase")) compose through the
     // vectors entry point: the keyword expands to its frozen IRI AND the phrase resolves to a
     // concept IRI, both spliced into one canonical query, both echoed for the agent.
     let g = graph();

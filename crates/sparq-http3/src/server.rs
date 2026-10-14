@@ -43,7 +43,7 @@ type PerIpCounts = Arc<Mutex<HashMap<IpAddr, usize>>>;
 /// Zero values are clamped to one so a direct configuration cannot accidentally disable the
 /// listener. Set [`max_connections_per_ip`](Self::max_connections_per_ip) to `None` to disable only
 /// the per-IP limit; the global limit is always enforced.
-// [GPT-5.6] sq-h1f9g: keep the compatibility entry point safe by default while allowing tuning.
+// sq-h1f9g: keep the compatibility entry point safe by default while allowing tuning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct H3ConnectionLimits {
     /// Maximum number of concurrently served HTTP/3 connections.
@@ -63,7 +63,7 @@ pub struct H3ConnectionLimits {
     /// single connection cannot fan out unbounded concurrent request tasks (stream-exhaustion
     /// hardening). Acceptance of further request streams back-pressures until an in-flight
     /// request completes; already-accepted requests keep progressing.
-    // [FABLE-5] sq-4rkcc: request-level bound mirroring the connection-level semaphore.
+    // sq-4rkcc: request-level bound mirroring the connection-level semaphore.
     pub max_requests_per_connection: usize,
 }
 
@@ -96,7 +96,7 @@ pub enum Http3ConfigError {
 /// pre-existing value. Apply it to the HTTP/1.1 or HTTP/2 router only after the corresponding QUIC
 /// endpoint has bound successfully. Constructing this layer from configuration alone can advertise
 /// a listener that does not exist.
-// [GPT-5.6] sq-oprna.4: one exact advertisement format shared by both TCP servers.
+// sq-oprna.4: one exact advertisement format shared by both TCP servers.
 pub fn alt_svc_layer(port: u16) -> SetResponseHeaderLayer<HeaderValue> {
     let value = HeaderValue::from_str(&format!("h3=\":{port}\"; ma={ALT_SVC_MAX_AGE_SECONDS}"))
         .expect("a u16 port and fixed Alt-Svc syntax always form a valid header value");
@@ -163,7 +163,7 @@ pub async fn serve_h3_with_limits(
 ) -> io::Result<()> {
     tokio::pin!(shutdown);
     let limiter = ConnectionLimiter::new(limits);
-    // [FABLE-5] sq-4rkcc: clamp like ConnectionLimiter::new so zero cannot disable requests.
+    // sq-4rkcc: clamp like ConnectionLimiter::new so zero cannot disable requests.
     let max_requests_per_connection = limits
         .max_requests_per_connection
         .clamp(1, Semaphore::MAX_PERMITS);
@@ -317,7 +317,7 @@ fn is_internal_ip(ip: IpAddr) -> bool {
 /// `max_concurrent_requests` request tasks are in flight, acceptance of further request streams
 /// back-pressures on the permit; in-flight requests keep progressing because each is driven by
 /// its own task, so a freed permit always unblocks the accept loop (no deadlock).
-// [FABLE-5] sq-4rkcc: cap the previously unbounded per-request tokio::spawn fan-out.
+// sq-4rkcc: cap the previously unbounded per-request tokio::spawn fan-out.
 async fn serve_connection(
     connection: quinn::Connection,
     router: Router,

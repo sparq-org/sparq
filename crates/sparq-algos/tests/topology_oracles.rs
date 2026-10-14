@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-bif.8: integration suite for `sparq-algos` over the crate's PUBLIC API.
+//! sq-bif.8: integration suite for `sparq-algos` over the crate's PUBLIC API.
 //!
 //! The crate already has a strong body of inline unit tests in `src/lib.rs` (a
 //! hand-computed PageRank stationary-distribution oracle, LP exact-membership,

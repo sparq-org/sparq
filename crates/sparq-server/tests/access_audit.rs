@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-gos8, epic sq-toze) Integration tests for the OPT-IN RICHER STRUCTURED
+//! (sq-gos8, epic sq-toze) Integration tests for the OPT-IN RICHER STRUCTURED
 //! access-audit sink (ASVS V7 / ISO 27001 A.8.15 / CDMC CD-2 logging).
 //!
 //! These spin the real axum server with a file-backed structured access-audit sink configured
@@ -178,7 +178,7 @@ async fn graph_store_write_records_named_graph_resource() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// [OPUS-4.8] sq-ljfz (sq-gos8 follow-up): when the operator configures a TRUSTED forwarded
+/// sq-ljfz (sq-gos8 follow-up): when the operator configures a TRUSTED forwarded
 /// -identity header, a fronting auth layer's resolved WebID is recorded as the audit actor
 /// (`Actor::WebId`) — the real authenticated subject — instead of the coarse Bearer-token
 /// fingerprint. This is the bead's enrichment, driven end-to-end through the real seam.
@@ -229,7 +229,7 @@ async fn trusted_forwarded_webid_header_becomes_the_audit_actor() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// [OPUS-4.8] sq-ljfz (audit-integrity / no-spoof): with NO trusted header configured (the
+/// sq-ljfz (audit-integrity / no-spoof): with NO trusted header configured (the
 /// default), a client-supplied identity header is IGNORED — the actor stays the local Bearer
 /// gate (here `anonymous`). This is the guarantee that a direct client cannot spoof an
 /// arbitrary WebID into the audit trail; the WebID is honoured ONLY behind a trusted front the

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-ip3a, epic sq-3183; follow-up to sq-7hx6) **Pluggable ANN backend seam +
+//! (sq-ip3a, epic sq-3183; follow-up to sq-7hx6) **Pluggable ANN backend seam +
 //! iterative over-fetch for the FILTERED approximate path.**
 //!
 //! sq-7hx6 ([`crate::cost`]) settled the *exact*-scan filtered story: post-filtering a **complete**
@@ -51,7 +51,7 @@ use crate::filter::IdMask;
 use crate::store::VectorStore;
 use sparq_core::dict::Id;
 
-/// [OPUS-4.8] (sq-ip3a) A nearest-neighbour backend the filtered over-fetch path searches through:
+/// (sq-ip3a) A nearest-neighbour backend the filtered over-fetch path searches through:
 /// it returns a ranked `(Id, cosine)` candidate list of a requested `fetch` size, **best-first**.
 ///
 /// The result must be a *prefix-stable* ranking: asking for a larger `fetch` returns a superset
@@ -74,7 +74,7 @@ pub trait AnnBackend {
     }
 }
 
-/// [OPUS-4.8] (sq-ip3a) The **answer-exact** backend: a full brute-force scan
+/// (sq-ip3a) The **answer-exact** backend: a full brute-force scan
 /// ([`nearest_exact`](crate::ann::nearest_exact)). A `fetch` ≥ the store size yields the COMPLETE
 /// cosine ranking, so post-filtering it never under-fills (the sq-7hx6 invariant) — recall `1.0`.
 /// This is the default backend and pulls no third-party ANN crate.
@@ -98,7 +98,7 @@ impl AnnBackend for ExactBackend<'_> {
     }
 }
 
-/// [OPUS-4.8] (sq-ip3a) The **approximate** backend over the on-disk Vamana graph
+/// (sq-ip3a) The **approximate** backend over the on-disk Vamana graph
 /// ([`DiskAnnIndex`](crate::DiskAnnIndex)). Recall is `< 1.0`: it returns a *bounded, approximate*
 /// candidate list (a greedy beam search), so post-filtering can under-fill — which is exactly why
 /// [`nearest_filtered_overfetch`] iterates. The beam is widened with the requested `fetch` so a
@@ -130,7 +130,7 @@ impl AnnBackend for ApproxBackend<'_> {
     }
 }
 
-/// [OPUS-4.8] (sq-ip3a) **Filtered top-`k` with iterative over-fetch** over any [`AnnBackend`].
+/// (sq-ip3a) **Filtered top-`k` with iterative over-fetch** over any [`AnnBackend`].
 ///
 /// Returns the best `k` `(Id, cosine)` neighbours the backend surfaces **whose id the `mask`
 /// admits**, best-first. The seam where the sq-7hx6 over-fetch boundary actually bites: post-
@@ -187,13 +187,13 @@ pub fn nearest_filtered_overfetch(
     }
 }
 
-/// [OPUS-4.8] (sq-ip3a) Default probe bound for [`nearest_filtered_overfetch`]: with doubling, this
+/// (sq-ip3a) Default probe bound for [`nearest_filtered_overfetch`]: with doubling, this
 /// many rounds spans a fetch from the first estimate up to the full backend size even for a large
 /// store (the loop also stops the instant the fetch reaches the backend size, so this is only a
 /// hard ceiling on pathological growth, never the usual exit).
 pub const DEFAULT_MAX_ROUNDS: usize = 24;
 
-/// [OPUS-4.8] (sq-ip3a) [`nearest_filtered_overfetch`] with [`DEFAULT_MAX_ROUNDS`].
+/// (sq-ip3a) [`nearest_filtered_overfetch`] with [`DEFAULT_MAX_ROUNDS`].
 pub fn nearest_filtered_overfetch_default(
     backend: &impl AnnBackend,
     query: &[f32],

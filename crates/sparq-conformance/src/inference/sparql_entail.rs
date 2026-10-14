@@ -79,7 +79,7 @@ pub fn run_suite(rdf_tests_root: &Path, out: &mut Vec<TestResult>) -> Result<(),
         } else if regimes.contains("OWL-RDF-Based") {
             Profile::OwlRl
         } else if d_regime_profile(&regimes).is_some() {
-            // [OPUS-4.8] sq-e5atd — a D-only (datatype / value-space) test: route
+            // sq-e5atd — a D-only (datatype / value-space) test: route
             // it through the opt-in `Profile::D` materializer when the `d-entail`
             // feature is ON. When OFF, `d_regime_profile` returns None and the test
             // stays OutOfScope (below), so the default inference binary's ratchet is
@@ -103,7 +103,7 @@ pub fn run_suite(rdf_tests_root: &Path, out: &mut Vec<TestResult>) -> Result<(),
     Ok(())
 }
 
-/// [OPUS-4.8] sq-e5atd — run ONLY the genuinely D-only (`sd:entailmentRegime
+/// sq-e5atd — run ONLY the genuinely D-only (`sd:entailmentRegime
 /// ent:D` WITHOUT any stronger RDFS/RDF/OWL-RDF-Based regime) tests of the
 /// `sparql11/entailment` suite, through the real `Profile::D` materializer. This
 /// is the DEDICATED D-regime lane the `tests/d_entail_suite.rs` ratchet asserts a
@@ -147,7 +147,7 @@ enum Profile {
     Rdf,
     Rdfs,
     OwlRl,
-    /// [OPUS-4.8] sq-e5atd — D-entailment (datatype / value-space). Opt-in,
+    /// sq-e5atd — D-entailment (datatype / value-space). Opt-in,
     /// `d-entail`. Only reached for a test whose regime set is D WITHOUT any of
     /// RDFS/RDF/OWL-RDF-Based (those stronger regimes subsume D and are picked
     /// first), so this arm graduates the genuinely D-only tests.
@@ -195,7 +195,7 @@ fn query_file_carries_dataset(entry: &TestEntry) -> bool {
 }
 
 fn run_one(entry: &TestEntry, profile: Profile, direct_sanctioned: bool) -> Outcome {
-    // [OPUS-4.8] sq-oy1f — the `sparql11/entailment` manifest at the pinned
+    // sq-oy1f — the `sparql11/entailment` manifest at the pinned
     // rdf-tests revision contains NO `qt:graphData` entries (every entailment test
     // uses a single default-graph `qt:data` dataset), so this guard is currently
     // unreachable: there are zero named-graph entailment cases to graduate. It is
@@ -259,7 +259,7 @@ fn run_one(entry: &TestEntry, profile: Profile, direct_sanctioned: bool) -> Outc
             sparq_reason::materialize(sparq_reason::Profile::OwlRl, &mut dict, &mut ids);
             add_eq_ref(&mut dict, &mut ids);
         }
-        // [OPUS-4.8] sq-e5atd — D-entailment: the rdfD1 datatype-typing closure
+        // sq-e5atd — D-entailment: the rdfD1 datatype-typing closure
         // under the STANDARD recognized datatype map (this suite's D tests do not
         // restrict D via a per-test set). The emitted typing triples are
         // GENERALIZED (literal subject `"l"^^d rdf:type d`); the N-Triples
@@ -505,7 +505,7 @@ fn add_rdfd2(dict: &mut Dict, ids: &mut Vec<[sparq_core::dict::Id; 3]>) {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-kuvu3 (epic sq-pbz04) — the EXPERIMENTAL OWL 2 QL (DL-Lite_R)
+// sq-kuvu3 (epic sq-pbz04) — the EXPERIMENTAL OWL 2 QL (DL-Lite_R)
 // query-rewriting arm. Opt-in, `ql-experimental`.
 // ---------------------------------------------------------------------------
 
@@ -515,7 +515,7 @@ fn add_rdfd2(dict: &mut Dict, ids: &mut Vec<[sparq_core::dict::Id; 3]>) {
 const PR_QL: &str = "http://www.w3.org/ns/owl-profile/QL";
 
 // ---------------------------------------------------------------------------
-// [FABLE-5] sq-pbz04.3.4 (epic sq-pbz04.3, design record
+// sq-pbz04.3.4 (epic sq-pbz04.3, design record
 // research/owl2-ql-cq-gate-broadening.md §4+§6) — the SIX-CONDITION GRADUATION
 // PREDICATE for the `pr:QL` entailment arm, plus the HONEST REASON TAXONOMY for
 // everything it holds back. A row graduates to the pinned named-case floor
@@ -526,7 +526,7 @@ const PR_QL: &str = "http://www.w3.org/ns/owl-profile/QL";
 // so every check is fail-closed and every hold carries a specific reason.
 // ---------------------------------------------------------------------------
 
-/// [FABLE-5] sq-pbz04.3.4 — why a `pr:QL` entailment row did NOT graduate to the
+/// sq-pbz04.3.4 — why a `pr:QL` entailment row did NOT graduate to the
 /// pinned named-case floor. The taxonomy is EXHAUSTIVE by construction: every
 /// non-graduated case carries exactly one variant, and the only "we could not
 /// classify it" variant ([`QlHoldReason::UnclassifiedAbstain`]) is asserted EMPTY
@@ -576,7 +576,7 @@ pub enum QlHoldReason {
     /// certain-answer semantics), but the W3C entailment-regime spec leaves a
     /// query on an inconsistent graph to the system (it MAY raise an error), so
     /// there is no spec-pinned oracle semantics to graduate against. Fail-closed
-    /// hold — never a guessed everything-is-entailed pass. [FABLE-5] sq-p6yb7
+    /// hold — never a guessed everything-is-entailed pass. sq-p6yb7
     InconsistentKb {
         /// The violated negative inclusion (Display form) — the witness.
         violated: String,
@@ -690,7 +690,7 @@ impl QlHoldReason {
     }
 }
 
-/// [FABLE-5] sq-pbz04.3.4 — the per-case verdict of the six-condition graduation
+/// sq-pbz04.3.4 — the per-case verdict of the six-condition graduation
 /// predicate.
 #[cfg(feature = "ql-experimental")]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -741,7 +741,7 @@ pub fn ql_graduated_reason(disjuncts: usize) -> String {
     )
 }
 
-/// [FABLE-5] sq-pbz04.3.4 — run the SIX-CONDITION GRADUATION PREDICATE over every
+/// sq-pbz04.3.4 — run the SIX-CONDITION GRADUATION PREDICATE over every
 /// `pr:QL`-tagged test of the `sparql11/entailment` suite and return one
 /// [`QlCaseVerdict`] per case, in manifest order. This is the single computation
 /// both consumers share: `tests/ql_entailment_floor.rs` pins the graduated ids as
@@ -777,7 +777,7 @@ pub fn run_ql_graduation(rdf_tests_root: &Path) -> Result<Vec<QlCaseVerdict>, St
     Ok(out)
 }
 
-/// [OPUS-4.8] sq-kuvu3 / [FABLE-5] sq-pbz04.3.4 — run the OWL 2 QL arm over the
+/// sq-kuvu3 / sq-pbz04.3.4 — run the OWL 2 QL arm over the
 /// `pr:QL`-tagged tests of the `sparql11/entailment` suite and append one
 /// `OutOfScope` `TestResult` per case.
 ///
@@ -911,7 +911,7 @@ fn ql_graduation_one(entry: &TestEntry) -> QlGraduationVerdict {
     // than rejecting it, so an overriding dataset would otherwise be silently
     // ignored and the rewrite evaluated over the wrong graph. No current
     // `pr:QL` case carries one (verified over the pinned rdf-tests revision);
-    // this keeps condition (4) complete against future re-pins. [FABLE-5]
+    // this keeps condition (4) complete against future re-pins.
     if query_carries_dataset(&query) {
         return Held(QlHoldReason::NamedGraphDataset);
     }
@@ -1208,7 +1208,7 @@ fn classify_gate_rejection(query: &Query, reason: &str) -> QlHoldReason {
     // `"intensional/schema-vocabulary atom: predicate <...> ..."` for rdfs: schema
     // vocabulary and owl: predicates used as role atoms.  This is a PERMANENT-REJECT
     // (the rewriter evaluates over ABox data only; using a schema-vocabulary predicate
-    // as a data atom has no sound certain-answer rewriting in this design). [SONNET-4.6]
+    // as a data atom has no sound certain-answer rewriting in this design).
     if reason.contains("intensional") {
         return QlHoldReason::PermanentlyOutside(reason.to_string());
     }
@@ -1269,7 +1269,7 @@ fn classify_rewrite_abstain(reason: &str) -> QlHoldReason {
     }
     // Multi-branch UCQ with per-branch FILTER/VALUES (sq-pbz04.3.1 fail-closed guard):
     // the branch-aware emitter is deferred to sq-pbz04.3.2, so this is pending-gate. The
-    // reason string starts with "multi-branch UCQ with per-branch FILTER or VALUES". [SONNET-4.6]
+    // reason string starts with "multi-branch UCQ with per-branch FILTER or VALUES".
     if reason.contains("multi-branch") && (reason.contains("FILTER") || reason.contains("VALUES")) {
         return QlHoldReason::PendingGate(format!(
             "{} (branch-aware emitter deferred to sq-pbz04.3.2)",
@@ -1285,7 +1285,7 @@ fn classify_rewrite_abstain(reason: &str) -> QlHoldReason {
 /// True iff the query carries its own `FROM`/`FROM NAMED` dataset clause
 /// (condition (4): the CQ-shape gate drops `dataset` rather than honouring it,
 /// so a dataset-carrying query must be HELD, never rewritten over the wrong
-/// graph). [FABLE-5] sq-pbz04.3.4
+/// graph). sq-pbz04.3.4
 fn query_carries_dataset(query: &Query) -> bool {
     match query {
         Query::Select { dataset, .. }
@@ -1435,7 +1435,7 @@ fn ql_eval_matches_oracle(
 }
 
 // ===========================================================================
-// [OPUS-4.8] sq-qo1a9 (epic sq-pbz04) — the GRADUATED DL-Lite_R CERTAIN-ANSWER
+// sq-qo1a9 (epic sq-pbz04) — the GRADUATED DL-Lite_R CERTAIN-ANSWER
 // oracle. This is the FORMAL OWL 2 QL conformance arm that earns a pinned floor.
 //
 // The broad `pr:QL` `sparql11/entailment` set (run by `run_ql_experimental_arm`
@@ -1635,7 +1635,7 @@ pub const QL_DLLITE_ORACLE: &[QlOracleCase] = &[
     },
 ];
 
-/// [OPUS-4.8] sq-qo1a9 — run the GRADUATED DL-Lite_R certain-answer oracle: for
+/// sq-qo1a9 — run the GRADUATED DL-Lite_R certain-answer oracle: for
 /// every [`QlOracleCase`], rewrite the CQ with `rewrite_production`, evaluate the
 /// UCQ over the UNMODIFIED ABox through the REAL engine, and compare to the
 /// hand-derived certain answers EXACTLY. Returns the per-case outcomes in corpus
@@ -1791,7 +1791,7 @@ fn projected_vars(p: &GraphPattern) -> Vec<String> {
     }
 }
 
-// [OPUS-4.8] sq-kuvu3 / [FABLE-5] sq-pbz04.3.4 — DIRECT unit tests for the public
+// sq-kuvu3 / sq-pbz04.3.4 — DIRECT unit tests for the public
 // QL-arm surface (the coverage-ratchet rule: one direct test per new public fn).
 // Hermetic (no fetched fixtures) except the arm smoke test, which self-skips.
 #[cfg(all(test, feature = "ql-experimental"))]
@@ -1900,7 +1900,7 @@ mod ql_tests {
         // gate rejects them, and that `intensional_atom()` still catches the remaining cases
         // that slip past the gate (rdf:type with class-position variable or schema-ns constant).
 
-        // Schema-vocabulary predicate (paper-sparqldl-Q1 shape): gate now rejects. [SONNET-4.6]
+        // Schema-vocabulary predicate (paper-sparqldl-Q1 shape): gate now rejects.
         let q_sub = parse(&format!(
             "{PRE} SELECT ?c WHERE {{ ?c rdfs:subClassOf :Student }}"
         ));
@@ -1908,7 +1908,7 @@ mod ql_tests {
             sparq_reason_ql::as_conjunctive_query(&q_sub).is_err(),
             "rdfs:subClassOf as predicate: gate must reject (B6 now in gate)"
         );
-        // owl: predicates are all semantics-bearing — gate rejects. [SONNET-4.6]
+        // owl: predicates are all semantics-bearing — gate rejects.
         let q_same = parse(&format!("{PRE} SELECT ?x WHERE {{ ?x owl:sameAs :a }}"));
         assert!(
             sparq_reason_ql::as_conjunctive_query(&q_same).is_err(),
@@ -1916,7 +1916,7 @@ mod ql_tests {
         );
 
         // rdf:type with a class-position VARIABLE: gate admits (predicate rdf:type is not
-        // schema-vocabulary), but intensional_atom() flags it. [SONNET-4.6]
+        // schema-vocabulary), but intensional_atom() flags it.
         let cq = cq_of(&format!("{PRE} SELECT ?c WHERE {{ :a rdf:type ?c }}"));
         assert!(intensional_atom(&cq)
             .unwrap()
@@ -1963,7 +1963,7 @@ mod ql_tests {
             .contains("blank-node body term"));
     }
 
-    // [FABLE-5] sq-p6yb7 — CONDITION (3) upgraded: the consistency check decides, fail-closed.
+    // sq-p6yb7 — CONDITION (3) upgraded: the consistency check decides, fail-closed.
     // MUTATION WITNESS (verified during development): making `ql_condition3_consistency`
     // return `Ok(())` unconditionally flips the `Inconsistent`/`Unknown` arms below red.
     #[test]
@@ -2030,13 +2030,13 @@ mod ql_tests {
         };
         // B1 broadening shape → pending-gate. A UNION at the top level is a UCQ —
         // `as_conjunctive_query` rejects multi-branch UCQs (use `as_ucq` for those), so
-        // it still generates a gate rejection classifiable as pending-gate (B1). [SONNET-4.6]
+        // it still generates a gate rejection classifiable as pending-gate (B1).
         let r = classify(&format!(
             "{PRE} SELECT ?x WHERE {{ {{ ?x rdf:type :A }} UNION {{ ?x rdf:type :B }} }}"
         ));
         assert_eq!(r.label(), "pending-gate");
         assert!(r.reason().contains("B1"));
-        // B6 gate-side intensional-atom rejection → permanently-outside. [SONNET-4.6]
+        // B6 gate-side intensional-atom rejection → permanently-outside.
         let r = classify(&format!(
             "{PRE} SELECT ?c WHERE {{ ?c rdfs:subClassOf :A }}"
         ));
@@ -2167,7 +2167,7 @@ mod ql_tests {
         }
     }
 
-    // [OPUS-4.8] sq-qo1a9 — DIRECT unit tests for the GRADUATED DL-Lite_R
+    // sq-qo1a9 — DIRECT unit tests for the GRADUATED DL-Lite_R
     // certain-answer oracle surface (the coverage-ratchet rule: one direct test
     // per new public fn). Hermetic — the corpus is in-source, no fetched fixtures.
     #[test]

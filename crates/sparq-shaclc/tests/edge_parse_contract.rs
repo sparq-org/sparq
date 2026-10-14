@@ -1,4 +1,4 @@
-// [GPT-5.6] Integration contracts for the crate-root SHACL-C parse API.
+// Integration contracts for the crate-root SHACL-C parse API.
 use sparq_shaclc::{parse_extended, parse_strict, DEFAULT_BASE};
 
 #[test]

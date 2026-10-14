@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-o5bi) ONLINE consistent snapshot backup + restore for the serving
+//! (sq-o5bi) ONLINE consistent snapshot backup + restore for the serving
 //! store — exporting an already-immutable pinned [`Generation`](crate::Generation) to a
 //! single self-describing artifact WHILE SERVING, and re-hydrating a ring/writer from one.
 //!
@@ -92,7 +92,7 @@ pub enum BackupError {
 impl std::fmt::Display for BackupError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // [OPUS-4.8] positional format args (CodeQL rust/unused-variable false-positive).
+            // positional format args (CodeQL rust/unused-variable false-positive).
             BackupError::Io(e) => write!(f, "backup I/O error: {}", e),
             BackupError::Format(m) => write!(f, "backup format error: {}", m),
             BackupError::Corrupt(m) => write!(f, "backup corrupt: {}", m),

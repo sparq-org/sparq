@@ -1,4 +1,4 @@
-//! [OPUS-4.8] Accuracy gates for vector quantization (sq-nq5):
+//! Accuracy gates for vector quantization (sq-nq5):
 //!
 //! 1. **SQ round-trip error bound** — per-dimension f32→u8→f32 reconstruction error is within
 //!    half a quantization step, and the cosine of the reconstruction tracks the original;
@@ -334,7 +334,7 @@ fn pq_ties_break_on_ascending_id() {
 }
 
 #[test]
-// [OPUS-4.8] (sq-qamd) The PQ codebook round-trips through to_bytes/from_bytes byte-for-byte (so it
+// (sq-qamd) The PQ codebook round-trips through to_bytes/from_bytes byte-for-byte (so it
 // can be persisted alongside a .spqg graph), and a decoded quantizer produces identical codes and
 // ADC distances.
 fn pq_codebook_serialization_round_trips() {
@@ -373,7 +373,7 @@ fn pq_codebook_serialization_round_trips() {
 }
 
 #[test]
-// [OPUS-4.8] (sq-qamd) EncodedStore::from_parts reconstructs the candidate cache from its flat
+// (sq-qamd) EncodedStore::from_parts reconstructs the candidate cache from its flat
 // ids/codes/stride and validates the code-array length.
 fn encoded_store_from_parts_round_trips_and_validates() {
     let path = tmp("pq-fromparts.spqv");

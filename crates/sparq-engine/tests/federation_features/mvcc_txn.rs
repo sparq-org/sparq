@@ -1,4 +1,4 @@
-//! [OPUS-4.8] (sq-it1x) MVCC / ACID transaction-isolation tests.
+//! (sq-it1x) MVCC / ACID transaction-isolation tests.
 //!
 //! Snapshot isolation over the COW delta-overlay substrate (`Graph::fork`/`snapshot`/
 //! `apply_delta`) with first-committer-wins write-write conflict detection — the

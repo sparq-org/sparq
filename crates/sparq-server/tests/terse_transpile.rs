@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-vczh2 (epic sq-2m6zm, design research/llm-ergonomic-sparql-surface.md §4):
+//! sq-vczh2 (epic sq-2m6zm, design research/llm-ergonomic-sparql-surface.md §4):
 //! e2e integration tests for the OPT-IN verifiable terse-transpiler endpoint
 //! (`POST /terse/transpile`).
 //!

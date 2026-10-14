@@ -1,4 +1,4 @@
-//! [OPUS-4.8] SHACL §6 — SPARQL-based constraint COMPONENTS (sq-sm2).
+//! SHACL §6 — SPARQL-based constraint COMPONENTS (sq-sm2).
 //!
 //! Local-fixture tests for custom `sh:ConstraintComponent` declarations: a
 //! component declares `sh:parameter`s and a validator (`sh:validator` /
@@ -226,7 +226,7 @@ fn node_validator_preferred_for_node_shape() {
     assert!(msg.contains("node-validator fired"), "message: {msg}");
 }
 
-/// [OPUS-4.8] (sq-wys) A `sh:propertyValidator` with `$PATH` pre-bound to the
+/// (sq-wys) A `sh:propertyValidator` with `$PATH` pre-bound to the
 /// property shape's path. Mirrors the W3C `propertyValidator-select-001` shape:
 /// a SELECT validator over `$this $PATH ?value` flags values that are not
 /// literals tagged with the parameter language `$lang`. `$PATH` is a property
@@ -301,7 +301,7 @@ fn property_validator_path_prebinding() {
     assert_eq!(r2.results[0].value.as_ref().unwrap().to_string(), "\"Muenchen\"");
 }
 
-/// [OPUS-4.8] (sq-wys) The pre-bound parameter variable is the LOCAL NAME of the
+/// (sq-wys) The pre-bound parameter variable is the LOCAL NAME of the
 /// parameter's `sh:path` IRI, NOT its `sh:name` display label (SHACL §6.2.1).
 /// Here the parameter is `sh:path ex:lang ; sh:name "language"` and the validator
 /// references `$lang`; binding `$language` would leave `$lang` unbound and the

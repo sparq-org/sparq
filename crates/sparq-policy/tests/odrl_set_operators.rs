@@ -1,6 +1,6 @@
 //! `odrl:isAnyOf` / `odrl:isNoneOf` set-relation operators — end-to-end parse +
 //! evaluate tests through the REAL `parse_policy_str` + `evaluate` path (not a
-//! mock). [FABLE-5] sq-uaz85.
+//! mock). sq-uaz85.
 //!
 //! Per the [ODRL 2.2 operator vocabulary](https://www.w3.org/TR/odrl-vocab/):
 //! - `isAnyOf` — the constraint is satisfied when the left-operand value equals

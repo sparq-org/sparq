@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-z9l: hidden-issuer-attestation host-side helpers.
+// sq-z9l: hidden-issuer-attestation host-side helpers.
 //! Host-side commitment + witness machinery for the in-circuit
 //! **Schnorr-over-Baby-JubJub + hidden-key set membership** proof (sq-z9l). The
 //! in-circuit relation is `zk/compose/compose_core/src/issuer.nr`; this module is
@@ -123,7 +123,7 @@ pub fn key_membership_witness(keys: &[PublicKey], depth: u32, index: u64) -> Opt
 }
 
 // =====================================================================
-// [OPUS-4.8] sq-8k3h: SPARSE host commitment for a very large registry.
+// sq-8k3h: SPARSE host commitment for a very large registry.
 //
 // The dense builders above are `O(2^depth)`: fine for tens-of-authorities issuer
 // sets, infeasible for a very large holder registry at the deep `depth` such a
@@ -444,7 +444,7 @@ mod tests {
     }
 
     // ============================================================
-    // [OPUS-4.8] sq-8k3h: SPARSE host commitment cross-checks.
+    // sq-8k3h: SPARSE host commitment cross-checks.
     // The sparse builders MUST produce a root + authentication path BIT-IDENTICAL
     // to the dense builders, so a sparse-built witness verifies under the same
     // depth-generic member. These pins are the soundness contract for the sparse
@@ -573,7 +573,7 @@ mod tests {
     // Fail-closed parity with the dense builder for the three conditions this test
     // ACTUALLY drives: overflow, `depth > 31`, and out-of-range index.
     //
-    // [OPUS-5] sq-r6dq review round 3 (gpt-5.6-sol finding 2): this comment used to
+    // sq-r6dq review round 3 (gpt-5.6-sol finding 2): this comment used to
     // also claim "identity key" coverage, which the body did NOT contain — a comment
     // asserting a guard that was not tested. The unusable-key guard
     // (`key_set_leaf(pk)?` in `key_leaves` / `sparse_key_leaves`) now has its own
@@ -608,7 +608,7 @@ mod tests {
         );
     }
 
-    // [OPUS-5] sq-r6dq review round 3 (gpt-5.6-sol finding 2): the `key_set_leaf(pk)?`
+    // sq-r6dq review round 3 (gpt-5.6-sol finding 2): the `key_set_leaf(pk)?`
     // FAIL-CLOSED guard — the one thing standing between an unusable (identity /
     // torsion / off-curve) key and the committed key set K — had NO test in either
     // builder, while `sparse_fail_closed_matches_dense`'s comment claimed it did.
@@ -671,7 +671,7 @@ mod tests {
         }
     }
 
-    // [OPUS-5] sq-r6dq review round 3 (gpt-5.6-sol finding 6): no test used a VALID
+    // sq-r6dq review round 3 (gpt-5.6-sol finding 6): no test used a VALID
     // depth 31, so tightening either `depth > 31` guard to `depth >= 31` — an
     // off-by-one that silently disables the deepest supported policy — reddened
     // nothing. Depth 31 is the LAST accepted depth (`1usize << 31` is representable
@@ -717,7 +717,7 @@ mod tests {
     }
 
     // ============================================================
-    // [OPUS-4.8] sq-ru0yx (internal re-audit finding M-1): the challenge-reduction
+    // sq-ru0yx (internal re-audit finding M-1): the challenge-reduction
     // NO-WRAP invariant, pinned host-side so the default `cargo test` lane (no nargo/
     // bb) guards the constants the in-circuit `issuer.nr::reduction_range_bind`
     // depends on. The in-circuit forge/accept tests live in `compose_core/tests.nr`

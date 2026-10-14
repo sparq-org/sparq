@@ -1,4 +1,4 @@
-//! [SONNET-4.6] sq-mc06h — Tripwire that `sparq-mcp`'s DEFAULT feature set keeps the two
+//! sq-mc06h — Tripwire that `sparq-mcp`'s DEFAULT feature set keeps the two
 //! engine planner/optimizer features lit: `algebra-rewrite` (the pre-execution algebra
 //! rewrite pass, #1735 / sq-7d3dj.30.1) and `dp-planner` (the DPccp bushy join-order
 //! planner, sq-7d3dj.30.5 / #1732).

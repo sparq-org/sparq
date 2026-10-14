@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-sqtk2.1 (epic sq-sqtk2; research/mechanized-proof-program.md §3.1 property
+//! sq-sqtk2.1 (epic sq-sqtk2; research/mechanized-proof-program.md §3.1 property
 //! A-2, §5 bead 1) — EXHAUSTIVELY TESTED (bounded domain): container-default ACL
 //! discovery. Kani string costs make a symbolic-IRI proof of the nearest-ancestor
 //! SELECTION intractable, and no Kani proof of the walk (selection or termination) exists

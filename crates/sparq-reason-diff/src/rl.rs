@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-xg6uu — the OWL 2 RL differential harness proper: canonicalizer,
+//! sq-xg6uu — the OWL 2 RL differential harness proper: canonicalizer,
 //! documented normalization, golden-vector loader, multiset differ, and the
 //! per-case disposition ledger.
 //!
@@ -395,7 +395,7 @@ mod tests {
         assert!(e1.is_empty() && e2.is_empty());
     }
 
-    // [GPT-5.6] sq-kcld6 — swapping inputs swaps the multiset-diff halves.
+    // sq-kcld6 — swapping inputs swaps the multiset-diff halves.
     #[test]
     fn diff_multisets_is_antisymmetric_under_argument_swap() {
         let a = v(&[

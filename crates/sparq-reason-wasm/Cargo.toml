@@ -1,4 +1,4 @@
-# [OPUS-4.8] sq-6qw3 (W-reason): the tier-b WASM bundle for sparq-reason.
+# sq-6qw3 (W-reason): the tier-b WASM bundle for sparq-reason.
 #
 # A SEPARATE, lazy-loaded bundle (not folded into the lean `sparq-wasm` bundle): it
 # carries the forward-chaining reasoner (`sparq-reason`) + the N-Triples serialiser
@@ -38,13 +38,13 @@ getrandom = { version = "0.3", features = ["wasm_js"] }
 
 [features]
 default = []
-# [OPUS-4.8] sq-6qw3: expose `Reasoner::why(...)` — the derivation proof tree — by turning
+# sq-6qw3: expose `Reasoner::why(...)` — the derivation proof tree — by turning
 # on `sparq-reason`'s non-default `explain` feature. OFF by default so the standard reason
 # bundle carries zero proof-tree code; CI builds the bundle BOTH with and without it, and
 # the headless wasm tests run with it on. Maps directly to the `why()` proof tree the
 # /surface/inference page renders.
 explain = ["sparq-reason/explain"]
-# [OPUS-4.8] sq-e5atd: expose `Profile::D` (opt-in D-entailment / datatype value-space
+# sq-e5atd: expose `Profile::D` (opt-in D-entailment / datatype value-space
 # materialiser) to the bundle's `materialize`/`entailed`/`materializeStats` methods by
 # turning on `sparq-reason`'s non-default `d-entail` feature. OFF by default. The `why()`
 # proof tree is NOT available for D (it is a value-space materialiser, not a rule-based
@@ -52,7 +52,7 @@ explain = ["sparq-reason/explain"]
 d-entail = ["sparq-reason/d-entail"]
 
 [dev-dependencies]
-# [OPUS-4.8] sq-6qw3 — headless wasm test harness, mirroring sparq-wasm: exercises the
+# sq-6qw3 — headless wasm test harness, mirroring sparq-wasm: exercises the
 # #[wasm_bindgen] JS-facing API in a REAL wasm runtime via `wasm-pack test --node`.
 # Dev-only: it must NOT enter the non-dev wasm graph.
 wasm-bindgen-test = "0.3"
@@ -60,7 +60,7 @@ wasm-bindgen-test = "0.3"
 [package.metadata.wasm-pack.profile.release]
 # Optimise the wasm for size (the regex automata are the bundle-size risk flagged in the bead).
 wasm-opt = ["-Oz"]
-# [SONNET-4.6] sq-7d3dj.15 — `js build:reason-wasm` now passes `--profile release-wasm`
+# sq-7d3dj.15 — `js build:reason-wasm` now passes `--profile release-wasm`
 # (NOT `--release`). wasm-pack only recognises the built-in `dev`/`profiling`/`release` profile
 # keys; the above `release` block is IGNORED for `--profile release-wasm` and wasm-opt uses its
 # default `-O` instead. The size win comes from the cargo `release-wasm` profile (opt-level "z"

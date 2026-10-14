@@ -1,21 +1,21 @@
-#![doc = include_str!("../README.md")] // [OPUS-4.8] README is the docs.rs front page
-#![forbid(unsafe_code)] // [OPUS-4.8] sq-emay: crate has zero `unsafe`
+#![doc = include_str!("../README.md")] // README is the docs.rs front page
+#![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
 mod authindex;
-// [OPUS-4.8] sq-3jtd.9: library-level ACP conformance harness — a table-driven scenario
+// sq-3jtd.9: library-level ACP conformance harness — a table-driven scenario
 // corpus over the ACP engine (materialize_acp + AuthIndex::accessible), asserting
 // decision parity against the Solid ACP spec semantics. Always compiled (no feature
 // gate): it depends only on the always-present ACP path. The corpus lives in
 // tests/conformance_acp.rs.
 pub mod conformance;
-// [OPUS-4.8] issue #992 Phase-1 (sq-snopa.1/.2/.3): the per-resource WAC DECISION layer —
+// issue #992 Phase-1 (sq-snopa.1/.2/.3): the per-resource WAC DECISION layer —
 // `PodStore::decide`/`decide_batch`/`resolve_acl`, the typed fail-closed `AclStatus`, and
 // the `accessTo`-vs-`default` `AclScope`. Always compiled (no feature gate): it adds no
 // dependency, reusing only `AuthIndex::accessible` + the loader's container-chain walk —
 // so it mirrors `wac_allow`'s always-present public-API placement (#1154).
 mod decide;
 pub mod fixture;
-// [SONNET-4.6] sq-ysv3u: the TRUSTED verified-credential channel behind ACP `acp:vc` — the
+// sq-ysv3u: the TRUSTED verified-credential channel behind ACP `acp:vc` — the
 // exact analogue of `provenance` below, carrying "which credential requirements has this
 // agent been VERIFIED to satisfy". Always compiled: the channel itself adds no dependency,
 // and the `acp:vc` fail-closed matcher semantics it feeds are unconditional. Only the
@@ -23,10 +23,10 @@ pub mod fixture;
 mod credentials;
 mod loader;
 mod materialize;
-// [OPUS-4.8] sq-3jtd.5: TRUSTED per-resource creator/owner provenance — the channel by
+// sq-3jtd.5: TRUSTED per-resource creator/owner provenance — the channel by
 // which the storage layer (PSS) supplies the `acp:CreatorAgent`/`acp:OwnerAgent` facts.
 mod provenance;
-// [OPUS-4.8] sq-h3uk: ODRL→AUTH_GRAPH bridge — opt-in (`odrl-bridge` feature), OFF by
+// sq-h3uk: ODRL→AUTH_GRAPH bridge — opt-in (`odrl-bridge` feature), OFF by
 // default, so the core sparq-solid build carries zero ODRL/sparq-policy code.
 #[cfg(feature = "odrl-bridge")]
 pub mod odrl_bridge;
@@ -34,29 +34,29 @@ pub mod odrl_bridge;
 // `sparq_policy::decide` for the accessing session.
 #[cfg(feature = "odrl-bridge")]
 pub mod odrl_enforce;
-// [OPUS-4.8] sq-pfae PoC (issue #940): trust-graph admission → AUTH_GRAPH wiring —
+// sq-pfae PoC (issue #940): trust-graph admission → AUTH_GRAPH wiring —
 // opt-in (`trust-graph` feature), OFF by default, so the core sparq-solid build carries
 // zero trust-graph/sparq-trust code and is byte-identical to WAC/ACP today (G6).
 #[cfg(feature = "trust-graph")]
 pub mod trust_wire;
-// [FABLE-5] sq-lrtc3.3: pattern-scoped (sub-named-graph) result masking — opt-in
+// sq-lrtc3.3: pattern-scoped (sub-named-graph) result masking — opt-in
 // (`pattern-scope` feature), OFF by default, zero code/deps/cost in the default build.
 // Design record: research/odrl-pattern-scoped-targets-2026-07.md.
 #[cfg(feature = "pattern-scope")]
 pub mod pattern_scope;
 mod rewrite;
-// [FABLE-5] sq-cnuqd (issue #1569): the BOUNDED, SHARDED, `&self`-readable session cache
+// sq-cnuqd (issue #1569): the BOUNDED, SHARDED, `&self`-readable session cache
 // that lets all read-side entry points take `&self` (concurrent `&PodStore` readers). No
 // feature gate + no new dependency (std `RwLock` + the existing `rustc-hash`).
 mod session_cache;
-mod update; // [OPUS-4.8] sq-xor3: write/update-path enforcement
-// [OPUS-4.8] issue #992 FR-3 (sq-snopa.5): the AUTHORITATIVE ACL write-through —
+mod update; // sq-xor3: write/update-path enforcement
+// issue #992 FR-3 (sq-snopa.5): the AUTHORITATIVE ACL write-through —
 // `PodStore::put_acl`/`delete_acl` replace (or remove) a `.acl`/`.acr` graph AND
 // re-materialize `<urn:sparq:auth>` as ONE atomic, fail-closed unit, keeping SPARQ the
 // source of truth. Always compiled (no feature gate): it adds no dependency, reusing only
 // the always-present materialize + named-graph machinery — mirroring `update_as`/`decide`.
 mod write_through;
-// [OPUS-4.8] sq-3jtd.8: library-level WAC conformance harness — the table-driven
+// sq-3jtd.8: library-level WAC conformance harness — the table-driven
 // scenario sibling of `conformance` (ACP), over the WAC engine (materialize_wac +
 // AuthIndex::accessible). Shares the decision/expectation/report vocabulary with
 // `conformance`; adds the WAC `.acl`-corpus builder (`AclBuilder`) and runner
@@ -64,11 +64,11 @@ mod write_through;
 pub mod wac_conformance;
 
 pub use authindex::{pair_principal, triple_principal, AuthIndex, Mode, Session};
-// [OPUS-4.8] sq-3jtd.9: the ACP conformance harness entry types.
+// sq-3jtd.9: the ACP conformance harness entry types.
 pub use conformance::{AcpScenario, AcrBuilder, Decision, Expect, ScenarioReport};
-// [OPUS-4.8] issue #992 Phase-1 (sq-snopa.1/.2/.3): the per-resource WAC decision types.
+// issue #992 Phase-1 (sq-snopa.1/.2/.3): the per-resource WAC decision types.
 pub use decide::{is_control_document_name, AclScope, AclStatus, EffectiveAcl, WacDecision};
-// [OPUS-4.8] sq-3jtd.8: the WAC conformance harness entry types (the decision/expectation
+// sq-3jtd.8: the WAC conformance harness entry types (the decision/expectation
 // /report vocabulary is the shared `conformance::{Decision, Expect, ScenarioReport}`).
 pub use wac_conformance::{AclBuilder, AuthBuilder, WacScenario};
 pub use fixture::{acp_fixture, wac_fixture};
@@ -77,7 +77,7 @@ pub use materialize::{
     MaterializeStats,
 };
 pub use provenance::AccessProvenance;
-// [SONNET-4.6] sq-ysv3u: the ACP `acp:vc` trusted verified-credential channel. Always
+// sq-ysv3u: the ACP `acp:vc` trusted verified-credential channel. Always
 // compiled (it adds no dependency); the `acp-vc` feature adds the sparq-vc-backed
 // trust-the-issuer verification that populates it.
 pub use credentials::VerifiedCredentials;
@@ -92,22 +92,22 @@ pub use odrl_bridge::{
 pub use odrl_bridge::{BridgeEntry, BridgeKind, BridgeLedger};
 #[cfg(feature = "odrl-bridge")]
 pub use odrl_enforce::OdrlEnforcement;
-// [OPUS-4.8] sq-pfae PoC: the trust-graph admission outcome types (feature-gated).
+// sq-pfae PoC: the trust-graph admission outcome types (feature-gated).
 // `TrustStaticOutcome` is the materialise-time (static/dynamic split, sq-xc4y) result.
 #[cfg(feature = "trust-graph")]
 pub use trust_wire::{TrustAdmissionOutcome, TrustStaticOutcome};
-// [FABLE-5] sq-lrtc3.3: the pattern-scoped masking types (feature-gated).
+// sq-lrtc3.3: the pattern-scoped masking types (feature-gated).
 #[cfg(feature = "pattern-scope")]
 pub use pattern_scope::{masked_dataset, masked_graph, GraphScope, ScopePattern, ScopedDataset};
 pub use rewrite::{rewrite_for, wrap_for_view};
-// [OPUS-4.8] sq-gq28y (issue #1546): the spec-conformant empty-default + explicit-union
+// sq-gq28y (issue #1546): the spec-conformant empty-default + explicit-union
 // read-path rewrite + the spec-minted reserved IRI, per the *Access-Controlled SPARQL Query
 // over a Solid Pod* Editor's Draft. This is DEFAULT public surface (always compiled): it is
 // the default `query_as` semantics. The `legacy-union-default-graph` feature only swaps the
 // internal `wrap_read` seam back to the union-always `wrap_for_view` — it does not remove
 // this surface. See the crate README and the access-control SKILL for the honest scope.
 pub use rewrite::{wrap_for_view_opt_in, UNION_DEFAULT_GRAPH_IRI};
-// [OPUS-4.8] issue #992 FR-3 (sq-snopa.5): the authoritative ACL write-through outcome type
+// issue #992 FR-3 (sq-snopa.5): the authoritative ACL write-through outcome type
 // (the `put_acl`/`delete_acl` methods live on `PodStore` in `write_through`).
 pub use write_through::AclWriteOutcome;
 
@@ -149,7 +149,7 @@ use std::sync::{Arc, OnceLock};
 pub const AUTH_GRAPH: &str = "urn:sparq:auth";
 
 /// The reserved named graph recording the **provenance** of bridged ODRL grants
-/// ([OPUS-4.8] sq-dpk4). Every auth triple the opt-in ODRL bridge writes into
+/// (sq-dpk4). Every auth triple the opt-in ODRL bridge writes into
 /// [`AUTH_GRAPH`] is mirrored here verbatim, so a bridged grant is structurally
 /// distinguishable from a static WAC/ACP grant: a triple is *bridged* iff it appears
 /// in this graph, *static* otherwise. This is what lets the refresh/retraction model
@@ -168,7 +168,7 @@ pub const AUTH_NS: &str = "https://sparq.dev/ns/auth#";
 /// the matcher accept-set facts that conditional grants reference).
 pub const SOLIDX_NS: &str = "https://sparq.dev/ns/solidx#";
 
-/// [OPUS-4.8] sq-gq28y (issue #1546). Wrap a read query for the zero-copy view path. By
+/// sq-gq28y (issue #1546). Wrap a read query for the zero-copy view path. By
 /// default this honours the *Access-Controlled SPARQL Query over a Solid Pod* Editor's Draft
 /// empty-default + explicit-union semantics (`rewrite::wrap_for_view_opt_in`): the standing
 /// default graph is empty, and a bare default-graph pattern sees the authorized union only
@@ -230,7 +230,7 @@ pub struct PodStore {
     pub graph: Graph,
     auth: Arc<AuthIndex>,
     epoch: u64,
-    // [OPUS-4.8] sq-j8qtt (issue #1570): the PERSISTENT structural ACL index — the
+    // sq-j8qtt (issue #1570): the PERSISTENT structural ACL index — the
     // `.acl`/`.acr` control-document set + `<urn:sparq:auth>`-materialized flag that
     // `decide` / `decide_batch` / `resolve_acl` walk to discover the governing ACL. It is
     // a pure function of the current named-graph NAMES, so it is built LAZILY on the first
@@ -249,7 +249,7 @@ pub struct PodStore {
     // more stale than `auth` itself, so it introduces no fail-open window. (sq-b7k7u's
     // incremental reindex + sq-cnuqd's shared `&self` session cache compose on this seam.)
     acl_index: OnceLock<decide::AclIndex>,
-    // [SONNET-4.6] issue #55: the set of graphs the current access-control documents
+    // issue #55: the set of graphs the current access-control documents
     // reference via `acl:agentGroup` — the WAC group-membership INPUTS of the auth view.
     // The write path consults it to decide whether a permitted update touched an auth-view
     // input and must re-materialize; unlike `.acl`/`.acr` a group document has no naming
@@ -261,22 +261,22 @@ pub struct PodStore {
     // can never be more stale than the auth view it guards, and a read-only workload never
     // pays for it.
     group_docs: OnceLock<FxHashSet<String>>,
-    // [OPUS-4.8] sq-3jtd.6: the cache key ([`SessionKey`]) spans all three session
+    // sq-3jtd.6: the cache key ([`SessionKey`]) spans all three session
     // dimensions — agent, client, AND issuer — so two sessions differing only by issuer
     // (e.g. the same WebID vouched for by a trusted vs an untrusted IdP) never collide on
     // a cached graph set.
-    // [OPUS-4.8] sq-b7k7u (issue #1571): each entry holds the session's accessible set
+    // sq-b7k7u (issue #1571): each entry holds the session's accessible set
     // BUCKETED by origin plus the assembled full memo, so a scoped ACL write invalidates
     // only the affected origin's slice (`SessionCache::invalidate_origin`) — a session
     // untouched by the written pod keeps its warm slices and re-derives at most the one
     // changed origin, instead of every session cold-starting on every ACL write.
-    // [FABLE-5] sq-cnuqd (issue #1569): the map is now BOUNDED + SHARDED behind interior
+    // sq-cnuqd (issue #1569): the map is now BOUNDED + SHARDED behind interior
     // mutability (`session_cache::SessionCache`), so every read-side entry point takes
     // `&self` and N concurrent `&PodStore` readers hit distinct lock stripes instead of
     // serialising on one exclusive borrow. Same transient-index D3 semantics: `reindex`
     // clears/invalidates it; eviction only drops re-derivable memoized sets.
     cache: session_cache::SessionCache,
-    /// [OPUS-4.8] sq-dpk4 — the bridged-ODRL-grant ledger: what was bridged from which
+    /// sq-dpk4 — the bridged-ODRL-grant ledger: what was bridged from which
     /// `(policy, request)`, plus the static-baseline auth view to rebuild from on a
     /// refresh. Only present when the `odrl-bridge` feature is enabled (the core build
     /// carries zero ODRL state).
@@ -297,8 +297,8 @@ pub struct PodStore {
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
-/// cache owns `String` copies) plus the [`Mode`]. [OPUS-4.8] sq-3jtd.6 added the issuer
-/// slot; [OPUS-4.8] sq-0q7n added the clock (`now`) slot so a time-windowed conditional
+/// cache owns `String` copies) plus the [`Mode`]. sq-3jtd.6 added the issuer
+/// slot; sq-0q7n added the clock (`now`) slot so a time-windowed conditional
 /// grant re-checked at two different instants never returns a stale cached graph set
 /// (two requests differing only by `now` — one inside a window, one after it — must not
 /// collide).
@@ -310,7 +310,7 @@ pub(crate) type SessionKey =
 /// and hashed (the engine [`DatasetView`], [`PodStore::accessible_set`]). Both are
 /// `Arc`-shared per call; neither is ever copied after construction.
 ///
-/// `Clone` is a cheap two-`Arc`-bump: [FABLE-5] sq-cnuqd, the sharded cache returns an
+/// `Clone` is a cheap two-`Arc`-bump: sq-cnuqd, the sharded cache returns an
 /// OWNED clone (it cannot hand out a borrow past its shard lock), and the caller re-shares
 /// the same underlying `Vec`/`FxHashSet` — nothing is deep-copied.
 #[derive(Clone)]
@@ -319,7 +319,7 @@ pub(crate) struct SessionSets {
     set: Arc<FxHashSet<Term>>,
 }
 
-/// [OPUS-4.8] sq-b7k7u (issue #1571) — one session's cache entry, partitioned by origin so
+/// sq-b7k7u (issue #1571) — one session's cache entry, partitioned by origin so
 /// an ACL write to one pod does not cold-start every other pod's cached view.
 ///
 /// `per_origin` holds the session's accessible graphs bucketed by origin
@@ -335,7 +335,7 @@ pub(crate) struct SessionSets {
 /// current auth view: a scoped invalidation drops exactly the changed origins' slices + the
 /// `memo` and marks those origins `dirty`; the next read re-derives only the dirty origins
 /// via [`AuthIndex::accessible_in_origin`] and re-assembles. **Sound by construction —
-/// diff-based** ([SONNET-4.6] sq-b7k7u fix): `reindex_with` diffs old vs new `AuthIndex`
+/// diff-based** (sq-b7k7u fix): `reindex_with` diffs old vs new `AuthIndex`
 /// per-origin and invalidates exactly the origins whose (allow, deny, cond) buckets changed.
 /// No confinement lemma assumed: WAC agentGroup membership, foreign-subject triples, and
 /// ACP cross-document indirection can all route a write at origin A through grants that
@@ -357,7 +357,7 @@ impl SessionEntry {
         SessionSets { sorted: Arc::new(sorted_full), set: Arc::new(set) }
     }
 
-    /// [FABLE-5] sq-cnuqd — (re-)derive this entry's memoized [`SessionSets`] against the
+    /// sq-cnuqd — (re-)derive this entry's memoized [`SessionSets`] against the
     /// pinned `auth` snapshot, returning an owned clone of the memo. This is the exact
     /// compute logic the pre-sharded `session_sets` ran inline; it now lives here so the
     /// sharded cache can invoke it under its shard write-lock via `get_or_compute`.
@@ -407,14 +407,14 @@ impl SessionEntry {
     }
 }
 
-/// [OPUS-4.8] sq-b7k7u (issue #1571) — how far a re-materialization must invalidate the
+/// sq-b7k7u (issue #1571) — how far a re-materialization must invalidate the
 /// per-session cache. `Full` (the default for any change whose blast radius is the whole
 /// store) clears every entry; `Origin` (an atomic single-`.acl`/`.acr` `put_acl`/`delete_acl`)
 /// triggers diff-based invalidation: `reindex_with` diffs old vs new `AuthIndex` per-origin
 /// and invalidates exactly the origins whose buckets changed — which may include origins
 /// beyond the ACL's own when a cross-origin dependency (agentGroup, foreign-subject grant,
 /// ACP cross-document indirection) is involved. Falls back to `Full` when the matcher maps
-/// change (they are not origin-bucketed). [SONNET-4.6] sq-b7k7u fix: the origin hint is no
+/// change (they are not origin-bucketed). sq-b7k7u fix: the origin hint is no
 /// longer carried — the actual changed origins are derived entirely from the index diff.
 #[derive(Clone, Copy)]
 enum ReindexScope {
@@ -451,9 +451,9 @@ impl PodStore {
             graph,
             auth: Arc::new(AuthIndex::default()),
             epoch: 0,
-            acl_index: OnceLock::new(), // [OPUS-4.8] sq-j8qtt: built lazily on first decide
-            group_docs: OnceLock::new(), // [SONNET-4.6] #55: built lazily on first update
-            cache: session_cache::SessionCache::new(), // [FABLE-5] sq-cnuqd: bounded + sharded
+            acl_index: OnceLock::new(), // sq-j8qtt: built lazily on first decide
+            group_docs: OnceLock::new(), // #55: built lazily on first update
+            cache: session_cache::SessionCache::new(), // sq-cnuqd: bounded + sharded
             #[cfg(feature = "odrl-bridge")]
             bridge_ledger: odrl_bridge::BridgeLedger::new(),
             view_dropped: false,
@@ -485,7 +485,7 @@ impl PodStore {
     /// session cache only at `scope` — the internal seam an atomic single-`.acl` `put_acl`
     /// uses with [`ReindexScope::Origin`] so an ACL write to one pod does not cold-start every
     /// other pod's cached view (issue #1571). The public method keeps the full-clear default.
-    /// [OPUS-4.8] sq-b7k7u.
+    /// sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
         let stats = materialize_wac(&mut self.graph)?;
         self.record_static_coverage();
@@ -495,7 +495,7 @@ impl PodStore {
         Ok(stats)
     }
 
-    /// [OPUS-4.8] sq-dpk4 — after a wholesale static (WAC/ACP) re-materialization has
+    /// sq-dpk4 — after a wholesale static (WAC/ACP) re-materialization has
     /// rebuilt `<urn:sparq:auth>` (dropping any bridged grants that were on top),
     /// capture the fresh static view as the refresh baseline and REPLAY the bridge
     /// ledger so still-valid bridged grants are re-applied (and now-invalid ones stay
@@ -530,7 +530,7 @@ impl PodStore {
     }
 
     /// (Re-)materialize the ACP auth view using TRUSTED per-resource creator/owner facts,
-    /// resolving `acp:CreatorAgent` / `acp:OwnerAgent` matchers ([OPUS-4.8] sq-3jtd.5).
+    /// resolving `acp:CreatorAgent` / `acp:OwnerAgent` matchers (sq-3jtd.5).
     ///
     /// Identical to [`PodStore::materialize_acp`], but `provenance` supplies "who
     /// created/owns `<r>`" for the resources whose ACP policies use a `CreatorAgent` /
@@ -581,7 +581,7 @@ impl PodStore {
     }
 
     /// (Re-)materialize the ACP auth view using TRUSTED creator/owner facts AND TRUSTED
-    /// verified-credential holdings, resolving `acp:vc` matchers ([SONNET-4.6] sq-ysv3u).
+    /// verified-credential holdings, resolving `acp:vc` matchers (sq-ysv3u).
     ///
     /// `acp:vc` gates a matcher on the requesting agent holding a Verifiable Credential that
     /// satisfies a stated requirement. sparq-solid never verifies a credential itself — the
@@ -644,7 +644,7 @@ impl PodStore {
 
     /// [`PodStore::materialize_acp_with`] invalidating the session cache only at `scope` — the
     /// ACP twin of [`PodStore::materialize_wac_scoped`], used by an atomic `.acr` `put_acl_acp`
-    /// (issue #1571). [OPUS-4.8] sq-b7k7u.
+    /// (issue #1571). sq-b7k7u.
     fn materialize_acp_with_scoped(
         &mut self,
         provenance: &AccessProvenance,
@@ -666,7 +666,7 @@ impl PodStore {
     /// - [`ReindexScope::Full`] clears every session's cached set (a change that could touch
     ///   any pod — a wholesale re-materialization, a bridge/trust grant, a wildcard update);
     /// - [`ReindexScope::Origin`] (an atomic `put_acl`/`delete_acl` to one `.acl`/`.acr`)
-    ///   uses **diff-based** invalidation ([SONNET-4.6] sq-b7k7u fix): the old and new
+    ///   uses **diff-based** invalidation (sq-b7k7u fix): the old and new
     ///   `AuthIndex` are compared per-origin, and exactly the origins whose (allow, deny,
     ///   cond) buckets changed are invalidated via `session_cache::SessionCache::invalidate_origin`. If
     ///   the matcher maps (`matcher_agents`/`matcher_clients`/`matcher_issuers`) differ — they
@@ -689,7 +689,7 @@ impl PodStore {
             // D3: the cache is transient; the triples are the storage.
             ReindexScope::Full => self.cache.clear(),
             ReindexScope::Origin => {
-                // [SONNET-4.6] sq-b7k7u fix: diff-based invalidation.
+                // sq-b7k7u fix: diff-based invalidation.
                 // If the matcher maps changed, they are not origin-bucketed → full fallback.
                 if !old_auth.matchers_eq(&new_auth) {
                     self.cache.clear();
@@ -706,18 +706,18 @@ impl PodStore {
                         .filter(|o| !old_auth.bucket_eq(&new_auth, o))
                         .collect();
                     for origin in changed {
-                        // [FABLE-5] sq-cnuqd: `&self`-callable now (interior mutability), but
+                        // sq-cnuqd: `&self`-callable now (interior mutability), but
                         // `reindex_with` holds `&mut self` so this is uncontended.
                         self.cache.invalidate_origin(&origin);
                     }
                 }
             }
         }
-        // [OPUS-4.8] sq-j8qtt: drop the persistent structural ACL index in lock-step with
+        // sq-j8qtt: drop the persistent structural ACL index in lock-step with
         // the auth rebuild. `take` empties the cell; the next `decide`/`resolve_acl` rebuilds
         // from the just-re-materialized graph.
         self.acl_index.take();
-        // [SONNET-4.6] issue #55: same lock-step for the referenced-group-document set — an
+        // issue #55: same lock-step for the referenced-group-document set — an
         // `.acl` write that starts (or stops) referencing a group document is reflected on
         // the next update's re-materialization decision.
         self.group_docs.take();
@@ -725,7 +725,7 @@ impl PodStore {
 
     /// The graphs the current access-control documents reference via `acl:agentGroup`,
     /// built lazily on the first update of a generation and reused across it
-    /// ([SONNET-4.6] issue #55). `reindex` empties the cell, so this can never outlive an
+    /// (issue #55). `reindex` empties the cell, so this can never outlive an
     /// ACL change. See [`loader::referenced_group_docs`] for why it is an
     /// over-approximation and why that is the safe direction.
     fn group_docs(&self) -> &FxHashSet<String> {
@@ -734,7 +734,7 @@ impl PodStore {
 
     /// The persistent structural ACL index for the current generation, built lazily on the
     /// first point decision after a (re-)materialization and reused across the whole
-    /// generation ([OPUS-4.8] sq-j8qtt). Shared by [`PodStore::decide`] / `decide_batch` /
+    /// generation (sq-j8qtt). Shared by [`PodStore::decide`] / `decide_batch` /
     /// [`PodStore::resolve_acl`] so a decision is a point lookup, not a per-call whole-store
     /// scan. `reindex` empties the cell, so this can never outlive an ACL change.
     fn acl_index(&self) -> &decide::AclIndex {
@@ -772,7 +772,7 @@ impl PodStore {
     /// Build the value of a [`WAC-Allow`](https://solidproject.org/TR/wac#wac-allow)
     /// response header for `resource` as seen by `session` — the RFC-style
     /// `user="…",public="…"` permission advertisement a Solid server returns on a
-    /// `GET`/`HEAD`. [OPUS-4.8] sq-i7k08.
+    /// `GET`/`HEAD`. sq-i7k08.
     ///
     /// **API tier-1 (proposed-stable)** — see [`PodStore::decide`].
     ///
@@ -839,7 +839,7 @@ impl PodStore {
 
     /// The space-separated WAC mode names `session` holds on `resource`'s graph, in the
     /// fixed `read write append control` order — the per-field body of [`Self::wac_allow`].
-    /// Empty string when no mode is held (fail-closed). [OPUS-4.8] sq-i7k08.
+    /// Empty string when no mode is held (fail-closed). sq-i7k08.
     fn modes_held(&self, session: &Session, resource: &NamedNode) -> String {
         const MODES: [(Mode, &str); 4] = [
             (Mode::Read, "read"),
@@ -856,7 +856,7 @@ impl PodStore {
         held.join(" ")
     }
 
-    /// [OPUS-4.8] issue #992 FR-1 (sq-snopa.1) — the per-REQUEST access-control decision:
+    /// issue #992 FR-1 (sq-snopa.1) — the per-REQUEST access-control decision:
     /// **may `principal` do `mode` on `resource`?** Returns a typed [`WacDecision`]
     /// (`allow`, `granted_modes`, `governing_acl`, `scope`, fail-closed `status`).
     ///
@@ -917,7 +917,7 @@ impl PodStore {
     /// # Ok::<(), String>(())
     /// ```
     pub fn decide(&self, session: &Session, resource: &str, mode: Mode) -> WacDecision {
-        // [OPUS-4.8] sq-j8qtt: reuse the persistent per-generation index (built once,
+        // sq-j8qtt: reuse the persistent per-generation index (built once,
         // dropped on `reindex`) instead of rebuilding it on every call.
         let d = decide::decide_one(self.acl_index(), &self.auth, session, resource, mode);
         self.apply_odrl(d, session, resource, mode)
@@ -1077,7 +1077,7 @@ impl PodStore {
         false
     }
 
-    /// [OPUS-4.8] issue #992 FR-1 (sq-snopa.1) — [`PodStore::decide`] for a BATCH of
+    /// issue #992 FR-1 (sq-snopa.1) — [`PodStore::decide`] for a BATCH of
     /// `(resource, mode)` requests as one `principal`, building the structural ACL index
     /// ONCE and reusing it for every request (the LDP server's "decide a page of
     /// resources" call). Each element's [`WacDecision`] is independent and fail-closed
@@ -1085,7 +1085,7 @@ impl PodStore {
     ///
     /// **API tier-1 (proposed-stable)** — see [`PodStore::decide`].
     pub fn decide_batch(&self, session: &Session, requests: &[(&str, Mode)]) -> Vec<WacDecision> {
-        // [OPUS-4.8] sq-j8qtt: the index now persists ACROSS calls too, not just within one
+        // sq-j8qtt: the index now persists ACROSS calls too, not just within one
         // batch — a batch and a stream of single `decide`s share the one per-generation build.
         let index = self.acl_index();
         requests
@@ -1097,7 +1097,7 @@ impl PodStore {
             .collect()
     }
 
-    /// [OPUS-5] The CREATE decision: **may `session` mint a child named `child_name`
+    /// The CREATE decision: **may `session` mint a child named `child_name`
     /// inside `container`?** — [`PodStore::decide`] for the one request shape whose
     /// authorization is not a function of the mode alone.
     ///
@@ -1184,7 +1184,7 @@ impl PodStore {
         self.apply_odrl_with(d, session, &format!("{container}{child_name}"), mode, false)
     }
 
-    /// [OPUS-4.8] issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a
+    /// issue #992 FR-7 (sq-snopa.3) — resolve the EFFECTIVE governing ACL for a
     /// resource in ONE indexed call: the up-the-container-chain `.acl`/`.acr` discovery +
     /// `acl:default` inheritance, returning the governing ACL IRI + `accessTo`-vs-`default`
     /// scope ([`EffectiveAcl`]) — instead of N HTTP round-trips up the chain.
@@ -1217,13 +1217,13 @@ impl PodStore {
     /// # Ok::<(), String>(())
     /// ```
     pub fn resolve_acl(&self, resource: &str) -> Option<EffectiveAcl> {
-        // [OPUS-4.8] sq-j8qtt: reuse the persistent per-generation index.
+        // sq-j8qtt: reuse the persistent per-generation index.
         self.acl_index().resolve_acl(resource)
     }
 
     /// The memoized [`SessionSets`] for this session+mode, re-derived at most the
-    /// diff-invalidated origins since the last read ([OPUS-4.8] sq-b7k7u, issue #1571;
-    /// [SONNET-4.6] sq-b7k7u fix).
+    /// diff-invalidated origins since the last read (sq-b7k7u, issue #1571;
+    /// sq-b7k7u fix).
     ///
     /// A warm entry (`memo` present) is an `Arc`-clone-cheap hit; otherwise the full set is
     /// re-assembled from `per_origin` — a cold entry does ONE whole-store
@@ -1233,7 +1233,7 @@ impl PodStore {
     /// `AuthIndex::accessible(s, mode)` for the current auth view — sound by construction
     /// because `reindex_with` marks dirty exactly the origins whose index buckets changed.
     ///
-    /// [FABLE-5] sq-cnuqd (issue #1569): `&self`, not `&mut self` — the cache is now behind
+    /// sq-cnuqd (issue #1569): `&self`, not `&mut self` — the cache is now behind
     /// the bounded, sharded interior-mutable `session_cache::SessionCache`, so N concurrent
     /// `&PodStore` readers share this path without an exclusive borrow. A warm hit takes only
     /// a shard READ lock (+ two `Arc` clones); only a miss/re-derive takes that one shard's
@@ -1397,7 +1397,7 @@ impl PodStore {
 
     /// Apply a SPARQL Update as `session`, **enforcing write access control** — the
     /// write-path mirror of [`PodStore::query_as`] (design doc §4.4 / §7 item 6).
-    /// [OPUS-4.8] sq-xor3.
+    /// sq-xor3.
     ///
     /// Every graph the update could mutate is checked against the session's WAC/ACP
     /// **write** permission BEFORE anything is applied: `acl:Write` ([`Mode::Write`])
@@ -1415,7 +1415,7 @@ impl PodStore {
     /// - writes to the **default graph** are always denied (pod data lives in named
     ///   graphs only);
     /// - a `DELETE`/`INSERT … WHERE` with a `GRAPH ?var` slot is resolved **precisely**
-    ///   ([OPUS-4.8] sq-biss): the operation's WHERE is evaluated to enumerate the
+    ///   (sq-biss): the operation's WHERE is evaluated to enumerate the
     ///   concrete graphs `?var` binds to (exactly the set the apply will write), and
     ///   write is required only on those — not on every store graph. Still fail-closed:
     ///   any bound graph the actor cannot write denies the whole update, and a binding
@@ -1473,14 +1473,14 @@ impl PodStore {
 
     /// [`PodStore::update_as`] for **ACP** pods: identical write-access enforcement, but
     /// a permitted control-doc/group write re-materializes the ACP view
-    /// ([`PodStore::materialize_acp`]) instead of the WAC one. [OPUS-4.8] sq-xor3.
+    /// ([`PodStore::materialize_acp`]) instead of the WAC one. sq-xor3.
     pub fn update_as_acp(&mut self, s: &Session, sparql: &str) -> Result<(), String> {
         self.update_inner(s, sparql, true, &QueryBudget::unlimited())
     }
 
     /// [`PodStore::update_as`] under a cooperative [`QueryBudget`] — the write-path twin of
     /// the budgeted read entry points, for a caller that must bound *every* evaluation it
-    /// issues (an agent tool surface, an HTTP handler). [FABLE-5] sq-yhlf0.
+    /// issues (an agent tool surface, an HTTP handler). sq-yhlf0.
     ///
     /// The budget covers the one evaluation an update performs, its
     /// `DELETE`/`INSERT … WHERE` (which also yields the `GRAPH ?var` write targets the
@@ -1534,7 +1534,7 @@ impl PodStore {
 
     /// [`PodStore::update_as_with_budget`] for **ACP** pods — the budgeted twin of
     /// [`PodStore::update_as_acp`] (a permitted control-doc/group write re-materializes the
-    /// ACP view instead of the WAC one). [FABLE-5] sq-yhlf0.
+    /// ACP view instead of the WAC one). sq-yhlf0.
     ///
     /// # Errors
     ///
@@ -1739,7 +1739,7 @@ impl PodStore {
         (!*view_dropped).then(|| bridge_ledger.refresh(graph))
     }
 
-    /// [OPUS-4.8] sq-h3uk — evaluate an ODRL `policy` against `request` and, on a
+    /// sq-h3uk — evaluate an ODRL `policy` against `request` and, on a
     /// definite Permit, materialize the equivalent WAC/ACP grant into this store's
     /// `<urn:sparq:auth>` view, then rebuild the session index so the grant takes
     /// effect on the next [`PodStore::accessible`] / [`PodStore::query_as`] call.
@@ -1780,7 +1780,7 @@ impl PodStore {
         outcome
     }
 
-    /// [OPUS-4.8] sq-w693 — evaluate an ODRL `policy`'s prohibitions against `request`
+    /// sq-w693 — evaluate an ODRL `policy`'s prohibitions against `request`
     /// and, on a matched Prohibition that carves the request out, materialize the
     /// equivalent `principal auth:deny<Mode> graph` DENY into this store's
     /// `<urn:sparq:auth>` view, then rebuild the session index so the deny takes effect
@@ -1812,7 +1812,7 @@ impl PodStore {
         outcome
     }
 
-    /// [OPUS-4.8] sq-w693 — materialize **both** sides of an ODRL `policy` for
+    /// sq-w693 — materialize **both** sides of an ODRL `policy` for
     /// `request` into this store's `<urn:sparq:auth>` view: the Permit allow grant AND
     /// the matched-Prohibition deny ([`odrl_bridge::materialize_policy`]), then rebuild
     /// the session index if either materialized.
@@ -1901,7 +1901,7 @@ impl PodStore {
         outcome
     }
 
-    /// [OPUS-4.8] sq-4r70 — the deny dual of
+    /// sq-4r70 — the deny dual of
     /// [`PodStore::materialize_odrl_permission_conditional`]: persist each ODRL
     /// **prohibition** covering the request's action and target as an unconditional ACP
     /// **deny** (`auth:effect auth:Deny` on `auth:Public`) that does not depend on who
@@ -1988,7 +1988,7 @@ impl PodStore {
         outcome
     }
 
-    /// [OPUS-4.8] sq-dpk4 — re-evaluate **every bridged ODRL grant** this store is
+    /// sq-dpk4 — re-evaluate **every bridged ODRL grant** this store is
     /// tracking against its (possibly changed) policy, and **retract** the ones that no
     /// longer hold, while preserving static WAC/ACP grants and still-valid bridged
     /// grants. Call this after an ODRL policy changes — a permission is withdrawn, a
@@ -2032,7 +2032,7 @@ impl PodStore {
         retracted
     }
 
-    /// [OPUS-4.8] sq-dpk4 — refresh the bridged grant for one slot against an **updated**
+    /// sq-dpk4 — refresh the bridged grant for one slot against an **updated**
     /// policy / request, then re-evaluate the whole ledger.
     ///
     /// This is the entry point for the real revocation cases: the ODRL `policy` changed
@@ -2109,7 +2109,7 @@ impl PodStore {
     ///
     /// Rebuilt on every re-materialization (the session cache is invalidated alongside —
     /// fully for a wholesale re-materialization, or scoped to the written pod's origin for an
-    /// atomic `put_acl`/`delete_acl`, [OPUS-4.8] sq-b7k7u); an un-materialized store exposes an
+    /// atomic `put_acl`/`delete_acl`, sq-b7k7u); an un-materialized store exposes an
     /// empty index.
     pub fn auth(&self) -> &AuthIndex {
         &self.auth
@@ -2124,7 +2124,7 @@ mod update_path_tests;
 
 #[cfg(test)]
 mod scoped_cache_tests {
-    //! [OPUS-4.8] sq-b7k7u (issue #1571) — WHITE-BOX proof that a scoped ACL write invalidates
+    //! sq-b7k7u (issue #1571) — WHITE-BOX proof that a scoped ACL write invalidates
     //! ONLY the written pod's session-cache slice, keeping every other pod's slice warm, and
     //! that the re-assembled set still equals a from-scratch rebuild (no stale grant survives).
     use super::*;
@@ -2180,7 +2180,7 @@ mod scoped_cache_tests {
     }
 
     /// White-box inspection of one cached [`SessionEntry`] through the sharded cache
-    /// ([FABLE-5] sq-cnuqd): reads the shard under its read lock and projects the fields the
+    /// (sq-cnuqd): reads the shard under its read lock and projects the fields the
     /// pre-sharded tests asserted on the plain map.
     fn with_entry<R>(store: &PodStore, s: &Session, f: impl FnOnce(&SessionEntry) -> R) -> R {
         store.cache.with_entry(&key_for(s), |e| f(e.expect("entry warmed")))

@@ -1,4 +1,4 @@
-//! [OPUS-4.8] issue #992 Phase-1 (sq-snopa.1/.2/.3) — soundness of the per-resource WAC
+//! issue #992 Phase-1 (sq-snopa.1/.2/.3) — soundness of the per-resource WAC
 //! DECISION layer (`PodStore::decide` / `decide_batch` / `resolve_acl`), exercised through
 //! the REAL materialize → AuthIndex::accessible path (no mock bypasses the verdict). This
 //! is security-critical authz logic, so the suite pins the soundness cases the issue calls
@@ -342,7 +342,7 @@ fn decide_verdict_matches_accessible_oracle() {
 // is a WRONG authorization, so these pin that a rule change is reflected by the very next
 // decision on the SAME store — in BOTH directions (a newly-granting ACL, and the
 // fail-open-critical case of a DELETED granting ACL) — through the real put_acl/delete_acl
-// → reindex seam, and that the lazy build is race-free under a shared `&self`. [OPUS-4.8]
+// → reindex seam, and that the lazy build is race-free under a shared `&self`.
 
 /// A materialized WAC store with content but NO access-control document anywhere.
 fn empty_store() -> PodStore {

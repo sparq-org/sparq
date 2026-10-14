@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-cnuqd (issue #1569) — the read side is `&self` and shares a bounded,
+//! sq-cnuqd (issue #1569) — the read side is `&self` and shares a bounded,
 //! sharded session cache, so N threads sharing ONE `&PodStore` can query concurrently.
 //!
 //! These tests exercise the REAL path (`Arc<PodStore>` shared across `std::thread`s calling

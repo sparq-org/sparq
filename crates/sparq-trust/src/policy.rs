@@ -36,7 +36,7 @@
 //! compile-time impossibility; [`try_parse_ungated`] exists for tests and returns an
 //! explicit [`PolicyError::NotControlGated`] so the fail-closed default is visible.
 //!
-//! [OPUS-4.8] sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC.
+//! sq-pfae PoC (issue #940). 🤖 SPARQ agent — trust-graph authorisation PoC.
 
 use crate::vocab;
 use oxrdf::{NamedNode, Term, Triple};

@@ -1,4 +1,4 @@
-//! [FABLE-5] sq-snopa.6 (issue #992 FR-4): e2e integration tests for the OPT-IN Solid WAC/ACP HTTP
+//! sq-snopa.6 (issue #992 FR-4): e2e integration tests for the OPT-IN Solid WAC/ACP HTTP
 //! authorization surface (`POST /authz/decide`, `POST /authz/wac-allow`, `POST /authz/query`).
 //!
 //! These tests run ONLY with the `solid-authz` cargo feature (the whole file is gated). They spin
@@ -299,7 +299,7 @@ async fn query_is_access_controlled_per_session() {
 /// and this test goes red — confirming it exercises the real header, not a vacuous assertion.
 #[tokio::test]
 async fn decide_emits_link_header_when_governing_acl_known() {
-    // [SONNET-4.6] sq-snopa.7: assert the RFC-8288 Link header is present and correct.
+    // sq-snopa.7: assert the RFC-8288 Link header is present and correct.
     let base = spawn(true).await;
     let resp = client()
         .post(format!("{base}/authz/decide"))
@@ -329,7 +329,7 @@ async fn decide_emits_link_header_when_governing_acl_known() {
 /// Fail-closed: if there is no ACL document to advertise, nothing is emitted.
 #[tokio::test]
 async fn decide_omits_link_header_when_no_governing_acl() {
-    // [SONNET-4.6] sq-snopa.7: resource with no governing ACL → no Link header.
+    // sq-snopa.7: resource with no governing ACL → no Link header.
     let base = spawn(true).await;
     let resp = client()
         .post(format!("{base}/authz/decide"))
@@ -351,7 +351,7 @@ async fn decide_omits_link_header_when_no_governing_acl() {
 /// wac-allow emits `Link: <acl-iri>; rel="acl"` when a governing ACL is known.
 #[tokio::test]
 async fn wac_allow_emits_link_header_when_governing_acl_known() {
-    // [SONNET-4.6] sq-snopa.7: wac-allow must also carry the Link header.
+    // sq-snopa.7: wac-allow must also carry the Link header.
     let base = spawn(true).await;
     let resp = client()
         .post(format!("{base}/authz/wac-allow"))
@@ -381,7 +381,7 @@ async fn wac_allow_emits_link_header_when_governing_acl_known() {
 /// wac-allow does NOT emit a Link header when no governing ACL exists.
 #[tokio::test]
 async fn wac_allow_omits_link_header_when_no_governing_acl() {
-    // [SONNET-4.6] sq-snopa.7: resource outside the dataset → no governing ACL → no Link header.
+    // sq-snopa.7: resource outside the dataset → no governing ACL → no Link header.
     let base = spawn(true).await;
     let resp = client()
         .post(format!("{base}/authz/wac-allow"))
@@ -443,7 +443,7 @@ async fn decide_is_read_auth_gated() {
 }
 
 // ---------------------------------------------------------------------------
-// [SONNET-4.6] sq-snopa.8 — the STATEFUL lane (`"source":"server"`).
+// sq-snopa.8 — the STATEFUL lane (`"source":"server"`).
 //
 // Everything above authorises over a dataset supplied in the request BODY. These tests boot a
 // server whose OWN loaded store IS the pod and assert that `"source":"server"` decides over it:

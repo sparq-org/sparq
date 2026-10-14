@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-cxk5 — integration tests for the Bearer **read**-token gate on the
+//! sq-cxk5 — integration tests for the Bearer **read**-token gate on the
 //! subscription READ surfaces: the `/subscriptions` WebSocket AND the `/subscriptions/sse`
 //! Server-Sent-Events stream.
 //!
@@ -16,7 +16,7 @@
 //! Reuses the WS harness shape from `subscriptions.rs` (tokio-tungstenite) and the SSE shape
 //! from `subscriptions_sse.rs` (reqwest reads the `text/event-stream` body).
 //!
-//! [OPUS-4.8] (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
+//! (sq-1b390) Gate the whole suite on the `server` feature. It spins the real axum
 //! server and uses the `server`-gated `sparq_server::router` / `AppState` API, so under
 //! `--no-default-features --all-targets` (the pure-serialiser-library build) this file must
 //! compile OUT — otherwise `clippy --no-default-features --all-targets` breaks on the

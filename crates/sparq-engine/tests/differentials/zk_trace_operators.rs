@@ -4,7 +4,7 @@
 //! asserts the EXACT captured input set / operator boundary structure. These
 //! are the ground-truth oracles for the per-property proof-input identification.
 //!
-//! [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+//! written while Fable 5 unavailable — re-review when Fable returns.
 
 #![cfg(feature = "zk")]
 

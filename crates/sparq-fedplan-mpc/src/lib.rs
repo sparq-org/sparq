@@ -1,5 +1,5 @@
 // ─── Crate-level documentation ──────────────────────────────────────────────────────
-// [OPUS-4.8] sq-2q1x: the crate doc is split per feature state (mirroring sparq-fedplan's
+// sq-2q1x: the crate doc is split per feature state (mirroring sparq-fedplan's
 // sq-gxx7 fix) so `cargo doc` is clean under `-D rustdoc::broken_intra_doc_links` in BOTH
 // states: the ON narrative intra-doc-links the gated public items (which exist only when
 // the feature is on); the default (feature OFF) build serves a concise, link-free doc.
@@ -128,7 +128,7 @@ it; a build that does not enable `fedplan-mpc` compiles an empty crate and pulls
 [OPUS-5] sq-1fo4 — Phase 5, canonicalisation half only."#
 )]
 // Default (feature OFF) build: a concise, link-free crate doc. None of the gated items above
-// exist in this build, so the doc is plain text only (no intra-doc links). [OPUS-4.8] sq-2q1x.
+// exist in this build, so the doc is plain text only (no intra-doc links). sq-2q1x.
 #![cfg_attr(
     not(feature = "fedplan-mpc"),
     doc = r#"sparq-fedplan-mpc: the opt-in glue between cost-based federated source selection
@@ -151,8 +151,8 @@ privacy-bearing phases are deferred and audit-gated (sq-9hrn / sq-qhy4).
 [OPUS-5] sq-1fo4 — Phase 5, canonicalisation half only."#
 )]
 #![forbid(unsafe_code)]
-// [OPUS-4.8] sq-2q1x: crate has zero `unsafe`.
-// [OPUS-4.8] sq-2q1x: lock the crate-doc split in — `broken_intra_doc_links` is a rustdoc-only
+// sq-2q1x: crate has zero `unsafe`.
+// sq-2q1x: lock the crate-doc split in — `broken_intra_doc_links` is a rustdoc-only
 // lint (fires under `cargo doc`, never `cargo build`/`clippy`/`test`), so denying it keeps the
 // existing build/clippy/test gates untouched while making a future broken link a hard error.
 #![deny(rustdoc::broken_intra_doc_links)]
@@ -160,26 +160,26 @@ privacy-bearing phases are deferred and audit-gated (sq-9hrn / sq-qhy4).
 #![cfg_attr(not(feature = "fedplan-mpc"), allow(dead_code, unused_imports))]
 
 // The whole seam surface is feature-gated; a feature-off build compiles an empty crate.
-// [OPUS-4.8] sq-pwr.3: Phase 6 result-aware source-combination prune lives in its own module
+// sq-pwr.3: Phase 6 result-aware source-combination prune lives in its own module
 // (mirroring the Phase-2 `selection` / Phase-3 `routing` / Phase-4 `envelope` splits).
 #[cfg(feature = "fedplan-mpc")]
 pub mod combination;
-// [OPUS-5] sq-1fo4: Phase 5 untrusted-plan binding. CANONICALISATION HALF ONLY — the commitment
+// sq-1fo4: Phase 5 untrusted-plan binding. CANONICALISATION HALF ONLY — the commitment
 // + fail-closed re-validation. The soundness half (`bind_plan_to_proof`) stays deferred: there is
 // no collaborative proof to bind to, and sq-qhy4 / sq-9hrn are pending.
 #[cfg(feature = "fedplan-mpc")]
 pub mod binding;
-// [OPUS-4.8] sq-pwr.2: Phase 4 leakage-envelope assembly + dual ratification lives in its own
+// sq-pwr.2: Phase 4 leakage-envelope assembly + dual ratification lives in its own
 // module (mirroring the Phase-2 `selection` / Phase-3 `routing` splits).
 #[cfg(feature = "fedplan-mpc")]
 pub mod envelope;
 #[cfg(feature = "fedplan-mpc")]
 mod privacy;
-// [OPUS-4.8] sq-i1wh2: Phase 3 disclosed/hidden routing pass lives in its own module (mirroring
+// sq-i1wh2: Phase 3 disclosed/hidden routing pass lives in its own module (mirroring
 // the Phase-2 `selection` split).
 #[cfg(feature = "fedplan-mpc")]
 pub mod routing;
-// [OPUS-4.8] sq-fix4: Phase 2 source-selection adapter lives in its own module (mirroring the
+// sq-fix4: Phase 2 source-selection adapter lives in its own module (mirroring the
 // upstream `sparq-fedplan::selection` split).
 #[cfg(feature = "fedplan-mpc")]
 mod seam;
@@ -188,14 +188,14 @@ pub mod selection;
 
 #[cfg(feature = "fedplan-mpc")]
 pub use privacy::{Disclosability, SourcePrivacyDescriptor, SourcePrivacyDescriptorBuilder};
-// [OPUS-4.8] sq-pwr.3 / sq-xkrt: Phase 6 — the result-aware source-combination prune + its
+// sq-pwr.3 / sq-xkrt: Phase 6 — the result-aware source-combination prune + its
 // result types (including the Rule-C2 `DeadPairing`).
 #[cfg(feature = "fedplan-mpc")]
 pub use combination::{
     prune_source_combinations, BgpComponent, CombinationPruneReason, DeadPairing,
     PrunedCombination, PrunedCombinations,
 };
-// [OPUS-5] sq-1fo4: Phase 5 — the plan commitment + fail-closed re-validation, and the DEFERRED
+// sq-1fo4: Phase 5 — the plan commitment + fail-closed re-validation, and the DEFERRED
 // plan→proof binding.
 #[cfg(feature = "fedplan-mpc")]
 pub use binding::{
@@ -203,18 +203,18 @@ pub use binding::{
     PlanCommitment, PlanDivergence, PlanRevalidation, PARTICIPATION_DOMAIN_TAG, PLAN_DOMAIN_TAG,
     ROUTING_DOMAIN_TAG, SELECTION_DOMAIN_TAG,
 };
-// [OPUS-4.8] sq-pwr.2: Phase 4 — the implemented leakage-envelope assembly + dual-ratification gate.
+// sq-pwr.2: Phase 4 — the implemented leakage-envelope assembly + dual-ratification gate.
 #[cfg(feature = "fedplan-mpc")]
 pub use envelope::{assemble_leakage_envelope, ratify_envelope};
-// [OPUS-4.8] sq-i1wh2: Phase 3 — the implemented disclosed/hidden routing pass + its input types.
+// sq-i1wh2: Phase 3 — the implemented disclosed/hidden routing pass + its input types.
 #[cfg(feature = "fedplan-mpc")]
 pub use routing::{route_operators, Operand, QueryOperator, RoutingPolicy, ANONYMOUS_GLOBAL_IRI};
-// [OPUS-4.8] sq-fix4 / sq-pwr.2: the shared seam error/phase types + the Phase-4 envelope/outcome types.
+// sq-fix4 / sq-pwr.2: the shared seam error/phase types + the Phase-4 envelope/outcome types.
 #[cfg(feature = "fedplan-mpc")]
 pub use seam::{
     LeakageEnvelope, OperatorDisclosure, PrivateRouting, RatificationOutcome, SeamError, SeamPhase,
 };
-// [OPUS-4.8] sq-fix4: Phase 2 — the implemented privacy/authorisation-aware source-selection
+// sq-fix4: Phase 2 — the implemented privacy/authorisation-aware source-selection
 // adapter and its result types.
 #[cfg(feature = "fedplan-mpc")]
 pub use selection::{

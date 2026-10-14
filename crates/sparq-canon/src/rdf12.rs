@@ -49,7 +49,7 @@
 //! `subject_nesting_depth`, whose matches are **exhaustive on purpose** (no
 //! `_` arm): a new subject variant upstream makes this module fail to COMPILE,
 //! at exactly the sites that must then be extended, instead of failing
-//! silently. [OPUS-5] sq-tx21.
+//! silently. sq-tx21.
 //!
 //! ## Boundary
 //!
@@ -104,11 +104,11 @@
 //! the rule-by-rule comparison table, and the two notes it surfaced to carry
 //! forward to the REC re-check, are recorded in the test file's module docs.
 //!
-//! [OPUS-4.8] sq-hslb — full non-standard RDF-1.2 triple-term canon profile;
+//! sq-hslb — full non-standard RDF-1.2 triple-term canon profile;
 //! sq-5i1d — `*_with::<D: Digest>` hash-profile parity (SHA-384).
 //! Fable unavailable; flag for re-review when Fable returns.
-//! [FABLE-5] sq-iaxd — constrained ground-triple-term (no-nested-bnode) variant.
-//! [FABLE-5] sq-g6b6 — canonical-token tracking suite (serializer version pin +
+//! sq-iaxd — constrained ground-triple-term (no-nested-bnode) variant.
+//! sq-g6b6 — canonical-token tracking suite (serializer version pin +
 //! byte-exact token expectations; re-verify once W3C rdf12-n-quads is final).
 
 use crate::CanonError;
@@ -126,7 +126,7 @@ const DEFAULT_HNDQ_CALL_LIMIT: usize = 4000;
 const DEFAULT_PERMUTATION_LIMIT: usize = 1 << 24;
 
 // ---------------------------------------------------------------------------
-// Subject-position tripwires ([OPUS-5] sq-tx21). Every read of a triple's
+// Subject-position tripwires (sq-tx21). Every read of a triple's
 // subject in this module goes through one of these two functions, and both
 // match EXHAUSTIVELY over `NamedOrBlankNode` — deliberately WITHOUT a `_` arm,
 // even though a catch-all would be shorter. That is the point: the descent's
@@ -219,7 +219,7 @@ pub fn issue_dataset_rdf12_with<D: Digest>(
 ) -> Result<std::collections::HashMap<String, String>, CanonError> {
     // Crate-wide nesting-depth bound, checked iteratively BEFORE any recursive
     // descent (this is the funnel every full-profile entry point drains
-    // through). [FABLE-5] sq-x3oj2.
+    // through). sq-x3oj2.
     ensure_triple_term_depth(dataset)?;
     let state = CanonState::compute::<D>(dataset)?;
     Ok(state.canonical_issuer.issued.into_iter().collect())
@@ -244,7 +244,7 @@ pub fn canonicalize_triples_rdf12_with<D: Digest>(
 ) -> Result<crate::CanonicalGraph, CanonError> {
     // Depth-bound BEFORE the per-triple `clone` below: oxrdf's `Clone` (and
     // `Drop`) recurse through nested triple terms, so an over-deep term must
-    // fail closed before it is ever cloned. [FABLE-5] sq-x3oj2.
+    // fail closed before it is ever cloned. sq-x3oj2.
     ensure_triple_term_depth_triples(triples)?;
     let dataset: Vec<Quad> = triples
         .iter()
@@ -306,7 +306,7 @@ pub fn canonicalize_graph_content_rdf12_with<D: Digest>(
 }
 
 // ---------------------------------------------------------------------------
-// Constrained ground-triple-term variant ([FABLE-5] sq-iaxd): thin wrappers
+// Constrained ground-triple-term variant (sq-iaxd): thin wrappers
 // that fail closed on any blank node nested inside a triple term, then
 // delegate. With every triple term ground, the nested-bnode HNDQ-descent
 // extension above is unreachable, so these entry points exercise exactly the
@@ -387,7 +387,7 @@ pub fn canonicalize_triples_rdf12_ground_terms_with<D: Digest>(
 /// but requires every triple term stored in the graph to be **ground** (no
 /// blank node at any nesting depth) and fails closed with
 /// [`CanonError::NestedBlankNode`] otherwise. The [`sparq_core::Graph`]-level
-/// parity sibling of [`canonicalize_triples_rdf12_ground_terms`] ([FABLE-5]
+/// parity sibling of [`canonicalize_triples_rdf12_ground_terms`] (
 /// sq-l3pk7); equivalent to composing [`crate::graph_triples`] with that
 /// function. See [`canonicalize_rdf12_ground_terms`] for the guard semantics.
 pub fn canonicalize_graph_content_rdf12_ground_terms(
@@ -432,7 +432,7 @@ fn term_has_nested_bnode(term: &Term) -> bool {
 /// triple's subject is `NamedOrBlankNode`, so only the object chain descends —
 /// walked with a **loop**, not recursion, so the walk itself is stack-safe on
 /// any depth (the entry points additionally bound depth up front; see
-/// [`ensure_triple_term_depth`]). [FABLE-5] sq-x3oj2.
+/// [`ensure_triple_term_depth`]). sq-x3oj2.
 fn triple_contains_bnode(t: &Triple) -> bool {
     let mut cur = t;
     loop {
@@ -448,7 +448,7 @@ fn triple_contains_bnode(t: &Triple) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Crate-wide triple-term nesting-depth bound ([FABLE-5] sq-x3oj2): the profile
+// Crate-wide triple-term nesting-depth bound (sq-x3oj2): the profile
 // walks triple terms with recursive descent (HNDQ gossip, bnode collection,
 // relabelling, `Display` serialization — and oxrdf's own `Drop`/`Clone`
 // recurse), so unbounded nesting is a stack-overflow vector. Every public
@@ -466,7 +466,7 @@ fn triple_term_depth(term: &Term) -> usize {
     while let Term::Triple(t) = cur {
         // The subject term of `t` contributes nothing to the nesting depth —
         // `subject_nesting_depth` is what pins that (and what breaks the build
-        // if it ever stops being true; [OPUS-5] sq-tx21), so accumulating down
+        // if it ever stops being true; sq-tx21), so accumulating down
         // the object chain alone measures the whole term.
         depth += 1 + subject_nesting_depth(&t.subject);
         cur = &t.object;
@@ -1249,7 +1249,7 @@ impl Permutations {
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-qcnn.14 — direct unit tests for PRIVATE helper functions in
+// sq-qcnn.14 — direct unit tests for PRIVATE helper functions in
 // rdf12.rs. These kill mutation survivors that the external functional tests
 // cannot see (the external tests verify final canonical OUTPUT; internal
 // mutations that produce the same output via different intermediate steps
@@ -1849,7 +1849,7 @@ mod private_tests {
         );
     }
 
-    // ---- ground-triple-term guard helpers ([FABLE-5] sq-iaxd) ----
+    // ---- ground-triple-term guard helpers (sq-iaxd) ----
 
     /// A TOP-LEVEL blank-node object is NOT "nested" — the guard must accept it
     /// (it is an ordinary RDFC-1.0 bnode). Kills a `_ => false` → `_ => true`
@@ -1954,7 +1954,7 @@ mod private_tests {
         ));
     }
 
-    // ---- [FABLE-5] sq-x3oj2: crate-wide triple-term nesting-depth bound ----
+    // ---- sq-x3oj2: crate-wide triple-term nesting-depth bound ----
 
     /// Builds a ground triple-term chain of exactly `depth` nesting levels
     /// (iteratively — the test helper must not itself recurse).

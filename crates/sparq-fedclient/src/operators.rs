@@ -41,7 +41,7 @@
 //! with the same materialised hash join (semantically identical result, just not the
 //! pushed-down execution discipline), which is sound for the equivalence property.
 //
-// [OPUS-4.8] sq-j27p (epic sq-dnko): Phase-3 materialised single-source interpreter +
+// sq-j27p (epic sq-dnko): Phase-3 materialised single-source interpreter +
 // SRJ parser + result-equivalence invariant. Flagged for Fable re-review when available.
 
 use crate::planner::{lower_leaf, lower_leaf_fragment, pattern_vars, SourceResolver};
@@ -49,7 +49,7 @@ use crate::source::{FedError, FederatedSource, FragBinding, FragPattern, FragTer
 use oxrdf::{BlankNode, Literal, NamedNode, Term, Variable};
 use sparq_fedplan::{JoinNode, JoinTree, PatternSources, TriplePattern};
 use std::collections::HashMap;
-// [OPUS-4.8] sq-vtba (Phase 5): the streaming-operator surface reuses the planner's proven
+// sq-vtba (Phase 5): the streaming-operator surface reuses the planner's proven
 // non-blocking `StreamJoin` + its `Tuple` model, the `SolutionStream` boundary, and `std`
 // threads/channels (NO async runtime — design §7).
 use crate::stream::{Solution, SolutionSink, SolutionStream};
@@ -63,7 +63,7 @@ use std::thread::{self, JoinHandle};
 
 /// A materialised solution table: named variables + rows, each cell `Some(term)` bound or
 /// `None` unbound — the same shape as `sparq-engine`'s `QueryResult`. The interpreter
-/// produces and joins these. [OPUS-4.8] sq-j27p.
+/// produces and joins these. sq-j27p.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Relation {
     /// Variable names (without the leading `?`), in column order.
@@ -99,7 +99,7 @@ impl Relation {
 
 // ─── Interpreter errors ──────────────────────────────────────────────────────────────
 
-/// A failure walking / materialising a plan. [OPUS-4.8] sq-j27p.
+/// A failure walking / materialising a plan. sq-j27p.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InterpError {
     /// A plan index could not be resolved (see [`crate::planner::ResolveError`]).
@@ -175,7 +175,7 @@ impl From<FedError> for InterpError {
 /// The join algorithm chosen by the planner ([`JoinAlgo`](sparq_fedplan::JoinAlgo)) is
 /// honoured *semantically* but not *physically* in this phase: bind and hash both execute
 /// as the same materialised natural join (identical result multiset). The non-blocking
-/// `StreamJoin` feeder + the pushed-down bind-join operator are Phase 5. [OPUS-4.8] sq-j27p.
+/// `StreamJoin` feeder + the pushed-down bind-join operator are Phase 5. sq-j27p.
 pub fn materialize_single_source(
     resolver: &SourceResolver<'_>,
     selection: &[PatternSources],
@@ -214,7 +214,7 @@ pub fn materialize_single_source(
 ///
 /// A leaf whose selection retained **no** source is an empty relation over the pattern's
 /// variables (the source-selection layer is the single source of truth; the interpreter
-/// does not silently fall back to "every adapter"). [OPUS-4.8] sq-7yf0.
+/// does not silently fall back to "every adapter"). sq-7yf0.
 pub fn materialize_multi_source(
     resolver: &SourceResolver<'_>,
     selection: &[PatternSources],
@@ -231,7 +231,7 @@ pub fn materialize_multi_source(
 
 /// Materialise one plan node into a [`Relation`]: each leaf is answered by `leaf`, and a join
 /// materialises its left subtree and its right leaf and natural-joins them. The single- and
-/// multi-source interpreters differ only in `leaf`. [OPUS-4.8] sq-j27p / sq-7yf0.
+/// multi-source interpreters differ only in `leaf`. sq-j27p / sq-7yf0.
 fn materialize_tree(
     node: &JoinNode,
     leaf: &mut dyn FnMut(usize) -> Result<Relation, InterpError>,
@@ -251,7 +251,7 @@ fn materialize_tree(
 /// and concatenate the rows re-keyed onto the pattern's variable header (a source's SRJ header
 /// may differ in order). SPARQL UNION multiset semantics, no de-duplication; a pattern with no
 /// retained source is the empty relation over its variables. `fetch` receives the source index
-/// so the adaptive executor can time each arm. [OPUS-4.8] sq-7yf0, [FABLE-5] sq-xw8zz.
+/// so the adaptive executor can time each arm. sq-7yf0, sq-xw8zz.
 pub(crate) fn union_leaf<F>(
     resolver: &SourceResolver<'_>,
     selection: &[PatternSources],
@@ -280,7 +280,7 @@ where
 /// [`select_sources`](sparq_fedplan::select_sources) records). A pattern absent from the
 /// selection — or one whose candidate set is empty — contributes no sources, hence an empty
 /// leaf relation. `pub(crate)`: the adaptive executor's union-arm leaf fetch
-/// ([FABLE-5] sq-xw8zz) shares this so both fan-outs resolve arms identically. [OPUS-4.8] sq-7yf0.
+/// (sq-xw8zz) shares this so both fan-outs resolve arms identically. sq-7yf0.
 pub(crate) fn leaf_source_indices(selection: &[PatternSources], pattern: usize) -> Vec<usize> {
     selection
         .iter()
@@ -291,7 +291,7 @@ pub(crate) fn leaf_source_indices(selection: &[PatternSources], pattern: usize) 
 
 /// All distinct variables of the resolver's BGP, in first-seen order (subject, predicate,
 /// object within a pattern; patterns in BGP order) — the `SELECT *` scope. Shared with the
-/// adaptive executor so every interpreter projects the same header. [OPUS-4.8] sq-j27p.
+/// adaptive executor so every interpreter projects the same header. sq-j27p.
 pub(crate) fn bgp_vars(resolver: &SourceResolver<'_>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for tp in &resolver.bgp().patterns {
@@ -305,7 +305,7 @@ pub(crate) fn bgp_vars(resolver: &SourceResolver<'_>) -> Vec<String> {
 }
 
 /// Reject (never silently drop) a leaf the planner retained more than one source for: the
-/// single-source entry points answer every leaf from one explicit source. [OPUS-4.8] sq-j27p.
+/// single-source entry points answer every leaf from one explicit source. sq-j27p.
 fn single_source_guard(selection: &[PatternSources], pattern: usize) -> Result<(), InterpError> {
     match selection.iter().find(|ps| ps.pattern == pattern) {
         Some(ps) if ps.candidates.len() > 1 => Err(InterpError::MultiSource {
@@ -318,7 +318,7 @@ fn single_source_guard(selection: &[PatternSources], pattern: usize) -> Result<(
 
 /// Answer one leaf from the single `source` after the single-source guard. Shared by the
 /// materialising and adaptive single-source interpreters, so both dispatch on the source's
-/// interface through [`fetch_leaf_relation`]. [OPUS-4.8] sq-j27p.
+/// interface through [`fetch_leaf_relation`]. sq-j27p.
 pub(crate) fn single_source_leaf(
     resolver: &SourceResolver<'_>,
     selection: &[PatternSources],
@@ -349,8 +349,8 @@ pub(crate) fn single_source_leaf(
 ///
 /// This is the wiring the bead asks for: a `JoinTree` leaf that resolves to a TPF/brTPF source is
 /// now answered, not rejected with `Unsupported`. The single-source-per-leaf contract is enforced
-/// by the caller. `pub(crate)`: the adaptive executor's union-arm leaf fetch ([FABLE-5] sq-xw8zz)
-/// times this exact fetch per arm, so both interpreters answer a leaf identically. [OPUS-4.8] sq-yzca.
+/// by the caller. `pub(crate)`: the adaptive executor's union-arm leaf fetch (sq-xw8zz)
+/// times this exact fetch per arm, so both interpreters answer a leaf identically. sq-yzca.
 pub(crate) fn fetch_leaf_relation(
     source: &dyn FederatedSource,
     tp: &TriplePattern,
@@ -381,7 +381,7 @@ pub(crate) fn fetch_leaf_relation(
 /// [`FragBinding`] row contributes one [`Relation`] row, with each [`FragTerm`] converted back to
 /// the engine's [`oxrdf::Term`] model so the leaf joins against the SAME term type a SPARQL-
 /// endpoint leaf produces (so a federated query mixing endpoint + fragment sources joins
-/// correctly). A binding the fragment did not bind for a column is unbound (`None`). [OPUS-4.8].
+/// correctly). A binding the fragment did not bind for a column is unbound (`None`)..
 fn frag_solutions_to_relation(pattern: &FragPattern, rows: Vec<FragBinding>) -> Relation {
     let vars = pattern.vars();
     let rows = rows
@@ -409,7 +409,7 @@ fn frag_solutions_to_relation(pattern: &FragPattern, rows: Vec<FragBinding>) -> 
 /// * a literal is parsed from its canonical N-Triples lexical form (`"v"`, `"v"@lang`,
 ///   `"v"^^<dt>` — the `FragTerm::Literal` model stores exactly that) via `Term::from_str`, the
 ///   inverse of the `oxterm_to_fragterm` writer the HTTP transport uses, so the round-trip is
-///   lossless; an unparseable lexical degrades to a simple literal of the raw text. [OPUS-4.8].
+///   lossless; an unparseable lexical degrades to a simple literal of the raw text..
 fn fragterm_to_oxterm(term: &FragTerm) -> Term {
     match term {
         FragTerm::Iri(s) => NamedNode::new(s)
@@ -432,7 +432,7 @@ fn fragterm_to_oxterm(term: &FragTerm) -> Term {
 ///
 /// `pub(crate)` so the Phase-7 adaptive executor ([`crate::adaptive`]) reuses the SAME
 /// proven join operator when it folds the re-ordered suffix — the result-equivalence
-/// invariant rests on adaptive + static using one identical join. [OPUS-4.8] sq-j27p / sq-ij5x.
+/// invariant rests on adaptive + static using one identical join. sq-j27p / sq-ij5x.
 pub(crate) fn natural_join(left: &Relation, right: &Relation) -> Relation {
     // Shared variables (join key) and the right-only variables (appended columns).
     let shared: Vec<(usize, usize)> = left
@@ -490,7 +490,7 @@ pub(crate) fn natural_join(left: &Relation, right: &Relation) -> Relation {
 
 /// The join key for a row at the shared columns: the bound terms in column order, or `None`
 /// if any shared cell is unbound (an unbound join variable cannot equi-join). `from_left`
-/// selects the left or right index of each `(li, ri)` shared pair. [OPUS-4.8] sq-j27p.
+/// selects the left or right index of each `(li, ri)` shared pair. sq-j27p.
 fn join_key(row: &[Option<Term>], shared: &[(usize, usize)], from_left: bool) -> Option<Vec<Term>> {
     let mut key = Vec::with_capacity(shared.len());
     for &(li, ri) in shared {
@@ -532,7 +532,7 @@ pub fn parse_srj(text: &str) -> Result<Relation, String> {
 /// form, which is the canonical N-Triples serialisation (`<iri>`, `_:b`, `"v"^^<dt>`,
 /// `"v"@lang`, `<< s p o >>`). That serialisation is injective — two terms are equal iff
 /// their Display strings are equal — so comparing on it preserves the term-equality the
-/// invariant needs while giving a total order to sort by. [OPUS-4.8] sq-j27p.
+/// invariant needs while giving a total order to sort by. sq-j27p.
 fn solution_map(vars: &[String], row: &[Option<Term>]) -> Vec<(String, String)> {
     let mut m: Vec<(String, String)> = vars
         .iter()
@@ -545,7 +545,7 @@ fn solution_map(vars: &[String], row: &[Option<Term>]) -> Vec<(String, String)> 
 
 /// Multiset (bag) of solution maps for a relation — the comparison normal form. A relation
 /// and the engine's `QueryResult` are equal iff these bags are equal (same maps with the
-/// same multiplicities), independent of row order and column order. [OPUS-4.8] sq-j27p.
+/// same multiplicities), independent of row order and column order. sq-j27p.
 fn solution_bag(vars: &[String], rows: &[Vec<Option<Term>>]) -> Vec<Vec<(String, String)>> {
     let mut bag: Vec<Vec<(String, String)>> =
         rows.iter().map(|row| solution_map(vars, row)).collect();
@@ -561,7 +561,7 @@ fn solution_bag(vars: &[String], rows: &[Vec<Option<Term>>]) -> Vec<Vec<(String,
 /// the same graph. It compares **solutions**, not table layout: SPARQL solution sequences
 /// are unordered (absent ORDER BY) and a binding map is column-order-independent, so two
 /// results that differ only in row/column order are equal — but a different multiplicity or
-/// a different bound term is NOT. [OPUS-4.8] sq-j27p.
+/// a different bound term is NOT. sq-j27p.
 pub fn solutions_equal(
     a_vars: &[String],
     a_rows: &[Vec<Option<Term>>],
@@ -585,7 +585,7 @@ pub fn solutions_equal(
 // concurrency is `std` only — a bounded thread-pool + bounded `sync_channel`s — and stays
 // inside this opt-in crate, so the lean core is untouched.
 //
-// [OPUS-4.8] sq-vtba — flagged for Fable re-review when available.
+// sq-vtba — flagged for Fable re-review when available.
 // ═════════════════════════════════════════════════════════════════════════════════════
 
 // ─── The `oxrdf::Term` ⟷ `fedplan::Tuple` bridge (lossless, injective) ────────────────
@@ -601,7 +601,7 @@ pub fn solutions_equal(
 /// [`tuple_to_solution`] parses it back with `Term::from_str` losslessly. An **unbound** cell
 /// is omitted (a `fedplan` tuple has no notion of an explicit unbound binding; an absent
 /// variable is exactly "unbound"), matching the Phase-3 join's rule that an unbound shared
-/// cell never equi-joins. [OPUS-4.8] sq-vtba.
+/// cell never equi-joins. sq-vtba.
 fn solution_to_tuple(sol: &Solution) -> Tuple {
     let pairs = sol
         .vars
@@ -616,7 +616,7 @@ fn solution_to_tuple(sol: &Solution) -> Tuple {
 /// N-Triples lexical via `Term::from_str` (the inverse of [`solution_to_tuple`]); a variable
 /// the tuple does not bind is unbound (`None`). A lexical that fails to re-parse (it cannot,
 /// for a value produced by `Term::Display`) surfaces as an error so a malformed value never
-/// silently becomes a wrong term. [OPUS-4.8] sq-vtba.
+/// silently becomes a wrong term. sq-vtba.
 fn tuple_to_solution(t: &Tuple, out_vars: &[String]) -> Result<Solution, FedError> {
     let mut cells = Vec::with_capacity(out_vars.len());
     for v in out_vars {
@@ -654,7 +654,7 @@ fn tuple_to_solution(t: &Tuple, out_vars: &[String]) -> Result<Solution, FedErro
 /// drains) and lets the running workers finish detached; each terminates when its fetch
 /// completes or its consumer goes away (`emit` → `false`). Threads are query-scoped: every
 /// worker exits once the leaf streams are consumed or dropped. Call [`ScatterPool::join`] to
-/// block for a clean shutdown when you DO want to wait (tests). [OPUS-4.8] sq-vtba.
+/// block for a clean shutdown when you DO want to wait (tests). sq-vtba.
 pub struct ScatterPool {
     tx: Option<std::sync::mpsc::SyncSender<Job>>,
     workers: Vec<JoinHandle<()>>,
@@ -664,7 +664,7 @@ type Job = Box<dyn FnOnce() + Send + 'static>;
 
 impl ScatterPool {
     /// Spin up a pool of `workers` threads (at least one) draining a bounded job queue of
-    /// `queue_cap` (at least one) pending jobs. [OPUS-4.8] sq-vtba.
+    /// `queue_cap` (at least one) pending jobs. sq-vtba.
     pub fn new(workers: usize, queue_cap: usize) -> ScatterPool {
         let (tx, rx) = sync_channel::<Job>(queue_cap.max(1));
         let rx = Arc::new(Mutex::new(rx));
@@ -691,7 +691,7 @@ impl ScatterPool {
     }
 
     /// Submit a blocking job. Blocks when the bounded queue is full (back-pressure).
-    /// [OPUS-4.8] sq-vtba.
+    /// sq-vtba.
     pub fn submit<F: FnOnce() + Send + 'static>(&self, job: F) {
         if let Some(tx) = &self.tx {
             // A closed receiver can only happen after the queue is closed; ignore the error
@@ -702,7 +702,7 @@ impl ScatterPool {
 
     /// Close the queue and **join** every worker (waits for in-flight jobs to finish). Use
     /// when a clean, blocking shutdown is wanted (e.g. tests draining their streams first).
-    /// [OPUS-4.8] sq-vtba.
+    /// sq-vtba.
     pub fn join(mut self) {
         self.tx.take(); // close the queue → idle workers exit.
         for h in self.workers.drain(..) {
@@ -724,7 +724,7 @@ impl Drop for ScatterPool {
 
 /// The shared **join variables** of two solution headers: variables present in BOTH (the
 /// equi-join key), in `left`'s order. The same key the Phase-3 [`natural_join`] computes,
-/// so the streamed join and the materialised join agree. [OPUS-4.8] sq-vtba.
+/// so the streamed join and the materialised join agree. sq-vtba.
 fn join_vars(left: &[String], right: &[String]) -> Vec<String> {
     left.iter()
         .filter(|v| right.contains(v))
@@ -733,7 +733,7 @@ fn join_vars(left: &[String], right: &[String]) -> Vec<String> {
 }
 
 /// The output header of a join: `left`'s variables followed by `right`'s left-not-present
-/// variables (matching Phase-3 `natural_join`'s `out_vars`). [OPUS-4.8] sq-vtba.
+/// variables (matching Phase-3 `natural_join`'s `out_vars`). sq-vtba.
 fn join_out_vars(left: &[String], right: &[String]) -> Vec<String> {
     let mut out = left.to_vec();
     for v in right {
@@ -757,7 +757,7 @@ fn join_out_vars(left: &[String], right: &[String]) -> Vec<String> {
 /// whichever has an item ready, via two `recv` loops multiplexed by a tiny merge) and pushes
 /// each arrival into the `StreamJoin`, forwarding every emitted match to the output sink. The
 /// feeder thread is the only place the two inputs meet, so no extra synchronisation is
-/// needed. [OPUS-4.8] sq-vtba.
+/// needed. sq-vtba.
 pub struct StreamingJoin {
     out_vars: Vec<String>,
     join_vars: Vec<String>,
@@ -769,7 +769,7 @@ pub struct StreamingJoin {
 impl StreamingJoin {
     /// A streaming join whose output header / join key are derived from the two input
     /// headers. `opts` tunes the reused [`StreamJoin`] (memory budget + spill store);
-    /// `out_cap` bounds the output channel. [OPUS-4.8] sq-vtba.
+    /// `out_cap` bounds the output channel. sq-vtba.
     pub fn new(
         left_vars: &[String],
         right_vars: &[String],
@@ -791,7 +791,7 @@ impl StreamingJoin {
 
     /// Run the join over `left`/`right`, returning the joined [`SolutionStream`]. Spawns one
     /// feeder thread; the thread ends (and the output stream closes) when both inputs are
-    /// drained. [OPUS-4.8] sq-vtba.
+    /// drained. sq-vtba.
     pub fn run(self, left: SolutionStream, right: SolutionStream) -> SolutionStream {
         let (sink, out) = SolutionStream::bounded(self.out_cap);
         let StreamingJoin {
@@ -814,7 +814,7 @@ impl StreamingJoin {
 /// item (a left item if one is available, else a right item, else blocks for either), pushes
 /// it into the symmetric join, and forwards the emitted matches. A side that has finished is
 /// skipped. The loop exits when BOTH inputs are exhausted. Any error item is forwarded and
-/// stops the join (a producer failure is terminal for that branch). [OPUS-4.8] sq-vtba.
+/// stops the join (a producer failure is terminal for that branch). sq-vtba.
 fn feed_streaming_join(
     left: SolutionStream,
     right: SolutionStream,
@@ -868,7 +868,7 @@ fn feed_streaming_join(
 
 /// Pull ONE item from `side` and feed it into the join, forwarding emitted matches to `sink`.
 /// Returns `false` if the consumer went away (stop) or a producer error was forwarded.
-/// `from_left` selects which side of the symmetric join the item enters. [OPUS-4.8] sq-vtba.
+/// `from_left` selects which side of the symmetric join the item enters. sq-vtba.
 fn pump(
     side: &mut ChannelPeek,
     from_left: bool,
@@ -909,7 +909,7 @@ fn pump(
 
 /// A tiny readiness wrapper over a [`SolutionStream`] so the feeder can prefer a ready side
 /// without an async runtime. It buffers a single look-ahead item pulled with `try_recv` (the
-/// `ready()` probe) and a `done` flag once the channel closes. [OPUS-4.8] sq-vtba.
+/// `ready()` probe) and a `done` flag once the channel closes. sq-vtba.
 struct ChannelPeek {
     rx: Receiver<crate::stream::StreamItem>,
     look: Option<crate::stream::StreamItem>,
@@ -923,7 +923,7 @@ impl ChannelPeek {
     }
 
     /// Whether an item is immediately available (buffers one via `try_recv` if so), without
-    /// blocking. Sets `done` if the channel has closed. [OPUS-4.8] sq-vtba.
+    /// blocking. Sets `done` if the channel has closed. sq-vtba.
     fn ready(&mut self) -> bool {
         if self.look.is_some() {
             return true;
@@ -945,7 +945,7 @@ impl ChannelPeek {
     }
 
     /// Pull the next item, blocking if necessary; returns `None` once drained. Consumes the
-    /// buffered look-ahead first. [OPUS-4.8] sq-vtba.
+    /// buffered look-ahead first. sq-vtba.
     fn next(&mut self) -> Option<crate::stream::StreamItem> {
         if let Some(item) = self.look.take() {
             return Some(item);
@@ -964,7 +964,7 @@ impl ChannelPeek {
 }
 
 impl ChannelPeek {
-    /// Wrap a [`SolutionStream`]'s receiver for readiness-multiplexed pulling. [OPUS-4.8].
+    /// Wrap a [`SolutionStream`]'s receiver for readiness-multiplexed pulling..
     fn over(stream: SolutionStream) -> ChannelPeek {
         ChannelPeek {
             rx: stream.into_rx(),
@@ -976,7 +976,7 @@ impl ChannelPeek {
 
 // ─── Concurrent leaf fan-out + the streaming interpreter ──────────────────────────────
 
-/// Tuning for the streaming interpreter. [OPUS-4.8] sq-vtba.
+/// Tuning for the streaming interpreter. sq-vtba.
 #[derive(Debug, Clone)]
 pub struct StreamOptions {
     /// Worker threads in the fan-out [`ScatterPool`] (concurrent leaf fetches).
@@ -1022,7 +1022,7 @@ impl Default for StreamOptions {
 /// need the resolver/selection/source for the lifetime of the fetch, so this collects each
 /// leaf's lowered [`SubQuery`](crate::source::SubQuery) eagerly (cheap, pure) and moves owned
 /// copies onto the worker threads; only the blocking `execute` runs concurrently.
-/// [OPUS-4.8] sq-vtba.
+/// sq-vtba.
 pub fn stream_single_source(
     resolver: &SourceResolver<'_>,
     selection: &[PatternSources],
@@ -1034,7 +1034,7 @@ pub fn stream_single_source(
     // (during the synchronous tree walk) never blocks waiting for a worker — a worker may be
     // blocked on `emit` before the consumer starts pulling, so a small queue could otherwise
     // deadlock the build. The pool still bounds *concurrency* to `opts.workers`; the queue is
-    // just the inbox. [OPUS-4.8] sq-vtba.
+    // just the inbox. sq-vtba.
     let leaf_count = resolver.bgp().patterns.len().max(1);
     let pool = Arc::new(ScatterPool::new(opts.workers, leaf_count));
     let node = stream_tree(&tree.root, opts, &mut |pattern| {
@@ -1050,7 +1050,7 @@ pub fn stream_single_source(
 /// Build the streaming pipeline for one plan node: each leaf's stream comes from `leaf`, and a
 /// join chains its (already-streaming) left subtree with the right leaf through a
 /// [`StreamingJoin`]. The single- and multi-source paths differ only in `leaf`.
-/// [OPUS-4.8] sq-vtba / sq-7yf0.
+/// sq-vtba / sq-7yf0.
 fn stream_tree(
     node: &JoinNode,
     opts: &StreamOptions,
@@ -1072,7 +1072,7 @@ fn stream_tree(
     }
 }
 
-/// A streamed sub-result: its output header + the live [`SolutionStream`]. [OPUS-4.8] sq-vtba.
+/// A streamed sub-result: its output header + the live [`SolutionStream`]. sq-vtba.
 struct StreamNode {
     vars: Vec<String>,
     stream: SolutionStream,
@@ -1097,7 +1097,7 @@ struct StreamNode {
 /// **Load-bearing invariant:** the streamed multiset equals [`materialize_multi_source`] for
 /// the same plan + adapters, for ANY interleaving of source arrivals — the union is a bag
 /// concatenation (order-independent) and the joins reuse the proven [`StreamJoin`].
-/// [OPUS-4.8] sq-7yf0.
+/// sq-7yf0.
 pub fn stream_multi_source(
     resolver: &SourceResolver<'_>,
     selection: &[PatternSources],
@@ -1144,7 +1144,7 @@ pub fn stream_multi_source(
 /// fragment sources dispatch identically) and re-keys every row onto the pattern's variable
 /// header. The stream is the bag-union of every source's rows and ends once the last job drops
 /// its sink; with no sources it is empty. The streaming win is at the join level: a fast leaf
-/// feeds the join while a slow one is still in flight. [OPUS-4.8] sq-vtba / sq-7yf0 / sq-yzca.
+/// feeds the join while a slow one is still in flight. sq-vtba / sq-7yf0 / sq-yzca.
 fn stream_leaf(
     tp: &TriplePattern,
     sources: Vec<Arc<dyn FederatedSource + Send + Sync>>,
@@ -1185,8 +1185,8 @@ fn stream_leaf(
 
 /// Project one parsed SRJ row from its `src_vars` order onto `keep`'s order (an absent
 /// variable becomes unbound). The streaming analogue of [`Relation::project`] for a single
-/// row. `pub(crate)`: also re-keys union arms in the adaptive executor ([FABLE-5] sq-xw8zz).
-/// [OPUS-4.8] sq-vtba.
+/// row. `pub(crate)`: also re-keys union arms in the adaptive executor (sq-xw8zz).
+/// sq-vtba.
 pub(crate) fn rel_row_project(
     src_vars: &[String],
     row: &[Option<Term>],
@@ -1203,7 +1203,7 @@ pub(crate) fn rel_row_project(
 }
 
 /// Re-project a live [`SolutionStream`] onto `keep` (the whole-BGP header), spawning a small
-/// relay thread so the projection is itself streaming. [OPUS-4.8] sq-vtba.
+/// relay thread so the projection is itself streaming. sq-vtba.
 fn project_stream(stream: SolutionStream, keep: Vec<String>, cap: usize) -> SolutionStream {
     let (sink, out) = SolutionStream::bounded(cap);
     thread::spawn(move || {
@@ -1246,7 +1246,7 @@ mod tests {
 
     /// A transport that answers a sub-query from a fixed map (sub-query SPARQL → SRJ body),
     /// recording what it was asked. Lets the interpreter run with NO network and NO engine,
-    /// over hand-built SRJ. [OPUS-4.8] sq-j27p.
+    /// over hand-built SRJ. sq-j27p.
     struct MapTransport {
         answers: StdHashMap<String, String>,
         seen: Mutex<Vec<String>>,
@@ -1390,7 +1390,7 @@ mod tests {
 
     /// The interpreter end-to-end over canned SRJ (no engine): a 2-pattern star
     /// ?s :p ?o . ?s :q ?z answered by ONE endpoint, joined on ?s. This drives the real
-    /// lowering + resolver + materialised join path. [OPUS-4.8] sq-j27p.
+    /// lowering + resolver + materialised join path. sq-j27p.
     #[test]
     fn interpreter_materialises_two_pattern_join() {
         let bgp = Bgp::new(vec![
@@ -1510,7 +1510,7 @@ mod tests {
 
     /// Unused-import guard: `SubQuery` is the lowering's output type; reference it so the
     /// test module's import set is honest. (Kept minimal — the real lowering is exercised by
-    /// `interpreter_materialises_two_pattern_join` through `lower_leaf`.) [OPUS-4.8] sq-j27p.
+    /// `interpreter_materialises_two_pattern_join` through `lower_leaf`.) sq-j27p.
     #[test]
     fn subquery_type_is_in_scope() {
         let _ = SubQuery::new("ASK {}");
@@ -1524,7 +1524,7 @@ mod tests {
 
     /// The `oxrdf::Term` ⟷ `fedplan::Tuple` bridge must be lossless across every term kind
     /// (IRI, plain/typed/lang literal) so the streamed join's term equality agrees with the
-    /// materialised join's. [OPUS-4.8] sq-vtba.
+    /// materialised join's. sq-vtba.
     #[test]
     fn term_tuple_bridge_round_trips() {
         let typed = Term::Literal(Literal::new_typed_literal(
@@ -1549,7 +1549,7 @@ mod tests {
     /// `StreamingJoin` over two streams must produce the SAME multiset as the Phase-3
     /// `natural_join`, regardless of which side feeds first (interleaving-independence). The
     /// `StreamingJoin` builds its own feeder thread; we drain the result and compare bags.
-    /// [OPUS-4.8] sq-vtba.
+    /// sq-vtba.
     #[test]
     fn streaming_join_equals_natural_join_any_order() {
         // L(?s,?o) join R(?s,?z) on ?s.
@@ -1597,7 +1597,7 @@ mod tests {
     }
 
     /// A tiny `StreamJoin` memory budget forces the spill path; the streamed join must STILL
-    /// equal the materialised natural join (spill is transparent to correctness). [OPUS-4.8].
+    /// equal the materialised natural join (spill is transparent to correctness)..
     #[test]
     fn streaming_join_equals_under_spill() {
         let left = Relation {
@@ -1633,7 +1633,7 @@ mod tests {
     /// `Arc<dyn FederatedSource + Send + Sync>` for the streaming interpreter. It embeds a real
     /// `Endpoint` so `source_type()` reports `SourceType::Endpoint` — which the interpreter's
     /// interface dispatch ([`fetch_leaf_relation`], sq-yzca) now CONSULTS to route an endpoint
-    /// leaf to the SRJ `execute` path (vs the typed fragment path). [OPUS-4.8].
+    /// leaf to the SRJ `execute` path (vs the typed fragment path)..
     struct ArcMapSource {
         answers: StdHashMap<String, String>,
         // A real endpoint so `source_type()` is honest (its inner transport is never reached —
@@ -1670,7 +1670,7 @@ mod tests {
 
     /// The streaming interpreter, end-to-end, over canned SRJ: a 2-pattern star answered by
     /// one source, joined on ?s. The streamed multiset must equal `materialize_single_source`.
-    /// This is the in-crate twin of the integration test. [OPUS-4.8] sq-vtba.
+    /// This is the in-crate twin of the integration test. sq-vtba.
     #[test]
     fn stream_interpreter_equals_materialised_two_pattern() {
         let bgp = Bgp::new(vec![
@@ -1755,7 +1755,7 @@ mod tests {
     }
 
     /// The streaming interpreter enforces the SAME single-source guard as Phase 3: a leaf with
-    /// >1 retained source fails closed with `MultiSource` (never under-answers). [OPUS-4.8].
+    /// >1 retained source fails closed with `MultiSource` (never under-answers)..
     #[test]
     fn stream_interpreter_rejects_multi_source_leaf() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -1799,7 +1799,7 @@ mod tests {
 
     /// An in-test fragment server (one fixed triple set, paged) so the interpreter exercises a
     /// TPF/brTPF leaf with NO network — the operators twin of `source`'s `FixtureFragments`.
-    /// [OPUS-4.8] sq-yzca.
+    /// sq-yzca.
     struct FragFixture {
         triples: Vec<FragTriple>,
         page_size: usize,
@@ -1878,7 +1878,7 @@ mod tests {
 
     /// A `?s :knows ?o` BGP planned over a single TPF source must be ANSWERED by the interpreter
     /// (the typed `solutions` path), not rejected with `Unsupported` — the wiring the bead asks
-    /// for. The materialised relation is the complete fragment bound into (?s, ?o). [OPUS-4.8].
+    /// for. The materialised relation is the complete fragment bound into (?s, ?o)..
     #[test]
     fn interpreter_answers_tpf_leaf() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -1914,7 +1914,7 @@ mod tests {
     }
 
     /// The SAME single-pattern plan over a brTPF source is answered through the brTPF `solutions`
-    /// path (an unbound scan that the interpreter joins locally). [OPUS-4.8] sq-yzca.
+    /// path (an unbound scan that the interpreter joins locally). sq-yzca.
     #[test]
     fn interpreter_answers_brtpf_leaf() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -1983,7 +1983,7 @@ mod tests {
     }
 
     /// The fragment leaf is also answered by the STREAMING interpreter (the dispatch is shared),
-    /// and the streamed multiset equals the materialised one. [OPUS-4.8] sq-yzca.
+    /// and the streamed multiset equals the materialised one. sq-yzca.
     #[test]
     fn stream_interpreter_answers_tpf_leaf() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -2027,7 +2027,7 @@ mod tests {
 
     /// A fragment term round-trips through `fragterm_to_oxterm` so a TPF leaf equi-joins with the
     /// SAME `oxrdf::Term` an endpoint leaf produces — the cross-interface join correctness check.
-    /// [OPUS-4.8] sq-yzca.
+    /// sq-yzca.
     #[test]
     fn fragterm_oxterm_round_trips_every_kind() {
         assert_eq!(
@@ -2056,7 +2056,7 @@ mod tests {
 
     // ─── sq-7yf0: multi-source UNION-per-leaf fan-out ─────────────────────────────────
 
-    /// A single canned answer for one sub-query, as a one-entry map. [OPUS-4.8] sq-7yf0.
+    /// A single canned answer for one sub-query, as a one-entry map. sq-7yf0.
     fn one_answer(sub: &str, body: String) -> StdHashMap<String, String> {
         let mut m = StdHashMap::new();
         m.insert(sub.to_string(), body);
@@ -2066,7 +2066,7 @@ mod tests {
     /// `materialize_multi_source` fans a leaf retained by TWO sources out as a per-source
     /// UNION (bag concatenation) instead of returning `MultiSource`. Two distinct endpoints
     /// answer the SAME leaf sub-query with disjoint rows; the union is their concatenation.
-    /// [OPUS-4.8] sq-7yf0.
+    /// sq-7yf0.
     #[test]
     fn materialize_multi_source_unions_two_sources() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -2128,7 +2128,7 @@ mod tests {
 
     /// The bag-union preserves multiplicity: when two sources return the SAME solution, the
     /// union carries it TWICE (SELECT bag semantics, no de-dup) — the honest federated
-    /// behaviour over disjoint sources that happen to share a triple. [OPUS-4.8] sq-7yf0.
+    /// behaviour over disjoint sources that happen to share a triple. sq-7yf0.
     #[test]
     fn materialize_multi_source_preserves_duplicates() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -2161,7 +2161,7 @@ mod tests {
     }
 
     /// `stream_multi_source` produces the SAME multiset as `materialize_multi_source` for a
-    /// two-source leaf (and proves the guard is lifted on the streaming path too). [OPUS-4.8].
+    /// two-source leaf (and proves the guard is lifted on the streaming path too)..
     #[test]
     fn stream_multi_source_equals_materialised() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -2223,7 +2223,7 @@ mod tests {
 
     /// A leaf the selection retained NO source for is an empty relation (the source-selection
     /// layer is authoritative — the interpreter never falls back to "every adapter"). Both
-    /// entry points agree. [OPUS-4.8] sq-7yf0.
+    /// entry points agree. sq-7yf0.
     #[test]
     fn multi_source_leaf_with_no_retained_source_is_empty() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -2250,7 +2250,7 @@ mod tests {
 
     /// A retained source index out of range for the streaming adapter slice fails closed with
     /// a `ResolveError` BEFORE any fetch job is spawned (never a silent under-answer).
-    /// [OPUS-4.8] sq-7yf0.
+    /// sq-7yf0.
     #[test]
     fn stream_multi_source_range_checks_source_index() {
         let bgp = Bgp::new(vec![TriplePattern::new(
@@ -2291,7 +2291,7 @@ mod tests {
         );
     }
 
-    // [FABLE-5] sq-3dyje.6 (mutation-kill): DIRECT unit tests for the private ChannelPeek
+    // sq-3dyje.6 (mutation-kill): DIRECT unit tests for the private ChannelPeek
     // readiness probe. Its ready()/is_done() answers only steer the streaming feeder's
     // side-preference, so no end-to-end result-equality test can observe them (the join
     // result is order-independent) — cargo-mutants proved that by surviving BOTH
@@ -2353,7 +2353,7 @@ mod tests {
         assert!(peek.is_done());
     }
 
-    // [FABLE-5] sq-3dyje.6 (mutation-kill): ScatterPool::join must BLOCK until every submitted
+    // sq-3dyje.6 (mutation-kill): ScatterPool::join must BLOCK until every submitted
     // job's side effect is visible — that blocking-drain is its whole contract (Drop only
     // closes the queue and lets workers finish detached). cargo-mutants showed `join` replaced
     // by `()` survived: no test observed that after join() returns, all work is DONE. Submit

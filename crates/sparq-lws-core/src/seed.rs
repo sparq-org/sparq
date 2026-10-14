@@ -646,7 +646,7 @@ pub const DEMO_README_LABEL: &str = "sparq LWS public demo";
 /// The `/README` banner (`rdfs:comment`) — the §3.2 honesty print every visitor can dereference:
 /// ephemeral, all data public-readable, wiped on idle, throwaway identities, no visitor isolation.
 ///
-/// [OPUS-5] sq-5ougp review round 3 (gpt-5.6-sol finding 7): "not isolated from each other"
+/// sq-5ougp review round 3 (gpt-5.6-sol finding 7): "not isolated from each other"
 /// UNDER-DISCLOSED the consequence of the shared `acl:Write` grant. `acl:AuthenticatedAgent` +
 /// `acl:Write` means any registered visitor may OVERWRITE and DELETE anyone else's resources, and
 /// may publish arbitrary accepted RDF under the operator's origin. That posture is RATIFIED

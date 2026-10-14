@@ -1,4 +1,4 @@
-//! [GPT-5.6] sq-bif.42: exact contracts for boundary-valued algorithm configuration.
+//! sq-bif.42: exact contracts for boundary-valued algorithm configuration.
 
 use sparq_algos::{label_propagation, pagerank, top_k, LabelPropConfig, NodeGraph, PageRankConfig};
 use sparq_core::Graph;

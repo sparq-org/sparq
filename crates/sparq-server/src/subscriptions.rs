@@ -87,7 +87,7 @@ impl SubscriptionCounters {
 /// still held, so a socket that disconnects (or a handler that panics) can never leak
 /// global capacity.
 ///
-/// [OPUS-4.8] sq-bxog: `pub(crate)` so the SSE transport ([`crate::subscriptions::sse`])
+/// sq-bxog: `pub(crate)` so the SSE transport ([`crate::subscriptions::sse`])
 /// reuses the SAME global-cap accounting as the WebSocket path — one stream holds one slot,
 /// released on disconnect by `Drop` exactly like a WS connection's slots.
 pub(crate) struct ConnSlots {
@@ -135,7 +135,7 @@ impl Drop for ConnSlots {
 /// `GET /subscriptions` — upgrades to the subscription WebSocket. Incoming text frames
 /// are capped at the server's `--max-body-bytes` (same guard as HTTP request bodies).
 ///
-/// [OPUS-4.8] sq-cxk5: this is a READ surface (live SELECT diffs), so when `--auth-token-read`
+/// sq-cxk5: this is a READ surface (live SELECT diffs), so when `--auth-token-read`
 /// is configured the UPGRADE is gated behind the read token EXACTLY like a `/sparql` GET —
 /// rejected with the same 401 BEFORE the socket is upgraded. Because a browser cannot set an
 /// `Authorization` header on a WS handshake, the token is accepted from EITHER the
@@ -167,7 +167,7 @@ pub async fn subscriptions_endpoint(State(state): State<AppState>, headers: Head
 /// One active subscription: the query, its identity, and the last seen result keyed by
 /// canonical row encoding (the diff baseline).
 ///
-/// [OPUS-4.8] sq-bxog: `pub(crate)` (with [`Subscription::reevaluate_step`]) so the SSE
+/// sq-bxog: `pub(crate)` (with [`Subscription::reevaluate_step`]) so the SSE
 /// transport drives the SAME re-evaluate + diff state machine as the WebSocket path — only
 /// the wire framing differs.
 pub(crate) struct Subscription {
@@ -180,7 +180,7 @@ pub(crate) struct Subscription {
     rows: HashMap<String, Value>,
 }
 
-/// [OPUS-4.8] sq-bxog: the outcome of one [`Subscription::reevaluate_step`] — the
+/// sq-bxog: the outcome of one [`Subscription::reevaluate_step`] — the
 /// transport-agnostic core that both `/subscriptions` (WS) and `/subscriptions/sse` reuse.
 pub(crate) enum ReevalStep {
     /// The result is unchanged (or only coalesced no-ops): emit nothing.
@@ -240,7 +240,7 @@ async fn handle_socket(mut socket: WebSocket, state: AppState) {
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Text(text))) => {
-                        // [OPUS-4.8] axum 0.8: ws Message::Text now wraps Utf8Bytes, not String.
+                        // axum 0.8: ws Message::Text now wraps Utf8Bytes, not String.
                         if !handle_client_message(&mut socket, &state, &mut subs, &mut slots, text.as_str()).await {
                             break;
                         }
@@ -298,7 +298,7 @@ async fn handle_client_message(
     .is_ok()
 }
 
-/// [OPUS-4.8] sq-bxog: a successfully-registered subscription, ready to stream. The
+/// sq-bxog: a successfully-registered subscription, ready to stream. The
 /// transport-agnostic product of [`subscribe_init`]: the live [`Subscription`] (its diff
 /// baseline holds the initial full result), its server-wide `id`, and the two opening
 /// frames a client expects — the `subscribed` ack and the sequence-0 notification (the full
@@ -310,7 +310,7 @@ pub(crate) struct NewSubscription {
     pub(crate) initial: Value,
 }
 
-/// [OPUS-4.8] sq-bxog (Copilot #120): a subscription-registration refusal, carrying BOTH the
+/// sq-bxog (Copilot #120): a subscription-registration refusal, carrying BOTH the
 /// `error` JSON to emit AND the HTTP status the SSE transport must surface — classified at the
 /// point of refusal so the SSE path is consistent with the `/sparql` endpoint's status
 /// semantics ([`crate::http::engine_error_response`]):
@@ -332,7 +332,7 @@ pub(crate) struct Refusal {
     pub(crate) status: StatusCode,
 }
 
-/// [OPUS-4.8] sq-bxog: the transport-agnostic "register a subscription" core, shared by the
+/// sq-bxog: the transport-agnostic "register a subscription" core, shared by the
 /// WebSocket `subscribe` frame and the SSE `GET /subscriptions/sse` handler. Validates the
 /// query (SELECT-only), enforces the per-connection then the global cap (acquiring one slot
 /// on `slots`), runs the initial evaluation (refusing on timeout / max-rows overflow,
@@ -345,7 +345,7 @@ pub(crate) async fn subscribe_init(
     query: &str,
     alias: Option<String>,
 ) -> Result<NewSubscription, Refusal> {
-    // [OPUS-4.8] sq-bxog (Copilot #120): carry the HTTP status alongside the `error` JSON so the
+    // sq-bxog (Copilot #120): carry the HTTP status alongside the `error` JSON so the
     // SSE transport surfaces the SAME status `/sparql` would (400 client / 413 row-cap / 503
     // capacity-or-timeout / 500 other) — see [`Refusal`].
     let refuse = |msg: String, status: StatusCode| Refusal { error: error_msg(&msg, None, alias.as_deref()), status };
@@ -356,7 +356,7 @@ pub(crate) async fn subscribe_init(
         Ok(p) if p.form == QueryForm::Select => {}
         Ok(_) => return Err(refuse("only SELECT queries can be subscribed".into(), StatusCode::BAD_REQUEST)),
         Err(PrepareError::Malformed(e)) => return Err(refuse(format!("malformed query: {e}"), StatusCode::BAD_REQUEST)),
-        // [OPUS-4.8] sq-z33x: subscriptions carry no SPARQL-Protocol dataset override, so this
+        // sq-z33x: subscriptions carry no SPARQL-Protocol dataset override, so this
         // arm is unreachable in practice — but a bad graph IRI is a client error regardless.
         Err(PrepareError::BadGraphUri(e)) => return Err(refuse(e, StatusCode::BAD_REQUEST)),
     }
@@ -409,7 +409,7 @@ async fn handle_subscribe(
 
     let new = match subscribe_init(state, slots, subs.len(), query, alias).await {
         Ok(n) => n,
-        // [OPUS-4.8] sq-bxog (Copilot #120): the WS transport has no HTTP status — it just emits
+        // sq-bxog (Copilot #120): the WS transport has no HTTP status — it just emits
         // the `error` frame (the refusal's `status` is for the SSE GET only).
         Err(refusal) => return send(socket, &refusal.error).await.is_ok(),
     };
@@ -456,7 +456,7 @@ async fn reevaluate_all(
     let mut ids: Vec<u64> = subs.keys().copied().collect();
     ids.sort_unstable();
     for id in ids {
-        // [OPUS-4.8] sq-bxog: the re-evaluate + diff core is `Subscription::reevaluate_step`,
+        // sq-bxog: the re-evaluate + diff core is `Subscription::reevaluate_step`,
         // shared verbatim with the SSE transport; the WS path only handles the framing.
         let sub = subs.get_mut(&id).expect("subscription vanished mid-batch");
         match sub.reevaluate_step(id, state).await {
@@ -482,7 +482,7 @@ async fn reevaluate_all(
 // Evaluation + diff primitives
 // ---------------------------------------------------------------------------
 
-/// [OPUS-4.8] sq-bxog (Copilot #120): a categorised initial-evaluation failure — the
+/// sq-bxog (Copilot #120): a categorised initial-evaluation failure — the
 /// human-readable `message` (named after the same limits a `/sparql` 413/503 would name) plus a
 /// [`RefuseKind`] so the refusal status mirrors the HTTP surface
 /// ([`crate::http::engine_error_response`]) instead of collapsing everything into 503.
@@ -491,7 +491,7 @@ struct EvalError {
     kind: RefuseKind,
 }
 
-/// [OPUS-4.8] sq-bxog (Copilot #120): the cause of an initial-evaluation failure, classified from
+/// sq-bxog (Copilot #120): the cause of an initial-evaluation failure, classified from
 /// the engine's budget-violation string EXACTLY as [`crate::http::engine_error_response`] does, so
 /// the SSE status is consistent with `/sparql`.
 enum RefuseKind {
@@ -524,7 +524,7 @@ async fn evaluate(state: &AppState, query: String) -> Result<(Vec<String>, HashM
     // Pin the current generation for this evaluation (lock-free; never blocked by the
     // writer). Each re-evaluation pins afresh, so it always sees the latest commit.
     let gen = state.current();
-    // [OPUS-4.8] sq-4w18: the SERVICE egress allowlist applies to subscription SELECTs
+    // sq-4w18: the SERVICE egress allowlist applies to subscription SELECTs
     // exactly as to /sparql ones — a federated subscription is gated like a read.
     let cfg = config.clone();
     let task = tokio::task::spawn_blocking(move || eval_rows(gen.snapshot(), &query, &budget, &cfg));
@@ -675,12 +675,12 @@ fn error_msg(message: &str, id: Option<u64>, alias: Option<&str>) -> Value {
 }
 
 async fn send(socket: &mut WebSocket, msg: &Value) -> Result<(), axum::Error> {
-    // [OPUS-4.8] axum 0.8: ws Message::Text wraps Utf8Bytes; String converts via Into.
+    // axum 0.8: ws Message::Text wraps Utf8Bytes; String converts via Into.
     socket.send(Message::Text(msg.to_string().into())).await
 }
 
 // ---------------------------------------------------------------------------
-// [OPUS-4.8] sq-bxog: SSE (Server-Sent Events) transport
+// sq-bxog: SSE (Server-Sent Events) transport
 // ---------------------------------------------------------------------------
 
 /// SSE (`text/event-stream`) transport for SPARQL update subscriptions, ALONGSIDE the
@@ -735,7 +735,7 @@ pub mod sse {
     /// `GET /subscriptions/sse?query=<SELECT>[&alias=<x>]` — registers ONE SPARQL update
     /// subscription and streams notifications as Server-Sent Events.
     ///
-    /// Auth ([OPUS-4.8] sq-cxk5): this is a READ surface (live SELECT diffs), so it mirrors the
+    /// Auth (sq-cxk5): this is a READ surface (live SELECT diffs), so it mirrors the
     /// WebSocket `/subscriptions` path AND the other `/sparql` GET routes — when
     /// `--auth-token-read` is configured the GET is gated behind the read token via
     /// `crate::http::auth_gate` (`crate::http::Operation::Read`) and refused with the SAME
@@ -752,7 +752,7 @@ pub mod sse {
     /// `super::Refusal`. On success the response is `text/event-stream` and the first two
     /// frames are the `subscribed` ack and the full initial result.
     pub async fn sse_endpoint(State(state): State<AppState>, headers: axum::http::HeaderMap, Query(params): Query<HashMap<String, String>>) -> Response {
-        // [OPUS-4.8] sq-cxk5: gate the read surface behind the read token (fail-closed when
+        // sq-cxk5: gate the read surface behind the read token (fail-closed when
         // required + absent/wrong), BEFORE opening the stream — exactly like a `/sparql` GET.
         if let Some(resp) = crate::http::auth_gate(state.config(), &headers, crate::http::Operation::Read) {
             return resp;
@@ -770,7 +770,7 @@ pub mod sse {
         let new = match subscribe_init(&state, &mut slots, 0, query, alias).await {
             Ok(n) => n,
             Err(refusal) => {
-                // [OPUS-4.8] sq-bxog (Copilot #120): the refusal already carries the HTTP status,
+                // sq-bxog (Copilot #120): the refusal already carries the HTTP status,
                 // classified at the point of refusal to match the `/sparql` endpoint (400 client /
                 // 413 row-cap / 503 capacity-or-timeout / 500 other) — see [`super::Refusal`].
                 let msg = refusal.error["error"]["message"].as_str().unwrap_or("subscription refused").to_string();
@@ -943,7 +943,7 @@ mod tests {
         assert_eq!(msg["notification"]["removedResults"]["results"]["bindings"], json!([]));
     }
 
-    // [OPUS-4.8] sq-4vao: behavioural tests for the lowest-covered subscription pieces — the
+    // sq-4vao: behavioural tests for the lowest-covered subscription pieces — the
     // budget→status classification, the RDF-1.2 triple-term encoding, the error-frame builder
     // edges, and the transport-agnostic reevaluate_step / subscribe_init state machine (the
     // added/removed diff, mid-stream termination, and the refusal classes).
@@ -966,7 +966,7 @@ mod tests {
         assert_eq!(v["value"]["object"], json!({"type": "literal", "value": "o"}));
     }
 
-    // [OPUS-4.8] sq-qcnn.37: cover the two term_json branches left uncovered by the existing
+    // sq-qcnn.37: cover the two term_json branches left uncovered by the existing
     // tests — the top-level BlankNode arm and the Triple-subject BlankNode arm.
 
     #[test]

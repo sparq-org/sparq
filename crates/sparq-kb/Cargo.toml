@@ -15,7 +15,7 @@ readme = "README.md"
 # crate. NOT published — adoption is gated on the Phase-1 token-A/B verdict.
 publish = false
 
-# [OPUS-4.8] docs.rs: build with all features + the `docsrs` cfg.
+# docs.rs: build with all features + the `docsrs` cfg.
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
@@ -36,14 +36,14 @@ validate = ["dep:sparq-core", "dep:sparq-shacl", "dep:oxttl", "dep:oxrdf"]
 # `query::nl_tool` — run a query and return the executed SPARQL + resolved IRIs +
 # confidence so the caller can verify the answer was not fabricated). Pulls in the
 # SPARQL engine + spargebra (algebra walk for the resolved-IRI provenance) + serde
-# (JSON envelope); keep it off the lean default build. [OPUS-4.8] sq-ve5dy
+# (JSON envelope); keep it off the lean default build. sq-ve5dy
 query = ["validate", "dep:sparq-engine", "dep:spargebra", "dep:serde", "dep:serde_json"]
 # OPT-IN (default-OFF). Adds the optional RDFS/OWL-RL closure step the design record
 # (§3.1) calls for before querying — materialise the `pkg:dependsOn owl:inverseOf
 # pkg:blockedBy` and `pkg:couldBeMergedWith` symmetry so a query over the inverse /
 # symmetric direction sees the entailed edges. Pulls in only `sparq-reason` (which
 # itself depends solely on `sparq-core`, already in the `query` build), so it stays
-# light. `close` implies `query`. [OPUS-4.8] sq-2m6zm.3
+# light. `close` implies `query`. sq-2m6zm.3
 close = ["query", "dep:sparq-reason"]
 # OPT-IN (default-OFF). Enables the `literature` ingestion scaffolding (GenAI-KB Phase 5,
 # sq-2489d.5): the connector adapter + record/replay extract trait + deterministic
@@ -54,7 +54,7 @@ close = ["query", "dep:sparq-reason"]
 # recorded connector/extraction JSON fixtures; it does NOT pull the SPARQL engine — the
 # scaffolding is a pure deterministic data-transform. The SHACL gate over the emitted TTL
 # is run by the `literature_pipeline` integration test, which additionally enables
-# `validate`. [OPUS-4.8] sq-2489d.5
+# `validate`. sq-2489d.5
 literature = ["dep:serde_json", "dep:percent-encoding"]
 # OPT-IN (default-OFF, implies `literature`). Enables the LIVE CORE API v3 connector
 # (sq-tzars.1): the networked socket layer of `connector_core` — `UreqTransport` +
@@ -64,7 +64,7 @@ literature = ["dep:serde_json", "dep:percent-encoding"]
 # already vendored for the engine's SERVICE transport, so no new lockfile entry) and it is
 # NEVER driven in CI (tests replay the committed `core-batch.json` fixture). The CORE key is
 # read from the `CORE_API_KEY` env var at run time only — never committed or logged.
-# [SONNET-4.6] sq-tzars.1
+# sq-tzars.1
 literature-live = ["literature", "dep:ureq"]
 
 [dependencies]
@@ -85,11 +85,11 @@ oxrdf = { workspace = true, optional = true }
 # SPARQL algebra parser (only behind `query`): the NL-tool envelope (sq-ve5dy) walks
 # the parsed query to collect the predicate/class IRIs the answer actually relied on,
 # so the returned `resolved_iris` provenance is exact, not a string scrape. Workspace-
-# pinned to the same vendored spargebra the engine uses. [OPUS-4.8] sq-ve5dy
+# pinned to the same vendored spargebra the engine uses. sq-ve5dy
 spargebra = { workspace = true, optional = true }
 # JSON envelope for the NL tool (only behind `query`): the `--json` output mode of
 # `pkg-query` and the serde-derived `NlToolResult` the agent-flavor sub-agent returns.
-# [OPUS-4.8] sq-ve5dy
+# sq-ve5dy
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 # #3712: the literature path's one query-value encoder (`percent_encode_query`); no_std,
@@ -98,14 +98,14 @@ percent-encoding = { workspace = true, optional = true }
 # Blocking HTTP client for the LIVE CORE connector (only behind `literature-live`).
 # ureq 3 + rustls, mirroring sparq-engine's SERVICE transport EXACTLY (same version +
 # feature set), so it reuses the already-vendored dependency and adds no new lockfile
-# entry; default build stays socket-free. [SONNET-4.6] sq-tzars.1
+# entry; default build stays socket-free. sq-tzars.1
 ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"], optional = true }
 
 # The `pkg-query` helper binary (sq-2m6zm.3): one command to introspect → ground →
 # ask over the ingested PKG. It needs the `query` module (engine), so it is only
 # built when the default-OFF `query` feature is on — `required-features` keeps the
 # default `cargo build` lean (pure data + constants crate) and excludes the binary.
-# [OPUS-4.8]
+#
 [[bin]]
 name = "pkg-query"
 path = "src/bin/pkg_query.rs"
@@ -121,7 +121,7 @@ required-features = ["validate"]
 # (prereg bar → fail-stop caps → append-only sidecar → audit → verdict → maintainer-armed
 # live-emit gate) is enforced in `literature::pilot` and tested with ZERO network and
 # ZERO live-model calls. `required-features` keeps it out of every default build; build
-# additionally with `validate` so the run's SHACL leg is real. [FABLE-5] sq-tzars.9
+# additionally with `validate` so the run's SHACL leg is real. sq-tzars.9
 [[bin]]
 name = "literature-pilot"
 path = "src/bin/literature_pilot.rs"

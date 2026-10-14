@@ -57,7 +57,7 @@
 //!   non-interop point with the wider `did:key` ecosystem, recorded so a working group can
 //!   register a real codec.
 //!
-//! [OPUS-4.8] sq-pfae.3 (issue #940 / gh-940). Written while Fable unavailable — flag for
+//! sq-pfae.3 (issue #940 / gh-940). Written while Fable unavailable — flag for
 //! re-review when Fable returns. 🤖 SPARQ agent — trust-graph authorisation PoC.
 
 use sparq_core::baseenc::{base58btc_decode, base58btc_encode};

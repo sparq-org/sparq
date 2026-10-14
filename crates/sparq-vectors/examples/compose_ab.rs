@@ -1,4 +1,4 @@
-//! [OPUS-4.8] sq-mztg8.1 (epic sq-mztg8; design `research/fo-llm-bridge.md` §2.3/§3.3/§6
+//! sq-mztg8.1 (epic sq-mztg8; design `research/fo-llm-bridge.md` §2.3/§3.3/§6
 //! Phase 3): the **closed NL→NL A/B harness** for the read-path URI-hiding "compose" step,
 //! run over the **real PKG**.
 //!

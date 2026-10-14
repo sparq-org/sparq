@@ -14,7 +14,7 @@
 //! terminal delegate); the **stolen-chain** case (the right delegate WebID but no live
 //! key / a stale PoP); and the intersection-vs-current-grant case (item N).
 //!
-//! [OPUS-4.8] sq-l5og: delegation invocation-binding gate (issue #940, epic sq-pfae P5).
+//! sq-l5og: delegation invocation-binding gate (issue #940, epic sq-pfae P5).
 //! 🤖 SPARQ agent — trust-graph delegation invocation binding.
 
 use oxrdf::NamedNode;

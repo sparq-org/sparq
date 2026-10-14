@@ -129,7 +129,7 @@
 //!   it back as input grants nothing (no admission rule trusts a `prov:` triple; the §2.4
 //!   reserved-predicate guard is unchanged).
 //!
-//! [OPUS-4.8] sq-pfae.7 (issue #940 / gh-940, epic sq-pfae P6). Written while Fable
+//! sq-pfae.7 (issue #940 / gh-940, epic sq-pfae P6). Written while Fable
 //! unavailable — flag for re-review when Fable returns. 🤖 SPARQ agent — trust-graph
 //! live-status / revocation gate.
 

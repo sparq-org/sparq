@@ -1,7 +1,7 @@
 //! Inline `OVER(...)` window-clause SYNTAX (sq-h564) — a NON-STANDARD, OPT-IN
 //! extension on top of the programmatic window pass in [`crate::window`].
 //!
-//! [OPUS-4.8] **There is still no W3C-REC syntax for SPARQL window functions**
+//! **There is still no W3C-REC syntax for SPARQL window functions**
 //! (see the [`crate::window`] module docs). SPARQL 1.1 has no
 //! `OVER (PARTITION BY … ORDER BY …)` clause and no community SEP defines one;
 //! engines that offer windowing each invent their own surface. PR #370 landed
@@ -124,7 +124,7 @@ struct WindowItem {
 }
 
 /// One `ORDER BY` sort key inside an `OVER ( … )` spec: either a bare projected
-/// variable or a computed SPARQL expression (sq-c1jv). [OPUS-4.8] A `Sort::Expr` is bound to
+/// variable or a computed SPARQL expression (sq-c1jv). A `Sort::Expr` is bound to
 /// a fresh helper var via a `(<expr> AS ?__win_orderkeyN)` projection item in the
 /// rewritten inner SELECT, then the window orders on that helper var and the
 /// helper is dropped from the final output. A `Sort::Var` is ordered on directly.
@@ -559,7 +559,7 @@ fn parse_window_func(head: &str) -> Result<WinFunc, String> {
 /// Parses a `LAG`/`LEAD ( ?var [, n [, default]] )` argument list. The first arg is
 /// a bare `?var`; an optional second arg is a non-negative integer offset (default
 /// `1`); an optional third arg is a constant RDF term used when the source row falls
-/// outside the partition. sq-hqhc. [OPUS-4.8]
+/// outside the partition. sq-hqhc.
 fn parse_offset_func(fname: &str, lead: bool, args: &str) -> Result<WinFunc, String> {
     let arg_inner = strip_outer_parens(args)
         .ok_or_else(|| format!("inline OVER: {fname} needs a parenthesised argument list '( ?var[, n[, default]] )'"))?;
@@ -592,7 +592,7 @@ fn parse_offset_func(fname: &str, lead: bool, args: &str) -> Result<WinFunc, Str
 /// Parses a constant RDF term literal as it appears in an `OVER(…)` argument: an
 /// integer/decimal/double numeric literal, a `"…"`-quoted string literal (optionally
 /// with a `@lang` or `^^<datatype>`), `true`/`false`, or an `<IRI>`. Used for a
-/// `LAG`/`LEAD` default value. sq-hqhc. [OPUS-4.8]
+/// `LAG`/`LEAD` default value. sq-hqhc.
 fn parse_constant_term(s: &str) -> Result<Term, String> {
     use oxrdf::{Literal, NamedNode};
     let s = s.trim();
@@ -704,7 +704,7 @@ type NamedWindows = Vec<(String, OverSpec)>;
 /// TAIL (the text after the SELECT projection — the WHERE block and the solution
 /// modifiers). Returns the tail WITH the WINDOW clause REMOVED (so the engine never
 /// sees it) plus the parsed definitions. With no WINDOW clause the tail is returned
-/// unchanged and the definition list is empty. sq-hqhc. [OPUS-4.8]
+/// unchanged and the definition list is empty. sq-hqhc.
 ///
 /// The clause is located at top level (depth 0 — outside the WHERE `{ … }` group and
 /// any parentheses), and runs to the next top-level solution-modifier keyword

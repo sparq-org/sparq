@@ -1,4 +1,4 @@
-//! [OPUS-5] sq-gg0qq.5 (issue #2571) — the POST-`Slug` access-control-document
+//! sq-gg0qq.5 (issue #2571) — the POST-`Slug` access-control-document
 //! privilege-escalation guard, asserted against the REAL `materialize_wac` →
 //! `AuthIndex::accessible` path (no mock short-circuits the verdict).
 //!

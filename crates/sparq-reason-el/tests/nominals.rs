@@ -1,4 +1,4 @@
-// [FABLE-5] sq-pbz04.2.1: CR6 (safe nominals) correctness fixtures — `owl:oneOf` singletons
+// sq-pbz04.2.1: CR6 (safe nominals) correctness fixtures — `owl:oneOf` singletons
 // and object-valued `owl:hasValue`.
 //
 // ORACLE NOTE: like tests/differential.rs, the oracle is hand verification against the
@@ -208,7 +208,7 @@ fn out_of_fragment_nominal_shapes_stay_skipped() {
     );
     let (dict, triples) = Graph::parse_to_triples(&ttl, "turtle").expect("parse");
     let h = Classifier::classify(&dict, &triples);
-    // [FABLE-5] sq-pbz04.2.2: under `cdomain` the exact-numeric DataHasValue
+    // sq-pbz04.2.2: under `cdomain` the exact-numeric DataHasValue
     // ("5"^^xsd:integer) is APPLIED; the multi-oneOf (disjunction) and the STRING
     // DataOneOf ("lex" — a non-numeric datatype, deferred) stay skipped in both states.
     let want = if cfg!(feature = "cdomain") { 2 } else { 3 };

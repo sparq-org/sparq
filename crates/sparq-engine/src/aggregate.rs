@@ -1,7 +1,7 @@
 //! Custom aggregate registry (sq-5qz9) — register a named (IRI) user aggregate
 //! and call it from a real SPARQL `GROUP BY`.
 //!
-//! [OPUS-4.8] This is the aggregate analogue of [`crate::FunctionRegistry`]: an
+//! This is the aggregate analogue of [`crate::FunctionRegistry`]: an
 //! extension surface that lets a caller add a SPARQL aggregate function without
 //! forking the engine. Unlike a scalar extension function (one row in, one term
 //! out), an aggregate FOLDS the whole multiset of a group's per-member values
@@ -71,7 +71,7 @@ impl CustomAggregateRegistry {
     /// projection over a `GROUP BY` — and what the parser is told to treat as an
     /// aggregate rather than a scalar function.
     ///
-    /// [OPUS-4.8] (sq-fldo) `DISTINCT` is honoured by the ENGINE, not the
+    /// (sq-fldo) `DISTINCT` is honoured by the ENGINE, not the
     /// closure: `<iri>(DISTINCT ?x)` de-duplicates the materialised member
     /// multiset (by `Option<Term>` equality, so two unbound members collapse to
     /// one) before `f` is called, matching the built-in `COUNT(DISTINCT ?x)` /
@@ -231,7 +231,7 @@ mod tests {
         assert!(query_with_aggregates(&g(), q, &reg).is_err());
     }
 
-    /// [OPUS-4.8] (sq-fldo) A dataset whose `ex:tag` column has DUPLICATE values
+    /// (sq-fldo) A dataset whose `ex:tag` column has DUPLICATE values
     /// WITHIN a single (one-row-per-subject) group, so an aggregate that folds the
     /// argument multiset gives a DIFFERENT result with vs without DISTINCT. `ex:t`
     /// has three rows but only two distinct tag values ("x","x","y").
@@ -278,7 +278,7 @@ mod tests {
         assert!(distinct_c.contains("\"2\""), "with DISTINCT should count 2 distinct members, got {distinct_c:?}");
     }
 
-    /// [OPUS-4.8] (sq-fldo) A SUM-style custom aggregate over a column with a
+    /// (sq-fldo) A SUM-style custom aggregate over a column with a
     /// repeated VALUE confirms DISTINCT de-duplicates the materialised member
     /// terms (not just adjacent ones) before the fold. `ex:n` over the group is
     /// {10, 10, 20}: the plain sum is 40, the DISTINCT sum is 30.
@@ -321,7 +321,7 @@ mod tests {
         );
     }
 
-    /// [OPUS-4.8] (sq-v411r, survey §B2) `MULTIPLICITY()` is observable inside a CUSTOM
+    /// (sq-v411r, survey §B2) `MULTIPLICITY()` is observable inside a CUSTOM
     /// aggregate's argument too (the `window-functions` registry path), not just the
     /// builtins. A summing custom aggregate over `?x * MULTIPLICITY()` folds the DISTINCT
     /// solutions weighted by their bag cardinality, so over the bag {10,10,10,20,20}

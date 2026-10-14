@@ -4,7 +4,7 @@
 //! verify it was computed, not guessed) must hold against the actual data, not just a
 //! tiny fixture.
 //!
-//! [OPUS-4.8] sq-ve5dy (epic sq-2m6zm). 🤖 SPARQ agent — dogfooding sparq as a project
+//! sq-ve5dy (epic sq-2m6zm). 🤖 SPARQ agent — dogfooding sparq as a project
 //! knowledge graph. Written while Fable unavailable; flag for re-review when Fable returns.
 //!
 //! Run: `cargo test -p sparq-kb --features query --test nl_tool -- --nocapture`.

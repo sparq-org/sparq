@@ -1,4 +1,4 @@
-//! [OPUS-4.8] issue #992 FR-3 (sq-snopa.5): the AUTHORITATIVE ACL write-through.
+//! issue #992 FR-3 (sq-snopa.5): the AUTHORITATIVE ACL write-through.
 //!
 //! Exercises the REAL path — `PodStore::put_acl`/`delete_acl` (WAC) and
 //! `put_acl_acp`/`delete_acl_acp` (ACP) over the live materializer + session oracle — for

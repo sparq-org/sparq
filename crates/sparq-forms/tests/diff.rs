@@ -1,4 +1,4 @@
-//! Form edit → SPARQL Update integration tests. [GPT-5.6] sq-wn788
+//! Form edit → SPARQL Update integration tests. sq-wn788
 
 use oxrdf::{Literal, NamedNode, Term};
 use sparq_core::Graph;

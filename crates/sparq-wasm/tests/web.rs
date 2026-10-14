@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-9qz6 pt2 — headless wasm test of the JS-facing sparq-wasm API.
+// sq-9qz6 pt2 — headless wasm test of the JS-facing sparq-wasm API.
 //
 // The crate's `#[cfg(test)] mod tests` in src/lib.rs runs on the NATIVE target only and
 // therefore exercises the engine functions the wrappers delegate to — NOT the actual
@@ -306,7 +306,7 @@ fn string_functions_retained() {
     );
 }
 
-/// [OPUS-4.8] sq-0ptd (gh-54): the NEGATIVE half of the audit — REGEX/REPLACE are compiled
+/// sq-0ptd (gh-54): the NEGATIVE half of the audit — REGEX/REPLACE are compiled
 /// OUT of the lean default browser bundle (the `regex` feature is OFF here) — asserted on the
 /// REAL `wasm32` target where it is actually observable. `sparq-wasm` disables
 /// `sparq-engine`'s defaults, and the wasm build links only `sparq-wasm`'s own (regex-off)
@@ -411,7 +411,7 @@ fn apply_delta_batch() {
         .unwrap());
 }
 
-// ---- [OPUS-4.8] sq-ty78o (#1114): the empty `new Store()` constructor, in real wasm ----
+// ---- sq-ty78o (#1114): the empty `new Store()` constructor, in real wasm ----
 
 /// `new Store()` (the wasm `constructor`) builds an empty, mutable store, and a
 /// `GRAPH`-targeted `updateInPlace` insert then a `GRAPH ?g` query round-trips THROUGH THE
@@ -434,7 +434,7 @@ fn new_store_named_graph_roundtrip() {
     );
 }
 
-// ---- [OPUS-4.8] sq-f66jz (#1115): base-IRI load (`loadWithBase`), in real wasm ----
+// ---- sq-f66jz (#1115): base-IRI load (`loadWithBase`), in real wasm ----
 
 /// `Store::loadWithBase` resolves relative IRIs against the base through the real wasm
 /// export, and a syntactically invalid base surfaces as the `JsError` Err arm (not a trap).
@@ -459,7 +459,7 @@ fn load_with_base_resolves_relative() {
     );
 }
 
-// ---- [OPUS-4.8] sq-fe1s: the opt-in `serialize` binding, in real wasm ----
+// ---- sq-fe1s: the opt-in `serialize` binding, in real wasm ----
 //
 // These exercise the REAL exported `Store::serialize(format, pretty, indent, abbreviate)`
 // through the wasm/JS boundary — both the document string it returns (the pretty-Turtle /
@@ -517,7 +517,7 @@ mod serialize {
         );
     }
 
-    // ---- [OPUS-4.8] sq-ixc3.5: the JSON-LD serialise-out path, in real wasm ----
+    // ---- sq-ixc3.5: the JSON-LD serialise-out path, in real wasm ----
 
     /// Pretty JSON-LD through the wasm `Store::serialize`, run in a genuine wasm32 runtime,
     /// is byte-identical to the engine writer it delegates to
@@ -555,7 +555,7 @@ mod serialize {
         assert!(compacted.contains("@context"), "compacted has @context: {compacted}");
     }
 
-    // ---- [OPUS-4.8] sq-l5kr: the OPTIONAL caller-supplied prefix map, in real wasm ----
+    // ---- sq-l5kr: the OPTIONAL caller-supplied prefix map, in real wasm ----
 
     /// A caller-supplied `prefixes` array (`[[prefix, iri], …]`) drives compaction across
     /// the JS boundary: `http://example.org/x` abbreviates to `ex:x`, and the SITE's
@@ -642,7 +642,7 @@ mod serialize {
         );
     }
 
-    // ---- [OPUS-4.8] sq-oy1f.5: full JSON-LD 1.1 Compaction (caller `@context`), real wasm ----
+    // ---- sq-oy1f.5: full JSON-LD 1.1 Compaction (caller `@context`), real wasm ----
 
     /// `serializeCompact(context, …)` in a genuine wasm32 runtime: a `@vocab` `@context`
     /// drives the full Compaction Algorithm (bare `@vocab`-relative predicate keys the
@@ -683,7 +683,7 @@ mod serialize {
     }
 }
 
-// ---- [OPUS-4.8] sq-yqi1 (#162): the opt-in SHACL `validate` binding, in real wasm ----
+// ---- sq-yqi1 (#162): the opt-in SHACL `validate` binding, in real wasm ----
 //
 // These exercise the REAL exported `Store::validate(data, shapes, format)` through the
 // wasm/JS boundary (the JSON string it returns and the JsError parse-error arm) — the
@@ -764,7 +764,7 @@ mod shacl {
         assert!(bad.is_err(), "a truncated data graph must return Err");
     }
 
-    /// [SONNET-4.6] gh-2520: `validateStore(shapes, format)` validates the store's
+    /// gh-2520: `validateStore(shapes, format)` validates the store's
     /// OWN triples across the wasm/JS boundary — the stateful counterpart. (Report
     /// equivalence with the stateless one-shot, which holds only modulo the
     /// blank-node labels each shapes parse mints afresh, is asserted in the native
@@ -811,7 +811,7 @@ mod shacl {
     }
 }
 
-// ---- [OPUS-4.8] sq-quly (#796): the opt-in SCS parse binding, in real wasm ----
+// ---- sq-quly (#796): the opt-in SCS parse binding, in real wasm ----
 //
 // These exercise the REAL exported `Store::parseShaclCompact(text, base?)` through the
 // wasm/JS boundary — both the shapes-graph Turtle string it returns AND the JsError arm
@@ -889,7 +889,7 @@ shapeClass ex:Person {
     }
 }
 
-// ---- [OPUS-4.8] sq-1dd5t (#1047): the real wasm32 `canonicalizeNQuads` export ----
+// ---- sq-1dd5t (#1047): the real wasm32 `canonicalizeNQuads` export ----
 //
 // The src/canon.rs `#[cfg(test)] mod tests` run NATIVELY (asserting against the
 // `sparq_canon` fn the export delegates to — `JsError::new` panics off-wasm), so they
@@ -923,7 +923,7 @@ mod canon {
 
 // ---- explain-json (feature-gated): the structured plan tree across the boundary ----
 //
-// [FABLE-5] sq-ixc3.19. The native `tests/exported_api.rs::explain_json` covers the Ok
+// sq-ixc3.19. The native `tests/exported_api.rs::explain_json` covers the Ok
 // arms for coverage; these drive the genuine wasm32 exports through the JS boundary —
 // including the `Err` (JsError) arms `JsError::new` makes wasm32-only — and pin the
 // wasm32 honesty caveat the GUI renders around: ANALYZE `nanos` reads 0 (no monotonic
@@ -967,7 +967,7 @@ mod explain_json {
     }
 }
 
-// ---- [FABLE-5] sq-3ul2n.3: the opt-in `Store::loadBytes` byte-ingest binding ----
+// ---- sq-3ul2n.3: the opt-in `Store::loadBytes` byte-ingest binding ----
 //
 // Drives the REAL `#[wasm_bindgen]` byte-ingest exports in a genuine wasm32 runtime: the
 // result-equivalence invariant (`loadBytes(utf8_of(s), fmt)` == `load(s, fmt)`, incl. a
@@ -1051,7 +1051,7 @@ mod bytes_ingest {
     }
 }
 
-// ---- [SONNET-4.6] sq-q4apb (#2644): the opt-in hosted-web forms bridge, in real wasm ----
+// ---- sq-q4apb (#2644): the opt-in hosted-web forms bridge, in real wasm ----
 //
 // Drives the REAL exported `Store::deriveForm(data, shapes, focus, format, optionsJson)`
 // in a genuine wasm32 runtime — the surface `gui/app`'s `forms-bridge.ts` feature-detects
@@ -1227,7 +1227,7 @@ mod forms {
     }
 }
 
-// ---- [SONNET-4.6] sq-yz27r (#3251): remote-`@context` JSON-LD ingest, in real wasm ----
+// ---- sq-yz27r (#3251): remote-`@context` JSON-LD ingest, in real wasm ----
 //
 // These drive the REAL exported `Store::loadJsonLdWithContexts(text, contexts)` across the
 // JS boundary — specifically the two halves the native `src/jsonld_context.rs` tests cannot

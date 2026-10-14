@@ -1,4 +1,4 @@
-//! [FABLE-5] (sq-uz0) Shapes-graph ASSEMBLY (W3C SHACL §§3.1/3.3 (shapes-graph)): `sh:shapesGraph`
+//! (sq-uz0) Shapes-graph ASSEMBLY (W3C SHACL §§3.1/3.3 (shapes-graph)): `sh:shapesGraph`
 //! discovery in the data graph plus the transitive, cycle-guarded `owl:imports`
 //! closure of every referenced shapes document, unioned into one shapes
 //! [`Graph`].

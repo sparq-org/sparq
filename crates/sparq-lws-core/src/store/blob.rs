@@ -214,7 +214,7 @@ pub struct InMemoryBlobStore {
     /// The `AtomicU64` type is retained only to keep the bump callable through the `&self` API; all
     /// ordering/visibility comes from the surrounding `Mutex`, so `Relaxed` suffices.
     next_generation: AtomicU64,
-    /// [GPT-5.6] Immutable admission ceilings; checks happen under `inner`'s lock.
+    /// Immutable admission ceilings; checks happen under `inner`'s lock.
     limits: InMemoryStoreLimits,
 }
 
@@ -482,7 +482,7 @@ mod tests {
 
     #[tokio::test]
     async fn byte_and_entry_limits_fail_without_mutating_usage() {
-        // [GPT-5.6] Mutation witness: removing either admission check makes its corresponding
+        // Mutation witness: removing either admission check makes its corresponding
         // rejected put succeed and changes the pinned usage below.
         let limits = InMemoryStoreLimits::new(4, 2);
         let blob = InMemoryBlobStore::with_limits(limits);
@@ -529,7 +529,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
     async fn concurrent_puts_cannot_over_admit_the_limits() {
-        // [GPT-5.6] The check and insert share one lock: a racing burst can fill, never overshoot.
+        // The check and insert share one lock: a racing burst can fill, never overshoot.
         let blob = Arc::new(InMemoryBlobStore::with_limits(InMemoryStoreLimits::new(
             8, 8,
         )));

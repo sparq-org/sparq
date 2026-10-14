@@ -1,6 +1,6 @@
 //! Expansion Algorithm + Value Expansion (JSON-LD 1.1 API §5.1, §5.3).
 //!
-//! [OPUS-4.8] (sq-oy1f.25) Expansion is the pipeline's central hinge: it turns a compact
+//! (sq-oy1f.25) Expansion is the pipeline's central hinge: it turns a compact
 //! JSON-LD document into the canonical **expanded** form every other output projects from
 //! (compaction, flattening, framing, and `toRdf`). This module implements the document-level
 //! **Expansion Algorithm** (§5.1.2) and **Value Expansion** (§5.3.2) over the `Json` AST,
@@ -46,7 +46,7 @@ struct Ctx<'a> {
 /// references are dereferenced **only** through `loader`, which is deny-by-default
 /// (`NoopLoader` refuses every fetch). Returns the first spec `JsonLdError` on invalid input.
 ///
-/// [OPUS-4.8] (sq-oy1f.25)
+/// (sq-oy1f.25)
 pub fn expand(
     input: &Json,
     options: &JsonLdOptions,
@@ -401,7 +401,7 @@ fn expand_object(
 
     // step 14: process deferred @nest keys into the same result.
     for nest_key in nests.clone() {
-        // [SONNET-4.6] sq-oy1f.45 — §5.1.2 step 14: apply any property-scoped context
+        // sq-oy1f.45 — §5.1.2 step 14: apply any property-scoped context
         // declared on the @nest-aliased term (tc037/tc038).  The context is applied with
         // override_protected = true and propagate = true so that term definitions from the
         // nest's scoped context remain visible when descending into child node objects
@@ -462,7 +462,7 @@ fn expand_keyword(
     match expanded_property {
         "@id" => match value {
             Json::Str(s) => {
-                // [SONNET-4.6] sq-oy1f.45 — §5.1.2 step 13.4.1: "set result[@id] to the
+                // sq-oy1f.45 — §5.1.2 step 13.4.1: "set result[@id] to the
                 // result of IRI expanding value" — the spec always stores the result,
                 // including null (a keyword-form string that is not a recognised keyword
                 // expands to null per §5.2 step 2).  W3C expand/0122 expects
@@ -494,7 +494,7 @@ fn expand_keyword(
             _ => return Err(JsonLdError::new(E::InvalidIdValue)),
         },
         "@type" => {
-            // [FABLE-5] sq-oy1f.29 — frameExpansion keeps the framing @type PATTERN
+            // sq-oy1f.29 — frameExpansion keeps the framing @type PATTERN
             // shapes: the wildcard `{}`, the match-none `[]`, and the default map
             // `{"@default": …}` (json-ld11-framing §2.1/§2.3). Dropping them turned a
             // constrained frame into the match-everything frame.
@@ -607,7 +607,7 @@ fn expand_keyword(
             }
         }
         "@language" => match value {
-            // [FABLE-5] sq-oy1f.29 — language tags are normalised to lower case
+            // sq-oy1f.29 — language tags are normalised to lower case
             // (§5.1.2 step 13.4.6 "Processors MAY normalize language tags to lower
             // case"; the reference processors and the framing suite do).
             Json::Str(s) => set_obj(result, "@language", Json::Str(s.to_lowercase())),
@@ -621,7 +621,7 @@ fn expand_keyword(
                     .collect();
                 set_obj(result, "@language", Json::Arr(lowered));
             }
-            // [FABLE-5] sq-oy1f.29 — frameExpansion also admits the wildcard `{}`
+            // sq-oy1f.29 — frameExpansion also admits the wildcard `{}`
             // language pattern (framing value patterns, json-ld11-framing §2.2).
             Json::Obj(m) if frame_expansion && m.is_empty() => {
                 set_obj(result, "@language", value.clone());
@@ -762,7 +762,7 @@ fn expand_property_value(
                 let drop_lang =
                     lang == "@none" || active_context.expand_iri(&lang, false, true).as_deref() == Some("@none");
                 if !drop_lang {
-                    // [FABLE-5] sq-oy1f.29 — language tags normalise to lower case.
+                    // sq-oy1f.29 — language tags normalise to lower case.
                     v.push(("@language".to_string(), Json::Str(lang.to_lowercase())));
                 }
                 if let Some(d) = direction {
@@ -940,7 +940,7 @@ pub(crate) fn expand_value(active_context: &ActiveContext, active_property: &str
                     _ => active_context.default_base_direction(),
                 };
                 if let Some(l) = language {
-                    // [FABLE-5] sq-oy1f.29 — language tags normalise to lower case.
+                    // sq-oy1f.29 — language tags normalise to lower case.
                     result.push(("@language".to_string(), Json::Str(l.to_lowercase())));
                 }
                 if let Some(d) = direction {
@@ -1005,7 +1005,7 @@ fn cleanup(
                 }
             }
         }
-        // [FABLE-5] sq-oy1f.29 — `@type: "@json"` may arrive as a kept single-element
+        // sq-oy1f.29 — `@type: "@json"` may arrive as a kept single-element
         // array under frameExpansion; recognise both shapes.
         let is_json = match obj_get(&members, "@type") {
             Some(Json::Str(s)) => s == "@json",
@@ -1023,14 +1023,14 @@ fn cleanup(
             }
             if has(&members, "@language")
                 && !matches!(v, Json::Str(_))
-                // [FABLE-5] sq-oy1f.29 — frameExpansion also admits the wildcard `{}`
+                // sq-oy1f.29 — frameExpansion also admits the wildcard `{}`
                 // and alternative-array `@value` patterns alongside `@language`.
                 && !(frame_expansion && matches!(v, Json::Arr(_) | Json::Obj(_)))
             {
                 return Err(JsonLdError::new(E::InvalidLanguageTaggedValue));
             }
             if let Some(t) = obj_get(&members, "@type") {
-                // [FABLE-5] sq-oy1f.29 — a frame value pattern's @type alternative may
+                // sq-oy1f.29 — a frame value pattern's @type alternative may
                 // also be the wildcard `{}` or `@json`.
                 // §5.1.2 step 15.4: the value of `@type` must be an IRI — a blank node
                 // identifier is NOT one, so a `_:`-datatyped literal is an

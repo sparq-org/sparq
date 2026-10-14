@@ -17,7 +17,7 @@
 //! `ontologies/trust/SEMANTICS.md`. The `ttl_pins_match_rust_constants` test below
 //! keeps the published Turtle and these Rust constants from drifting.
 //!
-//! [OPUS-4.8] sq-pfae PoC (issue #940); vocab/semantics note pinned in sq-pfae.2.
+//! sq-pfae PoC (issue #940); vocab/semantics note pinned in sq-pfae.2.
 //! Flag for re-review when Fable returns. 🤖 SPARQ agent — trust-graph authorisation.
 
 use oxrdf::{BlankNode, Literal, NamedNode, NamedOrBlankNode, Term, Triple};

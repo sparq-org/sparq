@@ -48,7 +48,7 @@ fn every_term_kind_empty_literal_and_unbound_round_trip_row_for_row() {
     assert_ipc_identity(&result);
 }
 
-/// [GPT-5.6] Value-pinned mutation witness: changing either expected name fails while
+/// Value-pinned mutation witness: changing either expected name fails while
 /// the encoded rows remain untouched.
 #[test]
 fn schema_only_reader_recovers_nonempty_result_variables() {

@@ -1,6 +1,6 @@
 //! Directed topology algorithms over a [`NodeGraph`].
 //!
-//! [GPT-5.6] sq-lsp7k.20: unlike the crate's weak community and extended-centrality
+//! sq-lsp7k.20: unlike the crate's weak community and extended-centrality
 //! passes, the algorithms in this module preserve edge direction. Strongly connected
 //! components use an iterative Tarjan traversal, and topological sorting uses Kahn's
 //! algorithm with an ascending-node ready queue. Neither algorithm uses recursion or RNG.
@@ -115,7 +115,7 @@ pub fn strongly_connected_components(g: &NodeGraph) -> Vec<usize> {
     densify_roots(&component_root)
 }
 
-/// [GPT-5.6] sq-awq7n: Returns the number of strongly connected components in a
+/// sq-awq7n: Returns the number of strongly connected components in a
 /// labelling produced by `strongly_connected_components` (dense ids, so this is
 /// `max + 1`, or `0` for an empty labelling).
 pub fn num_strongly_connected_components(labels: &[usize]) -> usize {
@@ -191,7 +191,7 @@ pub fn topological_sort(g: &NodeGraph) -> Result<Vec<usize>, CycleError> {
 ///
 /// A self-loop counts as a cycle. This is a convenience wrapper around
 /// [`topological_sort`] and has the same `O((V + E) log V)` running time.
-/// [GPT-5.6] sq-ulsqh.
+/// sq-ulsqh.
 pub fn is_acyclic(g: &NodeGraph) -> bool {
     topological_sort(g).is_ok()
 }

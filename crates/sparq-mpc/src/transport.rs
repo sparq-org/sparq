@@ -1,4 +1,4 @@
-// [OPUS-4.8] sq-tg6b — the NETWORK tier of the MPC benchmark matrix (Tier 2/3).
+// sq-tg6b — the NETWORK tier of the MPC benchmark matrix (Tier 2/3).
 // New module: a REAL multi-process transport where each of N parties is its own
 // OS process, exchanging the actual protocol messages over a loopback TCP socket
 // (`127.0.0.1`). The codec + `Channel` + `Coordinator` are transport-AGNOSTIC
@@ -78,7 +78,7 @@ use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
 /// modelled `bytes_per_party` of the in-process tier up to the small fixed frame
 /// header.
 ///
-/// [OPUS-4.8] PR #96: the harness reports a single RAW byte count
+/// PR #96: the harness reports a single RAW byte count
 /// ([`NetworkCell::bytes_sent`] / [`NetworkCell::bytes_recv`]) — total bytes on
 /// the wire, which includes the per-frame length+tag header and the 8-byte `x`
 /// coordinate of every share, NOT a field-payload-only figure. When comparing to
@@ -110,7 +110,7 @@ pub enum Message {
     /// (`a`, `b`) is data-INDEPENDENT (a function of the row count only — the
     /// obliviousness substrate); only the boolean varies, and for the shuffle it is
     /// a fresh random permutation's routing bit, for the disclosed-key sort the
-    /// public comparator outcome. `[OPUS-4.8]`
+    /// public comparator outcome. ``
     Swap { a: u32, b: u32, swap: bool },
     /// Either direction: protocol is done for this cell; close cleanly.
     Done,
@@ -368,7 +368,7 @@ pub fn run_party<S: Read + Write>(chan: &mut Channel<S>) -> Result<(), MpcError>
                 };
                 // Local, non-interactive sum of all share-points (the aggregate's
                 // free linear step). All shares are at this party's single point.
-                // [OPUS-4.8] PR #96: an empty batch is a protocol error, NOT an
+                // PR #96: an empty batch is a protocol error, NOT an
                 // `x=0` placeholder share — interpolating a manufactured `x=0`
                 // point (or any duplicate x) is undefined for Shamir and panics in
                 // `Fp::inv(0)` during reconstruction. Fail closed, mirroring the
@@ -429,7 +429,7 @@ pub fn run_party<S: Read + Write>(chan: &mut Channel<S>) -> Result<(), MpcError>
                 // exchange) terminated by `Done`, applies each locally to its
                 // column, and sends the whole permuted column back to open. The
                 // party never reconstructs and never learns the permutation as a
-                // whole — only the per-gate public boolean. [OPUS-4.8] sq-bdbv.
+                // whole — only the per-gate public boolean. sq-bdbv.
                 let mut column = match chan.recv()? {
                     Message::Shares(v) => v,
                     other => {
@@ -566,7 +566,7 @@ impl<S: Read + Write> Coordinator<S> {
         values: &[u64],
     ) -> Result<u64, MpcError> {
         let n = self.channels.len();
-        // [OPUS-4.8] PR #96: fail closed on an empty input set, exactly as the
+        // PR #96: fail closed on an empty input set, exactly as the
         // in-process `ShamirBackend::run_secure` does ("run_secure: no shared
         // inputs"). An empty deal would otherwise ship empty share columns to the
         // parties, which manufacture an `x=0` open-share and panic in
@@ -822,7 +822,7 @@ impl<S: Read + Write> Coordinator<S> {
 /// Reconstruct each opened row (one `Vec<Share>` per output row, transposed by
 /// [`Coordinator::collect_opens`]) at degree `t` to its cleartext value. Used by
 /// the oblivious shuffle / sort network drivers (sq-bdbv): a swap is local
-/// relabeling, so the open degree equals the deal degree `t`. [OPUS-4.8]
+/// relabeling, so the open degree equals the deal degree `t`.
 fn reconstruct_rows(opened: &[Vec<Share>], t: usize) -> Result<Vec<u64>, MpcError> {
     opened
         .iter()
@@ -914,7 +914,7 @@ pub fn run_cell_networked(
             // duplicated, or corrupted), the load-bearing correctness anchor for a
             // shuffle (which must not reveal — or alter — the multiset). The full
             // permuted column + permutation-of-input check lives in the in-crate
-            // tests that call `Coordinator::shuffle` directly. [OPUS-4.8] sq-bdbv.
+            // tests that call `Coordinator::shuffle` directly. sq-bdbv.
             let col_values: Vec<u64> = (0..scale as u64).map(|i| i * 7 + 1).collect();
             let (opened, gates) = coord.shuffle(dealer, &col_values)?;
             (opened.iter().copied().sum(), gates)
@@ -924,7 +924,7 @@ pub fn run_cell_networked(
             // `scale-i`) so the sort has work to do. The reported `result` is the
             // multiset-invariant COLUMN SUM (same anchor as the shuffle); the
             // ascending-order + permutation-of-input check lives in the in-crate
-            // tests that call `Coordinator::sort` directly. [OPUS-4.8] sq-bdbv.
+            // tests that call `Coordinator::sort` directly. sq-bdbv.
             let col_values: Vec<u64> = (0..scale as u64).map(|i| scale as u64 - i).collect();
             let (opened, gates) = coord.sort(dealer, &col_values)?;
             (opened.iter().copied().sum(), gates)
@@ -937,7 +937,7 @@ pub fn run_cell_networked(
             // this loopback transport harness. Refuse honestly here rather than
             // fabricate a wire run — the modelled cost is the counted metric, and a
             // networked driver for the operator is separate, deferred work.
-            // [OPUS-4.8]
+            //
             return Err(MpcError::not_yet(
                 "hidden bounded property-path over the live-wire transport harness",
                 "sq-py8h (operator cost is modelled analytically via bench::run_matrix / \
@@ -1092,7 +1092,7 @@ mod tests {
 
     #[test]
     fn networked_join_allows_n2_degenerate_t0() {
-        // [OPUS-4.8] PR #96: renamed — this test asserts the join is ALLOWED at
+        // PR #96: renamed — this test asserts the join is ALLOWED at
         // n=2, not rejected. n=2 ⇒ t=0 ⇒ 2t+1 = 1 ≤ 2, so the `n >= 2t+1` guard
         // passes; assert the join runs at n=2 (degenerate t=0) and still matches.
         // This pins that the guard mirrors the in-process one rather than being
@@ -1110,7 +1110,7 @@ mod tests {
         assert_eq!(cell.result as usize, 3);
     }
 
-    // [OPUS-4.8] sq-bdbv: the oblivious shuffle + sort now run over the SAME
+    // sq-bdbv: the oblivious shuffle + sort now run over the SAME
     // Coordinator/Channel transport, multi-round (one `Swap` per network gate). The
     // load-bearing anchor is the networked result == in-process result, exactly as
     // for the aggregate/join.
@@ -1258,7 +1258,7 @@ mod tests {
         }
     }
 
-    // [OPUS-4.8] PR #96: an empty aggregate input must FAIL CLOSED on the network
+    // PR #96: an empty aggregate input must FAIL CLOSED on the network
     // tier exactly as the in-process `ShamirBackend::run_secure` does, never
     // manufacture an `x=0` open-share that would panic in reconstruction.
     #[test]

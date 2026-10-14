@@ -1,4 +1,4 @@
-// [OPUS-4.8] written while Fable 5 unavailable — re-review when Fable returns.
+// written while Fable 5 unavailable — re-review when Fable returns.
 //! sq-c2ql (HolderPoP T6 / B2): the in-circuit holder Proof-of-Possession binding
 //! edge — the HIDDEN-key tier that ties the proven holder key to the ISSUER-ATTESTED
 //! credential, the analogue of the clear-key T3/sq-z8s7 B1 closure but WITHOUT

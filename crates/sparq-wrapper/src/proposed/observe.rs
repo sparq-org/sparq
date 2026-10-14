@@ -6,7 +6,7 @@
 //! typed event; set-valued no-ops stay silent. Observers run after the graph
 //! mutation completes and may therefore inspect the committed graph safely.
 
-// [GPT-5.6] sq-1rg2q.5: effective dataset and live-value change subscriptions.
+// sq-1rg2q.5: effective dataset and live-value change subscriptions.
 
 use oxrdf::{NamedNode, Term};
 use sparq_core::Graph;
