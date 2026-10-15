@@ -775,8 +775,8 @@ pub(crate) fn iri_origin(iri: &str) -> &str {
 }
 
 /// The auth view's resources in `graph`, and its control documents ending in `suffix`.
-/// The resources are every graph that is not reserved, not an `.acl`/`.acr` and has an
-/// authority, plus every structural container above one (a container is an inheritance
+/// The resources are every graph outside the reserved and skolem spaces that is not an
+/// `.acl`/`.acr` and has an authority, plus every structural container above one (a container is an inheritance
 /// anchor even without a graph of its own, but not when only control documents sit below
 /// it). The materializer and the store's provenance pruning both use this, so trusted
 /// creator/owner facts are stated for exactly the resources the view holds.
@@ -868,6 +868,29 @@ fn insert_with_containers(resources: &mut FxHashSet<String>, iri: &str) {
 /// the stored provenance is made against this one rule.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ResourceGraphs(std::collections::BTreeSet<String>);
+
+/// Whether each of `resources` is a resource of `graph` (as [`ResourceGraphs::holds`]), in one
+/// pass over its graph names: for judging a few resources without enumerating them all.
+pub(crate) fn held(graph: &Graph, resources: &[String]) -> Vec<bool> {
+    let mut held = vec![false; resources.len()];
+    if resources.is_empty() {
+        return held;
+    }
+    for name in graph.named.iter().filter_map(|(n, _)| graph_iri(n)) {
+        if !is_resource_graph(name) {
+            continue;
+        }
+        for (r, h) in resources.iter().zip(held.iter_mut()) {
+            if !*h
+                && (name == r
+                    || (r.ends_with('/') && is_container_name(r) && name.starts_with(r.as_str())))
+            {
+                *h = true;
+            }
+        }
+    }
+    held
+}
 
 impl ResourceGraphs {
     /// The resource graphs among the names of `graph`'s named graphs.

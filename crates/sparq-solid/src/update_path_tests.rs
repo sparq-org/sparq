@@ -341,12 +341,12 @@ fn a_failed_update_keeps_the_facts_of_a_resource_there_throughout() {
             "DELETE DATA {{ GRAPH <{D0}> {{ <{D0}#it> <{TITLE}> \"v\" }} }} ; \
              INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"
         ),
-        format!("CLEAR ALL ; INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"),
     ] {
         let mut store = mk();
         let before = store.acp_provenance().clone();
         FAIL_COMMIT.with(|f| f.set(true));
-        store.update_as_acp(&session(ADMIN), &update).expect_err("the commit fails");
+        let e = store.update_as_acp(&session(ADMIN), &update).expect_err("the commit fails");
+        assert!(e.contains("could not be committed"), "{update}: fails at the commit: {e}");
         let back = store.acp_provenance().clone();
         assert_eq!(back, before, "{update}: d0 keeps its facts");
         store.materialize_acp_with(&back).expect("passed back");
@@ -414,6 +414,31 @@ fn an_update_never_takes_over_a_resource() {
     assert_eq!(store.acp_provenance().creator(D0), Some(ALICE));
     assert!(!reads_d0(&store, ADMIN), "ADMIN gains nothing");
     assert!(reads_d0(&store, ALICE));
+}
+
+/// A failed commit that drops every named graph judges every stored fact: a resource there
+/// before it and after the failure keeps its creator, one it ended keeps nothing.
+#[test]
+fn a_failed_drop_of_every_graph_keeps_the_facts_of_a_resource_there_throughout() {
+    let n2 = "https://pod.ex/notes/n2";
+    let mut store = pod();
+    store.graph.named.extend(
+        Graph::load_dataset(&format!("<{n2}#x> <{TITLE}> \"y\" <{n2}> .\n"), "nquads").expect("nq").named,
+    );
+    let mut prov = AccessProvenance::new();
+    for r in [N1, n2, "https://pod.ex/"] {
+        prov.set_creator(r, BOB);
+    }
+    store.materialize_acp_with(&prov).expect("provenance");
+    store.materialize_wac().expect("wac");
+    FAIL_COMMIT.with(|f| f.set(true));
+    let update = format!("DROP NAMED ; INSERT DATA {{ GRAPH <{N1}> {{ <{N1}#x> <{TITLE}> \"y\" }} }}");
+    let e = store.update_as(&session(ALICE), &update).expect_err("the commit fails");
+    assert!(e.contains("could not be committed"), "fails at the commit: {e}");
+    let kept = |r| store.acp_provenance().creator(r).is_some();
+    assert!(kept(N1), "n1 is there before and after");
+    assert!(kept("https://pod.ex/"), "so is the root container");
+    assert!(!kept(n2), "n2 ended");
 }
 
 /// Under WAC, a partly applied commit leaves the store's own WAC rebuild usable: it uses no
