@@ -115,6 +115,9 @@ fn the_lws_service_namespace_is_not_a_target() {
         "/.lws/",
         "/.LWS/requests/r",
         "/%2Elws/grants/g1",
+        "//.lws/grants/x/y",
+        "///.LWS/",
+        "/%2F.lws/grants/g1",
     ] {
         assert!(
             matches!(parse_target(BASE, path), Err(ServerError::NotFound)),
@@ -133,14 +136,16 @@ fn the_lws_service_namespace_is_not_a_target() {
 }
 
 #[test]
-fn a_repeated_slash_is_no_target() {
-    for path in ["//alice/c", "/alice/c//", "/alice//c", "//"] {
+fn an_interior_empty_segment_is_no_target() {
+    for path in ["/alice//c", "/a//b/"] {
         assert!(
             matches!(parse_target(BASE, path), Err(ServerError::BadRequest(_))),
             "{path}"
         );
     }
-    for path in ["/", "/alice/c/", "/alice/c"] {
-        assert!(parse_target(BASE, path).is_ok(), "{path}");
+    // Leading and trailing repeated slashes are kept in the key, as they always were.
+    for path in ["/", "//", "/alice/c/", "/alice/c", "//alice/c", "/alice/c//"] {
+        let t = parse_target(BASE, path).unwrap_or_else(|e| panic!("{path}: {e:?}"));
+        assert_eq!(t.iri, format!("{BASE}{path}"));
     }
 }
