@@ -1131,6 +1131,9 @@ pub(crate) enum Undo {
     },
     /// A member that may have been created, removed from its container (see [`records::delete_record`]).
     Remove { iri: String, parent: String },
+    /// A write that failed unsettled, fenced so that it can no longer commit: the steps after it
+    /// put back what it may have written, and must not be outlived by it.
+    Fence { fence: crate::store::Fence },
     /// Nothing to put back: a resource the change holds the lock of without having changed it
     /// (one a recursive delete had not yet removed). It is set aside with the change, so nobody
     /// waits on that lock while the rest is put back.
@@ -1184,6 +1187,7 @@ impl Undo {
                     .map(drop)
             }
             Undo::Remove { iri, parent } => records::delete_record(store, iri, parent).await,
+            Undo::Fence { fence } => store.fence(fence).await,
             Undo::Locked { .. } => Ok(()),
             Undo::Forget { record, .. } => intents::clear(store, record).await,
             Undo::Resolve { record, undo, .. } => {
@@ -1206,6 +1210,7 @@ impl Undo {
                 .chain(parent.as_deref())
                 .collect(),
             Undo::Remove { iri, parent } => vec![iri, parent],
+            Undo::Fence { .. } => Vec::new(),
             Undo::Locked { iri } => vec![iri],
             Undo::Forget { iris, .. } | Undo::Resolve { iris, .. } => {
                 iris.iter().map(String::as_str).collect()
@@ -1273,7 +1278,7 @@ fn bytes_of(undo: &[Undo]) -> usize {
                 ..
             }
             | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
-            Undo::Locked { .. } | Undo::Forget { .. } => 0,
+            Undo::Fence { .. } | Undo::Locked { .. } | Undo::Forget { .. } => 0,
             Undo::Resolve { undo, .. } => bytes_of(undo),
             _ => MAX_META_BYTES,
         })
@@ -1372,7 +1377,7 @@ fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) 
                 priors_of(undo, out);
                 continue;
             }
-            Undo::Locked { .. } | Undo::Forget { .. } => continue,
+            Undo::Fence { .. } | Undo::Locked { .. } | Undo::Forget { .. } => continue,
         };
         out.entry(iri).or_default().or(prior);
     }

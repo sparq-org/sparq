@@ -1744,10 +1744,10 @@ async fn create<S: Store + 'static>(
             // concurrency ceiling once the request has gone.
             let _admission = admission;
             let locks = (child_guards, parent_guard);
-            // Until the content is created the member is in flight, with nothing there before
-            // it: a check made without its lock meanwhile is not decided on the metadata
-            // written for it.
-            let in_flight = [child.clone()];
+            // Until the content is created, or what the create may have written is put back, the
+            // member is in flight with nothing there before it: a check made without its lock
+            // meanwhile is not decided on the metadata written for it. What cannot be put back
+            // is set aside still in flight, so it stays decided that way until it is.
             let nothing = super::Prior {
                 existed: Some(false),
                 ..Default::default()
@@ -1755,45 +1755,67 @@ async fn create<S: Store + 'static>(
             state
                 .locks
                 .changing_from([(child.clone(), nothing)].into_iter().collect());
-            if let Err(e) = state.put_resource_meta(&child, &meta).await {
-                state.locks.landed(&in_flight);
-                return Err(e);
-            }
-            let created = match state
-                .store
-                .create_in_container(&parent, &child, body, &content_type)
-                .await
-            {
+            let in_flight = super::InFlight {
+                locks: state.locks.clone(),
+                iris: vec![child.clone()],
+            };
+            // A write that failed unsettled (an HTTP update that timed out) may still commit:
+            // it is fenced before anything it may have written is put back, so nothing it
+            // commits later outlives the undo.
+            let fence = |e: &ServerError| match e {
+                ServerError::Unsettled { fence, .. } => Some(super::Undo::Fence {
+                    fence: fence.clone(),
+                }),
+                _ => None,
+            };
+            let meta_gone = super::Undo::Restore {
+                key: meta_key(&child),
+                prior: None,
+            };
+            let written = state.put_resource_meta(&child, &meta).await;
+            let content_tried = written.is_ok();
+            let created = match written {
+                Ok(()) => {
+                    state
+                        .store
+                        .create_in_container(&parent, &child, body, &content_type)
+                        .await
+                }
+                Err(e) => Err(e),
+            };
+            let created = match created {
                 Ok(m) => {
-                    state.locks.landed(&in_flight);
+                    drop(in_flight);
                     m
                 }
                 Err(e) => {
                     // A refusal created nothing, and the metadata goes. A backend failure may
-                    // follow a create that committed (a remote store's lost reply): the member is
-                    // removed first, so committed content is never left without its creator.
-                    // Both are tried a few times with the locks held, so no request sees the
-                    // member or its metadata in between; what is left then is set aside with
-                    // the locks (see [`LwsState::set_aside`](super::LwsState::set_aside)).
-                    let mut undo = Vec::new();
-                    if matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. }) {
+                    // follow a write that committed (a remote store's lost reply): the member is
+                    // removed first, so committed content is never left without its creator, and
+                    // the metadata after it. Each step is tried a few times with the locks held,
+                    // so no request sees the member or its metadata in between; what is left then
+                    // is set aside with the locks (see
+                    // [`LwsState::set_aside`](super::LwsState::set_aside)).
+                    let mut undo: Vec<super::Undo> = fence(&e).into_iter().collect();
+                    let may_have_landed =
+                        matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. });
+                    if content_tried && may_have_landed {
                         undo.push(super::Undo::Remove {
                             iri: child.clone(),
                             parent: parent.clone(),
                         });
                     }
-                    undo.push(super::Undo::Restore {
-                        key: meta_key(&child),
-                        prior: None,
-                    });
+                    if content_tried || may_have_landed {
+                        undo.push(meta_gone);
+                    }
                     match super::settle(&state.store, undo).await {
                         None => {
-                            state.locks.landed(&in_flight);
+                            drop(in_flight);
                             drop(locks);
                         }
-                        Some(left) => {
+                        Some(mut left) => {
+                            left.1 = Some(in_flight);
                             state.set_aside(left, locks);
-                            state.locks.landed(&in_flight);
                         }
                     }
                     return Err(e);
@@ -8216,6 +8238,7 @@ mod tests {
         // Nobody else takes its lock while it is set aside, and its container, whose listing
         // may show it, is set aside with it.
         assert!(st.locks.try_lock(&kept).is_none());
+        assert!(st.locks.changing(&kept), "set aside still in flight");
         assert!(!st.visible(&st.cfg.storage()));
         *store.fail_delete_of.lock().unwrap() = None;
         for _ in 0..100 {
@@ -8226,6 +8249,10 @@ mod tests {
         }
         assert!(st.visible(&kept));
         assert!(st.locks.try_lock(&kept).is_some());
+        assert!(
+            !st.locks.changing(&kept),
+            "the create is over once it is put back"
+        );
         assert!(!st.store.exists(&kept).await.unwrap());
         assert!(stored_meta(&st, &kept).await.unwrap().is_none());
         store.fail_after_create.store(true, Ordering::SeqCst);
@@ -8236,6 +8263,117 @@ mod tests {
         store.fail_after_create.store(false, Ordering::SeqCst);
         assert!(!st.store.exists(&gone).await.unwrap());
         assert!(stored_meta(&st, &gone).await.unwrap().is_none());
+        assert!(!st.locks.changing(&gone));
+    }
+
+    /// Review findings: a create's metadata write that landed but reported a failure was left in
+    /// place, and a create the store answered unsettled was put back without being fenced, so it
+    /// could commit afterwards. Either way the member was then decided, for a caller refused
+    /// before the lock, on what the create wrote. What a failed create may have written is put
+    /// back (an unsettled write fenced first), and until it is, the member stays in flight with
+    /// nothing there before it.
+    #[tokio::test]
+    async fn a_failed_create_leaves_nothing_of_it_behind() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let tess = "https://tess.example/#me";
+        let note = "https://e.example/Note";
+        let notes = json!([{"leftOperand": "type", "operator": "eq", "rightOperand": note}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": tess,
+                "constraint": notes}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("tess", grant);
+        let link = format!("<{note}>; rel=\"type\"");
+        let post = |slug: &'static str| {
+            req(
+                Method::POST,
+                "/",
+                &[
+                    ("slug", slug),
+                    ("content-type", "text/plain"),
+                    ("link", link.as_str()),
+                ],
+                "x",
+            )
+        };
+        let same_as_nothing = |name: &'static str| {
+            let st = st.clone();
+            async move {
+                for method in [Method::GET, Method::PATCH] {
+                    let h = [("content-type", JSON_PATCH)];
+                    let answer = |path: String| {
+                        let (st, h, method) = (st.clone(), h, method.clone());
+                        async move {
+                            let r = req(method, &path, &h, "[]");
+                            handle(&st, &r, &agent(tess)).await.status()
+                        }
+                    };
+                    let created = answer(format!("/{name}")).await;
+                    let never = answer(format!("/never-{name}")).await;
+                    assert_eq!(created, never, "{method} {name}");
+                }
+            }
+        };
+        // The metadata lands, the reply is lost: the create fails, and the metadata goes.
+        let lost = st.cfg.absolute("/lost.txt");
+        *store.fail_after_write_of.lock().unwrap() = Some(meta_key(&lost));
+        let r = create(&st, &post("lost.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(stored_meta(&st, &lost).await.unwrap().is_none());
+        assert!(!st.locks.changing(&lost));
+        same_as_nothing("lost.txt").await;
+        // The content's create is answered unsettled: it is fenced before the metadata goes,
+        // so it never commits after the create is over.
+        let late = st.cfg.absolute("/late.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        let r = create(&st, &post("late.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !st.store.exists(&late).await.unwrap(),
+            "fenced, so never committed"
+        );
+        assert!(stored_meta(&st, &late).await.unwrap().is_none());
+        assert!(!st.locks.changing(&late));
+        same_as_nothing("late.txt").await;
+        // While it cannot be fenced it is set aside, still in flight with nothing before it,
+        // and nothing is put back under it; once it is fenced it goes.
+        let stuck = st.cfg.absolute("/stuck.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store
+            .fail_fence
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let r = create(&st, &post("stuck.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&stuck));
+        assert!(st.locks.changing(&stuck));
+        assert!(
+            stored_meta(&st, &stuck).await.unwrap().is_some(),
+            "kept until fenced"
+        );
+        same_as_nothing("stuck.txt").await;
+        store
+            .fail_fence
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        for _ in 0..200 {
+            if st.visible(&stuck) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(st.visible(&stuck));
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!st.store.exists(&stuck).await.unwrap());
+        assert!(stored_meta(&st, &stuck).await.unwrap().is_none());
+        assert!(!st.locks.changing(&stuck));
     }
 
     /// Review finding: HEAD responses dropped the body before the length was derived from it, so
