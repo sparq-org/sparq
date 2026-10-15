@@ -286,8 +286,8 @@ fn a_partly_applied_commit_fails_closed_whatever_its_net_effect() {
             .expect_err("the commit fails");
         assert_eq!(
             *store.acp_provenance(),
-            AccessProvenance::new(),
-            "{update}: nothing installed, and the resource it touched keeps nothing"
+            before,
+            "{update}: nothing installed, and d0, there before and after, keeps its facts"
         );
         assert!(!reads_d0(&store, ALICE), "{update}: the view is gone");
         assert!(
@@ -298,6 +298,60 @@ fn a_partly_applied_commit_fails_closed_whatever_its_net_effect() {
             .materialize_acp_with(&before)
             .expect("the caller supplies the context");
         assert!(reads_d0(&store, ALICE), "{update}: and decisions resume");
+    }
+}
+
+/// After a commit that fails past its commit point, a resource the update touched that
+/// exists before it and after the failure keeps its creator and owner, so a deny keyed on
+/// them still applies once the provenance is passed back.
+#[test]
+fn a_failed_update_keeps_the_facts_of_a_resource_there_throughout() {
+    const ERIN: &str = "https://erin.ex/card#me";
+    let (acp, acl) = ("http://www.w3.org/ns/solid/acp#", "http://www.w3.org/ns/auth/acl#");
+    let acr = "https://pod.ex/docs/.acr";
+    let nq = format!(
+        "<{D0}#it> <{TITLE}> \"v\" <{D0}> .\n\
+         <{acr}> <{acp}memberAccessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#all> <{acr}> .\n\
+         <{acr}#all> <{acp}allow> <{acl}Read> <{acr}> .\n\
+         <{acr}#all> <{acp}anyOf> <{acr}#mp> <{acr}> .\n\
+         <{acr}#mp> <{acp}agent> <{acp}PublicAgent> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#deny> <{acr}> .\n\
+         <{acr}#deny> <{acp}deny> <{acl}Read> <{acr}> .\n\
+         <{acr}#deny> <{acp}anyOf> <{acr}#md> <{acr}> .\n\
+         <{acr}#md> <{acp}agent> <{acp}CreatorAgent> <{acr}> .\n\
+         <{acr}#md> <{acp}agent> <{acp}OwnerAgent> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#admin> <{acr}> .\n\
+         <{acr}#admin> <{acp}allow> <{acl}Write> <{acr}> .\n\
+         <{acr}#admin> <{acp}anyOf> <{acr}#ma> <{acr}> .\n\
+         <{acr}#ma> <{acp}agent> <{ADMIN}> <{acr}> .\n"
+    );
+    let mk = || {
+        let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("pod loads"));
+        let mut prov = AccessProvenance::new();
+        prov.set_creator(D0, ALICE);
+        prov.set_owner(D0, ERIN);
+        store.materialize_acp_with(&prov).expect("acp");
+        assert!(!reads_d0(&store, ALICE) && !reads_d0(&store, ERIN), "the deny applies");
+        store
+    };
+    for update in [
+        format!("INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"),
+        format!(
+            "DELETE DATA {{ GRAPH <{D0}> {{ <{D0}#it> <{TITLE}> \"v\" }} }} ; \
+             INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"
+        ),
+        format!("CLEAR ALL ; INSERT DATA {{ GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}"),
+    ] {
+        let mut store = mk();
+        let before = store.acp_provenance().clone();
+        FAIL_COMMIT.with(|f| f.set(true));
+        store.update_as_acp(&session(ADMIN), &update).expect_err("the commit fails");
+        let back = store.acp_provenance().clone();
+        assert_eq!(back, before, "{update}: d0 keeps its facts");
+        store.materialize_acp_with(&back).expect("passed back");
+        assert!(!reads_d0(&store, ALICE), "{update}: the creator deny still applies");
+        assert!(!reads_d0(&store, ERIN), "{update}: the owner deny still applies");
     }
 }
 
