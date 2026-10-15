@@ -211,18 +211,31 @@ pub fn parse_n3_patch(body: &[u8], base_iri: &str) -> Result<N3Patch, ServerErro
 }
 
 /// The N-Triples text an unconditional, insert-only `patch` appends to a Turtle, N-Triples or
-/// N-Quads document: one statement a line. Appending it to a well-formed document of those formats gives
-/// a well-formed document whose graph is the union, without parsing what is stored (templates
-/// hold no blank nodes, so no label can meet one the document uses). `None` for any other patch.
+/// N-Quads document: one statement a line. Appending it, on a line of its own, to a well-formed
+/// document of those formats gives a well-formed document whose graph is the union, without
+/// parsing what is stored: every blank node the patch inserts (a SPARQL `INSERT DATA` may hold
+/// them) is given a fresh random label, so none can meet a label the document uses. `None` for
+/// any other patch.
 pub fn appended_ntriples(patch: &N3Patch) -> Option<Result<String, ServerError>> {
     if !patch.conditions.is_empty() || !patch.deletes.is_empty() {
         return None;
     }
     Some(
         instantiate_all(&patch.inserts, &Binding::default()).map(|inserts| {
+            let mut fresh: std::collections::HashMap<oxrdf::BlankNode, oxrdf::BlankNode> =
+                std::collections::HashMap::new();
+            let mut relabel = |b: &oxrdf::BlankNode| fresh.entry(b.clone()).or_default().clone();
             let mut text = String::new();
             for t in inserts {
-                text.push_str(&t.to_string());
+                let subject = match &t.subject {
+                    NamedOrBlankNode::BlankNode(b) => NamedOrBlankNode::BlankNode(relabel(b)),
+                    other => other.clone(),
+                };
+                let object = match &t.object {
+                    Term::BlankNode(b) => Term::BlankNode(relabel(b)),
+                    other => other.clone(),
+                };
+                text.push_str(&Triple::new(subject, t.predicate, object).to_string());
                 text.push_str(" .\n");
             }
             text
@@ -1508,6 +1521,19 @@ _:p solid:inserts { <#b> <https://e.example/q> \"v\\n\" , 3 . }.",
         got.sort_by_key(key);
         want.sort_by_key(key);
         assert_eq!(got, want);
+        // A blank node an INSERT DATA holds stays apart from one the document labels alike.
+        let stored = "_:b1 <https://e.example/p> \"old\" .";
+        let patch_b = parse_sparql_update(
+            b"INSERT DATA { _:b1 <https://e.example/p> \"new\" . }",
+            base,
+        )
+        .unwrap();
+        let text = appended_ntriples(&patch_b).unwrap().unwrap();
+        assert!(!text.contains("_:b1 "), "{text}");
+        let body = format!("{stored}\n{text}");
+        let got = parse_to_triples(RdfFormat::Turtle, body.as_bytes(), base).unwrap();
+        assert_eq!(got.len(), 2);
+        assert_ne!(got[0].subject, got[1].subject);
         let deleting = N3Patch {
             deletes: patch.inserts.clone(),
             ..patch
