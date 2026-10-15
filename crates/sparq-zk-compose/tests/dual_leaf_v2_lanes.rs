@@ -2466,3 +2466,230 @@ fn the_inputs_level_pairing_check_is_use_aware() {
         Ok(())
     );
 }
+
+// ====== the whole-graph builder ROUTES the boolean, dateTime and date lanes ===
+
+/// The V2 whole-graph builder routes all six value lanes, so a graph committed
+/// under V2 carries a real value hook for an `xsd:boolean` / `xsd:dateTime` /
+/// `xsd:date` literal — and the leaf it commits is EXACTLY the `operand_enc` that
+/// lane's value-lane FILTER builder presents.
+///
+/// That equality is the whole point of routing: before it, those literals took
+/// the degenerate string lane, so a value-lane FILTER's `operand_enc` matched no
+/// committed leaf of the graph and the proof could not be anchored to it.
+#[test]
+fn a_v2_committed_graph_carries_the_three_newly_routed_lanes_value_hooks() {
+    use oxrdf::{NamedOrBlankNode, Term, Triple};
+    use sparq_zk::encode::salt_from_bytes;
+    use sparq_zk_compose::build::{build_filter_value_dl_date, build_filter_value_dl_datetime};
+
+    let subject = || NamedOrBlankNode::NamedNode(NamedNode::new("http://ex/s").unwrap());
+    let flag = typed("true", XSD_BOOLEAN);
+    let at = typed(
+        "2024-01-02T03:04:05Z",
+        "http://www.w3.org/2001/XMLSchema#dateTime",
+    );
+    let on = typed("2024-01-02Z", "http://www.w3.org/2001/XMLSchema#date");
+    let g = vec![
+        Triple::new(
+            subject(),
+            NamedNode::new("http://ex/flag").unwrap(),
+            Term::Literal(flag.clone()),
+        ),
+        Triple::new(
+            subject(),
+            NamedNode::new("http://ex/at").unwrap(),
+            Term::Literal(at.clone()),
+        ),
+        Triple::new(
+            subject(),
+            NamedNode::new("http://ex/on").unwrap(),
+            Term::Literal(on.clone()),
+        ),
+    ];
+    let salt = salt_from_bytes(&[3u8; 32]);
+    let committed = dual_leaf_v2::commit_triples(&g, salt)
+        .expect("every literal is on a routed lane and canonically spelled");
+    assert_eq!(committed.leaves.len(), 3);
+
+    // Each lane's FILTER builder presents, as `operand_enc`, exactly the TERM
+    // encoding the committed graph holds for that object — which is what a scan
+    // proof discloses for the operand column.
+    let built_flag = build_filter_value_dl_bool(&flag, FilterOp::Eq, true).unwrap();
+    let built_at = build_filter_value_dl_datetime(&at, FilterOp::Ge, &at).unwrap();
+    let built_on = build_filter_value_dl_date(&on, FilterOp::Ge, &on).unwrap();
+    for (lane, literal, inputs) in [
+        ("xsd:boolean", &flag, &built_flag.inputs),
+        ("xsd:dateTime", &at, &built_at.inputs),
+        ("xsd:date", &on, &built_on.inputs),
+    ] {
+        let operand_enc = match inputs {
+            ProofInputs::FilterValueDlBool { operand_enc, .. }
+            | ProofInputs::FilterValueDlDateTime { operand_enc, .. } => operand_enc,
+            other => panic!("a value-lane variant, got {other:?}"),
+        };
+        let committed_term = dual_leaf_v2::encode_term(&Term::Literal(literal.clone()), &salt)
+            .expect("a routed lane's canonical literal encodes")
+            .expect("a literal is not a triple term");
+        assert_eq!(
+            committed_term,
+            fr(operand_enc),
+            "{} must be committed as its lane encoder's leaf",
+            lane
+        );
+        // And that term encoding is the leaf the lane ENCODER builds, not a
+        // degenerate string-lane one.
+        assert_ne!(
+            committed_term,
+            sparq_zk::poseidon2::hash(&[
+                dual_leaf_v2::degenerate_value_component(literal.datatype().as_str(), None)
+                    .unwrap(),
+                field_from_hash_bytes(blake3::hash(literal.to_string().as_bytes()).as_bytes()),
+                Fr::from(TYPE_CODE_LITERAL),
+            ]),
+            "{} must no longer take the degenerate lane",
+            lane
+        );
+    }
+
+    // And a literal on one of those lanes whose lexical the lane encoder rejects
+    // fails the WHOLE commitment — the §6 fail-closed rule, which routing extends
+    // to these three lanes.
+    let non_canonical = vec![Triple::new(
+        subject(),
+        NamedNode::new("http://ex/flag").unwrap(),
+        Term::Literal(typed("1", XSD_BOOLEAN)),
+    )];
+    assert!(
+        dual_leaf_v2::commit_triples(&non_canonical, salt).is_err(),
+        "a non-canonical boolean must not be committed on the string lane instead"
+    );
+}
+
+// ====== LIVE: the numeric build helpers on their members =====================
+
+/// The PRIVATE witness of a numeric build, for the raw hook-layout renderer.
+fn hook_witness_of(
+    built: &sparq_zk_compose::build::BuiltFilterValueDlNumeric,
+) -> (&FieldHex, &FieldHex) {
+    match &built.witness {
+        LaneWitness::Hook(w) => (&w.value_hook, &w.lexical_component),
+        other => panic!("the hook witness shape, got {other:?}"),
+    }
+}
+
+/// LIVE, one helper per lane family: the HOOK-shaped `xsd:integer` lane and the
+/// SIGN-FOLDED `xsd:decimal` lane, each proved through the checked typed path
+/// (`prove_value_lane`, which renders its own `Prover.toml` from the validated
+/// typed fields) and verified with `bb`. A flipped proof byte is the control that
+/// `verify` decides something. The lying-verdict check is the next test.
+#[test]
+fn full_prove_verify_the_numeric_build_helpers() {
+    use sparq_zk_compose::build::{build_filter_value_dl_decimal, build_filter_value_dl_int};
+    if !toolchain_available() || !bb_available() {
+        eprintln!("nargo/bb absent; skipping the live numeric value-lane prove+verify");
+        return;
+    }
+    let prover = CircuitProver::from_crate_root();
+    let integer = build_filter_value_dl_int(
+        &typed("18", XSD_INTEGER),
+        FilterOp::Ge,
+        &typed("18", XSD_INTEGER),
+    )
+    .expect("canonical integer operands");
+    let decimal = build_filter_value_dl_decimal(
+        &typed("2.50", XSD_DECIMAL),
+        FilterOp::Ge,
+        &typed("1.5", XSD_DECIMAL),
+    )
+    .expect("canonical decimal operands");
+    for (tag, built) in [("dlv2_num_int", &integer), ("dlv2_num_dec", &decimal)] {
+        let proof = built.lane_proof().expect("the build assembles typed inputs");
+        let out = unique_out_dir(tag);
+        let art = prover
+            .prove_value_lane(
+                CommitmentMethod::DualLeafV2,
+                MethodUse::NewIssuance,
+                &challenge_one(),
+                &proof,
+                &out,
+                tag,
+            )
+            .unwrap_or_else(|e| panic!("the honest {} assignment must prove: {:?}", tag, e));
+        assert!(!art.proof.is_empty(), "bb must emit a proof");
+        assert!(
+            prover.verify(&art, &out.join("verify")).expect("bb verify runs"),
+            "the honest {} proof must verify",
+            tag
+        );
+        let mut bad = art.clone();
+        let mid = bad.proof.len() / 2;
+        bad.proof[mid] ^= 0xff;
+        assert!(
+            !prover
+                .verify(&bad, &out.join("verify_bad"))
+                .expect("bb verify runs"),
+            "a tampered {} proof must be rejected",
+            tag
+        );
+    }
+}
+
+/// LIVE: a LYING disclosed verdict on the integer lane built by the helper does
+/// not solve a witness — so the verdict the helper computes is the one the member
+/// enforces, not a free public input.
+#[test]
+fn in_circuit_a_lying_verdict_on_the_integer_build_helper_is_refused() {
+    use sparq_zk_compose::build::build_filter_value_dl_int;
+    if !toolchain_available() {
+        eprintln!("nargo absent; skipping the in-circuit numeric integer-lane vector");
+        return;
+    }
+    let built = build_filter_value_dl_int(
+        &typed("18", XSD_INTEGER),
+        FilterOp::Ge,
+        &typed("18", XSD_INTEGER),
+    )
+    .expect("canonical integer operands");
+    let ProofInputs::FilterValueDl {
+        operand_enc,
+        op,
+        bound,
+        datatype_const,
+        expected,
+        ..
+    } = &built.inputs
+    else {
+        panic!("the integer builder must build FilterValueDl inputs");
+    };
+    assert!(*expected, "18 >= 18 is the honest verdict");
+    let (value_hook, lexical_component) = hook_witness_of(&built);
+    assert!(
+        member_accepts(
+            &CircuitId::FilterValueDl,
+            "dlv2_num_int_ok",
+            operand_enc,
+            *op,
+            *bound,
+            datatype_const,
+            *expected,
+            value_hook,
+            lexical_component,
+        ),
+        "the helper's honest integer witness must be provable"
+    );
+    assert!(
+        !member_accepts(
+            &CircuitId::FilterValueDl,
+            "dlv2_num_int_lie",
+            operand_enc,
+            *op,
+            *bound,
+            datatype_const,
+            !*expected,
+            value_hook,
+            lexical_component,
+        ),
+        "a flipped disclosed verdict must not solve"
+    );
+}
