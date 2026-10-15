@@ -385,3 +385,41 @@ fn a_failed_commit_under_wac_leaves_its_rebuild_usable() {
         "bob reads n1"
     );
 }
+
+/// A failed commit of an update that drops and stores again d0.acr while d0 does not exist,
+/// then the stored provenance passed back: d0 made again has no earlier creator.
+#[test]
+fn a_failed_update_leaves_no_acr_kept_for_provenance_passed_back() {
+    let acr = format!("{D0}.acr");
+    let mk = || {
+        let mut store = creator_pod();
+        store
+            .put_acl_acp(&acr, &format!("<{acr}> <http://www.w3.org/ns/solid/acp#accessControl> <{acr}#c> ."), "ntriples")
+            .expect("d0.acr");
+        let aa = format!("{acr}.acr");
+        let a = "http://www.w3.org/ns/solid/acp#";
+        let l = "http://www.w3.org/ns/auth/acl#";
+        store
+            .put_acl_acp(&aa, &format!("<{aa}> <{a}accessControl> <{aa}#c> .\n<{aa}#c> <{a}apply> <{aa}#p> .\n<{aa}#p> <{a}allow> <{l}Read> .\n<{aa}#p> <{a}allow> <{l}Write> .\n<{aa}#p> <{a}allow> <{l}Control> .\n<{aa}#p> <{a}anyOf> <{aa}#m> .\n<{aa}#m> <{a}agent> <{ADMIN}> .\n"), "ntriples")
+            .expect("d0.acr.acr");
+        store.update_as_acp(&session(ADMIN), &format!("DROP GRAPH <{D0}>")).expect("drop d0");
+        assert_eq!(store.acp_provenance().creator(D0), Some(ALICE), "kept with d0.acr");
+        store
+    };
+    let update = format!(
+        "DROP GRAPH <{acr}> ; INSERT DATA {{ GRAPH <{acr}> {{ <{acr}> <http://www.w3.org/ns/solid/acp#accessControl> <{acr}#c> }} }}"
+    );
+    let mut ok = mk();
+    ok.update_as_acp(&session(ADMIN), &update).expect("the update commits");
+    assert_eq!(ok.acp_provenance().creator(D0), None, "the drop ended it");
+    let mut store = mk();
+    FAIL_COMMIT.with(|f| f.set(true));
+    store.update_as_acp(&session(ADMIN), &update).expect_err("the commit fails");
+    let back = store.acp_provenance().clone();
+    store.materialize_acp_with(&back).expect("passed back");
+    let names = store.stored_graphs();
+    store.graph.named.extend(Graph::load_dataset(&format!("<{D0}#x> <{TITLE}> \"y\" <{D0}> .\n"), "nquads").expect("nq").named);
+    store.rematerialize_after_edit(&names, None, true).expect("d0 again");
+    assert_eq!(store.acp_provenance().creator(D0), None);
+    assert!(!reads_d0(&store, ALICE), "no creator grant");
+}

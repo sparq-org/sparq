@@ -763,10 +763,11 @@ impl PodStore {
     /// `materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())` — with no
     /// credential supplied, **every** `acp:vc` matcher rejects every candidate (fail-closed).
     ///
-    /// Facts equal to the stored ones (such as [`PodStore::acp_provenance`] passed back, to
-    /// refresh the credentials or after a failed update) are judged as stored: those of a
-    /// resource that does not exist are kept only if its `.acr` was stored at the last
-    /// install. Facts that differ are taken as given.
+    /// A resource whose creator and owner both equal the stored ones (such as
+    /// [`PodStore::acp_provenance`] passed back, to refresh the credentials or after a failed
+    /// update) is judged as stored: if it does not exist, its facts are kept only if its
+    /// `.acr` was stored at the last install (after a failed update, none is). A resource
+    /// whose creator or owner differs is taken as given in full.
     ///
     /// # Errors
     ///
@@ -1267,6 +1268,9 @@ impl PodStore {
             // view nor the stored provenance is known to describe the store any more, whatever
             // the update's net effect would have been.
             self.acp_context_stale = true;
+            // Nor is any `.acr` known to have been stored throughout: provenance passed back
+            // keeps the facts of existing resources only.
+            self.acr_controlled.clear();
             self.drop_auth_view();
             return Err(format!("the update could not be committed: {e}"));
         }
