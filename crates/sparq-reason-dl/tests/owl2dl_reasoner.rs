@@ -2787,3 +2787,39 @@ fn incremental_rechecks_agree_with_fresh_checks() {
             .join("\n")
     );
 }
+
+/// An automaton that grows past `MAX_AUTOMATON_STATES` by embedding non-simple sub-roles
+/// (each `r{i+1}` has two sub-roles that are both above `r{i}`, so its automaton doubles)
+/// is refused quickly, not built.
+#[test]
+fn an_automaton_past_the_state_cap_is_refused() {
+    let doubling = |n: usize| {
+        let mut body = String::from(":r0 a owl:ObjectProperty , owl:TransitiveProperty .\n");
+        for i in 0..n {
+            let j = i + 1;
+            body.push_str(&format!(
+            ":a{i} a owl:ObjectProperty . :b{i} a owl:ObjectProperty . :r{j} a owl:ObjectProperty .
+             :r{i} rdfs:subPropertyOf :a{i} , :b{i} . :a{i} rdfs:subPropertyOf :r{j} . :b{i} rdfs:subPropertyOf :r{j} .\n"
+        ));
+        }
+        body.push_str(&format!(
+            ":C0 a owl:Class . :C1 a owl:Class . :C0 rdfs:subClassOf {} .",
+            all(&format!(":r{n}"), ":C1")
+        ));
+        body
+    };
+    let body = doubling(24);
+    let start = std::time::Instant::now();
+    let (_, r) = run(&body);
+    assert!(
+        matches!(
+            r.consistency,
+            Consistency::Unknown(UnknownReason::OutOfFragment { .. })
+        ),
+        "{:?}",
+        r.consistency
+    );
+    assert!(start.elapsed() < std::time::Duration::from_secs(30));
+    // A small instance of the same shape is decided.
+    assert!(consistent(&doubling(3)));
+}

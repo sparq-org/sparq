@@ -129,8 +129,9 @@ data assertions) over the OWL 2 datatype map with facet restrictions, `DataOneOf
 booleans and acyclic `DatatypeDefinition`s. Literals are compared by value, and an ill-typed
 literal in an assertion makes the ontology inconsistent (`"sixteen"^^xsd:nonNegativeInteger`).
 Keys (`hasKey`) are decided over named individuals; a key whose data values are not
-fixed to literals answers `'Unconfirmed'`. **Keys on an object property with a transitive
-sub-property, a property hierarchy too large to encode, the top/bottom properties in axioms,
+fixed to literals answers `'Unconfirmed'`. **Keys on a non-simple object property (transitive,
+or implied by a chain or a transitive sub-property), a property hierarchy whose automaton
+would exceed a fixed size, the top/bottom properties in axioms,
 datatypes and literals outside the OWL 2 datatype map, and a property used as both an
 object and a data property currently answer `consistent: 'unknown'` with
 `reason.kind: 'OutOfFragment'`** and the triples of the axiom that uses them; a datatype

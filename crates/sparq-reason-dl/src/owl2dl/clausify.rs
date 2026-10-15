@@ -29,8 +29,9 @@
 //! or a datatype has more than one). The tableau's datatype check decides the labels with
 //! [`super::data_ranges`].
 //!
-//! Everything outside the supported fragment (keys on non-simple roles, the universal roles, datatypes outside the datatype map) is refused with [`Unsupported`],
-//! naming the axiom's source triples, so the reasoner can answer `Unknown(OutOfFragment)`
+//! Everything outside the supported fragment (keys on non-simple roles, the universal
+//! roles, datatypes outside the datatype map, an irregular or too large role hierarchy) is
+//! refused with [`Unsupported`], naming the axiom's source triples, so the reasoner can answer `Unknown(OutOfFragment)`
 //! instead of a wrong verdict; a data range or literal the datatype oracle cannot decide is
 //! refused as a datatype question (`Unknown(DatatypeUnknown)`).
 
@@ -332,6 +333,13 @@ struct Nfa {
 }
 
 impl Nfa {
+    /// Whether the automaton is past [`MAX_AUTOMATON_STATES`] (or its transitions past a
+    /// small multiple of it).
+    fn too_big(&self) -> bool {
+        self.states > MAX_AUTOMATON_STATES
+            || self.trans.len() + self.eps.len() > 4 * MAX_AUTOMATON_STATES as usize
+    }
+
     /// Adds a copy of `sub` read between `from` and `to`.
     fn embed(&mut self, sub: &Nfa, from: u32, to: u32) {
         let o = self.states;
@@ -399,7 +407,7 @@ pub(crate) fn clausify(
             }
         }
     }
-    // Role axioms first: the transitivity encoding of `∀` needs the whole hierarchy.
+    // Role axioms first: the automata encoding of `∀` needs the whole hierarchy.
     for (i, rec) in onto.axioms.iter().enumerate() {
         b.axiom = i;
         b.role_axiom(&rec.axiom)?;
@@ -807,6 +815,9 @@ impl Builder<'_> {
         if let Some(a) = self.automata.get(&k) {
             return Ok(a.clone());
         }
+        let too_big = |b: &Self| {
+            b.unsupported("a property hierarchy whose automaton exceeds MAX_AUTOMATON_STATES")
+        };
         if stack.contains(&k) {
             return Err(self.unsupported("an irregular property hierarchy"));
         }
@@ -830,6 +841,9 @@ impl Builder<'_> {
         for s in subs {
             let sub = self.automaton(s, stack)?;
             a.embed(&sub, 0, 1);
+            if a.too_big() {
+                return Err(too_big(self));
+            }
         }
         let chains: Vec<(Vec<Role>, usize)> = self
             .chains
@@ -871,12 +885,10 @@ impl Builder<'_> {
                 } else {
                     a.trans.push((cur, s, next));
                 }
+                if a.too_big() {
+                    return Err(too_big(self));
+                }
                 cur = next;
-            }
-            if a.states > MAX_AUTOMATON_STATES {
-                return Err(self.unsupported(
-                    "a property hierarchy whose automaton exceeds MAX_AUTOMATON_STATES",
-                ));
             }
         }
         stack.pop();
@@ -1024,8 +1036,8 @@ impl Builder<'_> {
             }
             Axiom::NegativeObjectPropertyAssertion(p, a, b) => {
                 // `Mₐ ⊑ ∀R.¬M_b` with markers on `a` and `b` only (they follow merges). As a
-                // universal it goes through the transitivity encoding, so an `R`-path made of
-                // a transitive sub-property's edges is caught too.
+                // universal it goes through `R`'s automaton, so an `R`-path made of
+                // sub-property or chain edges is caught too.
                 let r = self.role(p)?;
                 let (a, b) = (self.individual(a), self.individual(b));
                 let (ma, mb) = (self.fresh(AtomKind::Fresh), self.fresh(AtomKind::Fresh));
@@ -1042,8 +1054,8 @@ impl Builder<'_> {
                     .iter()
                     .map(|p| self.role(p))
                     .collect::<Result<Vec<_>, _>>()?;
-                // A key on a role with a transitive sub-role would have to see the values
-                // reached along paths, which the tableau does not materialise.
+                // A key on a non-simple role would have to see the values reached along
+                // paths, which the tableau does not materialise.
                 if roles.iter().any(|r| self.nonsimple.contains(r)) {
                     return Err(self.unsupported("HasKey on a non-simple object property"));
                 }
