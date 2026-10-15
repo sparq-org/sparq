@@ -742,7 +742,15 @@ none, which happens when the shared classification budget runs out).
 `is_satisfiable(iri)` / `is_subclass_of(sub_iri, sup_iri)` queries by class IRI
 (`Option<bool>`; `owl:Thing`, `owl:Nothing` and
 classes no axiom mentions included; `None` when an unloaded import could change a negative
-answer). The decided fragment is SROIQ(D) without the top and bottom properties: regular
+answer). `owl2dl::IncrementalChecker::check(&dict, &onto, budget)` rechecks successive
+versions of an ontology and returns `(DlReport, Reuse)`: the same report as `check`, except
+that it reuses the last decided answer when the logical axioms are the same
+(`Reuse::Identical`, no reasoning) or a superset (`Reuse::Extension`: by monotonicity the
+old inconsistency carries over, and old unsatisfiable classes and subsumptions are taken
+without a test), so a reused answer may be decided where a fresh one ran out of budget.
+Axioms are compared by the terms they name (each check may use its own `Dict`; an anonymous
+individual by its blank-node label); the profile check and clausification always run, and a
+refused version keeps the kept answer. The decided fragment is SROIQ(D) without the top and bottom properties: regular
 property chains (`owl:propertyChainAxiom`, transitivity; each non-simple property gets an
 automaton over the property words that imply it, and `∀R.C` follows its states), nominals
 (`ObjectOneOf`, `ObjectHasValue`; a node labelled `{a}` is merged into `a`'s node, and with

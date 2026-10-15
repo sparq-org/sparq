@@ -42,6 +42,28 @@ The load is memoised; a failed initialisation (for example the `.wasm` fetch) is
 fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*`
 (`checkOwlDl(tbox, abox, format, optionsJson) -> string`).
 
+## Rechecking a draft (`openOwlDlSession`)
+
+```js
+import { openOwlDlSession } from '@sparq-org/sparq';
+
+const session = await openOwlDlSession();   // loads the bundle like checkOwlDl
+let r = session.check(draftTurtle);         // synchronous; same arguments as checkOwlDl
+r = session.check(draftPlusEditTurtle);     // r.reuse: 'none' | 'identical' | 'extension'
+session.free();
+```
+
+A session keeps the last decided answer. `session.check` answers exactly what `checkOwlDl`
+would, plus `reuse`: `'identical'` when the logical axioms are the last decided version's (the
+answer is returned without reasoning), `'extension'` when they are a superset (OWL 2 is
+monotone, so the old inconsistency, unsatisfiable classes and subsumptions carry over and only
+the rest is tested; such an answer may be decided where a fresh check ran out of budget), and
+`'none'` otherwise (a removed or changed axiom, or nothing decided kept). Axioms are compared by
+the terms they name, an anonymous individual by its blank-node label, so `[]` nodes (which get
+fresh labels on every parse) make every version count as changed. A version that is refused or
+does not parse leaves the kept answer as it was. The raw glue class is `OwlDlSession`
+(`new OwlDlSession()`, `.check(tbox, abox, format, optionsJson) -> string`, `.free()`).
+
 ## Result shape (`OwlDlResult`)
 
 ```ts

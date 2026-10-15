@@ -298,7 +298,10 @@ fn out_of_fragment_constructs_answer_unknown() {
     ));
     match r.consistency {
         Consistency::Unknown(UnknownReason::OutOfFragment { construct, source }) => {
-            assert_eq!(construct, "owl:topObjectProperty / owl:bottomObjectProperty");
+            assert_eq!(
+                construct,
+                "owl:topObjectProperty / owl:bottomObjectProperty"
+            );
             assert!(!source.is_empty());
         }
         other => panic!("expected OutOfFragment, got {other:?}"),
@@ -983,7 +986,10 @@ fn the_data_domain_is_more_than_the_datatype_map() {
         verdict(&format!("{DDECL} :a a {} .", dsome(":d", &outside))),
         Consistency::Consistent
     );
-    assert!(!data_unsat(&format!(":X owl:equivalentClass {} .", dsome(":d", &outside)), "X"));
+    assert!(!data_unsat(
+        &format!(":X owl:equivalentClass {} .", dsome(":d", &outside)),
+        "X"
+    ));
     // Two of them are not forced equal: there are infinitely many.
     assert_eq!(
         verdict(&format!(
@@ -997,7 +1003,10 @@ fn the_data_domain_is_more_than_the_datatype_map() {
     assert_eq!(
         verdict(&format!(
             "{DDECL} :a a {} .",
-            dsome(":d", "[ a rdfs:Datatype ; owl:datatypeComplementOf rdfs:Literal ]")
+            dsome(
+                ":d",
+                "[ a rdfs:Datatype ; owl:datatypeComplementOf rdfs:Literal ]"
+            )
         )),
         Consistency::Inconsistent
     );
@@ -2676,5 +2685,105 @@ fn oracle_differential_datatypes() {
         DATATYPE_SEEDS,
         include_str!("data/owl2dl_oracle_datatypes_expected.txt"),
         Some(10),
+    );
+}
+
+// ---- incremental rechecks ------------------------------------------------------------------
+
+/// Rechecking with [`IncrementalChecker`] answers what a fresh [`check`] does: over every
+/// corpus, each seed's ontology and its first half are checked in the order half, whole,
+/// whole, half, whole, each read into its own dictionary, so the checker reuses an
+/// extension, an identical ontology, nothing (axioms removed), and an extension again. A
+/// reused answer may be decided where the fresh check ran out of budget (it skips tests),
+/// but never differs from a decided fresh answer.
+#[test]
+fn incremental_rechecks_agree_with_fresh_checks() {
+    use sparq_reason_dl::owl2dl::{IncrementalChecker, Reuse};
+    let corpora: [(&str, fn(u64) -> String); 6] = [
+        ("shiq", Gen::ontology),
+        ("nominals", |s| Gen::ontology_with(s, true)),
+        ("focused", focused),
+        ("keys", keys_corpus),
+        ("chains", chains_corpus),
+        ("datatypes", datatypes_corpus),
+    ];
+    let decided = |r: &DlReport| match r.consistency {
+        Consistency::Inconsistent => true,
+        Consistency::Consistent => r.classification.is_some(),
+        Consistency::Unknown(_) => false,
+    };
+    let mut failures = Vec::new();
+    let mut reused = [0usize; 2];
+    for (corpus, generate) in corpora {
+        for seed in 0..100 {
+            let whole = generate(seed);
+            let lines: Vec<&str> = whole.lines().collect();
+            let half = lines[..lines.len() / 2].join("\n");
+            let mut checker = IncrementalChecker::new();
+            let mut prev: Option<(bool, bool)> = None;
+            for (step, (body, is_whole)) in [
+                (&half, false),
+                (&whole, true),
+                (&whole, true),
+                (&half, false),
+                (&whole, true),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let (d, t) = Graph::parse_to_triples(&format!("{PRE}{body}"), "turtle").unwrap();
+                let o = extract(&d, &t).unwrap();
+                let fresh = check(&d, &o, Budget::default());
+                let (got, reuse) = checker.check(&d, &o, Budget::default());
+                let want_reuse = match prev {
+                    Some((true, was_whole)) if was_whole == is_whole => Reuse::Identical,
+                    Some((true, false)) if is_whole => Reuse::Extension,
+                    _ => Reuse::None,
+                };
+                // A refusal is never reused; otherwise the axioms decide.
+                let refused =
+                    matches!(fresh.consistency, Consistency::Unknown(_)) && reuse == Reuse::None;
+                if reuse != want_reuse && !refused {
+                    failures.push(format!(
+                        "{corpus} {seed} step {step}: {reuse:?}, want {want_reuse:?}"
+                    ));
+                }
+                match reuse {
+                    Reuse::Identical => reused[0] += 1,
+                    Reuse::Extension => reused[1] += 1,
+                    Reuse::None => {}
+                }
+                let agrees = if decided(&fresh) {
+                    got == fresh
+                } else {
+                    got.profile == fresh.profile && (got == fresh || decided(&got))
+                };
+                if !agrees {
+                    failures.push(format!(
+                        "{corpus} {seed} step {step} ({reuse:?}):\n--- fresh\n{fresh:?}\n--- got\n{got:?}\n{body}"
+                    ));
+                }
+                prev = Some((decided(&got), is_whole));
+            }
+        }
+    }
+    eprintln!(
+        "incremental: {} identical, {} extension reuses",
+        reused[0], reused[1]
+    );
+    assert!(
+        reused[0] > 300 && reused[1] > 300,
+        "too little reuse: {reused:?}"
+    );
+    assert!(
+        failures.is_empty(),
+        "{} disagreements:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }

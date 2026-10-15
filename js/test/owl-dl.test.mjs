@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { checkOwlDl, SparqStore } from '../dist/index.js';
+import { checkOwlDl, openOwlDlSession, SparqStore } from '../dist/index.js';
 
 const distDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 
@@ -253,4 +253,22 @@ test('options are read from own plain data properties only, and forwarded canoni
   const viaStore = await store.checkOwlDl(`${PRE} :alice a :Mother .`, starved);
   const direct = await checkOwlDl(store.serialize('turtle', { pretty: false }), `${PRE} :alice a :Mother .`, starved);
   assert.deepEqual(viaStore, direct);
+});
+
+test('a session reuses identical and extended versions and answers as checkOwlDl does', async () => {
+  const session = await openOwlDlSession();
+  const strip = ({ reuse, ...rest }) => rest;
+  const first = session.check(TBOX);
+  assert.equal(first.reuse, 'none');
+  assert.deepEqual(strip(first), await checkOwlDl(TBOX));
+  assert.equal(session.check(TBOX).reuse, 'identical');
+  const abox = `${PRE} :alice a :Woman , :Man .`;
+  const bad = session.check(TBOX, abox);
+  assert.equal(bad.reuse, 'extension');
+  assert.deepEqual(strip(bad), await checkOwlDl(TBOX, abox));
+  assert.equal(bad.consistent, false);
+  assert.equal(session.check(TBOX).reuse, 'none');
+  assert.throws(() => session.check(TBOX, undefined, { budget: { maxSteps: -1 } }), TypeError);
+  session.free();
+  assert.throws(() => session.check(TBOX), /after free/);
 });

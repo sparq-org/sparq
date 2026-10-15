@@ -347,6 +347,10 @@ The TBox and ABox are merged into one graph. The reasoner lives in its own wasm
 bundle (`wasm-dl/`, from `crates/sparq-dl-wasm`) which `checkOwlDl` imports
 dynamically on its first call, so importing `@sparq-org/sparq` never loads it.
 `store.checkOwlDl(abox?, { budget })` uses a store's default graph as the TBox.
+To recheck a draft as it is edited, `const s = await openOwlDlSession()` and call
+`s.check(tbox, abox?, options?)` per version: the same result plus `reuse`
+(`'none' | 'identical' | 'extension'`), reusing the last decided answer when the new
+version has the same axioms or adds to them (`s.free()` when done).
 
 Answers are three-valued and never guessed. The decided fragment is SROIQ(D)
 without the top and bottom properties (property chains, nominals, inverses, qualified cardinality up to a fixed bound,
