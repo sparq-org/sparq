@@ -664,6 +664,7 @@ pub fn parse_sparql_update(body: &[u8], base_iri: &str) -> Result<N3Patch, Serve
 
     let mut inserts: Vec<PatTriple> = Vec::new();
     let mut deletes: Vec<PatTriple> = Vec::new();
+    let mut fresh = HashMap::new();
     let mut saw_any = false;
     // Collected SPARQL prologue declarations, translated to Turtle so the `oxttl` parser of each DATA
     // group sees the prefixes. A SPARQL `PREFIX p: <iri>` becomes Turtle `@prefix p: <iri> .`; a
@@ -757,7 +758,11 @@ pub fn parse_sparql_update(body: &[u8], base_iri: &str) -> Result<N3Patch, Serve
         let group = &text[group_start..group_start + close_rel];
         // Parse the group as Turtle WITH the collected prologue prepended (so prefixed names resolve).
         let with_prologue = format!("{prologue}{group}");
-        let triples = parse_to_concrete_triples(&with_prologue, base_iri)?;
+        let triples = parse_to_concrete_triples(
+            &with_prologue,
+            base_iri,
+            (!is_delete).then_some(&mut fresh),
+        )?;
         if is_delete {
             deletes.extend(triples);
         } else {
@@ -781,8 +786,14 @@ pub fn parse_sparql_update(body: &[u8], base_iri: &str) -> Result<N3Patch, Serve
 }
 
 /// Parse a Turtle triple block into concrete (variable-free) [`PatTriple`]s, resolving relative IRIs
-/// against `base_iri`. Used by the SPARQL-Update `INSERT/DELETE DATA` path.
-fn parse_to_concrete_triples(group: &str, base_iri: &str) -> Result<Vec<PatTriple>, ServerError> {
+/// against `base_iri`. Used by the SPARQL-Update `INSERT/DELETE DATA` path. With `fresh`, each
+/// blank node (triple terms included) becomes a new one, one per label across the request, so an
+/// inserted blank node never merges with one the target document holds.
+fn parse_to_concrete_triples(
+    group: &str,
+    base_iri: &str,
+    mut fresh: Option<&mut HashMap<oxrdf::BlankNode, oxrdf::BlankNode>>,
+) -> Result<Vec<PatTriple>, ServerError> {
     use oxttl::TurtleParser;
     let parser = TurtleParser::new()
         .with_base_iri(base_iri)
@@ -792,6 +803,10 @@ fn parse_to_concrete_triples(group: &str, base_iri: &str) -> Result<Vec<PatTripl
         let t = t.map_err(|e| {
             ServerError::UnprocessablePatch(format!("invalid SPARQL-Update DATA triple: {e}"))
         })?;
+        let t = match fresh.as_deref_mut() {
+            Some(fresh) => relabeled(&t, fresh),
+            None => t,
+        };
         // A DATA block holds GROUND triples; every term is carried through as a concrete
         // [`PatTerm::Term`] (the apply engine treats these as ground, with the empty binding). The
         // containment scenarios use only IRIs/literals.
@@ -1539,6 +1554,22 @@ _:p solid:inserts { <#b> <https://e.example/q> \"v\\n\" , 3 . }.",
         let body = format!("{stored}\n{text}");
         let got = parse_to_triples(RdfFormat::Turtle, body.as_bytes(), base).unwrap();
         assert_eq!(got.len(), 2);
+        assert_ne!(got[0].subject, got[1].subject);
+        // A reader's patch inserts them fresh too, one node per label across the request.
+        let two = parse_sparql_update(
+            b"INSERT DATA { _:b1 <https://e.example/p> \"a\" . } ; \
+              INSERT DATA { _:b1 <https://e.example/p> \"b\" . }",
+            base,
+        )
+        .unwrap();
+        let stored_b1 = Triple::new(
+            oxrdf::BlankNode::new("b1").unwrap(),
+            oxrdf::NamedNode::new("https://e.example/p").unwrap(),
+            oxrdf::Literal::new_simple_literal("old"),
+        );
+        let got = apply_patch(std::slice::from_ref(&stored_b1), &two).unwrap();
+        assert_eq!(got.len(), 3);
+        assert_eq!(got[1].subject, got[2].subject);
         assert_ne!(got[0].subject, got[1].subject);
         // Inside a triple term too, one label stays one fresh node.
         let b1 = oxrdf::BlankNode::new("b1").unwrap();

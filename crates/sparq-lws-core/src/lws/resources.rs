@@ -235,13 +235,32 @@ async fn authorize_unlocked<S: Store + 'static>(
                 .await
                 .err()
                 .or_else(|| full(state, method)),
-            Ok(false) if state.needs_auth(agent) => Some(state.challenge(None)),
-            Ok(false) => Some(problem(StatusCode::NOT_FOUND, None)),
+            Ok(false) => Some(absent(state, action, uri, agent).await),
             Err(e) => Some(store_error(e)),
         }
     })
     .await
     .unwrap_or_else(|| Some(state.deny(agent)))
+}
+
+/// The answer to a request for `uri` where nothing is: the challenge to a caller that is not
+/// authenticated, a `404` to one that would be allowed `action` there
+/// ([`allowed_absent`](super::access::allowed_absent)), and to anyone else the refusal it would
+/// get were something there, so a caller without access learns nothing of whether it is.
+async fn absent<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Response {
+    if state.needs_auth(agent) {
+        return state.challenge(None);
+    }
+    match super::access::allowed_absent(state, action, uri, agent).await {
+        Ok(true) => problem(StatusCode::NOT_FOUND, None),
+        Ok(false) => state.deny(agent),
+        Err(e) => store_error(e),
+    }
 }
 
 /// How many times a check without the lock is made again while changes to its resource itself
@@ -283,8 +302,7 @@ async fn in_flight<S: Store + 'static>(
 ) -> Option<Response> {
     match super::access::aside(state, action, uri, agent).await {
         Ok(super::access::Aside::Allowed) => full(state, method),
-        Ok(super::access::Aside::Missing) if state.needs_auth(agent) => Some(state.challenge(None)),
-        Ok(super::access::Aside::Missing) => Some(problem(StatusCode::NOT_FOUND, None)),
+        Ok(super::access::Aside::Missing) => Some(absent(state, action, uri, agent).await),
         Ok(super::access::Aside::Denied) | Err(_) => Some(state.deny(agent)),
     }
 }
@@ -309,8 +327,7 @@ async fn authorized_aside<S: Store + 'static>(
 ) -> Response {
     match super::access::aside(state, action, uri, agent).await {
         Ok(super::access::Aside::Allowed) => set_aside_meanwhile(),
-        Ok(super::access::Aside::Missing) if state.needs_auth(agent) => state.challenge(None),
-        Ok(super::access::Aside::Missing) => problem(StatusCode::NOT_FOUND, None),
+        Ok(super::access::Aside::Missing) => absent(state, action, uri, agent).await,
         Ok(super::access::Aside::Denied) | Err(_) => state.deny(agent),
     }
 }
@@ -7002,13 +7019,8 @@ mod tests {
                 &bob,
             )
             .await;
-            // A replace or patch, which needs Read, is refused before its target is looked for.
-            let expected = if method == "PATCH" || method == "PUT" {
-                StatusCode::FORBIDDEN
-            } else {
-                StatusCode::NOT_FOUND
-            };
-            assert_eq!(r.status(), expected, "{method}");
+            // Bob may not act on it, so what he is told does not follow whether it is there.
+            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{method}");
         }
         *store.hide.lock().unwrap() = None;
         let r = handle(&st, &get, &owner).await;
@@ -12034,7 +12046,7 @@ mod tests {
     /// part way) is, to whoever may not act on it, the `404` (or challenge) of any missing
     /// resource.
     #[tokio::test]
-    async fn a_missing_set_aside_resource_is_missing_to_a_stranger() {
+    async fn a_missing_set_aside_resource_is_refused_to_a_stranger_alike() {
         use super::super::test_store::{agent, closed_state, stick, OWNER};
         let (st, store) = closed_state(100).await;
         let gone = st.cfg.absolute("/gone");
@@ -12045,8 +12057,9 @@ mod tests {
             async move { handle(&st, &r, &who).await.status() }
         };
         let stranger = agent("https://stranger.example/#me");
-        assert_eq!(get("/gone", &stranger).await, StatusCode::NOT_FOUND);
-        assert_eq!(get("/never", &stranger).await, StatusCode::NOT_FOUND);
+        // A caller without access is refused alike whether anything is there.
+        assert_eq!(get("/gone", &stranger).await, StatusCode::FORBIDDEN);
+        assert_eq!(get("/never", &stranger).await, StatusCode::FORBIDDEN);
         assert_eq!(
             get("/gone", &Agent::anonymous()).await,
             StatusCode::UNAUTHORIZED
