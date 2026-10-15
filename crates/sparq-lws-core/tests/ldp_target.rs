@@ -2,6 +2,7 @@
 //! LDP target / request-URL parsing tests (pure value logic).
 
 use sparq_lws_core::ldp::target::parse_target;
+use sparq_lws_core::ServerError;
 
 const BASE: &str = "https://pod.example";
 
@@ -87,15 +88,16 @@ fn a_linkset_record_name_is_not_a_target() {
         "/alice/c/.meta",
         "/alice/doc%2Emeta",
         "/alice/doc%2emeta?x=1",
-    ] {
-        assert!(parse_target(BASE, path).is_err(), "{path}");
-    }
-    for path in [
-        "/alice/doc.metadata",
         "/alice/doc.meta/",
-        "/alice/meta",
         "/alice/x.meta/y",
+        "/alice/X.Meta/y/",
     ] {
+        assert!(
+            matches!(parse_target(BASE, path), Err(ServerError::NotFound)),
+            "{path}"
+        );
+    }
+    for path in ["/alice/doc.metadata", "/alice/meta", "/alice/x.metas/y"] {
         assert!(parse_target(BASE, path).is_ok(), "{path}");
     }
 }

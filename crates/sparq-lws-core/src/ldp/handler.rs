@@ -3644,7 +3644,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_slug_dot_meta_is_allowed_meta_is_not_load_bearing() {
+    async fn post_slug_dot_meta_mints_no_record_name() {
         // A `.meta` stem is harmless on POST: the minted name is the stem followed by an opaque
         // suffix, never a name ending in `.meta` (which `parse_target` refuses for every method,
         // as the LWS surface keeps a linkset record there). An Append-only POST of

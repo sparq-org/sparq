@@ -207,9 +207,10 @@ same bytes.
 
 Use a trailing slash for containers. A resource and container cannot coexist at
 slash-equivalent paths. ACL resources use the sibling `.acl` convention and
-are themselves protected by `acl:Control`. A non-container name ending in `.meta` (any case,
-%-decoded too) is where the LWS surface keeps a resource's linkset record, so the LDP surface
-answers `404` for it on every method, whichever surfaces are enabled.
+are themselves protected by `acl:Control`. A name ending in `.meta` (any case, %-decoded too)
+is where the LWS surface keeps a resource's linkset record, so the LDP surface answers `404` for
+it, for a container of that name and for anything under one, on every method a request is routed
+for (a CORS preflight is answered before routing), whichever surfaces are enabled.
 
 ## Negotiate RDF representations
 

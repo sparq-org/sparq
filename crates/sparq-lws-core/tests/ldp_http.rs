@@ -320,7 +320,16 @@ async fn a_linkset_record_name_is_no_ldp_resource() {
         .await
         .expect("seed a record");
     let h = Harness::with_store(store).await;
-    for path in ["/alice/doc.meta", "/alice/doc.META", "/alice/c/.meta"] {
+    // The record itself, a case or %-encoded variant of it, its slash twin and a path through it:
+    // none is routed, so none answers by whether the record is there.
+    for path in [
+        "/alice/doc.meta",
+        "/alice/doc.META",
+        "/alice/doc%2Emeta",
+        "/alice/c/.meta",
+        "/alice/doc.meta/",
+        "/alice/doc.meta/child",
+    ] {
         for (method, body) in [
             ("GET", ""),
             ("HEAD", ""),
