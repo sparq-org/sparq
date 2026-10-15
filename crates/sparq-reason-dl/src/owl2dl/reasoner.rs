@@ -597,8 +597,9 @@ mod tests {
         );
         let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
         let o = extract(&d, &triples).unwrap();
-        // A budget that runs out between the work without the key and the work with it.
-        for max_steps in [(without_key + needed) / 2, needed - 1] {
+        // Every budget that runs out between the work without the key and the work with it,
+        // so inside the member scan, the value cache, the index and the pairs.
+        for max_steps in without_key..needed {
             let budget = Budget {
                 max_steps,
                 ..Budget::default()
