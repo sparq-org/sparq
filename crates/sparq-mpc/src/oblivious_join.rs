@@ -44,11 +44,13 @@
 //! - **The oblivious output TRANSFORM** — steps 2–4 above — given a secret-shared
 //!   match bit per candidate. The per-slot select `bit·real_tag` is a **single**
 //!   Shamir multiplication ([`crate::shamir::mul_shares_raw`]) plus local adds: no
-//!   multiplication CHAIN, so it needs **no degree reduction** and is buildable on
-//!   the single-product backend — exactly like
-//!   `crate::join::HiddenValueJoin::secure_equal`. Each product IS re-randomised
-//!   through [`crate::shamir::degree_reduce_through`] before the shuffle, so the
-//!   shuffled column is degree `t`. The shuffle is the sound substrate; the
+//!   multiplication CHAIN, so it is buildable on the single-product backend —
+//!   exactly like `crate::join::HiddenValueJoin::secure_equal`, which needs no
+//!   reduction to keep MULTIPLYING. Each product is nonetheless re-randomised
+//!   through [`crate::shamir::degree_reduce_through`] before the shuffle: the
+//!   reduction is there for what the OPEN would otherwise reveal, not to feed a
+//!   further multiplication. So the shuffled column is degree `t`. The shuffle is
+//!   the sound substrate; the
 //!   padded-prefix reveal is a degree-`t` open of `B` slots. This
 //!   is the structural obliviousness the bead asks for, and it holds at the
 //!   honest-majority Shamir layer.
@@ -115,9 +117,19 @@
 //!   encoding and does not say which candidate reached it. A caller-agreed public
 //!   width bound, failing closed above it, is a follow-up; this stage does not
 //!   have one.
-//! - Malicious security is unchanged from the Shamir layer: at `n = 2t + 1` the
-//!   degree-`t` opens have zero RS redundancy (research record §4.1 D×A; bead
-//!   sq-6d6g IT-MAC is the named fix). Semi-honest only.
+//! - Malicious security is unchanged from the Shamir layer. The opens themselves
+//!   carry the degree-`t` sharing's own RS redundancy: `n` points on a degree-`t`
+//!   polynomial leave `n - t - 1` redundant shares, which at `n = 2t + 1` is `t`,
+//!   so up to `t` corrupted shares are DETECTED and up to `⌊t/2⌋` are corrected
+//!   (at `n = 3`, `t = 1`, that is detect-only — see
+//!   [`crate::shamir::ShamirBackend::malicious_security`]). What has no
+//!   verification is everything BEFORE the open: nothing checks that a selector is
+//!   a sharing of 0 or 1, that a select multiplication was computed honestly, that
+//!   a degree reduction re-shared the value it was handed, or that the shuffle
+//!   permuted anything. A deviation there produces a well-formed degree-`t`
+//!   sharing of a different value that the open cannot flag, so the protocol stays
+//!   **semi-honest only** (research record §4.1 D×A; bead sq-6d6g IT-MAC is the
+//!   named fix).
 //!
 //! ## Communication / round cost (MODELLED — counted, not measured)
 //!
@@ -242,10 +254,11 @@ pub struct ObliviousOutputCost {
     /// candidate encoding rounded up to whole limbs and is public to the parties
     /// (see the module's residual-leakage section).
     pub payload_select_mults: usize,
-    /// Degree-reduction rounds: one per SELECTED element — the slot tag and each
-    /// of its payload limbs — so `bound · (1 + limb_capacity)` in all. Each one is
-    /// a [`shamir::degree_reduce_through`] that costs `2t + 1` re-sharings through
-    /// the seam; they are independent, so they run in one round. Every selected
+    /// Degree reductions: one per SELECTED element — the slot tag and each of its
+    /// payload limbs — so `bound · (1 + limb_capacity)` in all. This counts the
+    /// REDUCTIONS, not rounds: each one is a [`shamir::degree_reduce_through`] that
+    /// costs `2t + 1` re-sharings through the seam, and they are independent, so
+    /// all of them run in ONE round. Every selected
     /// element is a product sharing, and a product sharing opened without
     /// re-randomisation reveals more than its value, so this is not optional work.
     pub degree_reductions: usize,
@@ -313,11 +326,15 @@ pub type ObliviousOutput = (Vec<OutputSlot>, ObliviousOutputCost);
 ///    tag and the payload agree on what the slot is.
 /// 4. **Oblivious-shuffle** the (tag, payload-limbs) entry together so output
 ///    position is independent of input position (substrate `shuffle`).
-/// 5. **Open exactly `B` tags** at degree `t` (and the payload limbs, also at
-///    degree `t`, in the same shuffled order — every selected element is
-///    degree-reduced before the shuffle); emit [`OutputSlot::Row`] where the tag is
-///    the real sentinel, [`OutputSlot::Dummy`] where it is `0`, and FAIL CLOSED on
-///    any other value.
+/// 5. **Open and classify all `B` tags FIRST**, then the payload limbs — every
+///    open at degree `t`, since every selected element is degree-reduced before
+///    the shuffle. A tag outside `{0, REAL_TAG}` FAILS CLOSED before a single
+///    limb of any slot is opened. Then each slot's limbs are opened in the same
+///    shuffled order, and a slot the tag called a dummy must carry the pad block
+///    EXACTLY — the comparison is on the opened limb VECTOR, not on the decoded
+///    row — or the call refuses. Decoding is strict. Emit [`OutputSlot::Row`]
+///    where the tag was the real sentinel and [`OutputSlot::Dummy`] where it was
+///    `0`.
 ///
 /// ## Who opens, and what that reveals
 ///
@@ -332,8 +349,8 @@ pub type ObliviousOutput = (Vec<OutputSlot>, ObliviousOutputCost);
 /// `B` must be `>= candidates.len()` so every candidate gets a slot — we NEVER
 /// silently truncate candidates (that could drop a true match and corrupt the
 /// result). A `B < candidates.len()` is a [`MpcError::Protocol`] error. (The
-/// caller sizes `B` from the public candidate count `|L|·|R|`, optionally padded;
-/// the true MATCH count stays hidden.)
+/// caller sizes `B` from the public candidate count `|L|·|R|`, optionally padded,
+/// so `B` never tracks the true MATCH count.)
 pub fn oblivious_set_output(
     backend: &ShamirBackend,
     candidates: &[Candidate],
@@ -352,9 +369,12 @@ pub fn oblivious_set_output(
 }
 
 /// [`oblivious_set_output`] with every sharing and the shuffle drawn through
-/// `source` — the selector sharings, the real-tag sharings, the pure-dummy
-/// selectors, the payload-limb sharings and the oblivious shuffle itself, in that
-/// order.
+/// `source`, in this order: per candidate its selector sharing, its real-tag
+/// sharing and then the `2t + 1` re-sharings of the degree reduction that
+/// re-randomises its tag select; then the same triple for each pure-dummy padding
+/// slot; then, per slot and per packed limb, the limb sharing followed by the
+/// `2t + 1` re-sharings of that limb's reduction; and last the oblivious shuffle
+/// itself.
 ///
 /// Refuses a source whose `(n, t)` differs from `backend`'s
 /// ([`require_source_matches`]) **before any draw**, since every sharing is later
@@ -1692,6 +1712,52 @@ mod tests {
         assert_eq!(mine.holder, public.holder);
     }
 
+    /// Corrupting payload-limb shares exercises the degree-`t` open's RS
+    /// redundancy, which is what pins the opens to degree `t`.
+    ///
+    /// At `n = 5`, `t = 2`, a degree-`t` sharing has `n - t - 1 = 2` redundant
+    /// shares, so Berlekamp–Welch CORRECTS one corrupted share and DETECTS two.
+    /// Both halves are asserted on the real path:
+    ///
+    /// - ONE corrupted share: the open corrects it and the revealed slots are
+    ///   byte-identical to the untouched run. That is the load-bearing half for the
+    ///   degree: opened at degree `2t = 4` the sharing would have `n - 2t - 1 = 0`
+    ///   redundant shares, the corrupted share would be absorbed into a DIFFERENT
+    ///   value, and the slots could not come back unchanged.
+    /// - TWO corrupted shares: past the correction budget, so the call refuses
+    ///   rather than emitting a slot built from a value nobody shared.
+    #[test]
+    fn corrupted_limb_shares_are_corrected_then_refused_at_n5() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E05).unwrap();
+        assert_eq!(backend.threshold(), 2);
+        let cands = recipient_candidates();
+        let fresh = || {
+            oblivious_set_output_to_recipient(&backend, &cands, 1, 6, HolderId::new("recipient"))
+                .unwrap()
+                .0
+        };
+        let clean = fresh().reconstruct().expect("the untouched sharings open");
+
+        // One corrupted share: corrected, same result.
+        let mut one = fresh();
+        one.slots[0].1[0][2].y = one.slots[0].1[0][2].y.add(Fp::one());
+        assert_eq!(
+            one.reconstruct()
+                .expect("one corrupted share must be corrected"),
+            clean,
+            "the degree-t open must correct one corrupted share to the same value"
+        );
+
+        // Two corrupted shares: past the budget, so the call must fail closed.
+        let mut two = fresh();
+        two.slots[0].1[0][2].y = two.slots[0].1[0][2].y.add(Fp::one());
+        two.slots[0].1[0][3].y = two.slots[0].1[0][3].y.add(Fp::new(7));
+        match two.reconstruct() {
+            Err(MpcError::Tampered { .. }) | Err(MpcError::Protocol(_)) => {}
+            other => panic!("two corrupted limb shares must be refused, got {:?}", other),
+        }
+    }
+
     /// The real (non-dummy) rows of an output, as an order-independent multiset.
     fn real_multiset(slots: &[OutputSlot]) -> Vec<String> {
         let mut m: Vec<String> = slots
@@ -2528,7 +2594,8 @@ mod tests {
             let recovered = pad.add(x_coeff(&h_limb).mul(x_coeff(&h_tag).inv()));
             assert_eq!(
                 recovered, limb,
-                "the recovery formula must work on an unreduced product sharing —                  otherwise the assertions below prove nothing"
+                "the recovery formula must work on an unreduced product sharing \
+                 — otherwise the assertions below prove nothing"
             );
         }
         // The real path: 64 trials, the same formula, never the rejected row.
