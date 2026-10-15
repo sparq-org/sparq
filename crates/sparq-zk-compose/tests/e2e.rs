@@ -6344,6 +6344,75 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
     );
 }
 
+/// HIDDEN-ONLY, METHOD POLICY: the manifest's `hidden_issuer_attestations[i].message`
+/// is a FREE field, so it has to be held to the candidate set — it is what selects
+/// the commitment method the hidden-issuer gate is then required to bind.
+///
+/// Over the same valid hidden-only proof as the happy path above:
+/// - the honest method-UNBOUND message verifies under the default policy, and is
+///   refused with `MethodNotAuthenticated` once the relying party requires an
+///   authenticated method (the credential attests none);
+/// - that same message replaced by a value matching NO candidate is refused with
+///   `HiddenIssuerMessageMismatch` under BOTH policies, so a declared message
+///   outside the candidate set cannot carry a presentation past the policy.
+#[test]
+#[ignore = "slow: full bb prove of a scan + the hidden-issuer member (hidden-only method policy)"]
+fn hidden_issuer_only_message_is_held_to_the_method_policy() {
+    use sparq_zk_compose::MethodPolicy;
+    if !toolchain_available() {
+        eprintln!("nargo/bb absent; skipping the hidden-only method-policy case");
+        return;
+    }
+    let prover = CircuitProver::from_crate_root();
+    let signer = test_issuer_sk(1);
+    let (mut manifest, c, salt) =
+        hi_scan_manifest_no_clear_attestation(&prover, "hi_policy_scan");
+    let challenge = Fr::from(0x2au64);
+    let keyset = hi_keyset();
+    let signers = hi_canonical_signers();
+    let signer_index = keyset
+        .member_index(&public_key_to_hex(&signer.public_key()))
+        .expect("signer in K") as u64;
+    let hidden = prove_hidden_issuer(
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, "hi_policy",
+    );
+    manifest.hidden_issuer_attestations = vec![hidden];
+    let strict = hi_keyset().with_method_policy(MethodPolicy::current().require_method_bound());
+
+    let run = |m: &ProofManifest, ks: &KeySet, tag: &str| {
+        verify_manifest(
+            m, &prover, &scratch(tag), ks, &fresh_policy(),
+            &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(),
+            &EntailmentPolicy::simple_only(),
+            &nonce_for("0x2a"), &InMemorySeenNonces::new(),
+        )
+    };
+
+    run(&manifest, &keyset, "hi_policy_default")
+        .expect("the honest hidden-only presentation still verifies by default");
+    match run(&manifest, &strict, "hi_policy_strict") {
+        Err(CheckError::MethodNotAuthenticated { .. }) => {}
+        other => panic!("expected MethodNotAuthenticated under require_method_bound, got {other:?}"),
+    }
+
+    // The SAME proof, with the declared message replaced by a non-candidate value.
+    let mut mutated = manifest.clone();
+    mutated.hidden_issuer_attestations[0].message = FieldHex::from_field(&Fr::from(1u64));
+    // It is wire-expressible: it survives a JSON round-trip unchanged.
+    let round_tripped =
+        ProofManifest::from_json(&mutated.to_json()).expect("the mutated manifest parses");
+    assert_eq!(
+        round_tripped.hidden_issuer_attestations[0].message,
+        mutated.hidden_issuer_attestations[0].message
+    );
+    for (label, ks) in [("default", keyset.clone()), ("require_method_bound", strict.clone())] {
+        match run(&round_tripped, &ks, "hi_policy_mutated") {
+            Err(CheckError::HiddenIssuerMessageMismatch { .. }) => {}
+            other => panic!("[{label}] expected HiddenIssuerMessageMismatch, got {other:?}"),
+        }
+    }
+}
+
 /// OUT-OF-SET KEY: a REAL signature by an issuer NOT in K. Its signature is valid
 /// (the schnorr gadget accepts it), but the key is not a member of the committed
 /// set, so the in-circuit membership fold cannot recompute key_set_root -- the

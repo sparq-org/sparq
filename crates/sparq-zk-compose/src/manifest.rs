@@ -2284,14 +2284,36 @@ pub struct HiddenIssuerAttestation {
     /// input). Checked byte-equal to the relying party's authoritative root.
     pub key_set_root: FieldHex,
     /// The issuer-signed commitment message `m` the proof binds (the proof's
-    /// PUBLIC input). Checked equal to the message the verifier recomputes from the
-    /// disclosed commitment + salt + status reference.
+    /// PUBLIC input).
+    ///
+    /// For a HIDDEN-ONLY commitment — one with no clear
+    /// [`CommitmentAttestation`] — this field is ENFORCED, on EVERY entry
+    /// declared over that commitment: each must EQUAL one of the candidate
+    /// messages the verifier builds from the disclosed commitment + salt +
+    /// status reference (the method-UNBOUND `ZKSIG_C3` message plus the
+    /// method-bound `ZKSIG_M5` message of each recognised commitment method),
+    /// and all of them must equal the SAME candidate. Which candidate that is
+    /// authenticates the commitment's method (`crate::method_auth`), and the
+    /// relying party's `MethodPolicy` then applies to that method; a value equal
+    /// to no candidate, one that does not decode, or two entries selecting
+    /// different candidates are refused
+    /// (`crate::verifier::CheckError::HiddenIssuerMessageMismatch`). The bb
+    /// stage additionally byte-compares the proof's public input against the
+    /// message the verifier recomputes for the authenticated method, so this
+    /// field cannot select one method and bind another.
+    ///
+    /// In ADDITIVE mode — a clear [`CommitmentAttestation`] over the same
+    /// commitment alongside the hidden proof — the method comes from the clear
+    /// signature instead, and the bb stage binds the hidden proof to the message
+    /// of THAT method. This declared field must still equal that message: the
+    /// hidden-issuer stage checks every entry's declared `m` against the message
+    /// its proof is checked against before decoding any proof.
     pub message: FieldHex,
     /// The per-graph RDFC10 bnode salt this commitment was committed under (audit
     /// #9), hex. Carried HERE so the verifier can recompute the issuer-signed
-    /// message `m = commitment_message_with_status(C(G), salt, status_ref)` for a
-    /// HIDDEN-ONLY commitment — one with NO clear [`CommitmentAttestation`] from
-    /// which to read the salt (sq-xxg). The salt is NOT the privacy target (only
+    /// message `m` over `(C(G), salt, status_ref)` for a HIDDEN-ONLY commitment —
+    /// one with NO clear [`CommitmentAttestation`] from which to read the salt
+    /// (sq-xxg). The salt is NOT the privacy target (only
     /// WHICH issuer signed is hidden); disclosing it is consistent with the clear
     /// path, and it still participates in the salt-uniqueness guarantee (audit #9).
     ///
