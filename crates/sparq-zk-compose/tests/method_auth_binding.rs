@@ -438,6 +438,147 @@ fn an_unmatched_hidden_only_message_is_refused() {
         .expect("a method-bound hidden message passes the strict policy");
 }
 
+/// A hidden-issuer entry over `c` declaring `message`, with the salt disclosed on
+/// the entry itself. The `proof_hex` is empty: these tests stop at the pre-filter,
+/// which is the stage that reads the declared message.
+fn hidden_entry(c: Fr, salt: Fr, message: FieldHex) -> HiddenIssuerAttestation {
+    HiddenIssuerAttestation {
+        commitment: FieldHex::from_field(&c),
+        depth: HIDDEN_DEPTH,
+        key_set_root: FieldHex("0x0".into()),
+        message,
+        salt: Some(FieldHex::from_field(&salt)),
+        proof_hex: String::new(),
+    }
+}
+
+/// EVERY hidden-only commitment gets its OWN policy decision, not just the first
+/// one the scan loop reaches.
+///
+/// Two scans over two distinctly-salted committed graphs, both hidden-only: the
+/// first declares the method-BOUND `ZKSIG_M5` message, the second the
+/// method-UNBOUND one. Under `require_method_bound` the second must be refused —
+/// the first commitment's admitted entry must not stand in for it, and the
+/// second must not fall through to an absent-key default.
+#[test]
+fn each_hidden_only_commitment_gets_its_own_policy_decision() {
+    let sk = SecretKey::from_seed(1);
+    let (mut m, c1, salt1) = scan_manifest();
+    let salt2 = salt_from_bytes(&[9u8; 32]);
+    let graph2 = vec![Triple::new(
+        NamedOrBlankNode::NamedNode(iri("http://ex/bob")),
+        iri("http://ex/age"),
+        Term::Literal(Literal::new_typed_literal(
+            "30",
+            iri("http://www.w3.org/2001/XMLSchema#integer"),
+        )),
+    )];
+    let commit2 = commit_triples(&graph2, salt2).unwrap();
+    let c2 = commit2.commitment;
+    let pattern = Pattern {
+        s: Slot::Var,
+        p: Slot::Const(Term::NamedNode(iri("http://ex/age"))),
+        o: Slot::Var,
+    };
+    let scan2 = build_scan(&[commit2], &pattern).unwrap();
+    m.sub_proofs.push(SubProof { inputs: scan2.inputs, proof_hex: String::new() });
+    m.attributions.push(vec![0]);
+    m.query = "SELECT ?s ?o ?t ?u WHERE { ?s <http://ex/age> ?o . ?t <http://ex/age> ?u }".into();
+
+    let bound1 = sparq_zk::sig::presentation_message_with_status_and_scheme(
+        &c1,
+        &salt1,
+        &fixture_status_ref(),
+        &scheme_iri_to_field(CommitmentMethod::DualLeafV2.scheme_iri()),
+    );
+    let unbound2 = sparq_zk::sig::commitment_message_with_status(&c2, &salt2, &fixture_status_ref());
+    m.hidden_issuer_attestations = vec![
+        hidden_entry(c1, salt1, FieldHex::from_field(&bound1)),
+        hidden_entry(c2, salt2, FieldHex::from_field(&unbound2)),
+    ];
+    let strict = trusted(&sk)
+        .with_hidden_issuer_depth(HIDDEN_DEPTH)
+        .with_method_policy(MethodPolicy::current().require_method_bound());
+    match prefilter_manifest_structure(&m, &strict, &fresh_policy()) {
+        Err(CheckError::MethodNotAuthenticated { .. }) => {}
+        other => panic!(
+            "expected MethodNotAuthenticated for the second, method-unbound hidden-only commitment, got {other:?}"
+        ),
+    }
+}
+
+/// A hidden-only commitment with NO disclosed status reference builds no
+/// candidate set, so the message the bb gate would bind is the method-UNBOUND
+/// one — and `require_method_bound` must refuse it, through the whole
+/// pre-filter (not only through the helper that classifies the message).
+#[test]
+fn a_hidden_only_commitment_without_a_status_reference_is_refused_when_a_method_is_required() {
+    let sk = SecretKey::from_seed(1);
+    let (mut m, c, salt) = scan_manifest();
+    m.revocation = None;
+    let bound = sparq_zk::sig::presentation_message_with_status_and_scheme(
+        &c,
+        &salt,
+        &fixture_status_ref(),
+        &scheme_iri_to_field(CommitmentMethod::DualLeafV2.scheme_iri()),
+    );
+    m.hidden_issuer_attestations = vec![hidden_entry(c, salt, FieldHex::from_field(&bound))];
+    let strict = trusted(&sk)
+        .with_hidden_issuer_depth(HIDDEN_DEPTH)
+        .with_method_policy(MethodPolicy::current().require_method_bound());
+    match prefilter_manifest_structure(&m, &strict, &fresh_policy()) {
+        Err(CheckError::MethodNotAuthenticated { .. }) => {}
+        other => panic!(
+            "expected MethodNotAuthenticated with no candidate set to bind a method, got {other:?}"
+        ),
+    }
+}
+
+/// The declared message of EVERY hidden entry over a hidden-only commitment is
+/// checked, so the verdict does not depend on the order the prover listed them
+/// in: `[honest, unmatched]` and `[unmatched, honest]` are both refused.
+///
+/// Two entries that each DO match a candidate but match DIFFERENT ones are
+/// refused the same way, in either order: there is then no single method for the
+/// relying party's policy to decide on, so neither is taken.
+#[test]
+fn every_hidden_entry_declared_message_is_checked_in_either_order() {
+    let sk = SecretKey::from_seed(1);
+    let (m, c, salt) = scan_manifest();
+    let honest = FieldHex::from_field(&sparq_zk::sig::commitment_message_with_status(
+        &c,
+        &salt,
+        &fixture_status_ref(),
+    ));
+    let bound = FieldHex::from_field(
+        &sparq_zk::sig::presentation_message_with_status_and_scheme(
+            &c,
+            &salt,
+            &fixture_status_ref(),
+            &scheme_iri_to_field(CommitmentMethod::DualLeafV2.scheme_iri()),
+        ),
+    );
+    let unmatched = FieldHex::from_field(&Fr::from(1u64));
+    let keys = trusted(&sk).with_hidden_issuer_depth(HIDDEN_DEPTH);
+    let orders = [
+        ("honest first", vec![honest.clone(), unmatched.clone()]),
+        ("unmatched first", vec![unmatched, honest.clone()]),
+        ("unbound then bound", vec![honest.clone(), bound.clone()]),
+        ("bound then unbound", vec![bound, honest]),
+    ];
+    for (label, messages) in orders {
+        let mut mm = m.clone();
+        mm.hidden_issuer_attestations = messages
+            .into_iter()
+            .map(|message| hidden_entry(c, salt, message))
+            .collect();
+        match prefilter_manifest_structure(&mm, &keys, &fresh_policy()) {
+            Err(CheckError::HiddenIssuerMessageMismatch { .. }) => {}
+            other => panic!("[{}] expected HiddenIssuerMessageMismatch, got {:?}", label, other),
+        }
+    }
+}
+
 // --------------------------------------------------------- live toolchain lane
 
 fn toolchain_available() -> bool {
@@ -656,4 +797,132 @@ fn live_hidden_issuer_proof_over_the_m5_message() {
         &InMemorySeenNonces::new(),
     )
     .expect("a hidden-issuer proof over the M5 message verifies end to end");
+}
+
+/// LIVE, ADDITIVE mode: a commitment carrying BOTH a clear `ZKSIG_M5`
+/// attestation AND a hidden-issuer proof over that same M5 message, under
+/// `require_method_bound`.
+///
+/// This is the shape the declared-message rule must NOT disturb. With a clear
+/// attestation present the method comes from the clear signature, and the
+/// hidden-issuer stage then byte-compares the message it recomputes from that
+/// authenticated method — so the clear-authenticated method is what the hidden
+/// proof is held to, and the manifest verifies. Recording the method-unbound
+/// default for the clear attestation instead would make the recomputed message
+/// disagree with the proof's public input and fail this test.
+///
+/// `#[ignore]`: it proves both a scan member and the depth-4 hidden-issuer
+/// member, the same cost as the live tests above.
+#[test]
+#[ignore = "slow: full bb prove of a scan + the hidden-issuer member"]
+fn live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message() {
+    use sparq_zk_compose::driver::CircuitProver;
+    use sparq_zk_compose::issuer::{
+        hidden_issuer_prover_toml, key_membership_witness, key_set_root, HiddenIssuerWitness,
+    };
+    use sparq_zk_compose::manifest::CircuitId;
+    use sparq_zk_compose::toml::prover_toml_for;
+    use sparq_zk_compose::verifier::{
+        encode_artifacts, verify_manifest, EntailmentPolicy, HolderBindingPolicy, HolderRegistry,
+        InMemorySeenNonces, VerifierNonce,
+    };
+
+    if !toolchain_available() {
+        eprintln!("nargo/bb absent; skipping the live additive hidden-issuer M5 test");
+        return;
+    }
+    const DEPTH: u32 = 4;
+    let method = CommitmentMethod::DualLeafV2;
+    // ONE trusted issuer, so its canonical index is 0 and the order is trivial.
+    let sk = SecretKey::from_seed(1);
+    let keyset = trusted(&sk)
+        .with_hidden_issuer_depth(DEPTH)
+        .with_method_policy(MethodPolicy::current().require_method_bound());
+
+    let salt = salt_from_bytes(&GRAPH_SALT);
+    let commit = commit_triples(&credential_graph(), salt).unwrap();
+    let commitment = commit.commitment;
+    let pattern = Pattern {
+        s: Slot::Var,
+        p: Slot::Const(Term::NamedNode(iri("http://ex/age"))),
+        o: Slot::Var,
+    };
+    let scan = build_scan(&[commit], &pattern).unwrap();
+    let challenge = FieldHex("0x2a".into());
+    let challenge_fr = challenge.to_field().unwrap();
+    let prover = CircuitProver::from_crate_root();
+    let (scan_id, scan_toml) = prover_toml_for(
+        &scan.inputs,
+        &challenge,
+        &scan.witness.counts,
+        &scan.witness.enc,
+        &[],
+        None,
+        None,
+    )
+    .unwrap();
+    let scan_art = prover
+        .prove_in(&scan_id, &scan_toml, &scratch("add_m5_scan"), "add_m5_scan")
+        .expect("the scan member proves");
+
+    let scheme = scheme_iri_to_field(method.scheme_iri());
+    let message = sparq_zk::sig::presentation_message_with_status_and_scheme(
+        &commitment,
+        &salt,
+        &fixture_status_ref(),
+        &scheme,
+    );
+    let sig_hex = sk.sign_presentation_with_status_and_scheme(
+        &commitment,
+        &salt,
+        &fixture_status_ref(),
+        &scheme,
+    );
+    let sig = sparq_zk::sig::signature_from_hex(&sig_hex).unwrap();
+    let schnorr = sparq_zk::sig::in_circuit_witness(&sk.public_key(), &message, &sig).unwrap();
+    let pks = vec![sk.public_key()];
+    let root = key_set_root(&pks, DEPTH).expect("root");
+    let siblings = key_membership_witness(&pks, DEPTH, 0).expect("path");
+    let hi_toml = hidden_issuer_prover_toml(
+        &challenge_fr,
+        &message,
+        &root,
+        &HiddenIssuerWitness { schnorr, index: 0, siblings },
+    );
+    let hi_art = prover
+        .prove_in(
+            &CircuitId::HiddenIssuer { depth: DEPTH },
+            &hi_toml,
+            &scratch("add_m5_issuer"),
+            "add_m5_issuer",
+        )
+        .expect("the hidden-issuer member proves");
+
+    let (mut m, _, _) = scan_manifest();
+    m.sub_proofs = vec![SubProof { inputs: scan.inputs, proof_hex: encode_artifacts(&scan_art) }];
+    // ADDITIVE: a clear M5 attestation AND a hidden proof over the same message.
+    m.commitment_attestations = vec![attest_bound(commitment, salt, method, &sk)];
+    m.hidden_issuer_attestations = vec![HiddenIssuerAttestation {
+        commitment: FieldHex::from_field(&commitment),
+        depth: DEPTH,
+        key_set_root: FieldHex::from_field(
+            &keyset.hidden_issuer_root(DEPTH).expect("authoritative root"),
+        ),
+        message: FieldHex::from_field(&message),
+        salt: None,
+        proof_hex: encode_artifacts(&hi_art),
+    }];
+    verify_manifest(
+        &m,
+        &prover,
+        &scratch("add_m5_verify"),
+        &keyset,
+        &fresh_policy(),
+        &HolderRegistry::empty(),
+        &HolderBindingPolicy::allow_bearer(),
+        &EntailmentPolicy::simple_only(),
+        &VerifierNonce::from_hex("0x2a").unwrap(),
+        &InMemorySeenNonces::new(),
+    )
+    .expect("a clear M5 attestation alongside a hidden proof over that same M5 message verifies");
 }

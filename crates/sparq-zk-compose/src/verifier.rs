@@ -2713,8 +2713,13 @@ struct Prefiltered {
     ///
     /// A commitment absent from the map had no method authenticated, which the
     /// consumers treat as the method-UNBOUND case — i.e. exactly the behaviour
-    /// that predates method authentication. Every commitment the attestation gate
-    /// accepted, clear or hidden-only, carries an explicit entry.
+    /// that predates method authentication. Every clear-attested commitment the
+    /// attestation gate accepted carries an explicit entry, and so does every
+    /// hidden-only one whose per-graph salt the manifest resolves. A hidden-only
+    /// commitment with NO resolvable salt gets no entry: its message cannot be
+    /// recomputed, so no candidate set can be built for it, and the bb
+    /// hidden-issuer stage refuses it as unreferenced (fail-closed) before any
+    /// consumer reads the map.
     methods: AuthenticatedMethods,
 }
 
@@ -3120,8 +3125,9 @@ fn authenticate_attestation_method(
 }
 
 /// Authenticate the COMMITMENT METHOD of a HIDDEN-ONLY commitment — one with no
-/// clear [`crate::manifest::CommitmentAttestation`] — by matching the hidden
-/// entry's declared public `m` against the same verifier-built candidate set.
+/// clear [`crate::manifest::CommitmentAttestation`] — by matching the declared
+/// public `m` of EVERY hidden entry over that commitment against the same
+/// verifier-built candidate set, and requiring them all to select the same one.
 ///
 /// The outcomes are kept apart because the caller must treat them differently:
 /// see [`HiddenOnlyMethod`] for the two it must apply the policy to, and the
@@ -3150,41 +3156,61 @@ fn authenticate_hidden_only_method(
     let Some(status_ref) = status_ref_from_revocation(rev) else {
         return Ok(HiddenOnlyMethod::NoCandidateSet);
     };
-    let declared = manifest
-        .hidden_issuer_attestations
-        .iter()
-        .find(|hi| hi.commitment.to_field() == Some(*c_fr))
-        .and_then(|hi| hi.message.to_field());
-    // A candidate set exists from here on, so a declared `m` that is absent or
-    // does not decode cannot equal any candidate: refused like any other
-    // unmatched message rather than left to the method-unbound default.
-    let Some(declared) = declared else {
-        return Err(CheckError::HiddenIssuerMessageMismatch {
-            commitment: label.to_string(),
-        });
-    };
     let inputs = CommitmentMessageInputs {
         commitment: c_fr,
         salt: salt_fr,
         status_ref: &status_ref,
         holder_digest: None,
     };
-    match method_auth::classify(&method_auth::candidate_messages(&inputs), |m| {
-        *m == declared
-    }) {
-        Ok(authenticated) => Ok(HiddenOnlyMethod::Authenticated(authenticated)),
-        Err(MethodAuthError::NoCandidateVerified) => {
-            Err(CheckError::HiddenIssuerMessageMismatch {
-                commitment: label.to_string(),
-            })
+    let candidates = method_auth::candidate_messages(&inputs);
+    let mismatch = || CheckError::HiddenIssuerMessageMismatch {
+        commitment: label.to_string(),
+    };
+    // EVERY hidden-issuer entry declared over this commitment is checked, not
+    // just the first one found: each must decode and equal a candidate, and all
+    // of them must select the SAME candidate. Checking only one entry would make
+    // the verdict depend on the order the prover happened to list them in, and
+    // would leave the others' declared `m` unread even though the bb stage
+    // byte-compares each of them against a recomputed message.
+    let mut selected: Option<AuthenticatedMethod> = None;
+    for hi in manifest
+        .hidden_issuer_attestations
+        .iter()
+        .filter(|hi| hi.commitment.to_field() == Some(*c_fr))
+    {
+        // A candidate set exists from here on, so a declared `m` that is absent
+        // or does not decode cannot equal any candidate: refused like any other
+        // unmatched message rather than left to the method-unbound default.
+        let Some(declared) = hi.message.to_field() else {
+            return Err(mismatch());
+        };
+        let authenticated = match method_auth::classify(&candidates, |m| *m == declared) {
+            Ok(authenticated) => authenticated,
+            Err(MethodAuthError::NoCandidateVerified) => return Err(mismatch()),
+            // Unreachable with an equality predicate over pairwise-distinct
+            // candidate messages, but refused rather than resolved so the rule
+            // stays total without resting on that.
+            Err(_) => {
+                return Err(CheckError::AmbiguousMethod {
+                    commitment: label.to_string(),
+                })
+            }
+        };
+        match selected {
+            None => selected = Some(authenticated),
+            // Two entries over one commitment naming different methods leave no
+            // single method for the policy to decide on, so neither is taken.
+            Some(prev) if prev != authenticated => return Err(mismatch()),
+            Some(_) => {}
         }
-        // Unreachable with an equality predicate over pairwise-distinct candidate
-        // messages, but refused rather than resolved so the rule stays total
-        // without resting on that.
-        Err(_) => Err(CheckError::AmbiguousMethod {
-            commitment: label.to_string(),
-        }),
     }
+    // No entry at all over this commitment: the caller only reaches here for a
+    // hidden-COVERED commitment, so this is unreachable, but a candidate set
+    // exists and nothing selected one — refused rather than defaulted.
+    let Some(selected) = selected else {
+        return Err(mismatch());
+    };
+    Ok(HiddenOnlyMethod::Authenticated(selected))
 }
 
 /// What [`authenticate_hidden_only_method`] established about a HIDDEN-ONLY

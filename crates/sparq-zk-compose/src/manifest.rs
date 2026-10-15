@@ -2286,16 +2286,26 @@ pub struct HiddenIssuerAttestation {
     /// The issuer-signed commitment message `m` the proof binds (the proof's
     /// PUBLIC input).
     ///
-    /// It must EQUAL one of the candidate messages the verifier builds from the
-    /// disclosed commitment + salt + status reference — the method-UNBOUND
-    /// `ZKSIG_C3` message plus the method-bound `ZKSIG_M5` message of each
-    /// recognised commitment method. Which one it equals is what authenticates a
-    /// HIDDEN-ONLY commitment's method (`crate::method_auth`), and the relying
-    /// party's `MethodPolicy` then applies to that method; a value equal to none
-    /// of them is refused (`crate::verifier::CheckError::HiddenIssuerMessageMismatch`).
-    /// The bb stage additionally byte-compares the proof's public input against
-    /// the message the verifier recomputes for the authenticated method, so this
+    /// For a HIDDEN-ONLY commitment — one with no clear
+    /// [`CommitmentAttestation`] — this field is ENFORCED, on EVERY entry
+    /// declared over that commitment: each must EQUAL one of the candidate
+    /// messages the verifier builds from the disclosed commitment + salt +
+    /// status reference (the method-UNBOUND `ZKSIG_C3` message plus the
+    /// method-bound `ZKSIG_M5` message of each recognised commitment method),
+    /// and all of them must equal the SAME candidate. Which candidate that is
+    /// authenticates the commitment's method (`crate::method_auth`), and the
+    /// relying party's `MethodPolicy` then applies to that method; a value equal
+    /// to no candidate, one that does not decode, or two entries selecting
+    /// different candidates are refused
+    /// (`crate::verifier::CheckError::HiddenIssuerMessageMismatch`). The bb
+    /// stage additionally byte-compares the proof's public input against the
+    /// message the verifier recomputes for the authenticated method, so this
     /// field cannot select one method and bind another.
+    ///
+    /// In ADDITIVE mode — a clear [`CommitmentAttestation`] over the same
+    /// commitment alongside the hidden proof — the method comes from the clear
+    /// signature instead, and the bb stage binds the hidden proof to the message
+    /// of THAT method. This declared field is then not consulted.
     pub message: FieldHex,
     /// The per-graph RDFC10 bnode salt this commitment was committed under (audit
     /// #9), hex. Carried HERE so the verifier can recompute the issuer-signed

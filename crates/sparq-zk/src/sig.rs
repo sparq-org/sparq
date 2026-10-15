@@ -1109,6 +1109,17 @@ pub fn commitment_message_with_status_and_scheme(
 /// `(status-only | holder-bound) × (method-unbound | method-bound)` combination
 /// now has exactly one signed-message shape.
 ///
+/// # Where it sits among the method-bound shapes
+/// This is the HOLDER-BOUND presentation message. Its non-holder-bound
+/// counterpart for a PRESENTATION is `ZKSIG_M5`
+/// ([`presentation_message_with_status_and_scheme`]), not `ZKSIG_M3`: the
+/// method-bound status-only case has TWO shapes, because recording a commitment
+/// in an issuer's registry (`ZKSIG_M3`,
+/// [`commitment_message_with_status_and_scheme`]) is a separate statement from
+/// authorising its presentation (`ZKSIG_M5`). A verifier authenticating the
+/// method of a manifest attestation therefore builds candidates from `ZKSIG_M4`
+/// and `ZKSIG_M5`, never from `ZKSIG_M3`.
+///
 /// # Purely additive
 /// It adds a NEW message shape under a NEW domain tag and changes no existing
 /// message, so every already-issued signature keeps verifying over the message it
@@ -1152,6 +1163,18 @@ pub fn commitment_message_with_holder_and_scheme(
 /// [`commitment_message_with_holder`] / [`commitment_message_with_holder_and_scheme`].
 /// Under two tags the issuer states each thing separately, and neither signature
 /// verifies over the other's message.
+///
+/// The separation covers the method-BOUND shapes only. A registry entry signed by
+/// the issuance path BEFORE the signature covered the method carries a signature
+/// over the method-unbound `ZKSIG_C3` [`commitment_message_with_status`] message,
+/// which is byte-identical to the message a method-unbound presentation
+/// attestation signs — so such an entry stays indistinguishable from a `ZKSIG_C3`
+/// presentation attestation, and a verifier authenticating the method classifies
+/// it as carrying no attested method. The default `MethodPolicy` accepts that
+/// (`Unbound`), which is what keeps every already-issued credential verifying;
+/// a relying party that will not accept it writes down `require_method_bound()`,
+/// which refuses every `ZKSIG_C3`/`ZKSIG_C4` attestation and so excludes this
+/// case too.
 ///
 /// # Purely additive
 /// A NEW message shape under a NEW domain tag; no existing message changes, so
@@ -2963,10 +2986,12 @@ mod tests {
         }
     }
 
-    /// Known-answer digests for the four signed commitment messages: the
-    /// manifest attestation's `ZKSIG_C2` / `ZKSIG_C3` and the registry entry's
-    /// `ZKSIG_M2` / `ZKSIG_M3`, over fixed inputs. A changed tag, a reordered
-    /// slot, or one message routed through another's tag moves a digest.
+    /// Known-answer digests for the six signed commitment messages: the
+    /// manifest attestation's method-unbound `ZKSIG_C2` / `ZKSIG_C3`, the
+    /// registry entry's `ZKSIG_M2` / `ZKSIG_M3`, and the method-bound
+    /// PRESENTATION pair `ZKSIG_M5` (bearer) / `ZKSIG_M4` (holder-bound), over
+    /// fixed inputs. A changed tag, a reordered slot, or one message routed
+    /// through another's tag moves a digest.
     #[test]
     fn commitment_message_known_answers() {
         use crate::field::field_to_hex;
@@ -2974,6 +2999,7 @@ mod tests {
         let salt = Fr::from(0x2222u64);
         let status_ref = Fr::from(0x3333u64);
         let scheme_digest = Fr::from(0x4444u64);
+        let holder_pk_digest = Fr::from(0x5555u64);
         let c2 = commitment_message_with_salt(&commitment, &salt);
         let c3 = commitment_message_with_status(&commitment, &salt, &status_ref);
         let m2 = commitment_message_with_scheme(&commitment, &salt, &scheme_digest);
@@ -2983,11 +3009,26 @@ mod tests {
             &status_ref,
             &scheme_digest,
         );
+        let m5 = presentation_message_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &scheme_digest,
+        );
+        let m4 = commitment_message_with_holder_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &holder_pk_digest,
+            &scheme_digest,
+        );
         let got = [
             ("C2", field_to_hex(&c2)),
             ("C3", field_to_hex(&c3)),
             ("M2", field_to_hex(&m2)),
             ("M3", field_to_hex(&m3)),
+            ("M5", field_to_hex(&m5)),
+            ("M4", field_to_hex(&m4)),
         ];
         let expected = [
             (
@@ -3006,11 +3047,19 @@ mod tests {
                 "M3",
                 "0x2361d10863223581485a6b7d10fa24ce1ae9c391fe3f08d8eb33586571fc6c8b",
             ),
+            (
+                "M5",
+                "0x27191e0dd6fb02280c083410f59a6041cf6e425894742729c1896c78976c94a7",
+            ),
+            (
+                "M4",
+                "0x02efdff7cb3d8d242a43b7c5811f174fabd45a246c77528e2c97ac1eaf95f157",
+            ),
         ];
         for ((kind, g), (_, e)) in got.iter().zip(expected) {
             assert_eq!(g, e, "{kind} known-answer digest moved");
         }
-        // The four messages are pairwise distinct over these inputs.
+        // The six messages are pairwise distinct over these inputs.
         for i in 0..got.len() {
             for j in i + 1..got.len() {
                 assert_ne!(got[i].1, got[j].1, "{} == {}", got[i].0, got[j].0);

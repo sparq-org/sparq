@@ -26,19 +26,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CheckError::AmbiguousMethod`. For a HIDDEN-ONLY commitment the method is selected by the hidden
   entry's declared `message`, which must EQUAL one of the candidates — a value matching none of them
   is refused with `CheckError::HiddenIssuerMessageMismatch`, and the policy applies to the method the
-  hidden-issuer proof is then required to bind. New PRESENTATION message shapes and signers in
-  `sparq-zk`, each under its own domain tag: `sig::presentation_message_with_status_and_scheme`
-  (`ZKSIG_M5`, for a bearer attestation) and `sig::commitment_message_with_holder_and_scheme`
+  hidden-issuer proof is then required to bind. Every entry over a hidden-only commitment is checked,
+  and they must all select the same candidate, so the verdict does not depend on the order the entries
+  are listed in. New PRESENTATION message shapes and signers in `sparq-zk`, each under its own
+  domain tag: `sig::presentation_message_with_status_and_scheme` (`ZKSIG_M5`, for a bearer
+  attestation) and `sig::commitment_message_with_holder_and_scheme`
   (`ZKSIG_M4`, the one shape binding both a holder key and a method), signed with
   `SecretKey::{sign_presentation_with_status_and_scheme, sign_commitment_with_holder_and_scheme}`. A
   REGISTRY entry's own `ZKSIG_M3` signature is deliberately NOT a presentation attestation — recording
   a commitment in an issuer's registry is a separate statement from authorising its presentation, so
-  presenting one as a clear attestation reports `CheckError::InvalidIssuerSignature`. Back-compatible:
-  every manifest that verified before still verifies under the default policy — an attestation over
-  the method-unbound `ZKSIG_C3`/`ZKSIG_C4` message authenticates as `Unbound`, which the default
-  policy accepts, and a bad signature still reports `CheckError::InvalidIssuerSignature`. The
-  newly accepted manifests are only those carrying an issuer signature over a method-bound
-  PRESENTATION message (`ZKSIG_M5`/`ZKSIG_M4`). Not externally audited (sq-qhy4); no soundness or
+  presenting one as a clear attestation reports `CheckError::InvalidIssuerSignature`. Back-compatible
+  with ONE qualification: a hidden-issuer entry's declared `message` was previously not read at all,
+  and over a hidden-only commitment it is now required to equal a verifier-built candidate (for every
+  entry over that commitment), so a hidden-only manifest whose declared message is absent,
+  non-canonically spelled or unmatched is now refused with `CheckError::HiddenIssuerMessageMismatch`;
+  a refusal of a malformed hidden-only manifest may also be reported earlier, in the pre-filter, than
+  it was before. Otherwise every manifest that verified before still verifies under the default
+  policy — an attestation over the method-unbound `ZKSIG_C3`/`ZKSIG_C4` message authenticates as
+  `Unbound`, which the default policy accepts, and a bad signature still reports
+  `CheckError::InvalidIssuerSignature`. The newly accepted manifests are only those carrying an
+  issuer signature over a method-bound PRESENTATION message (`ZKSIG_M5`/`ZKSIG_M4`). Not externally
+  audited (sq-qhy4); no soundness or
   privacy property is claimed.
 - **sparq-zk:** `verify::fragment_typed_filters` re-derives a query's FILTER obligations keeping each
   constant as the typed `oxrdf::Literal` the query spells (`verify::TypedQueryFilter { variable, op,
