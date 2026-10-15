@@ -107,7 +107,10 @@ but does not bypass WAC; the applicable resource or inherited container ACL
 must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
 it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
-the new `ETag` only to a writer that may read the target.
+the new `ETag` only to a writer that may read the target. An insert-only `PATCH` that cannot
+apply (a target that is not RDF, or does not parse) is refused to an `acl:Append` writer without
+`acl:Read` as a write without access is; only a reader is told why. A `POST` names its member
+with the slug and a random suffix, so the name says nothing of what else was created.
 
 A rule may name its subject with `acl:agent`, `acl:agentClass foaf:Agent` (public)
 or `acl:AuthenticatedAgent`, or `acl:agentGroup`. A group grant resolves only when
@@ -580,7 +583,9 @@ What the server exposes, all discoverable from the storage description
   that may read the result; a linkset `PUT`'s `204` carries none. Nor is such a writer told
   anything a write keeps from before: a `PUT` without `Content-Type` (which would keep the stored
   type), a `PATCH` whose outcome depends on the content, and a write that the stored links, types
-  or content would refuse are all refused as a write without Modify is. A `Slug` names a new
+  or content would refuse are all refused as a write without Modify is (whether such a write is
+  admitted can still follow from how much room the stored links and types leave it). A `Slug`
+  names a new
   member only for a writer that may read the container; anyone else's member gets a name the
   server chooses, so the name says nothing about which members are there. A subscriber's
   subscription listing, and its `ETag`, change only with its own subscriptions.

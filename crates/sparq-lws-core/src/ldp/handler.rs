@@ -1689,14 +1689,26 @@ pub async fn patch_handler<S: Store>(
     //  - `Err(other)`       → a backend/blob inconsistency → surface the 500 (the caller is authorized,
     //                         so a 500 leaks nothing they could not already learn via a normal read).
     //
-    // Because authorization already ran above, a non-`NotFound` store error can be propagated
-    // immediately here WITHOUT an existence/state oracle: an UNAUTHORIZED caller never reaches this
-    // line (they returned the uniform 401/403 above), so a 500 is only ever seen by a caller permitted
-    // to read the target. (`ServerError` is not `Clone`; we distinguish present/absent via `current`.)
+    // An insert-only patch needs only Append, so a writer that may not read the target is told
+    // nothing about it when the patch cannot apply (its format, whether it parses, what the result
+    // would be): it gets the refusal it would get without access.
+    let reader = may_read(&target.iri, &granted);
+    let unread = |e: ServerError| {
+        if reader {
+            e
+        } else if token.web_id.is_none() {
+            state.unauthenticated()
+        } else {
+            ServerError::Forbidden
+        }
+    };
+    // A non-`NotFound` store error goes only to a caller permitted to read the target; an
+    // insert-only writer that may not gets the refusal above. (`ServerError` is not `Clone`; we
+    // distinguish present/absent via `current`.)
     let current: Option<crate::store::Resource> = match state.store.read(&target.iri).await {
         Ok(r) => Some(r),
         Err(ServerError::NotFound) => None,
-        Err(e) => return Err(e),
+        Err(e) => return Err(unread(e)),
     };
 
     // Apply preconditions against the current state's tag and modification time.
@@ -1715,23 +1727,16 @@ pub async fn patch_handler<S: Store>(
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
 
-    // An insert-only patch needs only Append, so a writer that may not read the target is told
-    // nothing about it when the patch cannot apply (its format, whether it parses, what the result
-    // would be): it gets the refusal it would get without access.
-    let reader = may_read(&target.iri, &granted);
-    let unread = |e: ServerError| {
-        if reader {
-            e
-        } else if token.web_id.is_none() {
-            state.unauthenticated()
-        } else {
-            ServerError::Forbidden
-        }
-    };
     // Determine the existing triples + the stored format (default Turtle for a new resource).
     let (existing_triples, stored_format) = match &current {
         Some(res) => {
-            let fmt = classify(Some(&res.meta.content_type)).unwrap_or(RdfFormat::Turtle);
+            // Nor is a resource that is not RDF parsed for it: whatever its bytes, the patch is
+            // refused, so its outcome follows the stored type alone, not the stored content.
+            let classified = classify(Some(&res.meta.content_type));
+            if classified.is_err() && !reader {
+                return Err(unread(ServerError::Forbidden));
+            }
+            let fmt = classified.unwrap_or(RdfFormat::Turtle);
             (
                 parse_to_triples(fmt, &res.body, &target.iri).map_err(unread)?,
                 fmt,

@@ -2556,6 +2556,10 @@ async fn update<S: Store + 'static>(
     if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &rmeta, format) {
         return unread(refused);
     }
+    // So is what the metadata could not hold, which the stored links and types count toward.
+    if let Err(e) = super::encode_meta(&rmeta) {
+        return unread(store_error(e));
+    }
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
     let (written, _guard, _) = write_with_meta(
@@ -3594,12 +3598,6 @@ async fn delete<S: Store + 'static>(
     uri: &str,
 ) -> Response {
     let storage = state.cfg.storage();
-    // Walking the subtree to lock it can answer (a member set aside, a container that keeps
-    // changing), so the delete is authorized again first; the check that counts is repeated once
-    // the locks are held.
-    if let Err(r) = recheck(state, Action::Delete, uri, agent).await {
-        return r;
-    }
     if let Err(r) = current(state, uri).await {
         return r;
     }
@@ -3620,15 +3618,15 @@ async fn delete<S: Store + 'static>(
         Ok(listing) => listing,
         Err(r) => return r,
     };
-    let meta = match current(state, uri).await {
-        Ok(m) => m,
-        Err(r) => return r,
-    };
     // The delete is authorized, now that its lock is held, before anything about the target (its
     // validators, its members) answers it.
     if let Err(r) = recheck(state, Action::Delete, uri, agent).await {
         return r;
     }
+    let meta = match current(state, uri).await {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
     // A data resource's date is compared only when it has one; a container's listing may have
     // one.
     if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
@@ -4705,18 +4703,6 @@ async fn linkset<S: Store + 'static>(
     if let Err(r) = read_check {
         return r;
     }
-    // A patch reads the linkset it patches (see [`patch`]), so it needs Read; a whole linkset
-    // replaces it, and needs Read only to compare it.
-    let read_check = if req.method == Method::PATCH {
-        recheck(state, Action::Read, uri, agent).await
-    } else if writes {
-        precondition_read_check(state, req, uri, agent, false).await
-    } else {
-        Ok(())
-    };
-    if let Err(r) = read_check {
-        return r;
-    }
     let meta = match state.resource_meta(uri).await {
         Ok(m) => m,
         Err(e) => return store_error(e),
@@ -4822,6 +4808,7 @@ async fn linkset<S: Store + 'static>(
                 patched,
                 locks,
                 LinksetValidator::Sent,
+                |refused| refused,
             )
             .await
         }
@@ -4885,6 +4872,8 @@ async fn linkset<S: Store + 'static>(
             // What is stored is not what was sent (references resolved, the server-managed links
             // restored), so a successful PUT carries no validator (RFC 9110 section 9.3.4): the
             // linkset and its tag are read with a GET.
+            // A patch needs Read; a whole linkset does not (see above).
+            let reader = state.allowed(Action::Read, uri, agent).await;
             store_linkset(
                 state,
                 req,
@@ -4893,6 +4882,7 @@ async fn linkset<S: Store + 'static>(
                 document,
                 locks,
                 LinksetValidator::Withheld,
+                |refused| if reader { refused } else { state.deny(agent) },
             )
             .await
         }
@@ -4912,7 +4902,9 @@ async fn linkset<S: Store + 'static>(
 /// user-managed links, holding `locks` (the resource's, exclusive, and its listing's) through the
 /// write. It must be a linkset ([`valid_linkset`]); relative references are resolved against the
 /// linkset's own URI, and the result is checked as it will be served and stored before anything
-/// is written. `204`, with the new tag as `validator` says, or the refusal.
+/// is written. `204`, with the new tag as `validator` says, or the refusal, passed through
+/// `unread` when it follows from what is stored.
+#[allow(clippy::too_many_arguments)]
 async fn store_linkset<S, L>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -4921,6 +4913,7 @@ async fn store_linkset<S, L>(
     document: Value,
     locks: L,
     validator: LinksetValidator,
+    unread: impl Fn(Response) -> Response,
 ) -> Response
 where
     S: Store + 'static,
@@ -4962,8 +4955,10 @@ where
             Err(e) => return store_error(e),
         }
     };
+    // What the stored format and types refuse, with the links, is refused to a writer that may
+    // not read the resource as a write without access is: it learns nothing of them.
     if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &meta, format.as_deref()) {
-        return refused;
+        return unread(refused);
     }
     // The linkset is checked whole, as it will be stored: inside the metadata it nests a
     // level deeper than in the patched document, and metadata that does not read back
@@ -4971,16 +4966,16 @@ where
     match super::encode_meta(&meta) {
         Ok(_) => {}
         Err(ServerError::Conflict(_)) => {
-            return problem(
+            return unread(problem(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 Some("the resource's metadata would be too large"),
-            )
+            ))
         }
         Err(_) => {
-            return problem(
+            return unread(problem(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Some("the linkset nests too deeply to be stored"),
-            )
+            ))
         }
     }
     // The tag of the document as written, once it is admitted: the stored links with the
@@ -12626,5 +12621,66 @@ mod tests {
                 assert_eq!(created.await, never.await, "{method} {:?}", who.subject);
             }
         }
+    }
+
+    /// Review finding: a DELETE was authorized again before its lock on the stored metadata,
+    /// not on the state before a change in flight, so a Delete grant that matched the resource
+    /// was refused while a write that would keep it matching was still under way.
+    #[tokio::test]
+    async fn a_delete_meanwhile_a_write_is_decided_under_its_lock() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let dave = "https://dave.example/#me";
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["delete"], "assignee": dave}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("dave", grant);
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let doc = st.cfg.absolute("/doc.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_write_of.lock().unwrap() = Some((doc.clone(), gate.clone()));
+        let put = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                let h = [
+                    ("content-type", "text/plain"),
+                    ("link", "<https://e.example/T>; rel=\"type\""),
+                ];
+                handle(&st, &req(Method::PUT, "/doc.txt", &h, "y"), &agent(OWNER))
+                    .await
+                    .status()
+            })
+        };
+        for _ in 0..200 {
+            if stored_meta(&st, &doc)
+                .await
+                .unwrap()
+                .is_some_and(|m| m.pending)
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(stored_meta(&st, &doc)
+            .await
+            .unwrap()
+            .is_some_and(|m| m.pending));
+        let delete = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                handle(&st, &req(Method::DELETE, "/doc.txt", &[], ""), &agent(dave))
+                    .await
+                    .status()
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        gate.add_permits(1);
+        assert!(put.await.unwrap().is_success());
+        assert_eq!(delete.await.unwrap(), StatusCode::NO_CONTENT);
     }
 }

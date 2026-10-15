@@ -1396,7 +1396,7 @@ _:p solid:inserts { <https://pod.example/alice/drop/note#a> <https://e.example/p
             "PUT",
             "/alice/drop/note.acl",
             Some("text/turtle"),
-            Body::from(acl),
+            Body::from(acl.clone()),
         )
         .await;
     assert_eq!(put_acl.status(), StatusCode::CREATED);
@@ -1404,6 +1404,37 @@ _:p solid:inserts { <https://pod.example/alice/drop/note#a> <https://e.example/p
         .request(
             "PATCH",
             "/alice/drop/note",
+            Some("text/n3"),
+            Body::from(insert),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    // Text it may not read is not parsed for it either: text that happens to parse as Turtle is
+    // refused the same way, and stays as it was.
+    let text = "<#a> <https://e.example/p> 0 .";
+    let r = h
+        .request(
+            "PUT",
+            "/alice/drop/text",
+            Some("text/plain"),
+            Body::from(text),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let r = h
+        .request(
+            "PUT",
+            "/alice/drop/text.acl",
+            Some("text/turtle"),
+            Body::from(acl.replace("drop/note>", "drop/text>")),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let insert = insert.replace("drop/note#a", "drop/text#a");
+    let r = h
+        .request(
+            "PATCH",
+            "/alice/drop/text",
             Some("text/n3"),
             Body::from(insert),
         )
