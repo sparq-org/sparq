@@ -319,7 +319,8 @@ What the server exposes, all discoverable from the storage description
 - **Storage**: `application/lws+json` containers with paging links, data resources with
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH` of a JSON
   data resource with RFC 6902 JSON Patch (`application/json-patch+json`), `DELETE` (with
-  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`,
+  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`
+  (a linkset has none of its own: `{resource}.meta.meta` is `404`, or the challenge),
   which take `PATCH` with JSON Patch and `PUT` of a whole `application/linkset+json` document
   (both advertised in `Allow`, the patch format in `Accept-Patch`; a failed precondition gets
   `412`, another content type on a `PUT` `415`). A linkset `PUT` replaces every user-managed link
@@ -572,7 +573,7 @@ What the server exposes, all discoverable from the storage description
   nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
   root compares its public storage description, which needs no Read. A data `PUT`'s, or any
   `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
-  that may read the resource; a linkset `PUT`'s `204` carries none. Nor is such a writer told
+  that may read the result; a linkset `PUT`'s `204` carries none. Nor is such a writer told
   anything a write keeps from before: a `PUT` without `Content-Type` (which would keep the stored
   type), a `PATCH` whose outcome depends on the content, and a write that the stored links, types
   or content would refuse are all refused as a write without Modify is. A `Slug` names a new

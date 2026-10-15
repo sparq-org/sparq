@@ -57,6 +57,7 @@ test('no `npm pack` lifecycle script writes to stdout', () => {
   // Pin the derivation itself: an empty/short list would make the assertion below vacuous.
   assert.deepEqual(chain, [
     'guardrails/prepare-build.mjs',
+    'scripts/copy-wasm-dl.mjs',
     'scripts/copy-wasm-node.mjs',
     'scripts/copy-wasm.mjs',
   ]);

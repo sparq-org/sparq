@@ -14,6 +14,7 @@
 #   - sparq-rsp-wasm    (the tier-b "W-rsp" windowed RSP-QL stream bundle — sq-nzcb)
 #   - sparq-text-wasm   (the tier-b "W-text" BM25 full-text bundle — sq-jbe6)
 #   - sparq-shacl-wasm  (the tier-b "W-shacl" SHACL validation bundle — sq-lfmf)
+#   - sparq-dl-wasm     (the OWL 2 DL reasoner bundle behind the npm `checkOwlDl` — #7031)
 # Opt-in features (sparq-wasm's `shacl`, sparq-reason-wasm's `explain`,
 # sparq-shacl-wasm's `shacl-af`) are NOT scanned here: they are off by default so the
 # default bundles stay lean, and the wasm32 build + clippy in CI prove the feature-on
@@ -31,7 +32,7 @@ set -euo pipefail
 
 TARGET="wasm32-unknown-unknown"
 # The shipped wasm bundle crates whose default wasm32 graph must stay lean.
-BUNDLES=(sparq-wasm sparq-reason-wasm sparq-rsp-wasm sparq-text-wasm sparq-shacl-wasm)
+BUNDLES=(sparq-wasm sparq-reason-wasm sparq-rsp-wasm sparq-text-wasm sparq-shacl-wasm sparq-dl-wasm)
 # Crates that must be absent from the wasm32 graph (non-dev deps).
 FORBIDDEN=(rayon flate2 zstd zstd-safe bzip2 sparq-parse mio tokio)
 

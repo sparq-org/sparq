@@ -115,9 +115,12 @@
 //! built network (AGENTS.md).
 
 use crate::field::Fp;
-use crate::oblivious::{shuffle, SecretColumn, ShuffleCost};
+use crate::oblivious::{SecretColumn, ShuffleCost};
 use crate::partial::{HolderId, MpcError, PartialResult};
-use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
+use crate::randomness::{
+    checked_oblivious_shuffle, checked_vss_own_input, require_source_matches, DistributedRandomness,
+};
+use crate::shamir::{self, ShamirBackend, Share};
 use oxrdf::{Term, Variable};
 use std::str::FromStr;
 
@@ -264,6 +267,64 @@ pub fn oblivious_set_output(
     payload_arity: usize,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    // Mint ONE fresh dealer for this run (production: a fresh OS-seeded CSPRNG,
+    // sq-1vt) and draw every sharing and the shuffle through the seam on it.
+    oblivious_set_output_through(
+        &mut backend.dealer(),
+        backend,
+        candidates,
+        payload_arity,
+        bound,
+    )
+}
+
+/// [`oblivious_set_output`] with every sharing and the shuffle drawn through
+/// `source` — the selector sharings, the real-tag sharings, the pure-dummy
+/// selectors, the payload-limb sharings and the oblivious shuffle itself, in that
+/// order.
+///
+/// Refuses a source whose `(n, t)` differs from `backend`'s
+/// ([`require_source_matches`]) **before any draw**, since every sharing is later
+/// combined with `backend`-built products and opened at `backend`'s degrees.
+/// Every drawn sharing is shape-checked where it is consumed
+/// ([`checked_vss_own_input`]) and the shuffled column's shape is checked on
+/// return ([`checked_oblivious_shuffle`]). Shape checks only — no VSS /
+/// consistency guarantee, and no verification that the source actually permuted
+/// anything. A source that cannot share a value it was handed (PRSS today) makes
+/// this fail closed with that source's own error.
+///
+/// ## The tag column is degree `2t` — what that means for a recombining source
+///
+/// Step 3's `tag_out = sel · real_tag` is a [`shamir::mul_shares_raw`] product, so
+/// the tag element of every packed entry is a degree-`2t` sharing while the
+/// payload limbs are degree `t`: the column handed to the shuffle is
+/// MIXED-degree. That is fine for a switch-network source, which only moves whole
+/// entries and never reads a share
+/// ([`DistributedRandomness::oblivious_shuffle`] documents the distinction), and
+/// it is why the dealer path opens the tags at `2 * t` in step 5.
+///
+/// A source that shuffles by RECOMBINING — as a dealer-less one must — requires
+/// degree-`<= t` elements and refuses this column
+/// ([`crate::prss::PrssRandomness`]). Routing the output stage through such a
+/// source therefore needs the tags degree-reduced through the seam
+/// ([`shamir::degree_reduce_through`]) before the shuffle, with step 5's open
+/// moved to degree `t` to match. That path is **unreachable today** — the only
+/// dealer-less source refuses `vss_own_input`, so this function already fails
+/// closed on the selector sharing long before the shuffle — and it is a
+/// prerequisite of the dealer-less VSS step (#6117), not work this stage can do
+/// on its own. The dealer path is deliberately left un-reduced: adding a
+/// reduction there would change what the simulation draws.
+pub(crate) fn oblivious_set_output_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    candidates: &[Candidate],
+    payload_arity: usize,
+    bound: usize,
+) -> Result<ObliviousOutput, MpcError> {
+    // Up front, before anything is drawn: a source whose (n, t) disagrees with the
+    // backend would deal sharings that do not compose with the backend's products
+    // and opens.
+    require_source_matches(source, backend)?;
     // Fail closed: the bound must cover every candidate so no match is ever
     // silently dropped (see the contract above).
     if bound < candidates.len() {
@@ -283,14 +344,12 @@ pub fn oblivious_set_output(
         }
     }
 
-    let mut dealer = backend.dealer();
-    let t = dealer.threshold();
+    let (n, t) = (backend.parties(), backend.threshold());
     // One multiplication (the select) needs honest-majority headroom n >= 2t+1.
-    if dealer.parties() < 2 * t + 1 {
+    if n < 2 * t + 1 {
         return Err(MpcError::Protocol(format!(
             "oblivious_set_output needs n >= 2t+1 for the select multiplication (n={}, t={})",
-            dealer.parties(),
-            t
+            n, t
         )));
     }
 
@@ -306,9 +365,9 @@ pub fn oblivious_set_output(
     let mut payloads: Vec<Vec<Option<Term>>> = Vec::with_capacity(bound);
 
     for c in candidates {
-        let sel = selector_sharing(&mut dealer, &c.matched)?;
+        let sel = selector_sharing(source, n, &c.matched)?;
         // tag_out = sel * real_tag  (degree 2t). sel=1 → REAL_TAG; sel=0 → 0.
-        let real_tag_share = dealer.share(real_tag);
+        let real_tag_share = checked_vss_own_input(source, n, real_tag)?;
         let tag_out = shamir::mul_shares_raw(&sel, &real_tag_share)?;
         tag_col.push(tag_out);
         payloads.push(c.payload.clone());
@@ -316,8 +375,8 @@ pub fn oblivious_set_output(
     // Pure-dummy padding slots: selector = shared 0 → tag opens to 0 → Dummy.
     let dummy_payload: Vec<Option<Term>> = vec![None; payload_arity];
     for _ in candidates.len()..bound {
-        let zero_sel = dealer.share(Fp::zero());
-        let real_tag_share = dealer.share(real_tag);
+        let zero_sel = checked_vss_own_input(source, n, Fp::zero())?;
+        let real_tag_share = checked_vss_own_input(source, n, real_tag)?;
         let tag_out = shamir::mul_shares_raw(&zero_sel, &real_tag_share)?;
         tag_col.push(tag_out);
         payloads.push(dummy_payload.clone());
@@ -327,7 +386,7 @@ pub fn oblivious_set_output(
     // Payloads ride THROUGH the shuffle as secret shares (the permutation is never
     // opened) — see `shuffle_with_payloads` (Copilot review #93, thread 1).
     let (shuffled_tags, shuffled_payloads, shuffle_cost) =
-        shuffle_with_payloads(&mut dealer, tag_col, payloads, payload_arity)?;
+        shuffle_with_payloads(source, n, t, tag_col, payloads, payload_arity)?;
 
     // --- Step 5: open exactly `B` tags at degree 2t; classify each slot. ---
     // FAIL CLOSED on an unexpected tag (Copilot review #93, thread 3): the only
@@ -371,18 +430,22 @@ pub fn oblivious_set_output(
 /// [`MatchBit::Public`] is lifted with a fresh sharing (sound, no secure compare —
 /// the disclosed-key regime). [`MatchBit::SecretShared`] is used as-is; its
 /// well-formedness (a sharing of exactly 0 or 1) is the producer's obligation.
-fn selector_sharing(dealer: &mut ShamirDealer, bit: &MatchBit) -> Result<Vec<Share>, MpcError> {
+fn selector_sharing(
+    source: &mut dyn DistributedRandomness,
+    n: usize,
+    bit: &MatchBit,
+) -> Result<Vec<Share>, MpcError> {
     match bit {
         MatchBit::Public(b) => {
             let v = if *b { Fp::one() } else { Fp::zero() };
-            Ok(dealer.share(v))
+            checked_vss_own_input(source, n, v)
         }
         MatchBit::SecretShared(s) => {
-            if s.len() != dealer.parties() {
+            if s.len() != n {
                 return Err(MpcError::Protocol(format!(
                     "secret-shared match bit has {} shares, expected n={}",
                     s.len(),
-                    dealer.parties()
+                    n
                 )));
             }
             Ok(s.clone())
@@ -552,15 +615,15 @@ fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
 /// (tag, payload), with no position→candidate linkage. Opening the payload at a
 /// shuffled position discloses no more than the step-5 row open already does.
 fn shuffle_with_payloads(
-    dealer: &mut ShamirDealer,
+    source: &mut dyn DistributedRandomness,
+    nparties: usize,
+    t: usize,
     tag_col: SecretColumn,
     payloads: Vec<PayloadRow>,
     payload_arity: usize,
 ) -> Result<ShuffledColumn, MpcError> {
     let n = tag_col.len();
     debug_assert_eq!(payloads.len(), n);
-    let t = dealer.threshold();
-    let nparties = dealer.parties();
 
     // Serialize every payload row and size a UNIFORM limb capacity = the max limb
     // count (length prefix + data limbs) over all rows. Uniform width is required
@@ -581,18 +644,18 @@ fn shuffle_with_payloads(
         let mut entry = tag; // tag shares first
         let limbs = bytes_to_limbs(enc);
         for limb in &limbs {
-            entry.extend(dealer.share(*limb));
+            entry.extend(checked_vss_own_input(source, nparties, *limb)?);
         }
         // Pad to uniform width with shared pad limbs.
         for _ in limbs.len()..limb_capacity {
-            entry.extend(dealer.share(Fp::new(PAD_LIMB)));
+            entry.extend(checked_vss_own_input(source, nparties, Fp::new(PAD_LIMB))?);
         }
         packed.push(entry);
     }
 
     // One oblivious shuffle over the packed entries (the substrate primitive). It
     // permutes whole entries by a SECRET permutation that is never revealed.
-    let (shuffled, base_cost) = shuffle(dealer, packed)?;
+    let (shuffled, base_cost) = checked_oblivious_shuffle(source, packed)?;
 
     // The real secret-control shuffle pays a conditional swap per FIELD ELEMENT per
     // switch; the packed entry is `entry_width` field elements wide (tag + limbs),
@@ -654,8 +717,22 @@ pub fn oblivious_join_output(
     out_vars: Vec<Variable>,
     bound: usize,
 ) -> Result<(PartialResult, ObliviousOutputCost), MpcError> {
+    // One fresh dealer for this run; every draw and the shuffle go through the seam.
+    oblivious_join_output_through(&mut backend.dealer(), backend, candidates, out_vars, bound)
+}
+
+/// [`oblivious_join_output`] with the whole output stage drawn through `source` —
+/// see [`oblivious_set_output_through`] for the draw order and the refusals.
+pub(crate) fn oblivious_join_output_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    candidates: &[Candidate],
+    out_vars: Vec<Variable>,
+    bound: usize,
+) -> Result<(PartialResult, ObliviousOutputCost), MpcError> {
     let payload_arity = out_vars.len();
-    let (slots, cost) = oblivious_set_output(backend, candidates, payload_arity, bound)?;
+    let (slots, cost) =
+        oblivious_set_output_through(source, backend, candidates, payload_arity, bound)?;
     // Filter dummies: the authorized recipient sees the real result multiset (and,
     // by construction, learns its true size — see the residual-leakage note).
     let mut rows: Vec<Vec<Option<Term>>> = slots
@@ -1226,5 +1303,215 @@ mod tests {
             }
             other => panic!("expected Tampered on an out-of-set tag, got {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod output_randomness_seam_tests {
+    //! Issue #6117 — the oblivious output stage draws its selector / real-tag /
+    //! pure-dummy / payload-limb sharings through
+    //! [`DistributedRandomness::vss_own_input`] and its shuffle through
+    //! [`DistributedRandomness::oblivious_shuffle`], instead of minting its own
+    //! dealer and calling `share` / [`crate::oblivious::shuffle`] directly. These
+    //! tests pin that the single-dealer simulation draws exactly what it drew
+    //! before the routing, that every drawn sharing and the shuffled column's
+    //! shape are checked where they are consumed, that a mismatched source is
+    //! refused before any draw, and that PRSS fails closed.
+    use super::*;
+    use crate::prss::PrssRandomness;
+    use crate::randomness::test_sources::{
+        fingerprint, MalformedShuffleSource, MalformedSource, MisreportedThresholdSource,
+        RecordingSource, SeamMethod, ALL_MALFORMATIONS, ALL_SHUFFLE_MALFORMATIONS, SHAPE_REFUSAL,
+        SHUFFLE_SHAPE_REFUSAL,
+    };
+
+    /// The refusal [`crate::randomness::require_source_matches`] raises.
+    const MISMATCH_REFUSAL: &str = "its sharings would not compose with the backend's";
+
+    fn lit(s: &str) -> Option<Term> {
+        Some(Term::Literal(oxrdf::Literal::new_simple_literal(s)))
+    }
+
+    /// The pinned fixture: three candidates matching / not / matching, payload
+    /// arity 1, run at `bound = 5` so TWO pure-dummy padding slots are added.
+    fn padded_candidates() -> Vec<Candidate> {
+        vec![
+            Candidate {
+                payload: vec![lit("a")],
+                matched: MatchBit::Public(true),
+            },
+            Candidate {
+                payload: vec![lit("b")],
+                matched: MatchBit::Public(false),
+            },
+            Candidate {
+                payload: vec![lit("c")],
+                matched: MatchBit::Public(true),
+            },
+        ]
+    }
+
+    /// The fixture's seam transcript is 20 sharings then one shuffle: per
+    /// candidate a selector + a real-tag sharing (6), per padding slot a
+    /// zero-selector + a real-tag sharing (4), then two payload limbs per slot
+    /// (10) — and finally the oblivious shuffle over the five packed entries.
+    const VSS_DRAWS: usize = 20;
+
+    fn rendered(slots: &[OutputSlot]) -> Vec<String> {
+        slots
+            .iter()
+            .map(|s| match s {
+                OutputSlot::Row(r) => format!("{:?}", r),
+                OutputSlot::Dummy => "Dummy".to_string(),
+            })
+            .collect()
+    }
+
+    /// Pinned from the PRE-ROUTING code (`backend.dealer()` + inline
+    /// `dealer.share` + `oblivious::shuffle(dealer, …)`), captured by threading a
+    /// draw log through the unmodified `oblivious_set_output` on `origin/main`.
+    /// The revealed slot ORDER is the strong pin: it is the shuffle's
+    /// permutation, which moves if the stage consumes more, fewer or differently
+    /// ordered draws before the shuffle samples it. The WITNESS draw after the run
+    /// pins the total draw count.
+    #[test]
+    fn seeded_output_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
+        let b = ShamirBackend::new_seeded(5, 0x0B15).unwrap();
+        let cands = padded_candidates();
+        let mut dealer = b.dealer();
+        let (slots, cost) = oblivious_set_output_through(&mut dealer, &b, &cands, 1, 5).unwrap();
+        assert_eq!(
+            rendered(&slots),
+            [
+                "Dummy",
+                "[Some(Literal(Literal(String(\"c\"))))]",
+                "[Some(Literal(Literal(String(\"a\"))))]",
+                "Dummy",
+                "Dummy",
+            ]
+        );
+        assert_eq!(cost.bound, 5);
+        assert_eq!(cost.opens, 5);
+        assert_eq!(cost.shuffle.items, 5);
+        assert_eq!(cost.shuffle.switches, 24);
+        assert_eq!(dealer.draw_fp().value(), 929230798186952631);
+
+        // The public entry point mints its own dealer from the same seeded
+        // backend, so it reproduces the same run.
+        let (public, _) = oblivious_set_output(&b, &cands, 1, 5).unwrap();
+        assert_eq!(rendered(&public), rendered(&slots));
+    }
+
+    /// The COMPLETE seam transcript of the output stage — the 20 sharings in
+    /// consumption order, then the shuffled column's shares — folded into the
+    /// order-sensitive fingerprint. Captured on the pre-routing code by mapping
+    /// each logged `dealer.share` to `vss_own_input` and the shuffle's returned
+    /// column to `oblivious_shuffle`.
+    #[test]
+    fn seeded_output_stage_transcript_is_pinned() {
+        let b = ShamirBackend::new_seeded(5, 0x0B15).unwrap();
+        let mut rec = RecordingSource::new(b.dealer());
+        oblivious_set_output_through(&mut rec, &b, &padded_candidates(), 1, 5).unwrap();
+        let methods: Vec<&str> = rec.log.iter().map(|(m, _)| *m).collect();
+        assert_eq!(
+            methods,
+            [
+                ["vss_own_input"; VSS_DRAWS].as_slice(),
+                &["oblivious_shuffle"]
+            ]
+            .concat()
+        );
+        assert_eq!(fingerprint(&rec.log), 0xa240_163d_d4cf_ba82);
+    }
+
+    /// Every sharing the output stage draws — selector, real tag, pure-dummy
+    /// selector, payload limb — is shape-checked where it is consumed: corrupting
+    /// exactly ONE draw must be refused by the shape check itself.
+    #[test]
+    fn malformed_draws_are_refused_at_every_output_consumption_site() {
+        let b = ShamirBackend::new_seeded(5, 0x0B17).unwrap();
+        let cands = padded_candidates();
+        for skip in 0..VSS_DRAWS {
+            for how in ALL_MALFORMATIONS {
+                let mut src = MalformedSource::new(b.dealer(), SeamMethod::VssOwnInput, skip, how);
+                match oblivious_set_output_through(&mut src, &b, &cands, 1, 5) {
+                    Err(MpcError::Protocol(m)) => assert!(
+                        m.contains(SHAPE_REFUSAL),
+                        "draw #{skip}, {how:?}: wrong check: {m}"
+                    ),
+                    other => panic!("draw #{skip}, {how:?}: must fail closed, got {other:?}"),
+                }
+                assert!(
+                    src.fired(),
+                    "draw #{skip}: the targeted draw never happened"
+                );
+            }
+        }
+    }
+
+    /// The shuffled column comes back from a caller-supplied source, so its SHAPE
+    /// is checked, not trusted: a dropped / extra entry, or an entry that lost or
+    /// gained a share, would mis-split the packed `[tag | limbs]` layout. Each
+    /// corruption must be refused by the shuffle shape check itself.
+    #[test]
+    fn a_malformed_shuffled_column_is_refused() {
+        let b = ShamirBackend::new_seeded(5, 0x0B18).unwrap();
+        let cands = padded_candidates();
+        for how in ALL_SHUFFLE_MALFORMATIONS {
+            let mut src = MalformedShuffleSource::new(b.dealer(), how);
+            match oblivious_set_output_through(&mut src, &b, &cands, 1, 5) {
+                Err(MpcError::Protocol(m)) => {
+                    assert!(
+                        m.contains(SHUFFLE_SHAPE_REFUSAL),
+                        "{how:?}: wrong check: {m}"
+                    )
+                }
+                other => panic!("{how:?}: must fail closed, got {other:?}"),
+            }
+            assert!(src.fired(), "{how:?}: the shuffle never happened");
+        }
+    }
+
+    /// A source whose `(n, t)` differs from the backend's is refused before any
+    /// draw: its sharings would not compose with the backend's products or open at
+    /// its degrees. A misreported threshold yields canonically SHAPED sharings, so
+    /// only the source-match check catches it.
+    #[test]
+    fn output_stage_refuses_a_mismatched_source_before_any_draw() {
+        let b = ShamirBackend::new_seeded(5, 0x0B19).unwrap();
+        let cands = padded_candidates();
+        for t in [0, 1] {
+            let mut src = MisreportedThresholdSource {
+                inner: b.dealer(),
+                t,
+            };
+            match oblivious_set_output_through(&mut src, &b, &cands, 1, 5) {
+                Err(MpcError::Protocol(m)) => {
+                    assert!(m.contains(MISMATCH_REFUSAL), "t={t}: wrong check: {m}")
+                }
+                other => panic!("t={t}: must fail closed, got {other:?}"),
+            }
+        }
+        let mut rec = RecordingSource::new(ShamirBackend::new_seeded(3, 0x0B19).unwrap().dealer());
+        let outcome = oblivious_set_output_through(&mut rec, &b, &cands, 1, 5);
+        assert!(
+            matches!(&outcome, Err(MpcError::Protocol(m)) if m.contains(MISMATCH_REFUSAL)),
+            "got {outcome:?}"
+        );
+        assert!(rec.log.is_empty(), "drew before refusing");
+    }
+
+    /// The output stage must share the selector and the real tag, which PRSS
+    /// refuses (it generates correlated randomness, it does not share a value it
+    /// was handed) — the refusal must surface as PRSS's own `NotYetImplemented`,
+    /// never a panic or a silently different output.
+    #[test]
+    fn prss_fails_closed_in_the_output_stage() {
+        let b = ShamirBackend::new(5).unwrap();
+        let mut prss = PrssRandomness::with_simulated_setup(5).unwrap();
+        assert!(matches!(
+            oblivious_set_output_through(&mut prss, &b, &padded_candidates(), 1, 5),
+            Err(MpcError::NotYetImplemented { .. })
+        ));
     }
 }

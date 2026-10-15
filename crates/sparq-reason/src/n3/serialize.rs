@@ -666,10 +666,11 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
 /// key itself uses no interning ids, pointers, hashes, locale or number formatting, but it is
 /// only as reproducible as the TERMS. For the same parsed input, an existential's skolem
 /// label (`__sk<n>_<label>`) does not depend on hash-set traversal or hasher width: it is
-/// numbered in the sorted order of each round's firing keys (GH #6749). It is not canonical
-/// across reordered isomorphic documents, and binding values that still carry traversal
-/// order (`log:collectAllIn` lists, `log:conclusion` formulas, whose rows follow the nested
-/// closure's set order, backward-renamed terms) can still move it (GH #6844).
+/// numbered in the sorted order of each round's firing keys (GH #6749), and a
+/// `log:conclusion` formula's derived rows are sorted under [`row_cmp`] (GH #6844). It is
+/// not canonical across reordered isomorphic documents, and binding values that still carry
+/// traversal order (`log:collectAllIn` lists; backward-renamed terms, whose `__bw<n>_`
+/// prefix is numbered in evaluation order) can still move it (GH #6844).
 fn term_key(t: &Term) -> String {
     fn quoted(s: &str, out: &mut String) {
         out.push('"');
@@ -739,6 +740,77 @@ pub fn statement_keys(f: &[Term; 3]) -> [String; 3] {
     #[cfg(test)]
     KEY_CALLS.with(|c| c.set(c.get() + 1));
     [term_key(&f[0]), term_key(&f[1]), term_key(&f[2])]
+}
+
+/// A deterministic TOTAL order on terms, for the engine's own canonical sorts (GH #6844):
+/// variant first (in `Term`'s declaration order), then the variant's fields in order,
+/// comparing a list, formula or triple term componentwise (a formula over its rows'
+/// terms in sequence) with a shorter sequence before a longer one that extends it.
+///
+/// `Equal` exactly when the terms are equal under `Term`'s own equality — the identity
+/// [`term_key`] encodes — so the order is as reproducible as the terms themselves. It is NOT
+/// the order of the `term_key` STRINGS (no tag bytes, no quoting), and nothing depends on
+/// that: a canonical sort only needs one order that every run and every target agrees on.
+/// Unlike keying it allocates nothing and stops at the first component that differs, which
+/// is why the plain materialization paths can afford it (`ListExpander` sorts every list
+/// value it interns).
+pub(super) fn term_cmp(a: &Term, b: &Term) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    /// The variant's position in `Term`'s declaration order.
+    fn tag(t: &Term) -> u8 {
+        match t {
+            Term::Iri(_) => 0,
+            Term::Lit(..) => 1,
+            Term::Blank(_) => 2,
+            Term::Var(_) => 3,
+            Term::Formula(_) => 4,
+            Term::List(_) => 5,
+            Term::Triple(_) => 6,
+        }
+    }
+    fn seq<'a>(
+        a: impl Iterator<Item = &'a Term>,
+        b: impl Iterator<Item = &'a Term>,
+    ) -> Ordering {
+        let (mut a, mut b) = (a, b);
+        loop {
+            return match (a.next(), b.next()) {
+                (None, None) => Ordering::Equal,
+                (None, Some(_)) => Ordering::Less,
+                (Some(_), None) => Ordering::Greater,
+                (Some(x), Some(y)) => match term_cmp(x, y) {
+                    Ordering::Equal => continue,
+                    o => o,
+                },
+            };
+        }
+    }
+    match (a, b) {
+        (Term::Iri(x), Term::Iri(y))
+        | (Term::Blank(x), Term::Blank(y))
+        | (Term::Var(x), Term::Var(y)) => x.cmp(y),
+        (Term::Lit(v, dt, lang), Term::Lit(w, et, mang)) => {
+            v.cmp(w).then_with(|| dt.cmp(et)).then_with(|| lang.cmp(mang))
+        }
+        (Term::List(x), Term::List(y)) => seq(x.iter(), y.iter()),
+        (Term::Triple(x), Term::Triple(y)) => seq(x.iter(), y.iter()),
+        // Every row is exactly three terms, so the flattened sequence's length determines
+        // the row count: comparing the rows' terms in sequence separates two formulae
+        // exactly when `Term`'s own equality does, with no row-count tie-break needed.
+        (Term::Formula(x), Term::Formula(y)) => seq(x.iter().flatten(), y.iter().flatten()),
+        _ => tag(a).cmp(&tag(b)),
+    }
+}
+
+/// One statement's terms compared in subject, predicate, object order under [`term_cmp`] —
+/// the canonical order of a formula's rows (GH #6844).
+pub(super) fn row_cmp(a: &[Term; 3], b: &[Term; 3]) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| term_cmp(x, y))
+        .find(|o| *o != Ordering::Equal)
+        .unwrap_or(Ordering::Equal)
 }
 
 #[cfg(test)]
@@ -1508,5 +1580,81 @@ mod tests {
         assert_eq!(rendered(&Term::Iri("http://ex/a\\b".into())), "<http://ex/a\\u005Cb>");
         let dt = Term::Lit("1".into(), "http://ex/d\\t".into(), None);
         assert_eq!(rendered(&dt), "\"1\"^^<http://ex/d\\u005Ct>");
+    }
+
+    #[test]
+    fn term_cmp_is_a_total_order_agreeing_with_term_equality() {
+        // GH #6844: the canonical sorts (`ListExpander`'s cell numbering, a `log:conclusion`
+        // formula's rows) are only canonical if this comparator is a TOTAL order whose
+        // `Equal` is exactly `Term`'s own equality — otherwise two distinct terms could tie
+        // and a sort would fall back to the input's traversal order.
+        let i = |n: &str| Term::Iri(n.to_string());
+        let corpus = vec![
+            i("http://ex/a"),
+            i("http://ex/ab"),
+            i("http://ex/b"),
+            Term::Lit("1".into(), "http://ex/d".into(), None),
+            Term::Lit("1".into(), "http://ex/d".into(), Some("en".into())),
+            Term::Lit("1".into(), "http://ex/e".into(), None),
+            Term::Lit("2".into(), "http://ex/d".into(), None),
+            Term::Blank("b0".into()),
+            Term::Blank("b1".into()),
+            Term::Var("x".into()),
+            Term::List(vec![]),
+            Term::List(vec![i("http://ex/a")]),
+            Term::List(vec![i("http://ex/a"), i("http://ex/b")]),
+            Term::List(vec![i("http://ex/b")]),
+            Term::Triple(Box::new([i("http://ex/a"), i("http://ex/b"), i("http://ex/c")])),
+            Term::Triple(Box::new([i("http://ex/a"), i("http://ex/b"), i("http://ex/d")])),
+            // Formulae over the same terms with different row counts, and two formulae of
+            // one row count differing only in their last row.
+            Term::Formula(vec![[i("http://ex/a"), i("http://ex/b"), i("http://ex/c")]]),
+            Term::Formula(vec![
+                [i("http://ex/a"), i("http://ex/b"), i("http://ex/c")],
+                [i("http://ex/a"), i("http://ex/b"), i("http://ex/c")],
+            ]),
+            Term::Formula(vec![
+                [i("http://ex/a"), i("http://ex/b"), i("http://ex/c")],
+                [i("http://ex/a"), i("http://ex/b"), i("http://ex/d")],
+            ]),
+        ];
+        for a in &corpus {
+            for b in &corpus {
+                let o = term_cmp(a, b);
+                assert_eq!(
+                    o == std::cmp::Ordering::Equal,
+                    a == b,
+                    "`Equal` must mean equal: {a:?} vs {b:?}"
+                );
+                assert_eq!(o.reverse(), term_cmp(b, a), "antisymmetry: {a:?} vs {b:?}");
+                // Agrees with the injective key encoding on `Equal`, which is what makes a
+                // sorted order as reproducible as the terms' own identity.
+                assert_eq!(
+                    o == std::cmp::Ordering::Equal,
+                    term_key(a) == term_key(b),
+                    "keys disagree: {a:?} vs {b:?}"
+                );
+            }
+        }
+        // Transitivity, over every triple of the corpus.
+        for a in &corpus {
+            for b in &corpus {
+                for c in &corpus {
+                    if term_cmp(a, b).is_lt() && term_cmp(b, c).is_lt() {
+                        assert!(term_cmp(a, c).is_lt(), "transitivity: {a:?} {b:?} {c:?}");
+                    }
+                }
+            }
+        }
+        // A shorter sequence sorts before a longer one that extends it, and the variant
+        // decides before any field.
+        assert!(term_cmp(&corpus[10], &corpus[11]).is_lt(), "() < (:a)");
+        assert!(term_cmp(&corpus[11], &corpus[12]).is_lt(), "(:a) < (:a :b)");
+        assert!(term_cmp(&i("http://ex/zzz"), &Term::Blank("a".into())).is_lt(), "IRI < blank");
+        // `row_cmp` orders on subject, then predicate, then object.
+        let row = |s: &str, o: &str| [i(s), i("http://ex/p"), i(o)];
+        assert!(row_cmp(&row("http://ex/a", "http://ex/z"), &row("http://ex/b", "http://ex/a")).is_lt());
+        assert!(row_cmp(&row("http://ex/a", "http://ex/a"), &row("http://ex/a", "http://ex/b")).is_lt());
+        assert_eq!(row_cmp(&row("http://ex/a", "http://ex/a"), &row("http://ex/a", "http://ex/a")), std::cmp::Ordering::Equal);
     }
 }

@@ -1,0 +1,974 @@
+//! The hypertableau calculus over [DL-clauses](super::clausify) (Motik, Shearer and
+//! Horrocks, JAIR 36, 2009, §3).
+//!
+//! The state is a completion graph: *root* nodes (the ABox individuals, or the test
+//! individual of a satisfiability test) and *blockable* nodes created by the `≥`-rule, each
+//! with a label of atomic concepts (at-least concepts are atoms too), role edges and
+//! inequalities. The rules:
+//!
+//! - **Hyp**: a clause whose body matches at a central node `x` and whose head does not hold
+//!   adds its single head atom, or opens a branch over its disjuncts; an empty head is a
+//!   clash.
+//! - **≥**: `≥n R.A(x)` on a node that is not blocked, without `n` pairwise-unequal
+//!   `R`-neighbours in `A`, creates `n` fresh successors.
+//! - **≈**: `s ≈ t` merges the later node into the earlier one (a blockable node into a root),
+//!   pruning the merged node's descendants; `s ≉ s` is a clash.
+//!
+//! Blocking is pairwise anywhere blocking over full labels, recomputed whenever the `≥`-rule
+//! runs, which makes the calculus terminate in the presence of inverse roles and number
+//! restrictions. Super-role facts are materialised when a role fact is added.
+//!
+//! Every fact carries the set of branch points it depends on; a clash backjumps to the
+//! latest branch point it depends on (dependency-directed backtracking), and state is
+//! restored from an undo trail. Work is bounded by a deterministic step count; running out
+//! is reported as [`Exhausted`], never as a verdict.
+
+use super::clausify::{Atom, AtomKind, Clauses, Head, Role, Var};
+use rustc_hash::FxHashMap;
+use std::cell::Cell;
+use std::rc::Rc;
+
+pub(crate) type Node = u32;
+
+/// The branch points a fact depends on, sorted ascending.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Dep(Option<Rc<[u32]>>);
+
+impl Dep {
+    fn single(b: u32) -> Dep {
+        Dep(Some(Rc::from(vec![b])))
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_none()
+    }
+
+    fn items(&self) -> &[u32] {
+        self.0.as_deref().unwrap_or(&[])
+    }
+
+    fn contains(&self, b: u32) -> bool {
+        self.items().binary_search(&b).is_ok()
+    }
+
+    fn union(&self, other: &Dep) -> Dep {
+        match (&self.0, &other.0) {
+            (None, _) => other.clone(),
+            (_, None) => self.clone(),
+            (Some(a), Some(b)) if Rc::ptr_eq(a, b) => self.clone(),
+            (Some(a), Some(b)) => {
+                let mut out = Vec::with_capacity(a.len() + b.len());
+                let (mut i, mut j) = (0, 0);
+                while i < a.len() || j < b.len() {
+                    let next = match (a.get(i), b.get(j)) {
+                        (Some(&x), Some(&y)) if x == y => {
+                            i += 1;
+                            j += 1;
+                            x
+                        }
+                        (Some(&x), Some(&y)) if x < y => {
+                            i += 1;
+                            x
+                        }
+                        (Some(_), Some(&y)) => {
+                            j += 1;
+                            y
+                        }
+                        (Some(&x), None) => {
+                            i += 1;
+                            x
+                        }
+                        (None, Some(&y)) => {
+                            j += 1;
+                            y
+                        }
+                        (None, None) => unreachable!(),
+                    };
+                    out.push(next);
+                }
+                Dep(Some(Rc::from(out)))
+            }
+        }
+    }
+
+    fn without(&self, b: u32) -> Dep {
+        let rest: Vec<u32> = self.items().iter().copied().filter(|&x| x != b).collect();
+        if rest.is_empty() {
+            Dep(None)
+        } else {
+            Dep(Some(Rc::from(rest)))
+        }
+    }
+}
+
+/// Deterministic work bounds of one tableau run.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Budget {
+    /// Rule applications (facts added, nodes created, branches opened).
+    pub max_steps: u64,
+    /// Nodes of the completion graph.
+    pub max_nodes: usize,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Budget {
+            max_steps: 2_000_000,
+            max_nodes: 100_000,
+        }
+    }
+}
+
+/// A run ran out of its [`Budget`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Exhausted;
+
+/// A clause's neighbour variable: its role atoms, its concept atoms, and whether it binds
+/// only nodes after the previous variable's.
+type YVar = (Vec<Role>, Vec<Atom>, bool);
+
+/// Where the clauses applicable at a central node are found.
+#[derive(Debug, Default)]
+pub(crate) struct ClauseIndex {
+    /// Clauses whose first `A(x)` body atom is the atom.
+    by_x_atom: Vec<Vec<u32>>,
+    /// Clauses without `A(x)` body atoms, by their first role (or self) body atom.
+    by_role: FxHashMap<Role, Vec<u32>>,
+    /// Clauses with an empty body.
+    unconditional: Vec<u32>,
+    /// Per clause, per neighbour variable: its role atoms, its concept atoms, and whether it
+    /// binds only nodes after the previous variable's.
+    ys: Vec<Vec<YVar>>,
+}
+
+impl ClauseIndex {
+    pub(crate) fn new(c: &Clauses) -> ClauseIndex {
+        let mut idx = ClauseIndex {
+            by_x_atom: vec![Vec::new(); c.atoms.len()],
+            ..ClauseIndex::default()
+        };
+        for (i, cl) in c.clauses.iter().enumerate() {
+            let i = i as u32;
+            if let Some(&a) = cl.body_x.first() {
+                idx.by_x_atom[a as usize].push(i);
+            } else if let Some(&(r, _)) = cl.body_roles.first() {
+                idx.by_role.entry(r).or_default().push(i);
+            } else if let Some(&r) = cl.body_self.first() {
+                idx.by_role.entry(r).or_default().push(i);
+            } else {
+                idx.unconditional.push(i);
+            }
+            let mut ys = vec![(Vec::new(), Vec::new(), false); cl.n_y as usize];
+            for &y in &cl.ordered {
+                ys[y as usize].2 = true;
+            }
+            for &(r, y) in &cl.body_roles {
+                ys[y as usize].0.push(r);
+            }
+            for &(a, y) in &cl.body_y {
+                ys[y as usize].1.push(a);
+            }
+            idx.ys.push(ys);
+        }
+        idx
+    }
+}
+
+#[derive(Clone, Debug)]
+struct NodeData {
+    parent: Option<Node>,
+    root: bool,
+    active: bool,
+    label: FxHashMap<Atom, Dep>,
+    /// `adj[n]` = the role expressions `r` with `r(self, n)`.
+    adj: FxHashMap<Node, Vec<Role>>,
+}
+
+#[derive(Clone, Debug)]
+struct Instance {
+    clause: u32,
+    /// `x`, then `y₀ … yₖ`.
+    nodes: Vec<Node>,
+    deps: Dep,
+}
+
+#[derive(Debug)]
+enum Undo {
+    Concept(Node, Atom),
+    Role(u32, Node, Node),
+    Ineq(Node, Node),
+    NewNode,
+    Deactivate(Node),
+    Merge(Node),
+    PendingPush,
+    PendingPop(Instance),
+}
+
+#[derive(Debug)]
+struct Branch {
+    mark: usize,
+    inst: Instance,
+    alt: usize,
+    acc: Dep,
+}
+
+/// One tableau run over a fixed clause set.
+pub(crate) struct Tableau<'c> {
+    c: &'c Clauses,
+    index: &'c ClauseIndex,
+    nodes: Vec<NodeData>,
+    roles: FxHashMap<(u32, Node, Node), Dep>,
+    ineq: FxHashMap<(Node, Node), Dep>,
+    /// `t → s` for every merged node `t`.
+    merges: FxHashMap<Node, Node>,
+    trail: Vec<Undo>,
+    pending: Vec<Instance>,
+    branches: Vec<Branch>,
+    dirty: Vec<Node>,
+    in_dirty: Vec<bool>,
+    clash: Option<Dep>,
+    forbidden: Option<(Node, Atom)>,
+    steps: u64,
+    /// Work inside a single rule application (clause matching, clique search), counted
+    /// against the same step budget so one application cannot run unbounded.
+    probes: Cell<u64>,
+    budget: Budget,
+}
+
+impl<'c> Tableau<'c> {
+    pub(crate) fn new(c: &'c Clauses, index: &'c ClauseIndex, budget: Budget) -> Tableau<'c> {
+        Tableau {
+            c,
+            index,
+            nodes: Vec::new(),
+            roles: FxHashMap::default(),
+            ineq: FxHashMap::default(),
+            merges: FxHashMap::default(),
+            trail: Vec::new(),
+            pending: Vec::new(),
+            branches: Vec::new(),
+            dirty: Vec::new(),
+            in_dirty: Vec::new(),
+            clash: None,
+            forbidden: None,
+            steps: 0,
+            probes: Cell::new(0),
+            budget,
+        }
+    }
+
+    /// Creates a root node.
+    pub(crate) fn add_root(&mut self) -> Node {
+        self.new_node(None)
+    }
+
+    /// Makes deriving `atom` at `node` a clash (the `¬B` of a subsumption test).
+    pub(crate) fn forbid(&mut self, node: Node, atom: Atom) {
+        self.forbidden = Some((node, atom));
+    }
+
+    pub(crate) fn assert_concept(&mut self, n: Node, a: Atom) {
+        self.add_concept(n, a, &Dep::default());
+    }
+
+    pub(crate) fn assert_role(&mut self, r: Role, a: Node, b: Node) {
+        self.add_role(r, a, b, &Dep::default());
+    }
+
+    pub(crate) fn assert_different(&mut self, a: Node, b: Node) {
+        self.add_ineq(a, b, &Dep::default());
+    }
+
+    pub(crate) fn assert_same(&mut self, a: Node, b: Node) {
+        let (a, b) = (self.canonical(a), self.canonical(b));
+        self.merge(a, b, &Dep::default());
+    }
+
+    /// The label of a root node after a satisfiable run: each atom, and whether it holds
+    /// without depending on any branch choice.
+    pub(crate) fn root_label(&self, n: Node) -> Vec<(Atom, bool)> {
+        let mut out: Vec<(Atom, bool)> = self.nodes[n as usize]
+            .label
+            .iter()
+            .map(|(&a, d)| (a, d.is_empty()))
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// The node `n` was (transitively) merged into, or `n` itself.
+    fn canonical(&self, mut n: Node) -> Node {
+        while let Some(&s) = self.merges.get(&n) {
+            n = s;
+        }
+        n
+    }
+
+    /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
+    /// built, `Ok(false)` when every branch closed.
+    pub(crate) fn run(&mut self) -> Result<bool, Exhausted> {
+        loop {
+            if self.over_budget() || self.nodes.len() > self.budget.max_nodes {
+                return Err(Exhausted);
+            }
+            if let Some(d) = self.clash.take() {
+                if !self.backtrack(d) {
+                    return Ok(false);
+                }
+                continue;
+            }
+            if let Some(x) = self.dirty.pop() {
+                self.in_dirty[x as usize] = false;
+                if self.nodes[x as usize].active {
+                    self.match_node(x);
+                }
+                continue;
+            }
+            if let Some(inst) = self.pending.pop() {
+                self.trail.push(Undo::PendingPop(inst.clone()));
+                if self.valid(&inst) && !self.satisfied(&inst) {
+                    self.branch(inst);
+                }
+                continue;
+            }
+            if self.expand() {
+                continue;
+            }
+            return Ok(true);
+        }
+    }
+
+    fn over_budget(&self) -> bool {
+        self.steps.saturating_add(self.probes.get()) > self.budget.max_steps
+    }
+
+    /// Counts one unit of inner work; `true` when the budget is spent and the caller should
+    /// stop (`run` then reports [`Exhausted`] before using any partial result).
+    fn probe(&self) -> bool {
+        self.charge(1)
+    }
+
+    /// Counts `n` units of inner work; `true` when the budget is spent.
+    fn charge(&self, n: usize) -> bool {
+        self.probes.set(self.probes.get().saturating_add(n as u64));
+        self.over_budget()
+    }
+
+    /// The work done so far (steps plus inner work), in budget units.
+    pub(crate) fn work(&self) -> u64 {
+        self.steps.saturating_add(self.probes.get())
+    }
+
+    // ---- facts ------------------------------------------------------------------------
+
+    fn new_node(&mut self, parent: Option<Node>) -> Node {
+        let n = self.nodes.len() as Node;
+        self.nodes.push(NodeData {
+            parent,
+            root: parent.is_none(),
+            active: true,
+            label: FxHashMap::default(),
+            adj: FxHashMap::default(),
+        });
+        self.in_dirty.push(false);
+        self.trail.push(Undo::NewNode);
+        self.steps += 1;
+        self.mark(n);
+        n
+    }
+
+    fn mark(&mut self, n: Node) {
+        if !self.in_dirty[n as usize] {
+            self.in_dirty[n as usize] = true;
+            self.dirty.push(n);
+        }
+    }
+
+    fn mark_with_neighbours(&mut self, n: Node) {
+        self.mark(n);
+        let nbs: Vec<Node> = self.nodes[n as usize].adj.keys().copied().collect();
+        for m in nbs {
+            if self.nodes[m as usize].active {
+                self.mark(m);
+            }
+        }
+    }
+
+    fn set_clash(&mut self, d: Dep) {
+        if self.clash.is_none() {
+            self.clash = Some(d);
+        }
+    }
+
+    fn add_concept(&mut self, n: Node, a: Atom, d: &Dep) {
+        let node = &mut self.nodes[n as usize];
+        if node.label.contains_key(&a) {
+            return;
+        }
+        node.label.insert(a, d.clone());
+        self.trail.push(Undo::Concept(n, a));
+        self.steps += 1;
+        if self.forbidden == Some((n, a)) {
+            self.set_clash(d.clone());
+        }
+        self.mark_with_neighbours(n);
+    }
+
+    fn has_role(&self, r: Role, a: Node, b: Node) -> bool {
+        self.nodes[a as usize]
+            .adj
+            .get(&b)
+            .is_some_and(|rs| rs.contains(&r))
+    }
+
+    fn role_dep(&self, r: Role, a: Node, b: Node) -> Dep {
+        let key = if r.inv { (r.idx, b, a) } else { (r.idx, a, b) };
+        self.roles.get(&key).cloned().unwrap_or_default()
+    }
+
+    fn add_role(&mut self, r: Role, a: Node, b: Node, d: &Dep) {
+        let supers = self.c.supers(r).to_vec();
+        for s in supers {
+            self.add_base_role(s, a, b, d);
+        }
+    }
+
+    fn add_base_role(&mut self, r: Role, a: Node, b: Node, d: &Dep) {
+        let (from, to) = if r.inv { (b, a) } else { (a, b) };
+        let key = (r.idx, from, to);
+        if self.roles.contains_key(&key) {
+            return;
+        }
+        self.roles.insert(key, d.clone());
+        let fwd = Role {
+            idx: r.idx,
+            inv: false,
+        };
+        self.nodes[from as usize]
+            .adj
+            .entry(to)
+            .or_default()
+            .push(fwd);
+        self.nodes[to as usize]
+            .adj
+            .entry(from)
+            .or_default()
+            .push(fwd.inverse());
+        self.trail.push(Undo::Role(r.idx, from, to));
+        self.steps += 1;
+        self.mark(from);
+        self.mark(to);
+    }
+
+    fn add_ineq(&mut self, a: Node, b: Node, d: &Dep) {
+        if a == b {
+            self.set_clash(d.clone());
+            return;
+        }
+        let key = (a.min(b), a.max(b));
+        if self.ineq.contains_key(&key) {
+            return;
+        }
+        self.ineq.insert(key, d.clone());
+        self.trail.push(Undo::Ineq(key.0, key.1));
+        self.steps += 1;
+    }
+
+    fn merge(&mut self, a: Node, b: Node, d: &Dep) {
+        if a == b {
+            return;
+        }
+        let (ra, rb) = (self.nodes[a as usize].root, self.nodes[b as usize].root);
+        let (s, t) = match (ra, rb) {
+            (true, false) => (a, b),
+            (false, true) => (b, a),
+            _ => (a.min(b), a.max(b)),
+        };
+        if let Some(di) = self.ineq.get(&(s.min(t), s.max(t))) {
+            let clash = d.union(di);
+            self.set_clash(clash);
+            return;
+        }
+        self.prune_descendants(t);
+        let label: Vec<(Atom, Dep)> = self.nodes[t as usize]
+            .label
+            .iter()
+            .map(|(&a, dd)| (a, dd.union(d)))
+            .collect();
+        let edges: Vec<(Node, Vec<Role>)> = self.nodes[t as usize]
+            .adj
+            .iter()
+            .map(|(&n, rs)| (n, rs.clone()))
+            .collect();
+        self.charge(self.ineq.len());
+        let ineqs: Vec<(Node, Dep)> = self
+            .ineq
+            .iter()
+            .filter_map(|(&(x, y), dd)| {
+                if x == t {
+                    Some((y, dd.union(d)))
+                } else if y == t {
+                    Some((x, dd.union(d)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        self.nodes[t as usize].active = false;
+        self.trail.push(Undo::Deactivate(t));
+        self.merges.insert(t, s);
+        self.trail.push(Undo::Merge(t));
+        for (a, dd) in label {
+            self.add_concept(s, a, &dd);
+        }
+        for (n, rs) in edges {
+            if n != t && !self.nodes[n as usize].active {
+                continue;
+            }
+            let target = if n == t { s } else { n };
+            for r in rs {
+                let dd = self.role_dep(r, t, n).union(d);
+                self.add_base_role(r, s, target, &dd);
+            }
+        }
+        for (n, dd) in ineqs {
+            if self.nodes[n as usize].active {
+                self.add_ineq(s, n, &dd);
+            }
+        }
+        self.mark_with_neighbours(s);
+    }
+
+    fn prune_descendants(&mut self, t: Node) {
+        let len = self.nodes.len();
+        self.charge(len);
+        let mut desc = vec![false; len];
+        for n in (t as usize + 1)..len {
+            let node = &self.nodes[n];
+            if !node.active || node.root {
+                continue;
+            }
+            if let Some(p) = node.parent {
+                if p == t || desc[p as usize] {
+                    desc[n] = true;
+                }
+            }
+        }
+        for (n, &is_desc) in desc.iter().enumerate() {
+            if is_desc {
+                self.nodes[n].active = false;
+                self.trail.push(Undo::Deactivate(n as Node));
+            }
+        }
+    }
+
+    // ---- Hyp-rule ---------------------------------------------------------------------
+
+    fn candidates(&self, x: Node) -> Vec<u32> {
+        let node = &self.nodes[x as usize];
+        let mut out: Vec<u32> = self.index.unconditional.clone();
+        for &a in node.label.keys() {
+            out.extend_from_slice(&self.index.by_x_atom[a as usize]);
+        }
+        self.charge(out.len());
+        if !self.index.by_role.is_empty() {
+            for (&n, rs) in &node.adj {
+                if !self.nodes[n as usize].active {
+                    continue;
+                }
+                for r in rs {
+                    if let Some(cs) = self.index.by_role.get(r) {
+                        out.extend_from_slice(cs);
+                    }
+                }
+            }
+        }
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    fn match_node(&mut self, x: Node) {
+        let mut found = Vec::new();
+        for ci in self.candidates(x) {
+            self.match_clause(ci, x, &mut found);
+        }
+        for inst in found {
+            if self.clash.is_some() {
+                return;
+            }
+            if !self.valid(&inst) || self.satisfied(&inst) {
+                continue;
+            }
+            let head = &self.c.clauses[inst.clause as usize].head;
+            match head.len() {
+                0 => self.set_clash(inst.deps.clone()),
+                1 => {
+                    let h = head[0].clone();
+                    self.apply(&inst, &h, &inst.deps.clone());
+                }
+                _ => {
+                    self.pending.push(inst);
+                    self.trail.push(Undo::PendingPush);
+                }
+            }
+        }
+    }
+
+    fn match_clause(&self, ci: u32, x: Node, found: &mut Vec<Instance>) {
+        let cl = &self.c.clauses[ci as usize];
+        let node = &self.nodes[x as usize];
+        let mut deps = Dep::default();
+        for a in &cl.body_x {
+            match node.label.get(a) {
+                Some(d) => deps = deps.union(d),
+                None => return,
+            }
+        }
+        for &r in &cl.body_self {
+            if !self.has_role(r, x, x) {
+                return;
+            }
+            deps = deps.union(&self.role_dep(r, x, x));
+        }
+        let mut nodes = vec![x];
+        self.match_ys(ci, 0, &mut nodes, deps, found);
+    }
+
+    fn match_ys(
+        &self,
+        ci: u32,
+        y: usize,
+        nodes: &mut Vec<Node>,
+        deps: Dep,
+        found: &mut Vec<Instance>,
+    ) {
+        let ys = &self.index.ys[ci as usize];
+        if y == ys.len() {
+            found.push(Instance {
+                clause: ci,
+                nodes: nodes.clone(),
+                deps,
+            });
+            return;
+        }
+        let x = nodes[0];
+        let (roles, atoms, ordered) = &ys[y];
+        let after = if *ordered { Some(nodes[y]) } else { None };
+        let first = roles[0];
+        let mut cands: Vec<Node> = self.nodes[x as usize]
+            .adj
+            .iter()
+            .filter(|(&n, rs)| self.nodes[n as usize].active && rs.contains(&first))
+            .map(|(&n, _)| n)
+            .collect();
+        cands.sort_unstable();
+        'cand: for n in cands {
+            if after.is_some_and(|p| n <= p) {
+                continue;
+            }
+            if self.probe() {
+                return;
+            }
+            let mut d = deps.clone();
+            for &r in roles {
+                if !self.has_role(r, x, n) {
+                    continue 'cand;
+                }
+                d = d.union(&self.role_dep(r, x, n));
+            }
+            for a in atoms {
+                match self.nodes[n as usize].label.get(a) {
+                    Some(da) => d = d.union(da),
+                    None => continue 'cand,
+                }
+            }
+            nodes.push(n);
+            self.match_ys(ci, y + 1, nodes, d, found);
+            nodes.pop();
+        }
+    }
+
+    fn valid(&self, inst: &Instance) -> bool {
+        inst.nodes.iter().all(|&n| self.nodes[n as usize].active)
+    }
+
+    fn var(inst: &Instance, v: Var) -> Node {
+        match v {
+            Var::X => inst.nodes[0],
+            Var::Y(i) => inst.nodes[1 + i as usize],
+        }
+    }
+
+    fn holds(&self, inst: &Instance, h: &Head) -> bool {
+        match *h {
+            Head::Concept(a, v) => self.nodes[Self::var(inst, v) as usize]
+                .label
+                .contains_key(&a),
+            Head::Eq(u, v) => Self::var(inst, u) == Self::var(inst, v),
+            Head::SelfLoop(r) => {
+                let x = inst.nodes[0];
+                self.has_role(r, x, x)
+            }
+        }
+    }
+
+    fn satisfied(&self, inst: &Instance) -> bool {
+        self.c.clauses[inst.clause as usize]
+            .head
+            .iter()
+            .any(|h| self.holds(inst, h))
+    }
+
+    fn apply(&mut self, inst: &Instance, h: &Head, d: &Dep) {
+        match *h {
+            Head::Concept(a, v) => self.add_concept(Self::var(inst, v), a, d),
+            Head::Eq(u, v) => self.merge(Self::var(inst, u), Self::var(inst, v), d),
+            Head::SelfLoop(r) => {
+                let x = inst.nodes[0];
+                self.add_role(r, x, x, d);
+            }
+        }
+    }
+
+    // ---- branching --------------------------------------------------------------------
+
+    fn branch(&mut self, inst: Instance) {
+        let level = self.branches.len() as u32;
+        self.steps += 1;
+        let h = self.c.clauses[inst.clause as usize].head[0].clone();
+        let d = inst.deps.union(&Dep::single(level));
+        self.branches.push(Branch {
+            mark: self.trail.len(),
+            inst: inst.clone(),
+            alt: 0,
+            acc: Dep::default(),
+        });
+        self.apply(&inst, &h, &d);
+    }
+
+    fn backtrack(&mut self, clash: Dep) -> bool {
+        loop {
+            let Some(b) = self.branches.last() else {
+                return false;
+            };
+            let level = (self.branches.len() - 1) as u32;
+            let mark = b.mark;
+            self.undo_to(mark);
+            if !clash.contains(level) {
+                self.branches.pop();
+                continue;
+            }
+            let b = self.branches.last_mut().expect("checked above");
+            b.acc = b.acc.union(&clash.without(level));
+            b.alt += 1;
+            let inst = b.inst.clone();
+            let alt = b.alt;
+            let n_alts = self.c.clauses[inst.clause as usize].head.len();
+            let h = self.c.clauses[inst.clause as usize].head[alt].clone();
+            let d = if alt + 1 < n_alts {
+                inst.deps.union(&Dep::single(level))
+            } else {
+                let acc = b.acc.clone();
+                self.branches.pop();
+                inst.deps.union(&acc)
+            };
+            self.apply(&inst, &h, &d);
+            return true;
+        }
+    }
+
+    fn undo_to(&mut self, mark: usize) {
+        while self.trail.len() > mark {
+            match self.trail.pop().expect("len > mark") {
+                Undo::Concept(n, a) => {
+                    self.nodes[n as usize].label.remove(&a);
+                }
+                Undo::Role(idx, from, to) => {
+                    self.roles.remove(&(idx, from, to));
+                    let fwd = Role { idx, inv: false };
+                    remove_role(&mut self.nodes[from as usize].adj, to, fwd);
+                    remove_role(&mut self.nodes[to as usize].adj, from, fwd.inverse());
+                }
+                Undo::Ineq(a, b) => {
+                    self.ineq.remove(&(a, b));
+                }
+                Undo::NewNode => {
+                    self.nodes.pop();
+                    self.in_dirty.pop();
+                }
+                Undo::Deactivate(n) => self.nodes[n as usize].active = true,
+                Undo::Merge(t) => {
+                    self.merges.remove(&t);
+                }
+                Undo::PendingPush => {
+                    self.pending.pop();
+                }
+                Undo::PendingPop(inst) => self.pending.push(inst),
+            }
+        }
+        for n in self.dirty.drain(..) {
+            if let Some(f) = self.in_dirty.get_mut(n as usize) {
+                *f = false;
+            }
+        }
+    }
+
+    // ---- ≥-rule and blocking -----------------------------------------------------------
+
+    fn blocked(&self) -> Vec<bool> {
+        let len = self.nodes.len();
+        let mut blocked = vec![false; len];
+        let mut seen: FxHashMap<Vec<u32>, Node> = FxHashMap::default();
+        for n in 0..len {
+            let node = &self.nodes[n];
+            if !node.active || node.root {
+                continue;
+            }
+            let p = node.parent.expect("blockable nodes have a parent") as usize;
+            if blocked[p] {
+                blocked[n] = true;
+                continue;
+            }
+            let sig = self.signature(n as Node, p as Node);
+            // Building and hashing the signature is work proportional to its length.
+            self.charge(sig.len());
+            match seen.entry(sig) {
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(n as Node);
+                }
+                std::collections::hash_map::Entry::Occupied(_) => blocked[n] = true,
+            }
+        }
+        blocked
+    }
+
+    fn signature(&self, n: Node, p: Node) -> Vec<u32> {
+        let mut sig: Vec<u32> = Vec::new();
+        let push_label = |sig: &mut Vec<u32>, m: Node| {
+            let mut l: Vec<u32> = self.nodes[m as usize].label.keys().copied().collect();
+            l.sort_unstable();
+            sig.extend(l);
+            sig.push(u32::MAX);
+        };
+        push_label(&mut sig, n);
+        push_label(&mut sig, p);
+        let mut rs: Vec<u32> = self.nodes[p as usize]
+            .adj
+            .get(&n)
+            .map(|rs| rs.iter().map(|r| 2 * r.idx + u32::from(r.inv)).collect())
+            .unwrap_or_default();
+        rs.sort_unstable();
+        sig.extend(rs);
+        sig
+    }
+
+    fn expand(&mut self) -> bool {
+        let blocked = self.blocked();
+        if self.over_budget() {
+            // `run` reports the exhaustion before using anything.
+            return true;
+        }
+        let mut todo: Vec<(Node, Atom, u32, Role, Option<Atom>, Dep)> = Vec::new();
+        for (n, node) in self.nodes.iter().enumerate() {
+            if !node.active || blocked[n] {
+                continue;
+            }
+            let mut atoms: Vec<(&Atom, &Dep)> = node
+                .label
+                .iter()
+                .filter(|(a, _)| matches!(self.c.atoms[**a as usize], AtomKind::AtLeast { .. }))
+                .collect();
+            atoms.sort_unstable_by_key(|(a, _)| **a);
+            for (&a, d) in atoms {
+                let AtomKind::AtLeast { n: k, role, filler } = self.c.atoms[a as usize] else {
+                    unreachable!("filtered");
+                };
+                if !self.at_least_holds(n as Node, k, role, filler) {
+                    todo.push((n as Node, a, k, role, filler, d.clone()));
+                }
+            }
+        }
+        if todo.is_empty() {
+            return false;
+        }
+        for (x, _, k, role, filler, d) in todo {
+            if !self.nodes[x as usize].active || self.at_least_holds(x, k, role, filler) {
+                continue;
+            }
+            let ys: Vec<Node> = (0..k).map(|_| self.new_node(Some(x))).collect();
+            for &y in &ys {
+                self.add_role(role, x, y, &d);
+                if let Some(f) = filler {
+                    self.add_concept(y, f, &d);
+                }
+            }
+            for (i, &a) in ys.iter().enumerate() {
+                for &b in &ys[i + 1..] {
+                    self.add_ineq(a, b, &d);
+                }
+            }
+        }
+        true
+    }
+
+    fn at_least_holds(&self, x: Node, k: u32, r: Role, filler: Option<Atom>) -> bool {
+        let mut cands: Vec<Node> = self.nodes[x as usize]
+            .adj
+            .iter()
+            .filter(|(&n, rs)| {
+                self.nodes[n as usize].active
+                    && rs.contains(&r)
+                    && filler.is_none_or(|f| self.nodes[n as usize].label.contains_key(&f))
+            })
+            .map(|(&n, _)| n)
+            .collect();
+        if (cands.len() as u64) < u64::from(k) {
+            return false;
+        }
+        if k <= 1 {
+            return true;
+        }
+        cands.sort_unstable();
+        let mut chosen = Vec::with_capacity(k as usize);
+        self.clique(&cands, 0, k as usize, &mut chosen)
+    }
+
+    /// `true` when `k` of `cands[from..]` together with `chosen` are pairwise unequal.
+    fn clique(&self, cands: &[Node], from: usize, k: usize, chosen: &mut Vec<Node>) -> bool {
+        if chosen.len() == k {
+            return true;
+        }
+        if cands.len() - from < k - chosen.len() {
+            return false;
+        }
+        for i in from..cands.len() {
+            if self.probe() {
+                return false;
+            }
+            let c = cands[i];
+            if chosen
+                .iter()
+                .all(|&o| self.ineq.contains_key(&(o.min(c), o.max(c))))
+            {
+                chosen.push(c);
+                if self.clique(cands, i + 1, k, chosen) {
+                    return true;
+                }
+                chosen.pop();
+            }
+        }
+        false
+    }
+}
+
+fn remove_role(adj: &mut FxHashMap<Node, Vec<Role>>, n: Node, r: Role) {
+    if let Some(rs) = adj.get_mut(&n) {
+        if let Some(pos) = rs.iter().rposition(|&x| x == r) {
+            rs.remove(pos);
+        }
+        if rs.is_empty() {
+            adj.remove(&n);
+        }
+    }
+}

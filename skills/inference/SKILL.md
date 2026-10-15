@@ -106,6 +106,16 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // arithmetic past i128 — the value still falls back to f64; i128::MIN % -1 is 0; the flag is
 // shared across nested closures, explicit strata and a query's data closure): the run errors
 // unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
+// A log:includes / log:notIncludes / log:supports PATTERN given through a variable is
+// matched, with a { … } formula (or {}) as the scope, as the stored formula the variable
+// is DIRECTLY bound to, as stored, only when that formula holds NO variable at any depth
+// (blank nodes are its existentials), exactly as if written in the rule (GH #6936); its
+// statements are charged to max_join_rows. Any other value (a formula holding a variable,
+// so a chained binding is not followed; a non-formula value; an unbound variable), and
+// EVERY bound pattern with the STORE as the scope, matches as the EMPTY pattern (includes
+// holds, notIncludes fails), as before; full matching is
+// https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. Each
+// containment matches its blanks afresh (no witness carries over to the next one).
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares
@@ -227,17 +237,21 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // reproducible as the engine's terms. Skolem labels (__sk<n>_e) are numbered in the sorted order
 // of each round's firing keys (every variable the conclusion substitutes), so for the SAME parsed
 // input the labels and the structural keys of facts carrying them do not depend on hash-set
-// traversal or hasher width (native vs wasm32; GH #6749). why() proof trees are NOT covered: a
-// non-existential fact keeps whichever supporting binding arrives first, and an existential's
-// proof includes its premises' proofs. E.g. with :a :p :v. :b :p :v. and rules ?x :p :v => ?x :q :v,
-// ?x :q :v => :m :r :v, :m :r :v => :m :s _:e, the :m :s label and key are stable, but its
-// why() tree may cite :a or :b as the :q witness depending on traversal order (GH #6844).
-// Labels are also NOT canonical across reordered isomorphic
+// traversal or hasher width (native vs wasm32; GH #6749). why() proof steps are covered too:
+// where a round derives ONE fact several ways - one rule firing under distinct bindings, two
+// different rules, or the transitivity fast path over several intermediate paths - the step
+// records the derivation with the least premise vector, not whichever arrived first (GH
+// #6844). E.g. with :a :p :v. :b :p :v. and rules
+// ?x :p :v => ?x :q :v, ?x :q :v => :m :r :v, :m :r :v => :m :s _:e, the :m :s label and key
+// are stable AND its why() tree always cites the same :q witness. A log:conclusion formula's
+// derived rows, and the rdf:first/rest cell labels interning a list value mints (_l<k>_<n>),
+// are likewise sorted / numbered in a canonical term order, not in a fact set's traversal order.
+// Labels are still NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,
 // and a label depends on the other firings in its round), and they hold only while the binding
 // values and firing sets are themselves stable. Values that still carry traversal order -
-// log:collectAllIn lists, log:conclusion formulas (rows in nested-closure set order),
-// backward-renamed __bw<n> terms - can reorder ranks and so labels (GH #6844).
+// log:collectAllIn lists, and backward-renamed __bw<n> terms (that counter is still assigned in
+// evaluation order) - can reorder ranks and so labels (GH #6844).
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
@@ -692,6 +706,68 @@ named reason and unlock path in the deferral ledger: `sparq-conformance/tests/dl
 (`DOCUMENTED_DIVERGENCES`, `DL_DIRECT_ABSTAINED`, `DL_PROFILE_ABSTAINED`) and the design
 record `research/owl2-direct-semantics-scoping.md`.
 
+**Full OWL 2 DL front end (`sparq_reason_dl::owl2dl`, issue #7031, in progress).** The
+ALCH layers above are being extended to OWL 2 DL (SROIQ(D)) by a hypertableau reasoner.
+Its first layer is built: `owl2dl::extract(&dict, &triples)` reads the whole OWL 2 RDF
+mapping (inverses, cardinalities, nominals, `hasSelf`, chains, keys, datatypes and facets,
+`sameAs`/`differentFrom`, negative assertions, n-ary disjointness) into a typed
+`owl2dl::Ontology`, every axiom carrying the input triple indices it came from. It stays
+fail-closed: a triple it cannot place gives an `ExtractError` naming that triple.
+Annotations are kept too (annotation axioms, plus ontology and reified axiom annotations in
+`Ontology::annotations`), outside the logical axioms.
+`owl2dl::check_dl(&dict, &onto)` runs the OWL 2 DL global restrictions (declarations and
+typing, punning, reserved vocabulary, simple roles, property-hierarchy regularity,
+anonymous-individual forests, operand sets, ill-typed literals, facets, datatype
+definitions) and returns a `DlProfileReport`. It is fail-closed: `verdict()` is
+`Some(false)` on a violation, `Some(true)` only when every restriction was checked, and
+`None` when one was not (listed in `unchecked`: `xsd:pattern` syntax, `rdf:XMLLiteral`
+content, an unloaded imports closure, anonymous individuals outside an anonymous forest,
+literal values beyond the represented range such as a year past `i64` or a language tag
+that is not well-formed BCP 47 (or, in an `rdf:PlainLiteral`, not a `langtag`), and the facet space of a bound outside the restricted
+datatype's value space, and whether operands with cardinality restrictions are distinct). Cardinalities must be valid non-negative `xsd:nonNegativeInteger` or
+`xsd:integer` literals; others are refused as unsupported. Lexical forms get no
+whitespace normalisation (RDF applies no `whiteSpace` facet), and with unloaded imports
+the violations an import could repair (undeclared entities, unknown datatypes) are
+unchecked rather than definite.
+`blocking()` lists the violations a reasoner must refuse. `owl:imports` is recorded in
+`Ontology::imports`, never dereferenced.
+`owl2dl::check(&dict, &onto, Budget::default())` is the reasoner: a hypertableau (Motik,
+Shearer and Horrocks) over DL-clauses, with pairwise anywhere blocking, merging and
+dependency-directed backjumping. It returns a `DlReport` with the profile report,
+`consistency` (`Consistent`, `Inconsistent`, or `Unknown(reason)`) and, when consistent, a
+`Classification` (unsatisfiable named classes, every entailed named subsumption, and the
+`inferred` ones not asserted; `classification_unknown` says why a consistent ontology has
+none, which happens when the shared classification budget runs out).
+`owl2dl::Reasoner::new(&dict, &onto, budget)` answers single
+`is_satisfiable(iri)` / `is_subclass_of(sub_iri, sup_iri)` queries by class IRI
+(`Option<bool>`; `owl:Thing`, `owl:Nothing` and
+classes no axiom mentions included; `None` when an unloaded import could change a negative
+answer). The decided fragment is ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`,
+number restrictions up to `MAX_CARDINALITY`; anything else (data properties and
+datatypes, nominals and `hasValue`, other chains, keys, the top and bottom object
+properties) gives `Unknown(OutOfFragment { construct, source })`, a blocking profile
+violation gives `Unknown(NotInDl)`, an exhausted step budget gives
+`Unknown(ResourceBudget)`, and unloaded imports turn `Consistent` into
+`Unknown(ImportsNotLoaded)` with no classification. It never guesses a verdict. Its answers are checked against
+HermiT on a seeded corpus (`tests/owl2dl_reasoner.rs`).
+From JavaScript the same pipeline (parse, `extract`, `check`) is `checkOwlDl(tbox, abox?,
+options?)` in `@sparq-org/sparq`, backed by the separate, lazily-loaded `crates/sparq-dl-wasm`
+bundle; it returns the report as JSON with the offending triples as N-Triples lines — see
+[`../javascript-wasm/references/owl-dl.md`](../javascript-wasm/references/owl-dl.md).
+`owl2dl::data_ranges` answers the datatype questions the tableau asks of a data range
+(`DataRangeExpr`: a datatype, a facet restriction, `OneOf`, `And`, `Or`, `Not`):
+`is_empty`, `contains`, `has_at_least(r, n)` for data cardinalities, and
+`conjunction_satisfiable(pos, neg, distinct, values)`, which asks whether `distinct`
+pairwise different values exist inside every range of `pos`, outside every range of `neg`
+and outside `values`. Each answer is a `Tri`: `Yes` and `No` are exact (rational bounds
+without rounding, discrete floats with `-0` and `+0` distinct, the ±14:00 rule for
+`xsd:dateTime`, strings of XML characters, and automata for XSD patterns, lengths, basic
+language ranges and BCP 47 tags, `langtag`s only for `rdf:PlainLiteral`), and `Unknown` covers particular `rdf:XMLLiteral`
+values (their XML content is not checked), a facet outside the datatype's facet space
+(including an order bound outside its value space), a value no literal has, data ranges nested more than 64 deep, an XSD pattern this implementation does
+not support (block escapes such as `\p{IsBasicLatin}`, or groups nested more than 64 deep),
+and string searches over a fixed automaton budget (states, edges and automaton bytes).
+
 ## Common recipes
 
 **1. OWL 2 RL closure + inconsistency report.** OWL includes RDFS; run the clash check on the materialized result.
@@ -808,7 +884,7 @@ the profile.
 - **The RL materializer is COMPLETE for the assertion-style RL/RDF rules — the W3C OWL-RL conformance row is at the RL ceiling (sq-350ms).** Every rule with a positive-assertion head in Profiles §4.3 Tables 5/6/9 is implemented (the `owl.rs` per-rule status table + `research/inference-completeness-audit.md` §2/§2b are the per-rule proof). The 13 documented OWL-RL conformance divergences are PROVABLY outside the RL profile, **not** missing rules: TBox-axiom conclusions, invented class expressions (`owl:complementOf`/`unionOf`), reified `owl:AllDifferent` structures, the `prp-pdw`/`prp-fp`/`prp-ifp` **contrapositives** (RL has NO rule producing `owl:differentFrom` between INDIVIDUALS — `dt-diff` emits it only between unequal-value literals, otherwise it appears only in clash bodies), `owl:ReflexiveObjectProperty` (EXCLUDED from the RL grammar — there is no `prp-rfx`), and datatype-range INTERSECTION. They stay documented divergences (closing them would be unsound or beyond-profile); the inference ratchet HOLDS — see `inference-conformance-report.md` and the central scoreboard (`scoreboard::SUITES`, CI job `inference-conformance`) for the current pinned count. Multi-round assertion-rule completeness and the prp-pdw/prp-fp soundness boundary are pinned by in-crate guards in `owl.rs::tests`; the per-divergence disposition pass (sq-pbz04.1.3) re-audited all 13 from the raw export premises/conclusions (verdict: 13/13 PERMANENT, zero in-profile fixes), tagged every report-facing rationale `PERMANENT — …` with its rule-level grounding, and pinned tag+grounding with an in-crate disposition test in `owl_suite.rs`.
 - **OWL incremental fallback is silent.** `MaterializedOwlGraph` drops to `OwlMode::Fallback` (re-materializes via `materialize_owl_rl` every mutation, still correct) when the base uses `owl:sameAs`, Functional/InverseFunctional, property chains, restrictions, cardinality, hasKey, oneOf, intersection/union — and on any TBox mutation. Check `.mode()` / `.full_rebuilds()` if incremental cost matters. These usually live in a static TBox, so the mode is decided once at load.
 - **`MaterializedN3Graph` keeps the caller's blank nodes apart from every other blank (GH #6775).** A caller's `Term::Blank(l)` (in `new`'s base, `insert`, `delete`, `contains`, `why`) is the caller's own node, never one of the rules document's blanks (the parser's `[]` labels `_b1`, `_b2`, … or a written `_:x`) nor one minted at run time. `closure()` and `why()` show caller labels unchanged and every other blank in the reserved `N3_GRAPH_BLANK` space (`__d.` + its label: the document's `_:x` is `_:__d.x`), so output terms are distinct exactly when the nodes are and `contains(t)` holds for every `t` in `closure()`. A label `__d.<label>` passed in names that graph node. A `__d.` label that `closure()` could never return is refused: `new` returns `Err`, while `insert`, `delete` and `contains` ignore the fact. Documents parsed at run time (`log:parsedAsN3`, `log:semantics`) get their blanks standardized apart by the engine as `__rp{k}_<key>_<label>`, in every entry point including `reason_n3_query`, so their text cannot spell a blank of the source, the query or the caller's. `key` is specified: the first 8 bytes (16 hex digits) of SHA-256 over `"sparq-n3-runtime-doc\0"`, then the text and the base, each preceded by its byte length as a big-endian `u64`; so a label depends only on the document, is the same on every build, and is stable in exported proof keys. Two documents with one key fail the run. A runtime-document table (a run's, or a `MaterializedN3Graph`'s for its whole life) keeps a constant-size entry per distinct document (SHA-256 digest and label prefix, not the text) and takes at most 100,000 documents; one more fails the run (`runtime-document limit exceeded`, recorded as a cut). A source blank spelled exactly as a runtime blank (`__rp{k}_<16 hex>_<label>`), whether an exported closure or a person wrote it, names that runtime document's blank and does not move `k`, so `reason_n3_pass_all` over its own output stays a fixed point and an annotation on an exported runtime blank joins the reparsed node. A `MaterializedN3Graph` keeps its runtime-document table (and `k`) for its whole life, shared by rebuilds and `why()`, so a returned runtime blank can be annotated through its `__d.` label and stays the same node. `why_document_with(fact, opts)` explains the graph's closure as `why_with` does (same lifetime runtime-document table, `None` for a fact outside that closure) but takes and shows blanks in the rules document's own labels, as `reason_n3` prints them. For a standalone document (no graph) `why_n3_document(src, fact, opts)` (feature `explain`) is a batch evaluation of `src` exactly as `reason_n3` runs it, and returns `None` for every fact, asserted ones included, when that evaluation fails (e.g. an unstratifiable negation cycle); the WASM `whyN3` uses it, and it is tested to explain every triple `reasonN3New` derives from document blanks and from runtime texts spelling `_:__bs0_x`, with and without a later `log:notIncludes` rule.
-- **N3 incremental qualification is narrow.** `MaterializedN3Graph` only runs `N3Mode::Counting` (truly incremental) for a monotone, input-stratified rule fragment: forward rules with ground-IRI predicates, no conclusion blank nodes, builtins limited to the parity whitelist (`log:uri`, `log:equalTo`/`notEqualTo`, `string:concatenation`/`scrape`/`encodeForUri`), and negation only via the store-scoped `?x log:notIncludes { … }` idiom over input-only predicates. Base facts containing formula values with variables (including inside lists or triple terms) also use the checked fallback: counting emission requires recursive groundness, while batch preserves formula-scoped variables. `insert` accepts these values and switches to fallback under the same `ClosureLimits`; deleting them allows counting to resume. Ground formula values remain eligible, and inserts with variables outside formulas are still ignored. Anything else → `N3Mode::Fallback`; always consult `.fallback_reason()` (`None` ⇔ counting active). `MaterializedN3Graph::new` refuses a rules document that negates through a dependency cycle; if a later rematerialization is refused (e.g. a nested closure over a cyclic formula), the closure fails closed to the base facts and `.stratification_warning()` says why. The full *batch* N3 engine (`reason_n3`) supports the much larger `math:`/`string:`/`list:`/`time:`/`log:` builtin set and goal-directed `<=` rules.
+- **N3 incremental qualification is narrow.** `MaterializedN3Graph` only runs `N3Mode::Counting` (truly incremental) for a monotone, input-stratified rule fragment: forward rules with ground-IRI predicates, no conclusion blank nodes, builtins limited to the parity whitelist (`log:uri`, `log:equalTo`/`notEqualTo`, `string:concatenation`/`scrape`/`encodeForUri`), and negation only via the store-scoped `?x log:notIncludes { … }` idiom over input-only predicates. Base facts containing formula values with variables (including inside lists or triple terms) also use the checked fallback: counting emission requires recursive groundness, while batch preserves formula-scoped variables. `insert` accepts these values and switches to fallback under the same `ClosureLimits`; deleting them allows counting to resume. Ground formula values remain eligible, and base facts with variables outside formulas are still ignored, both by `insert` and by `new` / `with_limits`. Anything else → `N3Mode::Fallback`; always consult `.fallback_reason()` (`None` ⇔ counting active). `MaterializedN3Graph::new` refuses a rules document that negates through a dependency cycle; if a later rematerialization is refused (e.g. a nested closure over a cyclic formula), the closure fails closed to the base facts and `.stratification_warning()` says why. The full *batch* N3 engine (`reason_n3`) supports the much larger `math:`/`string:`/`list:`/`time:`/`log:` builtin set and goal-directed `<=` rules.
 - **N3 `math:` comparisons follow XPath numeric type promotion by DATATYPE (GH #6745).** `math:greaterThan` / `lessThan` / `notGreaterThan` / `notLessThan` / `equalTo` / `notEqualTo`, and the check a functional `math:` builtin runs against an already-bound object (`(1 2) math:sum 3`), promote both operands as XPath `op:numeric-*` does: an integer (any derived integer type) or `xsd:decimal` pair compares EXACTLY on its digits via the substrate's `cmp_plain_decimal` (arbitrary precision — `9007199254740993 math:equalTo 9007199254740992` does NOT fire, nor do values past `i128`); with an `xsd:float` and no `xsd:double` both sides are promoted to `xsd:float` (`0.1 math:equalTo "0.1"^^xsd:float` fires); with an `xsd:double` both are promoted to `xsd:double`. `NaN` is unordered, so every comparison but `notEqualTo` is false. A bare N3 numeral takes its datatype from its lexical form (`1` integer, `1.0` decimal, `1e0` double); a literal of a non-numeric datatype (a string) is still coerced by lexical shape, as EYE does; an ill-typed operand (`"1.5"^^xsd:integer`, `"-1"^^xsd:positiveInteger`) never matches. A typed numeric literal gets XSD `whiteSpace=collapse` (`" 3"^^xsd:integer` is 3; `"3 4"^^xsd:integer` stays ill-typed); a string operand is trimmed in the bound-object check (`(1 2) math:sum " 3"` fires) but not in the six comparisons. The one non-XSD form read is `"inf"` / `"-inf"` / `"NaN"`^^xsd:decimal — how a non-finite f64 fallback result is rendered (`(0.5 -1024) math:exponentiation ?x`) — which reads as ±INF / NaN, so such a result still matches a bound `"INF"^^xsd:double` and later comparisons on `?x`. Arithmetic RESULT datatypes and lexical forms are unchanged (EYE-compat rules below).
 - **N3 `math:` exact arithmetic is on the SHARED substrate tower (`sq-pbz04.5.1`, seam 2).** The chainer's exact add / subtract / multiply / negate / abs core (and the scale-aligned comparison the max/min and value-equality paths use) DELEGATES to `sparq-substrate::numeric::Dec` — a base, non-optional `numeric`-slice dependency, the SAME exact fixed-point `mant * 10^-scale` decimal the SPARQL engine's FILTER/BIND path drives — so the reasoner and the engine can never diverge on exact-decimal arithmetic (`0.1 + 0.2` is exactly `0.3`; `('2.7' '2') math:difference` is exactly `0.7`). The private `NumVal` enum stays a thin EYE-compat ADAPTER over that core: EYE's own edges are byte-identical and stay adapter-resident — lexical-shape string coercion, the `numval_term` result rendering (whole-`f64` → `xsd:integer`), `math:remainder`'s divisor-sign integer semantics, `math:integerQuotient`'s floor, `math:quotient`'s scale-34 exactness rule (non-terminating → `f64`, exact integer/integer → `xsd:integer`, NOT substrate `Dec::checked_div`'s always-decimal scale-18 rounding), integer `math:exponentiation`, and the `Int`-collapse rendering of floor/ceiling. The i128↔i64 wrinkle: the chainer `Int` tier is `i128` while substrate `Num::Int` is `i64`, so an out-of-`i64`-range integer is carried as substrate `Dec { mant, scale: 0 }` (exact for the full `i128` range; a mantissa overflow falls back to `f64` exactly as before). N3/EYE differential + expressivity floors and `RIF_CORE_FLOOR` are all byte-identical (the closure is unchanged; a direct old-`NumVal`-vs-substrate differential over the `>i64::MAX` / `0.1+0.2` / INF-NaN / `2.7-2` matrix pins it).
 - **An N3 forward closure that never reaches a fixpoint is refused (GH #6757).** Each forward closure (one document's fixpoint over all its strata, and each nested `log:conclusion` closure on its own) may run `ClosureLimits::max_rounds` rounds (default 1,000,000) and hold `ClosureLimits::max_facts` facts, asserted and derived (default 50,000,000). Past either limit the call returns `Err("n3: forward closure limit exceeded …")` and records a cut, so no entry point returns the truncated closure, and `MaterializedN3Graph` fails closed as it does for any refused rematerialization. A semi-naive closure needs about one round per step of its longest derivation chain, so a linear walk over N edges needs about N + 2 rounds. Raise the limits with `reason_n3_with_limits` / `reason_n3_terms_with_limits` for longer finite walks, or lower them to fail faster. Rules whose **terms** grow (a string or list that doubles each round) are caught by `ClosureLimits::max_term_bytes` instead (GH #6771, default 16 MiB). In the **text engine**, the terms it builds are sized from borrowed inputs and charged to the run's limit **before** they are built:

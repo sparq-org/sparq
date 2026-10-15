@@ -115,6 +115,16 @@ async fn handle_now<S: Store + 'static>(
 ) -> Response {
     let path = req.path.as_str();
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
+        // A linkset describes a resource, and no resource's name ends in `.meta` (see
+        // [`sanitize_slug`]): what is stored under such a name is a linkset's own record, which
+        // has no linkset and is no resource. Whatever is stored, it is not there.
+        if stem.to_ascii_lowercase().ends_with(META_SUFFIX) {
+            return if state.needs_auth(agent) {
+                state.challenge(None)
+            } else {
+                problem(StatusCode::NOT_FOUND, None)
+            };
+        }
         let uri = state.cfg.absolute(stem);
         return linkset(state, req, agent, &uri).await;
     }
@@ -3589,6 +3599,8 @@ async fn delete<S: Store + 'static>(
     if let Err(r) = recheck(state, Action::Delete, uri, agent).await {
         return r;
     }
+    // A data resource's date is compared only when it has one; a container's listing may have
+    // one.
     if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
         return r;
     }
@@ -4650,6 +4662,18 @@ async fn linkset<S: Store + 'static>(
         } else {
             problem(StatusCode::NOT_FOUND, None)
         };
+    }
+    // A patch reads the linkset it patches (see [`patch`]), so it needs Read; a whole linkset
+    // replaces it, and needs Read only to compare it.
+    let read_check = if req.method == Method::PATCH {
+        recheck(state, Action::Read, uri, agent).await
+    } else if writes {
+        precondition_read_check(state, req, uri, agent, false).await
+    } else {
+        Ok(())
+    };
+    if let Err(r) = read_check {
+        return r;
     }
     // A patch reads the linkset it patches (see [`patch`]), so it needs Read; a whole linkset
     // replaces it, and needs Read only to compare it.
@@ -12245,6 +12269,128 @@ mod tests {
             let created = answer(method.clone(), format!("/c/{suffix}"), h.clone()).await;
             let never = answer(method.clone(), format!("/n/{suffix}"), h).await;
             assert_eq!(created, never, "{method} {suffix}");
+        }
+    }
+
+    /// Review finding: the linkset route took `X.meta.meta` for the linkset of `X.meta`, a
+    /// linkset's own record, and authorized and served it as a resource: a reader refused `X` and
+    /// its linkset was answered on the record's format, size and date, and a writer could store
+    /// records under it that outlived `X`. No resource's name ends in `.meta`, so nothing is there.
+    #[tokio::test]
+    async fn a_linksets_record_is_no_resource() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str, constraint: Value| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who,
+                    "constraint": constraint}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (carol, dave) = ("https://carol.example/#me", "https://dave.example/#me");
+        let json_only = json!([{"leftOperand": "format", "operator": "eq", "rightOperand": JSON}]);
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read"]), carol, json_only));
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave, json!([])));
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let doc = st.cfg.absolute("/doc.txt");
+        let record = format!("{doc}.meta");
+        assert!(st.store.meta(&record).await.unwrap().is_some());
+        let status = |method: Method, path: &'static str, who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("content-type", LINKSET_JSON)];
+                let body = r#"{"linkset": []}"#;
+                handle(&st, &req(method, path, &h, body), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert_eq!(
+            status(Method::GET, "/doc.txt.meta", agent(carol)).await,
+            StatusCode::FORBIDDEN
+        );
+        for path in [
+            "/doc.txt.meta.meta",
+            "/doc.txt.META.meta",
+            "/doc.txt.meta.meta.meta",
+        ] {
+            for who in [agent(OWNER), agent(carol), agent(dave)] {
+                for method in [Method::GET, Method::PUT, Method::PATCH, Method::DELETE] {
+                    let got = status(method.clone(), path, who.clone()).await;
+                    assert_eq!(
+                        got,
+                        StatusCode::NOT_FOUND,
+                        "{method} {path} {:?}",
+                        who.subject
+                    );
+                }
+            }
+            let got = status(Method::GET, path, Agent::anonymous()).await;
+            assert_eq!(got, StatusCode::UNAUTHORIZED, "{path}");
+        }
+        for key in [format!("{doc}.meta.meta"), format!("{doc}.meta.meta.meta")] {
+            assert!(st.store.meta(&key).await.unwrap().is_none(), "{key}");
+        }
+        // Once the resource is deleted, nothing of it is left there either.
+        let delete = req(Method::DELETE, "/doc.txt", &[], "");
+        let r = handle(&st, &delete, &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert_eq!(
+            status(Method::GET, "/doc.txt.meta.meta", agent(OWNER)).await,
+            StatusCode::NOT_FOUND
+        );
+        assert!(st.store.meta(&record).await.unwrap().is_none());
+    }
+
+    /// The same for a create that is set aside (it landed, reported a failure, and could not be
+    /// taken back): its linkset's record answers as one where nothing was ever created.
+    #[tokio::test]
+    async fn a_linksets_record_is_no_resource_while_a_create_is_set_aside() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let carol = "https://carol.example/#me";
+        let json_only = json!([{"leftOperand": "format", "operator": "eq", "rightOperand": JSON}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": carol,
+                "constraint": json_only}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("carol", grant);
+        let uri = st.cfg.absolute("/new.txt");
+        store
+            .fail_after_create
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        let h = [("slug", "new.txt"), ("content-type", "text/plain")];
+        let r = create(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER), &root).await;
+        store
+            .fail_after_create
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri), "the create is set aside");
+        let status = |method: Method, path: String, who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("content-type", JSON_PATCH)];
+                handle(&st, &req(method, &path, &h, "[]"), &who)
+                    .await
+                    .status()
+            }
+        };
+        for who in [agent(OWNER), agent(carol), Agent::anonymous()] {
+            for method in [Method::GET, Method::PATCH] {
+                let created = status(method.clone(), "/new.txt.meta.meta".into(), who.clone());
+                let never = status(method.clone(), "/never.txt.meta.meta".into(), who.clone());
+                assert_eq!(created.await, never.await, "{method} {:?}", who.subject);
+            }
         }
     }
 }

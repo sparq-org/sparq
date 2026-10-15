@@ -988,6 +988,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     let mut out: Vec<[Term; 3]> = Vec::new();
     let mut emitted: FxHashSet<[Term; 3]> = FxHashSet::default();
     let mut sk_counter = 0usize;
+    let mut scratch = FiringScratch::default();
     for (ri, rule) in query_parsed.rules.iter().enumerate() {
         let premise = order_premise(&rule.premise);
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
@@ -1015,11 +1016,12 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
         }
         // One instantiation per distinct conclusion-relevant binding, numbered in the
         // canonical order of the firings (GH #6749).
-        let none_fired = FxHashSet::default();
-        let firings = canonical_new_firings(bindings, &concl_vars, &none_fired, false);
+        let mut none_fired = FxHashSet::default();
+        let firings =
+            canonical_new_firings(bindings, &concl_vars, &mut none_fired, false, &mut scratch);
         let base = sk_counter;
         sk_counter += firings.len();
-        for (rank, _, b) in firings {
+        for (rank, b) in firings {
             let n = base + rank + 1;
             let sk: FxHashMap<String, String> = concl_blanks
                 .iter()
@@ -1087,9 +1089,15 @@ fn conclusion_existentials(conclusion: &[[Term; 3]]) -> (Vec<String>, Vec<String
 /// Every variable whose binding can change the instantiated conclusion, sorted: exactly the
 /// variables [`ground_triple`] substitutes ([`apply_deep`]), at any depth — inside lists,
 /// quoted triples AND quoted `{ … }` formulas. This is the one definition of the firing key
-/// ([`firing_key`]), so the dedup of firings, their ranking, and the proof-mode choice of
-/// binding cannot disagree about which bindings instantiate the same conclusion. A variable
-/// a binding leaves unbound (a formula's own quantified variable) keys as unbound.
+/// ([`firing_key`]), so the dedup of firings, their ranking and their tie-break cannot
+/// disagree about which bindings instantiate the same conclusion. A variable a binding
+/// leaves unbound (a formula's own quantified variable) keys as unbound.
+///
+/// One key gives one conclusion; the converse does NOT hold. A conclusion of several
+/// triples, or a symmetric one such as `{ ?x :r ?y . ?y :r ?x }`, derives one fact under
+/// several DISTINCT keys, so the firing key is no guide to how many derivations a FACT has
+/// — which proof step a fact records is settled over the whole round instead
+/// ([`step_precedes`], GH #6844).
 fn conclusion_relevant_vars(conclusion: &[[Term; 3]]) -> Vec<String> {
     fn scan(t: &Term, vars: &mut std::collections::BTreeSet<String>) {
         match t {
@@ -1108,15 +1116,31 @@ fn conclusion_relevant_vars(conclusion: &[[Term; 3]]) -> Vec<String> {
 }
 
 /// The firing key of binding `b` for a rule whose conclusion-relevant variables are
-/// `concl_vars` ([`conclusion_relevant_vars`]): one existential instantiation per distinct
-/// key. Two bindings with one key instantiate the same conclusion.
-fn firing_key(b: &Binding, concl_vars: &[String]) -> String {
-    concl_vars.iter().map(|v| format!("{:?};", b.get(v))).collect()
+/// `concl_vars` ([`conclusion_relevant_vars`]), written into `out` (cleared first): one
+/// existential instantiation per distinct key. Two bindings with one key instantiate the same
+/// conclusion. The buffer is the caller's so that keying a binding whose firing has already
+/// minted its existentials — the common case once a rule is saturated — allocates nothing.
+fn firing_key(b: &Binding, concl_vars: &[String], out: &mut String) {
+    use std::fmt::Write;
+    out.clear();
+    for v in concl_vars {
+        // Infallible: `String`'s `fmt::Write` never errors.
+        let _ = write!(out, "{:?};", b.get(v));
+    }
+}
+
+/// Buffers [`canonical_new_firings`] reuses across a run's rules and rounds (GH #6843): the
+/// firing-key buffer, this round's fresh keys, and the permutation that ranks them.
+#[derive(Default)]
+struct FiringScratch {
+    key: String,
+    keys: Vec<String>,
+    order: Vec<u64>,
 }
 
 /// The firings among `bindings` that mint existentials for the first time — one per firing
-/// key not yet in `fired` — each with its RANK in the canonical order of those keys
-/// (sorted; GH #6749), returned in arrival order.
+/// key not yet in `fired`, which this call extends with them — each with its RANK in the
+/// canonical order of those keys (sorted; GH #6749), returned in arrival order.
 ///
 /// Skolem labels are numbered by rank. The bindings arrive in the order the fact and delta
 /// hash sets yield them, which depends on insertion history and on the hasher's word size
@@ -1125,56 +1149,154 @@ fn firing_key(b: &Binding, concl_vars: &[String]) -> String {
 /// get distinct ranks, so labels stay injective. Only the numbering is canonical: the
 /// firings keep their arrival order, so the facts they derive are inserted as before.
 ///
-/// Bindings are deduplicated by key before sorting. Of several bindings with one key, the
-/// first to arrive is kept; with `tie_break`, the least by its full canonical encoding is
-/// kept instead, so the premises a proof step records are reproducible too. The key covers
-/// every conclusion-relevant variable, so the conclusion they instantiate — and hence the
-/// closure — is the same either way.
+/// Bindings are deduplicated by key before sorting — `fired` itself is the dedup, so a key
+/// seen twice in one round is as settled as one carried over from an earlier round. Of
+/// several bindings with one key, the first to arrive is kept; with `tie_break`, the least by
+/// its full canonical encoding is kept instead, so the premise instances a firing builds are
+/// a function of the round. The key covers every conclusion-relevant variable, so the
+/// conclusion they instantiate — and hence the closure — is the same either way.
+///
+/// `tie_break` alone does NOT make a proof step reproducible: one conclusion can be derived
+/// under several distinct keys and by several rules, and the transitivity fast path never
+/// reaches this function at all. The step a fact records is chosen over the round's whole
+/// derivation list ([`step_precedes`], GH #6844); this tie-break only settles which binding
+/// of one key a firing uses.
 fn canonical_new_firings(
     bindings: Vec<Binding>,
     concl_vars: &[String],
-    fired: &FxHashSet<String>,
+    fired: &mut FxHashSet<String>,
     tie_break: bool,
-) -> Vec<(usize, String, Binding)> {
+    scratch: &mut FiringScratch,
+) -> Vec<(usize, Binding)> {
     let full_encoding = |b: &Binding| -> Vec<String> {
         let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
         f.sort_unstable();
         f
     };
-    // One entry per fresh key, in the arrival order of the key's first binding.
-    let mut fresh: Vec<(String, Binding)> = Vec::new();
-    let mut full: Vec<Vec<String>> = Vec::new(); // tie_break only
+    let FiringScratch { key, keys, order } = scratch;
+    keys.clear();
+    // One entry per fresh key, in the arrival order of the key's first binding; the ranks
+    // are filled in below.
+    let mut out: Vec<(usize, Binding)> = Vec::new();
+    // `tie_break` only, parallel to `out`: the kept binding's full encoding, computed when a
+    // second binding with the same key arrives and there is something to compare against.
+    let mut full: Vec<Option<Vec<String>>> = Vec::new();
     let mut slot: FxHashMap<String, usize> = FxHashMap::default();
     for b in bindings {
-        let key = firing_key(&b, concl_vars);
-        if fired.contains(&key) {
+        firing_key(&b, concl_vars, key);
+        if tie_break {
+            if let Some(&i) = slot.get(key.as_str()) {
+                let f = full_encoding(&b);
+                if full[i].is_none() {
+                    full[i] = Some(full_encoding(&out[i].1));
+                }
+                if full[i].as_ref().is_some_and(|kept| &f < kept) {
+                    full[i] = Some(f);
+                    out[i].1 = b;
+                }
+                continue; // a later binding of a key already kept
+            }
+        }
+        if fired.contains(key.as_str()) {
             continue;
         }
-        match slot.get(&key) {
-            None => {
-                slot.insert(key.clone(), fresh.len());
-                if tie_break {
-                    full.push(full_encoding(&b));
-                }
-                fresh.push((key, b));
-            }
-            Some(&i) if tie_break => {
-                let f = full_encoding(&b);
-                if f < full[i] {
-                    full[i] = f;
-                    fresh[i].1 = b;
-                }
-            }
-            Some(_) => {} // a later binding of a key already kept
+        fired.insert(key.clone());
+        if tie_break {
+            slot.insert(key.clone(), out.len());
+            full.push(None);
+        }
+        keys.push(key.clone());
+        out.push((0, b));
+    }
+    if out.len() > 1 {
+        let index = rank_keys(keys, order);
+        for (r, &e) in order.iter().enumerate() {
+            out[(e & index) as usize].0 = r;
         }
     }
-    let mut order: Vec<usize> = (0..fresh.len()).collect();
-    order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0)); // keys are distinct
-    let mut rank = vec![0; fresh.len()];
-    for (r, &i) in order.iter().enumerate() {
-        rank[i] = r;
+    out
+}
+
+/// Fills `order` with `keys`' indexes in ASCENDING key order, packed into the low bits of a
+/// sort word — the permutation that numbers a round's firings (GH #6749). Returns the mask
+/// that reads an index back out.
+///
+/// Equivalent to sorting the indexes by `keys[i]`, and cheaper on the keys this path sees
+/// (GH #6843). A round's keys are one conclusion-variable shape filled in, so they usually
+/// share a long prefix (`Some(Iri("http://…`) that a comparison sort re-reads on every
+/// comparison. This instead strips whatever prefix they do have in common once and sorts
+/// plain `u64`s carrying the leading bytes of what is left, which usually decides every key
+/// outright:
+///
+/// - the common prefix is common, so it orders nothing, and dropping it leaves the keys'
+///   relative order unchanged;
+/// - a key's word is the next bytes zero-padded, big-endian, keeping only the bits above the
+///   index; 0 is below every byte and truncating low bits is monotone, so `k < k'` implies
+///   `word(k) <= word(k')` — a strictly smaller word is a strictly smaller key, whatever the
+///   keys' lengths and whatever bytes (`\0` included) they hold;
+/// - so sorting by word and then re-sorting each equal-word run by its whole key is exactly
+///   ascending key order. Keys are distinct, so that order is total, and the index in the low
+///   bits only separates equal words, never decides a rank.
+fn rank_keys(keys: &[String], order: &mut Vec<u64>) -> u64 {
+    debug_assert!(keys.len() > 1, "a round with one key needs no ranking");
+    let index = u64::MAX >> (keys.len() as u64).leading_zeros(); // >= keys.len() - 1
+    let common = keys[1..]
+        .iter()
+        .fold(keys[0].len(), |p, k| common_prefix(&keys[0].as_bytes()[..p], k.as_bytes()));
+    let word = |k: &String| {
+        let mut w = [0u8; 8];
+        let tail = &k.as_bytes()[common..];
+        let n = tail.len().min(8);
+        w[..n].copy_from_slice(&tail[..n]);
+        u64::from_be_bytes(w) & !index
+    };
+    order.clear();
+    order.extend(keys.iter().enumerate().map(|(i, k)| word(k) | i as u64));
+    order.sort_unstable();
+    // Re-sort the runs the packed words left tied (for most rounds, there are none).
+    let mut i = 0;
+    while i < order.len() {
+        let w = order[i] & !index;
+        let end = i + order[i..].iter().take_while(|e| *e & !index == w).count();
+        if end - i > 1 {
+            let key = |e: &u64| &keys[(e & index) as usize];
+            order[i..end].sort_unstable_by(|a, b| key(a).cmp(key(b)));
+        }
+        i = end;
     }
-    fresh.into_iter().zip(rank).map(|((key, b), r)| (r, key, b)).collect()
+    index
+}
+
+/// Whether derivation `a` comes before `b` in the canonical order of the derivations of ONE
+/// conclusion (GH #6844): premise vectors compared lexicographically under
+/// [`serialize::row_cmp`], a shorter vector before a longer one that extends it, then the
+/// lower rule index.
+///
+/// A total order on `(premises, rule)` — `serialize::row_cmp` is `Equal` exactly on equal
+/// rows, so two derivations tie only when they record the same premises from the same rule,
+/// which makes them the same proof step. The conclusions are NOT compared: this orders the
+/// candidates for one fact, never the facts themselves, so the round's derivation order is
+/// left alone.
+fn step_precedes(a: &DerivationStep, b: &DerivationStep) -> bool {
+    use std::cmp::Ordering;
+    let (_, ra, pa) = a;
+    let (_, rb, pb) = b;
+    let by_premises = pa
+        .iter()
+        .zip(pb)
+        .map(|(x, y)| serialize::row_cmp(x, y))
+        .find(|o| *o != Ordering::Equal)
+        // Every compared row was equal, so the shorter vector is a prefix of the longer.
+        .unwrap_or_else(|| pa.len().cmp(&pb.len()));
+    match by_premises {
+        Ordering::Equal => ra < rb,
+        o => o == Ordering::Less,
+    }
+}
+
+/// The length of `a` and `b`'s common prefix.
+fn common_prefix(a: &[u8], b: &[u8]) -> usize {
+    a.iter().zip(b).take_while(|(x, y)| x == y).count()
 }
 
 /// A stratified run's result ([`reason_n3_stratified`]).
@@ -1768,6 +1890,7 @@ fn run_closure_in(
     let premise_meta: Vec<Option<Box<[String]>>> =
         rules.iter().map(|r| premise_universals(&r.premise)).collect();
     let mut fired: Vec<FxHashSet<String>> = vec![FxHashSet::default(); rules.len()];
+    let mut scratch = FiringScratch::default();
     let mut sk_counter = 0usize;
 
     // TRANSITIVITY fast path: rules of the exact shape `{?x P ?y. ?y P ?z} => {?x P ?z}`
@@ -2039,6 +2162,9 @@ fn run_closure_in(
                     }
                 };
                 if concl_blanks.is_empty() {
+                    // Which binding of a shared firing key arrives first is not observable
+                    // here: the proof step a fact records is chosen over the whole round's
+                    // `produced` list below (GH #6844), not per rule.
                     for b in &bindings {
                         emit(b, None);
                     }
@@ -2049,17 +2175,22 @@ fn run_closure_in(
                 // of this round's new firings so a label never depends on hash-set traversal
                 // order (GH #6749).
                 let tie_break = mode == StepMode::Full;
-                let firings = canonical_new_firings(bindings, concl_vars, &fired[ri], tie_break);
+                let firings = canonical_new_firings(
+                    bindings,
+                    concl_vars,
+                    &mut fired[ri],
+                    tie_break,
+                    &mut scratch,
+                );
                 let base = sk_counter;
                 sk_counter += firings.len();
-                for (rank, key, b) in firings {
+                for (rank, b) in firings {
                     let n = base + rank + 1;
                     let sk: FxHashMap<String, String> = concl_blanks
                         .iter()
                         .map(|l| (l.clone(), format!("{}{}_{}", sk_prefix, n, l)))
                         .collect();
                     emit(&b, Some(&sk));
-                    fired[ri].insert(key);
                 }
             }
             let mut new_delta: FxHashSet<[Term; 3]> = FxHashSet::default();
@@ -2067,6 +2198,41 @@ fn run_closure_in(
             // transitive predicate, those with at least one NON-transitive-rule derivation are
             // generators (a fact may be produced by several rules in one round — OR the flags).
             let mut trans_new: FxHashMap<[Term; 3], bool> = FxHashMap::default();
+            // The proof step a fact records is the derivation at its FIRST entry in
+            // `produced` — `facts.insert` below is the dedup — and `produced` is built in the
+            // order the delta and fact hash sets yield their contents. THREE independent
+            // producers put several derivations of one conclusion in it: a rule whose
+            // conclusion is symmetric or has several triples derives one fact under several
+            // DISTINCT firing keys (one key gives one conclusion, but one conclusion can come
+            // from many keys); different rules derive the same fact in one round; and the
+            // transitivity fast path pushes one entry per intermediate path, over a `gen_out`
+            // adjacency whose own order comes from a hash map. So `why()` could name
+            // different premises run to run and native vs `wasm32`.
+            //
+            // Swap each conclusion's CANONICAL derivation into that conclusion's first slot:
+            // least premise vector (lexicographic under [`step_precedes`]), then least rule
+            // index. A swap only ever exchanges two entries that carry the SAME conclusion,
+            // so the multiset of (conclusion, rule) pairs the generator OR below and
+            // `facts.insert` see is untouched — it decides which derivation `why()` names and
+            // nothing else (GH #6844). Doing it here, once over the round, covers every
+            // producer; collapsing one rule's bindings by firing key cannot.
+            if mode == StepMode::Full && produced.len() > 1 {
+                let mut slot: FxHashMap<[Term; 3], usize> = FxHashMap::default();
+                for i in 0..produced.len() {
+                    match slot.get(&produced[i].0) {
+                        // `j` always holds the best entry for this conclusion so far, so one
+                        // comparison per entry suffices.
+                        Some(&j) => {
+                            if step_precedes(&produced[i], &produced[j]) {
+                                produced.swap(i, j);
+                            }
+                        }
+                        None => {
+                            slot.insert(produced[i].0.clone(), i);
+                        }
+                    }
+                }
+            }
             for (g, ri, prem) in produced {
                 let is_new = facts.insert(g.clone());
                 if is_new {
@@ -2227,6 +2393,11 @@ fn intern_closure<K: KeyMode>(
 /// caller is already carrying (a document blank or a projected query answer
 /// literally spelled `_:_l1` would otherwise MERGE with a generated cell and
 /// emit a semantically wrong graph).
+///
+/// Within that prefix the cells are numbered in the canonical order of the list VALUES
+/// reachable in those rows ([`ListExpander::new`] interns them all up front, in
+/// `serialize::term_cmp` order), so a cell label never depends on the order a fact hash set
+/// yields the rows (GH #6844).
 struct ListExpander {
     heads: FxHashMap<Term, Term>,
     structure: Vec<[Term; 3]>,
@@ -2240,11 +2411,30 @@ impl ListExpander {
     /// expand, since the prefix is fixed at construction.
     fn new<'a>(rows: impl IntoIterator<Item = &'a [Term; 3]>) -> Self {
         let mut seen = FxHashSet::default();
+        let mut lists: Vec<&Term> = Vec::new();
         for r in rows {
-            r.iter().for_each(|t| term_blank_labels(t, &mut seen));
+            r.iter().for_each(|t| {
+                term_blank_labels(t, &mut seen);
+                reachable_lists(t, &mut lists);
+            });
         }
         let prefix = fresh_blank_prefix(&seen, "_l");
-        Self { heads: FxHashMap::default(), structure: Vec::new(), counter: 0, prefix }
+        let mut exp =
+            Self { heads: FxHashMap::default(), structure: Vec::new(), counter: 0, prefix };
+        // Number the cells in the canonical order of the list VALUES, not in the order the
+        // rows happen to arrive: `rows` is usually drained from a fact hash SET, so the
+        // arrival order depends on insertion history and on the hasher's word size (native
+        // vs `wasm32`), and a cell label is a blank-node identity that shows up in `why()`
+        // strings, `term_key`s and `sparq-prov` IRIs. Interning every reachable list up
+        // front in one canonical term order, makes each cell label a function of the SET of
+        // rows (GH #6844). Expanding a row later is then a pure cache hit for its lists, so
+        // nothing in `expand` can renumber them.
+        lists.sort_by(|a, b| serialize::term_cmp(a, b));
+        lists.dedup();
+        for t in lists {
+            exp.expand(t);
+        }
+        exp
     }
     fn expand_rows(&mut self, rows: &[[Term; 3]]) -> (Vec<[Term; 3]>, Vec<[Term; 3]>) {
         let out: Vec<[Term; 3]> = rows.iter().map(|r| self.expand_row(r)).collect();
@@ -2282,6 +2472,21 @@ impl ListExpander {
         }
         self.heads.insert(t.clone(), tail.clone());
         tail
+    }
+}
+
+/// Every list value [`ListExpander::expand`] would intern a chain for while expanding `t`,
+/// appended to `out`: `t` itself when it is a list, plus the lists reachable through list
+/// members and triple-term components. Mirrors `expand`'s own recursion exactly — a list
+/// inside a quoted `{ … }` FORMULA is not expanded, so it is not collected either.
+fn reachable_lists<'a>(t: &'a Term, out: &mut Vec<&'a Term>) {
+    match t {
+        Term::Triple(tr) => tr.iter().for_each(|m| reachable_lists(m, out)),
+        Term::List(ms) => {
+            ms.iter().for_each(|m| reachable_lists(m, out));
+            out.push(t);
+        }
+        _ => {}
     }
 }
 
@@ -2376,7 +2581,7 @@ fn match_premise_admitted(
         // `log:includes` may BIND free variables of the object pattern (one
         // binding per match, like EYE); `log:notIncludes` holds iff no match.
         if let Some(op) = scope_op(&pat[1]) {
-            let inner: &[[Term; 3]] = match &pat[2] {
+            let written: &[[Term; 3]] = match &pat[2] {
                 Term::Formula(t) => t,
                 _ => &[],
             };
@@ -2385,8 +2590,7 @@ fn match_premise_admitted(
             for b in bindings {
                 // A pattern reached through a variable was not visible to
                 // [`validate_rule_quantifiers`]: a quantified formula bound to it is refused
-                // the same way, failing the run. (Only a pattern written as a formula is
-                // matched; any other object matches as the empty pattern.)
+                // the same way, failing the run.
                 if !matches!(&pat[2], Term::Formula(_)) {
                     if let Term::Var(v) = &pat[2] {
                         if b.get(v).is_some_and(|val| matches!(val, Term::Formula(_)) && quantified_clause(val)) {
@@ -2397,6 +2601,39 @@ fn match_premise_admitted(
                 }
                 let Some(scope_term) = bounded::substitute_deep(&pat[0], &b, &bw.truncated) else {
                     continue;
+                };
+                // The pattern: the formula written in place, or (GH #6936), with a FORMULA
+                // as the scope, the stored formula a variable is DIRECTLY bound to when it
+                // holds no variable at any depth ([`stored_ground_statements`]). It is
+                // matched as stored, as if written in place: its blank nodes are its own
+                // existentials. Its statements are charged to the round's work allowance
+                // first. Any other object (a chained, open or non-formula value, or an
+                // unbound variable), and every object with the store as the scope, still
+                // matches as the empty pattern: the stratification does not read a
+                // pattern given through a variable (GH #6943).
+                let formula_scope = match &scope_term {
+                    Term::Formula(_) => true,
+                    Term::Lit(v, _, _) => v == "true",
+                    _ => false,
+                };
+                let bound = match &pat[2] {
+                    Term::Var(v) if formula_scope => b.get(v).and_then(|val| match val {
+                        Term::Formula(ts) => stored_ground_statements(ts).map(|n| (ts, n)),
+                        _ => None,
+                    }),
+                    _ => None,
+                };
+                let inner: &[[Term; 3]] = match bound {
+                    Some((ts, n)) => {
+                        // A spent allowance refuses the run (recorded on it): the premise
+                        // evaluation stops here, with no binding.
+                        if !bw.work.charge(n, &bw.truncated) {
+                            next.clear();
+                            break;
+                        }
+                        ts
+                    }
+                    None => written,
                 };
                 let matches: Vec<Binding> = match scope_term {
                     // log:supports searches the closure in place: no term is built.
@@ -2414,6 +2651,12 @@ fn match_premise_admitted(
                         None => Vec::new(),
                     },
                 };
+                // A containment's existential witnesses (`__w.` bindings of the pattern's
+                // blank nodes) stay inside it: each test gets fresh ones.
+                let mut matches = matches;
+                for nb in &mut matches {
+                    nb.retain(|k, _| !k.starts_with(PATTERN_WILDCARD));
+                }
                 // Every negation passes the gate, whatever it found.
                 if is_not {
                     if negation_gate(bw) && matches.is_empty() {
@@ -3407,6 +3650,52 @@ fn formula_statements(ts: &[[Term; 3]]) -> usize {
         }
     }
     n
+}
+
+/// The statements of the stored formula `ts` and of every formula nested in it, when it
+/// holds no variable at any depth (GH #6936); `None` when it holds one. The walk keeps one
+/// iterator frame per open container, so its scratch grows with the term's depth (already
+/// within the run's term-depth allowance), not with its size, and it takes no call stack
+/// per level.
+fn stored_ground_statements(ts: &[[Term; 3]]) -> Option<usize> {
+    enum Frame<'a> {
+        Statements(std::slice::Iter<'a, [Term; 3]>),
+        Terms(std::slice::Iter<'a, Term>),
+    }
+    let mut n = ts.len();
+    let mut stack = vec![Frame::Statements(ts.iter())];
+    while let Some(top) = stack.last_mut() {
+        let t = match top {
+            Frame::Statements(it) => match it.next() {
+                Some(st) => {
+                    stack.push(Frame::Terms(st.iter()));
+                    continue;
+                }
+                None => {
+                    stack.pop();
+                    continue;
+                }
+            },
+            Frame::Terms(it) => match it.next() {
+                Some(t) => t,
+                None => {
+                    stack.pop();
+                    continue;
+                }
+            },
+        };
+        match t {
+            Term::Var(_) => return None,
+            Term::Formula(rs) => {
+                n = n.saturating_add(rs.len());
+                stack.push(Frame::Statements(rs.iter()));
+            }
+            Term::List(ms) => stack.push(Frame::Terms(ms.iter())),
+            Term::Triple(tr) => stack.push(Frame::Terms(tr.iter())),
+            _ => {}
+        }
+    }
+    Some(n)
 }
 
 /// The search of [`formula_unify`].
@@ -4477,6 +4766,15 @@ fn with_formula_closure<R>(
     bw.visited.borrow_mut().docs.remove(&key);
     let mut derived: Vec<[Term; 3]> = closed.all.into_iter().collect();
     parser::own_universals_from(&mut derived, &lift);
+    // `closed.all` is a hash SET: draining it yields the derivations in an order that
+    // depends on the closure's insertion history and on the hasher's word size (native vs
+    // `wasm32`). A formula is an ORDERED vector of rows to the engine, so that order is part
+    // of the result term's identity — its `term_key`, and every `why()` string and
+    // `sparq-prov` IRI built from it. Sort the derivations into `serialize::row_cmp` order,
+    // one canonical total order on terms, so the result
+    // formula is a function of the closure's CONTENTS (a set) and not of its traversal
+    // (GH #6844). The original statements keep the subject formula's own order ahead of them.
+    derived.sort_by(serialize::row_cmp);
     let mut seen: FxHashSet<&[Term; 3]> = ts.iter().collect();
     let mut all: Vec<&[Term; 3]> = ts.iter().collect();
     all.extend(derived.iter().filter(|f| seen.insert(f)));
@@ -9199,6 +9497,542 @@ mod tests {
         let mut want: Vec<String> = (n + 1..=2 * n).map(|k| format!("__sk0_{k}_f")).collect();
         want.sort();
         assert_eq!(f, want);
+    }
+
+    /// GH #6844 variants: `body` written in several orders, and with an unrelated padding
+    /// set that changes the fact sets' capacity and so their traversal order. Every variant
+    /// holds the same statements, so every variant has the same closure as a SET.
+    fn order_variants(prefixes: &str, body: &[String], pad_pred: &str) -> Vec<String> {
+        let pad: String = (0..300).map(|i| format!(":pad{i} {pad_pred} {i} .\n")).collect();
+        let fwd: String = body.concat();
+        let rev: String = body.iter().rev().cloned().collect();
+        let mut mixed = body.to_vec();
+        mixed.rotate_left(body.len() / 3);
+        vec![
+            format!("{prefixes}{fwd}"),
+            format!("{prefixes}{rev}"),
+            format!("{prefixes}{}", mixed.concat()),
+            format!("{prefixes}{pad}{fwd}"),
+            format!("{prefixes}{rev}{pad}"),
+            format!("{prefixes}{pad}{}", mixed.concat()),
+        ]
+    }
+
+    /// The `:q` rows of the `log:conclusion` formula bound to `?c`, IN THE ORDER the result
+    /// formula holds them.
+    fn nested_closure_row_order(src: &str) -> Vec<String> {
+        let c = reason_n3_terms(src, None).expect("reasons");
+        let formula = c
+            .facts
+            .iter()
+            .find_map(|[s, p, o]| match (s, p) {
+                (Term::Iri(si), Term::Iri(pi))
+                    if si == "http://ex/result" && pi == "http://ex/is" =>
+                {
+                    Some(o.clone())
+                }
+                _ => None,
+            })
+            .expect("the rule concluded :result :is <the nested closure>");
+        let Term::Formula(rows) = formula else { panic!("log:conclusion is formula-valued") };
+        rows.iter()
+            .filter(|r| matches!(&r[1], Term::Iri(i) if i == "http://ex/q"))
+            .map(|r| format!("{:?}", r[0]))
+            .collect()
+    }
+
+    #[test]
+    fn nested_closure_rows_do_not_depend_on_traversal_order() {
+        // GH #6844 item 1: `log:conclusion` built its result formula by draining the nested
+        // closure's fact hash SET, so the rows' order — part of a formula term's identity,
+        // and so of its `term_key` and of every `why()` string built from it — followed that
+        // set's traversal.
+        let n = 24;
+        let body: Vec<String> = (0..n).map(|i| format!("        :s{i:02} :p :v .\n")).collect();
+        let runs: Vec<Vec<String>> = order_variants("", &body, ":unrelated")
+            .iter()
+            .map(|inner| {
+                let src = format!(
+                    "@prefix : <http://ex/> .\n\
+                     @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                     {{ {{\n{inner}        {{ ?x :p :v }} => {{ ?x :q :w }} .\n\
+                     }} log:conclusion ?c }} => {{ :result :is ?c }} .\n"
+                );
+                nested_closure_row_order(&src)
+            })
+            .collect();
+        assert_eq!(runs[0].len(), n, "every subject's `:q` row is derived in the closure");
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
+        }
+    }
+
+    /// subject local name -> the list-cell label its `:has` list value's chain head carries.
+    fn list_cell_labels(src: &str, n: usize) -> std::collections::BTreeMap<String, String> {
+        let mut dict = Dict::new();
+        let triples = reason_n3(&mut dict, src).expect("reasons");
+        let has = dict.intern_iri("http://ex/has");
+        // Probe the labels the expander can have minted (one cell per member, so `n` lists
+        // of two members need at most `2 * n`), AFTER the run so an existing label resolves
+        // to the id it was interned under.
+        let cells: Vec<(Id, String)> =
+            (1..=2 * n).map(|k| (dict.intern_blank(&format!("_l0_{k}")), format!("_l0_{k}"))).collect();
+        (0..n)
+            .filter_map(|i| {
+                let s = dict.intern_iri(&format!("http://ex/a{i:02}"));
+                let head = triples.iter().find(|[ts, tp, _]| *ts == s && *tp == has)?[2];
+                let label = cells.iter().find(|(id, _)| *id == head)?.1.clone();
+                Some((format!("a{i:02}"), label))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn list_cell_labels_do_not_depend_on_traversal_order() {
+        // GH #6844 item 3: `ListExpander` numbered its cells from a counter bumped as the
+        // rows arrived, and the rows are drained from the closure's fact hash SET — so a
+        // generated cell's blank label (an RDF node identity, reachable in `why()` output
+        // and in `sparq-prov` IRIs) followed that set's traversal order.
+        let n = 12;
+        let body: Vec<String> =
+            (0..n).map(|i| format!(":a{i:02} :raw ( :m{i:02} :n{i:02} ) .\n")).collect();
+        // The lists reach the expander through a DERIVED fact, so they are carried by the
+        // closure's hash set rather than by the parsed document's statement order.
+        let prefixes = "@prefix : <http://ex/> .\n{ ?a :raw ?l } => { ?a :has ?l } .\n";
+        let runs: Vec<_> = order_variants(prefixes, &body, ":unrelated")
+            .iter()
+            .map(|src| list_cell_labels(src, n))
+            .collect();
+        assert_eq!(runs[0].len(), n, "every subject's list value got a chain head");
+        assert_eq!(
+            runs[0].values().collect::<std::collections::BTreeSet<_>>().len(),
+            n,
+            "distinct list values get distinct chain heads"
+        );
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
+        }
+    }
+
+    /// conclusion key -> the premise keys its ONE proof step records, for every derived fact.
+    fn proof_premises(src: &str) -> std::collections::BTreeMap<String, Vec<[String; 3]>> {
+        let (_, steps) = reason_n3_proof(&mut Dict::new(), src).expect("reasons");
+        steps
+            .iter()
+            .map(|s| (s.conclusion_key.join("|"), s.premise_keys.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn proof_premises_do_not_depend_on_traversal_order() {
+        // GH #6844 item 4: a conclusion with no existentials is instantiated the same way by
+        // every binding sharing its firing key, so several bindings derive ONE fact — and
+        // only the first to ARRIVE had its premises kept as that fact's proof step. Here
+        // `:a<i> :reaches :b<i>` is derivable through either of two intermediates, so which
+        // premises `why()` names followed the delta set's traversal order.
+        let n = 16;
+        // Each statement is its own variant element, so reversing or rotating the document
+        // genuinely reorders the two routes `:a<i> -> :b<i>` against each other.
+        let mut body: Vec<String> = Vec::new();
+        for i in 0..n {
+            for m in ["m", "o", "q"] {
+                body.push(format!(":a{i:02} :link :{m}{i:02} .\n"));
+                body.push(format!(":{m}{i:02} :link :b{i:02} .\n"));
+            }
+        }
+        let prefixes =
+            "@prefix : <http://ex/> .\n{ ?x :link ?y . ?y :link ?z } => { ?x :reaches ?z } .\n";
+        let runs: Vec<_> =
+            order_variants(prefixes, &body, ":link").iter().map(|s| proof_premises(s)).collect();
+        // Exactly one step per `i`: `:a<i> :reaches :b<i>`, derivable under three bindings
+        // (one per intermediate) in one round, so every recorded step is an ambiguous one.
+        assert_eq!(runs[0].len(), n, "one ambiguous step per subject");
+        assert_proof_premises_agree(&runs);
+        // The derivation kept is the one with the LEAST premise vector of the three, so the
+        // proof names `:m00` — not whichever route the delta set happened to yield first.
+        let step = &runs[0]["I\"http://ex/a00\"|I\"http://ex/reaches\"|I\"http://ex/b00\""];
+        assert!(
+            step.iter().any(|p| p[2] == "I\"http://ex/m00\"" || p[0] == "I\"http://ex/m00\""),
+            "the least premise vector is recorded: {step:?}"
+        );
+    }
+
+    /// Every variant's `proof_premises` map, asserted equal to the first variant's, naming
+    /// the first disagreeing step. The shared body of the GH #6844 proof determinism tests.
+    fn assert_proof_premises_agree(runs: &[std::collections::BTreeMap<String, Vec<[String; 3]>>]) {
+        for (i, r) in runs.iter().enumerate().skip(1) {
+            let diff: Vec<&String> =
+                r.iter().filter(|(k, v)| runs[0].get(*k) != Some(v)).map(|(k, _)| k).collect();
+            assert_eq!(r.len(), runs[0].len(), "variant {i} recorded a different step set");
+            assert!(
+                diff.is_empty(),
+                "variant {i} named different premises for {} of {} steps, e.g. {:?} -> {:?} \
+                 (was {:?})",
+                diff.len(),
+                r.len(),
+                diff[0],
+                r[diff[0]],
+                runs[0][diff[0]],
+            );
+        }
+    }
+
+    #[test]
+    fn proof_premises_do_not_depend_on_which_firing_key_arrives_first() {
+        // GH #6844 review round 1: collapsing a rule's bindings by FIRING KEY is not enough,
+        // because one key gives one conclusion but one conclusion can come from many keys. A
+        // symmetric conclusion is the clean witness: over `:a :p :b . :b :p :a .` the rule
+        // below fires under the two DISTINCT keys (?x=:a, ?y=:b) and (?x=:b, ?y=:a), and each
+        // derives BOTH `:a :r :b` and `:b :r :a` — from different premises. The firing-key
+        // dedup never sees the collision; only choosing over the round's derivations does.
+        let n = 24;
+        let mut body: Vec<String> = Vec::new();
+        for i in 0..n {
+            body.push(format!(":a{i:02} :p :b{i:02} .\n"));
+            body.push(format!(":b{i:02} :p :a{i:02} .\n"));
+        }
+        let prefixes =
+            "@prefix : <http://ex/> .\n{ ?x :p ?y } => { ?x :r ?y . ?y :r ?x } .\n";
+        let runs: Vec<_> =
+            order_variants(prefixes, &body, ":unrelated").iter().map(|s| proof_premises(s)).collect();
+        // Two `:r` facts per `i`, each derivable under either key.
+        assert_eq!(runs[0].len(), 2 * n, "two ambiguous steps per subject pair");
+        assert_proof_premises_agree(&runs);
+    }
+
+    #[test]
+    fn proof_premises_do_not_depend_on_traversal_order_through_the_transitivity_fast_path() {
+        // GH #6844 review round 1: a rule of the exact shape
+        // `{?x P ?y. ?y P ?z} => {?x P ?z}` takes the TRANSITIVITY fast path, which is chosen
+        // regardless of StepMode and bypasses the binding machinery entirely — it walks the
+        // delta set and a `gen_out` adjacency whose own order comes from a hash map, pushing
+        // one derivation per intermediate path. So no per-rule binding fix can reach it.
+        // Here each `:a<i>` reaches its `:b<i>` through three intermediates.
+        let n = 16;
+        let mut body: Vec<String> = Vec::new();
+        for i in 0..n {
+            for m in ["m", "o", "q"] {
+                body.push(format!(":a{i:02} :link :{m}{i:02} .\n"));
+                body.push(format!(":{m}{i:02} :link :b{i:02} .\n"));
+            }
+        }
+        let prefixes =
+            "@prefix : <http://ex/> .\n{ ?x :link ?y . ?y :link ?z } => { ?x :link ?z } .\n";
+        let runs: Vec<_> =
+            order_variants(prefixes, &body, ":unrelated").iter().map(|s| proof_premises(s)).collect();
+        assert!(runs[0].len() >= n, "steps recorded: {}", runs[0].len());
+        assert_proof_premises_agree(&runs);
+    }
+
+    /// A deterministic xorshift64* stream, for the randomized differentials below.
+    fn rng(seed: u64) -> impl FnMut(u64) -> u64 {
+        let mut x = seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1;
+        move |m| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % m.max(1)
+        }
+    }
+
+    /// The STRAIGHTFORWARD ordering GH #6838 shipped, kept as the reference the optimized
+    /// ranking (GH #6843) is differentially tested against: one entry per firing key not yet
+    /// in `fired`, in arrival order, ranked by sorting those keys.
+    fn reference_new_firings(
+        bindings: Vec<Binding>,
+        concl_vars: &[String],
+        fired: &mut FxHashSet<String>,
+        tie_break: bool,
+    ) -> Vec<(usize, Binding)> {
+        let full_encoding = |b: &Binding| -> Vec<String> {
+            let mut f: Vec<String> = b.iter().map(|(v, t)| format!("{v:?}={t:?};")).collect();
+            f.sort_unstable();
+            f
+        };
+        let mut fresh: Vec<(String, Binding)> = Vec::new();
+        let mut full: Vec<Vec<String>> = Vec::new();
+        let mut slot: FxHashMap<String, usize> = FxHashMap::default();
+        for b in bindings {
+            let mut key = String::new();
+            firing_key(&b, concl_vars, &mut key);
+            if fired.contains(&key) {
+                continue;
+            }
+            match slot.get(&key) {
+                None => {
+                    slot.insert(key.clone(), fresh.len());
+                    full.push(full_encoding(&b));
+                    fresh.push((key, b));
+                }
+                Some(&i) if tie_break => {
+                    let f = full_encoding(&b);
+                    if f < full[i] {
+                        full[i] = f;
+                        fresh[i].1 = b;
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        let mut order: Vec<usize> = (0..fresh.len()).collect();
+        order.sort_unstable_by(|&x, &y| fresh[x].0.cmp(&fresh[y].0));
+        let mut rank = vec![0; fresh.len()];
+        for (r, &i) in order.iter().enumerate() {
+            rank[i] = r;
+        }
+        for (key, _) in &fresh {
+            fired.insert(key.clone());
+        }
+        fresh.into_iter().zip(rank).map(|((_, b), r)| (r, b)).collect()
+    }
+
+    /// Random bindings over `concl_vars` plus an extra variable (so proof-mode tie-breaking
+    /// has something to break on), with a small term alphabet so keys repeat, share long
+    /// prefixes, and sometimes prefix one another.
+    fn random_bindings(seed: u64, concl_vars: &[String], n: usize) -> Vec<Binding> {
+        let mut r = rng(seed);
+        let term = |i: u64| -> Term {
+            match i % 5 {
+                // Long shared prefixes, and `…s1` is a prefix of `…s1x`: the packed sort
+                // word cannot separate these on its leading bytes alone.
+                0 => Term::Iri(format!("http://example.org/a/very/long/shared/path/s{}", i / 5)),
+                1 => Term::Iri(format!("http://example.org/a/very/long/shared/path/s{}x", i / 5)),
+                2 => Term::Blank(format!("b{}", i / 5)),
+                // A literal whose Debug escapes a control character, so the key holds `\u{0}`
+                // rather than a raw NUL.
+                3 => Term::Lit(format!("l\u{0}{}", i / 5), "http://x/dt".into(), None),
+                _ => Term::List(vec![Term::Iri(format!("http://x/{}", i / 5))]),
+            }
+        };
+        (0..n)
+            .map(|_| {
+                let mut b = Binding::new();
+                for v in concl_vars {
+                    if r(8) > 0 {
+                        // Sometimes leave a variable unbound: it keys as unbound.
+                        b.insert(v.clone(), term(r(14)));
+                    }
+                }
+                b.insert("other".to_string(), term(r(14)));
+                b
+            })
+            .collect()
+    }
+
+    #[test]
+    fn canonical_new_firings_matches_the_reference_ordering() {
+        // GH #6843: the optimized ranking must agree with GH #6838's straightforward
+        // "sort the round's new keys" ordering on every input — same firings, same ranks,
+        // same bindings kept, same `fired` set — in BOTH strategy branches (`tie_break` is
+        // the proof-mode branch). Randomized over rule shapes, binding counts and the
+        // carried-over `fired` set.
+        // Rounds compared, ranked rounds, tie-broken rounds (a later binding of a key the round
+        // already keeps reached the comparison), and rounds where that comparison REPLACED
+        // the first-arriving binding.
+        let mut covered = (0, 0, 0, 0);
+        for seed in 0..600u64 {
+            let mut r = rng(seed ^ 0x5151);
+            let tie_break = seed % 2 == 0;
+            let nvars = 1 + r(3) as usize;
+            let concl_vars: Vec<String> = (0..nvars).map(|i| format!("v{i}")).collect();
+            let mut mine: FxHashSet<String> = FxHashSet::default();
+            let mut theirs: FxHashSet<String> = FxHashSet::default();
+            let mut scratch = FiringScratch::default();
+            // Several rounds, so keys carried over in `fired` are exercised too.
+            for round in 0..3 {
+                let bindings = random_bindings(seed * 7 + round, &concl_vars, r(12) as usize);
+                // What the tie-break saw, measured on the input rather than inferred from the
+                // output: the first binding of each fresh key, and whether a later one arrived.
+                let mut first: FxHashMap<String, Binding> = FxHashMap::default();
+                let mut repeated = false;
+                for b in &bindings {
+                    let mut key = String::new();
+                    firing_key(b, &concl_vars, &mut key);
+                    if theirs.contains(&key) {
+                        continue;
+                    }
+                    repeated |= first.contains_key(&key);
+                    first.entry(key).or_insert_with(|| b.clone());
+                }
+                let want =
+                    reference_new_firings(bindings.clone(), &concl_vars, &mut theirs, tie_break);
+                let got = canonical_new_firings(
+                    bindings,
+                    &concl_vars,
+                    &mut mine,
+                    tie_break,
+                    &mut scratch,
+                );
+                let fmt = |f: &[(usize, Binding)]| -> Vec<String> {
+                    f.iter()
+                        .map(|(rank, b)| {
+                            let mut e: Vec<String> =
+                                b.iter().map(|(v, t)| format!("{v:?}={t:?}")).collect();
+                            e.sort();
+                            format!("{rank}:{}", e.join(","))
+                        })
+                        .collect()
+                };
+                assert_eq!(
+                    fmt(&got),
+                    fmt(&want),
+                    "seed {seed} round {round} tie_break={tie_break}"
+                );
+                let mut m: Vec<&String> = mine.iter().collect();
+                let mut t: Vec<&String> = theirs.iter().collect();
+                m.sort();
+                t.sort();
+                assert_eq!(m, t, "fired keys diverged (seed {seed} round {round})");
+                covered.0 += 1;
+                covered.1 += usize::from(got.len() > 1);
+                if tie_break && repeated {
+                    covered.2 += 1;
+                    let replaced = got.iter().any(|(_, b)| {
+                        let mut key = String::new();
+                        firing_key(b, &concl_vars, &mut key);
+                        first.get(&key) != Some(b)
+                    });
+                    covered.3 += usize::from(replaced);
+                }
+            }
+        }
+        // The differential is worthless if the inputs never reach the ranking or the
+        // tie-break; pin that they do, and that the tie-break both keeps and replaces.
+        assert!(covered.1 > 500, "rounds that actually rank: {}", covered.1);
+        assert!(covered.2 > 120, "rounds that reach the tie-break: {}", covered.2);
+        assert!(covered.3 > 60, "rounds where the tie-break replaces: {}", covered.3);
+    }
+
+    #[test]
+    fn rank_keys_matches_sorting_the_keys() {
+        // GH #6843: the packed-word ranking, against the plain comparison sort it replaces,
+        // on the cases its correctness argument turns on — a long common prefix, keys that
+        // differ only past the packed bytes, a key that is a prefix of another, and keys
+        // holding an escaped NUL, non-ASCII bytes, very long keys, and index masks of every
+        // width a small round reaches. Every set is shuffled first, so the ranking never
+        // starts from sorted input.
+        let long = "Some(Iri(\"http://example.org/a/very/long/shared/path/s";
+        let mut sets: Vec<Vec<String>> = vec![
+            vec![format!("{long}1\"));"), format!("{long}10\"));"), format!("{long}2\"));")],
+            vec!["ab".into(), "a".into(), "abc".into(), "b".into()],
+            vec!["a\\u{0}b".into(), "ab".into(), "a".into()],
+            // The common prefix ends at `a` vs `b`, so the `a…` keys are identical for 24 bytes
+            // PAST it: their packed words all tie, and only the whole-key re-sort orders them.
+            (0..9)
+                .map(|i| format!("{long}aaaaaaaaaaaaaaaaaaaaaaaa{i}"))
+                .chain([format!("{long}b")])
+                .collect(),
+            // Multi-byte UTF-8: `é` (C3 A9) and `ê` (C3 AA) share their lead byte, and `€`
+            // (E2 82 AC) sorts above both; a split character must not reorder anything.
+            ["é", "ê", "e", "€", "éé", "éê", "ée", "z", "\u{10FFFF}", "é€"]
+                .iter()
+                .map(|t| format!("{long}{t}\"));"))
+                .collect(),
+            // Very long keys that differ only in their last byte, after 10 KB in common past
+            // the common prefix of the whole set.
+            (0..6)
+                .map(|i| format!("{long}{}{i}", "x".repeat(10_000)))
+                .chain([format!("{long}y")])
+                .collect(),
+        ];
+        // Index masks of every width up to 10 bits, at and either side of each power of two.
+        // The `Q` key pins the common prefix at `{long}`, so every `P…` key's packed word is
+        // `Paaaaaa` plus one varying LAST byte: the mask truncates some or all of what tells
+        // those keys apart, and the run re-sort has to finish the job.
+        for n in [1usize, 2, 3, 4, 7, 8, 9, 15, 16, 17, 255, 256, 257, 511, 512, 513] {
+            sets.push(
+                (0..n)
+                    .map(|i| format!("{long}Paaaaaa{}{i:04x}", char::from(b'0' + (i % 64) as u8)))
+                    .chain([format!("{long}Q")])
+                    .collect(),
+            );
+        }
+        let mut r = rng(0xabc);
+        for _ in 0..200 {
+            let n = 2 + r(20) as usize;
+            let mut keys: Vec<String> = (0..n)
+                .map(|_| match r(3) {
+                    0 => format!("{long}{}\"));", r(40)),
+                    1 => format!("{}", r(1000)),
+                    _ => format!("Some(Lit(\"l\\u{{0}}{}\"));", r(40)),
+                })
+                .collect();
+            keys.sort();
+            keys.dedup(); // the ranking's contract: the round's keys are distinct
+            if keys.len() > 1 {
+                sets.push(keys);
+            }
+        }
+        for mut keys in sets {
+            for i in (1..keys.len()).rev() {
+                keys.swap(i, r(i as u64 + 1) as usize);
+            }
+            let mut want: Vec<usize> = (0..keys.len()).collect();
+            want.sort_by(|&x, &y| keys[x].cmp(&keys[y]));
+            let mut order = Vec::new();
+            let index = rank_keys(&keys, &mut order);
+            let got: Vec<usize> = order.iter().map(|e| (e & index) as usize).collect();
+            assert_eq!(got, want, "ranking {keys:?}");
+        }
+    }
+
+    #[test]
+    fn random_existential_rule_sets_label_order_independently() {
+        // GH #6749/#6843: the closure-level half of the differential — over random
+        // existential rule sets, reordering a document (which changes the fact sets'
+        // traversal order) must change neither the closure nor one skolem label.
+        let mut labelled = 0;
+        for seed in 0..120u64 {
+            let mut r = rng(seed ^ 0x77);
+            let mut rules = String::new();
+            for i in 0..1 + r(3) {
+                let (p, q) = (r(3), r(3));
+                rules.push_str(&match r(3) {
+                    0 => format!("{{ ?x :p{p} ?y }} => {{ ?x :c{i} _:e. _:e :k ?y }} .\n"),
+                    1 => format!(
+                        "{{ ?x :p{p} ?y. ?y :p{q} ?z }} => {{ ?x :c{i} _:e. _:e :k ?z, ?y }} .\n"
+                    ),
+                    _ => format!("{{ ?x :p{p} ?y }} => {{ _:e :c{i} ?x. _:f :k _:e }} .\n"),
+                });
+            }
+            let facts: Vec<String> = (0..4 + r(14))
+                .map(|_| {
+                    let (a, b, p) = (r(6), r(6), r(3));
+                    if r(5) == 0 {
+                        format!(":s{a} :p{p} \"l{b}\" .\n")
+                    } else {
+                        format!(":s{a} :p{p} :s{b} .\n")
+                    }
+                })
+                .collect();
+            let head = "@prefix : <http://ex/> .\n";
+            let pad: String = (0..200).map(|i| format!(":pad{i} :unrelated {i} .\n")).collect();
+            let rev: String = facts.iter().rev().cloned().collect();
+            let docs = [
+                format!("{head}{}{rules}", facts.concat()),
+                format!("{head}{rules}{rev}"),
+                format!("{head}{pad}{rules}{}", facts.concat()),
+            ];
+            let render = |src: &str| -> Vec<String> {
+                let c = reason_n3_terms(src, None).unwrap();
+                let mut f: Vec<String> = c
+                    .facts
+                    .iter()
+                    .map(|t| format!("{t:?}"))
+                    .filter(|f| !f.contains("/unrelated"))
+                    .collect();
+                f.sort();
+                f
+            };
+            let base = render(&docs[0]);
+            if base.iter().any(|f| f.contains("__sk")) {
+                labelled += 1;
+            }
+            for d in &docs[1..] {
+                assert_eq!(render(d), base, "seed {seed}: reordering changed the closure");
+            }
+        }
+        assert!(labelled > 80, "documents that minted a skolem: {labelled}");
     }
 
     #[test]
