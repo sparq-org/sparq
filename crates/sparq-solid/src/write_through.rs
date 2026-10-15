@@ -251,6 +251,11 @@ impl PodStore {
         let term = Term::NamedNode(name.clone());
         let prior = self.take_named_slot(&term);
         let existed = prior.is_some();
+        if let (false, Some(governed)) = (existed, acl_iri.strip_suffix(crate::loader::ACR_SUFFIX)) {
+            // A new `.acr` keeps no facts of a resource that does not exist, whatever an
+            // earlier install saw (a rebuild after a failure resets this from the graph).
+            self.acr_controlled.remove(governed);
+        }
         self.graph.named.push((term.clone(), new_graph));
 
         // Re-materialize; roll back to the prior content on any error. sq-b7k7u

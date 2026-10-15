@@ -239,8 +239,9 @@ pub struct PodStore {
     /// NOT rebuild the session index: take [`PodStore::stored_graphs`] before the edit and
     /// call [`PodStore::rematerialize_after_edit`] after it, before any other write or
     /// rebuild, so the stored provenance follows the edit; a `materialize_*` call alone only
-    /// drops the facts of resources that no longer exist and whose `.acr` was not stored
-    /// throughout since the last install.
+    /// drops the facts of resources that no longer exist unless their `.acr` is stored and
+    /// was at the last install (an unannounced removal and re-adding in between cannot be
+    /// told apart).
     pub graph: Graph,
     auth: Arc<AuthIndex>,
     epoch: u64,
@@ -663,17 +664,28 @@ impl PodStore {
 
     /// `provenance` for only the resources the auth view of the store holds (the loader's own
     /// resource enumeration, [`loader::resources`]) and those whose own access control
-    /// resource is stored and was when the provenance was last installed, or, for provenance
-    /// the caller supplies (`supplied`), is stored now (see [`lifecycle`]). Records which
-    /// resources have their `.acr` stored, for the next install.
-    fn existing_provenance(&mut self, provenance: &AccessProvenance, supplied: bool) -> AccessProvenance {
+    /// resource is stored and was when the provenance was last installed, or, for facts the
+    /// caller supplies (`supplied`) that differ from the stored ones, is stored now (see
+    /// [`lifecycle`]); stored facts passed back are judged as stored. Records which resources
+    /// have their `.acr` stored, for the next install.
+    fn existing_provenance(
+        &mut self,
+        provenance: &AccessProvenance,
+        supplied: bool,
+    ) -> AccessProvenance {
         let resources = loader::resources(&self.graph);
-        let controlled: FxHashSet<String> =
-            loader::controlled_resources(&self.graph).into_iter().map(str::to_owned).collect();
-        let before = &self.acr_controlled;
+        let controlled: FxHashSet<String> = loader::controlled_resources(&self.graph)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let (before, stored) = (&self.acr_controlled, &self.acp_context.0);
+        let new = |r: &str| {
+            (provenance.creator(r), provenance.owner(r)) != (stored.creator(r), stored.owner(r))
+        };
         let mut kept = provenance.clone();
         kept.retain(|r| {
-            resources.contains(r) || (controlled.contains(r) && (supplied || before.contains(r)))
+            resources.contains(r)
+                || (controlled.contains(r) && (before.contains(r) || (supplied && new(r))))
         });
         self.acr_controlled = controlled;
         kept
@@ -690,9 +702,9 @@ impl PodStore {
     /// <self>` in a document they control cannot thereby grant themselves access (design
     /// doc §2.4). The store keeps `provenance`, with no credentials, for the ACP rebuilds it
     /// makes itself (after an access-control write or an update, and
-    /// [`PodStore::materialize_acp`]), and forgets a resource's facts once neither it nor
-    /// its own `.acr` exists, or when its `.acr` is removed while it does not exist; call again
-    /// when it changes.
+    /// [`PodStore::materialize_acp`]), and forgets a resource's facts once it does not
+    /// exist unless its own `.acr` is stored and was at the previous install (facts that
+    /// differ from the stored ones are taken as supplied); call again when it changes.
     ///
     /// # Errors
     ///
@@ -751,9 +763,10 @@ impl PodStore {
     /// `materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())` — with no
     /// credential supplied, **every** `acp:vc` matcher rejects every candidate (fail-closed).
     ///
-    /// Passed back after a failed update (see [`PodStore::acp_provenance`]), the provenance
-    /// is trusted as given: the caller checks it against the stored graphs first, since the
-    /// update may have stored or removed an `.acr`.
+    /// Facts equal to the stored ones (such as [`PodStore::acp_provenance`] passed back, to
+    /// refresh the credentials or after a failed update) are judged as stored: those of a
+    /// resource that does not exist are kept only if its `.acr` was stored at the last
+    /// install. Facts that differ are taken as given.
     ///
     /// # Errors
     ///

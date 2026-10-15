@@ -914,3 +914,39 @@ fn provenance_the_caller_supplies_for_a_resource_under_its_acr_is_kept() {
     st.materialize_acp().expect("rebuild");
     assert_eq!(st.acp_provenance().creator(D0), Some(ALICE), "kept with d0.acr");
 }
+
+#[test]
+fn an_acr_written_again_after_an_unannounced_removal_keeps_nothing() {
+    let mut store = kept_under_own_acr();
+    store
+        .update_as_acp(&sess(ADMIN), &format!("DROP GRAPH <{KR}>"))
+        .expect("admin drops r");
+    assert_eq!(store.acp_provenance().creator(KR), Some(ALICE), "kept with r.acr");
+    drop_graph(&mut store, KRACR);
+    store
+        .put_acl_acp(KRACR, &format!("<{KRACR}> <{ACP}accessControl> <{KRACR}#c> ."), "ntriples")
+        .expect("a new r.acr");
+    assert_eq!(store.acp_provenance().creator(KR), None);
+    assert_eq!(store.acp_provenance().owner(KR), None);
+}
+
+#[test]
+fn stored_provenance_passed_back_is_judged_as_stored() {
+    let mut st = d0_under_an_unannounced_acr();
+    let prov = st.acp_provenance().clone();
+    st.materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())
+        .expect("materializes");
+    push_graph(&mut st, D0);
+    st.materialize_acp().expect("rebuild");
+    assert_d0_forgotten(&st, "passed back");
+}
+
+#[test]
+fn the_installed_acrs_are_those_of_the_last_install() {
+    let mut store = kept_under_own_acr();
+    store.delete_acl_acp(KRACR).expect("r.acr removed while r exists");
+    drop_graph(&mut store, KR);
+    push_graph(&mut store, KRACR);
+    store.materialize_acp().expect("rebuild");
+    assert_eq!(store.acp_provenance().creator(KR), None);
+}

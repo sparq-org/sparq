@@ -125,8 +125,9 @@ Materialize the authorization view from the access-control documents, then enfor
   change to which graphs exist, staged with the change and installed only once it
   commits. Only the net effect counts: a resource (document or container) keeps its creator
   and owner across a change if it exists before and after it, whatever happens in between,
-  or if its own `.acr` is stored before the change and not removed at any point in it; it
-  loses them otherwise. So the facts of a dropped document, or of an emptied container, are
+  or if its own `.acr` is stored before the change, was stored when the provenance was last
+  installed, and is not removed at any point in it; it loses them otherwise (so an `.acr`
+  stored by an edit the store was not told of keeps nothing). So the facts of a dropped document, or of an emptied container, are
   kept with its `.acr` and come back with the resource only while that `.acr` stays stored
   (a `.acl` keeps nothing, as the ACP view never reads one). A SPARQL update and the MCP
   server never record a creator; a direct edit (below)
@@ -141,7 +142,8 @@ Materialize the authorization view from the access-control documents, then enfor
   applies the same rule and installs the view and provenance together only on success.
   `store.acp_provenance()` reads the stored provenance. A resource removed by editing
   `store.graph` without that call is forgotten at the next rebuild, WAC or ACP (unless its
-  own `.acr` is stored), so rebuild before creating it again. The view is rebuilt for a provenance change only when its `.acr`
+  own `.acr` is stored and was at the previous install; facts passed back unchanged to
+  `materialize_acp_with*` are judged the same way), so rebuild before creating it again. The view is rebuilt for a provenance change only when its `.acr`
   documents name `acp:CreatorAgent` or `acp:OwnerAgent`.
 - `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
   (sq-ysv3u, issue #2935) the same, ALSO resolving **`acp:vc`** matchers.
