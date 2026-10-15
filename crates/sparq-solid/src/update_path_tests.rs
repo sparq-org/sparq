@@ -286,8 +286,8 @@ fn a_partly_applied_commit_fails_closed_whatever_its_net_effect() {
             .expect_err("the commit fails");
         assert_eq!(
             *store.acp_provenance(),
-            before,
-            "{update}: nothing installed"
+            AccessProvenance::new(),
+            "{update}: nothing installed, and the resource it touched keeps nothing"
         );
         assert!(!reads_d0(&store, ALICE), "{update}: the view is gone");
         assert!(
@@ -308,11 +308,14 @@ fn a_partly_applied_commit_fails_closed_whatever_its_net_effect() {
 #[test]
 fn a_failed_commit_that_moves_provenance_fails_closed_until_the_context_is_supplied() {
     let mut store = creator_pod();
-    let before = store.acp_provenance().clone();
     FAIL_COMMIT.with(|f| f.set(true));
     let update = format!("DROP GRAPH <{D0}>");
     store.update_as_acp(&session(ADMIN), &update).expect_err("the commit fails");
-    assert_eq!(*store.acp_provenance(), before, "the staged provenance was not installed");
+    assert_eq!(
+        *store.acp_provenance(),
+        AccessProvenance::new(),
+        "nothing staged installed, and the resource it touched keeps nothing"
+    );
     assert!(!reads_d0(&store, ALICE), "the view is gone");
     assert!(store.materialize_acp().is_err(), "the stored context is not used");
     assert!(
@@ -420,6 +423,38 @@ fn a_failed_update_leaves_no_acr_kept_for_provenance_passed_back() {
     let names = store.stored_graphs();
     store.graph.named.extend(Graph::load_dataset(&format!("<{D0}#x> <{TITLE}> \"y\" <{D0}> .\n"), "nquads").expect("nq").named);
     store.rematerialize_after_edit(&names, None, true).expect("d0 again");
+    assert_eq!(store.acp_provenance().creator(D0), None);
+    assert!(!reads_d0(&store, ALICE), "no creator grant");
+}
+
+/// A commit that fails after its commit point leaves no fact of a resource the update touched
+/// for the provenance passed back, so a resource the update brought back keeps nothing.
+#[test]
+fn a_failed_update_leaves_no_fact_of_a_resource_it_touched_for_provenance_passed_back() {
+    let acr = format!("{D0}.acr");
+    let a = "http://www.w3.org/ns/solid/acp#";
+    let l = "http://www.w3.org/ns/auth/acl#";
+    let policy = format!("<{acr}> <{a}accessControl> <{acr}#c> . <{acr}#c> <{a}apply> <{acr}#p> . <{acr}#p> <{a}allow> <{l}Write> . <{acr}#p> <{a}anyOf> <{acr}#m> . <{acr}#m> <{a}agent> <{ADMIN}> .");
+    let mk = || {
+        let mut store = creator_pod();
+        store.put_acl_acp(&acr, &format!("{}\n<{acr}#p> <{a}allow> <{l}Read> .\n", policy.replace(" . ", " .\n")), "ntriples").expect("d0.acr");
+        let aa = format!("{acr}.acr");
+        store
+            .put_acl_acp(&aa, &format!("<{aa}> <{a}accessControl> <{aa}#c> .\n<{aa}#c> <{a}apply> <{aa}#p> .\n<{aa}#p> <{a}allow> <{l}Read> .\n<{aa}#p> <{a}allow> <{l}Write> .\n<{aa}#p> <{a}allow> <{l}Control> .\n<{aa}#p> <{a}anyOf> <{aa}#m> .\n<{aa}#m> <{a}agent> <{ADMIN}> .\n"), "ntriples")
+            .expect("d0.acr.acr");
+        store.update_as_acp(&session(ADMIN), &format!("DROP GRAPH <{D0}>")).expect("drop d0");
+        assert_eq!(store.acp_provenance().creator(D0), Some(ALICE), "kept with d0.acr");
+        store
+    };
+    let update = format!("DROP GRAPH <{acr}> ; INSERT DATA {{ GRAPH <{acr}> {{ {policy} }} GRAPH <{D0}> {{ <{D0}#x> <{TITLE}> \"y\" }} }}");
+    let mut ok = mk();
+    ok.update_as_acp(&session(ADMIN), &update).expect("the update commits");
+    assert_eq!(ok.acp_provenance().creator(D0), None, "the drop ended it");
+    let mut store = mk();
+    FAIL_COMMIT.with(|f| f.set(true));
+    store.update_as_acp(&session(ADMIN), &update).expect_err("the commit fails");
+    let back = store.acp_provenance().clone();
+    store.materialize_acp_with(&back).expect("passed back");
     assert_eq!(store.acp_provenance().creator(D0), None);
     assert!(!reads_d0(&store, ALICE), "no creator grant");
 }
