@@ -237,17 +237,21 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // reproducible as the engine's terms. Skolem labels (__sk<n>_e) are numbered in the sorted order
 // of each round's firing keys (every variable the conclusion substitutes), so for the SAME parsed
 // input the labels and the structural keys of facts carrying them do not depend on hash-set
-// traversal or hasher width (native vs wasm32; GH #6749). why() proof trees are NOT covered: a
-// non-existential fact keeps whichever supporting binding arrives first, and an existential's
-// proof includes its premises' proofs. E.g. with :a :p :v. :b :p :v. and rules ?x :p :v => ?x :q :v,
-// ?x :q :v => :m :r :v, :m :r :v => :m :s _:e, the :m :s label and key are stable, but its
-// why() tree may cite :a or :b as the :q witness depending on traversal order (GH #6844).
-// Labels are also NOT canonical across reordered isomorphic
+// traversal or hasher width (native vs wasm32; GH #6749). why() proof steps are covered too:
+// where a round derives ONE fact several ways - one rule firing under distinct bindings, two
+// different rules, or the transitivity fast path over several intermediate paths - the step
+// records the derivation with the least premise vector, not whichever arrived first (GH
+// #6844). E.g. with :a :p :v. :b :p :v. and rules
+// ?x :p :v => ?x :q :v, ?x :q :v => :m :r :v, :m :r :v => :m :s _:e, the :m :s label and key
+// are stable AND its why() tree always cites the same :q witness. A log:conclusion formula's
+// derived rows, and the rdf:first/rest cell labels interning a list value mints (_l<k>_<n>),
+// are likewise sorted / numbered in a canonical term order, not in a fact set's traversal order.
+// Labels are still NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,
 // and a label depends on the other firings in its round), and they hold only while the binding
 // values and firing sets are themselves stable. Values that still carry traversal order -
-// log:collectAllIn lists, log:conclusion formulas (rows in nested-closure set order),
-// backward-renamed __bw<n> terms - can reorder ranks and so labels (GH #6844).
+// log:collectAllIn lists, and backward-renamed __bw<n> terms (that counter is still assigned in
+// evaluation order) - can reorder ranks and so labels (GH #6844).
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
