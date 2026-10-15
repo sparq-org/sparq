@@ -490,6 +490,23 @@ fn keys_identify_named_individuals() {
 }
 
 #[test]
+fn keys_on_non_simple_properties_are_out_of_fragment() {
+    // `a t c t z` gives `a t z`, which a key on `t` would have to see.
+    for key in [":t", ":r"] {
+        let body = format!(
+            "{DECL} :t a owl:TransitiveProperty . :t rdfs:subPropertyOf :r . owl:Thing owl:hasKey ( {key} ) .
+             :z a owl:NamedIndividual . :a :t :c . :c :t :z . :b :t :z . :a owl:differentFrom :b ."
+        );
+        match verdict(&body) {
+            Consistency::Unknown(UnknownReason::OutOfFragment { construct, .. }) => {
+                assert!(construct.contains("HasKey"), "{construct}")
+            }
+            other => panic!("{key}: expected OutOfFragment, got {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn keys_ignore_anonymous_individuals() {
     // The anonymous individual shares the key value with `a` but is not named, so it is
     // not identified with `a` (which would put `a` in `B` and `¬B`).
@@ -1850,7 +1867,8 @@ const NOMINAL_SEEDS: u64 = 400;
 /// The SHIQ corpus with keys: one to three `HasKey` axioms over object properties and a
 /// data property `:d0`, and an ABox of a few named individuals with role assertions,
 /// small-integer data assertions and the occasional `differentFrom`, so keys fire. Up to a
-/// tenth of the seeds may answer Unknown (values a key compares that are not fixed).
+/// tenth of the seeds may answer Unknown (values a key compares that are not fixed). Key
+/// object properties are simple: a key on a role with a transitive sub-role is refused.
 ///
 /// Key properties are named: the reference reasoner ignores an `ObjectInverseOf` in a key
 /// (it finds `HasKey(⊤ (r⁻))` with `r(c, a)`, `r(c, b)` and `a ≠ b` consistent, but not the
@@ -1863,6 +1881,25 @@ fn keys_corpus(seed: u64) -> String {
             .count()
     };
     let (n_classes, n_roles) = (count("C"), count("r"));
+    // Keys are on simple roles only (a key on a role with a transitive sub-role is refused):
+    // a role is non-simple when it is transitive or above a non-simple one.
+    let mut simple: Vec<bool> = (0..n_roles)
+        .map(|i| !out.contains(&format!(":r{i} a owl:TransitiveProperty .")))
+        .collect();
+    for _ in 0..n_roles {
+        for a in 0..n_roles {
+            for b in 0..n_roles {
+                let below = out.contains(&format!(":r{a} rdfs:subPropertyOf :r{b} ."))
+                    || out.contains(&format!(
+                        "[ owl:inverseOf :r{a} ] rdfs:subPropertyOf [ owl:inverseOf :r{b} ] ."
+                    ));
+                if below && !simple[a] {
+                    simple[b] = false;
+                }
+            }
+        }
+    }
+    let simple: Vec<usize> = (0..n_roles).filter(|&i| simple[i]).collect();
     let mut rng = Rng(seed.wrapping_mul(0xD1B5_4A32_D192_ED03) | 1);
     let _ = writeln!(out, ":d0 a owl:DatatypeProperty .");
     let n_ind = 2 + rng.below(4);
@@ -1877,9 +1914,12 @@ fn keys_corpus(seed: u64) -> String {
         };
         let mut props: Vec<String> = Vec::new();
         for _ in 0..(1 + rng.below(2)) {
-            props.push(format!(":r{}", rng.below(n_roles)));
+            let r = rng.below(n_roles);
+            if !simple.is_empty() {
+                props.push(format!(":r{}", simple[r % simple.len()]));
+            }
         }
-        if rng.chance(35) {
+        if props.is_empty() || rng.chance(35) {
             props.push(":d0".into());
         }
         props.dedup();

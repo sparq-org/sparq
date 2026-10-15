@@ -178,7 +178,8 @@ CONSISTENT true
 SUB http://ex/C2 http://ex/C1
 SUB http://ex/C4 http://ex/C0
 FILE seed0057.ttl
-CONSISTENT false
+CONSISTENT true
+UNSAT http://ex/C2
 FILE seed0058.ttl
 CONSISTENT false
 FILE seed0059.ttl
@@ -212,10 +213,7 @@ CONSISTENT true
 SUB http://ex/C1 http://ex/C2
 SUB http://ex/C2 http://ex/C1
 FILE seed0069.ttl
-CONSISTENT true
-SUB http://ex/C0 http://ex/C1
-SUB http://ex/C1 http://ex/C0
-UNSAT http://ex/C2
+CONSISTENT false
 FILE seed0070.ttl
 CONSISTENT true
 SUB http://ex/C0 http://ex/C2
@@ -243,9 +241,7 @@ CONSISTENT false
 FILE seed0077.ttl
 CONSISTENT true
 FILE seed0078.ttl
-CONSISTENT true
-SUB http://ex/C1 http://ex/C2
-SUB http://ex/C2 http://ex/C1
+CONSISTENT false
 FILE seed0079.ttl
 CONSISTENT false
 FILE seed0080.ttl
@@ -322,7 +318,11 @@ SUB http://ex/C0 http://ex/C1
 SUB http://ex/C0 http://ex/C2
 SUB http://ex/C1 http://ex/C2
 FILE seed0105.ttl
-CONSISTENT false
+CONSISTENT true
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C2 http://ex/C4
+SUB http://ex/C4 http://ex/C1
+SUB http://ex/C4 http://ex/C2
 FILE seed0106.ttl
 CONSISTENT false
 FILE seed0107.ttl
@@ -341,12 +341,7 @@ CONSISTENT true
 FILE seed0112.ttl
 CONSISTENT false
 FILE seed0113.ttl
-CONSISTENT true
-SUB http://ex/C1 http://ex/C0
-SUB http://ex/C1 http://ex/C2
-SUB http://ex/C1 http://ex/C4
-SUB http://ex/C2 http://ex/C4
-SUB http://ex/C4 http://ex/C2
+CONSISTENT false
 FILE seed0114.ttl
 CONSISTENT true
 SUB http://ex/C0 http://ex/C2
@@ -616,7 +611,10 @@ CONSISTENT true
 SUB http://ex/C0 http://ex/C4
 SUB http://ex/C4 http://ex/C0
 FILE seed0206.ttl
-CONSISTENT false
+CONSISTENT true
+SUB http://ex/C4 http://ex/C0
+SUB http://ex/C5 http://ex/C2
+SUB http://ex/C5 http://ex/C3
 FILE seed0207.ttl
 CONSISTENT true
 SUB http://ex/C1 http://ex/C2
@@ -630,8 +628,7 @@ UNSAT http://ex/C4
 FILE seed0209.ttl
 CONSISTENT false
 FILE seed0210.ttl
-CONSISTENT true
-SUB http://ex/C1 http://ex/C4
+CONSISTENT false
 FILE seed0211.ttl
 CONSISTENT true
 SUB http://ex/C0 http://ex/C1
@@ -756,7 +753,9 @@ SUB http://ex/C1 http://ex/C3
 SUB http://ex/C3 http://ex/C2
 SUB http://ex/C4 http://ex/C0
 FILE seed0244.ttl
-CONSISTENT false
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C3 http://ex/C0
 FILE seed0245.ttl
 CONSISTENT true
 SUB http://ex/C4 http://ex/C1
@@ -807,9 +806,11 @@ CONSISTENT false
 FILE seed0258.ttl
 CONSISTENT true
 FILE seed0259.ttl
-CONSISTENT false
-FILE seed0260.ttl
 CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+UNSAT http://ex/C3
+FILE seed0260.ttl
+CONSISTENT false
 FILE seed0261.ttl
 CONSISTENT true
 SUB http://ex/C1 http://ex/C3
@@ -825,7 +826,8 @@ CONSISTENT true
 SUB http://ex/C4 http://ex/C0
 SUB http://ex/C4 http://ex/C1
 FILE seed0266.ttl
-CONSISTENT false
+CONSISTENT true
+SUB http://ex/C4 http://ex/C0
 FILE seed0267.ttl
 CONSISTENT true
 SUB http://ex/C2 http://ex/C1
@@ -948,7 +950,9 @@ SUB http://ex/C1 http://ex/C5
 SUB http://ex/C3 http://ex/C2
 SUB http://ex/C4 http://ex/C0
 FILE seed0304.ttl
-CONSISTENT false
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C1
 FILE seed0305.ttl
 CONSISTENT false
 FILE seed0306.ttl
@@ -968,7 +972,13 @@ SUB http://ex/C2 http://ex/C0
 SUB http://ex/C3 http://ex/C0
 SUB http://ex/C3 http://ex/C2
 FILE seed0308.ttl
-CONSISTENT false
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C0 http://ex/C4
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C4 http://ex/C0
+SUB http://ex/C4 http://ex/C3
+SUB http://ex/C4 http://ex/C5
 FILE seed0309.ttl
 CONSISTENT true
 SUB http://ex/C0 http://ex/C1
@@ -1044,9 +1054,7 @@ SUB http://ex/C3 http://ex/C0
 SUB http://ex/C3 http://ex/C1
 SUB http://ex/C3 http://ex/C2
 FILE seed0326.ttl
-CONSISTENT true
-SUB http://ex/C4 http://ex/C3
-UNSAT http://ex/C0
+CONSISTENT false
 FILE seed0327.ttl
 CONSISTENT false
 FILE seed0328.ttl
@@ -1103,7 +1111,7 @@ CONSISTENT true
 SUB http://ex/C3 http://ex/C4
 SUB http://ex/C4 http://ex/C3
 FILE seed0349.ttl
-CONSISTENT false
+CONSISTENT true
 FILE seed0350.ttl
 CONSISTENT true
 FILE seed0351.ttl

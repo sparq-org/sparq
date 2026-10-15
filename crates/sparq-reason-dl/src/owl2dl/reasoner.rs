@@ -18,8 +18,9 @@
 //! OWL 2 datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
 //! `DataUnionOf`, `DataComplementOf` and acyclic `DatatypeDefinition`s), decided by
 //! [`super::data_ranges`], and keys (`HasKey`, over named individuals; a key whose data
-//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Property
-//! chains other than `R∘R ⊑ R`, the top and bottom
+//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on an
+//! object property with a transitive sub-property, property chains other than `R∘R ⊑ R`,
+//! the top and bottom
 //! properties, datatypes outside the map, and number restrictions above
 //! [`MAX_CARDINALITY`] answer `Unknown(OutOfFragment)`; a datatype question the oracle cannot
 //! decide answers `Unknown(DatatypeUnknown)`. An ill-typed literal in an assertion,

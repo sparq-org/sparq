@@ -25,8 +25,8 @@
 //! or a datatype has more than one). The tableau's datatype check decides the labels with
 //! [`super::data_ranges`].
 //!
-//! Everything outside the supported fragment (nominals, property chains, keys, the
-//! universal roles, datatypes outside the datatype map) is refused with [`Unsupported`],
+//! Everything outside the supported fragment (property chains other than `R∘R ⊑ R`, keys on
+//! non-simple roles, the universal roles, datatypes outside the datatype map) is refused with [`Unsupported`],
 //! naming the axiom's source triples, so the reasoner can answer `Unknown(OutOfFragment)`
 //! instead of a wrong verdict; a data range or literal the datatype oracle cannot decide is
 //! refused as a datatype question (`Unknown(DatatypeUnknown)`).
@@ -841,6 +841,14 @@ impl Builder<'_> {
                     .iter()
                     .map(|p| self.role(p))
                     .collect::<Result<Vec<_>, _>>()?;
+                // A key on a role with a transitive sub-role would have to see the values
+                // reached along paths, which the tableau does not materialise.
+                if roles
+                    .iter()
+                    .any(|&r| !self.transitive_subroles(r).is_empty())
+                {
+                    return Err(self.unsupported("HasKey on a non-simple object property"));
+                }
                 let data = ds
                     .iter()
                     .map(|&d| self.data_role(d))

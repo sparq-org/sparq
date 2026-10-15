@@ -771,7 +771,8 @@ apply to named individuals only, as OWL 2 specifies: two named members of the ke
 sharing a named value on every object property and a value on every data property are
 merged. Data values are compared when the tableau fixed them to literals (ABox
 assertions, `DataHasValue`); a pair that might share a value not fixed yet closes the
-branch as unconfirmed.
+branch as unconfirmed. A key on an object property with a transitive sub-property
+(a non-simple one) is `OutOfFragment`: the values it compares would lie along paths.
 Still out of the fragment, as
 `Unknown(OutOfFragment { construct, source })`: other chains, the top and bottom object and data properties
 in axioms (except `SubDataPropertyOf(D owl:topDataProperty)`), datatypes outside the map

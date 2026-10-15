@@ -221,7 +221,8 @@ export function normaliseOwlDlOptions(
  * Decided fragment: SHOIQ(D) — classes and every class constructor including nominals,
  * object properties with inverses, hierarchies, transitivity, `R∘R ⊑ R` chains, the role
  * characteristics, `hasSelf`, qualified cardinality up to a fixed bound, data properties over
- * the OWL 2 datatype map, keys over named individuals, and the ABox. Other property chains, the top and bottom
+ * the OWL 2 datatype map, keys over named individuals, and the ABox. Keys on a non-simple
+ * property, other property chains, the top and bottom
  * properties, datatypes outside the map and object/data property punning answer
  * `consistent: "unknown"` with reason `OutOfFragment` and the triples; an undecided datatype
  * question answers `DatatypeUnknown`, and an unconfirmed model with nominals `Unconfirmed`.

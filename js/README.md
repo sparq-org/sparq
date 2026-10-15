@@ -351,7 +351,7 @@ dynamically on its first call, so importing `@sparq-org/sparq` never loads it.
 Answers are three-valued and never guessed. The decided fragment is SHOIQ(D)
 with `hasSelf` and `R∘R ⊑ R` (nominals, inverses, qualified cardinality up to a fixed bound,
 the role characteristics, data properties over the OWL 2 datatype map and the ABox
-included, and keys over named individuals); **other property chains, the top and bottom properties, datatypes outside
+included, and keys over named individuals); **keys on a transitive (non-simple) property, other property chains, the top and bottom properties, datatypes outside
 the OWL 2 map and object/data property punning currently answer
 `consistent: 'unknown'` with reason `OutOfFragment`** and the offending input triples (as
 N-Triples lines). A graph
