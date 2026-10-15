@@ -593,15 +593,26 @@ impl<'c> Tableau<'c> {
                         .map(|d| (*n, d.union(dn))),
                 })
                 .collect();
-            // Each member's values on the key's data properties, read once per key.
-            let values: Vec<Vec<DataValues>> = members
-                .iter()
-                .map(|&(x, _)| key.data.iter().map(|&d| self.data_values(d, x)).collect())
-                .collect();
             // The member scan, one unit per named individual.
             if self.charge(named.len()) {
                 // `run` reports the exhaustion before using anything.
                 return KeyStep::Merged;
+            }
+            // Each member's values on the key's data properties, read once per key (one unit
+            // per entry, besides the scans).
+            let mut values: Vec<Vec<DataValues>> = Vec::with_capacity(members.len());
+            for &(x, _) in &members {
+                let mut row = Vec::with_capacity(key.data.len());
+                for &d in &key.data {
+                    if self.probe() {
+                        return KeyStep::Merged;
+                    }
+                    row.push(self.data_values(d, x));
+                    if self.over_budget() {
+                        return KeyStep::Merged;
+                    }
+                }
+                values.push(row);
             }
             let n = members.len();
             let indexed = self.key_candidates(&values);
