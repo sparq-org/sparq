@@ -133,6 +133,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
+  recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that
+  commitment, instead of from whichever entry the prover listed first. All such entries must carry
+  a salt, every one must decode to a field element, and all must decode to the SAME one (the hex
+  spelling may differ, since agreement is compared on the decoded element). If any is absent or
+  malformed, or two disagree, the salt does not resolve and the commitment is refused as
+  unreferenced — the same fail-closed outcome a single missing salt already produced. The previous
+  first-entry-wins resolution made that verdict depend on entry order (`[no salt, salt]` refused
+  while `[salt, no salt]` proceeded, and a second, disagreeing salt was never read). The new rule
+  refuses strictly more: the clear-attestation-preferred path is unchanged, and no manifest that
+  verified before is newly refused unless it carried a salt-less or disagreeing hidden-issuer entry
+  over the same commitment.
+- **sparq-zk:** doc correction — `RegistryEntry::issued_with_status` documented its signed message
+  as the method-unbound `commitment_message_with_status` (`ZKSIG_C3`); it signs the method-bound
+  `commitment_message_with_status_and_scheme` (`ZKSIG_M3`), which is what the code already did and
+  what `verify_commitment_signature_with_status` recomputes. No behaviour change.
 - **sparq-zk:** hardening — the dual-leaf encoders now assert the §14.1 `LANG_NONE` separation
   on the host side instead of assuming it. `dual_leaf::degenerate_value_component` and
   `dual_leaf_v2::degenerate_value_component` return `Result<Fr, DualLeafError>` and refuse a language

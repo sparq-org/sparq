@@ -2323,6 +2323,14 @@ pub struct HiddenIssuerAttestation {
     /// attestation) MUST carry the salt here, or the verifier cannot recompute `m`
     /// and rejects the entry as unreferenced (fail-closed).
     ///
+    /// On the hidden-ONLY path the salt is resolved by AGREEMENT over every entry
+    /// declared over the same commitment, not from whichever entry is listed first:
+    /// all of them must carry a salt, every one must decode to a field element, and
+    /// all must decode to the SAME one (hex spelling may differ). If any is absent
+    /// or malformed, or two disagree, the salt does not resolve and the commitment
+    /// is rejected as unreferenced — the same fail-closed outcome a single missing
+    /// salt produces, now independent of the order the entries are listed in.
+    ///
     /// # Why the salt is not withheld (sq-93h, assessed — do not re-litigate)
     /// Disclosing it adds NO cross-presentation linkability, because [`Self::commitment`]
     /// — the SAME graph's `C(G)` — is disclosed in the clear on this very entry and is
