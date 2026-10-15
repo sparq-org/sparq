@@ -1140,6 +1140,7 @@ pub async fn put_handler<S: Store>(
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
     let target = parse_target(&state.base_url, uri.path())?;
+    refuse_repeated_slash_write(&state.base_url, &target)?;
 
     // WAC for PUT — EXISTENCE-NON-DISCLOSURE (`research/lws-design-records.md` §6): a PUT requires
     // `acl:Write` on the TARGET's effective ACL (inherited via `acl:default` for a not-yet-existing
@@ -1176,16 +1177,6 @@ pub async fn put_handler<S: Store>(
     // create-vs-replace) — reused for the conditional-write ETag and the create/replace branch below.
     let current = state.store.meta(&target.iri).await?;
     let existed = current.is_some();
-    // A create under a repeated slash is refused before the slash rule looks for a twin by a name
-    // authorization never covered.
-    if !existed && !crate::authz::is_acl_resource(&target.iri) {
-        if let Some(rest) = target
-            .iri
-            .strip_prefix(state.base_url.trim_end_matches('/'))
-        {
-            refuse_repeated_slash(rest)?;
-        }
-    }
 
     // Slash-semantics: a trailing-slash IRI (a container) and the same IRI without the slash (a plain
     // resource) MUST NOT co-exist (Solid Protocol — "with and without trailing slash cannot
@@ -1306,6 +1297,7 @@ pub async fn post_handler<S: Store>(
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
     let container = parse_target(&state.base_url, uri.path())?;
+    refuse_repeated_slash_write(&state.base_url, &container)?;
     // WAC: a POST to a container requires `acl:Append` on the container (a writer also satisfies it).
     // Anonymous ⇒ 401, authenticated-but-unauthorized ⇒ 403. Authorize BEFORE the container-shape /
     // existence checks so an unauthorized caller cannot probe existence (the read-access POST cases
@@ -1637,6 +1629,7 @@ pub async fn patch_handler<S: Store>(
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
     let target = parse_target(&state.base_url, uri.path())?;
+    refuse_repeated_slash_write(&state.base_url, &target)?;
 
     // Select the PATCH language from the Content-Type (ABSENT ⇒ 400, unsupported ⇒ 415) and parse the
     // document. `text/n3` is the Solid N3 Patch; `application/sparql-update` is the INSERT/DELETE DATA
@@ -2187,9 +2180,18 @@ async fn write_validator<S: Store>(
 /// "conflicts when … turning resource into container"). The conflict is detected by the
 /// trailing-slash container record being absent while the slash-less resource record is present.
 /// A name with a repeated slash (only a leading or trailing one gets past `parse_target`) has no
-/// chain of containers to create it in: authorization walks its key as named, which the containers
-/// would not match. So nothing is created for it, before anything else is looked at. `rest` is the
-/// path below the base URL.
+/// chain of containers to write in: authorization walks its key as named, while containment and
+/// the slash rule would read it with the slashes folded. So nothing is written under one (a `PUT`,
+/// `PATCH` or `POST` target, or the container a `POST` names), refused on the name alone before
+/// anything is authorized or looked up; what is stored under one can still be read and deleted.
+fn refuse_repeated_slash_write(base: &str, target: &LdpTarget) -> Result<(), ServerError> {
+    target
+        .iri
+        .strip_prefix(base.trim_end_matches('/'))
+        .map_or(Ok(()), refuse_repeated_slash)
+}
+
+/// [`refuse_repeated_slash_write`] for `rest`, a path below the base URL.
 fn refuse_repeated_slash(rest: &str) -> Result<(), ServerError> {
     if rest.contains("//") {
         return Err(ServerError::BadRequest(
@@ -2451,9 +2453,7 @@ async fn mint_child_iri<S: Store>(
     stem: Option<&str>,
     as_container: bool,
 ) -> Result<String, ServerError> {
-    // One slash only: a container named with a repeated trailing slash keeps its members below
-    // its own name, where authorization and containment find them.
-    let base = container_iri.strip_suffix('/').unwrap_or(container_iri);
+    let base = container_iri.trim_end_matches('/');
     generate_unique(store, base, stem, as_container).await
 }
 
