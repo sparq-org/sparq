@@ -663,12 +663,24 @@ impl PodStore {
         }
     }
 
-    /// Forget the stored facts of every resource `effects` may have removed or brought back:
-    /// each graph they name, the resource an `.acr` among them governs, and every container
-    /// above either; all of them for a `CLEAR`/`DROP` of more than one graph.
-    fn forget_touched(&mut self, effects: &[sparq_engine::UpdateEffect]) {
+    /// Forget the stored facts of every resource `effects` may have removed or brought back
+    /// (each graph they name, the resource an `.acr` among them governs, and every container
+    /// above either; every resource for a `CLEAR`/`DROP` of more than one graph), except one
+    /// that exists both in `before` and now: as for a committed change, a resource that exists
+    /// before and after it keeps its creator and owner, whatever happened in between.
+    fn forget_touched(
+        &mut self,
+        effects: &[sparq_engine::UpdateEffect],
+        before: Option<&loader::ResourceGraphs>,
+    ) {
         use sparq_engine::UpdateEffect;
         use spargebra::algebra::GraphTarget;
+        let Some(before) = before else {
+            // Nothing was stored to forget.
+            return;
+        };
+        let after = loader::ResourceGraphs::of(&self.graph);
+        let throughout = |r: &str| before.holds(r) && after.holds(r);
         let mut names: Vec<&str> = Vec::new();
         for effect in effects {
             match effect {
@@ -678,7 +690,7 @@ impl PodStore {
                     GraphTarget::NamedNode(n) => names.push(n.as_str()),
                     GraphTarget::DefaultGraph => {}
                     _ => {
-                        self.acp_context.0 = AccessProvenance::new();
+                        self.acp_context.0.retain(throughout);
                         return;
                     }
                 },
@@ -688,7 +700,9 @@ impl PodStore {
         for name in names {
             let mut r = Some(name.strip_suffix(loader::ACR_SUFFIX).unwrap_or(name));
             while let Some(at) = r {
-                self.acp_context.0.forget(at);
+                if !throughout(at) {
+                    self.acp_context.0.forget(at);
+                }
                 r = loader::parent_iri(at);
             }
         }
@@ -799,7 +813,8 @@ impl PodStore {
     /// [`PodStore::acp_provenance`] passed back, to refresh the credentials or after a failed
     /// update) is judged as stored: if it does not exist, its facts are kept only if its
     /// `.acr` was stored at the last install (after a commit that fails past its commit point,
-    /// none is, and the facts of every resource the update touched are already forgotten). A
+    /// none is, and the facts of every resource the update touched are already forgotten
+    /// unless it existed both before the update and after the failure). A
     /// resource whose creator or owner differs is taken as given in full.
     ///
     /// # Errors
@@ -1269,6 +1284,9 @@ impl PodStore {
             self.usable_acp_context()
                 .map_err(|e| format!("update denied: {e}; nothing was changed"))?;
         }
+        // The resources before the commit, for a commit that fails past its commit point to
+        // judge the stored facts by (none to judge when none are stored).
+        let before = (!self.acp_context.0.is_empty()).then(|| loader::ResourceGraphs::of(&self.graph));
         #[cfg(test)]
         let committed = update_path_tests::injected_failure_before_commit()
             .map_err(|e| sparq_engine::ApplyError {
@@ -1301,11 +1319,11 @@ impl PodStore {
             // view nor the stored provenance is known to describe the store any more, whatever
             // the update's net effect would have been.
             self.acp_context_stale = true;
-            // Nor is any `.acr` known to have been stored throughout, nor any resource the
-            // update touched known to have existed throughout: provenance passed back keeps
-            // the facts of existing resources the update did not touch only.
+            // Nor is any `.acr` known to have been stored throughout: provenance passed back
+            // keeps the facts of a resource the update touched only if it exists both before
+            // the update and now.
             self.acr_controlled.clear();
-            self.forget_touched(effects);
+            self.forget_touched(effects, before.as_ref());
             self.drop_auth_view();
             return Err(format!("the update could not be committed: {e}"));
         }
