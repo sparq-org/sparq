@@ -114,19 +114,28 @@ async fn handle_now<S: Store + 'static>(
     agent: &Agent,
 ) -> Response {
     let path = req.path.as_str();
+    let not_there = || {
+        if state.needs_auth(agent) {
+            state.challenge(None)
+        } else {
+            problem(StatusCode::NOT_FOUND, None)
+        }
+    };
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
         // A linkset describes a resource, and no resource's name ends in `.meta` (see
         // [`sanitize_slug`]): what is stored under such a name is a linkset's own record, which
         // has no linkset and is no resource. Whatever is stored, it is not there.
         if super::names_record(stem) {
-            return if state.needs_auth(agent) {
-                state.challenge(None)
-            } else {
-                problem(StatusCode::NOT_FOUND, None)
-            };
+            return not_there();
         }
         let uri = state.cfg.absolute(stem);
         return linkset(state, req, agent, &uri).await;
+    }
+    // Nor is a name that ends in `.meta` in another case a resource's: what is stored under one
+    // is listed, followed and subscribed to as nothing (see [`super::names_record`]), and so it
+    // is answered.
+    if super::names_record(path) {
+        return not_there();
     }
     let uri = state.cfg.absolute(path);
     let is_root = path == "/";
@@ -3609,7 +3618,8 @@ async fn delete<S: Store + 'static>(
         return refused;
     }
     // A linkset record a legacy edge makes a member is no member: it neither keeps a container
-    // from being empty nor needs a permission of its own, and goes with the container.
+    // from being empty nor needs a permission of its own, and is removed with the container
+    // when it is there.
     let members = || doomed.iter().filter(|(n, _)| !super::names_record(n));
     if uri.ends_with('/') && members().count() > 1 {
         let infinity = req
@@ -12413,7 +12423,7 @@ mod tests {
         assert_eq!(r.status(), StatusCode::OK);
         let listing = String::from_utf8(body_of(r).await.to_vec()).unwrap();
         assert!(!listing.contains("x.meta"), "{listing}");
-        // A subscription to one is refused as one to a name where nothing is.
+        // A subscription to a record's name is refused as one to a name where nothing is.
         let subscribe = |topic: String| {
             let st = st.clone();
             async move {
@@ -12441,8 +12451,49 @@ mod tests {
         let doc = subscribe(format!("{root}doc.txt.meta.meta")).await;
         assert_eq!(doc, subscribe(format!("{root}none.txt.meta.meta")).await);
         assert_eq!(doc.0, StatusCode::FORBIDDEN);
+        // What is stored under a name that ends in `.META` is answered as nothing there too, as
+        // the listing, the delete and a subscription take it.
+        let upper = format!("{c}X.META");
+        st.store
+            .create_in_container(&c, &upper, Bytes::from_static(b"u"), "text/plain")
+            .await
+            .unwrap();
+        for who in &callers {
+            for method in [Method::GET, Method::HEAD, Method::PUT, Method::DELETE] {
+                let a = answer(method.clone(), "/c/X.META".into(), who.clone()).await;
+                let b = answer(method.clone(), "/c/Y.META".into(), who.clone()).await;
+                assert_eq!(a, b, "{method} /c/X.META as {:?}", who.subject);
+            }
+        }
+        st.store.delete(&upper, Some(&c)).await.unwrap();
         // The container holds nothing else, so it is empty: deleting it removes the record
-        // with it, without Depth.
+        // with it, without Depth, and without a permission on the record, which the container's
+        // creator does not hold (it may create, but has no Delete grant).
+        let eve = "https://eve.example/#me";
+        st.access
+            .put_grant_for_test("eve", grant(json!(["create"]), eve));
+        let h = [
+            ("slug", "e"),
+            (
+                "link",
+                "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+            ),
+        ];
+        let r = handle(&st, &req(Method::POST, "/", &h, ""), &agent(eve)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let e = st.cfg.absolute("/e/");
+        st.store
+            .create_in_container(
+                &e,
+                &format!("{e}x.meta"),
+                Bytes::from_static(br#"{"linkset": []}"#),
+                LINKSET_JSON,
+            )
+            .await
+            .unwrap();
+        let r = handle(&st, &req(Method::DELETE, "/e/", &[], ""), &agent(eve)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert!(!st.store.exists(&format!("{e}x.meta")).await.unwrap());
         let r = handle(&st, &req(Method::DELETE, "/c/", &[], ""), &agent(OWNER)).await;
         assert!(r.status().is_success(), "{}", r.status());
         assert!(!st.store.exists(&format!("{c}x.meta")).await.unwrap());
