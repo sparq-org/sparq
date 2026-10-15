@@ -3169,7 +3169,7 @@ fn authenticate_hidden_only_method(
     // EVERY hidden-issuer entry declared over this commitment is checked, not
     // just the first one found: each must decode and equal a candidate, and all
     // of them must select the SAME candidate. Checking only one entry would make
-    // the verdict depend on the order the prover happened to list them in, and
+    // this check depend on the order the prover happened to list them in, and
     // would leave the others' declared `m` unread even though the bb stage
     // byte-compares each of them against a recomputed message.
     let mut selected: Option<AuthenticatedMethod> = None;

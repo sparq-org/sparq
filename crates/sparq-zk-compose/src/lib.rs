@@ -50,8 +50,7 @@ pub mod manifest;
 // Verifier-side AUTHENTICATION of a commitment's commitment method from the
 // issuer signature (the method-bound `ZKSIG_M5`/`ZKSIG_M4` PRESENTATION message
 // family), plus the relying party's `MethodPolicy` over the result. Always
-// compiled: the
-// method axis is not dual-leaf-specific. The default policy accepts a
+// compiled: the method axis is not dual-leaf-specific. The default policy accepts a
 // method-UNBOUND attestation, so every already-issued credential authenticates
 // exactly as before. Opening a value-lane gate is NOT part of this; see
 // `value_pin`. Research-grade, NOT externally audited (sq-qhy4).

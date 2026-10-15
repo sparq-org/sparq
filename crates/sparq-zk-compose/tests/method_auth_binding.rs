@@ -500,7 +500,11 @@ fn each_hidden_only_commitment_gets_its_own_policy_decision() {
         .with_hidden_issuer_depth(HIDDEN_DEPTH)
         .with_method_policy(MethodPolicy::current().require_method_bound());
     match prefilter_manifest_structure(&m, &strict, &fresh_policy()) {
-        Err(CheckError::MethodNotAuthenticated { .. }) => {}
+        Err(CheckError::MethodNotAuthenticated { commitment }) => assert_eq!(
+            FieldHex(commitment).to_field(),
+            Some(c2),
+            "the refusal must name the second, method-unbound commitment"
+        ),
         other => panic!(
             "expected MethodNotAuthenticated for the second, method-unbound hidden-only commitment, got {other:?}"
         ),
@@ -532,11 +536,19 @@ fn a_hidden_only_commitment_without_a_status_reference_is_refused_when_a_method_
             "expected MethodNotAuthenticated with no candidate set to bind a method, got {other:?}"
         ),
     }
+    // Control: the refusal is the policy's. The default policy does not refuse
+    // this commitment's method in the pre-filter.
+    let default = trusted(&sk).with_hidden_issuer_depth(HIDDEN_DEPTH);
+    let r = prefilter_manifest_structure(&m, &default, &fresh_policy());
+    assert!(
+        !matches!(r, Err(CheckError::MethodNotAuthenticated { .. })),
+        "the default policy accepts an unbound method, got {r:?}"
+    );
 }
 
 /// The declared message of EVERY hidden entry over a hidden-only commitment is
-/// checked, so the verdict does not depend on the order the prover listed them
-/// in: `[honest, unmatched]` and `[unmatched, honest]` are both refused.
+/// checked, so the message check does not depend on the order the prover
+/// listed them in: `[honest, unmatched]` and `[unmatched, honest]` are both refused.
 ///
 /// Two entries that each DO match a candidate but match DIFFERENT ones are
 /// refused the same way, in either order: there is then no single method for the

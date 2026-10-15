@@ -27,8 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry's declared `message`, which must EQUAL one of the candidates — a value matching none of them
   is refused with `CheckError::HiddenIssuerMessageMismatch`, and the policy applies to the method the
   hidden-issuer proof is then required to bind. Every entry over a hidden-only commitment is checked,
-  and they must all select the same candidate, so the verdict does not depend on the order the entries
-  are listed in. New PRESENTATION message shapes and signers in `sparq-zk`, each under its own
+  and they must all select the same candidate, so the message check does not depend on the order
+  the entries are listed in. New PRESENTATION message shapes and signers in `sparq-zk`, each under its own
   domain tag: `sig::presentation_message_with_status_and_scheme` (`ZKSIG_M5`, for a bearer
   attestation) and `sig::commitment_message_with_holder_and_scheme`
   (`ZKSIG_M4`, the one shape binding both a holder key and a method), signed with
@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with ONE qualification: a hidden-issuer entry's declared `message` was previously not read at all,
   and over a hidden-only commitment it is now required to equal a verifier-built candidate (for every
   entry over that commitment), so a hidden-only manifest whose declared message is absent,
-  non-canonically spelled or unmatched is now refused with `CheckError::HiddenIssuerMessageMismatch`;
+  not decodable as a field element, or unmatched is now refused with `CheckError::HiddenIssuerMessageMismatch`;
   a refusal of a malformed hidden-only manifest may also be reported earlier, in the pre-filter, than
   it was before. Otherwise every manifest that verified before still verifies under the default
   policy — an attestation over the method-unbound `ZKSIG_C3`/`ZKSIG_C4` message authenticates as
