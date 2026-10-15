@@ -52,6 +52,7 @@ fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*
     | { kind: 'NotInDl', violations: OwlDlViolation[] }     // the blocking profile violations
     | { kind: 'ResourceBudget' }
     | { kind: 'DatatypeUnknown', triples: string[] }
+    | { kind: 'Unconfirmed' }                                // a model with nominals not confirmed
     | { kind: 'ImportsNotLoaded', imports: string[] }        // owl:imports targets (not fetched)
     | { kind: 'Unparsed' | 'Malformed' | 'Ambiguous' | 'Unsupported', detail: string, triples: string[] },
   profile: {
@@ -61,7 +62,7 @@ fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*
   },
   unsatisfiable: string[],                   // named-class IRIs, sorted
   inferredSubClassOf: [string, string][],    // entailed [sub, super], not asserted, sorted
-  classification: 'complete' | { unknown: 'ResourceBudget' | … } | null,  // null unless consistent
+  classification: 'complete' | { unknown: 'ResourceBudget' | 'DatatypeUnknown' | 'Unconfirmed' } | null,  // null unless consistent
 }
 ```
 
@@ -85,12 +86,16 @@ fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*
   `profile.violations` for `Undeclared` / `ExtractionNote` when you pass a separate ABox.
 - `unsatisfiable` and `inferredSubClassOf` are empty unless `classification` is
   `'complete'`. An inconsistent ontology has `classification: null` (it entails everything).
-  A consistent one whose classification ran out of budget has `{ unknown: 'ResourceBudget' }`.
+  A consistent one whose classification could not finish has `{ unknown: kind }`:
+  `'ResourceBudget'` (the budget ran out), `'DatatypeUnknown'` (a class test met an undecided
+  datatype question) or `'Unconfirmed'` (a class test met an unconfirmed model). Only the
+  first is helped by a larger budget.
 
 ## Scope (honest)
 
-The decided fragment is ALCHIQ(D) with `hasSelf`, transitive roles and `R∘R ⊑ R`: class
-constructors except nominals, object properties with inverses and hierarchies, the role
+The decided fragment is SHOIQ(D) with `hasSelf` and `R∘R ⊑ R`: every class constructor
+including nominals (`oneOf`, `hasValue` on object properties; with nominals the ABox takes
+part in classification, so `A ≡ {a}` and `a ∈ B` give `A ⊑ B`), object properties with inverses and hierarchies, the role
 characteristics (functional, inverse-functional, reflexive, irreflexive, symmetric,
 asymmetric, disjoint), qualified cardinality up to the reasoner's cardinality bound
 (`MAX_CARDINALITY`; larger numbers, and axioms needing more successors than the clause limit,
@@ -100,10 +105,14 @@ disjointness, functional, some / all / has-value, data cardinalities, positive a
 data assertions) over the OWL 2 datatype map with facet restrictions, `DataOneOf`, the data
 booleans and acyclic `DatatypeDefinition`s. Literals are compared by value, and an ill-typed
 literal in an assertion makes the ontology inconsistent (`"sixteen"^^xsd:nonNegativeInteger`).
-**Nominals (`oneOf`, `hasValue` on object properties), other property chains, keys, and the
-top/bottom properties in axioms currently answer `consistent: 'unknown'` with
+**Property chains other than `R∘R ⊑ R`, keys, the top/bottom properties in axioms,
+datatypes and literals outside the OWL 2 datatype map, and a property used as both an
+object and a data property currently answer `consistent: 'unknown'` with
 `reason.kind: 'OutOfFragment'`** and the triples of the axiom that uses them; a datatype
 question the reasoner does not decide (for example an XSD pattern with a block escape)
-answers `reason.kind: 'DatatypeUnknown'` with the triples involved. The answer is never a guess: every verdict is either
+answers `reason.kind: 'DatatypeUnknown'` with the triples involved. Nominals are decided
+without SHOIQ's NI-rule: when nominals tie a part of the candidate model that blocking
+repeats to an individual whose number restrictions the repetition could break, the
+answer is `reason.kind: 'Unconfirmed'` instead of a verdict. The answer is never a guess: every verdict is either
 decided or `'unknown'` with a reason. Budgets are deterministic work counts (`maxSteps`: rule applications, `maxNodes`: completion-graph
 nodes, at most 2^32 - 1), not time limits; the defaults are those of `sparq_reason_dl::owl2dl::Budget::default()`.

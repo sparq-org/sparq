@@ -348,10 +348,11 @@ bundle (`wasm-dl/`, from `crates/sparq-dl-wasm`) which `checkOwlDl` imports
 dynamically on its first call, so importing `@sparq-org/sparq` never loads it.
 `store.checkOwlDl(abox?, { budget })` uses a store's default graph as the TBox.
 
-Answers are three-valued and never guessed. The decided fragment is ALCHIQ(D)
-with `hasSelf`, transitive roles and `R∘R ⊑ R` (inverses, qualified cardinality up to a fixed bound,
+Answers are three-valued and never guessed. The decided fragment is SHOIQ(D)
+with `hasSelf` and `R∘R ⊑ R` (nominals, inverses, qualified cardinality up to a fixed bound,
 the role characteristics, data properties over the OWL 2 datatype map and the ABox
-included); **nominals, keys and other property chains currently answer
+included); **keys, other property chains, the top and bottom properties, datatypes outside
+the OWL 2 map and object/data property punning currently answer
 `consistent: 'unknown'` with reason `OutOfFragment`** and the offending input triples (as
 N-Triples lines). A graph
 the OWL 2 RDF mapping cannot read also resolves `'unknown'` (reason `Malformed`,
