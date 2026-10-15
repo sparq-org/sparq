@@ -211,14 +211,17 @@ is numbered in the sorted order of each round's firing keys, so for the same par
 input a fact carrying one gets an IRI independent of hash-set traversal and hasher
 width (native vs `wasm32`; GH #6749). A `log:conclusion` formula's derived rows, and the
 list-cell labels (`_l<k>_<n>`) interning a list value mints, are sorted / numbered in a
-canonical term order for the same reason (GH #6844). It is not canonical across reordered
-isomorphic documents (anonymous `_b<n>` parser labels follow arrival order, formula rows keep
-source order, a label depends on its round's other firings), and it assumes stable
-binding values and firing sets: `log:collectAllIn` lists and backward-renamed `__bw<n>`
-terms — that counter is still assigned in evaluation order — can still carry traversal
-order into a key (GH #6844). The numbering changed with GH #6749 and the nested-closure row
-order and list-cell labels with GH #6844, so such a fact's IRI differs from one minted
-before them: regenerate as above.
+canonical term order for the same reason (GH #6844). A backward-chaining copy's `__bw<n>_`
+prefixes spell the proof-tree node that standardized that rule application apart — the
+premise-atom index then the `(rule, conclusion)` site index, one chunk per step — instead of
+counting applications in evaluation order, so a fact carrying one has a stable IRI too
+(GH #6844). It is not canonical across reordered isomorphic documents (anonymous `_b<n>`
+parser labels follow arrival order, formula rows keep source order, a label depends on its
+round's other firings), and it assumes stable
+binding values and firing sets: a `log:collectAllIn` list can still carry traversal
+order into a key (GH #6844). The numbering changed with GH #6749, and the nested-closure row
+order, the list-cell labels and the backward-renaming prefixes with GH #6844, so such a fact's
+IRI differs from one minted before them: regenerate as above.
 The `<hash>` is a 64-bit FNV-1a fold of the key: content-addressed, but
 **not collision-free and not a cryptographic commitment** — do not treat an entity
 IRI as proof of a fact's content; bind content with a real commitment if you need one.

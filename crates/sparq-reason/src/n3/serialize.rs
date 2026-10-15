@@ -98,8 +98,11 @@ pub(super) fn formula_universal(v: &str) -> Option<(usize, &str)> {
     Some((n.bytes().fold(0, |a, b| a * 10 + usize::from(b - b'0')), iri))
 }
 
-/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, possibly
-/// repeated) stripped, when what remains is an `@forAll` universal.
+/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, repeated: one chunk
+/// per step of the proof-tree path that standardized the application apart, behind a chunk
+/// holding how many steps follow — `BwPath::prefix`) stripped, when what remains is an
+/// `@forAll` universal. Each chunk's digits are read by maximal munch, which is what makes
+/// the rendering of a path injective.
 fn universal_base(v: &str) -> Option<&str> {
     let mut rest = v;
     loop {
@@ -667,10 +670,12 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
 /// only as reproducible as the TERMS. For the same parsed input, an existential's skolem
 /// label (`__sk<n>_<label>`) does not depend on hash-set traversal or hasher width: it is
 /// numbered in the sorted order of each round's firing keys (GH #6749), and a
-/// `log:conclusion` formula's derived rows are sorted under [`row_cmp`] (GH #6844). It is
-/// not canonical across reordered isomorphic documents, and binding values that still carry
-/// traversal order (`log:collectAllIn` lists; backward-renamed terms, whose `__bw<n>_`
-/// prefix is numbered in evaluation order) can still move it (GH #6844).
+/// `log:conclusion` formula's derived rows are sorted under [`row_cmp`] (GH #6844). A
+/// backward-chaining copy's `__bw<n>_` prefixes likewise spell the proof-tree node that
+/// standardized that rule application apart, not how many applications ran before it (GH
+/// #6844). It is not canonical across reordered isomorphic documents, and a binding value
+/// that still carries traversal order (a `log:collectAllIn` list) can still move it (GH
+/// #6844).
 fn term_key(t: &Term) -> String {
     fn quoted(s: &str, out: &mut String) {
         out.push('"');

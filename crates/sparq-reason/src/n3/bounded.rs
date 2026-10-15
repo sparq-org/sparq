@@ -1490,11 +1490,43 @@ mod tests {
         (v, sink.get())
     }
 
-    /// The GH #6757 programs: a backward rule concludes a formula holding a variable (or
-    /// an `@forAll` universal), and a forward rule copies it out. Every backward proof
-    /// renames the variable apart, so each round derives a new, syntactically distinct
-    /// fact and the closure never saturates.
+    /// The GH #6757 shape, still diverging: a backward rule concludes a formula holding a
+    /// variable (or an `@forAll` universal), a forward rule nests that value one level
+    /// deeper, and a second forward rule feeds the deeper value back to the backward rule's
+    /// own predicate. Each round's value is one `{ :s :t … }` deeper than the last, so the
+    /// closure never saturates.
+    ///
+    /// The feedback is what diverges. The RENAMING no longer does: a `__bw…` name addresses
+    /// the proof-tree node, so it is the same every round (GH #6844) — the four programs
+    /// that diverged on the counter alone now saturate, which
+    /// `the_gh_6757_renaming_programs_saturate` pins.
     const DIVERGING: [&str; 4] = [
+        "@prefix : <http://example.org/#>.\n\
+         { :a :p { ?x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r { :s :t ?f } } .\n\
+         { :a :r ?f } => { :a :p ?f } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r { :s :t ?f } } .\n\
+         { :a :r ?f } => { :a :p ?f } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :b :r { :s :t ?f } } .\n\
+         { :b :r ?f } => { :a :p ?f } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r { :s :t { :s :u ?f } } } .\n\
+         { :a :r ?f } => { :a :p ?f } .\n",
+    ];
+
+    /// The four GH #6757 programs AS THEY WERE WRITTEN THERE: a backward rule concludes a
+    /// formula holding a variable (or an `@forAll` universal) and a forward rule copies it
+    /// out, with nothing feeding the copy back. Each round re-proves the same goal, so the
+    /// only thing that could differ between rounds was the freshened variable's name.
+    const GH_6757_RENAMING_ONLY: [&str; 4] = [
         "@prefix : <http://example.org/#>.\n\
          { :a :p { ?x :q :z } } <= true .\n\
          { :a :p ?f } => { :a :r ?f } .\n",
@@ -1576,6 +1608,25 @@ mod tests {
             every_entry_point_refuses(doc, 64, CLOSURE_FACTS);
             // The fact allowance trips on its own too.
             every_entry_point_refuses(doc, CLOSURE_ROUNDS, 32);
+        }
+    }
+
+    /// GH #6844 item 2: the backward chainer's freshened names no longer count
+    /// applications, so re-proving one goal in a later round derives the SAME fact and the
+    /// closure saturates. These four programs were refused at the closure limit before.
+    #[test]
+    fn the_gh_6757_renaming_programs_saturate() {
+        use crate::n3;
+        for doc in GH_6757_RENAMING_ONLY {
+            // Far below the old allowance: the closure is one fact, reached in a few rounds.
+            let closure = with_allowance(16, 8, || n3::reason_n3_terms(doc, None))
+                .unwrap_or_else(|e| panic!("still diverges: {e}\n{doc}"));
+            let derived: Vec<&[Term; 3]> = closure
+                .facts
+                .iter()
+                .filter(|[_, p, _]| matches!(p, Term::Iri(i) if i.ends_with("#r")))
+                .collect();
+            assert_eq!(derived.len(), 1, "{doc}: {derived:?}");
         }
     }
 

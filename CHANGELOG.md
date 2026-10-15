@@ -327,8 +327,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has several triples firing under distinct bindings, two different rules, or the transitivity
   fast path walking several intermediate paths — the proof step records the derivation with the
   least premise vector rather than whichever one arrived first, so `why()` names the same
-  supporting facts every run. The `__bw<n>_` backward-renaming counter
-  is still assigned in evaluation order and stays tracked on #6844. (refs #6844)
+  supporting facts every run. (refs #6844)
+
+- **sparq-reason (N3):** the backward chainer's freshened variable names (`__bw<n>_`) now
+  address the PROOF-TREE NODE whose rule application they standardize apart, instead of
+  counting applications. A rule conclusion can bind a goal variable to a quoted formula that
+  still holds that application's renamed variables, and that value reaches a derived fact —
+  so the name was part of the fact's term identity (its `term_key` / `statement_keys`, its
+  `why()` string, its `sparq-prov` IRI) while the counter's value depended on how many
+  applications had run before it, and so on a fact set's traversal order and the hasher's
+  width (native vs `wasm32`). The name is now the node's path from the root of the premise
+  evaluation — the premise-atom index, then the `(rule, conclusion)` site index, plus a
+  scoped operator's clause position — rendered in the repeated-`__bw<n>_` form the readers
+  already accept, so no writer, key or refusal changes shape. Two consequences: a fact
+  carrying a renamed variable has a different identity than before, so regenerate stored
+  `sparq-prov` IRIs for such facts; and a program whose only round-to-round growth was that
+  counter (the #6757 shape: a backward rule concluding a formula with a variable, a forward
+  rule copying it out) now SATURATES instead of being refused at the closure limit. A
+  program that diverges by growing its terms is still refused. (#6844)
 
 - **sparq-reason:** `MaterializedN3Graph::new` / `with_limits` now ignore a `base_facts`
   entry with a variable outside a formula, as `insert` already does, instead of adding it

@@ -246,12 +246,17 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // are stable AND its why() tree always cites the same :q witness. A log:conclusion formula's
 // derived rows, and the rdf:first/rest cell labels interning a list value mints (_l<k>_<n>),
 // are likewise sorted / numbered in a canonical term order, not in a fact set's traversal order.
-// Labels are still NOT canonical across reordered isomorphic
+// A backward-chaining copy's __bw<n>_ prefixes spell the PROOF-TREE NODE that standardized that
+// rule application apart - premise-atom index then (rule, conclusion) site index, one chunk per
+// step, deepest first, behind a chunk holding the step count - so a renamed variable that reaches
+// a derived fact (a quoted formula value carrying one) names the same term every run and on every
+// target, instead of counting applications in evaluation order (GH #6844). A side effect: the
+// GH #6757 programs whose only growth was that counter now SATURATE instead of being refused at
+// the closure limit. Labels are still NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,
 // and a label depends on the other firings in its round), and they hold only while the binding
-// values and firing sets are themselves stable. Values that still carry traversal order -
-// log:collectAllIn lists, and backward-renamed __bw<n> terms (that counter is still assigned in
-// evaluation order) - can reorder ranks and so labels (GH #6844).
+// values and firing sets are themselves stable. A log:collectAllIn list still carries traversal
+// order and can reorder ranks and so labels (GH #6844).
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
