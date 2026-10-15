@@ -800,13 +800,44 @@ pub fn oblivious_set_output_hidden_keys(
     right_keys: &[Fp],
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    let mut dealer = backend.dealer();
+    // ONE fresh dealer for this run (production: a fresh OS-seeded CSPRNG, sq-1vt)
+    // covering BOTH the per-pair equality bits and the output stage.
+    oblivious_set_output_hidden_keys_through(
+        &mut backend.dealer(),
+        backend,
+        left_keys,
+        right_keys,
+        bound,
+    )
+}
+
+/// [`oblivious_set_output_hidden_keys`] with the per-pair equality bits AND the
+/// whole output stage (selector / real-tag / pure-dummy / payload-limb sharings and
+/// the shuffle) drawn through ONE `source`, in that order.
+///
+/// Refuses a source whose `(n, t)` differs from `backend`'s
+/// ([`require_source_matches`]) **before any draw** — the equality chain draws
+/// first, so the check cannot be left to [`oblivious_set_output_through`]. Every
+/// drawn sharing is shape-checked where it is consumed and the shuffled column's
+/// shape on return. Shape checks only — no VSS / consistency guarantee. A source
+/// that cannot share a value it was handed (PRSS today) makes this fail closed with
+/// that source's own error, inside the first `secure_equal_to_bit_through`.
+pub(crate) fn oblivious_set_output_hidden_keys_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    left_keys: &[Fp],
+    right_keys: &[Fp],
+    bound: usize,
+) -> Result<ObliviousOutput, MpcError> {
+    // Up front, before anything is drawn (the equality chain below draws before
+    // the output stage's own check would run).
+    require_source_matches(source, backend)?;
     // All-pairs candidates: each (i, j) becomes one slot whose match bit is the
     // SECRET-SHARED equality of the two private keys — never opened.
     let mut candidates: Vec<Candidate> = Vec::with_capacity(left_keys.len() * right_keys.len());
     for (i, &lk) in left_keys.iter().enumerate() {
         for (j, &rk) in right_keys.iter().enumerate() {
-            let match_bit = crate::compare::secure_equal_to_bit(&mut dealer, lk, rk)?;
+            let match_bit = crate::compare::secure_equal_to_bit_through(source, lk, rk)?;
             // A single disclosed payload column tagging the matched right index, so
             // the test surface can identify which pair survived (the key stays
             // hidden; this is a disclosed payload column, convention #4).
@@ -819,7 +850,7 @@ pub fn oblivious_set_output_hidden_keys(
             });
         }
     }
-    oblivious_set_output(backend, &candidates, 1, bound)
+    oblivious_set_output_through(source, backend, &candidates, 1, bound)
 }
 
 #[cfg(test)]
@@ -1499,6 +1530,138 @@ mod output_randomness_seam_tests {
             "got {outcome:?}"
         );
         assert!(rec.log.is_empty(), "drew before refusing");
+    }
+
+    // ---- The hidden-key stage's equality bits + output stage (#6117 step 6) ----
+
+    /// The pinned hidden-key fixture: `n = 3`, keys `[1, 2, 3]` against
+    /// `[3, 5, 1]`, all nine pairs revealed at `bound = 9` (so no padding slot).
+    /// Two pairs match (`0-2` and `2-0`).
+    fn hidden_key_fixture() -> (ShamirBackend, [Fp; 3], [Fp; 3]) {
+        (
+            ShamirBackend::new_seeded(3, 1).unwrap(),
+            [Fp::new(1), Fp::new(2), Fp::new(3)],
+            [Fp::new(3), Fp::new(5), Fp::new(1)],
+        )
+    }
+
+    /// The whole hidden-key stage — the per-pair equality bits AND the output
+    /// stage — now draws from ONE source, where the output stage previously minted
+    /// a second dealer. The REVEALED multiset and every modelled cost are
+    /// byte-identical to the pre-routing capture (the revealed ORDER is the
+    /// shuffle's secret permutation and carries no result meaning), and the public
+    /// entry point reproduces the `_through` run exactly.
+    #[test]
+    fn hidden_keys_reveal_the_same_multiset_and_cost_through_one_source() {
+        let (b, left, right) = hidden_key_fixture();
+        let (slots, cost) =
+            oblivious_set_output_hidden_keys_through(&mut b.dealer(), &b, &left, &right, 9)
+                .unwrap();
+        let mut got = rendered(&slots);
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                "Dummy",
+                "Dummy",
+                "Dummy",
+                "Dummy",
+                "Dummy",
+                "Dummy",
+                "Dummy",
+                "[Some(Literal(Literal(String(\"0-2\"))))]",
+                "[Some(Literal(Literal(String(\"2-0\"))))]",
+            ]
+        );
+        assert_eq!(
+            (
+                cost.bound,
+                cost.select_mults,
+                cost.opens,
+                cost.shuffle.items,
+                cost.shuffle.switches,
+                cost.shuffle.depth_rounds
+            ),
+            (9, 9, 9, 9, 63, 7)
+        );
+        let (public, public_cost) = oblivious_set_output_hidden_keys(&b, &left, &right, 9).unwrap();
+        assert_eq!(rendered(&public), rendered(&slots));
+        assert_eq!(public_cost.shuffle.switches, cost.shuffle.switches);
+    }
+
+    /// The COMPLETE seam transcript of the hidden-key stage, folded into the
+    /// order-sensitive fingerprint.
+    ///
+    /// **This is the #6117-step-6 guard for this path.** The log's tail is the
+    /// output stage's 27 `vss_own_input` draws (a real-tag sharing per pair — the
+    /// selector is the SHARED equality bit, which costs no draw — then two payload
+    /// limbs per slot) and its `oblivious_shuffle`. If the stage went back to
+    /// minting its own dealer for the output, the recorded log would stop at the
+    /// equality chain and both the length and the tail assertion would fail.
+    #[test]
+    fn seeded_hidden_keys_transcript_is_pinned() {
+        let (b, left, right) = hidden_key_fixture();
+        let mut rec = RecordingSource::new(b.dealer());
+        oblivious_set_output_hidden_keys_through(&mut rec, &b, &left, &right, 9).unwrap();
+        assert_eq!(rec.log.len(), 4321);
+        assert_eq!(fingerprint(&rec.log), 0xa585_30af_cfe0_0b05);
+        let tail: Vec<&str> = rec.log[rec.log.len() - 28..]
+            .iter()
+            .map(|(m, _)| *m)
+            .collect();
+        assert_eq!(
+            tail,
+            [["vss_own_input"; 27].as_slice(), &["oblivious_shuffle"]].concat()
+        );
+    }
+
+    /// A source whose `(n, t)` differs from the backend's is refused BEFORE any
+    /// draw. The hidden-key stage's equality chain draws first, so the check cannot
+    /// be left to [`oblivious_set_output_through`] — it is made up front in
+    /// [`oblivious_set_output_hidden_keys_through`] itself.
+    #[test]
+    fn hidden_keys_refuse_a_mismatched_source_before_any_draw() {
+        let (b, left, right) = hidden_key_fixture();
+        for t in [0, 2] {
+            let mut src = MisreportedThresholdSource {
+                inner: b.dealer(),
+                t,
+            };
+            match oblivious_set_output_hidden_keys_through(&mut src, &b, &left, &right, 9) {
+                Err(MpcError::Protocol(m)) => {
+                    assert!(m.contains(MISMATCH_REFUSAL), "t={t}: wrong check: {m}")
+                }
+                other => panic!("t={t}: must fail closed, got {other:?}"),
+            }
+        }
+        let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 1).unwrap().dealer());
+        let outcome = oblivious_set_output_hidden_keys_through(&mut rec, &b, &left, &right, 9);
+        assert!(
+            matches!(&outcome, Err(MpcError::Protocol(m)) if m.contains(MISMATCH_REFUSAL)),
+            "got {outcome:?}"
+        );
+        assert!(rec.log.is_empty(), "drew before refusing");
+    }
+
+    /// The hidden-key stage must share a holder's own input — first inside the
+    /// per-pair equality chain, then again in the output stage — which PRSS
+    /// refuses. The refusal must surface as PRSS's own `NotYetImplemented`, never a
+    /// panic or a silently different output.
+    #[test]
+    fn prss_fails_closed_in_the_hidden_keys_stage() {
+        let b = ShamirBackend::new(3).unwrap();
+        let mut prss = PrssRandomness::with_simulated_setup(3).unwrap();
+        let left = [Fp::new(1), Fp::new(2)];
+        let right = [Fp::new(2), Fp::new(3)];
+        assert!(matches!(
+            oblivious_set_output_hidden_keys_through(&mut prss, &b, &left, &right, 4),
+            Err(MpcError::NotYetImplemented { .. })
+        ));
+        // And with no pairs at all, where the output stage is the only draw site.
+        assert!(matches!(
+            oblivious_set_output_hidden_keys_through(&mut prss, &b, &[], &[], 2),
+            Err(MpcError::NotYetImplemented { .. })
+        ));
     }
 
     /// The output stage must share the selector and the real tag, which PRSS
