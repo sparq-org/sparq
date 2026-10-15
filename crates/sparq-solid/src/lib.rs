@@ -512,10 +512,11 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// Returns `Err` if any agent / group-member / origin IRI in the ACL or group
-    /// documents collides with the reserved principal encoding (starts with
-    /// `urn:sparq:` or contains the literal `&client=`), or if the N3 reasoner fails.
-    /// On error the previous auth view (if any) is left in place.
+    /// Returns `Err` if the N3 reasoner fails. On error the previous auth view (if any) is
+    /// left in place. A document stating a triple it may not (one about a node outside it, a
+    /// minted name, a reserved principal such as a `urn:sparq:` IRI or one containing
+    /// `&client=`, or view vocabulary) is not an error: the loader rejects it whole and the
+    /// resources it governs get no grant from any source.
     pub fn materialize_wac(&mut self) -> Result<MaterializeStats, String> {
         self.materialize_wac_scoped(ReindexScope::Full)
     }
@@ -567,8 +568,8 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// As [`PodStore::materialize_wac`] (reserved-encoding collisions in
-    /// agent/client IRIs; reasoner failure).
+    /// As [`PodStore::materialize_wac`]; also a reserved name in trusted provenance or
+    /// credentials.
     ///
     /// The view uses the trusted context (provenance and credentials) last passed to
     /// [`PodStore::materialize_acp_with`] or [`PodStore::materialize_acp_with_credentials`],
@@ -1210,6 +1211,7 @@ impl PodStore {
             self.odrl.grants(session, m, target) && !self.auth.denies(session, m, target)
         };
         self.statically_covered.contains(target)
+            && !self.auth.is_withheld(target)
             && (mode == Mode::Read || !self.group_docs().contains(target))
             && match mode {
                 // `Append` through a `Write` grant needs that grant to stand, an explicit deny
@@ -1981,6 +1983,54 @@ impl PodStore {
         // in force before it.
         let wrote_rules =
             update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &odrl)?;
+        // A statement an access-control document may not make is refused here, rather than
+        // left for the loader to reject the whole document (and with it its writer's Control).
+        // Judged in the state the update leaves, by what it leaves added: a statement it adds
+        // and removes again later in the update is not checked.
+        let control_writes = loader::ControlWrites::new(&candidate, acp);
+        let is_control = |doc: &str| doc.ends_with(loader::ACL_SUFFIX) || doc.ends_with(loader::ACR_SUFFIX);
+        let mut added: Vec<(&str, Vec<&[Term; 3]>)> = Vec::new();
+        for effect in &effects {
+            match effect {
+                sparq_engine::UpdateEffect::Delta {
+                    slot: Some(Term::NamedNode(doc)),
+                    inserts,
+                    deletes,
+                } if is_control(doc.as_str()) => {
+                    let doc = doc.as_str();
+                    let at = match added.iter().position(|(d, _)| *d == doc) {
+                        Some(at) => at,
+                        None => {
+                            added.push((doc, Vec::new()));
+                            added.len() - 1
+                        }
+                    };
+                    // Deletes first, then inserts, as the effect applies them.
+                    let pending = &mut added[at].1;
+                    pending.retain(|t| !deletes.contains(t));
+                    pending.extend(inserts.iter());
+                }
+                sparq_engine::UpdateEffect::Clear(target) | sparq_engine::UpdateEffect::Drop(target) => {
+                    for (doc, pending) in &mut added {
+                        let hit = match target {
+                            spargebra::algebra::GraphTarget::NamedNode(n) => n.as_str() == *doc,
+                            spargebra::algebra::GraphTarget::DefaultGraph => false,
+                            _ => true,
+                        };
+                        if hit {
+                            pending.clear();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (doc, pending) in added {
+            let surviving: Vec<[Term; 3]> = pending.into_iter().cloned().collect();
+            control_writes
+                .check(doc, &surviving)
+                .map_err(|e| format!("update denied: {e}"))?;
+        }
         // The ACP view is built from trusted provenance too: an update that ends or begins a
         // resource's life stages the provenance that follows, and rebuilds the view with it
         // when the view depends on it.
@@ -2088,6 +2138,10 @@ impl PodStore {
     /// FIRST if you also want the static WAC/ACP grants present; the bridge adds to
     /// whatever auth view currently exists (or creates a fresh one holding just the
     /// bridged grant).
+    ///
+    /// As with [`PodStore::attach_odrl_policy`], `policy` and `request` are trusted input
+    /// from the embedding application: the store never reads them from pod content, so pass
+    /// only a policy the application itself vetted.
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_permission(
         &mut self,
@@ -2402,6 +2456,10 @@ impl PodStore {
     /// authoritative and does not explicitly deny it, and refuses a mode some attached
     /// prohibition applies to. See [`odrl_enforce`] for the action-to-mode mapping and the graphs it
     /// never touches.
+    ///
+    /// The policy is trusted input from the embedding application, like the
+    /// [`AccessProvenance`] and [`VerifiedCredentials`] channels: nothing a session writes
+    /// into the pod is ever attached, so pass only policies the application itself vetted.
     ///
     /// # Errors
     ///
