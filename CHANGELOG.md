@@ -401,10 +401,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `wasm32`). A name is now the FINGERPRINT of the derivation: a 64-bit fold of the evaluation
   scope, the node's place in the proof tree (the premise-atom index, then the
   `(rule, conclusion)` site index, plus a scoped operator's clause position) and the goal
-  being proved, rendered in the `__bw<n>_` form the readers already accept, so no writer, key
+  being proved — folded step by step, each step from the one above it, so neither the name nor
+  the work of building it grows with the depth of the proof — rendered in the `__bw<n>_` form the readers already accept, so no writer, key
   or refusal changes shape, and a name's length no longer grows with the depth of the proof.
   Two derivations that fold alike are refused — the run fails rather than let them share one
-  set of renamed variables. Three consequences: a fact carrying
+  set of renamed variables, and the table that detects it belongs to the whole top-level run,
+  so a collision between a data closure, a query's own evaluation and a nested
+  `log:conclusion` closure is caught too; the table takes at most 1,000,000 nodes, one more
+  failing the run. Sibling nested closures at one nesting depth are also told apart, by the
+  nested document's own key. Three consequences: a fact carrying
   a renamed variable has a different identity than before, so regenerate stored `sparq-prov`
   IRIs for such facts; proofs of different goals keep the distinct values they had, including
   values inside a quoted formula, which substitution does not reach; and a program whose only

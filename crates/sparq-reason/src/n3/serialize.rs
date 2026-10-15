@@ -764,12 +764,43 @@ pub(super) fn goal_key(g: &[Term; 3]) -> String {
 /// proof-tree node's identity is folded to for its name (`BwCtx::node`, which refuses to
 /// hand one fold to two identities).
 pub(super) fn fnv1a64(s: &str) -> u64 {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in s.bytes() {
+    fold_bytes(FNV_OFFSET, s.as_bytes())
+}
+
+/// FNV-1a's 64-bit offset basis.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a over `bytes`, continuing from `h` — `fnv1a64`'s loop, usable incrementally.
+fn fold_bytes(mut h: u64, bytes: &[u8]) -> u64 {
+    for &b in bytes {
         h ^= u64::from(b);
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h
+}
+
+/// A proof-tree node key's fold: FNV-1a over `tag`, then each of `parts` big-endian, so
+/// the value is the same on `wasm32` as on a 64-bit target. The tag separates the key
+/// SHAPES (`NodeKey`), so a root, a step and a site cannot be read as one another, and
+/// every part is a fixed eight bytes, so no part's digits can run into the next's.
+///
+/// This is what names a node WITHOUT building its identity as a string: a key's parts
+/// already carry the parent node's fold, so the whole path above it is accounted for by
+/// one `u64` however deep the proof goes. It is not collision-free — nothing 64 bits wide
+/// is — which is why every fold handed out is registered against the exact key it came
+/// from, and a second, different key with the same fold fails the run (`BwCtx::node`).
+pub(super) fn fold_key(tag: u8, parts: &[u64]) -> u64 {
+    let mut h = fold_bytes(FNV_OFFSET, &[tag]);
+    for p in parts {
+        h = fold_bytes(h, &p.to_be_bytes());
+    }
+    h
+}
+
+/// The fold of a backward proof goal's identity (`goal_key`): computed once where the goal
+/// is built, not again at each node that resolves it.
+pub(super) fn goal_fold(g: &[Term; 3]) -> u64 {
+    fnv1a64(&goal_key(g))
 }
 
 /// The identity keys of one statement's three terms (`term_key`): equal exactly when the

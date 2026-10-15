@@ -248,11 +248,14 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // are likewise sorted / numbered in a canonical term order, not in a fact set's traversal order.
 // A backward-chaining copy's __bw<n>_ prefix is the FINGERPRINT of the derivation that
 // standardized that rule application apart: a 64-bit fold of where the application sits in the
-// proof tree, the goal it is proving and the evaluation scope - so a renamed variable that
+// proof tree, the goal it is proving and the evaluation scope (and, for a nested closure, that
+// document's own key) - so a renamed variable that
 // reaches a derived fact (a quoted formula value carrying one) names the same term every run and
 // on every target, instead of counting applications in evaluation order (GH #6844). Two proofs
 // of DIFFERENT goals therefore stay different terms, and two derivations that fold alike fail
-// the run rather than share a name. A side effect: the GH #6757 programs whose only growth was
+// the run rather than share a name - checked over the whole top-level run, so a collision
+// between a closure, a query's evaluation and a nested closure is caught too; a run names at
+// most 1,000,000 distinct nodes, and one more fails it. A side effect: the GH #6757 programs whose only growth was
 // that counter now SATURATE instead of being refused at the closure limit, because re-proving
 // one goal at one node mints one name. Labels are still NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,

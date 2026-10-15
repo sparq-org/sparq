@@ -976,6 +976,64 @@ pub(crate) fn runtime_docs() -> usize {
     RUNTIME_DOCS
 }
 
+/// Why a run was stopped by [`proof_nodes`].
+const PROOF_NODES_CUT: &str = "backward proof-node limit exceeded";
+
+/// Distinct backward proof-tree nodes one top-level run may name
+/// (`run_shared::RunShared::node`). The run keeps a constant-size entry per node — the
+/// node's fold and the key it was folded from, never a string — so this bounds the
+/// table's memory; the node that would be one too many fails the run
+/// ([`proof_nodes_exceeded`]) instead of letting the table grow with the search.
+///
+/// It is its own allowance rather than a charge against [`JoinWork`] because the table
+/// outlives a round: `JoinWork` is refreshed at the start of every round
+/// ([`JoinWork::round`]), so it can bound a round's work but not a structure that
+/// accumulates across all of them. A document with no `<=` rule never names a node at
+/// all, so this allowance is never reached on the forward-only path.
+pub(crate) fn proof_nodes() -> usize {
+    #[cfg(test)]
+    if let Some(n) = PROOF_NODES_OVERRIDE.with(Cell::get) {
+        return n;
+    }
+    1_000_000
+}
+
+/// The error of a run that has named as many proof-tree nodes as it may, the cut recorded
+/// on `cuts`.
+pub(crate) fn proof_nodes_exceeded(cuts: &impl Sink) -> String {
+    cuts.record(PROOF_NODES_CUT);
+    format!(
+        "n3: {PROOF_NODES_CUT}: a run standardizes apart at most {} distinct backward \
+         proof-tree nodes",
+        proof_nodes()
+    )
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// A lowered [`proof_nodes`] for runs on this thread.
+    static PROOF_NODES_OVERRIDE: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// Lowers [`proof_nodes`] on this thread until dropped.
+#[cfg(test)]
+pub(crate) struct ProofNodesOverride;
+
+#[cfg(test)]
+impl ProofNodesOverride {
+    pub(crate) fn set(n: usize) -> ProofNodesOverride {
+        PROOF_NODES_OVERRIDE.with(|c| c.set(Some(n)));
+        ProofNodesOverride
+    }
+}
+
+#[cfg(test)]
+impl Drop for ProofNodesOverride {
+    fn drop(&mut self) {
+        PROOF_NODES_OVERRIDE.with(|c| c.set(None));
+    }
+}
+
 /// The error of a run whose runtime-document table is full, the cut recorded on `cuts`.
 pub(crate) fn runtime_docs_exceeded(cuts: &impl Sink) -> String {
     cuts.record(RUNTIME_DOCS_CUT);
