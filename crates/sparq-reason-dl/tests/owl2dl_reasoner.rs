@@ -2699,7 +2699,8 @@ fn oracle_differential_datatypes() {
 #[test]
 fn incremental_rechecks_agree_with_fresh_checks() {
     use sparq_reason_dl::owl2dl::{IncrementalChecker, Reuse};
-    let corpora: [(&str, fn(u64) -> String); 6] = [
+    type Corpus = (&'static str, fn(u64) -> String);
+    let corpora: [Corpus; 6] = [
         ("shiq", Gen::ontology),
         ("nominals", |s| Gen::ontology_with(s, true)),
         ("focused", focused),
