@@ -17,7 +17,10 @@
 //! cardinality) and positive and negative data property assertions, over data ranges of the
 //! OWL 2 datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
 //! `DataUnionOf`, `DataComplementOf` and acyclic `DatatypeDefinition`s), decided by
-//! [`super::data_ranges`]. Property chains other than `R∘R ⊑ R`, keys, the top and bottom
+//! [`super::data_ranges`], and keys (`HasKey`, over named individuals; a key whose data
+//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on an
+//! object property with a transitive sub-property, property chains other than `R∘R ⊑ R`,
+//! the top and bottom
 //! properties, datatypes outside the map, and number restrictions above
 //! [`MAX_CARDINALITY`] answer `Unknown(OutOfFragment)`; a datatype question the oracle cannot
 //! decide answers `Unknown(DatatypeUnknown)`. An ill-typed literal in an assertion,
@@ -40,7 +43,7 @@ use super::dl_profile::{
     check_dl, for_each_class_in_axiom, for_each_range_in_axiom, DlProfileReport, Violation,
 };
 use super::hypertableau::{ClauseIndex, Stop, Tableau};
-use super::model::{Axiom, ClassExpression, DataRange, Literal, Ontology};
+use super::model::{Axiom, ClassExpression, DataRange, Individual, Literal, Ontology};
 use super::vocab::{iri_of, OWL};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
@@ -74,7 +77,8 @@ pub enum UnknownReason {
     ImportsNotLoaded(Vec<Id>),
     /// The tableau built a candidate model that it could not confirm: nominals tie a part of
     /// the completion graph that blocking repeats to an individual whose number
-    /// restrictions the repetitions could break (SHOIQ's NI-rule case, not implemented).
+    /// restrictions the repetitions could break (SHOIQ's NI-rule case, not implemented), or
+    /// a key compares data values the tableau has not fixed.
     Unconfirmed,
 }
 
@@ -249,8 +253,11 @@ impl Reasoner {
     /// Adds the ABox to `t`: individual `i` becomes root node `i`.
     fn load_abox(&self, t: &mut Tableau) {
         let abox = &self.clauses.abox;
-        for _ in &abox.individuals {
-            t.add_root();
+        for ind in &abox.individuals {
+            let n = t.add_root();
+            if matches!(ind, Individual::Named(_)) {
+                t.mark_named(n);
+            }
         }
         for &(a, n, _) in &abox.concepts {
             t.assert_concept(n, a);

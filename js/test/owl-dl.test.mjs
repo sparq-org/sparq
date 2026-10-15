@@ -99,12 +99,24 @@ test('nominals are decided, and class tests see the ABox', async () => {
   assert.equal((await checkOwlDl(tbox, `${PRE} :ann a :Man .`)).consistent, false);
 });
 
-test('keys are out of fragment: unknown, with the offending triples', async () => {
-  const r = await checkOwlDl(`${TBOX} :Person owl:hasKey ( :hasMother ) .`);
+test('keys are decided over named individuals', async () => {
+  const tbox = `${TBOX} :Person owl:hasKey ( :hasMother ) . :ann a :Person ; :hasMother :eve . :bea a :Person ; :hasMother :eve .`;
+  assert.equal((await checkOwlDl(tbox)).consistent, true);
+  assert.equal((await checkOwlDl(tbox, `${PRE} :ann owl:differentFrom :bea .`)).consistent, false);
+});
+
+test('other property chains are out of fragment: unknown, with the offending triples', async () => {
+  const r = await checkOwlDl(
+    `${TBOX} :hasGrandparent a owl:ObjectProperty ; owl:propertyChainAxiom ( :hasParent :hasParent ) .`,
+  );
   assert.equal(r.consistent, 'unknown');
   assert.equal(r.reason.kind, 'OutOfFragment');
-  assert.equal(r.reason.construct, 'HasKey');
-  assert.ok(r.reason.triples.some((t) => t.startsWith('<http://ex/Person> <http://www.w3.org/2002/07/owl#hasKey> ')));
+  assert.equal(r.reason.construct, 'ObjectPropertyChain');
+  assert.ok(
+    r.reason.triples.some((t) =>
+      t.startsWith('<http://ex/hasGrandparent> <http://www.w3.org/2002/07/owl#propertyChainAxiom> '),
+    ),
+  );
   for (const t of r.reason.triples) assert.match(t, / \.$/);
   assert.equal(r.profile.dl, true);
   assert.equal(r.classification, null);

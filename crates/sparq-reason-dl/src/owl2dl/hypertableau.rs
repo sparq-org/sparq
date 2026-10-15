@@ -55,7 +55,7 @@
 //! [`Stop::Undecided`] instead of "unsatisfiable" when one of them was undecided. Only a
 //! clash-free, complete branch whose datatype check succeeded is reported satisfiable.
 
-use super::clausify::{Atom, AtomKind, Clauses, Head, Role, Var};
+use super::clausify::{Atom, AtomKind, Clauses, Head, Key, Role, Var};
 use super::data_ranges::{self, DataRangeExpr, Tri};
 use super::datatypes::Value;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -163,9 +163,10 @@ pub(crate) enum Stop {
     /// involved in the first undecided check.
     Undecided(Vec<u32>),
     /// Every branch closed, but at least one only because its completion graph could not
-    /// be confirmed to unravel into a model: nominals connect a copied or blocked part of
-    /// the graph to a node whose number restrictions the copies could break (the case the
-    /// NI-rule of SHOIQ handles, which this calculus does not implement).
+    /// be confirmed to be a model: nominals connect a copied or blocked part of the graph
+    /// to a node whose number restrictions the copies could break (the case the NI-rule of
+    /// SHOIQ handles, which this calculus does not implement), or two individuals might
+    /// share a key's data value that is not fixed.
     Unconfirmed,
 }
 
@@ -301,8 +302,26 @@ pub(crate) struct Tableau<'c> {
     /// Nodes that gained a nominal atom `{a}` and may have to be merged into `a`'s node.
     nominal_todo: Vec<Node>,
     /// A complete, clash-free branch was closed because it could not be confirmed to
-    /// unravel into a model ([`Stop::Unconfirmed`]).
+    /// be a model ([`Stop::Unconfirmed`]).
     unconfirmed: bool,
+    /// The nodes of the named individuals.
+    named: Vec<Node>,
+}
+
+/// What the key rule did.
+enum KeyStep {
+    /// It merged two individuals (or the budget ran out).
+    Merged,
+    /// Nothing to merge, but some pair might share an unfixed data value.
+    Unsure,
+    Done,
+}
+
+/// Whether two individuals share a key's values.
+enum Shared {
+    No,
+    Maybe,
+    Yes(Dep),
 }
 
 /// The outcome of the datatype check of one component.
@@ -350,6 +369,7 @@ impl<'c> Tableau<'c> {
             contains_memo: FxHashMap::default(),
             nominal_todo: Vec::new(),
             unconfirmed: false,
+            named: Vec::new(),
         }
     }
 
@@ -488,21 +508,162 @@ impl<'c> Tableau<'c> {
             if self.expand() {
                 continue;
             }
+            match self.apply_keys() {
+                KeyStep::Merged => continue,
+                KeyStep::Unsure => {
+                    self.close_unconfirmed();
+                    continue;
+                }
+                KeyStep::Done => {}
+            }
             if !self.unravels() {
-                // Not a verdict either way: close the branch on every choice made so far
-                // (chronological backtracking), so the search looks for a branch that does
-                // unravel.
-                self.unconfirmed = true;
-                let all: Vec<u32> = (0..self.branches.len() as u32).collect();
-                self.set_clash(if all.is_empty() {
-                    Dep::default()
-                } else {
-                    Dep(Some(Rc::from(all)))
-                });
+                self.close_unconfirmed();
                 continue;
             }
             return Ok(true);
         }
+    }
+
+    /// Closes a complete branch that is not a verdict either way, on every choice made so
+    /// far (chronological backtracking), so the search looks for a branch that is.
+    fn close_unconfirmed(&mut self) {
+        self.unconfirmed = true;
+        let all: Vec<u32> = (0..self.branches.len() as u32).collect();
+        self.set_clash(if all.is_empty() {
+            Dep::default()
+        } else {
+            Dep(Some(Rc::from(all)))
+        });
+    }
+
+    /// Marks `n` as a named individual's node (keys apply to named individuals only).
+    pub(crate) fn mark_named(&mut self, n: Node) {
+        self.named.push(n);
+    }
+
+    /// The key rule, on a complete graph: two named individuals in a key's class that share
+    /// a named value on every object property and a value on every data property of the key
+    /// are merged. A data value is known only when its node is fixed to one literal; a pair
+    /// that might share an unfixed value is [`KeyStep::Unsure`].
+    fn apply_keys(&mut self) -> KeyStep {
+        if self.c.keys.is_empty() {
+            return KeyStep::Done;
+        }
+        // A named individual's canonical node stands for it only given the merges on the way.
+        let mut named: Vec<(Node, Dep)> = self
+            .named
+            .iter()
+            .map(|&n| self.canonical_dep(n))
+            .filter(|&(n, _)| self.nodes[n as usize].active)
+            .collect();
+        named.sort_unstable_by_key(|&(n, _)| n);
+        named.dedup_by_key(|&mut (n, _)| n);
+        let mut unsure = false;
+        for key in &self.c.keys {
+            let members: Vec<(Node, Dep)> = named
+                .iter()
+                .filter_map(|(n, dn)| match key.class {
+                    None => Some((*n, dn.clone())),
+                    Some(a) => self.nodes[*n as usize]
+                        .label
+                        .get(&a)
+                        .map(|d| (*n, d.union(dn))),
+                })
+                .collect();
+            for (i, (x, dx)) in members.iter().enumerate() {
+                for (y, dy) in &members[i + 1..] {
+                    // A pair scans the named individuals once per object property.
+                    if self.charge(1 + key.roles.len() * named.len()) {
+                        // `run` reports the exhaustion before using anything.
+                        return KeyStep::Merged;
+                    }
+                    match self.key_shared(key, *x, *y, &named) {
+                        Shared::No => {}
+                        Shared::Maybe => unsure = true,
+                        Shared::Yes(d) => {
+                            let d = d.union(dx).union(dy);
+                            self.merge(*x, *y, &d);
+                            return KeyStep::Merged;
+                        }
+                    }
+                }
+            }
+        }
+        if unsure {
+            KeyStep::Unsure
+        } else {
+            KeyStep::Done
+        }
+    }
+
+    /// Whether `x` and `y` share a value on every property of `key`, and on what.
+    fn key_shared(&self, key: &Key, x: Node, y: Node, named: &[(Node, Dep)]) -> Shared {
+        let mut deps = Dep::default();
+        for &r in &key.roles {
+            let z = named
+                .iter()
+                .find(|&&(z, _)| self.has_role(r, x, z) && self.has_role(r, y, z));
+            match z {
+                Some((z, dz)) => {
+                    deps = deps.union(
+                        &self
+                            .role_dep(r, x, *z)
+                            .union(&self.role_dep(r, y, *z))
+                            .union(dz),
+                    )
+                }
+                None => return Shared::No,
+            }
+        }
+        let mut maybe = false;
+        for &d in &key.data {
+            let (vx, ux) = self.data_values(d, x);
+            let (vy, uy) = self.data_values(d, y);
+            let common = vx
+                .iter()
+                .find_map(|(v, da)| vy.iter().find(|(w, _)| w == v).map(|(_, db)| da.union(db)));
+            match common {
+                Some(dv) => deps = deps.union(&dv),
+                // An unfixed value on one side may equal any value on the other.
+                None if (ux && (uy || !vy.is_empty())) || (uy && !vx.is_empty()) => maybe = true,
+                None => return Shared::No,
+            }
+        }
+        if maybe {
+            Shared::Maybe
+        } else {
+            Shared::Yes(deps)
+        }
+    }
+
+    /// The `d`-values of `x`: those of concrete neighbours fixed to one literal (with what
+    /// that depends on), and whether some neighbour's value is not fixed.
+    fn data_values(&self, d: Role, x: Node) -> (Vec<(Value, Dep)>, bool) {
+        let mut fixed = Vec::new();
+        let mut unfixed = false;
+        for (&n, rs) in &self.nodes[x as usize].adj {
+            let node = &self.nodes[n as usize];
+            if !node.active || !node.concrete || !rs.contains(&d) {
+                continue;
+            }
+            let one = node
+                .label
+                .iter()
+                .find_map(|(&a, da)| match self.c.atoms[a as usize] {
+                    AtomKind::Data(i) => match &self.c.data[i as usize] {
+                        DataRangeExpr::OneOf(vs) if vs.len() == 1 => {
+                            Some((vs[0].clone(), da.clone()))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                });
+            match one {
+                Some((v, da)) => fixed.push((v, da.union(&self.role_dep(d, x, n)))),
+                None => unfixed = true,
+            }
+        }
+        (fixed, unfixed)
     }
 
     fn over_budget(&self) -> bool {
