@@ -551,7 +551,12 @@ async fn lws_segments_and_outer_slashes_stay_reachable() {
         to_bytes(r.into_body(), usize::MAX).await.unwrap()
     }
     let before = listing(&h).await;
-    for path in ["//alice/c/new/x", "//alice/d/x", "/alice/c//", "//alice/c/x/y"] {
+    for path in [
+        "//alice/c/new/x",
+        "//alice/d/x",
+        "/alice/c//",
+        "//alice/c/x/y",
+    ] {
         for method in ["PUT", "PATCH"] {
             let (ct, body) = match method {
                 "PUT" => ("text/turtle", TURTLE.to_string()),
