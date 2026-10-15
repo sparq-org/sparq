@@ -559,4 +559,54 @@ mod tests {
             }
         }
     }
+
+    /// Data-key matching is metered: the value scans and the pairwise comparisons count
+    /// towards the budget, so a budget below them answers `ResourceBudget`.
+    #[test]
+    fn data_key_matching_is_inside_the_budget() {
+        let (n, k) = (6usize, 8usize);
+        let mut body = String::from(
+            r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            :P a owl:Class . :d a owl:DatatypeProperty . :P owl:hasKey ( :d ) .
+            "#,
+        );
+        for i in 0..n {
+            body.push_str(&format!(":i{i} a owl:NamedIndividual , :P"));
+            for j in 0..k {
+                body.push_str(&format!(" ; :d {}", i * k + j));
+            }
+            body.push_str(" .\n");
+        }
+        let work = |body: &str| {
+            let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            let full = Reasoner::new(&d, &o, Budget::default()).unwrap();
+            let mut t = Tableau::new(&full.clauses, &full.index, full.budget);
+            full.load_abox(&mut t);
+            assert_eq!(t.run(), Ok(true));
+            t.work()
+        };
+        let needed = work(&body);
+        let without_key = work(&body.replace(":P owl:hasKey ( :d ) .", ""));
+        let comparisons = (n * (n - 1) / 2 * k * k) as u64;
+        assert!(
+            needed - without_key >= comparisons,
+            "{needed} - {without_key} < {comparisons}"
+        );
+        let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        for max_steps in [needed / 2, needed - 1] {
+            let budget = Budget {
+                max_steps,
+                ..Budget::default()
+            };
+            let r = check(&d, &o, budget);
+            assert_eq!(
+                r.consistency,
+                Consistency::Unknown(UnknownReason::ResourceBudget),
+                "max_steps {max_steps}"
+            );
+        }
+    }
 }

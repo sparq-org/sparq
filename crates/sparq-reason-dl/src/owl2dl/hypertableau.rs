@@ -596,7 +596,12 @@ impl<'c> Tableau<'c> {
                         // `run` reports the exhaustion before using anything.
                         return KeyStep::Merged;
                     }
-                    match self.key_shared(key, *x, *y, &named) {
+                    let shared = self.key_shared(key, *x, *y, &named);
+                    if self.over_budget() {
+                        // The data-value scans ran out of budget part way.
+                        return KeyStep::Merged;
+                    }
+                    match shared {
                         Shared::No => {}
                         Shared::Maybe => unsure = true,
                         Shared::Yes(d) => {
@@ -638,6 +643,10 @@ impl<'c> Tableau<'c> {
         for &d in &key.data {
             let (vx, ux) = self.data_values(d, x);
             let (vy, uy) = self.data_values(d, y);
+            // Comparing the two value lists pairwise.
+            if self.charge(vx.len().saturating_mul(vy.len())) {
+                return Shared::Maybe;
+            }
             let common = vx
                 .iter()
                 .find_map(|(v, da)| vy.iter().find(|(w, _)| w == v).map(|(_, db)| da.union(db)));
@@ -662,8 +671,15 @@ impl<'c> Tableau<'c> {
         let mut unfixed = false;
         for (&n, rs) in &self.nodes[x as usize].adj {
             let node = &self.nodes[n as usize];
+            // One unit per neighbour, and one per label entry of a matching one.
+            if self.probe() {
+                break;
+            }
             if !node.active || !node.concrete || !rs.contains(&d) {
                 continue;
+            }
+            if self.charge(node.label.len()) {
+                break;
             }
             let one = node
                 .label
