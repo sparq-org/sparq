@@ -592,6 +592,12 @@ jobs:
         run: cargo clippy -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-targets --features stateful -- -D warnings
       - name: clippy (wasm32 target, sparq-shacl-wasm, all features, deny warnings)
         run: cargo clippy -p sparq-shacl-wasm --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings
+      # #7031: the OWL 2 DL reasoner bundle (sparq-reason-dl's owl2dl module behind the
+      # npm package's lazily-loaded `checkOwlDl`). One feature state, so one build + clippy.
+      - name: Build sparq-dl-wasm for the browser target
+        run: cargo build -p sparq-dl-wasm --target wasm32-unknown-unknown
+      - name: clippy (wasm32 target, sparq-dl-wasm, deny warnings)
+        run: cargo clippy -p sparq-dl-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings
       - name: Guard the wasm dependency graph (no native-only deps)
         # sq-9qz6: enforce the "flate2/zstd/rayon/sparq-parse must never
         # enter the wasm graph" invariant (was comment-only) — fails if a native-only
@@ -607,6 +613,7 @@ jobs:
         # pure-Rust + wasm-portable; the guard catches any native-only dep leaking in).
         # sq-lfmf: and sparq-shacl-wasm (regex is allowed there — pure-Rust +
         # wasm-portable, the sh:pattern constraint; the guard catches native-only leaks).
+        # #7031: and sparq-dl-wasm (the OWL 2 DL reasoner bundle).
         run: ./scripts/wasm-deps-guard.sh
       # Headless wasm tests of the REAL #[wasm_bindgen] exports
       # (crates/sparq-wasm/tests/web.rs). `cargo build --target wasm32` above never
@@ -702,6 +709,11 @@ jobs:
       - name: Headless wasm tests (sparq-shacl-wasm, wasm-pack test --node, all features)
         working-directory: crates/sparq-shacl-wasm
         run: wasm-pack test --node --all-features
+      # #7031: drive the REAL #[wasm_bindgen] checkOwlDl export (crates/sparq-dl-wasm/tests/web.rs)
+      # in a genuine wasm runtime, including the JsError arm the native tests cannot reach.
+      - name: Headless wasm tests (sparq-dl-wasm, wasm-pack test --node)
+        working-directory: crates/sparq-dl-wasm
+        run: wasm-pack test --node
       # sq-aq5: sparq-introspect wasm-safety. The crate is pure sorted scans over
       # sparq-core's public read API (no threads, no syscalls, no wall clock) so it is a
       # tier-b browser surface for in-tab schema cards. It is NOT a #[wasm_bindgen] BUNDLE
