@@ -142,9 +142,11 @@ pub enum PinError {
     /// one the lane's encoder accepts — a non-canonical spelling, a negative
     /// integer on the non-negative integer lane, an un-timezoned instant.
     ConstantNotEncodable { lexical: String },
-    /// The lane the constant routes to is not one the whole-graph builder routes
-    /// to, so a committed graph cannot hold that lane's leaves today and a pin
-    /// on it would be vacuous.
+    /// The datatype is not one the whole-graph builder routes to a value lane,
+    /// so a committed graph cannot hold a value-hooked leaf on it and a pin
+    /// would be vacuous. The builder routes all six value-lane datatypes, so
+    /// this is what a caller gets for any OTHER datatype; see
+    /// [`check_lane_routed`].
     LaneNotRouted { datatype: String },
     /// The sub-proof is on a different member than the constant's lane.
     MemberMismatch { expected: String, presented: String },
@@ -198,7 +200,7 @@ impl std::fmt::Display for PinError {
             ),
             PinError::LaneNotRouted { datatype } => write!(
                 f,
-                "the value lane for {} is not routed by the whole-graph commitment builder, so a pin on it would be vacuous",
+                "the datatype {} is not routed to a value lane by the whole-graph commitment builder, so a pin on it would be vacuous",
                 datatype
             ),
             PinError::MemberMismatch { expected, presented } => write!(
@@ -340,7 +342,7 @@ pub fn expected_value_lane(
             // that is. (The scale is public via the constant either way — that
             // is already true of every decimal value-lane proof.)
             let fraction_digits =
-                fraction_digits_of(&c.datatype_const).ok_or(PinError::ScaleNotAdmitted)?;
+                fraction_digits_of_decoded(&c.datatype_const).ok_or(PinError::ScaleNotAdmitted)?;
             Ok(ExpectedLane {
                 member: CircuitId::FilterValueDlDecimal,
                 lane_const: ExpectedLaneConst::DecimalAtAdmittedScale,
@@ -390,11 +392,14 @@ pub fn expected_value_lane(
 ///
 /// It reads [`dual_leaf_v2::is_hookable_datatype`], the one definition of that
 /// routing, so the answer cannot drift from what the builder actually does.
-/// `xsd:boolean`, `xsd:dateTime` and `xsd:date` are the documented UNROUTED
-/// seam: their standalone encoders exist and feed the value-lane FILTER members,
-/// but a committed graph's literals on those datatypes still take the string
-/// lane. Pinning a FILTER to a lane no committed leaf is on would be vacuous, so
-/// those are refused here with [`PinError::LaneNotRouted`] rather than pinned.
+///
+/// The builder now routes ALL SIX value lanes — `xsd:integer`, `xsd:decimal`,
+/// `xsd:double`, `xsd:boolean`, `xsd:dateTime` and `xsd:date` — so every datatype
+/// [`expected_value_lane`] accepts passes this check, and `xsd:boolean` /
+/// `xsd:dateTime` / `xsd:date` are no longer refused here. What remains is the
+/// refusal for every OTHER datatype, which a DIRECT caller gets:
+/// [`PinError::LaneNotRouted`]. Pinning a FILTER to a lane no committed leaf can
+/// be on would be vacuous, so it fails closed rather than being pinned.
 pub fn check_lane_routed(datatype: &str) -> Result<(), PinError> {
     if dual_leaf_v2::is_hookable_datatype(datatype) {
         Ok(())
@@ -493,7 +498,7 @@ pub fn check_value_lane_pin(
 /// `u64`, and scaling DOWN must not discard a non-zero digit. There is no
 /// rounding mode, because a rounded bound is a different bound — the query asked
 /// about one number and the proof would be about another.
-fn rescale_exact(magnitude: u64, from: u32, to: u32) -> Option<u64> {
+pub(crate) fn rescale_exact(magnitude: u64, from: u32, to: u32) -> Option<u64> {
     if to >= from {
         let factor = 10u64.checked_pow(to - from)?;
         magnitude.checked_mul(factor)
@@ -506,12 +511,13 @@ fn rescale_exact(magnitude: u64, from: u32, to: u32) -> Option<u64> {
     }
 }
 
-/// The admitted decimal scale a lane constant names, or `None`.
-fn fraction_digits_of(datatype_const: &Fr) -> Option<u32> {
-    fraction_digits_of_decoded(datatype_const)
-}
-
-fn fraction_digits_of_decoded(decoded: &Fr) -> Option<u32> {
+/// The admitted decimal scale a lane constant names, or `None` when it names no
+/// scale in [`ADMITTED_FRACTION_DIGITS`].
+///
+/// The ONE place the `decimal_lane_const(fd)` relation is inverted, so the scale
+/// the host BUILDS a decimal sub-proof at and the scale this module PINS it to
+/// come from the same table. `crate::build`'s decimal builder reads it too.
+pub(crate) fn fraction_digits_of_decoded(decoded: &Fr) -> Option<u32> {
     ADMITTED_FRACTION_DIGITS.clone().find(|fd| dual_leaf_v2::decimal_lane_const(*fd) == *decoded)
 }
 
@@ -866,14 +872,26 @@ mod tests {
 
     // ---------------- routing ----------------
 
-    /// `check_lane_routed` reads the whole-graph builder's own routing, so the
-    /// unrouted seam — boolean, dateTime, date — is refused TODAY.
+    /// `check_lane_routed` reads the whole-graph builder's own routing, so all
+    /// six value-lane datatypes pass and everything else is refused.
     #[test]
-    fn check_lane_routed_refuses_the_unrouted_seam() {
-        for dt in [XSD_INTEGER, XSD_DECIMAL, XSD_DOUBLE] {
+    fn check_lane_routed_admits_the_six_value_lanes_and_refuses_the_rest() {
+        for dt in [
+            XSD_INTEGER,
+            XSD_DECIMAL,
+            XSD_DOUBLE,
+            XSD_BOOLEAN,
+            XSD_DATE_TIME,
+            XSD_DATE,
+        ] {
             assert_eq!(check_lane_routed(dt), Ok(()), "{dt} is routed");
         }
-        for dt in [XSD_BOOLEAN, XSD_DATE_TIME, XSD_DATE, "http://ex/opaque"] {
+        for dt in [
+            "http://ex/opaque",
+            "http://www.w3.org/2001/XMLSchema#string",
+            "http://www.w3.org/2001/XMLSchema#float",
+            "",
+        ] {
             assert_eq!(
                 check_lane_routed(dt),
                 Err(PinError::LaneNotRouted { datatype: dt.to_string() }),
@@ -1075,12 +1093,12 @@ mod tests {
         assert_eq!(*ADMITTED_FRACTION_DIGITS.end(), 19);
         for fd in ADMITTED_FRACTION_DIGITS.clone() {
             assert_eq!(
-                fraction_digits_of(&dual_leaf_v2::decimal_lane_const(fd)),
+                fraction_digits_of_decoded(&dual_leaf_v2::decimal_lane_const(fd)),
                 Some(fd)
             );
         }
-        assert_eq!(fraction_digits_of(&dual_leaf_v2::decimal_lane_const(0)), None);
-        assert_eq!(fraction_digits_of(&dual_leaf_v2::decimal_lane_const(20)), None);
+        assert_eq!(fraction_digits_of_decoded(&dual_leaf_v2::decimal_lane_const(0)), None);
+        assert_eq!(fraction_digits_of_decoded(&dual_leaf_v2::decimal_lane_const(20)), None);
     }
 
     // ---------------- helpers ----------------

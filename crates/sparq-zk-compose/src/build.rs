@@ -775,6 +775,319 @@ pub(crate) fn assemble_dl_datetime(
     })
 }
 
+// === The three NUMERIC DualLeafV2 value lanes, from typed operands ===========
+//
+// `build_filter_value_dl_bool` / `_datetime` / `_date` above build the boolean,
+// dateTime and date lanes from typed `oxrdf::Literal` operands. The integer,
+// double and decimal lanes had no such entry: a caller had to assemble the
+// `ProofInputs` variant by hand, which meant deciding the lane constant, the
+// bound's encoding and (for decimal) the SCALE the bound is carried at outside
+// any checked path. The entries below close that, through ONE shared assembly.
+
+/// The `DualLeafV2` value lane a [`build_numeric_value_lane`] call is on.
+#[cfg(feature = "dual-leaf")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NumericValueLane {
+    /// `xsd:integer` — [`CircuitId::FilterValueDl`], a non-negative `u64` bound.
+    Integer,
+    /// `xsd:double` — [`CircuitId::FilterValueDlF64`], the bound's canonical
+    /// IEEE-754 bit pattern.
+    Double,
+    /// `xsd:decimal` — [`CircuitId::FilterValueDlDecimal`], a sign-split
+    /// magnitude at the COMMITTED literal's scale.
+    Decimal,
+}
+
+/// Why a numeric `DualLeafV2` value-lane builder refused. Every variant is
+/// fail-closed: nothing is rounded, promoted or repaired.
+#[cfg(feature = "dual-leaf")]
+#[derive(Debug, PartialEq, Eq)]
+pub enum BuildValueDlV2Error {
+    /// A host encoder refused an operand (the §6 fail-closed co-binding): the
+    /// wrong datatype, or a lexical form outside the lane's canonical domain.
+    Encode(sparq_zk::dual_leaf::DualLeafError),
+    /// An operand's encoded value handle is outside its lane's handle domain:
+    /// not a `u64` (nor, on the sign-folded decimal lane, the field negation of
+    /// one). No shipped encoder produces such a handle — the integer lane's is a
+    /// non-negative `u64`, the double lane's a 64-bit pattern, and the decimal
+    /// lane's a sign-folded `u64` magnitude — so this is surfaced fail-closed
+    /// rather than unwrapping an invariant the type system does not carry, the
+    /// same way `assemble_dl_datetime` treats its own split.
+    HandleOutsideLaneDomain { lexical: String },
+    /// The decimal lane: one of the two operands' lane constants names no
+    /// admitted scale, or the FILTER constant cannot be rescaled to the
+    /// COMMITTED literal's scale exactly (it would need rounding, or the
+    /// rescaled magnitude overflows a `u64`).
+    DecimalScaleNotRepresentable { value: String, bound: String },
+}
+
+#[cfg(feature = "dual-leaf")]
+impl From<sparq_zk::dual_leaf::DualLeafError> for BuildValueDlV2Error {
+    fn from(e: sparq_zk::dual_leaf::DualLeafError) -> Self {
+        BuildValueDlV2Error::Encode(e)
+    }
+}
+
+#[cfg(feature = "dual-leaf")]
+impl std::fmt::Display for BuildValueDlV2Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BuildValueDlV2Error::Encode(e) => write!(f, "{}", e),
+            BuildValueDlV2Error::HandleOutsideLaneDomain { lexical } => write!(
+                f,
+                "the value handle of {} is outside its value lane's handle domain",
+                lexical
+            ),
+            BuildValueDlV2Error::DecimalScaleNotRepresentable { value, bound } => write!(
+                f,
+                "the FILTER constant {} cannot be carried exactly at the scale the committed literal {} was encoded at",
+                bound, value
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "dual-leaf")]
+impl std::error::Error for BuildValueDlV2Error {}
+
+/// A built `DualLeafV2` value-lane FILTER on one of the three NUMERIC lanes: the
+/// public [`ProofInputs`] plus that member's PRIVATE witness, in the shape
+/// `crate::value_lane` takes.
+///
+/// The witness is the [`sparq_zk::dual_leaf::DualLeafComponents`] the lane
+/// encoder produced for the COMMITTED literal, so `inputs.operand_enc` is by
+/// construction the leaf it rebinds to in-circuit.
+#[cfg(feature = "dual-leaf")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuiltFilterValueDlNumeric {
+    /// Public inputs for the lane's member, carrying the COMMITTED literal's own
+    /// V2 lane constant.
+    pub inputs: ProofInputs,
+    /// PRIVATE: the member's witness — [`crate::value_lane::LaneWitness::Hook`]
+    /// for the integer and double lanes, `Signed` for the decimal lane.
+    pub witness: crate::value_lane::LaneWitness,
+}
+
+#[cfg(feature = "dual-leaf")]
+impl BuiltFilterValueDlNumeric {
+    /// The typed inputs of the checked prove entry
+    /// (`crate::driver::CircuitProver::prove_value_lane`), assembled by
+    /// [`crate::value_lane::ValueLaneProof::from_inputs`] — so a public field
+    /// edited after the build is re-checked rather than trusted, and the
+    /// `Prover.toml` is rendered from the validated typed fields rather than from
+    /// caller text.
+    pub fn lane_proof(
+        &self,
+    ) -> Result<crate::value_lane::ValueLaneProof, crate::dispatch::DispatchError> {
+        crate::value_lane::ValueLaneProof::from_inputs(&self.inputs, self.witness.clone())
+    }
+}
+
+/// The INTEGER-lane verdict for `value <op> bound` over `u64` — the host mirror
+/// of the `filter_value_dl_int` member's `integer_verdict`
+/// (`zk/compose/compose_core/src/filter_value.nr`).
+#[cfg(feature = "dual-leaf")]
+pub fn integer_verdict(value: u64, op: FilterOp, bound: u64) -> bool {
+    match op {
+        FilterOp::Lt => value < bound,
+        FilterOp::Le => value <= bound,
+        FilterOp::Gt => value > bound,
+        FilterOp::Ge => value >= bound,
+        FilterOp::Eq => value == bound,
+        FilterOp::Ne => value != bound,
+    }
+}
+
+/// The DOUBLE-lane verdict for `value <op> bound` over two IEEE-754 bit patterns
+/// — the host mirror of the `filter_value_dl_f64` member's `f64_verdict`, which
+/// compares the two patterns AS doubles (so a NaN operand is unordered and only
+/// `NE` holds of it, and `-0.0` compares equal to `+0.0`).
+///
+/// The member folds its witnessed handle to the SPARQL-numeric canonical bits
+/// before comparing; the host encoder already emits those canonical bits, so the
+/// two agree on the handle this is called with.
+#[cfg(feature = "dual-leaf")]
+pub fn double_bits_verdict(value_bits: u64, op: FilterOp, bound_bits: u64) -> bool {
+    let a = f64::from_bits(value_bits);
+    let b = f64::from_bits(bound_bits);
+    match op {
+        FilterOp::Lt => a < b,
+        FilterOp::Le => a <= b,
+        FilterOp::Gt => a > b,
+        FilterOp::Ge => a >= b,
+        FilterOp::Eq => a == b,
+        FilterOp::Ne => a != b,
+    }
+}
+
+/// Build a `DualLeafV2` `xsd:integer` value-lane FILTER over the committed
+/// literal `literal` under `op` against the constant `bound`.
+///
+/// Both operands go through `sparq_zk::dual_leaf_v2::encode_integer`, so the
+/// disclosed `bound` is the same `u64` handle the committer would have folded,
+/// derived by the same fail-closed canonical predicate. A negative or
+/// non-canonically spelled integer on either side returns the encoder's error.
+///
+/// The disclosed verdict is COMPUTED ([`integer_verdict`]) rather than taken from
+/// the caller. The resulting public inputs are exactly what
+/// [`crate::value_pin::check_value_lane_pin`] requires of this lane for the
+/// matching typed FILTER; [`BuiltFilterValueDlNumeric::lane_proof`] is the
+/// validated typed path to a `Prover.toml`.
+///
+/// DOCUMENTED RISK: inherits the value lane's INV-VL downgrade (#769 accepted,
+/// CR-G8 / sq-qhy4). NOT externally audited; no soundness / privacy claim.
+#[cfg(feature = "dual-leaf")]
+pub fn build_filter_value_dl_int(
+    literal: &oxrdf::Literal,
+    op: FilterOp,
+    bound: &oxrdf::Literal,
+) -> Result<BuiltFilterValueDlNumeric, BuildValueDlV2Error> {
+    build_numeric_value_lane(NumericValueLane::Integer, literal, op, bound)
+}
+
+/// Build a `DualLeafV2` `xsd:double` value-lane FILTER — the same shared path as
+/// [`build_filter_value_dl_int`], with `b_bits` the bound's CANONICAL IEEE-754
+/// bit pattern (both operands through `sparq_zk::dual_leaf_v2::encode_double`,
+/// which folds `-0.0` and every NaN payload to one handle) and the verdict from
+/// [`double_bits_verdict`].
+///
+/// DOCUMENTED RISK: as [`build_filter_value_dl_int`].
+#[cfg(feature = "dual-leaf")]
+pub fn build_filter_value_dl_f64(
+    literal: &oxrdf::Literal,
+    op: FilterOp,
+    bound: &oxrdf::Literal,
+) -> Result<BuiltFilterValueDlNumeric, BuildValueDlV2Error> {
+    build_numeric_value_lane(NumericValueLane::Double, literal, op, bound)
+}
+
+/// Build a `DualLeafV2` `xsd:decimal` value-lane FILTER — the same shared path as
+/// [`build_filter_value_dl_int`], on the SIGN-FOLDED decimal member.
+///
+/// The decimal lane folds its SCALE into the lane constant, and the member
+/// compares the two magnitudes at one scale. The scale is therefore the COMMITTED
+/// literal's — it is what that literal's leaf was built with — so the bound is
+/// rescaled to it EXACTLY, never rounded: `"1.5"` against a literal written
+/// `"2.50"` is carried as `150` at scale 2, and a bound that would need rounding
+/// (or whose rescaled magnitude overflows a `u64`) is
+/// [`BuildValueDlV2Error::DecimalScaleNotRepresentable`]. That is the same exact
+/// rescale `crate::value_pin` pins, through the same two functions.
+///
+/// DOCUMENTED RISK: as [`build_filter_value_dl_int`].
+#[cfg(feature = "dual-leaf")]
+pub fn build_filter_value_dl_decimal(
+    literal: &oxrdf::Literal,
+    op: FilterOp,
+    bound: &oxrdf::Literal,
+) -> Result<BuiltFilterValueDlNumeric, BuildValueDlV2Error> {
+    build_numeric_value_lane(NumericValueLane::Decimal, literal, op, bound)
+}
+
+/// The ONE assembly behind the three numeric-lane entries: encode BOTH operands
+/// with the lane's own V2 encoder, split each handle into `(neg, magnitude)`,
+/// carry the committed literal's lane constant, compute the verdict with that
+/// member's host verdict mirror, and self-check the pairing.
+#[cfg(feature = "dual-leaf")]
+fn build_numeric_value_lane(
+    lane: NumericValueLane,
+    literal: &oxrdf::Literal,
+    op: FilterOp,
+    bound: &oxrdf::Literal,
+) -> Result<BuiltFilterValueDlNumeric, BuildValueDlV2Error> {
+    use crate::value_lane::{HookWitness, LaneWitness, SignedWitness};
+    let encode = match lane {
+        NumericValueLane::Integer => sparq_zk::dual_leaf_v2::encode_integer,
+        NumericValueLane::Double => sparq_zk::dual_leaf_v2::encode_double,
+        NumericValueLane::Decimal => sparq_zk::dual_leaf_v2::encode_decimal,
+    };
+    let value = encode(literal)?;
+    let bound_components = encode(bound)?;
+    let outside = |l: &oxrdf::Literal| BuildValueDlV2Error::HandleOutsideLaneDomain {
+        lexical: l.to_string(),
+    };
+    // The two HOOK lanes take a NON-NEGATIVE handle (the integer lane's value,
+    // the double lane's 64-bit pattern); the decimal lane takes a sign-folded
+    // one. Each operand's handle is read in its lane's own domain, so a handle
+    // outside it is refused rather than having its sign discarded.
+    let split = |hook: &Fr, l: &oxrdf::Literal| -> Result<(bool, u64), BuildValueDlV2Error> {
+        match (lane, split_signed_hook(hook)) {
+            (NumericValueLane::Decimal, Some(parts)) => Ok(parts),
+            (_, Some((false, mag))) => Ok((false, mag)),
+            _ => Err(outside(l)),
+        }
+    };
+    let (value_neg, value_mag) = split(&value.value_hook, literal)?;
+    let (bound_neg, bound_mag) = split(&bound_components.value_hook, bound)?;
+
+    let operand_enc = hexf(&value.leaf());
+    let datatype_const = hexf(&value.datatype_const);
+    let inputs = match lane {
+        NumericValueLane::Integer | NumericValueLane::Double => {
+            debug_assert!(!value_neg && !bound_neg, "the hook lanes split unsigned");
+            if lane == NumericValueLane::Integer {
+                ProofInputs::FilterValueDl {
+                    id: CircuitId::FilterValueDl,
+                    operand_enc,
+                    op,
+                    bound: bound_mag,
+                    datatype_const,
+                    expected: integer_verdict(value_mag, op, bound_mag),
+                }
+            } else {
+                ProofInputs::FilterValueDlF64 {
+                    id: CircuitId::FilterValueDlF64,
+                    operand_enc,
+                    op,
+                    b_bits: bound_mag,
+                    datatype_const,
+                    expected: double_bits_verdict(value_mag, op, bound_mag),
+                }
+            }
+        }
+        NumericValueLane::Decimal => {
+            let scale_error = || BuildValueDlV2Error::DecimalScaleNotRepresentable {
+                value: literal.to_string(),
+                bound: bound.to_string(),
+            };
+            // The member works at ONE scale, and that scale is the committed
+            // literal's: it is folded into the lane constant its leaf carries.
+            let value_fd = crate::value_pin::fraction_digits_of_decoded(&value.datatype_const)
+                .ok_or_else(scale_error)?;
+            let bound_fd =
+                crate::value_pin::fraction_digits_of_decoded(&bound_components.datatype_const)
+                    .ok_or_else(scale_error)?;
+            let bound_scaled = crate::value_pin::rescale_exact(bound_mag, bound_fd, value_fd)
+                .ok_or_else(scale_error)?;
+            // No `-0`: the encoder rejects a negative zero, and an EXACT rescale
+            // of a non-zero magnitude is non-zero (scaling down requires exact
+            // divisibility), so `bound_neg` cannot pair with a zero magnitude.
+            ProofInputs::FilterValueDlDecimal {
+                id: CircuitId::FilterValueDlDecimal,
+                operand_enc,
+                op,
+                bound_neg,
+                bound_scaled,
+                datatype_const,
+                expected: signed_epoch_verdict(value_neg, value_mag, bound_neg, bound_scaled, op),
+            }
+        }
+    };
+    v2_self_check(&inputs);
+    let witness = match lane {
+        NumericValueLane::Integer | NumericValueLane::Double => LaneWitness::Hook(HookWitness {
+            value_hook: hexf(&value.value_hook),
+            lexical_component: hexf(&value.lexical_component),
+        }),
+        // The member takes the MAGNITUDE privately and re-folds the sign itself.
+        NumericValueLane::Decimal => LaneWitness::Signed(SignedWitness {
+            value_neg,
+            value_hook_scaled: hexf(&Fr::from(value_mag)),
+            lexical_component: hexf(&value.lexical_component),
+        }),
+    };
+    Ok(BuiltFilterValueDlNumeric { inputs, witness })
+}
+
 /// Encode an xsd:integer literal `value` to its term encoding under `salt`
 /// (salt-independent for literals; convenience for callers wiring a filter to
 /// a known constant).
