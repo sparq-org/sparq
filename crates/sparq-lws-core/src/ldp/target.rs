@@ -22,6 +22,24 @@ pub struct LdpTarget {
     pub is_container: bool,
 }
 
+/// The suffix the LWS surface stores a resource's linkset record under (`crate::lws::META_SUFFIX`,
+/// which is not built for every target this module is).
+const LINKSET_RECORD_SUFFIX: &str = ".meta";
+
+/// Whether `path` names a linkset record of the LWS surface: a non-container whose last segment
+/// ends in `.meta` (ASCII case-insensitive), as sent or %-decoded. Used only to refuse.
+pub fn is_linkset_record_path(path: &str) -> bool {
+    let names_record = |path: &str| {
+        !path.ends_with('/')
+            && path.rsplit('/').next().is_some_and(|last| {
+                last.len() >= LINKSET_RECORD_SUFFIX.len()
+                    && last.as_bytes()[last.len() - LINKSET_RECORD_SUFFIX.len()..]
+                        .eq_ignore_ascii_case(LINKSET_RECORD_SUFFIX.as_bytes())
+            })
+    };
+    names_record(path) || names_record(&crate::identity::percent_decode_lossy(path))
+}
+
 /// Parse a request path against the public base URL into an [`LdpTarget`].
 ///
 /// `base` is the server's public origin (e.g. `https://pod.example`), WITHOUT a trailing slash.
@@ -49,6 +67,14 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     // first (outermost); this check is the belt-and-braces chokepoint covering every handler and
     // any internally-constructed target re-validated through `parse_target`.
     if crate::identity::is_reserved_identity_path(path_only) {
+        return Err(ServerError::NotFound);
+    }
+
+    // The LWS surface keeps each resource's linkset record at `{resource}.meta` in the same
+    // store (`crate::lws::META_SUFFIX`). Where both surfaces share a store, such a name is that
+    // record and never an LDP resource, so it is refused OUTRIGHT here as well: 404 for every
+    // method, in any case, %-decoded too, whichever surfaces are enabled.
+    if is_linkset_record_path(path_only) {
         return Err(ServerError::NotFound);
     }
 

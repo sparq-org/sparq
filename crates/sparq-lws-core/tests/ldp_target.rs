@@ -78,3 +78,24 @@ fn a_deep_path_parses() {
     assert_eq!(t.iri, "https://pod.example/a/b/c/d.ttl");
     assert!(!t.is_container);
 }
+
+#[test]
+fn a_linkset_record_name_is_not_a_target() {
+    for path in [
+        "/alice/doc.meta",
+        "/alice/doc.META",
+        "/alice/c/.meta",
+        "/alice/doc%2Emeta",
+        "/alice/doc%2emeta?x=1",
+    ] {
+        assert!(parse_target(BASE, path).is_err(), "{path}");
+    }
+    for path in [
+        "/alice/doc.metadata",
+        "/alice/doc.meta/",
+        "/alice/meta",
+        "/alice/x.meta/y",
+    ] {
+        assert!(parse_target(BASE, path).is_ok(), "{path}");
+    }
+}
