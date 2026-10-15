@@ -560,8 +560,8 @@ mod tests {
         }
     }
 
-    /// Data-key matching is metered: the value scans and the pairwise comparisons count
-    /// towards the budget, so a budget below them answers `ResourceBudget`.
+    /// Data-key matching is metered: the value scans and the comparisons count towards the
+    /// budget, so a budget below them answers `ResourceBudget`.
     #[test]
     fn data_key_matching_is_inside_the_budget() {
         let (n, k) = (6usize, 8usize);
@@ -589,14 +589,16 @@ mod tests {
         };
         let needed = work(&body);
         let without_key = work(&body.replace(":P owl:hasKey ( :d ) .", ""));
-        let comparisons = (n * (n - 1) / 2 * k * k) as u64;
+        // Each pair compares its two value lists, `k` values each.
+        let comparisons = (n * (n - 1) / 2 * 2 * k) as u64;
         assert!(
             needed - without_key >= comparisons,
             "{needed} - {without_key} < {comparisons}"
         );
         let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
         let o = extract(&d, &triples).unwrap();
-        for max_steps in [needed / 2, needed - 1] {
+        // A budget that runs out between the work without the key and the work with it.
+        for max_steps in [(without_key + needed) / 2, needed - 1] {
             let budget = Budget {
                 max_steps,
                 ..Budget::default()
@@ -608,5 +610,31 @@ mod tests {
                 "max_steps {max_steps}"
             );
         }
+    }
+
+    /// Metering keys does not cost a modest ABox its answer: each member's values are read
+    /// once per key, not once per pair, and object edges do not count as data scans twice.
+    #[test]
+    fn data_keys_on_a_modest_abox_are_decided_under_the_default_budget() {
+        let n = 300;
+        let mut body = String::from(
+            r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :P a owl:Class . :d a owl:DatatypeProperty . :r a owl:ObjectProperty .
+            :P owl:hasKey ( :d ) .
+            "#,
+        );
+        for i in 0..n {
+            body.push_str(&format!(":i{i} a owl:NamedIndividual , :P ; :d {i}"));
+            for j in 1..=10 {
+                body.push_str(&format!(" ; :r :i{}", (i + j) % n));
+            }
+            body.push_str(" .\n");
+        }
+        let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        assert_eq!(
+            check(&d, &o, Budget::default()).consistency,
+            Consistency::Consistent
+        );
     }
 }

@@ -322,6 +322,10 @@ enum KeyStep {
     Done,
 }
 
+/// A node's values on one data property: those fixed to a literal (with what that
+/// depends on), and whether some value is not fixed.
+type DataValues = (Vec<(Value, Dep)>, bool);
+
 /// Whether two individuals share a key's values.
 enum Shared {
     No,
@@ -589,16 +593,25 @@ impl<'c> Tableau<'c> {
                         .map(|d| (*n, d.union(dn))),
                 })
                 .collect();
+            // Each member's values on the key's data properties, read once per key.
+            let values: Vec<Vec<DataValues>> = members
+                .iter()
+                .map(|&(x, _)| key.data.iter().map(|&d| self.data_values(d, x)).collect())
+                .collect();
+            // The member scan, one unit per named individual.
+            if self.charge(named.len()) {
+                // `run` reports the exhaustion before using anything.
+                return KeyStep::Merged;
+            }
             for (i, (x, dx)) in members.iter().enumerate() {
-                for (y, dy) in &members[i + 1..] {
+                for (j, (y, dy)) in members.iter().enumerate().skip(i + 1) {
                     // A pair scans the named individuals once per object property.
                     if self.charge(1 + key.roles.len() * named.len()) {
-                        // `run` reports the exhaustion before using anything.
                         return KeyStep::Merged;
                     }
-                    let shared = self.key_shared(key, *x, *y, &named);
+                    let shared = self.key_shared(key, *x, *y, &named, &values[i], &values[j]);
                     if self.over_budget() {
-                        // The data-value scans ran out of budget part way.
+                        // The value comparisons ran out of budget part way.
                         return KeyStep::Merged;
                     }
                     match shared {
@@ -621,7 +634,15 @@ impl<'c> Tableau<'c> {
     }
 
     /// Whether `x` and `y` share a value on every property of `key`, and on what.
-    fn key_shared(&self, key: &Key, x: Node, y: Node, named: &[(Node, Dep)]) -> Shared {
+    fn key_shared(
+        &self,
+        key: &Key,
+        x: Node,
+        y: Node,
+        named: &[(Node, Dep)],
+        values_x: &[DataValues],
+        values_y: &[DataValues],
+    ) -> Shared {
         let mut deps = Dep::default();
         for &r in &key.roles {
             let z = named
@@ -640,16 +661,16 @@ impl<'c> Tableau<'c> {
             }
         }
         let mut maybe = false;
-        for &d in &key.data {
-            let (vx, ux) = self.data_values(d, x);
-            let (vy, uy) = self.data_values(d, y);
-            // Comparing the two value lists pairwise.
-            if self.charge(vx.len().saturating_mul(vy.len())) {
+        for ((vx, ux), (vy, uy)) in values_x.iter().zip(values_y) {
+            let (ux, uy) = (*ux, *uy);
+            // Comparing the two value lists through a hash map of one of them.
+            if self.charge(vx.len() + vy.len()) {
                 return Shared::Maybe;
             }
-            let common = vx
+            let by_value: FxHashMap<&Value, &Dep> = vx.iter().map(|(v, da)| (v, da)).collect();
+            let common = vy
                 .iter()
-                .find_map(|(v, da)| vy.iter().find(|(w, _)| w == v).map(|(_, db)| da.union(db)));
+                .find_map(|(w, db)| by_value.get(w).map(|da| da.union(db)));
             match common {
                 Some(dv) => deps = deps.union(&dv),
                 // An unfixed value on one side may equal any value on the other.
@@ -666,7 +687,7 @@ impl<'c> Tableau<'c> {
 
     /// The `d`-values of `x`: those of concrete neighbours fixed to one literal (with what
     /// that depends on), and whether some neighbour's value is not fixed.
-    fn data_values(&self, d: Role, x: Node) -> (Vec<(Value, Dep)>, bool) {
+    fn data_values(&self, d: Role, x: Node) -> DataValues {
         let mut fixed = Vec::new();
         let mut unfixed = false;
         for (&n, rs) in &self.nodes[x as usize].adj {
