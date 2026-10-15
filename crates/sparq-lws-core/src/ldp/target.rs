@@ -48,11 +48,15 @@ pub(crate) fn is_linkset_record_path(path: &str) -> bool {
 const LWS_SERVICE_SEGMENT: &str = ".lws";
 
 /// Whether `path` (a path from the storage root, starting with `/`) lies in the LWS surface's
-/// service namespace: its first segment is `.lws` (ASCII case-insensitive).
+/// service namespace: its first non-empty segment is `.lws` (ASCII case-insensitive), so a
+/// repeated leading slash does not take a path out of it.
 fn names_lws_service(path: &str) -> bool {
-    path.strip_prefix('/')
-        .and_then(|rest| rest.split('/').next())
-        .is_some_and(|seg| seg.eq_ignore_ascii_case(LWS_SERVICE_SEGMENT))
+    path.starts_with('/')
+        && path
+            .trim_start_matches('/')
+            .split('/')
+            .next()
+            .is_some_and(|seg| seg.eq_ignore_ascii_case(LWS_SERVICE_SEGMENT))
 }
 
 /// Whether the request path `path` (without query or fragment) lies in the LWS surface's service

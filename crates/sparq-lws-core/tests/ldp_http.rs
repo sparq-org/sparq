@@ -535,11 +535,38 @@ async fn lws_segments_and_outer_slashes_stay_reachable() {
         let r = h.request("GET", path, None, Body::empty()).await;
         assert_eq!(r.status(), StatusCode::OK, "GET {path}");
     }
-    // Routed and looked up as named, not refused as malformed.
-    for path in ["/alice/c//", "//alice/c"] {
+    // Routed and looked up as named, not refused as malformed; but nothing is created under such
+    // a name, and a create through it changes nothing, whatever exists.
+    h.make_container("/alice/c/").await;
+    let r = h
+        .request("PUT", "/alice/c/x", Some("text/turtle"), Body::from(TURTLE))
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    for path in ["/alice/c//", "//alice/c", "//alice/c/x"] {
         let r = h.request("GET", path, None, Body::empty()).await;
         assert_eq!(r.status(), StatusCode::NOT_FOUND, "GET {path}");
     }
+    async fn listing(h: &Harness) -> axum::body::Bytes {
+        let r = h.request("GET", "/alice/", None, Body::empty()).await;
+        to_bytes(r.into_body(), usize::MAX).await.unwrap()
+    }
+    let before = listing(&h).await;
+    for path in ["//alice/c/new/x", "//alice/d/x", "/alice/c//", "//alice/c/x/y"] {
+        for method in ["PUT", "PATCH"] {
+            let (ct, body) = match method {
+                "PUT" => ("text/turtle", TURTLE.to_string()),
+                _ => (
+                    "text/n3",
+                    "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <urn:a> <urn:b> <urn:c> . }.\n"
+                        .to_string(),
+                ),
+            };
+            let r = h.request(method, path, Some(ct), Body::from(body)).await;
+            assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{method} {path}");
+        }
+    }
+    assert_eq!(listing(&h).await, before);
 }
 
 #[tokio::test]

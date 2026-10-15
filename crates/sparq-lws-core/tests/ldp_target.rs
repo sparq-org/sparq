@@ -115,6 +115,9 @@ fn the_lws_service_namespace_is_not_a_target() {
         "/.lws/",
         "/.LWS/requests/r",
         "/%2Elws/grants/g1",
+        "//.lws/grants/x/y",
+        "///.LWS/",
+        "/%2F.lws/grants/g1",
     ] {
         assert!(
             matches!(parse_target(BASE, path), Err(ServerError::NotFound)),

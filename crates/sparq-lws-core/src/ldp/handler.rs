@@ -2184,6 +2184,14 @@ async fn ensure_ancestor_containers<S: Store>(
     let Some(rest) = iri.strip_prefix(base) else {
         return Ok(());
     };
+    // A name with a repeated slash (only a leading or trailing one gets this far) has no chain
+    // of containers to create it in: authorization walks its key as named, which the containers
+    // below would not match. So nothing is created for it, before anything is looked at.
+    if rest.contains("//") {
+        return Err(ServerError::BadRequest(
+            "a repeated slash names no container to create a resource in".into(),
+        ));
+    }
 
     // The storage ROOT container `<base>/` is the ancestor of EVERYTHING; ensure it exists first (a
     // parentless write mints its record) so the walk below can wire each child into a present parent.
