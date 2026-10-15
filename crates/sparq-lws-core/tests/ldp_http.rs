@@ -470,6 +470,78 @@ async fn a_record_beside_a_container_decides_nothing() {
     assert_eq!(status(14), StatusCode::NO_CONTENT, "DELETE /alice/e/");
 }
 
+/// A CORS preflight is answered before routing, from the request alone: a reserved name, a
+/// stored record and an ordinary path get the same answer.
+#[tokio::test]
+async fn a_preflight_answers_from_the_request_alone() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    store
+        .write(
+            "https://pod.example/alice/doc.meta",
+            axum::body::Bytes::from_static(b"{}"),
+            "application/json",
+        )
+        .await
+        .expect("seed a record");
+    let h = Harness::with_store(store).await;
+    let mut answers = Vec::new();
+    for path in [
+        "/alice/doc.meta",
+        "/alice/none.meta",
+        "/.lws/grants/g",
+        "/alice//c",
+        "/alice/doc",
+    ] {
+        let r = h
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("OPTIONS")
+                    .uri(path)
+                    .header("origin", "https://app.example")
+                    .header("access-control-request-method", "PUT")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let mut headers: Vec<(String, String)> = r
+            .headers()
+            .iter()
+            .filter(|(k, _)| k.as_str() != "date")
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        headers.sort();
+        answers.push((r.status(), headers));
+    }
+    assert_eq!(answers[0].0, StatusCode::NO_CONTENT);
+    for a in &answers[1..] {
+        assert_eq!(a, &answers[0]);
+    }
+}
+
+/// Names with a `.lws` segment below the storage root's own, and leading or trailing repeated
+/// slashes, are ordinary paths their owner reaches.
+#[tokio::test]
+async fn lws_segments_and_outer_slashes_stay_reachable() {
+    let h = Harness::new().await;
+    for path in ["/alice/.lws/report", "/alice/proj/.LWS/x"] {
+        let r = h
+            .request("PUT", path, Some("text/turtle"), Body::from(TURTLE))
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED, "PUT {path}");
+        let r = h.request("GET", path, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::OK, "GET {path}");
+    }
+    // Routed and looked up as named, not refused as malformed.
+    for path in ["/alice/c//", "//alice/c"] {
+        let r = h.request("GET", path, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND, "GET {path}");
+    }
+}
+
 #[tokio::test]
 async fn put_twice_is_a_replace_with_no_content() {
     let h = Harness::new().await;

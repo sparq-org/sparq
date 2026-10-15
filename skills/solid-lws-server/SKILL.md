@@ -214,7 +214,7 @@ whichever surfaces are enabled. A container of that name (`X.meta/`) and what li
 ordinary resources: a stored record never lists as a member, conflicts with that container or
 serves as a group document, and a container whose only members are such records is empty. So
 is any path under `/.lws/` below the storage root, where the LWS surface keeps its grants, access
-requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment (`//`) is a `400`.
+requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment inside it (`/a//b`) is a `400`; leading and trailing repeated slashes are kept as part of the name.
 
 ## Negotiate RDF representations
 

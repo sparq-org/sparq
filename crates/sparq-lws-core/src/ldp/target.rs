@@ -118,15 +118,9 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     // plain resource).
     let is_container = path_only.ends_with('/');
 
-    // Split into interior segments: drop the leading empty segment (before the first '/') and a
-    // single trailing empty segment (the container slash). Any remaining empty segment is a
-    // "//" (leading, interior or trailing), which is rejected. "." / ".." in any segment is path
-    // traversal — rejected.
-    if path_only.contains("//") {
-        return Err(ServerError::BadRequest(
-            "empty path segment rejected".into(),
-        ));
-    }
+    // Split into interior segments: leading and trailing slashes are dropped for this check (the
+    // store key keeps them). Any remaining empty segment is an interior "//", which is rejected.
+    // "." / ".." in any segment is path traversal — rejected.
     let trimmed = path_only.trim_start_matches('/').trim_end_matches('/');
     if !trimmed.is_empty() {
         for seg in trimmed.split('/') {
