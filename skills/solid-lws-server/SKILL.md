@@ -109,7 +109,8 @@ must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
 the new `ETag` only to a writer that may read the target. An insert-only `PATCH` that cannot
 apply (a target that is not RDF, or does not parse) is refused to an `acl:Append` writer without
-`acl:Read` as a write without access is; only a reader is told why. A `POST` names its member
+`acl:Read` as a write without access is; only a reader is told why (whether the insert applies
+still says whether the target is RDF). A `POST` names its member
 with the slug and a random suffix, so the name says nothing of what else was created.
 
 A rule may name its subject with `acl:agent`, `acl:agentClass foaf:Agent` (public)
@@ -585,10 +586,9 @@ What the server exposes, all discoverable from the storage description
   type), a `PATCH` whose outcome depends on the content, and a write that the stored links, types
   or content would refuse are all refused as a write without Modify is (whether such a write is
   admitted can still follow from how much room the stored links and types leave it). A `Slug`
-  names a new
-  member only for a writer that may read the container; anyone else's member gets a name the
-  server chooses, so the name says nothing about which members are there. A subscriber's
-  subscription listing, and its `ETag`, change only with its own subscriptions.
+  names a new member only for a writer that may read the container; anyone else's member gets a
+  name the server chooses, so the name says nothing about which members are there. A
+  subscriber's subscription listing, and its `ETag`, change only with its own subscriptions.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link

@@ -2556,9 +2556,18 @@ async fn update<S: Store + 'static>(
     if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &rmeta, format) {
         return unread(refused);
     }
-    // So is what the metadata could not hold, which the stored links and types count toward.
-    if let Err(e) = super::encode_meta(&rmeta) {
-        return unread(store_error(e));
+    // So is what the metadata could not hold, which the stored links and types count toward,
+    // when the write changes it (metadata it leaves as stored is not written again; see
+    // [`write_with_meta`]).
+    let unchanged = {
+        let mut new = rmeta.clone();
+        new.pending = false;
+        old_rmeta.clone().unwrap_or_default() == new
+    };
+    if !unchanged {
+        if let Err(e) = super::encode_meta(&rmeta) {
+            return unread(store_error(e));
+        }
     }
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
