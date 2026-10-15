@@ -365,11 +365,16 @@ pub fn no_value() -> Fr {
 /// predicate is unchanged, so an already-issued V1 graph is unaffected):
 ///
 /// 1. **It narrows what a V2 graph may CONTAIN.** The three newly routed lanes
-///    inherit the §6 fail-closed rule, so an XSD-legal but non-canonical lexical
-///    on them — `"1"^^xsd:boolean`, a bare or non-`Z` `xsd:dateTime`, a
-///    `24:00:00` instant — now fails the WHOLE commitment instead of taking the
-///    degenerate string lane. That is the same bargain the integer, decimal and
-///    double lanes already made.
+///    inherit the §6 fail-closed rule, so any lexical outside those lanes'
+///    §13.2 value domain now fails the WHOLE commitment instead of taking the
+///    degenerate string lane. That covers non-canonical spellings
+///    (`"1"^^xsd:boolean`, a `24:00:00` instant) AND XSD-canonical forms the
+///    domain excludes: an untimezoned or non-`Z` `xsd:dateTime` / `xsd:date`,
+///    and more than three fraction digits. A graph holding such values cannot
+///    be committed under V2; it stays committable under the string-canonical
+///    method. Failing closed is chosen over a silent string-lane fallback,
+///    under which equal instants spelled differently would sit on different
+///    lanes. The integer, decimal and double lanes already made this bargain.
 /// 2. **It re-bases those leaves.** A V2 commitment over a graph containing an
 ///    `xsd:boolean` / `xsd:dateTime` / `xsd:date` literal differs from what the
 ///    same graph committed to before these lanes were routed. Every leaf on the
@@ -379,7 +384,10 @@ pub fn no_value() -> Fr {
 /// Routing does not rest on a value-dependent argument: a degenerate fold and a
 /// lane constant are in separate BLAKE3 hash domains for EVERY datatype string,
 /// so a string-lane leaf does not open on any lane constant whatever hook a
-/// member would accept.
+/// member would accept. Routing does widen the set of leaves that carry an
+/// in-band hook, so which MEMBER may open a routed leaf still rests on the
+/// relying party pinning the lane constant to the member (see above), as it
+/// already did for the decimal lane.
 pub fn is_hookable_datatype(datatype: &str) -> bool {
     matches!(
         datatype,

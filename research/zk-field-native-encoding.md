@@ -1305,8 +1305,9 @@ lanes bound an `operand_enc` no committed leaf of the graph was — which is why
 refused them as vacuous. Two consequences, both deliberate:
 
 - It **narrows what a V2 graph may contain**: the three lanes inherit §6's fail-closed rule, so
-  an XSD-legal but non-canonical lexical on them (`"1"^^xsd:boolean`, a bare or non-`Z`
-  `xsd:dateTime`, a `24:00:00` instant) now fails the WHOLE commitment instead of taking the
+  any lexical outside their §13.2 value domain (non-canonical spellings such as
+  `"1"^^xsd:boolean` or a `24:00:00` instant, and also XSD-canonical forms the domain excludes:
+  an untimezoned or non-`Z` `xsd:dateTime`/`xsd:date`, or more than three fraction digits) now fails the WHOLE commitment instead of taking the
   degenerate string lane. That is the bargain the integer, decimal and double lanes already made.
 - It **re-bases those leaves**: a V2 commitment over a graph containing a literal on one of the
   three changes. Every leaf on the three ALREADY-routed lanes, every degenerate string-lane

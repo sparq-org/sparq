@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   graph committed under `DualLeafV2` carries a real value hook, under that datatype's own lane
   constant, for every literal on them — which is what a value-lane FILTER member needs the
   committed leaf to be. Two deliberate consequences. The three newly routed lanes inherit the
-  fail-closed ingest rule, so an XSD-legal but NON-canonical lexical on them (`"1"^^xsd:boolean`,
-  a bare or non-`Z` `xsd:dateTime`, a `24:00:00` instant) now fails the WHOLE commitment instead
+  fail-closed ingest rule, so any lexical outside their §13.2 value domain (non-canonical spellings such as
+  `"1"^^xsd:boolean` or a `24:00:00` instant, and also XSD-canonical forms the domain excludes:
+  an untimezoned or non-`Z` `xsd:dateTime`/`xsd:date`, or more than three fraction digits) now fails the WHOLE commitment instead
   of taking the degenerate string lane. And **a V2 commitment over a graph that CONTAINS a
   literal on one of those three lanes changes**; every leaf on the three already-routed lanes,
   every degenerate string-lane leaf, every IRI and blank-node leaf, and the whole-graph
