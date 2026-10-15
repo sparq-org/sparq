@@ -16,7 +16,7 @@
 //! circuit would constrain against — not merely the host function — is the one
 //! shown to be out of band.
 //!
-//! TEST-ONLY: no source change, and no shipped Noir member imports that library,
+//! The pin changes no proving path: no shipped Noir member imports that library,
 //! so nothing here changes which proofs verify. Research-grade, NOT externally
 //! audited (sq-qhy4); the value lanes carry the documented INV-VL downgrade
 //! (#769 accepted, CR-G8).
@@ -46,10 +46,30 @@ fn noir_globals() -> Vec<(String, Fr)> {
             .0
             .split_whitespace()
             .collect::<String>();
-        let value = field_from_hex_str(&literal)
-            .unwrap_or_else(|| panic!("global {} is not a hex field literal", name.trim()));
+        // Hex literals go through the field parser; a decimal literal must be a
+        // plain `u64` (only `LANG_NONE = 1` today). Anything else is refused, so
+        // a reformatted literal cannot parse to a different value.
+        let value = if literal.starts_with("0x") {
+            field_from_hex_str(&literal)
+        } else if !literal.is_empty() && literal.bytes().all(|b| b.is_ascii_digit()) {
+            literal.parse::<u64>().ok().map(Fr::from)
+        } else {
+            None
+        }
+        .unwrap_or_else(|| panic!("global {} is not a field literal: {literal}", name.trim()));
         out.push((name.trim().to_string(), value));
     }
+    // Every `global` token outside a line comment must belong to a declaration
+    // this parser read, so a `pub(crate)`, `comptime` or differently spaced
+    // declaration cannot slip past the pin. The file has no block comments.
+    assert!(!NOIR_LIB.contains("/*"), "the pin parser does not read block comments");
+    let declared = NOIR_LIB
+        .lines()
+        .map(|l| l.split_once("//").map_or(l, |(code, _)| code))
+        .flat_map(str::split_whitespace)
+        .filter(|tok| *tok == "global")
+        .count();
+    assert_eq!(declared, out.len(), "every Noir global must be a parsed `pub global`");
     out
 }
 

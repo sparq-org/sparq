@@ -5020,9 +5020,25 @@ fn bind_holder_set(
 /// issuer-signed message, resolved from EITHER a clear [`CommitmentAttestation`]
 /// over `c_fr` OR — for a HIDDEN-ONLY commitment (sq-xxg) — the
 /// [`HiddenIssuerAttestation`]'s own `salt`. The clear attestation's salt is
-/// preferred when present (the additive mode); the hidden entry's salt is the
+/// preferred when present (the additive mode); the hidden entries' salt is the
 /// fallback so a commitment with no clear attestation can still have its `m`
 /// recomputed. `None` if neither source supplies a parseable salt.
+///
+/// # Order-independence of the hidden fallback
+/// The fallback is an AGREEMENT over every [`HiddenIssuerAttestation`] declared
+/// over `c_fr`, not the first one listed: all of them must carry a salt that
+/// decodes to a field element and all must decode to the SAME element. If any
+/// entry's salt is absent or malformed, or two entries disagree, the salt does
+/// not resolve and this returns `None` — the same fail-closed outcome a single
+/// missing salt already produced (the commitment is then skipped in
+/// [`scan_referenced_messages`] and the hidden-issuer gate refuses it as
+/// unreferenced). Two equal salts written with different hex spellings agree,
+/// because agreement is compared on the DECODED field element. This makes the
+/// verdict independent of the order the prover listed the entries in; through
+/// `verify_manifest` it accepts nothing that was refused before (the structural
+/// prefilter alone records no salt for an unresolved commitment, so its
+/// salt-reuse check no longer sees it; the full verifier refuses it as
+/// unreferenced).
 ///
 /// # Disclosure posture (sq-93h, assessed)
 /// Every salt this can return belongs to a commitment the presentation ALREADY
@@ -5047,13 +5063,28 @@ fn resolve_commitment_salt(manifest: &ProofManifest, c_fr: &Fr) -> Option<Fr> {
             }
         }
     }
-    // Fall back to a hidden-issuer entry's salt (the hidden-only case).
-    manifest
+    // Fall back to the hidden-issuer entries' salt (the hidden-only case).
+    // EVERY entry over this commitment must carry a salt that decodes and agrees
+    // on one value, so the resolved salt does not depend on the order the prover
+    // listed the entries in (see the order-independence note above).
+    let mut agreed: Option<Fr> = None;
+    for hi in manifest
         .hidden_issuer_attestations
         .iter()
-        .find(|hi| hi.commitment.to_field() == Some(*c_fr))
-        .and_then(|hi| hi.salt.as_ref())
-        .and_then(|salt_hex| salt_hex.to_field())
+        .filter(|hi| hi.commitment.to_field() == Some(*c_fr))
+    {
+        // Missing or malformed salt on ANY entry over this commitment => the salt
+        // does not resolve (fail closed, exactly as a single missing salt did).
+        let salt_fr = hi.salt.as_ref()?.to_field()?;
+        match agreed {
+            None => agreed = Some(salt_fr),
+            // Two entries declaring different salts: refuse rather than let the
+            // first listed one win.
+            Some(prev) if prev != salt_fr => return None,
+            Some(_) => {}
+        }
+    }
+    agreed
 }
 
 /// The issuer-signed message for every commitment a VERIFIED scan sub-proof
@@ -10180,6 +10211,120 @@ mod tests {
             pi,
             "a verifier that only ever sees the salt-withheld wire form still reconstructs \
              the SAME C(G)-bearing public inputs"
+        );
+    }
+
+    /// A HIDDEN-ONLY manifest: one scan over `c`, no clear attestation, and one
+    /// hidden-issuer entry per `salts` element — so `resolve_commitment_salt` must
+    /// take the hidden fallback.
+    fn hidden_only_with_salts(c: Fr, salts: &[Option<FieldHex>]) -> ProofManifest {
+        let mut m = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+        m.sub_proofs = vec![crate::manifest::SubProof {
+            inputs: flat_scan_with_commit(c),
+            proof_hex: String::new(),
+        }];
+        m.hidden_issuer_attestations = salts
+            .iter()
+            .map(|salt| crate::manifest::HiddenIssuerAttestation {
+                commitment: FieldHex::from_field(&c),
+                depth: 4,
+                key_set_root: fh("0x8"),
+                message: fh("0x9"),
+                salt: salt.clone(),
+                proof_hex: String::new(),
+            })
+            .collect();
+        assert!(
+            m.commitment_attestations.is_empty(),
+            "the fixture must be HIDDEN-ONLY — a clear attestation would supply the salt \
+             by the preferred path and the hidden fallback would go untested"
+        );
+        m
+    }
+
+    /// The hidden fallback is an AGREEMENT over every entry over the commitment, so
+    /// one entry omitting its salt refuses in BOTH listing orders. Before the
+    /// agreement rule, `[salt, None]` resolved (the first entry won) while
+    /// `[None, salt]` did not — the verdict depended on prover-chosen order.
+    #[test]
+    fn hidden_only_missing_salt_refuses_in_either_order() {
+        let c = Fr::from(4242u64);
+        let salt = FieldHex::from_field(&Fr::from(1357u64));
+
+        let none_first = hidden_only_with_salts(c, &[None, Some(salt.clone())]);
+        let salt_first = hidden_only_with_salts(c, &[Some(salt.clone()), None]);
+        assert_eq!(
+            resolve_commitment_salt(&none_first, &c),
+            resolve_commitment_salt(&salt_first, &c),
+            "the resolved salt must not depend on the order the entries are listed in"
+        );
+        assert_eq!(
+            resolve_commitment_salt(&salt_first, &c),
+            None,
+            "an entry over this commitment with NO salt must stop the salt resolving \
+             (fail closed), whichever position it is listed in"
+        );
+
+        // CONTROL: the same fixture with the salt-less entry dropped resolves — so the
+        // refusals above are the agreement rule, not a broken fixture.
+        assert_eq!(
+            resolve_commitment_salt(&hidden_only_with_salts(c, &[Some(salt)]), &c),
+            Some(Fr::from(1357u64)),
+            "one entry carrying a decodable salt must still resolve it"
+        );
+    }
+
+    /// Two hidden-issuer entries declaring DIFFERENT salts for one commitment are
+    /// refused in either order, rather than letting the first-listed salt win and
+    /// never reading the second.
+    #[test]
+    fn hidden_only_disagreeing_salts_are_refused_in_either_order() {
+        let c = Fr::from(4242u64);
+        let a = FieldHex::from_field(&Fr::from(1357u64));
+        let b = FieldHex::from_field(&Fr::from(2468u64));
+
+        for (first, second) in [(&a, &b), (&b, &a)] {
+            let m = hidden_only_with_salts(c, &[Some(first.clone()), Some(second.clone())]);
+            assert_eq!(
+                resolve_commitment_salt(&m, &c),
+                None,
+                "two hidden-issuer entries disagreeing on the salt must refuse to resolve \
+                 one, not take the first listed: {:?} then {:?}",
+                first,
+                second
+            );
+        }
+    }
+
+    /// Agreement is on the DECODED field element, not the hex text: two entries
+    /// whose salts are spelled differently but decode to the same element agree, and
+    /// a malformed salt on any entry refuses.
+    #[test]
+    fn hidden_only_equal_salts_agree_across_hex_spellings() {
+        let c = Fr::from(4242u64);
+        let salt = Fr::from(1357u64);
+        // 1357 == 0x54d: the padded 64-nibble spelling, a short one, and an
+        // upper-case one all decode to the same element.
+        let padded = FieldHex::from_field(&salt);
+        assert_ne!(padded.0, "0x54d", "the two spellings must differ as TEXT");
+        for spelling in [fh("0x54d"), fh("0x54D"), padded.clone()] {
+            let m = hidden_only_with_salts(c, &[Some(padded.clone()), Some(spelling.clone())]);
+            assert_eq!(
+                resolve_commitment_salt(&m, &c),
+                Some(salt),
+                "entries agreeing on the decoded salt must resolve it, however it is \
+                 spelled: {:?}",
+                spelling
+            );
+        }
+
+        // A salt that does not decode refuses, so agreement cannot be reached by
+        // two entries that are equal as text but malformed.
+        let bad = hidden_only_with_salts(c, &[Some(fh("0xnope")), Some(fh("0xnope"))]);
+        assert_eq!(
+            resolve_commitment_salt(&bad, &c),
+            None,
+            "a malformed salt must never resolve, even if every entry repeats it"
         );
     }
 
