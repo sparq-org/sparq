@@ -293,17 +293,172 @@ fn unsatisfiable_classes() {
 
 #[test]
 fn out_of_fragment_constructs_answer_unknown() {
-    let (_, r) = run(&format!(
-        "{DECL} :A owl:equivalentClass [ owl:oneOf ( :a :b ) ] ."
-    ));
+    let (_, r) = run(&format!("{DECL} :A owl:hasKey ( :r ) ."));
     match r.consistency {
         Consistency::Unknown(UnknownReason::OutOfFragment { construct, source }) => {
-            assert_eq!(construct, "ObjectOneOf");
+            assert_eq!(construct, "HasKey");
             assert!(!source.is_empty());
         }
         other => panic!("expected OutOfFragment, got {other:?}"),
     }
     assert!(r.classification.is_none());
+}
+
+// ---- nominals ----------------------------------------------------------------------------
+
+fn object_one_of(is: &str) -> String {
+    format!("[ a owl:Class ; owl:oneOf ( {is} ) ]")
+}
+
+fn has_value(r: &str, i: &str) -> String {
+    format!("[ a owl:Restriction ; owl:onProperty {r} ; owl:hasValue {i} ]")
+}
+
+#[test]
+fn a_nominal_is_its_individual() {
+    // `a ∈ {b}` makes `a` and `b` one element.
+    let c = |body: &str| verdict(&format!("{DECL} {body}"));
+    assert_eq!(
+        c(&format!(
+            ":a a {} . :a owl:differentFrom :b .",
+            object_one_of(":b")
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":a a {} . :b a :A .", object_one_of(":b"))),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        c(&format!(
+            ":a a [ owl:complementOf {} ] .",
+            object_one_of(":a")
+        )),
+        Consistency::Inconsistent
+    );
+    // Through a class: `A ≡ {b}` and `a ∈ A`.
+    assert_eq!(
+        c(&format!(
+            ":A owl:equivalentClass {} . :a a :A . :b a :B . :a a [ owl:complementOf :B ] .",
+            object_one_of(":b")
+        )),
+        Consistency::Inconsistent
+    );
+}
+
+#[test]
+fn nominals_bound_the_domain() {
+    // `⊤ ⊑ {a, b}` leaves at most two elements.
+    let closed = format!(
+        "{DECL} owl:Thing rdfs:subClassOf {} .",
+        object_one_of(":a :b")
+    );
+    assert_eq!(
+        verdict(&format!("{closed} :c owl:differentFrom :a , :b .")),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        verdict(&format!("{closed} :a owl:differentFrom :b .")),
+        Consistency::Consistent
+    );
+    let body = format!(
+        "{closed} :A rdfs:subClassOf {} . :B rdfs:subClassOf {} .",
+        min(3, ":r", "owl:Thing"),
+        min(2, ":r", "owl:Thing")
+    );
+    assert!(unsat(&body, "A"));
+    assert!(!unsat(&body, "B"));
+}
+
+#[test]
+fn class_tests_with_nominals_see_the_abox() {
+    // `A ≡ {a}` and `B(a)`: `A ⊑ B`, which only the ABox says.
+    let body = format!(
+        "{DECL} :A owl:equivalentClass {} . :a a :B .",
+        object_one_of(":a")
+    );
+    assert!(entails_sub(&body, "A", "B"));
+    assert!(!entails_sub(&body, "B", "A"));
+    // `A ⊑ ∃r.{a}`, `B(a)`, `B ⊑ ∀r⁻.D`: every `A` has an `r` to `a`, so is in `D`.
+    let body = format!(
+        "{DECL} :A rdfs:subClassOf {} . :a a :B . :B rdfs:subClassOf {} .",
+        has_value(":r", ":a"),
+        all("[ owl:inverseOf :r ]", ":D")
+    );
+    assert!(entails_sub(&body, "A", "D"));
+    assert!(!entails_sub(&body, "D", "A"));
+    // Two classes equivalent to one nominal are equivalent.
+    let body = format!(
+        "{DECL} :A owl:equivalentClass {n} . :B owl:equivalentClass {n} .",
+        n = object_one_of(":a")
+    );
+    assert!(entails_sub(&body, "A", "B") && entails_sub(&body, "B", "A"));
+    let (d, o) = {
+        let (d, t) = Graph::parse_to_triples(&format!("{PRE}{body}"), "turtle").unwrap();
+        let o = extract(&d, &t).unwrap();
+        (d, o)
+    };
+    let r = Reasoner::new(&d, &o, Budget::default()).unwrap();
+    assert_eq!(r.is_subclass_of("http://ex/A", "http://ex/B"), Some(true));
+    assert_eq!(r.is_subclass_of("http://ex/A", "http://ex/C"), Some(false));
+}
+
+#[test]
+fn facts_through_a_merge_depend_on_it() {
+    // `A ⊑ {a, b}`, `a ∈ ∃r.C`, `∃r.C ⊑ B`: `A = {b}` with `b ∉ B` is a model, so `A ⋢ B`.
+    // The test root merges into `a` on one branch; `B(a)` is derived without any choice,
+    // but its clash with the forbidden `B` depends on that branch.
+    let body = format!(
+        "{DECL} :A rdfs:subClassOf {} . :a a {} . {} rdfs:subClassOf :B .",
+        object_one_of(":a :b"),
+        some(":r", ":C"),
+        some(":r", ":C")
+    );
+    assert!(!entails_sub(&body, "A", "B"));
+    // `k`'s two `r`-values merge on one branch (`≤1 r`, the other is `Y`); `m`'s `{j}`
+    // successor then lands on `i` through that merge, and `∀s.¬E` clashes with `E(i)` only
+    // on that branch. `k ∈ Y`, `i ≠ j` is a model.
+    let body = format!(
+        "{DECL} :k :r :a , :b . :k a [ a owl:Class ; owl:unionOf ( {} :D ) ] . :a a :A .
+         :c a {} , {} .",
+        max(1, ":r", "owl:Thing"),
+        has_value(":s", ":b"),
+        all(":s", "[ owl:complementOf :A ]")
+    );
+    assert_eq!(verdict(&body), Consistency::Consistent);
+}
+
+#[test]
+fn nominals_with_blocking_answer_or_abstain() {
+    // Every person has a parent who is a person, and every person lives in `uk`.
+    let base = format!(
+        "{DECL} :hasParent a owl:ObjectProperty , owl:AsymmetricProperty , owl:IrreflexiveProperty .
+         :livesIn a owl:ObjectProperty .
+         :P rdfs:subClassOf {} , {} . :bob a :P .",
+        some(":hasParent", ":P"),
+        has_value(":livesIn", ":c")
+    );
+    // An infinite chain of persons all living in `c`: consistent.
+    assert_eq!(verdict(&base), Consistency::Consistent);
+    // At most two persons live in `c`, so the chain needs a 2-cycle or a loop, which
+    // asymmetry and irreflexivity forbid: inconsistent. Deciding it needs SHOIQ's NI-rule;
+    // the answer is Unknown, never Consistent.
+    let capped = format!(
+        "{base} {} rdfs:subClassOf {} .",
+        object_one_of(":c"),
+        max(2, "[ owl:inverseOf :livesIn ]", "owl:Thing")
+    );
+    assert_eq!(
+        verdict(&capped),
+        Consistency::Unknown(UnknownReason::Unconfirmed)
+    );
+    // With at most one, merging is forced at once: bob is his own parent, a clash.
+    let one = format!(
+        "{base} {} rdfs:subClassOf {} .",
+        object_one_of(":c"),
+        max(1, "[ owl:inverseOf :livesIn ]", "owl:Thing")
+    );
+    assert_eq!(verdict(&one), Consistency::Inconsistent);
 }
 
 #[test]
@@ -1192,6 +1347,8 @@ struct Gen {
     n_classes: usize,
     n_roles: usize,
     simple: Vec<bool>,
+    /// Individuals `:i0 …` that nominals may name (0: no nominals).
+    nominals: usize,
 }
 
 impl Gen {
@@ -1214,7 +1371,25 @@ impl Gen {
         })
     }
 
+    fn nominal(&mut self) -> String {
+        let n = self.nominals;
+        if self.rng.chance(50) {
+            let r = self.role(false).unwrap();
+            let i = self.rng.below(n);
+            return format!("[ a owl:Restriction ; owl:onProperty {r} ; owl:hasValue :i{i} ]");
+        }
+        let k = 1 + self.rng.below(2.min(n));
+        let mut is: Vec<usize> = (0..k).map(|_| self.rng.below(n)).collect();
+        is.sort_unstable();
+        is.dedup();
+        let list: Vec<String> = is.iter().map(|i| format!(":i{i}")).collect();
+        format!("[ a owl:Class ; owl:oneOf ( {} ) ]", list.join(" "))
+    }
+
     fn concept(&mut self, depth: usize) -> String {
+        if self.nominals > 0 && self.rng.chance(18) {
+            return self.nominal();
+        }
         if depth == 0 || self.rng.chance(35) {
             return match self.rng.below(10) {
                 0 => format!("[ a owl:Class ; owl:complementOf {} ]", self.class()),
@@ -1273,11 +1448,22 @@ impl Gen {
     }
 
     fn ontology(seed: u64) -> String {
+        Self::ontology_with(seed, false)
+    }
+
+    /// The corpus ontology of `seed`; with `nominals`, class expressions may also be
+    /// `ObjectOneOf` and `ObjectHasValue` over a few individuals (the RNG stream is
+    /// unchanged without).
+    fn ontology_with(seed: u64, nominals: bool) -> String {
         let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
         let n_classes = 3 + rng.below(4);
         let n_roles = 1 + rng.below(3);
+        let n_nominals = if nominals { 1 + rng.below(3) } else { 0 };
         let mut out = String::new();
         let _ = writeln!(out, "<http://ex/o{seed}> a owl:Ontology .");
+        for i in 0..n_nominals {
+            let _ = writeln!(out, ":i{i} a owl:NamedIndividual .");
+        }
         for i in 0..n_classes {
             let _ = writeln!(out, ":C{i} a owl:Class .");
         }
@@ -1323,6 +1509,7 @@ impl Gen {
             n_classes,
             n_roles,
             simple,
+            nominals: n_nominals,
         };
         for i in 0..n_roles {
             if !g.simple[i] {
@@ -1576,6 +1763,22 @@ fn oracle_differential() {
     );
 }
 
+/// The SHIQ corpus with nominals: class expressions may also be `ObjectOneOf` and
+/// `ObjectHasValue` over a few individuals, so class tests depend on the ABox. Up to a
+/// tenth of the seeds may answer Unknown (an unconfirmed model, or the budget).
+#[test]
+fn oracle_differential_nominals() {
+    differential(
+        "nominals",
+        |seed| Gen::ontology_with(seed, true),
+        NOMINAL_SEEDS,
+        include_str!("data/owl2dl_oracle_nominals_expected.txt"),
+        Some(10),
+    );
+}
+
+const NOMINAL_SEEDS: u64 = 400;
+
 /// A second corpus aimed at the constructs earlier reviews found answers wrong for:
 /// negative property assertions over transitive roles and role hierarchies, `owl:Thing` and
 /// `owl:Nothing` in axioms, and declared classes no axiom mentions. Each ontology has an
@@ -1620,6 +1823,7 @@ fn focused(seed: u64) -> String {
         n_classes: used,
         n_roles,
         simple,
+        nominals: 0,
     };
     for _ in 0..(1 + g.rng.below(4)) {
         let line = match g.rng.below(9) {
@@ -1940,6 +2144,7 @@ fn datatypes_corpus(seed: u64) -> String {
         n_classes,
         n_roles: 1,
         simple: vec![true],
+        nominals: 0,
     };
     let mut d = D {
         g,

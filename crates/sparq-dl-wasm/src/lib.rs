@@ -185,6 +185,7 @@ fn reason_kind(reason: &UnknownReason) -> &'static str {
         UnknownReason::ResourceBudget => "ResourceBudget",
         UnknownReason::ImportsNotLoaded(_) => "ImportsNotLoaded",
         UnknownReason::DatatypeUnknown { .. } => "DatatypeUnknown",
+        UnknownReason::Unconfirmed => "Unconfirmed",
     }
 }
 
@@ -268,7 +269,7 @@ impl Writer<'_> {
                 self.key("triples");
                 self.triples(source);
             }
-            UnknownReason::ResourceBudget => {}
+            UnknownReason::ResourceBudget | UnknownReason::Unconfirmed => {}
         }
         self.raw("}");
     }

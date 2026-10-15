@@ -114,19 +114,28 @@ async fn handle_now<S: Store + 'static>(
     agent: &Agent,
 ) -> Response {
     let path = req.path.as_str();
+    let not_there = || {
+        if state.needs_auth(agent) {
+            state.challenge(None)
+        } else {
+            problem(StatusCode::NOT_FOUND, None)
+        }
+    };
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
         // A linkset describes a resource, and no resource's name ends in `.meta` (see
         // [`sanitize_slug`]): what is stored under such a name is a linkset's own record, which
         // has no linkset and is no resource. Whatever is stored, it is not there.
-        if stem.to_ascii_lowercase().ends_with(META_SUFFIX) {
-            return if state.needs_auth(agent) {
-                state.challenge(None)
-            } else {
-                problem(StatusCode::NOT_FOUND, None)
-            };
+        if super::names_record(stem) {
+            return not_there();
         }
         let uri = state.cfg.absolute(stem);
         return linkset(state, req, agent, &uri).await;
+    }
+    // Nor is a name that ends in `.meta` in another case a resource's: what is stored under one
+    // is listed, followed and subscribed to as nothing (see [`super::names_record`]), and so it
+    // is answered.
+    if super::names_record(path) {
+        return not_there();
     }
     let uri = state.cfg.absolute(path);
     let is_root = path == "/";
@@ -1127,6 +1136,8 @@ async fn members<S: Store + 'static>(
         .into_iter()
         .map(|c| c.as_str().to_string())
         .collect();
+    // A linkset's record is no member, whatever an edge to it says.
+    children.retain(|c| !super::names_record(c));
     children.sort();
     children.dedup();
     let mut out = Vec::with_capacity(children.len());
@@ -1754,10 +1765,10 @@ async fn create<S: Store + 'static>(
             // concurrency ceiling once the request has gone.
             let _admission = admission;
             let locks = (child_guards, parent_guard);
-            // Until the content is created the member is in flight, with nothing there before
-            // it: a check made without its lock meanwhile is not decided on the metadata
-            // written for it.
-            let in_flight = [child.clone()];
+            // Until the content is created, or what the create may have written is put back, the
+            // member is in flight with nothing there before it: a check made without its lock
+            // meanwhile is not decided on the metadata written for it. What cannot be put back
+            // is set aside still in flight, so it stays decided that way until it is.
             let nothing = super::Prior {
                 existed: Some(false),
                 ..Default::default()
@@ -1765,45 +1776,75 @@ async fn create<S: Store + 'static>(
             state
                 .locks
                 .changing_from([(child.clone(), nothing)].into_iter().collect());
-            if let Err(e) = state.put_resource_meta(&child, &meta).await {
-                state.locks.landed(&in_flight);
-                return Err(e);
-            }
-            let created = match state
-                .store
-                .create_in_container(&parent, &child, body, &content_type)
-                .await
-            {
+            let in_flight = super::InFlight {
+                locks: state.locks.clone(),
+                iris: vec![child.clone()],
+            };
+            // A write that failed unsettled (an HTTP update that timed out) may still commit:
+            // it is fenced before anything it may have written is put back, so nothing it
+            // commits later outlives the undo.
+            let fence = |e: &ServerError| match e {
+                ServerError::Unsettled { fence, .. } => Some(super::Undo::Fence {
+                    fence: fence.clone(),
+                }),
+                _ => None,
+            };
+            let meta_gone = super::Undo::Restore {
+                key: meta_key(&child),
+                prior: None,
+            };
+            let written = state.put_resource_meta(&child, &meta).await;
+            let content_tried = written.is_ok();
+            let created = match written {
+                Ok(()) => {
+                    state
+                        .store
+                        .create_in_container(&parent, &child, body, &content_type)
+                        .await
+                }
+                Err(e) => Err(e),
+            };
+            let created = match created {
                 Ok(m) => {
-                    state.locks.landed(&in_flight);
+                    drop(in_flight);
                     m
                 }
                 Err(e) => {
                     // A refusal created nothing, and the metadata goes. A backend failure may
-                    // follow a create that committed (a remote store's lost reply): the member is
-                    // removed first, so committed content is never left without its creator.
-                    // Both are tried a few times with the locks held, so no request sees the
-                    // member or its metadata in between; what is left then is set aside with
-                    // the locks (see [`LwsState::set_aside`](super::LwsState::set_aside)).
-                    let mut undo = Vec::new();
-                    if matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. }) {
+                    // follow a write that committed (a remote store's lost reply): the member is
+                    // removed first, so committed content is never left without its creator, and
+                    // the metadata after it. Each step is tried a few times with the locks held,
+                    // so no request sees the member or its metadata in between; what is left then
+                    // is set aside with the locks (see
+                    // [`LwsState::set_aside`](super::LwsState::set_aside)).
+                    let mut undo: Vec<super::Undo> = fence(&e).into_iter().collect();
+                    let may_have_landed =
+                        matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. });
+                    if content_tried && may_have_landed {
                         undo.push(super::Undo::Remove {
                             iri: child.clone(),
                             parent: parent.clone(),
                         });
                     }
-                    undo.push(super::Undo::Restore {
-                        key: meta_key(&child),
-                        prior: None,
-                    });
+                    if content_tried || may_have_landed {
+                        undo.push(meta_gone);
+                    }
                     match super::settle(&state.store, undo).await {
                         None => {
-                            state.locks.landed(&in_flight);
+                            drop(in_flight);
                             drop(locks);
                         }
-                        Some(left) => {
+                        Some(mut left) if content_tried => {
+                            left.1 = Some(in_flight);
                             state.set_aside(left, locks);
-                            state.locks.landed(&in_flight);
+                        }
+                        Some(mut left) => {
+                            // No content was written, so no listing can show the member: only
+                            // the member is set aside, and its container's lock goes now.
+                            let (child_guards, parent_guard) = locks;
+                            drop(parent_guard);
+                            left.1 = Some(in_flight);
+                            state.set_aside_unlisted(left, child_guards);
                         }
                     }
                     return Err(e);
@@ -3606,7 +3647,11 @@ async fn delete<S: Store + 'static>(
     if let Some(refused) = unless_preconditions(req, etag.as_deref(), modified) {
         return refused;
     }
-    if uri.ends_with('/') && doomed.len() > 1 {
+    // A linkset record a legacy edge makes a member is no member: it neither keeps a container
+    // from being empty nor needs a permission of its own, and goes with the container (its edge
+    // too, when the record itself is already gone).
+    let members = || doomed.iter().filter(|(n, _)| !super::names_record(n));
+    if uri.ends_with('/') && members().count() > 1 {
         let infinity = req
             .header("depth")
             .is_some_and(|d| d.trim().eq_ignore_ascii_case("infinity"));
@@ -3617,7 +3662,7 @@ async fn delete<S: Store + 'static>(
     // Delete on the container is not Delete on what is in it: a recursive delete removes nothing
     // unless the agent may delete every descendant. `uri` itself is checked again too, now that
     // its lock is held.
-    for (node, _) in &doomed {
+    for (node, _) in members() {
         if let Err(r) = recheck(state, Action::Delete, node, agent).await {
             return r;
         }
@@ -3643,7 +3688,12 @@ async fn delete<S: Store + 'static>(
             // would be dropped when sent, and is not held while the removals run.
             let mut notices = Vec::with_capacity(doomed.len());
             let mut room = state.cfg.delivery.queue;
-            for (gone, origin) in doomed.iter().cloned() {
+            // A linkset record a legacy edge makes a member is announced to nobody.
+            for (gone, origin) in doomed
+                .iter()
+                .filter(|(n, _)| !super::names_record(n))
+                .cloned()
+            {
                 let event = Event {
                     kind: "Delete",
                     is_container: gone.ends_with('/'),
@@ -8226,6 +8276,7 @@ mod tests {
         // Nobody else takes its lock while it is set aside, and its container, whose listing
         // may show it, is set aside with it.
         assert!(st.locks.try_lock(&kept).is_none());
+        assert!(st.locks.changing(&kept), "set aside still in flight");
         assert!(!st.visible(&st.cfg.storage()));
         *store.fail_delete_of.lock().unwrap() = None;
         for _ in 0..100 {
@@ -8236,6 +8287,10 @@ mod tests {
         }
         assert!(st.visible(&kept));
         assert!(st.locks.try_lock(&kept).is_some());
+        assert!(
+            !st.locks.changing(&kept),
+            "the create is over once it is put back"
+        );
         assert!(!st.store.exists(&kept).await.unwrap());
         assert!(stored_meta(&st, &kept).await.unwrap().is_none());
         store.fail_after_create.store(true, Ordering::SeqCst);
@@ -8246,6 +8301,231 @@ mod tests {
         store.fail_after_create.store(false, Ordering::SeqCst);
         assert!(!st.store.exists(&gone).await.unwrap());
         assert!(stored_meta(&st, &gone).await.unwrap().is_none());
+        assert!(!st.locks.changing(&gone));
+    }
+
+    /// Review finding: the test below let an unsettled write commit only once it was fenced, so
+    /// a create whose unsettled write was never removed, or was removed before it was fenced,
+    /// passed it. The write now commits while it cannot be fenced, and the undo still removes it.
+    #[tokio::test]
+    async fn an_unsettled_create_that_commits_before_its_fence_is_removed() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let post = req(
+            Method::POST,
+            "/",
+            &[("slug", "early.txt"), ("content-type", "text/plain")],
+            "x",
+        );
+        let early = st.cfg.absolute("/early.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store
+            .fail_fence
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let r = create(&st, &post, &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&early));
+        // The write the store answered unsettled commits now, before it could be fenced: the undo
+        // still removes it once the fence holds.
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if st.store.exists(&early).await.unwrap() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(st.store.exists(&early).await.unwrap(), "committed late");
+        assert!(!st.visible(&early));
+        assert!(st.locks.changing(&early));
+        store
+            .fail_fence
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        for _ in 0..500 {
+            if st.visible(&early) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(st.visible(&early));
+        assert!(
+            !st.store.exists(&early).await.unwrap(),
+            "removed once fenced"
+        );
+        assert!(stored_meta(&st, &early).await.unwrap().is_none());
+        assert!(!st.locks.changing(&early));
+    }
+
+    /// Review finding: a create whose metadata write and its removal both failed set aside its
+    /// container with it, so the storage description, the root listing and every other create
+    /// into the root waited on the store for as long as it stayed down, though no content was
+    /// written and no listing could show the member.
+    #[tokio::test]
+    async fn a_create_whose_content_was_never_written_hides_no_container() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let x = st.cfg.absolute("/x.txt");
+        // The metadata write fails and so does its removal: the member is set aside, but no
+        // content was written, so its container stays visible and open to other requests.
+        *store.fail_write_of.lock().unwrap() = Some(meta_key(&x));
+        *store.fail_delete_of.lock().unwrap() = Some(meta_key(&x));
+        let post = |slug: &str| {
+            req(
+                Method::POST,
+                "/",
+                &[("slug", slug), ("content-type", "text/plain")],
+                "x",
+            )
+        };
+        let r = create(&st, &post("x.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&x));
+        assert!(st.visible(&root));
+        let desc = req(Method::GET, "/", &[("accept", "application/lws+cid")], "");
+        let r = handle(&st, &desc, &super::super::Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let r = handle(&st, &post("y.txt"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // Nor is the container's lock held: a conditional create into it, which takes it whole,
+        // is answered meanwhile.
+        let conditional = req(
+            Method::POST,
+            "/",
+            &[
+                ("slug", "z.txt"),
+                ("content-type", "text/plain"),
+                ("if-match", "*"),
+            ],
+            "z",
+        );
+        let r = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            handle(&st, &conditional, &agent(OWNER)),
+        )
+        .await
+        .expect("answered while the member is set aside");
+        assert_eq!(r.status(), StatusCode::CREATED);
+        *store.fail_delete_of.lock().unwrap() = None;
+        for _ in 0..500 {
+            if st.visible(&x) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(st.visible(&x));
+        assert!(!st.locks.changing(&x));
+    }
+
+    /// Review findings: a create's metadata write that landed but reported a failure was left in
+    /// place, and a create the store answered unsettled was put back without being fenced, so it
+    /// could commit afterwards. Either way the member was then decided, for a caller refused
+    /// before the lock, on what the create wrote. What a failed create may have written is put
+    /// back (an unsettled write fenced first), and until it is, the member stays in flight with
+    /// nothing there before it.
+    #[tokio::test]
+    async fn a_failed_create_leaves_nothing_of_it_behind() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let tess = "https://tess.example/#me";
+        let note = "https://e.example/Note";
+        let notes = json!([{"leftOperand": "type", "operator": "eq", "rightOperand": note}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": tess,
+                "constraint": notes}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("tess", grant);
+        let link = format!("<{note}>; rel=\"type\"");
+        let post = |slug: &'static str| {
+            req(
+                Method::POST,
+                "/",
+                &[
+                    ("slug", slug),
+                    ("content-type", "text/plain"),
+                    ("link", link.as_str()),
+                ],
+                "x",
+            )
+        };
+        let same_as_nothing = |name: &'static str| {
+            let st = st.clone();
+            async move {
+                for method in [Method::GET, Method::PATCH] {
+                    let h = [("content-type", JSON_PATCH)];
+                    let answer = |path: String| {
+                        let (st, h, method) = (st.clone(), h, method.clone());
+                        async move {
+                            let r = req(method, &path, &h, "[]");
+                            handle(&st, &r, &agent(tess)).await.status()
+                        }
+                    };
+                    let created = answer(format!("/{name}")).await;
+                    let never = answer(format!("/never-{name}")).await;
+                    assert_eq!(created, never, "{method} {name}");
+                }
+            }
+        };
+        // The metadata lands, the reply is lost: the create fails, and the metadata goes.
+        let lost = st.cfg.absolute("/lost.txt");
+        *store.fail_after_write_of.lock().unwrap() = Some(meta_key(&lost));
+        let r = create(&st, &post("lost.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(stored_meta(&st, &lost).await.unwrap().is_none());
+        assert!(!st.locks.changing(&lost));
+        same_as_nothing("lost.txt").await;
+        // The content's create is answered unsettled: it is fenced before the metadata goes,
+        // so it never commits after the create is over.
+        let late = st.cfg.absolute("/late.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        let r = create(&st, &post("late.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !st.store.exists(&late).await.unwrap(),
+            "fenced, so never committed"
+        );
+        assert!(stored_meta(&st, &late).await.unwrap().is_none());
+        assert!(!st.locks.changing(&late));
+        same_as_nothing("late.txt").await;
+        // While it cannot be fenced it is set aside, still in flight with nothing before it,
+        // and nothing is put back under it; once it is fenced it goes.
+        let stuck = st.cfg.absolute("/stuck.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store
+            .fail_fence
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let r = create(&st, &post("stuck.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&stuck));
+        assert!(st.locks.changing(&stuck));
+        assert!(
+            stored_meta(&st, &stuck).await.unwrap().is_some(),
+            "kept until fenced"
+        );
+        same_as_nothing("stuck.txt").await;
+        store
+            .fail_fence
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        for _ in 0..200 {
+            if st.visible(&stuck) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(st.visible(&stuck));
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!st.store.exists(&stuck).await.unwrap());
+        assert!(stored_meta(&st, &stuck).await.unwrap().is_none());
+        assert!(!st.locks.changing(&stuck));
     }
 
     /// Review finding: HEAD responses dropped the body before the length was derived from it, so
@@ -12321,5 +12601,246 @@ mod tests {
                 assert_eq!(created.await, never.await, "{method} {:?}", who.subject);
             }
         }
+    }
+
+    /// Review findings: what is stored under a linkset record's name, or a legacy edge that makes
+    /// one a container's member, must not show anywhere. Every answer on such a name is the one
+    /// on a name where nothing is stored, the container's listing does not name it, a recursive
+    /// delete does not follow it, and a subscription to it is refused as one to nothing.
+    #[tokio::test]
+    async fn a_stored_record_shows_nowhere() {
+        use super::super::test_store::{agent, closed_state, request as req, route_as, OWNER};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let (carol, dave) = ("https://carol.example/#me", "https://dave.example/#me");
+        let grant = |actions: Value, who: &str| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who}]),
+                &root,
+            )
+            .unwrap()
+        };
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read"]), carol));
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify", "delete"]), dave));
+        let h = [
+            ("slug", "c"),
+            (
+                "link",
+                "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+            ),
+        ];
+        let r = handle(&st, &req(Method::POST, "/", &h, ""), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let c = st.cfg.absolute("/c/");
+        // Records stored where only an older server could have put them: under a record's name,
+        // and as a member of the container.
+        for (key, member) in [
+            (format!("{c}doc.meta.meta"), false),
+            (format!("{c}x.meta"), true),
+        ] {
+            let body = Bytes::from_static(br#"{"linkset": []}"#);
+            if member {
+                st.store
+                    .create_in_container(&c, &key, body, LINKSET_JSON)
+                    .await
+                    .unwrap();
+            } else {
+                st.store.write(&key, body, LINKSET_JSON).await.unwrap();
+            }
+        }
+        let answer = |method: Method, path: String, who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("content-type", LINKSET_JSON)];
+                let r = handle(&st, &req(method, &path, &h, r#"{"linkset": []}"#), &who).await;
+                let mut headers: Vec<String> = r
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v:?}"))
+                    .collect();
+                headers.sort();
+                (r.status(), headers, body_of(r).await)
+            }
+        };
+        let callers = [agent(OWNER), agent(carol), agent(dave), Agent::anonymous()];
+        for (stored, nothing) in [
+            ("/c/doc.meta.meta", "/c/none.meta.meta"),
+            ("/c/x.meta", "/c/y.meta"),
+            ("/c/x.meta.meta", "/c/y.meta.meta"),
+        ] {
+            for who in &callers {
+                for method in [Method::GET, Method::HEAD, Method::PUT, Method::DELETE] {
+                    let a = answer(method.clone(), stored.into(), who.clone()).await;
+                    let b = answer(method.clone(), nothing.into(), who.clone()).await;
+                    assert_eq!(a, b, "{method} {stored} as {:?}", who.subject);
+                }
+            }
+        }
+        // The listing names no record.
+        let r = handle(&st, &req(Method::GET, "/c/", &[], ""), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let listing = String::from_utf8(body_of(r).await.to_vec()).unwrap();
+        assert!(!listing.contains("x.meta"), "{listing}");
+        // A subscription to a record's name is refused as one to a name where nothing is.
+        let subscribe = |topic: String| {
+            let st = st.clone();
+            async move {
+                let body = json!({"type": super::super::notify::WEBHOOK, "topic": [topic],
+                    "inbox": "https://inbox.example/"});
+                let r = req(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body.to_string(),
+                );
+                let r = route_as(&st, r, &agent(carol)).await;
+                (r.status(), body_of(r).await)
+            }
+        };
+        let stored = subscribe(format!("{c}x.meta")).await;
+        assert_eq!(stored, subscribe(format!("{c}y.meta")).await);
+        assert_eq!(stored.0, StatusCode::FORBIDDEN);
+        let stored = subscribe(format!("{c}doc.meta.meta")).await;
+        assert_eq!(stored, subscribe(format!("{c}none.meta.meta")).await);
+        // So is one to the record of a resource that has a linkset.
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let doc = subscribe(format!("{root}doc.txt.meta.meta")).await;
+        assert_eq!(doc, subscribe(format!("{root}none.txt.meta.meta")).await);
+        assert_eq!(doc.0, StatusCode::FORBIDDEN);
+        // What is stored under a name that ends in `.META` is answered as nothing there too, as
+        // the listing, the delete and a subscription take it.
+        let upper = format!("{c}X.META");
+        st.store
+            .create_in_container(&c, &upper, Bytes::from_static(b"u"), "text/plain")
+            .await
+            .unwrap();
+        for who in &callers {
+            for method in [Method::GET, Method::HEAD, Method::PUT, Method::DELETE] {
+                let a = answer(method.clone(), "/c/X.META".into(), who.clone()).await;
+                let b = answer(method.clone(), "/c/Y.META".into(), who.clone()).await;
+                assert_eq!(a, b, "{method} /c/X.META as {:?}", who.subject);
+            }
+        }
+        st.store.delete(&upper, Some(&c)).await.unwrap();
+        // The container holds nothing else, so it is empty: deleting it removes the record
+        // with it, without Depth, and without a permission on the record, which the container's
+        // creator does not hold (it may create, but has no Delete grant).
+        let eve = "https://eve.example/#me";
+        st.access
+            .put_grant_for_test("eve", grant(json!(["create"]), eve));
+        let h = [
+            ("slug", "e"),
+            (
+                "link",
+                "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+            ),
+        ];
+        let r = handle(&st, &req(Method::POST, "/", &h, ""), &agent(eve)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let e = st.cfg.absolute("/e/");
+        st.store
+            .create_in_container(
+                &e,
+                &format!("{e}x.meta"),
+                Bytes::from_static(br#"{"linkset": []}"#),
+                LINKSET_JSON,
+            )
+            .await
+            .unwrap();
+        let r = handle(&st, &req(Method::DELETE, "/e/", &[], ""), &agent(eve)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert!(!st.store.exists(&format!("{e}x.meta")).await.unwrap());
+        let r = handle(&st, &req(Method::DELETE, "/c/", &[], ""), &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert!(!st.store.exists(&format!("{c}x.meta")).await.unwrap());
+    }
+
+    /// Review finding: a linkset record that a legacy edge listed in its container kept the
+    /// edge once its subject's removal took the record, and so did one whose subject went first
+    /// in a recursive delete: the container then could never be deleted. An edge to a record
+    /// that is gone goes with the container.
+    #[tokio::test]
+    async fn a_legacy_record_edge_goes_with_its_record() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let container = |slug: &'static str| {
+            req(
+                Method::POST,
+                "/",
+                &[
+                    ("slug", slug),
+                    (
+                        "link",
+                        "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+                    ),
+                ],
+                "",
+            )
+        };
+        let member = |into: &'static str, slug: &'static str| {
+            req(
+                Method::POST,
+                into,
+                &[("slug", slug), ("content-type", "text/plain")],
+                "x",
+            )
+        };
+        // The subject goes alone, then its container.
+        for slug in ["c", "d"] {
+            let r = handle(&st, &container(slug), &agent(OWNER)).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let (c, d) = (st.cfg.absolute("/c/"), st.cfg.absolute("/d/"));
+        let r = handle(&st, &member("/c/", "x.txt"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let x = format!("{c}x.txt");
+        let record = st.store.read(&meta_key(&x)).await.unwrap();
+        st.store.delete(&meta_key(&x), None).await.unwrap();
+        st.store
+            .create_in_container(&c, &meta_key(&x), record.body, &record.meta.content_type)
+            .await
+            .unwrap();
+        let r = handle(
+            &st,
+            &req(Method::DELETE, "/c/x.txt", &[], ""),
+            &agent(OWNER),
+        )
+        .await;
+        assert!(r.status().is_success(), "{}", r.status());
+        // An edge an older server left to a record already gone goes with the container.
+        let gone = format!("{c}z.txt.meta");
+        st.store
+            .create_in_container(&c, &gone, Bytes::from_static(b"{}"), "application/json")
+            .await
+            .unwrap();
+        st.store.delete(&gone, None).await.unwrap();
+        assert_eq!(st.store.list_children(&c).await.unwrap().len(), 2);
+        let r = handle(&st, &req(Method::DELETE, "/c/", &[], ""), &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        // A recursive delete, the record's edge listed before its subject.
+        let y = format!("{d}y.txt");
+        st.store
+            .create_in_container(
+                &d,
+                &meta_key(&y),
+                Bytes::from_static(b"{}"),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        let r = handle(&st, &member("/d/", "y.txt"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let depth = [("depth", "infinity")];
+        let r = handle(&st, &req(Method::DELETE, "/d/", &depth, ""), &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        for gone in [&y, &meta_key(&y), &d] {
+            assert!(!st.store.exists(gone).await.unwrap(), "{gone}");
+        }
+        assert!(st.visible(&root));
     }
 }

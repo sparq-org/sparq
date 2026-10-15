@@ -54,14 +54,20 @@ export interface OwlDlProfile {
 }
 
 /** Why the reasoner gave no verdict on a parsed ontology. */
-export type OwlDlUnknownKind = 'OutOfFragment' | 'NotInDl' | 'ResourceBudget' | 'ImportsNotLoaded' | 'DatatypeUnknown';
+export type OwlDlUnknownKind =
+  | 'OutOfFragment'
+  | 'NotInDl'
+  | 'ResourceBudget'
+  | 'ImportsNotLoaded'
+  | 'DatatypeUnknown'
+  | 'Unconfirmed';
 
 /** Why the RDF graph could not be read as an OWL 2 ontology (the fail-closed reverse mapping). */
 export type OwlDlRefusalKind = 'Unparsed' | 'Malformed' | 'Ambiguous' | 'Unsupported';
 
 /** The reason attached to `consistent: "unknown"`. */
 export type OwlDlReason =
-  /** A construct outside the decided fragment (e.g. a nominal or a key). */
+  /** A construct outside the decided fragment (e.g. a key or a property chain). */
   | { kind: 'OutOfFragment'; construct: string; triples: OwlDlTriple[] }
   /** A blocking OWL 2 DL violation (a non-simple property where a simple one is required, or an irregular property hierarchy). */
   | { kind: 'NotInDl'; violations: OwlDlViolation[] }
@@ -69,6 +75,11 @@ export type OwlDlReason =
   | { kind: 'ResourceBudget' }
   /** A datatype question the reasoner does not decide (e.g. an XSD pattern with a block escape). */
   | { kind: 'DatatypeUnknown'; triples: OwlDlTriple[] }
+  /**
+   * A candidate model the reasoner could not confirm: nominals tie a repeated part of it to
+   * an individual whose number restrictions the repetition could break.
+   */
+  | { kind: 'Unconfirmed' }
   /** Consistent on its own, but `owl:imports` targets were not loaded. */
   | { kind: 'ImportsNotLoaded'; imports: string[] }
   /** The graph is not read as an OWL 2 ontology at all. */
@@ -206,13 +217,14 @@ export function normaliseOwlDlOptions(
  * the graph as OWL 2, runs the OWL 2 DL profile check, consistency, and — for a consistent
  * ontology — classification.
  *
- * Decided fragment: ALCHIQ(D) — classes and class constructors except nominals, object
- * properties with inverses, hierarchies, transitivity, `R∘R ⊑ R` chains, the role
+ * Decided fragment: SHOIQ(D) — classes and every class constructor including nominals,
+ * object properties with inverses, hierarchies, transitivity, `R∘R ⊑ R` chains, the role
  * characteristics, `hasSelf`, qualified cardinality up to a fixed bound, data properties over
- * the OWL 2 datatype map, and the ABox. Nominals, other property chains and keys answer
- * `consistent: "unknown"` with reason `OutOfFragment` and the triples; a datatype question the
- * reasoner does not decide answers `DatatypeUnknown`. Options must be plain objects of this
- * realm.
+ * the OWL 2 datatype map, and the ABox. Other property chains, keys, the top and bottom
+ * properties, datatypes outside the map and object/data property punning answer
+ * `consistent: "unknown"` with reason `OutOfFragment` and the triples; an undecided datatype
+ * question answers `DatatypeUnknown`, and an unconfirmed model with nominals `Unconfirmed`.
+ * Options must be plain objects of this realm.
  *
  * Rejects on a parse error, on malformed options, or if the DL bundle cannot be loaded. A graph
  * the OWL mapping refuses is NOT a rejection: it resolves with `consistent: "unknown"`.

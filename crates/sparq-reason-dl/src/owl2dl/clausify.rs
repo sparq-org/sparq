@@ -75,6 +75,9 @@ pub(crate) enum AtomKind {
     },
     /// A data range, by index into [`Clauses::data`]. Labels concrete nodes only.
     Data(u32),
+    /// The nominal `{a}` of the individual with this index: the node it labels is `a`'s
+    /// node (the tableau merges the two).
+    Nominal(u32),
 }
 
 /// A variable of a DL-clause: the central `x` or the `i`-th neighbour.
@@ -169,6 +172,9 @@ pub(crate) struct Clauses {
     pub data_source: Vec<u32>,
     /// Per role index: whether it is a data property.
     pub data_roles: Vec<bool>,
+    /// The [`AtomKind::Nominal`] atoms, by individual index. Non-empty makes class tests
+    /// depend on the ABox.
+    pub nominals: FxHashMap<u32, Atom>,
 }
 
 impl Clauses {
@@ -544,6 +550,18 @@ impl Builder<'_> {
         self.out.abox.individuals.push(*a);
         self.individuals.insert(*a, i);
         i
+    }
+
+    /// The nominal atom `{a}`, asserted of `a` itself.
+    fn nominal(&mut self, a: &Individual) -> Atom {
+        let i = self.individual(a);
+        if let Some(&o) = self.out.nominals.get(&i) {
+            return o;
+        }
+        let o = self.fresh(AtomKind::Nominal(i));
+        self.out.nominals.insert(i, o);
+        self.out.abox.concepts.push((o, i, self.axiom as u32));
+        o
     }
 
     fn include(&mut self, r: Role, s: Role) {
@@ -945,8 +963,11 @@ impl Builder<'_> {
                 let (r, f) = (self.role(p)?, self.nnf(f, true)?);
                 Nnf::And(vec![at_least(*n, r, f.clone()), at_most(*n, r, f)])
             }
-            C::OneOf(_) => return Err(self.unsupported("ObjectOneOf")),
-            C::HasValue(..) => return Err(self.unsupported("ObjectHasValue")),
+            C::OneOf(is) => Nnf::Or(is.iter().map(|a| Nnf::Atom(self.nominal(a))).collect()),
+            C::HasValue(p, a) => {
+                let r = self.role(p)?;
+                at_least(1, r, Nnf::Atom(self.nominal(a)))
+            }
             C::DataSomeValuesFrom(d, dr) => {
                 let (r, f) = (self.data_role(*d)?, self.data_nnf(dr)?);
                 at_least(1, r, f)

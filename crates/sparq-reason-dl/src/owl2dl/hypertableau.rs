@@ -13,6 +13,15 @@
 //!   `R`-neighbours in `A`, creates `n` fresh successors.
 //! - **≈**: `s ≈ t` merges the later node into the earlier one (a blockable node into a root),
 //!   pruning the merged node's descendants; `s ≉ s` is a clash.
+//! - **o**: a node labelled with the nominal `{a}` is merged into `a`'s node (the ABox
+//!   asserts `{a}(a)`). These merges are queued and done before anything else, so none is
+//!   pending when a branch point is created.
+//!
+//! **Nominals without the NI-rule.** A nominal can leave an edge between an individual and a
+//! blockable node that is not its child. A complete, clash-free graph is reported
+//! satisfiable only when it provably unravels into a model despite such edges (see
+//! [`Tableau::unravels`]); otherwise the branch is closed and, if no branch gives a model,
+//! the run returns [`Stop::Unconfirmed`], never a verdict.
 //!
 //! Blocking is pairwise anywhere blocking over full labels, recomputed whenever the `≥`-rule
 //! runs, which makes the calculus terminate in the presence of inverse roles and number
@@ -153,6 +162,11 @@ pub(crate) enum Stop {
     /// undecided. Carries the axioms (indices into the ontology) of the data ranges
     /// involved in the first undecided check.
     Undecided(Vec<u32>),
+    /// Every branch closed, but at least one only because its completion graph could not
+    /// be confirmed to unravel into a model: nominals connect a copied or blocked part of
+    /// the graph to a node whose number restrictions the copies could break (the case the
+    /// NI-rule of SHOIQ handles, which this calculus does not implement).
+    Unconfirmed,
 }
 
 /// A clause's neighbour variable: its role atoms, its concept atoms, and whether it binds
@@ -171,6 +185,8 @@ pub(crate) struct ClauseIndex {
     /// Per clause, per neighbour variable: its role atoms, its concept atoms, and whether it
     /// binds only nodes after the previous variable's.
     ys: Vec<Vec<YVar>>,
+    /// The clauses with two or more neighbour variables (number restrictions).
+    multi_y: Vec<u32>,
 }
 
 impl ClauseIndex {
@@ -201,6 +217,9 @@ impl ClauseIndex {
                 ys[y as usize].1.push(a);
             }
             idx.ys.push(ys);
+            if cl.n_y >= 2 {
+                idx.multi_y.push(i);
+            }
         }
         idx
     }
@@ -253,8 +272,8 @@ pub(crate) struct Tableau<'c> {
     nodes: Vec<NodeData>,
     roles: FxHashMap<(u32, Node, Node), Dep>,
     ineq: FxHashMap<(Node, Node), Dep>,
-    /// `t → s` for every merged node `t`.
-    merges: FxHashMap<Node, Node>,
+    /// `t → s` for every merged node `t`, with what the merge depends on.
+    merges: FxHashMap<Node, (Node, Dep)>,
     trail: Vec<Undo>,
     pending: Vec<Instance>,
     branches: Vec<Branch>,
@@ -279,6 +298,11 @@ pub(crate) struct Tableau<'c> {
     count_memo: FxHashMap<(Vec<Atom>, usize, Vec<Value>), Tri>,
     /// `contains` answers, by (data atom, value).
     contains_memo: FxHashMap<(Atom, Value), Tri>,
+    /// Nodes that gained a nominal atom `{a}` and may have to be merged into `a`'s node.
+    nominal_todo: Vec<Node>,
+    /// A complete, clash-free branch was closed because it could not be confirmed to
+    /// unravel into a model ([`Stop::Unconfirmed`]).
+    unconfirmed: bool,
 }
 
 /// The outcome of the datatype check of one component.
@@ -324,6 +348,8 @@ impl<'c> Tableau<'c> {
             undecided: None,
             count_memo: FxHashMap::default(),
             contains_memo: FxHashMap::default(),
+            nominal_todo: Vec::new(),
+            unconfirmed: false,
         }
     }
 
@@ -389,10 +415,13 @@ impl<'c> Tableau<'c> {
     /// The label of a root node after a satisfiable run: each atom, and whether it holds
     /// without depending on any branch choice.
     pub(crate) fn root_label(&self, n: Node) -> Vec<(Atom, bool)> {
-        let mut out: Vec<(Atom, bool)> = self.nodes[n as usize]
+        // A root a nominal merged into another node has that node's label; its facts hold
+        // of `n` only given the merges on the way.
+        let (s, dm) = self.canonical_dep(n);
+        let mut out: Vec<(Atom, bool)> = self.nodes[s as usize]
             .label
             .iter()
-            .map(|(&a, d)| (a, d.is_empty()))
+            .map(|(&a, d)| (a, dm.is_empty() && d.is_empty()))
             .collect();
         out.sort_unstable();
         out
@@ -400,10 +429,21 @@ impl<'c> Tableau<'c> {
 
     /// The node `n` was (transitively) merged into, or `n` itself.
     fn canonical(&self, mut n: Node) -> Node {
-        while let Some(&s) = self.merges.get(&n) {
-            n = s;
+        while let Some((s, _)) = self.merges.get(&n) {
+            n = *s;
         }
         n
+    }
+
+    /// [`canonical`](Self::canonical), with the branch points the merges on the way depend
+    /// on: a fact found at the canonical node holds of `n` only given those merges.
+    fn canonical_dep(&self, mut n: Node) -> (Node, Dep) {
+        let mut d = Dep::default();
+        while let Some((s, dd)) = self.merges.get(&n) {
+            d = d.union(dd);
+            n = *s;
+        }
+        (n, d)
     }
 
     /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
@@ -416,10 +456,15 @@ impl<'c> Tableau<'c> {
             if let Some(d) = self.clash.take() {
                 if !self.backtrack(d) {
                     return match self.undecided.take() {
-                        None => Ok(false),
                         Some(atoms) => Err(Stop::Undecided(self.data_axioms(&atoms))),
+                        None if self.unconfirmed => Err(Stop::Unconfirmed),
+                        None => Ok(false),
                     };
                 }
+                continue;
+            }
+            if let Some(n) = self.nominal_todo.pop() {
+                self.merge_nominal(n);
                 continue;
             }
             if let Some(x) = self.dirty.pop() {
@@ -441,6 +486,19 @@ impl<'c> Tableau<'c> {
                 continue;
             }
             if self.expand() {
+                continue;
+            }
+            if !self.unravels() {
+                // Not a verdict either way: close the branch on every choice made so far
+                // (chronological backtracking), so the search looks for a branch that does
+                // unravel.
+                self.unconfirmed = true;
+                let all: Vec<u32> = (0..self.branches.len() as u32).collect();
+                self.set_clash(if all.is_empty() {
+                    Dep::default()
+                } else {
+                    Dep(Some(Rc::from(all)))
+                });
                 continue;
             }
             return Ok(true);
@@ -528,10 +586,43 @@ impl<'c> Tableau<'c> {
         }
         self.trail.push(Undo::Concept(n, a));
         self.steps += 1;
-        if self.forbidden == Some((n, a)) {
-            self.set_clash(d.clone());
+        if let Some((f, fa)) = self.forbidden {
+            let (cf, df) = self.canonical_dep(f);
+            if fa == a && cf == n {
+                self.set_clash(d.union(&df));
+            }
+        }
+        if matches!(self.c.atoms[a as usize], AtomKind::Nominal(_)) {
+            self.nominal_todo.push(n);
         }
         self.mark_with_neighbours(n);
+    }
+
+    /// The nominal rule: a node labelled `{a}` is `a`'s node, so it is merged into it.
+    fn merge_nominal(&mut self, n: Node) {
+        if !self.nodes[n as usize].active {
+            // Merged away: its labels moved to the node it was merged into, which is queued
+            // in turn if it gained a nominal.
+            return;
+        }
+        let mut found: Option<(Node, Dep)> = None;
+        for (&a, d) in &self.nodes[n as usize].label {
+            if let AtomKind::Nominal(i) = self.c.atoms[a as usize] {
+                let (s, ds) = self.canonical_dep(i as Node);
+                if s != n {
+                    found = Some((s, d.union(&ds)));
+                    break;
+                }
+            }
+        }
+        self.charge(self.nodes[n as usize].label.len());
+        if let Some((s, d)) = found {
+            self.merge(n, s, &d);
+            // `n` may have survived (a root with a smaller id) and carry another nominal.
+            if self.nodes[n as usize].active {
+                self.nominal_todo.push(n);
+            }
+        }
     }
 
     fn has_role(&self, r: Role, a: Node, b: Node) -> bool {
@@ -615,6 +706,17 @@ impl<'c> Tableau<'c> {
             self.set_clash(clash);
             return;
         }
+        if let Some((f, fa)) = self.forbidden {
+            // The forbidden node becomes `s`: a forbidden atom `s` already has is a clash.
+            let (cf, df) = self.canonical_dep(f);
+            if cf == t {
+                if let Some(ds) = self.nodes[s as usize].label.get(&fa) {
+                    let clash = d.union(ds).union(&df);
+                    self.set_clash(clash);
+                    return;
+                }
+            }
+        }
         self.prune_descendants(t);
         let label: Vec<(Atom, Dep)> = self.nodes[t as usize]
             .label
@@ -642,7 +744,7 @@ impl<'c> Tableau<'c> {
             .collect();
         self.nodes[t as usize].active = false;
         self.trail.push(Undo::Deactivate(t));
-        self.merges.insert(t, s);
+        self.merges.insert(t, (s, d.clone()));
         self.trail.push(Undo::Merge(t));
         for (a, dd) in label {
             self.add_concept(s, a, &dd);
@@ -960,14 +1062,24 @@ impl<'c> Tableau<'c> {
             }
         }
         self.touched.clear();
+        // Nominal merges are done before any branch point is created, so a queued one is
+        // about a fact the undo just removed.
+        self.nominal_todo.clear();
         self.recheck_all = true;
     }
 
     // ---- ≥-rule and blocking -----------------------------------------------------------
 
     fn blocked(&self) -> Vec<bool> {
+        self.blocking().0
+    }
+
+    /// Per node: whether it is blocked (directly or through its parent), and whether it
+    /// blocks some node.
+    fn blocking(&self) -> (Vec<bool>, Vec<bool>) {
         let len = self.nodes.len();
         let mut blocked = vec![false; len];
+        let mut blocker = vec![false; len];
         let mut seen: FxHashMap<Vec<u32>, Node> = FxHashMap::default();
         for n in 0..len {
             let node = &self.nodes[n];
@@ -987,10 +1099,103 @@ impl<'c> Tableau<'c> {
                 std::collections::hash_map::Entry::Vacant(e) => {
                     e.insert(n as Node);
                 }
-                std::collections::hash_map::Entry::Occupied(_) => blocked[n] = true,
+                std::collections::hash_map::Entry::Occupied(e) => {
+                    blocked[n] = true;
+                    blocker[*e.get() as usize] = true;
+                }
             }
         }
-        blocked
+        (blocked, blocker)
+    }
+
+    /// Whether a complete, clash-free graph is known to unravel into a model.
+    ///
+    /// Without nominals every edge is a tree edge (parent to child) or joins two roots, and
+    /// pairwise blocking unravels the graph: each blocked node is replaced by a copy of its
+    /// blocker's subtree. A nominal merges a blockable node into a root, which leaves an edge
+    /// between a root and a blockable node that is not its child. Such an edge is copied with
+    /// the subtree it hangs from, and the model is still one as long as
+    ///
+    /// - no blocked node has one (it is dropped by the unravelling, together with what it
+    ///   gave the root),
+    /// - no edge joins two blockable nodes outside the tree (an at-most restriction at a
+    ///   root merged nodes of different subtrees), and
+    /// - where the blockable end is copied, no number restriction at the root can match two
+    ///   of its copies.
+    ///
+    /// Otherwise the answer is unconfirmed (SHOIQ needs the NI-rule here). A graph with no
+    /// blocked node is a finite model as it stands.
+    fn unravels(&self) -> bool {
+        let (blocked, blocker) = self.blocking();
+        if !blocked.contains(&true) {
+            return true;
+        }
+        let len = self.nodes.len();
+        // Copied: a blocker or inside a blocker's subtree (parents have smaller ids).
+        let mut copied = vec![false; len];
+        for n in 0..len {
+            let node = &self.nodes[n];
+            if !node.active || node.root {
+                continue;
+            }
+            copied[n] = blocker[n] || node.parent.is_some_and(|p| copied[p as usize]);
+        }
+        for (u, node) in self.nodes.iter().enumerate() {
+            if !node.active || node.concrete {
+                continue;
+            }
+            self.charge(node.adj.len());
+            for &v in node.adj.keys() {
+                let vn = &self.nodes[v as usize];
+                if v as usize == u || !vn.active {
+                    continue;
+                }
+                let tree = node.parent == Some(v) || vn.parent == Some(u as Node);
+                if tree || (node.root && vn.root) {
+                    continue;
+                }
+                // Only a root's edge to a blockable node is understood (each edge is seen
+                // from both ends; take it from the root's).
+                if vn.concrete || !(node.root || vn.root) {
+                    return false;
+                }
+                if !node.root {
+                    continue;
+                }
+                let w = v as usize;
+                if blocked[w] || (copied[w] && self.counts_copies(u as Node, v)) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Whether a clause with several neighbour variables (a number restriction) can apply
+    /// at root `s` with two of its variables bound to copies of `w`.
+    fn counts_copies(&self, s: Node, w: Node) -> bool {
+        let (sn, wn) = (&self.nodes[s as usize], &self.nodes[w as usize]);
+        let Some(rs) = sn.adj.get(&w) else {
+            return false;
+        };
+        for &ci in &self.index.multi_y {
+            self.probe();
+            let cl = &self.c.clauses[ci as usize];
+            if !cl.body_x.iter().all(|a| sn.label.contains_key(a)) {
+                continue;
+            }
+            let fits = self.index.ys[ci as usize]
+                .iter()
+                .filter(|(roles, atoms, _)| {
+                    roles.iter().all(|r| rs.contains(r))
+                        && atoms.iter().all(|a| wn.label.contains_key(a))
+                })
+                .count();
+            if fits >= 2 {
+                return true;
+            }
+        }
+        false
     }
 
     fn signature(&self, n: Node, p: Node) -> Vec<u32> {
