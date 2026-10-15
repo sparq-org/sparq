@@ -133,10 +133,11 @@
 //!   the seed count, fine for the small `n` this module targets and a further
 //!   reason it is a small-`n` tool.
 //! - **Degree-`<= t` inputs only**, checked and refused otherwise: the conversion
-//!   recombines from `t+1` points, so a degree-`2t` element (e.g. the oblivious
-//!   output stage's `selector * real_tag` product) would come back as a
+//!   recombines from `t+1` points, so a degree-`2t` element (e.g. an
+//!   un-re-randomised `selector * real_tag` product) would come back as a
 //!   well-formed degree-`t` sharing of a DIFFERENT secret. A caller with such a
-//!   column must degree-reduce it first.
+//!   column must degree-reduce it first — the oblivious output stage does, for
+//!   every selected element, before it shuffles.
 //! - **Fresh output sharings**, so the output is unlinkable to the input; no
 //!   caller may match entries by share equality.
 //! - **Ordered delivery is a TRANSPORT obligation, not enforced here.** Over real
@@ -604,11 +605,13 @@ impl PrssRandomness {
     /// points). For a sharing of degree `> t` that is simply a different secret:
     /// the output would be a well-formed degree-`t` sharing of the WRONG value, and
     /// because it is well-formed no later reconstruction could notice. The caller
-    /// most likely to hit this is the oblivious output stage, whose tag column is
-    /// the degree-`2t` product `selector * real_tag` packed alongside degree-`t`
-    /// payload limbs — a MIXED-degree entry (see
-    /// [`crate::oblivious_join::oblivious_set_output`]). So the degree is checked
-    /// and an unsupported sharing is refused.
+    /// case to watch for is a select product packed without re-randomisation: a
+    /// degree-`2t` `selector * real_tag` alongside degree-`t` payload limbs, a
+    /// MIXED-degree entry. The oblivious output stage degree-reduces every
+    /// selected element before it shuffles (see
+    /// [`crate::oblivious_join::oblivious_set_output`]), so it presents a
+    /// degree-`t` column; the degree is still checked here, and an unsupported
+    /// sharing from any caller is refused.
     ///
     /// ## What the check is, exactly
     ///
@@ -654,6 +657,14 @@ impl PrssRandomness {
                         .zip(ys)
                         .fold(Fp::zero(), |acc, (w, sh)| acc.add(w.mul(sh.y)));
                     if extrapolated != ys[*x - 1].y {
+                        // A note for any future PRSS integration of the oblivious
+                        // output stage: EVERY selected element must be
+                        // degree-reduced before the shuffle — the slot tags AND all
+                        // of their payload limbs, not the tags alone. Reducing only
+                        // the tags leaves the limbs as degree-`2t` products, which
+                        // this check refuses, and which an open would reveal more
+                        // of than their values.
+                        //
                         // Name the POSITION only. The two values compared here are
                         // a share and a function of t+1 shares, so printing either
                         // leaks secret-shared data into logs: at n = 3, t = 1 one
@@ -665,7 +676,7 @@ impl PrssRandomness {
                              degree-<= t sharing (t = {}): its share at x = {x} is off the \
                              polynomial through x = 1..={} (share values withheld). This \
                              construction recombines from t+1 points, so a higher-degree \
-                             sharing (e.g. the oblivious output stage's degree-2t selector-tag \
+                             sharing (e.g. an un-re-randomised degree-2t selector-tag \
                              product) would be silently re-interpreted as a different secret - \
                              degree-reduce it first",
                             self.t,
@@ -1935,9 +1946,11 @@ mod tests {
         ));
     }
 
-    /// A column packed the way the oblivious output stage packs one: a degree-`2t`
-    /// tag element (the `selector * real_tag` product) followed by degree-`t`
-    /// payload limbs, in one entry.
+    /// A column packed the way a select would pack one WITHOUT re-randomising the
+    /// product: a degree-`2t` tag element (the `selector * real_tag` product)
+    /// followed by degree-`t` payload limbs, in one entry. This is a fixture for
+    /// the degree check, not what the oblivious output stage builds — that stage
+    /// degree-reduces every selected element first.
     fn mixed_degree_column(
         backend: &ShamirBackend,
         rows: &[(u64, Vec<u64>)],
@@ -1947,7 +1960,7 @@ mod tests {
             .map(|(sel, limbs)| {
                 let selector = dealer.share(Fp::new(*sel));
                 let real_tag = dealer.share(Fp::one());
-                // Exactly what `oblivious_set_output` builds: degree 2t.
+                // A raw product, left un-reduced on purpose: degree 2t.
                 let mut entry = crate::shamir::mul_shares_raw(&selector, &real_tag).unwrap();
                 for limb in limbs {
                     entry.extend(dealer.share(Fp::new(*limb)));
@@ -1957,10 +1970,10 @@ mod tests {
             .collect()
     }
 
-    /// The MEDIUM from the #7079 review: a degree-`2t` element recombined from
-    /// `t+1` points would come back as a well-formed degree-`t` sharing of a
-    /// DIFFERENT secret, undetectable downstream. The output stage's own packed
-    /// layout is mixed-degree, so that is the case that must be refused.
+    /// A degree-`2t` element recombined from `t+1` points would come back as a
+    /// well-formed degree-`t` sharing of a DIFFERENT secret, undetectable
+    /// downstream. A mixed-degree packed entry is the shape that case arrives in,
+    /// so that is what must be refused.
     #[test]
     fn a_mixed_degree_packed_column_is_refused() {
         let n = 5;

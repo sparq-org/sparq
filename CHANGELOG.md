@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
+  and the host builds every lane's value-lane sub-proof inputs from typed operands.
+  `dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route `xsd:boolean`,
+  `xsd:dateTime` and `xsd:date` as well as `xsd:integer`, `xsd:decimal` and `xsd:double`, so a
+  graph committed under `DualLeafV2` carries a real value hook, under that datatype's own lane
+  constant, for every literal on them — which is what a value-lane FILTER member needs the
+  committed leaf to be. Two deliberate consequences. The three newly routed lanes inherit the
+  fail-closed ingest rule, so any lexical outside their §13.2 value domain (non-canonical spellings such as
+  `"1"^^xsd:boolean` or a `24:00:00` instant, and also XSD-canonical forms the domain excludes:
+  an untimezoned or non-`Z` `xsd:dateTime`/`xsd:date`, or more than three fraction digits) now fails the WHOLE commitment instead
+  of taking the degenerate string lane. And **a V2 commitment over a graph that CONTAINS a
+  literal on one of those three lanes changes**; every leaf on the three already-routed lanes,
+  every degenerate string-lane leaf, every IRI and blank-node leaf, and the whole-graph
+  commitment over a graph of only those are BYTE-IDENTICAL, pinned by a fixed vector captured
+  before the change. `DualLeafV1`'s routing is unchanged, so an already-issued V1 graph is
+  unaffected. Beside this, `build::build_filter_value_dl_{int, f64, decimal}(&Literal, FilterOp,
+  bound: &Literal)` complete the V2 builder set next to the existing `_bool` / `_datetime` /
+  `_date` entries, over ONE shared assembly: both operands go through the lane's own
+  `dual_leaf_v2` encoder, the COMMITTED literal's lane constant is carried, and the disclosed
+  verdict is COMPUTED by that member's host verdict mirror (`build::integer_verdict`,
+  `build::double_bits_verdict`, the shared `build::signed_epoch_verdict`) rather than taken from
+  the caller. The decimal lane rescales the FILTER constant to the committed literal's scale
+  EXACTLY — never rounded — refusing an inexact or overflowing rescale with
+  `BuildValueDlV2Error::DecimalScaleNotRepresentable`, through the same two functions
+  `value_pin` pins with. `BuiltFilterValueDlNumeric::lane_proof` feeds the checked typed prove
+  entry, so the `Prover.toml` is rendered from validated typed fields and never from caller TOML.
+  Every lane's builder output satisfies `value_pin::check_value_lane_pin` for the matching typed
+  FILTER, and changing any single pinned field of it — member, lane constant, op, bound, verdict
+  — is refused with that field's own `PinError`. **The value-lane verifier gates are UNCHANGED
+  and still CLOSED:** `verifier::prefilter_manifest_structure` refuses every value-lane sub-proof
+  at stage 0 with `CheckError::ValueLaneSubProofNotAccepted`, the stage-2 operand match,
+  `filter_edge_true` and `encode_pattern_slot` are untouched, and a test asserts per lane that a
+  manifest assembled entirely by these builders is still refused. Host-side Rust only; no `.nr`
+  source changed. Research grade, NOT externally audited (`sq-qhy4`); the value lanes carry the
+  #769-accepted INV-VL downgrade (CR-G8). No soundness or privacy claim.
+  <!-- privacy-claims-allow: opt-in host routing + build helpers; the INV-VL downgrade and the external audit are framed as OPEN obligations; the verifier gates are stated as unchanged and closed; asserts no soundness/privacy property; sq-qhy4 / CR-G8 -->
+
 - **sparq-zk-compose:** verifier-side **authenticated commitment method**. The verifier no longer has
   to assume which commitment method a committed graph was made under, and it does not read one from
   the manifest either — it RECOVERS it from the issuer signature. `method_auth` builds one candidate

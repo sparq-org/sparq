@@ -1562,11 +1562,32 @@ pub async fn delete_handler<S: Store>(
         // between a separate empty-check and a separate delete and be orphaned. A non-empty container
         // is a 409; an absent one a 404 (the precondition load above already 404'd a fully-absent
         // target, but the atomic op is the authoritative existence+empty decision).
-        match state
+        let mut outcome = state
             .store
             .delete_container_if_empty(&target.iri, parent.as_deref())
-            .await?
-        {
+            .await?;
+        // A container whose only members are linkset records of the LWS surface (listed by a
+        // legacy edge) is empty as the listing shows it: those records, which name nothing left in
+        // it, go first, and the delete is tried again.
+        if matches!(outcome, DeleteOutcome::NotEmpty) {
+            let members = state.store.list_children(&target.iri).await?;
+            if members
+                .iter()
+                .all(|c| crate::ldp::target::names_linkset_record(c.as_str()))
+            {
+                for record in &members {
+                    match state.store.delete(record.as_str(), Some(&target.iri)).await {
+                        Ok(()) | Err(ServerError::NotFound) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+                outcome = state
+                    .store
+                    .delete_container_if_empty(&target.iri, parent.as_deref())
+                    .await?;
+            }
+        }
+        match outcome {
             DeleteOutcome::Deleted => {
                 // EMIT only on an actual delete: Delete on the container + a derived Remove on its
                 // parent (membership shrank). NotEmpty/NotFound deleted nothing ⇒ no notification.
@@ -1895,11 +1916,12 @@ pub async fn patch_handler<S: Store>(
 /// response. The `read-method-support` / `read-method-allow` scenarios require OPTIONS ≠ 405 and an
 /// `Allow` listing GET + HEAD.
 pub async fn options_handler<S: Store>(
-    State(_state): State<Arc<LdpState<S>>>,
+    State(state): State<Arc<LdpState<S>>>,
     Extension(_token): Extension<VerifiedToken>,
     uri: axum::http::Uri,
 ) -> Result<Response, ServerError> {
-    let is_container = uri.path().ends_with('/');
+    // What no other method may address is not advertised either (see [`parse_target`]).
+    let is_container = parse_target(&state.base_url, uri.path())?.is_container;
     let mut out = HeaderMap::new();
     add_method_advertisement(&mut out, is_container);
     Ok((StatusCode::NO_CONTENT, out).into_response())
@@ -2167,6 +2189,8 @@ async fn sorted_children<S: Store>(
     container_iri: &str,
 ) -> Result<Vec<crate::store::ValidatedChildIri>, ServerError> {
     let mut children = state.store.list_children(container_iri).await?;
+    // A linkset record of the LWS surface is no member, whatever an edge to it says.
+    children.retain(|c| !crate::ldp::target::names_linkset_record(c.as_str()));
     children.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
     Ok(children)
 }
@@ -2245,9 +2269,13 @@ async fn ensure_ancestor_containers<S: Store>(
         prefix.push_str(seg);
         let container = format!("{prefix}/");
 
-        // A pre-existing NON-container at this path (the slash-less form) ⇒ conflict.
+        // A pre-existing NON-container at this path (the slash-less form) ⇒ conflict. A slash-less
+        // form naming a linkset record of the LWS surface is no resource, so it is not consulted.
         let slashless = prefix.clone();
-        if state.store.exists(&slashless).await? && !state.store.exists(&container).await? {
+        if !crate::ldp::target::names_linkset_record(&slashless)
+            && state.store.exists(&slashless).await?
+            && !state.store.exists(&container).await?
+        {
             return Err(ServerError::Conflict(
                 "an ancestor path already exists as a non-container resource".into(),
             ));
@@ -2284,6 +2312,11 @@ async fn reject_slash_semantics_conflict<S: Store>(
         // Resource `…/foo` collides with container `…/foo/`.
         format!("{}/", target.iri)
     };
+    // A linkset record of the LWS surface is no resource, so its name never conflicts (and is not
+    // consulted): a container `X.meta/` sits beside the record `X.meta`.
+    if crate::ldp::target::names_linkset_record(&opposite) {
+        return Ok(());
+    }
     if state.store.exists(&opposite).await? {
         return Err(ServerError::Conflict(
             "a resource and a container cannot share the same path (trailing-slash semantics)"
@@ -2599,7 +2632,11 @@ fn write_precondition_time(
     target: &crate::ldp::target::LdpTarget,
     recorded: Option<std::time::SystemTime>,
 ) -> Option<std::time::SystemTime> {
-    if target.is_container { None } else { recorded }
+    if target.is_container {
+        None
+    } else {
+        recorded
+    }
 }
 
 fn header_str(headers: &HeaderMap, name: HeaderName) -> Option<&str> {

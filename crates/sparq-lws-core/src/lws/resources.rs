@@ -8355,9 +8355,10 @@ mod tests {
         assert!(!st.locks.changing(&gone));
     }
 
-    /// Review finding: the test below let an unsettled write commit only once it was fenced, so
-    /// a create whose unsettled write was never removed, or was removed before it was fenced,
-    /// passed it. The write now commits while it cannot be fenced, and the undo still removes it.
+    /// Review finding: `a_failed_create_leaves_nothing_of_it_behind` let an unsettled write commit
+    /// only once it was fenced, so a create whose unsettled write was never removed, or was
+    /// removed before it was fenced, passed it. Here the write commits while it cannot be fenced,
+    /// and the undo still removes it.
     #[tokio::test]
     async fn an_unsettled_create_that_commits_before_its_fence_is_removed() {
         use super::super::test_store::{agent, closed_state, request as req, OWNER};

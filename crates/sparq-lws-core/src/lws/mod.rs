@@ -1086,6 +1086,8 @@ impl LwsRequest {
 /// Remove the member `iri` of `parent` (if any): its record and its parent's membership edge in
 /// one store step, so no failure can leave a live record its container no longer lists. Every
 /// removal of a member goes through here: resources, service records, expired subscriptions.
+/// (The one exception is an edge left to a linkset record already gone, which
+/// [`Journal::remove_member`] detaches alone.)
 /// A container that is not empty is not removed ([`crate::store::DeleteOutcome::NotEmpty`]).
 pub(crate) async fn remove_member<S: Store>(
     store: &S,
@@ -1639,7 +1641,9 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         let Some((body, meta)) = self.prior(iri).await? else {
             // A record a legacy edge lists may be gone already (its subject's removal took it):
             // the edge, which is all that is left, goes too, so it keeps no container from being
-            // empty. Nothing is there to put back.
+            // empty. The edge is not put back if the change is (it names nothing, and no LWS
+            // listing shows it), and it goes in a step of its own: with the record absent, no
+            // live member can be left unlisted by it.
             if let (true, Some(parent)) = (names_record(iri), parent) {
                 self.durable().await?;
                 match self.state.store.delete(iri, Some(parent)).await {
@@ -3677,7 +3681,8 @@ mod tests {
     /// Review finding: a member's record and its parent's membership edge were removed in two
     /// steps on some paths (service records, expired subscriptions), so a failure in between left
     /// a live record its container no longer listed. Every removal goes through
-    /// [`remove_member`]; this drives each one and counts the two-step deletes it makes.
+    /// [`remove_member`]; this drives each one and counts the two-step deletes it makes. (Only
+    /// an edge left to a record already gone is detached alone; no path here makes one.)
     #[tokio::test]
     async fn every_removal_takes_one_step() {
         use std::sync::atomic::Ordering;

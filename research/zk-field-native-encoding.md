@@ -1177,9 +1177,9 @@ public `bound` to `{0, 1}` (`v * (v - 1) == 0`). The shared integer member range
 its handle to the whole `u64` domain, which it legitimately needs, and adding constraints to
 it would move its gate count and its measured evidence — hence a separate member. V2's
 boolean lane targets it; V1's keeps sharing the integer member, unchanged. `xsd:boolean`,
-`xsd:dateTime` and `xsd:date` remain **unrouted** in the whole-graph builder for V2 as for
-V1 (§14.4), so their literals still take the string lane unless an encoder is called
-directly.
+`xsd:dateTime` and `xsd:date` are **routed** by the V2 whole-graph builder (§14.6); V1's
+routing (§14.4) is unchanged, so an already-issued V1 graph still takes the string lane for
+them.
 
 **(d) The lane↔member pairing and the issuance boundary are host-side policy.** Because
 `datatype_const` is an unpinned public input, the V2 boolean lane constant would also be
@@ -1258,9 +1258,9 @@ What is now COMPUTABLE but NOT ENFORCED (no verify path calls it):
   never rounded, which is the scale pin §14.5 previously recorded as unpinned — the op code after
   the `const op ?var` flip, the bound under the lane's own V2 encoder, and a `true` verdict. Each
   equality fails closed on its own. `scan_method` additionally requires every commitment a scan
-  draws from to have authenticated the SAME method, and `check_lane_routed` refuses a lane the
-  whole-graph builder does not route (so `xsd:boolean`, `xsd:dateTime` and `xsd:date` are refused
-  today).
+  draws from to have authenticated the SAME method, and `check_lane_routed` refuses a datatype the
+  whole-graph builder does not route to a value lane at all (since §14.6 all six value lanes are
+  routed, so every datatype the lane routing accepts passes that check).
 
 What is still NOT enforced, stated plainly:
 
@@ -1289,3 +1289,50 @@ so §14.3's registration of the circuit half is unchanged. Nor does
 anything here become an audited property: both dual-leaf versions carry the same INV-VL
 downgrade (value↔lexical agreement rests on trusted-issuer honesty) and the whole ZK estate
 remains NOT externally audited under CR-G8 / sq-qhy4.
+
+### 14.6 `DualLeafV2` routes all six value lanes, and the host builds every lane's inputs
+
+Two host-side gaps closed. Neither opens a verifier gate: the stage-0
+`ValueLaneSubProofNotAccepted` refusal, the stage-2 operand match, `filter_edge_true` and
+`encode_pattern_slot` are untouched, and a manifest assembled entirely by the builders below
+is still refused — a test asserts exactly that per lane.
+
+**(a) The whole-graph builder routes `xsd:boolean`, `xsd:dateTime` and `xsd:date`.**
+`dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route all six value lanes, so a
+graph committed under `DualLeafV2` carries a real value hook, under that datatype's own lane
+constant, for every literal on them. Before this, a value-lane FILTER on one of those three
+lanes bound an `operand_enc` no committed leaf of the graph was — which is why `value_pin`
+refused them as vacuous. Two consequences, both deliberate:
+
+- It **narrows what a V2 graph may contain**: the three lanes inherit §6's fail-closed rule, so
+  any lexical outside their §13.2 value domain (non-canonical spellings such as
+  `"1"^^xsd:boolean` or a `24:00:00` instant, and also XSD-canonical forms the domain excludes:
+  an untimezoned or non-`Z` `xsd:dateTime`/`xsd:date`, or more than three fraction digits) now fails the WHOLE commitment instead of taking the
+  degenerate string lane. That is the bargain the integer, decimal and double lanes already made.
+- It **re-bases those leaves**: a V2 commitment over a graph containing a literal on one of the
+  three changes. Every leaf on the three ALREADY-routed lanes, every degenerate string-lane
+  leaf, every IRI and blank-node leaf, and the whole-graph commitment over a graph of only those
+  are byte-unchanged; a fixed vector captured before the routing change pins both halves.
+
+`DualLeafV1`'s routing is unchanged, so an already-issued V1 graph is unaffected.
+
+**(b) The host builds the integer, double and decimal lanes' inputs from typed operands.**
+`sparq_zk_compose::build::build_filter_value_dl_{int, f64, decimal}` complete the set beside the
+existing `_bool` / `_datetime` / `_date` entries, over ONE shared assembly rather than three
+copies. Each takes the committed literal and the FILTER constant as `oxrdf::Literal`s, encodes
+BOTH with the lane's own V2 encoder (so the disclosed bound is the same field the committer
+would have folded, by the same code), carries the COMMITTED literal's lane constant, computes
+the verdict with that member's host verdict mirror (`integer_verdict` /
+`double_bits_verdict` / the shared `signed_epoch_verdict`) rather than taking it from the
+caller, and self-checks the lane↔member pairing. The decimal lane rescales the bound to the
+committed literal's scale **exactly** — the scale the member works at is the one folded into
+that literal's lane constant — and refuses a bound that would need rounding or would overflow
+a `u64`, through the same two functions `value_pin` pins with, so the builder's scale and the
+pin's scale cannot disagree. `BuiltFilterValueDlNumeric::lane_proof` hands the result to the
+checked typed prove entry, so the `Prover.toml` is rendered from validated typed fields and
+never from caller text.
+
+The composition is tested directly: every one of the six lanes' builder output satisfies
+`value_pin::check_value_lane_pin` for the matching typed FILTER, and changing any single pinned
+field of it — member, lane constant, op, bound, verdict — is refused with that field's own
+`PinError`.

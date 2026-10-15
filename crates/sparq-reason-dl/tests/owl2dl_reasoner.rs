@@ -293,10 +293,10 @@ fn unsatisfiable_classes() {
 
 #[test]
 fn out_of_fragment_constructs_answer_unknown() {
-    let (_, r) = run(&format!("{DECL} :A owl:hasKey ( :r ) ."));
+    let (_, r) = run(&format!("{DECL} :t owl:propertyChainAxiom ( :r :s ) ."));
     match r.consistency {
         Consistency::Unknown(UnknownReason::OutOfFragment { construct, source }) => {
-            assert_eq!(construct, "HasKey");
+            assert_eq!(construct, "ObjectPropertyChain");
             assert!(!source.is_empty());
         }
         other => panic!("expected OutOfFragment, got {other:?}"),
@@ -459,6 +459,99 @@ fn nominals_with_blocking_answer_or_abstain() {
         max(1, "[ owl:inverseOf :livesIn ]", "owl:Thing")
     );
     assert_eq!(verdict(&one), Consistency::Inconsistent);
+}
+
+// ---- keys -------------------------------------------------------------------------------
+
+#[test]
+fn keys_identify_named_individuals() {
+    let key = format!("{DECL} :A owl:hasKey ( :r ) . :a a :A ; :r :c . :b a :A ; :r :c .");
+    assert_eq!(verdict(&key), Consistency::Consistent);
+    assert_eq!(
+        verdict(&format!("{key} :a owl:differentFrom :b .")),
+        Consistency::Inconsistent
+    );
+    // A shared value on only one of the key's properties does not identify.
+    let partial = format!(
+        "{DECL} :A owl:hasKey ( :r :s ) . :a a :A ; :r :c . :b a :A ; :r :c . :a owl:differentFrom :b ."
+    );
+    assert_eq!(verdict(&partial), Consistency::Consistent);
+    // Membership derived through the TBox counts, and so does a complex key class.
+    let derived = format!(
+        "{DECL} [ a owl:Class ; owl:intersectionOf ( :A :B ) ] owl:hasKey ( [ owl:inverseOf :s ] ) .
+         :C rdfs:subClassOf :A , :B . :a a :C . :b a :A , :B . :c :s :a , :b . :a owl:differentFrom :b ."
+    );
+    assert_eq!(verdict(&derived), Consistency::Inconsistent);
+    // An inverse property expression in a key: `c` is an `r⁻`-value of both.
+    let inverse = format!(
+        "{DECL} owl:Thing owl:hasKey ( [ owl:inverseOf :r ] ) . :c :r :a , :b . :a owl:differentFrom :b ."
+    );
+    assert_eq!(verdict(&inverse), Consistency::Inconsistent);
+}
+
+#[test]
+fn keys_on_non_simple_properties_are_out_of_fragment() {
+    // `a t c t z` gives `a t z`, which a key on `t` would have to see.
+    let sub = ":t a owl:TransitiveProperty . :t rdfs:subPropertyOf :r .";
+    let chain = ":t owl:propertyChainAxiom ( :t :t ) .";
+    for (roles, key) in [
+        (sub, ":t"),
+        (sub, ":r"),
+        (sub, "[ owl:inverseOf :t ]"),
+        (chain, ":t"),
+    ] {
+        let body = format!(
+            "{DECL} {roles} owl:Thing owl:hasKey ( {key} ) .
+             :z a owl:NamedIndividual . :a :t [ :t :z ] . :b :t :z . :a owl:differentFrom :b ."
+        );
+        match verdict(&body) {
+            Consistency::Unknown(UnknownReason::OutOfFragment { construct, .. }) => {
+                assert!(construct.contains("HasKey"), "{construct}")
+            }
+            other => panic!("{key}: expected OutOfFragment, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn keys_ignore_anonymous_individuals() {
+    // The anonymous individual shares the key value with `a` but is not named, so it is
+    // not identified with `a` (which would put `a` in `B` and `¬B`).
+    let body = format!(
+        "{DECL} :A owl:hasKey ( :r ) . :a a :A , [ owl:complementOf :B ] ; :r :c .
+         :a :s [ a :A , :B ; :r :c ] ."
+    );
+    assert_eq!(verdict(&body), Consistency::Consistent);
+    // A class's members in general are not named either: keys do not change the hierarchy.
+    let body = format!(
+        "{DECL} :A owl:hasKey ( :r ) . :B rdfs:subClassOf :A , {} .",
+        has_value(":r", ":c")
+    );
+    assert!(!entails_sub(&body, "B", "C"));
+}
+
+#[test]
+fn data_keys_compare_values() {
+    let key = format!(
+        "{DDECL} :A owl:hasKey ( :d ) . :a a :A ; :d \"1\"^^xsd:int . :b a :A ; :d \"01\"^^xsd:integer ."
+    );
+    assert_eq!(
+        verdict(&format!("{key} :a owl:differentFrom :b .")),
+        Consistency::Inconsistent
+    );
+    let other = format!(
+        "{DDECL} :A owl:hasKey ( :d ) . :a a :A ; :d 1 . :b a :A ; :d 2 . :a owl:differentFrom :b ."
+    );
+    assert_eq!(verdict(&other), Consistency::Consistent);
+    // Values the reasoner has not fixed might coincide: no verdict rather than a guess.
+    let open = format!(
+        "{DDECL} :A owl:hasKey ( :d ) . :A rdfs:subClassOf {} . :a a :A . :b a :A . :a owl:differentFrom :b .",
+        dsome(":d", "xsd:integer")
+    );
+    assert_eq!(
+        verdict(&open),
+        Consistency::Unknown(UnknownReason::Unconfirmed)
+    );
 }
 
 #[test]
@@ -1316,7 +1409,6 @@ fn out_of_fragment_data_constructs_answer_unknown() {
     out(":T a rdfs:Datatype ; owl:equivalentClass [ a rdfs:Datatype ; owl:datatypeComplementOf :T ] .");
     out(":T a rdfs:Datatype ; owl:equivalentClass xsd:integer , xsd:string .");
     out(":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topDataProperty ; owl:someValuesFrom xsd:integer ] .");
-    out(":A owl:hasKey ( :d ) .");
     out(":a :d \"x\"^^<http://ex/unknownDatatype> .");
 }
 
@@ -1778,6 +1870,106 @@ fn oracle_differential_nominals() {
 }
 
 const NOMINAL_SEEDS: u64 = 400;
+
+/// The SHIQ corpus with keys: one to three `HasKey` axioms over object properties and a
+/// data property `:d0`, and an ABox of a few named individuals with role assertions,
+/// small-integer data assertions and the occasional `differentFrom`, so keys fire. Up to a
+/// tenth of the seeds may answer Unknown (values a key compares that are not fixed). Key
+/// object properties are simple: a key on a role with a transitive sub-role is refused.
+///
+/// Key properties are named: the reference reasoner ignores an `ObjectInverseOf` in a key
+/// (it finds `HasKey(⊤ (r⁻))` with `r(c, a)`, `r(c, b)` and `a ≠ b` consistent, but not the
+/// same key over a property declared `owl:inverseOf r`); the hand-written tests cover it.
+fn keys_corpus(seed: u64) -> String {
+    let mut out = Gen::ontology(seed);
+    let count = |what: &str| {
+        (0..)
+            .take_while(|i| out.contains(&format!(":{what}{i} a ")))
+            .count()
+    };
+    let (n_classes, n_roles) = (count("C"), count("r"));
+    // Keys are on simple roles only (a key on a role with a transitive sub-role is refused):
+    // a role is non-simple when it is transitive or above a non-simple one.
+    let mut simple: Vec<bool> = (0..n_roles)
+        .map(|i| !out.contains(&format!(":r{i} a owl:TransitiveProperty .")))
+        .collect();
+    for _ in 0..n_roles {
+        for a in 0..n_roles {
+            for b in 0..n_roles {
+                let below = out.contains(&format!(":r{a} rdfs:subPropertyOf :r{b} ."))
+                    || out.contains(&format!(
+                        "[ owl:inverseOf :r{a} ] rdfs:subPropertyOf [ owl:inverseOf :r{b} ] ."
+                    ));
+                if below && !simple[a] {
+                    simple[b] = false;
+                }
+            }
+        }
+    }
+    let simple: Vec<usize> = (0..n_roles).filter(|&i| simple[i]).collect();
+    let mut rng = Rng(seed.wrapping_mul(0xD1B5_4A32_D192_ED03) | 1);
+    let _ = writeln!(out, ":d0 a owl:DatatypeProperty .");
+    let n_ind = 2 + rng.below(4);
+    for i in 0..n_ind {
+        let _ = writeln!(out, ":k{i} a owl:NamedIndividual .");
+    }
+    for _ in 0..(1 + rng.below(3)) {
+        let class = if rng.chance(20) {
+            "owl:Thing".to_string()
+        } else {
+            format!(":C{}", rng.below(n_classes))
+        };
+        let mut props: Vec<String> = Vec::new();
+        for _ in 0..(1 + rng.below(2)) {
+            let r = rng.below(n_roles);
+            if !simple.is_empty() {
+                props.push(format!(":r{}", simple[r % simple.len()]));
+            }
+        }
+        if props.is_empty() || rng.chance(35) {
+            props.push(":d0".into());
+        }
+        props.dedup();
+        let _ = writeln!(out, "{class} owl:hasKey ( {} ) .", props.join(" "));
+    }
+    for _ in 0..(3 + rng.below(8)) {
+        let a = rng.below(n_ind);
+        match rng.below(10) {
+            0..=3 => {
+                let (r, b) = (rng.below(n_roles), rng.below(n_ind));
+                let _ = writeln!(out, ":k{a} :r{r} :k{b} .");
+            }
+            4..=6 => {
+                let c = rng.below(n_classes);
+                let _ = writeln!(out, ":k{a} a :C{c} .");
+            }
+            7 | 8 => {
+                let v = 1 + rng.below(3);
+                let _ = writeln!(out, ":k{a} :d0 {v} .");
+            }
+            _ => {
+                let b = rng.below(n_ind);
+                if a != b {
+                    let _ = writeln!(out, ":k{a} owl:differentFrom :k{b} .");
+                }
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn oracle_differential_keys() {
+    differential(
+        "keys",
+        keys_corpus,
+        KEY_SEEDS,
+        include_str!("data/owl2dl_oracle_keys_expected.txt"),
+        Some(10),
+    );
+}
+
+const KEY_SEEDS: u64 = 400;
 
 /// A second corpus aimed at the constructs earlier reviews found answers wrong for:
 /// negative property assertions over transitive roles and role hierarchies, `owl:Thing` and
