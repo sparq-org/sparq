@@ -603,25 +603,33 @@ impl<'c> Tableau<'c> {
                 // `run` reports the exhaustion before using anything.
                 return KeyStep::Merged;
             }
-            for (i, (x, dx)) in members.iter().enumerate() {
-                for (j, (y, dy)) in members.iter().enumerate().skip(i + 1) {
-                    // A pair scans the named individuals once per object property.
-                    if self.charge(1 + key.roles.len() * named.len()) {
+            let n = members.len();
+            let indexed = self.key_candidates(&values);
+            if self.over_budget() {
+                return KeyStep::Merged;
+            }
+            let pairs: Box<dyn Iterator<Item = (usize, usize)>> = match indexed {
+                Some(pairs) => Box::new(pairs.into_iter()),
+                None => Box::new((0..n).flat_map(move |i| (i + 1..n).map(move |j| (i, j)))),
+            };
+            for (i, j) in pairs {
+                let ((x, dx), (y, dy)) = (&members[i], &members[j]);
+                // A pair scans the named individuals once per object property.
+                if self.charge(1 + key.roles.len() * named.len()) {
+                    return KeyStep::Merged;
+                }
+                let shared = self.key_shared(key, *x, *y, &named, &values[i], &values[j]);
+                if self.over_budget() {
+                    // The value comparisons ran out of budget part way.
+                    return KeyStep::Merged;
+                }
+                match shared {
+                    Shared::No => {}
+                    Shared::Maybe => unsure = true,
+                    Shared::Yes(d) => {
+                        let d = d.union(dx).union(dy);
+                        self.merge(*x, *y, &d);
                         return KeyStep::Merged;
-                    }
-                    let shared = self.key_shared(key, *x, *y, &named, &values[i], &values[j]);
-                    if self.over_budget() {
-                        // The value comparisons ran out of budget part way.
-                        return KeyStep::Merged;
-                    }
-                    match shared {
-                        Shared::No => {}
-                        Shared::Maybe => unsure = true,
-                        Shared::Yes(d) => {
-                            let d = d.union(dx).union(dy);
-                            self.merge(*x, *y, &d);
-                            return KeyStep::Merged;
-                        }
                     }
                 }
             }
@@ -631,6 +639,51 @@ impl<'c> Tableau<'c> {
         } else {
             KeyStep::Done
         }
+    }
+
+    /// The member pairs `(i, j)`, `i < j`, in order, that a key with a data property might
+    /// identify: those sharing a fixed value on its first data property, or with a value not
+    /// fixed there on one side and any value on the other. Other pairs share no value there,
+    /// so [`key_shared`](Self::key_shared) would answer [`Shared::No`]. `None` (every pair)
+    /// for a key without data properties. One unit per value indexed and per pair returned.
+    fn key_candidates(&self, values: &[Vec<DataValues>]) -> Option<Vec<(usize, usize)>> {
+        if values.first().is_none_or(|v| v.is_empty()) {
+            return None;
+        }
+        let mut by_value: FxHashMap<&Value, Vec<usize>> = FxHashMap::default();
+        let mut unfixed = Vec::new();
+        for (i, v) in values.iter().enumerate() {
+            let (fixed, open) = &v[0];
+            if self.charge(fixed.len()) {
+                return Some(Vec::new());
+            }
+            for (value, _) in fixed {
+                by_value.entry(value).or_default().push(i);
+            }
+            if *open {
+                unfixed.push(i);
+            }
+        }
+        let mut pairs: Vec<(usize, usize)> = Vec::new();
+        for ms in by_value.values() {
+            for (a, &i) in ms.iter().enumerate() {
+                for &j in ms[a + 1..].iter().filter(|&&j| j != i) {
+                    pairs.push((i.min(j), i.max(j)));
+                }
+            }
+        }
+        // An unfixed value may equal any value, fixed or not, on the other side.
+        for &i in &unfixed {
+            for (j, v) in values.iter().enumerate() {
+                if j != i && (v[0].1 || !v[0].0.is_empty()) {
+                    pairs.push((i.min(j), i.max(j)));
+                }
+            }
+        }
+        pairs.sort_unstable();
+        pairs.dedup();
+        self.charge(pairs.len());
+        Some(pairs)
     }
 
     /// Whether `x` and `y` share a value on every property of `key`, and on what.

@@ -560,7 +560,7 @@ mod tests {
         }
     }
 
-    /// Data-key matching is metered: the value scans and the comparisons count towards the
+    /// Data-key matching is metered: the value scans and the value index count towards the
     /// budget, so a budget below them answers `ResourceBudget`.
     #[test]
     fn data_key_matching_is_inside_the_budget() {
@@ -589,8 +589,8 @@ mod tests {
         };
         let needed = work(&body);
         let without_key = work(&body.replace(":P owl:hasKey ( :d ) .", ""));
-        // Each pair compares its two value lists, `k` values each.
-        let comparisons = (n * (n - 1) / 2 * 2 * k) as u64;
+        // Every member's `k` values are read and indexed.
+        let comparisons = (n * k) as u64;
         assert!(
             needed - without_key >= comparisons,
             "{needed} - {without_key} < {comparisons}"
@@ -613,7 +613,8 @@ mod tests {
     }
 
     /// Metering keys does not cost a modest ABox its answer: each member's values are read
-    /// once per key, not once per pair, and object edges do not count as data scans twice.
+    /// once per key, and only members sharing a value are compared, so neither many members
+    /// nor many merges run the default budget out.
     #[test]
     fn data_keys_on_a_modest_abox_are_decided_under_the_default_budget() {
         let n = 300;
@@ -629,6 +630,25 @@ mod tests {
                 body.push_str(&format!(" ; :r :i{}", (i + j) % n));
             }
             body.push_str(" .\n");
+        }
+        let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        assert_eq!(
+            check(&d, &o, Budget::default()).consistency,
+            Consistency::Consistent
+        );
+        // Many merges: each pair of individuals shares its value, so the key merges half of
+        // them, one rule application at a time.
+        let mut body = String::from(
+            r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :P a owl:Class . :d a owl:DatatypeProperty . :P owl:hasKey ( :d ) .
+            "#,
+        );
+        for i in 0..n {
+            body.push_str(&format!(
+                ":i{i} a owl:NamedIndividual , :P ; :d {} .\n",
+                i / 2
+            ));
         }
         let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
         let o = extract(&d, &triples).unwrap();
