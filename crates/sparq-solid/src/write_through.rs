@@ -246,8 +246,9 @@ impl PodStore {
                 acl_iri, format, e
             )
         })?;
-        crate::loader::ControlWrites::new(&self.graph, acp)
-            .check(acl_iri, &crate::loader::graph_triples(&new_graph))
+        let content = crate::loader::graph_triples(&new_graph);
+        crate::loader::ControlWrites::replacing(&self.graph, acp, acl_iri, content.clone())
+            .check(acl_iri, &content)
             .map_err(|e| format!("put_acl denied: {e}"))?;
         let new_len = graph_len(&new_graph);
 

@@ -211,8 +211,17 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
     );
     let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
     store.materialize_acp().expect("materializes");
-    let controls = |store: &PodStore| store.decide(&sess(ADMIN), r, Mode::Control).allow;
-    assert!(controls(&store), "control: ADMIN controls r");
+    let decisions = |store: &PodStore| {
+        [r, acr.as_str(), other]
+            .iter()
+            .flat_map(|target| {
+                [Mode::Read, Mode::Write, Mode::Append, Mode::Control]
+                    .map(|mode| store.decide(&sess(ADMIN), target, mode).allow)
+            })
+            .collect::<Vec<bool>>()
+    };
+    let (before, stored) = (decisions(&store), snapshot(&store.graph));
+    assert!(store.decide(&sess(ADMIN), r, Mode::Control).allow, "control: ADMIN controls r");
     let link = format!("<{acr}#c> <{ACP}apply> <{other}#p>");
     let err = store
         .update_as_acp(
@@ -221,7 +230,8 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
         )
         .expect_err("the update is refused");
     assert!(err.contains("not admitted"), "{err}");
-    assert!(controls(&store), "nothing changed");
+    assert_eq!(decisions(&store), before, "no decision changed");
+    assert_eq!(snapshot(&store.graph), stored, "nothing was stored");
     let doc = format!(
         "<{acr}> <{ACP}accessControl> <{acr}#c> .\n\
          <{acr}#c> <{ACP}apply> <{acr}#p> .\n\
@@ -236,7 +246,30 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
         .put_acl_acp(&acr, &doc, "ntriples")
         .expect_err("the replace is refused");
     assert!(err.contains("not admitted"), "{err}");
-    assert!(controls(&store), "nothing changed");
+    assert_eq!(decisions(&store), before, "no decision changed");
+    assert_eq!(snapshot(&store.graph), stored, "nothing was stored");
+}
+
+/// Every stored quad outside the reserved space, sorted.
+fn snapshot(g: &Graph) -> Vec<String> {
+    let mut quads = Vec::new();
+    for (name, sub) in &g.named {
+        if name.to_string().starts_with("<urn:sparq:") {
+            continue;
+        }
+        let scan = sub.store.scan(&[None, None, None]);
+        for row in scan.rows.iter() {
+            let t = scan.to_spo(row);
+            quads.push(format!(
+                "{} {} {} {name}",
+                sub.dict.term(t[0]),
+                sub.dict.term(t[1]),
+                sub.dict.term(t[2])
+            ));
+        }
+    }
+    quads.sort();
+    quads
 }
 
 /// The same check refuses nothing it need not: a reference to a sound access-control
@@ -307,4 +340,77 @@ fn an_acr_may_take_up_a_sound_policy_and_be_repaired() {
             "ntriples",
         )
         .expect("no ACP check in a WAC store");
+    // Nor a statement about another document's node in a .acr, which the WAC loader filters
+    // per triple; and an ACP store likewise leaves a .acl to its loader.
+    store
+        .put_acl(
+            &racr,
+            &body("<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" .\n"),
+            "ntriples",
+        )
+        .expect("a .acr is not a WAC control document");
+    let nq = format!("{data}{}", quads(&racr, &body("")));
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    store.materialize_acp().expect("materializes");
+    store
+        .put_acl_acp(
+            &format!("{r}.acl"),
+            "<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" .\n",
+            "ntriples",
+        )
+        .expect("a .acl is not an ACP control document");
+}
+
+/// An update is judged in the state it leaves: one that takes up a sound policy while breaking
+/// its document is refused, and nothing is stored.
+#[test]
+fn an_update_is_judged_in_the_state_it_leaves() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let r = "https://pod.ex/r";
+    let acr = format!("{r}.acr");
+    let other = "https://pod.ex/other.acr";
+    let stray = "<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\"";
+    let nq = || {
+        let nq = format!(
+            "<{r}#it> <https://ex.dev/ns#k> \"v\" <{r}> .\n\
+             <https://pod.ex/other#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/other> .\n\
+             <{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .\n\
+             <{acr}#c> <{ACP}apply> <{acr}#p> <{acr}> .\n\
+             <{acr}#p> <{ACP}allow> <{ACL}Read> <{acr}> .\n\
+             <{acr}#p> <{ACP}allow> <{ACL}Write> <{acr}> .\n\
+             <{acr}#p> <{ACP}allow> <{ACL}Control> <{acr}> .\n\
+             <{acr}#p> <{ACP}anyOf> <{acr}#m> <{acr}> .\n\
+             <{acr}#m> <{ACP}agent> <{ADMIN}> <{acr}> .\n\
+             <{acr}.acr> <{ACP}accessControl> <{acr}.acr#c> <{acr}.acr> .\n\
+             <{acr}.acr#c> <{ACP}apply> <{acr}.acr#p> <{acr}.acr> .\n\
+             <{acr}.acr#p> <{ACP}allow> <{ACL}Write> <{acr}.acr> .\n\
+             <{acr}.acr#p> <{ACP}anyOf> <{acr}.acr#m> <{acr}.acr> .\n\
+             <{acr}.acr#m> <{ACP}agent> <{ADMIN}> <{acr}.acr> .\n\
+             <{other}#p> <{ACP}allow> <{ACL}Read> <{other}> .\n\
+             <{other}.acr> <{ACP}accessControl> <{other}.acr#c> <{other}.acr> .\n\
+             <{other}.acr#c> <{ACP}apply> <{other}.acr#p> <{other}.acr> .\n\
+             <{other}.acr#p> <{ACP}allow> <{ACL}Write> <{other}.acr> .\n\
+             <{other}.acr#p> <{ACP}anyOf> <{other}.acr#m> <{other}.acr> .\n\
+             <{other}.acr#m> <{ACP}agent> <{ADMIN}> <{other}.acr> .\n"
+        );
+        PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"))
+    };
+    let link = format!("<{acr}#c> <{ACP}apply> <{other}#p>");
+    // A sound other.acr broken in the same update: the statement other.acr may not make is
+    // refused, whichever order the update makes them in.
+    let mut store = nq();
+    store.materialize_acp().expect("materializes");
+    let stored = snapshot(&store.graph);
+    let err = store
+        .update_as_acp(
+            &sess(ADMIN),
+            &format!(
+                "INSERT DATA {{ GRAPH <{acr}> {{ {link} }} }} ; \
+                 INSERT DATA {{ GRAPH <{other}> {{ {stray} }} }}"
+            ),
+        )
+        .expect_err("the update is refused");
+    assert!(err.contains("may not state"), "{err}");
+    assert_eq!(snapshot(&store.graph), stored, "nothing was stored");
 }

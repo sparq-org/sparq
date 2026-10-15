@@ -173,49 +173,80 @@ fn refuse_inadmissible(doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
     }
 }
 
-/// The check of what one write adds to access-control documents: [`refuse_inadmissible`],
-/// and, in an ACP store, a statement that uses (as an access control, a policy or a matcher)
-/// a node of another access-control resource the loader rejects, which would reject the
-/// written one with it. The rejected set is computed at most once per write.
+/// The check of what one write adds to the access-control documents the active view reads
+/// (`.acr` under ACP, `.acl` under WAC, outside the reserved and skolem spaces and below an
+/// authority; the loader filters any other per triple): [`refuse_inadmissible`], and, in an
+/// ACP store, a statement that uses (as an access control, a policy or a matcher) a node of
+/// another access-control resource the loader would reject in the state the write leaves,
+/// which would reject the written one with it. The rejected set is computed at most once per
+/// write.
 pub(crate) struct ControlWrites<'g> {
     graph: &'g Graph,
     acp: bool,
+    /// A document whose content the write replaces, with its new content, when `graph` does
+    /// not hold it yet.
+    replaced: Option<(&'g str, Vec<[Term; 3]>)>,
     rejected: std::cell::OnceCell<FxHashSet<&'g str>>,
 }
 
 impl<'g> ControlWrites<'g> {
-    /// The check for a write to `graph` (the store before it) whose view is ACP when `acp`.
+    /// The check for a write that leaves the store as `graph`, whose view is ACP when `acp`.
     pub(crate) fn new(graph: &'g Graph, acp: bool) -> Self {
         ControlWrites {
             graph,
             acp,
+            replaced: None,
             rejected: std::cell::OnceCell::new(),
         }
     }
 
-    /// The control graphs the ACP loader reads from the store, but `except`.
+    /// The check for a write that replaces document `doc` of `graph` with `content`.
+    pub(crate) fn replacing(graph: &'g Graph, acp: bool, doc: &'g str, content: Vec<[Term; 3]>) -> Self {
+        ControlWrites {
+            replaced: Some((doc, content)),
+            ..Self::new(graph, acp)
+        }
+    }
+
+    /// The control graphs the ACP loader reads from the state the write leaves, but `except`.
     fn control_graphs(&self, except: Option<&str>) -> Vec<(&'g str, Vec<[Term; 3]>)> {
-        self.graph
+        let replaced = self.replaced.as_ref().map(|(doc, _)| *doc);
+        let mut graphs: Vec<(&'g str, Vec<[Term; 3]>)> = self
+            .graph
             .named
             .iter()
             .filter_map(|(n, g)| {
                 graph_iri(n)
-                    .filter(|iri| Some(*iri) != except && reads_as_control(iri, ACR_SUFFIX))
+                    .filter(|iri| {
+                        Some(*iri) != except
+                            && Some(*iri) != replaced
+                            && reads_as_control(iri, ACR_SUFFIX)
+                    })
                     .map(|iri| (iri, graph_triples(g)))
             })
-            .collect()
+            .collect();
+        if let Some((doc, content)) = &self.replaced {
+            if Some(*doc) != except && reads_as_control(doc, ACR_SUFFIX) {
+                graphs.push((doc, content.clone()));
+            }
+        }
+        graphs
     }
 
     /// Refuse `added` to the access-control document `doc`, naming the first statement it
     /// may not make.
     pub(crate) fn check(&self, doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
+        let suffix = if self.acp { ACR_SUFFIX } else { ACL_SUFFIX };
+        if !reads_as_control(doc, suffix) {
+            return Ok(());
+        }
         refuse_inadmissible(doc, added)?;
         let depends = |t: &[Term; 3]| {
             matches!((&t[1], &t[2]), (Term::NamedNode(p), Term::NamedNode(o))
                 if ACP_DEPENDENCY_PREDICATES.contains(&p.as_str())
                     && group_doc_of(o.as_str()) != doc)
         };
-        if !self.acp || !reads_as_control(doc, ACR_SUFFIX) || !added.iter().any(&depends) {
+        if !self.acp || !added.iter().any(&depends) {
             return Ok(());
         }
         let rejected = self

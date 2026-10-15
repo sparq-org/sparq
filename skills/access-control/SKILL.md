@@ -115,8 +115,11 @@ Materialize the authorization view from the access-control documents, then enfor
   an IRI containing `&client=`) as agent, member, origin, client or issuer, and use no
   `auth:`/`solidx:` predicate or class. Under ACP, an `.acr` that uses (as an access
   control, policy or matcher) a node of a rejected `.acr` is rejected with it. `put_acl*` and
-  `update_as*` refuse a write that would add such a triple, naming it (nothing changes; a
-  writer of one `.acr` can so learn whether another is rejected); a stored document holding
+  `update_as*` refuse a write that would add such a triple to a control document the active
+  view reads (`.acr` under ACP, `.acl` under WAC, neither reserved nor authority-less),
+  judged in the state the write leaves, naming it (nothing changes; a writer of one `.acr`
+  can so learn whether another is rejected); other documents are filtered per triple by the
+  loader; a stored document holding
   one is rejected whole by the loader, and the resources it governs (ACP: the resource and everything below it; WAC:
   everything the rejected ACL governs, stored or not) get no grant from any source, static,
   attached, bridged or trust. So a writer who embeds `<r> solidx:creator <self>` in a

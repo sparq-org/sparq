@@ -1671,7 +1671,8 @@ impl PodStore {
             update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &odrl)?;
         // A statement an access-control document may not make is refused here, rather than
         // left for the loader to reject the whole document (and with it its writer's Control).
-        let control_writes = loader::ControlWrites::new(&self.graph, acp);
+        // Judged in the state the update leaves.
+        let control_writes = loader::ControlWrites::new(&candidate, acp);
         for effect in &effects {
             if let sparq_engine::UpdateEffect::Delta {
                 slot: Some(Term::NamedNode(doc)),
