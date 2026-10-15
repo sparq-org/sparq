@@ -346,25 +346,55 @@ fn slot_pairs(slots: &[crate::oblivious_join::OutputSlot]) -> BTreeSet<(String, 
         .collect()
 }
 
-/// A source whose `(n, t)` differs from the backend's is refused before any draw.
+/// A source whose `(n, t)` differs from the backend's is refused by the up-front
+/// check in `eval_exact_k_chain_hidden_slots_through`, BEFORE the chain stage
+/// draws anything.
+///
+/// The shape matters: `k = 2` over the two-hop chain at `B = 4` is a shape whose
+/// OWN stage draws (the hop equalities' operand bits, then the AND fold's
+/// re-sharings — the sites `malformed_draws_in_the_chain_are_refused` aims at).
+/// A draw-free shape would be refused by the output stage's own
+/// `require_source_matches` even with the up-front check deleted, which is why
+/// the assertions below are on the draw count and not only on the error.
 #[test]
 fn exact_k_through_refuses_a_source_that_does_not_match_the_backend() {
-    use crate::randomness::test_sources::MisreportedThresholdSource;
-    let backend = ShamirBackend::new_seeded(3, 0x9A7C).unwrap();
-    let (edges, _) = hidden_edges(&[("http://ex/a", "http://ex/b")]);
-    let mut lying = MisreportedThresholdSource {
-        inner: backend.dealer(),
-        t: 0,
+    use crate::randomness::test_sources::{
+        DrawCountingSource, MisreportedThresholdSource, RecordingSource,
     };
-    let mut other = ShamirBackend::new_seeded(5, 0x9A7C).unwrap().dealer();
-    for source in [
-        &mut lying as &mut dyn crate::randomness::DistributedRandomness,
-        &mut other,
-    ] {
-        match eval_exact_k_chain_hidden_slots_through(source, &backend, &edges, 1, 1) {
-            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
-            other => panic!("a mismatched source must be refused, got {other:?}"),
+    let backend = ShamirBackend::new_seeded(3, 0x9A7C).unwrap();
+    let (edges, _) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+
+    // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
+    // whether anything was drawn before the refusal.
+    let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0x9A7C).unwrap().dealer());
+    match eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 4) {
+        Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+        other => panic!("a wrong-n source must be refused, got {other:?}"),
+    }
+    assert!(
+        rec.log.is_empty(),
+        "drew {} times before refusing",
+        rec.log.len()
+    );
+
+    // Misreported `t`: every sharing such a source returns is canonically SHAPED
+    // for the backend's `n`, so no downstream shape check can catch it — only the
+    // source-match check can. Counted through a wrapper, since `RecordingSource`
+    // wraps a real dealer and so cannot misreport a threshold.
+    for t in [0, 2] {
+        let mut lying = MisreportedThresholdSource {
+            inner: backend.dealer(),
+            t,
+        };
+        let mut counted = DrawCountingSource::new(&mut lying);
+        match eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, 4) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
+            other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
         }
+        assert_eq!(counted.draws(), 0, "t={t}: drew before refusing");
     }
 }
 

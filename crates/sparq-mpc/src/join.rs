@@ -2867,6 +2867,12 @@ mod randomness_seam_tests {
     /// `draw_nonzero_fp` + `share` pair to `shared_nonzero_mask`), asserted here
     /// unchanged: the routing appended an output-stage SUFFIX and moved nothing in
     /// the key/mask part. The full-log fingerprints are the new pins.
+    ///
+    /// The third case (`B = 5`, padding two pure-dummy slots onto the same three
+    /// candidates) is a NEW fixture: its method list and full-log fingerprint were
+    /// captured on the current code, so they pin today's behaviour forward and
+    /// make no pre-routing claim. Its PREFIX, however, is asserted against the
+    /// same pre-routing pin as the `B = 3` case.
     #[test]
     fn seeded_batched_join_transcripts_are_pinned() {
         use crate::randomness::test_sources::{fingerprint, RecordingSource};
@@ -2911,6 +2917,35 @@ mod randomness_seam_tests {
         );
         assert_eq!(fingerprint(&rec.log[..6]), 0xbd36_3090_bbad_ff3c);
         assert_eq!(fingerprint(&rec.log), 0xd02a_c43b_ebf5_4891);
+
+        // `B = 5` over the SAME three candidates: the output stage pads with two
+        // PURE-DUMMY slots on top of the three real ones. That padding branch is
+        // where a regression can hide — a `bound > candidates.len()` special case
+        // that fell back to minting a dealer for the output stage would leave this
+        // log with only the key/mask prefix. The prefix fingerprint is the SAME pin
+        // as the `B = 3` case above (same backend seed, same first nine draws):
+        // only the output suffix differs with `B`.
+        let b = ShamirBackend::new_seeded(5, 0xBA7C1).unwrap();
+        let join = HiddenValueJoin::new(b.clone());
+        let (l, r) = positional_pair();
+        let mut rec = RecordingSource::new(b.dealer());
+        join.batched_join_through(&mut rec, &l, &r, 5).unwrap();
+        let methods: Vec<&str> = rec.log.iter().map(|(m, _)| *m).collect();
+        assert_eq!(
+            methods,
+            [
+                ["vss_own_input"; 6].as_slice(),
+                &["shared_nonzero_mask"; 3],
+                // Five slots now, at the same five sharings per slot as the
+                // `B = 3` case (15 for three), then one shuffle over all five.
+                &["vss_own_input"; 25],
+                &["oblivious_shuffle"],
+            ]
+            .concat()
+        );
+        // Same prefix pin as `B = 3`: `B` changes only the output suffix.
+        assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
+        assert_eq!(fingerprint(&rec.log), 0x604f_aace_76d7_9bee);
     }
 
     /// Every key sharing (any row of either column), every equality mask AND every
@@ -3123,5 +3158,32 @@ mod randomness_seam_tests {
             join.batched_join_through(&mut prss, &l, &r, 3),
             Err(MpcError::NotYetImplemented { .. })
         ));
+    }
+
+    /// EMPTY inputs on both sides: no key to share and no candidate to compare,
+    /// so the key/equality stages draw nothing at all. The join must still fail
+    /// closed under PRSS, because the OUTPUT stage draws through the same source
+    /// for its `B = 2` pure-dummy slots (#6117 step 6). Before that routing this
+    /// shape ran to completion under PRSS, since the output stage minted its own
+    /// dealer and never touched the caller's source — so this is the shape that
+    /// pins the routing rather than the key dealing.
+    #[test]
+    fn prss_fails_closed_on_an_empty_batched_join_whose_only_draws_are_the_output_stage() {
+        let backend = ShamirBackend::new(5).unwrap();
+        let join = HiddenValueJoin::new(backend);
+        let empty = |holder: &str, var: &str| input(holder, var, &[], RowBinding::Positional);
+        let (l, r) = (empty("L", "l"), empty("R", "r"));
+        // The key dealing itself is draw-free here: an empty column shares nothing,
+        // so PRSS has nothing to refuse and succeeds.
+        let mut prss = PrssRandomness::with_simulated_setup(5).unwrap();
+        assert!(l.shared_keys_through(&mut prss, 5).is_ok());
+        // The whole join nonetheless fails closed — the refusal comes from the
+        // output stage, which is only reachable because it draws from `prss`.
+        let outcome = join.batched_join_through(&mut prss, &l, &r, 2);
+        assert!(
+            matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
+            "got {:?}",
+            outcome
+        );
     }
 }
