@@ -309,49 +309,80 @@ fn malformed_key_sharings_are_refused() {
     }
 }
 
-/// A source whose `(n, t)` differs from the backend's is refused before any draw.
+/// A source whose `(n, t)` differs from the backend's is refused by the up-front
+/// check in `distinct_hidden_pairs_slots_through`, BEFORE the sort-and-scan
+/// stage draws anything.
+///
+/// The shape matters: three pairs (one a duplicate) at `B = 4` is a shape whose
+/// OWN stage draws — each row's two keys are shared as the holder's own input
+/// before any comparison, the sites `malformed_key_sharings_are_refused` aims
+/// at. With the up-front check deleted, the output stage's own
+/// `require_source_matches` would still raise the same error, so the assertions
+/// below are on the draw count and not only on the error.
 #[test]
 fn distinct_through_refuses_a_source_that_does_not_match_the_backend() {
-    use crate::randomness::test_sources::MisreportedThresholdSource;
-    let backend = ShamirBackend::new_seeded(3, 0xD15C9).unwrap();
-    let pairs = vec![pair(1, 2, "a", "b")];
-    let mut lying = MisreportedThresholdSource {
-        inner: backend.dealer(),
-        t: 0,
+    use crate::randomness::test_sources::{
+        DrawCountingSource, MisreportedThresholdSource, RecordingSource,
     };
-    let mut other = ShamirBackend::new_seeded(5, 0xD15C9).unwrap().dealer();
-    for source in [
-        &mut lying as &mut dyn crate::randomness::DistributedRandomness,
-        &mut other,
-    ] {
-        match distinct_hidden_pairs_slots_through(source, &backend, &pairs, 1) {
-            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
-            other => panic!("a mismatched source must be refused, got {other:?}"),
+    let backend = ShamirBackend::new_seeded(3, 0xD15C9).unwrap();
+    let pairs = vec![
+        pair(1, 2, "a", "b"),
+        pair(5, 6, "e", "f"),
+        pair(1, 2, "a", "b"),
+    ];
+
+    // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
+    // whether anything was drawn before the refusal.
+    let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0xD15C9).unwrap().dealer());
+    match distinct_hidden_pairs_slots_through(&mut rec, &backend, &pairs, 4) {
+        Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+        other => panic!("a wrong-n source must be refused, got {other:?}"),
+    }
+    assert!(
+        rec.log.is_empty(),
+        "drew {} times before refusing",
+        rec.log.len()
+    );
+
+    // Misreported `t`: canonically SHAPED sharings, so only the source-match
+    // check can catch it. Counted through a wrapper, since `RecordingSource`
+    // wraps a real dealer and so cannot misreport a threshold.
+    for t in [0, 2] {
+        let mut lying = MisreportedThresholdSource {
+            inner: backend.dealer(),
+            t,
+        };
+        let mut counted = DrawCountingSource::new(&mut lying);
+        match distinct_hidden_pairs_slots_through(&mut counted, &backend, &pairs, 4) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
+            other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
         }
+        assert_eq!(counted.draws(), 0, "t={t}: drew before refusing");
     }
 }
 
-/// Under PRSS only the draw-free shape runs: an empty DISTINCT draws nothing from
-/// the source. Any row needs its keys shared as the holder's own input, which PRSS
-/// refuses — so the DISTINCT fails closed with PRSS's own `NotYetImplemented`.
+/// Under PRSS EVERY shape fails closed, never panics. A row needs its keys shared
+/// as the holder's own input, which PRSS refuses; and since #6117 step 6 routed the
+/// output stage through the same source, so does the EMPTY DISTINCT — the output
+/// stage always shares the real-row tag and the payload limbs for its `B`
+/// pure-dummy slots, so there is no longer a draw-free shape here. (Before the
+/// routing the empty case ran, because the output stage minted its own dealer and
+/// never touched the caller's source.)
 #[test]
-fn prss_runs_only_the_draw_free_distinct_and_fails_closed_otherwise() {
+fn prss_fails_closed_on_every_distinct_shape() {
     use crate::prss::PrssRandomness;
     let backend = ShamirBackend::new_seeded(3, 0xD15CA).unwrap();
     let mut prss = PrssRandomness::with_simulated_setup(3).unwrap();
-    let (slots, cost) = distinct_hidden_pairs_slots_through(&mut prss, &backend, &[], 2).unwrap();
-    assert_eq!(slots.len(), 2);
-    assert!(slots.iter().all(|s| matches!(s, OutputSlot::Dummy)));
-    assert_eq!(cost.rows, 0);
-
     for pairs in [
+        vec![],
         vec![pair(1, 2, "a", "b")],
         vec![pair(1, 2, "a", "b"), pair(1, 2, "a", "b")],
     ] {
         let outcome = distinct_hidden_pairs_slots_through(&mut prss, &backend, &pairs, 2);
         assert!(
             matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
-            "PRSS must refuse to share the keys, got {outcome:?}"
+            "PRSS must fail closed over {} rows, got {outcome:?}",
+            pairs.len()
         );
     }
 }
@@ -425,27 +456,56 @@ fn seeded_distinct_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
     );
     assert_eq!(dealer.draw_fp().value(), 888758199960741934);
 
+    // The REVEALED slot ORDER moved in #6117 step 6 (it was
+    // ["dummy", "dummy", "<http://ex/a> <http://ex/b>", "<http://ex/e> <http://ex/f>"]):
+    // the output stage now draws its sharings and its shuffle from the SAME source
+    // as the sort-and-scan stage instead of minting a second dealer, so the
+    // shuffle samples a different point of one continuous keystream. The order is
+    // the shuffle's secret permutation and carries no result meaning — the
+    // canonicalised multiset below is what the recipient sees, and it is
+    // byte-identical to the pre-routing capture.
     let expected_slots = [
+        "<http://ex/e> <http://ex/f>",
         "dummy",
         "dummy",
         "<http://ex/a> <http://ex/b>",
+    ];
+    let canonical = [
+        "<http://ex/a> <http://ex/b>",
         "<http://ex/e> <http://ex/f>",
+        "dummy",
+        "dummy",
     ];
     let (slots, cost) = distinct_hidden_pairs_slots(&backend, &pairs, 4).unwrap();
     assert_eq!(slot_strings(&slots), expected_slots);
+    let mut sorted = slot_strings(&slots);
+    sorted.sort();
+    assert_eq!(sorted, canonical, "revealed multiset must be unchanged");
     assert_eq!(
         (cost.sort_compare_exchanges, cost.adjacent_equalities),
         (3, 2)
     );
+    // `distinct_hidden_pairs_oblivious` draws both stages from ONE dealer too, so
+    // it reveals exactly the same slots in the same order.
     let (slots, _) = distinct_hidden_pairs_oblivious(&backend, &pairs, 4).unwrap();
     assert_eq!(slot_strings(&slots), expected_slots);
 }
 
 /// The COMPLETE draw sequence, not just its length: every seam call the stage
 /// makes, in order, with every `y` it returned, folded into an order-sensitive
-/// fingerprint. Captured on the pre-routing code (same discipline as above). A
-/// reordering, a swapped method or a changed value fails here even when the
-/// witness draw count and the keep bits happen to agree.
+/// fingerprint. A reordering, a swapped method or a changed value fails here even
+/// when the witness draw count and the keep bits happen to agree.
+///
+/// **This is the #6117-step-6 guard.** The transcript now ends in the output
+/// stage's 29 `vss_own_input` draws and its `oblivious_shuffle`: if
+/// `distinct_hidden_pairs_slots_through` went back to minting its own dealer for
+/// the output stage the log would stop at 8418 entries and both the length and the
+/// suffix assertion would fail.
+///
+/// The 8418-entry PREFIX is the pre-routing whole-log pin
+/// (`0x5455_9ace_20c7_0f97`, captured on the pre-routing code), asserted here
+/// unchanged: the routing appended an output-stage SUFFIX and moved nothing in the
+/// sort-and-scan part. The full-log fingerprint is the new pin.
 #[test]
 fn seeded_distinct_stage_transcript_is_pinned() {
     use crate::randomness::test_sources::{fingerprint, RecordingSource};
@@ -457,6 +517,13 @@ fn seeded_distinct_stage_transcript_is_pinned() {
     ];
     let mut rec = RecordingSource::new(backend.dealer());
     distinct_hidden_pairs_slots_through(&mut rec, &backend, &pairs, 4).unwrap();
-    assert_eq!(rec.log.len(), 8418);
-    assert_eq!(fingerprint(&rec.log), 0x5455_9ace_20c7_0f97);
+    assert_eq!(rec.log.len(), 8448);
+    // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
+    assert_eq!(fingerprint(&rec.log[..8418]), 0x5455_9ace_20c7_0f97);
+    assert_eq!(fingerprint(&rec.log), 0xa636_3f2c_e548_9f86);
+    let suffix: Vec<&str> = rec.log[8418..].iter().map(|(m, _)| *m).collect();
+    assert_eq!(
+        suffix,
+        [["vss_own_input"; 29].as_slice(), &["oblivious_shuffle"]].concat()
+    );
 }

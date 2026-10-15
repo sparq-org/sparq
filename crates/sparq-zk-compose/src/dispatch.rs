@@ -584,10 +584,13 @@ fn value_lane_field_hexes(
 ///
 /// PRECONDITION, stated plainly: this is a HOST-side boundary on what this crate
 /// builds, renders and proves, plus a structural pre-filter refusal verifier-side.
-/// The value-lane verifier GATES (`verifier.rs`'s stage-2 binding edges and
-/// `filter_edge_true`) stay closed until the verifier authenticates the commitment
-/// method and pins member, lane, scale and bound itself; a check here does not
-/// make a value-lane proof verifier-enforced.
+/// The verifier now does AUTHENTICATE the commitment method from the issuer
+/// signature ([`crate::method_auth`]) and can compute the member, lane, scale and
+/// bound a value-lane sub-proof would need ([`crate::value_pin`]) — but the
+/// value-lane verifier GATES are still CLOSED: `verifier.rs` refuses every
+/// value-lane sub-proof unconditionally at stage 0, and its stage-2 binding edges
+/// and `filter_edge_true` are unchanged. Neither a check here nor a computed pin
+/// makes a value-lane proof verifier-enforced.
 #[cfg(feature = "dual-leaf")]
 pub fn check_lane_const_for_member(
     circuit: &CircuitId,

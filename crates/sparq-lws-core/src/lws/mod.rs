@@ -811,7 +811,15 @@ impl<S: Store + 'static> LwsState<S> {
     /// ([`LwsState::touch_owed`]): those whose kept changes' touches waited at start, and the
     /// one a settled [`Undo::Resolve`] listed.
     pub(crate) fn set_aside<L: Send + 'static>(&self, left: Unsettled, locks: L) {
-        let hidden = self.hide(&left);
+        let hidden = self.hide(&left, true);
+        self.settle_aside(left, hidden, locks);
+    }
+
+    /// Set aside `left` as [`LwsState::set_aside`] does, but hide only its own resources: for a
+    /// change no container lists (a create whose content was never written), so its containers
+    /// stay visible and their locks need not be held.
+    pub(crate) fn set_aside_unlisted<L: Send + 'static>(&self, left: Unsettled, locks: L) {
+        let hidden = self.hide(&left, false);
         self.settle_aside(left, hidden, locks);
     }
 
@@ -827,7 +835,7 @@ impl<S: Store + 'static> LwsState<S> {
     /// Hide each of `all`, to be put back by [`LwsState::settle_hidden`]: until then nothing of
     /// them is put back, so what is not visible stays so.
     pub(crate) fn hide_all(&self, all: Vec<Unsettled>) -> Hidden {
-        let hidden: Vec<_> = all.iter().map(|left| self.hide(left)).collect();
+        let hidden: Vec<_> = all.iter().map(|left| self.hide(left, true)).collect();
         Hidden(all.into_iter().zip(hidden).collect())
     }
 
@@ -838,16 +846,18 @@ impl<S: Store + 'static> LwsState<S> {
         }
     }
 
-    /// Hide the resources of `left` and the containers listing them, and count what it holds to
-    /// put back: what [`LwsState::settle_aside`] undoes once it is back.
-    fn hide(&self, left: &Unsettled) -> (Vec<String>, usize) {
+    /// Hide the resources of `left` and, when `listed`, the containers listing them, and count
+    /// what it holds to put back: what [`LwsState::settle_aside`] undoes once it is back.
+    fn hide(&self, left: &Unsettled, listed: bool) -> (Vec<String>, usize) {
         let storage = self.cfg.storage();
         let mut iris = left.iris();
-        let parents: Vec<String> = iris
-            .iter()
-            .filter_map(|i| resources::parent_of(i, &storage))
-            .collect();
-        iris.extend(parents);
+        if listed {
+            let parents: Vec<String> = iris
+                .iter()
+                .filter_map(|i| resources::parent_of(i, &storage))
+                .collect();
+            iris.extend(parents);
+        }
         iris.sort();
         iris.dedup();
         let bytes = left.bytes();
@@ -1131,6 +1141,9 @@ pub(crate) enum Undo {
     },
     /// A member that may have been created, removed from its container (see [`records::delete_record`]).
     Remove { iri: String, parent: String },
+    /// A write that failed unsettled, fenced so that it can no longer commit: the steps after it
+    /// put back what it may have written, and must not be outlived by it.
+    Fence { fence: crate::store::Fence },
     /// Nothing to put back: a resource the change holds the lock of without having changed it
     /// (one a recursive delete had not yet removed). It is set aside with the change, so nobody
     /// waits on that lock while the rest is put back.
@@ -1184,6 +1197,7 @@ impl Undo {
                     .map(drop)
             }
             Undo::Remove { iri, parent } => records::delete_record(store, iri, parent).await,
+            Undo::Fence { fence } => store.fence(fence).await,
             Undo::Locked { .. } => Ok(()),
             Undo::Forget { record, .. } => intents::clear(store, record).await,
             Undo::Resolve { record, undo, .. } => {
@@ -1206,6 +1220,7 @@ impl Undo {
                 .chain(parent.as_deref())
                 .collect(),
             Undo::Remove { iri, parent } => vec![iri, parent],
+            Undo::Fence { .. } => Vec::new(),
             Undo::Locked { iri } => vec![iri],
             Undo::Forget { iris, .. } | Undo::Resolve { iris, .. } => {
                 iris.iter().map(String::as_str).collect()
@@ -1273,7 +1288,7 @@ fn bytes_of(undo: &[Undo]) -> usize {
                 ..
             }
             | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
-            Undo::Locked { .. } | Undo::Forget { .. } => 0,
+            Undo::Fence { .. } | Undo::Locked { .. } | Undo::Forget { .. } => 0,
             Undo::Resolve { undo, .. } => bytes_of(undo),
             _ => MAX_META_BYTES,
         })
@@ -1372,7 +1387,7 @@ fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) 
                 priors_of(undo, out);
                 continue;
             }
-            Undo::Locked { .. } | Undo::Forget { .. } => continue,
+            Undo::Fence { .. } | Undo::Locked { .. } | Undo::Forget { .. } => continue,
         };
         out.entry(iri).or_default().or(prior);
     }

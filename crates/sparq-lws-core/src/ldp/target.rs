@@ -22,6 +22,25 @@ pub struct LdpTarget {
     pub is_container: bool,
 }
 
+/// The suffix the LWS surface stores a resource's linkset record under (`crate::lws::META_SUFFIX`,
+/// which is not built for every target this module is).
+const LINKSET_RECORD_SUFFIX: &str = ".meta";
+
+/// Whether `path` names, or lies under, a linkset record of the LWS surface: any segment ends in
+/// `.meta` (ASCII case-insensitive), as sent or %-decoded. A container `X.meta/` and anything
+/// under it are refused too, so a stored record decides no LDP outcome (the slash rule would
+/// otherwise probe it). `path` is the path alone, without query or fragment. Used only to refuse.
+pub(crate) fn is_linkset_record_path(path: &str) -> bool {
+    let names_record = |path: &str| {
+        path.split('/').any(|seg| {
+            seg.len() >= LINKSET_RECORD_SUFFIX.len()
+                && seg.as_bytes()[seg.len() - LINKSET_RECORD_SUFFIX.len()..]
+                    .eq_ignore_ascii_case(LINKSET_RECORD_SUFFIX.as_bytes())
+        })
+    };
+    names_record(path) || names_record(&crate::identity::percent_decode_lossy(path))
+}
+
 /// Parse a request path against the public base URL into an [`LdpTarget`].
 ///
 /// `base` is the server's public origin (e.g. `https://pod.example`), WITHOUT a trailing slash.
@@ -49,6 +68,14 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     // first (outermost); this check is the belt-and-braces chokepoint covering every handler and
     // any internally-constructed target re-validated through `parse_target`.
     if crate::identity::is_reserved_identity_path(path_only) {
+        return Err(ServerError::NotFound);
+    }
+
+    // The LWS surface keeps each resource's linkset record at `{resource}.meta` in the same
+    // store (`crate::lws::META_SUFFIX`). Where both surfaces share a store, such a name is that
+    // record and never an LDP resource, so it, and any path through such a name, is refused
+    // OUTRIGHT here as well: 404, in any case, %-decoded too, whichever surfaces are enabled.
+    if is_linkset_record_path(path_only) {
         return Err(ServerError::NotFound);
     }
 

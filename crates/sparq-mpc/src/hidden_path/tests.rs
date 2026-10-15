@@ -346,25 +346,55 @@ fn slot_pairs(slots: &[crate::oblivious_join::OutputSlot]) -> BTreeSet<(String, 
         .collect()
 }
 
-/// A source whose `(n, t)` differs from the backend's is refused before any draw.
+/// A source whose `(n, t)` differs from the backend's is refused by the up-front
+/// check in `eval_exact_k_chain_hidden_slots_through`, BEFORE the chain stage
+/// draws anything.
+///
+/// The shape matters: `k = 2` over the two-hop chain at `B = 4` is a shape whose
+/// OWN stage draws (the hop equalities' operand bits, then the AND fold's
+/// re-sharings — the sites `malformed_draws_in_the_chain_are_refused` aims at).
+/// A draw-free shape would be refused by the output stage's own
+/// `require_source_matches` even with the up-front check deleted, which is why
+/// the assertions below are on the draw count and not only on the error.
 #[test]
 fn exact_k_through_refuses_a_source_that_does_not_match_the_backend() {
-    use crate::randomness::test_sources::MisreportedThresholdSource;
-    let backend = ShamirBackend::new_seeded(3, 0x9A7C).unwrap();
-    let (edges, _) = hidden_edges(&[("http://ex/a", "http://ex/b")]);
-    let mut lying = MisreportedThresholdSource {
-        inner: backend.dealer(),
-        t: 0,
+    use crate::randomness::test_sources::{
+        DrawCountingSource, MisreportedThresholdSource, RecordingSource,
     };
-    let mut other = ShamirBackend::new_seeded(5, 0x9A7C).unwrap().dealer();
-    for source in [
-        &mut lying as &mut dyn crate::randomness::DistributedRandomness,
-        &mut other,
-    ] {
-        match eval_exact_k_chain_hidden_slots_through(source, &backend, &edges, 1, 1) {
-            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
-            other => panic!("a mismatched source must be refused, got {other:?}"),
+    let backend = ShamirBackend::new_seeded(3, 0x9A7C).unwrap();
+    let (edges, _) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+
+    // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
+    // whether anything was drawn before the refusal.
+    let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0x9A7C).unwrap().dealer());
+    match eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 4) {
+        Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+        other => panic!("a wrong-n source must be refused, got {other:?}"),
+    }
+    assert!(
+        rec.log.is_empty(),
+        "drew {} times before refusing",
+        rec.log.len()
+    );
+
+    // Misreported `t`: every sharing such a source returns is canonically SHAPED
+    // for the backend's `n`, so no downstream shape check can catch it — only the
+    // source-match check can. Counted through a wrapper, since `RecordingSource`
+    // wraps a real dealer and so cannot misreport a threshold.
+    for t in [0, 2] {
+        let mut lying = MisreportedThresholdSource {
+            inner: backend.dealer(),
+            t,
+        };
+        let mut counted = DrawCountingSource::new(&mut lying);
+        match eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, 4) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
+            other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
         }
+        assert_eq!(counted.draws(), 0, "t={t}: drew before refusing");
     }
 }
 
@@ -399,31 +429,45 @@ fn malformed_draws_in_the_chain_are_refused() {
     }
 }
 
-/// Under PRSS only the draw-free shape runs: `k = 1` over edges with distinct
-/// endpoint pairs needs no hop equality and no OR-fold, so it draws nothing from
-/// the source and returns the edges. `k = 2` (a hop equality) and `k = 1` with
-/// parallel edges (an OR-fold, i.e. a degree reduction) both need a holder's own
-/// input shared, which PRSS refuses — they fail closed with `NotYetImplemented`.
+/// Under PRSS EVERY shape fails closed, never panics. `k = 2` needs a hop equality
+/// and `k = 1` over parallel edges needs an OR-fold, both of which share a holder's
+/// own input — which PRSS refuses. Since #6117 step 6 routed the output stage
+/// through the same source, so does `k = 1` over distinct endpoint pairs, whose
+/// chain stage draws nothing: the output stage always shares the real-row tag and
+/// the payload limbs for its `B` slots, so there is no longer a draw-free shape
+/// here. (Before the routing that case ran, because the output stage minted its own
+/// dealer and never touched the caller's source.)
 #[test]
-fn prss_runs_only_draw_free_exact_k_shapes_and_fails_closed_otherwise() {
+fn prss_fails_closed_on_every_exact_k_shape() {
     use crate::prss::PrssRandomness;
     let backend = ShamirBackend::new_seeded(3, 0x9A7E).unwrap();
     let mut prss = PrssRandomness::with_simulated_setup(3).unwrap();
-    let pairs = [
+    let (edges, _) = hidden_edges(&[
         ("http://ex/a", "http://ex/b"),
         ("http://ex/b", "http://ex/c"),
-    ];
-    let (edges, _) = hidden_edges(&pairs);
-    let (slots, _) =
-        eval_exact_k_chain_hidden_slots_through(&mut prss, &backend, &edges, 1, 3).unwrap();
-    assert_eq!(slots.len(), 3);
-    assert_eq!(slot_pairs(&slots), plaintext_exact_k(&pairs, 1));
-
+    ]);
     let (parallel, _) = hidden_edges(&[
         ("http://ex/a", "http://ex/b"),
         ("http://ex/a", "http://ex/b"),
     ]);
-    for (edges, k) in [(&edges, 2), (&parallel, 1)] {
+    // The formerly-draw-free shape still evaluates CORRECTLY through the seam on a
+    // dealer source — it is the SOURCE that refuses below, not the shape.
+    let (slots, _) =
+        eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), &backend, &edges, 1, 3)
+            .unwrap();
+    assert_eq!(slots.len(), 3);
+    assert_eq!(
+        slot_pairs(&slots),
+        plaintext_exact_k(
+            &[
+                ("http://ex/a", "http://ex/b"),
+                ("http://ex/b", "http://ex/c"),
+            ],
+            1
+        )
+    );
+
+    for (edges, k) in [(&edges, 1), (&edges, 2), (&parallel, 1)] {
         let outcome = eval_exact_k_chain_hidden_slots_through(&mut prss, &backend, edges, k, 4);
         assert!(
             matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
@@ -505,22 +549,63 @@ fn seeded_exact_k_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
         ]
     );
     assert_eq!(dealer.draw_fp().value(), 641842556892271371);
-    let (slots, _) = eval_exact_k_chain_hidden_slots(&backend, &edges, 2, 5).unwrap();
+    // The REVEALED slot ORDER moved in #6117 step 6 (it was
+    // ["dummy", "dummy", "<http://ex/a> <http://ex/c>", "dummy", "dummy"]): the
+    // output stage now draws its sharings and its shuffle from the SAME source as
+    // the chain stage instead of minting a second dealer, so the shuffle samples a
+    // different point of one continuous keystream. The order is the shuffle's
+    // secret permutation and carries no result meaning — the canonicalised
+    // multiset below is byte-identical to the pre-routing capture.
+    let (slots, cost) = eval_exact_k_chain_hidden_slots(&backend, &edges, 2, 5).unwrap();
     assert_eq!(
         slot_strings(&slots),
         [
             "dummy",
             "dummy",
-            "<http://ex/a> <http://ex/c>",
             "dummy",
+            "<http://ex/a> <http://ex/c>",
             "dummy"
         ]
+    );
+    let mut sorted = slot_strings(&slots);
+    sorted.sort();
+    assert_eq!(
+        sorted,
+        [
+            "<http://ex/a> <http://ex/c>",
+            "dummy",
+            "dummy",
+            "dummy",
+            "dummy"
+        ],
+        "revealed multiset must be unchanged"
+    );
+    assert_eq!(
+        (
+            cost.bound,
+            cost.select_mults,
+            cost.opens,
+            cost.shuffle.items,
+            cost.shuffle.switches,
+            cost.shuffle.depth_rounds
+        ),
+        (5, 5, 5, 5, 56, 5)
     );
 }
 
 /// The COMPLETE draw sequence of the exactly-2 chain stage (entry count and an
-/// order-sensitive fingerprint over every method and returned `y`), captured on
-/// the pre-routing code.
+/// order-sensitive fingerprint over every method and returned `y`).
+///
+/// **This is the #6117-step-6 guard.** The transcript now ends in the output
+/// stage's 36 `vss_own_input` draws and its `oblivious_shuffle`: if
+/// `eval_exact_k_chain_hidden_slots_through` went back to minting its own dealer
+/// for the output stage the log would stop at 1920 entries and both the length and
+/// the suffix assertion would fail.
+///
+/// The 1920-entry PREFIX is the pre-routing whole-log pin
+/// (`0x1013_9382_581b_a7e3`, captured on the pre-routing code), asserted here
+/// unchanged: the routing appended an output-stage SUFFIX and moved nothing in the
+/// chain part. The full-log fingerprint is the new pin.
 #[test]
 fn seeded_exact_k_stage_transcript_is_pinned() {
     use crate::randomness::test_sources::{fingerprint, RecordingSource};
@@ -528,6 +613,13 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
     let (edges, _) = hidden_edges(&PIN_EDGES);
     let mut rec = RecordingSource::new(backend.dealer());
     eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 5).unwrap();
-    assert_eq!(rec.log.len(), 1920);
-    assert_eq!(fingerprint(&rec.log), 0x1013_9382_581b_a7e3);
+    assert_eq!(rec.log.len(), 1957);
+    // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
+    assert_eq!(fingerprint(&rec.log[..1920]), 0x1013_9382_581b_a7e3);
+    assert_eq!(fingerprint(&rec.log), 0xbadc_7b13_baeb_fc0f);
+    let suffix: Vec<&str> = rec.log[1920..].iter().map(|(m, _)| *m).collect();
+    assert_eq!(
+        suffix,
+        [["vss_own_input"; 36].as_slice(), &["oblivious_shuffle"]].concat()
+    );
 }
