@@ -3198,14 +3198,17 @@ impl Graph {
         Ok(())
     }
 
-    /// Refuse a rewrite of the base (compaction, vacuum) while the journal keeps a frame for the
-    /// reopen to replay: the rewrite would start a fresh journal without it.
+    /// Refuse a rewrite of the base (compaction, vacuum) while the journal of this graph or of
+    /// any named graph under it keeps a frame for the reopen to replay: the rewrite would start
+    /// a fresh journal without it.
     fn refuse_while_txn_poisoned(&self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
         if self.txn.as_ref().is_some_and(TxnJournal::poisoned) {
             return Err("the txn journal keeps a failed commit; reopen the graph first".to_owned());
         }
-        Ok(())
+        self.named
+            .iter()
+            .try_for_each(|(_, g)| g.refuse_while_txn_poisoned())
     }
 
     /// Keep the journal's frame for the next reopen to replay, and refuse every later
@@ -10564,6 +10567,27 @@ mod tests {
         let nt = format!("{:?}", dump_terms(&reopened));
         assert!(nt.contains("http://ex/s1"), "the kept frame is redone: {nt}");
         assert!(!nt.contains("http://ex/s2"), "the refused one is not: {nt}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A poisoned journal of a named graph refuses the parent's compaction and vacuum too.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_poisoned_named_graph_journal_refuses_the_parents_rewrite() {
+        let dir = txn_tmp_dir("poisoned-named");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        g.named[0].1.poison_txn();
+        assert!(g.vacuum().is_err(), "vacuum is refused");
+        assert!(g.compact().is_err(), "compaction is refused");
         std::fs::remove_dir_all(&dir).ok();
     }
 
