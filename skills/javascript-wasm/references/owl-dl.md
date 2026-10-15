@@ -51,6 +51,7 @@ fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*
     | { kind: 'OutOfFragment', construct: string, triples: string[] }
     | { kind: 'NotInDl', violations: OwlDlViolation[] }     // the blocking profile violations
     | { kind: 'ResourceBudget' }
+    | { kind: 'DatatypeUnknown', triples: string[] }
     | { kind: 'ImportsNotLoaded', imports: string[] }        // owl:imports targets (not fetched)
     | { kind: 'Unparsed' | 'Malformed' | 'Ambiguous' | 'Unsupported', detail: string, triples: string[] },
   profile: {
@@ -88,15 +89,21 @@ fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*
 
 ## Scope (honest)
 
-The decided fragment is ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`: class
+The decided fragment is ALCHIQ(D) with `hasSelf`, transitive roles and `R∘R ⊑ R`: class
 constructors except nominals, object properties with inverses and hierarchies, the role
 characteristics (functional, inverse-functional, reflexive, irreflexive, symmetric,
 asymmetric, disjoint), qualified cardinality up to the reasoner's cardinality bound
 (`MAX_CARDINALITY`; larger numbers, and axioms needing more successors than the clause limit,
 answer `OutOfFragment`; very deeply nested expressions are refused as `Unsupported`), and class / object-property / negative /
-`sameAs` / `differentFrom` assertions. **Data properties and datatypes, nominals
-(`oneOf`, `hasValue`), other property chains, keys, and the top/bottom object properties
-currently answer `consistent: 'unknown'` with `reason.kind: 'OutOfFragment'`** and the
-triples of the axiom that uses them. The answer is never a guess: every verdict is either
+`sameAs` / `differentFrom` assertions, and data properties (domain, range, hierarchy,
+disjointness, functional, some / all / has-value, data cardinalities, positive and negative
+data assertions) over the OWL 2 datatype map with facet restrictions, `DataOneOf`, the data
+booleans and acyclic `DatatypeDefinition`s. Literals are compared by value, and an ill-typed
+literal in an assertion makes the ontology inconsistent (`"sixteen"^^xsd:nonNegativeInteger`).
+**Nominals (`oneOf`, `hasValue` on object properties), other property chains, keys, and the
+top/bottom properties in axioms currently answer `consistent: 'unknown'` with
+`reason.kind: 'OutOfFragment'`** and the triples of the axiom that uses them; a datatype
+question the reasoner does not decide (for example an XSD pattern with a block escape)
+answers `reason.kind: 'DatatypeUnknown'` with the triples involved. The answer is never a guess: every verdict is either
 decided or `'unknown'` with a reason. Budgets are deterministic work counts (`maxSteps`: rule applications, `maxNodes`: completion-graph
-nodes), not time limits; the defaults are those of `sparq_reason_dl::owl2dl::Budget::default()`.
+nodes, at most 2^32 - 1), not time limits; the defaults are those of `sparq_reason_dl::owl2dl::Budget::default()`.

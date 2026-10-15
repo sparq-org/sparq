@@ -54,19 +54,21 @@ export interface OwlDlProfile {
 }
 
 /** Why the reasoner gave no verdict on a parsed ontology. */
-export type OwlDlUnknownKind = 'OutOfFragment' | 'NotInDl' | 'ResourceBudget' | 'ImportsNotLoaded';
+export type OwlDlUnknownKind = 'OutOfFragment' | 'NotInDl' | 'ResourceBudget' | 'ImportsNotLoaded' | 'DatatypeUnknown';
 
 /** Why the RDF graph could not be read as an OWL 2 ontology (the fail-closed reverse mapping). */
 export type OwlDlRefusalKind = 'Unparsed' | 'Malformed' | 'Ambiguous' | 'Unsupported';
 
 /** The reason attached to `consistent: "unknown"`. */
 export type OwlDlReason =
-  /** A construct outside the decided fragment (e.g. a data property or a nominal). */
+  /** A construct outside the decided fragment (e.g. a nominal or a key). */
   | { kind: 'OutOfFragment'; construct: string; triples: OwlDlTriple[] }
   /** A blocking OWL 2 DL violation (a non-simple property where a simple one is required, or an irregular property hierarchy). */
   | { kind: 'NotInDl'; violations: OwlDlViolation[] }
   /** The deterministic work budget ran out. */
   | { kind: 'ResourceBudget' }
+  /** A datatype question the reasoner does not decide (e.g. an XSD pattern with a block escape). */
+  | { kind: 'DatatypeUnknown'; triples: OwlDlTriple[] }
   /** Consistent on its own, but `owl:imports` targets were not loaded. */
   | { kind: 'ImportsNotLoaded'; imports: string[] }
   /** The graph is not read as an OWL 2 ontology at all. */
@@ -91,7 +93,7 @@ export interface OwlDlResult {
 export interface OwlDlBudget {
   /** Rule applications (facts added, nodes created, branches opened). */
   maxSteps?: number;
-  /** Nodes of the completion graph. */
+  /** Nodes of the completion graph (at most 2^32 - 1). */
   maxNodes?: number;
 }
 
@@ -132,41 +134,42 @@ function loadDl(): Promise<DlModule> {
   return loading;
 }
 
-function budgetLimit(name: string, value: unknown): number | undefined {
+function budgetLimit(name: string, value: unknown, max = Number.MAX_SAFE_INTEGER): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`checkOwlDl: options.budget.${name} must be a non-negative integer`);
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > max) {
+    throw new TypeError(`checkOwlDl: options.budget.${name} must be an integer from 0 to ${max}`);
   }
   return value;
 }
 
+/** `maxNodes` is a `usize` in the bundle, which is 32-bit on wasm32. */
+const MAX_NODES = 2 ** 32 - 1;
+
 const FORMATS: readonly string[] = ['turtle', 'ntriples', 'nquads', 'trig'] satisfies OwlDlFormat[];
 
 /**
- * `value` as a plain object (prototype `Object.prototype` or `null`) whose own properties are
- * all enumerable string-keyed data properties named in `allowed`; anything else is a TypeError.
- * Only own properties are read afterwards, so nothing inherited or hidden is ever consulted.
+ * The own values of `value`, a plain object of this realm (prototype `Object.prototype` or
+ * `null`) whose own properties are all enumerable string-keyed data properties named in
+ * `allowed`; anything else is a TypeError. The values are taken from the property descriptors,
+ * so no getter runs and nothing inherited is consulted.
  */
 function plainObject(value: unknown, allowed: readonly string[], what: string): Record<string, unknown> {
   const proto = typeof value === 'object' && value !== null ? Object.getPrototypeOf(value) : undefined;
   if (proto !== Object.prototype && proto !== null) {
     throw new TypeError(`checkOwlDl: ${what} must be a plain object`);
   }
-  const obj = value as Record<string, unknown>;
-  for (const key of Reflect.ownKeys(obj)) {
-    const d = Object.getOwnPropertyDescriptor(obj, key);
+  const values: Record<string, unknown> = Object.create(null);
+  for (const key of Reflect.ownKeys(value as object)) {
+    const d = Object.getOwnPropertyDescriptor(value, key);
     if (typeof key !== 'string' || !allowed.includes(key)) {
       throw new TypeError(`checkOwlDl: unknown ${what} key ${String(key)} (expected ${allowed.join(', ')})`);
     }
     if (!d || !d.enumerable || !('value' in d)) {
       throw new TypeError(`checkOwlDl: ${what}.${key} must be a plain enumerable value`);
     }
+    values[key] = d.value;
   }
-  return obj;
-}
-
-function own(obj: Record<string, unknown>, key: string): unknown {
-  return Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+  return values;
 }
 
 /**
@@ -181,17 +184,17 @@ export function normaliseOwlDlOptions(
 ): { format: OwlDlFormat; budget: OwlDlBudget | undefined; optionsJson: string | undefined } {
   if (options === undefined) return { format: 'turtle', budget: undefined, optionsJson: undefined };
   const opts = plainObject(options, allowed, 'options');
-  const rawFormat = own(opts, 'format');
+  const rawFormat = opts.format;
   const format = rawFormat === undefined ? 'turtle' : rawFormat;
   if (typeof format !== 'string' || !FORMATS.includes(format)) {
     throw new TypeError(`checkOwlDl: options.format must be one of ${FORMATS.join(', ')}`);
   }
-  const rawBudget = own(opts, 'budget');
+  const rawBudget = opts.budget;
   if (rawBudget === undefined) return { format: format as OwlDlFormat, budget: undefined, optionsJson: undefined };
   const b = plainObject(rawBudget, ['maxSteps', 'maxNodes'], 'options.budget');
   const budget: OwlDlBudget = {};
-  const maxSteps = budgetLimit('maxSteps', own(b, 'maxSteps'));
-  const maxNodes = budgetLimit('maxNodes', own(b, 'maxNodes'));
+  const maxSteps = budgetLimit('maxSteps', b.maxSteps);
+  const maxNodes = budgetLimit('maxNodes', b.maxNodes, MAX_NODES);
   if (maxSteps !== undefined) budget.maxSteps = maxSteps;
   if (maxNodes !== undefined) budget.maxNodes = maxNodes;
   return { format: format as OwlDlFormat, budget, optionsJson: JSON.stringify({ budget }) };
@@ -203,10 +206,13 @@ export function normaliseOwlDlOptions(
  * the graph as OWL 2, runs the OWL 2 DL profile check, consistency, and — for a consistent
  * ontology — classification.
  *
- * Decided fragment: classes and class constructors except nominals, object properties with
- * inverses, hierarchies, transitivity, `R∘R ⊑ R` chains, the role characteristics, `hasSelf`,
- * qualified cardinality, and the ABox. Data properties, datatypes, nominals, other property
- * chains and keys answer `consistent: "unknown"` with reason `OutOfFragment` and the triples.
+ * Decided fragment: ALCHIQ(D) — classes and class constructors except nominals, object
+ * properties with inverses, hierarchies, transitivity, `R∘R ⊑ R` chains, the role
+ * characteristics, `hasSelf`, qualified cardinality up to a fixed bound, data properties over
+ * the OWL 2 datatype map, and the ABox. Nominals, other property chains and keys answer
+ * `consistent: "unknown"` with reason `OutOfFragment` and the triples; a datatype question the
+ * reasoner does not decide answers `DatatypeUnknown`. Options must be plain objects of this
+ * realm.
  *
  * Rejects on a parse error, on malformed options, or if the DL bundle cannot be loaded. A graph
  * the OWL mapping refuses is NOT a rejection: it resolves with `consistent: "unknown"`.
