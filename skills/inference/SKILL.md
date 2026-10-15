@@ -738,14 +738,40 @@ none, which happens when the shared classification budget runs out).
 `is_satisfiable(iri)` / `is_subclass_of(sub_iri, sup_iri)` queries by class IRI
 (`Option<bool>`; `owl:Thing`, `owl:Nothing` and
 classes no axiom mentions included; `None` when an unloaded import could change a negative
-answer). The decided fragment is ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`,
-number restrictions up to `MAX_CARDINALITY`; anything else (data properties and
-datatypes, nominals and `hasValue`, other chains, keys, the top and bottom object
-properties) gives `Unknown(OutOfFragment { construct, source })`, a blocking profile
+answer). The decided fragment is ALCHIQ(D) with `hasSelf`, transitive roles and `R∘R ⊑ R`,
+number restrictions up to `MAX_CARDINALITY`, and data properties: domain, range, sub- /
+equivalent / disjoint data properties, `FunctionalDataProperty`, `DataSomeValuesFrom`,
+`DataAllValuesFrom`, `DataHasValue`, data min / max / exact cardinality (qualified or
+not), and positive and negative data property assertions, over data ranges of the OWL 2
+datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
+`DataUnionOf`, `DataComplementOf`, and named datatypes with one acyclic
+`DatatypeDefinition`, which is expanded). Data edges end in concrete nodes; a datatype
+check over the graph of value inequalities (per node, peeling, exact search over
+enumerated `DataOneOf` nodes, and clique counting) decides the labels with
+`owl2dl::data_ranges`. Literals are compared by value (`"1"^^xsd:int` and
+`"01"^^xsd:integer` are one value; float `-0` and `+0` are two), and an ill-typed literal
+in an assertion, `DataHasValue` or `DataOneOf` (e.g. `"sixteen"^^xsd:nonNegativeInteger`)
+makes the ontology `Inconsistent`. Still out of the fragment, as
+`Unknown(OutOfFragment { construct, source })`: nominals and `hasValue` on object
+properties, other chains, keys (`HasKey`), the top and bottom object and data properties
+in axioms (except `SubDataPropertyOf(D owl:topDataProperty)`), datatypes outside the map
+without exactly one definition, cyclic or repeated definitions, literals of datatypes
+outside the map, and a property used both as an object and as a data property. A data
+question the oracle answers Unknown for (an XSD pattern with a block escape, a facet bound
+outside the restricted datatype's value space, a value beyond the represented range, an
+`rdf:XMLLiteral` literal), or a value-inequality graph outside the shapes the check
+decides, gives `Unknown(DatatypeUnknown { source })`: a branch the check cannot decide is
+closed as undecided, so the answer is `Consistent` only from a fully checked model and
+`Inconsistent` only when every branch closed on a real clash. A blocking profile
 violation gives `Unknown(NotInDl)`, an exhausted step budget gives
 `Unknown(ResourceBudget)`, and unloaded imports turn `Consistent` into
-`Unknown(ImportsNotLoaded)` with no classification. It never guesses a verdict. Its answers are checked against
-HermiT on a seeded corpus (`tests/owl2dl_reasoner.rs`).
+`Unknown(ImportsNotLoaded)` with no classification; `classification_unknown` carries
+`ResourceBudget` or `DatatypeUnknown`. It never guesses a verdict. Its answers are checked
+against HermiT on seeded corpora (`tests/owl2dl_reasoner.rs`), one of them of data
+properties and datatypes; the constructs where HermiT departs from the Direct Semantics
+(ill-typed literals, float zeros, `NegativeDataPropertyAssertion` compared by lexical
+form, data booleans and single-value intervals under data cardinalities) are kept out of
+that corpus and pinned by hand-written tests instead.
 `owl2dl::data_ranges` answers the datatype questions the tableau asks of a data range
 (`DataRangeExpr`: a datatype, a facet restriction, `OneOf`, `And`, `Or`, `Not`):
 `is_empty`, `contains`, `has_at_least(r, n)` for data cardinalities, and
