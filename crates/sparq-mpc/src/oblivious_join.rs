@@ -892,8 +892,25 @@ pub(crate) fn oblivious_join_output_through(
     let payload_arity = out_vars.len();
     let (slots, cost) =
         oblivious_set_output_through(source, backend, candidates, payload_arity, bound)?;
-    // Filter dummies: the authorized recipient sees the real result multiset (and,
-    // by construction, learns its true size — see the residual-leakage note).
+    Ok((partial_result_from_slots(slots, out_vars), cost))
+}
+
+/// Narrow the `B` revealed slots to the disclosed [`PartialResult`]: filter the
+/// dummies and put the surviving rows in canonical order.
+///
+/// Filtering dummies is what the authorized recipient does — it sees the real
+/// result multiset and, by construction, learns its true size (see the
+/// residual-leakage note). The canonical (order-independent) row order makes the
+/// disclosed multiset independent of the shuffle's permutation; the recipient
+/// recomputes any ORDER BY over it (convention #4).
+///
+/// `pub(crate)` so every operator that already has the slots
+/// ([`crate::hidden_path`]) reaches its `PartialResult` through this one function
+/// rather than a second route into the output stage.
+pub(crate) fn partial_result_from_slots(
+    slots: Vec<OutputSlot>,
+    out_vars: Vec<Variable>,
+) -> PartialResult {
     let mut rows: Vec<Vec<Option<Term>>> = slots
         .into_iter()
         .filter_map(|s| match s {
@@ -901,18 +918,12 @@ pub(crate) fn oblivious_join_output_through(
             OutputSlot::Dummy => None,
         })
         .collect();
-    // Canonical (order-independent) row order so the disclosed multiset is
-    // independent of the shuffle's permutation (the recipient recomputes any
-    // ORDER BY over the disclosed multiset — convention #4).
     canonicalize_rows(&mut rows);
-    Ok((
-        PartialResult {
-            holder: HolderId::new("federation"),
-            vars: out_vars,
-            rows,
-        },
-        cost,
-    ))
+    PartialResult {
+        holder: HolderId::new("federation"),
+        vars: out_vars,
+        rows,
+    }
 }
 
 /// Sort rows into a canonical order (by their `{:?}` term tuple) so the disclosed
@@ -980,7 +991,10 @@ pub fn oblivious_set_output_hidden_keys(
 /// drawn sharing is shape-checked where it is consumed and the shuffled column's
 /// shape on return. Shape checks only — no VSS / consistency guarantee. A source
 /// that cannot share a value it was handed (PRSS today) makes this fail closed with
-/// that source's own error, inside the first `secure_equal_to_bit_through`.
+/// that source's own error — inside the first `secure_equal_to_bit_through` when
+/// there is a candidate pair, and otherwise (empty key lists) inside the output
+/// stage, which shares the real-row tag and the payload limbs for each of its `B`
+/// pure-dummy slots. With empty key lists AND `bound = 0` nothing is drawn at all.
 pub(crate) fn oblivious_set_output_hidden_keys_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,

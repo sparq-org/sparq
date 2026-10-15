@@ -538,14 +538,14 @@ fn malformed_draws_in_the_or_fold_are_refused() {
     }
 }
 
-/// Under PRSS EVERY shape fails closed, never panics. `{1,2}` needs a hop equality
-/// (a holder's own input shared), which PRSS refuses. Since #6117 step 6 routed the
-/// output stage through the same source, so does `p?` over a single predicate with
-/// no self-loop and no repeated endpoint pair, whose union stage draws nothing: the
-/// output stage always shares the real-row tag and the payload limbs for its `B`
-/// slots, so there is no longer a draw-free shape here. (Before the routing that
-/// case ran, because the output stage minted its own dealer and never touched the
-/// caller's source.)
+/// Under PRSS every shape fails closed for any `B > 0`, never panics. `{1,2}` needs
+/// a hop equality (a holder's own input shared), which PRSS refuses. Since #6117
+/// step 6 routed the output stage through the same source, so does `p?` over a
+/// single predicate with no self-loop and no repeated endpoint pair, whose union
+/// stage draws nothing: the output stage shares the real-row tag and the payload
+/// limbs for each of its `B` slots, so that shape is draw-free only at `B = 0`.
+/// (Before the routing that case ran at any `B`, because the output stage minted
+/// its own dealer and never touched the caller's source.)
 #[test]
 fn prss_fails_closed_on_every_bounded_shape() {
     use crate::prss::PrssRandomness;

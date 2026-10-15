@@ -399,14 +399,14 @@ fn malformed_draws_in_the_chain_are_refused() {
     }
 }
 
-/// Under PRSS EVERY shape fails closed, never panics. `k = 2` needs a hop equality
-/// and `k = 1` over parallel edges needs an OR-fold, both of which share a holder's
-/// own input — which PRSS refuses. Since #6117 step 6 routed the output stage
-/// through the same source, so does `k = 1` over distinct endpoint pairs, whose
-/// chain stage draws nothing: the output stage always shares the real-row tag and
-/// the payload limbs for its `B` slots, so there is no longer a draw-free shape
-/// here. (Before the routing that case ran, because the output stage minted its own
-/// dealer and never touched the caller's source.)
+/// Under PRSS every shape fails closed for any `B > 0`, never panics. `k = 2` needs
+/// a hop equality and `k = 1` over parallel edges needs an OR-fold, both of which
+/// share a holder's own input — which PRSS refuses. Since #6117 step 6 routed the
+/// output stage through the same source, so does `k = 1` over distinct endpoint
+/// pairs, whose chain stage draws nothing: the output stage shares the real-row tag
+/// and the payload limbs for each of its `B` slots, so that shape is draw-free only
+/// at `B = 0`. (Before the routing that case ran at any `B`, because the output
+/// stage minted its own dealer and never touched the caller's source.)
 #[test]
 fn prss_fails_closed_on_every_exact_k_shape() {
     use crate::prss::PrssRandomness;
