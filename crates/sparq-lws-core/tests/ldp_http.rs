@@ -572,6 +572,57 @@ _:p solid:inserts { <urn:a> <urn:b> <urn:c> . }.\n"
         }
     }
     assert_eq!(listing(&h).await, before);
+    // Nor does the slash rule look for a twin by a name nothing authorized: a create below a
+    // document's name with a repeated slash is refused alike whether that document exists.
+    for path in ["/alice/doc//", "/alice/nodoc//"] {
+        if path == "/alice/doc//" {
+            let r = h
+                .request("PUT", "/alice/doc", Some("text/turtle"), Body::from(TURTLE))
+                .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let r = h
+            .request("PUT", path, Some("text/turtle"), Body::from(TURTLE))
+            .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "PUT {path}");
+    }
+}
+
+/// A container left with a repeated trailing slash (from before such names were refused) keeps
+/// what is posted into it below its own name.
+#[tokio::test]
+async fn a_post_into_a_repeated_slash_container_stays_below_it() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let alice = "https://pod.example/alice/";
+    let odd = "https://pod.example/alice/c//";
+    store
+        .write(
+            "https://pod.example/",
+            axum::body::Bytes::new(),
+            "text/turtle",
+        )
+        .await
+        .expect("seed the root");
+    for (parent, child) in [("https://pod.example/", alice), (alice, odd)] {
+        store
+            .create_in_container(parent, child, axum::body::Bytes::new(), "text/turtle")
+            .await
+            .expect("seed a container");
+    }
+    let h = Harness::with_store(store).await;
+    let r = h
+        .request(
+            "POST",
+            "/alice/c//",
+            Some("text/turtle"),
+            Body::from(TURTLE),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let location = r.headers()[axum::http::header::LOCATION].to_str().unwrap();
+    assert!(location.starts_with(odd), "{location}");
+    assert!(!location[odd.len()..].contains('/'), "{location}");
 }
 
 #[tokio::test]

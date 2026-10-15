@@ -1176,6 +1176,16 @@ pub async fn put_handler<S: Store>(
     // create-vs-replace) — reused for the conditional-write ETag and the create/replace branch below.
     let current = state.store.meta(&target.iri).await?;
     let existed = current.is_some();
+    // A create under a repeated slash is refused before the slash rule looks for a twin by a name
+    // authorization never covered.
+    if !existed && !crate::authz::is_acl_resource(&target.iri) {
+        if let Some(rest) = target
+            .iri
+            .strip_prefix(state.base_url.trim_end_matches('/'))
+        {
+            refuse_repeated_slash(rest)?;
+        }
+    }
 
     // Slash-semantics: a trailing-slash IRI (a container) and the same IRI without the slash (a plain
     // resource) MUST NOT co-exist (Solid Protocol — "with and without trailing slash cannot
@@ -2176,6 +2186,19 @@ async fn write_validator<S: Store>(
 /// cannot have children — the slash-semantics invariant), this is a 409 Conflict (`containment`
 /// "conflicts when … turning resource into container"). The conflict is detected by the
 /// trailing-slash container record being absent while the slash-less resource record is present.
+/// A name with a repeated slash (only a leading or trailing one gets past `parse_target`) has no
+/// chain of containers to create it in: authorization walks its key as named, which the containers
+/// would not match. So nothing is created for it, before anything else is looked at. `rest` is the
+/// path below the base URL.
+fn refuse_repeated_slash(rest: &str) -> Result<(), ServerError> {
+    if rest.contains("//") {
+        return Err(ServerError::BadRequest(
+            "a repeated slash names no container to create a resource in".into(),
+        ));
+    }
+    Ok(())
+}
+
 async fn ensure_ancestor_containers<S: Store>(
     state: &LdpState<S>,
     iri: &str,
@@ -2184,14 +2207,7 @@ async fn ensure_ancestor_containers<S: Store>(
     let Some(rest) = iri.strip_prefix(base) else {
         return Ok(());
     };
-    // A name with a repeated slash (only a leading or trailing one gets this far) has no chain
-    // of containers to create it in: authorization walks its key as named, which the containers
-    // below would not match. So nothing is created for it, before anything is looked at.
-    if rest.contains("//") {
-        return Err(ServerError::BadRequest(
-            "a repeated slash names no container to create a resource in".into(),
-        ));
-    }
+    refuse_repeated_slash(rest)?;
 
     // The storage ROOT container `<base>/` is the ancestor of EVERYTHING; ensure it exists first (a
     // parentless write mints its record) so the walk below can wire each child into a present parent.
@@ -2435,7 +2451,9 @@ async fn mint_child_iri<S: Store>(
     stem: Option<&str>,
     as_container: bool,
 ) -> Result<String, ServerError> {
-    let base = container_iri.trim_end_matches('/');
+    // One slash only: a container named with a repeated trailing slash keeps its members below
+    // its own name, where authorization and containment find them.
+    let base = container_iri.strip_suffix('/').unwrap_or(container_iri);
     generate_unique(store, base, stem, as_container).await
 }
 
