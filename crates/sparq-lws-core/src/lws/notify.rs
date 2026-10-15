@@ -22,9 +22,11 @@
 //!
 //! Subscriptions are stored through the [`Store`] as members of the service container, so they
 //! survive a restart on a durable backend, and kept in memory for event matching, by id and by
-//! subscriber: a subscriber's listing, and the count of what it may still hold, read its own
-//! records and no one else's. That index is built as the records are loaded, and what is stored
-//! is the same either way. Their
+//! subscriber: a subscriber's listing, and the count of its own capacity, read its own records
+//! and no one else's. That index is built as the records are loaded, and what is stored is the
+//! same either way. The store they share is finite, so how many subscriptions stand in all is
+//! bounded too ([`MAX_SUBSCRIPTIONS`]); a create at that bound is refused `507`, whoever filled
+//! it, as an access request at its own total is. Their
 //! subscriber and the storage owner may read and cancel them; to anyone else they do not exist.
 
 use std::collections::{BTreeMap, HashMap};
@@ -220,23 +222,25 @@ pub const MAX_TOPICS: usize = 64;
 /// may be anyone's and are counted here because nothing says whose they are.
 pub const MAX_OWNER_SUBSCRIPTIONS: usize = 512;
 
+/// Most subscriptions held at once by subscribers other than the storage owner, expired ones
+/// included until they are removed: a bound on what the store holds, not a capacity any one
+/// subscriber is given. Each subscription is stored as a resource is, in the same store as the
+/// rest of the storage, and that store is finite; without this bound the first refusal would
+/// come from the store itself, which the rest of the storage shares.
+/// So a create is refused `507` once this many stand, whoever made them — a resource bound, as
+/// the total on access requests is. One subscriber cannot reach it on its own: each is held to
+/// [`MAX_SUBSCRIPTIONS_PER_SUBSCRIBER`], so it takes many subscribers, and `507` here says the
+/// storage is full of subscriptions, not that the requester asked for too many (`429` says
+/// that). The owner's subscriptions are counted apart, against
+/// [`MAX_OWNER_SUBSCRIPTIONS`].
+pub const MAX_SUBSCRIPTIONS: usize = 512;
+
 /// Most subscriptions one subscriber other than the storage owner may hold, expired ones
 /// excluded (an expired one can neither be seen nor cancelled by its subscriber, so it takes
-/// none of this capacity). Every subscriber has this capacity in full: whether a subscription
-/// request is admitted rests on that subscriber's own records alone, never on how many anyone
-/// else holds.
+/// none of this capacity). Every subscriber has this capacity in full: how many subscriptions
+/// anyone else holds never makes a subscriber's own share smaller. What all of them hold
+/// together is bounded apart, by [`MAX_SUBSCRIPTIONS`].
 pub const MAX_SUBSCRIPTIONS_PER_SUBSCRIBER: usize = 16;
-
-/// Subscriptions held by subscribers other than the storage owner share no total of their own.
-///
-/// A shared total would make one subscriber's create answer `507` because of how many others had
-/// subscribed. A total that one subscriber's own requests could not reach would be
-/// [`MAX_SUBSCRIPTIONS_PER_SUBSCRIBER`] times a bound on the number of distinct subscribers, and
-/// nothing bounds that: anyone who may read a resource may subscribe to it, and this server caps
-/// neither accounts nor WebIDs. So there is no such total, and the per-subscriber capacity is the
-/// only one. The store's own capacity still applies (a create that the store refuses is refused),
-/// and the owner keeps a capacity of its own ([`MAX_OWNER_SUBSCRIPTIONS`]).
-const NO_SHARED_SUBSCRIPTION_TOTAL: usize = usize::MAX;
 
 /// Largest subscription request body, in bytes.
 pub const MAX_SUBSCRIPTION_BYTES: usize = 16 * 1024;
@@ -362,7 +366,7 @@ impl Subs {
         self.by_id.contains_key(id)
     }
 
-    #[cfg(test)]
+    /// How many subscriptions are held in all, whoever holds them.
     fn len(&self) -> usize {
         self.by_id.len()
     }
@@ -447,9 +451,9 @@ pub struct Notifier {
     workers: Arc<tokio::sync::Semaphore>,
     /// Per inbox origin, its own limit (dropped once no delivery holds it).
     inboxes: Mutex<HashMap<String, Weak<tokio::sync::Semaphore>>>,
-    /// What one subscriber other than the storage owner may hold (see [`super::Quota`]): its
-    /// own capacity, with no total shared with anyone else
-    /// (`NO_SHARED_SUBSCRIPTION_TOTAL`).
+    /// What subscribers other than the storage owner may hold (see [`super::Quota`]): each its
+    /// own capacity of [`MAX_SUBSCRIPTIONS_PER_SUBSCRIBER`], and all of them together the
+    /// store's bound of [`MAX_SUBSCRIPTIONS`].
     quota: super::Quota,
     /// The storage owner's own capacity, apart from everyone else's, as a total as well: the
     /// owner is one principal, so its own requests are what fill it, together with the records
@@ -524,10 +528,7 @@ impl Notifier {
             prepared_for: AtomicUsize::new(0),
             workers: Arc::new(tokio::sync::Semaphore::new(cfg.delivery.workers.max(1))),
             inboxes: Mutex::new(HashMap::new()),
-            quota: super::Quota::new(
-                NO_SHARED_SUBSCRIPTION_TOTAL,
-                MAX_SUBSCRIPTIONS_PER_SUBSCRIBER,
-            ),
+            quota: super::Quota::new(MAX_SUBSCRIPTIONS, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER),
             owner_quota: super::Quota::new(MAX_OWNER_SUBSCRIPTIONS, MAX_OWNER_SUBSCRIPTIONS),
             purged_to: Mutex::new(String::new()),
             held_back: AtomicUsize::new(0),
@@ -620,12 +621,10 @@ impl Notifier {
         Ok(())
     }
 
-    /// What of the subscriptions in force is past the capacities they are held to, counted as a
-    /// new subscription is admitted: the owner's total holds its own subscriptions and those
-    /// held back or quarantined at the start (which may be anyone's), and each subscriber's
-    /// capacity its own unexpired ones. Subscribers other than the owner share no total
-    /// (`NO_SHARED_SUBSCRIPTION_TOTAL`), so for them only a subscriber holding more than its
-    /// own capacity is reported. `None` when nothing is past one.
+    /// What of the subscriptions in force is past the bounds they are held to, counted as a new
+    /// subscription is admitted: each total holds its own subscriptions and those held back or
+    /// quarantined at the start (which may be anyone's), and each subscriber's capacity its own
+    /// unexpired ones. `None` when nothing is past one.
     pub(crate) fn past_quota(&self, owner: Option<&str>) -> Option<String> {
         let now = jose::now_secs();
         let subs = self.subs.read().expect("lock");
@@ -819,17 +818,17 @@ impl Notifier {
         // the place of one that may. For the same reason the authorization done here has no
         // budget of its own: a budget spent on the candidates in turn could be used up by one
         // party's subscriptions that may not read the resource before an authorized one is
-        // reached. The work is instead one authorization per subscription in force whose topics
-        // cover the resource, and none past the `limit`-th delivery prepared. Each subscriber
-        // brings at most MAX_SUBSCRIPTIONS_PER_SUBSCRIBER of those and the owner at most
-        // MAX_OWNER_SUBSCRIPTIONS, so the count grows with the number of distinct subscribers to
-        // the resource, which nothing bounds. That is a count of checks, not their cost: each
+        // reached. The work is bounded instead by the subscriptions in force, which the totals
+        // bound: at most MAX_SUBSCRIPTIONS held by subscribers other than the owner and
+        // MAX_OWNER_SUBSCRIPTIONS by the owner, so one authorization each for at most
+        // MAX_SUBSCRIPTIONS + MAX_OWNER_SUBSCRIPTIONS candidates, and none past the `limit`-th
+        // delivery prepared. That is a ceiling on the number of checks, not on their work: each
         // takes the resource's access from one snapshot taken for the change
         // ([`access::ResourceAccess`]), so the resource's metadata is read and the grants (which
         // have no quota) are scanned once per change, not once per check. What the checks admit
-        // is bounded by `limit`, and the deliveries they make are queued off the path that
-        // answers the change ([`Notifier::send`]). Stored subscriptions loaded past a capacity
-        // are reported at the start, and admit no new one to it until it is under it.
+        // is bounded by `limit`, and the deliveries they make are queued off the response path
+        // ([`Notifier::send`]). Stored subscriptions loaded past a bound are reported at the
+        // start, and admit no new one to it until it is under it.
         let candidates: Vec<Subscription> = {
             let subs = self.subs.read().expect("lock");
             subs.values()
@@ -1763,6 +1762,11 @@ async fn subscribe<S: Store + 'static>(
     // expired subscriptions, which may be anyone's, have a few removed (waiting on their
     // locks): before the listing a conditional create is evaluated against is held, and before
     // this one is counted.
+    //
+    // That purge is work other subscribers' records put on this request: up to
+    // EXPIRED_REMOVED_PER_SUBSCRIBE of them, anyone's, are removed here, each waiting on its own
+    // lock. It is bounded and it is what keeps expired records from holding the store's bound
+    // against everyone, but it is not work this request's own records asked for.
     if let Some(refused) = super::resources::unavailable(state, req) {
         return refused;
     }
@@ -1781,14 +1785,15 @@ async fn subscribe<S: Store + 'static>(
         Err(refused) => return refused,
     };
     // The place is reserved before anything is stored and held until the subscription is
-    // registered. Everyone other than the storage owner is counted against its own capacity
-    // alone ([`MAX_SUBSCRIPTIONS_PER_SUBSCRIBER`]) and against no shared total
-    // ([`NO_SHARED_SUBSCRIPTION_TOTAL`]), so what this request is answered rests on the
-    // requester's own records. The storage owner, being one principal, keeps a capacity of its
-    // own ([`MAX_OWNER_SUBSCRIPTIONS`]), counted as a total as well, since what fills it is the
-    // owner's own requests and the records held back or quarantined at the start, which may be
-    // anyone's. Expired subscriptions take room in the store until they are
-    // removed, but none of their subscriber's capacity: it can neither see nor cancel them.
+    // registered. Two bounds are counted, and they say different things. The requester's own
+    // capacity ([`MAX_SUBSCRIPTIONS_PER_SUBSCRIBER`]) is counted from its own records alone, so
+    // `429` rests on nothing but what it holds itself. The total
+    // ([`MAX_SUBSCRIPTIONS`], or [`MAX_OWNER_SUBSCRIPTIONS`] for the storage owner, whose
+    // subscriptions are counted apart) is a bound on what the store holds: `507` says the
+    // storage is full of subscriptions, whoever filled it, as it does for access requests, and
+    // one subscriber cannot reach it alone. Expired subscriptions take room in the store until
+    // they are removed, and so count against the total, but take none of their subscriber's
+    // capacity: it can neither see nor cancel them.
     let now = jose::now_secs();
     let owner = access::is_owner(state, agent);
     let (quota, what) = if owner {
@@ -1801,17 +1806,24 @@ async fn subscribe<S: Store + 'static>(
         // Read through the subscriber index: only this subscriber's own records are counted,
         // and only they are touched.
         let mine = subs.live_count_of(agent.subject.as_deref(), now);
-        // The owner's total is the owner's own records, plus those held back or quarantined at
-        // the start, which may be anyone's. Everyone else has no total to count against, so
-        // nothing of anyone else's is counted here.
-        let in_share = if owner {
-            subs.count_of(state.cfg.owner.as_deref())
+        // Each total counts the records in it. The owner's are the ones the subscriber index
+        // holds for it (none when no owner is configured: nothing is then the owner's), and
+        // everyone else's are the rest, which is the count of all of them less the owner's --
+        // a length and one indexed lookup, so no one else's records are read to reach it.
+        let owners = state
+            .cfg
+            .owner
+            .as_deref()
+            .map_or(0, |o| subs.count_of(Some(o)));
+        let in_share = if owner { owners } else { subs.len() - owners };
+        // Those held back or quarantined at the start may be anyone's: they count against
+        // either total.
+        (
+            in_share
                 + state.notify.held_back.load(Ordering::SeqCst)
-                + state.notify.quarantined.read().expect("lock").len()
-        } else {
-            0
-        };
-        (in_share, mine)
+                + state.notify.quarantined.read().expect("lock").len(),
+            mine,
+        )
     });
     let slot = match reserved {
         Ok(slot) => slot,
@@ -3670,19 +3682,21 @@ mod tests {
         assert_eq!(state.notify.unprepared(), 1);
     }
 
-    /// Review finding (#6810): stored subscriptions can exceed the capacity they are held to
-    /// (stored before it was lowered, or written to the store directly). The start loads them
-    /// all, removes none, reports whose capacity is past, and admits no new subscription to a
-    /// subscriber already at its own. The subscriber at its capacity is refused whatever anyone
-    /// else holds, and a newcomer is admitted however many subscriptions others hold.
+    /// Review finding (#6810): stored subscriptions can exceed the bounds they are held to
+    /// (stored before one was lowered, or written to the store directly). The start loads them
+    /// all, removes none, reports what is past which bound, and admits no new subscription to a
+    /// bound until it is under it again. The two bounds answer differently and say different
+    /// things: a subscriber at its own capacity is told `429`, it asked for too many; a
+    /// subscriber at the store's total is told `507`, the storage is full of subscriptions —
+    /// which it is whoever filled it, so a newcomer holding none is refused too.
     #[tokio::test]
-    async fn subscriptions_stored_past_a_capacity_are_kept_reported_and_admit_no_more() {
+    async fn subscriptions_stored_past_their_quota_are_kept_reported_and_admit_no_more() {
         let (state, store) = test_store::state(100).await;
         let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
         let reader = "https://reader.example/#me";
-        // The reader holds one more than its own capacity; many other subscribers hold one
-        // each, more in all than the storage owner's own capacity.
-        let others = MAX_OWNER_SUBSCRIPTIONS + 1 - (MAX_SUBSCRIPTIONS_PER_SUBSCRIBER + 1);
+        // The reader holds one more than its own capacity, and with one subscription each of
+        // others, everyone but the owner holds one more together than the store's total.
+        let others = MAX_SUBSCRIPTIONS + 1 - (MAX_SUBSCRIPTIONS_PER_SUBSCRIBER + 1);
         let subscribers = (0..=MAX_SUBSCRIPTIONS_PER_SUBSCRIBER)
             .map(|_| reader.to_string())
             .chain((0..others).map(|i| format!("https://p{i}.example/#me")));
@@ -3708,14 +3722,15 @@ mod tests {
             .unwrap();
         assert_eq!(
             state.notify.subs.read().unwrap().len(),
-            MAX_OWNER_SUBSCRIPTIONS + 1,
+            MAX_SUBSCRIPTIONS + 1,
             "all loaded"
         );
         let past = state.notify.past_quota(state.cfg.owner.as_deref()).unwrap();
+        assert!(
+            past.contains(&format!("{} held", MAX_SUBSCRIPTIONS + 1)),
+            "{past}"
+        );
         assert!(past.contains("1 author(s)"), "{past}");
-        // No shared total is counted for subscribers other than the owner, so however many
-        // are held in all, nothing is reported as held past one.
-        assert!(!past.contains("held, of at most"), "{past}");
         let body = json!({
             "type": WEBHOOK,
             "topic": [state.cfg.storage()],
@@ -3735,11 +3750,10 @@ mod tests {
         let newcomer = agent("https://new.example/#me");
         let r = handle(&state, &post, &agent(reader)).await;
         assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
-        // A newcomer is admitted: how many subscriptions everyone else holds is no part of
-        // the answer to its request.
         let r = handle(&state, &post, &newcomer).await;
-        assert_eq!(r.status(), StatusCode::CREATED);
-        // The reader cancels two of its own: its own capacity is under its bound again.
+        assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
+        // The reader cancels two of its own: it is under its own capacity, and everyone
+        // together is under the total.
         for i in 0..2 {
             let delete = test_store::request(
                 Method::DELETE,
@@ -3750,9 +3764,11 @@ mod tests {
             let r = handle(&state, &delete, &agent(reader)).await;
             assert_eq!(r.status(), StatusCode::NO_CONTENT);
             if i == 0 {
-                // At its capacity, not under it: still refused.
+                // At its capacity, not under it: still refused, and the total is still full.
                 let r = handle(&state, &post, &agent(reader)).await;
                 assert_eq!(r.status(), StatusCode::TOO_MANY_REQUESTS);
+                let r = handle(&state, &post, &newcomer).await;
+                assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
             }
         }
         assert!(state
@@ -3761,19 +3777,21 @@ mod tests {
             .is_none());
         let r = handle(&state, &post, &newcomer).await;
         assert_eq!(r.status(), StatusCode::CREATED);
-        // The reader is under its own capacity again, so it too is admitted; the newcomer's
-        // two creates moved nothing for it either way.
+        // The newcomer's create filled the total again, so the reader -- under its own
+        // capacity, and holding none of the blame -- is told the storage is full, not that it
+        // asked for too many.
         let r = handle(&state, &post, &agent(reader)).await;
-        assert_eq!(r.status(), StatusCode::CREATED);
+        assert_eq!(r.status(), StatusCode::INSUFFICIENT_STORAGE);
     }
 
     /// A closed state holding `mine` subscriptions of `alice` to one data resource, and one
-    /// subscription each of more other subscribers than any capacity here, all stored and then
-    /// loaded as a start loads them. Gives back the state, the topic, and alice's subscription
-    /// IRIs in the order they were stored.
+    /// subscription each of `others` other subscribers, all stored and then loaded as a start
+    /// loads them. Gives back the state, the topic, and alice's subscription IRIs in the order
+    /// they were stored.
     async fn state_with_other_subscribers(
         alice: &str,
         mine: usize,
+        others: usize,
     ) -> (LwsState<test_store::FlakyStore>, String, Vec<String>) {
         use test_store::{closed_state, data, grant_read};
         let (state, store) = closed_state(100).await;
@@ -3783,7 +3801,7 @@ mod tests {
         let mut ours = Vec::new();
         let subscribers = (0..mine)
             .map(|_| alice.to_string())
-            .chain((0..=MAX_OWNER_SUBSCRIPTIONS).map(|i| format!("https://p{}.example/#me", i)));
+            .chain((0..others).map(|i| format!("https://p{}.example/#me", i)));
         for (i, subscriber) in subscribers.enumerate() {
             let sub = Subscription {
                 id: String::new(),
@@ -3832,11 +3850,13 @@ mod tests {
 
     /// A subscriber's listing and its subscription request are answered from its own records:
     /// how many subscriptions other subscribers hold moves neither what it is shown nor what it
-    /// is answered, and its own cancellation is reflected at once.
+    /// is answered, and its own cancellation is reflected at once. (What everyone holds
+    /// together is bounded apart, by [`MAX_SUBSCRIPTIONS`]; here it is well under it.)
     #[tokio::test]
     async fn another_subscribers_records_move_neither_my_listing_nor_my_create() {
         let alice = "https://alice.example/#me";
-        let (state, topic, mine) = state_with_other_subscribers(alice, 2).await;
+        let others = MAX_SUBSCRIPTIONS / 8;
+        let (state, topic, mine) = state_with_other_subscribers(alice, 2, others).await;
         let me = test_store::agent(alice);
         let (status, listed) = listed_for(&state, &me).await;
         assert_eq!(status, StatusCode::OK);
@@ -3880,12 +3900,14 @@ mod tests {
     }
 
     /// A subscriber at its own capacity is refused, and one under it is admitted, whatever
-    /// anyone else holds: the capacity is each subscriber's own.
+    /// anyone else holds: the capacity is each subscriber's own. Everyone here holds well under
+    /// [`MAX_SUBSCRIPTIONS`] together, so the store's own bound decides nothing.
     #[tokio::test]
     async fn a_create_is_refused_at_the_subscribers_own_capacity_whatever_others_hold() {
         let alice = "https://alice.example/#me";
+        let others = MAX_SUBSCRIPTIONS / 8;
         let (state, topic, mine) =
-            state_with_other_subscribers(alice, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER).await;
+            state_with_other_subscribers(alice, MAX_SUBSCRIPTIONS_PER_SUBSCRIBER, others).await;
         assert_eq!(mine.len(), MAX_SUBSCRIPTIONS_PER_SUBSCRIBER);
         let body = json!({
             "type": WEBHOOK,

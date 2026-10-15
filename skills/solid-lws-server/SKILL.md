@@ -293,18 +293,22 @@ content write, are fenced against that (see below); other resource writes, and p
 failed change back, are not.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), and each such request body is at most 16 KiB
-(413). The server holds at most 512 access requests in all (507). Subscriptions have no such
-shared total: every subscriber has the capacity of 16 in full, and the storage owner a capacity
-of 512 of its own (429 past that, or 507 when records held back or quarantined at the start fill
-it). Whether a subscription
-request is admitted therefore rests on how many the requester itself holds, never on how many
-anyone else holds; there is no shared total, because nothing bounds how many distinct
-subscribers there may be. A type-search filter is at most 8 KiB and an
+(413). Every subscriber has that capacity of 16 in full: how many subscriptions anyone else
+holds never makes it smaller, and the count behind a 429 is read from the requester's own
+records alone. The server holds at most 512 access requests and 512 subscriptions in all (507),
+the storage owner's subscriptions counted apart against 512 of its own. Those totals are
+resource bounds, not capacities: the records share the storage's store, which is finite, so a
+507 says the storage is full of subscriptions (or of access requests) **whoever filled it** —
+a newcomer holding none is refused the same, and without the total the first refusal would
+come from the store itself, which the rest of the storage shares. One subscriber cannot reach a
+total on its own, being held to 16. A type-search filter is at most 8 KiB and an
 access grant 256 KiB; these limits apply while the body is read. Stored requests or subscriptions
-past these capacities at startup (stored
+past these bounds at startup (stored
 before one was lowered, or written to the store directly) are all loaded and none is removed;
-the start logs a line naming the container and what is past which capacity, and no new one is
-admitted to a capacity until it is under it. An access document nested too deeply to store and read back gets 400. A
+the start logs a line naming the container and what is past which bound, and no new one is
+admitted to a bound until it is under it. A subscription request also removes up to 16 expired
+subscriptions, anyone's, before it is counted, so expired records cannot hold the total against
+everyone. An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
@@ -500,7 +504,7 @@ What the server exposes, all discoverable from the storage description
   subscriptions to its own service container (not to one to the storage root): the owner and the
   record's author may hear of it. A stored subscription that cannot be read stops the start; one
   whose stored body is not a subscription is quarantined as access records are: listed to the
-  owner, counted against the owner's capacity, `500` to a read, removed by the owner's `DELETE` as any
+  owner, counted against both totals, `500` to a read, removed by the owner's `DELETE` as any
   record is. A subscription is created and cancelled as an access record is, by the same code.
   Each topic of a new subscription is checked before its lock is taken: one the subscriber may
   not read is refused (`403`, or `401` anonymous) at once, whatever its state. One it may read
@@ -512,13 +516,14 @@ What the server exposes, all discoverable from the storage description
   owed. Both are counted in memory from the start, and only for a change that happened (a delete
   that fails counts nothing). The authorization for one change has no budget of its own (one
   party's subscriptions that may not read the resource could spend it before an authorized one is
-  reached): it is one check per subscription in force whose topics cover the resource, so it
-  grows with the number of distinct subscribers to that resource, which nothing bounds. That is
-  a count of checks, not their cost: each reads from one snapshot of the
+  reached): the subscription totals cap it at one check per subscription in force (at most
+  1,024). That caps the number of checks, not their cost: each reads from one snapshot of the
   resource's access taken for the change, so its metadata is read and the grants are scanned
   once per change. Taking a place in the delivery queue, parsing each inbox and running each
-  delivery run on the runtime, off the request's path (`Notifier::send` spawns them), so a
-  delivery target that never answers holds up neither that change nor the next.
+  delivery happen off the response path, on a task of their own (`Notifier::send`), so a
+  delivery target that never answers holds up neither that change nor the next, and the change
+  is answered without the per-delivery work of however many subscriptions it has. Who hears of
+  the change is still decided on the response path, while its locks are held.
   A recursive delete too large to put back is refused before any of its
   notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`
