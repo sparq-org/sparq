@@ -146,11 +146,11 @@
 //! - The dishonest-majority SPDZ regime (route (b) / sq-j5ok) is NOT entered.
 
 use crate::authenticated::{auth_add, auth_add_constant, auth_scale, auth_sub, AuthenticatedShare};
+#[cfg(test)]
+use crate::compare::{DECOMP_MASK_BITS, DECOMP_VALUE_BITS, DECOMP_VALUE_MAX_EXCLUSIVE};
 use crate::compare::{
     check_party_count, RABBIT_MASK_BITS, RABBIT_VALUE_BITS, RABBIT_VALUE_MAX_EXCLUSIVE,
 };
-#[cfg(test)]
-use crate::compare::{DECOMP_MASK_BITS, DECOMP_VALUE_BITS, DECOMP_VALUE_MAX_EXCLUSIVE};
 use crate::field::Fp;
 use crate::partial::{HolderId, MpcError, PartialResult};
 use crate::shamir::{MacSession, ShamirBackend, Share};
@@ -1045,7 +1045,8 @@ mod tests {
                 .unwrap();
                 let shares = share_sum(&backend, sum);
                 let got =
-                    experimental_tamper_evident_threshold_over_sum(&backend, &shares, thr).unwrap();
+                    experimental_tamper_evident_threshold_over_sum(&backend, &shares, thr)
+                        .unwrap();
                 assert_eq!(
                     got,
                     sum > thr,
@@ -1069,7 +1070,8 @@ mod tests {
                 let backend = ShamirBackend::new_seeded(n, sum.wrapping_add(thr)).unwrap();
                 let shares = share_sum(&backend, sum);
                 let mal =
-                    experimental_tamper_evident_threshold_over_sum(&backend, &shares, thr).unwrap();
+                    experimental_tamper_evident_threshold_over_sum(&backend, &shares, thr)
+                        .unwrap();
                 let semi = disclose_threshold_verdict(&backend, &shares, thr).unwrap();
                 let semi_bool = semi.rows[0][0]
                     .as_ref()
@@ -1089,8 +1091,9 @@ mod tests {
     fn public_partial_result_carries_only_the_bool() {
         let backend = ShamirBackend::new_seeded(5, 7).unwrap();
         let shares = share_sum(&backend, 200_000);
-        let pr = experimental_tamper_evident_disclose_threshold_verdict(&backend, &shares, 100_000)
-            .unwrap();
+        let pr =
+            experimental_tamper_evident_disclose_threshold_verdict(&backend, &shares, 100_000)
+                .unwrap();
         assert_eq!(pr.rows.len(), 1);
         assert_eq!(pr.rows[0].len(), 1);
         assert_eq!(pr.vars.len(), 1);
@@ -1260,8 +1263,8 @@ mod tests {
             0u64,
             1,
             100_000,
-            DECOMP_VALUE_MAX_EXCLUSIVE, // 2^20 — the old first-OOB, now in range
-            1u64 << 40,                 // deep above the old cap
+            DECOMP_VALUE_MAX_EXCLUSIVE,     // 2^20 — the old first-OOB, now in range
+            1u64 << 40,                     // deep above the old cap
             RABBIT_VALUE_MAX_EXCLUSIVE - 1, // 2^60 - 1, the new max
         ] {
             let backend = ShamirBackend::new_seeded(5, sum.wrapping_add(11)).unwrap();
@@ -1309,9 +1312,7 @@ mod tests {
             let mut dealer = backend.dealer();
             let mut session = dealer.new_mac_session();
             let key = session.mac_key();
-            let auth_sum = session
-                .authenticate_existing(&share_sum(&backend, sum))
-                .unwrap();
+            let auth_sum = session.authenticate_existing(&share_sum(&backend, sum)).unwrap();
             let (bits, _r) =
                 auth_masked_bit_decompose(&mut session, &backend, &auth_sum, &key).unwrap();
             let got = auth_verify_sum_in_range(&mut session, &backend, &auth_sum, &bits);
@@ -1357,8 +1358,8 @@ mod tests {
             1,
             42,
             100_000,
-            DECOMP_VALUE_MAX_EXCLUSIVE - 1, // 2^20 - 1, the old max
-            DECOMP_VALUE_MAX_EXCLUSIVE,     // 2^20, the old first-OOB
+            DECOMP_VALUE_MAX_EXCLUSIVE - 1,  // 2^20 - 1, the old max
+            DECOMP_VALUE_MAX_EXCLUSIVE,      // 2^20, the old first-OOB
             1u64 << 30,
             1u64 << 45,
             1u64 << 59,                      // a high bit deep above the old cap
@@ -1367,7 +1368,8 @@ mod tests {
         ];
         for n in [3usize, 5] {
             for (idx, &v) in values.iter().enumerate() {
-                let backend = ShamirBackend::new_seeded(n, 90_000 + idx as u64 + n as u64).unwrap();
+                let backend =
+                    ShamirBackend::new_seeded(n, 90_000 + idx as u64 + n as u64).unwrap();
                 let mut dealer = backend.dealer();
                 let mut session = dealer.new_mac_session();
                 let key = session.mac_key();
@@ -1400,13 +1402,10 @@ mod tests {
             (DECOMP_VALUE_MAX_EXCLUSIVE, DECOMP_VALUE_MAX_EXCLUSIVE),     // equal, over the old cap
             (1u64 << 30, 1_000_000),
             (1_000_000, 1u64 << 30),
-            (1u64 << 45, (1u64 << 45) - 1), // adjacent, high magnitude
-            ((1u64 << 45) - 1, 1u64 << 45), // adjacent, other side
-            (1u64 << 59, (1u64 << 59) + 1), // adjacent near the top
-            (
-                RABBIT_VALUE_MAX_EXCLUSIVE - 1,
-                RABBIT_VALUE_MAX_EXCLUSIVE - 2,
-            ), // max vs max-1
+            (1u64 << 45, (1u64 << 45) - 1),  // adjacent, high magnitude
+            ((1u64 << 45) - 1, 1u64 << 45),  // adjacent, other side
+            (1u64 << 59, (1u64 << 59) + 1),  // adjacent near the top
+            (RABBIT_VALUE_MAX_EXCLUSIVE - 1, RABBIT_VALUE_MAX_EXCLUSIVE - 2), // max vs max-1
             (RABBIT_VALUE_MAX_EXCLUSIVE - 1, 0),
             (0, RABBIT_VALUE_MAX_EXCLUSIVE - 1),
         ];
@@ -1419,7 +1418,8 @@ mod tests {
                 .unwrap();
                 let shares = share_sum(&backend, sum);
                 let got =
-                    experimental_tamper_evident_threshold_over_sum(&backend, &shares, thr).unwrap();
+                    experimental_tamper_evident_threshold_over_sum(&backend, &shares, thr)
+                        .unwrap();
                 assert_eq!(
                     got,
                     sum > thr,
@@ -1449,10 +1449,7 @@ mod tests {
                 .as_ref()
                 .map(|t| t.to_string().contains("true"))
                 .unwrap_or(false);
-            assert_eq!(
-                mal, semi_bool,
-                "authenticated Rabbit must agree with semi-honest"
-            );
+            assert_eq!(mal, semi_bool, "authenticated Rabbit must agree with semi-honest");
             assert_eq!(mal, sum > thr);
         }
     }
@@ -1815,6 +1812,8 @@ mod tests {
             assert_eq!(v_lo.vars, v_hi.vars);
         }
     }
+
+
 
     /// ACCEPTANCE (sq-km34.6, the MAC-check-BEFORE-open discipline, pinned so it
     /// cannot be silently deleted): the production `auth_bit_decompose_rabbit` spends

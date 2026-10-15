@@ -776,9 +776,11 @@ pub fn shuffle(
 /// non-canonical evaluation points is re-randomised correctly too (the caller's
 /// own shape checks decide whether such a column is acceptable at all).
 ///
-/// The transport tier routes the network itself
-/// ([`sample_random_permutation`] + [`WaksmanNetwork::apply`]) and must call this
-/// on the routed column for the same reason.
+/// It is public because a caller that routes the network itself
+/// ([`sample_random_permutation`] + [`WaksmanNetwork::apply`]) must apply the same
+/// step before handing the routed column on. [`crate::transport`]'s shuffle routes
+/// its own network but RECONSTRUCTS the column in the same call and returns the
+/// opened values, so no output sharing leaves it and it does not call this today.
 pub fn rerandomise_sharings(
     dealer: &mut ShamirDealer,
     col: &mut SecretColumn,

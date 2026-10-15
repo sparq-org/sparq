@@ -2416,9 +2416,7 @@ mod tests {
                 panic!("expected Protocol range error, got {err:?}");
             };
             assert!(
-                message.starts_with(&format!(
-                    "{context} (Rabbit): in-protocol range proof FAILED"
-                )),
+                message.starts_with(&format!("{context} (Rabbit): in-protocol range proof FAILED")),
                 "wrong caller context: {message}"
             );
             assert!(!message.contains("disclose_threshold_verdict"), "{message}");
