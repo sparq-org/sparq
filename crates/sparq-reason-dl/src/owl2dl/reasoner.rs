@@ -658,4 +658,48 @@ mod tests {
             Consistency::Consistent
         );
     }
+
+    /// A key matches on any shared value: two individuals sharing only their second value of
+    /// the first key property, or only one of several values of a second key property, are
+    /// identified (the value index holds every value, not just the first).
+    #[test]
+    fn data_keys_match_on_any_shared_value() {
+        let answer = |abox: &str| {
+            let body = format!(
+                r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+                :P a owl:Class . :d a owl:DatatypeProperty . :e a owl:DatatypeProperty .
+                :s a owl:ObjectProperty . :o a owl:NamedIndividual .
+                :a a owl:NamedIndividual , :P . :b a owl:NamedIndividual , :P .
+                :a owl:differentFrom :b .
+                {abox}"#
+            );
+            let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            check(&d, &o, Budget::default()).consistency
+        };
+        // Shared second value of the first key property.
+        assert_eq!(
+            answer(":P owl:hasKey ( :d ) . :a :d 1 , 2 . :b :d 3 , 2 ."),
+            Consistency::Inconsistent
+        );
+        // Two data properties, the second matching on one of several values.
+        assert_eq!(
+            answer(":P owl:hasKey ( :d :e ) . :a :d 1 ; :e 5 , 6 . :b :d 1 ; :e 7 , 6 ."),
+            Consistency::Inconsistent
+        );
+        assert_eq!(
+            answer(":P owl:hasKey ( :d :e ) . :a :d 1 ; :e 5 . :b :d 1 ; :e 7 ."),
+            Consistency::Consistent
+        );
+        // An object property first, then a data property.
+        assert_eq!(
+            answer(":P owl:hasKey ( :s :d ) . :a :s :o ; :d 1 , 2 . :b :s :o ; :d 2 ."),
+            Consistency::Inconsistent
+        );
+        // Object properties only.
+        assert_eq!(
+            answer(":P owl:hasKey ( :s ) . :a :s :o . :b :s :o ."),
+            Consistency::Inconsistent
+        );
+    }
 }
