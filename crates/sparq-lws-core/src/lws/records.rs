@@ -211,7 +211,8 @@ where
 }
 
 /// The preconditions of a create in a service container (grants, requests, subscriptions),
-/// evaluated against `listing` with the container held exclusively: `Ok(None)` when the create is
+/// evaluated with the container held exclusively, against `listing` when they compare its state
+/// (an entity tag or a date) and against existence alone otherwise: `Ok(None)` when the create is
 /// unconditional, `Ok(Some(guard))` when its preconditions hold (the guard is passed on to
 /// [`create_record`], so no member arrives or leaves until the new one is registered), and the
 /// response to send otherwise. A listing that cannot be produced (a representation the client does
