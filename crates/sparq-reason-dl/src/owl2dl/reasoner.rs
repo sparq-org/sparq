@@ -7,24 +7,31 @@
 //! [`Unknown`](Consistency::Unknown) with the reason, and the triples behind it when there are
 //! any.
 //!
-//! The fragment is currently SHIQ(D) plus the OWL 2 role characteristics and ABox: classes
-//! and all class constructors except nominals (`ObjectOneOf`, `ObjectHasValue`), object
-//! properties with inverses, hierarchies, transitivity, functionality, reflexivity,
-//! irreflexivity, symmetry, asymmetry and disjointness, `hasSelf`, qualified cardinality,
-//! class / object-property / negative-property / same / different assertions, and data
-//! properties: domain, range, sub- / equivalent / disjoint data properties, functionality,
-//! the data restrictions (some, all, has-value, qualified cardinality) and positive and
-//! negative data property assertions, over data ranges of the OWL 2 datatype map
-//! (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`, `DataUnionOf`,
-//! `DataComplementOf` and acyclic `DatatypeDefinition`s), decided by
-//! [`super::data_ranges`]. Nominals, property chains other than `R∘R ⊑ R`, keys, the top and
-//! bottom properties, datatypes outside the map, and number restrictions above
+//! The fragment is currently SHOIQ(D) plus the OWL 2 role characteristics and ABox:
+//! classes and all class constructors including nominals (`ObjectOneOf`,
+//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity,
+//! functionality, reflexivity, irreflexivity, symmetry, asymmetry and disjointness,
+//! `hasSelf`, qualified cardinality, class / object-property / negative-property / same /
+//! different assertions, and data properties: domain, range, sub- / equivalent / disjoint
+//! data properties, functionality, the data restrictions (some, all, has-value, qualified
+//! cardinality) and positive and negative data property assertions, over data ranges of the
+//! OWL 2 datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
+//! `DataUnionOf`, `DataComplementOf` and acyclic `DatatypeDefinition`s), decided by
+//! [`super::data_ranges`]. Property chains other than `R∘R ⊑ R`, keys, the top and bottom
+//! properties, datatypes outside the map, and number restrictions above
 //! [`MAX_CARDINALITY`] answer `Unknown(OutOfFragment)`; a datatype question the oracle cannot
 //! decide answers `Unknown(DatatypeUnknown)`. An ill-typed literal in an assertion,
 //! `DataHasValue` or `DataOneOf` has no value, so the ontology has no model: `Inconsistent`.
 //!
-//! Classification is TBox-only, which is exact when the ontology is consistent and has no
-//! nominals: for SHIQ(D) the ABox cannot change a subsumption between classes.
+//! Nominals are decided without SHOIQ's NI-rule. A candidate model is accepted only when
+//! its completion graph provably unravels into a model (see the tableau's `unravels`); when
+//! nominals tie a repeated part of the graph to an individual whose number restrictions the
+//! repetition could break, that branch is closed as unconfirmed, and if no other branch
+//! gives a model the answer is `Unknown(Unconfirmed)`, never a guess.
+//!
+//! Classification is TBox-only when the ontology has no nominals, which is exact for a
+//! consistent ontology: for SHIQ(D) the ABox cannot change a subsumption between classes.
+//! With nominals every class test includes the ABox.
 
 pub use super::clausify::MAX_CARDINALITY;
 use super::clausify::{clausify, AtomKind, Clauses};
@@ -65,6 +72,10 @@ pub enum UnknownReason {
     /// The ontology is consistent on its own, but it imports ontologies that were not
     /// loaded, so it may still be inconsistent.
     ImportsNotLoaded(Vec<Id>),
+    /// The tableau built a candidate model that it could not confirm: nominals tie a part of
+    /// the completion graph that blocking repeats to an individual whose number
+    /// restrictions the repetitions could break (SHOIQ's NI-rule case, not implemented).
+    Unconfirmed,
 }
 
 /// The three-valued consistency answer.
@@ -222,15 +233,22 @@ impl Reasoner {
                 source.dedup();
                 UnknownReason::DatatypeUnknown { source }
             }
+            Stop::Unconfirmed => UnknownReason::Unconfirmed,
         }
     }
 
     fn abox_run(&self) -> Result<bool, Stop> {
         let mut t = Tableau::new(&self.clauses, &self.index, self.budget);
-        let abox = &self.clauses.abox;
-        if abox.individuals.is_empty() {
+        if self.clauses.abox.individuals.is_empty() {
             t.add_root();
         }
+        self.load_abox(&mut t);
+        t.run()
+    }
+
+    /// Adds the ABox to `t`: individual `i` becomes root node `i`.
+    fn load_abox(&self, t: &mut Tableau) {
+        let abox = &self.clauses.abox;
         for _ in &abox.individuals {
             t.add_root();
         }
@@ -252,7 +270,6 @@ impl Reasoner {
         for &(a, b, _) in &abox.same {
             t.assert_same(a, b);
         }
-        t.run()
     }
 
     /// How a class IRI enters a test.
@@ -267,8 +284,9 @@ impl Reasoner {
         }
     }
 
-    /// Whether some element can be in `class` and outside `outside` (a TBox test; the ABox
-    /// cannot change it for a consistent ontology without nominals).
+    /// Whether some element can be in `class` and outside `outside`, in a model of the
+    /// ontology. Without nominals the ABox cannot change that for a consistent ontology, so
+    /// the test is TBox-only; with nominals the individuals and their facts come along.
     fn test(
         &self,
         class: Option<u32>,
@@ -294,7 +312,11 @@ impl Reasoner {
         if let Some(left) = pool {
             budget.max_steps = left.get();
         }
-        Tableau::new(&self.clauses, &self.index, budget)
+        let mut t = Tableau::new(&self.clauses, &self.index, budget);
+        if !self.clauses.nominals.is_empty() {
+            self.load_abox(&mut t);
+        }
+        t
     }
 
     /// `Some(true)` when the class is satisfiable, `Some(false)` when it is not, `None` when
