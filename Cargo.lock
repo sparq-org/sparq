@@ -4975,6 +4975,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sparq-dl-wasm"
+version = "0.1.6"
+dependencies = [
+ "getrandom 0.3.4",
+ "oxrdf 0.3.3",
+ "sparq-core",
+ "sparq-reason-dl",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+]
+
+[[package]]
 name = "sparq-e2ee-ng"
 version = "0.1.6"
 dependencies = [

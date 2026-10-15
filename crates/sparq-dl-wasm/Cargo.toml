@@ -1,0 +1,38 @@
+# #7031: the OWL 2 DL reasoner WebAssembly bundle behind `checkOwlDl` in `@sparq-org/sparq`.
+#
+# A SEPARATE, lazy-loaded bundle (not folded into the lean `sparq-wasm` bundle): it carries
+# the OWL 2 DL reverse mapping, profile check and hypertableau reasoner (`sparq-reason-dl`),
+# which the default package bundle does not. The npm package imports it dynamically on the
+# first `checkOwlDl` call, so pages that never call it never fetch it. Mirrors the
+# per-bundle-crate pattern of `sparq-reason-wasm`.
+[package]
+name = "sparq-dl-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+# cdylib for the wasm artifact; rlib so the JSON-producing core is unit-tested natively.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# No default features on sparq-core => no rayon (the wasm build has no threads); the
+# document parsers (oxttl) are part of sparq-core's default-off build.
+sparq-core = { path = "../sparq-core", default-features = false }
+sparq-reason-dl = { path = "../sparq-reason-dl" }
+oxrdf.workspace = true
+wasm-bindgen = "0.2"
+
+# oxrdf pulls `rand`/getrandom (blank-node ids). On wasm there is no OS RNG, so select
+# getrandom's browser backend (crypto.getRandomValues). The matching
+# `--cfg getrandom_backend="wasm_js"` is set in the workspace .cargo/config.toml.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+
+
+[dev-dependencies]
+# Headless wasm test harness (`wasm-pack test --node`, tests/web.rs): drives the REAL
+# #[wasm_bindgen] export, including the JsError arm the native tests cannot reach.
+# Dev-only: it must NOT enter the non-dev wasm graph.
+wasm-bindgen-test = "0.3"

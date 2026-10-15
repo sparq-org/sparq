@@ -4,6 +4,8 @@ wasm/
 # The `--target nodejs` (CommonJS) sibling of `wasm/`, built by `build:wasm:node`
 # and shipped in the tarball for `require()` consumers. [OPUS-5] sq-2hk
 wasm-node/
+# The lazily-loaded OWL 2 DL reasoner bundle (crates/sparq-dl-wasm), built by `build:wasm:dl`.
+wasm-dl/
 *.tgz
 # Agent-Skills usage docs copied in at prepack time (single-sourced at repo root:
 # ../skills, ../AGENTS.md) so they ship in the npm tarball. [OPUS-4.8]
