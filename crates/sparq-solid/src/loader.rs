@@ -65,7 +65,7 @@ fn external_principal(iri: &str) -> bool {
         && !iri.contains(PAIR_DELIMITER)
 }
 
-fn validate_principal_iri(iri: &str) -> Result<(), String> {
+pub(crate) fn validate_principal_iri(iri: &str) -> Result<(), String> {
     if !external_principal(iri) {
         return Err(format!(
             "agent/client/origin IRI <{iri}> is not allowed: \
@@ -468,45 +468,12 @@ pub(crate) fn assemble_facts(
     let in_doc_p = named(&format!("{SOLIDX_NS}inDoc"));
     let is_webid = named(&format!("{SOLIDX_NS}isWebId"));
 
-    // 1) resources: every non-control, non-auth graph + every structural container
-    //    prefix (containers exist as inheritance anchors even without their own graph).
-    let mut resources: FxHashSet<String> = FxHashSet::default();
-    let mut control_graphs: Vec<(&str, Vec<[Term; 3]>)> = Vec::new(); // (name, triples)
-    for (name, sub) in &graph.named {
-        let Some(iri) = graph_iri(name) else { continue };
-        // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
-        // never reasoning input. [`strip_reserved_graphs`] also drops these from the
-        // dataset, but assembly must not DEPEND on that having run first — the
-        // materializer defers every mutation until after this fallible pass so an error
-        // leaves the previous auth view in place (roborev 5005). A graph named in the
-        // skolem space is skipped too, so it is never a resource: no one is granted it.
-        if iri.starts_with(RESERVED_PREFIX) || iri.starts_with(SKOLEM_PREFIX) {
-            continue;
-        }
-        let control_of = iri.strip_suffix(ACL_SUFFIX).or_else(|| iri.strip_suffix(ACR_SUFFIX));
-        // A bare `scheme://` names no authority, so it is not a container of any pod
-        // root, and neither it nor its control document takes part in the auth view.
-        // (The parent rule's textual scrape of `https://pod.ex/` yields `https://`;
-        // [`parent_iri`] already stops at the authority root.)
-        if is_authority_less(control_of.unwrap_or(iri)) {
-            continue;
-        }
-        if control_of.is_some() {
-            if iri.ends_with(suffix) {
-                control_graphs.push((iri, graph_triples(sub)));
-            }
-            continue;
-        }
-        resources.insert(iri.to_owned());
-        // structural container chain: https://host/a/b/doc -> /a/b/ -> /a/ -> /
-        let mut cur = iri;
-        while let Some(parent) = parent_iri(cur) {
-            if !resources.insert(parent.to_owned()) {
-                break;
-            }
-            cur = parent;
-        }
-    }
+    // 1) resources (see [`enumerate`]).
+    let (resources, control_graphs) = enumerate(graph, suffix);
+    let control_graphs: Vec<(&str, Vec<[Term; 3]>)> = control_graphs
+        .into_iter()
+        .map(|(iri, sub)| (iri, graph_triples(sub)))
+        .collect();
     // A control document with a triple it may not state contributes nothing. For ACP,
     // whose policies also deny, so does every ACR that references a node of a rejected
     // document (transitively), and the resources a rejected ACR governs, with everything
@@ -619,8 +586,17 @@ pub(crate) fn assemble_facts(
     // candidate-generation lattice picks them up.
     if system == System::Acp {
         for (resource, creator, owner) in provenance.iter() {
+            // Every fact is validated, emitted or not: the store keeps the facts of a
+            // resource that does not exist while its own `.acr` is stored, so a later rebuild
+            // must not be the first to refuse one.
+            for p in creator.into_iter().chain(owner) {
+                validate_principal_iri(p)?;
+            }
+            // Emitted only for a resource the view holds.
+            if !resources.contains(resource) {
+                continue;
+            }
             if let Some(c) = creator {
-                validate_principal_iri(c)?;
                 webids.insert(c.to_owned());
                 out.push([
                     named(resource),
@@ -629,7 +605,6 @@ pub(crate) fn assemble_facts(
                 ]);
             }
             if let Some(o) = owner {
-                validate_principal_iri(o)?;
                 webids.insert(o.to_owned());
                 out.push([named(resource), named(&format!("{SOLIDX_NS}owner")), named(o)]);
             }
@@ -799,6 +774,200 @@ pub(crate) fn iri_origin(iri: &str) -> &str {
     }
 }
 
+/// The auth view's resources in `graph`, and its control documents ending in `suffix`.
+/// The resources are every graph that is not reserved, not an `.acl`/`.acr` and has an
+/// authority, plus every structural container above one (a container is an inheritance
+/// anchor even without a graph of its own, but not when only control documents sit below
+/// it). The materializer and the store's provenance pruning both use this, so trusted
+/// creator/owner facts are stated for exactly the resources the view holds.
+fn enumerate<'g>(graph: &'g Graph, suffix: &str) -> (FxHashSet<String>, Vec<(&'g str, &'g Graph)>) {
+    let mut resources: FxHashSet<String> = FxHashSet::default();
+    let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
+    for (name, sub) in &graph.named {
+        let Some(iri) = graph_iri(name) else { continue };
+        // Skip the whole reserved space (`<urn:sparq:auth>` included): a graph there is
+        // never reasoning input. [`strip_reserved_graphs`] also drops these from the
+        // dataset, but assembly must not DEPEND on that having run first — the
+        // materializer defers every mutation until after this fallible pass so an error
+        // leaves the previous auth view in place (roborev 5005). A graph named in the
+        // skolem space is skipped too, so it is never a resource: no one is granted it.
+        if iri.starts_with(RESERVED_PREFIX) || iri.starts_with(SKOLEM_PREFIX) {
+            continue;
+        }
+        if is_control_graph(iri) {
+            if iri.ends_with(suffix) && !is_authority_less(control_target(iri)) {
+                control_graphs.push((iri, sub));
+            }
+            continue;
+        }
+        if is_resource_graph(iri) {
+            insert_with_containers(&mut resources, iri);
+        }
+    }
+    (resources, control_graphs)
+}
+
+/// Whether the stored graph `iri` is an access-control document.
+fn is_control_graph(iri: &str) -> bool {
+    iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX)
+}
+
+/// The resources whose own access control resource (`.acr`) is stored in `graph`: the only
+/// document the ACP view, the one reader of creators and owners, reads.
+pub(crate) fn controlled_resources(graph: &Graph) -> FxHashSet<&str> {
+    graph
+        .named
+        .iter()
+        .filter_map(|(n, _)| graph_iri(n))
+        .filter_map(|iri| iri.strip_suffix(ACR_SUFFIX))
+        .collect()
+}
+
+/// The resource an access-control document `iri` governs.
+fn control_target(iri: &str) -> &str {
+    iri.strip_suffix(ACL_SUFFIX)
+        .or_else(|| iri.strip_suffix(ACR_SUFFIX))
+        .unwrap_or(iri)
+}
+
+/// Whether the stored graph `iri` is a resource of the auth view by itself: outside the
+/// reserved and skolem spaces, not an access-control document, and below an authority. A bare
+/// `scheme://` names no authority, so it is not a container of any pod root, and neither it
+/// nor its control document takes part in the auth view. (The parent rule's textual scrape
+/// of `https://pod.ex/` yields `https://`; [`parent_iri`] already stops at the authority
+/// root.)
+fn is_resource_graph(iri: &str) -> bool {
+    !iri.starts_with(RESERVED_PREFIX)
+        && !iri.starts_with(SKOLEM_PREFIX)
+        && !is_control_graph(iri)
+        && !is_authority_less(iri)
+}
+
+/// Whether `iri` can be a structural container: a `/`-terminated IRI at or below an
+/// authority root (`scheme://host/…`), the only names [`parent_iri`] yields.
+fn is_container_name(iri: &str) -> bool {
+    iri.find("://")
+        .is_some_and(|i| iri[i + 3..].contains('/') && !is_authority_less(iri))
+}
+
+/// Add `iri` and its structural container chain (https://host/a/b/doc -> /a/b/ -> /a/ -> /).
+fn insert_with_containers(resources: &mut FxHashSet<String>, iri: &str) {
+    resources.insert(iri.to_owned());
+    let mut cur = iri;
+    while let Some(parent) = parent_iri(cur) {
+        if !resources.insert(parent.to_owned()) {
+            break;
+        }
+        cur = parent;
+    }
+}
+
+/// The stored graphs that are resources by themselves (see [`is_resource_graph`]), kept in
+/// order so the resources they make can be tested one at a time: a graph is a resource, and
+/// so is every container on its chain (see [`enumerate`]). Every lifecycle decision about
+/// the stored provenance is made against this one rule.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ResourceGraphs(std::collections::BTreeSet<String>);
+
+impl ResourceGraphs {
+    /// The resource graphs among the names of `graph`'s named graphs.
+    pub(crate) fn of(graph: &Graph) -> Self {
+        Self::from_names(graph.named.iter().filter_map(|(n, _)| graph_iri(n)))
+    }
+
+    /// The resource graphs among `names`.
+    pub(crate) fn from_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Self {
+        ResourceGraphs(
+            names
+                .into_iter()
+                .filter(|n| is_resource_graph(n))
+                .map(str::to_owned)
+                .collect(),
+        )
+    }
+
+    /// Whether `iri` is a resource: a stored resource graph, or a container on the chain of
+    /// one. Every `/`-terminated prefix of a graph name (below its authority) is on its chain,
+    /// so a container is held exactly when some graph name starts with it.
+    pub(crate) fn holds(&self, iri: &str) -> bool {
+        self.0.contains(iri)
+            || (iri.ends_with('/')
+                && is_container_name(iri)
+                && self
+                    .0
+                    .range::<str, _>((std::ops::Bound::Included(iri), std::ops::Bound::Unbounded))
+                    .next()
+                    .is_some_and(|n| n.starts_with(iri)))
+    }
+
+    /// Every resource, with its containers.
+    pub(crate) fn all(&self) -> FxHashSet<String> {
+        let mut out = FxHashSet::default();
+        for name in &self.0 {
+            insert_with_containers(&mut out, name);
+        }
+        out
+    }
+
+    /// Store a graph named `name`, calling `appears` for each resource it makes that was
+    /// not one just before (the graph itself and the containers it brings).
+    pub(crate) fn add(&mut self, name: &str, mut appears: impl FnMut(&str)) {
+        if !is_resource_graph(name) || self.0.contains(name) {
+            return;
+        }
+        let mut chain = vec![name];
+        let mut cur = name;
+        while let Some(parent) = parent_iri(cur) {
+            chain.push(parent);
+            cur = parent;
+        }
+        let fresh: Vec<&str> = chain.into_iter().filter(|r| !self.holds(r)).collect();
+        self.0.insert(name.to_owned());
+        fresh.into_iter().for_each(&mut appears);
+    }
+
+    /// Remove the graph named `name`, calling `gone` for each resource that is not one any
+    /// more (the graph itself, and each container left with no graph below it).
+    pub(crate) fn remove(&mut self, name: &str, mut gone: impl FnMut(&str)) {
+        if !self.0.remove(name) {
+            return;
+        }
+        let mut cur = name;
+        if !self.holds(cur) {
+            gone(cur);
+        }
+        while let Some(parent) = parent_iri(cur) {
+            if self.holds(parent) {
+                break;
+            }
+            gone(parent);
+            cur = parent;
+        }
+    }
+
+    /// Remove every graph, calling `gone` for every resource.
+    pub(crate) fn clear(&mut self, mut gone: impl FnMut(&str)) {
+        self.all().iter().for_each(|r| gone(r));
+        self.0.clear();
+    }
+}
+
+/// Whether an access-control resource document in `graph` names `acp:CreatorAgent` or
+/// `acp:OwnerAgent`: whether an ACP view built from it depends on the trusted provenance.
+pub(crate) fn control_documents_name_provenance(graph: &Graph) -> bool {
+    graph.named.iter().any(|(name, g)| {
+        graph_iri(name).is_some_and(|iri| iri.ends_with(ACR_SUFFIX))
+            && graph_triples(g).iter().any(|t| {
+                matches!(&t[2], Term::NamedNode(o) if SPECIAL_AGENTS[2..4].contains(&o.as_str()))
+            })
+    })
+}
+
+/// The auth view's resources in `graph` (see [`enumerate`]).
+pub(crate) fn resources(graph: &Graph) -> FxHashSet<String> {
+    enumerate(graph, ACR_SUFFIX).0
+}
+
 /// Whether `iri` is exactly a bare `scheme://` with no authority — above every authority
 /// root. The `://` must follow the scheme itself (an opaque IRI such as
 /// `urn:example:x://` does not match).
@@ -809,8 +978,10 @@ fn is_authority_less(iri: &str) -> bool {
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
 }
 
-/// Solid slash-semantics parent of an IRI (None at/above the authority root).
-pub(crate) fn parent_iri(iri: &str) -> Option<&str> {
+/// Solid slash-semantics parent of an IRI (None at/above the authority root): the one
+/// container traversal the auth view, the store's provenance and the MCP server's
+/// containment all use.
+pub fn parent_iri(iri: &str) -> Option<&str> {
     let scheme_end = iri.find("://").map(|i| i + 3)?;
     let path = &iri[scheme_end..];
     let host_end = scheme_end + path.find('/')?;

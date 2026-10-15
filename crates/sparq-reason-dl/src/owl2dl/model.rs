@@ -370,4 +370,13 @@ impl Ontology {
     pub fn logical_axioms(&self) -> impl Iterator<Item = &AxiomRecord> {
         self.axioms.iter().filter(|a| a.axiom.is_logical())
     }
+
+    /// Whether axiom `ai` carries an annotation (an `owl:Axiom` reification of one of its
+    /// triples).
+    pub fn is_annotated(&self, ai: usize) -> bool {
+        let source = &self.axioms[ai].source;
+        self.annotations
+            .iter()
+            .any(|a| matches!(a.target, AnnotationTarget::Axiom(t) if source.contains(&t)))
+    }
 }

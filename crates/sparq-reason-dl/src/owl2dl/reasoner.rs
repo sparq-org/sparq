@@ -37,7 +37,7 @@
 //! With nominals every class test includes the ABox.
 
 pub use super::clausify::MAX_CARDINALITY;
-use super::clausify::{clausify, AtomKind, Clauses};
+use super::clausify::{clausify, AtomKind, Clauses, Refusal};
 use super::datatypes::{self, ValueError};
 use super::dl_profile::{
     check_dl, for_each_class_in_axiom, for_each_range_in_axiom, DlProfileReport, Violation,
@@ -173,15 +173,15 @@ impl Reasoner {
                 model: OnceCell::from(Ok(false)),
             });
         }
-        let clauses = clausify(dict, onto).map_err(|u| {
+        let clauses = clausify(dict, onto, budget.max_steps).map_err(|u| {
             let source = onto.axioms[u.axiom].source.clone();
-            if u.datatype {
-                UnknownReason::DatatypeUnknown { source }
-            } else {
-                UnknownReason::OutOfFragment {
+            match u.kind {
+                Refusal::Datatype => UnknownReason::DatatypeUnknown { source },
+                Refusal::Budget => UnknownReason::ResourceBudget,
+                Refusal::Fragment => UnknownReason::OutOfFragment {
                     construct: u.construct,
                     source,
-                }
+                },
             }
         })?;
         let index = ClauseIndex::new(&clauses);
@@ -518,5 +518,45 @@ pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
         consistency,
         classification,
         classification_unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::owl2dl::extract;
+    use sparq_core::Graph;
+
+    /// Every budget either stops the run or holds the whole of it: the work that confirms
+    /// a model (blocking, the unravelling check) is inside the budget too.
+    #[test]
+    fn a_verdict_never_exceeds_the_budget() {
+        let body = r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            :P a owl:Class . :hasParent a owl:ObjectProperty . :livesIn a owl:ObjectProperty .
+            :c a owl:NamedIndividual . :bob a owl:NamedIndividual , :P .
+            :P rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :hasParent ; owl:someValuesFrom :P ] ,
+                [ a owl:Restriction ; owl:onProperty :livesIn ; owl:hasValue :c ] .
+        "#;
+        let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        let full = Reasoner::new(&d, &o, Budget::default()).unwrap();
+        let mut t = Tableau::new(&full.clauses, &full.index, full.budget);
+        full.load_abox(&mut t);
+        assert_eq!(t.run(), Ok(true));
+        let needed = t.work();
+        for max_steps in 0..=needed + 2 {
+            let budget = Budget {
+                max_steps,
+                ..Budget::default()
+            };
+            let r = Reasoner::new(&d, &o, budget).unwrap();
+            let mut t = Tableau::new(&r.clauses, &r.index, r.budget);
+            r.load_abox(&mut t);
+            if t.run() == Ok(true) {
+                assert!(t.work() <= max_steps, "{} > {max_steps}", t.work());
+            }
+        }
     }
 }

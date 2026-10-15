@@ -21,6 +21,7 @@ pub mod fixture;
 // and the `acp:vc` fail-closed matcher semantics it feeds are unconditional. Only the
 // `sparq-vc`-backed verification that populates it is behind the opt-in `acp-vc` feature.
 mod credentials;
+mod lifecycle;
 mod loader;
 mod materialize;
 // sq-3jtd.5: TRUSTED per-resource creator/owner provenance — the channel by
@@ -77,6 +78,9 @@ pub use materialize::{
     MaterializeStats,
 };
 pub use provenance::AccessProvenance;
+/// The Solid slash-semantics parent container of an IRI (`None` at or above the authority
+/// root): the one container traversal the auth view and the store's provenance use.
+pub use loader::parent_iri as parent_container;
 // sq-ysv3u: the ACP `acp:vc` trusted verified-credential channel. Always
 // compiled (it adds no dependency); the `acp-vc` feature adds the sparq-vc-backed
 // trust-the-issuer verification that populates it.
@@ -190,6 +194,12 @@ fn wrap_read(sparql: &str) -> Result<String, String> {
     }
 }
 
+/// The names of a store's graphs at one moment ([`PodStore::stored_graphs`]), for
+/// [`PodStore::rematerialize_after_edit`].
+#[derive(Clone, Debug, Default)]
+pub struct StoredGraphs(FxHashSet<String>);
+
+
 /// A pod dataset + its materialized auth view + the per-session graph-set cache.
 ///
 /// The central type of this crate: wrap a loaded dataset with [`PodStore::new`],
@@ -226,7 +236,12 @@ fn wrap_read(sparql: &str) -> Result<String, String> {
 pub struct PodStore {
     /// The underlying dataset: pod documents, `.acl`/`.acr` graphs, and (after a
     /// `materialize_*` call) the `<urn:sparq:auth>` view. Mutating it directly does
-    /// NOT rebuild the session index — go through the `materialize_*` methods.
+    /// NOT rebuild the session index: take [`PodStore::stored_graphs`] before the edit and
+    /// call [`PodStore::rematerialize_after_edit`] after it, before any other write or
+    /// rebuild, so the stored provenance follows the edit; a `materialize_*` call alone only
+    /// drops the facts of resources that no longer exist unless their `.acr` is stored and
+    /// was at the last install (an unannounced removal and re-adding in between cannot be
+    /// told apart).
     pub graph: Graph,
     auth: Arc<AuthIndex>,
     epoch: u64,
@@ -294,6 +309,26 @@ pub struct PodStore {
     /// Only these can be granted by an attached ODRL permission.
     #[cfg(feature = "odrl-bridge")]
     statically_covered: Arc<FxHashSet<String>>,
+    /// The trusted ACP context (creator/owner provenance and verified credentials) of the
+    /// last successful ACP materialization. Every ACP rebuild the store makes on its own,
+    /// after an access-control write or an update, uses it, so a write never drops the
+    /// grants and denies that context decides.
+    acp_context: (AccessProvenance, VerifiedCredentials),
+    /// Whether the ACP view in force depends on the stored provenance: it was built by an ACP
+    /// materialization from rules naming `acp:CreatorAgent` or `acp:OwnerAgent`. Only then
+    /// does a provenance change rebuild it.
+    acp_uses_provenance: bool,
+    /// Whether the stored provenance may no longer describe the stored graphs: a change that
+    /// would have changed it failed part way. No rebuild uses it until the caller supplies
+    /// the context again ([`PodStore::materialize_acp_with_credentials`]).
+    acp_context_stale: bool,
+    /// The resources whose own access control resource was stored when the stored provenance
+    /// was last installed: a change or rebuild keeps the facts of a resource that does not
+    /// exist only if its `.acr` was stored then and still is, so an `.acr` stored since by an
+    /// edit the store was not told of keeps nothing (one removed and stored again between two
+    /// installs by such an edit cannot be told apart). Empty after a commit that fails past
+    /// its commit point, until the next install.
+    acr_controlled: FxHashSet<String>,
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -461,6 +496,10 @@ impl PodStore {
             odrl: odrl_enforce::OdrlEnforcement::default(),
             #[cfg(feature = "odrl-bridge")]
             statically_covered: Arc::default(),
+            acp_context: Default::default(),
+            acp_uses_provenance: false,
+            acp_context_stale: false,
+            acr_controlled: FxHashSet::default(),
         }
     }
 
@@ -489,8 +528,13 @@ impl PodStore {
     /// sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
         let stats = materialize_wac(&mut self.graph)?;
+        // Stored creator and owner facts of resources gone with their access control resource
+        // go at any rebuild, so an ACP view built later never revives them.
+        let provenance = std::mem::take(&mut self.acp_context.0);
+        self.acp_context.0 = self.existing_provenance(&provenance, false);
         self.record_static_coverage();
         self.view_dropped = false;
+        self.acp_uses_provenance = false;
         self.reconcile_bridged_after_static();
         self.reindex_with(scope);
         Ok(stats)
@@ -526,8 +570,158 @@ impl PodStore {
     ///
     /// As [`PodStore::materialize_wac`]; also a reserved name in trusted provenance or
     /// credentials.
+    ///
+    /// The view uses the trusted context (provenance and credentials) last passed to
+    /// [`PodStore::materialize_acp_with`] or [`PodStore::materialize_acp_with_credentials`],
+    /// none until then; pass empty ones to those to clear it, and current ones when a
+    /// credential holding expires or is revoked. The creator and owner of a resource that no
+    /// longer exists are dropped from it unless its own `.acr` is stored and was when the
+    /// provenance was last installed.
     pub fn materialize_acp(&mut self) -> Result<MaterializeStats, String> {
-        self.materialize_acp_with(&AccessProvenance::new())
+        self.rematerialize_acp_scoped(ReindexScope::Full)
+    }
+
+    /// Rebuild the ACP view under the stored trusted context, invalidating the session
+    /// cache at `scope`.
+    pub(crate) fn rematerialize_acp_scoped(
+        &mut self,
+        scope: ReindexScope,
+    ) -> Result<MaterializeStats, String> {
+        self.usable_acp_context()?;
+        let (provenance, credentials) = self.acp_context.clone();
+        self.materialize_acp_with_scoped(&provenance, &credentials, scope, false)
+    }
+
+    /// Refuse a rebuild from the stored context while it may not describe the stored graphs.
+    fn usable_acp_context(&self) -> Result<(), String> {
+        if self.acp_context_stale {
+            return Err("the stored creator/owner provenance may not describe the store after a \
+                        change that failed part way; materialize with the trusted context again"
+                .to_owned());
+        }
+        Ok(())
+    }
+
+    /// The creator/owner provenance in the stored ACP context.
+    pub fn acp_provenance(&self) -> &AccessProvenance {
+        &self.acp_context.0
+    }
+
+    /// The names of the stored graphs, taken by a caller before it changes `graph` directly
+    /// (adding or removing graphs), for [`PodStore::rematerialize_after_edit`].
+    pub fn stored_graphs(&self) -> StoredGraphs {
+        StoredGraphs(
+            self.graph
+                .named
+                .iter()
+                .filter_map(|(n, _)| match n {
+                    Term::NamedNode(n) => Some(n.as_str().to_owned()),
+                    _ => None,
+                })
+                .collect(),
+        )
+    }
+
+    /// Rebuild the auth view (ACP when `acp`, else WAC) after a caller changed `graph`
+    /// directly since it took `before` ([`PodStore::stored_graphs`]), such as the MCP server
+    /// creating or deleting a resource. The stored provenance follows the change's net
+    /// effect as an update's does (see [`PodStore::materialize_acp_with_credentials`]): a
+    /// resource keeps its creator and owner if it exists before and after the edit, or its own
+    /// `.acr` is stored throughout it, and loses them otherwise; every resource that exists
+    /// after the edit and did not before gets `creator` (the acting agent, when the view takes
+    /// it as a principal) unless its own `.acr` was stored before it. The edit is seen only as
+    /// the difference between the graph names stored before and after it, so an `.acr` whose
+    /// content it replaces counts as stored throughout. The view and the provenance are installed together, and
+    /// only if the rebuild succeeds.
+    ///
+    /// # Errors
+    ///
+    /// As [`PodStore::materialize_acp`] / [`PodStore::materialize_wac`]; the view and the
+    /// stored provenance are then unchanged, and the caller restores `graph`.
+    pub fn rematerialize_after_edit(
+        &mut self,
+        before: &StoredGraphs,
+        creator: Option<&str>,
+        acp: bool,
+    ) -> Result<MaterializeStats, String> {
+        let events = lifecycle::edit_events(&before.0, &self.graph);
+        let staged =
+            lifecycle::provenance_after_names(
+                &before.0,
+                &events,
+                &self.acp_context.0,
+                creator,
+                &self.acr_controlled,
+            )
+                .unwrap_or_else(|| self.acp_context.0.clone());
+        if acp {
+            self.usable_acp_context()?;
+            let credentials = self.acp_context.1.clone();
+            self.materialize_acp_with_scoped(&staged, &credentials, ReindexScope::Full, false)
+        } else {
+            let kept = std::mem::replace(&mut self.acp_context.0, staged);
+            self.materialize_wac().inspect_err(|_| self.acp_context.0 = kept)
+        }
+    }
+
+    /// Forget the stored facts of every resource `effects` may have removed or brought back:
+    /// each graph they name, the resource an `.acr` among them governs, and every container
+    /// above either; all of them for a `CLEAR`/`DROP` of more than one graph.
+    fn forget_touched(&mut self, effects: &[sparq_engine::UpdateEffect]) {
+        use sparq_engine::UpdateEffect;
+        use spargebra::algebra::GraphTarget;
+        let mut names: Vec<&str> = Vec::new();
+        for effect in effects {
+            match effect {
+                UpdateEffect::Delta { slot: Some(Term::NamedNode(n)), .. } => names.push(n.as_str()),
+                UpdateEffect::Create(Term::NamedNode(n)) => names.push(n.as_str()),
+                UpdateEffect::Clear(t) | UpdateEffect::Drop(t) => match t {
+                    GraphTarget::NamedNode(n) => names.push(n.as_str()),
+                    GraphTarget::DefaultGraph => {}
+                    _ => {
+                        self.acp_context.0 = AccessProvenance::new();
+                        return;
+                    }
+                },
+                _ => {}
+            }
+        }
+        for name in names {
+            let mut r = Some(name.strip_suffix(loader::ACR_SUFFIX).unwrap_or(name));
+            while let Some(at) = r {
+                self.acp_context.0.forget(at);
+                r = loader::parent_iri(at);
+            }
+        }
+    }
+
+    /// `provenance` for only the resources the auth view of the store holds (the loader's own
+    /// resource enumeration, [`loader::resources`]) and those whose own access control
+    /// resource is stored and was when the provenance was last installed, or, for facts the
+    /// caller supplies (`supplied`) that differ from the stored ones, is stored now (see
+    /// [`lifecycle`]); stored facts passed back are judged as stored. Records which resources
+    /// have their `.acr` stored, for the next install.
+    fn existing_provenance(
+        &mut self,
+        provenance: &AccessProvenance,
+        supplied: bool,
+    ) -> AccessProvenance {
+        let resources = loader::resources(&self.graph);
+        let controlled: FxHashSet<String> = loader::controlled_resources(&self.graph)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let (before, stored) = (&self.acr_controlled, &self.acp_context.0);
+        let new = |r: &str| {
+            (provenance.creator(r), provenance.owner(r)) != (stored.creator(r), stored.owner(r))
+        };
+        let mut kept = provenance.clone();
+        kept.retain(|r| {
+            resources.contains(r)
+                || (controlled.contains(r) && (before.contains(r) || (supplied && new(r))))
+        });
+        self.acr_controlled = controlled;
+        kept
     }
 
     /// (Re-)materialize the ACP auth view using TRUSTED per-resource creator/owner facts,
@@ -539,7 +733,11 @@ impl PodStore {
     /// are asserted by the caller (the storage layer that minted the resource) and are
     /// **never** read from the resource graph — a writer who embeds `<r> solidx:creator
     /// <self>` in a document they control cannot thereby grant themselves access (design
-    /// doc §2.4). `materialize_acp()` is exactly `materialize_acp_with(&AccessProvenance::new())`.
+    /// doc §2.4). The store keeps `provenance`, with no credentials, for the ACP rebuilds it
+    /// makes itself (after an access-control write or an update, and
+    /// [`PodStore::materialize_acp`]), and forgets a resource's facts once it does not
+    /// exist unless its own `.acr` is stored and was at the previous install (facts that
+    /// differ from the stored ones are taken as supplied); call again when it changes.
     ///
     /// # Errors
     ///
@@ -598,6 +796,13 @@ impl PodStore {
     /// `materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())` — with no
     /// credential supplied, **every** `acp:vc` matcher rejects every candidate (fail-closed).
     ///
+    /// A resource whose creator and owner both equal the stored ones (such as
+    /// [`PodStore::acp_provenance`] passed back, to refresh the credentials or after a failed
+    /// update) is judged as stored: if it does not exist, its facts are kept only if its
+    /// `.acr` was stored at the last install (after a commit that fails past its commit point,
+    /// none is, and the facts of every resource the update touched are already forgotten). A
+    /// resource whose creator or owner differs is taken as given in full.
+    ///
     /// # Errors
     ///
     /// As [`PodStore::materialize_acp_with`], plus an `Err` if a credential holder's WebID
@@ -640,7 +845,7 @@ impl PodStore {
         provenance: &AccessProvenance,
         credentials: &VerifiedCredentials,
     ) -> Result<MaterializeStats, String> {
-        self.materialize_acp_with_scoped(provenance, credentials, ReindexScope::Full)
+        self.materialize_acp_with_scoped(provenance, credentials, ReindexScope::Full, true)
     }
 
     /// [`PodStore::materialize_acp_with`] invalidating the session cache only at `scope` — the
@@ -651,8 +856,13 @@ impl PodStore {
         provenance: &AccessProvenance,
         credentials: &VerifiedCredentials,
         scope: ReindexScope,
+        supplied: bool,
     ) -> Result<MaterializeStats, String> {
         let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
+        // Kept for exactly the resources the view was built over (see [`loader::resources`]).
+        self.acp_context = (self.existing_provenance(provenance, supplied), credentials.clone());
+        self.acp_uses_provenance = loader::control_documents_name_provenance(&self.graph);
+        self.acp_context_stale = false;
         self.record_static_coverage();
         self.view_dropped = false;
         self.reconcile_bridged_after_static();
@@ -1014,12 +1224,114 @@ impl PodStore {
             }
     }
 
-    /// Commit an authorized update's effects to the graph. A graph the update removes, at any
-    /// point in it, leaves the static coverage first: a graph of that name created again (in
-    /// this update or a later one) is covered only once a static materialization runs again.
-    fn apply_update(&mut self, effects: &[sparq_engine::UpdateEffect]) -> Result<(), String> {
+    /// The provenance an update with `effects` stages (see [`lifecycle`]): the creator and
+    /// owner of every resource it ends are forgotten, and it records no creator. Installed
+    /// with the update when it commits; `None` when it ends no resource (most updates).
+    fn staged_provenance(
+        &self,
+        effects: &[sparq_engine::UpdateEffect],
+    ) -> Option<AccessProvenance> {
+        let events = lifecycle::update_events(&self.graph, effects);
+        // An update that only creates graphs changes nothing when nothing is known of any
+        // resource (it records no creator); otherwise it may bring one with known facts back.
+        if self.acp_context.0.is_empty()
+            && !events
+                .iter()
+                .any(|e| !matches!(e, lifecycle::GraphEvent::Added(_)))
+        {
+            return None;
+        }
+        lifecycle::provenance_after(
+            &self.graph,
+            &events,
+            &self.acp_context.0,
+            None,
+            &self.acr_controlled,
+        )
+    }
+
+    /// Whether installing `staged` changes what the ACP view in force decides, so the view
+    /// must be rebuilt with it.
+    fn provenance_rebuilds(&self, acp: bool, staged: &Option<AccessProvenance>) -> bool {
+        acp && self.acp_uses_provenance && staged.is_some()
+    }
+
+    /// Commit an authorized update: its effects to the store, then (only once they are
+    /// committed) the provenance it stages and, when `rebuild` names the model, the view
+    /// rebuilt from both. A graph the update removes, at any point in it, leaves the static
+    /// coverage first: a graph of that name created again (in this update or a later one) is
+    /// covered only once a static materialization runs again.
+    fn commit_update(
+        &mut self,
+        effects: &[sparq_engine::UpdateEffect],
+        staged: Option<AccessProvenance>,
+        rebuild: Option<bool>,
+    ) -> Result<(), String> {
+        if rebuild == Some(true) {
+            self.usable_acp_context()
+                .map_err(|e| format!("update denied: {e}; nothing was changed"))?;
+        }
+        #[cfg(test)]
+        let committed = update_path_tests::injected_failure_before_commit()
+            .map_err(|e| sparq_engine::ApplyError {
+                applied: false,
+                message: e,
+            })
+            .and_then(|()| sparq_engine::apply_effects_checked(&mut self.graph, effects));
+        #[cfg(not(test))]
+        let committed = sparq_engine::apply_effects_checked(&mut self.graph, effects);
+        // A commit that applied everything in memory and still failed: the worst case.
+        #[cfg(test)]
+        let committed = committed.and_then(|()| {
+            update_path_tests::injected_commit_failure().map_err(|e| sparq_engine::ApplyError {
+                applied: true,
+                message: e,
+            })
+        });
+        if let Err(sparq_engine::ApplyError {
+            applied: false,
+            message,
+        }) = &committed
+        {
+            // Refused at the commit point: the store, and so the view and the provenance that
+            // describe it, are as they were.
+            return Err(format!("the update could not be committed: {message}"));
+        }
         self.forget_removed_coverage(effects);
-        sparq_engine::apply_effects(&mut self.graph, effects)
+        if let Err(sparq_engine::ApplyError { message: e, .. }) = committed {
+            // Part of it may be applied in memory, intermediate steps included: neither the
+            // view nor the stored provenance is known to describe the store any more, whatever
+            // the update's net effect would have been.
+            self.acp_context_stale = true;
+            // Nor is any `.acr` known to have been stored throughout, nor any resource the
+            // update touched known to have existed throughout: provenance passed back keeps
+            // the facts of existing resources the update did not touch only.
+            self.acr_controlled.clear();
+            self.forget_touched(effects);
+            self.drop_auth_view();
+            return Err(format!("the update could not be committed: {e}"));
+        }
+        if let Some(staged) = staged {
+            self.acp_context.0 = staged;
+        }
+        if let Some(acp) = rebuild {
+            let rebuilt = if acp {
+                self.materialize_acp().map(drop)
+            } else {
+                self.materialize_wac().map(drop)
+            };
+            // Rules it changed materialized on the fork first, and a provenance change alone
+            // names only validated principals; should this rebuild fail anyway, the view no
+            // longer describes the store, and it goes.
+            if let Err(e) = rebuilt {
+                self.drop_auth_view();
+                return Err(format!(
+                    "the update was applied but the authorization view could not be rebuilt \
+                     ({e}); every request is denied until it is re-materialized"
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Drop from the static coverage every graph `effects` removes.
@@ -1607,8 +1919,9 @@ impl PodStore {
                     Ok(false),
                     "the static check covers a data-only update's effects"
                 );
-                return self.apply_update(&effects)
-                    .map_err(|e| format!("the update could not be committed: {e}"));
+                let staged = self.staged_provenance(&effects);
+                let rebuild = self.provenance_rebuilds(acp, &staged).then_some(true);
+                return self.commit_update(&effects, staged, rebuild);
             }
         }
         // A single `DELETE`/`INSERT … WHERE` (the LDP PATCH shape) whose static targets leave
@@ -1630,8 +1943,9 @@ impl PodStore {
                     &odrl,
                 )?;
                 if !wrote_rules {
-                    return self.apply_update(&effects)
-                        .map_err(|e| format!("the update could not be committed: {e}"));
+                    let staged = self.staged_provenance(&effects);
+                    let rebuild = self.provenance_rebuilds(acp, &staged).then_some(true);
+                    return self.commit_update(&effects, staged, rebuild);
                 }
             }
         }
@@ -1717,17 +2031,24 @@ impl PodStore {
                 .check(doc, &surviving)
                 .map_err(|e| format!("update denied: {e}"))?;
         }
+        // The ACP view is built from trusted provenance too: an update that ends or begins a
+        // resource's life stages the provenance that follows, and rebuilds the view with it
+        // when the view depends on it.
+        let staged = self.staged_provenance(&effects);
         let rules_changed = permit.rematerialize || auth_input || wrote_rules;
         // Rules it leaves are materialized on the fork first: rules that cannot be refuse the
         // update, and nothing is changed, so no writer of one access-control document can take
         // the whole store's view down.
         if rules_changed {
             let rebuilt = if acp {
-                materialize_acp_with_credentials(
-                    &mut candidate,
-                    &AccessProvenance::new(),
-                    &VerifiedCredentials::new(),
-                )
+                let provenance = staged.as_ref().unwrap_or(&self.acp_context.0);
+                self.usable_acp_context().and_then(|()| {
+                    materialize_acp_with_credentials(
+                        &mut candidate,
+                        provenance,
+                        &self.acp_context.1,
+                    )
+                })
             } else {
                 materialize_wac(&mut candidate)
             };
@@ -1740,31 +2061,10 @@ impl PodStore {
         }
         drop(candidate);
         // Commit: the effects to the store itself (one journaled, durable commit for a
-        // directory-backed graph), then the view rebuilt from the rules now stored.
-        if let Err(e) = self.apply_update(&effects) {
-            // Part of it may be applied in memory: the rules may no longer match the view.
-            if rules_changed {
-                self.drop_auth_view();
-            }
-            return Err(format!("the update could not be committed: {e}"));
-        }
-        if rules_changed {
-            let rebuilt = if acp {
-                self.materialize_acp().map(drop)
-            } else {
-                self.materialize_wac().map(drop)
-            };
-            // The same rules materialized on the fork; should this rebuild fail anyway, the
-            // view no longer describes the rules, and it goes.
-            if let Err(e) = rebuilt {
-                self.drop_auth_view();
-                return Err(format!(
-                    "the update was applied but the authorization view could not be rebuilt \
-                     ({e}); every request is denied until it is re-materialized"
-                ));
-            }
-        }
-        Ok(())
+        // directory-backed graph), then the provenance and the view rebuilt from what is now
+        // stored, together.
+        let rebuild = rules_changed || self.provenance_rebuilds(acp, &staged);
+        self.commit_update(&effects, staged, rebuild.then_some(acp))
     }
 
     /// Drop the materialized auth view, so every decision fails closed (an un-materialized
