@@ -512,6 +512,9 @@ fn seeded_distinct_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
     // payload packs six limbs (a length prefix plus five data limbs), so the limb
     // select adds 6 multiplications per slot on top of the one tag select.
     assert_eq!(out_cost.payload_select_mults, 24);
+    // One degree reduction per SELECTED element: the tag plus the six limbs, for
+    // each of the four slots.
+    assert_eq!(out_cost.degree_reductions, 28);
 }
 
 /// The COMPLETE draw sequence, not just its length: every seam call the stage
