@@ -1551,11 +1551,32 @@ pub async fn delete_handler<S: Store>(
         // between a separate empty-check and a separate delete and be orphaned. A non-empty container
         // is a 409; an absent one a 404 (the precondition load above already 404'd a fully-absent
         // target, but the atomic op is the authoritative existence+empty decision).
-        match state
+        let mut outcome = state
             .store
             .delete_container_if_empty(&target.iri, parent.as_deref())
-            .await?
-        {
+            .await?;
+        // A container whose only members are linkset records of the LWS surface (listed by a
+        // legacy edge) is empty as the listing shows it: those records, which name nothing left in
+        // it, go first, and the delete is tried again.
+        if matches!(outcome, DeleteOutcome::NotEmpty) {
+            let members = state.store.list_children(&target.iri).await?;
+            if members
+                .iter()
+                .all(|c| crate::ldp::target::names_linkset_record(c.as_str()))
+            {
+                for record in &members {
+                    match state.store.delete(record.as_str(), Some(&target.iri)).await {
+                        Ok(()) | Err(ServerError::NotFound) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+                outcome = state
+                    .store
+                    .delete_container_if_empty(&target.iri, parent.as_deref())
+                    .await?;
+            }
+        }
+        match outcome {
             DeleteOutcome::Deleted => {
                 // EMIT only on an actual delete: Delete on the container + a derived Remove on its
                 // parent (membership shrank). NotEmpty/NotFound deleted nothing ⇒ no notification.
@@ -2114,7 +2135,7 @@ async fn sorted_children<S: Store>(
 ) -> Result<Vec<crate::store::ValidatedChildIri>, ServerError> {
     let mut children = state.store.list_children(container_iri).await?;
     // A linkset record of the LWS surface is no member, whatever an edge to it says.
-    children.retain(|c| !crate::ldp::target::is_linkset_record_path(c.as_str()));
+    children.retain(|c| !crate::ldp::target::names_linkset_record(c.as_str()));
     children.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
     Ok(children)
 }
@@ -2196,7 +2217,7 @@ async fn ensure_ancestor_containers<S: Store>(
         // A pre-existing NON-container at this path (the slash-less form) ⇒ conflict. A slash-less
         // form naming a linkset record of the LWS surface is no resource, so it is not consulted.
         let slashless = prefix.clone();
-        if !crate::ldp::target::is_linkset_record_path(&slashless)
+        if !crate::ldp::target::names_linkset_record(&slashless)
             && state.store.exists(&slashless).await?
             && !state.store.exists(&container).await?
         {
@@ -2238,7 +2259,7 @@ async fn reject_slash_semantics_conflict<S: Store>(
     };
     // A linkset record of the LWS surface is no resource, so its name never conflicts (and is not
     // consulted): a container `X.meta/` sits beside the record `X.meta`.
-    if crate::ldp::target::is_linkset_record_path(&opposite) {
+    if crate::ldp::target::names_linkset_record(&opposite) {
         return Ok(());
     }
     if state.store.exists(&opposite).await? {
@@ -2562,7 +2583,11 @@ fn write_precondition_time(
     target: &crate::ldp::target::LdpTarget,
     recorded: Option<std::time::SystemTime>,
 ) -> Option<std::time::SystemTime> {
-    if target.is_container { None } else { recorded }
+    if target.is_container {
+        None
+    } else {
+        recorded
+    }
 }
 
 fn header_str(headers: &HeaderMap, name: HeaderName) -> Option<&str> {

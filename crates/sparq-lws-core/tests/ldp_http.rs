@@ -377,7 +377,21 @@ async fn a_record_beside_a_container_decides_nothing() {
             )
             .await
             .expect("seed alice");
+        let e = "https://pod.example/alice/e/";
+        store
+            .create_in_container(alice, e, axum::body::Bytes::new(), "text/turtle")
+            .await
+            .expect("seed a container");
         if records {
+            store
+                .create_in_container(
+                    e,
+                    &format!("{e}old.meta"),
+                    axum::body::Bytes::from_static(b"{}"),
+                    "application/json",
+                )
+                .await
+                .expect("seed a record listed alone");
             for name in ["doc.meta", "x.meta", ".meta"] {
                 store
                     .write(
@@ -416,6 +430,8 @@ async fn a_record_beside_a_container_decides_nothing() {
             ("PUT", "/alice/x.meta/z", false),
             ("DELETE", "/alice/x.meta/y", true),
             ("DELETE", "/alice/x.meta/", true),
+            ("GET", "/alice/e/", true),
+            ("DELETE", "/alice/e/", true),
             ("GET", "/alice/", true),
         ] {
             let (ct, body) = match method {
@@ -451,6 +467,7 @@ async fn a_record_beside_a_container_decides_nothing() {
     assert_eq!(status(4), StatusCode::OK, "GET /alice/doc.meta/");
     assert_eq!(status(5), StatusCode::OK, "GET /alice/x.meta/y");
     assert_eq!(status(12), StatusCode::NO_CONTENT, "DELETE /alice/x.meta/");
+    assert_eq!(status(14), StatusCode::NO_CONTENT, "DELETE /alice/e/");
 }
 
 #[tokio::test]

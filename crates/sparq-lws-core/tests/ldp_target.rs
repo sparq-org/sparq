@@ -113,7 +113,6 @@ fn the_lws_service_namespace_is_not_a_target() {
     for path in [
         "/.lws/grants/g1",
         "/.lws/",
-        "/alice/.lws/subscriptions/s",
         "/.LWS/requests/r",
         "/%2Elws/grants/g1",
     ] {
@@ -122,7 +121,13 @@ fn the_lws_service_namespace_is_not_a_target() {
             "{path}"
         );
     }
-    for path in ["/.lwsx/a", "/alice/lws/a", "/a.lws"] {
+    // Only the namespace below the storage root is the service's.
+    for path in [
+        "/.lwsx/a",
+        "/alice/lws/a",
+        "/a.lws",
+        "/alice/.lws/subscriptions/s",
+    ] {
         assert!(parse_target(BASE, path).is_ok(), "{path}");
     }
 }

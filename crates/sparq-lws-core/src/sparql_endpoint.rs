@@ -271,7 +271,9 @@ async fn assemble_authorized_dataset<S: Store>(
                     children
                         .into_iter()
                         .map(|child| child.as_str().to_owned())
-                        .filter(|child| child.starts_with(&root)),
+                        .filter(|child| child.starts_with(&root))
+                        // A linkset record of the LWS surface is no member.
+                        .filter(|child| !crate::ldp::target::names_linkset_record(child)),
                 );
             }
         }

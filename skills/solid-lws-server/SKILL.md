@@ -212,9 +212,9 @@ is where the LWS surface keeps a resource's linkset record, so the LDP surface a
 it on every method a request is routed for (a CORS preflight is answered before routing),
 whichever surfaces are enabled. A container of that name (`X.meta/`) and what lies under it are
 ordinary resources: a stored record never lists as a member, conflicts with that container or
-serves as a group document. So is any
-path through a `.lws` segment, where the LWS surface keeps its grants, access requests and
-subscriptions. A path with an empty segment (`//`) is a `400`.
+serves as a group document, and a container whose only members are such records is empty. So
+is any path under `/.lws/` below the storage root, where the LWS surface keeps its grants, access
+requests and subscriptions (a `.lws` segment deeper down is an ordinary name). A path with an empty segment (`//`) is a `400`.
 
 ## Negotiate RDF representations
 
