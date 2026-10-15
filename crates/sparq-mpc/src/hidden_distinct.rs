@@ -105,11 +105,15 @@
 //! [`crate::randomness::DistributedRandomness`] seam: the key sharings (`a_key`
 //! then `b_key`, row by row) via `vss_own_input`, every conditional swap and AND
 //! via [`crate::shamir::degree_reduce_through`], and every comparison / equality
-//! via the [`crate::compare`] `*_through` chain. The single-dealer simulation
-//! draws exactly what it drew before (seeded pin tests); a source that cannot
-//! share a holder's own input (PRSS today) makes any DISTINCT over rows fail
-//! closed. The final oblivious output stage
-//! ([`crate::oblivious_join::oblivious_set_output`]) still mints its own dealer.
+//! via the [`crate::compare`] `*_through` chain. The single-dealer simulation's
+//! sort-and-scan draws are unchanged from the pre-seam code (a seeded prefix pin
+//! test); a source that cannot share a holder's own input (PRSS today) makes any
+//! DISTINCT fail closed. The
+//! final oblivious output stage draws from the SAME source
+//! (`oblivious_join::oblivious_set_output_through`), so one continuous
+//! source covers the whole operator — and because that stage always shares the
+//! real-row tag and the payload limbs, even an EMPTY DISTINCT now fails closed
+//! under PRSS.
 
 use crate::compare::{
     secure_equal_to_bit_through, secure_greater_than_through, COMPARE_MAX_EXCLUSIVE,
@@ -117,7 +121,7 @@ use crate::compare::{
 use crate::field::Fp;
 use crate::oblivious::SortingNetwork;
 use crate::oblivious_join::{
-    oblivious_set_output, Candidate, MatchBit, ObliviousOutput, OutputSlot,
+    oblivious_set_output_through, Candidate, MatchBit, ObliviousOutput, OutputSlot,
 };
 use crate::partial::{HolderId, MpcError, PartialResult};
 use crate::randomness::{checked_vss_own_input, require_source_matches, DistributedRandomness};
@@ -454,13 +458,19 @@ pub fn distinct_hidden_pairs_slots(
 }
 
 /// [`distinct_hidden_pairs_slots`] with the sort-and-scan stage's randomness drawn
-/// through the [`DistributedRandomness`] seam (sq-yyro, issue #6117). The
-/// single-dealer simulation draws exactly what the public function always drew,
-/// so its output is unchanged. A source whose `(n, t)` differs from `backend`'s is
+/// through the [`DistributedRandomness`] seam (sq-yyro, issue #6117), and — since
+/// #6117 step 6 — the output stage's too. Under the single-dealer simulation the
+/// REVEALED multiset and the [`DistinctCost`] are unchanged from the pre-seam code,
+/// and the sort-and-scan prefix of the draw transcript is pinned unchanged; the
+/// revealed slot ORDER moved, since the shuffle now samples a different point of
+/// one continuous keystream rather than a second dealer's fresh one.
+/// A source whose `(n, t)` differs from `backend`'s is
 /// refused ([`require_source_matches`]); a source that cannot share a holder's own
-/// input (PRSS today) makes a DISTINCT over any rows fail closed with that
-/// source's error. The oblivious output stage still mints its own dealer from
-/// `backend`.
+/// input (PRSS today) makes the DISTINCT fail closed with that source's error.
+/// The oblivious output stage draws from the SAME `source`
+/// ([`oblivious_set_output_through`]) — one continuous source for the whole
+/// operator, where it previously minted a second dealer from `backend` and
+/// restarted the keystream.
 pub(crate) fn distinct_hidden_pairs_slots_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
@@ -470,7 +480,7 @@ pub(crate) fn distinct_hidden_pairs_slots_through(
     require_source_matches(source, backend)?;
     check_params(backend, pairs, bound)?;
     let (candidates, sort_ce, adj_eq) = build_distinct_candidates(backend, source, pairs)?;
-    let (slots, _out_cost) = oblivious_set_output(backend, &candidates, 2, bound)?;
+    let (slots, _out_cost) = oblivious_set_output_through(source, backend, &candidates, 2, bound)?;
     let cost = DistinctCost {
         rows: pairs.len(),
         sort_compare_exchanges: sort_ce,
@@ -482,6 +492,9 @@ pub(crate) fn distinct_hidden_pairs_slots_through(
 
 /// The raw oblivious output (`ObliviousOutput`-shaped: `B` slots + output cost), for
 /// callers wiring this into the oblivious-output cost model.
+///
+/// Draws the sort-and-scan stage AND the output stage from ONE fresh dealer, so it
+/// reveals exactly what [`distinct_hidden_pairs_slots`] reveals.
 pub fn distinct_hidden_pairs_oblivious(
     backend: &ShamirBackend,
     pairs: &[SecretEndpointPair],
@@ -490,7 +503,7 @@ pub fn distinct_hidden_pairs_oblivious(
     check_params(backend, pairs, bound)?;
     let mut dealer = backend.dealer();
     let (candidates, _ce, _eq) = build_distinct_candidates(backend, &mut dealer, pairs)?;
-    oblivious_set_output(backend, &candidates, 2, bound)
+    oblivious_set_output_through(&mut dealer, backend, &candidates, 2, bound)
 }
 
 #[cfg(test)]

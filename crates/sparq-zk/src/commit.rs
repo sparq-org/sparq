@@ -238,6 +238,40 @@ impl CommitmentMethod {
             CommitmentMethod::ValueOnlyV1 => true,
         }
     }
+
+    /// Every commitment method THIS BUILD recognises, in a fixed order.
+    ///
+    /// This is the enumeration counterpart of [`Self::from_scheme_iri`]: that
+    /// function answers "is this IRI a method I know?", and this one answers
+    /// "which methods do I know?". A verifier that must decide WHICH method a
+    /// commitment was attested under needs the latter, because it has to try the
+    /// method-bound signed message of every candidate rather than read a
+    /// prover-supplied scheme field.
+    ///
+    /// The list follows the same closed-enum, fail-closed discipline as the rest
+    /// of this type: when the `commitment-value-only` feature is OFF the
+    /// research-dial method is not a variant at all, so it is absent here and no
+    /// candidate is ever built for it. Being LISTED says only that the method is
+    /// recognised and decodable — it asserts no cryptographic property, and says
+    /// nothing about whether a policy ADMITS it (`DualLeafV1` is recognised but
+    /// not production-selectable; see [`Self::is_production_selectable`]). The
+    /// estate is NOT externally audited (CR-G8 / sq-qhy4).
+    pub fn recognised() -> &'static [CommitmentMethod] {
+        #[cfg(feature = "commitment-value-only")]
+        const RECOGNISED: &[CommitmentMethod] = &[
+            CommitmentMethod::StringCanonicalV1,
+            CommitmentMethod::DualLeafV1,
+            CommitmentMethod::DualLeafV2,
+            CommitmentMethod::ValueOnlyV1,
+        ];
+        #[cfg(not(feature = "commitment-value-only"))]
+        const RECOGNISED: &[CommitmentMethod] = &[
+            CommitmentMethod::StringCanonicalV1,
+            CommitmentMethod::DualLeafV1,
+            CommitmentMethod::DualLeafV2,
+        ];
+        RECOGNISED
+    }
 }
 
 /// WHY a caller is selecting a commitment method — the axis
@@ -624,6 +658,67 @@ mod tests {
             .checked_for(MethodUse::NewIssuance)
             .is_err());
         assert_eq!(MethodUse::default(), MethodUse::NewIssuance);
+    }
+
+    /// `recognised()` must list EXACTLY the variants this build has, with no
+    /// duplicates, and every listed method's IRI must round-trip.
+    ///
+    /// The coupling is the `match` below: it is exhaustive over
+    /// `CommitmentMethod`, so adding a variant does not COMPILE until it is named
+    /// there, and the equality then fails until it is added to `recognised()` as
+    /// well. A verifier builds one candidate signed message per recognised
+    /// method, so a method missing from the list would silently never be
+    /// authenticable — it would fall through to "no method attested" instead.
+    #[test]
+    fn recognised_lists_exactly_the_variants_in_this_build() {
+        // Exhaustive by construction: a new variant forces an arm here.
+        fn arm(m: CommitmentMethod) -> CommitmentMethod {
+            match m {
+                CommitmentMethod::StringCanonicalV1 => CommitmentMethod::StringCanonicalV1,
+                CommitmentMethod::DualLeafV1 => CommitmentMethod::DualLeafV1,
+                CommitmentMethod::DualLeafV2 => CommitmentMethod::DualLeafV2,
+                #[cfg(feature = "commitment-value-only")]
+                CommitmentMethod::ValueOnlyV1 => CommitmentMethod::ValueOnlyV1,
+            }
+        }
+        #[allow(unused_mut)]
+        let mut expected = vec![
+            arm(CommitmentMethod::StringCanonicalV1),
+            arm(CommitmentMethod::DualLeafV1),
+            arm(CommitmentMethod::DualLeafV2),
+        ];
+        #[cfg(feature = "commitment-value-only")]
+        expected.push(arm(CommitmentMethod::ValueOnlyV1));
+
+        assert_eq!(CommitmentMethod::recognised(), expected.as_slice());
+
+        let mut seen: Vec<&'static str> = Vec::new();
+        for m in CommitmentMethod::recognised() {
+            assert_eq!(
+                CommitmentMethod::from_scheme_iri(m.scheme_iri()),
+                Some(*m),
+                "a recognised method's IRI must resolve back to it"
+            );
+            assert!(
+                !seen.contains(&m.scheme_iri()),
+                "recognised() lists {} twice",
+                m.scheme_iri()
+            );
+            seen.push(m.scheme_iri());
+        }
+        // The default is recognised (so it is always an authenticable candidate).
+        assert!(CommitmentMethod::recognised().contains(&CommitmentMethod::DEFAULT));
+    }
+
+    /// With the research dial OFF, `recognised()` must not list it: a build that
+    /// did not opt in never builds a candidate for it.
+    #[cfg(not(feature = "commitment-value-only"))]
+    #[test]
+    fn recognised_omits_the_value_only_dial_without_the_feature() {
+        assert_eq!(CommitmentMethod::recognised().len(), 3);
+        assert!(CommitmentMethod::recognised()
+            .iter()
+            .all(|m| m.scheme_iri() != crate::registry::ZK_SCHEME_POSEIDON2_VALUEHOOK_V1));
     }
 
     // value-only is the research dial: gated OFF by default. With the feature ON it

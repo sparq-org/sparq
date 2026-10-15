@@ -25,7 +25,7 @@ use super::access::Action;
 use super::{
     add_page_links, is_uri, jose, json_response, method_not_allowed, problem, relation_key,
     requested_page, set, Agent, LwsRequest, LwsState, ResourceMeta, LD_JSON, LWS_CONTEXT, LWS_JSON,
-    LWS_NS, META_SUFFIX, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
+    LWS_NS, TYPE_INDEX_PATH, TYPE_SEARCH_PATH,
 };
 use crate::store::Store;
 
@@ -324,7 +324,7 @@ async fn readable<S: Store + 'static>(
             let mut once = std::collections::HashSet::new();
             for child in &children {
                 let child = child.as_str();
-                if !child.ends_with(META_SUFFIX)
+                if !super::names_record(child)
                     && child.len() > uri.len()
                     && child.starts_with(uri.as_str())
                     && once.insert(child)

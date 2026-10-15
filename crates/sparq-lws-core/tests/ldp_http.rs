@@ -304,6 +304,55 @@ async fn put_flood_beyond_resource_cap_is_refused_with_507() {
     assert_eq!(retry.status(), StatusCode::INSUFFICIENT_STORAGE);
 }
 
+/// The LWS surface keeps each resource's linkset record at `{resource}.meta` in the same store. On
+/// the LDP surface such a name is never a resource: not served, written or deleted, even for the
+/// owner and even when a record is stored there.
+#[tokio::test]
+async fn a_linkset_record_name_is_no_ldp_resource() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    store
+        .write(
+            "https://pod.example/alice/doc.meta",
+            axum::body::Bytes::from_static(b"{}"),
+            "application/json",
+        )
+        .await
+        .expect("seed a record");
+    let h = Harness::with_store(store).await;
+    // The record itself, a case or %-encoded variant of it, its slash twin and a path through it:
+    // none is routed, so none answers by whether the record is there.
+    for path in [
+        "/alice/doc.meta",
+        "/alice/doc.META",
+        "/alice/doc%2Emeta",
+        "/alice/c/.meta",
+        "/alice/doc.meta/",
+        "/alice/doc.meta/child",
+    ] {
+        for (method, body) in [
+            ("GET", ""),
+            ("HEAD", ""),
+            ("PUT", TURTLE),
+            ("DELETE", ""),
+            ("PATCH", ""),
+        ] {
+            let ct = (method == "PUT").then_some("text/turtle");
+            let r = h.request(method, path, ct, Body::from(body)).await;
+            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+    let r = h
+        .request(
+            "PUT",
+            "/alice/doc.metadata",
+            Some("text/turtle"),
+            Body::from(TURTLE),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+}
+
 #[tokio::test]
 async fn put_twice_is_a_replace_with_no_content() {
     let h = Harness::new().await;

@@ -517,8 +517,8 @@ pub(crate) fn checked_oblivious_shuffle(
 
 /// Test-only [`DistributedRandomness`] sources shared by the seam tests of every
 /// module that draws through the seam: a source that corrupts exactly one
-/// targeted draw, one that misreports its threshold, and one that records the
-/// full draw transcript.
+/// targeted draw, one that misreports its threshold, one that records the full
+/// draw transcript, and one that merely counts the draws made through it.
 #[cfg(test)]
 pub(crate) mod test_sources {
     use super::*;
@@ -801,6 +801,61 @@ pub(crate) mod test_sources {
             &mut self,
             col: SecretColumn,
         ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+            self.inner.oblivious_shuffle(col)
+        }
+    }
+
+    /// Counts the draws made through it and delegates EVERYTHING else — including
+    /// the reported `(n, t)` — to the wrapped source.
+    ///
+    /// [`RecordingSource`] can only wrap a real [`ShamirDealer`], which always
+    /// reports the backend's own `(n, t)`; this wrapper takes any
+    /// [`DistributedRandomness`], so a test can wrap a
+    /// [`MisreportedThresholdSource`] and still assert that an up-front source
+    /// check refused it before a single draw.
+    pub(crate) struct DrawCountingSource<'a> {
+        inner: &'a mut dyn DistributedRandomness,
+        draws: usize,
+    }
+
+    impl<'a> DrawCountingSource<'a> {
+        pub(crate) fn new(inner: &'a mut dyn DistributedRandomness) -> Self {
+            DrawCountingSource { inner, draws: 0 }
+        }
+
+        /// How many draws (of any seam method) have gone through this wrapper.
+        pub(crate) fn draws(&self) -> usize {
+            self.draws
+        }
+    }
+
+    impl DistributedRandomness for DrawCountingSource<'_> {
+        fn randomness_model(&self) -> RandomnessModel {
+            self.inner.randomness_model()
+        }
+        fn parties(&self) -> usize {
+            self.inner.parties()
+        }
+        fn threshold(&self) -> usize {
+            self.inner.threshold()
+        }
+        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.draws += 1;
+            self.inner.shared_mask()
+        }
+        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.draws += 1;
+            self.inner.shared_nonzero_mask()
+        }
+        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
+            self.draws += 1;
+            self.inner.vss_own_input(secret)
+        }
+        fn oblivious_shuffle(
+            &mut self,
+            col: SecretColumn,
+        ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+            self.draws += 1;
             self.inner.oblivious_shuffle(col)
         }
     }
@@ -1097,6 +1152,31 @@ mod tests {
         assert_eq!(src.vss_own_input(Fp::one()).unwrap().len(), 4);
         assert!(src.fired());
         assert_eq!(src.vss_own_input(Fp::one()).unwrap().len(), 5);
+    }
+
+    #[test]
+    fn draw_counting_source_counts_every_draw_and_reports_the_inner_n_and_t() {
+        use test_sources::{DrawCountingSource, MisreportedThresholdSource};
+        let mut lying = MisreportedThresholdSource {
+            inner: seeded_dealer(),
+            t: 0,
+        };
+        let mut counted = DrawCountingSource::new(&mut lying);
+        // The wrapper is transparent about (n, t): it passes the INNER source's
+        // misreported threshold through, which is the whole reason it exists.
+        assert_eq!(DistributedRandomness::parties(&counted), 5);
+        assert_eq!(DistributedRandomness::threshold(&counted), 0);
+        assert_eq!(counted.draws(), 0);
+        // Every seam method counts, once per call.
+        counted.shared_mask().unwrap();
+        assert_eq!(counted.draws(), 1);
+        counted.shared_nonzero_mask().unwrap();
+        counted.vss_own_input(Fp::new(7)).unwrap();
+        assert_eq!(counted.draws(), 3);
+        let col = vec![counted.vss_own_input(Fp::new(1)).unwrap()];
+        assert_eq!(counted.draws(), 4);
+        counted.oblivious_shuffle(col).unwrap();
+        assert_eq!(counted.draws(), 5);
     }
 
     #[test]

@@ -279,6 +279,113 @@ pub struct QueryFilter {
     pub bound: u64,
 }
 
+/// One query FILTER comparison with its constant kept as the TYPED RDF literal
+/// the query spells: `?variable op constant`, normalized so the variable is on
+/// the left (a `const op ?var` comparison is flipped, exactly as
+/// [`QueryFilter`] does).
+///
+/// The difference from [`QueryFilter`] is the constant. `QueryFilter::bound` is
+/// a `u64`, so it can only carry a non-negative `xsd:integer`; this keeps the
+/// `oxrdf::Literal` verbatim — datatype, language and lexical form — because a
+/// relying party that wants to PIN a value-lane FILTER input has to derive the
+/// lane, the scale and the encoded bound from exactly those bytes. No
+/// canonicality judgement is made here: a non-canonical lexical form is RETURNED
+/// as spelled, and refusing it is the pinning step's job (where the refusal can
+/// name which encoder rejected it).
+///
+/// Extraction is datatype-GENERAL: any literal operand is accepted. What is NOT
+/// widened is the comparison SHAPE — `?var op literal` (or the flipped form) is
+/// still the only admitted conjunct, so `?a op ?b`, arithmetic, function calls
+/// and IRI operands remain outside the fragment and fail closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypedQueryFilter {
+    /// The variable the FILTER constrains (its operand column).
+    pub variable: String,
+    /// The comparison operator, already normalized to `?var op const` form.
+    pub op: FilterCmp,
+    /// The constant operand, verbatim as the query spells it.
+    pub constant: oxrdf::Literal,
+}
+
+/// What a FILTER walk needs in order to turn one parsed comparison into an
+/// obligation, and how to word each refusal.
+///
+/// Implemented twice — for [`QueryFilter`] (integer-only, the established
+/// stage-1 gate) and for [`TypedQueryFilter`] (datatype-general). Private on
+/// purpose: it is an internal factoring of ONE walk, not an extension point. An
+/// open trait here would let a caller define its own notion of "bindable
+/// FILTER", which is exactly the closed, fail-closed decision this module must
+/// own.
+trait FilterExtraction: Sized {
+    /// Parse one comparison `(a, b)` under `op` into a normalized obligation, or
+    /// `None` when the operand pair is outside the extraction's fragment.
+    fn from_comparison(op: FilterCmp, a: &Expression, b: &Expression) -> Option<Self>;
+    /// The refusal for a `Not(..)` whose payload is not an admitted equality.
+    fn not_payload_error(other: &Expression) -> VerifyError;
+    /// The refusal for an expression node that is not an admitted comparison.
+    fn expression_error(other: &Expression) -> VerifyError;
+    /// The refusal for an admitted comparison node with inadmissible operands.
+    fn comparison_error() -> VerifyError;
+}
+
+impl FilterExtraction for QueryFilter {
+    fn from_comparison(op: FilterCmp, a: &Expression, b: &Expression) -> Option<Self> {
+        comparison_filter(op, a, b)
+    }
+    fn not_payload_error(other: &Expression) -> VerifyError {
+        VerifyError::UnsupportedFragment(format!(
+            "FILTER `!(...)` is not a bindable integer `!=` (only `?var != <xsd:integer>` binds): {other:?}"
+        ))
+    }
+    fn expression_error(other: &Expression) -> VerifyError {
+        VerifyError::UnsupportedFragment(format!(
+            "FILTER expression not a bindable integer comparison: {other:?}"
+        ))
+    }
+    fn comparison_error() -> VerifyError {
+        VerifyError::UnsupportedFragment(
+            "FILTER comparison is not `?var <op> <xsd:integer>` (the bindable fragment)".into(),
+        )
+    }
+}
+
+impl FilterExtraction for TypedQueryFilter {
+    fn from_comparison(op: FilterCmp, a: &Expression, b: &Expression) -> Option<Self> {
+        let var_of = |e: &Expression| match e {
+            Expression::Variable(v) => Some(v.as_str().to_string()),
+            _ => None,
+        };
+        let lit_of = |e: &Expression| match e {
+            Expression::Literal(l) => Some(l.clone()),
+            _ => None,
+        };
+        if let (Some(variable), Some(constant)) = (var_of(a), lit_of(b)) {
+            return Some(TypedQueryFilter { variable, op, constant });
+        }
+        // `const op ?var` — flip so the variable is on the left, the same
+        // normalization `comparison_filter` applies.
+        if let (Some(constant), Some(variable)) = (lit_of(a), var_of(b)) {
+            return Some(TypedQueryFilter { variable, op: flip_cmp(op), constant });
+        }
+        None
+    }
+    fn not_payload_error(other: &Expression) -> VerifyError {
+        VerifyError::UnsupportedFragment(format!(
+            "FILTER `!(...)` is not a typed `!=` comparison (only `?var != <literal>` binds): {other:?}"
+        ))
+    }
+    fn expression_error(other: &Expression) -> VerifyError {
+        VerifyError::UnsupportedFragment(format!(
+            "FILTER expression not a typed comparison: {other:?}"
+        ))
+    }
+    fn comparison_error() -> VerifyError {
+        VerifyError::UnsupportedFragment(
+            "FILTER comparison is not `?var <op> <literal>` (the typed fragment)".into(),
+        )
+    }
+}
+
 /// xsd:integer datatype IRI (the only literal datatype the `filter_int`
 /// circuit can bind — see `encode.rs` / `filter_int.nr`).
 const XSD_INTEGER: &str = "http://www.w3.org/2001/XMLSchema#integer";
@@ -349,7 +456,19 @@ fn canonical_u64(lex: &str) -> Option<u64> {
 /// cannot vouch for fails CLOSED rather than being silently disclosed unproven
 /// (audit #10: a FILTER must have a bound sub-proof, so an unbindable FILTER
 /// must be rejected, never ignored).
-fn collect_filter_expr(e: &Expression, out: &mut Vec<QueryFilter>) -> Result<(), VerifyError> {
+///
+/// # One walker, two extractions
+/// The walk itself — flatten `AND`, recognise `Not(Equal(..))` as `!=`, reject
+/// everything else — is identical for the integer-only [`QueryFilter`]
+/// extraction and the datatype-general [`TypedQueryFilter`] one, so it is
+/// written once and parameterised by [`FilterExtraction`]. Only the per-operand
+/// parse and the refusal WORDING differ, and the implementation supplies both.
+/// `QueryFilter`'s arm reproduces the previous messages verbatim, so the
+/// `fragment_filters` surface is unchanged down to its error strings.
+fn collect_filter_expr<T: FilterExtraction>(
+    e: &Expression,
+    out: &mut Vec<T>,
+) -> Result<(), VerifyError> {
     use Expression as E;
     match e {
         E::And(a, b) => {
@@ -372,30 +491,24 @@ fn collect_filter_expr(e: &Expression, out: &mut Vec<QueryFilter>) -> Result<(),
         // anything beyond the equality shape `comparison_filter` already vets.
         E::Not(inner) => match inner.as_ref() {
             E::Equal(a, b) => push_cmp(FilterCmp::Ne, a, b, out),
-            other => Err(VerifyError::UnsupportedFragment(format!(
-                "FILTER `!(...)` is not a bindable integer `!=` (only `?var != <xsd:integer>` binds): {other:?}"
-            ))),
+            other => Err(T::not_payload_error(other)),
         },
-        other => Err(VerifyError::UnsupportedFragment(format!(
-            "FILTER expression not a bindable integer comparison: {other:?}"
-        ))),
+        other => Err(T::expression_error(other)),
     }
 }
 
-fn push_cmp(
+fn push_cmp<T: FilterExtraction>(
     op: FilterCmp,
     a: &Expression,
     b: &Expression,
-    out: &mut Vec<QueryFilter>,
+    out: &mut Vec<T>,
 ) -> Result<(), VerifyError> {
-    match comparison_filter(op, a, b) {
+    match T::from_comparison(op, a, b) {
         Some(qf) => {
             out.push(qf);
             Ok(())
         }
-        None => Err(VerifyError::UnsupportedFragment(
-            "FILTER comparison is not `?var <op> <xsd:integer>` (the bindable fragment)".into(),
-        )),
+        None => Err(T::comparison_error()),
     }
 }
 
@@ -404,6 +517,41 @@ fn push_cmp(
 /// [`QueryFilter`] per integer comparison. Rejects any FILTER outside the
 /// bindable integer fragment (so it cannot be silently disclosed unproven).
 pub fn fragment_filters(sparql: &str) -> Result<Vec<QueryFilter>, VerifyError> {
+    fragment_filters_as::<QueryFilter>(sparql)
+}
+
+/// Re-derive the query's FILTER obligations keeping each constant as the TYPED
+/// RDF literal the query spells, rather than reducing it to a `u64`.
+///
+/// Returns one [`TypedQueryFilter`] per comparison, in the same walk order and
+/// under the same fail-closed discipline as [`fragment_filters`]: `AND` chains
+/// flatten, `?v != c` is recognised, `const op ?var` is flipped so the variable
+/// is on the left, and any FILTER outside the one-comparison-per-conjunct shape
+/// is `Err(UnsupportedFragment)` — never silently dropped.
+///
+/// # Why a second entry point rather than a widening
+/// [`QueryFilter`] carries `bound: u64`, which can only ever represent a
+/// non-negative `xsd:integer`. A relying party that wants to PIN a value-lane
+/// FILTER's constant needs the constant's DATATYPE and LEXICAL FORM, because the
+/// lane, the scale and the encoded bound all derive from them. Widening
+/// `QueryFilter` would change an established verifier-side gate's type; this
+/// leaves that path byte-identical (error strings included) and adds the typed
+/// view beside it.
+///
+/// # Honest scope
+/// This is a QUERY-side extraction only. It decides nothing about any proof: it
+/// does not route a filter to a lane, does not encode a constant, and does not
+/// discharge any FILTER obligation. What consumes it is the relying party's
+/// value-lane pin check, whose own gates are CLOSED (see
+/// `sparq_zk_compose::value_pin`).
+pub fn fragment_typed_filters(sparql: &str) -> Result<Vec<TypedQueryFilter>, VerifyError> {
+    fragment_filters_as::<TypedQueryFilter>(sparql)
+}
+
+/// The shared body of [`fragment_filters`] and [`fragment_typed_filters`]: ONE
+/// independent `spargebra` parse, the same `SELECT`/`ASK`-only + no-dataset-clause
+/// admission, and the same walk, with the extraction supplied by `T`.
+fn fragment_filters_as<T: FilterExtraction>(sparql: &str) -> Result<Vec<T>, VerifyError> {
     let query = spargebra::SparqlParser::new()
         .parse_query(sparql)
         .map_err(|e| VerifyError::Parse(e.to_string()))?;
@@ -418,7 +566,10 @@ pub fn fragment_filters(sparql: &str) -> Result<Vec<QueryFilter>, VerifyError> {
     Ok(out)
 }
 
-fn collect_filters_gp(gp: &GraphPattern, out: &mut Vec<QueryFilter>) -> Result<(), VerifyError> {
+fn collect_filters_gp<T: FilterExtraction>(
+    gp: &GraphPattern,
+    out: &mut Vec<T>,
+) -> Result<(), VerifyError> {
     match gp {
         GraphPattern::Bgp { .. } => Ok(()),
         GraphPattern::Filter { expr, inner } => {
@@ -1995,6 +2146,184 @@ mod tests {
     fn no_filter_yields_empty() {
         let fs = fragment_filters("SELECT ?s ?o WHERE { ?s <http://ex/age> ?o }").unwrap();
         assert!(fs.is_empty());
+    }
+
+    // =====================================================================
+    // Typed FILTER extraction (`fragment_typed_filters`) + the regression that
+    // factoring the walk left `fragment_filters` byte-identical.
+    // =====================================================================
+
+    fn typed_lit(value: &str, datatype: &str) -> oxrdf::Literal {
+        oxrdf::Literal::new_typed_literal(value, oxrdf::NamedNode::new_unchecked(datatype))
+    }
+
+    /// The typed extraction keeps the constant's DATATYPE and LEXICAL FORM, and
+    /// normalizes the operand order exactly as the integer path does.
+    #[test]
+    fn typed_filters_keep_the_literal_verbatim_in_both_operand_orders() {
+        let dt = "http://www.w3.org/2001/XMLSchema#decimal";
+        let q = format!(
+            "SELECT ?s ?p WHERE {{ ?s <http://ex/p> ?p FILTER(?p >= \"1.50\"^^<{}>) }}",
+            dt
+        );
+        assert_eq!(
+            fragment_typed_filters(&q).unwrap(),
+            vec![TypedQueryFilter {
+                variable: "p".into(),
+                op: FilterCmp::Ge,
+                constant: typed_lit("1.50", dt),
+            }],
+            "the lexical form `1.50` must survive verbatim — the scale is in it"
+        );
+        let q2 = format!(
+            "SELECT ?s ?p WHERE {{ ?s <http://ex/p> ?p FILTER(\"1.50\"^^<{}> <= ?p) }}",
+            dt
+        );
+        assert_eq!(
+            fragment_typed_filters(&q2).unwrap(),
+            vec![TypedQueryFilter {
+                variable: "p".into(),
+                op: FilterCmp::Ge,
+                constant: typed_lit("1.50", dt),
+            }],
+            "const <= ?var must normalize to ?var >= const"
+        );
+    }
+
+    /// Datatypes the integer path refuses are IN the typed fragment (that is the
+    /// point of the second entry point), and `!=` / `AND` behave as in the
+    /// integer walk.
+    #[test]
+    fn typed_filters_admit_non_integer_datatypes_and_the_same_shapes() {
+        let dbl = "http://www.w3.org/2001/XMLSchema#double";
+        let q = format!(
+            "SELECT ?s ?h WHERE {{ ?s <http://ex/h> ?h FILTER(?h != \"1.5\"^^<{}>) }}",
+            dbl
+        );
+        // The integer path refuses this; the typed path admits it.
+        assert!(matches!(
+            fragment_filters(&q),
+            Err(VerifyError::UnsupportedFragment(_))
+        ));
+        assert_eq!(
+            fragment_typed_filters(&q).unwrap(),
+            vec![TypedQueryFilter {
+                variable: "h".into(),
+                op: FilterCmp::Ne,
+                constant: typed_lit("1.5", dbl),
+            }]
+        );
+
+        // An `AND` chain flattens, one obligation per conjunct, in query order.
+        let dt = "http://www.w3.org/2001/XMLSchema#integer";
+        let q2 = format!(
+            "SELECT ?s ?a WHERE {{ ?s <http://ex/a> ?a FILTER(?a >= \"1\"^^<{dt}> && ?a < \"9\"^^<{dt}>) }}"
+        );
+        let fs = fragment_typed_filters(&q2).unwrap();
+        assert_eq!(fs.len(), 2);
+        assert_eq!(fs[0].op, FilterCmp::Ge);
+        assert_eq!(fs[1].op, FilterCmp::Lt);
+
+        // A NON-canonical lexical form is returned AS SPELLED — refusing it is
+        // the pinning step's job, not the extraction's.
+        let q3 = format!(
+            "SELECT ?s ?a WHERE {{ ?s <http://ex/a> ?a FILTER(?a >= \"018\"^^<{}>) }}",
+            dt
+        );
+        assert!(matches!(
+            fragment_filters(&q3),
+            Err(VerifyError::UnsupportedFragment(_))
+        ));
+        assert_eq!(
+            fragment_typed_filters(&q3).unwrap()[0].constant,
+            typed_lit("018", dt)
+        );
+    }
+
+    /// The typed extraction widens the DATATYPE axis only: the comparison SHAPE
+    /// stays exactly as closed as the integer walk's.
+    #[test]
+    fn typed_filters_still_fail_closed_outside_the_comparison_shape() {
+        let dt = "http://www.w3.org/2001/XMLSchema#integer";
+        for q in [
+            // var vs var
+            "SELECT ?s WHERE { ?s <http://ex/a> ?a . ?s <http://ex/b> ?b FILTER(?a >= ?b) }".to_string(),
+            // disjunction
+            format!("SELECT ?s WHERE {{ ?s <http://ex/a> ?a FILTER(?a >= \"1\"^^<{dt}> || ?a < \"0\"^^<{dt}>) }}"),
+            // arithmetic operand
+            format!("SELECT ?s WHERE {{ ?s <http://ex/a> ?a FILTER(?a + \"1\"^^<{dt}> >= \"2\"^^<{dt}>) }}"),
+            // negation of a non-equality
+            format!("SELECT ?s WHERE {{ ?s <http://ex/a> ?a FILTER(!(?a > \"1\"^^<{dt}>)) }}"),
+            // an IRI operand is not a literal constant
+            "SELECT ?s WHERE { ?s <http://ex/a> ?a FILTER(?a = <http://ex/x>) }".to_string(),
+            // EXISTS
+            "SELECT ?s WHERE { ?s <http://ex/a> ?a FILTER(EXISTS { ?s <http://ex/b> ?b }) }".to_string(),
+        ] {
+            assert!(
+                matches!(
+                    fragment_typed_filters(&q),
+                    Err(VerifyError::UnsupportedFragment(_))
+                ),
+                "must fail closed: {q}"
+            );
+        }
+        // And the admission boundary is the same: CONSTRUCT / DESCRIBE are out.
+        assert!(fragment_typed_filters("CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }").is_err());
+    }
+
+    /// REGRESSION for the walker factoring: `fragment_filters`'s accept/reject
+    /// decisions AND its refusal strings must be exactly what they were before
+    /// the walk was shared with the typed extraction. The messages are asserted
+    /// verbatim because they are the only observable the refactor could have
+    /// silently moved.
+    #[test]
+    fn fragment_filters_messages_are_unchanged_by_the_shared_walker() {
+        let dt = "http://www.w3.org/2001/XMLSchema#integer";
+
+        // (1) An admitted comparison node with inadmissible operands.
+        let q = "SELECT ?s WHERE { ?s <http://ex/h> ?h FILTER(?h >= \"18\") }";
+        match fragment_filters(q) {
+            Err(VerifyError::UnsupportedFragment(msg)) => assert_eq!(
+                msg,
+                "FILTER comparison is not `?var <op> <xsd:integer>` (the bindable fragment)"
+            ),
+            other => panic!("expected UnsupportedFragment, got {other:?}"),
+        }
+
+        // (2) A `Not(..)` whose payload is not an equality.
+        let q = format!("SELECT ?s WHERE {{ ?s <http://ex/a> ?a FILTER(!(?a > \"1\"^^<{dt}>)) }}");
+        match fragment_filters(&q) {
+            Err(VerifyError::UnsupportedFragment(msg)) => assert!(
+                msg.starts_with(
+                    "FILTER `!(...)` is not a bindable integer `!=` (only `?var != <xsd:integer>` binds): "
+                ),
+                "unexpected message: {msg}"
+            ),
+            other => panic!("expected UnsupportedFragment, got {other:?}"),
+        }
+
+        // (3) An expression node that is not an admitted comparison.
+        let q = format!(
+            "SELECT ?s WHERE {{ ?s <http://ex/a> ?a FILTER(?a >= \"1\"^^<{dt}> || ?a < \"0\"^^<{dt}>) }}"
+        );
+        match fragment_filters(&q) {
+            Err(VerifyError::UnsupportedFragment(msg)) => assert!(
+                msg.starts_with("FILTER expression not a bindable integer comparison: "),
+                "unexpected message: {msg}"
+            ),
+            other => panic!("expected UnsupportedFragment, got {other:?}"),
+        }
+
+        // (4) And the typed path's messages are its OWN, so the two surfaces
+        // cannot be confused in a log.
+        let q = "SELECT ?s WHERE { ?s <http://ex/a> ?a . ?s <http://ex/b> ?b FILTER(?a >= ?b) }";
+        match fragment_typed_filters(q) {
+            Err(VerifyError::UnsupportedFragment(msg)) => assert_eq!(
+                msg,
+                "FILTER comparison is not `?var <op> <literal>` (the typed fragment)"
+            ),
+            other => panic!("expected UnsupportedFragment, got {other:?}"),
+        }
     }
 
     #[test]

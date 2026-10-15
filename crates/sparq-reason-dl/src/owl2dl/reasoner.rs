@@ -7,22 +7,40 @@
 //! [`Unknown`](Consistency::Unknown) with the reason, and the triples behind it when there are
 //! any.
 //!
-//! The fragment is currently SHIQ plus the OWL 2 role characteristics and ABox: classes and
-//! all class constructors except nominals (`ObjectOneOf`, `ObjectHasValue`), object
-//! properties with inverses, hierarchies, transitivity, functionality, reflexivity,
-//! irreflexivity, symmetry, asymmetry and disjointness, `hasSelf`, qualified cardinality, and
-//! class / object-property / negative-property / same / different assertions. Data
-//! properties, datatypes, nominals, property chains other than `R∘R ⊑ R`, keys, and number
-//! restrictions above [`MAX_CARDINALITY`] answer `Unknown`.
+//! The fragment is currently SHOIQ(D) plus the OWL 2 role characteristics and ABox:
+//! classes and all class constructors including nominals (`ObjectOneOf`,
+//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity,
+//! functionality, reflexivity, irreflexivity, symmetry, asymmetry and disjointness,
+//! `hasSelf`, qualified cardinality, class / object-property / negative-property / same /
+//! different assertions, and data properties: domain, range, sub- / equivalent / disjoint
+//! data properties, functionality, the data restrictions (some, all, has-value, qualified
+//! cardinality) and positive and negative data property assertions, over data ranges of the
+//! OWL 2 datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
+//! `DataUnionOf`, `DataComplementOf` and acyclic `DatatypeDefinition`s), decided by
+//! [`super::data_ranges`]. Property chains other than `R∘R ⊑ R`, keys, the top and bottom
+//! properties, datatypes outside the map, and number restrictions above
+//! [`MAX_CARDINALITY`] answer `Unknown(OutOfFragment)`; a datatype question the oracle cannot
+//! decide answers `Unknown(DatatypeUnknown)`. An ill-typed literal in an assertion,
+//! `DataHasValue` or `DataOneOf` has no value, so the ontology has no model: `Inconsistent`.
 //!
-//! Classification is TBox-only, which is exact when the ontology is consistent and has no
-//! nominals: for SHIQ the ABox cannot change a subsumption between classes.
+//! Nominals are decided without SHOIQ's NI-rule. A candidate model is accepted only when
+//! its completion graph provably unravels into a model (see the tableau's `unravels`); when
+//! nominals tie a repeated part of the graph to an individual whose number restrictions the
+//! repetition could break, that branch is closed as unconfirmed, and if no other branch
+//! gives a model the answer is `Unknown(Unconfirmed)`, never a guess.
+//!
+//! Classification is TBox-only when the ontology has no nominals, which is exact for a
+//! consistent ontology: for SHIQ(D) the ABox cannot change a subsumption between classes.
+//! With nominals every class test includes the ABox.
 
 pub use super::clausify::MAX_CARDINALITY;
 use super::clausify::{clausify, AtomKind, Clauses};
-use super::dl_profile::{check_dl, DlProfileReport, Violation};
-use super::hypertableau::{ClauseIndex, Exhausted, Tableau};
-use super::model::Ontology;
+use super::datatypes::{self, ValueError};
+use super::dl_profile::{
+    check_dl, for_each_class_in_axiom, for_each_range_in_axiom, DlProfileReport, Violation,
+};
+use super::hypertableau::{ClauseIndex, Stop, Tableau};
+use super::model::{Axiom, ClassExpression, DataRange, Literal, Ontology};
 use super::vocab::{iri_of, OWL};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
@@ -44,9 +62,20 @@ pub enum UnknownReason {
     NotInDl(Vec<Violation>),
     /// The deterministic work budget ran out.
     ResourceBudget,
+    /// The datatype oracle ([`super::data_ranges`]) answered Unknown for a data range, a
+    /// literal or a combination of data constraints the decision depends on (for example
+    /// an XSD pattern with a block escape, or a value beyond the represented range).
+    DatatypeUnknown {
+        /// The input triples of the axioms whose data ranges are involved.
+        source: Vec<usize>,
+    },
     /// The ontology is consistent on its own, but it imports ontologies that were not
     /// loaded, so it may still be inconsistent.
     ImportsNotLoaded(Vec<Id>),
+    /// The tableau built a candidate model that it could not confirm: nominals tie a part of
+    /// the completion graph that blocking repeats to an individual whose number
+    /// restrictions the repetitions could break (SHOIQ's NI-rule case, not implemented).
+    Unconfirmed,
 }
 
 /// The three-valued consistency answer.
@@ -100,8 +129,10 @@ pub struct Reasoner {
     /// The atom of each class the clauses mention, by IRI, so queries do not depend on
     /// dictionary ids (an IRI interned after construction, or never, is still recognised).
     class_iris: FxHashMap<String, u32>,
-    /// Whether TBox plus ABox has a model (`None`: the budget ran out), once computed.
-    model: OnceCell<Option<bool>>,
+    /// The source triples of each axiom, by axiom index.
+    sources: Vec<Vec<usize>>,
+    /// Whether TBox plus ABox has a model, once computed.
+    model: OnceCell<Result<bool, UnknownReason>>,
 }
 
 impl Reasoner {
@@ -123,9 +154,31 @@ impl Reasoner {
         if !blocking.is_empty() {
             return Err(UnknownReason::NotInDl(blocking));
         }
-        let clauses = clausify(dict, onto).map_err(|u| UnknownReason::OutOfFragment {
-            construct: u.construct,
-            source: onto.axioms[u.axiom].source.clone(),
+        let sources: Vec<Vec<usize>> = onto.axioms.iter().map(|r| r.source.clone()).collect();
+        if has_ill_typed_literal(onto) {
+            // No interpretation gives an ill-typed literal a value: no model at all.
+            let clauses = Clauses::default();
+            let index = ClauseIndex::new(&clauses);
+            return Ok(Reasoner {
+                clauses,
+                index,
+                budget,
+                imports: onto.imports.clone(),
+                class_iris: FxHashMap::default(),
+                sources,
+                model: OnceCell::from(Ok(false)),
+            });
+        }
+        let clauses = clausify(dict, onto).map_err(|u| {
+            let source = onto.axioms[u.axiom].source.clone();
+            if u.datatype {
+                UnknownReason::DatatypeUnknown { source }
+            } else {
+                UnknownReason::OutOfFragment {
+                    construct: u.construct,
+                    source,
+                }
+            }
         })?;
         let index = ClauseIndex::new(&clauses);
         let class_iris = clauses
@@ -139,33 +192,63 @@ impl Reasoner {
             budget,
             imports: onto.imports.clone(),
             class_iris,
+            sources,
             model: OnceCell::new(),
         })
     }
 
     /// Consistency of the whole ontology (TBox and ABox).
     pub fn consistency(&self) -> Consistency {
-        match self.abox_model() {
-            None => Consistency::Unknown(UnknownReason::ResourceBudget),
-            Some(false) => Consistency::Inconsistent,
-            Some(true) if !self.imports.is_empty() => {
+        match self.model() {
+            Err(reason) => Consistency::Unknown(reason),
+            Ok(false) => Consistency::Inconsistent,
+            Ok(true) if !self.imports.is_empty() => {
                 Consistency::Unknown(UnknownReason::ImportsNotLoaded(self.imports.clone()))
             }
-            Some(true) => Consistency::Consistent,
+            Ok(true) => Consistency::Consistent,
         }
     }
 
     /// Whether the ontology (TBox and ABox) has a model, computed once.
-    fn abox_model(&self) -> Option<bool> {
-        *self.model.get_or_init(|| self.abox_run().ok())
+    fn model(&self) -> Result<bool, UnknownReason> {
+        self.model
+            .get_or_init(|| self.abox_run().map_err(|s| self.reason(s)))
+            .clone()
     }
 
-    fn abox_run(&self) -> Result<bool, Exhausted> {
+    fn abox_model(&self) -> Option<bool> {
+        self.model().ok()
+    }
+
+    /// The reason a run stopped without a verdict.
+    fn reason(&self, stop: Stop) -> UnknownReason {
+        match stop {
+            Stop::Exhausted => UnknownReason::ResourceBudget,
+            Stop::Undecided(axioms) => {
+                let mut source: Vec<usize> = axioms
+                    .iter()
+                    .flat_map(|&a| self.sources[a as usize].iter().copied())
+                    .collect();
+                source.sort_unstable();
+                source.dedup();
+                UnknownReason::DatatypeUnknown { source }
+            }
+            Stop::Unconfirmed => UnknownReason::Unconfirmed,
+        }
+    }
+
+    fn abox_run(&self) -> Result<bool, Stop> {
         let mut t = Tableau::new(&self.clauses, &self.index, self.budget);
-        let abox = &self.clauses.abox;
-        if abox.individuals.is_empty() {
+        if self.clauses.abox.individuals.is_empty() {
             t.add_root();
         }
+        self.load_abox(&mut t);
+        t.run()
+    }
+
+    /// Adds the ABox to `t`: individual `i` becomes root node `i`.
+    fn load_abox(&self, t: &mut Tableau) {
+        let abox = &self.clauses.abox;
         for _ in &abox.individuals {
             t.add_root();
         }
@@ -178,10 +261,15 @@ impl Reasoner {
         for &(a, b, _) in &abox.different {
             t.assert_different(a, b);
         }
+        let data: Vec<_> = abox
+            .data
+            .iter()
+            .map(|(r, a, atom, v, _)| (*r, *a, *atom, v.clone()))
+            .collect();
+        t.assert_data(&data);
         for &(a, b, _) in &abox.same {
             t.assert_same(a, b);
         }
-        t.run()
     }
 
     /// How a class IRI enters a test.
@@ -196,9 +284,15 @@ impl Reasoner {
         }
     }
 
-    /// Whether some element can be in `class` and outside `outside` (a TBox test; the ABox
-    /// cannot change it for a consistent ontology without nominals).
-    fn test(&self, class: Option<u32>, outside: Option<u32>, pool: Pool) -> Option<bool> {
+    /// Whether some element can be in `class` and outside `outside`, in a model of the
+    /// ontology. Without nominals the ABox cannot change that for a consistent ontology, so
+    /// the test is TBox-only; with nominals the individuals and their facts come along.
+    fn test(
+        &self,
+        class: Option<u32>,
+        outside: Option<u32>,
+        pool: Pool,
+    ) -> Result<bool, UnknownReason> {
         let mut t = self.tableau(pool);
         let root = t.add_root();
         if let Some(b) = outside {
@@ -209,7 +303,7 @@ impl Reasoner {
         }
         let r = t.run();
         settle(pool, &t);
-        r.ok()
+        r.map_err(|s| self.reason(s))
     }
 
     /// A tableau with the whole budget, or with what is left of a shared `pool`.
@@ -218,7 +312,11 @@ impl Reasoner {
         if let Some(left) = pool {
             budget.max_steps = left.get();
         }
-        Tableau::new(&self.clauses, &self.index, budget)
+        let mut t = Tableau::new(&self.clauses, &self.index, budget);
+        if !self.clauses.nominals.is_empty() {
+            self.load_abox(&mut t);
+        }
+        t
     }
 
     /// `Some(true)` when the class is satisfiable, `Some(false)` when it is not, `None` when
@@ -232,8 +330,8 @@ impl Reasoner {
         let pool = None;
         let sat = match self.concept(class) {
             Concept::Nothing => false,
-            Concept::Thing | Concept::Fresh => self.test(None, None, pool)?,
-            Concept::Atom(a) => self.test(Some(a), None, pool)?,
+            Concept::Thing | Concept::Fresh => self.test(None, None, pool).ok()?,
+            Concept::Atom(a) => self.test(Some(a), None, pool).ok()?,
         };
         (!sat || self.imports.is_empty()).then_some(sat)
     }
@@ -246,13 +344,21 @@ impl Reasoner {
         if !self.abox_model()? {
             return Some(true);
         }
-        let below = self.below(self.concept(sub), self.concept(sup), sub == sup, None)?;
+        let below = self
+            .below(self.concept(sub), self.concept(sup), sub == sup, None)
+            .ok()?;
         (below || self.imports.is_empty()).then_some(below)
     }
 
     /// Whether `sub ⊑ sup` holds in a consistent ontology (`same`: the same class).
-    fn below(&self, sub: Concept, sup: Concept, same: bool, pool: Pool) -> Option<bool> {
-        Some(match (sub, sup) {
+    fn below(
+        &self,
+        sub: Concept,
+        sup: Concept,
+        same: bool,
+        pool: Pool,
+    ) -> Result<bool, UnknownReason> {
+        Ok(match (sub, sup) {
             _ if same => true,
             (Concept::Nothing, _) | (_, Concept::Thing) => true,
             (sub_c, Concept::Nothing | Concept::Fresh) => match sub_c {
@@ -265,11 +371,17 @@ impl Reasoner {
     }
 
     /// Classifies the named classes. `None` unless the ontology is consistent with nothing
-    /// left unloaded (an unloaded import could add subsumptions), or when the budget ran out.
+    /// left unloaded (an unloaded import could add subsumptions), or when the budget ran out
+    /// or a datatype question was undecided.
     pub fn classify(&self) -> Option<Classification> {
         if !self.imports.is_empty() || !self.abox_model()? {
             return None;
         }
+        self.classify_consistent().ok()
+    }
+
+    /// Classifies a consistent ontology, or says why it could not.
+    fn classify_consistent(&self) -> Result<Classification, UnknownReason> {
         let classes = &self.clauses.classes;
         let is_class = |a: u32| matches!(self.clauses.atoms[a as usize], AtomKind::Class(_));
         let mut out = Classification::default();
@@ -283,7 +395,7 @@ impl Reasoner {
             t.assert_concept(root, a);
             let r = t.run();
             settle(pool, &t);
-            if !r.ok()? {
+            if !r.map_err(|s| self.reason(s))? {
                 out.unsatisfiable.push(id);
                 continue;
             }
@@ -316,8 +428,37 @@ impl Reasoner {
             .copied()
             .filter(|p| !self.clauses.told.contains(p))
             .collect();
-        Some(out)
+        Ok(out)
     }
+}
+
+/// Whether a literal the semantics must give a value (in a data property assertion, a
+/// `DataHasValue` or a `DataOneOf`) is ill-typed. Facet values are not literals of the
+/// interpretation, and annotations have no logical meaning.
+fn has_ill_typed_literal(onto: &Ontology) -> bool {
+    let ill = |l: &Literal| {
+        datatypes::parse_value(&l.lexical, &l.datatype, l.lang.as_deref())
+            == Err(ValueError::IllTyped)
+    };
+    let mut found = false;
+    for rec in onto.logical_axioms() {
+        if let Axiom::DataPropertyAssertion(_, _, l)
+        | Axiom::NegativeDataPropertyAssertion(_, _, l) = &rec.axiom
+        {
+            found |= ill(l);
+        }
+        for_each_class_in_axiom(&rec.axiom, &mut |c| {
+            if let ClassExpression::DataHasValue(_, l) = c {
+                found |= ill(l);
+            }
+        });
+        for_each_range_in_axiom(&rec.axiom, &mut |r| {
+            if let DataRange::OneOf(ls) = r {
+                found |= ls.iter().any(ill);
+            }
+        });
+    }
+    found
 }
 
 /// What is left of a budget shared by several tests (`None`: each test has the whole
@@ -357,14 +498,14 @@ pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
         }
     };
     let consistency = reasoner.consistency();
-    let classification = if consistency == Consistency::Consistent {
-        reasoner.classify()
+    let (classification, classification_unknown) = if consistency == Consistency::Consistent {
+        match reasoner.classify_consistent() {
+            Ok(c) => (Some(c), None),
+            Err(reason) => (None, Some(reason)),
+        }
     } else {
-        None
+        (None, None)
     };
-    let classification_unknown = (consistency == Consistency::Consistent
-        && classification.is_none())
-    .then_some(UnknownReason::ResourceBudget);
     DlReport {
         profile,
         consistency,

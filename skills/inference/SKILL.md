@@ -749,18 +749,50 @@ none, which happens when the shared classification budget runs out).
 `is_satisfiable(iri)` / `is_subclass_of(sub_iri, sup_iri)` queries by class IRI
 (`Option<bool>`; `owl:Thing`, `owl:Nothing` and
 classes no axiom mentions included; `None` when an unloaded import could change a negative
-answer). The decided fragment is ALCHIQ with `hasSelf`, transitive roles and `R∘R ⊑ R`,
-number restrictions up to `MAX_CARDINALITY`; anything else (data properties and
-datatypes, nominals and `hasValue`, other chains, keys, the top and bottom object
-properties) gives `Unknown(OutOfFragment { construct, source })`, a blocking profile
+answer). The decided fragment is SHOIQ(D) with `hasSelf` and `R∘R ⊑ R`: nominals
+(`ObjectOneOf`, `ObjectHasValue`; a node labelled `{a}` is merged into `a`'s node, and with
+nominals every class test runs with the ABox), number restrictions up to
+`MAX_CARDINALITY`, and data properties: domain, range, sub- /
+equivalent / disjoint data properties, `FunctionalDataProperty`, `DataSomeValuesFrom`,
+`DataAllValuesFrom`, `DataHasValue`, data min / max / exact cardinality (qualified or
+not), and positive and negative data property assertions, over data ranges of the OWL 2
+datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
+`DataUnionOf`, `DataComplementOf`, and named datatypes with one acyclic
+`DatatypeDefinition`, which is expanded). Data edges end in concrete nodes; a datatype
+check over the graph of value inequalities (per node, peeling, exact search over
+enumerated `DataOneOf` nodes, and clique counting) decides the labels with
+`owl2dl::data_ranges`. Literals are compared by value (`"1"^^xsd:int` and
+`"01"^^xsd:integer` are one value; float `-0` and `+0` are two), and an ill-typed literal
+in an assertion, `DataHasValue` or `DataOneOf` (e.g. `"sixteen"^^xsd:nonNegativeInteger`)
+makes the ontology `Inconsistent`. Literal policies that decide verdicts: lexical forms
+are not whitespace-normalised, so `" 1"^^xsd:integer` is ill-typed; an `rdf:PlainLiteral`
+without `@` is ill-typed; `rdf:langString` is accepted as a datatype (it is RDF 1.1's, not
+in the OWL 2 map); `xsd:hexBinary` and `xsd:base64Binary` share no values (OWL 2 §4.5).
+Nominals are decided without SHOIQ's NI-rule: a complete branch is accepted only when its
+graph provably unravels into a model (no blocked node keeps an edge to an individual, no
+edge outside the tree joins two blockable nodes, and no number restriction at an
+individual can count two copies of a repeated node). Otherwise the branch is closed as
+unconfirmed, and when no other branch gives a model the answer is `Unknown(Unconfirmed)`.
+Still out of the fragment, as
+`Unknown(OutOfFragment { construct, source })`: other chains, keys (`HasKey`), the top and bottom object and data properties
+in axioms (except `SubDataPropertyOf(D owl:topDataProperty)`), datatypes outside the map
+without exactly one definition, cyclic or repeated definitions, literals of datatypes
+outside the map, and a property used both as an object and as a data property. A data
+question the oracle answers Unknown for (an XSD pattern with a block escape, a facet bound
+outside the restricted datatype's value space, a value beyond the represented range, an
+`rdf:XMLLiteral` literal), or a value-inequality graph outside the shapes the check
+decides, gives `Unknown(DatatypeUnknown { source })`: a branch the check cannot decide is
+closed as undecided, so the answer is `Consistent` only from a fully checked model and
+`Inconsistent` only when every branch closed on a real clash. A blocking profile
 violation gives `Unknown(NotInDl)`, an exhausted step budget gives
 `Unknown(ResourceBudget)`, and unloaded imports turn `Consistent` into
-`Unknown(ImportsNotLoaded)` with no classification. It never guesses a verdict. Its answers are checked against
-HermiT on a seeded corpus (`tests/owl2dl_reasoner.rs`).
-From JavaScript the same pipeline (parse, `extract`, `check`) is `checkOwlDl(tbox, abox?,
-options?)` in `@sparq-org/sparq`, backed by the separate, lazily-loaded `crates/sparq-dl-wasm`
-bundle; it returns the report as JSON with the offending triples as N-Triples lines — see
-[`../javascript-wasm/references/owl-dl.md`](../javascript-wasm/references/owl-dl.md).
+`Unknown(ImportsNotLoaded)` with no classification; `classification_unknown` carries
+`ResourceBudget`, `DatatypeUnknown` or `Unconfirmed`. It never guesses a verdict. Its answers are checked
+against HermiT on seeded corpora (`tests/owl2dl_reasoner.rs`), one of data properties
+and datatypes and one with nominals; the constructs where HermiT departs from the Direct Semantics
+(ill-typed literals, float zeros, `NegativeDataPropertyAssertion` compared by lexical
+form, data booleans and single-value intervals under data cardinalities) are kept out of
+that corpus and pinned by hand-written tests instead.
 `owl2dl::data_ranges` answers the datatype questions the tableau asks of a data range
 (`DataRangeExpr`: a datatype, a facet restriction, `OneOf`, `And`, `Or`, `Not`):
 `is_empty`, `contains`, `has_at_least(r, n)` for data cardinalities, and
@@ -774,6 +806,10 @@ values (their XML content is not checked), a facet outside the datatype's facet 
 (including an order bound outside its value space), a value no literal has, data ranges nested more than 64 deep, an XSD pattern this implementation does
 not support (block escapes such as `\p{IsBasicLatin}`, or groups nested more than 64 deep),
 and string searches over a fixed automaton budget (states, edges and automaton bytes).
+From JavaScript the same pipeline (parse, `extract`, `check`) is `checkOwlDl(tbox, abox?,
+options?)` in `@sparq-org/sparq`, backed by the separate, lazily-loaded `crates/sparq-dl-wasm`
+bundle; it returns the report as JSON with the offending triples as N-Triples lines — see
+[`../javascript-wasm/references/owl-dl.md`](../javascript-wasm/references/owl-dl.md).
 
 ## Common recipes
 

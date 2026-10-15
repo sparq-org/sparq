@@ -327,6 +327,13 @@ mod owa_omission_tests;
 #[cfg(test)]
 mod witness_validation_tests;
 
+// sq-yyro / issue #6117: how many dealers one protocol run mints. Test-only.
+// Pins the "ONE fresh dealer per run" contract the public hidden-regime entry
+// points document — and its mirror, that a `*_through` entry mints none and so
+// runs entirely on the caller's source. See the module docs.
+#[cfg(test)]
+mod dealer_mint_tests;
+
 // sq-km34.1: the IT-MAC authenticated-sharing foundation surface.
 pub use authenticated::{
     auth_add, auth_add_constant, auth_scale, auth_sub, auth_sum, AuthenticatedShare, MacKey,

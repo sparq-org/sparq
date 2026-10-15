@@ -47,6 +47,20 @@ pub mod value_lane;
 pub mod holder;
 pub mod issuer;
 pub mod manifest;
+// Verifier-side AUTHENTICATION of a commitment's commitment method from the
+// issuer signature (the method-bound `ZKSIG_M5`/`ZKSIG_M4` PRESENTATION message
+// family), plus the relying party's `MethodPolicy` over the result. Always
+// compiled: the method axis is not dual-leaf-specific. The default policy accepts a
+// method-UNBOUND attestation, so every already-issued credential authenticates
+// exactly as before. Opening a value-lane gate is NOT part of this; see
+// `value_pin`. Research-grade, NOT externally audited (sq-qhy4).
+pub mod method_auth;
+// The relying party's value-lane PIN functions: given an authenticated
+// `DualLeafV2` method and a typed query FILTER, what the value-lane public
+// inputs would have to be. Reporting only — the value-lane verifier gates stay
+// CLOSED (see the module docs).
+#[cfg(feature = "dual-leaf")]
+pub mod value_pin;
 // Research-grade disclosure obligations and PRIVATE successful-row witnesses.
 pub mod planner;
 // sq-rsd3v.3: witnessed-rule-shape N3 derivation — the host mirror of
@@ -102,6 +116,8 @@ pub use dispatch::{
 #[cfg(feature = "extended-fragment")]
 pub use verifier::{dispatch_fragment, verify_fragment_manifest, FragmentDispatchError};
 pub use verifier::EntailmentPolicy;
+// Verifier-side commitment-method authentication + the relying party's policy.
+pub use method_auth::{AuthenticatedMethod, MethodAuthError, MethodPolicy};
 // sq-3e5 + sq-h2v: hidden-index revocation host helpers.
 pub use revocation::{merkle_root, merkle_witness, revoke_prover_toml, MerkleWitness};
 // sq-6qe / sq-kndw: the ACCEPTED-SET commitment host helpers — the relying

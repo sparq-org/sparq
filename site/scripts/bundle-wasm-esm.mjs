@@ -60,8 +60,8 @@ const externaliseGlue = {
       path: "./sparq_wasm.js",
       external: true,
     }));
-    // The OWL 2 DL bundle (`checkOwlDl`) is a separate, dynamically imported wasm module the
-    // site does not host; keep its import external so this artifact never inlines or requires it.
+    // The OWL 2 DL bundle (`checkOwlDl`) is a separate, dynamically imported wasm module that
+    // sync-wasm copies next to this artifact; keep its import external so it is never inlined.
     b.onResolve({ filter: /(^|\/)sparq_dl_wasm\.js$/ }, () => ({
       path: "./sparq_dl_wasm.js",
       external: true,

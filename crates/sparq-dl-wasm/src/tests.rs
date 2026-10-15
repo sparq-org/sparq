@@ -156,25 +156,77 @@ fn unsatisfiable_class_and_inferred_subclass() {
 }
 
 #[test]
-fn data_properties_are_out_of_fragment_with_the_offending_triple() {
-    let r = run(&format!(
-        "{ALCHIQ} :age a owl:DatatypeProperty ; rdfs:domain :Person ; rdfs:range xsd:integer ."
-    ));
+fn data_properties_are_decided_and_ill_typed_literals_are_inconsistent() {
+    let age = format!(
+        "{ALCHIQ} :age a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain :Person ; rdfs:range xsd:nonNegativeInteger ."
+    );
+    let r = run(&age);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(true));
+    assert_eq!(s(get(&r, "classification")), "complete");
+    let r = run_with(&age, Some(":ann :age 16 ."), None);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(true));
+    let r = run_with(&age, Some(":ann :age -1 ."), None);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(false));
+    let r = run_with(
+        &age,
+        Some(":ann :age \"sixteen\"^^xsd:nonNegativeInteger ."),
+        None,
+    );
+    assert_eq!(get(&r, "consistent"), &Value::Bool(false));
+}
+
+#[test]
+fn nominals_are_decided() {
+    let ann = format!(
+        "{ALCHIQ} :ann a owl:NamedIndividual , :Woman . :Ann a owl:Class ; owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] ."
+    );
+    let r = run(&ann);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(true));
+    assert_eq!(s(get(&r, "classification")), "complete");
+    // `Ann ≡ {ann}` and `Woman(ann)`: `Ann ⊑ Woman`, which only the ABox says.
+    assert!(
+        pairs(get(&r, "inferredSubClassOf")).contains(&("http://ex/Ann", "http://ex/Woman")),
+        "{r:?}"
+    );
+    let r = run_with(&ann, Some(":ann a :Man ."), None);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(false));
+}
+
+#[test]
+fn keys_are_out_of_fragment_with_the_offending_triples() {
+    let r = run(&format!("{ALCHIQ} :Person owl:hasKey ( :hasMother ) ."));
     assert_eq!(s(get(&r, "consistent")), "unknown");
     let reason = get(&r, "reason");
     assert_eq!(s(get(reason, "kind")), "OutOfFragment");
-    assert!(!s(get(reason, "construct")).is_empty());
+    assert_eq!(s(get(reason, "construct")), "HasKey");
     let triples = strs(get(reason, "triples"));
-    assert!(!triples.is_empty());
     assert!(
-        triples.iter().all(|t| t.contains("<http://ex/age>")),
+        triples
+            .iter()
+            .any(|t| t.starts_with("<http://ex/Person> <http://www.w3.org/2002/07/owl#hasKey> ")),
         "{triples:?}"
     );
     for t in &triples {
         assert!(t.ends_with(" ."), "{t}");
     }
-    // The profile check still ran and the ontology is in OWL 2 DL; only reasoning abstains.
     assert_eq!(get(get(&r, "profile"), "dl"), &Value::Bool(true));
+    assert_eq!(get(&r, "classification"), &Value::Null);
+}
+
+#[test]
+fn an_undecided_datatype_question_is_datatype_unknown_with_its_triples() {
+    let r = run(&format!(
+        "{ALCHIQ} :d a owl:DatatypeProperty ; rdfs:range [ a rdfs:Datatype ; owl:onDatatype xsd:string ; owl:withRestrictions ( [ xsd:pattern \"\\\\p{{IsBasicLatin}}+\" ] ) ] . :a :d \"x\" ."
+    ));
+    assert_eq!(s(get(&r, "consistent")), "unknown");
+    let reason = get(&r, "reason");
+    assert_eq!(keys(reason), ["kind", "triples"]);
+    assert_eq!(s(get(reason, "kind")), "DatatypeUnknown");
+    let triples = strs(get(reason, "triples"));
+    assert!(!triples.is_empty());
+    for t in &triples {
+        assert!(t.ends_with(" ."), "{t}");
+    }
     assert_eq!(get(&r, "classification"), &Value::Null);
 }
 

@@ -106,7 +106,10 @@ impl Step {
                 iri: iri.clone(),
                 parent: parent.clone(),
             },
-            Undo::Locked { .. } | Undo::Forget { .. } | Undo::Resolve { .. } => return None,
+            Undo::Fence { .. }
+            | Undo::Locked { .. }
+            | Undo::Forget { .. }
+            | Undo::Resolve { .. } => return None,
         })
     }
 

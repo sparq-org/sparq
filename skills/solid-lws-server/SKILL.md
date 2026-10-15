@@ -73,8 +73,8 @@ Set `PSS_SPARQ_BACKEND` to one of:
   endpoint that can lag is not supported, because the LWS server decides what a failed
   write left behind by reading the store straight after it. An update that times out
   can still commit on the service afterwards. The creates and removals of grants,
-  requests and subscriptions are fenced against that, but resource writes and their
-  rollback are not, so the native LWS server still refuses this backend (below).
+  requests and subscriptions, and the content write of a resource create, are fenced
+  against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
@@ -207,7 +207,10 @@ same bytes.
 
 Use a trailing slash for containers. A resource and container cannot coexist at
 slash-equivalent paths. ACL resources use the sibling `.acl` convention and
-are themselves protected by `acl:Control`.
+are themselves protected by `acl:Control`. A name ending in `.meta` (any case, %-decoded too)
+is where the LWS surface keeps a resource's linkset record, so the LDP surface answers `404` for
+it, for a container of that name and for anything under one, on every method a request is routed
+for (a CORS preflight is answered before routing), whichever surfaces are enabled.
 
 ## Negotiate RDF representations
 
@@ -275,8 +278,9 @@ self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
 because a remote write reported as failed may still commit later. Only the creates and
-removals of service records (grants, requests, subscriptions) are fenced against that (see
-below); resource writes, and putting a failed change back, are not.
+removals of service records (grants, requests, subscriptions), and a resource create's
+content write, are fenced against that (see below); other resource writes, and putting a
+failed change back, are not.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), the server at most 512 of each (507),
 and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB and an
@@ -319,7 +323,8 @@ What the server exposes, all discoverable from the storage description
 - **Storage**: `application/lws+json` containers with paging links, data resources with
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH` of a JSON
   data resource with RFC 6902 JSON Patch (`application/json-patch+json`), `DELETE` (with
-  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`,
+  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`
+  (a linkset has none of its own: `{resource}.meta.meta` is `404`, or the challenge),
   which take `PATCH` with JSON Patch and `PUT` of a whole `application/linkset+json` document
   (both advertised in `Allow`, the patch format in `Accept-Patch`; a failed precondition gets
   `412`, another content type on a `PUT` `415`). A linkset `PUT` replaces every user-managed link

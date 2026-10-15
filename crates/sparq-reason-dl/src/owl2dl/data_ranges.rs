@@ -39,7 +39,7 @@ use strings::{Atom, Space, StrKind, F};
 pub(crate) use strings::is_lang_tag;
 
 /// A three-valued answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tri {
     Yes,
     No,
@@ -63,7 +63,7 @@ impl From<Option<bool>> for Tri {
 }
 
 /// A data range over the datatype map (OWL 2 Structural Specification §7).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum DataRangeExpr {
     Datatype(Builtin),
     /// `DatatypeRestriction`: a datatype and its `(facet, value)` pairs.
