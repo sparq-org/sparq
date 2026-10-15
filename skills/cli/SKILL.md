@@ -173,6 +173,14 @@ cargo run --release -p sparq-cli --features hdt-write -- \
 
 ## Gotchas / feature flags / prerequisites
 
+- **One writer per store directory (`sq-ycle`).** Every command that OPENS a saved/persist
+  directory (`query-mmap`, `bench-mmap`, `compact`, …) takes an **exclusive advisory lock** on it
+  (`<dir>/.writer.lock`, unix `flock`) for the length of the run, so it fails with a clear error
+  instead of racing a running `--persist` server or another CLI invocation on the same directory.
+  Consequence: `compact` on a live server's dir now errors rather than interleaving (stop the
+  server first, as the `compact` command entry says), and **two directory-opening CLI commands cannot run on one directory at
+  the same time** — even two read-only queries. Copy the directory, or serialise the runs. The
+  lock is advisory and unix-only, and it is released on process exit however the process exits.
 - **`query` and `query-mmap` print RESULTS** (a table by default for SELECT; a boolean for ASK; N-Triples for CONSTRUCT/DESCRIBE) on stdout — load stats and reasoning/inconsistency reports go to stderr. Use `--format <table|tsv|csv|xml|json|ntriples>` to pick the SELECT/ASK serialisation, or `--count` for the legacy count-only line (`<n> solutions/triples in <ms>ms`). The two are at output parity (they share one emission core; `query-mmap` only differs in opening the indexes memory-mapped instead of loading into RAM). `bench`/`bench-mmap` are unchanged and emit TSV.
 - **No `--help`.** Run a subcommand with too few args to see its one-line usage; an unknown subcommand prints the top-level usage and exits 2. Query errors exit 1.
 - **`--reason <profile>` is a flag on `query`** (scanned anywhere in argv); the standalone `reason` subcommand instead takes the profile as the 3rd positional. Profiles: `rdfs`, `owl`, `n3`, and — with the opt-in features — `el` and `datalog:<rules.dlog>`. `datalog:` is the only profile that carries an ARGUMENT (its rules file), split on the FIRST `:`; a bare `datalog` is a usage error (exit 2) naming the syntax, in both feature states.

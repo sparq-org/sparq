@@ -34,7 +34,11 @@ compact-index = []
 # reads sort and allocate; forks copy retained projections. See the crate README.
 overlay-deleted-projections = []
 # Out-of-core querying: persist the indexes and memory-map them (native only).
-mmap = ["dep:memmap2"]
+# (sq-ycle) `libc` rides `mmap`: the durable directory store takes an exclusive
+# single-writer `flock(2)` advisory lock on its directory (see `DirLock`). This adds NO new
+# compiled crate — `memmap2` already depends on `libc` on unix — and the default / wasm build,
+# which has no `mmap`, still names neither.
+mmap = ["dep:memmap2", "dep:libc"]
 # sq-wihld (survey §A1): OPT-IN per-block Bloom filters on the high-NDV
 # (subject/object) leading column of a BLOCK-COMPRESSED permutation. The directory's
 # first-triple already gives an implicit min/max zone map that prunes RANGE scans, but for

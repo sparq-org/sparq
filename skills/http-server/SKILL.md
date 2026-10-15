@@ -1921,6 +1921,29 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   published snapshot, and a recovered write is durable across a restart — covered for a transient
   burst, a permanent jam, AND (sq-bif.14) an INTERLEAVED recover→fail→recover sequence whose final
   durable set is exactly the successful writes (no refused write resurrects).
+- **One writer per `--persist DIR` (enforced, `sq-ycle`).** A durable directory is opened with an
+  **exclusive advisory lock** (`DIR/.writer.lock`, unix `flock`), held for the life of the open
+  store. A second writer of the same directory — another `sparq-server`, a `sparq-cli compact`
+  against a live server's dir, or a second `Graph::open` in one process — now fails with a clear
+  error naming the directory instead of interleaving its WAL/journal appends with the running
+  writer's. So stop the server before an offline `sparq-cli compact` on its dir (which the
+  compaction note above already advises). The lock is released when the store is dropped and by
+  the kernel on process exit however it exits, so a crash never leaves it stale. Unix only: on a
+  non-unix target the open proceeds unlocked and a second writer is not detected.
+- **A refused durable commit fails CLOSED until restart (`sq-ycle`).** When an UPDATE body is
+  committed to the transaction journal but its materialisation then fails, the frame is KEPT for
+  the next `Graph::open` to redo — and until that restart **every** durable mutation of the store
+  is refused unwritten, named graphs included (not just the next journal commit). Accepting a
+  direct write in that window would see it undone or reordered by the kept frame's redo, which
+  replays after the per-graph WALs. The refusal reaches the server as the same durable-write
+  error its existing fail-closed path already handles; recovery is a restart on the same `DIR`.
+- **Graph existence is journalled (`sq-ycle`).** `CREATE GRAPH <g>` of a new empty graph and
+  `DROP [SILENT] GRAPH <g>` of an empty one change the dataset's graph set while resolving to no
+  triple change, so the journal frame carries explicit create/drop records and redoes them in
+  commit order. A crash in the window the journal exists for — after the commit fsync, before
+  the per-graph materialisation — therefore recovers the graph SET the committed frame describes,
+  not just its triples. The on-disk journal frame format is versioned
+  (`WTX2`); a frame left by an older build (`WTX1`) is still replayed.
 - **Online backup/restore — opt-in `backup` feature (default OFF).** Build with
   `--features backup` to mount the WRITE-gated, POST-only `/admin/backup` (stream a
   self-describing snapshot artifact of the live store WITHOUT stopping the world) and

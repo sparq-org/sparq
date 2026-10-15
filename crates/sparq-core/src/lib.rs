@@ -145,6 +145,31 @@ pub struct Graph {
     /// in-memory graphs (the per-`apply_effects` commit/clear are then no-ops). See [`TxnJournal`].
     #[cfg(feature = "mmap")]
     txn: Option<TxnJournal>,
+    /// (sq-ycle) The SHARED "the root redo journal keeps a failed commit" flag for a
+    /// whole durable graph TREE — set by [`poison_txn`](Self::poison_txn) (and by a failed journal
+    /// append) and read by EVERY durable mutation of this graph or of any named graph under it.
+    ///
+    /// DESIGN. A named graph is a separate `Graph` value inside [`named`](Self::named) with its
+    /// OWN per-graph WAL, so it cannot see the root's `txn` field; but the root journal's kept
+    /// frame is redone on the next `open` AFTER those per-graph WALs are replayed, so a direct
+    /// write to ANY graph in the tree while the frame is kept would be overwritten or reordered by
+    /// that redo. The simplest correct design is therefore ONE flag per tree rather than a check
+    /// routed through the root: the root's `Arc` is handed to every named graph — those restored by
+    /// `open`, those created later by [`ensure_named`](Self::ensure_named) /
+    /// [`apply_delta_nquads`](Self::apply_delta_nquads), and those re-opened by a named-drop swap —
+    /// so a sub-graph refuses a write as soon as the root is poisoned, with no parent pointer and
+    /// no borrow of the root. A [`fork`](Self::fork)/[`snapshot`](Self::snapshot) gets a FRESH flag:
+    /// it has no directory, so it carries no durability obligation.
+    ///
+    /// Cleared only by reopening (a fresh `Graph::open` mints a fresh flag after redoing the frame).
+    #[cfg(feature = "mmap")]
+    txn_poison: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// (sq-ycle) The exclusive SINGLE-WRITER advisory lock on the backing directory,
+    /// held for this graph's whole lifetime (see `DirLock`). `None` for an in-memory graph and for
+    /// the internally-opened named sub-graphs (the lock is taken once, on the root directory the
+    /// public [`open`](Self::open) was given).
+    #[cfg(feature = "mmap")]
+    dir_lock: Option<DirLock>,
 }
 
 /// (sq-5lf) An IMMUTABLE, logically-independent point-in-time view of a
@@ -1769,9 +1794,14 @@ impl Graph {
             graph_prefix_index: std::sync::Mutex::new(None),
             #[cfg(feature = "mmap")]
             wal: None,
-            // (sq-ycle) In-memory graph: no parent-level redo journal.
+            // (sq-ycle) In-memory graph: no parent-level redo journal, nothing to
+            // poison, no directory to lock.
             #[cfg(feature = "mmap")]
             txn: None,
+            #[cfg(feature = "mmap")]
+            txn_poison: fresh_txn_poison(),
+            #[cfg(feature = "mmap")]
+            dir_lock: None,
         }
     }
 
@@ -1812,6 +1842,12 @@ impl Graph {
             // journal handle with the WAL, so a compressed graph stays atomically durable.
             #[cfg(feature = "mmap")]
             txn: self.txn,
+            // The SAME tree (same named graphs) keeps the SAME poison flag and the SAME
+            // single-writer lock — re-encoding is not a reopen.
+            #[cfg(feature = "mmap")]
+            txn_poison: self.txn_poison,
+            #[cfg(feature = "mmap")]
+            dir_lock: self.dir_lock,
         }
     }
 
@@ -1945,7 +1981,7 @@ impl Graph {
         for i in 0..count {
             let (name, next) = decode_graph_name(&bytes, pos).map_err(|m| bad(&m))?;
             pos = next;
-            let sub = Graph::open(&named_dir.join(i.to_string()))?;
+            let sub = Graph::open_inner(&named_dir.join(i.to_string()), false)?;
             out.push((name, sub));
         }
         Ok(out)
@@ -1965,14 +2001,42 @@ impl Graph {
     /// A missing or wrong-sized current cache is recomputed in memory. Legacy
     /// unversioned caches are ignored because they used older validation rules.
     /// Saving to a new directory persists current cache files without changing RDF.
+    ///
+    /// SINGLE WRITER (sq-ycle). The returned graph holds an EXCLUSIVE advisory lock
+    /// (`dir/.writer.lock`) on the directory for its whole lifetime, so a second `open` of the
+    /// same directory — in another process OR in this one — fails with an `Err` naming the
+    /// conflict instead of interleaving WAL and redo-journal appends with the first writer. The
+    /// lock is released when the graph is dropped (and by the process exiting, however it exits),
+    /// so it never goes stale after a crash. On a non-unix target the lock is a no-op (see
+    /// `DirLock`).
     #[cfg(feature = "mmap")]
     pub fn open(dir: &std::path::Path) -> std::io::Result<Graph> {
+        Self::open_inner(dir, true)
+    }
+
+    /// [`open`](Self::open), with the single-writer [`DirLock`] made optional: the named
+    /// sub-graphs under a root directory are opened with `lock = false`, because the lock is taken
+    /// ONCE on the root directory and a sub-graph's directory is never opened independently by
+    /// another writer (reaching it requires the root, which is locked).
+    #[cfg(feature = "mmap")]
+    fn open_inner(dir: &std::path::Path, lock: bool) -> std::io::Result<Graph> {
         // (review 1593) Finish or roll back any compaction directory swap that a
         // crash interrupted, so `dir` is always present (never lost in the rename window).
         recover_compaction(dir)?;
         // (sq-glw2) Finish or roll back any named-graph DROP sub-tree swap a crash
         // interrupted, so `named/` is always consistent with the manifest before `open_named`.
         recover_named_drop(dir)?;
+        // (sq-ycle) Take the SINGLE-WRITER lock before ANY state is read or replayed:
+        // the WAL/journal replay below MUTATES the directory (it truncates torn tails and
+        // re-logs the kept frame), so two concurrent opens must not both reach it. The two
+        // recovery steps above run first because they are what guarantees `dir` exists at all
+        // (a crash in the compaction swap can leave it renamed away), and they are themselves
+        // idempotent and deterministic from the surviving sibling.
+        let dir_lock = if lock {
+            Some(DirLock::acquire(dir)?)
+        } else {
+            None
+        };
         let store = TripleStore::open(dir)?;
         // (review 1325, sub-finding 2) Prefer the mmap dictionary format
         // (`dict-meta.bin`, written by `save_mmap`); fall back to the LEGACY single-file
@@ -2036,7 +2100,12 @@ impl Graph {
             graph_prefix_index: std::sync::Mutex::new(None),
             wal: None,
             txn: None,
+            txn_poison: fresh_txn_poison(),
+            dir_lock,
         };
+        // (sq-ycle) Hand this root's poison flag to every restored named graph, so a
+        // later `poison_txn` reaches their durable mutators too (see the `txn_poison` field docs).
+        g.share_txn_poison();
         // Replay any write-ahead log into the delta-overlay (recovery after a crash or a
         // plain not-yet-compacted close), stopping cleanly at the first torn record and
         // truncating the log there — then keep the log open for further appends.
@@ -2058,7 +2127,7 @@ impl Graph {
         // find-or-create.
         //
         // (Copilot #135) DURABILITY ORDER (load-bearing): the records MUST be
-        // MATERIALISED INTO THE DURABLE PER-GRAPH WAL (`redo_txn_record` -> `apply_delta`, which
+        // MATERIALISED INTO THE DURABLE PER-GRAPH WAL (`redo_txn_op` -> `apply_delta`, which
         // appends + fsyncs) BEFORE the `txn.log` is truncated. The earlier code applied them with
         // `apply_delta_mem` (IN-MEMORY only) and then truncated the journal, so a record that lived
         // ONLY in `txn.log` — the precise crash window the journal exists for — was applied to this
@@ -2066,9 +2135,15 @@ impl Graph {
         // survive the NEXT restart. Re-logging into the WAL first (then truncate) makes the recovered
         // state durable across any number of restarts; a re-crash between WAL-redo and truncation
         // simply redoes the (idempotent) frame again on the next open.
-        let txn_records = TxnJournal::replay(dir)?;
-        for (insert, slot, t) in txn_records {
-            g.redo_txn_record(insert, slot, t).map_err(std::io::Error::other)?;
+        //
+        // (sq-ycle) GRAPH EXISTENCE: the frame also carries explicit
+        // [`TxnOp::Create`]/[`TxnOp::Drop`] records, redone HERE in COMMIT ORDER along with the
+        // data records — so a `CREATE GRAPH`/`DROP GRAPH` that resolves to no triple change is
+        // recovered too, and a create/drop interleaved with inserts is recovered in the order it
+        // was committed rather than being applied out of band during materialisation.
+        let txn_ops = TxnJournal::replay(dir)?;
+        for op in txn_ops {
+            g.redo_txn_op(op).map_err(std::io::Error::other)?;
         }
         // Every committed record is now durably in a per-graph WAL (fsync'd by `apply_delta`); only
         // NOW is it safe to truncate the journal that was the sole durable home of those records.
@@ -2093,8 +2168,26 @@ impl Graph {
     /// subsequent restarts. Re-logging a record the per-graph WAL already holds is harmless: the WAL
     /// replays with set semantics (re-inserting a present triple / deleting an absent one is a
     /// no-op), so a re-crash mid-redo simply redoes the (idempotent) frame again.
+    ///
+    /// (sq-ycle) A [`TxnOp::Create`]/[`TxnOp::Drop`] record redoes the GRAPH-EXISTENCE
+    /// change through the same durable helpers the live path uses
+    /// ([`ensure_named`](Self::ensure_named) / [`drop_named_durable`](Self::drop_named_durable)),
+    /// both of which are idempotent (find-or-create / no-op-on-absent), so replaying a create or
+    /// drop the materialisation already performed changes nothing.
     #[cfg(feature = "mmap")]
-    fn redo_txn_record(&mut self, insert: bool, slot: Option<Term>, t: [Term; 3]) -> Result<(), String> {
+    fn redo_txn_op(&mut self, op: TxnOp) -> Result<(), String> {
+        let (insert, slot, t) = match op {
+            TxnOp::Insert { slot, triple } => (true, slot, triple),
+            TxnOp::Delete { slot, triple } => (false, slot, triple),
+            TxnOp::Create(name) => {
+                self.ensure_named(&name)?;
+                return Ok(());
+            }
+            TxnOp::Drop(name) => {
+                self.drop_named_durable(&name)?;
+                return Ok(());
+            }
+        };
         match slot {
             None => {
                 if insert {
@@ -3055,6 +3148,12 @@ impl Graph {
             // NO directory association — no WAL and no redo journal (like `wal: None`).
             #[cfg(feature = "mmap")]
             txn: None,
+            // A fork has no directory, so it inherits NEITHER the source tree's poison
+            // obligation (a fresh, clear flag) NOR its single-writer lock.
+            #[cfg(feature = "mmap")]
+            txn_poison: fresh_txn_poison(),
+            #[cfg(feature = "mmap")]
+            dir_lock: None,
         }
     }
 
@@ -3104,6 +3203,11 @@ impl Graph {
         if inserts.is_empty() && deletes.is_empty() {
             return Ok(());
         }
+        // (sq-ycle) Fail closed while a committed journal frame is kept for the reopen:
+        // the reopen replays this WAL first and the kept frame after it, so a write accepted now
+        // could be undone or reordered by that redo.
+        #[cfg(feature = "mmap")]
+        self.refuse_durable_write_while_poisoned()?;
         #[cfg(feature = "mmap")]
         if let Some(w) = &mut self.wal {
             w.append_batch(inserts, deletes).map_err(|e| format!("WAL append failed: {e}"))?;
@@ -3173,15 +3277,71 @@ impl Graph {
         &mut self,
         records: &[(bool, Option<Term>, [Term; 3])],
     ) -> Result<(), (bool, String)> {
+        let ops: Vec<TxnOp> = records
+            .iter()
+            .map(|(insert, slot, triple)| {
+                if *insert {
+                    TxnOp::Insert {
+                        slot: slot.clone(),
+                        triple: triple.clone(),
+                    }
+                } else {
+                    TxnOp::Delete {
+                        slot: slot.clone(),
+                        triple: triple.clone(),
+                    }
+                }
+            })
+            .collect();
+        self.commit_txn_ops_checked(&ops)
+    }
+
+    /// (sq-ycle) [`commit_txn`](Self::commit_txn) over the FULL record vocabulary
+    /// ([`TxnOp`]): the data delta PLUS explicit graph-existence records
+    /// ([`TxnOp::Create`]/[`TxnOp::Drop`]), committed as ONE frame in the caller's order.
+    ///
+    /// Use this rather than [`commit_txn`](Self::commit_txn) whenever the body can change which
+    /// graphs EXIST. `CREATE GRAPH <g>` of a new empty graph, and `DROP GRAPH <g>` of an empty
+    /// one, resolve to NO triple records at all, so a tuple-only frame carries no trace of them:
+    /// a crash between the commit and materialisation then recovered a dataset whose graph SET
+    /// differed from the one the commit acknowledged, and a create/drop interleaved with inserts
+    /// recovered out of commit order. A `TxnOp::Create`/`TxnOp::Drop` record is redone on `open`
+    /// in frame order through the same idempotent durable helpers the live path uses.
+    pub fn commit_txn_ops(&mut self, ops: &[TxnOp]) -> Result<(), String> {
+        self.commit_txn_ops_checked(ops).map_err(|(_, e)| e)
+    }
+
+    /// [`commit_txn_ops`](Self::commit_txn_ops), saying on failure whether the journal may hold
+    /// any of the frame: `false` only when the journal refused it unwritten, after an earlier
+    /// failed append.
+    pub fn commit_txn_ops_checked(&mut self, ops: &[TxnOp]) -> Result<(), (bool, String)> {
         #[cfg(feature = "mmap")]
-        if let Some(j) = &mut self.txn {
-            let refused = j.poisoned();
-            return j
-                .append(records)
-                .map_err(|e| (!refused, format!("txn journal commit failed: {e}")));
+        if self.txn.is_some() {
+            // Refused UNWRITTEN (`applied: false`) once anything in this tree is poisoned: the
+            // kept frame is the one the reopen will replay, so nothing may be appended after it.
+            if self.txn_poisoned() {
+                return Err((
+                    false,
+                    "txn journal commit failed: an earlier commit failed; reopen the graph"
+                        .to_owned(),
+                ));
+            }
+            // An append failure may have left part of a frame behind for a later replay to
+            // apply, so the WHOLE tree stops taking durable writes until the reopen — exactly
+            // as `poison_txn` does for a failed materialisation.
+            let r = self
+                .txn
+                .as_mut()
+                .expect("checked above")
+                .append(ops)
+                .map_err(|e| (true, format!("txn journal commit failed: {}", e)));
+            if r.is_err() {
+                self.poison_txn();
+            }
+            return r;
         }
         #[cfg(not(feature = "mmap"))]
-        let _ = records;
+        let _ = ops;
         Ok(())
     }
 
@@ -3203,7 +3363,7 @@ impl Graph {
     /// a fresh journal without it.
     fn refuse_while_txn_poisoned(&self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
-        if self.txn.as_ref().is_some_and(TxnJournal::poisoned) {
+        if self.txn_poisoned() {
             return Err("the txn journal keeps a failed commit; reopen the graph first".to_owned());
         }
         self.named
@@ -3211,13 +3371,56 @@ impl Graph {
             .try_for_each(|(_, g)| g.refuse_while_txn_poisoned())
     }
 
+    /// (sq-ycle) Whether a kept, not-yet-replayed journal frame makes this graph
+    /// unwritable: either its OWN journal holds one, or the root of its tree does (the shared
+    /// flag — see the `txn_poison` field docs).
+    #[cfg(feature = "mmap")]
+    fn txn_poisoned(&self) -> bool {
+        self.txn_poison.load(std::sync::atomic::Ordering::Acquire)
+            || self.txn.as_ref().is_some_and(TxnJournal::poisoned)
+    }
+
+    /// (sq-ycle) FAIL-CLOSED guard on every DURABLE mutation (`apply_delta` and the
+    /// graph create/drop helpers): while a journal frame is kept for the reopen to replay, a
+    /// direct write must NOT reach a per-graph WAL. The reopen replays the per-graph WALs FIRST
+    /// and the kept frame AFTER, so a write accepted now would be silently undone or reordered by
+    /// that redo — an acknowledged write that does not survive. Refusing it unwritten until the
+    /// graph is reopened is the only honest answer.
+    #[cfg(feature = "mmap")]
+    fn refuse_durable_write_while_poisoned(&self) -> Result<(), String> {
+        if self.txn_poisoned() {
+            return Err(
+                "durable write refused: the txn journal keeps a failed commit; reopen the graph first"
+                    .to_owned(),
+            );
+        }
+        Ok(())
+    }
+
     /// Keep the journal's frame for the next reopen to replay, and refuse every later
-    /// commit until then: for a caller whose materialisation failed after the commit point
+    /// commit — and every later DURABLE WRITE anywhere in this graph tree — until then: for a
+    /// caller whose materialisation failed after the commit point
     /// (`sparq_engine::apply_effects`). A NO-OP for an in-memory graph.
     pub fn poison_txn(&mut self) {
         #[cfg(feature = "mmap")]
         if let Some(j) = &mut self.txn {
             j.poisoned = true;
+            // The flag is SHARED with every named graph in this tree (see the `txn_poison`
+            // field docs), so their direct durable mutators refuse too.
+            self.txn_poison
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+    }
+
+    /// (sq-ycle) Hand this graph's poison flag to every named graph beneath it (and
+    /// recursively onward), so the whole tree reads ONE flag. Called after `open` restores the
+    /// named set and after any path that re-opens or inserts a named sub-graph.
+    #[cfg(feature = "mmap")]
+    fn share_txn_poison(&mut self) {
+        let flag = std::sync::Arc::clone(&self.txn_poison);
+        for (_, sub) in &mut self.named {
+            sub.txn_poison = std::sync::Arc::clone(&flag);
+            sub.share_txn_poison();
         }
     }
 
@@ -3229,6 +3432,8 @@ impl Graph {
     /// WAL-logged + fsync'd and survive a crash/reopen; for an in-memory graph it clears the
     /// store overlay in place (no WAL to keep). Named graphs are untouched.
     pub fn clear_default_durable(&mut self) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        self.refuse_durable_write_while_poisoned()?;
         #[cfg(feature = "mmap")]
         if self.wal.is_some() {
             // Retract every current default-graph triple as a WAL-logged delete batch.
@@ -3301,6 +3506,10 @@ impl Graph {
         let Some(idx) = self.named.iter().position(|(n, _)| n == name) else {
             return Ok(false);
         };
+        // Removing a graph is a DURABLE mutation (sub-tree swap + manifest rewrite), so it fails
+        // closed while a journal frame is kept for the reopen.
+        #[cfg(feature = "mmap")]
+        self.refuse_durable_write_while_poisoned()?;
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
         // parent (or a non-mmap build) fall through to the plain in-memory entry removal below.
         #[cfg(feature = "mmap")]
@@ -3344,6 +3553,8 @@ impl Graph {
         if self.named.is_empty() {
             return Ok(());
         }
+        #[cfg(feature = "mmap")]
+        self.refuse_durable_write_while_poisoned()?;
         // Release every sub-graph's mmap/WAL handles before any directory is touched (Issue 1/2:
         // no live map may point into `named/<i>/` across the removal — correct on every platform,
         // required on Windows where a mapped file blocks `remove_dir_all`/`rename`).
@@ -3418,7 +3629,11 @@ impl Graph {
         // Re-open survivors from their NEW directories so each carries a correctly-indexed WAL
         // (and a fresh, correctly-targeted mmap into the swapped-in `named/`).
         for (i, name) in names.into_iter().enumerate() {
-            let sub = Graph::open(&named_dir.join(i.to_string())).map_err(|e| e.to_string())?;
+            let mut sub = Graph::open_inner(&named_dir.join(i.to_string()), false)
+                .map_err(|e| e.to_string())?;
+            // The re-opened survivor is still part of THIS tree, so it reads this tree's
+            // poison flag (a fresh `open` would otherwise have minted it a private one).
+            sub.txn_poison = std::sync::Arc::clone(&self.txn_poison);
             self.named.push((name, sub));
         }
         Ok(())
@@ -3434,6 +3649,11 @@ impl Graph {
     /// name a bnode), which is what makes quad-level retraction of bnode triples
     /// possible. The string-parsing entry point for bindings (wasm/python) callers.
     pub fn apply_delta_nquads(&mut self, inserts: &str, deletes: &str) -> Result<(), String> {
+        // Fail closed BEFORE parsing / creating any sub-graph while a journal frame is kept for
+        // the reopen (the per-slot `apply_delta`s below refuse too, but a brand-new named slot
+        // would otherwise have its directory + manifest entry written first).
+        #[cfg(feature = "mmap")]
+        self.refuse_durable_write_while_poisoned()?;
         use oxrdf::GraphName;
         type Slot = Option<Term>;
         // Per-graph delta: `(slot, inserts, deletes)` — one entry per distinct graph.
@@ -3488,6 +3708,8 @@ impl Graph {
                         #[cfg(feature = "mmap")]
                         if let Some(dir) = &parent_dir {
                             let mut g = self.create_durable_named(dir, &name)?;
+                            // The new sub-graph joins this tree, so it reads its poison flag.
+                            g.txn_poison = std::sync::Arc::clone(&self.txn_poison);
                             g.apply_delta(&ins, &[])?;
                             self.named.push((name, g));
                             continue;
@@ -3531,7 +3753,8 @@ impl Graph {
         let mut names: Vec<Term> = self.named.iter().map(|(n, _)| n.clone()).collect();
         names.push(name.clone());
         write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
-        Graph::open(&sub_dir).map_err(|e| e.to_string())
+        // UNLOCKED: a named sub-graph is reached only through its (locked) root directory.
+        Graph::open_inner(&sub_dir, false).map_err(|e| e.to_string())
     }
 
     /// (sq-7cxr, gh-44) Returns the index of the named sub-graph called `name`,
@@ -3550,9 +3773,15 @@ impl Graph {
         if let Some(i) = self.named.iter().position(|(n, _)| n == name) {
             return Ok(i);
         }
+        // Creating a graph is a DURABLE mutation (a new sub-dir + a manifest rewrite), so it
+        // fails closed while a journal frame is kept for the reopen.
+        #[cfg(feature = "mmap")]
+        self.refuse_durable_write_while_poisoned()?;
         #[cfg(feature = "mmap")]
         if let Some(dir) = self.wal.as_ref().map(|w| w.dir.clone()) {
-            let g = self.create_durable_named(&dir, name)?;
+            let mut g = self.create_durable_named(&dir, name)?;
+            // The new sub-graph joins this tree, so it reads this tree's poison flag.
+            g.txn_poison = std::sync::Arc::clone(&self.txn_poison);
             self.named.push((name.clone(), g));
             return Ok(self.named.len() - 1);
         }
@@ -3680,8 +3909,16 @@ impl Graph {
         // away with `dir`), then run the shared crash-safe swap, writing `self`'s CURRENT image as
         // the new base. Adopt the re-opened directory-backed graph in place. (sq-ft7u)
         self.wal = None;
-        let reopened = swap_dir_to_new_base(dir, |new_dir| self.save(new_dir))
-            .map_err(|e| e.to_string())?;
+        // (sq-ycle) Release the single-writer lock before the swap renames `dir` away
+        // (the lock file lives under it), and re-take it on the new canonical directory after —
+        // so the compacted graph keeps holding the lock a caller of `open` was promised.
+        let was_locked = self.dir_lock.is_some();
+        self.dir_lock = None;
+        let mut reopened =
+            swap_dir_to_new_base(dir, |new_dir| self.save(new_dir)).map_err(|e| e.to_string())?;
+        if was_locked {
+            reopened.dir_lock = Some(DirLock::acquire(dir).map_err(|e| e.to_string())?);
+        }
         *self = reopened;
         Ok(())
     }
@@ -3715,7 +3952,11 @@ impl Graph {
         dir: &std::path::Path,
         fresh: Graph,
     ) -> std::io::Result<Graph> {
-        swap_dir_to_new_base(dir, |new_dir| fresh.save(new_dir))
+        let mut restored = swap_dir_to_new_base(dir, |new_dir| fresh.save(new_dir))?;
+        // Public `open`-equivalent seam: the returned graph is the directory's writer, so it
+        // takes the single-writer lock on the new canonical `dir`.
+        restored.dir_lock = Some(DirLock::acquire(dir)?);
+        Ok(restored)
     }
 
     /// Whether this graph, or any named graph under it, is backed by a directory (opened with
@@ -3888,7 +4129,9 @@ where
     std::fs::rename(&new_dir, dir)?;
     fsync_dir(parent)?;
     // Re-open memory-mapped from the new base (fresh, empty WAL); only then drop the old files.
-    let reopened = Graph::open(dir)?;
+    // UNLOCKED: the caller decides whether the returned graph takes the single-writer lock
+    // (`persist_swap` re-takes the one it released; `restore_into_durable` takes a fresh one).
+    let reopened = Graph::open_inner(dir, false)?;
     std::fs::remove_dir_all(&old_dir).ok();
     Ok(reopened)
 }
@@ -4259,11 +4502,124 @@ impl Wal {
     }
 }
 
-/// (sq-ycle) One resolved redo-journal record: `(is_insert, slot, triple)` — an
-/// insert/delete flag, the graph slot (`None` = default graph, `Some` = that named graph) and the
-/// term-triple. The unit the parent-level [`TxnJournal`] commits and [`Graph::commit_txn`] takes.
+/// (sq-ycle) One record of a redo-journal frame — the unit the parent-level redo
+/// journal commits and [`Graph::commit_txn_ops`] takes.
+///
+/// A frame is a whole multi-operation SPARQL UPDATE body's resolved effect on the dataset, in
+/// commit order. Two kinds of record appear in it:
+///
+/// * a DATA record ([`Insert`](TxnOp::Insert)/[`Delete`](TxnOp::Delete)) — one triple in one
+///   graph slot (`None` = the default graph, `Some(name)` = that named graph);
+/// * a GRAPH-EXISTENCE record ([`Create`](TxnOp::Create)/[`Drop`](TxnOp::Drop)) — the named graph
+///   comes into / goes out of existence. These matter on their own because `CREATE GRAPH` of a
+///   new empty graph, and `DROP GRAPH` / `DROP SILENT GRAPH` of an empty one, change the
+///   dataset's graph SET while resolving to no triple records at all; without them a crash
+///   between the commit and the materialisation recovered a different graph set from the one the
+///   commit acknowledged.
+///
+/// Records are replayed on `Graph::open` in frame order, so an existence change interleaved with
+/// data records is recovered in the order it was committed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TxnOp {
+    /// Add `triple` to the graph `slot` names.
+    Insert {
+        /// `None` = the default graph; `Some(name)` = that named graph.
+        slot: Option<Term>,
+        /// The triple to add.
+        triple: [Term; 3],
+    },
+    /// Remove `triple` from the graph `slot` names (a no-op if absent — set semantics).
+    Delete {
+        /// `None` = the default graph; `Some(name)` = that named graph.
+        slot: Option<Term>,
+        /// The triple to remove.
+        triple: [Term; 3],
+    },
+    /// The named graph exists after this frame (find-or-create on replay).
+    Create(Term),
+    /// The named graph does not exist after this frame (no-op-on-absent on replay).
+    Drop(Term),
+}
+
+/// (sq-ycle) A fresh, clear shared poison flag — for a graph that carries no durability
+/// obligation yet (an in-memory graph, a fork, or a directory just opened and replayed). See the
+/// `Graph::txn_poison` field docs.
 #[cfg(feature = "mmap")]
-type TxnRecord = (bool, Option<Term>, [Term; 3]);
+fn fresh_txn_poison() -> std::sync::Arc<std::sync::atomic::AtomicBool> {
+    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))
+}
+
+/// (sq-ycle) An EXCLUSIVE SINGLE-WRITER advisory lock on a durable graph directory,
+/// held for the lifetime of the [`Graph`] that [`Graph::open`] returned.
+///
+/// WHY. Nothing previously stopped two processes — or two `Graph::open` calls in ONE process —
+/// from opening the same directory for writing. Both would then replay and truncate the same
+/// torn WAL/journal tails and interleave their own appends into one `wal.log` / `txn.log`, so a
+/// frame could be split by a foreign append and the redo of one writer could undo the
+/// acknowledged writes of the other. A single-writer directory is the invariant the WAL and the
+/// redo journal are designed around; this makes it enforced rather than assumed.
+///
+/// HOW. `dir/.writer.lock` is opened and `flock(2)`-ed `LOCK_EX | LOCK_NB`. `flock` locks the
+/// OPEN FILE DESCRIPTION, not the process, so a second `Graph::open` in the SAME process
+/// conflicts exactly as a second process does — which is what makes the in-process case an
+/// honest `Err` instead of silent interleaving. The lock is released when the file is closed:
+/// when the `Graph` is dropped, and by the kernel when the process exits however it exits — so,
+/// unlike a lock built from `create_new`, it is NEVER left stale by a crash (the case the redo
+/// journal exists to recover from).
+///
+/// BOUNDARY: unix only. On any other target `acquire` succeeds without taking a lock, so a
+/// second writer is NOT detected there; the native durable store is unix-tested only, and the
+/// wasm build has no `mmap` feature at all. No new dependency: `libc` is already compiled
+/// whenever `mmap` is on (`memmap2` depends on it on unix), and the `mmap` feature now names it.
+#[cfg(feature = "mmap")]
+struct DirLock {
+    /// Holding the file open IS the lock — closing it (on drop) releases the `flock`.
+    #[cfg(unix)]
+    _file: std::fs::File,
+}
+
+#[cfg(feature = "mmap")]
+impl DirLock {
+    /// The lock file's name inside the graph directory. A plain sentinel: it is never read or
+    /// written, only locked, and `save`/`open` ignore unknown files, so an older store that has
+    /// no such file simply gets one on its next open.
+    const FILE_NAME: &'static str = ".writer.lock";
+
+    /// Takes the exclusive lock, or fails with a message naming the directory. Never blocks:
+    /// `LOCK_NB` turns a held lock into an immediate `Err` rather than a hang.
+    #[cfg(unix)]
+    fn acquire(dir: &std::path::Path) -> std::io::Result<DirLock> {
+        use std::os::unix::io::AsRawFd;
+        let path = dir.join(Self::FILE_NAME);
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)?;
+        // SAFETY: `flock` is called with a valid, open file descriptor owned by `file` (which
+        // outlives the call and is kept alive by the returned `DirLock`) and a valid operation
+        // bitmask. It only takes a lock on that descriptor — it neither reads nor writes memory.
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if rc != 0 {
+            let cause = std::io::Error::last_os_error();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                format!(
+                    "{} is already open for writing by another sparq graph or process ({})",
+                    dir.display(),
+                    cause
+                ),
+            ));
+        }
+        Ok(DirLock { _file: file })
+    }
+
+    /// Non-unix fallback: no advisory lock is available here, so the open proceeds unlocked (see
+    /// the type-level BOUNDARY note).
+    #[cfg(not(unix))]
+    fn acquire(_dir: &std::path::Path) -> std::io::Result<DirLock> {
+        Ok(DirLock {})
+    }
+}
 
 /// (sq-ycle) Serialise a journal SLOT — the graph a record targets — into `buf`.
 /// A named slot reuses the manifest's [`encode_graph_name`] (kind 0 NamedNode / 1 BlankNode);
@@ -4321,9 +4677,15 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 ///
 /// ```text
 /// [TXN_MAGIC u32][n_records u32][body_len u32]   <- header
-/// <body_len bytes of records>                     <- each: [op u8][slot ...][nt_len u32][N-Triples]
+/// <body_len bytes of records>                     <- data:      [op u8][slot ...][nt_len u32][N-Triples]
+///                                                 <- existence: [op u8][slot ...]
 /// [checksum u64][COMMIT_MARKER u32]               <- commit trailer (written last)
 /// ```
+///
+/// (sq-ycle) A record is a DATA change (`INSERT`/`DELETE`, carrying a triple) or a
+/// GRAPH-EXISTENCE change (`CREATE`/`DROP`, carrying only its named slot) — see [`TxnOp`]. The
+/// existence records are why the frame magic is `WTX2`; a `WTX1` frame written by an older build
+/// is still replayed, with data records only.
 ///
 /// where a record's SLOT is [`encode_slot`]'s `[kind u8]( [len u32][value] )?` and the triple is
 /// the N-Triples line + `u32` length, exactly as [`Wal::push_record`] frames it (so the same
@@ -4344,9 +4706,22 @@ struct TxnJournal {
 impl TxnJournal {
     const INSERT: u8 = 0;
     const DELETE: u8 = 1;
-    /// Frame magic ("WTX1" little-endian) — distinct from `Wal::BATCH_MAGIC` so a `txn.log` frame
-    /// can never be mistaken for a `wal.log` batch (and vice versa) on a misdirected read.
-    const TXN_MAGIC: u32 = 0x31_58_54_57;
+    /// (sq-ycle) GRAPH-EXISTENCE op codes. Their record is `[op][slot]` with NO triple
+    /// payload, and their slot is always a NAMED graph (kind 0/1) — the default graph can be
+    /// cleared but neither created nor dropped.
+    const CREATE: u8 = 2;
+    const DROP: u8 = 3;
+    /// Frame magic ("WTX2" little-endian) — the version this build WRITES: frames that may carry
+    /// the graph-existence records (`CREATE`/`DROP`). Distinct from `Wal::BATCH_MAGIC` so a
+    /// `txn.log` frame can never be mistaken for a `wal.log` batch (and vice versa) on a
+    /// misdirected read.
+    const TXN_MAGIC: u32 = 0x32_58_54_57;
+    /// (sq-ycle) The PREVIOUS frame magic ("WTX1"), still READ so a journal left by an
+    /// older build (a crash before this upgrade) is replayed rather than discarded. A `WTX1` frame
+    /// may only hold `INSERT`/`DELETE` records; a `CREATE`/`DROP` op byte in one is corruption and
+    /// is rejected as a torn tail. An older build meeting a `WTX2` frame sees unknown magic and
+    /// discards the tail — hence the clean version bump rather than a silent record-format change.
+    const TXN_MAGIC_V1: u32 = 0x31_58_54_57;
 
     fn path(dir: &std::path::Path) -> std::path::PathBuf {
         dir.join("txn.log")
@@ -4367,7 +4742,7 @@ impl TxnJournal {
     /// THE single commit point for one `apply_effects` body. A crash mid-append leaves an
     /// uncommitted tail that [`replay`](Self::replay) discards entirely. An empty record set is a
     /// no-op (an UPDATE that resolves to no data change carries no atomicity obligation).
-    fn append(&mut self, records: &[TxnRecord]) -> std::io::Result<()> {
+    fn append(&mut self, records: &[TxnOp]) -> std::io::Result<()> {
         use std::io::Write;
         // A failed append may have left any part of its frame behind, a complete one included,
         // for a later replay to apply: the journal takes no further frame, not even an empty
@@ -4381,16 +4756,24 @@ impl TxnJournal {
             return Ok(());
         }
         let mut body = Vec::new();
-        for (insert, slot, t) in records {
-            let op = if *insert { Self::INSERT } else { Self::DELETE };
+        for record in records {
+            // A graph-existence record is `[op][slot]` and stops there; a data record adds the
+            // triple as N-Triples + u32 length — byte-identical to `Wal::push_record`'s line form
+            // (minus the op byte, written before the slot), so the same `parse_nt_record` decodes
+            // it on replay.
+            let (op, slot, triple) = match record {
+                TxnOp::Insert { slot, triple } => (Self::INSERT, slot.clone(), Some(triple)),
+                TxnOp::Delete { slot, triple } => (Self::DELETE, slot.clone(), Some(triple)),
+                TxnOp::Create(name) => (Self::CREATE, Some(name.clone()), None),
+                TxnOp::Drop(name) => (Self::DROP, Some(name.clone()), None),
+            };
             body.push(op);
-            encode_slot(&mut body, slot);
-            // The triple as N-Triples + u32 length — byte-identical to `Wal::push_record`'s line
-            // form (minus the op byte, which we wrote before the slot above), so the same
-            // `parse_nt_record` decodes it on replay.
-            let line = format!("{} {} {} .\n", t[0], t[1], t[2]);
-            body.extend_from_slice(&(line.len() as u32).to_le_bytes());
-            body.extend_from_slice(line.as_bytes());
+            encode_slot(&mut body, &slot);
+            if let Some(t) = triple {
+                let line = format!("{} {} {} .\n", t[0], t[1], t[2]);
+                body.extend_from_slice(&(line.len() as u32).to_le_bytes());
+                body.extend_from_slice(line.as_bytes());
+            }
         }
         let mut buf = Vec::with_capacity(body.len() + 24);
         buf.extend_from_slice(&Self::TXN_MAGIC.to_le_bytes());
@@ -4434,7 +4817,7 @@ impl TxnJournal {
     /// marker) are returned; the file is TRUNCATED at the start of the first incomplete/corrupt
     /// frame — the torn tail of an interrupted append — so a partial frame is NEVER partially
     /// applied. EXACT clone of [`Wal::replay`]'s torn-tail logic, extended with the per-record slot.
-    fn replay(dir: &std::path::Path) -> std::io::Result<Vec<TxnRecord>> {
+    fn replay(dir: &std::path::Path) -> std::io::Result<Vec<TxnOp>> {
         let path = Self::path(dir);
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
@@ -4450,9 +4833,12 @@ impl TxnJournal {
                 break; // torn header
             }
             let rd = |o: usize| u32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]);
-            if rd(bstart) != Self::TXN_MAGIC {
+            // Accept the magic this build writes AND the previous one (an older build's journal).
+            let magic = rd(bstart);
+            if magic != Self::TXN_MAGIC && magic != Self::TXN_MAGIC_V1 {
                 break; // not a txn frame (corruption / torn tail)
             }
+            let existence_ops_allowed = magic == Self::TXN_MAGIC;
             let n_records = rd(bstart + 4) as usize;
             let body_len = rd(bstart + 8) as usize;
             let body_start = bstart + 12;
@@ -4482,6 +4868,23 @@ impl TxnJournal {
                     break 'frames;
                 };
                 pos = after_slot;
+                // (sq-ycle) A graph-existence record carries no triple. It needs a
+                // NAMED slot, and may only appear in a frame whose magic declares the format
+                // that has it — anything else is a corrupt/torn body, handled conservatively.
+                if op == Self::CREATE || op == Self::DROP {
+                    let Some(name) = slot.filter(|_| existence_ops_allowed) else {
+                        break 'frames;
+                    };
+                    frame_ops.push(if op == Self::CREATE {
+                        TxnOp::Create(name)
+                    } else {
+                        TxnOp::Drop(name)
+                    });
+                    continue;
+                }
+                if op != Self::INSERT && op != Self::DELETE {
+                    break 'frames; // unknown op byte — corrupt body
+                }
                 if pos + 4 > body_end {
                     break 'frames;
                 }
@@ -4490,10 +4893,14 @@ impl TxnJournal {
                 let Some(end) = start.checked_add(len).filter(|&e| e <= body_end) else {
                     break 'frames;
                 };
-                let Some(t) = parse_nt_record(&bytes[start..end]) else {
+                let Some(triple) = parse_nt_record(&bytes[start..end]) else {
                     break 'frames;
                 };
-                frame_ops.push((op == Self::INSERT, slot, t));
+                frame_ops.push(if op == Self::INSERT {
+                    TxnOp::Insert { slot, triple }
+                } else {
+                    TxnOp::Delete { slot, triple }
+                });
                 pos = end;
             }
             if frame_ops.len() != n_records {
@@ -10443,11 +10850,15 @@ mod tests {
         //     the uncommitted batch is discarded WHOLE — never partially applied.
         let torn = &full[..first_batch_len + 14]; // header + a few body bytes, no trailer
         std::fs::write(&wal_path, torn).unwrap();
-        let g = Graph::open(&dir).unwrap();
-        let got = dump_terms(&g);
-        assert_eq!(got.len(), 2, "only the first committed batch replays");
-        assert!(got.iter().any(|(s, _, _)| s.contains("s1")));
-        assert!(!got.iter().any(|(s, _, _)| s.contains("s2")));
+        // Each reopen is SCOPED: `open` holds the directory's single-writer lock for the
+        // graph's lifetime, so the next `open` of the same directory must follow this one's drop.
+        {
+            let g = Graph::open(&dir).unwrap();
+            let got = dump_terms(&g);
+            assert_eq!(got.len(), 2, "only the first committed batch replays");
+            assert!(got.iter().any(|(s, _, _)| s.contains("s1")));
+            assert!(!got.iter().any(|(s, _, _)| s.contains("s2")));
+        }
         assert_eq!(std::fs::read(&wal_path).unwrap().len(), first_batch_len, "torn tail truncated to the batch boundary");
 
         // (b) Corrupt the FIRST batch's body (flip a byte inside it): the checksum fails, so
@@ -10591,6 +11002,351 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// (sq-ycle) GAP 1 — a poisoned root journal must stop EVERY durable mutation in the
+    /// tree, not just the next commit. The reopen replays the per-graph WALs FIRST and the kept
+    /// frame AFTER, so a direct `apply_delta` accepted while the frame is kept is undone (or
+    /// reordered) by that redo — an acknowledged write that does not survive. Every durable
+    /// mutator, on the root AND on a named graph reached through it, must refuse unwritten.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_poisoned_journal_refuses_every_direct_durable_write() {
+        let dir = txn_tmp_dir("poisoned-direct");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+
+        let kept = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        let direct = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            // A body is committed, then its materialisation fails: the frame is kept for the
+            // reopen and the whole tree stops taking durable writes.
+            g.commit_txn_ops(&[TxnOp::Insert {
+                slot: None,
+                triple: kept.clone(),
+            }])
+            .unwrap();
+            g.poison_txn();
+
+            assert!(
+                g.apply_delta(std::slice::from_ref(&direct), &[]).is_err(),
+                "root apply_delta refused"
+            );
+            assert!(
+                g.insert_triple(term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o"))
+                    .is_err(),
+                "insert_triple refused"
+            );
+            assert!(g
+                .remove_triple(term_iri(0, "base"), term_iri(0, "p"), term_iri(0, "o"))
+                .is_err());
+            assert!(
+                g.apply_delta_nquads("<http://ex/s3> <http://ex/p> <http://ex/o> .", "")
+                    .is_err(),
+                "apply_delta_nquads refused"
+            );
+            assert!(
+                g.clear_default_durable().is_err(),
+                "durable default clear refused"
+            );
+            assert!(
+                g.clear_named_durable(&named("g")).is_err(),
+                "durable named clear refused"
+            );
+            assert!(
+                g.ensure_named(&named("fresh")).is_err(),
+                "graph creation refused"
+            );
+            assert!(
+                g.drop_named_durable(&named("g")).is_err(),
+                "graph removal refused"
+            );
+            assert!(
+                g.drop_all_named_durable().is_err(),
+                "batch graph removal refused"
+            );
+            // A NAMED graph is a separate `Graph` with its own WAL — it must refuse too, via the
+            // flag the root shares with it.
+            assert!(
+                g.named[0]
+                    .1
+                    .apply_delta(std::slice::from_ref(&direct), &[])
+                    .is_err(),
+                "a named graph under a poisoned root refuses its own direct write"
+            );
+            // Drop without clearing the journal: the crash window the frame exists for.
+        }
+
+        // The reopen redoes exactly the kept frame; none of the refused writes exists, and the
+        // pre-existing named-graph content is untouched.
+        let reopened = Graph::open(&dir).unwrap();
+        let nt = format!("{:?}", dump_terms(&reopened));
+        assert!(
+            nt.contains("http://ex/s1"),
+            "the kept frame is redone: {}",
+            nt
+        );
+        assert!(
+            !nt.contains("http://ex/s2"),
+            "no refused write became durable: {}",
+            nt
+        );
+        assert!(
+            !nt.contains("http://ex/s3"),
+            "no refused write became durable: {}",
+            nt
+        );
+        assert!(nt.contains("http://ex/base"), "nothing was cleared: {}", nt);
+        assert_eq!(reopened.named.len(), 1, "no graph was created or dropped");
+        assert_eq!(
+            dump_terms(&reopened.named[0].1),
+            base_named(),
+            "the named graph is intact"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) GAP 1, the DURABILITY point: a write that was NOT refused must survive
+    /// the reopen. Pre-fix the second write was acknowledged and then undone by the kept frame's
+    /// redo; post-fix it is refused, so there is no acknowledged-but-lost write either way. The
+    /// assertion is on that invariant, so it fails whichever half regresses.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_acknowledged_write_after_a_poisoned_commit_survives_the_reopen() {
+        let dir = txn_tmp_dir("poisoned-ack");
+        std::fs::remove_dir_all(&dir).ok();
+        // The named graph starts holding one triple; the committed-but-unmaterialised body
+        // RETRACTS it, so a later direct re-insert is exactly what the redo would undo.
+        Graph::load_dataset(
+            "<http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let iri = |s: &str| Term::NamedNode(oxrdf::NamedNode::new_unchecked(s));
+        let retracted = [iri("http://ex/n0"), iri("http://ex/p"), iri("http://ex/o0")];
+        let wrote = {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn_ops(&[TxnOp::Delete {
+                slot: Some(named("g")),
+                triple: retracted.clone(),
+            }])
+            .unwrap();
+            g.poison_txn();
+            // The write the server would acknowledge next: put the triple back.
+            g.named[0]
+                .1
+                .apply_delta(std::slice::from_ref(&retracted), &[])
+                .is_ok()
+        };
+        let reopened = Graph::open(&dir).unwrap();
+        let present = dump_terms(&reopened.named[0].1) == base_named();
+        assert_eq!(
+            present, wrote,
+            "a durable write is either refused (and absent after the reopen) or accepted (and \
+             still present after it) — never acknowledged and then undone by the kept frame's redo"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) GAP 2 — a CREATE of a new EMPTY graph resolves to no triple record, so
+    /// only an explicit existence record carries it. Commit the frame, crash before
+    /// materialising, and the reopen must still produce the acknowledged graph.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_committed_graph_creation_is_redone_on_reopen() {
+        let dir = txn_tmp_dir("create-redo");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            assert!(g.named.is_empty(), "no named graph to start with");
+            g.commit_txn_ops(&[TxnOp::Create(named("fresh"))]).unwrap();
+            // Crash right after the commit fsync: no materialisation, no clear_txn.
+        }
+        let reopened = Graph::open(&dir).unwrap();
+        assert_eq!(
+            reopened
+                .named
+                .iter()
+                .map(|(n, _)| n.clone())
+                .collect::<Vec<_>>(),
+            vec![named("fresh")],
+            "the acknowledged empty graph exists after the crash"
+        );
+        assert!(reopened.named[0]
+            .1
+            .store
+            .scan(&[None, None, None])
+            .rows
+            .is_empty());
+        // The journal was truncated once its frame was materialised by the redo.
+        assert_eq!(std::fs::read(TxnJournal::path(&dir)).unwrap().len(), 0);
+        // And the redo is idempotent: a second reopen neither duplicates nor drops the slot.
+        drop(reopened);
+        assert_eq!(Graph::open(&dir).unwrap().named.len(), 1, "idempotent redo");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) GAP 2 — the DROP twin: dropping an EMPTY named graph also resolves to no
+    /// triple record, so the reopen must learn of it from an existence record. Also covers the
+    /// COMMIT ORDER requirement: a create and a drop of the SAME name in one frame must replay in
+    /// frame order, so the last one wins.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_committed_graph_drop_is_redone_on_reopen_in_commit_order() {
+        let dir = txn_tmp_dir("drop-redo");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // Give the store an EMPTY named graph (no triples at all), durably.
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.ensure_named(&named("empty")).unwrap();
+        }
+        assert_eq!(
+            Graph::open(&dir).unwrap().named.len(),
+            1,
+            "the empty graph is on disk"
+        );
+
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn_ops(&[TxnOp::Drop(named("empty"))]).unwrap();
+            // Crash before materialisation.
+        }
+        assert!(
+            Graph::open(&dir).unwrap().named.is_empty(),
+            "the acknowledged drop of an empty graph survives the crash"
+        );
+
+        // COMMIT ORDER: drop-then-create and create-then-drop of one name differ only in order.
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn_ops(&[TxnOp::Drop(named("z")), TxnOp::Create(named("z"))])
+                .unwrap();
+        }
+        assert_eq!(
+            Graph::open(&dir).unwrap().named.len(),
+            1,
+            "drop-then-create leaves the graph existing"
+        );
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.commit_txn_ops(&[TxnOp::Create(named("z")), TxnOp::Drop(named("z"))])
+                .unwrap();
+        }
+        assert!(
+            Graph::open(&dir).unwrap().named.is_empty(),
+            "create-then-drop leaves it absent — the frame replays in commit order"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) GAP 2 — a `WTX1` journal written by a build predating the
+    /// graph-existence records is still replayed (its data records apply), rather than being
+    /// discarded as a torn tail.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_previous_version_journal_frame_still_replays() {
+        let dir = txn_tmp_dir("v1-frame");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        {
+            let mut j = TxnJournal::open(&dir).unwrap();
+            j.append(&[TxnOp::Insert {
+                slot: None,
+                triple: [term_iri(7, "s"), term_iri(7, "p"), term_iri(7, "o")],
+            }])
+            .unwrap();
+        }
+        // Rewrite the frame's magic as the PREVIOUS version's and re-checksum it, exactly as an
+        // older build would have written the same data records.
+        let path = TxnJournal::path(&dir);
+        let mut bytes = std::fs::read(&path).unwrap();
+        let body_end = bytes.len() - 12;
+        bytes[0..4].copy_from_slice(&TxnJournal::TXN_MAGIC_V1.to_le_bytes());
+        let crc = Wal::checksum(&bytes[..body_end]);
+        bytes[body_end..body_end + 8].copy_from_slice(&crc.to_le_bytes());
+        std::fs::write(&path, &bytes).unwrap();
+
+        let reopened = Graph::open(&dir).unwrap();
+        let nt = format!("{:?}", dump_terms(&reopened));
+        assert!(
+            nt.contains("http://ex/s7"),
+            "a WTX1 frame still replays: {}",
+            nt
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) GAP 3 — a directory has ONE writer. A second `open` of the same
+    /// directory, in this process or any other, fails instead of interleaving its WAL and
+    /// journal appends with the first writer's; the lock goes away with the graph.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_second_open_of_the_same_directory_is_refused() {
+        let dir = txn_tmp_dir("writer-lock");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let first = Graph::open(&dir).unwrap();
+        let second = Graph::open(&dir);
+        // The unix advisory lock is per OPEN FILE DESCRIPTION, so the in-process case conflicts
+        // exactly as a second process does.
+        #[cfg(unix)]
+        {
+            let Err(err) = second else {
+                panic!("a second writer open must fail")
+            };
+            assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock);
+            assert!(
+                err.to_string().contains("already open for writing"),
+                "the error names the conflict: {}",
+                err
+            );
+        }
+        #[cfg(not(unix))]
+        let _ = second.map(drop);
+        // Releasing the first writer releases the lock.
+        drop(first);
+        let third = Graph::open(&dir).expect("the directory is open-able again once released");
+        // A compaction swaps the directory and must leave the writer still holding the lock.
+        let mut third = third;
+        third
+            .apply_delta(
+                &[[term_iri(4, "s"), term_iri(4, "p"), term_iri(4, "o")]],
+                &[],
+            )
+            .unwrap();
+        third.compact().unwrap();
+        #[cfg(unix)]
+        assert!(
+            Graph::open(&dir).is_err(),
+            "the compacted graph still holds the lock"
+        );
+        drop(third);
+        assert!(Graph::open(&dir).is_ok(), "and releases it on drop");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     /// (sq-ycle) TORN-TAIL guarantee: a multi-slot redo frame (a default-graph record
     /// PLUS a named-graph record) whose commit trailer + part of the last record were severed by a
     /// crash must apply NOTHING on `open`, and the torn `txn.log` must be truncated to empty.
@@ -10613,9 +11369,15 @@ mod tests {
         let base = dump_terms(&Graph::open(&dir).unwrap());
 
         // Write ONE valid frame with a default-slot insert AND a named-slot insert.
-        let records: Vec<(bool, Option<Term>, [Term; 3])> = vec![
-            (true, None, [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")]),
-            (true, Some(named("g")), [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")]),
+        let records: Vec<TxnOp> = vec![
+            TxnOp::Insert {
+                slot: None,
+                triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+            },
+            TxnOp::Insert {
+                slot: Some(named("g")),
+                triple: [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")],
+            },
         ];
         {
             let mut j = TxnJournal::open(&dir).unwrap();
@@ -10820,8 +11582,10 @@ mod tests {
 
         // A valid frame, then strip JUST the commit trailer (the last 12 bytes) — header + body
         // present, no commit marker → an uncommitted frame.
-        let records: Vec<(bool, Option<Term>, [Term; 3])> =
-            vec![(true, None, [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")])];
+        let records: Vec<TxnOp> = vec![TxnOp::Insert {
+            slot: None,
+            triple: [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")],
+        }];
         {
             let mut j = TxnJournal::open(&dir).unwrap();
             j.append(&records).unwrap();
