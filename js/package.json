@@ -25,12 +25,14 @@
       "require": "./wasm-node/sparq_wasm.js",
       "default": "./wasm-node/sparq_wasm.js"
     },
-    "./wasm/*": "./wasm/*"
+    "./wasm/*": "./wasm/*",
+    "./wasm-dl/*": "./wasm-dl/*"
   },
   "files": [
     "dist",
     "wasm",
     "wasm-node",
+    "wasm-dl",
     "README.md",
     "AGENTS.md",
     "skills"
@@ -49,11 +51,13 @@
     "build:wasm:lean": "wasm-pack build ../crates/sparq-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false && npm run _copy:wasm",
     "_copy:wasm:node": "node scripts/copy-wasm-node.mjs",
     "build:wasm:node": "wasm-pack build ../crates/sparq-wasm --target nodejs --out-dir pkg-node --profile release-wasm --features shacl,jsonld,serialize-rdf,scs,canon,explain-json,native-ttl,bytes-ingest,forms --config profile.release-wasm.strip=false && npm run _copy:wasm:node",
+    "_copy:wasm:dl": "node scripts/copy-wasm-dl.mjs",
+    "build:wasm:dl": "wasm-pack build ../crates/sparq-dl-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false && npm run _copy:wasm:dl",
     "build:reason-wasm": "wasm-pack build ../crates/sparq-reason-wasm --target web --profile release-wasm --features explain --config profile.release-wasm.strip=false",
     "build:rsp-wasm": "wasm-pack build ../crates/sparq-rsp-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false",
     "build:text-wasm": "wasm-pack build ../crates/sparq-text-wasm --target web --profile release-wasm --config profile.release-wasm.strip=false",
     "build:ts": "tsc",
-    "build": "npm run build:wasm && npm run build:wasm:node && npm run build:ts",
+    "build": "npm run build:wasm && npm run build:wasm:node && npm run build:wasm:dl && npm run build:ts",
     "typecheck": "tsc --noEmit",
     "typecheck:conformance": "tsc --noEmit -p tsconfig.conformance.json",
     "pretest": "node guardrails/check-test-deps.mjs",

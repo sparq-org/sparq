@@ -28,6 +28,9 @@
 //      the tarball, and `wasm-node/package.json` re-scopes that directory to
 //      CommonJS (without it the `"type": "module"` at the package root would make
 //      Node parse the CJS glue as ESM and `require()` would throw).
+//   6. The lazily-loaded OWL 2 DL bundle (#7031) is shipped: `wasm-dl` is in `files`,
+//      the `./wasm-dl/*` export is declared, and the glue + wasm bytes that
+//      `dist/owl-dl.js` imports on the first `checkOwlDl` call are in the tarball.
 //
 // USAGE
 //   node guardrails/check-package.mjs           # check the packable tree
@@ -71,7 +74,7 @@ if (!scripts.prepare) {
 
 // (2) publish allowlist names the built outputs.
 const files = pkg.files ?? [];
-for (const required of ['dist', 'wasm', 'wasm-node']) {
+for (const required of ['dist', 'wasm', 'wasm-node', 'wasm-dl']) {
   if (!files.includes(required)) {
     fail(`package.json \`files\` allowlist is missing "${required}" — it would be omitted from the published/packed tarball`);
   }
@@ -88,6 +91,11 @@ if (!wasmNodeExport) {
   );
 } else if (typeof wasmNodeExport.require !== 'string') {
   fail('the "./wasm-node" export has no `require` condition, so `require()` of it fails to resolve');
+}
+
+// (6a) the DL bundle's raw glue stays reachable for consumers that load it themselves.
+if (pkg.exports?.['./wasm-dl/*'] !== './wasm-dl/*') {
+  fail('package.json `exports` has no "./wasm-dl/*" subpath for the OWL 2 DL bundle');
 }
 
 // (3) the tree `npm pack` would ship actually contains the entrypoints + wasm.
@@ -133,6 +141,13 @@ if (packed) {
   if (!has((p) => /^wasm-node\/.*\.js$/.test(p))) {
     fail('packed tarball is missing the CommonJS wasm glue (wasm-node/*.js)');
   }
+  // (6b) the OWL 2 DL bundle `dist/owl-dl.js` loads lazily: without these files every
+  //      `checkOwlDl` call would reject with a module-not-found error.
+  for (const f of ['wasm-dl/sparq_dl_wasm.js', 'wasm-dl/sparq_dl_wasm_bg.wasm']) {
+    if (!entries.includes(f)) {
+      fail(`packed tarball is missing ${f} — checkOwlDl would have no reasoner to load`);
+    }
+  }
   if (!entries.includes('wasm-node/package.json')) {
     fail(
       'packed tarball is missing wasm-node/package.json — without its `{"type": "commonjs"}` the ' +
@@ -147,4 +162,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log(`check-package: ${EXPECTED_NAME} is publishable + git-pin-installable (prepare + files + packed dist/wasm verified).`);
+console.log(`check-package: ${EXPECTED_NAME} is publishable + git-pin-installable (prepare + files + packed dist/wasm/wasm-dl verified).`);

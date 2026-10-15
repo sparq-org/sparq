@@ -31,11 +31,13 @@ const wasmArtifact = resolve(pkgDir, 'wasm', 'sparq_wasm_bg.wasm');
 // built": skipping there would hand a git-pin consumer a package whose
 // `./wasm-node` export resolves to nothing.
 const wasmNodeArtifact = resolve(pkgDir, 'wasm-node', 'sparq_wasm_bg.wasm');
+// #7031 — the lazily-loaded OWL 2 DL bundle is part of a complete build as well.
+const wasmDlArtifact = resolve(pkgDir, 'wasm-dl', 'sparq_dl_wasm_bg.wasm');
 const distEntry = resolve(pkgDir, 'dist', 'index.js');
 const sourceCrate = resolve(pkgDir, '..', 'crates', 'sparq-wasm', 'Cargo.toml');
 
 // Already built (or shipping a built tree) — nothing to do.
-if (existsSync(wasmArtifact) && existsSync(wasmNodeArtifact) && existsSync(distEntry)) {
+if (existsSync(wasmArtifact) && existsSync(wasmNodeArtifact) && existsSync(wasmDlArtifact) && existsSync(distEntry)) {
   process.exit(0);
 }
 
