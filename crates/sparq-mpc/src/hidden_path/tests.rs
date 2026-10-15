@@ -305,6 +305,44 @@ fn oversized_k_is_rejected() {
     assert!(matches!(err, MpcError::Protocol(m) if m.contains("chain")));
 }
 
+/// Hop counts are capped before evaluation: a `k` past [`MAX_HOP_COUNT`] — up to
+/// `usize::MAX`, where the per-hop counting loop and the `k`-wide odometer would
+/// otherwise run — is refused by the hop guard with NO draw made, so the refusal
+/// does not wait on the enumeration being sized. Finishing the test at all is the
+/// no-hang witness; nothing here asserts a timing.
+#[test]
+fn huge_hop_count_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+    let (edges, _i) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    // A single self-loop edge too: with |E| = 1 the projected tuple count stays 1
+    // for ANY k, so MAX_CHAIN_TUPLES never fires and only the hop cap refuses.
+    let (one_edge, _j) = hidden_edges(&[("http://ex/a", "http://ex/a")]);
+    let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+
+    for edge_set in [&edges, &one_edge] {
+        for k in [MAX_HOP_COUNT + 1, 262_144, usize::MAX] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err =
+                eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, edge_set, k, 8)
+                    .expect_err("a hop count past the cap must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
+                "k={}: expected the hop-count refusal, got {:?}",
+                k,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "k={}: refused before any draw", k);
+        }
+    }
+    // The cap itself is still a legal `k` as far as the hop guard goes (|E| = 1
+    // keeps the tuple count at 1, so nothing else refuses it).
+    assert!(eval_exact_k_chain_hidden(&backend, &one_edge, MAX_HOP_COUNT, 8).is_ok());
+}
+
 // =====================================================================
 // Determinism of the disclosed result across shuffle seeds
 // =====================================================================

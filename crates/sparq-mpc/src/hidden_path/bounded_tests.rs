@@ -430,7 +430,11 @@ fn bounded_empty_alternation_is_rejected() {
     assert!(matches!(err, MpcError::Protocol(m) if m.contains("no predicates")));
 }
 
-/// An over-large unroll (huge max) is rejected fail-closed BEFORE any crypto runs.
+/// An over-large unroll is rejected fail-closed BEFORE any crypto runs. An upper
+/// bound past [`MAX_HOP_COUNT`] is refused by the hop guard (which precedes the
+/// tuple accounting, since that accounting's own cost grows with the bound); an
+/// upper bound WITHIN the hop cap whose `Σ_ℓ (a^ℓ·|E|^ℓ)` is still too large is
+/// refused by [`MAX_CHAIN_TUPLES`].
 #[test]
 fn bounded_oversized_unroll_is_rejected() {
     let edges = predicated_edges(&[
@@ -439,9 +443,53 @@ fn bounded_oversized_unroll_is_rejected() {
         (P, "http://ex/c", "http://ex/a"),
     ]);
     let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+
+    // Upper bound past the hop cap → the hop guard.
     let form = HiddenBoundedPath::range(P, 1, 64);
     let err = eval_bounded_path_hidden(&backend, &edges, &form, 1 << 30).unwrap_err();
-    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_CHAIN_TUPLES")));
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
+        "expected the hop-count refusal, got {:?}",
+        err
+    );
+
+    // Upper bound AT the hop cap, so the hop guard passes; Σ_ℓ 3^ℓ over ℓ = 1..=18
+    // is far past MAX_CHAIN_TUPLES → the tuple guard.
+    let form = HiddenBoundedPath::range(P, 1, MAX_HOP_COUNT);
+    let err = eval_bounded_path_hidden(&backend, &edges, &form, 8).unwrap_err();
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_CHAIN_TUPLES")),
+        "expected the tuple-count refusal, got {:?}",
+        err
+    );
+}
+
+/// Hop counts are capped before evaluation on the bounded form too: an upper bound
+/// past [`MAX_HOP_COUNT`] — up to `usize::MAX`, where `check_bounded_params`'
+/// `Σ_ℓ` accumulation is quadratic in the bound — is refused with NO draw made.
+/// Finishing the test at all is the no-hang witness; nothing here asserts a timing.
+#[test]
+fn huge_upper_bound_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+    let edges = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ]);
+    let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+    for max in [MAX_HOP_COUNT + 1, 262_144, usize::MAX] {
+        let form = HiddenBoundedPath::range(P, 1, max);
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 8)
+            .expect_err("an upper bound past the cap must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
+            "max={}: expected the hop-count refusal, got {:?}",
+            max,
+            err
+        );
+        assert_eq!(counted.draws(), 0, "max={}: refused before any draw", max);
+    }
 }
 
 /// A bound `B` below the candidate count fails closed (never truncates a true match).

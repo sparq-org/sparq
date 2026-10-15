@@ -192,6 +192,54 @@ pub enum MatchBit {
     SecretShared(Vec<Share>),
 }
 
+/// Maximum padded output bound `B` the oblivious output stage accepts before
+/// refusing with an [`MpcError::Protocol`] error.
+///
+/// `B` is the number of slots the stage MATERIALISES: each one allocates a tag
+/// sharing and `limb_capacity` payload-limb sharings of `n` [`Share`]s each, costs
+/// a select multiplication per limb plus an open, and enters the oblivious
+/// shuffle's Waksman/Beneš network. `B` is a PUBLIC plan parameter, so the
+/// guard is a closed-form check on a public number — the bound is validated before
+/// any allocation or draw, so an over-cap `B` (including `usize::MAX`) is a
+/// controlled refusal rather than an allocation the stage cannot satisfy.
+///
+/// The value is set to cover every in-tree producer of candidates for this stage:
+/// it matches [`crate::hidden_path::MAX_CHAIN_TUPLES`], the largest candidate count
+/// the hidden path operator can present, and sits well above
+/// [`crate::hidden_distinct::MAX_DISTINCT_ROWS`]. A protocol guard, not a tuning
+/// knob: `B` beyond it is not a workload this stage is built to run.
+pub const MAX_OUTPUT_BOUND: usize = 1 << 18; // 262_144
+
+/// The cap half of the fail-closed bound contract, callable before a candidate set
+/// exists — so a public entry that BUILDS its candidates (and draws while doing so)
+/// can validate its bound first. See [`MAX_OUTPUT_BOUND`].
+pub(crate) fn check_output_bound_cap(bound: usize) -> Result<(), MpcError> {
+    if bound > MAX_OUTPUT_BOUND {
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: padded bound B={} exceeds the MAX_OUTPUT_BOUND cap of {} — \
+             refusing (B slots are materialised, shuffled and opened, so B is bounded before \
+             anything is allocated or drawn)",
+            bound, MAX_OUTPUT_BOUND
+        )));
+    }
+    Ok(())
+}
+
+/// The whole fail-closed bound contract: `B` within [`MAX_OUTPUT_BOUND`] (checked
+/// first, since it is the one that would otherwise reach an allocation) AND `B`
+/// covering every candidate so no match is ever silently truncated.
+fn check_output_bound(bound: usize, candidates: usize) -> Result<(), MpcError> {
+    check_output_bound_cap(bound)?;
+    if bound < candidates {
+        return Err(MpcError::Protocol(format!(
+            "oblivious_set_output: padded bound B={} < candidate count {} — would truncate \
+             candidates and could drop a true match",
+            bound, candidates
+        )));
+    }
+    Ok(())
+}
+
 /// MODELLED communication / round cost of one [`oblivious_set_output`] over `bound`
 /// output slots. Counted, never measured — see the module cost note. No hard-coded
 /// numbers: derived from `bound` and the built shuffle network.
@@ -283,6 +331,10 @@ pub type ObliviousOutput = (Vec<OutputSlot>, ObliviousOutputCost);
 /// result). A `B < candidates.len()` is a [`MpcError::Protocol`] error. (The
 /// caller sizes `B` from the public candidate count `|L|·|R|`, optionally padded;
 /// the true MATCH count stays hidden.)
+///
+/// `B` must also be `<= `[`MAX_OUTPUT_BOUND`]. Both halves are checked **before any
+/// allocation or draw** — the stage materialises `B` slots, so the bound is
+/// validated first and an over-cap `B` is a [`MpcError::Protocol`] error.
 pub fn oblivious_set_output(
     backend: &ShamirBackend,
     candidates: &[Candidate],
@@ -393,19 +445,13 @@ fn oblivious_set_output_decoded_through(
     payload_arity: usize,
     bound: usize,
 ) -> Result<(Vec<DecodedSlot>, ObliviousOutputCost), MpcError> {
-    // Up front, before anything is drawn: a source whose (n, t) disagrees with the
-    // backend would deal sharings that do not compose with the backend's products
-    // and opens.
+    // FIRST, before anything is drawn or allocated: the bound is validated. Every
+    // `Vec::with_capacity(bound)` below and the shuffle network are sized from it,
+    // so the cap check precedes even the source check (see the contract above).
+    check_output_bound(bound, candidates.len())?;
+    // A source whose (n, t) disagrees with the backend would deal sharings that do
+    // not compose with the backend's products and opens.
     require_source_matches(source, backend)?;
-    // Fail closed: the bound must cover every candidate so no match is ever
-    // silently dropped (see the contract above).
-    if bound < candidates.len() {
-        return Err(MpcError::Protocol(format!(
-            "oblivious_set_output: padded bound B={bound} < candidate count {} — \
-             would truncate candidates and could drop a true match",
-            candidates.len()
-        )));
-    }
     // Validate payload arity up front (the recipient relies on a uniform schema).
     for (k, c) in candidates.iter().enumerate() {
         if c.payload.len() != payload_arity {
@@ -1003,7 +1049,8 @@ pub(crate) fn oblivious_set_output_hidden_keys_through(
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
     // Up front, before anything is drawn (the equality chain below draws before
-    // the output stage's own check would run).
+    // the output stage's own checks would run).
+    check_output_bound_cap(bound)?;
     require_source_matches(source, backend)?;
     // All-pairs candidates: each (i, j) becomes one slot whose match bit is the
     // SECRET-SHARED equality of the two private keys — never opened.
@@ -1265,6 +1312,68 @@ mod tests {
         let cands = public_candidates(&[(true, vec![lit("a")]), (true, vec![lit("b")])]);
         let err = oblivious_set_output(&backend, &cands, 1, 1).unwrap_err();
         assert!(matches!(err, MpcError::Protocol(m) if m.contains("truncate")));
+    }
+
+    /// A bound past [`MAX_OUTPUT_BOUND`] — including `usize::MAX`, which would
+    /// otherwise reach the stage's `Vec::with_capacity(bound)` — is a Protocol
+    /// error, not a panic. The bound is validated before allocation.
+    #[test]
+    fn bound_above_cap_is_protocol_error_not_a_panic() {
+        let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+        let cands = public_candidates(&[(true, vec![lit("a")])]);
+        for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                oblivious_set_output(&backend, &cands, 1, bound)
+            }));
+            let err = outcome
+                .unwrap_or_else(|_| panic!("B={} panicked instead of returning Err", bound))
+                .expect_err("an over-cap bound must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "B={}: expected the cap refusal, got {:?}",
+                bound,
+                err
+            );
+        }
+        // The cap itself is still accepted as a parameter — it is a cap, not an
+        // off-by-one. Checked on the validator so the test costs no `B`-slot run.
+        assert!(check_output_bound(MAX_OUTPUT_BOUND, 1).is_ok());
+    }
+
+    /// The over-cap bound is refused before ANYTHING is drawn — on the dealer
+    /// source and on PRSS alike, so the refusal does not depend on which source is
+    /// driving the stage nor on that source's own refusals.
+    #[test]
+    fn bound_above_cap_is_refused_before_any_draw() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+        let cands = public_candidates(&[(true, vec![lit("a")])]);
+
+        let mut dealer = backend.dealer();
+        let mut prss = crate::prss::PrssRandomness::with_simulated_setup(3).unwrap();
+        let mut sources: Vec<(&str, &mut dyn DistributedRandomness)> =
+            vec![("dealer", &mut dealer), ("prss", &mut prss)];
+        for (name, inner) in sources.iter_mut() {
+            for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+                let mut counted = DrawCountingSource::new(*inner);
+                let err = oblivious_set_output_through(&mut counted, &backend, &cands, 1, bound)
+                    .expect_err("an over-cap bound must be refused");
+                assert!(
+                    matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                    "{} B={}: {:?}",
+                    name,
+                    bound,
+                    err
+                );
+                assert_eq!(
+                    counted.draws(),
+                    0,
+                    "{} B={}: the bound must be validated before any draw",
+                    name,
+                    bound
+                );
+            }
+        }
     }
 
     /// Wrong payload arity is rejected (uniform schema for the recipient).

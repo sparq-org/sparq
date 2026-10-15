@@ -830,6 +830,10 @@ impl HiddenValueJoin {
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
+        // The bound is validated before any draw: the candidates this entry builds
+        // below cost a draw each, and the output stage sizes its allocations and its
+        // shuffle network from `bound`.
+        oblivious_join::check_output_bound_cap(bound)?;
         require_source_matches(source, &self.backend)?;
         let n = self.backend.parties();
 
@@ -990,6 +994,8 @@ impl HiddenValueJoin {
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
+        // Validated before any draw, as in `batched_join_through`.
+        oblivious_join::check_output_bound_cap(bound)?;
         require_source_matches(source, &self.backend)?;
 
         // Output schema: left payload vars then right payload vars (key NOT projected).
@@ -1074,6 +1080,7 @@ impl HiddenValueJoin {
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<(Vec<Candidate>, Vec<(bool, Vec<Option<Term>>)>), MpcError> {
+        oblivious_join::check_output_bound_cap(bound)?;
         require_source_matches(source, &self.backend)?;
         let payload_arity = left.payload_vars.len() + right.payload_vars.len();
         let candidates = self.fully_oblivious_candidates(source, left, right)?;

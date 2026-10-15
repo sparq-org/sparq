@@ -358,7 +358,7 @@ pub use bounded_path::{
 pub use hidden_path::{
     eval_bounded_path_hidden, eval_bounded_path_hidden_slots, eval_exact_k_chain_hidden,
     eval_exact_k_chain_hidden_slots, HiddenBoundedPath, HiddenEdge, HiddenEdges, HiddenNode,
-    PredicatedEdge, PredicatedEdges, MAX_CHAIN_TUPLES,
+    PredicatedEdge, PredicatedEdges, MAX_CHAIN_TUPLES, MAX_HOP_COUNT,
 };
 // sq-py8h.4: the hidden-key endpoint DISTINCT surface — collapse
 // duplicate SECRET endpoint pairs (oblivious sort by a never-opened secure
@@ -434,7 +434,7 @@ pub use federated_binding::{
 // sq-jnkm: the oblivious set-returning output path surface.
 pub use oblivious_join::{
     oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys, Candidate,
-    MatchBit, ObliviousOutput, ObliviousOutputCost, OutputSlot,
+    MatchBit, ObliviousOutput, ObliviousOutputCost, OutputSlot, MAX_OUTPUT_BOUND,
 };
 pub use rng::{MpcRng, SecureRng};
 // sq-yyro: the dealer-less correlated-randomness seam surface.

@@ -306,6 +306,9 @@ fn check_params(
             MAX_DISTINCT_ROWS
         )));
     }
+    // The output bound is validated before the sort-and-scan stage draws: the
+    // output stage materialises `B` slots and sizes its shuffle network from them.
+    crate::oblivious_join::check_output_bound_cap(bound)?;
     if bound < pairs.len() {
         return Err(MpcError::Protocol(format!(
             "hidden-key DISTINCT: padded bound B={bound} < row count {} — would truncate \

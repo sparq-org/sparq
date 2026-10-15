@@ -64,6 +64,30 @@ fn statically_large_unroll_is_rejected() {
     }
 }
 
+// Hop counts are capped before the projection: an upper bound past MAX_HOP_COUNT is
+// refused with a controlled Protocol error rather than running `project_bounded`,
+// whose own loop count grows with the bound. Finishing the test is the no-hang
+// witness; nothing here asserts a timing.
+#[test]
+fn upper_bound_past_the_hop_cap_is_rejected() {
+    for max in [MAX_HOP_COUNT + 1, 262_144, usize::MAX] {
+        let req = HiddenPathRequest::range("p", 1, max);
+        let err = plan_hidden_bounded_path(&req, 4).unwrap_err();
+        match err {
+            MpcError::Protocol(m) => assert!(
+                m.contains("MAX_HOP_COUNT"),
+                "max={}: rejection must cite the hop cap: {}",
+                max,
+                m
+            ),
+            other => panic!("max={}: expected Protocol refusal, got {:?}", max, other),
+        }
+    }
+    // At the cap the hop guard passes; |E| = 1 keeps the projection inside the
+    // tuple cap, so the plan is admitted.
+    assert!(plan_hidden_bounded_path(&HiddenPathRequest::range("p", 1, MAX_HOP_COUNT), 1).is_ok());
+}
+
 #[test]
 fn alternation_arity_blowup_is_rejected() {
     // A 6-way alternation at k = 8 over |E| = 6: Σ_ℓ (6·6)^ℓ overshoots the cap.

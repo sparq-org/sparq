@@ -147,6 +147,34 @@ fn chain_out_vars() -> Vec<Variable> {
 /// guard, not a tuning knob: a path that exceeds it is abusive for this regime.
 pub const MAX_CHAIN_TUPLES: u64 = 1 << 18; // 262_144
 
+/// Maximum hop count the operator will consider — the exactly-`k` chain's `k`, and
+/// the bounded form's upper bound (`HiddenBoundedPath::max`). A larger one is an
+/// [`MpcError::Protocol`] refusal raised BEFORE any enumeration, counting or draw.
+///
+/// [`MAX_CHAIN_TUPLES`] alone does not bound the hop count. Two loops grow with the
+/// hop count and run *while computing* the tuple count that cap is compared
+/// against: `projected_tuple_count` multiplies once per hop, and
+/// `check_bounded_params` accumulates `Σ_ℓ (a^ℓ·|E|^ℓ)` with an inner loop per
+/// length — quadratic in the upper bound. So hop counts are capped before
+/// evaluation, on the hop count itself, which is a PUBLIC plan parameter.
+///
+/// The value is `log2(`[`MAX_CHAIN_TUPLES`]`)`, which makes this guard agree with
+/// the tuple guard instead of adding an independent number: for `|E| >= 2` — the
+/// only case where a `k`-hop chain has more than one edge-tuple — `|E|^k >= 2^k`,
+/// so [`MAX_CHAIN_TUPLES`] already refuses every `k` above this. What the hop cap
+/// adds is the `|E| <= 1` corner, where the tuple count stays `1` (or `0`) for any
+/// `k` while the per-chain work — `k − 1` secure equalities, and a `k`-wide
+/// odometer allocation — still grows with `k`.
+///
+/// Hops beyond the number of distinct nodes are redundant for path EXISTENCE, which
+/// would permit capping the effective bound at the node count instead of refusing.
+/// This operator refuses instead: truncating the bound would silently change the
+/// evaluated form (the bounded union runs over `min..=max`, so a `min` above the
+/// node count is not a no-op), and a fail-closed refusal on a public parameter is
+/// the discipline the module's other guards follow. A protocol guard, not a tuning
+/// knob.
+pub const MAX_HOP_COUNT: usize = MAX_CHAIN_TUPLES.ilog2() as usize; // 18
+
 /// One node of the secret graph: its PRIVATE join key (an `F_p` element — the
 /// holder's injective encoding of the node, exactly the contract
 /// [`crate::join::HiddenValueJoin`] documents) plus its DISCLOSED term (used ONLY
@@ -342,11 +370,22 @@ fn build_candidates(
     }
 }
 
-/// Fail-closed parameter checks shared by both entry points. `k >= 1`,
-/// `n >= 2t+1` (the AND/OR chain's degree reduction needs it), and the projected
-/// `|E|^k` tuple count must be within [`MAX_CHAIN_TUPLES`] — all computed from
-/// PUBLIC parameters, before any crypto runs.
+/// Fail-closed parameter checks shared by both entry points. `k >= 1`, `k` within
+/// [`MAX_HOP_COUNT`], `n >= 2t+1` (the AND/OR chain's degree reduction needs it),
+/// and the projected `|E|^k` tuple count within [`MAX_CHAIN_TUPLES`] — all computed
+/// from PUBLIC parameters, before any crypto runs.
+///
+/// The hop cap is checked BEFORE the tuple count, because `projected_tuple_count`
+/// itself loops once per hop: hop counts are capped before evaluation.
 fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Result<(), MpcError> {
+    if k > MAX_HOP_COUNT {
+        return Err(MpcError::Protocol(format!(
+            "hidden exactly-k chain with k={} exceeds the MAX_HOP_COUNT cap of {} — refusing \
+             (each hop adds a secure equality to every enumerated chain, so the hop count is \
+             bounded before the enumeration is sized)",
+            k, MAX_HOP_COUNT
+        )));
+    }
     if k == 0 {
         return Err(MpcError::Protocol(
             "hidden exactly-k chain: k must be >= 1 (the reflexive length-0 arm is the {0,k} \
@@ -437,6 +476,10 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
 ) -> Result<ObliviousOutput, MpcError> {
     require_source_matches(source, backend)?;
     check_params(backend, edges, k)?;
+    // The output bound is validated before any draw: `build_candidates` below draws
+    // per hop equality, and the output stage sizes `B` slots from `bound`. It sits
+    // after `check_params` so the operator's own parameter refusals keep precedence.
+    crate::oblivious_join::check_output_bound_cap(bound)?;
     let candidates = build_candidates(backend, source, edges, k)?;
     // Payload arity is 2 (the endpoint pair). Route through the slot-returning path.
     oblivious_set_output_through(source, backend, &candidates, 2, bound)
@@ -459,6 +502,7 @@ pub(crate) fn exact_k_chain_candidates_and_opened_rows(
 ) -> Result<(Vec<Candidate>, Vec<(bool, Vec<Option<Term>>)>), MpcError> {
     require_source_matches(source, backend)?;
     check_params(backend, edges, k)?;
+    crate::oblivious_join::check_output_bound_cap(bound)?;
     let candidates = build_candidates(backend, source, edges, k)?;
     let slots =
         crate::oblivious_join::opened_slot_rows_through(source, backend, &candidates, 2, bound)?;
@@ -664,6 +708,16 @@ fn check_bounded_params(
         return Err(MpcError::Protocol(format!(
             "hidden bounded path {{{},{}}} has min > max",
             form.min, form.max
+        )));
+    }
+    // Hop counts are capped before evaluation — and before the Σ_ℓ accumulation
+    // below, whose own cost is quadratic in `form.max`.
+    if form.max > MAX_HOP_COUNT {
+        return Err(MpcError::Protocol(format!(
+            "hidden bounded path {{{},{}}} exceeds the MAX_HOP_COUNT cap of {} — refusing (the \
+             union runs one fixed-length chain family per length up to the upper bound, so the \
+             hop count is bounded before the enumeration is sized)",
+            form.min, form.max, MAX_HOP_COUNT
         )));
     }
     let t = backend.threshold();
@@ -880,6 +934,8 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
 ) -> Result<ObliviousOutput, MpcError> {
     require_source_matches(source, backend)?;
     check_bounded_params(backend, edges, form)?;
+    // Validated before any draw, as in the exactly-k entry.
+    crate::oblivious_join::check_output_bound_cap(bound)?;
     let candidates = build_bounded_candidates(backend, source, edges, form)?;
     oblivious_set_output_through(source, backend, &candidates, 2, bound)
 }
