@@ -536,8 +536,15 @@ async fn unread_precondition<S: Store + 'static>(
         req.method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     );
-    // A patch reads what it patches, whatever its preconditions (see [`patch`]).
-    if !writes || (req.method != Method::PATCH && !compares_state(&req.headers, dated)) {
+    // A patch reads what it patches, whatever its preconditions (see [`patch`]). So, in effect,
+    // does a replace, of data or of a whole linkset (what it keeps decides whether it is admitted;
+    // see [`update`] and [`linkset`]), and a container's delete (what it holds decides how it
+    // ends; see [`delete`]): each needs Read, decided here, before any lock is waited for or a
+    // change set aside answers.
+    let reads = req.method == Method::PATCH
+        || req.method == Method::PUT
+        || (req.method == Method::DELETE && uri.ends_with('/'));
+    if !writes || (!reads && !compares_state(&req.headers, dated)) {
         return None;
     }
     if req.method == Method::POST
@@ -2481,10 +2488,10 @@ async fn update<S: Store + 'static>(
     }
     // A replace keeps what is stored beside the content (the declared types, the links, the
     // content type when none is sent), and that decides whether it is admitted. So a writer that
-    // may not read the resource is refused before anything stored answers, and one that may is
-    // told why a write is refused.
-    if !state.allowed(Action::Read, uri, agent).await {
-        return state.deny(agent);
+    // may not read the resource is refused before anything stored answers (and before its lock;
+    // see [`unread_precondition`]), and one that may is told why a write is refused.
+    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
+        return r;
     }
     let meta = match current(state, uri).await {
         Ok(m) => m,
@@ -3607,15 +3614,6 @@ async fn delete<S: Store + 'static>(
     }
     if uri == storage {
         return method_not_allowed(&allow_for(uri, true));
-    }
-    // How a container's delete ends follows from what it holds (whether it is empty, whether a
-    // member is busy or may be deleted by the requester), so it also needs Read on the
-    // container, decided before any member is looked at. Both are decided again under the lock.
-    if uri.ends_with('/')
-        && !(state.allowed(Action::Delete, uri, agent).await
-            && state.allowed(Action::Read, uri, agent).await)
-    {
-        return state.deny(agent);
     }
     let parent = parent_of(uri, &storage);
     // Every resource the delete may remove is locked before anything is decided, so the
@@ -6759,7 +6757,12 @@ mod tests {
         assert_eq!(status, StatusCode::FORBIDDEN);
         // A replace needs Read in any case; a reader gets the new tag.
         for (who, ok) in [(&dave, false), (&bob, true)] {
-            let r = handle(&st, &request("PUT", &p, &[("content-type", JSON)], "{}"), who).await;
+            let r = handle(
+                &st,
+                &request("PUT", &p, &[("content-type", JSON)], "{}"),
+                who,
+            )
+            .await;
             assert_eq!(r.status().is_success(), ok, "PUT {who:?}");
             assert_eq!(r.headers().contains_key("etag"), ok, "PUT {who:?}");
         }
@@ -6777,7 +6780,13 @@ mod tests {
             }
         }
         // `*` stays open to a writer that may not read, where the method is.
-        let status = send(dave.clone(), "DELETE", p.clone(), vec![("if-match", "*".into())]).await;
+        let status = send(
+            dave.clone(),
+            "DELETE",
+            p.clone(),
+            vec![("if-match", "*".into())],
+        )
+        .await;
         assert!(status.is_success(), "DELETE {status}");
         // A `Slug` names the member only for a writer that may list the container: the name
         // would otherwise say whether one by that name is there.
@@ -6993,8 +7002,8 @@ mod tests {
                 &bob,
             )
             .await;
-            // A patch, which needs Read, is refused before its target is looked for.
-            let expected = if method == "PATCH" {
+            // A replace or patch, which needs Read, is refused before its target is looked for.
+            let expected = if method == "PATCH" || method == "PUT" {
                 StatusCode::FORBIDDEN
             } else {
                 StatusCode::NOT_FOUND
@@ -12877,7 +12886,10 @@ mod tests {
         assert_eq!(r.status(), StatusCode::CREATED);
         // A writer that may not read the container gets a name of the server's, not its slug.
         let e = r.headers()[header::LOCATION].to_str().unwrap().to_string();
-        let e_path = e.strip_prefix(st.cfg.storage().trim_end_matches('/')).unwrap().to_string();
+        let e_path = e
+            .strip_prefix(st.cfg.storage().trim_end_matches('/'))
+            .unwrap()
+            .to_string();
         st.store
             .create_in_container(
                 &e,

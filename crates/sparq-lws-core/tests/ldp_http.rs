@@ -1571,7 +1571,10 @@ async fn an_append_without_read_follows_the_request_alone() {
         .collect();
     for (name, body) in [
         ("good", "<#a> <https://e.example/p> 0 .".to_string()),
-        ("broken", "<#a> <https://e.example/p> \"unterminated".to_string()),
+        (
+            "broken",
+            "<#a> <https://e.example/p> \"unterminated".to_string(),
+        ),
         ("large", large),
     ] {
         let iri = format!("https://pod.example/alice/{name}");
@@ -1585,7 +1588,11 @@ async fn an_append_without_read_follows_the_request_alone() {
             webid = common::WEBID
         );
         store
-            .write(&format!("{iri}.acl"), axum::body::Bytes::from(acl), "text/turtle")
+            .write(
+                &format!("{iri}.acl"),
+                axum::body::Bytes::from(acl),
+                "text/turtle",
+            )
             .await
             .expect("seed its acl");
     }
@@ -1624,8 +1631,22 @@ _:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> 
 /// gets the denial for an empty one and a full one alike.
 #[tokio::test]
 async fn a_container_delete_without_read_is_denied_whatever_it_holds() {
+    // Write and Control without Read: the DELETE is refused alike whether the container is empty
+    // or not. With Read added, the same requests answer by what the container holds.
     let h = Harness::new().await;
-    for (c, members) in [("/alice/wo-empty/", 0), ("/alice/wo-full/", 2)] {
+    let acl = |c: &str, modes: &str| {
+        format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#w> a acl:Authorization; acl:agent <{webid}>;
+     acl:accessTo <https://pod.example{c}>; acl:default <https://pod.example{c}>;
+     acl:mode {modes}."#,
+            webid = common::WEBID
+        )
+    };
+    for (c, members, with_read) in [
+        ("/alice/wo-empty/", 0, StatusCode::NO_CONTENT),
+        ("/alice/wo-full/", 2, StatusCode::CONFLICT),
+    ] {
         h.make_container(c).await;
         for i in 0..members {
             let r = h
@@ -1638,24 +1659,29 @@ async fn a_container_delete_without_read_is_denied_whatever_it_holds() {
                 .await;
             assert_eq!(r.status(), StatusCode::CREATED);
         }
-        let acl = format!(
-            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
-<#w> a acl:Authorization; acl:agent <{webid}>;
-     acl:accessTo <https://pod.example{c}>; acl:default <https://pod.example{c}>;
-     acl:mode acl:Write."#,
-            webid = common::WEBID
-        );
         let r = h
             .request(
                 "PUT",
                 &format!("{c}.acl"),
                 Some("text/turtle"),
-                Body::from(acl),
+                Body::from(acl(c, "acl:Write, acl:Control")),
             )
             .await;
         assert_eq!(r.status(), StatusCode::CREATED);
         let r = h.request("DELETE", c, None, Body::empty()).await;
         assert_eq!(r.status(), StatusCode::FORBIDDEN, "{c}");
+
+        let r = h
+            .request(
+                "PUT",
+                &format!("{c}.acl"),
+                Some("text/turtle"),
+                Body::from(acl(c, "acl:Read, acl:Write, acl:Control")),
+            )
+            .await;
+        assert!(r.status().is_success(), "{c}: {}", r.status());
+        let r = h.request("DELETE", c, None, Body::empty()).await;
+        assert_eq!(r.status(), with_read, "{c}");
     }
 }
 

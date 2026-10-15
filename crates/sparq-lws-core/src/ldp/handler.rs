@@ -49,8 +49,8 @@ use crate::ldp::content::{
     serialize_triples, serialize_triples_negotiated, validate_rdf, RdfFormat,
 };
 use crate::ldp::patch::{
-    appended_ntriples, apply_patch, classify_patch_media_type, parse_n3_patch,
-    parse_sparql_update, PatchKind,
+    appended_ntriples, apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update,
+    PatchKind,
 };
 use crate::ldp::range::{self, RangeOutcome};
 use crate::ldp::target::{parse_target, LdpTarget};
@@ -1759,15 +1759,16 @@ pub async fn patch_handler<S: Store>(
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
 
-    // A writer that may not read the target appends to it without its content being read: the
-    // inserted statements are appended as text to a Turtle, N-Triples or N-Quads document, so the outcome
-    // follows the request, the requester's permissions and the stored type alone, never what is
-    // stored (whether it parses, how large its graph is). Any other stored type is refused to it.
-    // (Only an unconditional insert-only patch gets here without Read.)
+    // A writer that may not read the target appends to it without its content being parsed: the
+    // inserted statements are appended as text to a Turtle document, so the outcome follows the
+    // request, the requester's permissions and the stored type alone, never what is stored
+    // (whether it parses, what its graph holds). Any other stored type is refused to it. (Only an
+    // unconditional insert-only patch gets here without Read.) The stored bytes are still read
+    // and rewritten whole, so the time this takes follows their size.
     if let (Some(res), false) = (&current, reader) {
         let appendable = matches!(
             classify(Some(&res.meta.content_type)),
-            Ok(RdfFormat::Turtle | RdfFormat::NTriples | RdfFormat::NQuads)
+            Ok(RdfFormat::Turtle)
         );
         let Some(text) = appended_ntriples(&patch).filter(|_| appendable) else {
             return Err(unread(ServerError::Forbidden));

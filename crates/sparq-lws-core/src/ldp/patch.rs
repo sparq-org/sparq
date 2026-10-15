@@ -210,37 +210,43 @@ pub fn parse_n3_patch(body: &[u8], base_iri: &str) -> Result<N3Patch, ServerErro
     })
 }
 
-/// The N-Triples text an unconditional, insert-only `patch` appends to a Turtle, N-Triples or
-/// N-Quads document: one statement a line. Appending it, on a line of its own, to a well-formed
-/// document of those formats gives a well-formed document whose graph is the union, without
-/// parsing what is stored: every blank node the patch inserts (a SPARQL `INSERT DATA` may hold
-/// them) is given a fresh random label, so none can meet a label the document uses. `None` for
-/// any other patch.
+/// The N-Triples text an unconditional, insert-only `patch` appends to a Turtle document: one
+/// statement a line. Appending it, on a line of its own, to a well-formed Turtle document gives a
+/// well-formed document whose graph is the union, without parsing what is stored: every blank
+/// node the patch inserts (a SPARQL `INSERT DATA` may hold them, triple terms included) is given
+/// a fresh random label, so none can meet a label the document uses. `None` for any other patch.
 pub fn appended_ntriples(patch: &N3Patch) -> Option<Result<String, ServerError>> {
     if !patch.conditions.is_empty() || !patch.deletes.is_empty() {
         return None;
     }
     Some(
         instantiate_all(&patch.inserts, &Binding::default()).map(|inserts| {
-            let mut fresh: std::collections::HashMap<oxrdf::BlankNode, oxrdf::BlankNode> =
-                std::collections::HashMap::new();
-            let mut relabel = |b: &oxrdf::BlankNode| fresh.entry(b.clone()).or_default().clone();
+            let mut fresh = HashMap::new();
             let mut text = String::new();
             for t in inserts {
-                let subject = match &t.subject {
-                    NamedOrBlankNode::BlankNode(b) => NamedOrBlankNode::BlankNode(relabel(b)),
-                    other => other.clone(),
-                };
-                let object = match &t.object {
-                    Term::BlankNode(b) => Term::BlankNode(relabel(b)),
-                    other => other.clone(),
-                };
-                text.push_str(&Triple::new(subject, t.predicate, object).to_string());
+                text.push_str(&relabeled(&t, &mut fresh).to_string());
                 text.push_str(" .\n");
             }
             text
         }),
     )
+}
+
+/// `t` with each blank node in it, triple terms included, replaced by the fresh one `fresh` holds
+/// for its label (made on first use).
+fn relabeled(t: &Triple, fresh: &mut HashMap<oxrdf::BlankNode, oxrdf::BlankNode>) -> Triple {
+    let subject = match &t.subject {
+        NamedOrBlankNode::BlankNode(b) => {
+            NamedOrBlankNode::BlankNode(fresh.entry(b.clone()).or_default().clone())
+        }
+        other => other.clone(),
+    };
+    let object = match &t.object {
+        Term::BlankNode(b) => Term::BlankNode(fresh.entry(b.clone()).or_default().clone()),
+        Term::Triple(inner) => Term::Triple(Box::new(relabeled(inner, fresh))),
+        other => other.clone(),
+    };
+    Triple::new(subject, t.predicate.clone(), object)
 }
 
 /// Apply a parsed patch to the target's existing triples, returning the new triple set.
@@ -1534,6 +1540,18 @@ _:p solid:inserts { <#b> <https://e.example/q> \"v\\n\" , 3 . }.",
         let got = parse_to_triples(RdfFormat::Turtle, body.as_bytes(), base).unwrap();
         assert_eq!(got.len(), 2);
         assert_ne!(got[0].subject, got[1].subject);
+        // Inside a triple term too, one label stays one fresh node.
+        let b1 = oxrdf::BlankNode::new("b1").unwrap();
+        let p = oxrdf::NamedNode::new("https://e.example/p").unwrap();
+        let inner = Triple::new(b1.clone(), p.clone(), Term::from(b1.clone()));
+        let outer = Triple::new(b1.clone(), p, Term::Triple(Box::new(inner)));
+        let got = relabeled(&outer, &mut HashMap::new());
+        let Term::Triple(got_inner) = &got.object else {
+            panic!("{got}")
+        };
+        assert!(!got.to_string().contains("_:b1 "), "{got}");
+        assert_eq!(got.subject, got_inner.subject);
+        assert_eq!(Term::from(got.subject.clone()), got_inner.object);
         let deleting = N3Patch {
             deletes: patch.inserts.clone(),
             ..patch
