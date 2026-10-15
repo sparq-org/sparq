@@ -117,7 +117,8 @@ Materialize the authorization view from the access-control documents, then enfor
   control, policy or matcher) a node of a rejected `.acr` is rejected with it. `put_acl*` and
   `update_as*` refuse a write that would add such a triple to a control document the active
   view reads (`.acr` under ACP, `.acl` under WAC, neither reserved nor authority-less),
-  judged in the state the write leaves, naming it (nothing changes; a writer of one `.acr`
+  judged in the state the write leaves (a statement an update adds and removes again is not
+  checked), naming it (nothing changes; a writer of one `.acr`
   can so learn whether another is rejected); other documents are filtered per triple by the
   loader; a stored document holding
   one is rejected whole by the loader, and the resources it governs (ACP: the resource and everything below it; WAC:

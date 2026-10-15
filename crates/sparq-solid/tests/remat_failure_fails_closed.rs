@@ -232,6 +232,18 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
     assert!(err.contains("not admitted"), "{err}");
     assert_eq!(decisions(&store), before, "no decision changed");
     assert_eq!(snapshot(&store.graph), stored, "nothing was stored");
+    // Added and removed again in the same update, it leaves nothing to refuse.
+    store
+        .update_as_acp(
+            &sess(ADMIN),
+            &format!(
+                "INSERT DATA {{ GRAPH <{acr}> {{ {link} }} }} ; \
+                 DELETE DATA {{ GRAPH <{acr}> {{ {link} }} }}"
+            ),
+        )
+        .expect("nothing it leaves uses the rejected document");
+    assert_eq!(decisions(&store), before);
+    assert_eq!(snapshot(&store.graph), stored);
     let doc = format!(
         "<{acr}> <{ACP}accessControl> <{acr}#c> .\n\
          <{acr}#c> <{ACP}apply> <{acr}#p> .\n\
@@ -359,6 +371,72 @@ fn an_acr_may_take_up_a_sound_policy_and_be_repaired() {
             "ntriples",
         )
         .expect("a .acl is not an ACP control document");
+}
+
+/// A rejected access control resource can be replaced, whether it is rejected for what it
+/// states itself or only through what it uses, by content that uses nothing rejected; content
+/// still using a rejected document is refused.
+#[test]
+fn an_acr_rejected_by_itself_or_through_another_can_be_replaced() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let r = "https://pod.ex/r";
+    let acr = format!("{r}.acr");
+    let bad = "https://pod.ex/bad.acr";
+    let sound = format!(
+        "<{acr}> <{ACP}accessControl> <{acr}#c> .\n\
+         <{acr}#c> <{ACP}apply> <{acr}#p> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Read> .\n\
+         <{acr}#p> <{ACP}anyOf> <{acr}#m> .\n\
+         <{acr}#m> <{ACP}agent> <{ADMIN}> .\n"
+    );
+    let quads = |nt: &str| -> String {
+        nt.lines()
+            .map(|l| format!("{} <{acr}> .\n", l.trim_end_matches(" .")))
+            .collect()
+    };
+    let base = format!(
+        "<{r}#it> <https://ex.dev/ns#k> \"v\" <{r}> .\n\
+         <{bad}#p> <{ACP}allow> <{ACL}Read> <{bad}> .\n\
+         <https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{bad}> .\n"
+    );
+    let uses_bad = format!("<{acr}#c> <{ACP}apply> <{bad}#p> .\n");
+    let seeds = [
+        ("by itself", format!("<https://elsewhere.ex/y#n> <https://ex.dev/ns#t> \"t\" <{acr}> .\n")),
+        ("through bad.acr", quads(&uses_bad)),
+    ];
+    for (why, seed) in seeds {
+        let nq = format!("{base}{}{seed}", quads(&sound));
+        let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+        store.materialize_acp().expect("materializes");
+        assert!(!store.decide(&sess(ADMIN), r, Mode::Read).allow, "rejected {why}");
+        let err = store
+            .put_acl_acp(&acr, &format!("{sound}{uses_bad}"), "ntriples")
+            .expect_err("still using bad.acr");
+        assert!(err.contains("not admitted"), "{why}: {err}");
+        store
+            .put_acl_acp(&acr, &sound, "ntriples")
+            .unwrap_or_else(|e| panic!("{why}: the replacement is accepted: {e}"));
+        assert!(store.decide(&sess(ADMIN), r, Mode::Read).allow, "{why}: governed again");
+    }
+}
+
+/// Documents the loader never reads as access control (reserved or skolem names, or one
+/// governing an authority-less IRI) are not refused for what they state.
+#[test]
+fn documents_the_loader_does_not_read_are_not_refused() {
+    let stray = "<https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" .\n";
+    for doc in ["urn:sparq:x.acr", "urn:skolem:x.acr", "https://.acr"] {
+        let mut store = PodStore::new(Graph::load_dataset(
+            "<https://pod.ex/r#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/r> .\n",
+            "nquads",
+        )
+        .expect("parses"));
+        store.materialize_acp().expect("materializes");
+        if let Err(e) = store.put_acl_acp(doc, stray, "ntriples") {
+            assert!(!e.contains("may not state"), "{doc}: {e}");
+        }
+    }
 }
 
 /// An update is judged in the state it leaves: one that takes up a sound policy while breaking

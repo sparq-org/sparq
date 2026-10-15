@@ -1671,22 +1671,51 @@ impl PodStore {
             update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &odrl)?;
         // A statement an access-control document may not make is refused here, rather than
         // left for the loader to reject the whole document (and with it its writer's Control).
-        // Judged in the state the update leaves.
+        // Judged in the state the update leaves, by what it leaves added: a statement it adds
+        // and removes again later in the update is not checked.
         let control_writes = loader::ControlWrites::new(&candidate, acp);
+        let is_control = |doc: &str| doc.ends_with(loader::ACL_SUFFIX) || doc.ends_with(loader::ACR_SUFFIX);
+        let mut added: Vec<(&str, Vec<&[Term; 3]>)> = Vec::new();
         for effect in &effects {
-            if let sparq_engine::UpdateEffect::Delta {
-                slot: Some(Term::NamedNode(doc)),
-                inserts,
-                ..
-            } = effect
-            {
-                let doc = doc.as_str();
-                if doc.ends_with(loader::ACL_SUFFIX) || doc.ends_with(loader::ACR_SUFFIX) {
-                    control_writes
-                        .check(doc, inserts)
-                        .map_err(|e| format!("update denied: {e}"))?;
+            match effect {
+                sparq_engine::UpdateEffect::Delta {
+                    slot: Some(Term::NamedNode(doc)),
+                    inserts,
+                    deletes,
+                } if is_control(doc.as_str()) => {
+                    let doc = doc.as_str();
+                    let at = match added.iter().position(|(d, _)| *d == doc) {
+                        Some(at) => at,
+                        None => {
+                            added.push((doc, Vec::new()));
+                            added.len() - 1
+                        }
+                    };
+                    // Deletes first, then inserts, as the effect applies them.
+                    let pending = &mut added[at].1;
+                    pending.retain(|t| !deletes.contains(t));
+                    pending.extend(inserts.iter());
                 }
+                sparq_engine::UpdateEffect::Clear(target) | sparq_engine::UpdateEffect::Drop(target) => {
+                    for (doc, pending) in &mut added {
+                        let hit = match target {
+                            spargebra::algebra::GraphTarget::NamedNode(n) => n.as_str() == *doc,
+                            spargebra::algebra::GraphTarget::DefaultGraph => false,
+                            _ => true,
+                        };
+                        if hit {
+                            pending.clear();
+                        }
+                    }
+                }
+                _ => {}
             }
+        }
+        for (doc, pending) in added {
+            let surviving: Vec<[Term; 3]> = pending.into_iter().cloned().collect();
+            control_writes
+                .check(doc, &surviving)
+                .map_err(|e| format!("update denied: {e}"))?;
         }
         let rules_changed = permit.rematerialize || auth_input || wrote_rules;
         // Rules it leaves are materialized on the fork first: rules that cannot be refuse the
