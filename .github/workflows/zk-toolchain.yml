@@ -66,8 +66,12 @@ on:
       # sq-5reoy: narrowed from zk/** to zk/compose/** — the zk/ieee754 and
       # zk/xpath trees were externalized to the sparq-org/noir_IEEE754 and
       # sparq-org/noir_XPath face repos (#1599), whose own CI covers their nargo tests
-      # and the ieee754 differential oracle. zk/compose is the only in-tree Noir tree left.
+      # and the ieee754 differential oracle. zk/compose is the only in-tree Noir tree that
+# PROVES anything; zk/dual-leaf-v2 (the DualLeafV2 sentinel/constants mirror, no deps,
+# imported by no member) is the one other in-tree Noir package and runs its nargo tests
+# in this lane too.
       - "zk/compose/**"
+      - "zk/dual-leaf-v2/**"
       - "bench/zk-compose/campaigns/**"
       - "bench/zk-bindings/**"
       - "crates/sparq-conformance/examples/proof_corpus.rs"
@@ -88,6 +92,7 @@ on:
       # sq-5reoy: narrowed from zk/** to zk/compose/** (see the pull_request
       # paths note above — the ieee754/xpath trees moved to their face repos, #1599).
       - "zk/compose/**"
+      - "zk/dual-leaf-v2/**"
       - "bench/zk-compose/campaigns/**"
       - "bench/zk-bindings/**"
       - "crates/sparq-conformance/examples/proof_corpus.rs"
@@ -390,6 +395,17 @@ jobs:
         if: steps.changes.outputs.zk == 'true'
         working-directory: zk/compose
         run: nargo test --package sparq_zk_compose_core
+
+      # The DualLeafV2 sentinel/constants mirror (zk/dual-leaf-v2). A separate Nargo
+      # package on purpose: every *.nr under zk/compose is sha256-pinned by the
+      # bench/zk-compose measurement evidence, whose verifier requires the measured
+      # inventory to equal the tree EXACTLY (verify_result_evidence.py), so a new file
+      # there would invalidate a measurement that only dedicated hardware can redo.
+      # Dependency-free, imported by no member: compile + execute only, seconds.
+      - name: Run the DualLeafV2 constants-mirror Noir tests (nargo test)
+        if: steps.changes.outputs.zk == 'true'
+        working-directory: zk/dual-leaf-v2
+        run: nargo test
 
       # The load-bearing step: run EVERY `#[ignore]`d test in the ZK crates. With the
       # toolchain on PATH the forge tests do a REAL bb prove and assert every forgery is

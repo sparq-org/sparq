@@ -68,6 +68,11 @@ pub(crate) type Node = u32;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Dep(Option<Rc<[u32]>>);
 
+/// A pseudo branch point no branch has: the dependency of a branch closed without a
+/// clash (undecided or unconfirmed). Backtracking never removes it, so whatever is derived
+/// on the alternatives after such a close keeps it, and is never read as forced.
+const UNCERTAIN: u32 = u32::MAX;
+
 impl Dep {
     fn single(b: u32) -> Dep {
         Dep(Some(Rc::from(vec![b])))
@@ -407,6 +412,9 @@ impl<'c> Tableau<'c> {
         let mut nodes: FxHashMap<(Node, &Value), Node> = FxHashMap::default();
         let mut by_ind: FxHashMap<Node, Vec<Node>> = FxHashMap::default();
         for (r, a, atom, v) in facts {
+            if self.over_budget() || self.nodes.len() > self.budget.max_nodes {
+                return;
+            }
             let a = self.canonical(*a);
             let y = match nodes.get(&(a, v)) {
                 Some(&y) => y,
@@ -422,6 +430,15 @@ impl<'c> Tableau<'c> {
         }
         let mut inds: Vec<Node> = by_ind.keys().copied().collect();
         inds.sort_unstable();
+        // The pairwise inequalities are quadratic in an individual's values: charge them
+        // before making them (`run` reports the exhaustion before using anything).
+        let pairs = inds
+            .iter()
+            .map(|a| by_ind[a].len().saturating_mul(by_ind[a].len()) / 2)
+            .fold(0usize, usize::saturating_add);
+        if self.charge(pairs) || self.nodes.len() > self.budget.max_nodes {
+            return;
+        }
         for a in inds {
             let ys = by_ind[&a].clone();
             for (i, &y) in ys.iter().enumerate() {
@@ -516,7 +533,12 @@ impl<'c> Tableau<'c> {
                 }
                 KeyStep::Done => {}
             }
-            if !self.unravels() {
+            let unravels = self.unravels();
+            if self.over_budget() {
+                // The confirmation itself ran out: no verdict.
+                return Err(Stop::Exhausted);
+            }
+            if !unravels {
                 self.close_unconfirmed();
                 continue;
             }
@@ -528,12 +550,9 @@ impl<'c> Tableau<'c> {
     /// far (chronological backtracking), so the search looks for a branch that is.
     fn close_unconfirmed(&mut self) {
         self.unconfirmed = true;
-        let all: Vec<u32> = (0..self.branches.len() as u32).collect();
-        self.set_clash(if all.is_empty() {
-            Dep::default()
-        } else {
-            Dep(Some(Rc::from(all)))
-        });
+        let mut all: Vec<u32> = (0..self.branches.len() as u32).collect();
+        all.push(UNCERTAIN);
+        self.set_clash(Dep(Some(Rc::from(all))));
     }
 
     /// Marks `n` as a named individual's node (keys apply to named individuals only).
@@ -1577,7 +1596,7 @@ impl<'c> Tableau<'c> {
         }
         if let Some((d, atoms)) = undecided {
             self.undecided.get_or_insert(atoms);
-            self.set_clash(d);
+            self.set_clash(d.union(&Dep::single(UNCERTAIN)));
         }
     }
 

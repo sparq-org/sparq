@@ -3161,11 +3161,24 @@ impl Graph {
     /// durable as a unit BEFORE it is materialised across the per-graph WALs; if a crash interrupts
     /// materialisation, `open` redoes this frame idempotently. A NO-OP (returns `Ok`)
     /// for an IN-MEMORY graph (no journal) and for an empty record set, so the in-memory live
-    /// update path is byte-for-byte unchanged.
+    /// update path is byte-for-byte unchanged. Once the journal is poisoned
+    /// ([`Graph::poison_txn`]) every commit, an empty one included, is refused unwritten.
     pub fn commit_txn(&mut self, records: &[(bool, Option<Term>, [Term; 3])]) -> Result<(), String> {
+        self.commit_txn_checked(records).map_err(|(_, e)| e)
+    }
+
+    /// [`Graph::commit_txn`], saying on failure whether the journal may hold any of the frame:
+    /// `false` only when the journal refused it unwritten, after an earlier failed append.
+    pub fn commit_txn_checked(
+        &mut self,
+        records: &[(bool, Option<Term>, [Term; 3])],
+    ) -> Result<(), (bool, String)> {
         #[cfg(feature = "mmap")]
         if let Some(j) = &mut self.txn {
-            return j.append(records).map_err(|e| format!("txn journal commit failed: {e}"));
+            let refused = j.poisoned();
+            return j
+                .append(records)
+                .map_err(|e| (!refused, format!("txn journal commit failed: {e}")));
         }
         #[cfg(not(feature = "mmap"))]
         let _ = records;
@@ -3175,13 +3188,37 @@ impl Graph {
     /// (sq-ycle) Clear the redo journal after its frame has been fully materialised into
     /// the per-graph state (the second half of `sparq_engine::apply_effects`'s journal-first
     /// protocol), so the next body starts from an empty journal and a clean reopen is a no-op. A
-    /// NO-OP for an in-memory graph (no journal).
+    /// NO-OP for an in-memory graph (no journal). Refused (`Err`) once the journal is poisoned
+    /// ([`Graph::poison_txn`]): its frame is kept for the reopen.
     pub fn clear_txn(&mut self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
         if let Some(j) = &mut self.txn {
             return j.truncate().map_err(|e| format!("txn journal clear failed: {e}"));
         }
         Ok(())
+    }
+
+    /// Refuse a rewrite of the base (compaction, vacuum) while the journal of this graph or of
+    /// any named graph under it keeps a frame for the reopen to replay: the rewrite would start
+    /// a fresh journal without it.
+    fn refuse_while_txn_poisoned(&self) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        if self.txn.as_ref().is_some_and(TxnJournal::poisoned) {
+            return Err("the txn journal keeps a failed commit; reopen the graph first".to_owned());
+        }
+        self.named
+            .iter()
+            .try_for_each(|(_, g)| g.refuse_while_txn_poisoned())
+    }
+
+    /// Keep the journal's frame for the next reopen to replay, and refuse every later
+    /// commit until then: for a caller whose materialisation failed after the commit point
+    /// (`sparq_engine::apply_effects`). A NO-OP for an in-memory graph.
+    pub fn poison_txn(&mut self) {
+        #[cfg(feature = "mmap")]
+        if let Some(j) = &mut self.txn {
+            j.poisoned = true;
+        }
     }
 
     /// (review 1593) DURABLY empties this graph's default-graph content while
@@ -3579,8 +3616,10 @@ impl Graph {
     /// it keeps compaction O(triples) with no re-interning). For a directory-backed
     /// graph the new base is persisted ATOMICALLY (written to a fresh sibling directory,
     /// then swapped in via rename) and the write-ahead log truncated; the graph re-opens
-    /// memory-mapped from the new base.
+    /// memory-mapped from the new base. Refused while the txn journal is poisoned
+    /// ([`Graph::poison_txn`]), as the new base would start a journal without its frame.
     pub fn compact(&mut self) -> Result<(), String> {
+        self.refuse_while_txn_poisoned()?;
         #[cfg(feature = "mmap")]
         let dir = self.wal.as_ref().map(|w| w.dir.clone());
         // Fold the structural-fork layers first (ids unchanged throughout): named
@@ -3732,8 +3771,9 @@ impl Graph {
     /// PHYSICAL-ERASURE SCOPE (honest): this scrubs the engine's own on-disk segments + dictionary;
     /// it cannot reach bytes already copied off-box (filesystem snapshots, block-level COW history,
     /// external backups), which the storage/backup tier must handle per the retention-erasure
-    /// runbook.
+    /// runbook. Refused while the txn journal is poisoned, as [`Graph::compact`] is.
     pub fn vacuum(&mut self) -> Result<(), String> {
+        self.refuse_while_txn_poisoned()?;
         #[cfg(feature = "mmap")]
         let dir = self.wal.as_ref().map(|w| w.dir.clone());
         // Re-intern the whole live dataset into a fresh graph with an EMPTY dictionary, so any
@@ -4294,6 +4334,10 @@ fn decode_slot(bytes: &[u8], pos: usize) -> Result<(Option<Term>, usize), String
 #[cfg(feature = "mmap")]
 struct TxnJournal {
     file: std::fs::File,
+    /// Set when an append, or the materialisation after one, failed: the journal may then
+    /// hold a frame reported as failed, so it takes no further frame, and keeps what it holds,
+    /// until reopened.
+    poisoned: bool,
 }
 
 #[cfg(feature = "mmap")]
@@ -4309,8 +4353,14 @@ impl TxnJournal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<TxnJournal> {
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(Self::path(dir))?;
-        Ok(TxnJournal { file })
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(Self::path(dir))?;
+        Ok(TxnJournal {
+            file,
+            poisoned: false,
+        })
     }
 
     /// Frames `records` (each `(is_insert, slot, triple)`) into ONE checksummed frame and fsyncs —
@@ -4319,6 +4369,14 @@ impl TxnJournal {
     /// no-op (an UPDATE that resolves to no data change carries no atomicity obligation).
     fn append(&mut self, records: &[TxnRecord]) -> std::io::Result<()> {
         use std::io::Write;
+        // A failed append may have left any part of its frame behind, a complete one included,
+        // for a later replay to apply: the journal takes no further frame, not even an empty
+        // one, until it is reopened (and replayed), so nothing is ever appended after it.
+        if self.poisoned {
+            return Err(std::io::Error::other(
+                "txn journal refused: an earlier append failed; reopen the graph",
+            ));
+        }
         if records.is_empty() {
             return Ok(());
         }
@@ -4344,12 +4402,29 @@ impl TxnJournal {
         let crc = Wal::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
-        self.file.write_all(&buf)?;
-        self.file.sync_data()
+        let written = self
+            .file
+            .write_all(&buf)
+            .and_then(|()| self.file.sync_data());
+        if written.is_err() {
+            self.poisoned = true;
+        }
+        written
+    }
+
+    /// Whether an append failed, so the journal takes no further frame.
+    fn poisoned(&self) -> bool {
+        self.poisoned
     }
 
     /// Empties the journal (after its frame has been materialised into the per-graph state).
+    /// Refused once an append or a materialisation failed: its frame is kept for the reopen.
     fn truncate(&mut self) -> std::io::Result<()> {
+        if self.poisoned {
+            return Err(std::io::Error::other(
+                "txn journal kept: an earlier commit failed; reopen the graph",
+            ));
+        }
         self.file.set_len(0)?;
         self.file.sync_data()
     }
@@ -10458,6 +10533,62 @@ mod tests {
     #[cfg(feature = "mmap")]
     fn base_named() -> Vec<(String, String, String)> {
         vec![("<http://ex/n0>".into(), "<http://ex/p>".into(), "<http://ex/o0>".into())]
+    }
+
+    /// A journal whose frame failed to materialise keeps it for the reopen to redo, and
+    /// refuses later commits unwritten until then.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_poisoned_txn_journal_keeps_its_frame_and_refuses_more() {
+        let dir = txn_tmp_dir("poisoned");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        let first: Vec<(bool, Option<Term>, [Term; 3])> =
+            vec![(true, None, [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")])];
+        g.commit_txn_checked(&first).unwrap();
+        g.poison_txn();
+        assert!(g.clear_txn().is_err(), "a poisoned journal is not cleared");
+        assert!(!g.commit_txn_checked(&[]).unwrap_err().0, "nor takes an empty frame");
+        let held = std::fs::read(TxnJournal::path(&dir)).unwrap();
+        assert!(!held.is_empty(), "the frame stays for the reopen");
+        let second: Vec<(bool, Option<Term>, [Term; 3])> =
+            vec![(true, None, [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")])];
+        let refused = g.commit_txn_checked(&second).unwrap_err();
+        assert!(!refused.0, "refused unwritten");
+        assert_eq!(std::fs::read(TxnJournal::path(&dir)).unwrap(), held);
+        assert!(g.compact().is_err(), "nor is the base rewritten without it");
+        assert!(g.vacuum().is_err());
+        drop(g);
+        let reopened = Graph::open(&dir).unwrap();
+        let nt = format!("{:?}", dump_terms(&reopened));
+        assert!(nt.contains("http://ex/s1"), "the kept frame is redone: {nt}");
+        assert!(!nt.contains("http://ex/s2"), "the refused one is not: {nt}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A poisoned journal of a named graph refuses the parent's compaction and vacuum too.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_poisoned_named_graph_journal_refuses_the_parents_rewrite() {
+        let dir = txn_tmp_dir("poisoned-named");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        g.named[0].1.poison_txn();
+        assert!(g.vacuum().is_err(), "vacuum is refused");
+        assert!(g.compact().is_err(), "compaction is refused");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// (sq-ycle) TORN-TAIL guarantee: a multi-slot redo frame (a default-graph record

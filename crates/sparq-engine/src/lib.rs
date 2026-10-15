@@ -160,11 +160,11 @@ pub use explain_json::{
     SlowQueryRing,
 };
 pub use update::{
-    apply_effects, data_update_effects, parse_update_rec2013, update, update_in_place,
-    update_in_place_algebra_capturing, update_in_place_algebra_with_budget,
-    update_in_place_atomic, update_in_place_atomic_with_budget,
-    update_in_place_capturing, update_in_place_with_budget, where_update_effects, with_load_base,
-    UpdateEffect, WriteAuthorizer,
+    apply_effects, apply_effects_checked, data_update_effects, parse_update_rec2013, update,
+    update_in_place, update_in_place_algebra_capturing, update_in_place_algebra_with_budget,
+    update_in_place_atomic, update_in_place_atomic_with_budget, update_in_place_capturing,
+    update_in_place_with_budget, where_update_effects, with_load_base, ApplyError, UpdateEffect,
+    WriteAuthorizer,
 };
 
 /// Test/measurement hooks for sideways information passing (SIP) — the correlated

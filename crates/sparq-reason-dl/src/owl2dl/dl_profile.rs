@@ -11,8 +11,8 @@
 
 use super::datatypes::{self, builtin, Builtin, Facet};
 use super::model::{
-    AnnotationSubject, AnnotationTarget, AnnotationValue, Axiom, AxiomRecord, ClassExpression,
-    DataRange, EntityKind, Individual, Literal, ObjectProperty, Ontology,
+    AnnotationSubject, AnnotationValue, Axiom, AxiomRecord, ClassExpression, DataRange, EntityKind,
+    Individual, Literal, ObjectProperty, Ontology,
 };
 use super::vocab::{iri_of, Vocab, OWL, RDF, RDFS, XSD};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -482,11 +482,7 @@ impl<'a> Checker<'a> {
     /// Whether any annotation may target axiom `ai` (one whose target is any of its input
     /// triples, an over-approximation of its main triple).
     fn is_annotated(&self, ai: usize) -> bool {
-        let source = &self.onto.axioms[ai].source;
-        self.onto
-            .annotations
-            .iter()
-            .any(|a| matches!(a.target, AnnotationTarget::Axiom(t) if source.contains(&t)))
+        self.onto.is_annotated(ai)
     }
 
     fn sources(&self, axioms: &[usize]) -> Vec<usize> {
