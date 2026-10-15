@@ -212,9 +212,10 @@ input a fact carrying one gets an IRI independent of hash-set traversal and hash
 width (native vs `wasm32`; GH #6749). A `log:conclusion` formula's derived rows, and the
 list-cell labels (`_l<k>_<n>`) interning a list value mints, are sorted / numbered in a
 canonical term order for the same reason (GH #6844). A backward-chaining copy's `__bw<n>_`
-prefixes spell the proof-tree node that standardized that rule application apart — the
-premise-atom index then the `(rule, conclusion)` site index, one chunk per step — instead of
-counting applications in evaluation order, so a fact carrying one has a stable IRI too
+prefixes spell the derivation that standardized that rule application apart — the premise-atom
+index, the `(rule, conclusion)` site index, a 64-bit fold of the goal proved and the evaluation
+scope, one chunk each — instead of counting applications in evaluation order, so a fact carrying
+one has a stable IRI too, and two proofs of different goals keep the distinct IRIs they had
 (GH #6844). It is not canonical across reordered isomorphic documents (anonymous `_b<n>`
 parser labels follow arrival order, formula rows keep source order, a label depends on its
 round's other firings), and it assumes stable

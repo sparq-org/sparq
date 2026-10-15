@@ -564,10 +564,12 @@ fn formula_key(ts: &[[Term; 3]]) -> u64 {
 
 /// Goal-directed context: the document's backward (`<=`) rules; it also carries the
 /// document base, the optional [`Resolver`] for the document-access builtins, and the
-/// import-cycle guard ([`VisitedDocs`]). Standardizing a rule application apart (so nested
-/// applications of one rule do not capture each other's bindings) is deliberately NOT state
-/// of this context: it is a function of where the application sits in the proof tree
-/// ([`BwPath`]).
+/// import-cycle guard ([`VisitedDocs`]). Standardizing a rule application apart (so two
+/// applications of one rule do not capture each other's bindings, or merge each other's
+/// derived facts) is deliberately not a COUNTER on this context: it is a function of where
+/// the application sits in the proof tree and of the goal it is proving ([`BwPath`]). What
+/// the context does hold for it is this evaluation's scope number and the fingerprints it
+/// has handed out.
 struct BwCtx<'a> {
     rules: &'a [Rule],
     base: String,
@@ -584,6 +586,16 @@ struct BwCtx<'a> {
     /// The current round's join-work allowance ([`bounded::JoinWork`]): every binding row
     /// a premise of this run produces, and every rule firing, is charged to it.
     work: bounded::JoinWork,
+    /// This evaluation's scope number, the innermost chunk of every [`BwPath`] it mints: a
+    /// query's premise evaluation, a top-level closure and a nested `log:conclusion` closure
+    /// each number their rules from zero, so without it their names would collide.
+    scope: u64,
+    /// Every backward goal fingerprint this run has minted a name for, by the goal key it
+    /// was folded from ([`serialize::goal_key`]). A fingerprint is a 64-bit fold, so a
+    /// collision is possible; letting one through would silently merge two different goals'
+    /// standardize-apart spaces, which is a capture. Two goals that fold alike therefore
+    /// FAIL the run (through [`BwCtx::nested_error`]) rather than share a name.
+    goal_fingerprints: std::cell::RefCell<rustc_hash::FxHashMap<u64, String>>,
 }
 
 impl BwCtx<'_> {
@@ -655,6 +667,7 @@ fn negation_gate(bw: &BwCtx) -> bool {
 impl<'a> BwCtx<'a> {
     /// A context sharing `visited` with the run it belongs to.
     fn new(rules: &'a [Rule], truncated: Truncation, visited: VisitedDocs) -> BwCtx<'a> {
+        let visited_depth = visited.borrow().docs.len() as u64;
         BwCtx {
             rules,
             base: String::new(),
@@ -664,7 +677,35 @@ impl<'a> BwCtx<'a> {
             nested_error: std::cell::RefCell::new(None),
             work: bounded::JoinWork::forward(&truncated),
             truncated,
+            // Each nesting level of `log:conclusion` closures gets its own even scope
+            // number; `query_terms_in` makes a query's evaluation odd (see `BwPath`).
+            scope: visited_depth * 2,
+            goal_fingerprints: std::cell::RefCell::new(rustc_hash::FxHashMap::default()),
         }
+    }
+
+    /// The GOAL chunk of a [`BwPath`]: a 64-bit fold ([`serialize::fnv1a64`]) of `goal`'s
+    /// canonical key ([`serialize::goal_key`]). `None` when a DIFFERENT goal already folded
+    /// to the same value: sharing a name would merge two standardize-apart spaces, which is
+    /// a capture, so the run fails instead ([`BwCtx::goal_fingerprints`]).
+    fn goal_chunk(&self, goal: &[Term; 3]) -> Option<u64> {
+        let key = serialize::goal_key(goal);
+        let fp = serialize::fnv1a64(&key);
+        let mut seen = self.goal_fingerprints.borrow_mut();
+        if let Some(prev) = seen.get(&fp) {
+            if *prev != key {
+                drop(seen);
+                self.nested_error.borrow_mut().get_or_insert_with(|| {
+                    "two backward proof goals share one 64-bit fingerprint; refused rather \
+                     than let their standardized-apart variables alias"
+                        .to_string()
+                });
+                return None;
+            }
+            return Some(fp);
+        }
+        seen.insert(fp, key);
+        Some(fp)
     }
 }
 
@@ -984,6 +1025,10 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     .read_further(&truncated);
     let mut bw = BwCtx::new(&backward, truncated, shared);
     bw.base = base;
+    // A query's premise evaluation numbers the QUERY's rules, the closure above numbered the
+    // data document's, and both ran at nesting depth zero: the odd scope keeps the two sets
+    // of names apart ([`BwPath`]).
+    bw.scope += 1;
 
     let mut out: Vec<[Term; 3]> = Vec::new();
     let mut emitted: FxHashSet<[Term; 3]> = FxHashSet::default();
@@ -992,7 +1037,7 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     for (ri, rule) in query_parsed.rules.iter().enumerate() {
         let premise = order_premise(&rule.premise);
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
-        let bindings = match_premise(&premise, &facts, &bw, BwPath::rule(ri));
+        let bindings = match_premise(&premise, &facts, &bw, BwPath::root(bw.scope, ri));
         let mut emit = |b: &Binding, sk: Option<&FxHashMap<String, String>>| {
             for c in &rule.conclusion {
                 let c = match sk {
@@ -2095,7 +2140,7 @@ fn run_closure_in(
                     // (every round): full evaluation, with no delta seeding. A constant
                     // rule (no join) fires only in naive rounds.
                     if naive_round || *needs_full {
-                        match_premise(&rule.premise, &facts, &bw, BwPath::rule(ri))
+                        match_premise(&rule.premise, &facts, &bw, BwPath::root(bw.scope, ri))
                     } else {
                         Vec::new()
                     }
@@ -2107,10 +2152,10 @@ fn run_closure_in(
                             &rule.premise,
                             &facts,
                             &Binding::new(),
-                            Some((&delta, k)),
+                            JoinMode::Delta(&delta, k),
                             &bw,
                             bounded::backward_depth(),
-                            BwPath::rule(ri),
+                            BwPath::root(bw.scope, ri),
                         ));
                     }
                     bs
@@ -2493,6 +2538,25 @@ fn reachable_lists<'a>(t: &'a Term, out: &mut Vec<&'a Term>) {
 
 type Binding = HashMap<String, Term>;
 
+/// Which facts a premise evaluation's join atoms may match, and which atom (if any) is
+/// already bound into the seed. The atoms KEEP THEIR ORIGINAL premise indices under every
+/// mode, because an atom's index is part of the name its backward proofs standardize apart
+/// into ([`BwPath`]): re-indexing the remaining atoms would make a derivation's names depend
+/// on whether the round was naive or semi-naive, and the same derivation would then derive
+/// two different facts in two rounds.
+#[derive(Clone, Copy)]
+enum JoinMode<'d> {
+    /// Naive: every join atom matches all of `facts`.
+    All,
+    /// Semi-naive: the join atom at premise index `k` matches only this DELTA set (the
+    /// newly-derived facts), so the driver, by running once per join-atom index, considers
+    /// only bindings that involve ≥1 new fact.
+    Delta(&'d FxHashSet<[Term; 3]>, usize),
+    /// The rest of a semi-naive round: premise atom `k` is bound into the seed already and
+    /// is skipped, every other atom matches all of `facts`.
+    Without(usize),
+}
+
 /// All variable bindings under which every premise pattern holds (joining against `facts`,
 /// evaluating builtins as filters/computations). N3 collections `( … )` in the premise are
 /// rule-local list STRUCTURE (rdf:first/rest over fresh bnodes), not data to match — they are
@@ -2507,19 +2571,15 @@ fn match_premise(
         premise,
         facts,
         &Binding::new(),
-        None,
+        JoinMode::All,
         bw,
         bounded::backward_depth(),
         path,
     )
 }
 
-/// Match `premise` starting from an existing partial binding `seed`. For SEMI-NAIVE
-/// evaluation, `delta_at = Some((delta, k))` restricts the join atom at premise index `k` to
-/// match only the `delta` set (the newly-derived facts) rather than the full `facts` — so the
-/// driver, by running once per join-atom index, considers only bindings that involve ≥1 new
-/// fact. `None` = naive (every join atom matches all facts); also used for the negation
-/// sub-formula recursion.
+/// Match `premise` starting from an existing partial binding `seed`, with `join` saying
+/// which facts its join atoms may match ([`JoinMode`]).
 ///
 /// An evaluation boundary ([`within_depth`]): a `seed` past the term-depth limit is
 /// refused, as a cut, before any atom is evaluated under it.
@@ -2527,7 +2587,7 @@ fn match_premise_seeded(
     premise: &[[Term; 3]],
     facts: &FactIndex,
     seed: &Binding,
-    delta_at: Option<(&FxHashSet<[Term; 3]>, usize)>,
+    join: JoinMode<'_>,
     bw: &BwCtx,
     depth: usize,
     path: BwPath<'_>,
@@ -2535,7 +2595,7 @@ fn match_premise_seeded(
     if !seed.is_empty() && !within_depth(seed, bw) {
         return Vec::new();
     }
-    match_premise_admitted(premise, facts, seed, delta_at, bw, depth, path)
+    match_premise_admitted(premise, facts, seed, join, bw, depth, path)
 }
 
 /// [`match_premise_seeded`] for a `seed` already within the term-depth limit.
@@ -2543,7 +2603,7 @@ fn match_premise_admitted(
     premise: &[[Term; 3]],
     facts: &FactIndex,
     seed: &Binding,
-    delta_at: Option<(&FxHashSet<[Term; 3]>, usize)>,
+    join: JoinMode<'_>,
     bw: &BwCtx,
     depth: usize,
     path: BwPath<'_>,
@@ -2551,7 +2611,7 @@ fn match_premise_admitted(
     // Semi-naive: seed from the DELTA atom first (delta is small → most selective), then
     // evaluate the rest against the index. Doing the delta atom first makes it prune early
     // instead of letting a non-delta atom do a full predicate-index scan.
-    if let Some((delta, k)) = delta_at {
+    if let JoinMode::Delta(delta, k) = join {
         let mut seeds = Vec::new();
         for fact in delta {
             if let Some(nb) = unify(&premise[k], fact, seed, &bw.truncated) {
@@ -2564,17 +2624,33 @@ fn match_premise_admitted(
         if seeds.is_empty() {
             return Vec::new();
         }
-        let rest: Vec<[Term; 3]> =
-            premise.iter().enumerate().filter(|&(i, _)| i != k).map(|(_, p)| p.clone()).collect();
         let mut out = Vec::new();
-        // Each seed extends the admitted `seed` with parts of stored facts only.
+        // Each seed extends the admitted `seed` with parts of stored facts only. The whole
+        // premise is passed back, with atom `k` SKIPPED rather than removed, so the other
+        // atoms keep their original indices ([`JoinMode`]).
         for s in &seeds {
-            out.extend(match_premise_admitted(&rest, facts, s, None, bw, depth, path));
+            out.extend(match_premise_admitted(
+                premise,
+                facts,
+                s,
+                JoinMode::Without(k),
+                bw,
+                depth,
+                path,
+            ));
         }
         return out;
     }
+    // The atom a semi-naive round already bound into the seed, if any ([`JoinMode`]).
+    let skip = match join {
+        JoinMode::Without(k) => Some(k),
+        JoinMode::All | JoinMode::Delta(..) => None,
+    };
     let mut bindings: Vec<Binding> = vec![seed.clone()];
     for (ai, pat) in premise.iter().enumerate() {
+        if Some(ai) == skip {
+            continue;
+        }
         // log:includes / log:notIncludes / log:supports — does the SCOPE
         // include (or entail, for supports) the object formula?
         //   * subject a `{ … }` formula (even `{}` — the EMPTY formula
@@ -2657,7 +2733,7 @@ fn match_premise_admitted(
                     // holding a unit of the run's stack allowance (`_frames`).
                     _ => match bw.settle(bounded::nested_step(&bw.truncated)) {
                         Some(_frames) => {
-                            match_premise_seeded(inner, facts, &b, None, bw, depth, path.child(ai))
+                            match_premise_seeded(inner, facts, &b, JoinMode::All, bw, depth, path.child(ai as u64))
                         }
                         None => Vec::new(),
                     },
@@ -2712,7 +2788,7 @@ fn match_premise_admitted(
             for b in bindings {
                 // Solutions of a `{ clause }` value under `seed`, against the
                 // applied scope (`None` ⇒ the clause is not a formula).
-                let solve = |clause: &Term, seed: &Binding, ci: usize| -> Option<Vec<Binding>> {
+                let solve = |clause: &Term, seed: &Binding, ci: u64| -> Option<Vec<Binding>> {
                     let atoms: &[[Term; 3]] = match clause {
                         Term::Formula(ts) => ts,
                         // `{}` parses as the literal true: no constraint —
@@ -2731,10 +2807,10 @@ fn match_premise_admitted(
                                 atoms,
                                 facts,
                                 seed,
-                                None,
+                                JoinMode::All,
                                 bw,
                                 depth,
-                                path.child(ai).child(ci),
+                                path.child(ai as u64).child(ci),
                             ),
                             None => Vec::new(),
                         },
@@ -2918,7 +2994,7 @@ fn match_premise_admitted(
                     if let Some((d, _frames)) = bw.settle(step) {
                         // Each proof was charged as [`backward_prove`] built it.
                         next.extend(
-                            backward_prove(pat, b, facts, bw, d, path.child(ai))
+                            backward_prove(pat, b, facts, bw, d, path.child(ai as u64))
                                 .into_iter()
                                 .filter(|nb| within_depth(nb, bw)),
                         );
@@ -3088,14 +3164,23 @@ fn backward_prove(
     if !bw.settle(bounded::generated(&bw.truncated, &goal)) {
         return Vec::new();
     }
+    // The GOAL chunk ([`BwPath`]): two applications proving DIFFERENT goals must take
+    // different names, or the renamed variables their conclusions leak into two derived
+    // facts make those facts one fact and an answer is lost. Keying the name to the goal is
+    // also what keeps a later round from resolving a leaked variable at the very node that
+    // minted it (a goal carrying it is a different goal).
+    let Some(gc) = bw.goal_chunk(&goal) else {
+        return Vec::new();
+    };
+    let at_goal = path.child(gc);
     let mut out = Vec::new();
     // The `(rule, conclusion)` SITE index: a position in the document's rule order, counted
     // over every site whether or not the gate below skips it, so a site's index does not
     // depend on the goal ([`BwPath`]).
-    let mut site = 0usize;
+    let mut site = 0u64;
     for rule in bw.rules {
         for concl in &rule.conclusion {
-            let node = path.child(site);
+            let node = at_goal.child(site);
             site += 1;
             // Cheap gate: ground predicates must agree before we rename/unify anything.
             if let (Term::Iri(gp), Term::Iri(cp)) = (&goal[1], &concl[1]) {
@@ -3119,7 +3204,7 @@ fn backward_prove(
                 .iter()
                 .map(|t| [rename_vars(&t[0], n), rename_vars(&t[1], n), rename_vars(&t[2], n)])
                 .collect();
-            for sol in match_premise_seeded(&prem, facts, &subst, None, bw, depth, node) {
+            for sol in match_premise_seeded(&prem, facts, &subst, JoinMode::All, bw, depth, node) {
                 // Project the proof onto the goal's variables (walk chains like
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
@@ -3178,59 +3263,80 @@ fn rename_vars(t: &Term, prefix: &str) -> Term {
     }
 }
 
-/// Where one node of a backward proof tree sits: its PATH from the root of the premise
-/// evaluation proving it. The path NAMES the node's standardize-apart space
-/// ([`rename_vars`]).
+/// Where one node of a backward proof tree sits: the evaluation SCOPE it belongs to, its
+/// PATH from the root of the premise evaluation proving it, and the GOAL INSTANCE it is
+/// resolving. Together those NAME the node's standardize-apart space ([`rename_vars`]).
 ///
 /// A renamed variable is not confined to the proof. A rule conclusion can bind a goal
 /// variable to a quoted formula that still holds one, and that value reaches a derived fact,
 /// where it becomes part of the fact's term identity — its `term_key`, its `why()` string and
-/// its `sparq-prov` IRI. So the name has to be a function of the proof tree, not
-/// of how much proving happened first: a counter bumped once per rule application made every
-/// such name depend on the order bindings arrived out of a fact set, and so on insertion
-/// history and on the hasher's width (native vs `wasm32`) — GH #6844 item 2.
+/// its `sparq-prov` IRI. So the name has to be a function of the derivation, not of how much
+/// proving happened first: a counter bumped once per rule application made every such name
+/// depend on the order bindings arrived out of a fact set, and so on insertion history and on
+/// the hasher's width (native vs `wasm32`) — GH #6844 item 2.
 ///
-/// Depth alone is not enough, and not merely for canonicity. Sibling conjuncts of one
-/// premise are evaluated against ONE shared substitution: a value the first conjunct's proof
-/// leaked into it — a quoted formula still holding that application's renamed variables —
-/// reaches the next conjunct's goal, and a conjunct standardized apart the SAME way would
-/// unify its own copy of those variables with it, making two independent applications of a
-/// rule one term. Every descent that can rename therefore pushes a step:
+/// Three things have to go into the name, and leaving any one out is a WRONG ANSWER, not a
+/// cosmetic defect:
 ///
-/// - resolving premise atom `k` against the backward rules pushes `k`, then the index of the
-///   `(rule, conclusion)` SITE chosen for it ([`backward_prove`]) — two steps;
-/// - a clause evaluated inside a scoped operator at premise atom `k` pushes `k`, and
-///   `log:collectAllIn` / `log:forAllIn` also push the clause's position in the operator's
-///   subject list, so its two clauses (which share a substitution) differ.
+/// - **The path**, because applications that coexist must differ. Depth alone does not do it:
+///   sibling conjuncts of one premise are evaluated against ONE shared substitution (each
+///   atom's bindings seed the next), so a value the first conjunct's proof leaked into it
+///   reaches the second's goal, and a sibling standardized apart the same way would unify its
+///   own copy of those variables with it. Every descent that can rename pushes a step:
+///   resolving premise atom `k` pushes `k` and then the `(rule, conclusion)` SITE index
+///   ([`backward_prove`]); a clause inside a scoped operator pushes the enclosing atom's
+///   index, and `log:collectAllIn` / `log:forAllIn` also the clause's position in the
+///   operator's subject list, so its two clauses (which share a substitution) differ.
+/// - **The goal instance**, because applications that prove DIFFERENT goals derive different
+///   facts. A quoted formula is opaque to substitution, so a renamed variable survives into
+///   the conclusion's value even where the proof bound it; two proofs of `:s0 :has ?f` and
+///   `:s1 :has ?f` must therefore not take one name, or their two derived facts merge into
+///   one and an answer is LOST. The goal chunk is a 64-bit fold ([`serialize::fnv1a64`]) of
+///   the walked goal's canonical key ([`serialize::goal_key`]).
+/// - **The scope**, so a query's premise evaluation, a top-level closure and a nested
+///   `log:conclusion` closure (each of which numbers its rules from zero in its own
+///   [`BwCtx`]) cannot collide.
 ///
-/// The path is rendered as one `__bw<n>_` chunk per step, deepest step first, behind a
-/// leading chunk holding how many steps follow. That is exactly the format
-/// `serialize::universal_base` already reads — it strips repeated `__bw<n>_` prefixes — so
-/// no downstream consumer changes: spellability, the exact writers' backward-copy refusal
-/// and the display writers' renaming all see the same shape of name as before. The leading
-/// count is what makes the rendering injective: chunks are read by maximal munch, so equal
-/// renders force equal counts and then equal chunk sequences, whatever the variable's own
-/// name is. Without it a rule variable a document spells `?__bw0_y` could make an ancestor's
-/// rendering and a descendant's coincide — and those two DO share a substitution.
+/// Keying the name to the goal is also what makes it safe ACROSS ROUNDS. The same goal
+/// re-proved at the same node in a later round takes the same name and derives the same fact
+/// — which is why a program whose only growth was the old counter now saturates. A
+/// goal that a later round reaches carrying a renamed variable leaked out of an earlier one
+/// (through a stored quoted formula and a forward `log:includes`, say) is a DIFFERENT goal,
+/// so it takes a different name and cannot capture the node that minted that variable.
+///
+/// A node is rendered as one `__bw<n>_` chunk per step — the goal chunk among them, between
+/// the site index that follows it and the premise-atom index above it — deepest step first,
+/// then the scope, behind a leading chunk holding how many chunks follow. That is exactly the format
+/// `serialize::universal_base` already reads — it strips repeated `__bw<n>_` prefixes — so no
+/// downstream consumer changes: spellability, the exact writers' backward-copy refusal and
+/// the display writers' renaming all see the same shape of name as before. The leading count
+/// makes the rendering of a path injective among RENAMED names: chunks are read by maximal
+/// munch, so equal renders force equal counts and then equal chunk sequences. It does NOT
+/// make a renamed name distinct from a variable a document itself spells `__bw…`: that
+/// namespace is not reserved, so such a variable can still be captured, here as before this
+/// name was ([`rename_vars`] renames it like any other).
 #[derive(Clone, Copy)]
 struct BwPath<'p> {
     /// The rest of the path, towards the root.
     up: Option<&'p BwPath<'p>>,
     /// This step.
-    step: usize,
-    /// How many steps the path holds, this one included (always ≥ 1).
+    step: u64,
+    /// The evaluation scope, carried by every node and written as the innermost chunk
+    /// ([`BwCtx::scope`]).
+    scope: u64,
+    /// How many chunks the rendering holds: the step chain plus the scope.
     len: usize,
 }
 
 impl BwPath<'_> {
-    /// The root of rule `ri`'s proof trees: the evaluation of its own premise.
-    fn rule(ri: usize) -> BwPath<'static> {
-        BwPath { up: None, step: ri, len: 1 }
+    /// The root of rule `ri`'s proof trees inside evaluation scope `scope`.
+    fn root(scope: u64, ri: usize) -> BwPath<'static> {
+        BwPath { up: None, step: ri as u64, scope, len: 2 }
     }
 
     /// This path with one more `step`.
-    fn child(&self, step: usize) -> BwPath<'_> {
-        BwPath { up: Some(self), step, len: self.len + 1 }
+    fn child(&self, step: u64) -> BwPath<'_> {
+        BwPath { up: Some(self), step, scope: self.scope, len: self.len + 1 }
     }
 
     /// The `__bw…_` prefix [`rename_vars`] puts on the variables renamed at this node.
@@ -3243,6 +3349,8 @@ impl BwPath<'_> {
             s.push_str(&format!("__bw{step}_"));
             at = p.up;
         }
+        let scope = self.scope;
+        s.push_str(&format!("__bw{scope}_"));
         s
     }
 }
@@ -9602,13 +9710,15 @@ mod tests {
         assert_eq!(f, want);
     }
 
-    /// Direct unit test for `BwPath`'s rendering: distinct proof-tree nodes render to
-    /// distinct `__bw…` prefixes, and the leading step-count chunk is what makes that hold
-    /// even against a rule variable a document spells `?__bw0___bw0_y`.
+    /// Direct unit test for `BwPath`'s rendering: distinct nodes render to distinct `__bw…`
+    /// prefixes, and the leading chunk count is what makes that hold even against a rule
+    /// variable a document spells `?__bw0___bw0_y`.
     #[test]
     fn a_backward_path_prefix_decomposes_only_one_way() {
         use super::BwPath;
-        let root = BwPath::rule(0);
+        // Scope 0 and step 0 throughout: the chunks are all alike, so only the count tells
+        // an ancestor's rendering from a descendant's.
+        let root = BwPath::root(0, 0);
         let anc = root.child(0);
         let sibling = root.child(1);
         let mid = anc.child(0);
@@ -9669,17 +9779,78 @@ mod tests {
         for (i, r) in runs.iter().enumerate().skip(1) {
             assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
         }
-        // The name spells the proof-tree node, so it is the same for every subject: the
-        // query rule (index 0), its premise atom 1, the one backward site (index 0). Three
-        // steps, written deepest first behind the step count.
-        assert!(
-            runs[0][0].ends_with(
-                "Formula([[Var(\"__bw3___bw0___bw1___bw0_y\"), Iri(\"http://ex/inner\"), \
-                 Var(\"__bw3___bw0___bw1___bw0_z\")]])"
-            ),
-            "{}",
-            runs[0][0]
-        );
+        // The name spells the derivation and nothing else: the one backward site (index 0),
+        // the goal's own fingerprint, the query rule's premise atom 1, the rule (index 0)
+        // and the evaluation scope — chunks written deepest first behind the chunk count.
+        let names: Vec<&str> = runs[0]
+            .iter()
+            .map(|r| {
+                let at = r.find("Var(\"__bw").expect("the value carries a renamed variable");
+                &r[at..]
+            })
+            .collect();
+        for n in &names {
+            assert!(n.starts_with("Var(\"__bw5___bw0___bw"), "{n}");
+            assert!(n.contains("___bw1___bw0___bw1_y\"), Iri(\"http://ex/inner\")"), "{n}");
+        }
+        // Each subject is a different GOAL, so each takes a name of its own: one derived
+        // value per subject, never one value standing for all of them.
+        let mut uniq = names.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), n, "one renaming per goal: {names:?}");
+    }
+
+    #[test]
+    fn two_goals_of_one_site_derive_two_facts() {
+        // GH #6844 item 2: naming a node by its PATH alone merges every resolution of that
+        // site, whatever it is proving. A quoted formula is opaque to substitution, so a
+        // renamed variable survives into the conclusion's value even where the proof bound
+        // it: with one name, `:s0`'s `{ ?y :inner ?z }` and `:s1`'s are the SAME term and the
+        // two rows collapse into one — an answer is lost. The goal chunk of the name keeps
+        // the two applications apart because they prove different goals.
+        let data = "@prefix : <http://ex/> .\n:s0 :p :v0 .\n:s1 :p :v1 .\n\
+                    { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { ?x :p ?any . ?x :has ?f } => { :all :vals ?f } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows.len(), 2, "one row per subject's own value: {rows:?}");
+        assert_ne!(rows[0], rows[1], "{rows:?}");
+    }
+
+    #[test]
+    fn a_leaked_name_coming_back_through_the_store_does_not_capture() {
+        // GH #6844 item 2: the premise substitution is not the only channel a renamed
+        // variable travels. A quoted formula holding one is STORED, and a later round pulls
+        // it back out (`log:includes` here) into an ordinary bindable variable, which then
+        // becomes a goal term. If the name only spelled the proof-tree node, that variable
+        // would arrive at the very node that MINTED it: round 2's goal `…_y :has ?f` would
+        // unify `…_y` with the node's own freshened `…_x`, so proving the premise would bind
+        // the goal's own subject as a side effect, the projection would find it refined to a
+        // constant the caller never asked for, and the row would be dropped — silently
+        // losing `:k :seed3`. The goal chunk makes a goal carrying a leaked variable a
+        // DIFFERENT goal, so it is standardized apart from the node it came from.
+        let doc = "@prefix : <http://ex/> .\n\
+                   @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                   :a :p :c .\n:k :seed1 { :a :in :zz } .\n\
+                   :seed1 :next :seed2 .\n:seed2 :next :seed3 .\n\
+                   { ?x :has { ?y :in ?z } } <= { :a :p ?y } .\n\
+                   { :k ?sp ?g . ?sp :next ?np . ?g log:includes { ?s :in ?w } . ?s :has ?f }\n\
+                     => { :k ?np ?f } .\n";
+        let closure = reason_n3_terms(doc, None).expect("the closure saturates");
+        let seeds: Vec<String> = closure
+            .facts
+            .iter()
+            .filter_map(|[s, p, _]| match (s, p) {
+                (Term::Iri(s), Term::Iri(p)) if s == "http://ex/k" => {
+                    Some(p.rsplit('/').next().unwrap_or(p).to_string())
+                }
+                _ => None,
+            })
+            .collect();
+        for want in ["seed1", "seed2", "seed3"] {
+            assert!(seeds.iter().any(|s| s == want), "{want} missing: {seeds:?}");
+        }
     }
 
     #[test]

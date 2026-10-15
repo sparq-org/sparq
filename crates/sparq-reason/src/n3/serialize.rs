@@ -99,10 +99,11 @@ pub(super) fn formula_universal(v: &str) -> Option<(usize, &str)> {
 }
 
 /// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, repeated: one chunk
-/// per step of the proof-tree path that standardized the application apart, behind a chunk
-/// holding how many steps follow — `BwPath::prefix`) stripped, when what remains is an
-/// `@forAll` universal. Each chunk's digits are read by maximal munch, which is what makes
-/// the rendering of a path injective.
+/// per step of the proof-tree path that standardized the application apart, plus a chunk for
+/// the goal it was proving and one for the evaluation scope, behind a chunk holding how many
+/// chunks follow — `BwPath::prefix`) stripped, when what remains is an `@forAll` universal.
+/// Each chunk's digits are read by maximal munch, which, with the leading count, is what
+/// makes the rendering of one of those names injective.
 fn universal_base(v: &str) -> Option<&str> {
     let mut rest = v;
     loop {
@@ -671,9 +672,9 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
 /// label (`__sk<n>_<label>`) does not depend on hash-set traversal or hasher width: it is
 /// numbered in the sorted order of each round's firing keys (GH #6749), and a
 /// `log:conclusion` formula's derived rows are sorted under [`row_cmp`] (GH #6844). A
-/// backward-chaining copy's `__bw<n>_` prefixes likewise spell the proof-tree node that
-/// standardized that rule application apart, not how many applications ran before it (GH
-/// #6844). It is not canonical across reordered isomorphic documents, and a binding value
+/// backward-chaining copy's `__bw<n>_` prefixes likewise spell the evaluation scope, the
+/// proof-tree node and the goal that standardized that rule application apart, not how many
+/// applications ran before it (GH #6844). It is not canonical across reordered isomorphic documents, and a binding value
 /// that still carries traversal order (a `log:collectAllIn` list) can still move it (GH
 /// #6844).
 fn term_key(t: &Term) -> String {
@@ -736,6 +737,36 @@ fn term_key(t: &Term) -> String {
     let mut s = String::new();
     enc(t, &mut s);
     s
+}
+
+/// A backward proof GOAL's canonical identity string: each term's `term_key` written behind
+/// its byte length, so the concatenation of three of them is injective over the goal's terms
+/// without resting on a key being self-delimiting (today's keys are, being tagged and
+/// quoted; this does not need them to stay so).
+///
+/// This NAMES a standardize-apart space (`BwPath`), it is not provenance, so it is
+/// deliberately not counted as a keyed call (`KEY_CALLS`): the plain materialization paths
+/// stay unkeyed, and a document with no `<=` rule never reaches this.
+pub(super) fn goal_key(g: &[Term; 3]) -> String {
+    let mut out = String::new();
+    for t in g {
+        let k = term_key(t);
+        out.push_str(&k.len().to_string());
+        out.push(':');
+        out.push_str(&k);
+    }
+    out
+}
+
+/// FNV-1a over `s`'s bytes in explicit `u64` arithmetic, so the value does not depend on
+/// the target's word size (native vs `wasm32`) the way a `usize`-wide hasher would.
+pub(super) fn fnv1a64(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
 }
 
 /// The identity keys of one statement's three terms (`term_key`): equal exactly when the
@@ -1425,6 +1456,38 @@ mod tests {
     }
 
     const LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
+    #[test]
+    fn a_goal_key_is_injective_over_the_goals_terms() {
+        // Goals that differ in any term get different keys, and so different 64-bit folds
+        // and different standardize-apart spaces (`BwPath`); goals that are equal get one
+        // key. Everything the name has to keep apart rests on this.
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let a = [iri("http://ex/ab"), iri("http://ex/p"), iri("http://ex/c")];
+        // Different in the subject only, and the difference is exactly where one term's key
+        // ends and the next one's begins.
+        let b = [iri("http://ex/a"), iri("http://ex/bp"), iri("http://ex/c")];
+        assert_ne!(goal_key(&a), goal_key(&b), "{}", goal_key(&a));
+        // Different in the predicate only.
+        let c = [iri("http://ex/ab"), iri("http://ex/q"), iri("http://ex/c")];
+        assert_ne!(goal_key(&a), goal_key(&c), "{}", goal_key(&c));
+        // Same goal, same key: the name a later round mints for a goal it has proved before
+        // is the same name, which is what lets a closure saturate.
+        assert_eq!(goal_key(&a), goal_key(&a.clone()));
+        // A variable in the goal is part of its identity: resolving `?f` is a different goal
+        // from resolving a bound value.
+        let with_var = [iri("http://ex/ab"), iri("http://ex/p"), Term::Var("f".into())];
+        assert_ne!(goal_key(&a), goal_key(&with_var));
+    }
+
+    #[test]
+    fn the_goal_fold_is_the_specified_fnv1a_in_u64_arithmetic() {
+        // Pinned against the published FNV-1a 64 test vectors, so the fold is the same value
+        // on a 32-bit target (`wasm32`) as on a 64-bit one — a `usize`-wide hasher is not.
+        assert_eq!(fnv1a64(""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a64("a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a64("foobar"), 0x8594_4171_f739_67e8);
+    }
 
     #[test]
     fn writes_each_term_kind() {
