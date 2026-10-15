@@ -59,13 +59,15 @@ fn noir_globals() -> Vec<(String, Fr)> {
         .unwrap_or_else(|| panic!("global {} is not a field literal: {literal}", name.trim()));
         out.push((name.trim().to_string(), value));
     }
-    // Every `global` keyword in the file must be one this parser read, so a
-    // non-`pub` or differently spaced declaration cannot slip past the pin.
+    // Every `global` token outside a line comment must belong to a declaration
+    // this parser read, so a `pub(crate)`, `comptime` or differently spaced
+    // declaration cannot slip past the pin. The file has no block comments.
+    assert!(!NOIR_LIB.contains("/*"), "the pin parser does not read block comments");
     let declared = NOIR_LIB
         .lines()
-        .map(str::trim_start)
-        .filter(|l| !l.starts_with("//"))
-        .filter(|l| l.starts_with("global ") || l.starts_with("pub global "))
+        .map(|l| l.split_once("//").map_or(l, |(code, _)| code))
+        .flat_map(str::split_whitespace)
+        .filter(|tok| *tok == "global")
         .count();
     assert_eq!(declared, out.len(), "every Noir global must be a parsed `pub global`");
     out

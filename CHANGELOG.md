@@ -142,10 +142,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   malformed, or two disagree, the salt does not resolve and the commitment is refused as
   unreferenced — the same fail-closed outcome a single missing salt already produced. The previous
   first-entry-wins resolution made that verdict depend on entry order (`[no salt, salt]` refused
-  while `[salt, no salt]` proceeded, and a second, disagreeing salt was never read). The new rule
-  refuses strictly more: the clear-attestation-preferred path is unchanged, and no manifest that
-  verified before is newly refused unless it carried a salt-less or disagreeing hidden-issuer entry
-  over the same commitment.
+  while `[salt, no salt]` proceeded, and a second, disagreeing salt was never read). Under
+  `verify_manifest` the new rule refuses strictly more: the clear-attestation-preferred path is
+  unchanged, and no manifest that verified before is newly refused unless it carried a salt-less,
+  malformed-salt or disagreeing hidden-issuer entry over the same commitment. The structural
+  prefilter alone is not a verifier: there, an unresolved salt now skips the salt-reuse check, and
+  the full verifier refuses the commitment as unreferenced instead.
 - **sparq-zk:** doc correction — `RegistryEntry::issued_with_status` documented its signed message
   as the method-unbound `commitment_message_with_status` (`ZKSIG_C3`); it signs the method-bound
   `commitment_message_with_status_and_scheme` (`ZKSIG_M3`), which is what the code already did and

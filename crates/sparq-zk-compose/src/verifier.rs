@@ -5034,8 +5034,11 @@ fn bind_holder_set(
 /// [`scan_referenced_messages`] and the hidden-issuer gate refuses it as
 /// unreferenced). Two equal salts written with different hex spellings agree,
 /// because agreement is compared on the DECODED field element. This makes the
-/// verdict independent of the order the prover listed the entries in; it
-/// accepts nothing that was refused before.
+/// verdict independent of the order the prover listed the entries in; through
+/// `verify_manifest` it accepts nothing that was refused before (the structural
+/// prefilter alone records no salt for an unresolved commitment, so its
+/// salt-reuse check no longer sees it; the full verifier refuses it as
+/// unreferenced).
 ///
 /// # Disclosure posture (sq-93h, assessed)
 /// Every salt this can return belongs to a commitment the presentation ALREADY
