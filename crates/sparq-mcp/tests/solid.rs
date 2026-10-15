@@ -1864,7 +1864,6 @@ fn acp_resources_created_through_the_server_record_no_creator() {
     let (text, is_err) = tool(&mut s, "resource_get", json!({"url": d1}));
     assert!(is_err, "bob is not d1's creator: {text}");
     assert_eq!(s.store().acp_provenance().creator(d1), None);
-
 }
 
 /// A container with a graph stored below it cannot be deleted through the server, whatever

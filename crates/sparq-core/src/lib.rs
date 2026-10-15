@@ -3161,7 +3161,8 @@ impl Graph {
     /// durable as a unit BEFORE it is materialised across the per-graph WALs; if a crash interrupts
     /// materialisation, `open` redoes this frame idempotently. A NO-OP (returns `Ok`)
     /// for an IN-MEMORY graph (no journal) and for an empty record set, so the in-memory live
-    /// update path is byte-for-byte unchanged.
+    /// update path is byte-for-byte unchanged. Once the journal is poisoned
+    /// ([`Graph::poison_txn`]) every commit, an empty one included, is refused unwritten.
     pub fn commit_txn(&mut self, records: &[(bool, Option<Term>, [Term; 3])]) -> Result<(), String> {
         self.commit_txn_checked(records).map_err(|(_, e)| e)
     }
@@ -3187,7 +3188,8 @@ impl Graph {
     /// (sq-ycle) Clear the redo journal after its frame has been fully materialised into
     /// the per-graph state (the second half of `sparq_engine::apply_effects`'s journal-first
     /// protocol), so the next body starts from an empty journal and a clean reopen is a no-op. A
-    /// NO-OP for an in-memory graph (no journal).
+    /// NO-OP for an in-memory graph (no journal). Refused (`Err`) once the journal is poisoned
+    /// ([`Graph::poison_txn`]): its frame is kept for the reopen.
     pub fn clear_txn(&mut self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
         if let Some(j) = &mut self.txn {
@@ -3611,7 +3613,8 @@ impl Graph {
     /// it keeps compaction O(triples) with no re-interning). For a directory-backed
     /// graph the new base is persisted ATOMICALLY (written to a fresh sibling directory,
     /// then swapped in via rename) and the write-ahead log truncated; the graph re-opens
-    /// memory-mapped from the new base.
+    /// memory-mapped from the new base. Refused while the txn journal is poisoned
+    /// ([`Graph::poison_txn`]), as the new base would start a journal without its frame.
     pub fn compact(&mut self) -> Result<(), String> {
         self.refuse_while_txn_poisoned()?;
         #[cfg(feature = "mmap")]
@@ -3765,7 +3768,7 @@ impl Graph {
     /// PHYSICAL-ERASURE SCOPE (honest): this scrubs the engine's own on-disk segments + dictionary;
     /// it cannot reach bytes already copied off-box (filesystem snapshots, block-level COW history,
     /// external backups), which the storage/backup tier must handle per the retention-erasure
-    /// runbook.
+    /// runbook. Refused while the txn journal is poisoned, as [`Graph::compact`] is.
     pub fn vacuum(&mut self) -> Result<(), String> {
         self.refuse_while_txn_poisoned()?;
         #[cfg(feature = "mmap")]

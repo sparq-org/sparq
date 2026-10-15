@@ -6,7 +6,8 @@
 //! effect counts. A resource (a document or a container) keeps its creator and owner across
 //! a change if it exists before and after it, or if its own access control resource
 //! (`<r>.acr`, the only document the ACP view, their one reader, reads) is stored before the
-//! change and not removed at any point in it; any other resource loses them. So the facts of
+//! change and not removed at any point in it (replacing its content, by a PUT or `CLEAR` and
+//! `INSERT`, is no removal; a `DROP` is); any other resource loses them. So the facts of
 //! a resource that goes are kept with its `.acr` and come back with the resource only while
 //! that `.acr` stays stored, and a container left with no graph below it ends like a
 //! document. A resource that exists after the change and did not before gets the acting

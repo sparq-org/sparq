@@ -236,7 +236,10 @@ pub struct StoredGraphs(FxHashSet<String>);
 pub struct PodStore {
     /// The underlying dataset: pod documents, `.acl`/`.acr` graphs, and (after a
     /// `materialize_*` call) the `<urn:sparq:auth>` view. Mutating it directly does
-    /// NOT rebuild the session index — go through the `materialize_*` methods.
+    /// NOT rebuild the session index: take [`PodStore::stored_graphs`] before the edit and
+    /// call [`PodStore::rematerialize_after_edit`] after it, before any other write or
+    /// rebuild, so the stored provenance follows the edit; a `materialize_*` call alone only
+    /// drops the facts of resources that no longer exist.
     pub graph: Graph,
     auth: Arc<AuthIndex>,
     epoch: u64,
@@ -317,6 +320,11 @@ pub struct PodStore {
     /// would have changed it failed part way. No rebuild uses it until the caller supplies
     /// the context again ([`PodStore::materialize_acp_with_credentials`]).
     acp_context_stale: bool,
+    /// The resources whose own access control resource was stored when the stored provenance
+    /// was last installed: a rebuild keeps the facts of a resource that does not exist only if
+    /// its `.acr` was stored then and still is, so an `.acr` stored since, by an edit the store
+    /// was not told of, revives nothing.
+    acr_controlled: FxHashSet<String>,
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -487,6 +495,7 @@ impl PodStore {
             acp_context: Default::default(),
             acp_uses_provenance: false,
             acp_context_stale: false,
+            acr_controlled: FxHashSet::default(),
         }
     }
 
@@ -516,7 +525,8 @@ impl PodStore {
         let stats = materialize_wac(&mut self.graph)?;
         // Stored creator and owner facts of resources gone with their access control resource
         // go at any rebuild, so an ACP view built later never revives them.
-        self.acp_context.0 = Self::existing_provenance(&self.graph, &self.acp_context.0);
+        let provenance = std::mem::take(&mut self.acp_context.0);
+        self.acp_context.0 = self.existing_provenance(&provenance, false);
         self.record_static_coverage();
         self.view_dropped = false;
         self.acp_uses_provenance = false;
@@ -573,7 +583,7 @@ impl PodStore {
     ) -> Result<MaterializeStats, String> {
         self.usable_acp_context()?;
         let (provenance, credentials) = self.acp_context.clone();
-        self.materialize_acp_with_scoped(&provenance, &credentials, scope)
+        self.materialize_acp_with_scoped(&provenance, &credentials, scope, false)
     }
 
     /// Refuse a rebuild from the stored context while it may not describe the stored graphs.
@@ -613,7 +623,9 @@ impl PodStore {
     /// resource keeps its creator and owner if it exists before and after the edit, or its own
     /// `.acr` is stored throughout it, and loses them otherwise; every resource that exists
     /// after the edit and did not before gets `creator` (the acting agent, when the view takes
-    /// it as a principal) unless its own `.acr` was stored before it. The view and the provenance are installed together, and
+    /// it as a principal) unless its own `.acr` was stored before it. The edit is seen only as
+    /// the difference between the graph names stored before and after it, so an `.acr` whose
+    /// content it replaces counts as stored throughout. The view and the provenance are installed together, and
     /// only if the rebuild succeeds.
     ///
     /// # Errors
@@ -633,21 +645,28 @@ impl PodStore {
         if acp {
             self.usable_acp_context()?;
             let credentials = self.acp_context.1.clone();
-            self.materialize_acp_with_scoped(&staged, &credentials, ReindexScope::Full)
+            self.materialize_acp_with_scoped(&staged, &credentials, ReindexScope::Full, false)
         } else {
             let kept = std::mem::replace(&mut self.acp_context.0, staged);
             self.materialize_wac().inspect_err(|_| self.acp_context.0 = kept)
         }
     }
 
-    /// `provenance` for only the resources the auth view of `graph` holds (the loader's own
+    /// `provenance` for only the resources the auth view of the store holds (the loader's own
     /// resource enumeration, [`loader::resources`]) and those whose own access control
-    /// resource is stored (see [`lifecycle`]).
-    fn existing_provenance(graph: &Graph, provenance: &AccessProvenance) -> AccessProvenance {
-        let resources = loader::resources(graph);
-        let controlled = loader::controlled_resources(graph);
+    /// resource is stored and was when the provenance was last installed, or, for provenance
+    /// the caller supplies (`supplied`), is stored now (see [`lifecycle`]). Records which
+    /// resources have their `.acr` stored, for the next install.
+    fn existing_provenance(&mut self, provenance: &AccessProvenance, supplied: bool) -> AccessProvenance {
+        let resources = loader::resources(&self.graph);
+        let controlled: FxHashSet<String> =
+            loader::controlled_resources(&self.graph).into_iter().map(str::to_owned).collect();
+        let before = &self.acr_controlled;
         let mut kept = provenance.clone();
-        kept.retain(|r| resources.contains(r) || controlled.contains(r));
+        kept.retain(|r| {
+            resources.contains(r) || (controlled.contains(r) && (supplied || before.contains(r)))
+        });
+        self.acr_controlled = controlled;
         kept
     }
 
@@ -765,7 +784,7 @@ impl PodStore {
         provenance: &AccessProvenance,
         credentials: &VerifiedCredentials,
     ) -> Result<MaterializeStats, String> {
-        self.materialize_acp_with_scoped(provenance, credentials, ReindexScope::Full)
+        self.materialize_acp_with_scoped(provenance, credentials, ReindexScope::Full, true)
     }
 
     /// [`PodStore::materialize_acp_with`] invalidating the session cache only at `scope` — the
@@ -776,10 +795,11 @@ impl PodStore {
         provenance: &AccessProvenance,
         credentials: &VerifiedCredentials,
         scope: ReindexScope,
+        supplied: bool,
     ) -> Result<MaterializeStats, String> {
         let stats = materialize_acp_with_credentials(&mut self.graph, provenance, credentials)?;
         // Kept for exactly the resources the view was built over (see [`loader::resources`]).
-        self.acp_context = (Self::existing_provenance(&self.graph, provenance), credentials.clone());
+        self.acp_context = (self.existing_provenance(provenance, supplied), credentials.clone());
         self.acp_uses_provenance = loader::control_documents_name_provenance(&self.graph);
         self.acp_context_stale = false;
         self.record_static_coverage();

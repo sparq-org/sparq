@@ -804,3 +804,57 @@ fn a_resource_whose_acr_went_after_it_comes_back_with_nothing() {
     assert!(!store.decide(&sess(ALICE), KR, Mode::Control).allow, "no creator grant");
     assert!(!store.decide(&sess(ERIN), KR, Mode::Read).allow, "no owner grant");
 }
+
+fn drop_graph(store: &mut PodStore, iri: &str) {
+    store.graph.named.retain(|(n, _)| n.to_string() != format!("<{iri}>"));
+}
+
+fn push_graph(store: &mut PodStore, iri: &str) {
+    let nq = format!("<{iri}#it> <https://ex.dev/ns#k> \"x\" <{iri}> .\n");
+    store
+        .graph
+        .named
+        .extend(Graph::load_dataset(&nq, "nquads").expect("parses").named);
+}
+
+#[test]
+fn an_acr_stored_by_an_edit_the_store_was_not_told_of_revives_nothing() {
+    let acr = format!("{D0}.acr");
+    // Stored directly, then a rebuild.
+    let mut st = store();
+    drop_graph(&mut st, D0);
+    push_graph(&mut st, &acr);
+    st.materialize_acp().expect("rebuild");
+    push_graph(&mut st, D0);
+    st.materialize_acp().expect("rebuild");
+    assert_eq!(st.acp_provenance().creator(D0), None);
+    assert_eq!(st.acp_provenance().owner(D0), None);
+    // Written by an access-control write after the unannounced removal.
+    let mut st = store();
+    drop_graph(&mut st, D0);
+    st
+        .put_acl_acp(
+            &acr,
+            &format!("<{acr}> <{ACP}accessControl> <{acr}#c> ."),
+            "ntriples",
+        )
+        .expect("the .acr is written");
+    push_graph(&mut st, D0);
+    st.materialize_acp().expect("rebuild");
+    assert_eq!(st.acp_provenance().creator(D0), None);
+    assert_eq!(st.acp_provenance().owner(D0), None);
+}
+
+#[test]
+fn a_container_emptied_outside_an_update_is_forgotten_at_the_next_rebuild() {
+    let zz = "https://pod.ex/zz/";
+    let mut store = store();
+    push_graph(&mut store, &format!("{zz}x"));
+    let mut prov = store.acp_provenance().clone();
+    prov.set_creator(zz, ALICE);
+    store.materialize_acp_with(&prov).expect("materializes");
+    assert_eq!(store.acp_provenance().creator(zz), Some(ALICE));
+    drop_graph(&mut store, &format!("{zz}x"));
+    store.materialize_acp().expect("rebuild");
+    assert_eq!(store.acp_provenance().creator(zz), None);
+}
