@@ -105,7 +105,8 @@ disjointness, functional, some / all / has-value, data cardinalities, positive a
 data assertions) over the OWL 2 datatype map with facet restrictions, `DataOneOf`, the data
 booleans and acyclic `DatatypeDefinition`s. Literals are compared by value, and an ill-typed
 literal in an assertion makes the ontology inconsistent (`"sixteen"^^xsd:nonNegativeInteger`).
-**Property chains other than `R∘R ⊑ R`, keys, the top/bottom properties in axioms,
+Keys (`hasKey`) are decided over named individuals; a key whose data values are not
+fixed to literals answers `'Unconfirmed'`. **Property chains other than `R∘R ⊑ R`, the top/bottom properties in axioms,
 datatypes and literals outside the OWL 2 datatype map, and a property used as both an
 object and a data property currently answer `consistent: 'unknown'` with
 `reason.kind: 'OutOfFragment'`** and the triples of the axiom that uses them; a datatype

@@ -140,6 +140,18 @@ pub(crate) struct Abox {
     pub data: Vec<(Role, u32, Atom, Value, u32)>,
 }
 
+/// A `HasKey` axiom: two named individuals in the class that share a named value on every
+/// object property and a value on every data property of the key are the same.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Key {
+    /// An atom equivalent to the key's class (`None`: `owl:Thing`).
+    pub class: Option<Atom>,
+    /// The object property expressions of the key.
+    pub roles: Vec<Role>,
+    /// The data properties of the key.
+    pub data: Vec<Role>,
+}
+
 /// A construct outside the fragment the reasoner decides.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Unsupported {
@@ -175,6 +187,8 @@ pub(crate) struct Clauses {
     /// The [`AtomKind::Nominal`] atoms, by individual index. Non-empty makes class tests
     /// depend on the ABox.
     pub nominals: FxHashMap<u32, Atom>,
+    /// The `HasKey` axioms.
+    pub keys: Vec<Key>,
 }
 
 impl Clauses {
@@ -822,7 +836,30 @@ impl Builder<'_> {
                     Nnf::All(r, Box::new(Nnf::Not(mb))),
                 ]));
             }
-            Axiom::HasKey(..) => return Err(self.unsupported("HasKey")),
+            Axiom::HasKey(c, ps, ds) => {
+                let roles = ps
+                    .iter()
+                    .map(|p| self.role(p))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let data = ds
+                    .iter()
+                    .map(|&d| self.data_role(d))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let class = match self.nnf(c, true)? {
+                    Nnf::Top => None,
+                    // No element is in the class: the key says nothing.
+                    Nnf::Bottom => return Ok(()),
+                    Nnf::Atom(a) => Some(a),
+                    c => {
+                        // The key applies exactly to the class's members: `Q ≡ C`.
+                        let q = self.fresh(AtomKind::Fresh);
+                        self.gci(Nnf::Or(vec![Nnf::Not(q), c.clone()]));
+                        self.gci(Nnf::Or(vec![negate(&c), Nnf::Atom(q)]));
+                        Some(q)
+                    }
+                };
+                self.out.keys.push(Key { class, roles, data });
+            }
             // Read in the first pass.
             Axiom::SubDataPropertyOf(..) | Axiom::EquivalentDataProperties(_) => {}
             Axiom::DatatypeDefinition(dt, _) => {

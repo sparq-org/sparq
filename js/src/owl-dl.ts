@@ -77,7 +77,8 @@ export type OwlDlReason =
   | { kind: 'DatatypeUnknown'; triples: OwlDlTriple[] }
   /**
    * A candidate model the reasoner could not confirm: nominals tie a repeated part of it to
-   * an individual whose number restrictions the repetition could break.
+   * an individual whose number restrictions the repetition could break, or a key compares
+   * data values not fixed to literals.
    */
   | { kind: 'Unconfirmed' }
   /** Consistent on its own, but `owl:imports` targets were not loaded. */
@@ -220,7 +221,7 @@ export function normaliseOwlDlOptions(
  * Decided fragment: SHOIQ(D) — classes and every class constructor including nominals,
  * object properties with inverses, hierarchies, transitivity, `R∘R ⊑ R` chains, the role
  * characteristics, `hasSelf`, qualified cardinality up to a fixed bound, data properties over
- * the OWL 2 datatype map, and the ABox. Other property chains, keys, the top and bottom
+ * the OWL 2 datatype map, keys over named individuals, and the ABox. Other property chains, the top and bottom
  * properties, datatypes outside the map and object/data property punning answer
  * `consistent: "unknown"` with reason `OutOfFragment` and the triples; an undecided datatype
  * question answers `DatatypeUnknown`, and an unconfirmed model with nominals `Unconfirmed`.

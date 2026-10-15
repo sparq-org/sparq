@@ -766,8 +766,14 @@ graph provably unravels into a model (no blocked node keeps an edge to an indivi
 edge outside the tree joins two blockable nodes, and no number restriction at an
 individual can count two copies of a repeated node). Otherwise the branch is closed as
 unconfirmed, and when no other branch gives a model the answer is `Unknown(Unconfirmed)`.
+Keys (`HasKey`, object property expressions including inverses, and data properties)
+apply to named individuals only, as OWL 2 specifies: two named members of the key class
+sharing a named value on every object property and a value on every data property are
+merged. Data values are compared when the tableau fixed them to literals (ABox
+assertions, `DataHasValue`); a pair that might share a value not fixed yet closes the
+branch as unconfirmed.
 Still out of the fragment, as
-`Unknown(OutOfFragment { construct, source })`: other chains, keys (`HasKey`), the top and bottom object and data properties
+`Unknown(OutOfFragment { construct, source })`: other chains, the top and bottom object and data properties
 in axioms (except `SubDataPropertyOf(D owl:topDataProperty)`), datatypes outside the map
 without exactly one definition, cyclic or repeated definitions, literals of datatypes
 outside the map, and a property used both as an object and as a data property. A data
@@ -782,7 +788,7 @@ violation gives `Unknown(NotInDl)`, an exhausted step budget gives
 `Unknown(ImportsNotLoaded)` with no classification; `classification_unknown` carries
 `ResourceBudget`, `DatatypeUnknown` or `Unconfirmed`. It never guesses a verdict. Its answers are checked
 against HermiT on seeded corpora (`tests/owl2dl_reasoner.rs`), one of data properties
-and datatypes and one with nominals; the constructs where HermiT departs from the Direct Semantics
+and datatypes, one with nominals and one with keys; the constructs where HermiT departs from the Direct Semantics
 (ill-typed literals, float zeros, `NegativeDataPropertyAssertion` compared by lexical
 form, data booleans and single-value intervals under data cardinalities) are kept out of
 that corpus and pinned by hand-written tests instead.

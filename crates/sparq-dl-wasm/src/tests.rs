@@ -193,17 +193,29 @@ fn nominals_are_decided() {
 }
 
 #[test]
-fn keys_are_out_of_fragment_with_the_offending_triples() {
-    let r = run(&format!("{ALCHIQ} :Person owl:hasKey ( :hasMother ) ."));
+fn keys_are_decided() {
+    let key = format!(
+        "{ALCHIQ} :Person owl:hasKey ( :hasMother ) . :ann a :Person ; :hasMother :eve . :bea a :Person ; :hasMother :eve ."
+    );
+    assert_eq!(get(&run(&key), "consistent"), &Value::Bool(true));
+    let r = run_with(&key, Some(":ann owl:differentFrom :bea ."), None);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(false));
+}
+
+#[test]
+fn chains_are_out_of_fragment_with_the_offending_triples() {
+    let r = run(&format!(
+        "{ALCHIQ} :hasGrandparent a owl:ObjectProperty ; owl:propertyChainAxiom ( :hasParent :hasParent ) ."
+    ));
     assert_eq!(s(get(&r, "consistent")), "unknown");
     let reason = get(&r, "reason");
     assert_eq!(s(get(reason, "kind")), "OutOfFragment");
-    assert_eq!(s(get(reason, "construct")), "HasKey");
+    assert_eq!(s(get(reason, "construct")), "ObjectPropertyChain");
     let triples = strs(get(reason, "triples"));
     assert!(
-        triples
-            .iter()
-            .any(|t| t.starts_with("<http://ex/Person> <http://www.w3.org/2002/07/owl#hasKey> ")),
+        triples.iter().any(|t| t.starts_with(
+            "<http://ex/hasGrandparent> <http://www.w3.org/2002/07/owl#propertyChainAxiom> "
+        )),
         "{triples:?}"
     );
     for t in &triples {

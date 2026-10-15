@@ -1,0 +1,1259 @@
+FILE seed0000.ttl
+CONSISTENT true
+UNSAT http://ex/C3
+FILE seed0001.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C4
+SUB http://ex/C2 http://ex/C3
+FILE seed0002.ttl
+CONSISTENT false
+FILE seed0003.ttl
+CONSISTENT false
+FILE seed0004.ttl
+CONSISTENT true
+FILE seed0005.ttl
+CONSISTENT false
+FILE seed0006.ttl
+CONSISTENT true
+FILE seed0007.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+FILE seed0008.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C4
+FILE seed0009.ttl
+CONSISTENT false
+FILE seed0010.ttl
+CONSISTENT true
+FILE seed0011.ttl
+CONSISTENT false
+FILE seed0012.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C5
+FILE seed0013.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C4 http://ex/C0
+SUB http://ex/C4 http://ex/C2
+FILE seed0014.ttl
+CONSISTENT false
+FILE seed0015.ttl
+CONSISTENT true
+UNSAT http://ex/C0
+UNSAT http://ex/C3
+FILE seed0016.ttl
+CONSISTENT false
+FILE seed0017.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C1 http://ex/C5
+SUB http://ex/C5 http://ex/C1
+SUB http://ex/C5 http://ex/C4
+FILE seed0018.ttl
+CONSISTENT false
+FILE seed0019.ttl
+CONSISTENT false
+FILE seed0020.ttl
+CONSISTENT false
+FILE seed0021.ttl
+CONSISTENT false
+FILE seed0022.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+FILE seed0023.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C1 http://ex/C5
+SUB http://ex/C2 http://ex/C5
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C3 http://ex/C5
+SUB http://ex/C4 http://ex/C5
+FILE seed0024.ttl
+CONSISTENT false
+FILE seed0025.ttl
+CONSISTENT false
+FILE seed0026.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C1
+UNSAT http://ex/C0
+FILE seed0027.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C4 http://ex/C0
+SUB http://ex/C5 http://ex/C2
+SUB http://ex/C5 http://ex/C3
+FILE seed0028.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+FILE seed0029.ttl
+CONSISTENT true
+FILE seed0030.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C3
+FILE seed0031.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C3 http://ex/C0
+SUB http://ex/C3 http://ex/C1
+FILE seed0032.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+FILE seed0033.ttl
+CONSISTENT true
+FILE seed0034.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+FILE seed0035.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C1
+FILE seed0036.ttl
+CONSISTENT true
+FILE seed0037.ttl
+CONSISTENT true
+FILE seed0038.ttl
+CONSISTENT false
+FILE seed0039.ttl
+CONSISTENT true
+UNSAT http://ex/C0
+FILE seed0040.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+FILE seed0041.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C2 http://ex/C3
+FILE seed0042.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C1 http://ex/C5
+SUB http://ex/C3 http://ex/C0
+SUB http://ex/C3 http://ex/C5
+SUB http://ex/C5 http://ex/C0
+SUB http://ex/C5 http://ex/C3
+FILE seed0043.ttl
+CONSISTENT true
+FILE seed0044.ttl
+CONSISTENT false
+FILE seed0045.ttl
+CONSISTENT true
+FILE seed0046.ttl
+CONSISTENT true
+FILE seed0047.ttl
+CONSISTENT false
+FILE seed0048.ttl
+CONSISTENT false
+FILE seed0049.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C2 http://ex/C0
+FILE seed0050.ttl
+CONSISTENT true
+FILE seed0051.ttl
+CONSISTENT true
+FILE seed0052.ttl
+CONSISTENT false
+FILE seed0053.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C3 http://ex/C1
+FILE seed0054.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C3
+FILE seed0055.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C3
+FILE seed0056.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C4 http://ex/C0
+FILE seed0057.ttl
+CONSISTENT false
+FILE seed0058.ttl
+CONSISTENT false
+FILE seed0059.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C1
+FILE seed0060.ttl
+CONSISTENT false
+FILE seed0061.ttl
+CONSISTENT false
+FILE seed0062.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+FILE seed0063.ttl
+CONSISTENT false
+FILE seed0064.ttl
+CONSISTENT false
+FILE seed0065.ttl
+CONSISTENT false
+FILE seed0066.ttl
+CONSISTENT true
+UNSAT http://ex/C2
+FILE seed0067.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C4 http://ex/C1
+SUB http://ex/C5 http://ex/C1
+FILE seed0068.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C1
+FILE seed0069.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C1 http://ex/C0
+UNSAT http://ex/C2
+FILE seed0070.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C3 http://ex/C2
+FILE seed0071.ttl
+CONSISTENT false
+FILE seed0072.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C5 http://ex/C0
+FILE seed0073.ttl
+CONSISTENT false
+FILE seed0074.ttl
+CONSISTENT false
+FILE seed0075.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C3
+UNSAT http://ex/C2
+FILE seed0076.ttl
+CONSISTENT false
+FILE seed0077.ttl
+CONSISTENT true
+FILE seed0078.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C1
+FILE seed0079.ttl
+CONSISTENT false
+FILE seed0080.ttl
+CONSISTENT false
+FILE seed0081.ttl
+CONSISTENT true
+FILE seed0082.ttl
+CONSISTENT true
+SUB http://ex/C4 http://ex/C3
+FILE seed0083.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+FILE seed0084.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+FILE seed0085.ttl
+CONSISTENT false
+FILE seed0086.ttl
+CONSISTENT true
+FILE seed0087.ttl
+CONSISTENT true
+FILE seed0088.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C1
+FILE seed0089.ttl
+CONSISTENT false
+FILE seed0090.ttl
+CONSISTENT true
+UNSAT http://ex/C0
+FILE seed0091.ttl
+CONSISTENT false
+FILE seed0092.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C3
+FILE seed0093.ttl
+CONSISTENT true
+FILE seed0094.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C4 http://ex/C2
+FILE seed0095.ttl
+CONSISTENT false
+FILE seed0096.ttl
+CONSISTENT false
+FILE seed0097.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+FILE seed0098.ttl
+CONSISTENT false
+FILE seed0099.ttl
+CONSISTENT false
+FILE seed0100.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+FILE seed0101.ttl
+ERROR StackOverflowError null
+FILE seed0102.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C3 http://ex/C5
+FILE seed0103.ttl
+CONSISTENT true
+FILE seed0104.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+FILE seed0105.ttl
+CONSISTENT false
+FILE seed0106.ttl
+CONSISTENT false
+FILE seed0107.ttl
+CONSISTENT false
+FILE seed0108.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C2
+FILE seed0109.ttl
+CONSISTENT false
+FILE seed0110.ttl
+CONSISTENT true
+FILE seed0111.ttl
+CONSISTENT true
+FILE seed0112.ttl
+CONSISTENT false
+FILE seed0113.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C2 http://ex/C4
+SUB http://ex/C4 http://ex/C2
+FILE seed0114.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+FILE seed0115.ttl
+CONSISTENT false
+FILE seed0116.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C2 http://ex/C0
+FILE seed0117.ttl
+CONSISTENT false
+FILE seed0118.ttl
+CONSISTENT false
+FILE seed0119.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+FILE seed0120.ttl
+CONSISTENT false
+FILE seed0121.ttl
+CONSISTENT false
+FILE seed0122.ttl
+CONSISTENT false
+FILE seed0123.ttl
+CONSISTENT false
+FILE seed0124.ttl
+CONSISTENT false
+FILE seed0125.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C1
+FILE seed0126.ttl
+CONSISTENT false
+FILE seed0127.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C1
+FILE seed0128.ttl
+CONSISTENT false
+FILE seed0129.ttl
+CONSISTENT false
+FILE seed0130.ttl
+CONSISTENT false
+FILE seed0131.ttl
+CONSISTENT false
+FILE seed0132.ttl
+CONSISTENT false
+FILE seed0133.ttl
+CONSISTENT false
+FILE seed0134.ttl
+CONSISTENT true
+FILE seed0135.ttl
+CONSISTENT false
+FILE seed0136.ttl
+CONSISTENT true
+FILE seed0137.ttl
+CONSISTENT false
+FILE seed0138.ttl
+CONSISTENT false
+FILE seed0139.ttl
+CONSISTENT true
+FILE seed0140.ttl
+CONSISTENT false
+FILE seed0141.ttl
+CONSISTENT false
+FILE seed0142.ttl
+CONSISTENT false
+FILE seed0143.ttl
+CONSISTENT true
+UNSAT http://ex/C1
+FILE seed0144.ttl
+CONSISTENT false
+FILE seed0145.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C4 http://ex/C1
+FILE seed0146.ttl
+CONSISTENT true
+UNSAT http://ex/C3
+FILE seed0147.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+FILE seed0148.ttl
+CONSISTENT false
+FILE seed0149.ttl
+CONSISTENT false
+FILE seed0150.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C3 http://ex/C1
+UNSAT http://ex/C4
+FILE seed0151.ttl
+CONSISTENT false
+FILE seed0152.ttl
+CONSISTENT false
+FILE seed0153.ttl
+CONSISTENT false
+FILE seed0154.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C1
+FILE seed0155.ttl
+CONSISTENT true
+FILE seed0156.ttl
+CONSISTENT false
+FILE seed0157.ttl
+CONSISTENT false
+FILE seed0158.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+FILE seed0159.ttl
+CONSISTENT true
+FILE seed0160.ttl
+CONSISTENT true
+FILE seed0161.ttl
+CONSISTENT false
+FILE seed0162.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C2
+FILE seed0163.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+FILE seed0164.ttl
+CONSISTENT true
+FILE seed0165.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C4 http://ex/C2
+SUB http://ex/C5 http://ex/C2
+UNSAT http://ex/C1
+UNSAT http://ex/C3
+FILE seed0166.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+FILE seed0167.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C4
+SUB http://ex/C4 http://ex/C3
+FILE seed0168.ttl
+CONSISTENT false
+FILE seed0169.ttl
+CONSISTENT true
+FILE seed0170.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C3 http://ex/C0
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C4 http://ex/C0
+FILE seed0171.ttl
+CONSISTENT false
+FILE seed0172.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C4
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C2 http://ex/C4
+SUB http://ex/C2 http://ex/C5
+SUB http://ex/C5 http://ex/C4
+FILE seed0173.ttl
+CONSISTENT false
+FILE seed0174.ttl
+CONSISTENT false
+FILE seed0175.ttl
+CONSISTENT false
+FILE seed0176.ttl
+CONSISTENT false
+FILE seed0177.ttl
+CONSISTENT true
+FILE seed0178.ttl
+CONSISTENT false
+FILE seed0179.ttl
+CONSISTENT false
+FILE seed0180.ttl
+CONSISTENT false
+FILE seed0181.ttl
+CONSISTENT true
+UNSAT http://ex/C0
+FILE seed0182.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C0 http://ex/C4
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C2 http://ex/C4
+SUB http://ex/C4 http://ex/C1
+SUB http://ex/C4 http://ex/C2
+SUB http://ex/C4 http://ex/C3
+FILE seed0183.ttl
+CONSISTENT true
+FILE seed0184.ttl
+CONSISTENT true
+FILE seed0185.ttl
+CONSISTENT false
+FILE seed0186.ttl
+CONSISTENT false
+FILE seed0187.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C3 http://ex/C1
+FILE seed0188.ttl
+CONSISTENT true
+FILE seed0189.ttl
+CONSISTENT true
+SUB http://ex/C4 http://ex/C2
+FILE seed0190.ttl
+CONSISTENT true
+UNSAT http://ex/C1
+UNSAT http://ex/C2
+FILE seed0191.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+FILE seed0192.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+FILE seed0193.ttl
+CONSISTENT false
+FILE seed0194.ttl
+CONSISTENT false
+FILE seed0195.ttl
+CONSISTENT true
+UNSAT http://ex/C1
+FILE seed0196.ttl
+CONSISTENT true
+FILE seed0197.ttl
+CONSISTENT false
+FILE seed0198.ttl
+CONSISTENT false
+FILE seed0199.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C3 http://ex/C2
+FILE seed0200.ttl
+CONSISTENT false
+FILE seed0201.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C3
+FILE seed0202.ttl
+CONSISTENT true
+UNSAT http://ex/C0
+UNSAT http://ex/C1
+FILE seed0203.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C3 http://ex/C2
+FILE seed0204.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C2 http://ex/C3
+FILE seed0205.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C4
+SUB http://ex/C4 http://ex/C0
+FILE seed0206.ttl
+CONSISTENT false
+FILE seed0207.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+FILE seed0208.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C5 http://ex/C1
+UNSAT http://ex/C4
+FILE seed0209.ttl
+CONSISTENT false
+FILE seed0210.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C4
+FILE seed0211.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+FILE seed0212.ttl
+CONSISTENT true
+FILE seed0213.ttl
+CONSISTENT true
+SUB http://ex/C4 http://ex/C5
+SUB http://ex/C5 http://ex/C4
+FILE seed0214.ttl
+CONSISTENT false
+FILE seed0215.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+FILE seed0216.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C4 http://ex/C2
+SUB http://ex/C5 http://ex/C1
+SUB http://ex/C5 http://ex/C2
+FILE seed0217.ttl
+CONSISTENT true
+FILE seed0218.ttl
+CONSISTENT false
+FILE seed0219.ttl
+CONSISTENT true
+FILE seed0220.ttl
+CONSISTENT false
+FILE seed0221.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C3
+FILE seed0222.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+FILE seed0223.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C1
+FILE seed0224.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C4 http://ex/C1
+SUB http://ex/C4 http://ex/C2
+SUB http://ex/C4 http://ex/C3
+FILE seed0225.ttl
+CONSISTENT true
+FILE seed0226.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C4 http://ex/C3
+SUB http://ex/C5 http://ex/C2
+SUB http://ex/C5 http://ex/C3
+FILE seed0227.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C0
+FILE seed0228.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C3 http://ex/C2
+FILE seed0229.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C3 http://ex/C0
+FILE seed0230.ttl
+CONSISTENT true
+FILE seed0231.ttl
+CONSISTENT false
+FILE seed0232.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C4
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C2 http://ex/C4
+SUB http://ex/C3 http://ex/C4
+FILE seed0233.ttl
+CONSISTENT false
+FILE seed0234.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+FILE seed0235.ttl
+CONSISTENT false
+FILE seed0236.ttl
+CONSISTENT true
+FILE seed0237.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+FILE seed0238.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+UNSAT http://ex/C0
+FILE seed0239.ttl
+CONSISTENT false
+FILE seed0240.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C1
+FILE seed0241.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C2 http://ex/C4
+SUB http://ex/C4 http://ex/C0
+SUB http://ex/C4 http://ex/C2
+SUB http://ex/C4 http://ex/C3
+FILE seed0242.ttl
+CONSISTENT false
+FILE seed0243.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C4 http://ex/C0
+FILE seed0244.ttl
+CONSISTENT false
+FILE seed0245.ttl
+CONSISTENT true
+SUB http://ex/C4 http://ex/C1
+FILE seed0246.ttl
+CONSISTENT false
+FILE seed0247.ttl
+CONSISTENT true
+FILE seed0248.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C3 http://ex/C2
+FILE seed0249.ttl
+CONSISTENT false
+FILE seed0250.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C4 http://ex/C1
+SUB http://ex/C4 http://ex/C3
+UNSAT http://ex/C2
+FILE seed0251.ttl
+CONSISTENT false
+FILE seed0252.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C1
+FILE seed0253.ttl
+CONSISTENT true
+FILE seed0254.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C2 http://ex/C4
+SUB http://ex/C3 http://ex/C4
+UNSAT http://ex/C0
+FILE seed0255.ttl
+CONSISTENT false
+FILE seed0256.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C2 http://ex/C0
+FILE seed0257.ttl
+CONSISTENT false
+FILE seed0258.ttl
+CONSISTENT true
+FILE seed0259.ttl
+CONSISTENT false
+FILE seed0260.ttl
+CONSISTENT true
+FILE seed0261.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C3 http://ex/C1
+FILE seed0262.ttl
+CONSISTENT true
+FILE seed0263.ttl
+CONSISTENT true
+FILE seed0264.ttl
+CONSISTENT false
+FILE seed0265.ttl
+CONSISTENT true
+SUB http://ex/C4 http://ex/C0
+SUB http://ex/C4 http://ex/C1
+FILE seed0266.ttl
+CONSISTENT false
+FILE seed0267.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C1
+FILE seed0268.ttl
+CONSISTENT false
+FILE seed0269.ttl
+CONSISTENT false
+FILE seed0270.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C1 http://ex/C5
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C2 http://ex/C5
+SUB http://ex/C3 http://ex/C5
+SUB http://ex/C4 http://ex/C5
+FILE seed0271.ttl
+CONSISTENT false
+FILE seed0272.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C3 http://ex/C1
+FILE seed0273.ttl
+CONSISTENT false
+FILE seed0274.ttl
+CONSISTENT false
+FILE seed0275.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C3 http://ex/C4
+FILE seed0276.ttl
+CONSISTENT false
+FILE seed0277.ttl
+CONSISTENT false
+FILE seed0278.ttl
+CONSISTENT false
+FILE seed0279.ttl
+CONSISTENT false
+FILE seed0280.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+FILE seed0281.ttl
+CONSISTENT true
+FILE seed0282.ttl
+CONSISTENT true
+FILE seed0283.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C2 http://ex/C4
+UNSAT http://ex/C0
+FILE seed0284.ttl
+CONSISTENT false
+FILE seed0285.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C3
+FILE seed0286.ttl
+CONSISTENT false
+FILE seed0287.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C5 http://ex/C4
+FILE seed0288.ttl
+CONSISTENT false
+FILE seed0289.ttl
+CONSISTENT true
+FILE seed0290.ttl
+CONSISTENT false
+FILE seed0291.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+FILE seed0292.ttl
+CONSISTENT false
+FILE seed0293.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C4 http://ex/C2
+SUB http://ex/C5 http://ex/C2
+FILE seed0294.ttl
+CONSISTENT false
+FILE seed0295.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+FILE seed0296.ttl
+CONSISTENT true
+FILE seed0297.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+FILE seed0298.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C4
+SUB http://ex/C4 http://ex/C3
+FILE seed0299.ttl
+CONSISTENT true
+FILE seed0300.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C1
+FILE seed0301.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C3 http://ex/C4
+SUB http://ex/C5 http://ex/C0
+FILE seed0302.ttl
+CONSISTENT false
+FILE seed0303.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C4
+SUB http://ex/C1 http://ex/C5
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C4 http://ex/C0
+FILE seed0304.ttl
+CONSISTENT false
+FILE seed0305.ttl
+CONSISTENT false
+FILE seed0306.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C4 http://ex/C2
+FILE seed0307.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C3 http://ex/C0
+SUB http://ex/C3 http://ex/C2
+FILE seed0308.ttl
+CONSISTENT false
+FILE seed0309.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C1 http://ex/C0
+FILE seed0310.ttl
+CONSISTENT false
+FILE seed0311.ttl
+CONSISTENT false
+FILE seed0312.ttl
+CONSISTENT true
+FILE seed0313.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+FILE seed0314.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C1
+FILE seed0315.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C1
+UNSAT http://ex/C0
+FILE seed0316.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+FILE seed0317.ttl
+CONSISTENT false
+FILE seed0318.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C1 http://ex/C5
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C2 http://ex/C5
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C3 http://ex/C5
+SUB http://ex/C4 http://ex/C5
+FILE seed0319.ttl
+CONSISTENT true
+FILE seed0320.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C1 http://ex/C0
+FILE seed0321.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C4 http://ex/C1
+FILE seed0322.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C3 http://ex/C0
+SUB http://ex/C3 http://ex/C2
+FILE seed0323.ttl
+CONSISTENT false
+FILE seed0324.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C4 http://ex/C0
+FILE seed0325.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C1 http://ex/C3
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C3 http://ex/C0
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C3 http://ex/C2
+FILE seed0326.ttl
+CONSISTENT true
+SUB http://ex/C4 http://ex/C3
+UNSAT http://ex/C0
+FILE seed0327.ttl
+CONSISTENT false
+FILE seed0328.ttl
+CONSISTENT false
+FILE seed0329.ttl
+CONSISTENT false
+FILE seed0330.ttl
+CONSISTENT true
+FILE seed0331.ttl
+CONSISTENT false
+FILE seed0332.ttl
+CONSISTENT false
+FILE seed0333.ttl
+CONSISTENT false
+FILE seed0334.ttl
+CONSISTENT false
+FILE seed0335.ttl
+CONSISTENT false
+FILE seed0336.ttl
+CONSISTENT false
+FILE seed0337.ttl
+CONSISTENT false
+FILE seed0338.ttl
+CONSISTENT false
+FILE seed0339.ttl
+CONSISTENT true
+UNSAT http://ex/C1
+UNSAT http://ex/C2
+UNSAT http://ex/C3
+FILE seed0340.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C1
+FILE seed0341.ttl
+CONSISTENT true
+FILE seed0342.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C0
+FILE seed0343.ttl
+CONSISTENT true
+FILE seed0344.ttl
+CONSISTENT true
+FILE seed0345.ttl
+CONSISTENT false
+FILE seed0346.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C2 http://ex/C3
+SUB http://ex/C2 http://ex/C4
+SUB http://ex/C3 http://ex/C4
+FILE seed0347.ttl
+CONSISTENT false
+FILE seed0348.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C4
+SUB http://ex/C4 http://ex/C3
+FILE seed0349.ttl
+CONSISTENT false
+FILE seed0350.ttl
+CONSISTENT true
+FILE seed0351.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+FILE seed0352.ttl
+CONSISTENT false
+FILE seed0353.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+FILE seed0354.ttl
+CONSISTENT false
+FILE seed0355.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C2 http://ex/C0
+SUB http://ex/C3 http://ex/C0
+FILE seed0356.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+FILE seed0357.ttl
+CONSISTENT false
+FILE seed0358.ttl
+CONSISTENT false
+FILE seed0359.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+FILE seed0360.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C1
+FILE seed0361.ttl
+CONSISTENT true
+UNSAT http://ex/C5
+FILE seed0362.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C4
+FILE seed0363.ttl
+CONSISTENT false
+FILE seed0364.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C3 http://ex/C2
+FILE seed0365.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C3
+FILE seed0366.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C1 http://ex/C2
+FILE seed0367.ttl
+CONSISTENT true
+FILE seed0368.ttl
+CONSISTENT false
+FILE seed0369.ttl
+CONSISTENT true
+FILE seed0370.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C2 http://ex/C1
+SUB http://ex/C3 http://ex/C1
+SUB http://ex/C4 http://ex/C1
+FILE seed0371.ttl
+CONSISTENT false
+FILE seed0372.ttl
+CONSISTENT true
+FILE seed0373.ttl
+CONSISTENT true
+FILE seed0374.ttl
+CONSISTENT false
+FILE seed0375.ttl
+CONSISTENT false
+FILE seed0376.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C3 http://ex/C2
+SUB http://ex/C4 http://ex/C2
+SUB http://ex/C4 http://ex/C3
+FILE seed0377.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C2 http://ex/C3
+FILE seed0378.ttl
+CONSISTENT true
+SUB http://ex/C2 http://ex/C0
+FILE seed0379.ttl
+CONSISTENT true
+FILE seed0380.ttl
+CONSISTENT true
+FILE seed0381.ttl
+CONSISTENT false
+FILE seed0382.ttl
+CONSISTENT false
+FILE seed0383.ttl
+CONSISTENT true
+FILE seed0384.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C2
+FILE seed0385.ttl
+CONSISTENT false
+FILE seed0386.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+FILE seed0387.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C2 http://ex/C1
+FILE seed0388.ttl
+CONSISTENT true
+UNSAT http://ex/C5
+FILE seed0389.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C0 http://ex/C2
+SUB http://ex/C1 http://ex/C2
+SUB http://ex/C2 http://ex/C1
+FILE seed0390.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C1
+SUB http://ex/C1 http://ex/C0
+FILE seed0391.ttl
+CONSISTENT false
+FILE seed0392.ttl
+CONSISTENT true
+FILE seed0393.ttl
+CONSISTENT false
+FILE seed0394.ttl
+CONSISTENT false
+FILE seed0395.ttl
+CONSISTENT true
+FILE seed0396.ttl
+CONSISTENT true
+SUB http://ex/C0 http://ex/C3
+SUB http://ex/C0 http://ex/C5
+SUB http://ex/C2 http://ex/C5
+SUB http://ex/C3 http://ex/C5
+FILE seed0397.ttl
+CONSISTENT true
+FILE seed0398.ttl
+CONSISTENT true
+SUB http://ex/C1 http://ex/C0
+SUB http://ex/C4 http://ex/C0
+FILE seed0399.ttl
+CONSISTENT true
+SUB http://ex/C3 http://ex/C4
+SUB http://ex/C4 http://ex/C3
