@@ -463,19 +463,19 @@ fn seeded_distinct_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
     );
     assert_eq!(dealer.draw_fp().value(), 888758199960741934);
 
-    // The REVEALED slot ORDER moved in #6117 step 6 (it was
-    // ["dummy", "dummy", "<http://ex/a> <http://ex/b>", "<http://ex/e> <http://ex/f>"]):
-    // the output stage now draws its sharings and its shuffle from the SAME source
-    // as the sort-and-scan stage instead of minting a second dealer, so the
-    // shuffle samples a different point of one continuous keystream. The order is
-    // the shuffle's secret permutation and carries no result meaning — the
+    // The REVEALED slot ORDER has moved twice: first in #6117 step 6 (the output
+    // stage draws its sharings and its shuffle from the SAME source as the
+    // sort-and-scan stage instead of minting a second dealer), then again when the
+    // output stage's per-element degree reduction added its re-sharings, so the
+    // shuffle samples a later point of one continuous keystream. The order is the
+    // shuffle's secret permutation and carries no result meaning — the
     // canonicalised multiset below is what the recipient sees, and it is
     // byte-identical to the pre-routing capture.
     let expected_slots = [
+        "<http://ex/a> <http://ex/b>",
         "<http://ex/e> <http://ex/f>",
         "dummy",
         "dummy",
-        "<http://ex/a> <http://ex/b>",
     ];
     let canonical = [
         "<http://ex/a> <http://ex/b>",
@@ -520,7 +520,7 @@ fn seeded_distinct_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
 /// when the witness draw count and the keep bits happen to agree.
 ///
 /// **This is the #6117-step-6 guard.** The transcript now ends in the output
-/// stage's 29 `vss_own_input` draws and its `oblivious_shuffle`: if
+/// stage's 113 `vss_own_input` draws and its `oblivious_shuffle`: if
 /// `distinct_hidden_pairs_slots_through` went back to minting its own dealer for
 /// the output stage the log would stop at 8418 entries and both the length and the
 /// suffix assertion would fail.
@@ -528,7 +528,8 @@ fn seeded_distinct_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
 /// The 8418-entry PREFIX is the pre-routing whole-log pin
 /// (`0x5455_9ace_20c7_0f97`, captured on the pre-routing code), asserted here
 /// unchanged: the routing appended an output-stage SUFFIX and moved nothing in the
-/// sort-and-scan part. The full-log fingerprint is the new pin.
+/// sort-and-scan part, and the output stage's per-element degree reduction only
+/// grew that suffix. The full-log fingerprint is the new pin.
 #[test]
 fn seeded_distinct_stage_transcript_is_pinned() {
     use crate::randomness::test_sources::{fingerprint, RecordingSource};
@@ -540,13 +541,14 @@ fn seeded_distinct_stage_transcript_is_pinned() {
     ];
     let mut rec = RecordingSource::new(backend.dealer());
     distinct_hidden_pairs_slots_through(&mut rec, &backend, &pairs, 4).unwrap();
-    assert_eq!(rec.log.len(), 8448);
-    // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
+    assert_eq!(rec.log.len(), 8532);
+    // Prefix unchanged from the pre-routing pin; the whole move is in the output
+    // suffix, which grew by the per-element degree reductions.
     assert_eq!(fingerprint(&rec.log[..8418]), 0x5455_9ace_20c7_0f97);
-    assert_eq!(fingerprint(&rec.log), 0x3160_a4cd_6b1a_3f2f);
+    assert_eq!(fingerprint(&rec.log), 0x0e8a_77a0_b90f_0200);
     let suffix: Vec<&str> = rec.log[8418..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,
-        [["vss_own_input"; 29].as_slice(), &["oblivious_shuffle"]].concat()
+        [["vss_own_input"; 113].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }

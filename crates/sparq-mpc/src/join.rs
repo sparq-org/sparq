@@ -2945,7 +2945,7 @@ mod randomness_seam_tests {
             ),
             (3, 3, 3, 3, 12, 3)
         );
-        assert_eq!(dealer.draw_fp().value(), 459721877472897114);
+        assert_eq!(dealer.draw_fp().value(), 2161249352783106125);
 
         let b = ShamirBackend::new_seeded(3, 0xBA7C2).unwrap();
         let join = HiddenValueJoin::new(b.clone());
@@ -2957,7 +2957,7 @@ mod randomness_seam_tests {
             (cost.bound, cost.shuffle.items, cost.shuffle.switches),
             (2, 2, 4)
         );
-        assert_eq!(dealer.draw_fp().value(), 949282158979249119);
+        assert_eq!(dealer.draw_fp().value(), 1407478561319806175);
     }
 
     /// The COMPLETE seam transcript of a batched join — both key columns (left
@@ -2997,17 +2997,19 @@ mod randomness_seam_tests {
             [
                 ["vss_own_input"; 6].as_slice(),
                 &["shared_nonzero_mask"; 3],
-                // The output stage: a real-tag sharing per candidate (the selector
-                // is a PUBLIC bit, lifted with its own sharing) then the payload
-                // limbs, and finally the shuffle over the three packed entries.
-                &["vss_own_input"; 15],
+                // The output stage: per slot a selector (a PUBLIC bit, lifted
+                // with its own sharing) + a real-tag sharing + `2t + 1 = 5`
+                // tag-reduction re-sharings, then per payload limb the limb
+                // sharing + 5 re-sharings — 25 per slot over three slots — and
+                // finally the shuffle over the three packed entries.
+                &["vss_own_input"; 75],
                 &["oblivious_shuffle"],
             ]
             .concat()
         );
         // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
         assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
-        assert_eq!(fingerprint(&rec.log), 0xcf4b_5f4b_0b3b_a661);
+        assert_eq!(fingerprint(&rec.log), 0x1522_2b64_f255_3b1f);
 
         let b = ShamirBackend::new_seeded(3, 0xBA7C2).unwrap();
         let join = HiddenValueJoin::new(b.clone());
@@ -3020,13 +3022,16 @@ mod randomness_seam_tests {
             [
                 ["vss_own_input"; 4].as_slice(),
                 &["shared_nonzero_mask"; 2],
-                &["vss_own_input"; 10],
+                // At `n = 3`, `t = 1` each reduction re-shares through 3 parties:
+                // per slot the tag costs 2 + 3 = 5 and each of the three limbs
+                // 1 + 3 = 4, so 17 per slot over two slots.
+                &["vss_own_input"; 34],
                 &["oblivious_shuffle"],
             ]
             .concat()
         );
         assert_eq!(fingerprint(&rec.log[..6]), 0xbd36_3090_bbad_ff3c);
-        assert_eq!(fingerprint(&rec.log), 0x1526_f97b_0b86_7eac);
+        assert_eq!(fingerprint(&rec.log), 0xa975_f38b_2f6e_c6e8);
 
         // `B = 5` over the SAME three candidates: the output stage pads with two
         // PURE-DUMMY slots on top of the three real ones. That padding branch is
@@ -3046,32 +3051,38 @@ mod randomness_seam_tests {
             [
                 ["vss_own_input"; 6].as_slice(),
                 &["shared_nonzero_mask"; 3],
-                // Five slots now, at the same five sharings per slot as the
-                // `B = 3` case (15 for three), then one shuffle over all five.
-                &["vss_own_input"; 25],
+                // Five slots now, at the same 25 sharings per slot as the
+                // `B = 3` case (75 for three), then one shuffle over all five.
+                &["vss_own_input"; 125],
                 &["oblivious_shuffle"],
             ]
             .concat()
         );
         // Same prefix pin as `B = 3`: `B` changes only the output suffix.
         assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
-        assert_eq!(fingerprint(&rec.log), 0x7550_17bd_b92f_7bd6);
+        assert_eq!(fingerprint(&rec.log), 0x348e_74ee_9564_b8cc);
     }
 
     /// Every key sharing (any row of either column), every equality mask AND every
     /// sharing the OUTPUT stage draws (real tag, pure-dummy selector, payload limb)
     /// in a batched join is shape-checked where it is consumed: corrupting exactly
-    /// ONE draw must be refused by the shape check itself. The 21 `vss_own_input`
-    /// sites are the 6 key sharings plus the output stage's 15 (#6117 step 6).
+    /// ONE draw must be refused by a shape check itself — either the stage's own
+    /// `checked_vss_own_input` or `shamir::degree_reduce_through`'s
+    /// `require_canonical_sharing` on a reduction re-sharing; both name the
+    /// canonical sharing, so the assertion below matches either wording. The 81
+    /// `vss_own_input` sites are the 6 key sharings plus the output stage's 75: per
+    /// slot a selector + a real-tag sharing + `2t + 1 = 5` tag-reduction
+    /// re-sharings, then per payload limb the limb sharing + 5 re-sharings.
     #[test]
     fn malformed_draws_are_refused_at_every_batched_join_consumption_site() {
-        use crate::randomness::test_sources::{
-            MalformedSource, SeamMethod, ALL_MALFORMATIONS, SHAPE_REFUSAL,
-        };
+        use crate::randomness::test_sources::{MalformedSource, SeamMethod, ALL_MALFORMATIONS};
+        /// Either shape refusal's common substring (the stage's own, or the
+        /// reduction's "re-sharing" wording).
+        const ANY_SHAPE_REFUSAL: &str = "sharing that is not the canonical";
         let b = ShamirBackend::new_seeded(5, 0xBA7C3).unwrap();
         let join = HiddenValueJoin::new(b.clone());
         let (l, r) = positional_pair();
-        let sites = (0..21)
+        let sites = (0..81)
             .map(|k| (SeamMethod::VssOwnInput, k))
             .chain((0..3).map(|k| (SeamMethod::SharedNonzeroMask, k)));
         for (method, skip) in sites {
@@ -3079,7 +3090,7 @@ mod randomness_seam_tests {
                 let mut src = MalformedSource::new(b.dealer(), method, skip, how);
                 match join.batched_join_through(&mut src, &l, &r, 3) {
                     Err(MpcError::Protocol(m)) => assert!(
-                        m.contains(SHAPE_REFUSAL),
+                        m.contains(ANY_SHAPE_REFUSAL),
                         "{method:?} #{skip}, {how:?}: wrong check: {m}"
                     ),
                     other => {
@@ -3152,20 +3163,20 @@ mod randomness_seam_tests {
     // ---- The fully-oblivious join's output stage (#6117 step 5) ----
 
     /// The fully-oblivious fixture: the positional pair at `bound = 4`, so the
-    /// three candidates get one pure-dummy padding slot. The output stage draws 17
-    /// sharings — a real-tag sharing per candidate (the selector is the SHARED
-    /// equality bit, which costs no draw), a zero-selector + real-tag sharing for
-    /// the padding slot, then three payload limbs per slot — and then one shuffle.
-    const OUTPUT_STAGE_DRAWS: usize = 18;
+    /// three candidates get one pure-dummy padding slot. At `n = 5`, `t = 2` each
+    /// degree reduction re-shares through `2t + 1 = 5` parties, so the output stage
+    /// draws 97 sharings — per candidate a real-tag sharing + 5 reduction
+    /// re-sharings (the selector is the SHARED equality bit, which costs no draw),
+    /// for the padding slot a zero-selector + a real-tag sharing + 5 re-sharings,
+    /// then for each of the three payload limbs per slot the limb sharing + 5
+    /// re-sharings — and then one shuffle.
+    const OUTPUT_STAGE_DRAWS: usize = 98;
 
-    /// Pinned from the PRE-ROUTING code, captured on `origin/main` by threading a
-    /// draw log through the unmodified output stage and handing it the SAME dealer
-    /// the equality bits were drawn from — the arrangement this routing makes the
-    /// only one (see the behaviour note on
-    /// [`HiddenValueJoin::fully_oblivious_batched_join`]). The rows are the
-    /// canonicalised result, which `origin/main` produces identically on both its
-    /// own two-dealer path and that shared-dealer arrangement; the WITNESS draw
-    /// after the run pins the total draw count of the whole join.
+    /// The rows are the canonicalised result — unchanged — and the WITNESS draw
+    /// after the run pins the total draw count of the whole join. The witness and
+    /// the modelled costs other than `degree_reductions` were pinned against the
+    /// pre-routing code; the witness was re-captured when the per-element degree
+    /// reduction added its `2t + 1` re-sharings per selected element.
     #[test]
     fn seeded_fully_oblivious_join_draws_exactly_what_the_dealer_drew_before_the_seam() {
         let b = ShamirBackend::new_seeded(5, 0x0B16).unwrap();
@@ -3182,7 +3193,10 @@ mod randomness_seam_tests {
         assert_eq!(cost.bound, 4);
         assert_eq!(cost.shuffle.items, 4);
         assert_eq!(cost.shuffle.switches, 20);
-        assert_eq!(dealer.draw_fp().value(), 743530243942672807);
+        // One degree reduction per selected element: the tag plus its three limbs,
+        // over four slots.
+        assert_eq!(cost.degree_reductions, 16);
+        assert_eq!(dealer.draw_fp().value(), 529688288171226898);
 
         // The public entry point mints its own dealer from the same seeded
         // backend, so it reproduces the same run.
@@ -3191,10 +3205,11 @@ mod randomness_seam_tests {
     }
 
     /// The OUTPUT-STAGE suffix of the fully-oblivious join's seam transcript —
-    /// the 17 sharings in consumption order then the shuffled column — folded into
-    /// the order-sensitive fingerprint, pinned against the pre-routing code. Only
-    /// the suffix: the long prefix is the per-pair `secure_equal_to_bit` chain,
-    /// whose own transcript the `compare` seam tests already pin.
+    /// every sharing in consumption order then the shuffled column — folded into
+    /// the order-sensitive fingerprint. Only the suffix: the long prefix is the
+    /// per-pair `secure_equal_to_bit` chain, whose own transcript the `compare` seam
+    /// tests already pin, and which this change does not touch. The suffix pin was
+    /// re-captured when the per-element degree reduction grew the stage's draws.
     #[test]
     fn seeded_fully_oblivious_output_stage_transcript_is_pinned() {
         use crate::randomness::test_sources::{fingerprint, RecordingSource};
@@ -3218,7 +3233,7 @@ mod randomness_seam_tests {
             ]
             .concat()
         );
-        assert_eq!(fingerprint(suffix), 0x8bcd_93aa_c917_47ea);
+        assert_eq!(fingerprint(suffix), 0xb7ce_9855_44a5_f58e);
     }
 
     /// A source whose `(n, t)` differs from the backend's is refused before the
