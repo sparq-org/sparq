@@ -4,8 +4,9 @@
 // ontology per construct). The differential test runs a seeded generator of random SHIQ
 // ontologies and compares consistency, unsatisfiable classes and every entailed named
 // subsumption with answers recorded from an independent OWL 2 DL reasoner
-// (`tests/data/owl2dl_oracle_expected.txt`); a second, focused corpus has its own answers
-// (`tests/data/owl2dl_oracle_focused_expected.txt`). To regenerate them, dump the corpora with
+// (`tests/data/owl2dl_oracle_expected.txt`); a second, focused corpus and a corpus of data
+// properties and datatypes have their own answers (`tests/data/owl2dl_oracle_focused_expected.txt`,
+// `tests/data/owl2dl_oracle_datatypes_expected.txt`). To regenerate them, dump the corpora with
 // `OWL2DL_ORACLE_DUMP=<dir> cargo test -p sparq-reason-dl --test owl2dl_reasoner oracle`,
 // run the reference reasoner over `<dir>/<corpus>/*.ttl` in seed order, and write its answers
 // in the same line format (see `render`).
@@ -1034,6 +1035,11 @@ fn undecidable_datatype_questions_answer_unknown() {
         "{DDECL} :a :d \"1000000000000000000000000000000000000000000\"^^xsd:integer ."
     ));
     assert!(is_datatype_unknown(&c), "{c:?}");
+    // A facet bound outside the restricted datatype's value space.
+    let c = verdict(&format!(
+        "{DDECL} :d rdfs:range [ a rdfs:Datatype ; owl:onDatatype xsd:nonNegativeInteger ; owl:withRestrictions ( [ xsd:maxExclusive -2 ] ) ] ."
+    ));
+    assert!(is_datatype_unknown(&c), "{c:?}");
     // An rdf:XMLLiteral literal (its XML content is not checked).
     let c = verdict(&format!("{DDECL} :a :d \"<b>x</b>\"^^rdf:XMLLiteral ."));
     assert!(is_datatype_unknown(&c), "{c:?}");
@@ -1069,6 +1075,22 @@ fn undecidable_datatype_questions_answer_unknown() {
     ));
     let r = Reasoner::new(&d, &o, Budget::default()).unwrap();
     assert_eq!(r.is_satisfiable("http://ex/X"), None);
+    // Concrete nodes and their datatype checks count against the budget.
+    let body = format!("{PRE}{DDECL} :a a {} .", dmin(40, ":d", &int_range(1, 40)));
+    let (d, t) = Graph::parse_to_triples(&body, "turtle").unwrap();
+    let o = extract(&d, &t).unwrap();
+    let small = Budget {
+        max_steps: 200,
+        max_nodes: 100_000,
+    };
+    assert_eq!(
+        check(&d, &o, small).consistency,
+        Consistency::Unknown(UnknownReason::ResourceBudget)
+    );
+    assert_eq!(
+        check(&d, &o, Budget::default()).consistency,
+        Consistency::Consistent
+    );
 }
 
 #[test]
@@ -1386,7 +1408,17 @@ fn expected(text: &str) -> BTreeMap<u64, String> {
 
 /// Compares `seeds` generated ontologies with the reference answers in `recorded`. With
 /// `OWL2DL_ORACLE_DUMP=<dir>` set, writes the corpus to `<dir>/<corpus>/` instead.
-fn differential(corpus: &str, generate: fn(u64) -> String, seeds: u64, recorded: &str) {
+///
+/// Every verdict must agree exactly. With `max_unknown_percent` set, an `Unknown` answer
+/// (no consistency verdict, or no classification) is counted instead of failing, and at
+/// most that share of the seeds may be unknown; without it, every seed needs a verdict.
+fn differential(
+    corpus: &str,
+    generate: fn(u64) -> String,
+    seeds: u64,
+    recorded: &str,
+    max_unknown_percent: Option<u64>,
+) {
     if let Ok(dir) = std::env::var("OWL2DL_ORACLE_DUMP") {
         let dir = format!("{dir}/{corpus}");
         std::fs::create_dir_all(&dir).unwrap();
@@ -1399,6 +1431,7 @@ fn differential(corpus: &str, generate: fn(u64) -> String, seeds: u64, recorded:
     let expected = expected(recorded);
     let mut failures = Vec::new();
     let mut skipped = 0;
+    let mut unknown = 0;
     for seed in 0..seeds {
         let body = generate(seed);
         let (d, t) = Graph::parse_to_triples(&format!("{PRE}{body}"), "turtle").unwrap();
@@ -1418,6 +1451,10 @@ fn differential(corpus: &str, generate: fn(u64) -> String, seeds: u64, recorded:
         // The reference itself failed on this seed (recorded as an `ERROR` line).
         if want.starts_with("ERROR") {
             skipped += 1;
+            continue;
+        }
+        if max_unknown_percent.is_some() && got.starts_with("UNKNOWN") {
+            unknown += 1;
             continue;
         }
         if &got != want {
@@ -1449,6 +1486,16 @@ fn differential(corpus: &str, generate: fn(u64) -> String, seeds: u64, recorded:
         skipped * 50 < seeds,
         "the reference failed on {skipped} seeds"
     );
+    eprintln!(
+        "{corpus}: {} of {seeds} agree, {unknown} unknown, {skipped} skipped",
+        seeds - skipped - unknown - failures.len() as u64
+    );
+    if let Some(pct) = max_unknown_percent {
+        assert!(
+            unknown * 100 <= seeds * pct,
+            "{unknown} of {seeds} seeds answered unknown"
+        );
+    }
     assert!(
         failures.is_empty(),
         "{} of {seeds} seeds disagree:\n{}",
@@ -1469,6 +1516,7 @@ fn oracle_differential() {
         Gen::ontology,
         SEEDS,
         include_str!("data/owl2dl_oracle_expected.txt"),
+        None,
     );
 }
 
@@ -1571,5 +1619,369 @@ fn oracle_differential_focused() {
         focused,
         FOCUSED_SEEDS,
         include_str!("data/owl2dl_oracle_focused_expected.txt"),
+        None,
+    );
+}
+
+/// A corpus of data properties and datatypes: data property axioms, data restrictions
+/// over integer, decimal, string and boolean ranges (facet restrictions, `DataOneOf`, the
+/// data booleans, a `DatatypeDefinition`), and data assertions whose literals denote the
+/// same value in different datatypes and lexical forms.
+///
+/// Left out on purpose, where the reference reasoner departs from the OWL 2 Direct
+/// Semantics: ill-typed literals (it refuses the ontology instead of answering
+/// inconsistent), facet bounds that make a single-value interval at zero (see `range`), a
+/// `DataUnionOf` or `DataIntersectionOf` in the filler of a data cardinality restriction
+/// (it answers wrongly when the boolean is empty or a single value: with
+/// `SubClassOf(C1 DataMaxCardinality(1 d (E1 ∪ E2)))` for empty facet restrictions `E1`,
+/// `E2` and `SubClassOf(DataMaxCardinality(2 d xsd:int) C2)` it entails `C1 ⊑ C2`, though
+/// each `Eᵢ` alone does not; it finds `ClassAssertion(DataExactCardinality(1 d
+/// (xsd:nonNegativeInteger ∪ xsd:integer)) a)` consistent with `d(a, -1)` and `d(a, 4)`;
+/// and with a `DataPropertyDomain` it finds `EquivalentClasses(C
+/// ¬DataExactCardinality(1 d ({2} ∩ xsd:integer)))` inconsistent with one assertion),
+/// `xsd:float` / `xsd:double` zeros (it treats `"0"` and `"-0"` as one
+/// value, while OWL 2 §4.2 makes them distinct), and `NegativeDataPropertyAssertion` (it
+/// compares the target literal syntactically, so `"2"^^xsd:nonNegativeInteger` does not
+/// exclude the value `2`; the corpus uses the equivalent class assertion
+/// `∀D.¬{v}(a)`, which it compares by value). `xsd:pattern` is left out too: its
+/// regular-expression dialect differs between implementations. All four are covered by
+/// the hand-written tests above.
+fn datatypes_corpus(seed: u64) -> String {
+    struct D {
+        g: Gen,
+        n_data: usize,
+        defined: bool,
+    }
+
+    impl D {
+        fn data(&mut self) -> String {
+            format!(":d{}", self.g.rng.below(self.n_data))
+        }
+
+        fn small(&mut self) -> i64 {
+            self.g.rng.below(9) as i64 - 2
+        }
+
+        fn literal(&mut self) -> String {
+            let n = self.small();
+            match self.g.rng.below(11) {
+                0 => format!("\"{n}\"^^xsd:integer"),
+                1 => format!("\"{n}\"^^xsd:int"),
+                2 if n >= 0 => format!("\"0{n}\"^^xsd:integer"),
+                3 if n >= 0 => format!("\"{n}\"^^xsd:nonNegativeInteger"),
+                4 => format!("\"{n}.0\"^^xsd:decimal"),
+                5 => format!("\"{n}.5\"^^xsd:decimal"),
+                6 => ["\"a\"", "\"b\"", "\"ab\""][self.g.rng.below(3)].to_string(),
+                7 => ["\"a\"^^xsd:string", "\"\"^^xsd:string"][self.g.rng.below(2)].to_string(),
+                8 => [
+                    "\"true\"^^xsd:boolean",
+                    "\"false\"^^xsd:boolean",
+                    "\"1\"^^xsd:boolean",
+                ][self.g.rng.below(3)]
+                .to_string(),
+                _ => format!("{n}"),
+            }
+        }
+
+        /// A data range; `in_card` keeps `DataUnionOf` and `DataIntersectionOf` (and the
+        /// defined datatype, which may be one) out of the filler of a data cardinality
+        /// restriction.
+        fn range(&mut self, depth: usize, in_card: bool) -> String {
+            let pick = if depth == 0 {
+                self.g.rng.below(9)
+            } else {
+                self.g.rng.below(13)
+            };
+            let pick = if in_card && matches!(pick, 7 | 9 | 10) {
+                3
+            } else {
+                pick
+            };
+            match pick {
+                0 => "xsd:integer".into(),
+                1 => "xsd:nonNegativeInteger".into(),
+                2 => [
+                    "xsd:string",
+                    "xsd:boolean",
+                    "xsd:decimal",
+                    "xsd:int",
+                    "rdfs:Literal",
+                ][self.g.rng.below(5)]
+                .into(),
+                3 | 4 => {
+                    let base = [
+                        "xsd:integer",
+                        "xsd:int",
+                        "xsd:nonNegativeInteger",
+                        "xsd:decimal",
+                    ][self.g.rng.below(4)];
+                    // Bounds stay in the restricted datatype's value space (a bound outside it
+                    // is outside the facet space, which the oracle answers Unknown for), and
+                    // away from -1, 0 and 1: the reference reasoner gets an interval ending
+                    // at zero wrong when it is a single value (it does not find
+                    // `integer[0, 0] ⊑ integer[0, 5]`, though it finds `[3, 3] ⊑ [0, 5]`).
+                    let bound = |d: &mut D| {
+                        let n: i64 = [-3, -2, 2, 3, 4, 5, 6][d.g.rng.below(7)];
+                        if base == "xsd:nonNegativeInteger" {
+                            n.abs()
+                        } else {
+                            n
+                        }
+                    };
+                    let mut facets = Vec::new();
+                    for f in [
+                        "xsd:minInclusive",
+                        "xsd:maxInclusive",
+                        "xsd:minExclusive",
+                        "xsd:maxExclusive",
+                    ] {
+                        if self.g.rng.chance(35) {
+                            let n = bound(self);
+                            facets.push(format!("[ {f} \"{n}\"^^xsd:integer ]"));
+                        }
+                    }
+                    if facets.is_empty() {
+                        let n = bound(self);
+                        facets.push(format!("[ xsd:maxInclusive \"{n}\"^^xsd:integer ]"));
+                    }
+                    format!(
+                        "[ a rdfs:Datatype ; owl:onDatatype {base} ; owl:withRestrictions ( {} ) ]",
+                        facets.join(" ")
+                    )
+                }
+                5 => {
+                    let n = 1 + self.g.rng.below(3);
+                    let lits: Vec<String> = (0..n).map(|_| self.literal()).collect();
+                    format!("[ a rdfs:Datatype ; owl:oneOf ( {} ) ]", lits.join(" "))
+                }
+                6 => {
+                    let (lo, hi) = (self.g.rng.below(3), self.g.rng.below(3));
+                    format!(
+                        "[ a rdfs:Datatype ; owl:onDatatype xsd:string ; owl:withRestrictions ( [ xsd:minLength \"{lo}\"^^xsd:integer ] [ xsd:maxLength \"{hi}\"^^xsd:integer ] ) ]"
+                    )
+                }
+                7 if self.defined => ":DT0".into(),
+                7 | 8 => "xsd:integer".into(),
+                9 | 10 => {
+                    let kw = if pick == 9 {
+                        "owl:unionOf"
+                    } else {
+                        "owl:intersectionOf"
+                    };
+                    let (a, b) = (
+                        self.range(depth - 1, in_card),
+                        self.range(depth - 1, in_card),
+                    );
+                    // A data union or intersection needs two distinct members.
+                    if a == b {
+                        return a;
+                    }
+                    format!("[ a rdfs:Datatype ; {kw} ( {a} {b} ) ]")
+                }
+                _ => format!(
+                    "[ a rdfs:Datatype ; owl:datatypeComplementOf {} ]",
+                    self.range(depth - 1, in_card)
+                ),
+            }
+        }
+
+        fn restriction(&mut self) -> String {
+            let d = self.data();
+            let card = |n: usize| format!("\"{n}\"^^xsd:nonNegativeInteger");
+            // Cardinalities are weighted up: they exercise the datatype check most.
+            match [0, 1, 2, 3, 4, 4, 4, 5, 5, 5, 6, 6, 7][self.g.rng.below(13)] {
+                0 | 1 => format!(
+                    "[ a owl:Restriction ; owl:onProperty {d} ; owl:someValuesFrom {} ]",
+                    self.range(1, false)
+                ),
+                2 => format!(
+                    "[ a owl:Restriction ; owl:onProperty {d} ; owl:allValuesFrom {} ]",
+                    self.range(1, false)
+                ),
+                3 => format!(
+                    "[ a owl:Restriction ; owl:onProperty {d} ; owl:hasValue {} ]",
+                    self.literal()
+                ),
+                4 => format!(
+                    "[ a owl:Restriction ; owl:onProperty {d} ; owl:minQualifiedCardinality {} ; owl:onDataRange {} ]",
+                    card(1 + self.g.rng.below(3)),
+                    self.range(1, true)
+                ),
+                5 => format!(
+                    "[ a owl:Restriction ; owl:onProperty {d} ; owl:maxQualifiedCardinality {} ; owl:onDataRange {} ]",
+                    card(self.g.rng.below(3)),
+                    self.range(1, true)
+                ),
+                6 => format!(
+                    "[ a owl:Restriction ; owl:onProperty {d} ; owl:qualifiedCardinality {} ; owl:onDataRange {} ]",
+                    card(1 + self.g.rng.below(2)),
+                    self.range(1, true)
+                ),
+                _ => {
+                    let kw = ["owl:minCardinality", "owl:maxCardinality", "owl:cardinality"]
+                        [self.g.rng.below(3)];
+                    format!(
+                        "[ a owl:Restriction ; owl:onProperty {d} ; {kw} {} ]",
+                        card(self.g.rng.below(3))
+                    )
+                }
+            }
+        }
+
+        /// A class expression mixing classes, booleans, an object role and data
+        /// restrictions.
+        fn concept(&mut self, depth: usize) -> String {
+            if depth == 0 || self.g.rng.chance(25) {
+                return if self.g.rng.chance(60) {
+                    self.restriction()
+                } else if self.g.rng.chance(15) {
+                    format!("[ a owl:Class ; owl:complementOf {} ]", self.g.class())
+                } else {
+                    self.g.class()
+                };
+            }
+            let d = depth - 1;
+            match self.g.rng.below(6) {
+                0 => format!(
+                    "[ a owl:Class ; owl:intersectionOf ( {} {} ) ]",
+                    self.concept(d),
+                    self.concept(d)
+                ),
+                1 => format!(
+                    "[ a owl:Class ; owl:unionOf ( {} {} ) ]",
+                    self.concept(d),
+                    self.concept(d)
+                ),
+                2 => format!("[ a owl:Class ; owl:complementOf {} ]", self.concept(d)),
+                3 => format!(
+                    "[ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom {} ]",
+                    self.concept(d)
+                ),
+                4 => format!(
+                    "[ a owl:Restriction ; owl:onProperty :r0 ; owl:allValuesFrom {} ]",
+                    self.concept(d)
+                ),
+                _ => self.restriction(),
+            }
+        }
+    }
+
+    let mut rng = Rng(seed.wrapping_mul(0xA24B_AED4_963E_E407) | 1);
+    let n_classes = 3 + rng.below(4);
+    let n_data = 2 + rng.below(3);
+    let defined = rng.chance(20);
+    let mut out = String::new();
+    let _ = writeln!(out, "<http://ex/dt{seed}> a owl:Ontology .");
+    for i in 0..n_classes {
+        let _ = writeln!(out, ":C{i} a owl:Class .");
+    }
+    let _ = writeln!(out, ":r0 a owl:ObjectProperty .");
+    for i in 0..n_data {
+        let _ = writeln!(out, ":d{i} a owl:DatatypeProperty .");
+    }
+    let g = Gen {
+        rng,
+        n_classes,
+        n_roles: 1,
+        simple: vec![true],
+    };
+    let mut d = D {
+        g,
+        n_data,
+        defined: false,
+    };
+    if defined {
+        let r = d.range(1, false);
+        let _ = writeln!(out, ":DT0 a rdfs:Datatype ; owl:equivalentClass {r} .");
+        d.defined = true;
+    }
+    for i in 0..n_data {
+        if d.g.rng.chance(35) {
+            let _ = writeln!(out, ":d{i} a owl:FunctionalProperty .");
+        }
+        if d.g.rng.chance(15) {
+            let c = d.concept(1);
+            let _ = writeln!(out, ":d{i} rdfs:domain {c} .");
+        }
+        if d.g.rng.chance(30) {
+            let r = d.range(1, false);
+            let _ = writeln!(out, ":d{i} rdfs:range {r} .");
+        }
+    }
+    for _ in 0..d.g.rng.below(5) {
+        let (a, b) = (d.g.rng.below(n_data), d.g.rng.below(n_data));
+        if a == b {
+            continue;
+        }
+        let p = [
+            "rdfs:subPropertyOf",
+            "owl:equivalentProperty",
+            "owl:propertyDisjointWith",
+        ][d.g.rng.below(3)];
+        let _ = writeln!(out, ":d{a} {p} :d{b} .");
+    }
+    for _ in 0..(2 + d.g.rng.below(5)) {
+        match d.g.rng.below(10) {
+            0..=5 => {
+                let (a, b) = if d.g.rng.chance(50) {
+                    (d.g.class(), d.concept(2))
+                } else {
+                    (d.concept(2), d.g.class())
+                };
+                let _ = writeln!(out, "{a} rdfs:subClassOf {b} .");
+            }
+            6 | 7 => {
+                let (a, b) = (d.g.class(), d.concept(2));
+                let _ = writeln!(out, "{a} owl:equivalentClass {b} .");
+            }
+            _ => {
+                let (a, b) = (d.g.class(), d.g.class());
+                if a != b {
+                    let _ = writeln!(out, "{a} owl:disjointWith {b} .");
+                }
+            }
+        }
+    }
+    let n_ind = 1 + d.g.rng.below(3);
+    for i in 0..n_ind {
+        let _ = writeln!(out, ":i{i} a owl:NamedIndividual .");
+    }
+    if n_ind > 0 {
+        for _ in 0..d.g.rng.below(9) {
+            let a = d.g.rng.below(n_ind);
+            match d.g.rng.below(10) {
+                0..=2 => {
+                    let c = d.concept(1);
+                    let _ = writeln!(out, ":i{a} a {c} .");
+                }
+                3..=6 => {
+                    let (p, l) = (d.data(), d.literal());
+                    let _ = writeln!(out, ":i{a} {p} {l} .");
+                }
+                7 => {
+                    let b = d.g.rng.below(n_ind);
+                    let _ = writeln!(out, ":i{a} :r0 :i{b} .");
+                }
+                _ => {
+                    // `NegativeDataPropertyAssertion(p a l)`, in its class-assertion form.
+                    let (p, l) = (d.data(), d.literal());
+                    let _ = writeln!(out, ":i{a} a [ a owl:Restriction ; owl:onProperty {p} ; owl:allValuesFrom [ a rdfs:Datatype ; owl:datatypeComplementOf [ a rdfs:Datatype ; owl:oneOf ( {l} ) ] ] ] .");
+                }
+            }
+        }
+    }
+    out
+}
+
+const DATATYPE_SEEDS: u64 = 300;
+
+#[test]
+fn oracle_differential_datatypes() {
+    differential(
+        "datatypes",
+        datatypes_corpus,
+        DATATYPE_SEEDS,
+        include_str!("data/owl2dl_oracle_datatypes_expected.txt"),
+        Some(10),
     );
 }
