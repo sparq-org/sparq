@@ -90,11 +90,6 @@ impl AccessProvenance {
         self.by_resource.retain(|r, _| exists(r));
     }
 
-    /// Whether there is any fact about `resource`. Internal.
-    pub(crate) fn knows(&self, resource: &str) -> bool {
-        self.by_resource.contains_key(resource)
-    }
-
     /// Forget every fact about `resource` (for a resource that no longer exists, or comes back
     /// without what kept them). Internal.
     pub(crate) fn forget(&mut self, resource: &str) {

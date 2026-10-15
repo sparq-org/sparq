@@ -3196,6 +3196,16 @@ impl Graph {
         Ok(())
     }
 
+    /// Refuse a rewrite of the base (compaction, vacuum) while the journal keeps a frame for the
+    /// reopen to replay: the rewrite would start a fresh journal without it.
+    fn refuse_while_txn_poisoned(&self) -> Result<(), String> {
+        #[cfg(feature = "mmap")]
+        if self.txn.as_ref().is_some_and(TxnJournal::poisoned) {
+            return Err("the txn journal keeps a failed commit; reopen the graph first".to_owned());
+        }
+        Ok(())
+    }
+
     /// Keep the journal's frame for the next reopen to replay, and refuse every later
     /// commit until then: for a caller whose materialisation failed after the commit point
     /// (`sparq_engine::apply_effects`). A NO-OP for an in-memory graph.
@@ -3603,6 +3613,7 @@ impl Graph {
     /// then swapped in via rename) and the write-ahead log truncated; the graph re-opens
     /// memory-mapped from the new base.
     pub fn compact(&mut self) -> Result<(), String> {
+        self.refuse_while_txn_poisoned()?;
         #[cfg(feature = "mmap")]
         let dir = self.wal.as_ref().map(|w| w.dir.clone());
         // Fold the structural-fork layers first (ids unchanged throughout): named
@@ -3756,6 +3767,7 @@ impl Graph {
     /// external backups), which the storage/backup tier must handle per the retention-erasure
     /// runbook.
     pub fn vacuum(&mut self) -> Result<(), String> {
+        self.refuse_while_txn_poisoned()?;
         #[cfg(feature = "mmap")]
         let dir = self.wal.as_ref().map(|w| w.dir.clone());
         // Re-intern the whole live dataset into a fresh graph with an EMPTY dictionary, so any
@@ -4351,6 +4363,14 @@ impl TxnJournal {
     /// no-op (an UPDATE that resolves to no data change carries no atomicity obligation).
     fn append(&mut self, records: &[TxnRecord]) -> std::io::Result<()> {
         use std::io::Write;
+        // A failed append may have left any part of its frame behind, a complete one included,
+        // for a later replay to apply: the journal takes no further frame, not even an empty
+        // one, until it is reopened (and replayed), so nothing is ever appended after it.
+        if self.poisoned {
+            return Err(std::io::Error::other(
+                "txn journal refused: an earlier append failed; reopen the graph",
+            ));
+        }
         if records.is_empty() {
             return Ok(());
         }
@@ -4376,14 +4396,6 @@ impl TxnJournal {
         let crc = Wal::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
-        // A failed append may have left any part of its frame behind, a complete one included,
-        // for a later replay to apply: the journal takes no further frame until it is reopened
-        // (and replayed), so nothing is ever appended after it.
-        if self.poisoned {
-            return Err(std::io::Error::other(
-                "txn journal refused: an earlier append failed; reopen the graph",
-            ));
-        }
         let written = self
             .file
             .write_all(&buf)
@@ -4399,11 +4411,13 @@ impl TxnJournal {
         self.poisoned
     }
 
-    /// Empties the journal (after its frame has been materialised into the per-graph state),
-    /// unless an append or a materialisation failed: its frame is then kept for the reopen.
+    /// Empties the journal (after its frame has been materialised into the per-graph state).
+    /// Refused once an append or a materialisation failed: its frame is kept for the reopen.
     fn truncate(&mut self) -> std::io::Result<()> {
         if self.poisoned {
-            return Ok(());
+            return Err(std::io::Error::other(
+                "txn journal kept: an earlier commit failed; reopen the graph",
+            ));
         }
         self.file.set_len(0)?;
         self.file.sync_data()
@@ -10515,10 +10529,6 @@ mod tests {
         vec![("<http://ex/n0>".into(), "<http://ex/p>".into(), "<http://ex/o0>".into())]
     }
 
-    /// (sq-ycle) TORN-TAIL guarantee: a multi-slot redo frame (a default-graph record
-    /// PLUS a named-graph record) whose commit trailer + part of the last record were severed by a
-    /// crash must apply NOTHING on `open`, and the torn `txn.log` must be truncated to empty.
-    /// Mirrors `wal_torn_multi_record_batch_is_all_or_nothing` for the parent-level journal.
     /// A journal whose frame failed to materialise keeps it for the reopen to redo, and
     /// refuses later commits unwritten until then.
     #[cfg(feature = "mmap")]
@@ -10535,7 +10545,8 @@ mod tests {
             vec![(true, None, [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")])];
         g.commit_txn_checked(&first).unwrap();
         g.poison_txn();
-        g.clear_txn().unwrap();
+        assert!(g.clear_txn().is_err(), "a poisoned journal is not cleared");
+        assert!(!g.commit_txn_checked(&[]).unwrap_err().0, "nor takes an empty frame");
         let held = std::fs::read(TxnJournal::path(&dir)).unwrap();
         assert!(!held.is_empty(), "the frame stays for the reopen");
         let second: Vec<(bool, Option<Term>, [Term; 3])> =
@@ -10543,6 +10554,8 @@ mod tests {
         let refused = g.commit_txn_checked(&second).unwrap_err();
         assert!(!refused.0, "refused unwritten");
         assert_eq!(std::fs::read(TxnJournal::path(&dir)).unwrap(), held);
+        assert!(g.compact().is_err(), "nor is the base rewritten without it");
+        assert!(g.vacuum().is_err());
         drop(g);
         let reopened = Graph::open(&dir).unwrap();
         let nt = format!("{:?}", dump_terms(&reopened));
@@ -10551,6 +10564,10 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
+    /// (sq-ycle) TORN-TAIL guarantee: a multi-slot redo frame (a default-graph record
+    /// PLUS a named-graph record) whose commit trailer + part of the last record were severed by a
+    /// crash must apply NOTHING on `open`, and the torn `txn.log` must be truncated to empty.
+    /// Mirrors `wal_torn_multi_record_batch_is_all_or_nothing` for the parent-level journal.
     #[cfg(feature = "mmap")]
     #[test]
     fn txn_journal_torn_tail_is_all_or_nothing() {

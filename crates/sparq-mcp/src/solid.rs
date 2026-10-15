@@ -786,14 +786,12 @@ impl SolidMcpServer {
     }
 
     /// Rebuild the authorization view after this call changed the store's graphs since
-    /// `before`: the store's provenance follows the change, with the session agent as the
-    /// creator of every resource it brings into being that has no `.acr` of its own stored
-    /// already (see [`PodStore::rematerialize_after_edit`]). On error nothing of the view or provenance
-    /// changed, and the caller restores the graphs.
+    /// `before`: the store's provenance follows the change (see
+    /// [`PodStore::rematerialize_after_edit`]), recording no creator for what it creates. On
+    /// error nothing of the view or provenance changed, and the caller restores the graphs.
     fn rematerialize_after(&mut self, before: &StoredGraphs) -> Result<(), String> {
-        let agent = self.config.agent.clone();
         self.store
-            .rematerialize_after_edit(before, agent.as_deref(), self.config.acp)
+            .rematerialize_after_edit(before, None, self.config.acp)
             .map(|_| ())
     }
 

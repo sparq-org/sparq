@@ -398,6 +398,22 @@ fn a_resource_removed_outside_an_update_is_forgotten_at_the_next_rebuild() {
 }
 
 #[test]
+fn a_wac_rebuild_forgets_a_removed_resource_too() {
+    let mut store = store();
+    let d0 = store
+        .graph
+        .named
+        .iter()
+        .position(|(n, _)| n.to_string() == format!("<{D0}>"))
+        .expect("d0 is stored");
+    let removed = store.graph.named.remove(d0);
+    store.materialize_wac().expect("WAC rebuild without d0");
+    store.graph.named.push(removed);
+    store.materialize_acp().expect("ACP rebuild with d0 again");
+    assert_context_forgotten(&store, "remove, WAC rebuild, restore");
+}
+
+#[test]
 fn a_container_left_with_only_its_access_control_document_keeps_its_creator() {
     const BOX: &str = "https://pod.ex/box/";
     let acr = format!("{BOX}.acr");
@@ -764,4 +780,27 @@ fn an_access_control_list_in_an_acp_pod_keeps_no_creator() {
         .update_as_acp(&sess(ADMIN), "DROP GRAPH <https://pod.ex/a/z>")
         .expect("admin drops z");
     assert_eq!(store.acp_provenance().creator("https://pod.ex/a/z"), None);
+}
+
+#[test]
+fn a_resource_whose_acr_went_after_it_comes_back_with_nothing() {
+    let mut store = kept_under_own_acr();
+    store
+        .update_as_acp(&sess(ADMIN), &format!("DROP GRAPH <{KR}>"))
+        .expect("admin drops r");
+    assert_eq!(store.acp_provenance().creator(KR), Some(ALICE), "kept with r.acr");
+    store
+        .update_as_acp(&sess(ADMIN), &format!("DROP GRAPH <{KRACR}>"))
+        .expect("admin drops r.acr");
+    assert_eq!(store.acp_provenance().creator(KR), None, "r.acr went");
+    let before = store.stored_graphs();
+    let nq = format!("<{KR}#it> <https://ex.dev/ns#k> \"new\" <{KR}> .\n");
+    store.graph.named.extend(Graph::load_dataset(&nq, "nquads").expect("parses").named);
+    store
+        .rematerialize_after_edit(&before, None, true)
+        .expect("r made again");
+    assert_eq!(store.acp_provenance().creator(KR), None);
+    assert_eq!(store.acp_provenance().owner(KR), None);
+    assert!(!store.decide(&sess(ALICE), KR, Mode::Control).allow, "no creator grant");
+    assert!(!store.decide(&sess(ERIN), KR, Mode::Read).allow, "no owner grant");
 }

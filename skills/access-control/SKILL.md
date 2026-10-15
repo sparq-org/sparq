@@ -123,20 +123,21 @@ Materialize the authorization view from the access-control documents, then enfor
   clear them, or when a holding expires or is revoked, call
   `materialize_acp_with_credentials` with the current maps. Provenance follows every
   change to which graphs exist, staged with the change and installed only once it
-  commits. Only the net effect counts: a resource that existed before an update and does
-  not after it (a document whose graph is dropped) loses its creator and owner unless its
-  own `.acr` is still stored (they are kept with it and come back with the resource if it
-  is still stored then; a `.acl` keeps nothing, as the ACP view never reads one); a
-  container's end only when the container itself is removed (its own graph, or every
-  graph), not when its members go. One that exists before and after keeps both, whatever
-  happens in between. A SPARQL update never records a creator; a direct edit (below)
+  commits. Only the net effect counts: a resource (document or container) keeps its creator
+  and owner across a change if it exists before and after it, whatever happens in between,
+  or if its own `.acr` is stored before the change and not removed at any point in it; it
+  loses them otherwise. So the facts of a dropped document, or of an emptied container, are
+  kept with its `.acr` and come back with the resource only while that `.acr` stays stored
+  (a `.acl` keeps nothing, as the ACP view never reads one). A SPARQL update and the MCP
+  server never record a creator; a direct edit (below)
   records its agent as creator of a new resource whose own `.acr` was not already
   stored. A commit refused at its
   commit point unwritten changes nothing; any other failed commit (part of the update may be
   applied, or journaled for a reopen to replay) drops the view, and `materialize_acp()`
   refuses until the context is passed again. A caller that edits `store.graph` directly
   takes `store.stored_graphs()` first and then calls
-  `store.rematerialize_after_edit(&before, creator, acp)` (the MCP server does), which
+  `store.rematerialize_after_edit(&before, creator, acp)` (the MCP server does, with no
+  creator), which
   applies the same rule and installs the view and provenance together only on success.
   `store.acp_provenance()` reads the stored provenance. A resource removed by editing
   `store.graph` without that call is forgotten at the next rebuild, WAC or ACP (unless its

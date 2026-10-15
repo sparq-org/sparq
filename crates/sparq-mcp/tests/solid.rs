@@ -1817,11 +1817,10 @@ fn acp_trusted_context_survives_a_write_through_the_server() {
     );
 }
 
-/// Resources created through the server record their creator for ACP `CreatorAgent`
-/// matchers, and a deleted resource's creator is forgotten: the same IRI created again
-/// outside the server has none.
+/// Resources created through the server record no creator for ACP `CreatorAgent` matchers,
+/// as on main: the writer gains nothing from `CreatorAgent` rules on what it creates.
 #[test]
-fn acp_creator_follows_resources_created_and_deleted_through_the_server() {
+fn acp_resources_created_through_the_server_record_no_creator() {
     const ACP: &str = "http://www.w3.org/ns/solid/acp#";
     const ACL: &str = "http://www.w3.org/ns/auth/acl#";
     const BOB: &str = "https://bob.ex/card#me";
@@ -1863,35 +1862,15 @@ fn acp_creator_follows_resources_created_and_deleted_through_the_server() {
     );
     assert!(!is_err, "bob writes in /docs/: {text}");
     let (text, is_err) = tool(&mut s, "resource_get", json!({"url": d1}));
-    assert!(!is_err, "bob created d1, so he reads it: {text}");
-    let (text, is_err) = tool(&mut s, "resource_delete", json!({"url": d1}));
-    assert!(!is_err, "bob deletes d1: {text}");
+    assert!(is_err, "bob is not d1's creator: {text}");
+    assert_eq!(s.store().acp_provenance().creator(d1), None);
 
-    let mut store = s.into_store();
-    let again = Graph::load_dataset(
-        &format!("<{d1}#it> <https://ex.dev/ns#k> \"c\" <{d1}> .\n"),
-        "nquads",
-    )
-    .expect("parses");
-    store.graph.named.extend(again.named);
-    store.materialize_acp().expect("rebuild");
-    let bob = sparq_solid::Session {
-        agent: Some(BOB),
-        client: None,
-        issuer: None,
-        now: None,
-    };
-    assert!(
-        !store.decide(&bob, d1, sparq_solid::Mode::Read).allow,
-        "d1 created again has no creator"
-    );
 }
 
-/// Containers created through the server record their creator too, intermediate ones
-/// included, and deleting a container forgets it even while graphs stored under it keep it
-/// in place as an anchor.
+/// A container with a graph stored below it cannot be deleted through the server, whatever
+/// its containment listing says, and containers it creates record no creator.
 #[test]
-fn acp_container_creator_follows_the_container() {
+fn acp_a_container_with_a_graph_below_it_is_not_deleted() {
     const ACP: &str = "http://www.w3.org/ns/solid/acp#";
     const ACL: &str = "http://www.w3.org/ns/auth/acl#";
     const BOB: &str = "https://bob.ex/card#me";
@@ -1907,6 +1886,7 @@ fn acp_container_creator_follows_the_container() {
 <{docs}> <{ACP}memberAccessControl> <{docs}#c> <{docs}> .
 <{docs}#c> <{ACP}apply> <{docs}#writer> <{docs}> .
 <{docs}#c> <{ACP}apply> <{docs}#creator> <{docs}> .
+<{docs}#c> <{ACP}apply> <{docs}#lister> <{docs}> .
 <{docs}#writer> <{ACP}allow> <{ACL}Write> <{docs}> .
 <{docs}#writer> <{ACP}anyOf> <{docs}#mb> <{docs}> .
 <{docs}#mb> <{ACP}agent> <{BOB}> <{docs}> .
@@ -1923,24 +1903,16 @@ fn acp_container_creator_follows_the_container() {
         ..SolidServerConfig::default()
     };
     let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
-    let bob_reads = |s: &SolidMcpServer, url: &str| {
-        let bob = sparq_solid::Session {
-            agent: Some(BOB),
-            client: None,
-            issuer: None,
-            now: None,
-        };
-        s.store().decide(&bob, url, sparq_solid::Mode::Read).allow
-    };
     let (text, is_err) = tool(
         &mut s,
         "container_create",
         json!({"url": "https://pod.ex/docs/c/"}),
     );
     assert!(!is_err, "bob creates /docs/c/: {text}");
-    assert!(
-        bob_reads(&s, "https://pod.ex/docs/c/"),
-        "bob created /docs/c/"
+    assert_eq!(
+        s.store().acp_provenance().creator("https://pod.ex/docs/c/"),
+        None,
+        "no creator recorded for /docs/c/"
     );
     let (text, is_err) = tool(
         &mut s,
@@ -1948,9 +1920,9 @@ fn acp_container_creator_follows_the_container() {
         json!({"url": "https://pod.ex/docs/a/b", "content": "<https://pod.ex/docs/a/b#it> <https://ex.dev/ns#k> \"b\" .", "content_type": "text/turtle"}),
     );
     assert!(!is_err, "bob writes /docs/a/b: {text}");
-    assert!(
-        bob_reads(&s, "https://pod.ex/docs/a/"),
-        "bob created /docs/a/ on the way"
+    assert_eq!(
+        s.store().acp_provenance().creator("https://pod.ex/docs/a/"),
+        None
     );
 
     // A graph stored under /docs/c/ keeps it from being deleted, whatever its containment
@@ -1976,19 +1948,18 @@ fn acp_container_creator_follows_the_container() {
         is_err && text.contains("not empty"),
         "/docs/c/ holds x: {text}"
     );
-    assert!(
-        bob_reads(&s, "https://pod.ex/docs/c/"),
-        "a container that still exists keeps its creator"
-    );
-    assert_eq!(
-        s.store().acp_provenance().creator("https://pod.ex/docs/c/"),
-        Some(BOB)
-    );
+    let listed = s
+        .store()
+        .graph
+        .named
+        .iter()
+        .any(|(n, _)| n.to_string() == "<https://pod.ex/docs/c/>");
+    assert!(listed, "/docs/c/ is still stored");
 }
 
 /// A write below a container that already exists (here as the anchor of a graph someone
-/// else stored) creates the document, not the container: the writer becomes the creator of
-/// the document only.
+/// else stored) leaves the container's creator as it was, and records none for what it
+/// creates.
 #[test]
 fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
     const ACP: &str = "http://www.w3.org/ns/solid/acp#";
@@ -2041,8 +2012,8 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
     let prov = s.store().acp_provenance();
     assert_eq!(
         prov.creator("https://pod.ex/e/mine"),
-        Some(BOB),
-        "bob created /e/mine"
+        None,
+        "no creator recorded"
     );
     assert_eq!(
         prov.creator("https://pod.ex/e/"),
@@ -2057,8 +2028,8 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
     assert!(!is_err, "bob creates /f/: {text}");
     assert_eq!(
         s.store().acp_provenance().creator("https://pod.ex/f/"),
-        Some(BOB),
-        "a new container"
+        None,
+        "a new container, no creator recorded"
     );
     let (text, is_err) = tool(
         &mut s,
@@ -2074,8 +2045,8 @@ fn acp_an_existing_container_gets_no_creator_from_a_write_below_it() {
     ] {
         assert_eq!(
             prov.creator(r),
-            Some(BOB),
-            "bob created {r} and every container it needed"
+            None,
+            "no creator recorded for {r}"
         );
     }
     assert_eq!(
@@ -2146,6 +2117,19 @@ fn acp_a_container_brought_back_under_its_surviving_rules_keeps_its_creator() {
         json!({"url": "https://pod.ex/a/y", "content": "<https://pod.ex/a/y#it> <https://ex.dev/ns#k> \"y\" .", "content_type": "text/turtle"}),
     );
     assert!(!is_err, "bob writes /a/y: {text}");
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({"url": "https://pod.ex/a/x", "content": "<https://pod.ex/a/x#it> <https://ex.dev/ns#k> \"b\" .", "content_type": "text/turtle"}),
+    );
+    assert!(!is_err, "bob writes /a/x again: {text}");
+    for r in ["https://pod.ex/a/x", "https://pod.ex/a/y"] {
+        assert!(
+            !s.store().decide(&bob, r, sparq_solid::Mode::Control).allow,
+            "bob gains nothing on {r} from the creator rule"
+        );
+        assert_eq!(s.store().acp_provenance().creator(r), None, "{r}");
+    }
     assert_eq!(
         s.store().acp_provenance().creator("https://pod.ex/a/"),
         Some(ALICE),
@@ -2171,11 +2155,10 @@ fn acp_a_container_brought_back_under_its_surviving_rules_keeps_its_creator() {
     );
 }
 
-/// Under rules inherited from an ancestor only, a writer who empties a container and writes
-/// into it again is not its creator either: a container's creator ends only when the
-/// container itself is removed.
+/// Under rules inherited from an ancestor only, a container a writer empties ends like any
+/// resource, and the writer who fills it again gains nothing from the creator rule.
 #[test]
-fn acp_an_emptied_container_keeps_its_creator_under_inherited_rules() {
+fn acp_an_emptied_container_under_inherited_rules_gives_its_writer_nothing() {
     const ACP: &str = "http://www.w3.org/ns/solid/acp#";
     const ACL: &str = "http://www.w3.org/ns/auth/acl#";
     const ALICE: &str = "https://alice.ex/card#me";
@@ -2230,13 +2213,13 @@ fn acp_an_emptied_container_keeps_its_creator_under_inherited_rules() {
     let prov = s.store().acp_provenance();
     assert_eq!(
         prov.creator("https://pod.ex/a/b/"),
-        Some(ALICE),
-        "emptied, not removed"
+        None,
+        "/a/b/ ended when emptied"
     );
     assert_eq!(
         prov.creator("https://pod.ex/a/b/new"),
-        Some(BOB),
-        "a new document"
+        None,
+        "a new document, no creator recorded"
     );
     assert!(
         !s.store()
