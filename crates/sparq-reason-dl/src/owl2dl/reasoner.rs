@@ -702,4 +702,46 @@ mod tests {
             Consistency::Inconsistent
         );
     }
+
+    /// Many candidate pairs (every member shares one value) are generated and sorted inside
+    /// the budget: every budget between the work without the key and with it answers
+    /// `ResourceBudget`, including those running out while the candidates are built.
+    #[test]
+    fn key_candidates_are_built_inside_the_budget() {
+        let n = 16;
+        let mut body = String::from(
+            r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :P a owl:Class . :d a owl:DatatypeProperty . :P owl:hasKey ( :d ) .
+            "#,
+        );
+        for i in 0..n {
+            body.push_str(&format!(":i{i} a owl:NamedIndividual , :P ; :d 1 .\n"));
+        }
+        let work = |body: &str| {
+            let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            let full = Reasoner::new(&d, &o, Budget::default()).unwrap();
+            let mut t = Tableau::new(&full.clauses, &full.index, full.budget);
+            full.load_abox(&mut t);
+            assert_eq!(t.run(), Ok(true));
+            t.work()
+        };
+        let needed = work(&body);
+        let without_key = work(&body.replace(":P owl:hasKey ( :d ) .", ""));
+        // The first candidate list alone has `n (n - 1) / 2` pairs.
+        assert!(needed - without_key >= (n * (n - 1) / 2) as u64);
+        let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        for max_steps in without_key..needed {
+            let budget = Budget {
+                max_steps,
+                ..Budget::default()
+            };
+            assert_eq!(
+                check(&d, &o, budget).consistency,
+                Consistency::Unknown(UnknownReason::ResourceBudget),
+                "max_steps {max_steps}"
+            );
+        }
+    }
 }

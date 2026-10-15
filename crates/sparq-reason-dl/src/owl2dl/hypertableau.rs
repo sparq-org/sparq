@@ -656,7 +656,8 @@ impl<'c> Tableau<'c> {
     /// identify: those sharing a fixed value on its first data property, or with a value not
     /// fixed there on one side and any value on the other. Other pairs share no value there,
     /// so [`key_shared`](Self::key_shared) would answer [`Shared::No`]. `None` (every pair)
-    /// for a key without data properties. One unit per value indexed and per pair returned.
+    /// for a key without data properties. One unit per value indexed, per candidate pair
+    /// generated (charged before it is), and `n log n` for sorting them.
     fn key_candidates(&self, values: &[Vec<DataValues>]) -> Option<Vec<(usize, usize)>> {
         if values.first().is_none_or(|v| v.is_empty()) {
             return None;
@@ -679,6 +680,9 @@ impl<'c> Tableau<'c> {
         for ms in by_value.values() {
             for (a, &i) in ms.iter().enumerate() {
                 for &j in ms[a + 1..].iter().filter(|&&j| j != i) {
+                    if self.probe() {
+                        return Some(Vec::new());
+                    }
                     pairs.push((i.min(j), i.max(j)));
                 }
             }
@@ -686,14 +690,21 @@ impl<'c> Tableau<'c> {
         // An unfixed value may equal any value, fixed or not, on the other side.
         for &i in &unfixed {
             for (j, v) in values.iter().enumerate() {
+                if self.probe() {
+                    return Some(Vec::new());
+                }
                 if j != i && (v[0].1 || !v[0].0.is_empty()) {
                     pairs.push((i.min(j), i.max(j)));
                 }
             }
         }
+        // Sorting, `n log n` units, charged before it runs.
+        let n = pairs.len();
+        if self.charge(n.saturating_mul(n.max(2).ilog2() as usize)) {
+            return Some(Vec::new());
+        }
         pairs.sort_unstable();
         pairs.dedup();
-        self.charge(pairs.len());
         Some(pairs)
     }
 
