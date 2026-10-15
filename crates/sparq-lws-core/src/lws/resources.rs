@@ -1813,9 +1813,17 @@ async fn create<S: Store + 'static>(
                             drop(in_flight);
                             drop(locks);
                         }
-                        Some(mut left) => {
+                        Some(mut left) if content_tried => {
                             left.1 = Some(in_flight);
                             state.set_aside(left, locks);
+                        }
+                        Some(mut left) => {
+                            // No content was written, so no listing can show the member: only
+                            // the member is set aside, and its container's lock goes now.
+                            let (child_guards, parent_guard) = locks;
+                            drop(parent_guard);
+                            left.1 = Some(in_flight);
+                            state.set_aside_unlisted(left, child_guards);
                         }
                     }
                     return Err(e);
@@ -8272,6 +8280,94 @@ mod tests {
     /// before the lock, on what the create wrote. What a failed create may have written is put
     /// back (an unsettled write fenced first), and until it is, the member stays in flight with
     /// nothing there before it.
+    #[tokio::test]
+    async fn an_unsettled_create_that_commits_before_its_fence_is_removed() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let post = req(
+            Method::POST,
+            "/",
+            &[("slug", "early.txt"), ("content-type", "text/plain")],
+            "x",
+        );
+        let early = st.cfg.absolute("/early.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store
+            .fail_fence
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let r = create(&st, &post, &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&early));
+        // The write the store answered unsettled commits now, before it could be fenced: the undo
+        // still removes it once the fence holds.
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if st.store.exists(&early).await.unwrap() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(st.store.exists(&early).await.unwrap(), "committed late");
+        assert!(!st.visible(&early));
+        assert!(st.locks.changing(&early));
+        store
+            .fail_fence
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        for _ in 0..500 {
+            if st.visible(&early) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(st.visible(&early));
+        assert!(
+            !st.store.exists(&early).await.unwrap(),
+            "removed once fenced"
+        );
+        assert!(stored_meta(&st, &early).await.unwrap().is_none());
+        assert!(!st.locks.changing(&early));
+    }
+
+    #[tokio::test]
+    async fn a_create_whose_content_was_never_written_hides_no_container() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let x = st.cfg.absolute("/x.txt");
+        // The metadata write fails and so does its removal: the member is set aside, but no
+        // content was written, so its container stays visible and open to other requests.
+        *store.fail_write_of.lock().unwrap() = Some(meta_key(&x));
+        *store.fail_delete_of.lock().unwrap() = Some(meta_key(&x));
+        let post = |slug: &str| {
+            req(
+                Method::POST,
+                "/",
+                &[("slug", slug), ("content-type", "text/plain")],
+                "x",
+            )
+        };
+        let r = create(&st, &post("x.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&x));
+        assert!(st.visible(&root));
+        let desc = req(Method::GET, "/", &[("accept", "application/lws+cid")], "");
+        let r = handle(&st, &desc, &super::super::Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let r = handle(&st, &post("y.txt"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        *store.fail_delete_of.lock().unwrap() = None;
+        for _ in 0..500 {
+            if st.visible(&x) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(st.visible(&x));
+        assert!(!st.locks.changing(&x));
+    }
+
     #[tokio::test]
     async fn a_failed_create_leaves_nothing_of_it_behind() {
         use super::super::test_store::{agent, closed_state, request as req, OWNER};

@@ -811,7 +811,15 @@ impl<S: Store + 'static> LwsState<S> {
     /// ([`LwsState::touch_owed`]): those whose kept changes' touches waited at start, and the
     /// one a settled [`Undo::Resolve`] listed.
     pub(crate) fn set_aside<L: Send + 'static>(&self, left: Unsettled, locks: L) {
-        let hidden = self.hide(&left);
+        let hidden = self.hide(&left, true);
+        self.settle_aside(left, hidden, locks);
+    }
+
+    /// Set aside `left` as [`LwsState::set_aside`] does, but hide only its own resources: for a
+    /// change no container lists (a create whose content was never written), so its containers
+    /// stay visible and their locks need not be held.
+    pub(crate) fn set_aside_unlisted<L: Send + 'static>(&self, left: Unsettled, locks: L) {
+        let hidden = self.hide(&left, false);
         self.settle_aside(left, hidden, locks);
     }
 
@@ -827,7 +835,7 @@ impl<S: Store + 'static> LwsState<S> {
     /// Hide each of `all`, to be put back by [`LwsState::settle_hidden`]: until then nothing of
     /// them is put back, so what is not visible stays so.
     pub(crate) fn hide_all(&self, all: Vec<Unsettled>) -> Hidden {
-        let hidden: Vec<_> = all.iter().map(|left| self.hide(left)).collect();
+        let hidden: Vec<_> = all.iter().map(|left| self.hide(left, true)).collect();
         Hidden(all.into_iter().zip(hidden).collect())
     }
 
@@ -838,16 +846,18 @@ impl<S: Store + 'static> LwsState<S> {
         }
     }
 
-    /// Hide the resources of `left` and the containers listing them, and count what it holds to
-    /// put back: what [`LwsState::settle_aside`] undoes once it is back.
-    fn hide(&self, left: &Unsettled) -> (Vec<String>, usize) {
+    /// Hide the resources of `left` and, when `listed`, the containers listing them, and count
+    /// what it holds to put back: what [`LwsState::settle_aside`] undoes once it is back.
+    fn hide(&self, left: &Unsettled, listed: bool) -> (Vec<String>, usize) {
         let storage = self.cfg.storage();
         let mut iris = left.iris();
-        let parents: Vec<String> = iris
-            .iter()
-            .filter_map(|i| resources::parent_of(i, &storage))
-            .collect();
-        iris.extend(parents);
+        if listed {
+            let parents: Vec<String> = iris
+                .iter()
+                .filter_map(|i| resources::parent_of(i, &storage))
+                .collect();
+            iris.extend(parents);
+        }
         iris.sort();
         iris.dedup();
         let bytes = left.bytes();

@@ -73,8 +73,8 @@ Set `PSS_SPARQ_BACKEND` to one of:
   endpoint that can lag is not supported, because the LWS server decides what a failed
   write left behind by reading the store straight after it. An update that times out
   can still commit on the service afterwards. The creates and removals of grants,
-  requests and subscriptions are fenced against that, but resource writes and their
-  rollback are not, so the native LWS server still refuses this backend (below).
+  requests and subscriptions, and the content write of a resource create, are fenced
+  against that, but other resource writes and their rollback are not, so the native LWS server still refuses this backend (below).
 
 The native binary currently uses an in-memory blob backend. A durable/shared
 RDF index therefore does not by itself make resource bodies durable; do not
@@ -275,8 +275,9 @@ self-contained in `src/lws/`: its own authorization server, access grants,
 notifications and type index, over the same `Store` backend. It runs over the
 `memory` and `embedded` backends only; startup fails with `PSS_SPARQ_BACKEND=http`,
 because a remote write reported as failed may still commit later. Only the creates and
-removals of service records (grants, requests, subscriptions) are fenced against that (see
-below); resource writes, and putting a failed change back, are not.
+removals of service records (grants, requests, subscriptions), and a resource create's
+content write, are fenced against that (see below); other resource writes, and putting a
+failed change back, are not.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
 that; the owner's subscriptions are not counted), the server at most 512 of each (507),
 and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB and an
