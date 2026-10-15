@@ -1388,11 +1388,10 @@ pub async fn post_handler<S: Store>(
     // unauthorized POST. The guard is intent-based, not existence-based: `secret.acl` and `benign.acl`
     // are refused regardless of what exists, so it is never an existence oracle.)
     //
-    // SCOPE: `.acl` ONLY. `.meta` description-resources are NOT load-bearing in this server (the WAC
-    // resolver never consults a `.meta`, and the PUT/PATCH create paths only special-case `.acl`), so
-    // a `secret.meta` stem is just a normal resource name — guarding it ONLY at POST while PUT/PATCH
-    // would create it freely is an inconsistency with no security benefit, so it is not guarded. If
-    // `.meta` (or any other auxiliary) ever becomes load-bearing it MUST be guarded UNIFORMLY across
+    // SCOPE: `.acl` ONLY. A name ending in `.meta` is refused for every method by `parse_target`
+    // (it is where the LWS surface keeps a linkset record), and a POST never mints one: the minted
+    // name is the stem followed by an opaque suffix, so a `secret.meta` stem is harmless here. Any
+    // other auxiliary that becomes load-bearing MUST be guarded UNIFORMLY across
     // POST/PUT/PATCH/DELETE/read — not POST-only (see `is_acl_auxiliary_suffix`).
     if let Some(s) = &stem {
         // Check the `.acl` suffix on the bare stem (a leaf segment with no scheme/slashes). A trailing
@@ -3645,13 +3644,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_slug_dot_meta_is_allowed_meta_is_not_load_bearing() {
-        // `.meta` is NOT load-bearing in this server: the WAC resolver never consults a `.meta`, and
-        // the create paths only special-case `.acl`. So `secret.meta` is just a normal resource name
-        // with no security effect — guarding it ONLY at POST (while a PUT/PATCH could create it freely)
-        // was an inconsistency with no benefit. An Append-only POST of `Slug: secret.meta` is therefore
-        // ALLOWED, exactly like any other benign append. (If `.meta` ever becomes load-bearing it must
-        // be guarded UNIFORMLY across POST/PUT/PATCH/DELETE/read — see `is_acl_auxiliary_suffix`.)
+    async fn post_slug_dot_meta_mints_no_record_name() {
+        // A `.meta` stem is harmless on POST: the minted name is the stem followed by an opaque
+        // suffix, never a name ending in `.meta` (which `parse_target` refuses for every method,
+        // as the LWS surface keeps a linkset record there). An Append-only POST of
+        // `Slug: secret.meta` is therefore ALLOWED, exactly like any other benign append.
         let store = store_alice_container_bob_append_only().await;
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
         let uri: axum::http::Uri = "/alice/c/".parse().unwrap();
