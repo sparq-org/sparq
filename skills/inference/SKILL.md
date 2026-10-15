@@ -760,7 +760,11 @@ in an assertion, `DataHasValue` or `DataOneOf` (e.g. `"sixteen"^^xsd:nonNegative
 makes the ontology `Inconsistent`. Literal policies that decide verdicts: lexical forms
 are not whitespace-normalised, so `" 1"^^xsd:integer` is ill-typed; an `rdf:PlainLiteral`
 without `@` is ill-typed; `rdf:langString` is accepted as a datatype (it is RDF 1.1's, not
-in the OWL 2 map); `xsd:hexBinary` and `xsd:base64Binary` share no values (OWL 2 §4.5).
+in the OWL 2 map); `xsd:hexBinary` and `xsd:base64Binary` share no values (OWL 2 §4.5);
+the data domain has values outside every datatype of the map (the Direct Semantics allows
+them), so the complement of the whole map is not empty, while `rdfs:Literal` is the whole
+domain. A branch closed as undecided or unconfirmed never makes the alternatives after it
+look forced: no subsumption is read off them.
 Nominals are decided without SHOIQ's NI-rule: a complete branch is accepted only when its
 graph provably unravels into a model (no blocked node keeps an edge to an individual, no
 edge outside the tree joins two blockable nodes, and no number restriction at an

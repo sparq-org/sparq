@@ -115,8 +115,36 @@ Materialize the authorization view from the access-control documents, then enfor
   `.acr` they control cannot self-grant (this also blocks forged `solidx:appliesToResource`
   policy redirection). Each grant is RESOURCE-SCOPED (the creator of `R1` is never
   granted `R2`) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
-  `materialize_acp()` is `materialize_acp_with(&AccessProvenance::new())` — no provenance ⇒
-  no `CreatorAgent`/`OwnerAgent` grant (fail-closed).
+  The store keeps the provenance and credentials of its last successful ACP
+  materialization: `materialize_acp()` and every rebuild after `put_acl_acp`,
+  `delete_acl_acp` or an update use them. Before any is passed there is no provenance ⇒
+  no `CreatorAgent`/`OwnerAgent` grant (fail-closed). `materialize_acp_with(&prov)` stores
+  `prov` with NO credentials (it is `materialize_acp_with_credentials(&prov, &empty)`). To
+  clear them, or when a holding expires or is revoked, call
+  `materialize_acp_with_credentials` with the current maps. Provenance follows every
+  change to which graphs exist, staged with the change and installed only once it
+  commits. Only the net effect counts: a resource (document or container) keeps its creator
+  and owner across a change if it exists before and after it, whatever happens in between,
+  or if its own `.acr` is stored before the change, was stored when the provenance was last
+  installed, and is not removed at any point in it; it loses them otherwise (so an `.acr`
+  stored by an edit the store was not told of keeps nothing). So the facts of a dropped document, or of an emptied container, are
+  kept with its `.acr` and come back with the resource only while that `.acr` stays stored
+  (a `.acl` keeps nothing, as the ACP view never reads one). A SPARQL update and the MCP
+  server never record a creator; a direct edit (below)
+  records its agent as creator of a new resource whose own `.acr` was not already
+  stored. A commit refused at its
+  commit point unwritten changes nothing; any other failed commit (part of the update may be
+  applied, or journaled for a reopen to replay) drops the view, and `materialize_acp()`
+  refuses until the context is passed again. A caller that edits `store.graph` directly
+  takes `store.stored_graphs()` first and then calls
+  `store.rematerialize_after_edit(&before, creator, acp)` (the MCP server does, with no
+  creator), which
+  applies the same rule and installs the view and provenance together only on success.
+  `store.acp_provenance()` reads the stored provenance. A resource removed by editing
+  `store.graph` without that call is forgotten at the next rebuild, WAC or ACP (unless its
+  own `.acr` is stored and was at the previous install; facts passed back unchanged to
+  `materialize_acp_with*` are judged the same way), so rebuild before creating it again. The view is rebuilt for a provenance change only when its `.acr`
+  documents name `acp:CreatorAgent` or `acp:OwnerAgent`.
 - `store.materialize_acp_with_credentials(&AccessProvenance, &VerifiedCredentials)` —
   (sq-ysv3u, issue #2935) the same, ALSO resolving **`acp:vc`** matchers.
   `VerifiedCredentials::hold(agent_webid, requirement_iri)` asserts that the TRUSTED caller

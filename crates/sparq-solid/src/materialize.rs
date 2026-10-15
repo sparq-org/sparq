@@ -220,8 +220,10 @@ pub fn materialize_acp(graph: &mut Graph) -> Result<MaterializeStats, String> {
 /// graphs (design doc §2.4): a writer cannot self-grant via a forged `solidx:creator`
 /// triple in a document they control.
 ///
-/// `materialize_acp(graph)` is exactly `materialize_acp_with(graph, &AccessProvenance::new())`
-/// — with no provenance, no `CreatorAgent`/`OwnerAgent` matcher ever grants (fail-closed).
+/// This free function's `materialize_acp(graph)` is exactly
+/// `materialize_acp_with(graph, &AccessProvenance::new())` — with no provenance, no
+/// `CreatorAgent`/`OwnerAgent` matcher ever grants (fail-closed). (The
+/// `PodStore::materialize_acp` method instead reuses the store's stored context.)
 ///
 /// # Errors
 ///
