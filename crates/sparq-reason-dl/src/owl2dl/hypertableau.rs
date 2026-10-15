@@ -272,8 +272,8 @@ pub(crate) struct Tableau<'c> {
     nodes: Vec<NodeData>,
     roles: FxHashMap<(u32, Node, Node), Dep>,
     ineq: FxHashMap<(Node, Node), Dep>,
-    /// `t → s` for every merged node `t`.
-    merges: FxHashMap<Node, Node>,
+    /// `t → s` for every merged node `t`, with what the merge depends on.
+    merges: FxHashMap<Node, (Node, Dep)>,
     trail: Vec<Undo>,
     pending: Vec<Instance>,
     branches: Vec<Branch>,
@@ -415,15 +415,13 @@ impl<'c> Tableau<'c> {
     /// The label of a root node after a satisfiable run: each atom, and whether it holds
     /// without depending on any branch choice.
     pub(crate) fn root_label(&self, n: Node) -> Vec<(Atom, bool)> {
-        // A root a nominal merged into another node has that node's label, whose facts may
-        // hold of the other node without any choice yet depend on the merge for `n` (merges
-        // record no dependency of their own): none is deterministic for `n`.
-        let s = self.canonical(n);
-        let merged = s != n;
+        // A root a nominal merged into another node has that node's label; its facts hold
+        // of `n` only given the merges on the way.
+        let (s, dm) = self.canonical_dep(n);
         let mut out: Vec<(Atom, bool)> = self.nodes[s as usize]
             .label
             .iter()
-            .map(|(&a, d)| (a, !merged && d.is_empty()))
+            .map(|(&a, d)| (a, dm.is_empty() && d.is_empty()))
             .collect();
         out.sort_unstable();
         out
@@ -431,10 +429,21 @@ impl<'c> Tableau<'c> {
 
     /// The node `n` was (transitively) merged into, or `n` itself.
     fn canonical(&self, mut n: Node) -> Node {
-        while let Some(&s) = self.merges.get(&n) {
-            n = s;
+        while let Some((s, _)) = self.merges.get(&n) {
+            n = *s;
         }
         n
+    }
+
+    /// [`canonical`](Self::canonical), with the branch points the merges on the way depend
+    /// on: a fact found at the canonical node holds of `n` only given those merges.
+    fn canonical_dep(&self, mut n: Node) -> (Node, Dep) {
+        let mut d = Dep::default();
+        while let Some((s, dd)) = self.merges.get(&n) {
+            d = d.union(dd);
+            n = *s;
+        }
+        (n, d)
     }
 
     /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
@@ -578,8 +587,9 @@ impl<'c> Tableau<'c> {
         self.trail.push(Undo::Concept(n, a));
         self.steps += 1;
         if let Some((f, fa)) = self.forbidden {
-            if fa == a && self.canonical(f) == n {
-                self.set_clash(d.clone());
+            let (cf, df) = self.canonical_dep(f);
+            if fa == a && cf == n {
+                self.set_clash(d.union(&df));
             }
         }
         if matches!(self.c.atoms[a as usize], AtomKind::Nominal(_)) {
@@ -598,9 +608,9 @@ impl<'c> Tableau<'c> {
         let mut found: Option<(Node, Dep)> = None;
         for (&a, d) in &self.nodes[n as usize].label {
             if let AtomKind::Nominal(i) = self.c.atoms[a as usize] {
-                let s = self.canonical(i as Node);
+                let (s, ds) = self.canonical_dep(i as Node);
                 if s != n {
-                    found = Some((s, d.clone()));
+                    found = Some((s, d.union(&ds)));
                     break;
                 }
             }
@@ -698,9 +708,10 @@ impl<'c> Tableau<'c> {
         }
         if let Some((f, fa)) = self.forbidden {
             // The forbidden node becomes `s`: a forbidden atom `s` already has is a clash.
-            if self.canonical(f) == t {
+            let (cf, df) = self.canonical_dep(f);
+            if cf == t {
                 if let Some(ds) = self.nodes[s as usize].label.get(&fa) {
-                    let clash = d.union(ds);
+                    let clash = d.union(ds).union(&df);
                     self.set_clash(clash);
                     return;
                 }
@@ -733,7 +744,7 @@ impl<'c> Tableau<'c> {
             .collect();
         self.nodes[t as usize].active = false;
         self.trail.push(Undo::Deactivate(t));
-        self.merges.insert(t, s);
+        self.merges.insert(t, (s, d.clone()));
         self.trail.push(Undo::Merge(t));
         for (a, dd) in label {
             self.add_concept(s, a, &dd);

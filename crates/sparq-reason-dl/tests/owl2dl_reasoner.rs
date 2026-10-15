@@ -404,6 +404,31 @@ fn class_tests_with_nominals_see_the_abox() {
 }
 
 #[test]
+fn facts_through_a_merge_depend_on_it() {
+    // `A ⊑ {a, b}`, `a ∈ ∃r.C`, `∃r.C ⊑ B`: `A = {b}` with `b ∉ B` is a model, so `A ⋢ B`.
+    // The test root merges into `a` on one branch; `B(a)` is derived without any choice,
+    // but its clash with the forbidden `B` depends on that branch.
+    let body = format!(
+        "{DECL} :A rdfs:subClassOf {} . :a a {} . {} rdfs:subClassOf :B .",
+        object_one_of(":a :b"),
+        some(":r", ":C"),
+        some(":r", ":C")
+    );
+    assert!(!entails_sub(&body, "A", "B"));
+    // `k`'s two `r`-values merge on one branch (`≤1 r`, the other is `Y`); `m`'s `{j}`
+    // successor then lands on `i` through that merge, and `∀s.¬E` clashes with `E(i)` only
+    // on that branch. `k ∈ Y`, `i ≠ j` is a model.
+    let body = format!(
+        "{DECL} :k :r :a , :b . :k a [ a owl:Class ; owl:unionOf ( {} :D ) ] . :a a :A .
+         :c a {} , {} .",
+        max(1, ":r", "owl:Thing"),
+        has_value(":s", ":b"),
+        all(":s", "[ owl:complementOf :A ]")
+    );
+    assert_eq!(verdict(&body), Consistency::Consistent);
+}
+
+#[test]
 fn nominals_with_blocking_answer_or_abstain() {
     // Every person has a parent who is a person, and every person lives in `uk`.
     let base = format!(
