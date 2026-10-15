@@ -1,5 +1,6 @@
 use super::*;
 use oxrdf::NamedNode;
+use sparq_core::store::{Perm, BUILT};
 
 // Thread-local observation keeps parallel tests independent and compiles out of
 // production. Small reachability fixtures execute on the calling thread.
@@ -142,11 +143,13 @@ fn query_bag(result: crate::QueryResult) -> Vec<String> {
 }
 
 #[test]
-fn sparql_seed_scan_reaches_verified_runs_and_filter_scan_reaches_hash_fallback() {
+fn sparql_seed_scan_uses_available_order_and_filter_scan_reaches_hash_fallback() {
     let g = query_graph();
     take_observed();
     let sorted = crate::query(&g, SORTED_QUERY).unwrap();
-    assert_eq!(take_observed(), (1, 0, 32), "shared-key seed scan must reach run grouping");
+    // Only PSO can sort the predicate-bound seed by its shared subject key.
+    let expected = if BUILT.contains(&Perm::Pso) { (1, 0, 32) } else { (0, 1, 32) };
+    assert_eq!(take_observed(), expected, "seed grouping must match the available index order");
     assert_eq!(sorted.rows.len(), 64, "each seed has two payload matches");
     take_observed();
     let hashed = crate::query(&g, HASH_QUERY).unwrap();
@@ -158,7 +161,8 @@ fn sparql_seed_scan_reaches_verified_runs_and_filter_scan_reaches_hash_fallback(
 fn sparql_join_budget_fails_instead_of_returning_a_partial_bag() {
     let g = query_graph();
     let limit = crate::QueryBudget { max_rows: Some(40), ..crate::QueryBudget::unlimited() };
-    for (query, expected_path) in [(SORTED_QUERY, (1, 0)), (HASH_QUERY, (0, 1))] {
+    let seed_path = if BUILT.contains(&Perm::Pso) { (1, 0) } else { (0, 1) };
+    for (query, expected_path) in [(SORTED_QUERY, seed_path), (HASH_QUERY, (0, 1))] {
         take_observed();
         let err = crate::query_with_budget(&g, query, &limit).unwrap_err();
         assert_eq!(err, "query budget exceeded (max-rows)");

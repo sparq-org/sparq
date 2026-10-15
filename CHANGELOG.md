@@ -9,6 +9,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
+  and the host builds every lane's value-lane sub-proof inputs from typed operands.
+  `dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route `xsd:boolean`,
+  `xsd:dateTime` and `xsd:date` as well as `xsd:integer`, `xsd:decimal` and `xsd:double`, so a
+  graph committed under `DualLeafV2` carries a real value hook, under that datatype's own lane
+  constant, for every literal on them — which is what a value-lane FILTER member needs the
+  committed leaf to be. Two deliberate consequences. The three newly routed lanes inherit the
+  fail-closed ingest rule, so any lexical outside their §13.2 value domain (non-canonical spellings such as
+  `"1"^^xsd:boolean` or a `24:00:00` instant, and also XSD-canonical forms the domain excludes:
+  an untimezoned or non-`Z` `xsd:dateTime`/`xsd:date`, or more than three fraction digits) now fails the WHOLE commitment instead
+  of taking the degenerate string lane. And **a V2 commitment over a graph that CONTAINS a
+  literal on one of those three lanes changes**; every leaf on the three already-routed lanes,
+  every degenerate string-lane leaf, every IRI and blank-node leaf, and the whole-graph
+  commitment over a graph of only those are BYTE-IDENTICAL, pinned by a fixed vector captured
+  before the change. `DualLeafV1`'s routing is unchanged, so an already-issued V1 graph is
+  unaffected. Beside this, `build::build_filter_value_dl_{int, f64, decimal}(&Literal, FilterOp,
+  bound: &Literal)` complete the V2 builder set next to the existing `_bool` / `_datetime` /
+  `_date` entries, over ONE shared assembly: both operands go through the lane's own
+  `dual_leaf_v2` encoder, the COMMITTED literal's lane constant is carried, and the disclosed
+  verdict is COMPUTED by that member's host verdict mirror (`build::integer_verdict`,
+  `build::double_bits_verdict`, the shared `build::signed_epoch_verdict`) rather than taken from
+  the caller. The decimal lane rescales the FILTER constant to the committed literal's scale
+  EXACTLY — never rounded — refusing an inexact or overflowing rescale with
+  `BuildValueDlV2Error::DecimalScaleNotRepresentable`, through the same two functions
+  `value_pin` pins with. `BuiltFilterValueDlNumeric::lane_proof` feeds the checked typed prove
+  entry, so the `Prover.toml` is rendered from validated typed fields and never from caller TOML.
+  Every lane's builder output satisfies `value_pin::check_value_lane_pin` for the matching typed
+  FILTER, and changing any single pinned field of it — member, lane constant, op, bound, verdict
+  — is refused with that field's own `PinError`. **The value-lane verifier gates are UNCHANGED
+  and still CLOSED:** `verifier::prefilter_manifest_structure` refuses every value-lane sub-proof
+  at stage 0 with `CheckError::ValueLaneSubProofNotAccepted`, the stage-2 operand match,
+  `filter_edge_true` and `encode_pattern_slot` are untouched, and a test asserts per lane that a
+  manifest assembled entirely by these builders is still refused. Host-side Rust only; no `.nr`
+  source changed. Research grade, NOT externally audited (`sq-qhy4`); the value lanes carry the
+  #769-accepted INV-VL downgrade (CR-G8). No soundness or privacy claim.
+  <!-- privacy-claims-allow: opt-in host routing + build helpers; the INV-VL downgrade and the external audit are framed as OPEN obligations; the verifier gates are stated as unchanged and closed; asserts no soundness/privacy property; sq-qhy4 / CR-G8 -->
+
+- **sparq-zk-compose:** verifier-side **authenticated commitment method**. The verifier no longer has
+  to assume which commitment method a committed graph was made under, and it does not read one from
+  the manifest either — it RECOVERS it from the issuer signature. `method_auth` builds one candidate
+  signed message per `CommitmentMethod::recognised()` method from values the verifier already
+  established (the commitment, the issuer-attested salt, the issuer-bound status reference, and the
+  attested holder digest when the attestation is holder-bound) plus the method-UNBOUND message, and
+  `classify` reports which one the presented signature verifies over: `AuthenticatedMethod::Bound(m)`
+  or `AuthenticatedMethod::Unbound`. `MethodPolicy` is the relying party's decision over the answer,
+  carried on the external trust anchor as `KeySet::with_method_policy` (the
+  `with_hidden_issuer_depth` precedent, so no public verifier signature changes):
+  `MethodPolicy::current()` is the default, `require_method_bound()` refuses an attestation that binds
+  no method (`CheckError::MethodNotAuthenticated`), and `admit_legacy_dual_leaf_v1()` is the
+  written-down opt-in for an attested superseded method (refused otherwise with
+  `CheckError::MethodNotAdmitted`); more than one method's message verifying is
+  `CheckError::AmbiguousMethod`. For a HIDDEN-ONLY commitment the method is selected by the hidden
+  entry's declared `message`, which must EQUAL one of the candidates — a value matching none of them
+  is refused with `CheckError::HiddenIssuerMessageMismatch`, and the policy applies to the method the
+  hidden-issuer proof is then required to bind. Every entry over a hidden-only commitment is checked,
+  and they must all select the same candidate, so the message check does not depend on the order
+  the entries are listed in. New PRESENTATION message shapes and signers in `sparq-zk`, each under its own
+  domain tag: `sig::presentation_message_with_status_and_scheme` (`ZKSIG_M5`, for a bearer
+  attestation) and `sig::commitment_message_with_holder_and_scheme`
+  (`ZKSIG_M4`, the one shape binding both a holder key and a method), signed with
+  `SecretKey::{sign_presentation_with_status_and_scheme, sign_commitment_with_holder_and_scheme}`. A
+  REGISTRY entry's own `ZKSIG_M3` signature is deliberately NOT a presentation attestation — recording
+  a commitment in an issuer's registry is a separate statement from authorising its presentation, so
+  presenting one as a clear attestation reports `CheckError::InvalidIssuerSignature`. Back-compatible
+  with ONE qualification, about the declared `message` of hidden-issuer entries: a hidden-issuer entry's declared `message` was previously not read at all,
+  and over a hidden-only commitment it is now required to equal a verifier-built candidate (for every
+  entry over that commitment), so a hidden-only manifest whose declared message is empty,
+  not decodable as a field element, or unmatched is now refused with `CheckError::HiddenIssuerMessageMismatch`;
+  a refusal of a malformed hidden-only manifest may also be reported earlier, in the pre-filter, than
+  it was before. The hidden-issuer stage likewise requires EVERY entry's declared `message`, including
+  one over a commitment that also has a clear attestation, to equal the message its proof is checked
+  against, and that check may now be reported ahead of an entry's depth or proof refusal. Otherwise
+  every manifest that verified before still verifies under the default
+  policy — an attestation over the method-unbound `ZKSIG_C3`/`ZKSIG_C4` message authenticates as
+  `Unbound`, which the default policy accepts, and a bad signature still reports
+  `CheckError::InvalidIssuerSignature`. The newly accepted manifests are only those carrying an
+  issuer signature over a method-bound PRESENTATION message (`ZKSIG_M5`/`ZKSIG_M4`). Not externally
+  audited (sq-qhy4); no soundness or
+  privacy property is claimed.
+- **sparq-zk:** `verify::fragment_typed_filters` re-derives a query's FILTER obligations keeping each
+  constant as the typed `oxrdf::Literal` the query spells (`verify::TypedQueryFilter { variable, op,
+  constant }`), for a relying party that needs the constant's datatype and lexical form rather than a
+  `u64`. It shares one private walker with `fragment_filters`, whose behaviour and error strings are
+  unchanged (a regression test asserts the messages verbatim), and widens the datatype axis only: the
+  admitted comparison shape is still `?var op <literal>` after the `const op ?var` flip, with
+  everything else fail-closed. Also `commit::CommitmentMethod::recognised()`, the enumeration
+  counterpart of `from_scheme_iri`.
+- **sparq-zk-compose:** `value_pin` holds the relying party's **pinned value-lane inputs** for the
+  dual-leaf lanes (OFF-by-default `dual-leaf` feature): given an authenticated `DualLeafV2` method and
+  a typed query FILTER, `expected_value_lane` / `check_value_lane_pin` state what a value-lane
+  sub-proof's member, lane constant (for the decimal lane, the scale it names), op, bound and verdict
+  would have to be, each equality failing closed with its own `PinError`; `scan_method` requires every
+  commitment a scan draws from to have authenticated the same method, and `check_lane_routed` refuses
+  a lane the whole-graph commitment builder does not route. **The value-lane verifier gates stay
+  CLOSED:** the unconditional stage-0 `CheckError::ValueLaneSubProofNotAccepted` refusal is unchanged
+  and still first, the stage-2 binding-edge operand match and `filter_edge_true` are untouched, and a
+  manifest every one of whose pins holds is still refused (a test asserts exactly that). Computing a
+  pin is not enforcing one; the gate-opening change is separate. Research-grade, not externally
+  audited (sq-qhy4); the value lanes carry the #769-accepted INV-VL downgrade (CR-G8).
 - **sparq-zk:** `dual_leaf_v2` is a second dual-leaf commitment method (`CommitmentMethod::DualLeafV2`,
   scheme IRI `https://sparq.dev/ns/zk#poseidon2-dualleaf-v2`) behind the OFF-by-default `dual-leaf`
   feature. It keeps V1's leaf shapes and re-derives the constants: lane constants in BLAKE3's
@@ -19,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the HOST side. The in-circuit half stays open: no Noir global or assert names the sentinel, so a
   member refuses it only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
   unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
-  §14.1 `LANG_NONE` assumption is not discharged. Both versions carry the same #769-accepted INV-VL
+  §14.1 `LANG_NONE` separation is asserted on the host side only (see the hardening entry below). Both versions carry the same #769-accepted INV-VL
   downgrade; not externally audited (CR-G8 / sq-qhy4).
 - **sparq-zk-compose:** `filter_value_dl_bool` is the `DualLeafV2` `xsd:boolean` lane's dedicated
   member — `filter_value_dl_int`'s public layout field-for-field, plus in-circuit constraints that the
@@ -34,6 +133,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-zk:** hardening — the dual-leaf encoders now assert the §14.1 `LANG_NONE` separation
+  on the host side instead of assuming it. `dual_leaf::degenerate_value_component` and
+  `dual_leaf_v2::degenerate_value_component` return `Result<Fr, DualLeafError>` and refuse a language
+  tag whose language constant equals the reserved `LANG_NONE` sentinel with the new
+  `DualLeafError::ReservedLanguageConstant`, so such a tag fails the literal, term, triple and
+  whole-graph encoders rather than being encoded; `checked_lang_const` (in both modules) is the gate.
+  A language constant is a 248-bit truncated BLAKE3 digest and `LANG_NONE` is the field element `1`,
+  so only a fixed-target preimage reaches the refusal. No committed value, vector or leaf changes. The
+  in-circuit half of the assert stays open (no Noir member checks it;
+  `research/zk-field-native-encoding.md` §14.1, §14.3).
+
 - **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
   the same parsed input, and as long as the binding values and firing sets are themselves
   stable, their labels (`__sk<n>_<label>`), and the statement keys and `sparq-prov` entity IRIs
@@ -42,7 +152,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   list) can still change those keys (#6844). Existing labels are renumbered, so these keys and
   IRIs differ from those minted by earlier versions; regenerate stored ones. `why()` proof
   trees can still vary with traversal order. Ranking each round's existential firings adds a
-  small per-firing cost to rules with existential conclusions (#6843). (#6749)
+  per-firing cost to rules with existential conclusions, since reduced (#6843). (#6749)
+
+- **sparq-reason (N3):** the per-round ranking that makes existential skolem labels
+  deterministic (#6749) now orders a round's firing keys by a packed prefix of the keys rather
+  than by comparing whole keys, and a binding whose firing already minted its existentials no
+  longer allocates its key. The labels, the statement keys and the proof steps are unchanged,
+  byte for byte; only the cost of arriving at them is lower. Measured against the pre-#6749
+  path on an existential-heavy closure, a wide-firing-key closure and a proof-mode run.
+  (#6843)
 
 - **sparq-zk:** `CommitmentMethod::DualLeafV1` is no longer production-selectable
   (`is_production_selectable()` is `false` for it), and `secprop::production_method_iris()` yields the
@@ -284,6 +402,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
+  / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to
+  a stored formula that holds no variable at any depth is matched as that formula, as
+  stored (its blank nodes are its existentials), the same as the formula written in the
+  rule; its statements are charged to the round's `max_join_rows` allowance. It was
+  matched as the empty pattern, so `log:includes` held whatever the formula held and
+  `log:notIncludes` never fired. Every other value (a formula holding a variable, a
+  non-formula value, an unbound variable) and every bound pattern with the store as the
+  scope still match as the empty pattern (#6943). Each containment matches its pattern's
+  blank nodes afresh: a witness found by one `log:includes` no longer constrains the next
+  one in the premise. (refs #6936, #6943)
+
+- **sparq-reason (N3):** three more N3 outputs no longer depend on hash-set traversal order,
+  so the same input gives byte-identical labels, proofs and `term_key` / `statement_keys` on
+  every run and every target. A `log:conclusion` / `log:supports` closure's DERIVED rows are
+  sorted into a canonical term order instead of the nested closure's fact-set order (a
+  formula's row order is part of its term identity). The rdf:first/rest cell labels minted
+  when a list value is interned (`_l<k>_<n>`) are numbered by interning every reachable list
+  value up front in that same order, instead of from a counter bumped as the rows arrived.
+  And where a round derives ONE fact several ways — a rule whose conclusion is symmetric or
+  has several triples firing under distinct bindings, two different rules, or the transitivity
+  fast path walking several intermediate paths — the proof step records the derivation with the
+  least premise vector rather than whichever one arrived first, so `why()` names the same
+  supporting facts every run. The `__bw<n>_` backward-renaming counter
+  is still assigned in evaluation order and stays tracked on #6844. (refs #6844)
 
 - **sparq-reason:** `MaterializedN3Graph::new` / `with_limits` now ignore a `base_facts`
   entry with a variable outside a formula, as `insert` already does, instead of adding it

@@ -114,9 +114,28 @@ async fn handle_now<S: Store + 'static>(
     agent: &Agent,
 ) -> Response {
     let path = req.path.as_str();
+    let not_there = || {
+        if state.needs_auth(agent) {
+            state.challenge(None)
+        } else {
+            problem(StatusCode::NOT_FOUND, None)
+        }
+    };
     if let Some(stem) = path.strip_suffix(META_SUFFIX) {
+        // A linkset describes a resource, and no resource's name ends in `.meta` (see
+        // [`sanitize_slug`]): what is stored under such a name is a linkset's own record, which
+        // has no linkset and is no resource. Whatever is stored, it is not there.
+        if super::names_record(stem) {
+            return not_there();
+        }
         let uri = state.cfg.absolute(stem);
         return linkset(state, req, agent, &uri).await;
+    }
+    // Nor is a name that ends in `.meta` in another case a resource's: what is stored under one
+    // is listed, followed and subscribed to as nothing (see [`super::names_record`]), and so it
+    // is answered.
+    if super::names_record(path) {
+        return not_there();
     }
     let uri = state.cfg.absolute(path);
     let is_root = path == "/";
@@ -139,6 +158,9 @@ async fn handle_now<S: Store + 'static>(
             Method::DELETE => Action::Delete,
             _ => Action::Modify,
         };
+        if let Some(refused) = unread_precondition(state, req, agent, &uri, true).await {
+            return refused;
+        }
         // A backend failure is a 500, never "absent": absence skips the permission check. Nothing
         // was authorized on a missing target, so nothing is served or changed: every method on it
         // is a 404, and answering it here (rather than in the handler) means a resource that
@@ -495,6 +517,59 @@ async fn precondition_read_check<S: Store + 'static>(
         return recheck(state, Action::Read, uri, agent).await;
     }
     Ok(())
+}
+
+/// [`precondition_read_check`] made first, from the request alone, before anything about the
+/// target (whether it exists, its format, its metadata) can shape the answer: a write whose
+/// preconditions compare state, by a caller that may not read what they compare, is refused
+/// whatever the target. `dated` says whether the route evaluates `If-Unmodified-Since` at all (a
+/// linkset's does not). A conditional `POST` to the storage root that compares the public storage
+/// description needs no Read. The check is made again under the target's lock.
+async fn unread_precondition<S: Store + 'static>(
+    state: &LwsState<S>,
+    req: &LwsRequest,
+    agent: &Agent,
+    uri: &str,
+    dated: bool,
+) -> Option<Response> {
+    let writes = matches!(
+        req.method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    );
+    // A patch reads what it patches, whatever its preconditions (see [`patch`]).
+    if !writes || (req.method != Method::PATCH && !compares_state(&req.headers, dated)) {
+        return None;
+    }
+    if req.method == Method::POST
+        && uri == state.cfg.storage()
+        && serves_description(plain_get(req).header(header::ACCEPT))
+    {
+        return None;
+    }
+    (!reads_stably(state, uri, agent).await).then(|| state.deny(agent))
+}
+
+/// Whether `agent` may read `uri`, decided without its lock the way [`authorize_unlocked`] decides:
+/// on what the resource was before a change in flight to it (or one set aside) began, and only once
+/// no change began or ended meanwhile. A resource such a change is creating is decided, for anyone
+/// but the owner, as a URI where nothing is: nothing the change wrote meanwhile (its metadata, its
+/// format) is read, and the answer is the one the same request gets where nothing was ever created.
+async fn reads_stably<S: Store + 'static>(state: &LwsState<S>, uri: &str, agent: &Agent) -> bool {
+    use super::access::{allowed_absent, aside, Aside};
+    stably(state, uri, || async {
+        if !state.visible(uri) || state.locks.changing(uri) {
+            return match aside(state, Action::Read, uri, agent).await {
+                Ok(Aside::Allowed) => true,
+                Ok(Aside::Missing) => allowed_absent(state, Action::Read, uri, agent)
+                    .await
+                    .unwrap_or(false),
+                Ok(Aside::Denied) | Err(_) => false,
+            };
+        }
+        state.allowed(Action::Read, uri, agent).await
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// The tag a precondition is evaluated against when it asks only whether an existing target
@@ -1061,6 +1136,8 @@ async fn members<S: Store + 'static>(
         .into_iter()
         .map(|c| c.as_str().to_string())
         .collect();
+    // A linkset's record is no member, whatever an edge to it says.
+    children.retain(|c| !super::names_record(c));
     children.sort();
     children.dedup();
     let mut out = Vec::with_capacity(children.len());
@@ -1563,7 +1640,8 @@ async fn create<S: Store + 'static>(
     // Both are released before the container's own metadata is touched (which takes its lock
     // exclusively).
     //
-    // A conditional create is evaluated against the container's listing, and takes the
+    // A conditional create is evaluated against the container's listing (or, when it compares
+    // no state, only `*`, against the container's existence), and takes the
     // container's lock exclusively so no other create or delete changes the listing between the
     // evaluation and the create.
     let conditional = is_conditional(req);
@@ -1687,34 +1765,87 @@ async fn create<S: Store + 'static>(
             // concurrency ceiling once the request has gone.
             let _admission = admission;
             let locks = (child_guards, parent_guard);
-            state.put_resource_meta(&child, &meta).await?;
-            let created = match state
-                .store
-                .create_in_container(&parent, &child, body, &content_type)
-                .await
-            {
-                Ok(m) => m,
+            // Until the content is created, or what the create may have written is put back, the
+            // member is in flight with nothing there before it: a check made without its lock
+            // meanwhile is not decided on the metadata written for it. What cannot be put back
+            // is set aside still in flight, so it stays decided that way until it is.
+            let nothing = super::Prior {
+                existed: Some(false),
+                ..Default::default()
+            };
+            state
+                .locks
+                .changing_from([(child.clone(), nothing)].into_iter().collect());
+            let in_flight = super::InFlight {
+                locks: state.locks.clone(),
+                iris: vec![child.clone()],
+            };
+            // A write that failed unsettled (an HTTP update that timed out) may still commit:
+            // it is fenced before anything it may have written is put back, so nothing it
+            // commits later outlives the undo.
+            let fence = |e: &ServerError| match e {
+                ServerError::Unsettled { fence, .. } => Some(super::Undo::Fence {
+                    fence: fence.clone(),
+                }),
+                _ => None,
+            };
+            let meta_gone = super::Undo::Restore {
+                key: meta_key(&child),
+                prior: None,
+            };
+            let written = state.put_resource_meta(&child, &meta).await;
+            let content_tried = written.is_ok();
+            let created = match written {
+                Ok(()) => {
+                    state
+                        .store
+                        .create_in_container(&parent, &child, body, &content_type)
+                        .await
+                }
+                Err(e) => Err(e),
+            };
+            let created = match created {
+                Ok(m) => {
+                    drop(in_flight);
+                    m
+                }
                 Err(e) => {
                     // A refusal created nothing, and the metadata goes. A backend failure may
-                    // follow a create that committed (a remote store's lost reply): the member is
-                    // removed first, so committed content is never left without its creator.
-                    // Both are tried a few times with the locks held, so no request sees the
-                    // member or its metadata in between; what is left then is set aside with
-                    // the locks (see [`LwsState::set_aside`](super::LwsState::set_aside)).
-                    let mut undo = Vec::new();
-                    if matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. }) {
+                    // follow a write that committed (a remote store's lost reply): the member is
+                    // removed first, so committed content is never left without its creator, and
+                    // the metadata after it. Each step is tried a few times with the locks held,
+                    // so no request sees the member or its metadata in between; what is left then
+                    // is set aside with the locks (see
+                    // [`LwsState::set_aside`](super::LwsState::set_aside)).
+                    let mut undo: Vec<super::Undo> = fence(&e).into_iter().collect();
+                    let may_have_landed =
+                        matches!(e, ServerError::Storage(_) | ServerError::Unsettled { .. });
+                    if content_tried && may_have_landed {
                         undo.push(super::Undo::Remove {
                             iri: child.clone(),
                             parent: parent.clone(),
                         });
                     }
-                    undo.push(super::Undo::Restore {
-                        key: meta_key(&child),
-                        prior: None,
-                    });
+                    if content_tried || may_have_landed {
+                        undo.push(meta_gone);
+                    }
                     match super::settle(&state.store, undo).await {
-                        None => drop(locks),
-                        Some(left) => state.set_aside(left, locks),
+                        None => {
+                            drop(in_flight);
+                            drop(locks);
+                        }
+                        Some(mut left) if content_tried => {
+                            left.1 = Some(in_flight);
+                            state.set_aside(left, locks);
+                        }
+                        Some(mut left) => {
+                            // No content was written, so no listing can show the member: only
+                            // the member is set aside, and its container's lock goes now.
+                            let (child_guards, parent_guard) = locks;
+                            drop(parent_guard);
+                            left.1 = Some(in_flight);
+                            state.set_aside_unlisted(left, child_guards);
+                        }
                     }
                     return Err(e);
                 }
@@ -2344,9 +2475,7 @@ async fn update<S: Store + 'static>(
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
     }
-    if let Err(r) =
-        precondition_read_check(state, req, uri, agent, meta.last_modified.is_some()).await
-    {
+    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
         return r;
     }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
@@ -2849,19 +2978,6 @@ pub fn validate_json_patch(ops: &Value) -> Result<&[Value], PatchError> {
     Ok(ops)
 }
 
-/// Whether a JSON Patch observes the target's content: `test` compares a value and `copy` / `move`
-/// read one, so applying it reveals what the patcher may not be allowed to read.
-pub fn json_patch_reads(ops: &Value) -> bool {
-    ops.as_array().is_some_and(|ops| {
-        ops.iter().any(|op| {
-            matches!(
-                op.get("op").and_then(Value::as_str),
-                Some("test" | "copy" | "move")
-            )
-        })
-    })
-}
-
 /// The size of `v` as written, in bytes: a number held as text ([`NUMBER_MARK`]) counts as the
 /// number it is written back as, not as the marked string it is held as.
 fn json_size(v: &Value) -> usize {
@@ -3320,11 +3436,6 @@ impl Patch {
         read_json_patch(&req.body).map(Patch::Json)
     }
 
-    /// Whether applying the patch observes the target's content (see [`json_patch_reads`]).
-    fn reads_content(&self) -> bool {
-        matches!(self, Patch::Json(ops) if json_patch_reads(ops))
-    }
-
     /// Apply the patch to `target` within `budget` serialized bytes. `Err` carries the response.
     fn apply(&self, target: &Value, budget: usize) -> Result<Value, Response> {
         match self {
@@ -3372,20 +3483,6 @@ fn patch_refused(e: PatchError) -> Response {
     }
 }
 
-/// A patch that observes content (see [`Patch::reads_content`]) needs Read as well as Modify:
-/// otherwise 403, or the challenge for an anonymous caller.
-async fn patch_read_check<S: Store + 'static>(
-    state: &LwsState<S>,
-    patch: &Patch,
-    uri: &str,
-    agent: &Agent,
-) -> Result<(), Response> {
-    if patch.reads_content() {
-        return recheck(state, Action::Read, uri, agent).await;
-    }
-    Ok(())
-}
-
 async fn patch<S: Store + 'static>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -3404,6 +3501,12 @@ async fn patch<S: Store + 'static>(
         Err(r) => return r,
     };
     if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
+        return r;
+    }
+    // A patch reads what it patches: whether it applies, and what it makes, depend on the content
+    // (a member there or not, the document's shape, format and size). So it needs Read as well as
+    // Modify, checked before anything about the resource answers it.
+    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
         return r;
     }
     if uri.ends_with('/') {
@@ -3432,11 +3535,6 @@ async fn patch<S: Store + 'static>(
     if !is_json_type(&meta.content_type) {
         return not_json();
     }
-    if let Err(r) =
-        precondition_read_check(state, req, uri, agent, meta.last_modified.is_some()).await
-    {
-        return r;
-    }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
         &req.headers,
         Some(&quoted(&meta.etag)),
@@ -3444,9 +3542,6 @@ async fn patch<S: Store + 'static>(
         false,
     ) {
         return problem(StatusCode::PRECONDITION_FAILED, None);
-    }
-    if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
-        return r;
     }
     let body = match state.store.read_at(uri, &meta).await {
         Ok(b) => b,
@@ -3466,9 +3561,6 @@ async fn patch<S: Store + 'static>(
     };
     let patched = numbers_from_text(&serde_json::to_string(&patched).unwrap_or_default());
     let ct = meta.content_type.clone();
-    // The new tag describes the content as patched, which only a reader may learn (a writer that
-    // may not read it would otherwise learn its length and a hash of it).
-    let reader = state.allowed(Action::Read, uri, agent).await;
     // The linkset is left alone: a PATCH changes the content only.
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
@@ -3487,9 +3579,7 @@ async fn patch<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     let mut resp = StatusCode::NO_CONTENT.into_response();
-    if reader {
-        set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
-    }
+    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
     resp
 }
 
@@ -3528,8 +3618,7 @@ async fn delete<S: Store + 'static>(
     };
     // A data resource's date is compared only when it has one; a container's listing may have
     // one.
-    let dated = uri.ends_with('/') || meta.last_modified.is_some();
-    if let Err(r) = precondition_read_check(state, req, uri, agent, dated).await {
+    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
         return r;
     }
     // The validators the preconditions are evaluated against (RFC 9110 section 13): a data
@@ -3558,7 +3647,11 @@ async fn delete<S: Store + 'static>(
     if let Some(refused) = unless_preconditions(req, etag.as_deref(), modified) {
         return refused;
     }
-    if uri.ends_with('/') && doomed.len() > 1 {
+    // A linkset record a legacy edge makes a member is no member: it neither keeps a container
+    // from being empty nor needs a permission of its own, and goes with the container (its edge
+    // too, when the record itself is already gone).
+    let members = || doomed.iter().filter(|(n, _)| !super::names_record(n));
+    if uri.ends_with('/') && members().count() > 1 {
         let infinity = req
             .header("depth")
             .is_some_and(|d| d.trim().eq_ignore_ascii_case("infinity"));
@@ -3569,7 +3662,7 @@ async fn delete<S: Store + 'static>(
     // Delete on the container is not Delete on what is in it: a recursive delete removes nothing
     // unless the agent may delete every descendant. `uri` itself is checked again too, now that
     // its lock is held.
-    for (node, _) in &doomed {
+    for (node, _) in members() {
         if let Err(r) = recheck(state, Action::Delete, node, agent).await {
             return r;
         }
@@ -3595,7 +3688,12 @@ async fn delete<S: Store + 'static>(
             // would be dropped when sent, and is not held while the removals run.
             let mut notices = Vec::with_capacity(doomed.len());
             let mut room = state.cfg.delivery.queue;
-            for (gone, origin) in doomed.iter().cloned() {
+            // A linkset record a legacy edge makes a member is announced to nobody.
+            for (gone, origin) in doomed
+                .iter()
+                .filter(|(n, _)| !super::names_record(n))
+                .cloned()
+            {
                 let event = Event {
                     kind: "Delete",
                     is_container: gone.ends_with('/'),
@@ -4546,6 +4644,9 @@ async fn linkset<S: Store + 'static>(
     } else {
         Action::Modify
     };
+    if let Some(refused) = unread_precondition(state, req, agent, uri, false).await {
+        return refused;
+    }
     // A request is authorized once before it waits for the resource's lock, so one that may not
     // touch the resource never queues behind a write (holding its admission slot while it waits).
     if let Some(refused) = authorize_unlocked(state, action, uri, agent, &req.method).await {
@@ -4586,6 +4687,18 @@ async fn linkset<S: Store + 'static>(
         };
     }
     if let Err(r) = recheck(state, action, uri, agent).await {
+        return r;
+    }
+    // A patch reads the linkset it patches (see [`patch`]), so it needs Read; a whole linkset
+    // replaces it, and needs Read only to compare it.
+    let read_check = if req.method == Method::PATCH {
+        recheck(state, Action::Read, uri, agent).await
+    } else if writes {
+        precondition_read_check(state, req, uri, agent, false).await
+    } else {
+        Ok(())
+    };
+    if let Err(r) = read_check {
         return r;
     }
     let meta = match state.resource_meta(uri).await {
@@ -4635,16 +4748,10 @@ async fn linkset<S: Store + 'static>(
                 Ok(p) => p,
                 Err(r) => return r,
             };
-            if let Err(r) = precondition_read_check(state, req, uri, agent, false).await {
-                return r;
-            }
             if let Precondition::Failed | Precondition::NotModified =
                 evaluate(&req.headers, Some(&etag), None, false)
             {
                 return problem(StatusCode::PRECONDITION_FAILED, None);
-            }
-            if let Err(r) = patch_read_check(state, &patch, uri, agent).await {
-                return r;
             }
             let base = linkset_base(uri);
             // The patch holds its numbers as their text, so the linkset is read the same way,
@@ -4698,12 +4805,7 @@ async fn linkset<S: Store + 'static>(
                 meta,
                 patched,
                 locks,
-                // The tag describes the linkset as patched, which only a reader may learn.
-                if state.allowed(Action::Read, uri, agent).await {
-                    LinksetValidator::Sent
-                } else {
-                    LinksetValidator::Withheld
-                },
+                LinksetValidator::Sent,
             )
             .await
         }
@@ -6413,8 +6515,11 @@ mod tests {
         let doc =
             json!({"linkset": [{"anchor": uri, "describedby": [{"href": "d.ttl"}]}]}).to_string();
         let add = r#"[{"op": "add", "path": "/a", "value": 1}]"#;
-        let link =
-            r#"[{"op": "add", "path": "/linkset/0/describedby", "value": [{"href": "d.ttl"}]}]"#;
+        // A blind patch: one that adds a top-level member, whatever the linkset holds.
+        let link = json!([{"op": "add", "path": "/linkset",
+            "value": [{"anchor": uri, "describedby": [{"href": "d.ttl"}]}]}])
+        .to_string();
+        let link = link.as_str();
         let send =
             |who: Agent, method: &'static str, path: String, h: Vec<(&'static str, String)>| {
                 let st = st.clone();
@@ -6463,6 +6568,20 @@ mod tests {
             .await;
             assert_eq!(status, StatusCode::PRECONDITION_FAILED, "{method} {path}");
         }
+        // Nor is a writer that may not read told whether the target is there at all, or its
+        // format, before the comparison would be refused.
+        let gone = || vec![("if-match", "\"x\"".to_string())];
+        for (method, path) in [
+            ("PUT", "/nope".to_string()),
+            ("PATCH", "/nope".to_string()),
+            ("DELETE", "/nope".to_string()),
+            ("PATCH", "/nope.meta".to_string()),
+        ] {
+            let status = send(dave.clone(), method, path.clone(), gone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}");
+            let status = send(bob.clone(), method, path.clone(), gone()).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}");
+        }
         // A date the write compares is state too; on a linkset, which a date never decides, it is
         // ignored, so it is no reason to refuse.
         for (method, path) in [
@@ -6481,7 +6600,7 @@ mod tests {
         }
         let status = send(
             dave.clone(),
-            "PATCH",
+            "PUT",
             meta.clone(),
             vec![("if-unmodified-since", date.clone())],
         )
@@ -6505,7 +6624,13 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let status = send(bob.clone(), "POST", c.clone(), other()).await;
         assert_eq!(status, StatusCode::CREATED);
-        let status = send(dave.clone(), "POST", c.clone(), vec![("if-match", "*".into())]).await;
+        let status = send(
+            dave.clone(),
+            "POST",
+            c.clone(),
+            vec![("if-match", "*".into())],
+        )
+        .await;
         assert_eq!(status, StatusCode::CREATED);
         // `*` asks only whether the container exists, so it reads no listing: a page past the
         // last, which a listing would answer with 404, tells a writer nothing about the members.
@@ -6524,6 +6649,44 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        // With an `If-Match`, a date is not evaluated (RFC 9110 section 13.2.2), so `*` alone
+        // decides: no comparison, and no Read asked.
+        let status = send(
+            dave.clone(),
+            "PUT",
+            p.clone(),
+            vec![
+                ("if-match", "*".into()),
+                ("if-unmodified-since", date.clone()),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        // Deleting a container on `*` reads no listing either, a page past the last included.
+        let g = create(
+            &st,
+            &request("POST", "/", &[("slug", "g"), ("link", CONTAINER_LINK)], ""),
+            &owner,
+            &root,
+        )
+        .await;
+        let g = path_of(&hdr(&g, "location")).to_string();
+        let status = send(
+            dave.clone(),
+            "DELETE",
+            g.clone(),
+            vec![("if-match", "\"other\"".into())],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = send(
+            dave.clone(),
+            "DELETE",
+            format!("{g}?page=99"),
+            vec![("if-match", "*".into())],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
         // Read is asked of the container the create compares, not of another: Erin may read
         // only `e/`, and is told how its listing compares.
         let e = create(
@@ -6558,7 +6721,8 @@ mod tests {
             assert_eq!(r.status(), StatusCode::NO_CONTENT);
             assert_eq!(r.headers().contains_key("etag"), sent, "PUT {who:?}");
         }
-        for (who, sent) in [(&dave, false), (&bob, true)] {
+        // A patch needs Read in any case; a reader gets the new tag.
+        for (who, ok) in [(&dave, false), (&bob, true)] {
             for (path, body) in [(&p, add), (&meta, link)] {
                 let r = handle(
                     &st,
@@ -6566,14 +6730,13 @@ mod tests {
                     who,
                 )
                 .await;
-                assert_eq!(r.status(), StatusCode::NO_CONTENT, "{path}");
-                assert_eq!(r.headers().contains_key("etag"), sent, "{path} {who:?}");
+                assert_eq!(r.status().is_success(), ok, "{path} {who:?}");
+                assert_eq!(r.headers().contains_key("etag"), ok, "{path} {who:?}");
             }
         }
         // `*` stays open to a writer that may not read.
         for (method, path) in [
             ("PUT", meta.clone()),
-            ("PATCH", p.clone()),
             ("PUT", p.clone()),
             ("DELETE", p.clone()),
         ] {
@@ -6779,7 +6942,13 @@ mod tests {
                 &bob,
             )
             .await;
-            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{method}");
+            // A patch, which needs Read, is refused before its target is looked for.
+            let expected = if method == "PATCH" {
+                StatusCode::FORBIDDEN
+            } else {
+                StatusCode::NOT_FOUND
+            };
+            assert_eq!(r.status(), expected, "{method}");
         }
         *store.hide.lock().unwrap() = None;
         let r = handle(&st, &get, &owner).await;
@@ -8107,6 +8276,7 @@ mod tests {
         // Nobody else takes its lock while it is set aside, and its container, whose listing
         // may show it, is set aside with it.
         assert!(st.locks.try_lock(&kept).is_none());
+        assert!(st.locks.changing(&kept), "set aside still in flight");
         assert!(!st.visible(&st.cfg.storage()));
         *store.fail_delete_of.lock().unwrap() = None;
         for _ in 0..100 {
@@ -8117,6 +8287,10 @@ mod tests {
         }
         assert!(st.visible(&kept));
         assert!(st.locks.try_lock(&kept).is_some());
+        assert!(
+            !st.locks.changing(&kept),
+            "the create is over once it is put back"
+        );
         assert!(!st.store.exists(&kept).await.unwrap());
         assert!(stored_meta(&st, &kept).await.unwrap().is_none());
         store.fail_after_create.store(true, Ordering::SeqCst);
@@ -8127,6 +8301,232 @@ mod tests {
         store.fail_after_create.store(false, Ordering::SeqCst);
         assert!(!st.store.exists(&gone).await.unwrap());
         assert!(stored_meta(&st, &gone).await.unwrap().is_none());
+        assert!(!st.locks.changing(&gone));
+    }
+
+    /// Review finding: `a_failed_create_leaves_nothing_of_it_behind` let an unsettled write commit
+    /// only once it was fenced, so a create whose unsettled write was never removed, or was
+    /// removed before it was fenced, passed it. Here the write commits while it cannot be fenced,
+    /// and the undo still removes it.
+    #[tokio::test]
+    async fn an_unsettled_create_that_commits_before_its_fence_is_removed() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let post = req(
+            Method::POST,
+            "/",
+            &[("slug", "early.txt"), ("content-type", "text/plain")],
+            "x",
+        );
+        let early = st.cfg.absolute("/early.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store
+            .fail_fence
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let r = create(&st, &post, &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&early));
+        // The write the store answered unsettled commits now, before it could be fenced: the undo
+        // still removes it once the fence holds.
+        gate.add_permits(1);
+        for _ in 0..200 {
+            if st.store.exists(&early).await.unwrap() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(st.store.exists(&early).await.unwrap(), "committed late");
+        assert!(!st.visible(&early));
+        assert!(st.locks.changing(&early));
+        store
+            .fail_fence
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        for _ in 0..500 {
+            if st.visible(&early) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(st.visible(&early));
+        assert!(
+            !st.store.exists(&early).await.unwrap(),
+            "removed once fenced"
+        );
+        assert!(stored_meta(&st, &early).await.unwrap().is_none());
+        assert!(!st.locks.changing(&early));
+    }
+
+    /// Review finding: a create whose metadata write and its removal both failed set aside its
+    /// container with it, so the storage description, the root listing and every other create
+    /// into the root waited on the store for as long as it stayed down, though no content was
+    /// written and no listing could show the member.
+    #[tokio::test]
+    async fn a_create_whose_content_was_never_written_hides_no_container() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let x = st.cfg.absolute("/x.txt");
+        // The metadata write fails and so does its removal: the member is set aside, but no
+        // content was written, so its container stays visible and open to other requests.
+        *store.fail_write_of.lock().unwrap() = Some(meta_key(&x));
+        *store.fail_delete_of.lock().unwrap() = Some(meta_key(&x));
+        let post = |slug: &str| {
+            req(
+                Method::POST,
+                "/",
+                &[("slug", slug), ("content-type", "text/plain")],
+                "x",
+            )
+        };
+        let r = create(&st, &post("x.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&x));
+        assert!(st.visible(&root));
+        let desc = req(Method::GET, "/", &[("accept", "application/lws+cid")], "");
+        let r = handle(&st, &desc, &super::super::Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let r = handle(&st, &post("y.txt"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        // Nor is the container's lock held: a conditional create into it, which takes it whole,
+        // is answered meanwhile.
+        let conditional = req(
+            Method::POST,
+            "/",
+            &[
+                ("slug", "z.txt"),
+                ("content-type", "text/plain"),
+                ("if-match", "*"),
+            ],
+            "z",
+        );
+        let r = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            handle(&st, &conditional, &agent(OWNER)),
+        )
+        .await
+        .expect("answered while the member is set aside");
+        assert_eq!(r.status(), StatusCode::CREATED);
+        *store.fail_delete_of.lock().unwrap() = None;
+        for _ in 0..500 {
+            if st.visible(&x) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(st.visible(&x));
+        assert!(!st.locks.changing(&x));
+    }
+
+    /// Review findings: a create's metadata write that landed but reported a failure was left in
+    /// place, and a create the store answered unsettled was put back without being fenced, so it
+    /// could commit afterwards. Either way the member was then decided, for a caller refused
+    /// before the lock, on what the create wrote. What a failed create may have written is put
+    /// back (an unsettled write fenced first), and until it is, the member stays in flight with
+    /// nothing there before it.
+    #[tokio::test]
+    async fn a_failed_create_leaves_nothing_of_it_behind() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let tess = "https://tess.example/#me";
+        let note = "https://e.example/Note";
+        let notes = json!([{"leftOperand": "type", "operator": "eq", "rightOperand": note}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": tess,
+                "constraint": notes}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("tess", grant);
+        let link = format!("<{note}>; rel=\"type\"");
+        let post = |slug: &'static str| {
+            req(
+                Method::POST,
+                "/",
+                &[
+                    ("slug", slug),
+                    ("content-type", "text/plain"),
+                    ("link", link.as_str()),
+                ],
+                "x",
+            )
+        };
+        let same_as_nothing = |name: &'static str| {
+            let st = st.clone();
+            async move {
+                for method in [Method::GET, Method::PATCH] {
+                    let h = [("content-type", JSON_PATCH)];
+                    let answer = |path: String| {
+                        let (st, h, method) = (st.clone(), h, method.clone());
+                        async move {
+                            let r = req(method, &path, &h, "[]");
+                            handle(&st, &r, &agent(tess)).await.status()
+                        }
+                    };
+                    let created = answer(format!("/{name}")).await;
+                    let never = answer(format!("/never-{name}")).await;
+                    assert_eq!(created, never, "{method} {name}");
+                }
+            }
+        };
+        // The metadata lands, the reply is lost: the create fails, and the metadata goes.
+        let lost = st.cfg.absolute("/lost.txt");
+        *store.fail_after_write_of.lock().unwrap() = Some(meta_key(&lost));
+        let r = create(&st, &post("lost.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(stored_meta(&st, &lost).await.unwrap().is_none());
+        assert!(!st.locks.changing(&lost));
+        same_as_nothing("lost.txt").await;
+        // The content's create is answered unsettled: it is fenced before the metadata goes,
+        // so it never commits after the create is over.
+        let late = st.cfg.absolute("/late.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        let r = create(&st, &post("late.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(
+            !st.store.exists(&late).await.unwrap(),
+            "fenced, so never committed"
+        );
+        assert!(stored_meta(&st, &late).await.unwrap().is_none());
+        assert!(!st.locks.changing(&late));
+        same_as_nothing("late.txt").await;
+        // While it cannot be fenced it is set aside, still in flight with nothing before it,
+        // and nothing is put back under it; once it is fenced it goes.
+        let stuck = st.cfg.absolute("/stuck.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_create.lock().unwrap() = Some(gate.clone());
+        store
+            .fail_fence
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let r = create(&st, &post("stuck.txt"), &agent(OWNER), &root).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&stuck));
+        assert!(st.locks.changing(&stuck));
+        assert!(
+            stored_meta(&st, &stuck).await.unwrap().is_some(),
+            "kept until fenced"
+        );
+        same_as_nothing("stuck.txt").await;
+        store
+            .fail_fence
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        for _ in 0..200 {
+            if st.visible(&stuck) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert!(st.visible(&stuck));
+        gate.add_permits(1);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!st.store.exists(&stuck).await.unwrap());
+        assert!(stored_meta(&st, &stuck).await.unwrap().is_none());
+        assert!(!st.locks.changing(&stuck));
     }
 
     /// Review finding: HEAD responses dropped the body before the length was derived from it, so
@@ -10462,35 +10862,132 @@ mod tests {
         assert!(json_patch(&big, &Value::Array(ops), 1024).is_ok());
     }
 
+    /// A writer that may not read a JSON resource learns nothing about its content from a patch:
+    /// every patch reads what it patches (even an `add` of one member applies only to an object of
+    /// a size it fits), so it is refused before it is applied, whatever the content.
     #[tokio::test]
-    async fn content_reading_patches_need_read() {
-        let st = state_with(false).await;
-        let anonymous = Agent::anonymous();
-        let reads = Patch::Json(json!([{"op": "test", "path": "/a", "value": 1}]));
-        let blind = Patch::Json(json!([{"op": "add", "path": "/a", "value": 1}]));
-        assert!(reads.reads_content());
-        assert!(!blind.reads_content());
-        for op in ["copy", "move"] {
-            assert!(json_patch_reads(
-                &json!([{"op": op, "from": "/a", "path": "/b"}])
-            ));
-        }
-        let uri = format!("{BASE}/");
-        let denied = patch_read_check(&st, &reads, &uri, &anonymous)
-            .await
-            .unwrap_err();
-        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
-        let someone = Agent {
-            subject: Some("https://someone.example/#me".into()),
-            client: None,
+    async fn a_patch_tells_a_writer_without_read_nothing() {
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let st = LwsState::new(store, cfg).await.expect("state");
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who}]),
+                &root,
+            )
+            .unwrap()
         };
-        let denied = patch_read_check(&st, &reads, &uri, &someone)
-            .await
-            .unwrap_err();
-        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
-        assert!(patch_read_check(&st, &blind, &uri, &anonymous)
-            .await
-            .is_ok());
+        let (dave, bob) = ("https://dave.example/#me", "https://bob.example/#me");
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave));
+        st.access
+            .put_grant_for_test("bob", grant(json!(["read", "modify"]), bob));
+        let owner = agent("https://owner.example/#me");
+        let (dave, bob) = (agent(dave), agent(bob));
+        let make = |slug: &'static str, body: &'static str| {
+            let (st, owner, root) = (st.clone(), owner.clone(), root.clone());
+            async move {
+                let req = request("POST", "/", &[("slug", slug), ("content-type", JSON)], body);
+                let r = create(&st, &req, &owner, &root).await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+                path_of(&hdr(&r, "location")).to_string()
+            }
+        };
+        let doc = make("o.json", r#"{"here": 1}"#).await;
+        let list = make("l.json", "[1]").await;
+        let patch = |who: Agent, path: String, ops: Value| {
+            let st = st.clone();
+            async move {
+                let req = request(
+                    "PATCH",
+                    &path,
+                    &[("content-type", JSON_PATCH)],
+                    &ops.to_string(),
+                );
+                handle(&st, &req, &who).await.status()
+            }
+        };
+        for (op, there) in [
+            ("replace", "/here"),
+            ("replace", "/gone"),
+            ("remove", "/here"),
+            ("remove", "/gone"),
+        ] {
+            let ops = json!([{"op": op, "path": there, "value": 2}]);
+            let status = patch(dave.clone(), doc.clone(), ops.clone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{op} {there}");
+            // Bob may read, and is told whether it applies.
+            let applies = there == "/here";
+            let status = patch(bob.clone(), doc.clone(), ops).await;
+            assert_eq!(status.is_success(), applies, "{op} {there}: {status}");
+        }
+        // Not even an empty patch is answered to it.
+        let status = patch(dave.clone(), doc.clone(), json!([])).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let nested = json!([{"op": "add", "path": "/gone/x", "value": 1}]);
+        let status = patch(dave.clone(), doc.clone(), nested.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            patch(bob.clone(), doc.clone(), nested).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // Nor may it add one member: whether that applies (the document is an object, the result
+        // fits) depends on the content too.
+        let blind = json!([{"op": "add", "path": "/new", "value": 1}]);
+        let status = patch(dave.clone(), doc.clone(), blind.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            patch(bob.clone(), doc.clone(), blind.clone()).await,
+            StatusCode::NO_CONTENT
+        );
+        let status = patch(dave.clone(), list.clone(), blind.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            patch(bob.clone(), list, blind.clone()).await,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        // Nor that the stored JSON holds a number past what is read, or is not JSON at all.
+        let long: &'static str = Box::leak(format!("[{}]", "9".repeat(2000)).into_boxed_str());
+        let unreadable = [make("n.json", long).await, make("x.json", "not json").await];
+        for path in unreadable {
+            let status = patch(dave.clone(), path.clone(), blind.clone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{path}");
+            let status = patch(bob.clone(), path.clone(), blind.clone()).await;
+            assert!(
+                status.is_client_error() && status != StatusCode::FORBIDDEN,
+                "{path}"
+            );
+        }
+        // Nor is a writer without Read told the resource's format.
+        let req = request(
+            "POST",
+            "/",
+            &[("slug", "t.txt"), ("content-type", "text/plain")],
+            "plain",
+        );
+        let r = create(&st, &req, &owner, &root).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let text = path_of(&hdr(&r, "location")).to_string();
+        let status = patch(dave.clone(), text.clone(), blind.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            patch(bob.clone(), text, blind).await,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE
+        );
+        // A linkset is patched under the same rule.
+        let meta = format!("{doc}{META_SUFFIX}");
+        for ops in [
+            json!([{"op": "remove", "path": "/linkset/0"}]),
+            json!([{"op": "remove", "path": "/linkset/9"}]),
+            json!([{"op": "add", "path": "/linkset", "value": []}]),
+        ] {
+            let status = patch(dave.clone(), meta.clone(), ops.clone()).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{ops}");
+        }
+        let status = patch(bob, meta, json!([{"op": "remove", "path": "/linkset/9"}])).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     /// `doc` with its `/d` wrapped in `n` more objects, by add and move alone.
@@ -11576,5 +12073,775 @@ mod tests {
         super::super::test_store::put_back(&st, &uri).await;
         assert_eq!(get("https://old.example/#me").await, StatusCode::OK);
         assert_eq!(get("https://new.example/#me").await, StatusCode::FORBIDDEN);
+    }
+
+    /// Review finding: the Read check a conditional write or a patch makes before the lock read the
+    /// metadata a change in flight had written part way (`pending`), so a grantee of the resource as
+    /// it was could be refused while the change was put back. It is decided as the other checks
+    /// before the lock are, on the metadata before the change.
+    #[tokio::test]
+    async fn the_read_check_before_the_lock_is_made_on_the_metadata_before_a_change() {
+        use super::super::meta_key;
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let owner = agent(OWNER);
+        let (public, private) = ("https://e.example/Public", "https://e.example/Private");
+        for (who, ty) in [
+            ("https://old.example/#me", public),
+            ("https://new.example/#me", private),
+        ] {
+            let grant = json!({
+                "@context": ["https://www.w3.org/ns/lws/v1"],
+                "type": ["AccessGrant"],
+                "storage": st.cfg.storage(),
+                "access": [{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": who,
+                    "constraint": [{"leftOperand": "type", "operator": "eq", "rightOperand": ty}]}],
+            });
+            let r = super::super::access::handle(
+                &st,
+                &req(
+                    Method::POST,
+                    GRANTS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &grant.to_string(),
+                ),
+                &owner,
+            )
+            .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = create(
+            &st,
+            &req(Method::POST, "/", &h, "x"),
+            &owner,
+            &st.cfg.storage(),
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let uri = st.cfg.absolute("/doc.txt");
+        let put = |ty: &str, body: &str| {
+            let link = format!("<{ty}>; rel=\"type\"");
+            req(
+                Method::PUT,
+                "/doc.txt",
+                &[("content-type", "text/plain"), ("link", &link)],
+                body,
+            )
+        };
+        let get = |who: &str| {
+            let (st, who) = (st.clone(), agent(who));
+            async move {
+                handle(&st, &req(Method::GET, "/doc.txt", &[], ""), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert!(handle(&st, &put(public, "public"), &owner)
+            .await
+            .status()
+            .is_success());
+        assert_eq!(get("https://old.example/#me").await, StatusCode::OK);
+        // The PUT to the private type: the pending mark is written, then the content, then the
+        // new metadata, which lands but reports a failure; putting the metadata back stalls.
+        let key = meta_key(&uri);
+        *store.lose_nth_write_of.lock().unwrap() = Some((key.clone(), 2));
+        *store.fail_restore_of.lock().unwrap() = Some(key.clone());
+        let r = handle(&st, &put(private, "private"), &owner).await;
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri));
+        assert_eq!(
+            st.resource_meta(&uri).await.unwrap().types,
+            vec![private.to_string()],
+            "the new metadata landed"
+        );
+        // A conditional PATCH by the grantee of the old type is decided on the metadata before the
+        // change, as its GET is: it is told to retry, not refused.
+        let patch = |who: &str| {
+            let (st, who) = (st.clone(), agent(who));
+            async move {
+                let h = [("content-type", JSON_PATCH), ("if-match", "\"x\"")];
+                handle(&st, &req(Method::PATCH, "/doc.txt", &h, "[]"), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert_eq!(
+            patch("https://old.example/#me").await,
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+        assert_eq!(
+            patch("https://new.example/#me").await,
+            StatusCode::FORBIDDEN
+        );
+    }
+
+    /// Review finding: a create that is set aside (it landed, reported a failure, and could not be
+    /// taken back) has no state before it. Anyone but the owner is answered on it as on a URI where
+    /// nothing was ever created, by the Read check before the lock as by every other check, so no
+    /// caller learns from a write or a patch that someone is creating it, nor whether it may read
+    /// it. The owner is told to retry.
+    #[tokio::test]
+    async fn a_resource_being_created_is_answered_as_nothing_there() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str, constraint: Value| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who,
+                    "constraint": constraint}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (dave, bob, carol, eve) = (
+            "https://dave.example/#me",
+            "https://bob.example/#me",
+            "https://carol.example/#me",
+            "https://eve.example/#me",
+        );
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave, json!([])));
+        st.access
+            .put_grant_for_test("bob", grant(json!(["read", "modify"]), bob, json!([])));
+        // Carol may read and modify JSON only: what the create wrote must not decide for her.
+        let json_only = json!([{"leftOperand": "format", "operator": "eq", "rightOperand": JSON}]);
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read", "modify"]), carol, json_only));
+        let uri = st.cfg.absolute("/new.json");
+        store
+            .fail_after_create
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        // Tess may read and modify notes only, which is what the create declares the member is.
+        let tess = "https://tess.example/#me";
+        let note = "https://e.example/Note";
+        let notes = json!([{"leftOperand": "type", "operator": "eq", "rightOperand": note}]);
+        st.access
+            .put_grant_for_test("tess", grant(json!(["read", "modify"]), tess, notes));
+        let link = format!("<{note}>; rel=\"type\"");
+        let h = [
+            ("slug", "new.json"),
+            ("content-type", JSON),
+            ("link", link.as_str()),
+        ];
+        let r = create(&st, &req(Method::POST, "/", &h, "{}"), &agent(OWNER), &root).await;
+        store
+            .fail_after_create
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri), "the create is set aside");
+        let answer =
+            |method: Method, path: String, h: Vec<(&'static str, &'static str)>, body, who| {
+                let st = st.clone();
+                async move {
+                    let r = handle(&st, &req(method, &path, &h, body), &who).await;
+                    let mut headers: Vec<String> = r
+                        .headers()
+                        .iter()
+                        .map(|(k, v)| format!("{k}: {v:?}"))
+                        .collect();
+                    headers.sort();
+                    (r.status(), headers, body_of(r).await)
+                }
+            };
+        let callers = [
+            agent(bob),
+            agent(carol),
+            agent(dave),
+            agent(tess),
+            agent(eve),
+            Agent::anonymous(),
+        ];
+        let requests = [
+            (Method::PATCH, "", "[]", vec![("content-type", JSON_PATCH)]),
+            (
+                Method::PATCH,
+                ".meta",
+                "[]",
+                vec![("content-type", JSON_PATCH)],
+            ),
+            (
+                Method::PUT,
+                "",
+                "{}",
+                vec![("content-type", JSON), ("if-match", "\"x\"")],
+            ),
+            (Method::PUT, "", "{}", vec![("content-type", JSON)]),
+            (Method::DELETE, "", "", vec![("if-match", "\"x\"")]),
+            (Method::GET, "", "", vec![]),
+        ];
+        for (method, suffix, body, h) in requests {
+            for who in &callers {
+                let created = format!("/new.json{suffix}");
+                let never = format!("/never.json{suffix}");
+                let a = answer(method.clone(), created, h.clone(), body, who.clone()).await;
+                let b = answer(method.clone(), never, h.clone(), body, who.clone()).await;
+                assert_eq!(a, b, "{method} {suffix} as {:?}", who.subject);
+            }
+            if method == Method::GET {
+                continue;
+            }
+            let path = format!("/new.json{suffix}");
+            let (status, headers, _) = answer(method.clone(), path, h, body, agent(OWNER)).await;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{method} {suffix}");
+            assert!(
+                headers.iter().any(|h| h.starts_with("retry-after")),
+                "{method} {suffix}"
+            );
+        }
+    }
+
+    /// Review finding: the same holds while a change that creates the resource is in flight (it
+    /// holds the lock and has published that nothing was there): a caller refused before the lock
+    /// is answered as on a name where nothing was created, whatever the change has written.
+    #[tokio::test]
+    async fn a_resource_a_change_in_flight_creates_is_answered_as_nothing_there() {
+        use super::super::test_store::{agent, closed_state, data, request as req};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str, constraint: Value| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who,
+                    "constraint": constraint}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (dave, carol, eve) = (
+            "https://dave.example/#me",
+            "https://carol.example/#me",
+            "https://eve.example/#me",
+        );
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave, json!([])));
+        // Carol may read and modify plain text only, which is what the change has written.
+        let text_only =
+            json!([{"leftOperand": "format", "operator": "eq", "rightOperand": "text/plain"}]);
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read", "modify"]), carol, text_only));
+        let uri = data(&st, "new.txt").await;
+        let held = st.locks.lock(&uri).await.unwrap();
+        let prior = super::super::Prior {
+            existed: Some(false),
+            ..Default::default()
+        };
+        st.locks
+            .changing_from([(uri.clone(), prior)].into_iter().collect());
+        let answer = |method: Method, path: String, h: Vec<(&'static str, &'static str)>, who| {
+            let st = st.clone();
+            async move {
+                let r = req(method, &path, &h, "x");
+                let r = tokio::time::timeout(Duration::from_secs(5), handle(&st, &r, &who))
+                    .await
+                    .expect("refused before the lock");
+                let mut headers: Vec<String> = r
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v:?}"))
+                    .collect();
+                headers.sort();
+                (r.status(), headers, body_of(r).await)
+            }
+        };
+        let callers = [agent(carol), agent(dave), agent(eve), Agent::anonymous()];
+        let requests = [
+            (Method::PATCH, "", vec![("content-type", JSON_PATCH)]),
+            (Method::PATCH, ".meta", vec![("content-type", JSON_PATCH)]),
+            (
+                Method::PUT,
+                "",
+                vec![("content-type", "text/plain"), ("if-match", "\"x\"")],
+            ),
+            (Method::DELETE, "", vec![("if-match", "\"x\"")]),
+        ];
+        for (method, suffix, h) in requests {
+            for who in &callers {
+                let created = format!("/new.txt{suffix}");
+                let never = format!("/never.txt{suffix}");
+                let a = answer(method.clone(), created, h.clone(), who.clone()).await;
+                let b = answer(method.clone(), never, h.clone(), who.clone()).await;
+                assert!(a.0.is_client_error(), "{method} {suffix}: {}", a.0);
+                assert_eq!(a, b, "{method} {suffix} as {:?}", who.subject);
+            }
+        }
+        st.locks.landed(std::slice::from_ref(&uri));
+        drop(held);
+    }
+
+    /// Review finding: a create writes its member's metadata before the content, and a check made
+    /// without the lock in between read that metadata, so a grantee of the type the create
+    /// declares was answered as one that may read the member. The create is in flight until its
+    /// content is there, and the member is answered as nothing there until then.
+    #[tokio::test]
+    async fn a_create_under_way_is_answered_as_nothing_there() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let carol = "https://carol.example/#me";
+        let ty = "https://e.example/Note";
+        let only_notes = json!([{"leftOperand": "type", "operator": "eq", "rightOperand": ty}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": carol,
+                "constraint": only_notes}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("carol", grant);
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let creating = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                let link = format!("<{ty}>; rel=\"type\"");
+                let h = [
+                    ("slug", "new.txt"),
+                    ("content-type", "text/plain"),
+                    ("link", link.as_str()),
+                ];
+                let r = req(Method::POST, "/", &h, "x");
+                handle(&st, &r, &agent(OWNER)).await.status()
+            })
+        };
+        let uri = st.cfg.absolute("/new.txt");
+        // The member's metadata is written, and its content is held.
+        while st.resource_meta(&uri).await.unwrap().creator.is_none() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let patch = |path: &'static str| {
+            let st = st.clone();
+            async move {
+                let r = req(Method::PATCH, path, &[("content-type", JSON_PATCH)], "[]");
+                tokio::time::timeout(Duration::from_secs(5), handle(&st, &r, &agent(carol)))
+                    .await
+                    .expect("refused before the lock")
+                    .status()
+            }
+        };
+        let (created, never) = (patch("/new.txt").await, patch("/never.txt").await);
+        assert_eq!(created, never);
+        assert_eq!(never, StatusCode::FORBIDDEN);
+        gate.add_permits(1);
+        assert_eq!(creating.await.unwrap(), StatusCode::CREATED);
+        assert!(!st.locks.changing(&uri), "the create landed");
+    }
+
+    /// Review finding: a container's format is its listing's whatever is stored, so a container
+    /// being created is answered as one where nothing is with that format, not with none.
+    #[tokio::test]
+    async fn a_container_being_created_is_answered_as_nothing_there() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let carol = "https://carol.example/#me";
+        let listings =
+            json!([{"leftOperand": "format", "operator": "eq", "rightOperand": LWS_JSON}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": carol,
+                "constraint": listings}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("carol", grant);
+        let uri = st.cfg.absolute("/c/");
+        store
+            .fail_after_create
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        let link = format!("<{LWS_NS}Container>; rel=\"type\"");
+        let h = [("slug", "c"), ("link", link.as_str())];
+        let r = create(&st, &req(Method::POST, "/", &h, ""), &agent(OWNER), &root).await;
+        store
+            .fail_after_create
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri), "the create is set aside");
+        let answer = |method: Method, path: String, h: Vec<(&'static str, &'static str)>| {
+            let st = st.clone();
+            async move {
+                let r = handle(&st, &req(method, &path, &h, ""), &agent(carol)).await;
+                let mut headers: Vec<String> = r
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v:?}"))
+                    .collect();
+                headers.sort();
+                (r.status(), headers, body_of(r).await)
+            }
+        };
+        let requests = [
+            (Method::PATCH, "", vec![("content-type", JSON_PATCH)]),
+            (Method::PATCH, ".meta", vec![("content-type", JSON_PATCH)]),
+            (Method::DELETE, "", vec![("if-match", "\"x\"")]),
+            (Method::GET, "", vec![]),
+        ];
+        for (method, suffix, h) in requests {
+            let created = answer(method.clone(), format!("/c/{suffix}"), h.clone()).await;
+            let never = answer(method.clone(), format!("/n/{suffix}"), h).await;
+            assert_eq!(created, never, "{method} {suffix}");
+        }
+    }
+
+    /// Review finding: the linkset route took `X.meta.meta` for the linkset of `X.meta`, a
+    /// linkset's own record, and authorized and served it as a resource: a reader refused `X` and
+    /// its linkset was answered on the record's format, size and date, and a writer could store
+    /// records under it that outlived `X`. No resource's name ends in `.meta`, so nothing is there.
+    #[tokio::test]
+    async fn a_linksets_record_is_no_resource() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str, constraint: Value| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who,
+                    "constraint": constraint}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (carol, dave) = ("https://carol.example/#me", "https://dave.example/#me");
+        let json_only = json!([{"leftOperand": "format", "operator": "eq", "rightOperand": JSON}]);
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read"]), carol, json_only));
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave, json!([])));
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let doc = st.cfg.absolute("/doc.txt");
+        let record = format!("{doc}.meta");
+        assert!(st.store.meta(&record).await.unwrap().is_some());
+        let status = |method: Method, path: &'static str, who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("content-type", LINKSET_JSON)];
+                let body = r#"{"linkset": []}"#;
+                handle(&st, &req(method, path, &h, body), &who)
+                    .await
+                    .status()
+            }
+        };
+        assert_eq!(
+            status(Method::GET, "/doc.txt.meta", agent(carol)).await,
+            StatusCode::FORBIDDEN
+        );
+        for path in [
+            "/doc.txt.meta.meta",
+            "/doc.txt.META.meta",
+            "/doc.txt.meta.meta.meta",
+        ] {
+            for who in [agent(OWNER), agent(carol), agent(dave)] {
+                for method in [Method::GET, Method::PUT, Method::PATCH, Method::DELETE] {
+                    let got = status(method.clone(), path, who.clone()).await;
+                    assert_eq!(
+                        got,
+                        StatusCode::NOT_FOUND,
+                        "{method} {path} {:?}",
+                        who.subject
+                    );
+                }
+            }
+            let got = status(Method::GET, path, Agent::anonymous()).await;
+            assert_eq!(got, StatusCode::UNAUTHORIZED, "{path}");
+        }
+        for key in [format!("{doc}.meta.meta"), format!("{doc}.meta.meta.meta")] {
+            assert!(st.store.meta(&key).await.unwrap().is_none(), "{key}");
+        }
+        // Once the resource is deleted, nothing of it is left there either.
+        let delete = req(Method::DELETE, "/doc.txt", &[], "");
+        let r = handle(&st, &delete, &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert_eq!(
+            status(Method::GET, "/doc.txt.meta.meta", agent(OWNER)).await,
+            StatusCode::NOT_FOUND
+        );
+        assert!(st.store.meta(&record).await.unwrap().is_none());
+    }
+
+    /// The same for a create that is set aside (it landed, reported a failure, and could not be
+    /// taken back): its linkset's record answers as one where nothing was ever created.
+    #[tokio::test]
+    async fn a_linksets_record_is_no_resource_while_a_create_is_set_aside() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let carol = "https://carol.example/#me";
+        let json_only = json!([{"leftOperand": "format", "operator": "eq", "rightOperand": JSON}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": carol,
+                "constraint": json_only}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("carol", grant);
+        let uri = st.cfg.absolute("/new.txt");
+        store
+            .fail_after_create
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        let h = [("slug", "new.txt"), ("content-type", "text/plain")];
+        let r = create(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER), &root).await;
+        store
+            .fail_after_create
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri), "the create is set aside");
+        let status = |method: Method, path: String, who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("content-type", JSON_PATCH)];
+                handle(&st, &req(method, &path, &h, "[]"), &who)
+                    .await
+                    .status()
+            }
+        };
+        for who in [agent(OWNER), agent(carol), Agent::anonymous()] {
+            for method in [Method::GET, Method::PATCH] {
+                let created = status(method.clone(), "/new.txt.meta.meta".into(), who.clone());
+                let never = status(method.clone(), "/never.txt.meta.meta".into(), who.clone());
+                assert_eq!(created.await, never.await, "{method} {:?}", who.subject);
+            }
+        }
+    }
+
+    /// Review findings: what is stored under a linkset record's name, or a legacy edge that makes
+    /// one a container's member, must not show anywhere. Every answer on such a name is the one
+    /// on a name where nothing is stored, the container's listing does not name it, a recursive
+    /// delete does not follow it, and a subscription to it is refused as one to nothing.
+    #[tokio::test]
+    async fn a_stored_record_shows_nowhere() {
+        use super::super::test_store::{agent, closed_state, request as req, route_as, OWNER};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let (carol, dave) = ("https://carol.example/#me", "https://dave.example/#me");
+        let grant = |actions: Value, who: &str| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who}]),
+                &root,
+            )
+            .unwrap()
+        };
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read"]), carol));
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify", "delete"]), dave));
+        let h = [
+            ("slug", "c"),
+            (
+                "link",
+                "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+            ),
+        ];
+        let r = handle(&st, &req(Method::POST, "/", &h, ""), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let c = st.cfg.absolute("/c/");
+        // Records stored where only an older server could have put them: under a record's name,
+        // and as a member of the container.
+        for (key, member) in [
+            (format!("{c}doc.meta.meta"), false),
+            (format!("{c}x.meta"), true),
+        ] {
+            let body = Bytes::from_static(br#"{"linkset": []}"#);
+            if member {
+                st.store
+                    .create_in_container(&c, &key, body, LINKSET_JSON)
+                    .await
+                    .unwrap();
+            } else {
+                st.store.write(&key, body, LINKSET_JSON).await.unwrap();
+            }
+        }
+        let answer = |method: Method, path: String, who: Agent| {
+            let st = st.clone();
+            async move {
+                let h = [("content-type", LINKSET_JSON)];
+                let r = handle(&st, &req(method, &path, &h, r#"{"linkset": []}"#), &who).await;
+                let mut headers: Vec<String> = r
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v:?}"))
+                    .collect();
+                headers.sort();
+                (r.status(), headers, body_of(r).await)
+            }
+        };
+        let callers = [agent(OWNER), agent(carol), agent(dave), Agent::anonymous()];
+        for (stored, nothing) in [
+            ("/c/doc.meta.meta", "/c/none.meta.meta"),
+            ("/c/x.meta", "/c/y.meta"),
+            ("/c/x.meta.meta", "/c/y.meta.meta"),
+        ] {
+            for who in &callers {
+                for method in [Method::GET, Method::HEAD, Method::PUT, Method::DELETE] {
+                    let a = answer(method.clone(), stored.into(), who.clone()).await;
+                    let b = answer(method.clone(), nothing.into(), who.clone()).await;
+                    assert_eq!(a, b, "{method} {stored} as {:?}", who.subject);
+                }
+            }
+        }
+        // The listing names no record.
+        let r = handle(&st, &req(Method::GET, "/c/", &[], ""), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::OK);
+        let listing = String::from_utf8(body_of(r).await.to_vec()).unwrap();
+        assert!(!listing.contains("x.meta"), "{listing}");
+        // A subscription to a record's name is refused as one to a name where nothing is.
+        let subscribe = |topic: String| {
+            let st = st.clone();
+            async move {
+                let body = json!({"type": super::super::notify::WEBHOOK, "topic": [topic],
+                    "inbox": "https://inbox.example/"});
+                let r = req(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body.to_string(),
+                );
+                let r = route_as(&st, r, &agent(carol)).await;
+                (r.status(), body_of(r).await)
+            }
+        };
+        let stored = subscribe(format!("{c}x.meta")).await;
+        assert_eq!(stored, subscribe(format!("{c}y.meta")).await);
+        assert_eq!(stored.0, StatusCode::FORBIDDEN);
+        let stored = subscribe(format!("{c}doc.meta.meta")).await;
+        assert_eq!(stored, subscribe(format!("{c}none.meta.meta")).await);
+        // So is one to the record of a resource that has a linkset.
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let doc = subscribe(format!("{root}doc.txt.meta.meta")).await;
+        assert_eq!(doc, subscribe(format!("{root}none.txt.meta.meta")).await);
+        assert_eq!(doc.0, StatusCode::FORBIDDEN);
+        // What is stored under a name that ends in `.META` is answered as nothing there too, as
+        // the listing, the delete and a subscription take it.
+        let upper = format!("{c}X.META");
+        st.store
+            .create_in_container(&c, &upper, Bytes::from_static(b"u"), "text/plain")
+            .await
+            .unwrap();
+        for who in &callers {
+            for method in [Method::GET, Method::HEAD, Method::PUT, Method::DELETE] {
+                let a = answer(method.clone(), "/c/X.META".into(), who.clone()).await;
+                let b = answer(method.clone(), "/c/Y.META".into(), who.clone()).await;
+                assert_eq!(a, b, "{method} /c/X.META as {:?}", who.subject);
+            }
+        }
+        st.store.delete(&upper, Some(&c)).await.unwrap();
+        // The container holds nothing else, so it is empty: deleting it removes the record
+        // with it, without Depth, and without a permission on the record, which the container's
+        // creator does not hold (it may create, but has no Delete grant).
+        let eve = "https://eve.example/#me";
+        st.access
+            .put_grant_for_test("eve", grant(json!(["create"]), eve));
+        let h = [
+            ("slug", "e"),
+            (
+                "link",
+                "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+            ),
+        ];
+        let r = handle(&st, &req(Method::POST, "/", &h, ""), &agent(eve)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let e = st.cfg.absolute("/e/");
+        st.store
+            .create_in_container(
+                &e,
+                &format!("{e}x.meta"),
+                Bytes::from_static(br#"{"linkset": []}"#),
+                LINKSET_JSON,
+            )
+            .await
+            .unwrap();
+        let r = handle(&st, &req(Method::DELETE, "/e/", &[], ""), &agent(eve)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert!(!st.store.exists(&format!("{e}x.meta")).await.unwrap());
+        let r = handle(&st, &req(Method::DELETE, "/c/", &[], ""), &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        assert!(!st.store.exists(&format!("{c}x.meta")).await.unwrap());
+    }
+
+    /// Review finding: a linkset record that a legacy edge listed in its container kept the
+    /// edge once its subject's removal took the record, and so did one whose subject went first
+    /// in a recursive delete: the container then could never be deleted. An edge to a record
+    /// that is gone goes with the container.
+    #[tokio::test]
+    async fn a_legacy_record_edge_goes_with_its_record() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let container = |slug: &'static str| {
+            req(
+                Method::POST,
+                "/",
+                &[
+                    ("slug", slug),
+                    (
+                        "link",
+                        "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+                    ),
+                ],
+                "",
+            )
+        };
+        let member = |into: &'static str, slug: &'static str| {
+            req(
+                Method::POST,
+                into,
+                &[("slug", slug), ("content-type", "text/plain")],
+                "x",
+            )
+        };
+        // The subject goes alone, then its container.
+        for slug in ["c", "d"] {
+            let r = handle(&st, &container(slug), &agent(OWNER)).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let (c, d) = (st.cfg.absolute("/c/"), st.cfg.absolute("/d/"));
+        let r = handle(&st, &member("/c/", "x.txt"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let x = format!("{c}x.txt");
+        let record = st.store.read(&meta_key(&x)).await.unwrap();
+        st.store.delete(&meta_key(&x), None).await.unwrap();
+        st.store
+            .create_in_container(&c, &meta_key(&x), record.body, &record.meta.content_type)
+            .await
+            .unwrap();
+        let r = handle(
+            &st,
+            &req(Method::DELETE, "/c/x.txt", &[], ""),
+            &agent(OWNER),
+        )
+        .await;
+        assert!(r.status().is_success(), "{}", r.status());
+        // An edge an older server left to a record already gone goes with the container.
+        let gone = format!("{c}z.txt.meta");
+        st.store
+            .create_in_container(&c, &gone, Bytes::from_static(b"{}"), "application/json")
+            .await
+            .unwrap();
+        st.store.delete(&gone, None).await.unwrap();
+        assert_eq!(st.store.list_children(&c).await.unwrap().len(), 2);
+        let r = handle(&st, &req(Method::DELETE, "/c/", &[], ""), &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        // A recursive delete, the record's edge listed before its subject.
+        let y = format!("{d}y.txt");
+        st.store
+            .create_in_container(
+                &d,
+                &meta_key(&y),
+                Bytes::from_static(b"{}"),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        let r = handle(&st, &member("/d/", "y.txt"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let depth = [("depth", "infinity")];
+        let r = handle(&st, &req(Method::DELETE, "/d/", &depth, ""), &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        for gone in [&y, &meta_key(&y), &d] {
+            assert!(!st.store.exists(gone).await.unwrap(), "{gone}");
+        }
+        assert!(st.visible(&root));
     }
 }

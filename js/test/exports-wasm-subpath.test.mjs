@@ -32,3 +32,25 @@ test('the documented ./wasm/sparq_wasm.js subpath resolves through the exports m
   assert.equal(run.status, 0, `resolving ${specifier} failed:\n${run.stderr}`);
   assert.equal(fileURLToPath(run.stdout), join(installed, 'wasm', 'sparq_wasm.js'));
 });
+
+// #7031: the lazily-loaded OWL 2 DL bundle is shipped under `wasm-dl/`; `./wasm-dl/*` keeps
+// its raw glue reachable for consumers that load it themselves.
+test('the ./wasm-dl/sparq_dl_wasm.js subpath resolves through the exports map', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'sparq-exports-dl-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const installed = join(root, 'node_modules', '@sparq-org', 'sparq');
+  mkdirSync(join(installed, 'wasm-dl'), { recursive: true });
+  copyFileSync(resolve(pkgDir, 'package.json'), join(installed, 'package.json'));
+  for (const f of ['sparq_dl_wasm.js', 'sparq_dl_wasm.d.ts', 'sparq_dl_wasm_bg.wasm']) {
+    writeFileSync(join(installed, 'wasm-dl', f), '');
+  }
+
+  const specifier = '@sparq-org/sparq/wasm-dl/sparq_dl_wasm.js';
+  const run = spawnSync(
+    process.execPath,
+    ['--input-type=module', '-e', `process.stdout.write(import.meta.resolve(${JSON.stringify(specifier)}))`],
+    { cwd: root, encoding: 'utf8' },
+  );
+  assert.equal(run.status, 0, `resolving ${specifier} failed:\n${run.stderr}`);
+  assert.equal(fileURLToPath(run.stdout), join(installed, 'wasm-dl', 'sparq_dl_wasm.js'));
+});

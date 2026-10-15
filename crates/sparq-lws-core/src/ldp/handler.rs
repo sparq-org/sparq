@@ -653,13 +653,7 @@ impl<S: Store> LdpState<S> {
                     crate::http_date::single_line(headers, header::IF_UNMODIFIED_SINCE),
                 )
                 .is_some());
-        // The mode that governs reading THIS target's representation: Control for an `.acl`, else Read.
-        let read_mode = if crate::authz::is_acl_resource(target_iri) {
-            AccessMode::Control
-        } else {
-            AccessMode::Read
-        };
-        if has_etag_conditional && !granted.contains(&read_mode) {
+        if has_etag_conditional && !may_read(target_iri, granted) {
             return Err(if token.web_id.is_none() {
                 self.unauthenticated()
             } else {
@@ -1283,7 +1277,8 @@ pub async fn put_handler<S: Store>(
     // `invalidate_acl_if_acl`).
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target))
+    let reader = may_read(&target.iri, &granted);
+    Ok(write_response(existed, &meta, &target, reader))
 }
 
 /// `POST /{path}` — create a child resource inside a container.
@@ -1393,11 +1388,10 @@ pub async fn post_handler<S: Store>(
     // unauthorized POST. The guard is intent-based, not existence-based: `secret.acl` and `benign.acl`
     // are refused regardless of what exists, so it is never an existence oracle.)
     //
-    // SCOPE: `.acl` ONLY. `.meta` description-resources are NOT load-bearing in this server (the WAC
-    // resolver never consults a `.meta`, and the PUT/PATCH create paths only special-case `.acl`), so
-    // a `secret.meta` stem is just a normal resource name — guarding it ONLY at POST while PUT/PATCH
-    // would create it freely is an inconsistency with no security benefit, so it is not guarded. If
-    // `.meta` (or any other auxiliary) ever becomes load-bearing it MUST be guarded UNIFORMLY across
+    // SCOPE: `.acl` ONLY. A name ending in `.meta` is refused for every method by `parse_target`
+    // (it is where the LWS surface keeps a linkset record), and a POST never mints one: the minted
+    // name is the stem followed by an opaque suffix, so a `secret.meta` stem is harmless here. Any
+    // other auxiliary that becomes load-bearing MUST be guarded UNIFORMLY across
     // POST/PUT/PATCH/DELETE/read — not POST-only (see `is_acl_auxiliary_suffix`).
     if let Some(s) = &stem {
         // Check the `.acl` suffix on the bare stem (a leaf segment with no scheme/slashes). A trailing
@@ -1557,11 +1551,32 @@ pub async fn delete_handler<S: Store>(
         // between a separate empty-check and a separate delete and be orphaned. A non-empty container
         // is a 409; an absent one a 404 (the precondition load above already 404'd a fully-absent
         // target, but the atomic op is the authoritative existence+empty decision).
-        match state
+        let mut outcome = state
             .store
             .delete_container_if_empty(&target.iri, parent.as_deref())
-            .await?
-        {
+            .await?;
+        // A container whose only members are linkset records of the LWS surface (listed by a
+        // legacy edge) is empty as the listing shows it: those records, which name nothing left in
+        // it, go first, and the delete is tried again.
+        if matches!(outcome, DeleteOutcome::NotEmpty) {
+            let members = state.store.list_children(&target.iri).await?;
+            if members
+                .iter()
+                .all(|c| crate::ldp::target::names_linkset_record(c.as_str()))
+            {
+                for record in &members {
+                    match state.store.delete(record.as_str(), Some(&target.iri)).await {
+                        Ok(()) | Err(ServerError::NotFound) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+                outcome = state
+                    .store
+                    .delete_container_if_empty(&target.iri, parent.as_deref())
+                    .await?;
+            }
+        }
+        match outcome {
             DeleteOutcome::Deleted => {
                 // EMIT only on an actual delete: Delete on the container + a derived Remove on its
                 // parent (membership shrank). NotEmpty/NotFound deleted nothing ⇒ no notification.
@@ -1673,19 +1688,14 @@ pub async fn patch_handler<S: Store>(
     // `N3PatchModesExtractor`, which adds `read` when the patch has `conditions`. Fold to the
     // requester's denial (401 anon / 403 auth) BEFORE the target read, so it adds no oracle of its
     // own. An unconditional (no-`where`) patch is unaffected.
-    if !patch.conditions.is_empty() {
-        let read_mode = if crate::authz::is_acl_resource(&target.iri) {
-            AccessMode::Control
+    // `solid:deletes` reads the target as much as `solid:where` does: a patch whose deletes are
+    // not all there is refused (409), so its outcome says which triples the target holds.
+    if (!patch.conditions.is_empty() || has_deletes) && !may_read(&target.iri, &granted) {
+        return Err(if token.web_id.is_none() {
+            state.unauthenticated()
         } else {
-            AccessMode::Read
-        };
-        if !granted.contains(&read_mode) {
-            return Err(if token.web_id.is_none() {
-                state.unauthenticated()
-            } else {
-                ServerError::Forbidden
-            });
-        }
+            ServerError::Forbidden
+        });
     }
 
     // V4 (`research/lws-design-records.md` §6): a conditional precondition is a CONTENT-derived
@@ -1834,7 +1844,8 @@ pub async fn patch_handler<S: Store>(
     // read resolves against the patched ACL immediately.
     state.invalidate_acl_if_acl(&target.iri);
 
-    Ok(write_response(existed, &meta, &target))
+    let reader = may_read(&target.iri, &granted);
+    Ok(write_response(existed, &meta, &target, reader))
 }
 
 /// `OPTIONS /{path}` — advertise the methods + write media types for a target (RFC 9110 §9.3.7 +
@@ -1850,11 +1861,12 @@ pub async fn patch_handler<S: Store>(
 /// response. The `read-method-support` / `read-method-allow` scenarios require OPTIONS ≠ 405 and an
 /// `Allow` listing GET + HEAD.
 pub async fn options_handler<S: Store>(
-    State(_state): State<Arc<LdpState<S>>>,
+    State(state): State<Arc<LdpState<S>>>,
     Extension(_token): Extension<VerifiedToken>,
     uri: axum::http::Uri,
 ) -> Result<Response, ServerError> {
-    let is_container = uri.path().ends_with('/');
+    // What no other method may address is not advertised either (see [`parse_target`]).
+    let is_container = parse_target(&state.base_url, uri.path())?.is_container;
     let mut out = HeaderMap::new();
     add_method_advertisement(&mut out, is_container);
     Ok((StatusCode::NO_CONTENT, out).into_response())
@@ -2122,6 +2134,8 @@ async fn sorted_children<S: Store>(
     container_iri: &str,
 ) -> Result<Vec<crate::store::ValidatedChildIri>, ServerError> {
     let mut children = state.store.list_children(container_iri).await?;
+    // A linkset record of the LWS surface is no member, whatever an edge to it says.
+    children.retain(|c| !crate::ldp::target::names_linkset_record(c.as_str()));
     children.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
     Ok(children)
 }
@@ -2200,9 +2214,13 @@ async fn ensure_ancestor_containers<S: Store>(
         prefix.push_str(seg);
         let container = format!("{prefix}/");
 
-        // A pre-existing NON-container at this path (the slash-less form) ⇒ conflict.
+        // A pre-existing NON-container at this path (the slash-less form) ⇒ conflict. A slash-less
+        // form naming a linkset record of the LWS surface is no resource, so it is not consulted.
         let slashless = prefix.clone();
-        if state.store.exists(&slashless).await? && !state.store.exists(&container).await? {
+        if !crate::ldp::target::names_linkset_record(&slashless)
+            && state.store.exists(&slashless).await?
+            && !state.store.exists(&container).await?
+        {
             return Err(ServerError::Conflict(
                 "an ancestor path already exists as a non-container resource".into(),
             ));
@@ -2239,6 +2257,11 @@ async fn reject_slash_semantics_conflict<S: Store>(
         // Resource `…/foo` collides with container `…/foo/`.
         format!("{}/", target.iri)
     };
+    // A linkset record of the LWS surface is no resource, so its name never conflicts (and is not
+    // consulted): a container `X.meta/` sits beside the record `X.meta`.
+    if crate::ldp::target::names_linkset_record(&opposite) {
+        return Ok(());
+    }
     if state.store.exists(&opposite).await? {
         return Err(ServerError::Conflict(
             "a resource and a container cannot share the same path (trailing-slash semantics)"
@@ -2248,16 +2271,28 @@ async fn reject_slash_semantics_conflict<S: Store>(
     Ok(())
 }
 
+/// Whether `granted` lets the requester read `target_iri`'s representation: Control for an `.acl`,
+/// else Read.
+fn may_read(target_iri: &str, granted: &std::collections::BTreeSet<AccessMode>) -> bool {
+    granted.contains(&if crate::authz::is_acl_resource(target_iri) {
+        AccessMode::Control
+    } else {
+        AccessMode::Read
+    })
+}
+
 /// The shared 201/204 + ETag (+ Location on create) response for PUT / PATCH writes.
 ///
 /// A container's validators are [`container_state_etag`]s, so a newly created (hence empty)
 /// container gets the empty-listing state tag. A replaced container gets no `ETag`: its current tag
 /// depends on a listing the writer may not be allowed to read, and its stored tag is not a
-/// validator for any of its representations.
+/// validator for any of its representations. A tag describes the stored representation (its
+/// length and a hash of it), so it goes only to a writer that may read it (`reader`).
 fn write_response(
     existed: bool,
     meta: &ResourceMeta,
     target: &crate::ldp::target::LdpTarget,
+    reader: bool,
 ) -> Response {
     let status = if existed {
         StatusCode::NO_CONTENT
@@ -2265,9 +2300,9 @@ fn write_response(
         StatusCode::CREATED
     };
     let mut out = HeaderMap::new();
-    if !target.is_container {
+    if reader && !target.is_container {
         set_str(&mut out, header::ETAG, &meta.etag);
-    } else if !existed {
+    } else if reader && !existed {
         set_str(
             &mut out,
             header::ETAG,
@@ -2548,7 +2583,11 @@ fn write_precondition_time(
     target: &crate::ldp::target::LdpTarget,
     recorded: Option<std::time::SystemTime>,
 ) -> Option<std::time::SystemTime> {
-    if target.is_container { None } else { recorded }
+    if target.is_container {
+        None
+    } else {
+        recorded
+    }
 }
 
 fn header_str(headers: &HeaderMap, name: HeaderName) -> Option<&str> {
@@ -3642,13 +3681,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn post_slug_dot_meta_is_allowed_meta_is_not_load_bearing() {
-        // `.meta` is NOT load-bearing in this server: the WAC resolver never consults a `.meta`, and
-        // the create paths only special-case `.acl`. So `secret.meta` is just a normal resource name
-        // with no security effect — guarding it ONLY at POST (while a PUT/PATCH could create it freely)
-        // was an inconsistency with no benefit. An Append-only POST of `Slug: secret.meta` is therefore
-        // ALLOWED, exactly like any other benign append. (If `.meta` ever becomes load-bearing it must
-        // be guarded UNIFORMLY across POST/PUT/PATCH/DELETE/read — see `is_acl_auxiliary_suffix`.)
+    async fn post_slug_dot_meta_mints_no_record_name() {
+        // A `.meta` stem is harmless on POST: the minted name is the stem followed by an opaque
+        // suffix, never a name ending in `.meta` (which `parse_target` refuses for every method,
+        // as the LWS surface keeps a linkset record there). An Append-only POST of
+        // `Slug: secret.meta` is therefore ALLOWED, exactly like any other benign append.
         let store = store_alice_container_bob_append_only().await;
         let state = Arc::new(LdpState::new(store, "https://pod.example"));
         let uri: axum::http::Uri = "/alice/c/".parse().unwrap();

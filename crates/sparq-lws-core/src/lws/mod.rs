@@ -579,6 +579,14 @@ pub struct ResourceMeta {
     pub pending: bool,
 }
 
+/// Whether `iri` names a linkset's stored record rather than a resource: no resource's name ends
+/// in [`META_SUFFIX`], in any case (see `resources::sanitize_slug`), so whatever is stored under
+/// such a name is never served, listed, followed or subscribed to as a resource.
+pub(crate) fn names_record(iri: &str) -> bool {
+    let n = META_SUFFIX.len();
+    iri.len() >= n && iri.as_bytes()[iri.len() - n..].eq_ignore_ascii_case(META_SUFFIX.as_bytes())
+}
+
 /// The store key of a resource's LWS metadata, which is also its linkset's URI (the draft's own
 /// convention): `/a/b` maps to `/a/b.meta` and the container `/a/b/` to `/a/b/.meta`. Clients can
 /// never create a resource whose name ends with `.meta` or starts with a dot, so the keys never
@@ -811,7 +819,15 @@ impl<S: Store + 'static> LwsState<S> {
     /// ([`LwsState::touch_owed`]): those whose kept changes' touches waited at start, and the
     /// one a settled [`Undo::Resolve`] listed.
     pub(crate) fn set_aside<L: Send + 'static>(&self, left: Unsettled, locks: L) {
-        let hidden = self.hide(&left);
+        let hidden = self.hide(&left, true);
+        self.settle_aside(left, hidden, locks);
+    }
+
+    /// Set aside `left` as [`LwsState::set_aside`] does, but hide only its own resources: for a
+    /// change no container lists (a create whose content was never written), so its containers
+    /// stay visible and their locks need not be held.
+    pub(crate) fn set_aside_unlisted<L: Send + 'static>(&self, left: Unsettled, locks: L) {
+        let hidden = self.hide(&left, false);
         self.settle_aside(left, hidden, locks);
     }
 
@@ -827,7 +843,7 @@ impl<S: Store + 'static> LwsState<S> {
     /// Hide each of `all`, to be put back by [`LwsState::settle_hidden`]: until then nothing of
     /// them is put back, so what is not visible stays so.
     pub(crate) fn hide_all(&self, all: Vec<Unsettled>) -> Hidden {
-        let hidden: Vec<_> = all.iter().map(|left| self.hide(left)).collect();
+        let hidden: Vec<_> = all.iter().map(|left| self.hide(left, true)).collect();
         Hidden(all.into_iter().zip(hidden).collect())
     }
 
@@ -838,16 +854,18 @@ impl<S: Store + 'static> LwsState<S> {
         }
     }
 
-    /// Hide the resources of `left` and the containers listing them, and count what it holds to
-    /// put back: what [`LwsState::settle_aside`] undoes once it is back.
-    fn hide(&self, left: &Unsettled) -> (Vec<String>, usize) {
+    /// Hide the resources of `left` and, when `listed`, the containers listing them, and count
+    /// what it holds to put back: what [`LwsState::settle_aside`] undoes once it is back.
+    fn hide(&self, left: &Unsettled, listed: bool) -> (Vec<String>, usize) {
         let storage = self.cfg.storage();
         let mut iris = left.iris();
-        let parents: Vec<String> = iris
-            .iter()
-            .filter_map(|i| resources::parent_of(i, &storage))
-            .collect();
-        iris.extend(parents);
+        if listed {
+            let parents: Vec<String> = iris
+                .iter()
+                .filter_map(|i| resources::parent_of(i, &storage))
+                .collect();
+            iris.extend(parents);
+        }
         iris.sort();
         iris.dedup();
         let bytes = left.bytes();
@@ -1068,6 +1086,8 @@ impl LwsRequest {
 /// Remove the member `iri` of `parent` (if any): its record and its parent's membership edge in
 /// one store step, so no failure can leave a live record its container no longer lists. Every
 /// removal of a member goes through here: resources, service records, expired subscriptions.
+/// (The one exception is an edge left to a linkset record already gone, which
+/// [`Journal::remove_member`] detaches alone.)
 /// A container that is not empty is not removed ([`crate::store::DeleteOutcome::NotEmpty`]).
 pub(crate) async fn remove_member<S: Store>(
     store: &S,
@@ -1131,6 +1151,9 @@ pub(crate) enum Undo {
     },
     /// A member that may have been created, removed from its container (see [`records::delete_record`]).
     Remove { iri: String, parent: String },
+    /// A write that failed unsettled, fenced so that it can no longer commit: the steps after it
+    /// put back what it may have written, and must not be outlived by it.
+    Fence { fence: crate::store::Fence },
     /// Nothing to put back: a resource the change holds the lock of without having changed it
     /// (one a recursive delete had not yet removed). It is set aside with the change, so nobody
     /// waits on that lock while the rest is put back.
@@ -1184,6 +1207,7 @@ impl Undo {
                     .map(drop)
             }
             Undo::Remove { iri, parent } => records::delete_record(store, iri, parent).await,
+            Undo::Fence { fence } => store.fence(fence).await,
             Undo::Locked { .. } => Ok(()),
             Undo::Forget { record, .. } => intents::clear(store, record).await,
             Undo::Resolve { record, undo, .. } => {
@@ -1206,6 +1230,7 @@ impl Undo {
                 .chain(parent.as_deref())
                 .collect(),
             Undo::Remove { iri, parent } => vec![iri, parent],
+            Undo::Fence { .. } => Vec::new(),
             Undo::Locked { iri } => vec![iri],
             Undo::Forget { iris, .. } | Undo::Resolve { iris, .. } => {
                 iris.iter().map(String::as_str).collect()
@@ -1273,7 +1298,7 @@ fn bytes_of(undo: &[Undo]) -> usize {
                 ..
             }
             | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
-            Undo::Locked { .. } | Undo::Forget { .. } => 0,
+            Undo::Fence { .. } | Undo::Locked { .. } | Undo::Forget { .. } => 0,
             Undo::Resolve { undo, .. } => bytes_of(undo),
             _ => MAX_META_BYTES,
         })
@@ -1372,7 +1397,7 @@ fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) 
                 priors_of(undo, out);
                 continue;
             }
-            Undo::Locked { .. } | Undo::Forget { .. } => continue,
+            Undo::Fence { .. } | Undo::Locked { .. } | Undo::Forget { .. } => continue,
         };
         out.entry(iri).or_default().or(prior);
     }
@@ -1614,6 +1639,18 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         parent: Option<&str>,
     ) -> Result<crate::store::DeleteOutcome, crate::error::ServerError> {
         let Some((body, meta)) = self.prior(iri).await? else {
+            // A record a legacy edge lists may be gone already (its subject's removal took it):
+            // the edge, which is all that is left, goes too, so it keeps no container from being
+            // empty. The edge is not put back if the change is (it names nothing, and no LWS
+            // listing shows it), and it goes in a step of its own: with the record absent, no
+            // live member can be left unlisted by it.
+            if let (true, Some(parent)) = (names_record(iri), parent) {
+                self.durable().await?;
+                match self.state.store.delete(iri, Some(parent)).await {
+                    Ok(()) | Err(crate::error::ServerError::NotFound) => {}
+                    Err(e) => return Err(e),
+                }
+            }
             return Ok(crate::store::DeleteOutcome::NotFound);
         };
         self.durable().await?;
@@ -3644,7 +3681,8 @@ mod tests {
     /// Review finding: a member's record and its parent's membership edge were removed in two
     /// steps on some paths (service records, expired subscriptions), so a failure in between left
     /// a live record its container no longer listed. Every removal goes through
-    /// [`remove_member`]; this drives each one and counts the two-step deletes it makes.
+    /// [`remove_member`]; this drives each one and counts the two-step deletes it makes. (Only
+    /// an edge left to a record already gone is detached alone; no path here makes one.)
     #[tokio::test]
     async fn every_removal_takes_one_step() {
         use std::sync::atomic::Ordering;

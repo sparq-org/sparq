@@ -106,6 +106,16 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // arithmetic past i128 — the value still falls back to f64; i128::MIN % -1 is 0; the flag is
 // shared across nested closures, explicit strata and a query's data closure): the run errors
 // unless SinglePass. A syntax error in a parsed document is a plain no-match, not a cut.
+// A log:includes / log:notIncludes / log:supports PATTERN given through a variable is
+// matched, with a { … } formula (or {}) as the scope, as the stored formula the variable
+// is DIRECTLY bound to, as stored, only when that formula holds NO variable at any depth
+// (blank nodes are its existentials), exactly as if written in the rule (GH #6936); its
+// statements are charged to max_join_rows. Any other value (a formula holding a variable,
+// so a chained binding is not followed; a non-formula value; an unbound variable), and
+// EVERY bound pattern with the STORE as the scope, matches as the EMPTY pattern (includes
+// holds, notIncludes fails), as before; full matching is
+// https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. Each
+// containment matches its blanks afresh (no witness carries over to the next one).
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares
@@ -227,17 +237,21 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // reproducible as the engine's terms. Skolem labels (__sk<n>_e) are numbered in the sorted order
 // of each round's firing keys (every variable the conclusion substitutes), so for the SAME parsed
 // input the labels and the structural keys of facts carrying them do not depend on hash-set
-// traversal or hasher width (native vs wasm32; GH #6749). why() proof trees are NOT covered: a
-// non-existential fact keeps whichever supporting binding arrives first, and an existential's
-// proof includes its premises' proofs. E.g. with :a :p :v. :b :p :v. and rules ?x :p :v => ?x :q :v,
-// ?x :q :v => :m :r :v, :m :r :v => :m :s _:e, the :m :s label and key are stable, but its
-// why() tree may cite :a or :b as the :q witness depending on traversal order (GH #6844).
-// Labels are also NOT canonical across reordered isomorphic
+// traversal or hasher width (native vs wasm32; GH #6749). why() proof steps are covered too:
+// where a round derives ONE fact several ways - one rule firing under distinct bindings, two
+// different rules, or the transitivity fast path over several intermediate paths - the step
+// records the derivation with the least premise vector, not whichever arrived first (GH
+// #6844). E.g. with :a :p :v. :b :p :v. and rules
+// ?x :p :v => ?x :q :v, ?x :q :v => :m :r :v, :m :r :v => :m :s _:e, the :m :s label and key
+// are stable AND its why() tree always cites the same :q witness. A log:conclusion formula's
+// derived rows, and the rdf:first/rest cell labels interning a list value mints (_l<k>_<n>),
+// are likewise sorted / numbered in a canonical term order, not in a fact set's traversal order.
+// Labels are still NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,
 // and a label depends on the other firings in its round), and they hold only while the binding
 // values and firing sets are themselves stable. Values that still carry traversal order -
-// log:collectAllIn lists, log:conclusion formulas (rows in nested-closure set order),
-// backward-renamed __bw<n> terms - can reorder ranks and so labels (GH #6844).
+// log:collectAllIn lists, and backward-renamed __bw<n> terms (that counter is still assigned in
+// evaluation order) - can reorder ranks and so labels (GH #6844).
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 
@@ -691,6 +705,111 @@ Deferred constructs — inverse roles, cardinality/functionality, nominals, tran
 named reason and unlock path in the deferral ledger: `sparq-conformance/tests/dl_suite.rs`
 (`DOCUMENTED_DIVERGENCES`, `DL_DIRECT_ABSTAINED`, `DL_PROFILE_ABSTAINED`) and the design
 record `research/owl2-direct-semantics-scoping.md`.
+
+**Full OWL 2 DL front end (`sparq_reason_dl::owl2dl`, issue #7031, in progress).** The
+ALCH layers above are being extended to OWL 2 DL (SROIQ(D)) by a hypertableau reasoner.
+Its first layer is built: `owl2dl::extract(&dict, &triples)` reads the whole OWL 2 RDF
+mapping (inverses, cardinalities, nominals, `hasSelf`, chains, keys, datatypes and facets,
+`sameAs`/`differentFrom`, negative assertions, n-ary disjointness) into a typed
+`owl2dl::Ontology`, every axiom carrying the input triple indices it came from. It stays
+fail-closed: a triple it cannot place gives an `ExtractError` naming that triple.
+Annotations are kept too (annotation axioms, plus ontology and reified axiom annotations in
+`Ontology::annotations`), outside the logical axioms.
+`owl2dl::check_dl(&dict, &onto)` runs the OWL 2 DL global restrictions (declarations and
+typing, punning, reserved vocabulary, simple roles, property-hierarchy regularity,
+anonymous-individual forests, operand sets, ill-typed literals, facets, datatype
+definitions) and returns a `DlProfileReport`. It is fail-closed: `verdict()` is
+`Some(false)` on a violation, `Some(true)` only when every restriction was checked, and
+`None` when one was not (listed in `unchecked`: `xsd:pattern` syntax, `rdf:XMLLiteral`
+content, an unloaded imports closure, anonymous individuals outside an anonymous forest,
+literal values beyond the represented range such as a year past `i64` or a language tag
+that is not well-formed BCP 47 (or, in an `rdf:PlainLiteral`, not a `langtag`), and the facet space of a bound outside the restricted
+datatype's value space, and whether operands with cardinality restrictions are distinct). Cardinalities must be valid non-negative `xsd:nonNegativeInteger` or
+`xsd:integer` literals; others are refused as unsupported. Lexical forms get no
+whitespace normalisation (RDF applies no `whiteSpace` facet), and with unloaded imports
+the violations an import could repair (undeclared entities, unknown datatypes) are
+unchecked rather than definite.
+`blocking()` lists the violations a reasoner must refuse. `owl:imports` is recorded in
+`Ontology::imports`, never dereferenced.
+`owl2dl::check(&dict, &onto, Budget::default())` is the reasoner: a hypertableau (Motik,
+Shearer and Horrocks) over DL-clauses, with pairwise anywhere blocking, merging and
+dependency-directed backjumping. It returns a `DlReport` with the profile report,
+`consistency` (`Consistent`, `Inconsistent`, or `Unknown(reason)`) and, when consistent, a
+`Classification` (unsatisfiable named classes, every entailed named subsumption, and the
+`inferred` ones not asserted; `classification_unknown` says why a consistent ontology has
+none, which happens when the shared classification budget runs out).
+`owl2dl::Reasoner::new(&dict, &onto, budget)` answers single
+`is_satisfiable(iri)` / `is_subclass_of(sub_iri, sup_iri)` queries by class IRI
+(`Option<bool>`; `owl:Thing`, `owl:Nothing` and
+classes no axiom mentions included; `None` when an unloaded import could change a negative
+answer). The decided fragment is SHOIQ(D) with `hasSelf` and `R∘R ⊑ R`: nominals
+(`ObjectOneOf`, `ObjectHasValue`; a node labelled `{a}` is merged into `a`'s node, and with
+nominals every class test runs with the ABox), number restrictions up to
+`MAX_CARDINALITY`, and data properties: domain, range, sub- /
+equivalent / disjoint data properties, `FunctionalDataProperty`, `DataSomeValuesFrom`,
+`DataAllValuesFrom`, `DataHasValue`, data min / max / exact cardinality (qualified or
+not), and positive and negative data property assertions, over data ranges of the OWL 2
+datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
+`DataUnionOf`, `DataComplementOf`, and named datatypes with one acyclic
+`DatatypeDefinition`, which is expanded). Data edges end in concrete nodes; a datatype
+check over the graph of value inequalities (per node, peeling, exact search over
+enumerated `DataOneOf` nodes, and clique counting) decides the labels with
+`owl2dl::data_ranges`. Literals are compared by value (`"1"^^xsd:int` and
+`"01"^^xsd:integer` are one value; float `-0` and `+0` are two), and an ill-typed literal
+in an assertion, `DataHasValue` or `DataOneOf` (e.g. `"sixteen"^^xsd:nonNegativeInteger`)
+makes the ontology `Inconsistent`. Literal policies that decide verdicts: lexical forms
+are not whitespace-normalised, so `" 1"^^xsd:integer` is ill-typed; an `rdf:PlainLiteral`
+without `@` is ill-typed; `rdf:langString` is accepted as a datatype (it is RDF 1.1's, not
+in the OWL 2 map); `xsd:hexBinary` and `xsd:base64Binary` share no values (OWL 2 §4.5).
+Nominals are decided without SHOIQ's NI-rule: a complete branch is accepted only when its
+graph provably unravels into a model (no blocked node keeps an edge to an individual, no
+edge outside the tree joins two blockable nodes, and no number restriction at an
+individual can count two copies of a repeated node). Otherwise the branch is closed as
+unconfirmed, and when no other branch gives a model the answer is `Unknown(Unconfirmed)`.
+Keys (`HasKey`, object property expressions including inverses, and data properties)
+apply to named individuals only, as OWL 2 specifies: two named members of the key class
+sharing a named value on every object property and a value on every data property are
+merged. Data values are compared when the tableau fixed them to literals (ABox
+assertions, `DataHasValue`); a pair that might share a value not fixed yet closes the
+branch as unconfirmed. A key on an object property with a transitive sub-property
+(a non-simple one) is `OutOfFragment`: the values it compares would lie along paths.
+Still out of the fragment, as
+`Unknown(OutOfFragment { construct, source })`: other chains, the top and bottom object and data properties
+in axioms (except `SubDataPropertyOf(D owl:topDataProperty)`), datatypes outside the map
+without exactly one definition, cyclic or repeated definitions, literals of datatypes
+outside the map, and a property used both as an object and as a data property. A data
+question the oracle answers Unknown for (an XSD pattern with a block escape, a facet bound
+outside the restricted datatype's value space, a value beyond the represented range, an
+`rdf:XMLLiteral` literal), or a value-inequality graph outside the shapes the check
+decides, gives `Unknown(DatatypeUnknown { source })`: a branch the check cannot decide is
+closed as undecided, so the answer is `Consistent` only from a fully checked model and
+`Inconsistent` only when every branch closed on a real clash. A blocking profile
+violation gives `Unknown(NotInDl)`, an exhausted step budget gives
+`Unknown(ResourceBudget)`, and unloaded imports turn `Consistent` into
+`Unknown(ImportsNotLoaded)` with no classification; `classification_unknown` carries
+`ResourceBudget`, `DatatypeUnknown` or `Unconfirmed`. It never guesses a verdict. Its answers are checked
+against HermiT on seeded corpora (`tests/owl2dl_reasoner.rs`), one of data properties
+and datatypes, one with nominals and one with keys; the constructs where HermiT departs from the Direct Semantics
+(ill-typed literals, float zeros, `NegativeDataPropertyAssertion` compared by lexical
+form, data booleans and single-value intervals under data cardinalities) are kept out of
+that corpus and pinned by hand-written tests instead.
+`owl2dl::data_ranges` answers the datatype questions the tableau asks of a data range
+(`DataRangeExpr`: a datatype, a facet restriction, `OneOf`, `And`, `Or`, `Not`):
+`is_empty`, `contains`, `has_at_least(r, n)` for data cardinalities, and
+`conjunction_satisfiable(pos, neg, distinct, values)`, which asks whether `distinct`
+pairwise different values exist inside every range of `pos`, outside every range of `neg`
+and outside `values`. Each answer is a `Tri`: `Yes` and `No` are exact (rational bounds
+without rounding, discrete floats with `-0` and `+0` distinct, the ±14:00 rule for
+`xsd:dateTime`, strings of XML characters, and automata for XSD patterns, lengths, basic
+language ranges and BCP 47 tags, `langtag`s only for `rdf:PlainLiteral`), and `Unknown` covers particular `rdf:XMLLiteral`
+values (their XML content is not checked), a facet outside the datatype's facet space
+(including an order bound outside its value space), a value no literal has, data ranges nested more than 64 deep, an XSD pattern this implementation does
+not support (block escapes such as `\p{IsBasicLatin}`, or groups nested more than 64 deep),
+and string searches over a fixed automaton budget (states, edges and automaton bytes).
+From JavaScript the same pipeline (parse, `extract`, `check`) is `checkOwlDl(tbox, abox?,
+options?)` in `@sparq-org/sparq`, backed by the separate, lazily-loaded `crates/sparq-dl-wasm`
+bundle; it returns the report as JSON with the offending triples as N-Triples lines — see
+[`../javascript-wasm/references/owl-dl.md`](../javascript-wasm/references/owl-dl.md).
 
 ## Common recipes
 

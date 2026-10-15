@@ -154,24 +154,20 @@ fn q09_shape_anti_vacuity() {
     assert_eq!(res.rows.len(), 5, "q09 fixture should answer 5 distinct predicates");
     assert!(full_bag > 4000, "fixture too small for a meaningful collapse: {}", full_bag);
 
-    // The second UNION branch (`?person ?predicate ?object`) needs the `[P, J]` = PSO
-    // permutation for its loose scan; it exists in the full native index but NOT in the
-    // compact (wasm) index {SPO, POS, OSP}, where the pushdown conservatively declines.
-    let full_index = sparq_core::store::BUILT.contains(&sparq_core::store::Perm::Pso);
-    if full_index {
-        assert!(fired, "the DISTINCT pushdown did not fire on the q09 shape");
-        assert_eq!(emitted, 5, "pushdown should emit exactly the distinct predicates");
-        // Anti-vacuity: the loose scan touched an order of magnitude fewer rows than the
-        // full join it replaces (the q09 essence — a handful of predicates, not the join).
-        assert!(
-            scanned * 10 < full_bag,
-            "loose scan did not collapse: scanned={} full_bag={}",
-            scanned,
-            full_bag
-        );
-    } else {
-        assert!(!fired, "compact index lacks PSO → the 2-branch q09 pushdown must decline");
-    }
+    // The pushdown fires on either index: the full native index has the `[P, J]` = PSO
+    // permutation for the second UNION branch's loose scan, and the compact (wasm) index
+    // {SPO, POS, OSP}, which lacks it, answers the shape with the pattern trick
+    // (sq-7d3dj.30.10), which needs no PSO.
+    assert!(fired, "the DISTINCT pushdown did not fire on the q09 shape");
+    assert_eq!(emitted, 5, "pushdown should emit exactly the distinct predicates");
+    // Anti-vacuity: the scan touched an order of magnitude fewer rows than the full join it
+    // replaces (the q09 essence — a handful of predicates, not the join), on either index.
+    assert!(
+        scanned * 10 < full_bag,
+        "loose scan did not collapse: scanned={} full_bag={}",
+        scanned,
+        full_bag
+    );
 }
 
 #[test]

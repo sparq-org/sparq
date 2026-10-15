@@ -103,18 +103,21 @@
 //! The chain / union stage draws every sharing through the
 //! [`crate::randomness::DistributedRandomness`] seam: each hop equality via the
 //! [`crate::compare`] `*_through` chain and each AND / OR via
-//! [`crate::shamir::degree_reduce_through`]. The single-dealer simulation draws
-//! exactly what it drew before (seeded pin tests); a source that cannot share a
-//! holder's own input (PRSS today) can still run the draw-free shapes (`k = 1`
-//! with distinct endpoint pairs, `{0,1}` over a single predicate with no self-loop and no repeated endpoint pair) but makes every path
-//! that needs a secure equality or an OR-fold fail closed. The final oblivious
-//! output stage ([`crate::oblivious_join::oblivious_set_output`]) still mints its
-//! own dealer.
+//! [`crate::shamir::degree_reduce_through`]. The single-dealer simulation's chain
+//! / union draws are unchanged from the pre-seam code (a seeded prefix pin test);
+//! a source that cannot share a holder's own input (PRSS today) makes every path
+//! fail closed. The final
+//! oblivious output stage draws from the SAME source
+//! (`oblivious_join::oblivious_set_output_through`), so one continuous
+//! source covers the whole operator — and because that stage always shares the
+//! real-row tag and the payload limbs, even the shapes whose chain stage draws
+//! nothing (`k = 1` over distinct endpoint pairs, `p?` over a single predicate
+//! with no self-loop and no repeated endpoint pair) now fail closed under PRSS.
 
 use crate::compare::secure_equal_to_bit_through;
 use crate::field::Fp;
 use crate::oblivious_join::{
-    oblivious_join_output, oblivious_set_output, Candidate, MatchBit, ObliviousOutput,
+    oblivious_set_output_through, partial_result_from_slots, Candidate, MatchBit, ObliviousOutput,
 };
 use crate::partial::{MpcError, PartialResult};
 use crate::randomness::{require_source_matches, DistributedRandomness};
@@ -125,6 +128,14 @@ use std::collections::BTreeMap;
 /// Reserved subject-end / object-end variable names the operator projects onto.
 const SUBJECT_VAR: &str = "__pp_a";
 const OBJECT_VAR: &str = "__pp_b";
+
+/// The output schema both hidden-path entry points project onto: the endpoint pair.
+fn chain_out_vars() -> Vec<Variable> {
+    vec![
+        Variable::new_unchecked(SUBJECT_VAR),
+        Variable::new_unchecked(OBJECT_VAR),
+    ]
+}
 
 /// Maximum number of edge-tuples (`|E|^k`) the operator will enumerate before
 /// refusing the path with a [`MpcError::Protocol`]. The enumeration is
@@ -372,23 +383,20 @@ fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Resul
 /// oblivious output's `B`-slot reveal.
 ///
 /// `bound` is the public padded bound `B`; it must cover the distinct-endpoint-pair
-/// candidate count (fail-closed in [`oblivious_set_output`] — never truncates a
-/// match). See the module docs for the full construction and security tier.
+/// candidate count (fail-closed in `oblivious_set_output_through` — never
+/// truncates a match). One fresh dealer covers the chain stage AND the output
+/// stage: this is `eval_exact_k_chain_hidden_slots_through` on that one dealer,
+/// narrowed to the disclosed rows — a single code path, so nothing here can mint a
+/// second dealer. See the module docs for the full construction and security tier.
 pub fn eval_exact_k_chain_hidden(
     backend: &ShamirBackend,
     edges: &HiddenEdges,
     k: usize,
     bound: usize,
 ) -> Result<PartialResult, MpcError> {
-    check_params(backend, edges, k)?;
-    let mut dealer = backend.dealer();
-    let candidates = build_candidates(backend, &mut dealer, edges, k)?;
-    let out_vars = vec![
-        Variable::new_unchecked(SUBJECT_VAR),
-        Variable::new_unchecked(OBJECT_VAR),
-    ];
-    let (result, _cost) = oblivious_join_output(backend, &candidates, out_vars, bound)?;
-    Ok(result)
+    let (slots, _cost) =
+        eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), backend, edges, k, bound)?;
+    Ok(partial_result_from_slots(slots, chain_out_vars()))
 }
 
 /// Like [`eval_exact_k_chain_hidden`] but returns the raw oblivious output (the `B`
@@ -408,13 +416,18 @@ pub fn eval_exact_k_chain_hidden_slots(
 /// [`eval_exact_k_chain_hidden_slots`] with the chain stage's randomness drawn
 /// through the [`DistributedRandomness`] seam (sq-yyro, issue #6117): every hop
 /// equality via the [`crate::compare`] `*_through` chain and every AND / OR via
-/// [`shamir::degree_reduce_through`]. The single-dealer simulation draws exactly
-/// what the public function always drew, so its output is unchanged. A source
+/// [`shamir::degree_reduce_through`]. Under the single-dealer simulation the
+/// REVEALED multiset and the modelled cost are unchanged from the pre-seam code,
+/// and the chain prefix of the draw transcript is pinned unchanged; the revealed
+/// slot ORDER moved, since the shuffle now samples a different point of one
+/// continuous keystream rather than a second dealer's fresh one. A source
 /// whose `(n, t)` differs from `backend`'s is refused
 /// ([`require_source_matches`]); a source that cannot share a holder's own input
-/// (PRSS today) makes any path that needs a secure equality or an OR-fold fail
-/// closed with that source's error. The oblivious output stage still mints its
-/// own dealer from `backend`.
+/// (PRSS today) makes the evaluation fail closed with that source's error. The
+/// oblivious output stage draws from the SAME `source`
+/// ([`oblivious_set_output_through`]) — one continuous source for the whole
+/// operator, where it previously minted a second dealer from `backend` and
+/// restarted the keystream.
 pub(crate) fn eval_exact_k_chain_hidden_slots_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
@@ -426,7 +439,30 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
     check_params(backend, edges, k)?;
     let candidates = build_candidates(backend, source, edges, k)?;
     // Payload arity is 2 (the endpoint pair). Route through the slot-returning path.
-    oblivious_set_output(backend, &candidates, 2, bound)
+    oblivious_set_output_through(source, backend, &candidates, 2, bound)
+}
+
+/// Test-only instrumentation: the candidates
+/// `eval_exact_k_chain_hidden_slots_through` builds, together with the
+/// `(is_real, decoded_row)` of every slot the REAL output stage opens for them.
+/// Same candidate construction and same output stage as the public path — it just
+/// keeps the dummy slots' decoded payload rows, which [`ObliviousOutput`] cannot
+/// express.
+#[cfg(test)]
+#[allow(clippy::type_complexity)]
+pub(crate) fn exact_k_chain_candidates_and_opened_rows(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    edges: &HiddenEdges,
+    k: usize,
+    bound: usize,
+) -> Result<(Vec<Candidate>, Vec<(bool, Vec<Option<Term>>)>), MpcError> {
+    require_source_matches(source, backend)?;
+    check_params(backend, edges, k)?;
+    let candidates = build_candidates(backend, source, edges, k)?;
+    let slots =
+        crate::oblivious_join::opened_slot_rows_through(source, backend, &candidates, 2, bound)?;
+    Ok((candidates, slots))
 }
 
 // =====================================================================
@@ -800,8 +836,11 @@ fn build_bounded_candidates(
 /// chaining and the landed oblivious output path verbatim.
 ///
 /// `bound` is the public padded bound `B`; it must cover the distinct-endpoint-pair
-/// candidate count (fail-closed in [`oblivious_set_output`] — never truncates a
-/// match). Security tier is identical to [`eval_exact_k_chain_hidden`]:
+/// candidate count (fail-closed in `oblivious_set_output_through` — never
+/// truncates a match). One fresh dealer covers the union stage AND the output
+/// stage: this is `eval_bounded_path_hidden_slots_through` on that one dealer,
+/// narrowed to the disclosed rows — a single code path, so nothing here can mint a
+/// second dealer. Security tier is identical to [`eval_exact_k_chain_hidden`]:
 /// honest-majority, semi-honest, no new assumption.
 pub fn eval_bounded_path_hidden(
     backend: &ShamirBackend,
@@ -809,15 +848,9 @@ pub fn eval_bounded_path_hidden(
     form: &HiddenBoundedPath,
     bound: usize,
 ) -> Result<PartialResult, MpcError> {
-    check_bounded_params(backend, edges, form)?;
-    let mut dealer = backend.dealer();
-    let candidates = build_bounded_candidates(backend, &mut dealer, edges, form)?;
-    let out_vars = vec![
-        Variable::new_unchecked(SUBJECT_VAR),
-        Variable::new_unchecked(OBJECT_VAR),
-    ];
-    let (result, _cost) = oblivious_join_output(backend, &candidates, out_vars, bound)?;
-    Ok(result)
+    let (slots, _cost) =
+        eval_bounded_path_hidden_slots_through(&mut backend.dealer(), backend, edges, form, bound)?;
+    Ok(partial_result_from_slots(slots, chain_out_vars()))
 }
 
 /// Like [`eval_bounded_path_hidden`] but returns the raw oblivious output (the `B`
@@ -835,8 +868,9 @@ pub fn eval_bounded_path_hidden_slots(
 /// [`eval_bounded_path_hidden_slots`] with the union stage's randomness drawn
 /// through the [`DistributedRandomness`] seam (sq-yyro, issue #6117). Same routing,
 /// source checks and fail-closed behaviour as
-/// [`eval_exact_k_chain_hidden_slots_through`]; the single-dealer simulation's
-/// output is unchanged.
+/// `eval_exact_k_chain_hidden_slots_through`, including the output stage drawn
+/// from the SAME `source`; the single-dealer simulation's revealed multiset and
+/// cost are unchanged.
 pub(crate) fn eval_bounded_path_hidden_slots_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
@@ -847,7 +881,7 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
     require_source_matches(source, backend)?;
     check_bounded_params(backend, edges, form)?;
     let candidates = build_bounded_candidates(backend, source, edges, form)?;
-    oblivious_set_output(backend, &candidates, 2, bound)
+    oblivious_set_output_through(source, backend, &candidates, 2, bound)
 }
 
 /// Planner guard + cost-model wiring for the hidden bounded property-path operator

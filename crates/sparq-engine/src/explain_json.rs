@@ -18,6 +18,8 @@
 //! * [`PlanNode::to_json`] — a hand-written JSON projection (NO serde dependency,
 //!   matching the crate's existing `json`/`serialize` writers), so the default
 //!   build's dependency graph is byte-identical when this feature is off.
+//! * [`PlanNode::to_mermaid`] / [`PlanNode::to_dot`] — dependency-free diagrams
+//!   of the operator tree.
 //! * [`SlowQueryRing`] — a bounded ring buffer keeping the N worst-by-wall-time
 //!   recent analyzed plans, for an ops/admin slow-query view.
 //!
@@ -111,6 +113,50 @@ impl PlanNode {
         s
     }
 
+    /// Renders the operator tree as a Mermaid flowchart.
+    ///
+    /// Labels contain only `operator`, with special characters escaped. IDs start
+    /// at `n0` in preorder, following `children` order; edges point to inputs.
+    /// The returned source has a trailing newline and no Markdown fence.
+    pub fn to_mermaid(&self) -> String {
+        let mut s = String::from("flowchart TD\n");
+        self.write_diagram(&mut s, &mut 0, true);
+        s
+    }
+
+    /// Renders the operator tree as a Graphviz DOT directed graph.
+    ///
+    /// Labels contain only `operator`, quoted as plain text (not HTML). IDs start
+    /// at `n0` in preorder, following `children` order; edges point to inputs.
+    /// The returned source has a trailing newline and no Markdown fence.
+    pub fn to_dot(&self) -> String {
+        let mut s = String::from("digraph Plan {\n");
+        self.write_diagram(&mut s, &mut 0, false);
+        s.push_str("}\n");
+        s
+    }
+
+    fn write_diagram(&self, s: &mut String, next: &mut usize, mermaid: bool) {
+        let id = *next;
+        *next += 1;
+        let _ = write!(s, "  n{id}[");
+        if !mermaid {
+            s.push_str("label=");
+        }
+        s.push('"');
+        write_diagram_label(s, &self.operator, mermaid);
+        s.push_str(if mermaid { "\"]\n" } else { "\"];\n" });
+        for child in &self.children {
+            let child_id = *next;
+            child.write_diagram(s, next, mermaid);
+            if mermaid {
+                let _ = writeln!(s, "  n{id} --> n{child_id}");
+            } else {
+                let _ = writeln!(s, "  n{id} -> n{child_id};");
+            }
+        }
+    }
+
     fn write_json(&self, s: &mut String) {
         s.push_str("{\"operator\":");
         write_json_string(s, &self.operator);
@@ -144,6 +190,32 @@ impl PlanNode {
 }
 
 use sparq_core::json::push_string as write_json_string;
+
+fn write_diagram_label(s: &mut String, label: &str, mermaid: bool) {
+    let mut chars = label.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\r' | '\n' => {
+                // Treat CRLF as one line break, and lone CR like LF.
+                if c == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                s.push_str(if mermaid { "<br/>" } else { "\\n" });
+            }
+            '"' | '[' | ']' | '<' | '>' | '&' | '#' | '\\' | '`' | '%' | '{' | '}' | ':' if mermaid => {
+                // Mermaid decimal entities also protect literal entity prefixes
+                // and backticks, plus directives/comments processed before labels.
+                // Escape colons so `style:` cannot strip entity terminators.
+                let _ = write!(s, "#{};", u32::from(c));
+            }
+            // Graphviz decodes HTML entities even inside quoted plain-text labels.
+            '&' => s.push_str("&#38;"),
+            '"' => s.push_str("\\\""),
+            '\\' => s.push_str("\\\\"),
+            _ => s.push(c),
+        }
+    }
+}
 
 /// Writes an `Option<f64>` as a JSON number (or `null`). A non-finite value (the
 /// q-error never produces one, but be defensive) degrades to `null` rather than
@@ -446,6 +518,274 @@ impl SlowQueryRing {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn diagram_node(operator: &str, children: Vec<PlanNode>) -> PlanNode {
+        PlanNode {
+            operator: operator.into(),
+            estimated: None,
+            actual: None,
+            nanos: None,
+            q_error: None,
+            children,
+        }
+    }
+
+    #[test]
+    fn diagram_scan_golden() {
+        let plan = diagram_node("Scan", vec![]);
+        assert_eq!(plan.to_mermaid(), "flowchart TD\n  n0[\"Scan\"]\n");
+        assert_eq!(plan.to_dot(), "digraph Plan {\n  n0[label=\"Scan\"];\n}\n");
+    }
+
+    #[test]
+    fn diagram_join_golden() {
+        let plan = diagram_node(
+            "Join",
+            vec![
+                diagram_node("Scan A", vec![]),
+                diagram_node("Scan B", vec![]),
+            ],
+        );
+        assert_eq!(
+            plan.to_mermaid(),
+            concat!(
+                "flowchart TD\n",
+                "  n0[\"Join\"]\n",
+                "  n1[\"Scan A\"]\n",
+                "  n0 --> n1\n",
+                "  n2[\"Scan B\"]\n",
+                "  n0 --> n2\n",
+            )
+        );
+        assert_eq!(
+            plan.to_dot(),
+            concat!(
+                "digraph Plan {\n",
+                "  n0[label=\"Join\"];\n",
+                "  n1[label=\"Scan A\"];\n",
+                "  n0 -> n1;\n",
+                "  n2[label=\"Scan B\"];\n",
+                "  n0 -> n2;\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn diagram_filter_golden() {
+        let plan = diagram_node("Filter (?x > 1)", vec![diagram_node("Scan", vec![])]);
+        assert_eq!(
+            plan.to_mermaid(),
+            concat!(
+                "flowchart TD\n",
+                "  n0[\"Filter (?x #62; 1)\"]\n",
+                "  n1[\"Scan\"]\n",
+                "  n0 --> n1\n",
+            )
+        );
+        assert_eq!(
+            plan.to_dot(),
+            concat!(
+                "digraph Plan {\n",
+                "  n0[label=\"Filter (?x > 1)\"];\n",
+                "  n1[label=\"Scan\"];\n",
+                "  n0 -> n1;\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn diagram_nested_golden() {
+        let plan = diagram_node(
+            "Join",
+            vec![
+                diagram_node("Filter", vec![diagram_node("Scan", vec![])]),
+                diagram_node("Scan", vec![]),
+            ],
+        );
+        assert_eq!(
+            plan.to_mermaid(),
+            concat!(
+                "flowchart TD\n",
+                "  n0[\"Join\"]\n",
+                "  n1[\"Filter\"]\n",
+                "  n2[\"Scan\"]\n",
+                "  n1 --> n2\n",
+                "  n0 --> n1\n",
+                "  n3[\"Scan\"]\n",
+                "  n0 --> n3\n",
+            )
+        );
+        assert_eq!(
+            plan.to_dot(),
+            concat!(
+                "digraph Plan {\n",
+                "  n0[label=\"Join\"];\n",
+                "  n1[label=\"Filter\"];\n",
+                "  n2[label=\"Scan\"];\n",
+                "  n1 -> n2;\n",
+                "  n0 -> n1;\n",
+                "  n3[label=\"Scan\"];\n",
+                "  n0 -> n3;\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn diagram_mermaid_escaping_golden() {
+        let plan = diagram_node(
+            "`Scan [<http://ex/名#x?a=1&b=2>] \"x\"`\n\\N #quot; &quot;\r\nend\rtail",
+            vec![],
+        );
+        assert_eq!(
+            plan.to_mermaid(),
+            concat!(
+                "flowchart TD\n",
+                "  n0[\"#96;Scan #91;#60;http#58;//ex/名#35;x?a=1#38;b=2#62;#93; #34;x#34;#96;",
+                "<br/>#92;N #35;quot; #38;quot;<br/>end<br/>tail\"]\n",
+            )
+        );
+    }
+
+    #[test]
+    fn diagram_dot_escaping_golden() {
+        let plan = diagram_node(
+            "Scan [<http://ex/名#x>] \"x\"\n\\N \\n\r\nend\rtail",
+            vec![],
+        );
+        assert_eq!(
+            plan.to_dot(),
+            concat!(
+                "digraph Plan {\n",
+                "  n0[label=\"Scan [<http://ex/名#x>] \\\"x\\\"\\n\\\\N \\\\n\\nend\\ntail\"];\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn diagram_mermaid_preprocessing_escaping() {
+        let plan = diagram_node(
+            "%%{init: {\"theme\": \"dark\"}}%%\n%% comment\n---\nconfig: {}\n---",
+            vec![],
+        );
+        // No raw directive introducers or label line breaks reach preprocessing.
+        // Front matter stays inside the label, after the flowchart header.
+        assert_eq!(
+            plan.to_mermaid(),
+            concat!(
+                "flowchart TD\n",
+                "  n0[\"#37;#37;#123;init#58; #123;#34;theme#34;#58; #34;dark#34;#125;#125;#37;#37;",
+                "<br/>#37;#37; comment<br/>---<br/>config#58; #123;#125;<br/>---\"]\n",
+            )
+        );
+    }
+
+    #[test]
+    fn diagram_mermaid_style_label_escaping() {
+        let plan = diagram_node("style:x%", vec![]);
+        assert_eq!(plan.to_mermaid(), "flowchart TD\n  n0[\"style#58;x#37;\"]\n");
+        assert_eq!(plan.to_dot(), "digraph Plan {\n  n0[label=\"style:x%\"];\n}\n");
+    }
+
+    #[test]
+    fn diagram_dot_entity_escaping() {
+        let plan = diagram_node("<http://ex/?a=&amp;&b=&lt;&c=&#38;&d=&>", vec![]);
+        assert_eq!(
+            plan.to_dot(),
+            concat!(
+                "digraph Plan {\n",
+                "  n0[label=\"<http://ex/?a=&#38;amp;&#38;b=&#38;lt;&#38;c=&#38;#38;&#38;d=&#38;>\"];\n",
+                "}\n",
+            )
+        );
+    }
+
+    #[test]
+    fn diagram_dot_rendered_label_round_trips() {
+        use std::io::Write as _;
+        use std::process::{Command, Stdio};
+
+        let mut dot = match Command::new("dot")
+            .arg("-Tsvg")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(dot) => dot,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                eprintln!("skipping rendered label check: Graphviz dot is not installed");
+                return;
+            }
+            Err(error) => panic!("failed to start Graphviz dot: {error}"),
+        };
+        let label = "Scan [<http://ex/名?a=&amp;&b=&lt;&c=&#38;&d=&>] \"x\" \\N \\n\n%%{init: {}}%%\n%% comment";
+        dot.stdin
+            .take()
+            .unwrap()
+            .write_all(diagram_node(label, vec![]).to_dot().as_bytes())
+            .unwrap();
+        let output = dot.wait_with_output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let svg = String::from_utf8(output.stdout).unwrap();
+        // Decode the SVG text elements once, leaving entity-looking label text intact.
+        let rendered = svg
+            .split("<text ")
+            .skip(1)
+            .map(|element| {
+                element
+                    .split_once('>')
+                    .unwrap()
+                    .1
+                    .split_once("</text>")
+                    .unwrap()
+                    .0
+                    .replace("&quot;", "\"")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&amp;", "&")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(rendered, label);
+    }
+
+    #[test]
+    fn diagram_ids_are_local_and_deterministic() {
+        let plan = diagram_node("Join", vec![diagram_node("Scan", vec![]); 12]);
+        let before = plan.clone();
+        let mermaid = plan.to_mermaid();
+        let dot = plan.to_dot();
+        for _ in 0..3 {
+            assert_eq!(plan.to_mermaid(), mermaid);
+            assert_eq!(plan.clone().to_dot(), dot);
+            assert_eq!(
+                plan.children[0].to_mermaid(),
+                "flowchart TD\n  n0[\"Scan\"]\n"
+            );
+            assert_eq!(
+                plan.children[0].to_dot(),
+                "digraph Plan {\n  n0[label=\"Scan\"];\n}\n"
+            );
+        }
+        for id in 1..=12 {
+            assert_eq!(mermaid.matches(&format!("  n{id}[\"Scan\"]\n")).count(), 1);
+            assert_eq!(mermaid.matches(&format!("  n0 --> n{id}\n")).count(), 1);
+            assert_eq!(
+                dot.matches(&format!("  n{id}[label=\"Scan\"];\n")).count(),
+                1
+            );
+            assert_eq!(dot.matches(&format!("  n0 -> n{id};\n")).count(), 1);
+        }
+        assert_eq!(plan, before);
+    }
 
     const DATA: &str = r#"
         @prefix ex: <http://ex/> .

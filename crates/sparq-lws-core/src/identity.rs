@@ -179,7 +179,7 @@ fn first_segment_is_reserved(path: &str) -> bool {
 /// invalid escape is kept verbatim (it cannot address a store key anyway — LDP store keys are the
 /// RAW path), and non-UTF-8 decodes are replaced lossily. Used ONLY for the fail-closed refusal
 /// predicate, never to construct a key.
-fn percent_decode_lossy(path: &str) -> String {
+pub(crate) fn percent_decode_lossy(path: &str) -> String {
     let bytes = path.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

@@ -38,7 +38,7 @@
 //! BGP-join obliviousness-cost analysis (RQ2b). No fake crypto here.
 
 use crate::batched::{BatchedShares, RowBinding};
-use crate::compare::secure_equal_to_bit;
+use crate::compare::secure_equal_to_bit_through;
 use crate::field::Fp;
 use crate::oblivious_join::{self, Candidate, MatchBit, ObliviousOutputCost};
 use crate::partial::{HolderId, MpcError, PartialResult};
@@ -762,7 +762,9 @@ impl HiddenValueJoin {
     /// 3. For each candidate pair the match is decided by the existing
     ///    `Self::secure_equal` over the secret-shared keys — the join key/value is
     ///    NEVER opened; only the match bit is (see the honesty note).
-    /// 4. The candidates feed [`crate::oblivious_join::oblivious_join_output`] with
+    /// 4. The candidates feed
+    ///    [`crate::oblivious_join::oblivious_join_output`] (drawing from the same
+    ///    randomness source as steps 1–3) with
     ///    [`MatchBit::Public`] bits and the public bound `B`: non-matches become
     ///    indistinguishable dummies, the slots are oblivious-shuffled, and exactly
     ///    `B` are revealed — so the OUTPUT does not leak the true match count
@@ -807,14 +809,20 @@ impl HiddenValueJoin {
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
         // Mint ONE fresh dealer for this protocol run (production: a fresh OS-seeded
-        // CSPRNG, sq-1vt) — independent masks, never a reused keystream across joins.
+        // CSPRNG, sq-1vt) — independent masks, never a reused keystream across joins
+        // — and one source for the whole run: the key sharings, the equality masks
+        // AND the oblivious output stage draw from it in sequence, where before the
+        // output stage minted a second dealer of its own.
         self.batched_join_through(&mut self.backend.dealer(), left, right, bound)
     }
 
-    /// [`Self::batched_join`] with the key sharings and the equality masks drawn
-    /// through `source` (the oblivious output stage still mints its own dealer
-    /// from the backend). Refuses a source whose `(n, t)` differs from the
-    /// backend's; every drawn sharing is shape-checked where it is consumed.
+    /// [`Self::batched_join`] with the key sharings, the equality masks AND the
+    /// whole oblivious output stage (selector / real-tag / payload-limb sharings
+    /// and the shuffle) drawn through ONE `source`, in that order — where the
+    /// output stage previously minted a second dealer from the backend and
+    /// restarted the keystream. Refuses a source whose `(n, t)` differs from the
+    /// backend's before any draw; every drawn sharing is shape-checked where it is
+    /// consumed, and the shuffled column's shape on return. Shape checks only.
     pub(crate) fn batched_join_through(
         &self,
         source: &mut dyn DistributedRandomness,
@@ -877,7 +885,15 @@ impl HiddenValueJoin {
 
         // (4) Route through the oblivious output transform: hide which candidates
         // matched (shuffle) and bound the revealed cardinality to the public `B`.
-        oblivious_join::oblivious_join_output(&self.backend, &candidates, out_vars, bound)
+        // It draws from the SAME `source` the key sharings and equality masks came
+        // from, so one continuous source covers the whole join.
+        oblivious_join::oblivious_join_output_through(
+            source,
+            &self.backend,
+            &candidates,
+            out_vars,
+            bound,
+        )
     }
 
     /// **The fully-oblivious batched hidden-value join (sq-xhaw).** The upgrade
@@ -953,14 +969,59 @@ impl HiddenValueJoin {
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<BatchedJoinOutput, MpcError> {
+        // ONE fresh dealer for this protocol run (production: fresh OS-seeded
+        // CSPRNG, sq-1vt) — independent masks, never a reused keystream across
+        // joins — and now one source for the whole run: the equality bits AND the
+        // oblivious output stage draw from it in sequence, where before the output
+        // stage minted a second dealer of its own.
+        self.fully_oblivious_batched_join_through(&mut self.backend.dealer(), left, right, bound)
+    }
+
+    /// [`Self::fully_oblivious_batched_join`] with the per-pair equality bits AND
+    /// the whole oblivious output stage (selector / tag / payload-limb sharings and
+    /// the shuffle) drawn through ONE `source`, in that order. Refuses a source
+    /// whose `(n, t)` differs from the backend's before any draw; every drawn
+    /// sharing is shape-checked where it is consumed, and the shuffled column's
+    /// shape on return. Shape checks only.
+    pub(crate) fn fully_oblivious_batched_join_through(
+        &self,
+        source: &mut dyn DistributedRandomness,
+        left: &BatchedHiddenInput,
+        right: &BatchedHiddenInput,
+        bound: usize,
+    ) -> Result<BatchedJoinOutput, MpcError> {
+        require_source_matches(source, &self.backend)?;
+
         // Output schema: left payload vars then right payload vars (key NOT projected).
         let mut out_vars = left.payload_vars.clone();
         out_vars.extend(right.payload_vars.iter().cloned());
-        let payload_arity = out_vars.len();
+        let candidates = self.fully_oblivious_candidates(source, left, right)?;
 
-        // One fresh dealer for this protocol run (production: fresh OS-seeded CSPRNG,
-        // sq-1vt) — independent masks, never a reused keystream across joins.
-        let mut dealer = self.backend.dealer();
+        // (3) Route through the oblivious output transform with the SECRET-SHARED
+        // selectors: the oblivious select consumes the shared bit directly (one
+        // `mul_shares_raw` per slot, no open), the slots are shuffled, and exactly
+        // `B` tags are revealed. Nothing per-pair is opened anywhere.
+        oblivious_join::oblivious_join_output_through(
+            source,
+            &self.backend,
+            &candidates,
+            out_vars,
+            bound,
+        )
+    }
+
+    /// Steps (1) and (2) of [`Self::fully_oblivious_batched_join_through`]: the
+    /// candidate row pairs the row-binding permits, each carrying its joined
+    /// payload row and a SECRET-SHARED match bit that is never opened. Split out so
+    /// the candidates (and the payload rows they carry) are reachable without
+    /// re-running the output stage.
+    fn fully_oblivious_candidates(
+        &self,
+        source: &mut dyn DistributedRandomness,
+        left: &BatchedHiddenInput,
+        right: &BatchedHiddenInput,
+    ) -> Result<Vec<Candidate>, MpcError> {
+        let payload_arity = left.payload_vars.len() + right.payload_vars.len();
 
         // (1) Enumerate the candidate row pairs the RowBinding permits — the SAME
         // public candidate structure as `batched_join` (the candidate COUNT is a
@@ -976,7 +1037,7 @@ impl HiddenValueJoin {
         for (li, rj) in pairs {
             let (lkey, lpay) = &left.rows[li];
             let (rkey, rpay) = &right.rows[rj];
-            let match_bit = secure_equal_to_bit(&mut dealer, *lkey, *rkey)?;
+            let match_bit = secure_equal_to_bit_through(source, *lkey, *rkey)?;
             let mut payload = lpay.clone();
             payload.extend(rpay.iter().cloned());
             // Uniform output arity for the recipient (a short row is a malformed
@@ -995,12 +1056,35 @@ impl HiddenValueJoin {
                 matched: MatchBit::SecretShared(match_bit),
             });
         }
+        Ok(candidates)
+    }
 
-        // (3) Route through the oblivious output transform with the SECRET-SHARED
-        // selectors: the oblivious select consumes the shared bit directly (one
-        // `mul_shares_raw` per slot, no open), the slots are shuffled, and exactly
-        // `B` tags are revealed. Nothing per-pair is opened anywhere.
-        oblivious_join::oblivious_join_output(&self.backend, &candidates, out_vars, bound)
+    /// Test-only instrumentation: the candidates
+    /// [`Self::fully_oblivious_batched_join_through`] builds, together with the
+    /// `(is_real, decoded_row)` of every slot the REAL output stage opens for them.
+    /// Same candidate construction and same output stage as the public path — it
+    /// just keeps the dummy slots' decoded payload rows, which `PartialResult`
+    /// cannot express.
+    #[cfg(test)]
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn fully_oblivious_candidates_and_opened_rows(
+        &self,
+        source: &mut dyn DistributedRandomness,
+        left: &BatchedHiddenInput,
+        right: &BatchedHiddenInput,
+        bound: usize,
+    ) -> Result<(Vec<Candidate>, Vec<(bool, Vec<Option<Term>>)>), MpcError> {
+        require_source_matches(source, &self.backend)?;
+        let payload_arity = left.payload_vars.len() + right.payload_vars.len();
+        let candidates = self.fully_oblivious_candidates(source, left, right)?;
+        let slots = oblivious_join::opened_slot_rows_through(
+            source,
+            &self.backend,
+            &candidates,
+            payload_arity,
+            bound,
+        )?;
+        Ok((candidates, slots))
     }
 }
 
@@ -2425,6 +2509,73 @@ mod batched_hidden_value_tests {
         assert_eq!(c1.bound, 5);
     }
 
+    /// THE guard for the output stage's payload select in the batched join: with
+    /// non-matching rows present, no rejected candidate's joined payload row appears
+    /// among the opened payloads of the `B` slots. The opened set is exactly the
+    /// matched rows plus the dummy encoding (two unbound cells).
+    ///
+    /// Asserted by comparing the candidates' OWN payload rows against what each slot
+    /// actually opened to, through `fully_oblivious_candidates_and_opened_rows` — the
+    /// same candidate construction and the same output stage the public path runs.
+    #[test]
+    fn rejected_batched_join_rows_payloads_open_to_the_dummy_encoding() {
+        // Keys 1 and 3 overlap positionally; rows 1 and 3 do not match.
+        let l = [
+            (1u64, vec![lit("a")]),
+            (2, vec![lit("b")]),
+            (3, vec![lit("c")]),
+            (4, vec![lit("d")]),
+        ];
+        let r = [
+            (1u64, vec![lit("p")]),
+            (9, vec![lit("q")]),
+            (3, vec![lit("r")]),
+            (8, vec![lit("s")]),
+        ];
+        let li = positional("L", &["x"], &l);
+        let ri = positional("R", &["y"], &r);
+        let render = |row: &[Option<Term>]| format!("{row:?}");
+        let matched: Vec<Vec<Option<Term>>> =
+            vec![vec![lit("a"), lit("p")], vec![lit("c"), lit("r")]];
+        let pad: Vec<Option<Term>> = vec![None, None];
+        for seed in 0..8u64 {
+            let backend = ShamirBackend::new_seeded(5, 0xB0_0000 + seed).unwrap();
+            let join = HiddenValueJoin::new(backend.clone());
+            let (candidates, slots) = join
+                .fully_oblivious_candidates_and_opened_rows(&mut backend.dealer(), &li, &ri, 6)
+                .unwrap();
+            assert_eq!(slots.len(), 6, "seed {seed}: exactly B slots");
+            let opened: Vec<String> = slots.iter().map(|(_, r)| render(r)).collect();
+            let mut rejected_seen = 0usize;
+            for c in &candidates {
+                if !matched.contains(&c.payload) {
+                    rejected_seen += 1;
+                    assert!(
+                        !opened.contains(&render(&c.payload)),
+                        "seed {seed}: a rejected row's payload was opened: {}",
+                        render(&c.payload)
+                    );
+                }
+            }
+            assert!(
+                rejected_seen > 0,
+                "seed {seed}: fixture must contain rejected candidates"
+            );
+            let distinct: std::collections::BTreeSet<String> = opened.into_iter().collect();
+            let mut want: std::collections::BTreeSet<String> =
+                matched.iter().map(|r| render(r)).collect();
+            want.insert(render(&pad));
+            assert_eq!(distinct, want, "seed {seed}: opened payload set");
+            for (is_real, row) in &slots {
+                if *is_real {
+                    assert!(matched.contains(row), "seed {seed}");
+                } else {
+                    assert_eq!(row, &pad, "seed {seed}: dummy slot payload");
+                }
+            }
+        }
+    }
+
     /// Fail-closed: a `bound` below the candidate count is rejected (never truncates
     /// a candidate, which could drop a true match) — same contract as `batched_join`.
     #[test]
@@ -2572,6 +2723,18 @@ mod randomness_seam_tests {
         fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
             self.inner.vss_own_input(secret)
         }
+        fn oblivious_shuffle(
+            &mut self,
+            col: crate::oblivious::SecretColumn,
+        ) -> Result<
+            (
+                crate::oblivious::SecretColumn,
+                crate::oblivious::ShuffleCost,
+            ),
+            MpcError,
+        > {
+            self.inner.oblivious_shuffle(col)
+        }
     }
 
     /// Both key sharings and the equality mask are shape-checked where they are
@@ -2706,13 +2869,20 @@ mod randomness_seam_tests {
         result.rows.clone()
     }
 
-    /// Pinned from the PRE-ROUTING code (`dealer.share_batch` for the key columns),
-    /// captured by logging every dealer draw on the unmodified code. `shared_keys`
-    /// pins its three returned sharings and a direct WITNESS draw; the batched
-    /// joins pin their output and a WITNESS draw from the join's own dealer
-    /// (captured by replaying the logged draw sequence on a fresh dealer from the
-    /// same seed) — the witness moves if the keys or masks consume more or fewer
-    /// draws.
+    /// `shared_keys` pins its three returned sharings and a direct WITNESS draw,
+    /// both unchanged since the pre-routing code (`dealer.share_batch`).
+    ///
+    /// The two batched joins pin their output and a WITNESS draw from the join's
+    /// own dealer; the witness moves if the keys, the masks or the output stage
+    /// consume more or fewer draws. **Both witnesses moved in #6117 step 6**
+    /// (`1791168067962045003` → `459721877472897114` positional,
+    /// `604506784193922450` → `949282158979249119` keyed) because the oblivious
+    /// output stage now draws from the SAME source instead of minting a second
+    /// dealer: the join consumes 16 more draws on one keystream. The REVEALED
+    /// result and every modelled cost below are byte-identical to the pre-routing
+    /// values, and `seeded_batched_join_transcripts_are_pinned` shows the
+    /// key-and-mask PREFIX of the transcript is unchanged — only the output-stage
+    /// suffix is new.
     #[test]
     fn seeded_key_dealing_draws_exactly_what_the_dealer_drew_before_the_seam() {
         let b = ShamirBackend::new_seeded(5, 0x5EED8).unwrap();
@@ -2763,24 +2933,56 @@ mod randomness_seam_tests {
             vec![vec![lit("l0"), lit("r0")], vec![lit("l2"), lit("r2")]]
         );
         assert_eq!(rows_of(&public), rows_of(&through));
-        assert_eq!(cost.bound, 3);
-        assert_eq!(dealer.draw_fp().value(), 1791168067962045003);
+        // Every modelled cost is identical to the pre-routing capture.
+        assert_eq!(
+            (
+                cost.bound,
+                cost.select_mults,
+                cost.opens,
+                cost.shuffle.items,
+                cost.shuffle.switches,
+                cost.shuffle.depth_rounds
+            ),
+            (3, 3, 3, 3, 12, 3)
+        );
+        assert_eq!(dealer.draw_fp().value(), 2161249352783106125);
 
         let b = ShamirBackend::new_seeded(3, 0xBA7C2).unwrap();
         let join = HiddenValueJoin::new(b.clone());
         let (l, r) = keyed_pair();
         let mut dealer = b.dealer();
-        let (through, _) = join.batched_join_through(&mut dealer, &l, &r, 2).unwrap();
+        let (through, cost) = join.batched_join_through(&mut dealer, &l, &r, 2).unwrap();
         assert_eq!(rows_of(&through), vec![vec![lit("la"), lit("ra")]]);
-        assert_eq!(dealer.draw_fp().value(), 604506784193922450);
+        assert_eq!(
+            (cost.bound, cost.shuffle.items, cost.shuffle.switches),
+            (2, 2, 4)
+        );
+        assert_eq!(dealer.draw_fp().value(), 1407478561319806175);
     }
 
     /// The COMPLETE seam transcript of a batched join — both key columns (left
-    /// then right, each in row order) then one equality mask per candidate —
-    /// folded into the order-sensitive fingerprint. Captured on the pre-routing
-    /// code by mapping each logged `share` to `vss_own_input` and each
-    /// `draw_nonzero_fp` + `share` pair to `shared_nonzero_mask`. Swapping the two
-    /// key columns, or re-ordering rows, changes it.
+    /// then right, each in row order), one equality mask per candidate, then the
+    /// OUTPUT STAGE's sharings and its shuffle — folded into the order-sensitive
+    /// fingerprint. Swapping the two key columns, or re-ordering rows, changes it.
+    ///
+    /// **This is the #6117-step-6 guard.** The method list ends in the output
+    /// stage's `vss_own_input` run and its `oblivious_shuffle`: if
+    /// `batched_join_through` went back to minting its own dealer for the output
+    /// stage, the recorded log would stop at the equality masks and this
+    /// `assert_eq!` on `methods` would fail.
+    ///
+    /// The PREFIX fingerprints are the pre-routing whole-log pins
+    /// (`0x3928_3c3c_85e4_183f` / `0xbd36_3090_bbad_ff3c`, captured on the
+    /// pre-routing code by mapping each logged `share` to `vss_own_input` and each
+    /// `draw_nonzero_fp` + `share` pair to `shared_nonzero_mask`), asserted here
+    /// unchanged: the routing appended an output-stage SUFFIX and moved nothing in
+    /// the key/mask part. The full-log fingerprints are the new pins.
+    ///
+    /// The third case (`B = 5`, padding two pure-dummy slots onto the same three
+    /// candidates) is a NEW fixture: its method list and full-log fingerprint were
+    /// captured on the current code, so they pin today's behaviour forward and
+    /// make no pre-routing claim. Its PREFIX, however, is asserted against the
+    /// same pre-routing pin as the `B = 3` case.
     #[test]
     fn seeded_batched_join_transcripts_are_pinned() {
         use crate::randomness::test_sources::{fingerprint, RecordingSource};
@@ -2792,9 +2994,22 @@ mod randomness_seam_tests {
         let methods: Vec<&str> = rec.log.iter().map(|(m, _)| *m).collect();
         assert_eq!(
             methods,
-            [["vss_own_input"; 6].as_slice(), &["shared_nonzero_mask"; 3]].concat()
+            [
+                ["vss_own_input"; 6].as_slice(),
+                &["shared_nonzero_mask"; 3],
+                // The output stage: per slot a selector (a PUBLIC bit, lifted
+                // with its own sharing) + a real-tag sharing + `2t + 1 = 5`
+                // tag-reduction re-sharings, then per payload limb the limb
+                // sharing + 5 re-sharings — 25 per slot over three slots — and
+                // finally the shuffle over the three packed entries.
+                &["vss_own_input"; 75],
+                &["oblivious_shuffle"],
+            ]
+            .concat()
         );
-        assert_eq!(fingerprint(&rec.log), 0x3928_3c3c_85e4_183f);
+        // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
+        assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
+        assert_eq!(fingerprint(&rec.log), 0x1522_2b64_f255_3b1f);
 
         let b = ShamirBackend::new_seeded(3, 0xBA7C2).unwrap();
         let join = HiddenValueJoin::new(b.clone());
@@ -2804,23 +3019,70 @@ mod randomness_seam_tests {
         let methods: Vec<&str> = rec.log.iter().map(|(m, _)| *m).collect();
         assert_eq!(
             methods,
-            [["vss_own_input"; 4].as_slice(), &["shared_nonzero_mask"; 2]].concat()
+            [
+                ["vss_own_input"; 4].as_slice(),
+                &["shared_nonzero_mask"; 2],
+                // At `n = 3`, `t = 1` each reduction re-shares through 3 parties:
+                // per slot the tag costs 2 + 3 = 5 and each of the three limbs
+                // 1 + 3 = 4, so 17 per slot over two slots.
+                &["vss_own_input"; 34],
+                &["oblivious_shuffle"],
+            ]
+            .concat()
         );
-        assert_eq!(fingerprint(&rec.log), 0xbd36_3090_bbad_ff3c);
+        assert_eq!(fingerprint(&rec.log[..6]), 0xbd36_3090_bbad_ff3c);
+        assert_eq!(fingerprint(&rec.log), 0xa975_f38b_2f6e_c6e8);
+
+        // `B = 5` over the SAME three candidates: the output stage pads with two
+        // PURE-DUMMY slots on top of the three real ones. That padding branch is
+        // where a regression can hide — a `bound > candidates.len()` special case
+        // that fell back to minting a dealer for the output stage would leave this
+        // log with only the key/mask prefix. The prefix fingerprint is the SAME pin
+        // as the `B = 3` case above (same backend seed, same first nine draws):
+        // only the output suffix differs with `B`.
+        let b = ShamirBackend::new_seeded(5, 0xBA7C1).unwrap();
+        let join = HiddenValueJoin::new(b.clone());
+        let (l, r) = positional_pair();
+        let mut rec = RecordingSource::new(b.dealer());
+        join.batched_join_through(&mut rec, &l, &r, 5).unwrap();
+        let methods: Vec<&str> = rec.log.iter().map(|(m, _)| *m).collect();
+        assert_eq!(
+            methods,
+            [
+                ["vss_own_input"; 6].as_slice(),
+                &["shared_nonzero_mask"; 3],
+                // Five slots now, at the same 25 sharings per slot as the
+                // `B = 3` case (75 for three), then one shuffle over all five.
+                &["vss_own_input"; 125],
+                &["oblivious_shuffle"],
+            ]
+            .concat()
+        );
+        // Same prefix pin as `B = 3`: `B` changes only the output suffix.
+        assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
+        assert_eq!(fingerprint(&rec.log), 0x348e_74ee_9564_b8cc);
     }
 
-    /// Every key sharing (any row of either column) and every equality mask in a
-    /// batched join is shape-checked where it is consumed: corrupting exactly ONE
-    /// draw must be refused by the shape check itself.
+    /// Every key sharing (any row of either column), every equality mask AND every
+    /// sharing the OUTPUT stage draws (real tag, pure-dummy selector, payload limb)
+    /// in a batched join is shape-checked where it is consumed: corrupting exactly
+    /// ONE draw must be refused by a shape check itself — either the stage's own
+    /// `checked_vss_own_input` or `shamir::degree_reduce_through`'s
+    /// `require_canonical_sharing` on a reduction re-sharing; both name the
+    /// canonical sharing, so the assertion below matches either wording. The 81
+    /// `vss_own_input` sites are the 6 key sharings plus the output stage's 75: per
+    /// slot a selector + a real-tag sharing + `2t + 1 = 5` tag-reduction
+    /// re-sharings, then per payload limb the limb sharing + 5 re-sharings.
     #[test]
     fn malformed_draws_are_refused_at_every_batched_join_consumption_site() {
-        use crate::randomness::test_sources::{
-            MalformedSource, SeamMethod, ALL_MALFORMATIONS, SHAPE_REFUSAL,
-        };
+        use crate::randomness::test_sources::{MalformedSource, SeamMethod, ALL_MALFORMATIONS};
+        /// Either shape refusal's common substring (the stage's own, or the
+        /// reduction's "re-sharing" wording).
+        const ANY_SHAPE_REFUSAL: &str = "sharing that is not the canonical";
         let b = ShamirBackend::new_seeded(5, 0xBA7C3).unwrap();
         let join = HiddenValueJoin::new(b.clone());
         let (l, r) = positional_pair();
-        let sites = (0..6)
+        let sites = (0..81)
             .map(|k| (SeamMethod::VssOwnInput, k))
             .chain((0..3).map(|k| (SeamMethod::SharedNonzeroMask, k)));
         for (method, skip) in sites {
@@ -2828,7 +3090,7 @@ mod randomness_seam_tests {
                 let mut src = MalformedSource::new(b.dealer(), method, skip, how);
                 match join.batched_join_through(&mut src, &l, &r, 3) {
                     Err(MpcError::Protocol(m)) => assert!(
-                        m.contains(SHAPE_REFUSAL),
+                        m.contains(ANY_SHAPE_REFUSAL),
                         "{method:?} #{skip}, {how:?}: wrong check: {m}"
                     ),
                     other => {
@@ -2874,6 +3136,136 @@ mod randomness_seam_tests {
         assert!(rec.log.is_empty(), "drew before refusing");
     }
 
+    /// The batched join's output stage now shuffles through the caller's source,
+    /// so the column it gets back is SHAPE-checked rather than trusted: each
+    /// corruption must be refused by the shuffle shape check itself (#6117 step 6).
+    #[test]
+    fn a_malformed_shuffled_column_is_refused_by_the_batched_join() {
+        use crate::randomness::test_sources::{
+            MalformedShuffleSource, ALL_SHUFFLE_MALFORMATIONS, SHUFFLE_SHAPE_REFUSAL,
+        };
+        let b = ShamirBackend::new_seeded(5, 0xBA7C5).unwrap();
+        let join = HiddenValueJoin::new(b.clone());
+        let (l, r) = positional_pair();
+        for how in ALL_SHUFFLE_MALFORMATIONS {
+            let mut src = MalformedShuffleSource::new(b.dealer(), how);
+            match join.batched_join_through(&mut src, &l, &r, 3) {
+                Err(MpcError::Protocol(m)) => assert!(
+                    m.contains(SHUFFLE_SHAPE_REFUSAL),
+                    "{how:?}: wrong check: {m}"
+                ),
+                other => panic!("{how:?}: must fail closed, got {other:?}"),
+            }
+            assert!(src.fired(), "{how:?}: the shuffle never happened");
+        }
+    }
+
+    // ---- The fully-oblivious join's output stage (#6117 step 5) ----
+
+    /// The fully-oblivious fixture: the positional pair at `bound = 4`, so the
+    /// three candidates get one pure-dummy padding slot. At `n = 5`, `t = 2` each
+    /// degree reduction re-shares through `2t + 1 = 5` parties, so the output stage
+    /// draws 97 sharings — per candidate a real-tag sharing + 5 reduction
+    /// re-sharings (the selector is the SHARED equality bit, which costs no draw),
+    /// for the padding slot a zero-selector + a real-tag sharing + 5 re-sharings,
+    /// then for each of the three payload limbs per slot the limb sharing + 5
+    /// re-sharings — and then one shuffle.
+    const OUTPUT_STAGE_DRAWS: usize = 98;
+
+    /// The rows are the canonicalised result — unchanged — and the WITNESS draw
+    /// after the run pins the total draw count of the whole join. The witness and
+    /// the modelled costs other than `degree_reductions` were pinned against the
+    /// pre-routing code; the witness was re-captured when the per-element degree
+    /// reduction added its `2t + 1` re-sharings per selected element.
+    #[test]
+    fn seeded_fully_oblivious_join_draws_exactly_what_the_dealer_drew_before_the_seam() {
+        let b = ShamirBackend::new_seeded(5, 0x0B16).unwrap();
+        let join = HiddenValueJoin::new(b.clone());
+        let (l, r) = positional_pair();
+        let mut dealer = b.dealer();
+        let (through, cost) = join
+            .fully_oblivious_batched_join_through(&mut dealer, &l, &r, 4)
+            .unwrap();
+        assert_eq!(
+            rows_of(&through),
+            vec![vec![lit("l0"), lit("r0")], vec![lit("l2"), lit("r2")]]
+        );
+        assert_eq!(cost.bound, 4);
+        assert_eq!(cost.shuffle.items, 4);
+        assert_eq!(cost.shuffle.switches, 20);
+        // One degree reduction per selected element: the tag plus its three limbs,
+        // over four slots.
+        assert_eq!(cost.degree_reductions, 16);
+        assert_eq!(dealer.draw_fp().value(), 529688288171226898);
+
+        // The public entry point mints its own dealer from the same seeded
+        // backend, so it reproduces the same run.
+        let (public, _) = join.fully_oblivious_batched_join(&l, &r, 4).unwrap();
+        assert_eq!(rows_of(&public), rows_of(&through));
+    }
+
+    /// The OUTPUT-STAGE suffix of the fully-oblivious join's seam transcript —
+    /// every sharing in consumption order then the shuffled column — folded into
+    /// the order-sensitive fingerprint. Only the suffix: the long prefix is the
+    /// per-pair `secure_equal_to_bit` chain, whose own transcript the `compare` seam
+    /// tests already pin, and which this change does not touch. The suffix pin was
+    /// re-captured when the per-element degree reduction grew the stage's draws.
+    #[test]
+    fn seeded_fully_oblivious_output_stage_transcript_is_pinned() {
+        use crate::randomness::test_sources::{fingerprint, RecordingSource};
+        let b = ShamirBackend::new_seeded(5, 0x0B16).unwrap();
+        let join = HiddenValueJoin::new(b.clone());
+        let (l, r) = positional_pair();
+        let mut rec = RecordingSource::new(b.dealer());
+        join.fully_oblivious_batched_join_through(&mut rec, &l, &r, 4)
+            .unwrap();
+        assert!(
+            rec.log.len() > OUTPUT_STAGE_DRAWS,
+            "the equality chain must have drawn through the same source first"
+        );
+        let suffix = &rec.log[rec.log.len() - OUTPUT_STAGE_DRAWS..];
+        let methods: Vec<&str> = suffix.iter().map(|(m, _)| *m).collect();
+        assert_eq!(
+            methods,
+            [
+                ["vss_own_input"; OUTPUT_STAGE_DRAWS - 1].as_slice(),
+                &["oblivious_shuffle"]
+            ]
+            .concat()
+        );
+        assert_eq!(fingerprint(suffix), 0xb7ce_9855_44a5_f58e);
+    }
+
+    /// A source whose `(n, t)` differs from the backend's is refused before the
+    /// fully-oblivious join draws anything at all.
+    #[test]
+    fn fully_oblivious_join_refuses_a_mismatched_source_before_any_draw() {
+        use crate::randomness::test_sources::{MisreportedThresholdSource, RecordingSource};
+        const MISMATCH_REFUSAL: &str = "its sharings would not compose with the backend's";
+        let b = ShamirBackend::new_seeded(5, 0x0B1A).unwrap();
+        let join = HiddenValueJoin::new(b.clone());
+        let (l, r) = positional_pair();
+        for t in [0, 1] {
+            let mut src = MisreportedThresholdSource {
+                inner: b.dealer(),
+                t,
+            };
+            match join.fully_oblivious_batched_join_through(&mut src, &l, &r, 4) {
+                Err(MpcError::Protocol(m)) => {
+                    assert!(m.contains(MISMATCH_REFUSAL), "t={t}: wrong check: {m}")
+                }
+                other => panic!("t={t}: must fail closed, got {other:?}"),
+            }
+        }
+        let mut rec = RecordingSource::new(ShamirBackend::new_seeded(3, 0x0B1A).unwrap().dealer());
+        let outcome = join.fully_oblivious_batched_join_through(&mut rec, &l, &r, 4);
+        assert!(
+            matches!(&outcome, Err(MpcError::Protocol(m)) if m.contains(MISMATCH_REFUSAL)),
+            "got {outcome:?}"
+        );
+        assert!(rec.log.is_empty(), "drew before refusing");
+    }
+
     /// The batched join must first share both key columns, which PRSS refuses —
     /// the refusal must surface as PRSS's own `NotYetImplemented`, for both the
     /// key dealing alone and the whole join.
@@ -2891,5 +3283,32 @@ mod randomness_seam_tests {
             join.batched_join_through(&mut prss, &l, &r, 3),
             Err(MpcError::NotYetImplemented { .. })
         ));
+    }
+
+    /// EMPTY inputs on both sides: no key to share and no candidate to compare,
+    /// so the key/equality stages draw nothing at all. The join must still fail
+    /// closed under PRSS, because the OUTPUT stage draws through the same source
+    /// for its `B = 2` pure-dummy slots (#6117 step 6). Before that routing this
+    /// shape ran to completion under PRSS, since the output stage minted its own
+    /// dealer and never touched the caller's source — so this is the shape that
+    /// pins the routing rather than the key dealing.
+    #[test]
+    fn prss_fails_closed_on_an_empty_batched_join_whose_only_draws_are_the_output_stage() {
+        let backend = ShamirBackend::new(5).unwrap();
+        let join = HiddenValueJoin::new(backend);
+        let empty = |holder: &str, var: &str| input(holder, var, &[], RowBinding::Positional);
+        let (l, r) = (empty("L", "l"), empty("R", "r"));
+        // The key dealing itself is draw-free here: an empty column shares nothing,
+        // so PRSS has nothing to refuse and succeeds.
+        let mut prss = PrssRandomness::with_simulated_setup(5).unwrap();
+        assert!(l.shared_keys_through(&mut prss, 5).is_ok());
+        // The whole join nonetheless fails closed — the refusal comes from the
+        // output stage, which is only reachable because it draws from `prss`.
+        let outcome = join.batched_join_through(&mut prss, &l, &r, 2);
+        assert!(
+            matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
+            "got {:?}",
+            outcome
+        );
     }
 }
