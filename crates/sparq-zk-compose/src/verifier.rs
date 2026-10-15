@@ -4585,6 +4585,25 @@ fn bind_hidden_issuer_attestations(
     // selected and was admitted by the relying party's policy.
     let referenced = scan_referenced_messages(manifest, methods)?;
 
+    // The declared `m` is part of the presented manifest, so it must state the
+    // message its entry's proof is checked against — for EVERY entry, whether the
+    // commitment's method came from a clear attestation or from the hidden-only
+    // declarations, and before any proof is decoded. An entry over a commitment
+    // with no recomputed message is left to the unreferenced refusal below.
+    for hi in &manifest.hidden_issuer_attestations {
+        let expected = hi
+            .commitment
+            .to_field()
+            .and_then(|c_fr| referenced.get(&field_to_hex(&c_fr)));
+        if let Some(expected_m) = expected {
+            if hi.message.to_field() != Some(*expected_m) {
+                return Err(CheckError::HiddenIssuerMessageMismatch {
+                    commitment: hi.commitment.0.clone(),
+                });
+            }
+        }
+    }
+
     for (i, hi) in manifest.hidden_issuer_attestations.iter().enumerate() {
         if hi.depth != depth {
             return Err(CheckError::HiddenIssuerDepthMismatch {
@@ -4592,8 +4611,8 @@ fn bind_hidden_issuer_attestations(
                 policy: depth,
             });
         }
-        // The covered commitment must be referenced by a verified scan, and we use
-        // OUR recomputed message (never the prover's declared `hi.message`).
+        // The covered commitment must be referenced by a verified scan, and we feed
+        // OUR recomputed message to the proof check, never the declared one.
         let Some(c_fr) = hi.commitment.to_field() else {
             return Err(CheckError::HiddenIssuerUnreferencedCommitment {
                 commitment: hi.commitment.0.clone(),
@@ -8926,6 +8945,74 @@ mod tests {
     /// is built from `depth` — the POLICY depth — never from `hi.depth`. This gate
     /// exists so a prover cannot silently present a proof for a different-depth
     /// member; the vk it is verified against was never the attacker's to choose.
+    /// Every hidden-issuer entry's declared `m` must equal the message its proof
+    /// is checked against, including when a clear attestation over the same
+    /// commitment supplied the method (where the pre-filter does not read the
+    /// hidden declarations), and including a second entry over one commitment.
+    /// The proof bytes are a placeholder: the declared-message check runs before
+    /// any proof is decoded, so an honest declaration reaches the decode instead.
+    #[test]
+    fn every_hidden_issuer_entry_must_declare_the_message_its_proof_is_checked_against() {
+        use crate::manifest::HiddenIssuerAttestation;
+        use sparq_zk::commit::CommitmentMethod;
+        let sk = sparq_zk::sig::SecretKey::from_seed(1);
+        let depth = 4u32;
+        let k = KeySet::from_hex_keys([sparq_zk::sig::public_key_to_hex(&sk.public_key())])
+            .with_hidden_issuer_depth(depth);
+        let c = Fr::from(100u64);
+        let salt = Fr::from(7u64);
+        let status_ref = status_ref_digest(
+            &status_list_id_to_field(TEST_STATUS_LIST),
+            TEST_STATUS_INDEX,
+            TEST_STATUS_VERSION,
+        );
+        let scheme = sparq_zk::sig::scheme_iri_to_field(CommitmentMethod::DualLeafV2.scheme_iri());
+        let honest =
+            sparq_zk::sig::presentation_message_with_status_and_scheme(&c, &salt, &status_ref, &scheme);
+        let entry = |m: &Fr| HiddenIssuerAttestation {
+            commitment: FieldHex::from_field(&c),
+            depth,
+            key_set_root: fh("0x0"),
+            message: fh(&field_to_hex(m)),
+            salt: Some(FieldHex::from_field(&salt)),
+            proof_hex: "00".into(),
+        };
+
+        let mut m = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+        m.sub_proofs = vec![crate::manifest::SubProof {
+            inputs: flat_scan_with_commit(c),
+            proof_hex: String::new(),
+        }];
+        m.revocation = Some(test_revocation());
+        let mut att = test_attestation(c, salt, &sk);
+        att.signature = sk.sign_presentation_with_status_and_scheme(&c, &salt, &status_ref, &scheme);
+        m.commitment_attestations = vec![att];
+        let methods = bind_issuer_attestations(&m, &k, &std::collections::BTreeSet::new())
+            .expect("the clear attestation authenticates DualLeafV2");
+        let prover = CircuitProver::from_crate_root();
+        let work = std::env::temp_dir().join("sq_hidden_declared_message_gate");
+        let run = |entries: Vec<HiddenIssuerAttestation>| {
+            let mut mm = m.clone();
+            mm.hidden_issuer_attestations = entries;
+            bind_hidden_issuer_attestations(&mm, &k, &prover, &work, &fh("0x2a"), &methods)
+        };
+
+        assert!(
+            matches!(run(vec![entry(&honest)]), Err(CheckError::HiddenIssuerMalformedProof)),
+            "an honest declaration passes the message check and reaches the proof decode"
+        );
+        for entries in [
+            vec![entry(&Fr::from(1u64))],
+            vec![entry(&honest), entry(&Fr::from(1u64))],
+        ] {
+            let r = run(entries);
+            assert!(
+                matches!(r, Err(CheckError::HiddenIssuerMessageMismatch { .. })),
+                "a declared message other than the checked one is refused, got {r:?}"
+            );
+        }
+    }
+
     #[test]
     fn hidden_issuer_declared_depth_must_equal_policy_depth() {
         let mk = |declared: u32| crate::manifest::HiddenIssuerAttestation {

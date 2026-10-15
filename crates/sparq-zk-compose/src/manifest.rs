@@ -2305,7 +2305,9 @@ pub struct HiddenIssuerAttestation {
     /// In ADDITIVE mode — a clear [`CommitmentAttestation`] over the same
     /// commitment alongside the hidden proof — the method comes from the clear
     /// signature instead, and the bb stage binds the hidden proof to the message
-    /// of THAT method. This declared field is then not consulted.
+    /// of THAT method. This declared field must still equal that message: the
+    /// hidden-issuer stage checks every entry's declared `m` against the message
+    /// its proof is checked against before decoding any proof.
     pub message: FieldHex,
     /// The per-graph RDFC10 bnode salt this commitment was committed under (audit
     /// #9), hex. Carried HERE so the verifier can recompute the issuer-signed
