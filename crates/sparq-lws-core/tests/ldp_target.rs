@@ -101,3 +101,35 @@ fn a_linkset_record_name_is_not_a_target() {
         assert!(parse_target(BASE, path).is_ok(), "{path}");
     }
 }
+
+#[test]
+fn the_lws_service_namespace_is_not_a_target() {
+    for path in [
+        "/.lws/grants/g1",
+        "/.lws/",
+        "/alice/.lws/subscriptions/s",
+        "/.LWS/requests/r",
+        "/%2Elws/grants/g1",
+    ] {
+        assert!(
+            matches!(parse_target(BASE, path), Err(ServerError::NotFound)),
+            "{path}"
+        );
+    }
+    for path in ["/.lwsx/a", "/alice/lws/a", "/a.lws"] {
+        assert!(parse_target(BASE, path).is_ok(), "{path}");
+    }
+}
+
+#[test]
+fn a_repeated_slash_is_no_target() {
+    for path in ["//alice/c", "/alice/c//", "/alice//c", "//"] {
+        assert!(
+            matches!(parse_target(BASE, path), Err(ServerError::BadRequest(_))),
+            "{path}"
+        );
+    }
+    for path in ["/", "/alice/c/", "/alice/c"] {
+        assert!(parse_target(BASE, path).is_ok(), "{path}");
+    }
+}

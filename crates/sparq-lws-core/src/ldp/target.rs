@@ -41,6 +41,21 @@ pub(crate) fn is_linkset_record_path(path: &str) -> bool {
     names_record(path) || names_record(&crate::identity::percent_decode_lossy(path))
 }
 
+/// The segment under which the LWS surface keeps its service records (grants, access requests,
+/// subscriptions) in the store, below its storage root (`crate::lws::GRANTS_PATH` and its
+/// siblings).
+const LWS_SERVICE_SEGMENT: &str = ".lws";
+
+/// Whether `path` lies in the LWS surface's service namespace: a segment is `.lws` (ASCII
+/// case-insensitive), as sent or %-decoded. `path` is the path alone. Used only to refuse.
+pub(crate) fn is_lws_service_path(path: &str) -> bool {
+    let names_service = |path: &str| {
+        path.split('/')
+            .any(|seg| seg.eq_ignore_ascii_case(LWS_SERVICE_SEGMENT))
+    };
+    names_service(path) || names_service(&crate::identity::percent_decode_lossy(path))
+}
+
 /// Parse a request path against the public base URL into an [`LdpTarget`].
 ///
 /// `base` is the server's public origin (e.g. `https://pod.example`), WITHOUT a trailing slash.
@@ -79,14 +94,26 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
         return Err(ServerError::NotFound);
     }
 
+    // Nor is anything in its service namespace (`.lws/`), where it keeps grants, access requests
+    // and subscriptions in the same store.
+    if is_lws_service_path(path_only) {
+        return Err(ServerError::NotFound);
+    }
+
     // A trailing-slash path names a container — INCLUDING the storage root "/" itself (the root is a
     // `ldp:BasicContainer`, so a `GET /` must render its `ldp:contains` listing, not be treated as a
     // plain resource).
     let is_container = path_only.ends_with('/');
 
     // Split into interior segments: drop the leading empty segment (before the first '/') and a
-    // single trailing empty segment (the container slash). Any remaining empty segment is an
-    // interior "//", which is rejected. "." / ".." in any segment is path traversal — rejected.
+    // single trailing empty segment (the container slash). Any remaining empty segment is a
+    // "//" (leading, interior or trailing), which is rejected. "." / ".." in any segment is path
+    // traversal — rejected.
+    if path_only.contains("//") {
+        return Err(ServerError::BadRequest(
+            "empty path segment rejected".into(),
+        ));
+    }
     let trimmed = path_only.trim_start_matches('/').trim_end_matches('/');
     if !trimmed.is_empty() {
         for seg in trimmed.split('/') {
@@ -107,4 +134,19 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
         iri,
         is_container,
     })
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    #[test]
+    fn the_reserved_names_are_the_lws_surfaces() {
+        assert_eq!(super::LINKSET_RECORD_SUFFIX, crate::lws::META_SUFFIX);
+        for path in [
+            crate::lws::GRANTS_PATH,
+            crate::lws::REQUESTS_PATH,
+            crate::lws::SUBSCRIPTIONS_PATH,
+        ] {
+            assert!(path.starts_with(&format!("/{}/", super::LWS_SERVICE_SEGMENT)));
+        }
+    }
 }

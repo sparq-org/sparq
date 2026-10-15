@@ -1840,11 +1840,12 @@ pub async fn patch_handler<S: Store>(
 /// response. The `read-method-support` / `read-method-allow` scenarios require OPTIONS ≠ 405 and an
 /// `Allow` listing GET + HEAD.
 pub async fn options_handler<S: Store>(
-    State(_state): State<Arc<LdpState<S>>>,
+    State(state): State<Arc<LdpState<S>>>,
     Extension(_token): Extension<VerifiedToken>,
     uri: axum::http::Uri,
 ) -> Result<Response, ServerError> {
-    let is_container = uri.path().ends_with('/');
+    // What no other method may address is not advertised either (see [`parse_target`]).
+    let is_container = parse_target(&state.base_url, uri.path())?.is_container;
     let mut out = HeaderMap::new();
     add_method_advertisement(&mut out, is_container);
     Ok((StatusCode::NO_CONTENT, out).into_response())
