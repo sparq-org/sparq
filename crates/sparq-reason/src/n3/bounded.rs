@@ -1496,10 +1496,11 @@ mod tests {
     /// own predicate. Each round's value is one `{ :s :t … }` deeper than the last, so the
     /// closure never saturates.
     ///
-    /// The feedback is what diverges. The RENAMING no longer does: a `__bw…` name addresses
-    /// the proof-tree node and the GOAL, so re-proving the same goal in a later round mints
-    /// the same name (GH #6844) — the four programs that diverged on the counter alone now
-    /// saturate, which `the_gh_6757_renaming_programs_saturate` pins.
+    /// The feedback is what diverges. The RENAMING no longer does: a `__bw…` name is the
+    /// fingerprint of the proof-tree node and the GOAL, so re-proving the same goal at the
+    /// same node in a later round mints the same name (GH #6844) — the four programs that
+    /// diverged on the counter alone now saturate, which
+    /// `the_gh_6757_renaming_programs_saturate` pins.
     const DIVERGING: [&str; 4] = [
         "@prefix : <http://example.org/#>.\n\
          { :a :p { ?x :q :z } } <= true .\n\

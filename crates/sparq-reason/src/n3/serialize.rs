@@ -98,12 +98,11 @@ pub(super) fn formula_universal(v: &str) -> Option<(usize, &str)> {
     Some((n.bytes().fold(0, |a, b| a * 10 + usize::from(b - b'0')), iri))
 }
 
-/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, repeated: one chunk
-/// per step of the proof-tree path that standardized the application apart, plus a chunk for
-/// the goal it was proving and one for the evaluation scope, behind a chunk holding how many
-/// chunks follow — `BwPath::prefix`) stripped, when what remains is an `@forAll` universal.
-/// Each chunk's digits are read by maximal munch, which, with the leading count, is what
-/// makes the rendering of one of those names injective.
+/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, one chunk per rule
+/// application the variable was standardized apart by, `<n>` the FINGERPRINT of the proof-tree
+/// node that application sits at — `BwPath`) stripped, when what remains is an `@forAll`
+/// universal. Each chunk's digits are read by maximal munch, so a name decomposes only one
+/// way.
 fn universal_base(v: &str) -> Option<&str> {
     let mut rest = v;
     loop {
@@ -672,9 +671,10 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
 /// label (`__sk<n>_<label>`) does not depend on hash-set traversal or hasher width: it is
 /// numbered in the sorted order of each round's firing keys (GH #6749), and a
 /// `log:conclusion` formula's derived rows are sorted under [`row_cmp`] (GH #6844). A
-/// backward-chaining copy's `__bw<n>_` prefixes likewise spell the evaluation scope, the
-/// proof-tree node and the goal that standardized that rule application apart, not how many
-/// applications ran before it (GH #6844). It is not canonical across reordered isomorphic documents, and a binding value
+/// backward-chaining copy's `__bw<n>_` prefix is likewise the fingerprint of the derivation
+/// that standardized that rule application apart — its evaluation scope, its place in the
+/// proof tree and the goal it was proving — not how many applications ran before it
+/// (GH #6844). It is not canonical across reordered isomorphic documents, and a binding value
 /// that still carries traversal order (a `log:collectAllIn` list) can still move it (GH
 /// #6844).
 fn term_key(t: &Term) -> String {
@@ -744,9 +744,10 @@ fn term_key(t: &Term) -> String {
 /// without resting on a key being self-delimiting (today's keys are, being tagged and
 /// quoted; this does not need them to stay so).
 ///
-/// This NAMES a standardize-apart space (`BwPath`), it is not provenance, so it is
-/// deliberately not counted as a keyed call (`KEY_CALLS`): the plain materialization paths
-/// stay unkeyed, and a document with no `<=` rule never reaches this.
+/// This goes into the identity of a proof-tree node (`BwPath`), which NAMES a
+/// standardize-apart space; it is not provenance, so it is deliberately not counted as a
+/// keyed call (`KEY_CALLS`): the plain materialization paths stay unkeyed, and a document
+/// with no `<=` rule never reaches this.
 pub(super) fn goal_key(g: &[Term; 3]) -> String {
     let mut out = String::new();
     for t in g {
@@ -759,7 +760,9 @@ pub(super) fn goal_key(g: &[Term; 3]) -> String {
 }
 
 /// FNV-1a over `s`'s bytes in explicit `u64` arithmetic, so the value does not depend on
-/// the target's word size (native vs `wasm32`) the way a `usize`-wide hasher would.
+/// the target's word size (native vs `wasm32`) the way a `usize`-wide hasher would. What a
+/// proof-tree node's identity is folded to for its name (`BwCtx::node`, which refuses to
+/// hand one fold to two identities).
 pub(super) fn fnv1a64(s: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
@@ -1459,9 +1462,10 @@ mod tests {
 
     #[test]
     fn a_goal_key_is_injective_over_the_goals_terms() {
-        // Goals that differ in any term get different keys, and so different 64-bit folds
-        // and different standardize-apart spaces (`BwPath`); goals that are equal get one
-        // key. Everything the name has to keep apart rests on this.
+        // Goals that differ in any term get different keys, so the proof-tree node
+        // identities holding them differ and their fingerprints name different
+        // standardize-apart spaces (`BwPath`); equal goals get one key, which is what lets a
+        // goal re-proved in a later round take the name it had.
         let iri = |s: &str| Term::Iri(s.to_string());
         let a = [iri("http://ex/ab"), iri("http://ex/p"), iri("http://ex/c")];
         // Different in the subject only, and the difference is exactly where one term's key
@@ -1481,9 +1485,10 @@ mod tests {
     }
 
     #[test]
-    fn the_goal_fold_is_the_specified_fnv1a_in_u64_arithmetic() {
-        // Pinned against the published FNV-1a 64 test vectors, so the fold is the same value
-        // on a 32-bit target (`wasm32`) as on a 64-bit one — a `usize`-wide hasher is not.
+    fn the_node_fold_is_the_specified_fnv1a_in_u64_arithmetic() {
+        // Pinned against the published FNV-1a 64 test vectors, so a proof-tree node's
+        // fingerprint is the same value on a 32-bit target (`wasm32`) as on a 64-bit one —
+        // a `usize`-wide hasher is not.
         assert_eq!(fnv1a64(""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a64("a"), 0xaf63_dc4c_8601_ec8c);
         assert_eq!(fnv1a64("foobar"), 0x8594_4171_f739_67e8);

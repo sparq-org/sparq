@@ -590,12 +590,12 @@ struct BwCtx<'a> {
     /// query's premise evaluation, a top-level closure and a nested `log:conclusion` closure
     /// each number their rules from zero, so without it their names would collide.
     scope: u64,
-    /// Every backward goal fingerprint this run has minted a name for, by the goal key it
-    /// was folded from ([`serialize::goal_key`]). A fingerprint is a 64-bit fold, so a
-    /// collision is possible; letting one through would silently merge two different goals'
-    /// standardize-apart spaces, which is a capture. Two goals that fold alike therefore
-    /// FAIL the run (through [`BwCtx::nested_error`]) rather than share a name.
-    goal_fingerprints: std::cell::RefCell<rustc_hash::FxHashMap<u64, String>>,
+    /// Every proof-tree node fingerprint this run has handed out, by the node identity it
+    /// was folded from ([`BwPath`]). A fingerprint is a 64-bit fold, so a collision is
+    /// possible; letting one through would silently merge two derivations'
+    /// standardize-apart spaces, which is a capture. Two identities that fold alike
+    /// therefore FAIL the run (through [`BwCtx::nested_error`]) rather than share a name.
+    node_ids: std::cell::RefCell<rustc_hash::FxHashMap<u64, String>>,
 }
 
 impl BwCtx<'_> {
@@ -680,32 +680,39 @@ impl<'a> BwCtx<'a> {
             // Each nesting level of `log:conclusion` closures gets its own even scope
             // number; `query_terms_in` makes a query's evaluation odd (see `BwPath`).
             scope: visited_depth * 2,
-            goal_fingerprints: std::cell::RefCell::new(rustc_hash::FxHashMap::default()),
+            node_ids: std::cell::RefCell::new(rustc_hash::FxHashMap::default()),
         }
     }
 
-    /// The GOAL chunk of a [`BwPath`]: a 64-bit fold ([`serialize::fnv1a64`]) of `goal`'s
-    /// canonical key ([`serialize::goal_key`]). `None` when a DIFFERENT goal already folded
-    /// to the same value: sharing a name would merge two standardize-apart spaces, which is
-    /// a capture, so the run fails instead ([`BwCtx::goal_fingerprints`]).
-    fn goal_chunk(&self, goal: &[Term; 3]) -> Option<u64> {
-        let key = serialize::goal_key(goal);
-        let fp = serialize::fnv1a64(&key);
-        let mut seen = self.goal_fingerprints.borrow_mut();
-        if let Some(prev) = seen.get(&fp) {
-            if *prev != key {
+    /// The fingerprint of the proof-tree node whose identity is `id`: a 64-bit fold
+    /// ([`serialize::fnv1a64`]). `None` when a DIFFERENT identity already folded to the same
+    /// value — sharing a fingerprint would merge two standardize-apart spaces, which is a
+    /// capture, so the run fails instead ([`BwCtx::node_ids`]).
+    fn node(&self, id: &str) -> Option<u64> {
+        let fold = serialize::fnv1a64(id);
+        let mut seen = self.node_ids.borrow_mut();
+        if let Some(prev) = seen.get(&fold) {
+            if prev != id {
                 drop(seen);
                 self.nested_error.borrow_mut().get_or_insert_with(|| {
-                    "two backward proof goals share one 64-bit fingerprint; refused rather \
-                     than let their standardized-apart variables alias"
+                    "two backward proof-tree nodes share one 64-bit fingerprint; refused \
+                     rather than let their standardized-apart variables alias"
                         .to_string()
                 });
                 return None;
             }
-            return Some(fp);
+            return Some(fold);
         }
-        seen.insert(fp, key);
-        Some(fp)
+        seen.insert(fold, id.to_string());
+        Some(fold)
+    }
+
+    /// The root of rule `ri`'s proof trees in this evaluation: the fingerprint of its own
+    /// premise evaluation, which carries the evaluation's scope ([`BwCtx::scope`]) so a
+    /// query, a closure and a nested `log:conclusion` closure cannot name one node alike.
+    fn root_path(&self, ri: usize) -> Option<BwPath<'static>> {
+        let scope = self.scope;
+        self.node(&format!("S{scope}R{ri}")).map(BwPath::at)
     }
 }
 
@@ -1037,7 +1044,8 @@ fn query_terms_in(data: &str, query: &str, cuts: Truncation) -> Result<Vec<[Term
     for (ri, rule) in query_parsed.rules.iter().enumerate() {
         let premise = order_premise(&rule.premise);
         let (concl_blanks, concl_vars) = conclusion_existentials(&rule.conclusion);
-        let bindings = match_premise(&premise, &facts, &bw, BwPath::root(bw.scope, ri));
+        let Some(root) = bw.root_path(ri) else { break };
+        let bindings = match_premise(&premise, &facts, &bw, root);
         let mut emit = |b: &Binding, sk: Option<&FxHashMap<String, String>>| {
             for c in &rule.conclusion {
                 let c = match sk {
@@ -2140,7 +2148,10 @@ fn run_closure_in(
                     // (every round): full evaluation, with no delta seeding. A constant
                     // rule (no join) fires only in naive rounds.
                     if naive_round || *needs_full {
-                        match_premise(&rule.premise, &facts, &bw, BwPath::root(bw.scope, ri))
+                        match bw.root_path(ri) {
+                            Some(root) => match_premise(&rule.premise, &facts, &bw, root),
+                            None => Vec::new(),
+                        }
                     } else {
                         Vec::new()
                     }
@@ -2148,6 +2159,7 @@ fn run_closure_in(
                     // Semi-naive: union over delta-at-each-join-position (dedup via facts.insert).
                     let mut bs = Vec::new();
                     for &k in joins {
+                        let Some(root) = bw.root_path(ri) else { break };
                         bs.extend(match_premise_seeded(
                             &rule.premise,
                             &facts,
@@ -2155,7 +2167,7 @@ fn run_closure_in(
                             JoinMode::Delta(&delta, k),
                             &bw,
                             bounded::backward_depth(),
-                            BwPath::root(bw.scope, ri),
+                            root,
                         ));
                     }
                     bs
@@ -3164,15 +3176,18 @@ fn backward_prove(
     if !bw.settle(bounded::generated(&bw.truncated, &goal)) {
         return Vec::new();
     }
-    // The GOAL chunk ([`BwPath`]): two applications proving DIFFERENT goals must take
-    // different names, or the renamed variables their conclusions leak into two derived
-    // facts make those facts one fact and an answer is lost. Keying the name to the goal is
-    // also what keeps a later round from resolving a leaked variable at the very node that
-    // minted it (a goal carrying it is a different goal).
-    let Some(gc) = bw.goal_chunk(&goal) else {
-        return Vec::new();
-    };
-    let at_goal = path.child(gc);
+    // The identity every node of this goal's resolution is named by ([`BwPath`]): where the
+    // resolution sits, then the GOAL itself. The goal is part of it because two applications
+    // proving DIFFERENT goals must take different names — the renamed variables their
+    // conclusions leak into two derived facts would otherwise make those facts one fact and
+    // an answer would be lost — and because it is what keeps a later round from resolving a
+    // leaked variable at the very node that minted it (a goal carrying one is a different
+    // goal). The site index is appended per site below, and truncated back off, so the
+    // identity is built once however many sites this goal is tried against.
+    // It is built on the first site that gets past the gate below, so a goal no rule can
+    // conclude costs nothing.
+    let mut id = String::new();
+    let mut id_cut = 0usize;
     let mut out = Vec::new();
     // The `(rule, conclusion)` SITE index: a position in the document's rule order, counted
     // over every site whether or not the gate below skips it, so a site's index does not
@@ -3180,7 +3195,7 @@ fn backward_prove(
     let mut site = 0u64;
     for rule in bw.rules {
         for concl in &rule.conclusion {
-            let node = at_goal.child(site);
+            let at = site;
             site += 1;
             // Cheap gate: ground predicates must agree before we rename/unify anything.
             if let (Term::Iri(gp), Term::Iri(cp)) = (&goal[1], &concl[1]) {
@@ -3188,8 +3203,21 @@ fn backward_prove(
                     continue;
                 }
             }
-            // Standardize apart: names for this proof-tree node's variables ([`BwPath`]).
-            let pfx = node.prefix();
+            // Standardize apart: the fingerprint naming this proof-tree node's variables
+            // ([`BwPath`]). A fold shared with another identity fails the run.
+            if id.is_empty() {
+                path.write_id(&mut id);
+                id.push('#');
+                id.push_str(&serialize::goal_key(&goal));
+                id_cut = id.len();
+            }
+            id.truncate(id_cut);
+            id.push('/');
+            id.push_str(&at.to_string());
+            let Some(fold) = bw.node(&id) else {
+                return Vec::new();
+            };
+            let pfx = format!("__bw{fold}_");
             let n = pfx.as_str();
             let rc = [rename_vars(&concl[0], n), rename_vars(&concl[1], n), rename_vars(&concl[2], n)];
             let mut subst = b.clone();
@@ -3204,7 +3232,7 @@ fn backward_prove(
                 .iter()
                 .map(|t| [rename_vars(&t[0], n), rename_vars(&t[1], n), rename_vars(&t[2], n)])
                 .collect();
-            for sol in match_premise_seeded(&prem, facts, &subst, JoinMode::All, bw, depth, node) {
+            for sol in match_premise_seeded(&prem, facts, &subst, JoinMode::All, bw, depth, BwPath::at(fold)) {
                 // Project the proof onto the goal's variables (walk chains like
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
@@ -3263,9 +3291,10 @@ fn rename_vars(t: &Term, prefix: &str) -> Term {
     }
 }
 
-/// Where one node of a backward proof tree sits: the evaluation SCOPE it belongs to, its
-/// PATH from the root of the premise evaluation proving it, and the GOAL INSTANCE it is
-/// resolving. Together those NAME the node's standardize-apart space ([`rename_vars`]).
+/// Where one node of a backward proof tree sits, as the FINGERPRINT its standardize-apart
+/// space is named by ([`rename_vars`]) plus the steps taken since it: [`BwCtx::node`] folds a
+/// node's identity to 64 bits and refuses to hand the same fold to two different identities,
+/// so a fold names a derivation and nothing else.
 ///
 /// A renamed variable is not confined to the proof. A rule conclusion can bind a goal
 /// variable to a quoted formula that still holds one, and that value reaches a derived fact,
@@ -3275,7 +3304,7 @@ fn rename_vars(t: &Term, prefix: &str) -> Term {
 /// depend on the order bindings arrived out of a fact set, and so on insertion history and on
 /// the hasher's width (native vs `wasm32`) — GH #6844 item 2.
 ///
-/// Three things have to go into the name, and leaving any one out is a WRONG ANSWER, not a
+/// A node's identity has three parts, and leaving any one out is a WRONG ANSWER, not a
 /// cosmetic defect:
 ///
 /// - **The path**, because applications that coexist must differ. Depth alone does not do it:
@@ -3286,72 +3315,73 @@ fn rename_vars(t: &Term, prefix: &str) -> Term {
 ///   resolving premise atom `k` pushes `k` and then the `(rule, conclusion)` SITE index
 ///   ([`backward_prove`]); a clause inside a scoped operator pushes the enclosing atom's
 ///   index, and `log:collectAllIn` / `log:forAllIn` also the clause's position in the
-///   operator's subject list, so its two clauses (which share a substitution) differ.
+///   operator's subject list, so its two clauses (which share a substitution) differ. The
+///   steps are counted from the enclosing node's fingerprint ([`BwPath::base`]), which that
+///   node's own identity already accounts for, so an identity stays short however deep the
+///   proof goes.
 /// - **The goal instance**, because applications that prove DIFFERENT goals derive different
 ///   facts. A quoted formula is opaque to substitution, so a renamed variable survives into
 ///   the conclusion's value even where the proof bound it; two proofs of `:s0 :has ?f` and
 ///   `:s1 :has ?f` must therefore not take one name, or their two derived facts merge into
-///   one and an answer is LOST. The goal chunk is a 64-bit fold ([`serialize::fnv1a64`]) of
-///   the walked goal's canonical key ([`serialize::goal_key`]).
+///   one and an answer is LOST. The goal enters the identity as its canonical key
+///   ([`serialize::goal_key`]).
 /// - **The scope**, so a query's premise evaluation, a top-level closure and a nested
 ///   `log:conclusion` closure (each of which numbers its rules from zero in its own
-///   [`BwCtx`]) cannot collide.
+///   [`BwCtx`]) cannot collide: it is written into the root identity ([`BwCtx::root_path`]).
 ///
 /// Keying the name to the goal is also what makes it safe ACROSS ROUNDS. The same goal
 /// re-proved at the same node in a later round takes the same name and derives the same fact
-/// — which is why a program whose only growth was the old counter now saturates. A
-/// goal that a later round reaches carrying a renamed variable leaked out of an earlier one
-/// (through a stored quoted formula and a forward `log:includes`, say) is a DIFFERENT goal,
-/// so it takes a different name and cannot capture the node that minted that variable.
+/// — which is why a program whose only growth was the old counter now saturates. A goal that
+/// a later round reaches carrying a renamed variable leaked out of an earlier one (through a
+/// stored quoted formula and a forward `log:includes`, say) is a DIFFERENT goal, so it takes
+/// a different name and cannot capture the node that minted that variable.
 ///
-/// A node is rendered as one `__bw<n>_` chunk per step — the goal chunk among them, between
-/// the site index that follows it and the premise-atom index above it — deepest step first,
-/// then the scope, behind a leading chunk holding how many chunks follow. That is exactly the format
-/// `serialize::universal_base` already reads — it strips repeated `__bw<n>_` prefixes — so no
-/// downstream consumer changes: spellability, the exact writers' backward-copy refusal and
-/// the display writers' renaming all see the same shape of name as before. The leading count
-/// makes the rendering of a path injective among RENAMED names: chunks are read by maximal
-/// munch, so equal renders force equal counts and then equal chunk sequences. It does NOT
-/// make a renamed name distinct from a variable a document itself spells `__bw…`: that
-/// namespace is not reserved, so such a variable can still be captured, here as before this
-/// name was ([`rename_vars`] renames it like any other).
+/// The fingerprint renders as the one `__bw<n>_` chunk [`rename_vars`] prefixes, which is the
+/// format `serialize::universal_base` already reads — it strips repeated `__bw<n>_` prefixes
+/// — so no downstream consumer changes: spellability, the exact writers' backward-copy
+/// refusal and the display writers' renaming all see the same shape of name as before, and a
+/// name's LENGTH no longer grows with the depth of the proof that minted it. Two renamed
+/// names are equal only if their folds and the variables behind them are (the chunk's digits
+/// are read by maximal munch), and two folds are equal only if the identities behind them
+/// are ([`BwCtx::node`] fails the run otherwise). It does NOT make a renamed name distinct
+/// from a variable a document itself spells `__bw…`: that namespace is not reserved, so such
+/// a variable can still be captured, here as before this name was ([`rename_vars`] renames
+/// it like any other).
 #[derive(Clone, Copy)]
 struct BwPath<'p> {
-    /// The rest of the path, towards the root.
+    /// The fingerprint of the proof-tree node the steps below are counted from: the
+    /// enclosing [`backward_prove`] node, or the root of one rule's proof trees
+    /// ([`BwCtx::root_path`]).
+    base: u64,
+    /// The rest of the steps since `base`, towards it.
     up: Option<&'p BwPath<'p>>,
-    /// This step.
-    step: u64,
-    /// The evaluation scope, carried by every node and written as the innermost chunk
-    /// ([`BwCtx::scope`]).
-    scope: u64,
-    /// How many chunks the rendering holds: the step chain plus the scope.
-    len: usize,
+    /// This step — `None` only on the path `base` itself names.
+    step: Option<u64>,
 }
 
 impl BwPath<'_> {
-    /// The root of rule `ri`'s proof trees inside evaluation scope `scope`.
-    fn root(scope: u64, ri: usize) -> BwPath<'static> {
-        BwPath { up: None, step: ri as u64, scope, len: 2 }
+    /// The path that is just the node `fold` names, with no step taken yet.
+    fn at(fold: u64) -> BwPath<'static> {
+        BwPath { base: fold, up: None, step: None }
     }
 
     /// This path with one more `step`.
     fn child(&self, step: u64) -> BwPath<'_> {
-        BwPath { up: Some(self), step, scope: self.scope, len: self.len + 1 }
+        BwPath { base: self.base, up: Some(self), step: Some(step) }
     }
 
-    /// The `__bw…_` prefix [`rename_vars`] puts on the variables renamed at this node.
-    fn prefix(&self) -> String {
-        let len = self.len;
-        let mut s = format!("__bw{len}_");
-        let mut at = Some(self);
-        while let Some(p) = at {
-            let step = p.step;
-            s.push_str(&format!("__bw{step}_"));
-            at = p.up;
+    /// `out` gets this path's identity: the node it is counted from, then each step since,
+    /// outermost first. Each step is written behind a `/`, so the digits of two steps cannot
+    /// run together.
+    fn write_id(&self, out: &mut String) {
+        match self.up {
+            Some(up) => up.write_id(out),
+            None => out.push_str(&format!("N{}", self.base)),
         }
-        let scope = self.scope;
-        s.push_str(&format!("__bw{scope}_"));
-        s
+        if let Some(step) = self.step {
+            out.push('/');
+            out.push_str(&step.to_string());
+        }
     }
 }
 
@@ -9710,42 +9740,69 @@ mod tests {
         assert_eq!(f, want);
     }
 
-    /// Direct unit test for `BwPath`'s rendering: distinct nodes render to distinct `__bw…`
-    /// prefixes, and the leading chunk count is what makes that hold even against a rule
-    /// variable a document spells `?__bw0___bw0_y`.
+    /// Direct unit test for the node fingerprints `BwPath` is made of: distinct identities
+    /// get distinct fingerprints, one identity always gets the same fingerprint, and two
+    /// identities that fold alike FAIL the run rather than share one.
     #[test]
-    fn a_backward_path_prefix_decomposes_only_one_way() {
-        use super::BwPath;
-        // Scope 0 and step 0 throughout: the chunks are all alike, so only the count tells
-        // an ancestor's rendering from a descendant's.
-        let root = BwPath::root(0, 0);
-        let anc = root.child(0);
-        let sibling = root.child(1);
-        let mid = anc.child(0);
-        let desc = mid.child(0);
-        let rendered = [root.prefix(), anc.prefix(), sibling.prefix(), desc.prefix()];
-        let mut uniq = rendered.to_vec();
-        uniq.sort();
-        uniq.dedup();
-        assert_eq!(uniq.len(), rendered.len(), "{rendered:?}");
-        // `anc` is an ancestor of `desc`, so its chunks are a SUFFIX of `desc`'s. Drop the
-        // leading count and the two renderings below are the same string — `anc` renaming a
-        // variable the document itself spells `__bw0___bw0_y`, and `desc` renaming `y`.
-        // Those two paths share a substitution, so that coincidence would be a capture.
-        let drop_count = |p: &str| {
-            let r = p.strip_prefix("__bw").expect("a prefix starts with a chunk");
-            let digits = r.bytes().take_while(u8::is_ascii_digit).count();
-            r[digits..].strip_prefix('_').expect("a chunk ends with `_`").to_string()
+    fn a_node_fingerprint_names_one_identity_or_fails_the_run() {
+        use super::{run_shared::RunShared, BwCtx, BwPath, Truncation};
+        let shared = RunShared::for_sources(&[]);
+        let bw = BwCtx::new(&[], Truncation::top_level(), shared);
+        // The root of one rule's proof trees, and the identities of the nodes under it.
+        let root = bw.root_path(0).expect("a fresh run hands out a root");
+        let other_rule = bw.root_path(1).expect("and another rule's root");
+        assert_ne!(root.base, other_rule.base, "two rules, two roots");
+        let id_of = |p: &BwPath<'_>, goal: &str, site: u64| {
+            let mut id = String::new();
+            p.write_id(&mut id);
+            id.push('#');
+            id.push_str(goal);
+            id.push('/');
+            id.push_str(&site.to_string());
+            id
         };
-        assert_eq!(
-            format!("{}__bw0___bw0_y", drop_count(&anc.prefix())),
-            format!("{}y", drop_count(&desc.prefix())),
-            "without the count chunk an ancestor and a descendant can coincide"
-        );
+        // The evaluation SCOPE is in the root identity, so a query's premise evaluation, a
+        // closure and a nested `log:conclusion` closure cannot name one node alike even
+        // though each numbers its own rules from zero.
+        let mut other_scope =
+            BwCtx::new(&[], Truncation::top_level(), RunShared::for_sources(&[]));
+        other_scope.scope += 1;
         assert_ne!(
-            format!("{}__bw0___bw0_y", anc.prefix()),
-            format!("{}y", desc.prefix()),
-            "with the count chunk they cannot"
+            other_scope.root_path(0).expect("a root").base,
+            root.base,
+            "rule 0 of another evaluation is another node"
+        );
+        let a = id_of(&root, "G1", 0);
+        // Same node, same identity, so the same fingerprint — this is what lets a goal
+        // re-proved in a later round derive the same fact instead of a new one.
+        assert_eq!(bw.node(&a), bw.node(&a));
+        // A different step, a different goal and a different rule are all different nodes.
+        let others = [id_of(&root, "G1", 1), id_of(&root, "G2", 0), id_of(&other_rule, "G1", 0)];
+        let mut folds = vec![bw.node(&a).expect("a fingerprint")];
+        for o in &others {
+            folds.push(bw.node(o).expect("a fingerprint"));
+        }
+        // A step taken from a node is part of the identity too, and the steps do not run
+        // together: `/1/2` is not `/12`.
+        let child = root.child(1);
+        let grand = child.child(2);
+        folds.push(bw.node(&id_of(&grand, "G1", 0)).expect("a fingerprint"));
+        folds.push(bw.node(&id_of(&root.child(12), "G1", 0)).expect("a fingerprint"));
+        let mut uniq = folds.clone();
+        uniq.sort_unstable();
+        uniq.dedup();
+        assert_eq!(uniq.len(), folds.len(), "{folds:?}");
+        assert!(bw.nested_error.borrow().is_none(), "nothing has collided yet");
+        // Force the collision a 64-bit fold makes possible: another identity is already
+        // registered under the fold this one would take. The run is refused rather than let
+        // the two share a standardize-apart space.
+        let want = serialize::fnv1a64("COLLIDE");
+        bw.node_ids.borrow_mut().insert(want, "a different identity".to_string());
+        assert_eq!(bw.node("COLLIDE"), None);
+        assert!(
+            bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("fingerprint")),
+            "{:?}",
+            bw.nested_error.borrow()
         );
     }
 
@@ -9779,9 +9836,8 @@ mod tests {
         for (i, r) in runs.iter().enumerate().skip(1) {
             assert_eq!(r, &runs[0], "variant {i}: same statements, different order");
         }
-        // The name spells the derivation and nothing else: the one backward site (index 0),
-        // the goal's own fingerprint, the query rule's premise atom 1, the rule (index 0)
-        // and the evaluation scope — chunks written deepest first behind the chunk count.
+        // The name is the derivation's own fingerprint and nothing else: one `__bw<n>_`
+        // chunk, so its length does not grow with the depth of the proof that minted it.
         let names: Vec<&str> = runs[0]
             .iter()
             .map(|r| {
@@ -9789,9 +9845,14 @@ mod tests {
                 &r[at..]
             })
             .collect();
-        for n in &names {
-            assert!(n.starts_with("Var(\"__bw5___bw0___bw"), "{n}");
-            assert!(n.contains("___bw1___bw0___bw1_y\"), Iri(\"http://ex/inner\")"), "{n}");
+        for v in &names {
+            let rest = v.strip_prefix("Var(\"__bw").expect("a renamed variable");
+            let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+            assert!(digits > 0, "{v}");
+            assert!(
+                rest[digits..].starts_with("_y\"), Iri(\"http://ex/inner\")"),
+                "one chunk, then the rule's own variable: {v}"
+            );
         }
         // Each subject is a different GOAL, so each takes a name of its own: one derived
         // value per subject, never one value standing for all of them.
@@ -9815,6 +9876,24 @@ mod tests {
                      { ?x :p ?any . ?x :has ?f } => { :all :vals ?f } .\n";
         let rows = derived_rows(data, query);
         assert_eq!(rows.len(), 2, "one row per subject's own value: {rows:?}");
+        assert_ne!(rows[0], rows[1], "{rows:?}");
+    }
+
+    #[test]
+    fn two_sites_proving_one_goal_derive_two_facts() {
+        // GH #6844 item 2: one goal can be proved through SEVERAL `(rule, conclusion)` sites,
+        // and each application is its own copy of its rule. Both rules here conclude the same
+        // shape, so the only thing telling their two derived values apart is which rule
+        // proved them: drop the site index from a node's identity and the two applications
+        // take one name, their two quoted-formula values become the SAME term, and the two
+        // rows collapse into one — an answer is lost, exactly as when two different goals
+        // share a name.
+        let data = "@prefix : <http://ex/> .\n:a :p :v .\n:a :q :w .\n\
+                    { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n\
+                    { ?x :has { ?y :inner ?z } } <= { ?x :q ?y } .\n";
+        let query = "@prefix : <http://ex/> .\n{ :a :has ?f } => { :all :vals ?f } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows.len(), 2, "one row per proof: {rows:?}");
         assert_ne!(rows[0], rows[1], "{rows:?}");
     }
 

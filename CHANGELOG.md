@@ -336,12 +336,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fact's term identity (its `term_key` / `statement_keys`, its `why()` string, its
   `sparq-prov` IRI) while the counter's value depended on how many applications had run
   before it, and so on a fact set's traversal order and the hasher's width (native vs
-  `wasm32`). A name is now a function of the evaluation scope, the node's path from the root
-  of the premise evaluation (the premise-atom index, then the `(rule, conclusion)` site
-  index, plus a scoped operator's clause position) and a 64-bit fold of the goal being
-  proved, rendered in the repeated-`__bw<n>_` form the readers already accept, so no writer,
-  key or refusal changes shape. Two goals that fold alike are refused — the run fails rather
-  than let two goals share one set of renamed variables. Three consequences: a fact carrying
+  `wasm32`). A name is now the FINGERPRINT of the derivation: a 64-bit fold of the evaluation
+  scope, the node's place in the proof tree (the premise-atom index, then the
+  `(rule, conclusion)` site index, plus a scoped operator's clause position) and the goal
+  being proved, rendered in the `__bw<n>_` form the readers already accept, so no writer, key
+  or refusal changes shape, and a name's length no longer grows with the depth of the proof.
+  Two derivations that fold alike are refused — the run fails rather than let them share one
+  set of renamed variables. Three consequences: a fact carrying
   a renamed variable has a different identity than before, so regenerate stored `sparq-prov`
   IRIs for such facts; proofs of different goals keep the distinct values they had, including
   values inside a quoted formula, which substitution does not reach; and a program whose only
