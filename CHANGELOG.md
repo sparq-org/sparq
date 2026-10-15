@@ -36,14 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   REGISTRY entry's own `ZKSIG_M3` signature is deliberately NOT a presentation attestation — recording
   a commitment in an issuer's registry is a separate statement from authorising its presentation, so
   presenting one as a clear attestation reports `CheckError::InvalidIssuerSignature`. Back-compatible
-  with ONE qualification: a hidden-issuer entry's declared `message` was previously not read at all,
+  with ONE qualification, about the declared `message` of hidden-issuer entries: a hidden-issuer entry's declared `message` was previously not read at all,
   and over a hidden-only commitment it is now required to equal a verifier-built candidate (for every
   entry over that commitment), so a hidden-only manifest whose declared message is empty,
   not decodable as a field element, or unmatched is now refused with `CheckError::HiddenIssuerMessageMismatch`;
   a refusal of a malformed hidden-only manifest may also be reported earlier, in the pre-filter, than
   it was before. The hidden-issuer stage likewise requires EVERY entry's declared `message`, including
   one over a commitment that also has a clear attestation, to equal the message its proof is checked
-  against. Otherwise every manifest that verified before still verifies under the default
+  against, and that check may now be reported ahead of an entry's depth or proof refusal. Otherwise
+  every manifest that verified before still verifies under the default
   policy — an attestation over the method-unbound `ZKSIG_C3`/`ZKSIG_C4` message authenticates as
   `Unbound`, which the default policy accepts, and a bad signature still reports
   `CheckError::InvalidIssuerSignature`. The newly accepted manifests are only those carrying an

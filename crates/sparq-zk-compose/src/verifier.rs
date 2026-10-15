@@ -8945,6 +8945,70 @@ mod tests {
     /// is built from `depth` — the POLICY depth — never from `hi.depth`. This gate
     /// exists so a prover cannot silently present a proof for a different-depth
     /// member; the vk it is verified against was never the attacker's to choose.
+    #[test]
+    fn hidden_issuer_declared_depth_must_equal_policy_depth() {
+        let mk = |declared: u32| crate::manifest::HiddenIssuerAttestation {
+            commitment: fh("0x7"),
+            depth: declared,
+            key_set_root: fh("0x8"),
+            message: fh("0x9"),
+            salt: None,
+            proof_hex: "00".into(),
+        };
+        // `revocation: None` => `scan_referenced_messages` returns an empty map
+        // WITHOUT error, so the depth gate is the first thing the loop evaluates.
+        let mut m = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
+        let prover = CircuitProver::from_crate_root();
+        let work = std::env::temp_dir().join("sq_r6dq_hi_depth_gate");
+        let policy_depth = 4u32;
+        let k = KeySet::empty().with_hidden_issuer_depth(policy_depth);
+        assert!(
+            k.hidden_issuer_root(policy_depth).is_some(),
+            "an empty KeySet still derives an all-padding anchor, so the gate under \
+             test is reached rather than short-circuited by RootUnavailable"
+        );
+
+        // MISMATCH (both directions: shallower and deeper than the policy) => reject,
+        // with the declared/policy pair reported.
+        for declared in [3u32, 5, 0, 31] {
+            m.hidden_issuer_attestations = vec![mk(declared)];
+            match bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a"), &AuthenticatedMethods::new()) {
+                Err(CheckError::HiddenIssuerDepthMismatch { declared: d, policy: p }) => {
+                    assert_eq!(d, declared, "the REJECTED declared depth is reported");
+                    assert_eq!(p, policy_depth, "the POLICY depth is reported");
+                }
+                other => panic!(
+                    "a hidden-issuer attestation declaring depth {declared} under a \
+                     depth-{policy_depth} policy must be HiddenIssuerDepthMismatch, got {other:?}"
+                ),
+            }
+        }
+
+        // MATCH => the depth gate passes and the entry proceeds to the referenced-
+        // commitment check, which rejects for a DIFFERENT (non-depth) reason. This is
+        // the half that fails if the gate is inverted (`==` instead of `!=`).
+        m.hidden_issuer_attestations = vec![mk(policy_depth)];
+        match bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a"), &AuthenticatedMethods::new()) {
+            Err(CheckError::HiddenIssuerUnreferencedCommitment { .. }) => {}
+            other => panic!(
+                "a MATCHING declared depth must pass the depth gate and fail later on \
+                 the unreferenced commitment, got {other:?}"
+            ),
+        }
+
+        // The gate fires BEFORE any per-entry proof work, and on the FIRST offending
+        // entry: a good entry followed by a bad one still rejects on depth.
+        m.hidden_issuer_attestations = vec![mk(policy_depth), mk(policy_depth + 1)];
+        assert!(
+            matches!(
+                bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a"), &AuthenticatedMethods::new()),
+                Err(CheckError::HiddenIssuerUnreferencedCommitment { .. })
+                    | Err(CheckError::HiddenIssuerDepthMismatch { .. })
+            ),
+            "a mixed batch must still be rejected fail-closed"
+        );
+    }
+
     /// Every hidden-issuer entry's declared `m` must equal the message its proof
     /// is checked against, including when a clear attestation over the same
     /// commitment supplied the method (where the pre-filter does not read the
@@ -9011,70 +9075,6 @@ mod tests {
                 "a declared message other than the checked one is refused, got {r:?}"
             );
         }
-    }
-
-    #[test]
-    fn hidden_issuer_declared_depth_must_equal_policy_depth() {
-        let mk = |declared: u32| crate::manifest::HiddenIssuerAttestation {
-            commitment: fh("0x7"),
-            depth: declared,
-            key_set_root: fh("0x8"),
-            message: fh("0x9"),
-            salt: None,
-            proof_hex: "00".into(),
-        };
-        // `revocation: None` => `scan_referenced_messages` returns an empty map
-        // WITHOUT error, so the depth gate is the first thing the loop evaluates.
-        let mut m = minimal_manifest("SELECT * WHERE { ?s <http://ex/p> ?o }");
-        let prover = CircuitProver::from_crate_root();
-        let work = std::env::temp_dir().join("sq_r6dq_hi_depth_gate");
-        let policy_depth = 4u32;
-        let k = KeySet::empty().with_hidden_issuer_depth(policy_depth);
-        assert!(
-            k.hidden_issuer_root(policy_depth).is_some(),
-            "an empty KeySet still derives an all-padding anchor, so the gate under \
-             test is reached rather than short-circuited by RootUnavailable"
-        );
-
-        // MISMATCH (both directions: shallower and deeper than the policy) => reject,
-        // with the declared/policy pair reported.
-        for declared in [3u32, 5, 0, 31] {
-            m.hidden_issuer_attestations = vec![mk(declared)];
-            match bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a"), &AuthenticatedMethods::new()) {
-                Err(CheckError::HiddenIssuerDepthMismatch { declared: d, policy: p }) => {
-                    assert_eq!(d, declared, "the REJECTED declared depth is reported");
-                    assert_eq!(p, policy_depth, "the POLICY depth is reported");
-                }
-                other => panic!(
-                    "a hidden-issuer attestation declaring depth {declared} under a \
-                     depth-{policy_depth} policy must be HiddenIssuerDepthMismatch, got {other:?}"
-                ),
-            }
-        }
-
-        // MATCH => the depth gate passes and the entry proceeds to the referenced-
-        // commitment check, which rejects for a DIFFERENT (non-depth) reason. This is
-        // the half that fails if the gate is inverted (`==` instead of `!=`).
-        m.hidden_issuer_attestations = vec![mk(policy_depth)];
-        match bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a"), &AuthenticatedMethods::new()) {
-            Err(CheckError::HiddenIssuerUnreferencedCommitment { .. }) => {}
-            other => panic!(
-                "a MATCHING declared depth must pass the depth gate and fail later on \
-                 the unreferenced commitment, got {other:?}"
-            ),
-        }
-
-        // The gate fires BEFORE any per-entry proof work, and on the FIRST offending
-        // entry: a good entry followed by a bad one still rejects on depth.
-        m.hidden_issuer_attestations = vec![mk(policy_depth), mk(policy_depth + 1)];
-        assert!(
-            matches!(
-                bind_hidden_issuer_attestations(&m, &k, &prover, &work, &fh("0x2a"), &AuthenticatedMethods::new()),
-                Err(CheckError::HiddenIssuerUnreferencedCommitment { .. })
-                    | Err(CheckError::HiddenIssuerDepthMismatch { .. })
-            ),
-            "a mixed batch must still be rejected fail-closed"
-        );
     }
 
     // EMPIRICAL anchor for audit #1: the reconstruction must equal
