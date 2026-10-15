@@ -307,6 +307,15 @@ fn a_failed_materialization_keeps_the_context() {
 }
 
 #[test]
+fn a_fact_of_a_resource_that_does_not_exist_is_validated_too() {
+    let mut store = store();
+    let mut bad = store.acp_provenance().clone();
+    bad.set_creator("https://pod.ex/docs/absent", "urn:sparq:forged");
+    assert!(store.materialize_acp_with(&bad).is_err(), "refused at once");
+    assert_context_in_force(&store, "after the refusal");
+}
+
+#[test]
 fn a_rolled_back_write_keeps_the_context() {
     let mut store = store();
     // An agent in the reserved pair encoding cannot be materialized, so the write rolls back.

@@ -270,13 +270,17 @@ pub(crate) fn assemble_facts(
     // candidate-generation lattice picks them up.
     if system == System::Acp {
         for (resource, creator, owner) in provenance.iter() {
-            // Only for a resource the view holds: the store keeps the facts of another only
-            // while its own `.acr` is stored, for when it comes back.
+            // Every fact is validated, emitted or not: the store keeps the facts of a
+            // resource that does not exist while its own `.acr` is stored, so a later rebuild
+            // must not be the first to refuse one.
+            for p in creator.into_iter().chain(owner) {
+                validate_principal_iri(p)?;
+            }
+            // Emitted only for a resource the view holds.
             if !resources.contains(resource) {
                 continue;
             }
             if let Some(c) = creator {
-                validate_principal_iri(c)?;
                 webids.insert(c.to_owned());
                 out.push([
                     named(resource),
@@ -285,7 +289,6 @@ pub(crate) fn assemble_facts(
                 ]);
             }
             if let Some(o) = owner {
-                validate_principal_iri(o)?;
                 webids.insert(o.to_owned());
                 out.push([named(resource), named(&format!("{SOLIDX_NS}owner")), named(o)]);
             }
