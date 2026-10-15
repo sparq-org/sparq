@@ -1751,13 +1751,30 @@ async fn create<S: Store + 'static>(
             // concurrency ceiling once the request has gone.
             let _admission = admission;
             let locks = (child_guards, parent_guard);
-            state.put_resource_meta(&child, &meta).await?;
+            // Until the content is created the member is in flight, with nothing there before
+            // it: a check made without its lock meanwhile is not decided on the metadata
+            // written for it.
+            let in_flight = [child.clone()];
+            let nothing = super::Prior {
+                existed: Some(false),
+                ..Default::default()
+            };
+            state
+                .locks
+                .changing_from([(child.clone(), nothing)].into_iter().collect());
+            if let Err(e) = state.put_resource_meta(&child, &meta).await {
+                state.locks.landed(&in_flight);
+                return Err(e);
+            }
             let created = match state
                 .store
                 .create_in_container(&parent, &child, body, &content_type)
                 .await
             {
-                Ok(m) => m,
+                Ok(m) => {
+                    state.locks.landed(&in_flight);
+                    m
+                }
                 Err(e) => {
                     // A refusal created nothing, and the metadata goes. A backend failure may
                     // follow a create that committed (a remote store's lost reply): the member is
@@ -1777,8 +1794,14 @@ async fn create<S: Store + 'static>(
                         prior: None,
                     });
                     match super::settle(&state.store, undo).await {
-                        None => drop(locks),
-                        Some(left) => state.set_aside(left, locks),
+                        None => {
+                            state.locks.landed(&in_flight);
+                            drop(locks);
+                        }
+                        Some(left) => {
+                            state.set_aside(left, locks);
+                            state.locks.landed(&in_flight);
+                        }
                     }
                     return Err(e);
                 }
@@ -11956,7 +11979,18 @@ mod tests {
             .fail_after_create
             .store(true, std::sync::atomic::Ordering::SeqCst);
         *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
-        let h = [("slug", "new.json"), ("content-type", JSON)];
+        // Tess may read and modify notes only, which is what the create declares the member is.
+        let tess = "https://tess.example/#me";
+        let note = "https://e.example/Note";
+        let notes = json!([{"leftOperand": "type", "operator": "eq", "rightOperand": note}]);
+        st.access
+            .put_grant_for_test("tess", grant(json!(["read", "modify"]), tess, notes));
+        let link = format!("<{note}>; rel=\"type\"");
+        let h = [
+            ("slug", "new.json"),
+            ("content-type", JSON),
+            ("link", link.as_str()),
+        ];
         let r = create(&st, &req(Method::POST, "/", &h, "{}"), &agent(OWNER), &root).await;
         store
             .fail_after_create
@@ -11981,6 +12015,7 @@ mod tests {
             agent(bob),
             agent(carol),
             agent(dave),
+            agent(tess),
             agent(eve),
             Agent::anonymous(),
         ];
@@ -12020,6 +12055,196 @@ mod tests {
                 headers.iter().any(|h| h.starts_with("retry-after")),
                 "{method} {suffix}"
             );
+        }
+    }
+
+    /// Review finding: the same holds while a change that creates the resource is in flight (it
+    /// holds the lock and has published that nothing was there): a caller refused before the lock
+    /// is answered as on a name where nothing was created, whatever the change has written.
+    #[tokio::test]
+    async fn a_resource_a_change_in_flight_creates_is_answered_as_nothing_there() {
+        use super::super::test_store::{agent, closed_state, data, request as req};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let grant = |actions: Value, who: &str, constraint: Value| {
+            super::super::access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": actions, "assignee": who,
+                    "constraint": constraint}]),
+                &root,
+            )
+            .unwrap()
+        };
+        let (dave, carol, eve) = (
+            "https://dave.example/#me",
+            "https://carol.example/#me",
+            "https://eve.example/#me",
+        );
+        st.access
+            .put_grant_for_test("dave", grant(json!(["modify"]), dave, json!([])));
+        // Carol may read and modify plain text only, which is what the change has written.
+        let text_only =
+            json!([{"leftOperand": "format", "operator": "eq", "rightOperand": "text/plain"}]);
+        st.access
+            .put_grant_for_test("carol", grant(json!(["read", "modify"]), carol, text_only));
+        let uri = data(&st, "new.txt").await;
+        let held = st.locks.lock(&uri).await.unwrap();
+        let prior = super::super::Prior {
+            existed: Some(false),
+            ..Default::default()
+        };
+        st.locks
+            .changing_from([(uri.clone(), prior)].into_iter().collect());
+        let answer = |method: Method, path: String, h: Vec<(&'static str, &'static str)>, who| {
+            let st = st.clone();
+            async move {
+                let r = req(method, &path, &h, "x");
+                let r = tokio::time::timeout(Duration::from_secs(5), handle(&st, &r, &who))
+                    .await
+                    .expect("refused before the lock");
+                let mut headers: Vec<String> = r
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v:?}"))
+                    .collect();
+                headers.sort();
+                (r.status(), headers, body_of(r).await)
+            }
+        };
+        let callers = [agent(carol), agent(dave), agent(eve), Agent::anonymous()];
+        let requests = [
+            (Method::PATCH, "", vec![("content-type", JSON_PATCH)]),
+            (Method::PATCH, ".meta", vec![("content-type", JSON_PATCH)]),
+            (
+                Method::PUT,
+                "",
+                vec![("content-type", "text/plain"), ("if-match", "\"x\"")],
+            ),
+            (Method::DELETE, "", vec![("if-match", "\"x\"")]),
+        ];
+        for (method, suffix, h) in requests {
+            for who in &callers {
+                let created = format!("/new.txt{suffix}");
+                let never = format!("/never.txt{suffix}");
+                let a = answer(method.clone(), created, h.clone(), who.clone()).await;
+                let b = answer(method.clone(), never, h.clone(), who.clone()).await;
+                assert!(a.0.is_client_error(), "{method} {suffix}: {}", a.0);
+                assert_eq!(a, b, "{method} {suffix} as {:?}", who.subject);
+            }
+        }
+        st.locks.landed(std::slice::from_ref(&uri));
+        drop(held);
+    }
+
+    /// Review finding: a create writes its member's metadata before the content, and a check made
+    /// without the lock in between read that metadata, so a grantee of the type the create
+    /// declares was answered as one that may read the member. The create is in flight until its
+    /// content is there, and the member is answered as nothing there until then.
+    #[tokio::test]
+    async fn a_create_under_way_is_answered_as_nothing_there() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let carol = "https://carol.example/#me";
+        let ty = "https://e.example/Note";
+        let only_notes = json!([{"leftOperand": "type", "operator": "eq", "rightOperand": ty}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": carol,
+                "constraint": only_notes}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("carol", grant);
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_create.lock().unwrap() = Some(gate.clone());
+        let creating = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                let link = format!("<{ty}>; rel=\"type\"");
+                let h = [
+                    ("slug", "new.txt"),
+                    ("content-type", "text/plain"),
+                    ("link", link.as_str()),
+                ];
+                let r = req(Method::POST, "/", &h, "x");
+                handle(&st, &r, &agent(OWNER)).await.status()
+            })
+        };
+        let uri = st.cfg.absolute("/new.txt");
+        // The member's metadata is written, and its content is held.
+        while st.resource_meta(&uri).await.unwrap().creator.is_none() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let patch = |path: &'static str| {
+            let st = st.clone();
+            async move {
+                let r = req(Method::PATCH, path, &[("content-type", JSON_PATCH)], "[]");
+                tokio::time::timeout(Duration::from_secs(5), handle(&st, &r, &agent(carol)))
+                    .await
+                    .expect("refused before the lock")
+                    .status()
+            }
+        };
+        let (created, never) = (patch("/new.txt").await, patch("/never.txt").await);
+        assert_eq!(created, never);
+        assert_eq!(never, StatusCode::FORBIDDEN);
+        gate.add_permits(1);
+        assert_eq!(creating.await.unwrap(), StatusCode::CREATED);
+        assert!(!st.locks.changing(&uri), "the create landed");
+    }
+
+    /// Review finding: a container's format is its listing's whatever is stored, so a container
+    /// being created is answered as one where nothing is with that format, not with none.
+    #[tokio::test]
+    async fn a_container_being_created_is_answered_as_nothing_there() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let carol = "https://carol.example/#me";
+        let listings =
+            json!([{"leftOperand": "format", "operator": "eq", "rightOperand": LWS_JSON}]);
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["read", "modify"], "assignee": carol,
+                "constraint": listings}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("carol", grant);
+        let uri = st.cfg.absolute("/c/");
+        store
+            .fail_after_create
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        *store.fail_delete_of.lock().unwrap() = Some(uri.clone());
+        let link = format!("<{LWS_NS}Container>; rel=\"type\"");
+        let h = [("slug", "c"), ("link", link.as_str())];
+        let r = create(&st, &req(Method::POST, "/", &h, ""), &agent(OWNER), &root).await;
+        store
+            .fail_after_create
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(r.status().is_server_error(), "{}", r.status());
+        assert!(!st.visible(&uri), "the create is set aside");
+        let answer = |method: Method, path: String, h: Vec<(&'static str, &'static str)>| {
+            let st = st.clone();
+            async move {
+                let r = handle(&st, &req(method, &path, &h, ""), &agent(carol)).await;
+                let mut headers: Vec<String> = r
+                    .headers()
+                    .iter()
+                    .map(|(k, v)| format!("{k}: {v:?}"))
+                    .collect();
+                headers.sort();
+                (r.status(), headers, body_of(r).await)
+            }
+        };
+        let requests = [
+            (Method::PATCH, "", vec![("content-type", JSON_PATCH)]),
+            (Method::PATCH, ".meta", vec![("content-type", JSON_PATCH)]),
+            (Method::DELETE, "", vec![("if-match", "\"x\"")]),
+            (Method::GET, "", vec![]),
+        ];
+        for (method, suffix, h) in requests {
+            let created = answer(method.clone(), format!("/c/{suffix}"), h.clone()).await;
+            let never = answer(method.clone(), format!("/n/{suffix}"), h).await;
+            assert_eq!(created, never, "{method} {suffix}");
         }
     }
 }
