@@ -434,8 +434,9 @@ pub use federated_binding::{
 };
 // sq-jnkm: the oblivious set-returning output path surface.
 pub use oblivious_join::{
-    oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys, Candidate,
-    MatchBit, ObliviousOutput, ObliviousOutputCost, OutputSlot,
+    oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys,
+    oblivious_set_output_to_recipient, Candidate, MatchBit, ObliviousOutput, ObliviousOutputCost,
+    OutputSlot, RecipientOutputShares,
 };
 pub use rng::{MpcRng, SecureRng};
 // sq-yyro: the dealer-less correlated-randomness seam surface.

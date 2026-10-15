@@ -1588,6 +1588,50 @@ mod tests {
         assert_eq!(got, vec![(100, 500), (101, 501), (102, 502)]);
     }
 
+    /// [`rerandomise_sharings`] called directly: it changes every share, keeps
+    /// every value, and reports one fresh sharing per secret element.
+    #[test]
+    fn rerandomise_sharings_keeps_values_and_changes_shares() {
+        let n = 5usize;
+        let b = ShamirBackend::new_seeded(n, 0x5700).unwrap();
+        let t = b.threshold();
+        let mut dealer = b.dealer();
+        let vals = [11u64, 22, 33];
+        let col = share_col(&mut dealer, &vals);
+        let mut after = col.clone();
+        let fresh = rerandomise_sharings(&mut dealer, &mut after).unwrap();
+        assert_eq!(fresh, vals.len());
+        assert_eq!(
+            open_col(t, &after),
+            vals.to_vec(),
+            "values must be untouched"
+        );
+        for (k, (a, bfr)) in after.iter().zip(&col).enumerate() {
+            assert!(
+                a.iter().zip(bfr).all(|(x, y)| x.x == y.x),
+                "element {k}: the evaluation points must not move"
+            );
+            assert!(
+                a.iter().zip(bfr).all(|(x, y)| x.y != y.y),
+                "element {k}: every share must change"
+            );
+        }
+    }
+
+    /// [`ShuffleCost::with_fresh_sharings`] overrides the width-1 default and
+    /// leaves the other fields alone.
+    #[test]
+    fn with_fresh_sharings_overrides_only_that_field() {
+        let base = ShuffleCost::model(8, 17);
+        assert_eq!(base.fresh_sharings, 8);
+        let wide = base.with_fresh_sharings(8 * 7);
+        assert_eq!(wide.fresh_sharings, 56);
+        assert_eq!(
+            (wide.items, wide.switches, wide.depth_rounds),
+            (base.items, base.switches, base.depth_rounds)
+        );
+    }
+
     /// An entry whose width is not a whole number of `n`-party sharings is refused
     /// rather than masked by position — a per-position mask on a mis-aligned entry
     /// would corrupt values silently.
