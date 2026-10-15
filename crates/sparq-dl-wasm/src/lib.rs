@@ -184,6 +184,7 @@ fn reason_kind(reason: &UnknownReason) -> &'static str {
         UnknownReason::NotInDl(_) => "NotInDl",
         UnknownReason::ResourceBudget => "ResourceBudget",
         UnknownReason::ImportsNotLoaded(_) => "ImportsNotLoaded",
+        UnknownReason::DatatypeUnknown { .. } => "DatatypeUnknown",
     }
 }
 
@@ -261,6 +262,11 @@ impl Writer<'_> {
                 self.raw(",");
                 self.key("imports");
                 json::push_str_array(&mut self.out, iris.iter().map(String::as_str));
+            }
+            UnknownReason::DatatypeUnknown { source } => {
+                self.raw(",");
+                self.key("triples");
+                self.triples(source);
             }
             UnknownReason::ResourceBudget => {}
         }
