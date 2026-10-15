@@ -33,12 +33,14 @@
 
 use super::data_ranges::{self, DataRangeExpr, Tri};
 use super::datatypes::{self, builtin, Builtin, Value, ValueError};
+use super::dl_profile::canonical_range;
 use super::model::{
     Axiom, ClassExpression, DataRange, EntityKind, Individual, Literal, ObjectProperty, Ontology,
 };
 use super::vocab::{iri_of, Vocab, RDF};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
+use std::cell::Cell;
 
 /// A role expression: a named object property (by internal index) or its inverse.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -159,9 +161,20 @@ pub struct Unsupported {
     pub construct: &'static str,
     /// The index of the axiom in [`Ontology::axioms`].
     pub axiom: usize,
-    /// `true` when the construct is in the fragment but the datatype oracle cannot decide
-    /// it (a data range or literal it answers Unknown for).
-    pub datatype: bool,
+    pub kind: Refusal,
+}
+
+/// Why [`clausify`] gave no clauses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// The construct is outside the fragment.
+    Fragment,
+    /// The construct is in the fragment but the datatype oracle cannot decide it (a data
+    /// range or literal it answers Unknown for).
+    Datatype,
+    /// The translation ran out of the work budget (datatype definitions expanding to more
+    /// than it allows).
+    Budget,
 }
 
 /// The ontology as DL-clauses plus its ABox and role hierarchy.
@@ -288,6 +301,12 @@ struct Builder<'a> {
     data_atoms: FxHashMap<DataRangeExpr, Atom>,
     /// The distinct ranges of each `DatatypeDefinition`, by defined datatype.
     definitions: FxHashMap<Id, Vec<DataRange>>,
+    /// Datatypes with two definitions of the same range, one of them annotated: whether
+    /// the axioms are one depends on their annotations, which are not compared.
+    annotated_repeats: FxHashSet<Id>,
+    /// Work done expanding data ranges, against `max_work`.
+    work: Cell<u64>,
+    max_work: u64,
 }
 
 /// The largest cardinality in a number restriction the clausifier translates.
@@ -296,8 +315,13 @@ pub const MAX_CARDINALITY: u32 = 64;
 /// The most successor variables one DL-clause may have.
 const MAX_CLAUSE_VARS: u32 = 1024;
 
-/// Translates `onto` to DL-clauses, or names the first axiom outside the fragment.
-pub(crate) fn clausify(dict: &Dict, onto: &Ontology) -> Result<Clauses, Unsupported> {
+/// Translates `onto` to DL-clauses, or names the first axiom outside the fragment. Data
+/// range expansion may do at most `max_work` units of work.
+pub(crate) fn clausify(
+    dict: &Dict,
+    onto: &Ontology,
+    max_work: u64,
+) -> Result<Clauses, Unsupported> {
     let mut b = Builder {
         v: Vocab::intern(dict),
         out: Clauses::default(),
@@ -317,12 +341,27 @@ pub(crate) fn clausify(dict: &Dict, onto: &Ontology) -> Result<Clauses, Unsuppor
         dict,
         data_atoms: FxHashMap::default(),
         definitions: FxHashMap::default(),
+        annotated_repeats: FxHashSet::default(),
+        work: Cell::new(0),
+        max_work,
     };
-    for rec in &onto.axioms {
+    // Each datatype's distinct ranges, compared as the profile check compares them.
+    let mut seen: FxHashMap<Id, Vec<(DataRange, bool)>> = FxHashMap::default();
+    for (i, rec) in onto.axioms.iter().enumerate() {
         if let Axiom::DatatypeDefinition(dt, r) = &rec.axiom {
-            let defs = b.definitions.entry(*dt).or_default();
-            if !defs.contains(r) {
-                defs.push(r.clone());
+            let (range, annotated) = (canonical_range(r), onto.is_annotated(i));
+            let reps = seen.entry(*dt).or_default();
+            match reps.iter_mut().find(|(r, _)| *r == range) {
+                Some((_, other)) => {
+                    if annotated || *other {
+                        b.annotated_repeats.insert(*dt);
+                    }
+                    *other |= annotated;
+                }
+                None => {
+                    reps.push((range.clone(), annotated));
+                    b.definitions.entry(*dt).or_default().push(range);
+                }
             }
         }
     }
@@ -344,7 +383,7 @@ pub(crate) fn clausify(dict: &Dict, onto: &Ontology) -> Result<Clauses, Unsuppor
             return Err(Unsupported {
                 construct: "an axiom whose clause needs more than MAX_CLAUSE_VARS successors",
                 axiom,
-                datatype: false,
+                kind: Refusal::Fragment,
             });
         }
     }
@@ -369,7 +408,7 @@ impl Builder<'_> {
         Unsupported {
             construct,
             axiom: self.axiom,
-            datatype: false,
+            kind: Refusal::Fragment,
         }
     }
 
@@ -377,7 +416,7 @@ impl Builder<'_> {
         Unsupported {
             construct,
             axiom: self.axiom,
-            datatype: true,
+            kind: Refusal::Datatype,
         }
     }
 
@@ -464,6 +503,16 @@ impl Builder<'_> {
         /// the same depth anyway).
         const MAX_EXPANSION: usize = 64;
         let iri = |id: Id| iri_of(self.dict, id).unwrap_or_default();
+        // Expansion can grow exponentially (each definition naming the previous one twice):
+        // every node built counts against the budget.
+        self.work.set(self.work.get() + 1);
+        if self.work.get() > self.max_work {
+            return Err(Unsupported {
+                construct: "data ranges expanding past the work budget",
+                axiom: self.axiom,
+                kind: Refusal::Budget,
+            });
+        }
         Ok(match dr {
             DataRange::TopLiteral => DataRangeExpr::Datatype(Builtin::RdfsLiteral),
             DataRange::Datatype(id) => {
@@ -483,6 +532,11 @@ impl Builder<'_> {
                 };
                 if expanding.contains(id) {
                     return Err(self.unsupported("a cyclic DatatypeDefinition"));
+                }
+                if self.annotated_repeats.contains(id) {
+                    return Err(self.undecidable_data(
+                        "a DatatypeDefinition repeated with annotations (equality not compared)",
+                    ));
                 }
                 if expanding.len() >= MAX_EXPANSION {
                     return Err(self.undecidable_data("DatatypeDefinitions nested too deeply"));
