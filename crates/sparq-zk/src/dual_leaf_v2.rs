@@ -72,10 +72,18 @@
 //! counter until the result lies outside the band, and [`is_in_handle_band`] is
 //! the predicate this module's tests assert it against. V1's `VALUE_NONE = 2`
 //! lies inside the band, so V1 retains the in-band sentinel and V2 discharges
-//! this §14.1 requirement ON THE HOST SIDE. The in-circuit half is still OPEN:
-//! no Noir global or assert names the V2 sentinel, so nothing in a member
-//! enforces the band exclusion — the committer does, and the members reject the
-//! out-of-band value only because their `u64` range decomposition (and
+//! this §14.1 requirement ON THE HOST SIDE.
+//!
+//! The §14.1 requirement also has an IN-CIRCUIT half, and that half is PARTLY
+//! discharged. `zk/dual-leaf-v2/src/lib.nr` now carries the sentinel and the
+//! scale-free lane constants as Noir `global`s, re-checks the band exclusion in
+//! Noir (`nargo test`), and exports the `assert_handle_not_value_none` /
+//! `assert_handle_in_band` assertions a leaf recompute would call;
+//! `crates/sparq-zk/tests/dual_leaf_v2_noir_pin.rs` pins each Noir literal to
+//! its host derivation here. What is still OPEN is the ENFORCEMENT: no member
+//! in `zk/compose` imports that library, so no shipped circuit asserts the band
+//! exclusion on a witnessed hook. The committer does, and the members reject
+//! the out-of-band value only because their `u64` range decomposition (and
 //! `filter_value_dl_bool`'s `{0, 1}` constraint) cannot represent it.
 //!
 //! The §14.1 **`LANG_NONE` separation** is enforced on the HOST side, not by
@@ -320,9 +328,11 @@ pub fn is_in_handle_band(f: &Fr) -> bool {
 /// reserved-tag requirement ON THE HOST SIDE: the tag is a domain-separated
 /// constant whose band exclusion is a CHECKABLE invariant (asserted by this
 /// module's tests) rather than an argument about where a hash output lands. V1's
-/// `crate::dual_leaf::VALUE_NONE` retains the in-band value. The in-circuit half
-/// of the requirement remains OPEN — there is no Noir global or assert for this
-/// sentinel yet (see the module docs).
+/// `crate::dual_leaf::VALUE_NONE` retains the in-band value. The in-circuit
+/// MIRROR of this constant is `zk/dual-leaf-v2/src/lib.nr`'s `VALUE_NONE_V2`
+/// global, pinned to this function by `tests/dual_leaf_v2_noir_pin.rs`; its
+/// ENFORCEMENT remains open, because no member imports that library (see the
+/// module docs).
 ///
 /// A re-derivation is expected never to be needed (the band is a vanishing
 /// fraction of the field); the counter exists so the construction is TOTAL rather
