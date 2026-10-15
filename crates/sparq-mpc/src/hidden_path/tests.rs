@@ -429,14 +429,14 @@ fn malformed_draws_in_the_chain_are_refused() {
     }
 }
 
-/// Under PRSS EVERY shape fails closed, never panics. `k = 2` needs a hop equality
-/// and `k = 1` over parallel edges needs an OR-fold, both of which share a holder's
-/// own input — which PRSS refuses. Since #6117 step 6 routed the output stage
-/// through the same source, so does `k = 1` over distinct endpoint pairs, whose
-/// chain stage draws nothing: the output stage always shares the real-row tag and
-/// the payload limbs for its `B` slots, so there is no longer a draw-free shape
-/// here. (Before the routing that case ran, because the output stage minted its own
-/// dealer and never touched the caller's source.)
+/// Under PRSS every shape fails closed for any `B > 0`, never panics. `k = 2` needs
+/// a hop equality and `k = 1` over parallel edges needs an OR-fold, both of which
+/// share a holder's own input — which PRSS refuses. Since #6117 step 6 routed the
+/// output stage through the same source, so does `k = 1` over distinct endpoint
+/// pairs, whose chain stage draws nothing: the output stage shares the real-row tag
+/// and the payload limbs for each of its `B` slots, so that shape is draw-free only
+/// at `B = 0`. (Before the routing that case ran at any `B`, because the output
+/// stage minted its own dealer and never touched the caller's source.)
 #[test]
 fn prss_fails_closed_on_every_exact_k_shape() {
     use crate::prss::PrssRandomness;
@@ -549,21 +549,21 @@ fn seeded_exact_k_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
         ]
     );
     assert_eq!(dealer.draw_fp().value(), 641842556892271371);
-    // The REVEALED slot ORDER moved in #6117 step 6 (it was
-    // ["dummy", "dummy", "<http://ex/a> <http://ex/c>", "dummy", "dummy"]): the
-    // output stage now draws its sharings and its shuffle from the SAME source as
-    // the chain stage instead of minting a second dealer, so the shuffle samples a
-    // different point of one continuous keystream. The order is the shuffle's
-    // secret permutation and carries no result meaning — the canonicalised
-    // multiset below is byte-identical to the pre-routing capture.
+    // The REVEALED slot ORDER has moved twice: first in #6117 step 6 (the output
+    // stage draws its sharings and its shuffle from the SAME source as the chain
+    // stage instead of minting a second dealer), then again when the output stage's
+    // per-element degree reduction added its re-sharings, so the shuffle samples a
+    // later point of one continuous keystream. The order is the shuffle's secret
+    // permutation and carries no result meaning — the canonicalised multiset below
+    // is byte-identical to the pre-routing capture.
     let (slots, cost) = eval_exact_k_chain_hidden_slots(&backend, &edges, 2, 5).unwrap();
     assert_eq!(
         slot_strings(&slots),
         [
-            "dummy",
-            "dummy",
-            "dummy",
             "<http://ex/a> <http://ex/c>",
+            "dummy",
+            "dummy",
+            "dummy",
             "dummy"
         ]
     );
@@ -593,11 +593,67 @@ fn seeded_exact_k_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
     );
 }
 
+/// THE guard for the output stage's payload select on the two-hop chain
+/// `a → b → c`: only the pair `(a, c)` is connected, so every other endpoint-pair
+/// candidate is rejected — and no rejected pair's endpoint row may appear among the
+/// opened payloads of the `B` slots. The opened set must be exactly `{(a, c)}` plus
+/// the dummy encoding (two unbound cells).
+///
+/// Asserted by comparing the candidates' OWN payload rows against what each slot
+/// actually opened to, through `exact_k_chain_candidates_and_opened_rows` — the
+/// same candidate construction and the same output stage the public path runs.
+#[test]
+fn rejected_two_hop_pairs_payloads_open_to_the_dummy_encoding() {
+    let render = |row: &[Option<Term>]| format!("{row:?}");
+    for seed in 0..8u64 {
+        let backend = ShamirBackend::new_seeded(3, 0x9A80 + seed).unwrap();
+        let (edges, _) = hidden_edges(&PIN_EDGES);
+        let (candidates, slots) =
+            exact_k_chain_candidates_and_opened_rows(&mut backend.dealer(), &backend, &edges, 2, 6)
+                .unwrap();
+        assert_eq!(slots.len(), 6, "seed {seed}: exactly B slots");
+        let connected = vec![Some(iri_term("http://ex/a")), Some(iri_term("http://ex/c"))];
+        let pad: Vec<Option<Term>> = vec![None, None];
+        // Every candidate whose endpoint row is not the connected pair is rejected;
+        // its row must not be among the opened payloads.
+        let opened: Vec<String> = slots.iter().map(|(_, r)| render(r)).collect();
+        let mut rejected_seen = 0usize;
+        for c in &candidates {
+            if c.payload != connected {
+                rejected_seen += 1;
+                assert!(
+                    !opened.contains(&render(&c.payload)),
+                    "seed {seed}: a rejected pair's endpoint row was opened: {}",
+                    render(&c.payload)
+                );
+            }
+        }
+        assert!(
+            rejected_seen > 0,
+            "seed {seed}: fixture must contain rejected pairs"
+        );
+        // The opened set is exactly the connected pair plus the dummy encoding.
+        let distinct: BTreeSet<String> = opened.iter().cloned().collect();
+        assert_eq!(
+            distinct,
+            BTreeSet::from([render(&connected), render(&pad)]),
+            "seed {seed}: opened payload set"
+        );
+        for (is_real, row) in &slots {
+            if *is_real {
+                assert_eq!(row, &connected, "seed {seed}");
+            } else {
+                assert_eq!(row, &pad, "seed {seed}: dummy slot payload");
+            }
+        }
+    }
+}
+
 /// The COMPLETE draw sequence of the exactly-2 chain stage (entry count and an
 /// order-sensitive fingerprint over every method and returned `y`).
 ///
 /// **This is the #6117-step-6 guard.** The transcript now ends in the output
-/// stage's 36 `vss_own_input` draws and its `oblivious_shuffle`: if
+/// stage's 141 `vss_own_input` draws and its `oblivious_shuffle`: if
 /// `eval_exact_k_chain_hidden_slots_through` went back to minting its own dealer
 /// for the output stage the log would stop at 1920 entries and both the length and
 /// the suffix assertion would fail.
@@ -605,7 +661,8 @@ fn seeded_exact_k_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
 /// The 1920-entry PREFIX is the pre-routing whole-log pin
 /// (`0x1013_9382_581b_a7e3`, captured on the pre-routing code), asserted here
 /// unchanged: the routing appended an output-stage SUFFIX and moved nothing in the
-/// chain part. The full-log fingerprint is the new pin.
+/// chain part, and the output stage's per-element degree reduction only grew that
+/// suffix. The full-log fingerprint is the new pin.
 #[test]
 fn seeded_exact_k_stage_transcript_is_pinned() {
     use crate::randomness::test_sources::{fingerprint, RecordingSource};
@@ -613,13 +670,14 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
     let (edges, _) = hidden_edges(&PIN_EDGES);
     let mut rec = RecordingSource::new(backend.dealer());
     eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 5).unwrap();
-    assert_eq!(rec.log.len(), 1957);
-    // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
+    assert_eq!(rec.log.len(), 2062);
+    // Prefix unchanged from the pre-routing pin; the whole move is in the output
+    // suffix, which grew by the per-element degree reductions.
     assert_eq!(fingerprint(&rec.log[..1920]), 0x1013_9382_581b_a7e3);
-    assert_eq!(fingerprint(&rec.log), 0xbadc_7b13_baeb_fc0f);
+    assert_eq!(fingerprint(&rec.log), 0x896e_88fa_cc9f_51f3);
     let suffix: Vec<&str> = rec.log[1920..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,
-        [["vss_own_input"; 36].as_slice(), &["oblivious_shuffle"]].concat()
+        [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }

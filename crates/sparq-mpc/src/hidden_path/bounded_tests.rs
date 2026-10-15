@@ -567,14 +567,14 @@ fn malformed_draws_in_the_or_fold_are_refused() {
     }
 }
 
-/// Under PRSS EVERY shape fails closed, never panics. `{1,2}` needs a hop equality
-/// (a holder's own input shared), which PRSS refuses. Since #6117 step 6 routed the
-/// output stage through the same source, so does `p?` over a single predicate with
-/// no self-loop and no repeated endpoint pair, whose union stage draws nothing: the
-/// output stage always shares the real-row tag and the payload limbs for its `B`
-/// slots, so there is no longer a draw-free shape here. (Before the routing that
-/// case ran, because the output stage minted its own dealer and never touched the
-/// caller's source.)
+/// Under PRSS every shape fails closed for any `B > 0`, never panics. `{1,2}` needs
+/// a hop equality (a holder's own input shared), which PRSS refuses. Since #6117
+/// step 6 routed the output stage through the same source, so does `p?` over a
+/// single predicate with no self-loop and no repeated endpoint pair, whose union
+/// stage draws nothing: the output stage shares the real-row tag and the payload
+/// limbs for each of its `B` slots, so that shape is draw-free only at `B = 0`.
+/// (Before the routing that case ran at any `B`, because the output stage minted
+/// its own dealer and never touched the caller's source.)
 #[test]
 fn prss_fails_closed_on_every_bounded_shape() {
     use crate::prss::PrssRandomness;
@@ -693,23 +693,22 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
         ]
     );
     assert_eq!(dealer.draw_fp().value(), 1940071552581823960);
-    // The REVEALED slot ORDER moved in #6117 step 6 (it was
-    // ["<http://ex/a> <http://ex/b>", "<http://ex/b> <http://ex/a>", "dummy",
-    //  "<http://ex/a> <http://ex/a>", "<http://ex/b> <http://ex/b>"]): the output
-    // stage now draws its sharings and its shuffle from the SAME source as the
-    // union stage instead of minting a second dealer, so the shuffle samples a
-    // different point of one continuous keystream. The order is the shuffle's
-    // secret permutation and carries no result meaning — the canonicalised multiset
-    // below is byte-identical to the pre-routing capture.
+    // The REVEALED slot ORDER has moved twice: first in #6117 step 6 (the output
+    // stage draws its sharings and its shuffle from the SAME source as the union
+    // stage instead of minting a second dealer), then again when the output stage's
+    // per-element degree reduction added its re-sharings, so the shuffle samples a
+    // later point of one continuous keystream. The order is the shuffle's secret
+    // permutation and carries no result meaning — the canonicalised multiset below
+    // is byte-identical to the pre-routing capture.
     let (slots, cost) = eval_bounded_path_hidden_slots(&backend, &edges, &form, 5).unwrap();
     assert_eq!(
         slot_strings(&slots),
         [
-            "<http://ex/b> <http://ex/a>",
-            "dummy",
-            "<http://ex/a> <http://ex/b>",
             "<http://ex/b> <http://ex/b>",
-            "<http://ex/a> <http://ex/a>"
+            "dummy",
+            "<http://ex/a> <http://ex/a>",
+            "<http://ex/a> <http://ex/b>",
+            "<http://ex/b> <http://ex/a>"
         ]
     );
     let mut sorted = slot_strings(&slots);
@@ -742,7 +741,7 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
 /// order-sensitive fingerprint over every method and returned `y`).
 ///
 /// **This is the #6117-step-6 guard.** The transcript now ends in the output
-/// stage's 36 `vss_own_input` draws and its `oblivious_shuffle`: if
+/// stage's 141 `vss_own_input` draws and its `oblivious_shuffle`: if
 /// `eval_bounded_path_hidden_slots_through` went back to minting its own dealer for
 /// the output stage the log would stop at 1932 entries and both the length and the
 /// suffix assertion would fail.
@@ -750,7 +749,8 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
 /// The 1932-entry PREFIX is the pre-routing whole-log pin
 /// (`0x690e_cad1_cdf7_7eb0`, captured on the pre-routing code), asserted here
 /// unchanged: the routing appended an output-stage SUFFIX and moved nothing in the
-/// union part. The full-log fingerprint is the new pin.
+/// union part, and the output stage's per-element degree reduction only grew that
+/// suffix. The full-log fingerprint is the new pin.
 #[test]
 fn seeded_bounded_stage_transcript_is_pinned() {
     use crate::randomness::test_sources::{fingerprint, RecordingSource};
@@ -759,13 +759,14 @@ fn seeded_bounded_stage_transcript_is_pinned() {
     let form = HiddenBoundedPath::range("p", 0, 2);
     let mut rec = RecordingSource::new(backend.dealer());
     eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 5).unwrap();
-    assert_eq!(rec.log.len(), 1969);
-    // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
+    assert_eq!(rec.log.len(), 2074);
+    // Prefix unchanged from the pre-routing pin; the whole move is in the output
+    // suffix, which grew by the per-element degree reductions.
     assert_eq!(fingerprint(&rec.log[..1932]), 0x690e_cad1_cdf7_7eb0);
-    assert_eq!(fingerprint(&rec.log), 0x8ac7_aa74_a625_9a25);
+    assert_eq!(fingerprint(&rec.log), 0x9585_8505_1ecb_a85b);
     let suffix: Vec<&str> = rec.log[1932..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,
-        [["vss_own_input"; 36].as_slice(), &["oblivious_shuffle"]].concat()
+        [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }

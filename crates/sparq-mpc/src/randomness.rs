@@ -772,6 +772,101 @@ pub(crate) mod test_sources {
         }
     }
 
+    /// A dealer-backed source that keeps the shuffled column's SHAPE intact but
+    /// rewrites VALUES in it, so the corruption survives the shape check and has to
+    /// be caught by whatever the consumer checks about the opened values.
+    ///
+    /// Unlike [`MalformedShuffleSource`], which only breaks the shape, this one
+    /// returns a column that is still exactly `entries × width` canonical sharings.
+    /// Re-sharing a value through the inner dealer keeps every element a consistent
+    /// degree-`t` sharing, so a robust open accepts it and the only thing that can
+    /// notice is a check on the value itself.
+    pub(crate) struct TamperingShuffleSource {
+        inner: ShamirDealer,
+        how: ShuffleTampering,
+        fired: bool,
+    }
+
+    /// What [`TamperingShuffleSource`] rewrites in the shuffled column.
+    #[derive(Clone, Copy, Debug)]
+    pub(crate) enum ShuffleTampering {
+        /// Re-share `value` over every element of every entry PAST the first
+        /// `keep_prefix` elements, as a consistent degree-`t` sharing. With
+        /// `keep_prefix = 1` this keeps each entry's first element (an output
+        /// stage's tag) and rewrites all of its payload limbs.
+        ResharePast { keep_prefix: usize, value: u64 },
+    }
+
+    impl TamperingShuffleSource {
+        pub(crate) fn new(inner: ShamirDealer, how: ShuffleTampering) -> Self {
+            TamperingShuffleSource {
+                inner,
+                how,
+                fired: false,
+            }
+        }
+
+        /// Whether the shuffle happened (and its column was tampered with).
+        pub(crate) fn fired(&self) -> bool {
+            self.fired
+        }
+    }
+
+    impl DistributedRandomness for TamperingShuffleSource {
+        fn randomness_model(&self) -> RandomnessModel {
+            self.inner.randomness_model()
+        }
+        fn parties(&self) -> usize {
+            DistributedRandomness::parties(&self.inner)
+        }
+        fn threshold(&self) -> usize {
+            DistributedRandomness::threshold(&self.inner)
+        }
+        fn shared_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_mask()
+        }
+        fn shared_nonzero_mask(&mut self) -> Result<Vec<Share>, MpcError> {
+            self.inner.shared_nonzero_mask()
+        }
+        fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
+            self.inner.vss_own_input(secret)
+        }
+        fn oblivious_shuffle(
+            &mut self,
+            col: SecretColumn,
+        ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+            let n = DistributedRandomness::parties(&self.inner);
+            let (mut shuffled, cost) = self.inner.oblivious_shuffle(col)?;
+            self.fired = true;
+            match self.how {
+                ShuffleTampering::ResharePast { keep_prefix, value } => {
+                    let keep = keep_prefix * n;
+                    for entry in shuffled.iter_mut() {
+                        if entry.len() <= keep {
+                            continue;
+                        }
+                        let elements = (entry.len() - keep) / n;
+                        let mut rewritten = entry[..keep].to_vec();
+                        for _ in 0..elements {
+                            rewritten.extend(self.inner.vss_own_input(Fp::new(value))?);
+                        }
+                        // Keep the width byte-exact even if it was not a multiple
+                        // of `n` (the shape check would catch that on its own).
+                        rewritten.truncate(entry.len());
+                        while rewritten.len() < entry.len() {
+                            rewritten.push(Share {
+                                x: rewritten.len() as u64 % n as u64 + 1,
+                                y: Fp::zero(),
+                            });
+                        }
+                        *entry = rewritten;
+                    }
+                }
+            }
+            Ok((shuffled, cost))
+        }
+    }
+
     /// A dealer-backed source that misreports its threshold as `t`.
     pub(crate) struct MisreportedThresholdSource {
         pub(crate) inner: ShamirDealer,
