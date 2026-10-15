@@ -805,10 +805,17 @@ impl Builder<'_> {
                 ]));
             }
             Axiom::HasKey(..) => return Err(self.unsupported("HasKey")),
-            // Read in the first pass (hierarchy) and before it (definitions).
-            Axiom::SubDataPropertyOf(..)
-            | Axiom::EquivalentDataProperties(_)
-            | Axiom::DatatypeDefinition(..) => {}
+            // Read in the first pass.
+            Axiom::SubDataPropertyOf(..) | Axiom::EquivalentDataProperties(_) => {}
+            Axiom::DatatypeDefinition(dt, _) => {
+                // A definition constrains the models even when the datatype is unused: a
+                // built-in redefined, two different definitions or a cyclic one may have no
+                // model. Expanding it refuses the latter two.
+                if builtin(&iri_of(self.dict, *dt).unwrap_or_default()).is_some() {
+                    return Err(self.unsupported("a DatatypeDefinition of a datatype-map datatype"));
+                }
+                self.data_expr(&DataRange::Datatype(*dt), &mut Vec::new())?;
+            }
             Axiom::DisjointDataProperties(ds) => {
                 let rs = ds
                     .iter()

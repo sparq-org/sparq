@@ -995,6 +995,59 @@ fn classification_through_data_ranges() {
     assert!(!entails_sub(&body, "B", "A"));
 }
 
+/// The cases the differential corpus leaves out because the reference reasoner departs
+/// from the Direct Semantics on them (see `datatypes_corpus`), decided as the specification
+/// says.
+#[test]
+fn reference_deviations_follow_the_specification() {
+    // A single-value interval at zero is inside an interval ending at zero.
+    let body = format!(
+        "{DDECL} :A owl:equivalentClass {} . :B owl:equivalentClass {} .",
+        dsome(":d", &int_range(0, 0)),
+        dsome(":d", &int_range(0, 5))
+    );
+    assert!(entails_sub(&body, "A", "B"));
+    // An at-most over a union of empty ranges holds of everything.
+    let empty = |lo: i64, hi: i64| int_range(lo, hi);
+    let body = format!(
+        "{DDECL} :A rdfs:subClassOf {} . {} rdfs:subClassOf :B .",
+        dmax(
+            1,
+            ":d",
+            &format!(
+                "[ a rdfs:Datatype ; owl:unionOf ( {} {} ) ]",
+                empty(4, 3),
+                empty(9, 8)
+            )
+        ),
+        dmax(2, ":d", "xsd:int")
+    );
+    assert!(!entails_sub(&body, "A", "B"));
+    // Exactly one integer value, but two asserted.
+    let union = "[ a rdfs:Datatype ; owl:unionOf ( xsd:nonNegativeInteger xsd:integer ) ]";
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :a a [ a owl:Restriction ; owl:onProperty :d ; owl:qualifiedCardinality \"1\"^^xsd:nonNegativeInteger ; owl:onDataRange {union} ] . :a :d -1 , \"4\"^^xsd:nonNegativeInteger ."
+        )),
+        Consistency::Inconsistent
+    );
+    // A definition by a single-value intersection constrains nothing.
+    let single = format!(
+        "[ a rdfs:Datatype ; owl:intersectionOf ( {} xsd:integer ) ]",
+        one_of(&["2"])
+    );
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :d rdfs:domain {} . :C owl:equivalentClass [ a owl:Class ; owl:complementOf [ a owl:Restriction ; owl:onProperty :d ; owl:qualifiedCardinality \"1\"^^xsd:nonNegativeInteger ; owl:onDataRange {single} ] ] . :a :d 3 .",
+            dsome(
+                ":d",
+                "[ a rdfs:Datatype ; owl:onDatatype xsd:string ; owl:withRestrictions ( [ xsd:length 2 ] ) ]"
+            )
+        )),
+        Consistency::Consistent
+    );
+}
+
 #[test]
 fn ill_typed_literals_are_inconsistent() {
     assert_eq!(
@@ -1104,6 +1157,9 @@ fn out_of_fragment_data_constructs_answer_unknown() {
     };
     out(":d rdfs:range :Undefined . :Undefined a rdfs:Datatype .");
     out(":T a rdfs:Datatype ; owl:equivalentClass :U . :U a rdfs:Datatype ; owl:equivalentClass :T . :d rdfs:range :T .");
+    // Definitions constrain the models even when the datatype is unused.
+    out(":T a rdfs:Datatype ; owl:equivalentClass [ a rdfs:Datatype ; owl:datatypeComplementOf :T ] .");
+    out(":T a rdfs:Datatype ; owl:equivalentClass xsd:integer , xsd:string .");
     out(":A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topDataProperty ; owl:someValuesFrom xsd:integer ] .");
     out(":A owl:hasKey ( :d ) .");
     out(":a :d \"x\"^^<http://ex/unknownDatatype> .");
