@@ -1220,11 +1220,66 @@ every method (the signed message binds the scheme IRI), so an entry whose `zk:sc
 changed after signing fails verification. A registry signature over the earlier
 method-independent message does not verify.
 
-**PRECONDITION on (a)–(d), stated plainly.** All of it is HOST-side. The value-lane verifier
-gates (`verifier.rs`'s stage-2 binding edges and `filter_edge_true`) stay CLOSED until the
-verifier authenticates the commitment method and pins the member, the lane constant, the
-scale and the bound itself — the sq-j506 wiring. Nothing in §14.5 makes a V2 value-lane
-proof verifier-enforced.
+**PRECONDITION on (a)–(d), as it now stands.** All of (a)–(d) is HOST-side. Two of the four
+things the precondition named have since been built verifier-side, and two have not; the gates
+are still CLOSED. What is now ENFORCED by the verifier:
+
+- **The commitment method is AUTHENTICATED, not assumed.** `sparq-zk-compose`'s `method_auth`
+  recovers it from the issuer signature rather than reading it from the manifest: it builds the
+  METHOD-BOUND PRESENTATION message (`ZKSIG_M5`, or `ZKSIG_M4` for a holder-bound attestation) of
+  every `CommitmentMethod::recognised()` method from values the verifier itself established — the
+  commitment, the issuer-attested salt, the issuer-bound status reference, the attested holder
+  digest — plus the method-UNBOUND `ZKSIG_C3`/`ZKSIG_C4` message, and asks which one the presented
+  signature verifies over. Exactly one bound candidate verifying names the method; more than one is
+  refused rather than resolved; only the unbound one verifying is `AuthenticatedMethod::Unbound`,
+  which is the explicit ABSENCE of an attested method and never a default. A registry entry's own
+  `ZKSIG_M3` signature is not a candidate: being recorded in an issuer's registry is a separate
+  statement from being authorised for presentation, and the two tags keep them separate. The relying
+  party's `MethodPolicy` (on the `KeySet`, like every other external anchor) then decides: the
+  default accepts `Unbound`, so every already-issued credential verifies exactly as before;
+  `require_method_bound()` refuses it; an attested `DualLeafV1` needs the written-down
+  `admit_legacy_dual_leaf_v1()` opt-in, and the `value-only` dial is admitted by no policy.
+- **For a HIDDEN-ONLY commitment the declared message is held to that same candidate set.** A
+  commitment attested solely by a hidden-issuer proof has no clear signature, so the method is
+  selected by the hidden entry's public `message`. That value must EQUAL one of the verifier-built
+  candidates — one matching none of them is refused (`HiddenIssuerMessageMismatch`) — and the policy
+  applies to the method the bb hidden-issuer stage is then required to BIND, so a declared message
+  outside the candidate set cannot carry a presentation past the policy. Until that bb stage has run,
+  a hidden-only commitment's recorded method is the method SELECTED, not one yet shown to be signed.
+
+What is now COMPUTABLE but NOT ENFORCED (no verify path calls it):
+
+- **The member, the lane constant, the SCALE and the bound are PINNED — as a computation.**
+  `sparq-zk-compose`'s `value_pin` states, for an authenticated `DualLeafV2` method and a typed
+  query FILTER (`sparq_zk::verify::fragment_typed_filters`, which keeps the constant's datatype and
+  lexical form), exactly what a value-lane sub-proof's public inputs would have to be: the member
+  the datatype routes to, the canonically-spelled lane constant — for the decimal lane
+  `decimal_lane_const(fd)` at an admitted scale, with the query constant rescaled to it EXACTLY and
+  never rounded, which is the scale pin §14.5 previously recorded as unpinned — the op code after
+  the `const op ?var` flip, the bound under the lane's own V2 encoder, and a `true` verdict. Each
+  equality fails closed on its own. `scan_method` additionally requires every commitment a scan
+  draws from to have authenticated the SAME method, and `check_lane_routed` refuses a lane the
+  whole-graph builder does not route (so `xsd:boolean`, `xsd:dateTime` and `xsd:date` are refused
+  today).
+
+What is still NOT enforced, stated plainly:
+
+- **The value-lane verifier GATES remain CLOSED.** `verifier::prefilter_manifest_structure` refuses
+  every value-lane sub-proof unconditionally at stage 0, before it reads a sub-proof for anything
+  else; the stage-2 binding-edge operand match still admits only the `filter_int` family, and
+  `filter_edge_true` is untouched. A manifest every one of whose pins HOLDS is still refused, and a
+  test asserts that. Computing a pin is not enforcing one.
+- **No pin is tied to an obligation.** There is no edge from a value-lane sub-proof to a query
+  FILTER in this verifier, so nothing establishes that a sub-proof whose pin holds is the one
+  answering that FILTER. Creating that edge, adding the stage-2 arms, routing the typed filters by
+  the scan's authenticated method, and making `encode_pattern_slot` method-aware are the remaining
+  sq-j506 wiring.
+- Numeric promotion is unsupported (an `xsd:integer` constant does not route to the decimal member;
+  it fails closed), and the decimal scale is public via the lane constant — which was already true
+  of every decimal value-lane proof.
+
+Nothing in §14.5, and nothing in the method authentication or the pin functions, makes a V2
+value-lane proof verifier-enforced.
 
 **What V2 does NOT discharge.** V2 still folds `LANG_NONE = 1` in the no-language slot;
 its `LANG_CONTEXT` key derivation does not separate a language constant from `1`, which

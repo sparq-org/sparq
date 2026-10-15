@@ -39,6 +39,7 @@ Most callers want the typed wrapper instead: `import { checkOwlDl } from '@sparq
   { "consistent": true | false | "unknown",
     "reason": null | { "kind": "OutOfFragment", "construct", "triples" }
                    | { "kind": "NotInDl", "violations" } | { "kind": "ResourceBudget" }
+                   | { "kind": "DatatypeUnknown", "triples" }
                    | { "kind": "ImportsNotLoaded", "imports" }
                    | { "kind": "Unparsed" | "Malformed" | "Ambiguous" | "Unsupported", "detail", "triples" },
     "profile": { "dl": true | false | "unknown", "violations": [{ "kind", "detail", "triples" }],
@@ -51,8 +52,9 @@ Most callers want the typed wrapper instead: `import { checkOwlDl } from '@sparq
   [`skills/javascript-wasm/references/owl-dl.md`](../../skills/javascript-wasm/references/owl-dl.md).
 - **Fail-closed.** An ontology the reverse mapping refuses is a result
   (`"consistent": "unknown"` with the refusal as `reason`), not an error; only a parse error
-  or malformed options throw. Data properties, datatypes and nominals are outside the
-  decided fragment and answer `"unknown"` with reason `OutOfFragment`.
+  or malformed options throw. Nominals, keys and other chains are outside the decided
+  fragment and answer `"unknown"` with reason `OutOfFragment`; an undecided datatype question
+  answers `DatatypeUnknown`.
 - **No serde.** The JSON is written (and the options object parsed) by a small hand-written,
   unit-tested JSON module; all logic is the plain-Rust `check_owl_dl_json`, tested natively
   with `cargo test -p sparq-dl-wasm`. The `#[wasm_bindgen]` export only maps the error;

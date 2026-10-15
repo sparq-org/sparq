@@ -304,6 +304,55 @@ async fn put_flood_beyond_resource_cap_is_refused_with_507() {
     assert_eq!(retry.status(), StatusCode::INSUFFICIENT_STORAGE);
 }
 
+/// The LWS surface keeps each resource's linkset record at `{resource}.meta` in the same store. On
+/// the LDP surface such a name is never a resource: not served, written or deleted, even for the
+/// owner and even when a record is stored there.
+#[tokio::test]
+async fn a_linkset_record_name_is_no_ldp_resource() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    store
+        .write(
+            "https://pod.example/alice/doc.meta",
+            axum::body::Bytes::from_static(b"{}"),
+            "application/json",
+        )
+        .await
+        .expect("seed a record");
+    let h = Harness::with_store(store).await;
+    // The record itself, a case or %-encoded variant of it, its slash twin and a path through it:
+    // none is routed, so none answers by whether the record is there.
+    for path in [
+        "/alice/doc.meta",
+        "/alice/doc.META",
+        "/alice/doc%2Emeta",
+        "/alice/c/.meta",
+        "/alice/doc.meta/",
+        "/alice/doc.meta/child",
+    ] {
+        for (method, body) in [
+            ("GET", ""),
+            ("HEAD", ""),
+            ("PUT", TURTLE),
+            ("DELETE", ""),
+            ("PATCH", ""),
+        ] {
+            let ct = (method == "PUT").then_some("text/turtle");
+            let r = h.request(method, path, ct, Body::from(body)).await;
+            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        }
+    }
+    let r = h
+        .request(
+            "PUT",
+            "/alice/doc.metadata",
+            Some("text/turtle"),
+            Body::from(TURTLE),
+        )
+        .await;
+    assert_eq!(r.status(), StatusCode::CREATED);
+}
+
 #[tokio::test]
 async fn put_twice_is_a_replace_with_no_content() {
     let h = Harness::new().await;
@@ -1248,6 +1297,69 @@ _:p solid:deletes { <https://pod.example/alice/restricted/missing#x> foaf:name \
         "an append-only caller's delete-patch on a missing target must be 403 (Write required), \
          not a create-authorized 409/201"
     );
+}
+
+#[tokio::test]
+async fn a_writer_without_read_learns_nothing_from_a_patch() {
+    // A writer that may not read the target is told nothing about it by a PATCH: one whose deletes
+    // need the triples to be there reads the target as a `solid:where` does, so it needs Read; and
+    // an insert's response carries no tag of the graph it cannot read.
+    let h = Harness::new().await;
+    h.make_container("/alice/drop/").await;
+    let put = h
+        .request(
+            "PUT",
+            "/alice/drop/doc",
+            Some("text/turtle"),
+            Body::from("<#me> <http://xmlns.com/foaf/0.1/name> \"Alice\" ."),
+        )
+        .await;
+    assert_eq!(put.status(), StatusCode::CREATED);
+    let acl = format!(
+        r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#w> a acl:Authorization;
+     acl:agent <{webid}>;
+     acl:accessTo <https://pod.example/alice/drop/doc>;
+     acl:mode acl:Append, acl:Write."#,
+        webid = common::WEBID
+    );
+    let put_acl = h
+        .request(
+            "PUT",
+            "/alice/drop/doc.acl",
+            Some("text/turtle"),
+            Body::from(acl),
+        )
+        .await;
+    assert_eq!(put_acl.status(), StatusCode::CREATED);
+    let patch = |body: &'static str| {
+        h.request(
+            "PATCH",
+            "/alice/drop/doc",
+            Some("text/n3"),
+            Body::from(body),
+        )
+    };
+    let deletes = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .\n\
+_:p solid:deletes { <https://pod.example/alice/drop/doc#me> foaf:name \"Alice\" . }.\n";
+    assert_eq!(patch(deletes).await.status(), StatusCode::FORBIDDEN);
+    let inserts = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .\n\
+_:p solid:inserts { <https://pod.example/alice/drop/doc#me> foaf:nick \"A\" . }.\n";
+    let r = patch(inserts).await;
+    assert!(r.status().is_success(), "{}", r.status());
+    assert!(!r.headers().contains_key("etag"));
+    let r = h
+        .request(
+            "PUT",
+            "/alice/drop/doc",
+            Some("text/turtle"),
+            Body::from("<#me> a <#P> ."),
+        )
+        .await;
+    assert!(r.status().is_success(), "{}", r.status());
+    assert!(!r.headers().contains_key("etag"));
 }
 
 #[tokio::test]

@@ -77,10 +77,9 @@ pub fn is_acl_resource(iri: &str) -> bool {
 ///
 /// SCOPE — `.acl` ONLY (deliberate). The ACL auxiliary is the only auxiliary this server treats as
 /// load-bearing: the WAC resolver consults `<resource>.acl`, and the PUT/PATCH create paths only
-/// special-case `.acl`. `.meta` description-resources are NOT implemented here (the resolver never
-/// reads a `.meta`), so a `secret.meta` minted via POST is just a normal resource name with no
-/// security effect — guarding it ONLY at POST (while PUT/PATCH would happily create it) was an
-/// inconsistency with no benefit, so it is intentionally not guarded.
+/// special-case `.acl`. A name ending in `.meta` is the LWS surface's linkset record, and
+/// `ldp::target::parse_target` refuses it, and any path through it, for every LDP method; a POST
+/// mints `<stem>-<random>`, never such a name, so this mint guard need not cover it.
 ///
 /// FORWARD-LOOKING INVARIANT: if/when `.meta` (or any other auxiliary) becomes load-bearing — i.e.
 /// the resolver or a metadata path starts consulting it — it MUST be guarded UNIFORMLY across the
@@ -165,10 +164,8 @@ mod tests {
 
     #[test]
     fn is_acl_auxiliary_suffix_does_not_guard_meta() {
-        // `.meta` is NOT a load-bearing auxiliary in this server (the WAC resolver never consults a
-        // `.meta`, and the create paths only special-case `.acl`), so a `…/secret.meta` is a normal
-        // resource name and the mint guard must NOT reject it. (If `.meta` ever becomes load-bearing
-        // it must be guarded UNIFORMLY across POST/PUT/PATCH/DELETE/read — see the predicate doc.)
+        // `.meta` names are reserved by `parse_target` for every LDP method, not by this mint
+        // guard, which covers `.acl` alone (see the predicate doc).
         assert!(!is_acl_auxiliary_suffix(
             "https://pod.example/a/secret.meta"
         ));

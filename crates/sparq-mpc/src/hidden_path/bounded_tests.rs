@@ -490,26 +490,55 @@ fn slot_pairs(slots: &[crate::oblivious_join::OutputSlot]) -> BTreeSet<(String, 
         .collect()
 }
 
-/// A source whose `(n, t)` differs from the backend's is refused before any draw.
+/// A source whose `(n, t)` differs from the backend's is refused by the up-front
+/// check in `eval_bounded_path_hidden_slots_through`, BEFORE the union stage
+/// draws anything.
+///
+/// The shape matters: `{1,2}` over the two-hop chain at `B = 8` is a shape whose
+/// OWN stage draws (every hop equality shares a holder's own input — the reason
+/// `prss_fails_closed_on_every_bounded_shape` uses it). `p?` over a single edge
+/// draws nothing in its union stage, so with the up-front check deleted the
+/// output stage's own `require_source_matches` would still raise the same error
+/// — hence the assertions below are on the draw count, not only on the error.
 #[test]
 fn bounded_through_refuses_a_source_that_does_not_match_the_backend() {
-    use crate::randomness::test_sources::MisreportedThresholdSource;
-    let backend = ShamirBackend::new_seeded(3, 0xB0C).unwrap();
-    let edges = predicated_edges(&[(P, "http://ex/a", "http://ex/b")]);
-    let form = HiddenBoundedPath::optional(P);
-    let mut lying = MisreportedThresholdSource {
-        inner: backend.dealer(),
-        t: 0,
+    use crate::randomness::test_sources::{
+        DrawCountingSource, MisreportedThresholdSource, RecordingSource,
     };
-    let mut other = ShamirBackend::new_seeded(5, 0xB0C).unwrap().dealer();
-    for source in [
-        &mut lying as &mut dyn crate::randomness::DistributedRandomness,
-        &mut other,
-    ] {
-        match eval_bounded_path_hidden_slots_through(source, &backend, &edges, &form, 3) {
-            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
-            other => panic!("a mismatched source must be refused, got {other:?}"),
+    let backend = ShamirBackend::new_seeded(3, 0xB0C).unwrap();
+    let edges = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ]);
+    let form = HiddenBoundedPath::range(P, 1, 2);
+
+    // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
+    // whether anything was drawn before the refusal.
+    let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0xB0C).unwrap().dealer());
+    match eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 8) {
+        Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+        other => panic!("a wrong-n source must be refused, got {other:?}"),
+    }
+    assert!(
+        rec.log.is_empty(),
+        "drew {} times before refusing",
+        rec.log.len()
+    );
+
+    // Misreported `t`: canonically SHAPED sharings, so only the source-match
+    // check can catch it. Counted through a wrapper, since `RecordingSource`
+    // wraps a real dealer and so cannot misreport a threshold.
+    for t in [0, 2] {
+        let mut lying = MisreportedThresholdSource {
+            inner: backend.dealer(),
+            t,
+        };
+        let mut counted = DrawCountingSource::new(&mut lying);
+        match eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 8) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
+            other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
         }
+        assert_eq!(counted.draws(), 0, "t={t}: drew before refusing");
     }
 }
 

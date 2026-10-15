@@ -288,6 +288,8 @@ impl ShamirBackend {
     /// ChaCha20 CSPRNG — so two dealers from the same (or a cloned) backend draw
     /// independent, unpredictable masks, never a reused keystream.
     pub fn dealer(&self) -> ShamirDealer {
+        #[cfg(test)]
+        dealer_mints::bump();
         let rng: Box<dyn MpcRng> = match self.rng_source {
             RngSource::Os => Box::new(SecureRng::from_os()),
             #[cfg(any(test, feature = "insecure-test-rng"))]
@@ -316,6 +318,37 @@ impl ShamirBackend {
     /// plain Lagrange and makes NO detection claim.
     pub fn reconstruct(&self, shares: &[Share]) -> Result<Fp, MpcError> {
         crate::robust::reconstruct_robust(shares, self.t)
+    }
+}
+
+/// Test-only tally of how many [`ShamirDealer`]s have been minted on the current
+/// thread, so a test can pin the number of dealers ONE protocol run mints — the
+/// "one fresh dealer per run" contract the public entry points document.
+///
+/// The counter is `#[cfg(test)]` and write-only from `dealer()`: it observes the
+/// mint and changes nothing about it. Each `#[test]` runs on its own thread, so a
+/// test owns its own tally; `reset()` then `count()` brackets the run to measure.
+#[cfg(test)]
+pub(crate) mod dealer_mints {
+    use std::cell::Cell;
+
+    thread_local! {
+        static MINTS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Record one mint. Called by [`super::ShamirBackend::dealer`].
+    pub(crate) fn bump() {
+        MINTS.with(|c| c.set(c.get() + 1));
+    }
+
+    /// Zero this thread's tally, so the next [`count`] covers only what follows.
+    pub(crate) fn reset() {
+        MINTS.with(|c| c.set(0));
+    }
+
+    /// Mints recorded on this thread since the last [`reset`].
+    pub(crate) fn count() -> usize {
+        MINTS.with(Cell::get)
     }
 }
 

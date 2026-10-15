@@ -9,6 +9,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-zk-compose:** verifier-side **authenticated commitment method**. The verifier no longer has
+  to assume which commitment method a committed graph was made under, and it does not read one from
+  the manifest either — it RECOVERS it from the issuer signature. `method_auth` builds one candidate
+  signed message per `CommitmentMethod::recognised()` method from values the verifier already
+  established (the commitment, the issuer-attested salt, the issuer-bound status reference, and the
+  attested holder digest when the attestation is holder-bound) plus the method-UNBOUND message, and
+  `classify` reports which one the presented signature verifies over: `AuthenticatedMethod::Bound(m)`
+  or `AuthenticatedMethod::Unbound`. `MethodPolicy` is the relying party's decision over the answer,
+  carried on the external trust anchor as `KeySet::with_method_policy` (the
+  `with_hidden_issuer_depth` precedent, so no public verifier signature changes):
+  `MethodPolicy::current()` is the default, `require_method_bound()` refuses an attestation that binds
+  no method (`CheckError::MethodNotAuthenticated`), and `admit_legacy_dual_leaf_v1()` is the
+  written-down opt-in for an attested superseded method (refused otherwise with
+  `CheckError::MethodNotAdmitted`); more than one method's message verifying is
+  `CheckError::AmbiguousMethod`. For a HIDDEN-ONLY commitment the method is selected by the hidden
+  entry's declared `message`, which must EQUAL one of the candidates — a value matching none of them
+  is refused with `CheckError::HiddenIssuerMessageMismatch`, and the policy applies to the method the
+  hidden-issuer proof is then required to bind. Every entry over a hidden-only commitment is checked,
+  and they must all select the same candidate, so the message check does not depend on the order
+  the entries are listed in. New PRESENTATION message shapes and signers in `sparq-zk`, each under its own
+  domain tag: `sig::presentation_message_with_status_and_scheme` (`ZKSIG_M5`, for a bearer
+  attestation) and `sig::commitment_message_with_holder_and_scheme`
+  (`ZKSIG_M4`, the one shape binding both a holder key and a method), signed with
+  `SecretKey::{sign_presentation_with_status_and_scheme, sign_commitment_with_holder_and_scheme}`. A
+  REGISTRY entry's own `ZKSIG_M3` signature is deliberately NOT a presentation attestation — recording
+  a commitment in an issuer's registry is a separate statement from authorising its presentation, so
+  presenting one as a clear attestation reports `CheckError::InvalidIssuerSignature`. Back-compatible
+  with ONE qualification, about the declared `message` of hidden-issuer entries: a hidden-issuer entry's declared `message` was previously not read at all,
+  and over a hidden-only commitment it is now required to equal a verifier-built candidate (for every
+  entry over that commitment), so a hidden-only manifest whose declared message is empty,
+  not decodable as a field element, or unmatched is now refused with `CheckError::HiddenIssuerMessageMismatch`;
+  a refusal of a malformed hidden-only manifest may also be reported earlier, in the pre-filter, than
+  it was before. The hidden-issuer stage likewise requires EVERY entry's declared `message`, including
+  one over a commitment that also has a clear attestation, to equal the message its proof is checked
+  against, and that check may now be reported ahead of an entry's depth or proof refusal. Otherwise
+  every manifest that verified before still verifies under the default
+  policy — an attestation over the method-unbound `ZKSIG_C3`/`ZKSIG_C4` message authenticates as
+  `Unbound`, which the default policy accepts, and a bad signature still reports
+  `CheckError::InvalidIssuerSignature`. The newly accepted manifests are only those carrying an
+  issuer signature over a method-bound PRESENTATION message (`ZKSIG_M5`/`ZKSIG_M4`). Not externally
+  audited (sq-qhy4); no soundness or
+  privacy property is claimed.
+- **sparq-zk:** `verify::fragment_typed_filters` re-derives a query's FILTER obligations keeping each
+  constant as the typed `oxrdf::Literal` the query spells (`verify::TypedQueryFilter { variable, op,
+  constant }`), for a relying party that needs the constant's datatype and lexical form rather than a
+  `u64`. It shares one private walker with `fragment_filters`, whose behaviour and error strings are
+  unchanged (a regression test asserts the messages verbatim), and widens the datatype axis only: the
+  admitted comparison shape is still `?var op <literal>` after the `const op ?var` flip, with
+  everything else fail-closed. Also `commit::CommitmentMethod::recognised()`, the enumeration
+  counterpart of `from_scheme_iri`.
+- **sparq-zk-compose:** `value_pin` holds the relying party's **pinned value-lane inputs** for the
+  dual-leaf lanes (OFF-by-default `dual-leaf` feature): given an authenticated `DualLeafV2` method and
+  a typed query FILTER, `expected_value_lane` / `check_value_lane_pin` state what a value-lane
+  sub-proof's member, lane constant (for the decimal lane, the scale it names), op, bound and verdict
+  would have to be, each equality failing closed with its own `PinError`; `scan_method` requires every
+  commitment a scan draws from to have authenticated the same method, and `check_lane_routed` refuses
+  a lane the whole-graph commitment builder does not route. **The value-lane verifier gates stay
+  CLOSED:** the unconditional stage-0 `CheckError::ValueLaneSubProofNotAccepted` refusal is unchanged
+  and still first, the stage-2 binding-edge operand match and `filter_edge_true` are untouched, and a
+  manifest every one of whose pins holds is still refused (a test asserts exactly that). Computing a
+  pin is not enforcing one; the gate-opening change is separate. Research-grade, not externally
+  audited (sq-qhy4); the value lanes carry the #769-accepted INV-VL downgrade (CR-G8).
 - **sparq-zk:** `dual_leaf_v2` is a second dual-leaf commitment method (`CommitmentMethod::DualLeafV2`,
   scheme IRI `https://sparq.dev/ns/zk#poseidon2-dualleaf-v2`) behind the OFF-by-default `dual-leaf`
   feature. It keeps V1's leaf shapes and re-derives the constants: lane constants in BLAKE3's

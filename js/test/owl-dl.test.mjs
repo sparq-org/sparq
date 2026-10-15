@@ -83,16 +83,32 @@ test('unsatisfiable classes are reported', async () => {
   assert.deepEqual(r.unsatisfiable, ['http://ex/A']);
 });
 
-test('data properties are out of fragment: unknown, with the offending triple', async () => {
+test('data properties are decided; an ill-typed literal is inconsistent', async () => {
+  const tbox = `${TBOX} :age a owl:DatatypeProperty ; rdfs:domain :Person ; rdfs:range xsd:nonNegativeInteger .`;
+  assert.equal((await checkOwlDl(tbox, `${PRE} :ann :age 16 .`)).consistent, true);
+  assert.equal((await checkOwlDl(tbox, `${PRE} :ann :age -1 .`)).consistent, false);
+  assert.equal((await checkOwlDl(tbox, `${PRE} :ann :age "sixteen"^^xsd:nonNegativeInteger .`)).consistent, false);
+});
+
+test('nominals are out of fragment: unknown, with the offending triples', async () => {
   const r = await checkOwlDl(
-    `${TBOX} :age a owl:DatatypeProperty ; rdfs:domain :Person ; rdfs:range xsd:integer .`,
+    `${TBOX} :ann a owl:NamedIndividual . :Ann owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] .`,
   );
   assert.equal(r.consistent, 'unknown');
   assert.equal(r.reason.kind, 'OutOfFragment');
   assert.equal(typeof r.reason.construct, 'string');
   assert.ok(r.reason.triples.length > 0);
-  for (const t of r.reason.triples) assert.match(t, /^<http:\/\/ex\/age> .* \.$/);
+  for (const t of r.reason.triples) assert.match(t, / \.$/);
   assert.equal(r.classification, null);
+});
+
+test('an undecided datatype question answers DatatypeUnknown with its triples', async () => {
+  const r = await checkOwlDl(
+    `${TBOX} :d a owl:DatatypeProperty ; rdfs:range [ a rdfs:Datatype ; owl:onDatatype xsd:string ; owl:withRestrictions ( [ xsd:pattern "\\\\p{IsBasicLatin}+" ] ) ] . :a :d "x" .`,
+  );
+  assert.equal(r.consistent, 'unknown');
+  assert.equal(r.reason.kind, 'DatatypeUnknown');
+  assert.ok(r.reason.triples.length > 0);
 });
 
 test('an extraction refusal resolves with the refusal as reason', async () => {
@@ -140,6 +156,8 @@ test('N-Triples input and budget options', async () => {
 
   await assert.rejects(checkOwlDl(TBOX, undefined, { budget: { maxSteps: -1 } }), TypeError);
   await assert.rejects(checkOwlDl(TBOX, undefined, { budget: { maxNodes: 1.5 } }), TypeError);
+  await assert.rejects(checkOwlDl(TBOX, undefined, { budget: { maxNodes: 2 ** 32 } }), TypeError);
+  assert.equal((await checkOwlDl(TBOX, undefined, { budget: { maxNodes: 2 ** 32 - 1 } })).consistent, true);
 });
 
 test('a parse error rejects', async () => {

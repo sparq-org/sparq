@@ -309,25 +309,55 @@ fn malformed_key_sharings_are_refused() {
     }
 }
 
-/// A source whose `(n, t)` differs from the backend's is refused before any draw.
+/// A source whose `(n, t)` differs from the backend's is refused by the up-front
+/// check in `distinct_hidden_pairs_slots_through`, BEFORE the sort-and-scan
+/// stage draws anything.
+///
+/// The shape matters: three pairs (one a duplicate) at `B = 4` is a shape whose
+/// OWN stage draws — each row's two keys are shared as the holder's own input
+/// before any comparison, the sites `malformed_key_sharings_are_refused` aims
+/// at. With the up-front check deleted, the output stage's own
+/// `require_source_matches` would still raise the same error, so the assertions
+/// below are on the draw count and not only on the error.
 #[test]
 fn distinct_through_refuses_a_source_that_does_not_match_the_backend() {
-    use crate::randomness::test_sources::MisreportedThresholdSource;
-    let backend = ShamirBackend::new_seeded(3, 0xD15C9).unwrap();
-    let pairs = vec![pair(1, 2, "a", "b")];
-    let mut lying = MisreportedThresholdSource {
-        inner: backend.dealer(),
-        t: 0,
+    use crate::randomness::test_sources::{
+        DrawCountingSource, MisreportedThresholdSource, RecordingSource,
     };
-    let mut other = ShamirBackend::new_seeded(5, 0xD15C9).unwrap().dealer();
-    for source in [
-        &mut lying as &mut dyn crate::randomness::DistributedRandomness,
-        &mut other,
-    ] {
-        match distinct_hidden_pairs_slots_through(source, &backend, &pairs, 1) {
-            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
-            other => panic!("a mismatched source must be refused, got {other:?}"),
+    let backend = ShamirBackend::new_seeded(3, 0xD15C9).unwrap();
+    let pairs = vec![
+        pair(1, 2, "a", "b"),
+        pair(5, 6, "e", "f"),
+        pair(1, 2, "a", "b"),
+    ];
+
+    // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
+    // whether anything was drawn before the refusal.
+    let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0xD15C9).unwrap().dealer());
+    match distinct_hidden_pairs_slots_through(&mut rec, &backend, &pairs, 4) {
+        Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
+        other => panic!("a wrong-n source must be refused, got {other:?}"),
+    }
+    assert!(
+        rec.log.is_empty(),
+        "drew {} times before refusing",
+        rec.log.len()
+    );
+
+    // Misreported `t`: canonically SHAPED sharings, so only the source-match
+    // check can catch it. Counted through a wrapper, since `RecordingSource`
+    // wraps a real dealer and so cannot misreport a threshold.
+    for t in [0, 2] {
+        let mut lying = MisreportedThresholdSource {
+            inner: backend.dealer(),
+            t,
+        };
+        let mut counted = DrawCountingSource::new(&mut lying);
+        match distinct_hidden_pairs_slots_through(&mut counted, &backend, &pairs, 4) {
+            Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
+            other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
         }
+        assert_eq!(counted.draws(), 0, "t={t}: drew before refusing");
     }
 }
 

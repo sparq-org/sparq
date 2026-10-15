@@ -703,6 +703,31 @@ pub async fn aside<S: Store + 'static>(
     )
 }
 
+/// [`allowed`] as for a URI where nothing is (no metadata, and only a container's format, which is
+/// its listing's): what a caller other than the owner is told about a resource that was not there
+/// before a change in flight began.
+pub async fn allowed_absent<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<bool, ServerError> {
+    if state.cfg.open || is_owner(state, agent) {
+        return Ok(true);
+    }
+    // A container's format is its listing's, whatever is stored; nothing else has one.
+    let format = uri.ends_with('/').then(|| LWS_JSON.to_string());
+    decide(
+        state,
+        action,
+        uri,
+        agent,
+        &ResourceMeta::default(),
+        Some(format),
+    )
+    .await
+}
+
 /// What a decision about a resource rests on, taken while the resource is there: its metadata
 /// and its format. A Delete is announced once the resource is gone, so each delivery of it is
 /// authorized against this snapshot (and the grants as they stand then).

@@ -105,7 +105,9 @@ Generate the DPoP proof for the exact HTTP method and target URI. Reusing a
 proof fails because its `jti` is replay-protected. A valid token proves identity
 but does not bypass WAC; the applicable resource or inherited container ACL
 must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
-`acl:Control` mode.
+`acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
+it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
+the new `ETag` only to a writer that may read the target.
 
 A rule may name its subject with `acl:agent`, `acl:agentClass foaf:Agent` (public)
 or `acl:AuthenticatedAgent`, or `acl:agentGroup`. A group grant resolves only when
@@ -205,7 +207,10 @@ same bytes.
 
 Use a trailing slash for containers. A resource and container cannot coexist at
 slash-equivalent paths. ACL resources use the sibling `.acl` convention and
-are themselves protected by `acl:Control`.
+are themselves protected by `acl:Control`. A name ending in `.meta` (any case, %-decoded too)
+is where the LWS surface keeps a resource's linkset record, so the LDP surface answers `404` for
+it, for a container of that name and for anything under one, on every method a request is routed
+for (a CORS preflight is answered before routing), whichever surfaces are enabled.
 
 ## Negotiate RDF representations
 
@@ -317,7 +322,8 @@ What the server exposes, all discoverable from the storage description
 - **Storage**: `application/lws+json` containers with paging links, data resources with
   conditional requests and single byte ranges, `POST` with `Slug`, `PUT`, `PATCH` of a JSON
   data resource with RFC 6902 JSON Patch (`application/json-patch+json`), `DELETE` (with
-  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`,
+  `Depth: infinity` for non-empty containers), and RFC 9264 linksets at `{resource}.meta`
+  (a linkset has none of its own: `{resource}.meta.meta` is `404`, or the challenge),
   which take `PATCH` with JSON Patch and `PUT` of a whole `application/linkset+json` document
   (both advertised in `Allow`, the patch format in `Accept-Patch`; a failed precondition gets
   `412`, another content type on a `PUT` `415`). A linkset `PUT` replaces every user-managed link
@@ -368,8 +374,10 @@ What the server exposes, all discoverable from the storage description
   values their texts denote (zero is zero whatever its sign or exponent). A number longer than
   1,024 characters, or whose power of ten does not fit 64 bits, in the patch or the resource, gets
   `422`; a resource whose text is not JSON as written gets `415`. Sizes are those of the JSON as
-  written, and a `test` is charged for what it reads of both sides. A patch that reads the content (`test`, `copy`, `move`) needs
-  Read as well as Modify. A `POST` whose request is cancelled after the member is written is
+  written, and a `test` is charged for what it reads of both sides. A patch reads what it patches (whether
+  even an `add` of one member applies depends on the document's shape, format and size), so a
+  `PATCH`, of a resource or of its linkset, needs Read as well as Modify, and without it is
+  refused (`401`/`403`) before anything about the target answers it. A `POST` whose request is cancelled after the member is written is
   still announced; a `DELETE` that fails, and is being put back, announces nothing. `livez` and
   `readyz` are never
   given to a member of the root container, because the probes answer those paths. Stored metadata that cannot be read
@@ -558,9 +566,17 @@ What the server exposes, all discoverable from the storage description
   `If-None-Match`, or an `If-Unmodified-Since` the write evaluates) needs Read on the target too,
   and on a conditional `POST` Read on the container whose listing it compares (an access request's
   listing is the owner's alone): a writer without it is refused (`401`/`403`) whatever the
-  outcome would have been. A bare `*` asks only whether the target exists and needs no Read (nor
-  reads a listing, so a page past the last is no `404` then). A `PUT`'s or `PATCH`'s `204` carries
-  the new `ETag`, of a resource or a linkset, only to a writer that may read the result.
+  outcome would have been. A bare `*` asks only whether the target exists and needs no Read: a writer learns
+  that much from any write's response (`201` or `204`, a `DELETE`'s `404`). The Read check comes
+  first, before the target's existence, format or metadata decide anything, and an
+  `If-Unmodified-Since` counts as a comparison on every route that evaluates dates, whether or not
+  the target has a recorded time. A
+  precondition that compares no state (`*`, or a field the write ignores or cannot read) is
+  evaluated on the target's existence alone, without its listing, so neither a page past the last
+  nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
+  root compares its public storage description, which needs no Read. A data `PUT`'s, or any
+  `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
+  that may read the result; a linkset `PUT`'s `204` carries none.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link
