@@ -1442,6 +1442,106 @@ _:p solid:inserts { <https://pod.example/alice/drop/note#a> <https://e.example/p
     assert_eq!(r.status(), StatusCode::FORBIDDEN);
 }
 
+/// A writer that may append but not read gets the same answer whatever the target holds: an
+/// insert is appended without the stored document being read, so one that does not parse, or is
+/// large, answers as a small well-formed one does.
+#[tokio::test]
+async fn an_append_without_read_follows_the_request_alone() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let large: String = (0..2000)
+        .map(|i| format!("<#s{i}> <https://e.example/p> {i} .\n"))
+        .collect();
+    for (name, body) in [
+        ("good", "<#a> <https://e.example/p> 0 .".to_string()),
+        ("broken", "<#a> <https://e.example/p> \"unterminated".to_string()),
+        ("large", large),
+    ] {
+        let iri = format!("https://pod.example/alice/{name}");
+        store
+            .write(&iri, axum::body::Bytes::from(body), "text/turtle")
+            .await
+            .expect("seed a document");
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#a> a acl:Authorization; acl:agent <{webid}>; acl:accessTo <{iri}>; acl:mode acl:Append."#,
+            webid = common::WEBID
+        );
+        store
+            .write(&format!("{iri}.acl"), axum::body::Bytes::from(acl), "text/turtle")
+            .await
+            .expect("seed its acl");
+    }
+    let h = Harness::with_store(store).await;
+    let mut answers = Vec::new();
+    for name in ["good", "broken", "large"] {
+        let insert = format!(
+            "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> \"v\" . }}.\n"
+        );
+        let r = h
+            .request(
+                "PATCH",
+                &format!("/alice/{name}"),
+                Some("text/n3"),
+                Body::from(insert),
+            )
+            .await;
+        let status = r.status();
+        let mut headers: Vec<(String, String)> = r
+            .headers()
+            .iter()
+            .filter(|(k, _)| k.as_str() != "date")
+            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+            .collect();
+        headers.sort();
+        let body = to_bytes(r.into_body(), usize::MAX).await.unwrap();
+        answers.push((status, headers, body));
+    }
+    assert!(answers[0].0.is_success(), "{:?}", answers[0]);
+    assert_eq!(answers[0], answers[1], "a document that does not parse");
+    assert_eq!(answers[0], answers[2], "a large document");
+}
+
+/// Whether a container may be deleted depends on what it holds, so a writer that may not read it
+/// gets the denial for an empty one and a full one alike.
+#[tokio::test]
+async fn a_container_delete_without_read_is_denied_whatever_it_holds() {
+    let h = Harness::new().await;
+    for (c, members) in [("/alice/wo-empty/", 0), ("/alice/wo-full/", 2)] {
+        h.make_container(c).await;
+        for i in 0..members {
+            let r = h
+                .request(
+                    "PUT",
+                    &format!("{c}m{i}"),
+                    Some("text/turtle"),
+                    Body::from(TURTLE),
+                )
+                .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#w> a acl:Authorization; acl:agent <{webid}>;
+     acl:accessTo <https://pod.example{c}>; acl:default <https://pod.example{c}>;
+     acl:mode acl:Write."#,
+            webid = common::WEBID
+        );
+        let r = h
+            .request(
+                "PUT",
+                &format!("{c}.acl"),
+                Some("text/turtle"),
+                Body::from(acl),
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let r = h.request("DELETE", c, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN, "{c}");
+    }
+}
+
 #[tokio::test]
 async fn a_posts_tag_describes_only_what_was_posted() {
     // A POST's `ETag` goes to a writer that may not read the container (an Append drop box), so it

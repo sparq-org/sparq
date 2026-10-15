@@ -49,7 +49,8 @@ use crate::ldp::content::{
     serialize_triples, serialize_triples_negotiated, validate_rdf, RdfFormat,
 };
 use crate::ldp::patch::{
-    apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update, PatchKind,
+    appended_ntriples, apply_patch, classify_patch_media_type, parse_n3_patch,
+    parse_sparql_update, PatchKind,
 };
 use crate::ldp::range::{self, RangeOutcome};
 use crate::ldp::target::{parse_target, LdpTarget};
@@ -1507,6 +1508,16 @@ pub async fn delete_handler<S: Store>(
     // outcome. Folded BEFORE the existence probe.
     state.guard_conditional_requires_read(&target.iri, &headers, &granted, &token)?;
 
+    // Whether a container may go depends on what it holds (a non-empty one is a 409), so deleting
+    // one also needs Read on it: without, the requester gets the denial, whatever it holds.
+    if target.is_container && !may_read(&target.iri, &granted) {
+        return Err(if token.web_id.is_none() {
+            state.unauthenticated()
+        } else {
+            ServerError::Forbidden
+        });
+    }
+
     let current = state.store.meta(&target.iri).await?;
     // A DELETE of a non-existent target is reported through the SAME denial surface as a permission
     // failure (401 anonymous / 403 authenticated), NOT a 404 — so a DELETE cannot be used as an
@@ -1727,20 +1738,43 @@ pub async fn patch_handler<S: Store>(
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
 
+    // A writer that may not read the target appends to it without its content being read: the
+    // inserted statements are appended as text to a Turtle, N-Triples or N-Quads document, so the outcome
+    // follows the request, the requester's permissions and the stored type alone, never what is
+    // stored (whether it parses, how large its graph is). Any other stored type is refused to it.
+    // (Only an unconditional insert-only patch gets here without Read.)
+    if let (Some(res), false) = (&current, reader) {
+        let appendable = matches!(
+            classify(Some(&res.meta.content_type)),
+            Ok(RdfFormat::Turtle | RdfFormat::NTriples | RdfFormat::NQuads)
+        );
+        let Some(text) = appended_ntriples(&patch).filter(|_| appendable) else {
+            return Err(unread(ServerError::Forbidden));
+        };
+        let text = text?;
+        let mut body = Vec::with_capacity(res.body.len() + text.len() + 1);
+        body.extend_from_slice(&res.body);
+        if !body.is_empty() && !body.ends_with(b"\n") {
+            body.push(b'\n');
+        }
+        body.extend_from_slice(text.as_bytes());
+        let meta = state
+            .store
+            .write(&target.iri, Bytes::from(body), &res.meta.content_type)
+            .await?;
+        #[cfg(not(target_arch = "wasm32"))]
+        state
+            .notifications
+            .notify(&target.iri, ActivityType::Update, None)
+            .await;
+        return Ok(write_response(true, &meta, &target, false));
+    }
+
     // Determine the existing triples + the stored format (default Turtle for a new resource).
     let (existing_triples, stored_format) = match &current {
         Some(res) => {
-            // Nor is a resource that is not RDF parsed for it: whatever its bytes, the patch is
-            // refused, so its outcome follows the stored type alone, not the stored content.
-            let classified = classify(Some(&res.meta.content_type));
-            if classified.is_err() && !reader {
-                return Err(unread(ServerError::Forbidden));
-            }
-            let fmt = classified.unwrap_or(RdfFormat::Turtle);
-            (
-                parse_to_triples(fmt, &res.body, &target.iri).map_err(unread)?,
-                fmt,
-            )
+            let fmt = classify(Some(&res.meta.content_type)).unwrap_or(RdfFormat::Turtle);
+            (parse_to_triples(fmt, &res.body, &target.iri)?, fmt)
         }
         None => {
             // Create-on-PATCH: only an insert-only patch can create a resource. A delete on a missing

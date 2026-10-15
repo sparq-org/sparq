@@ -210,6 +210,26 @@ pub fn parse_n3_patch(body: &[u8], base_iri: &str) -> Result<N3Patch, ServerErro
     })
 }
 
+/// The N-Triples text an unconditional, insert-only `patch` appends to a Turtle, N-Triples or
+/// N-Quads document: one statement a line. Appending it to a well-formed document of those formats gives
+/// a well-formed document whose graph is the union, without parsing what is stored (templates
+/// hold no blank nodes, so no label can meet one the document uses). `None` for any other patch.
+pub fn appended_ntriples(patch: &N3Patch) -> Option<Result<String, ServerError>> {
+    if !patch.conditions.is_empty() || !patch.deletes.is_empty() {
+        return None;
+    }
+    Some(
+        instantiate_all(&patch.inserts, &Binding::default()).map(|inserts| {
+            let mut text = String::new();
+            for t in inserts {
+                text.push_str(&t.to_string());
+                text.push_str(" .\n");
+            }
+            text
+        }),
+    )
+}
+
 /// Apply a parsed patch to the target's existing triples, returning the new triple set.
 ///
 /// Semantics (Solid-Protocol-aligned):
@@ -1461,5 +1481,37 @@ mod tests {
             }
             other => panic!("expected UnprocessablePatch, got {other:?}"),
         }
+    }
+
+    /// The appended text joins the stored document's graph: the union, whatever prefixes, base
+    /// and final comment the document has.
+    #[test]
+    fn an_appended_insert_is_the_union() {
+        use crate::ldp::content::{parse_to_triples, RdfFormat};
+        let base = "https://pod.example/doc";
+        let stored = "@prefix ex: <https://e.example/> .\n@base <https://other.example/> .\n\
+<#a> ex:p \"x\"@en . # no newline after this comment";
+        let patch = parse_n3_patch(
+            b"@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <#b> <https://e.example/q> \"v\\n\" , 3 . }.",
+            base,
+        )
+        .unwrap();
+        let text = appended_ntriples(&patch).unwrap().unwrap();
+        let mut body = stored.as_bytes().to_vec();
+        body.push(b'\n');
+        body.extend_from_slice(text.as_bytes());
+        let mut got = parse_to_triples(RdfFormat::Turtle, &body, base).unwrap();
+        let mut want = parse_to_triples(RdfFormat::Turtle, stored.as_bytes(), base).unwrap();
+        want.extend(apply_patch(&[], &patch).unwrap());
+        let key = |t: &Triple| t.to_string();
+        got.sort_by_key(key);
+        want.sort_by_key(key);
+        assert_eq!(got, want);
+        let deleting = N3Patch {
+            deletes: patch.inserts.clone(),
+            ..patch
+        };
+        assert!(appended_ntriples(&deleting).is_none());
     }
 }
