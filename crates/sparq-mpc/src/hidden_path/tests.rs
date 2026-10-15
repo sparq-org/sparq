@@ -563,6 +563,62 @@ fn seeded_exact_k_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
     );
 }
 
+/// THE guard for the output stage's payload select on the two-hop chain
+/// `a → b → c`: only the pair `(a, c)` is connected, so every other endpoint-pair
+/// candidate is rejected — and no rejected pair's endpoint row may appear among the
+/// opened payloads of the `B` slots. The opened set must be exactly `{(a, c)}` plus
+/// the dummy encoding (two unbound cells).
+///
+/// Asserted by comparing the candidates' OWN payload rows against what each slot
+/// actually opened to, through `exact_k_chain_candidates_and_opened_rows` — the
+/// same candidate construction and the same output stage the public path runs.
+#[test]
+fn rejected_two_hop_pairs_payloads_open_to_the_dummy_encoding() {
+    let render = |row: &[Option<Term>]| format!("{row:?}");
+    for seed in 0..8u64 {
+        let backend = ShamirBackend::new_seeded(3, 0x9A80 + seed).unwrap();
+        let (edges, _) = hidden_edges(&PIN_EDGES);
+        let (candidates, slots) =
+            exact_k_chain_candidates_and_opened_rows(&mut backend.dealer(), &backend, &edges, 2, 6)
+                .unwrap();
+        assert_eq!(slots.len(), 6, "seed {seed}: exactly B slots");
+        let connected = vec![Some(iri_term("http://ex/a")), Some(iri_term("http://ex/c"))];
+        let pad: Vec<Option<Term>> = vec![None, None];
+        // Every candidate whose endpoint row is not the connected pair is rejected;
+        // its row must not be among the opened payloads.
+        let opened: Vec<String> = slots.iter().map(|(_, r)| render(r)).collect();
+        let mut rejected_seen = 0usize;
+        for c in &candidates {
+            if c.payload != connected {
+                rejected_seen += 1;
+                assert!(
+                    !opened.contains(&render(&c.payload)),
+                    "seed {seed}: a rejected pair's endpoint row was opened: {}",
+                    render(&c.payload)
+                );
+            }
+        }
+        assert!(
+            rejected_seen > 0,
+            "seed {seed}: fixture must contain rejected pairs"
+        );
+        // The opened set is exactly the connected pair plus the dummy encoding.
+        let distinct: BTreeSet<String> = opened.iter().cloned().collect();
+        assert_eq!(
+            distinct,
+            BTreeSet::from([render(&connected), render(&pad)]),
+            "seed {seed}: opened payload set"
+        );
+        for (is_real, row) in &slots {
+            if *is_real {
+                assert_eq!(row, &connected, "seed {seed}");
+            } else {
+                assert_eq!(row, &pad, "seed {seed}: dummy slot payload");
+            }
+        }
+    }
+}
+
 /// The COMPLETE draw sequence of the exactly-2 chain stage (entry count and an
 /// order-sensitive fingerprint over every method and returned `y`).
 ///
@@ -586,7 +642,7 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
     assert_eq!(rec.log.len(), 1957);
     // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
     assert_eq!(fingerprint(&rec.log[..1920]), 0x1013_9382_581b_a7e3);
-    assert_eq!(fingerprint(&rec.log), 0xbadc_7b13_baeb_fc0f);
+    assert_eq!(fingerprint(&rec.log), 0xbea3_3cb0_9754_016e);
     let suffix: Vec<&str> = rec.log[1920..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,

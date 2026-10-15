@@ -733,7 +733,7 @@ fn seeded_bounded_stage_transcript_is_pinned() {
     assert_eq!(rec.log.len(), 1969);
     // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
     assert_eq!(fingerprint(&rec.log[..1932]), 0x690e_cad1_cdf7_7eb0);
-    assert_eq!(fingerprint(&rec.log), 0x8ac7_aa74_a625_9a25);
+    assert_eq!(fingerprint(&rec.log), 0xab2f_413b_6e68_ba7a);
     let suffix: Vec<&str> = rec.log[1932..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,

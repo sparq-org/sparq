@@ -105,8 +105,11 @@
 //!
 //! ## Communication / round cost (MODELLED — counted, not measured)
 //!
-//! [`ObliviousOutputCost`] reports what a real deployment would pay: `B` select
-//! multiplications (one round, all in parallel), the shuffle's switch count +
+//! [`ObliviousOutputCost`] reports what a real deployment would pay: `B` tag
+//! select multiplications plus `B · limb_capacity` payload-limb select
+//! multiplications — the payload is selected against the dummy encoding limb by
+//! limb, so a slot costs `1 + limb_capacity` multiplications, all still in ONE
+//! parallel round — the shuffle's switch count +
 //! depth ([`crate::oblivious::ShuffleCost`]) — with the switch count scaled by the
 //! packed-entry WIDTH (tag + payload limbs), since a real secret-control shuffle
 //! pays a conditional swap per field element per switch and the payloads ride
@@ -142,9 +145,12 @@ const PAD_LIMB: u64 = 0;
 /// row shape `sparq_engine::QueryResult` / [`PartialResult`] use (`None` = unbound).
 type PayloadRow = Vec<Option<Term>>;
 
-/// Internal result of [`shuffle_with_payloads`]: the co-permuted (tag column,
-/// payload rows) plus the shuffle's modelled cost.
-type ShuffledColumn = (SecretColumn, Vec<PayloadRow>, ShuffleCost);
+/// Internal result of [`shuffle_with_payloads`]: the co-permuted tag column and
+/// OPENED payload-limb blocks (one block per slot, in shuffled order — decoding is
+/// the caller's step, after it has classified the slot by its tag), the shuffle's
+/// modelled cost, and the number of payload-limb select multiplications the stage
+/// performed (one per limb per slot).
+type ShuffledColumn = (SecretColumn, Vec<Vec<Fp>>, ShuffleCost, usize);
 
 /// A single candidate row entering the oblivious output path: the disclosed
 /// payload terms that would be emitted **on a match**, plus the match decision.
@@ -193,10 +199,20 @@ pub enum MatchBit {
 pub struct ObliviousOutputCost {
     /// The public padded bound `B` (number of slots revealed).
     pub bound: usize,
-    /// Select multiplications: one per slot (`bit·real_tag`), all in a single
+    /// Tag select multiplications: one per slot (`bit·real_tag`), all in a single
     /// parallel round.
     pub select_mults: usize,
-    /// Degree-`2t` opens performed at reveal (one per slot).
+    /// Payload-limb select multiplications: one per packed payload limb per slot
+    /// (`PAD + sel·(limb − PAD)`), all in the same parallel round as the tag
+    /// select. So a slot costs `1 + limb_capacity` multiplications in total, where
+    /// `limb_capacity` is the public uniform packed-payload width — the payload is
+    /// selected against the dummy encoding limb by limb, not carried through
+    /// unselected.
+    pub payload_select_mults: usize,
+    /// Degree-`2t` opens of the slot TAGS performed at reveal (one per slot). The
+    /// payload limbs are opened too (also at degree `2t` now that they are
+    /// selected products), inside the shuffle step; this field counts the tag
+    /// opens only, as it always has.
     pub opens: usize,
     /// The shuffle's cost over `B` slots (switch count + network depth). The
     /// `switches` count is scaled by the packed-entry WIDTH (tag + payload limbs):
@@ -247,12 +263,18 @@ pub type ObliviousOutput = (Vec<OutputSlot>, ObliviousOutputCost);
 ///    `tag_out = sel · real_tag` (one multiplication; a non-match has `sel = 0` so
 ///    the tag opens to the dummy sentinel `0`). The payload is encoded into
 ///    secret-shared `Fp` limbs that travel THROUGH the shuffle locked to the tag
-///    (so the permutation is never opened — Copilot review #93).
+///    (so the permutation is never opened — Copilot review #93), and **each limb
+///    is selected against the DUMMY encoding by the same selector**:
+///    `limb_out = PAD + sel · (limb − PAD)`. A slot with `sel = 0` therefore
+///    carries the dummy limb block, so its opened payload is the dummy encoding
+///    and decodes to the same all-unbound row a pure padding slot decodes to — the
+///    tag and the payload agree on what the slot is.
 /// 4. **Oblivious-shuffle** the (tag, payload-limbs) entry together so output
 ///    position is independent of input position (substrate `shuffle`).
-/// 5. **Open exactly `B` tags** at degree `2t` (and the payload limbs in the same
-///    shuffled order); emit [`OutputSlot::Row`] where the tag is the real sentinel,
-///    [`OutputSlot::Dummy`] where it is `0`, and FAIL CLOSED on any other value.
+/// 5. **Open exactly `B` tags** at degree `2t` (and the payload limbs, also at
+///    degree `2t`, in the same shuffled order); emit [`OutputSlot::Row`] where the
+///    tag is the real sentinel, [`OutputSlot::Dummy`] where it is `0`, and FAIL
+///    CLOSED on any other value.
 ///
 /// ## Fail-closed bound contract
 ///
@@ -295,16 +317,19 @@ pub fn oblivious_set_output(
 ///
 /// ## The tag column is degree `2t` — what that means for a recombining source
 ///
-/// Step 3's `tag_out = sel · real_tag` is a [`shamir::mul_shares_raw`] product, so
-/// the tag element of every packed entry is a degree-`2t` sharing while the
-/// payload limbs are degree `t`: the column handed to the shuffle is
-/// MIXED-degree. That is fine for a switch-network source, which only moves whole
-/// entries and never reads a share
+/// Step 3's `tag_out = sel · real_tag` is a [`shamir::mul_shares_raw`] product and
+/// each `limb_out = PAD + sel · (limb − PAD)` is a product of the same selector
+/// with a locally-shifted limb sharing, so EVERY element of a packed entry — the
+/// tag and all its payload limbs — is a degree-`2t` sharing. (Adding the public
+/// `PAD` constant back is local and does not change the degree.) That is fine for
+/// a switch-network source, which only moves whole entries and never reads a share
 /// ([`DistributedRandomness::oblivious_shuffle`] documents the distinction), and
-/// it is why the dealer path opens the tags at `2 * t` in step 5.
+/// it is why the dealer path opens the tags AND the limbs at `2 * t` in step 5.
+/// Both opens need `n >= 2t + 1`, which this function already requires for the
+/// select multiplication.
 ///
 /// A source that shuffles by RECOMBINING — as a dealer-less one must — requires
-/// degree-`<= t` elements and refuses this column
+/// degree-`<= t` elements and refuses this column (the tag and every limb)
 /// ([`crate::prss::PrssRandomness`]). Routing the output stage through such a
 /// source therefore needs the tags degree-reduced through the seam
 /// ([`shamir::degree_reduce_through`]) before the shuffle, with step 5's open
@@ -321,6 +346,53 @@ pub(crate) fn oblivious_set_output_through(
     payload_arity: usize,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    let (decoded, cost) =
+        oblivious_set_output_decoded_through(source, backend, candidates, payload_arity, bound)?;
+    // A slot whose tag is the dummy sentinel carries the dummy limb block (the
+    // per-limb select against the dummy encoding put it there — see
+    // `shuffle_with_payloads`), so its decode is the all-unbound row. We CHECK that
+    // rather than assume it: the tag and the payload must agree on what the slot
+    // is, and a disagreement is a refusal, not a quietly-emitted `Dummy`.
+    let dummy_row: PayloadRow = vec![None; payload_arity];
+    let mut out: Vec<OutputSlot> = Vec::with_capacity(bound);
+    for (is_real, row) in decoded {
+        if is_real {
+            out.push(OutputSlot::Row(row));
+        } else if row == dummy_row {
+            out.push(OutputSlot::Dummy);
+        } else {
+            return Err(MpcError::Tampered {
+                detail: "oblivious_set_output: a slot tagged as a dummy did not carry the dummy \
+                         payload encoding — the per-limb select against the dummy encoding did \
+                         not hold; refusing rather than emitting the slot"
+                    .to_string(),
+                cheaters: Vec::new(),
+            });
+        }
+    }
+    Ok((out, cost))
+}
+
+/// One opened slot of the output stage before it is narrowed to an
+/// [`OutputSlot`]: whether its tag was the real-row sentinel, and the payload row
+/// its OPENED limbs decoded to. Every slot's payload is decoded, including the
+/// dummy-tagged ones whose row [`OutputSlot::Dummy`] drops.
+type DecodedSlot = (bool, PayloadRow);
+
+/// [`oblivious_set_output_through`]'s whole protocol, stopping one step short: the
+/// `B` opened slots as `(is_real, decoded_row)` rather than [`OutputSlot`]s.
+///
+/// This is where the stage's steps 1–5 live. Keeping the dummy slots' decoded rows
+/// (instead of dropping them with the public `Dummy`) is what lets the tests see
+/// what a non-matching candidate's payload actually opened to — the pad, not its
+/// row — on the real path rather than on a re-implementation of it.
+fn oblivious_set_output_decoded_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    candidates: &[Candidate],
+    payload_arity: usize,
+    bound: usize,
+) -> Result<(Vec<DecodedSlot>, ObliviousOutputCost), MpcError> {
     // Up front, before anything is drawn: a source whose (n, t) disagrees with the
     // backend would deal sharings that do not compose with the backend's products
     // and opens.
@@ -360,9 +432,13 @@ pub(crate) fn oblivious_set_output_through(
 
     // --- Step 1–3: build per-slot (tag-sharing, payload) selecting on the bit. ---
     // tag_share is a degree-`2t` sharing (product of the degree-`t` selector and a
-    // degree-`t` real_tag sharing). payload travels in cleartext co-indexed.
+    // degree-`t` real_tag sharing). The selector is kept alongside so the SAME bit
+    // can select the payload limbs against the dummy encoding in step 3's payload
+    // half (`shuffle_with_payloads`); the payload itself travels co-indexed in
+    // cleartext only until it is encoded there.
     let mut tag_col: SecretColumn = Vec::with_capacity(bound);
     let mut payloads: Vec<Vec<Option<Term>>> = Vec::with_capacity(bound);
+    let mut selectors: Vec<Vec<Share>> = Vec::with_capacity(bound);
 
     for c in candidates {
         let sel = selector_sharing(source, n, &c.matched)?;
@@ -371,8 +447,10 @@ pub(crate) fn oblivious_set_output_through(
         let tag_out = shamir::mul_shares_raw(&sel, &real_tag_share)?;
         tag_col.push(tag_out);
         payloads.push(c.payload.clone());
+        selectors.push(sel);
     }
-    // Pure-dummy padding slots: selector = shared 0 → tag opens to 0 → Dummy.
+    // Pure-dummy padding slots: selector = shared 0 → tag opens to 0 → Dummy, and
+    // the same shared 0 selects the payload limbs to the dummy encoding.
     let dummy_payload: Vec<Option<Term>> = vec![None; payload_arity];
     for _ in candidates.len()..bound {
         let zero_sel = checked_vss_own_input(source, n, Fp::zero())?;
@@ -380,13 +458,15 @@ pub(crate) fn oblivious_set_output_through(
         let tag_out = shamir::mul_shares_raw(&zero_sel, &real_tag_share)?;
         tag_col.push(tag_out);
         payloads.push(dummy_payload.clone());
+        selectors.push(zero_sel);
     }
 
     // --- Step 4: oblivious-shuffle the tag column AND co-permute the payloads. ---
     // Payloads ride THROUGH the shuffle as secret shares (the permutation is never
-    // opened) — see `shuffle_with_payloads` (Copilot review #93, thread 1).
-    let (shuffled_tags, shuffled_payloads, shuffle_cost) =
-        shuffle_with_payloads(source, n, t, tag_col, payloads, payload_arity)?;
+    // opened) — see `shuffle_with_payloads` (Copilot review #93, thread 1), which
+    // also applies the per-limb select against the dummy encoding.
+    let (shuffled_tags, shuffled_limbs, shuffle_cost, payload_select_mults) =
+        shuffle_with_payloads(source, n, t, tag_col, payloads, &selectors, payload_arity)?;
 
     // --- Step 5: open exactly `B` tags at degree 2t; classify each slot. ---
     // FAIL CLOSED on an unexpected tag (Copilot review #93, thread 3): the only
@@ -396,13 +476,16 @@ pub(crate) fn oblivious_set_output_through(
     // open's detection budget — silently treating it as a dummy could drop a real
     // match without a word. The tag is already opened here, so refusing costs
     // nothing and leaks nothing extra; we surface it as a typed `Tampered` error.
-    let mut out: Vec<OutputSlot> = Vec::with_capacity(bound);
-    for (tag_share, payload) in shuffled_tags.iter().zip(shuffled_payloads) {
+    // The tag is classified BEFORE the payload limbs are decoded, so an out-of-set
+    // tag is refused rather than surfacing as a decode error on limbs the malformed
+    // selector scaled.
+    let mut out: Vec<DecodedSlot> = Vec::with_capacity(bound);
+    for (tag_share, limbs) in shuffled_tags.iter().zip(shuffled_limbs) {
         let tag = shamir::reconstruct_degree(tag_share, 2 * t)?;
-        if tag == real_tag {
-            out.push(OutputSlot::Row(payload));
+        let is_real = if tag == real_tag {
+            true
         } else if tag == Fp::zero() {
-            out.push(OutputSlot::Dummy);
+            false
         } else {
             return Err(MpcError::Tampered {
                 detail: format!(
@@ -413,16 +496,40 @@ pub(crate) fn oblivious_set_output_through(
                 ),
                 cheaters: Vec::new(),
             });
-        }
+        };
+        let bytes = limbs_to_bytes(&limbs)?;
+        out.push((is_real, decode_payload_row(&bytes, payload_arity)?));
     }
 
     let cost = ObliviousOutputCost {
         bound,
         select_mults: bound,
+        payload_select_mults,
         opens: bound,
         shuffle: shuffle_cost,
     };
     Ok((out, cost))
+}
+
+/// Test-only instrumentation on the real output stage: the `B` opened slots as
+/// `(is_real, decoded_row)`, keeping the payload row that every slot's OPENED
+/// limbs decoded to — including the dummy-tagged slots, whose row the public
+/// [`OutputSlot::Dummy`] drops.
+///
+/// This is the same [`oblivious_set_output_decoded_through`] the public path runs;
+/// nothing is re-implemented and nothing is bypassed. It exists so a test can
+/// compare the candidates' own payload rows against what each slot actually
+/// opened to, which the public return type cannot express.
+#[cfg(test)]
+pub(crate) fn opened_slot_rows_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    candidates: &[Candidate],
+    payload_arity: usize,
+    bound: usize,
+) -> Result<Vec<DecodedSlot>, MpcError> {
+    oblivious_set_output_decoded_through(source, backend, candidates, payload_arity, bound)
+        .map(|(slots, _cost)| slots)
 }
 
 /// Resolve a [`MatchBit`] to a degree-`t` secret-shared selector `{0,1}`.
@@ -605,50 +712,100 @@ fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
 /// Each payload row is serialized ([`encode_payload_row`]) and packed into a
 /// FIXED number of `Fp` limbs (`limb_capacity`, the max over all rows so every
 /// entry has identical width — required by the shuffle network and revealing only
-/// the public max payload length), with [`LIMB_END`] padding. Each limb is
-/// secret-shared and packed into the shuffle entry AFTER the tag shares:
+/// the public max payload length), with `PAD_LIMB` padding. Each limb is
+/// secret-shared, **selected against the dummy encoding** (below) and packed into
+/// the shuffle entry AFTER the tag shares:
 /// `[tag shares | limb₁ shares | … | limb_C shares]`. The substrate [`shuffle`]
 /// permutes whole entries by a secret permutation; the limbs ride along locked to
 /// their tag. At reveal, the caller opens the tag AND the payload limbs IN
 /// SHUFFLED ORDER (never the permutation), then decodes the limbs back to the
 /// row — so the only thing the transcript learns is the shuffled multiset of
-/// (tag, payload), with no position→candidate linkage. Opening the payload at a
-/// shuffled position discloses no more than the step-5 row open already does.
+/// (tag, payload), with no position→candidate linkage.
+///
+/// ## The per-limb select against the dummy encoding
+///
+/// A slot's tag is already selected by its secret bit, so a non-matching candidate
+/// opens to the dummy tag. Its PAYLOAD limbs are selected by the same bit, with the
+/// same [`shamir::mul_shares_raw`] product and the same degree handling, against the
+/// DUMMY limb block — the limbs of `encode_payload_row` applied to the all-unbound
+/// row of this arity, padded to `limb_capacity` with `PAD_LIMB`:
+///
+/// ```text
+/// limb_out = PAD + sel · (limb − PAD)
+/// ```
+///
+/// where `PAD` is that limb's dummy value (a PUBLIC constant — the dummy encoding
+/// depends only on the public arity, so subtracting and re-adding it is local and
+/// draws nothing). `sel = 1` reproduces `limb` exactly, so real rows' payloads are
+/// unchanged; `sel = 0` yields the dummy limb block, so the opened payload of a
+/// non-matching candidate is the pad, not its row, and decodes to exactly what a
+/// pure padding slot decodes to. Dummy slots are therefore identical in both their
+/// tag and their payload whether they arose from a non-match or from padding.
+///
+/// Both the tag and every limb are degree-`2t` products, so the limb opens move to
+/// `reconstruct_degree(.., 2 * t)` — the same `n >= 2t + 1` the tag select already
+/// requires.
 fn shuffle_with_payloads(
     source: &mut dyn DistributedRandomness,
     nparties: usize,
     t: usize,
     tag_col: SecretColumn,
     payloads: Vec<PayloadRow>,
+    selectors: &[Vec<Share>],
     payload_arity: usize,
 ) -> Result<ShuffledColumn, MpcError> {
     let n = tag_col.len();
     debug_assert_eq!(payloads.len(), n);
+    debug_assert_eq!(selectors.len(), n);
 
     // Serialize every payload row and size a UNIFORM limb capacity = the max limb
     // count (length prefix + data limbs) over all rows. Uniform width is required
     // by the shuffle network and leaks only the public maximum payload length (all
     // candidate payloads are cleartext to the protocol builder anyway).
     let encoded: Vec<Vec<u8>> = payloads.iter().map(|p| encode_payload_row(p)).collect();
-    let limb_capacity = encoded
+    // The dummy limb block every slot is selected against: the encoding of the
+    // all-unbound row of this arity. It depends only on the PUBLIC arity.
+    let dummy_limbs = bytes_to_limbs(&encode_payload_row(&vec![None; payload_arity]));
+    let mut limb_capacity = encoded
         .iter()
         .map(|b| limb_count_for(b.len()))
         .max()
         .unwrap_or(0);
+    if !encoded.is_empty() {
+        // Every real encoding is at least `payload_arity` bytes (one presence flag
+        // per column), so this is already the max; take it explicitly so the dummy
+        // block always fits the uniform width.
+        limb_capacity = limb_capacity.max(dummy_limbs.len());
+    }
+    // The dummy block padded out to the uniform width, so limb `i` has a public
+    // pad value for every `i < limb_capacity`.
+    let mut dummy_block = dummy_limbs;
+    dummy_block.resize(limb_capacity, Fp::new(PAD_LIMB));
 
-    // Pack each entry: [tag shares | limb shares...], every limb a degree-`t`
-    // sharing, padded to `limb_capacity` with shared PAD_LIMB so all entries are
-    // identical width (the explicit length prefix makes padding content irrelevant).
+    // Pack each entry: [tag shares | limb shares...]. Each limb is shared at
+    // degree `t`, then selected against its dummy value — a single multiplication
+    // by the slot's selector — so every packed element is degree `2t`. Short rows
+    // are padded to `limb_capacity` with shared PAD_LIMB before the select, so all
+    // entries are identical width (the explicit length prefix makes the padding
+    // content of a REAL row irrelevant to its decode).
     let mut packed: SecretColumn = Vec::with_capacity(n);
-    for (tag, enc) in tag_col.into_iter().zip(&encoded) {
+    let mut payload_select_mults = 0usize;
+    for ((tag, enc), sel) in tag_col.into_iter().zip(&encoded).zip(selectors) {
         let mut entry = tag; // tag shares first
         let limbs = bytes_to_limbs(enc);
-        for limb in &limbs {
-            entry.extend(checked_vss_own_input(source, nparties, *limb)?);
-        }
-        // Pad to uniform width with shared pad limbs.
-        for _ in limbs.len()..limb_capacity {
-            entry.extend(checked_vss_own_input(source, nparties, Fp::new(PAD_LIMB))?);
+        // `dummy_block` is exactly `limb_capacity` long, so iterating it walks the
+        // uniform width and supplies each limb's public pad value.
+        for (i, &pad) in dummy_block.iter().enumerate() {
+            // Draw order is unchanged: the row's own limbs first, then PAD_LIMB up
+            // to the uniform width.
+            let value = limbs.get(i).copied().unwrap_or(Fp::new(PAD_LIMB));
+            let limb_share = checked_vss_own_input(source, nparties, value)?;
+            // limb_out = pad + sel·(limb − pad): local shift, one multiplication,
+            // local shift back. Degree `2t`, like the tag.
+            let shifted = shamir::add_constant(&limb_share, pad.neg());
+            let selected = shamir::mul_shares_raw(sel, &shifted)?;
+            payload_select_mults += 1;
+            entry.extend(shamir::add_constant(&selected, pad));
         }
         packed.push(entry);
     }
@@ -668,12 +825,14 @@ fn shuffle_with_payloads(
         depth_rounds: base_cost.depth_rounds,
     };
 
-    // Split each shuffled entry into (tag shares, limb shares...) and decode the
-    // payload from the OPENED limbs — in shuffled order, never opening the
-    // permutation. Every entry has the same width = nparties·(1 + limb_capacity).
+    // Split each shuffled entry into (tag shares, limb shares...) and OPEN the
+    // limbs — in shuffled order, never opening the permutation. Decoding is left to
+    // the caller, which classifies the slot by its tag first (so a slot whose tag
+    // is out of `{0, REAL_TAG}` is refused before any byte is parsed). Every entry
+    // has the same width = nparties·(1 + limb_capacity).
     let expect_width = nparties * (1 + limb_capacity);
     let mut shuffled_tags: SecretColumn = Vec::with_capacity(n);
-    let mut shuffled_payloads: Vec<Vec<Option<Term>>> = Vec::with_capacity(n);
+    let mut shuffled_limbs: Vec<Vec<Fp>> = Vec::with_capacity(n);
     for entry in shuffled {
         if entry.len() != expect_width {
             return Err(MpcError::Protocol(format!(
@@ -684,16 +843,16 @@ fn shuffle_with_payloads(
         let (tag_part, limb_part) = entry.split_at(nparties);
         shuffled_tags.push(tag_part.to_vec());
 
-        // Open each limb sharing (degree `t`) IN SHUFFLED ORDER and decode.
+        // Open each limb sharing IN SHUFFLED ORDER. The limbs are selected
+        // products, so they open at degree `2t` like the tag.
         let mut limbs: Vec<Fp> = Vec::with_capacity(limb_capacity);
         for limb_shares in limb_part.chunks(nparties) {
-            limbs.push(shamir::reconstruct_degree(limb_shares, t)?);
+            limbs.push(shamir::reconstruct_degree(limb_shares, 2 * t)?);
         }
-        let row_bytes = limbs_to_bytes(&limbs)?;
-        shuffled_payloads.push(decode_payload_row(&row_bytes, payload_arity)?);
+        shuffled_limbs.push(limbs);
     }
 
-    Ok((shuffled_tags, shuffled_payloads, cost))
+    Ok((shuffled_tags, shuffled_limbs, cost, payload_select_mults))
 }
 
 /// Run a hidden-value join with the oblivious set-returning output path, from
@@ -1309,6 +1468,155 @@ mod tests {
         );
     }
 
+    // ---- What a dummy slot's payload opens to -----------------------------------
+
+    /// The encoding every dummy slot's opened limbs must decode to: the all-unbound
+    /// row of this arity, which is exactly what a PURE PADDING slot carries.
+    fn dummy_row(arity: usize) -> Vec<Option<Term>> {
+        vec![None; arity]
+    }
+
+    /// THE guard for the output stage's payload select: across ALL `B` slots, the
+    /// set of opened payload rows is `{the matched candidates' rows} ∪ {the dummy
+    /// encoding}` — a rejected candidate's row is never among them. Asserted by
+    /// comparing the rejected candidates' OWN payload rows against every slot's
+    /// opened row, on the real path via `opened_slot_rows_through`.
+    #[test]
+    fn rejected_candidates_payloads_open_to_the_dummy_encoding() {
+        let rows: Vec<(bool, Vec<Option<Term>>)> = vec![
+            (true, vec![lit("Alice"), lit("Leeds")]),
+            (false, vec![lit("Bob"), lit("York")]),
+            (true, vec![lit("Carol"), lit("Hull")]),
+            (false, vec![lit("Dan"), lit("Ely")]),
+            (false, vec![iri("http://ex/eve"), None]),
+        ];
+        let cands = public_candidates(&rows);
+        let kept: Vec<String> = rows
+            .iter()
+            .filter(|(m, _)| *m)
+            .map(|(_, p)| format!("{p:?}"))
+            .collect();
+        let rejected: Vec<String> = rows
+            .iter()
+            .filter(|(m, _)| !*m)
+            .map(|(_, p)| format!("{p:?}"))
+            .collect();
+        let pad = format!("{:?}", dummy_row(2));
+        for seed in 0..16u64 {
+            let b = ShamirBackend::new_seeded(5, 0xD0_0000 + seed).unwrap();
+            let slots = opened_slot_rows_through(&mut b.dealer(), &b, &cands, 2, 8).unwrap();
+            assert_eq!(slots.len(), 8, "seed {seed}: exactly B slots");
+            let opened: Vec<String> = slots.iter().map(|(_, r)| format!("{r:?}")).collect();
+            // No rejected candidate's row is among the opened payloads.
+            for r in &rejected {
+                assert!(
+                    !opened.contains(r),
+                    "seed {seed}: a rejected candidate's payload row was opened: {r}"
+                );
+            }
+            // The opened set is exactly the matched rows plus the dummy encoding.
+            let mut got: Vec<String> = opened.clone();
+            got.sort();
+            got.dedup();
+            let mut want: Vec<String> = kept.iter().cloned().chain([pad.clone()]).collect();
+            want.sort();
+            want.dedup();
+            assert_eq!(got, want, "seed {seed}: opened payload set");
+            // Every dummy-tagged slot opened to the pad; every real one to its row.
+            for (is_real, row) in &slots {
+                if *is_real {
+                    assert!(kept.contains(&format!("{row:?}")), "seed {seed}");
+                } else {
+                    assert_eq!(row, &dummy_row(2), "seed {seed}: dummy slot payload");
+                }
+            }
+        }
+    }
+
+    /// The same guard in the SECRET-SHARED selector regime: a candidate whose
+    /// shared bit is 0 opens to the dummy encoding, not to its row.
+    #[test]
+    fn rejected_secret_shared_candidates_open_to_the_dummy_encoding() {
+        let b = ShamirBackend::new_seeded(5, 0xD1).unwrap();
+        let mut dealer = b.dealer();
+        let one = dealer.share(Fp::one());
+        let zero = dealer.share(Fp::zero());
+        let cands = vec![
+            Candidate {
+                payload: vec![lit("kept"), lit("row")],
+                matched: MatchBit::SecretShared(one),
+            },
+            Candidate {
+                payload: vec![lit("rejected"), lit("row")],
+                matched: MatchBit::SecretShared(zero),
+            },
+        ];
+        let slots = opened_slot_rows_through(&mut dealer, &b, &cands, 2, 4).unwrap();
+        let opened: Vec<String> = slots.iter().map(|(_, r)| format!("{r:?}")).collect();
+        assert!(
+            !opened.contains(&format!("{:?}", vec![lit("rejected"), lit("row")])),
+            "the rejected candidate's row was opened: {opened:?}"
+        );
+        for (is_real, row) in &slots {
+            if !*is_real {
+                assert_eq!(row, &dummy_row(2));
+            }
+        }
+    }
+
+    /// A rejected candidate's opened payload is byte-for-byte the encoding a PURE
+    /// PADDING slot carries, so the two kinds of dummy slot are not distinguishable
+    /// by their payload. Run with a bound larger than the candidate count so both
+    /// kinds are present.
+    #[test]
+    fn a_rejected_candidate_and_a_padding_slot_open_to_the_same_payload() {
+        let b = ShamirBackend::new_seeded(3, 0xD2).unwrap();
+        let cands = public_candidates(&[
+            (false, vec![lit("rejected-a")]),
+            (false, vec![lit(&"rejected-b".repeat(20))]),
+        ]);
+        // B = 5: two rejected candidates and three pure padding slots.
+        let slots = opened_slot_rows_through(&mut b.dealer(), &b, &cands, 1, 5).unwrap();
+        assert_eq!(slots.len(), 5);
+        assert!(slots.iter().all(|(is_real, _)| !*is_real));
+        let distinct: std::collections::BTreeSet<String> =
+            slots.iter().map(|(_, r)| format!("{r:?}")).collect();
+        assert_eq!(
+            distinct.len(),
+            1,
+            "a rejected candidate and a padding slot must open to the same payload: {distinct:?}"
+        );
+        assert_eq!(slots[0].1, dummy_row(1));
+    }
+
+    /// The payload-limb select is counted in the modelled cost: one multiplication
+    /// per packed limb per slot, on top of the one tag select per slot. A wider
+    /// payload costs strictly more.
+    #[test]
+    fn payload_select_mults_are_counted_per_limb_per_slot() {
+        let b = ShamirBackend::new_seeded(3, 0xD3).unwrap();
+        let narrow = public_candidates(&[(true, vec![lit("x")])]);
+        let wide = public_candidates(&[(true, vec![lit(&"y".repeat(200))])]);
+        let (_, c_narrow) = oblivious_set_output(&b, &narrow, 1, 4).unwrap();
+        let (_, c_wide) = oblivious_set_output(&b, &wide, 1, 4).unwrap();
+        // The tag select is still one per slot.
+        assert_eq!((c_narrow.select_mults, c_wide.select_mults), (4, 4));
+        // The entry width the shuffle cost already scales by is `1 + limbs`, so the
+        // limb count is recoverable from it and must match the per-slot mult count.
+        for c in [c_narrow, c_wide] {
+            assert_eq!(c.payload_select_mults % c.bound, 0);
+            let limbs = c.payload_select_mults / c.bound;
+            assert!(limbs > 0, "a payload always packs at least a length limb");
+            assert_eq!(c.shuffle.switches % (1 + limbs), 0);
+        }
+        assert!(
+            c_wide.payload_select_mults > c_narrow.payload_select_mults,
+            "a wider payload must cost more limb selects: wide={}, narrow={}",
+            c_wide.payload_select_mults,
+            c_narrow.payload_select_mults
+        );
+    }
+
     // ---- Fail-closed on an out-of-set opened tag (Copilot #93, thread 3) ---------
 
     /// A `MatchBit::SecretShared` selector that is NOT a sharing of 0/1 makes the
@@ -1425,6 +1733,9 @@ mod output_randomness_seam_tests {
         assert_eq!(cost.opens, 5);
         assert_eq!(cost.shuffle.items, 5);
         assert_eq!(cost.shuffle.switches, 24);
+        // Two payload limbs per slot (length prefix + one data limb): the tag
+        // select is still one per slot, the limb select adds two.
+        assert_eq!((cost.select_mults, cost.payload_select_mults), (5, 10));
         assert_eq!(dealer.draw_fp().value(), 929230798186952631);
 
         // The public entry point mints its own dealer from the same seeded
@@ -1452,7 +1763,11 @@ mod output_randomness_seam_tests {
             ]
             .concat()
         );
-        assert_eq!(fingerprint(&rec.log), 0xa240_163d_d4cf_ba82);
+        // The 20 sharings are unchanged (same values, same order); only the
+        // shuffled column the source returns differs, so the DRAW prefix is pinned
+        // equal to its pre-change value and the full-log fingerprint is the new pin.
+        assert_eq!(fingerprint(&rec.log[..VSS_DRAWS]), 0x1833_380f_332a_d752);
+        assert_eq!(fingerprint(&rec.log), 0x6630_2a41_847f_32c4);
     }
 
     /// Every sharing the output stage draws — selector, real tag, pure-dummy
@@ -1584,6 +1899,9 @@ mod output_randomness_seam_tests {
             ),
             (9, 9, 9, 9, 63, 7)
         );
+        // Each slot's payload packs two limbs (length prefix + one data limb), so
+        // the limb select adds 2 multiplications per slot on top of the tag select.
+        assert_eq!(cost.payload_select_mults, 18);
         let (public, public_cost) = oblivious_set_output_hidden_keys(&b, &left, &right, 9).unwrap();
         assert_eq!(rendered(&public), rendered(&slots));
         assert_eq!(public_cost.shuffle.switches, cost.shuffle.switches);
@@ -1604,7 +1922,14 @@ mod output_randomness_seam_tests {
         let mut rec = RecordingSource::new(b.dealer());
         oblivious_set_output_hidden_keys_through(&mut rec, &b, &left, &right, 9).unwrap();
         assert_eq!(rec.log.len(), 4321);
-        assert_eq!(fingerprint(&rec.log), 0xa585_30af_cfe0_0b05);
+        // The draws are unchanged (same values, same order); only the shuffled
+        // column the source returns differs, so the prefix up to the shuffle is
+        // pinned equal to its pre-change value.
+        assert_eq!(
+            fingerprint(&rec.log[..rec.log.len() - 1]),
+            0x108b_b56f_8b48_8a95
+        );
+        assert_eq!(fingerprint(&rec.log), 0x19a3_e182_ecb3_9943);
         let tail: Vec<&str> = rec.log[rec.log.len() - 28..]
             .iter()
             .map(|(m, _)| *m)

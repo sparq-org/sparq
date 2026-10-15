@@ -490,7 +490,7 @@ fn seeded_distinct_stage_transcript_is_pinned() {
     assert_eq!(rec.log.len(), 8448);
     // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
     assert_eq!(fingerprint(&rec.log[..8418]), 0x5455_9ace_20c7_0f97);
-    assert_eq!(fingerprint(&rec.log), 0xa636_3f2c_e548_9f86);
+    assert_eq!(fingerprint(&rec.log), 0x3160_a4cd_6b1a_3f2f);
     let suffix: Vec<&str> = rec.log[8418..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,

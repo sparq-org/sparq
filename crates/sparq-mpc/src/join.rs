@@ -995,7 +995,33 @@ impl HiddenValueJoin {
         // Output schema: left payload vars then right payload vars (key NOT projected).
         let mut out_vars = left.payload_vars.clone();
         out_vars.extend(right.payload_vars.iter().cloned());
-        let payload_arity = out_vars.len();
+        let candidates = self.fully_oblivious_candidates(source, left, right)?;
+
+        // (3) Route through the oblivious output transform with the SECRET-SHARED
+        // selectors: the oblivious select consumes the shared bit directly (one
+        // `mul_shares_raw` per slot, no open), the slots are shuffled, and exactly
+        // `B` tags are revealed. Nothing per-pair is opened anywhere.
+        oblivious_join::oblivious_join_output_through(
+            source,
+            &self.backend,
+            &candidates,
+            out_vars,
+            bound,
+        )
+    }
+
+    /// Steps (1) and (2) of [`Self::fully_oblivious_batched_join_through`]: the
+    /// candidate row pairs the row-binding permits, each carrying its joined
+    /// payload row and a SECRET-SHARED match bit that is never opened. Split out so
+    /// the candidates (and the payload rows they carry) are reachable without
+    /// re-running the output stage.
+    fn fully_oblivious_candidates(
+        &self,
+        source: &mut dyn DistributedRandomness,
+        left: &BatchedHiddenInput,
+        right: &BatchedHiddenInput,
+    ) -> Result<Vec<Candidate>, MpcError> {
+        let payload_arity = left.payload_vars.len() + right.payload_vars.len();
 
         // (1) Enumerate the candidate row pairs the RowBinding permits — the SAME
         // public candidate structure as `batched_join` (the candidate COUNT is a
@@ -1030,18 +1056,35 @@ impl HiddenValueJoin {
                 matched: MatchBit::SecretShared(match_bit),
             });
         }
+        Ok(candidates)
+    }
 
-        // (3) Route through the oblivious output transform with the SECRET-SHARED
-        // selectors: the oblivious select consumes the shared bit directly (one
-        // `mul_shares_raw` per slot, no open), the slots are shuffled, and exactly
-        // `B` tags are revealed. Nothing per-pair is opened anywhere.
-        oblivious_join::oblivious_join_output_through(
+    /// Test-only instrumentation: the candidates
+    /// [`Self::fully_oblivious_batched_join_through`] builds, together with the
+    /// `(is_real, decoded_row)` of every slot the REAL output stage opens for them.
+    /// Same candidate construction and same output stage as the public path — it
+    /// just keeps the dummy slots' decoded payload rows, which `PartialResult`
+    /// cannot express.
+    #[cfg(test)]
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn fully_oblivious_candidates_and_opened_rows(
+        &self,
+        source: &mut dyn DistributedRandomness,
+        left: &BatchedHiddenInput,
+        right: &BatchedHiddenInput,
+        bound: usize,
+    ) -> Result<(Vec<Candidate>, Vec<(bool, Vec<Option<Term>>)>), MpcError> {
+        require_source_matches(source, &self.backend)?;
+        let payload_arity = left.payload_vars.len() + right.payload_vars.len();
+        let candidates = self.fully_oblivious_candidates(source, left, right)?;
+        let slots = oblivious_join::opened_slot_rows_through(
             source,
             &self.backend,
             &candidates,
-            out_vars,
+            payload_arity,
             bound,
-        )
+        )?;
+        Ok((candidates, slots))
     }
 }
 
@@ -2466,6 +2509,73 @@ mod batched_hidden_value_tests {
         assert_eq!(c1.bound, 5);
     }
 
+    /// THE guard for the output stage's payload select in the batched join: with
+    /// non-matching rows present, no rejected candidate's joined payload row appears
+    /// among the opened payloads of the `B` slots. The opened set is exactly the
+    /// matched rows plus the dummy encoding (two unbound cells).
+    ///
+    /// Asserted by comparing the candidates' OWN payload rows against what each slot
+    /// actually opened to, through `fully_oblivious_candidates_and_opened_rows` — the
+    /// same candidate construction and the same output stage the public path runs.
+    #[test]
+    fn rejected_batched_join_rows_payloads_open_to_the_dummy_encoding() {
+        // Keys 1 and 3 overlap positionally; rows 1 and 3 do not match.
+        let l = [
+            (1u64, vec![lit("a")]),
+            (2, vec![lit("b")]),
+            (3, vec![lit("c")]),
+            (4, vec![lit("d")]),
+        ];
+        let r = [
+            (1u64, vec![lit("p")]),
+            (9, vec![lit("q")]),
+            (3, vec![lit("r")]),
+            (8, vec![lit("s")]),
+        ];
+        let li = positional("L", &["x"], &l);
+        let ri = positional("R", &["y"], &r);
+        let render = |row: &[Option<Term>]| format!("{row:?}");
+        let matched: Vec<Vec<Option<Term>>> =
+            vec![vec![lit("a"), lit("p")], vec![lit("c"), lit("r")]];
+        let pad: Vec<Option<Term>> = vec![None, None];
+        for seed in 0..8u64 {
+            let backend = ShamirBackend::new_seeded(5, 0xB0_0000 + seed).unwrap();
+            let join = HiddenValueJoin::new(backend.clone());
+            let (candidates, slots) = join
+                .fully_oblivious_candidates_and_opened_rows(&mut backend.dealer(), &li, &ri, 6)
+                .unwrap();
+            assert_eq!(slots.len(), 6, "seed {seed}: exactly B slots");
+            let opened: Vec<String> = slots.iter().map(|(_, r)| render(r)).collect();
+            let mut rejected_seen = 0usize;
+            for c in &candidates {
+                if !matched.contains(&c.payload) {
+                    rejected_seen += 1;
+                    assert!(
+                        !opened.contains(&render(&c.payload)),
+                        "seed {seed}: a rejected row's payload was opened: {}",
+                        render(&c.payload)
+                    );
+                }
+            }
+            assert!(
+                rejected_seen > 0,
+                "seed {seed}: fixture must contain rejected candidates"
+            );
+            let distinct: std::collections::BTreeSet<String> = opened.into_iter().collect();
+            let mut want: std::collections::BTreeSet<String> =
+                matched.iter().map(|r| render(r)).collect();
+            want.insert(render(&pad));
+            assert_eq!(distinct, want, "seed {seed}: opened payload set");
+            for (is_real, row) in &slots {
+                if *is_real {
+                    assert!(matched.contains(row), "seed {seed}");
+                } else {
+                    assert_eq!(row, &pad, "seed {seed}: dummy slot payload");
+                }
+            }
+        }
+    }
+
     /// Fail-closed: a `bound` below the candidate count is rejected (never truncates
     /// a candidate, which could drop a true match) — same contract as `batched_join`.
     #[test]
@@ -2891,7 +3001,7 @@ mod randomness_seam_tests {
         );
         // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
         assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
-        assert_eq!(fingerprint(&rec.log), 0x9e6f_a07b_d16e_ee4a);
+        assert_eq!(fingerprint(&rec.log), 0xcf4b_5f4b_0b3b_a661);
 
         let b = ShamirBackend::new_seeded(3, 0xBA7C2).unwrap();
         let join = HiddenValueJoin::new(b.clone());
@@ -2910,7 +3020,7 @@ mod randomness_seam_tests {
             .concat()
         );
         assert_eq!(fingerprint(&rec.log[..6]), 0xbd36_3090_bbad_ff3c);
-        assert_eq!(fingerprint(&rec.log), 0xd02a_c43b_ebf5_4891);
+        assert_eq!(fingerprint(&rec.log), 0x1526_f97b_0b86_7eac);
     }
 
     /// Every key sharing (any row of either column), every equality mask AND every
@@ -3073,7 +3183,7 @@ mod randomness_seam_tests {
             ]
             .concat()
         );
-        assert_eq!(fingerprint(suffix), 0x9b26_e7a1_8617_e84c);
+        assert_eq!(fingerprint(suffix), 0x8bcd_93aa_c917_47ea);
     }
 
     /// A source whose `(n, t)` differs from the backend's is refused before the

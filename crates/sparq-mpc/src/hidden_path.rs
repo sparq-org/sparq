@@ -440,6 +440,29 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
     oblivious_set_output_through(source, backend, &candidates, 2, bound)
 }
 
+/// Test-only instrumentation: the candidates
+/// [`eval_exact_k_chain_hidden_slots_through`] builds, together with the
+/// `(is_real, decoded_row)` of every slot the REAL output stage opens for them.
+/// Same candidate construction and same output stage as the public path — it just
+/// keeps the dummy slots' decoded payload rows, which [`ObliviousOutput`] cannot
+/// express.
+#[cfg(test)]
+#[allow(clippy::type_complexity)]
+pub(crate) fn exact_k_chain_candidates_and_opened_rows(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    edges: &HiddenEdges,
+    k: usize,
+    bound: usize,
+) -> Result<(Vec<Candidate>, Vec<(bool, Vec<Option<Term>>)>), MpcError> {
+    require_source_matches(source, backend)?;
+    check_params(backend, edges, k)?;
+    let candidates = build_candidates(backend, source, edges, k)?;
+    let slots =
+        crate::oblivious_join::opened_slot_rows_through(source, backend, &candidates, 2, bound)?;
+    Ok((candidates, slots))
+}
+
 // =====================================================================
 // sq-py8h.3 — bounded repetition `{1,k}` / `{0,k}` / `p?` + alternation
 // over the SAME hidden edge set, as a union-of-fixed-chains with an
