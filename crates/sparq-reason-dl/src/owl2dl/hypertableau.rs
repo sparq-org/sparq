@@ -572,7 +572,8 @@ impl<'c> Tableau<'c> {
                 .collect();
             for (i, (x, dx)) in members.iter().enumerate() {
                 for (y, dy) in &members[i + 1..] {
-                    if self.probe() {
+                    // A pair scans the named individuals once per object property.
+                    if self.charge(1 + key.roles.len() * named.len()) {
                         // `run` reports the exhaustion before using anything.
                         return KeyStep::Merged;
                     }

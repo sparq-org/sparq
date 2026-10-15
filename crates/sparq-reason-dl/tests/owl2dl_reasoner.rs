@@ -492,10 +492,17 @@ fn keys_identify_named_individuals() {
 #[test]
 fn keys_on_non_simple_properties_are_out_of_fragment() {
     // `a t c t z` gives `a t z`, which a key on `t` would have to see.
-    for key in [":t", ":r"] {
+    let sub = ":t a owl:TransitiveProperty . :t rdfs:subPropertyOf :r .";
+    let chain = ":t owl:propertyChainAxiom ( :t :t ) .";
+    for (roles, key) in [
+        (sub, ":t"),
+        (sub, ":r"),
+        (sub, "[ owl:inverseOf :t ]"),
+        (chain, ":t"),
+    ] {
         let body = format!(
-            "{DECL} :t a owl:TransitiveProperty . :t rdfs:subPropertyOf :r . owl:Thing owl:hasKey ( {key} ) .
-             :z a owl:NamedIndividual . :a :t :c . :c :t :z . :b :t :z . :a owl:differentFrom :b ."
+            "{DECL} {roles} owl:Thing owl:hasKey ( {key} ) .
+             :z a owl:NamedIndividual . :a :t [ :t :z ] . :b :t :z . :a owl:differentFrom :b ."
         );
         match verdict(&body) {
             Consistency::Unknown(UnknownReason::OutOfFragment { construct, .. }) => {
