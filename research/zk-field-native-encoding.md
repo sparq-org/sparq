@@ -1066,9 +1066,9 @@ three, pending the external sign-off.
 
 The band-exclusion rule itself is **met by `DualLeafV2` on the HOST side** (§14.5) as an
 asserted, checkable invariant; `DualLeafV1` retains the in-band tag (§14.4). The
-qualifier is load-bearing: no Noir global or assert names the V2 sentinel, so in-circuit
-a V2 degenerate handle is refused only because it cannot be witnessed through a member's
-range decomposition (§14.5). Registration under CR-G8 / sq-qhy4 is unchanged either way
+qualifier is load-bearing: the `zk/dual-leaf-v2` Noir library mirrors the V2 sentinel and
+its band check, but no proving member imports it, so in-circuit a V2 degenerate handle is
+refused only because it cannot be witnessed through a member's range decomposition (§14.5). Registration under CR-G8 / sq-qhy4 is unchanged either way
 — being checkable is not being audited.
 
 ### 14.4 The shipped `DualLeafV1` host builder (sq-vvfte)
@@ -1139,8 +1139,10 @@ key-derivation mode under its own context string and re-derived with a `u32` cou
 until it falls **outside** the reachable handle band `[0, 2^64) ∪ (p − 2^64, p)`. The
 exclusion is asserted by a host test over `is_in_handle_band`, which is exactly the
 checkable invariant §14.1 asks for, so §14.1's requirement is **met for V2 on the HOST
-side**. The IN-CIRCUIT half remains **open**: no Noir global or assert names the V2
-sentinel, so no member enforces the band exclusion — a member refuses the sentinel only
+side**. The IN-CIRCUIT half remains **open**: the `zk/dual-leaf-v2` Noir library mirrors
+the sentinel as a `global` with `nargo test`-checked band assertions, each literal pinned to
+its host derivation by `crates/sparq-zk/tests/dual_leaf_v2_noir_pin.rs`, but no proving
+member imports it, so no member enforces the band exclusion — a member refuses the sentinel only
 because its `u64` range decomposition (and `filter_value_dl_bool`'s `{0, 1}` constraint)
 cannot represent it. `NO_VALUE`
 mirrors it unfolded, as in V1. The Noir-side compile-time check §14.1 also names is NOT

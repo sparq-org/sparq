@@ -115,8 +115,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left in the plain mode, and a `value_none()` re-derived until it falls outside the reachable
   value-handle band, which `is_in_handle_band` decides and a test asserts — the checkable invariant
   `research/zk-field-native-encoding.md` §14.1 asks for, discharging that reserved-tag requirement on
-  the HOST side. The in-circuit half stays open: no Noir global or assert names the sentinel, so a
-  member refuses it only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
+  the HOST side. The in-circuit half stays open: the `zk/dual-leaf-v2` Noir library mirrors the
+  sentinel and its band check, but no proving member imports it, so a member refuses the sentinel
+  only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
   unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
   §14.1 `LANG_NONE` separation is asserted on the host side only (see the hardening entry below). Both versions carry the same #769-accepted INV-VL
   downgrade; not externally audited (CR-G8 / sq-qhy4).

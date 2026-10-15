@@ -192,6 +192,16 @@ crates = ["sparq-reason"]
 pattern = "bench/zk-compose/**"
 crates = ["sparq-zk-compose"]
 
+# The DualLeafV2 sentinel/constants Noir mirror, include_str!'d by sparq-zk's
+# tests/dual_leaf_v2_noir_pin.rs (the host/circuit pin: every `global` in that
+# .nr must equal its dual_leaf_v2 host derivation). A literal edit there is
+# exactly a change that must re-run sparq-zk, so the file is attributed to it.
+# It sits OUTSIDE zk/compose on purpose — every *.nr under zk/compose is
+# sha256-pinned by the bench/zk-compose measurement evidence.
+[[map]]
+pattern = "zk/dual-leaf-v2/**"
+crates = ["sparq-zk"]
+
 # [FABLE-5] sq-0iqzw: the ADJUDICATED cross-engine divergence allowlist, read at
 # runtime by the sparq-bench differential fuzzer (crates/sparq-bench/src/fuzz.rs
 # DivergenceAllowlist, via an env!("CARGO_MANIFEST_DIR")-relative path) AND by its

@@ -945,6 +945,134 @@ fn is_datatype_unknown(c: &Consistency) -> bool {
     matches!(c, Consistency::Unknown(UnknownReason::DatatypeUnknown { source }) if !source.is_empty())
 }
 
+#[test]
+fn an_undecided_alternative_does_not_force_the_next() {
+    // `E` is satisfiable (its four values alternate 1, 2 round a four-cycle of `≉`) but the
+    // datatype check does not decide it. `A ⊑ E ⊔ B` must not give `A ⊑ B`: closing the `E`
+    // branch as undecided is not a proof that `B` is forced.
+    let cycle = format!(
+        ":g a owl:DatatypeProperty . :d owl:propertyDisjointWith :e . :e owl:propertyDisjointWith :f .
+         :f owl:propertyDisjointWith :g . :g owl:propertyDisjointWith :d .
+         :A rdfs:subClassOf [ a owl:Class ; owl:unionOf ( [ a owl:Class ; owl:intersectionOf ( {} {} {} {} ) ] :B ) ] .",
+        dsome(":d", &int_range(1, 2)),
+        dsome(":e", &int_range(1, 2)),
+        dsome(":f", &int_range(1, 2)),
+        dsome(":g", &int_range(1, 2))
+    );
+    let body = format!("{PRE}{DDECL} {cycle}");
+    let (d, t) = Graph::parse_to_triples(&body, "turtle").unwrap();
+    let o = extract(&d, &t).unwrap();
+    let r = Reasoner::new(&d, &o, Budget::default()).unwrap();
+    assert_ne!(r.is_subclass_of("http://ex/A", "http://ex/B"), Some(true));
+    let report = check(&d, &o, Budget::default());
+    if let Some(c) = report.classification {
+        assert!(!c.subsumptions.contains(&(ex(&d, "A"), ex(&d, "B"))));
+    }
+}
+
+#[test]
+fn the_data_domain_is_more_than_the_datatype_map() {
+    // The Direct Semantics only asks the data domain to contain the map's value spaces:
+    // the complement of their union still has values.
+    let map = "[ a rdfs:Datatype ; owl:unionOf ( owl:real xsd:float xsd:double xsd:boolean
+        xsd:hexBinary xsd:base64Binary xsd:dateTime rdf:PlainLiteral rdf:langString xsd:anyURI rdf:XMLLiteral ) ]";
+    let outside = format!("[ a rdfs:Datatype ; owl:datatypeComplementOf {map} ]");
+    assert_eq!(
+        verdict(&format!("{DDECL} :a a {} .", dsome(":d", &outside))),
+        Consistency::Consistent
+    );
+    assert!(!data_unsat(&format!(":X owl:equivalentClass {} .", dsome(":d", &outside)), "X"));
+    // Two of them are not forced equal: there are infinitely many.
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :a a {} , {} . :d owl:propertyDisjointWith :e .",
+            dsome(":d", &outside),
+            dsome(":e", &outside)
+        )),
+        Consistency::Consistent
+    );
+    // But `rdfs:Literal` is the whole domain.
+    assert_eq!(
+        verdict(&format!(
+            "{DDECL} :a a {} .",
+            dsome(":d", "[ a rdfs:Datatype ; owl:datatypeComplementOf rdfs:Literal ]")
+        )),
+        Consistency::Inconsistent
+    );
+}
+
+#[test]
+fn datatype_preprocessing_is_inside_the_budget() {
+    // Each definition names the previous one twice: the expansion doubles at each level.
+    let mut body = String::from(":t0 a rdfs:Datatype ; owl:equivalentClass xsd:integer .");
+    for k in 1..=40 {
+        let _ = write!(
+            body,
+            " :t{k} a rdfs:Datatype ; owl:equivalentClass [ a rdfs:Datatype ; owl:unionOf ( :t{p} [ a rdfs:Datatype ; owl:datatypeComplementOf :t{p} ] ) ] .",
+            p = k - 1
+        );
+    }
+    let _ = write!(body, " :a :d \"1\"^^:t40 .");
+    assert_eq!(
+        verdict(&format!("{DDECL} {body}")),
+        Consistency::Unknown(UnknownReason::ResourceBudget)
+    );
+    // Many values of one individual: their pairwise inequalities are charged up front.
+    let values: Vec<String> = (0..200).map(|i| i.to_string()).collect();
+    let body = format!("{PRE}{DDECL} :a :d {} .", values.join(" , "));
+    let (d, t) = Graph::parse_to_triples(&body, "turtle").unwrap();
+    let o = extract(&d, &t).unwrap();
+    let small = Budget {
+        max_steps: 1_000,
+        ..Budget::default()
+    };
+    assert_eq!(
+        check(&d, &o, small).consistency,
+        Consistency::Unknown(UnknownReason::ResourceBudget)
+    );
+    assert_eq!(
+        check(&d, &o, Budget::default()).consistency,
+        Consistency::Consistent
+    );
+}
+
+#[test]
+fn annotated_repeated_datatype_definitions_answer_datatype_unknown() {
+    // Whether two annotated definitions with one range are one axiom depends on their
+    // annotations, which are not compared (the profile check leaves it unchecked too).
+    let def = |b: &str| format!("_:{b} a rdfs:Datatype ; owl:datatypeComplementOf xsd:string .");
+    let ann = |b: &str, ax: &str| {
+        format!(
+            "_:{ax} a owl:Axiom ; owl:annotatedSource :dt ; owl:annotatedProperty owl:equivalentClass ; owl:annotatedTarget _:{b} ; rdfs:comment \"c\" ."
+        )
+    };
+    for body in [
+        format!(
+            ":dt a rdfs:Datatype ; owl:equivalentClass _:b1, _:b2 . {} {} {} {}",
+            def("b1"),
+            def("b2"),
+            ann("b1", "x1"),
+            ann("b2", "x2")
+        ),
+        format!(
+            ":dt a rdfs:Datatype ; owl:equivalentClass _:b2, _:b1 . {} {} {}",
+            def("b2"),
+            def("b1"),
+            ann("b1", "x1")
+        ),
+    ] {
+        let c = verdict(&format!("{DDECL} {body}"));
+        assert!(is_datatype_unknown(&c), "{c:?}");
+    }
+    // Unannotated repeats are one definition.
+    let one = format!(
+        "{DDECL} :dt a rdfs:Datatype ; owl:equivalentClass _:b1, _:b2 . {} {}",
+        def("b1"),
+        def("b2")
+    );
+    assert_eq!(verdict(&one), Consistency::Consistent);
+}
+
 /// The volunteering fixture of issue #7031: qualified cardinality, an inverse, functional
 /// object and data properties, a data range, a union domain and `AllDisjointClasses`.
 const VOLUNTEERING: &str = r#"

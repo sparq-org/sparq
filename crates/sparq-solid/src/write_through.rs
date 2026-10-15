@@ -251,6 +251,11 @@ impl PodStore {
         let term = Term::NamedNode(name.clone());
         let prior = self.take_named_slot(&term);
         let existed = prior.is_some();
+        if let (false, Some(governed)) = (existed, acl_iri.strip_suffix(crate::loader::ACR_SUFFIX)) {
+            // A new `.acr` keeps no facts of a resource that does not exist, whatever an
+            // earlier install saw (a rebuild after a failure resets this from the graph).
+            self.acr_controlled.remove(governed);
+        }
         self.graph.named.push((term.clone(), new_graph));
 
         // Re-materialize; roll back to the prior content on any error. sq-b7k7u
@@ -353,22 +358,15 @@ impl PodStore {
     /// diffs the old vs new `AuthIndex` per-origin and invalidates exactly the origins whose
     /// buckets changed — NOT merely the written ACL's own origin (a write at origin A can
     /// affect origin B's grants; the diff catches every such case). sq-vhhl0 doc
-    /// sweep. ACP re-materializes with no provenance, exactly as the non-scoped
-    /// `materialize_acp()` the write path used before — and, sq-ysv3u, with no
-    /// verified credentials either, so an `acp:vc` matcher stays fail-closed across an ACL
-    /// write exactly as it is on a plain `materialize_acp()`.
+    /// sweep. ACP re-materializes under the store's trusted context (the provenance and
+    /// credentials of the last ACP materialization), like [`PodStore::materialize_acp`].
     fn rematerialize_scoped(
         &mut self,
         acp: bool,
         scope: crate::ReindexScope,
     ) -> Result<(), String> {
         if acp {
-            self.materialize_acp_with_scoped(
-                &crate::AccessProvenance::new(),
-                &crate::VerifiedCredentials::new(),
-                scope,
-            )
-            .map(|_| ())
+            self.rematerialize_acp_scoped(scope).map(|_| ())
         } else {
             self.materialize_wac_scoped(scope).map(|_| ())
         }

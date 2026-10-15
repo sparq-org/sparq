@@ -285,6 +285,11 @@ pub(crate) struct Region {
     text: F,
     uri: F,
     xml: F,
+    /// The data values outside every datatype of the map. The Direct Semantics (§2.2) only
+    /// asks the data domain to contain the map's value spaces, so a model may have others
+    /// (`rdfs:Literal` is the whole domain, and a complement is taken relative to it). No
+    /// literal denotes one, and there are infinitely many: they are one infinite part.
+    other: bool,
 }
 
 impl Region {
@@ -295,6 +300,7 @@ impl Region {
             text: f(),
             uri: f(),
             xml: f(),
+            other: false,
         }
     }
 
@@ -305,6 +311,7 @@ impl Region {
             text: t(),
             uri: t(),
             xml: t(),
+            other: true,
         }
     }
 
@@ -352,6 +359,7 @@ impl Region {
             text: self.text.clone().and(o.text.clone()),
             uri: self.uri.clone().and(o.uri.clone()),
             xml: self.xml.clone().and(o.xml.clone()),
+            other: self.other && o.other,
         }
     }
 
@@ -366,6 +374,7 @@ impl Region {
             text: self.text.clone().or(o.text.clone()),
             uri: self.uri.clone().or(o.uri.clone()),
             xml: self.xml.clone().or(o.xml.clone()),
+            other: self.other || o.other,
         }
     }
 
@@ -380,6 +389,7 @@ impl Region {
             text: self.text.clone().not(),
             uri: self.uri.clone().not(),
             xml: self.xml.clone().not(),
+            other: !self.other,
         }
     }
 
@@ -387,6 +397,9 @@ impl Region {
     /// (`u128::MAX` also stands for infinitely many). `None` = a string walk outgrew its
     /// budget before the answer was settled.
     pub(crate) fn count(&self, need: u128) -> Option<u128> {
+        if self.other {
+            return Some(u128::MAX);
+        }
         let mut total = 0u128;
         for (c, sp) in self.ord.iter().zip(SPACES) {
             total = total.saturating_add(c.count(sp));
@@ -504,10 +517,23 @@ mod tests {
     }
 
     #[test]
-    fn complement_is_relative_to_the_whole_map() {
+    fn complement_is_relative_to_the_whole_data_domain() {
         let r = Region::value(&real(1));
         assert_eq!(r.not().not(), r);
         assert_eq!(Region::full().not().count(1), Some(0));
         assert_eq!(r.or(&r.not()).not().count(1), Some(0));
+        // Outside every value space of the map there are still (infinitely many) values.
+        let mut map = Region::empty();
+        for sp in SPACES {
+            map = map.or(&Region::ordered(
+                sp,
+                (0..sp.sorts()).map(|_| Cuts::full()).collect(),
+            ));
+        }
+        for space in [Space::Text, Space::Uri, Space::Xml] {
+            map = map.or(&Region::strings(space, F::Const(true)));
+        }
+        assert_eq!(map.not().count(u128::MAX), Some(u128::MAX));
+        assert_eq!(map.not().contains(&real(1)), Some(false));
     }
 }
