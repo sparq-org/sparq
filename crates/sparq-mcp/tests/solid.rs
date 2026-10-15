@@ -2170,3 +2170,78 @@ fn acp_a_container_brought_back_under_its_surviving_rules_keeps_its_creator() {
         "alice keeps Control on /a/"
     );
 }
+
+/// Under rules inherited from an ancestor only, a writer who empties a container and writes
+/// into it again is not its creator either: a container's creator ends only when the
+/// container itself is removed.
+#[test]
+fn acp_an_emptied_container_keeps_its_creator_under_inherited_rules() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    const ALICE: &str = "https://alice.ex/card#me";
+    const BOB: &str = "https://bob.ex/card#me";
+    let acr = "https://pod.ex/a/.acr";
+    let nq = format!(
+        "<https://pod.ex/a/b/doc#it> <https://ex.dev/ns#k> \"x\" <https://pod.ex/a/b/doc> .
+<{acr}> <{ACP}memberAccessControl> <{acr}#c> <{acr}> .
+<{acr}> <{ACP}accessControl> <{acr}#own> <{acr}> .
+<{acr}#own> <{ACP}apply> <{acr}#bob> <{acr}> .
+<{acr}#c> <{ACP}apply> <{acr}#owner> <{acr}> .
+<{acr}#owner> <{ACP}allow> <{ACL}Control> <{acr}> .
+<{acr}#owner> <{ACP}anyOf> <{acr}#mo> <{acr}> .
+<{acr}#mo> <{ACP}agent> <{ACP}CreatorAgent> <{acr}> .
+<{acr}#c> <{ACP}apply> <{acr}#bob> <{acr}> .
+<{acr}#bob> <{ACP}allow> <{ACL}Read> <{acr}> .
+<{acr}#bob> <{ACP}allow> <{ACL}Write> <{acr}> .
+<{acr}#bob> <{ACP}anyOf> <{acr}#mb> <{acr}> .
+<{acr}#mb> <{ACP}agent> <{BOB}> <{acr}> .
+"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("fixture parses"));
+    let mut trusted = sparq_solid::AccessProvenance::new();
+    trusted.set_creator("https://pod.ex/a/b/", ALICE);
+    trusted.set_creator("https://pod.ex/a/b/doc", ALICE);
+    store.materialize_acp_with(&trusted).expect("materializes");
+    let config = SolidServerConfig {
+        agent: Some(BOB.to_string()),
+        acp: true,
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
+    let bob = sparq_solid::Session {
+        agent: Some(BOB),
+        client: None,
+        issuer: None,
+        now: None,
+    };
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_delete",
+        json!({"url": "https://pod.ex/a/b/doc"}),
+    );
+    assert!(!is_err, "bob deletes /a/b/doc: {text}");
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_put",
+        json!({"url": "https://pod.ex/a/b/new", "content": "<https://pod.ex/a/b/new#it> <https://ex.dev/ns#k> \"n\" .", "content_type": "text/turtle"}),
+    );
+    assert!(!is_err, "bob writes /a/b/new: {text}");
+    let prov = s.store().acp_provenance();
+    assert_eq!(
+        prov.creator("https://pod.ex/a/b/"),
+        Some(ALICE),
+        "emptied, not removed"
+    );
+    assert_eq!(
+        prov.creator("https://pod.ex/a/b/new"),
+        Some(BOB),
+        "a new document"
+    );
+    assert!(
+        !s.store()
+            .decide(&bob, "https://pod.ex/a/b/", sparq_solid::Mode::Control)
+            .allow,
+        "bob gains no Control on /a/b/"
+    );
+}

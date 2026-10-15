@@ -1,9 +1,9 @@
 //! The trusted ACP context (creator/owner provenance and verified credentials) a store was
 //! materialized with stays in force across the rebuilds the store makes itself: after an
 //! authoritative `.acr` replace or delete, and after an authorized update, the grants and
-//! denies that context decides are unchanged. A resource that goes keeps none of it: one
-//! created again under the same IRI has no owner, and its creator is whoever created it
-//! again.
+//! denies that context decides are unchanged. A resource that goes keeps none of it unless
+//! its own `.acr` is still stored: one created again under the same IRI has no owner, and
+//! its creator is whoever created it again.
 
 use sparq_core::Graph;
 use sparq_solid::{AccessProvenance, Mode, PodStore, Session, VerifiedCredentials};
@@ -598,4 +598,170 @@ fn an_update_that_creates_nothing_keeps_every_creator_and_owner() {
         .expect("ADMIN may rewrite d0");
     assert_eq!(*store.acp_provenance(), before, "d0 was never removed");
     assert_context_in_force(&store, "a clear and an insert");
+}
+
+/// A resource whose owner is kept (with its own access-control resource) while it is gone
+/// gets the owner's deny back the moment an update recreates it, even after a rebuild
+/// while it was gone.
+#[test]
+fn a_resource_back_under_its_own_acr_gets_its_owner_deny_at_once() {
+    const X: &str = "https://pod.ex/x";
+    let acr = format!("{X}.acr");
+    let nq = format!(
+        "<{X}#it> <https://ex.dev/ns#k> \"v\" <{X}> .\n\
+         <{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{ACP}apply> <{acr}#all> <{acr}> .\n\
+         <{acr}#all> <{ACP}allow> <{ACL}Read> <{acr}> .\n\
+         <{acr}#all> <{ACP}allow> <{ACL}Write> <{acr}> .\n\
+         <{acr}#all> <{ACP}anyOf> <{acr}#pub> <{acr}> .\n\
+         <{acr}#pub> <{ACP}agent> <{ACP}PublicAgent> <{acr}> .\n\
+         <{acr}#c> <{ACP}apply> <{acr}#deny> <{acr}> .\n\
+         <{acr}#deny> <{ACP}deny> <{ACL}Read> <{acr}> .\n\
+         <{acr}#deny> <{ACP}anyOf> <{acr}#own> <{acr}> .\n\
+         <{acr}#own> <{ACP}agent> <{ACP}OwnerAgent> <{acr}> .\n"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    let mut prov = AccessProvenance::new();
+    prov.set_owner(X, ERIN);
+    store.materialize_acp_with(&prov).expect("acp materializes");
+    let erin = Session {
+        agent: Some(ERIN),
+        client: None,
+        issuer: None,
+        now: None,
+    };
+    let erin_reads = |store: &PodStore| store.decide(&erin, X, Mode::Read).allow;
+    assert!(!erin_reads(&store), "control: the owner deny applies");
+    store
+        .update_as_acp(&admin(), &format!("DROP GRAPH <{X}>"))
+        .expect("x is dropped");
+    assert_eq!(
+        store.acp_provenance().owner(X),
+        Some(ERIN),
+        "kept with x.acr"
+    );
+    store.materialize_acp().expect("a rebuild while x is gone");
+    store
+        .update_as_acp(
+            &admin(),
+            &format!("INSERT DATA {{ GRAPH <{X}> {{ <{X}#it> <https://ex.dev/ns#k> \"w\" }} }}"),
+        )
+        .expect("x is created again");
+    assert!(
+        !erin_reads(&store),
+        "the owner deny applies again, with no rebuild after"
+    );
+}
+
+const KR: &str = "https://pod.ex/a/r";
+const KRACR: &str = "https://pod.ex/a/r.acr";
+
+fn sess(agent: &'static str) -> Session<'static> {
+    Session {
+        agent: Some(agent),
+        client: None,
+        issuer: None,
+        now: None,
+    }
+}
+
+/// Root ACR: ADMIN Read/Write/Control on everything; members' CREATOR gets Read/Control, the
+/// OWNER gets Read. /a/r has its own ACR, its creator is alice and its owner erin, and it giving ADMIN Read/Write/Control.
+fn kept_under_own_acr() -> PodStore {
+    let root = "https://pod.ex/.acr";
+    let nq = format!(
+        "<https://pod.ex/a/z#it> <https://ex.dev/ns#k> \"z\" <https://pod.ex/a/z> .\n\
+         <{KR}#it> <https://ex.dev/ns#k> \"r\" <{KR}> .\n\
+         <{root}> <{ACP}accessControl> <{root}#c> <{root}> .\n\
+         <{root}> <{ACP}memberAccessControl> <{root}#c> <{root}> .\n\
+         <{root}#c> <{ACP}apply> <{root}#admin> <{root}> .\n\
+         <{root}#admin> <{ACP}allow> <{ACL}Read> <{root}> .\n\
+         <{root}#admin> <{ACP}allow> <{ACL}Write> <{root}> .\n\
+         <{root}#admin> <{ACP}allow> <{ACL}Control> <{root}> .\n\
+         <{root}#admin> <{ACP}anyOf> <{root}#ma> <{root}> .\n\
+         <{root}#ma> <{ACP}agent> <{ADMIN}> <{root}> .\n\
+         <{root}#c> <{ACP}apply> <{root}#creator> <{root}> .\n\
+         <{root}#creator> <{ACP}allow> <{ACL}Read> <{root}> .\n\
+         <{root}#creator> <{ACP}allow> <{ACL}Control> <{root}> .\n\
+         <{root}#creator> <{ACP}anyOf> <{root}#mc> <{root}> .\n\
+         <{root}#mc> <{ACP}agent> <{ACP}CreatorAgent> <{root}> .\n\
+         <{root}#c> <{ACP}apply> <{root}#owner> <{root}> .\n\
+         <{root}#owner> <{ACP}allow> <{ACL}Read> <{root}> .\n\
+         <{root}#owner> <{ACP}anyOf> <{root}#mo> <{root}> .\n\
+         <{root}#mo> <{ACP}agent> <{ACP}OwnerAgent> <{root}> .\n\
+         <{KRACR}> <{ACP}accessControl> <{KRACR}#c> <{KRACR}> .\n\
+         <{KRACR}#c> <{ACP}apply> <{KRACR}#p> <{KRACR}> .\n\
+         <{KRACR}#p> <{ACP}allow> <{ACL}Read> <{KRACR}> .\n\
+         <{KRACR}#p> <{ACP}allow> <{ACL}Write> <{KRACR}> .\n\
+         <{KRACR}#p> <{ACP}allow> <{ACL}Control> <{KRACR}> .\n\
+         <{KRACR}#p> <{ACP}anyOf> <{KRACR}#m> <{KRACR}> .\n\
+         <{KRACR}#m> <{ACP}agent> <{ADMIN}> <{KRACR}> .\n\
+         <{KRACR}.acr> <{ACP}accessControl> <{KRACR}.acr#c> <{KRACR}.acr> .\n\
+         <{KRACR}.acr#c> <{ACP}apply> <{KRACR}.acr#p> <{KRACR}.acr> .\n\
+         <{KRACR}.acr#p> <{ACP}allow> <{ACL}Write> <{KRACR}.acr> .\n\
+         <{KRACR}.acr#p> <{ACP}allow> <{ACL}Read> <{KRACR}.acr> .\n\
+         <{KRACR}.acr#p> <{ACP}anyOf> <{KRACR}.acr#m> <{KRACR}.acr> .\n\
+         <{KRACR}.acr#m> <{ACP}agent> <{ADMIN}> <{KRACR}.acr> .\n"
+    );
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    let mut prov = AccessProvenance::new();
+    prov.set_creator(KR, ALICE);
+    prov.set_owner(KR, ERIN);
+    store.materialize_acp_with(&prov).expect("acp materializes");
+    assert!(store.decide(&sess(ALICE), KR, Mode::Control).allow, "control: alice creator");
+    assert!(store.decide(&sess(ERIN), KR, Mode::Read).allow, "control: erin owner");
+    store
+}
+
+#[test]
+fn a_resource_back_after_its_own_acr_went_in_the_same_update_keeps_nothing() {
+    let mut store = kept_under_own_acr();
+    store
+        .update_as_acp(&sess(ADMIN), &format!("DROP GRAPH <{KR}>"))
+        .expect("admin drops r");
+    assert_eq!(store.acp_provenance().creator(KR), Some(ALICE), "kept with r.acr");
+    store
+        .update_as_acp(
+            &sess(ADMIN),
+            &format!(
+                "DROP GRAPH <{KRACR}> ; INSERT DATA {{ GRAPH <{KR}> {{ <{KR}#it> <https://ex.dev/ns#k> \"new\" }} }}"
+            ),
+        )
+        .expect("admin drops r.acr and makes r again");
+    assert_eq!(store.acp_provenance().creator(KR), None);
+    assert_eq!(store.acp_provenance().owner(KR), None);
+    assert!(!store.decide(&sess(ALICE), KR, Mode::Control).allow, "no creator grant");
+    assert!(!store.decide(&sess(ERIN), KR, Mode::Read).allow, "no owner grant");
+}
+
+#[test]
+fn an_access_control_list_in_an_acp_pod_keeps_no_creator() {
+    let mut store = kept_under_own_acr();
+    let before = store.stored_graphs();
+    let acl = "https://pod.ex/a/z.acl";
+    let nq = format!("<{acl}#x> <https://ex.dev/ns#k> \"x\" <{acl}> .\n");
+    store.graph.named.extend(Graph::load_dataset(&nq, "nquads").expect("parses").named);
+    store
+        .rematerialize_after_edit(&before, None, true)
+        .expect("rebuild");
+    let mut prov = store.acp_provenance().clone();
+    prov.set_creator("https://pod.ex/a/z", ALICE);
+    store.materialize_acp_with(&prov).expect("acp materializes");
+    // Removed with no rebuild after it: the next one forgets z, as z.acl is not read.
+    store
+        .graph
+        .named
+        .retain(|(n, _)| n.to_string() != "<https://pod.ex/a/z>");
+    store.materialize_acp().expect("rebuild");
+    assert_eq!(store.acp_provenance().creator("https://pod.ex/a/z"), None);
+    // Dropped by an update, likewise.
+    let mut store = kept_under_own_acr();
+    let mut prov = store.acp_provenance().clone();
+    prov.set_creator("https://pod.ex/a/z", ALICE);
+    store.graph.named.extend(Graph::load_dataset(&nq, "nquads").expect("parses").named);
+    store.materialize_acp_with(&prov).expect("acp materializes");
+    store
+        .update_as_acp(&sess(ADMIN), "DROP GRAPH <https://pod.ex/a/z>")
+        .expect("admin drops z");
+    assert_eq!(store.acp_provenance().creator("https://pod.ex/a/z"), None);
 }

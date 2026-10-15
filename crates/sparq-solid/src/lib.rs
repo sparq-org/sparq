@@ -514,6 +514,9 @@ impl PodStore {
     /// sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
         let stats = materialize_wac(&mut self.graph)?;
+        // Stored creator and owner facts of resources gone with their access control resource
+        // go at any rebuild, so an ACP view built later never revives them.
+        self.acp_context.0 = Self::existing_provenance(&self.graph, &self.acp_context.0);
         self.record_static_coverage();
         self.view_dropped = false;
         self.acp_uses_provenance = false;
@@ -557,7 +560,7 @@ impl PodStore {
     /// [`PodStore::materialize_acp_with`] or [`PodStore::materialize_acp_with_credentials`],
     /// none until then; pass empty ones to those to clear it, and current ones when a
     /// credential holding expires or is revoked. The creator and owner of a resource that no
-    /// longer exists are dropped from it.
+    /// longer exists, and has no `.acr` of its own stored, are dropped from it.
     pub fn materialize_acp(&mut self) -> Result<MaterializeStats, String> {
         self.rematerialize_acp_scoped(ReindexScope::Full)
     }
@@ -606,12 +609,14 @@ impl PodStore {
     /// Rebuild the auth view (ACP when `acp`, else WAC) after a caller changed `graph`
     /// directly since it took `before` ([`PodStore::stored_graphs`]), such as the MCP server
     /// creating or deleting a resource. The stored provenance follows the change's net
-    /// effect as an update's does: a resource that existed before it and
-    /// does not after it loses its creator and owner unless its own access-control document
-    /// is still stored, and every resource that exists after it and did not before gets
-    /// `creator` (the acting agent, when the view takes it as a principal) unless its own
-    /// access-control document was stored before it. The view and the provenance are
-    /// installed together, and only if the rebuild succeeds.
+    /// effect as an update's does (see [`PodStore::materialize_acp_with_credentials`]): a
+    /// resource that existed before it and does not after it loses its creator and owner
+    /// unless its own `.acr` is still stored (a container's only when it is removed itself);
+    /// a resource that comes back keeps them only if its own `.acr` was stored before and
+    /// after; and every resource that exists after it and did not before, and keeps nothing,
+    /// gets `creator` (the acting agent, when the view takes it as a principal) unless its own
+    /// `.acr` was stored before it. The view and the provenance are installed together, and
+    /// only if the rebuild succeeds.
     ///
     /// # Errors
     ///
@@ -632,20 +637,19 @@ impl PodStore {
             let credentials = self.acp_context.1.clone();
             self.materialize_acp_with_scoped(&staged, &credentials, ReindexScope::Full)
         } else {
-            let stats = self.materialize_wac()?;
-            self.acp_context.0 = Self::existing_provenance(&self.graph, &staged);
-            Ok(stats)
+            let kept = std::mem::replace(&mut self.acp_context.0, staged);
+            self.materialize_wac().inspect_err(|_| self.acp_context.0 = kept)
         }
     }
 
     /// `provenance` for only the resources the auth view of `graph` holds (the loader's own
-    /// resource enumeration, [`loader::resources`]) and those whose own access-control
-    /// document is stored (see [`lifecycle`]).
+    /// resource enumeration, [`loader::resources`]), those whose own access control resource
+    /// is stored, and containers (see [`lifecycle`]).
     fn existing_provenance(graph: &Graph, provenance: &AccessProvenance) -> AccessProvenance {
         let resources = loader::resources(graph);
         let controlled = loader::controlled_resources(graph);
         let mut kept = provenance.clone();
-        kept.retain(|r| resources.contains(r) || controlled.contains(r));
+        kept.retain(|r| r.ends_with('/') || resources.contains(r) || controlled.contains(r));
         kept
     }
 
@@ -660,8 +664,9 @@ impl PodStore {
     /// <self>` in a document they control cannot thereby grant themselves access (design
     /// doc §2.4). The store keeps `provenance`, with no credentials, for the ACP rebuilds it
     /// makes itself (after an access-control write or an update, and
-    /// [`PodStore::materialize_acp`]), and forgets a resource's facts once neither that
-    /// resource nor its own access-control document exists; call again when it changes.
+    /// [`PodStore::materialize_acp`]), and forgets a document's facts once neither it nor
+    /// its own `.acr` exists (a container's when it is removed itself), or when it comes
+    /// back without its `.acr` stored throughout; call again when it changes.
     ///
     /// # Errors
     ///
@@ -1147,9 +1152,12 @@ impl PodStore {
         effects: &[sparq_engine::UpdateEffect],
     ) -> Option<AccessProvenance> {
         let events = lifecycle::update_events(&self.graph, effects);
-        if !events
-            .iter()
-            .any(|e| !matches!(e, lifecycle::GraphEvent::Added(_)))
+        // An update that only creates graphs changes nothing when nothing is known of any
+        // resource (it records no creator); otherwise it may bring one with known facts back.
+        if self.acp_context.0.is_empty()
+            && !events
+                .iter()
+                .any(|e| !matches!(e, lifecycle::GraphEvent::Added(_)))
         {
             return None;
         }

@@ -1074,11 +1074,10 @@ pub fn apply_effects(graph: &mut Graph, effects: &[UpdateEffect]) -> Result<(), 
 /// Why [`apply_effects_checked`] failed, and whether it changed `graph` first.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApplyError {
-    /// `false` when the commit point refused the effects: nothing is applied in memory, and
-    /// the journal is cut back to where it was (should that fail too, the journal takes no
-    /// further commit until the graph is reopened, when it may replay the refused one);
-    /// `true` when a failure came after it, with part of the effects possibly applied in
-    /// memory.
+    /// `false` when the commit point refused the effects unwritten (the journal takes no
+    /// commit after a failed one until the graph is reopened): nothing is applied in memory
+    /// or in the journal. `true` for any other failure: the journal may hold the effects (a
+    /// reopen may replay them), and part of them may be applied in memory.
     pub applied: bool,
     /// The failure.
     pub message: String,
@@ -1095,13 +1094,20 @@ pub fn apply_effects_checked(
 ) -> Result<(), ApplyError> {
     // (sq-ycle) (1) RESOLVE + (2) COMMIT: the single durable commit point for the body.
     let records = resolve_effect_records(graph, effects);
-    graph.commit_txn(&records).map_err(|message| ApplyError {
-        applied: false,
-        message,
-    })?;
-    materialize_effects(graph, effects).map_err(|message| ApplyError {
-        applied: true,
-        message,
+    graph
+        .commit_txn_checked(&records)
+        .map_err(|(written, message)| ApplyError {
+            applied: written,
+            message,
+        })?;
+    materialize_effects(graph, effects).map_err(|message| {
+        // The journal holds the whole frame: keep it for the reopen to redo, whatever the
+        // next update does.
+        graph.poison_txn();
+        ApplyError {
+            applied: true,
+            message,
+        }
     })
 }
 

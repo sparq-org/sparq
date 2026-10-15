@@ -270,8 +270,8 @@ pub(crate) fn assemble_facts(
     // candidate-generation lattice picks them up.
     if system == System::Acp {
         for (resource, creator, owner) in provenance.iter() {
-            // Only for a resource the view holds: the store keeps no facts for any other
-            // (see [`resources`]), and one created again later has none.
+            // Only for a resource the view holds: the store keeps the facts of another only
+            // while its own `.acr` is stored, for when it comes back.
             if !resources.contains(resource) {
                 continue;
             }
@@ -460,7 +460,7 @@ pub(crate) fn iri_origin(iri: &str) -> &str {
 /// authority, plus every structural container above one (a container is an inheritance
 /// anchor even without a graph of its own, but not when only control documents sit below
 /// it). The materializer and the store's provenance pruning both use this, so trusted
-/// creator/owner facts are kept for exactly the resources the view holds.
+/// creator/owner facts are stated for exactly the resources the view holds.
 fn enumerate<'g>(graph: &'g Graph, suffix: &str) -> (FxHashSet<String>, Vec<(&'g str, &'g Graph)>) {
     let mut resources: FxHashSet<String> = FxHashSet::default();
     let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
@@ -492,18 +492,18 @@ fn is_control_graph(iri: &str) -> bool {
     iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX)
 }
 
-/// The resource an access-control document `iri` governs.
-/// The resources whose own access-control document (`.acl` or `.acr`) is stored in `graph`.
+/// The resources whose own access control resource (`.acr`) is stored in `graph`: the only
+/// document the ACP view, the one reader of creators and owners, reads.
 pub(crate) fn controlled_resources(graph: &Graph) -> FxHashSet<&str> {
     graph
         .named
         .iter()
         .filter_map(|(n, _)| graph_iri(n))
-        .filter(|iri| iri.ends_with(ACL_SUFFIX) || iri.ends_with(ACR_SUFFIX))
-        .map(control_target)
+        .filter_map(|iri| iri.strip_suffix(ACR_SUFFIX))
         .collect()
 }
 
+/// The resource an access-control document `iri` governs.
 fn control_target(iri: &str) -> &str {
     iri.strip_suffix(ACL_SUFFIX)
         .or_else(|| iri.strip_suffix(ACR_SUFFIX))

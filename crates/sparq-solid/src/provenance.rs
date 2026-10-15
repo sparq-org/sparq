@@ -84,8 +84,8 @@ impl AccessProvenance {
     }
 
     /// Keep the facts of only the resources `exists` accepts. Internal — the store drops
-    /// the facts of a resource that no longer exists, so one created again later under the
-    /// same IRI does not inherit them.
+    /// the facts of a resource that no longer exists and has no `.acr` of its own (see
+    /// `lifecycle`), so one created again later under the same IRI does not inherit them.
     pub(crate) fn retain(&mut self, mut exists: impl FnMut(&str) -> bool) {
         self.by_resource.retain(|r, _| exists(r));
     }
@@ -95,7 +95,8 @@ impl AccessProvenance {
         self.by_resource.contains_key(resource)
     }
 
-    /// Forget every fact about `resource` (for a resource that no longer exists). Internal.
+    /// Forget every fact about `resource` (for a resource that no longer exists, or comes back
+    /// without what kept them). Internal.
     pub(crate) fn forget(&mut self, resource: &str) {
         self.by_resource.remove(resource);
     }

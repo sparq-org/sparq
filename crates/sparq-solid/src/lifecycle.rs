@@ -4,16 +4,23 @@
 //! direct edit such as the MCP server's) is replayed, in order, against one rule for which
 //! resources exist ([`ResourceGraphs`], the loader's own enumeration), and only its net
 //! effect counts. A resource that existed before the change and does not after it (a
-//! document whose graph is removed, a container left with no graph below it) loses its
-//! creator and owner, unless its own access-control document (`<r>.acl`/`<r>.acr`) is still
-//! stored: they are kept with that document and come back with the resource. One that
-//! exists after the change and did not before gets the acting agent as its creator, when
-//! there is one (a SPARQL update records none) and its own access-control document was not
-//! stored before the change. A resource that exists
-//! before and after keeps both, whatever happens in between. The result is staged with the
+//! document whose graph is removed) loses its creator and owner, unless its own access
+//! control resource (`<r>.acr`, the only document the ACP view, their one reader, reads) is
+//! still stored: they are kept with that document and come back with the resource if the
+//! document is still stored then. A container's end only by an explicit removal of the
+//! container itself (its own graph, or every graph) ends them; one left with no graph below it
+//! keeps them for when it comes back. Any other resource that exists after the change and did
+//! not before keeps what is known of it only if its own access control resource was stored
+//! before and after the change; otherwise that is dropped, and the acting agent, when there
+//! is one (a SPARQL update records none), becomes its creator unless that document was stored
+//! before the change. Kept facts of a resource that does not exist are dropped by the next
+//! rebuild once its document is gone. The view states creator and owner facts for existing
+//! resources only, so a change that brings back or ends a resource with known facts asks for
+//! a rebuild. A resource that exists before and after keeps both, whatever happens in
+//! between. The result is staged with the
 //! change and installed only once the change commits.
 
-use crate::loader::{validate_principal_iri, ResourceGraphs, ACL_SUFFIX, ACR_SUFFIX};
+use crate::loader::{validate_principal_iri, ResourceGraphs, ACR_SUFFIX};
 use crate::AccessProvenance;
 use oxrdf::Term;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -169,7 +176,10 @@ fn replay(
     // graph, to tell which are stored after it.
     let mut control: FxHashMap<&str, bool> = FxHashMap::default();
     let mut cleared = false;
-    let is_control = |n: &str| n.ends_with(ACL_SUFFIX) || n.ends_with(ACR_SUFFIX);
+    let mut removed: FxHashSet<&str> = FxHashSet::default();
+    // Only the access control resource counts: the ACP view, the one reader of creators and
+    // owners, reads no `.acl`.
+    let is_control = |n: &str| n.ends_with(ACR_SUFFIX);
     for event in events {
         match *event {
             GraphEvent::Added(name) => {
@@ -184,6 +194,7 @@ fn replay(
                 if is_control(name) {
                     control.insert(name, false);
                 }
+                removed.insert(name);
                 graphs.remove(name, |r| {
                     touched.entry(r.to_owned()).or_insert(true);
                 });
@@ -204,35 +215,60 @@ fn replay(
             .unwrap_or_else(|| !cleared && stored_before(name))
     };
     let own_control = |r: &str, stored: &dyn Fn(&str) -> bool| {
-        stored(&format!("{r}{ACL_SUFFIX}")) || stored(&format!("{r}{ACR_SUFFIX}"))
+        stored(&format!("{r}{ACR_SUFFIX}"))
     };
     let creator = creator.filter(|c| validate_principal_iri(c).is_ok());
     let mut ended = Vec::new();
     let mut began = Vec::new();
+    // Whether a resource whose creator or owner is known starts or stops existing: the view
+    // states those facts for existing resources only, so it must be rebuilt even when the
+    // provenance itself stays as it is.
+    let mut known_moved = false;
+    let mut back = Vec::new();
     for (r, was) in &touched {
-        match (*was, graphs.holds(r)) {
-            // A resource whose own access-control document is still stored keeps its creator
-            // and owner: they come back with it, under that document's rules.
-            (true, false) if provenance.knows(r) && !own_control(r, &stored_after) => {
+        let now = graphs.holds(r);
+        if *was != now && provenance.knows(r) {
+            known_moved = true;
+        }
+        match (*was, now) {
+            // A container's creator and owner end only with an explicit removal of the
+            // container itself (its own graph, or every graph), never because its members
+            // went; any resource keeps them while its own access-control document is stored.
+            // They come back with it.
+            (true, false)
+                if provenance.knows(r)
+                    && (!r.ends_with('/') || cleared || removed.contains(r.as_str()))
+                    && !own_control(r, &stored_after) =>
+            {
                 ended.push(r);
             }
-            // So whoever brings such a resource back is not its creator.
-            (false, true) if creator.is_some() && !own_control(r, &stored_before) => {
-                began.push(r);
+            // Any other resource that comes back keeps them only if its own access control
+            // resource was stored throughout; otherwise they go, and whoever brings it back is its
+            // creator unless that document was stored before the change.
+            // A container keeps them as above.
+            (false, true) if r.ends_with('/') && provenance.knows(r) => {}
+            (false, true) => {
+                if provenance.knows(r)
+                    && !(own_control(r, &stored_before) && own_control(r, &stored_after))
+                {
+                    back.push(r);
+                }
+                if creator.is_some() && !own_control(r, &stored_before) {
+                    began.push(r);
+                }
             }
             _ => {}
         }
     }
-    if ended.is_empty() && began.is_empty() {
-        return None;
+    if ended.is_empty() && began.is_empty() && back.is_empty() {
+        return known_moved.then(|| provenance.clone());
     }
     let mut kept = provenance.clone();
-    for r in ended {
+    for r in ended.into_iter().chain(back) {
         kept.forget(r);
     }
     if let Some(creator) = creator {
         for r in began {
-            kept.forget(r);
             kept.set_creator(r.as_str(), creator);
         }
     }
@@ -315,8 +351,8 @@ mod tests {
         );
         assert_eq!(
             after.creator("https://pod.ex/b/x"),
-            None,
-            "x.acl outlived x"
+            Some(BOB),
+            "a .acl is not what the ACP view reads"
         );
         assert_eq!(after.creator("https://pod.ex/b/"), Some(BOB), "new");
     }
@@ -344,12 +380,46 @@ mod tests {
         let after = provenance_after(&before, &both, &prov, Some(BOB)).expect("a change");
         assert_eq!(
             after.creator("https://pod.ex/a/"),
-            None,
-            "its document went too"
+            Some(ALICE),
+            "a container ends only when removed itself"
         );
         let all = [GraphEvent::RemovedAll];
         let after = provenance_after(&before, &all, &prov, Some(BOB)).expect("a change");
         assert!(after.is_empty(), "everything went: {after:?}");
+    }
+
+    #[test]
+    fn a_container_ends_only_when_removed_itself() {
+        let before = store(&["https://pod.ex/a/x", "https://pod.ex/b/"]);
+        let prov = created_by(&["https://pod.ex/a/", "https://pod.ex/b/"], ALICE);
+        let emptied = [GraphEvent::Removed("https://pod.ex/a/x")];
+        let after = provenance_after(&before, &emptied, &prov, Some(BOB)).expect("a rebuild");
+        assert_eq!(
+            after.creator("https://pod.ex/a/"),
+            Some(ALICE),
+            "emptied, not removed"
+        );
+        let back = [GraphEvent::Added("https://pod.ex/a/y")];
+        let before_back = store(&["https://pod.ex/b/"]);
+        let again = provenance_after(&before_back, &back, &after, Some(BOB)).expect("a change");
+        assert_eq!(
+            again.creator("https://pod.ex/a/"),
+            Some(ALICE),
+            "back with it"
+        );
+        assert_eq!(again.creator("https://pod.ex/a/y"), Some(BOB));
+        let removed = [GraphEvent::Removed("https://pod.ex/b/")];
+        let after = provenance_after(&before, &removed, &prov, Some(BOB)).expect("a change");
+        assert_eq!(after.creator("https://pod.ex/b/"), None, "removed itself");
+    }
+
+    #[test]
+    fn a_change_that_moves_a_resource_with_known_facts_asks_for_a_rebuild() {
+        let before = store(&["https://pod.ex/x", "https://pod.ex/x.acr"]);
+        let prov = created_by(&["https://pod.ex/x"], ALICE);
+        let gone = [GraphEvent::Removed("https://pod.ex/x")];
+        let after = provenance_after(&before, &gone, &prov, None).expect("a rebuild");
+        assert_eq!(after, prov, "kept with x.acr");
     }
 
     #[test]
@@ -440,6 +510,46 @@ mod tests {
             let after = provenance_after(&before, &events, &AccessProvenance::new(), creator);
             assert!(after.is_none(), "{creator:?}: {after:?}");
         }
+    }
+
+    #[test]
+    fn an_access_control_list_keeps_no_creator() {
+        let before = store(&["https://pod.ex/a/x", "https://pod.ex/a/x.acl"]);
+        let prov = created_by(&["https://pod.ex/a/x"], ALICE);
+        let gone = [GraphEvent::Removed("https://pod.ex/a/x")];
+        let after = provenance_after(&before, &gone, &prov, None).expect("a change");
+        assert_eq!(after.creator("https://pod.ex/a/x"), None);
+    }
+
+    #[test]
+    fn a_resource_back_without_its_access_control_resource_drops_what_was_kept() {
+        let before = store(&["https://pod.ex/a/x.acr"]);
+        let prov = created_by(&["https://pod.ex/a/x"], ALICE);
+        let events = [
+            GraphEvent::Removed("https://pod.ex/a/x.acr"),
+            GraphEvent::Added("https://pod.ex/a/x"),
+        ];
+        let after = provenance_after(&before, &events, &prov, None).expect("a change");
+        assert_eq!(after.creator("https://pod.ex/a/x"), None, "no update records a creator");
+        let after = provenance_after(&before, &events, &prov, Some(BOB)).expect("a change");
+        assert_eq!(after.creator("https://pod.ex/a/x"), None, "its document predates it");
+        let fresh = store(&[]);
+        let events = [GraphEvent::Added("https://pod.ex/a/x")];
+        let after = provenance_after(&fresh, &events, &prov, Some(BOB)).expect("a change");
+        assert_eq!(after.creator("https://pod.ex/a/x"), Some(BOB), "the old entry goes");
+    }
+
+    #[test]
+    fn an_access_control_resource_put_back_before_its_resource_goes_keeps_the_creator() {
+        let before = store(&["https://pod.ex/a/x", "https://pod.ex/a/x.acr"]);
+        let prov = created_by(&["https://pod.ex/a/x"], ALICE);
+        let events = [
+            GraphEvent::Removed("https://pod.ex/a/x.acr"),
+            GraphEvent::Added("https://pod.ex/a/x.acr"),
+            GraphEvent::Removed("https://pod.ex/a/x"),
+        ];
+        let after = provenance_after(&before, &events, &prov, None).expect("a change");
+        assert_eq!(after.creator("https://pod.ex/a/x"), Some(ALICE));
     }
 
     #[test]
