@@ -797,10 +797,26 @@ pub(super) fn fold_key(tag: u8, parts: &[u64]) -> u64 {
     h
 }
 
-/// The fold of a backward proof goal's identity (`goal_key`): computed once where the goal
-/// is built, not again at each node that resolves it.
-pub(super) fn goal_fold(g: &[Term; 3]) -> u64 {
-    fnv1a64(&goal_key(g))
+/// The canonical identity string of a FORMULA, for the salt a nested `log:conclusion`
+/// closure's root identities carry (`BwCtx::scope_salt`): each row's `goal_key` behind its
+/// byte length, so the concatenation is injective over the rows in order.
+///
+/// It exists because `n3::formula_key` — the import-cycle guard's key — is `FxHasher` over
+/// `[[Term; 3]]::hash`, and rustc-hash picks its multiplier by `target_pointer_width` and
+/// does extra rounds on a 32-bit target. That value is fine for a guard that only has to
+/// agree with itself inside one run, and WRONG for anything a NAME is built from: it would
+/// make the names minted inside a nested closure differ between a 64-bit target and
+/// `wasm32`, which is the whole property GH #6844 is about. This is explicit `u64`
+/// arithmetic over `term_key`s and so is the same on every target.
+pub(super) fn formula_canonical_key(ts: &[[Term; 3]]) -> String {
+    let mut out = String::from("F");
+    for row in ts {
+        let k = goal_key(row);
+        out.push_str(&k.len().to_string());
+        out.push(':');
+        out.push_str(&k);
+    }
+    out
 }
 
 /// The identity keys of one statement's three terms (`term_key`): equal exactly when the
@@ -1523,6 +1539,36 @@ mod tests {
         assert_eq!(fnv1a64(""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a64("a"), 0xaf63_dc4c_8601_ec8c);
         assert_eq!(fnv1a64("foobar"), 0x8594_4171_f739_67e8);
+    }
+
+    /// A nested closure's scope salt is a value, not a hash of a memory layout: its fold is
+    /// pinned to a CONSTANT here, the way the FNV vectors above are, so a change that makes
+    /// it depend on the target's pointer width (as `n3::formula_key`'s `FxHasher` does)
+    /// cannot pass. The names a `log:conclusion` closure mints carry this salt, so the whole
+    /// native-vs-`wasm32` guarantee rests on it.
+    #[test]
+    fn the_nested_closure_salt_is_a_pinned_width_independent_constant() {
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let ts = vec![
+            [iri("http://ex/a"), iri("http://ex/p"), iri("http://ex/b")],
+            [iri("http://ex/b"), iri("http://ex/p"), Term::Var("y".into())],
+        ];
+        let canon = formula_canonical_key(&ts);
+        assert_eq!(
+            canon,
+            concat!(
+                r#"F51:14:I"http://ex/a"14:I"http://ex/p"14:I"http://ex/b""#,
+                r#"40:14:I"http://ex/b"14:I"http://ex/p"4:V"y""#
+            )
+        );
+        assert_eq!(fnv1a64(&canon), 0xffca_1a3f_df5f_9f49);
+        // The rows are read in ORDER, and a formula is an ordered vector of rows to the
+        // engine, so swapping two rows is a different formula and a different salt.
+        let mut swapped = ts.clone();
+        swapped.swap(0, 1);
+        assert_ne!(formula_canonical_key(&swapped), canon);
+        // And every row is read, not just the first.
+        assert_ne!(formula_canonical_key(&ts[..1]), canon);
     }
 
     #[test]

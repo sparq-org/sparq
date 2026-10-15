@@ -444,9 +444,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Two derivations that fold alike are refused — the run fails rather than let them share one
   set of renamed variables, and the table that detects it belongs to the whole top-level run,
   so a collision between a data closure, a query's own evaluation and a nested
-  `log:conclusion` closure is caught too; the table takes at most 1,000,000 nodes, one more
-  failing the run. Sibling nested closures at one nesting depth are also told apart, by the
-  nested document's own key. Three consequences: a fact carrying
+  `log:conclusion` closure is caught too. Every part a name is built from is registered the
+  same way, the goal included: it enters the name as an INTERNED id, not as a bare fold, so
+  two different goals cannot merge by folding alike, and it is identified from its FULLY
+  RESOLVED form — every variable walked to the end of its binding chain, through lists and
+  triple terms, a quoted formula left opaque — so two goals that differ only past one
+  binding (a repeated query variable aliasing two renamed ones) stay two goals instead of
+  merging and losing a row. Sibling nested closures at one nesting
+  depth are also told apart, by the nested document's canonical key — its `term_key`s folded
+  in explicit `u64` arithmetic, NOT the pointer-width-dependent hash the import-cycle guard
+  uses, so a nested closure's names agree between native and `wasm32` as well. **A run can
+  now be refused for this:** the nodes and identities a run registers are charged to
+  `ClosureLimits::max_join_rows`, counted over the whole run rather than per round, and the
+  entry that would be one too many fails the run with a cut; the DEFAULT `max_join_rows`
+  is the unbounded sentinel, so a default-limits run is never refused for it. Three
+  consequences: a fact carrying
   a renamed variable has a different identity than before, so regenerate stored `sparq-prov`
   IRIs for such facts; proofs of different goals keep the distinct values they had, including
   values inside a quoted formula, which substitution does not reach; and a program whose only

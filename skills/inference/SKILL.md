@@ -249,13 +249,18 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // A backward-chaining copy's __bw<n>_ prefix is the FINGERPRINT of the derivation that
 // standardized that rule application apart: a 64-bit fold of where the application sits in the
 // proof tree, the goal it is proving and the evaluation scope (and, for a nested closure, that
-// document's own key) - so a renamed variable that
+// document's own canonical key, folded width-independently) - so a renamed variable that
 // reaches a derived fact (a quoted formula value carrying one) names the same term every run and
 // on every target, instead of counting applications in evaluation order (GH #6844). Two proofs
 // of DIFFERENT goals therefore stay different terms, and two derivations that fold alike fail
 // the run rather than share a name - checked over the whole top-level run, so a collision
-// between a closure, a query's evaluation and a nested closure is caught too; a run names at
-// most 1,000,000 distinct nodes, and one more fails it. A side effect: the GH #6757 programs whose only growth was
+// between a closure, a query's evaluation and a nested closure is caught too, and every part
+// a name is built from is registered the same way (a goal enters it as an interned id, not a
+// bare fold, and is identified from its fully resolved form - every variable walked to the end
+// of its binding chain through lists and triple terms, a quoted formula left opaque - so two
+// goals that differ only past one binding stay two goals). The nodes and identities a run registers are charged to
+// ClosureLimits::max_join_rows over the whole run, so a run that SET that limit can now be
+// refused with a cut for registering one too many; the default is unbounded and never is. A side effect: the GH #6757 programs whose only growth was
 // that counter now SATURATE instead of being refused at the closure limit, because re-proving
 // one goal at one node mints one name. Labels are still NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,
