@@ -239,7 +239,8 @@ pub struct PodStore {
     /// NOT rebuild the session index: take [`PodStore::stored_graphs`] before the edit and
     /// call [`PodStore::rematerialize_after_edit`] after it, before any other write or
     /// rebuild, so the stored provenance follows the edit; a `materialize_*` call alone only
-    /// drops the facts of resources that no longer exist.
+    /// drops the facts of resources that no longer exist and whose `.acr` was not stored
+    /// throughout since the last install.
     pub graph: Graph,
     auth: Arc<AuthIndex>,
     epoch: u64,
@@ -321,9 +322,10 @@ pub struct PodStore {
     /// the context again ([`PodStore::materialize_acp_with_credentials`]).
     acp_context_stale: bool,
     /// The resources whose own access control resource was stored when the stored provenance
-    /// was last installed: a rebuild keeps the facts of a resource that does not exist only if
-    /// its `.acr` was stored then and still is, so an `.acr` stored since, by an edit the store
-    /// was not told of, revives nothing.
+    /// was last installed: a change or rebuild keeps the facts of a resource that does not
+    /// exist only if its `.acr` was stored then and still is, so an `.acr` stored since by an
+    /// edit the store was not told of keeps nothing (one removed and stored again between two
+    /// installs by such an edit cannot be told apart).
     acr_controlled: FxHashSet<String>,
 }
 
@@ -570,7 +572,8 @@ impl PodStore {
     /// [`PodStore::materialize_acp_with`] or [`PodStore::materialize_acp_with_credentials`],
     /// none until then; pass empty ones to those to clear it, and current ones when a
     /// credential holding expires or is revoked. The creator and owner of a resource that no
-    /// longer exists, and has no `.acr` of its own stored, are dropped from it.
+    /// longer exists are dropped from it unless its own `.acr` is stored and was when the
+    /// provenance was last installed.
     pub fn materialize_acp(&mut self) -> Result<MaterializeStats, String> {
         self.rematerialize_acp_scoped(ReindexScope::Full)
     }
@@ -640,7 +643,13 @@ impl PodStore {
     ) -> Result<MaterializeStats, String> {
         let events = lifecycle::edit_events(&before.0, &self.graph);
         let staged =
-            lifecycle::provenance_after_names(&before.0, &events, &self.acp_context.0, creator)
+            lifecycle::provenance_after_names(
+                &before.0,
+                &events,
+                &self.acp_context.0,
+                creator,
+                &self.acr_controlled,
+            )
                 .unwrap_or_else(|| self.acp_context.0.clone());
         if acp {
             self.usable_acp_context()?;
@@ -741,6 +750,10 @@ impl PodStore {
     /// `materialize_acp_with(&prov)` is exactly
     /// `materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())` — with no
     /// credential supplied, **every** `acp:vc` matcher rejects every candidate (fail-closed).
+    ///
+    /// Passed back after a failed update (see [`PodStore::acp_provenance`]), the provenance
+    /// is trusted as given: the caller checks it against the stored graphs first, since the
+    /// update may have stored or removed an `.acr`.
     ///
     /// # Errors
     ///
@@ -1179,7 +1192,13 @@ impl PodStore {
         {
             return None;
         }
-        lifecycle::provenance_after(&self.graph, &events, &self.acp_context.0, None)
+        lifecycle::provenance_after(
+            &self.graph,
+            &events,
+            &self.acp_context.0,
+            None,
+            &self.acr_controlled,
+        )
     }
 
     /// Whether installing `staged` changes what the ACP view in force decides, so the view

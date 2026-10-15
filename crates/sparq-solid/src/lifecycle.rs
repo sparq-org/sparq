@@ -6,7 +6,7 @@
 //! effect counts. A resource (a document or a container) keeps its creator and owner across
 //! a change if it exists before and after it, or if its own access control resource
 //! (`<r>.acr`, the only document the ACP view, their one reader, reads) is stored before the
-//! change and not removed at any point in it (replacing its content, by a PUT or `CLEAR` and
+//! change, and when the provenance was last installed, and not removed at any point in it (replacing its content, by a PUT or `CLEAR` and
 //! `INSERT`, is no removal; a `DROP` is); any other resource loses them. So the facts of
 //! a resource that goes are kept with its `.acr` and come back with the resource only while
 //! that `.acr` stays stored, and a container left with no graph below it ends like a
@@ -15,8 +15,9 @@
 //! unless its own `.acr` was stored before the change. The view states creator and owner
 //! facts for existing resources only, so a change that brings back or ends a resource with
 //! known facts asks for a rebuild. The result is staged with the change and installed only
-//! once the change commits; every rebuild also drops the facts of a resource that neither
-//! exists nor has its `.acr` stored.
+//! once the change commits; every rebuild also drops the facts of a resource that does not
+//! exist unless its `.acr` is stored and was at the previous install. So an `.acr` stored by
+//! an edit the store was not told of keeps nothing.
 
 use crate::loader::{validate_principal_iri, ResourceGraphs, ACR_SUFFIX};
 use crate::AccessProvenance;
@@ -120,6 +121,7 @@ pub(crate) fn provenance_after(
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
+    installed_acrs: &FxHashSet<String>,
 ) -> Option<AccessProvenance> {
     if events.is_empty() {
         return None;
@@ -136,6 +138,7 @@ pub(crate) fn provenance_after(
         provenance,
         creator,
         stored,
+        installed_acrs,
     )
 }
 
@@ -145,6 +148,7 @@ pub(crate) fn provenance_after_names(
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
+    installed_acrs: &FxHashSet<String>,
 ) -> Option<AccessProvenance> {
     if events.is_empty() {
         return None;
@@ -156,6 +160,7 @@ pub(crate) fn provenance_after_names(
         provenance,
         creator,
         stored,
+        installed_acrs,
     )
 }
 
@@ -165,6 +170,7 @@ fn replay(
     provenance: &AccessProvenance,
     creator: Option<&str>,
     stored_before: impl Fn(&str) -> bool,
+    installed_acrs: &FxHashSet<String>,
 ) -> Option<AccessProvenance> {
     // Each resource the change touches, with whether it was one before the change (the first
     // time the change touches it says which). Only the net effect counts: a resource that
@@ -200,10 +206,15 @@ fn replay(
     // Only the access control resource counts: the ACP view, the one reader of creators and
     // owners, reads no `.acl`.
     let acr_of = |r: &str| format!("{r}{ACR_SUFFIX}");
-    // A resource's own `.acr` stored before the change and never removed in it.
+    // A resource's own `.acr` stored before the change, and when the provenance was last
+    // installed (so one an edit the store was not told of stored keeps nothing), and never
+    // removed in the change.
     let acr_throughout = |r: &str| {
         let acr = acr_of(r);
-        !cleared && stored_before(&acr) && !acr_removed.contains(acr.as_str())
+        !cleared
+            && installed_acrs.contains(r)
+            && stored_before(&acr)
+            && !acr_removed.contains(acr.as_str())
     };
     let existed = |r: &str| touched.get(r).copied().unwrap_or_else(|| graphs.holds(r));
     let creator = creator.filter(|c| validate_principal_iri(c).is_ok());
@@ -248,12 +259,27 @@ fn replay(
 
 #[cfg(test)]
 mod tests {
-    use super::{provenance_after, GraphEvent};
+    use super::GraphEvent;
     use crate::AccessProvenance;
     use sparq_core::Graph;
 
     const ALICE: &str = "https://alice.ex/card#me";
     const BOB: &str = "https://bob.ex/card#me";
+
+    /// [`super::provenance_after`] with every `.acr` stored before the change stored when the
+    /// provenance was installed.
+    fn provenance_after(
+        before: &Graph,
+        events: &[GraphEvent<'_>],
+        provenance: &AccessProvenance,
+        creator: Option<&str>,
+    ) -> Option<AccessProvenance> {
+        let installed = crate::loader::controlled_resources(before)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        super::provenance_after(before, events, provenance, creator, &installed)
+    }
 
     fn store(names: &[&str]) -> Graph {
         let nq: String = names

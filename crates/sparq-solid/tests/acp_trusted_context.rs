@@ -858,3 +858,59 @@ fn a_container_emptied_outside_an_update_is_forgotten_at_the_next_rebuild() {
     store.materialize_acp().expect("rebuild");
     assert_eq!(store.acp_provenance().creator(zz), None);
 }
+
+/// d0 removed and its `.acr` stored by an edit the store is not told of.
+fn d0_under_an_unannounced_acr() -> PodStore {
+    let mut st = store();
+    drop_graph(&mut st, D0);
+    push_graph(&mut st, &format!("{D0}.acr"));
+    st
+}
+
+fn assert_d0_forgotten(st: &PodStore, after: &str) {
+    assert_eq!(st.acp_provenance().creator(D0), None, "{after}");
+    assert_eq!(st.acp_provenance().owner(D0), None, "{after}");
+}
+
+#[test]
+fn an_unannounced_acr_keeps_nothing_whatever_comes_next() {
+    // d0 made again by an update.
+    let mut st = d0_under_an_unannounced_acr();
+    st.update_as_acp(&admin(), &format!("INSERT DATA {{ GRAPH <{D0}> {{ {D0_DATA} }} }}"))
+        .expect("admin makes d0 again");
+    assert_d0_forgotten(&st, "an update");
+    assert!(!holds(&st, ALICE, Mode::Write), "the old creator does not write");
+    // d0 made again by an announced edit.
+    let mut st = d0_under_an_unannounced_acr();
+    let before = st.stored_graphs();
+    push_graph(&mut st, D0);
+    st.rematerialize_after_edit(&before, None, true)
+        .expect("rebuild");
+    assert_d0_forgotten(&st, "an announced edit");
+    // An unrelated announced edit, then d0 made again.
+    let mut st = d0_under_an_unannounced_acr();
+    let before = st.stored_graphs();
+    push_graph(&mut st, "https://pod.ex/docs/other");
+    st.rematerialize_after_edit(&before, None, true)
+        .expect("rebuild");
+    push_graph(&mut st, D0);
+    st.materialize_acp().expect("rebuild");
+    assert_d0_forgotten(&st, "an unrelated edit");
+    // A WAC rebuild in between.
+    let mut st = d0_under_an_unannounced_acr();
+    st.materialize_wac().expect("WAC rebuild");
+    push_graph(&mut st, D0);
+    st.materialize_acp().expect("rebuild");
+    assert_d0_forgotten(&st, "a WAC rebuild");
+}
+
+#[test]
+fn provenance_the_caller_supplies_for_a_resource_under_its_acr_is_kept() {
+    let mut st = d0_under_an_unannounced_acr();
+    let mut prov = AccessProvenance::new();
+    prov.set_creator(D0, ALICE);
+    st.materialize_acp_with(&prov).expect("materializes");
+    assert_eq!(st.acp_provenance().creator(D0), Some(ALICE), "supplied");
+    st.materialize_acp().expect("rebuild");
+    assert_eq!(st.acp_provenance().creator(D0), Some(ALICE), "kept with d0.acr");
+}
