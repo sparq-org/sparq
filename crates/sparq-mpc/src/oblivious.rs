@@ -1349,6 +1349,264 @@ mod tests {
         }
     }
 
+    // ---- Oblivious shuffle: output sharings are FRESH ---------------------
+
+    /// What a colluding set of parties holds of a column: each entry's shares at
+    /// the coalition's own evaluation points, and nothing else.
+    fn coalition_view(col: &SecretColumn, coalition: &[u64]) -> Vec<Vec<u64>> {
+        col.iter()
+            .map(|entry| {
+                entry
+                    .iter()
+                    .filter(|sh| coalition.contains(&sh.x))
+                    .map(|sh| sh.y.value())
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// The matching a coalition can do with the values it holds: for each OUTPUT
+    /// position, the input positions whose coalition shares are identical.
+    ///
+    /// Returns `Some(perm)` when every output position matches exactly one input
+    /// position — the coalition has then recovered the permutation outright — and
+    /// `None` when any output position matches none or several, so the coalition
+    /// must guess.
+    fn coalition_recovered_permutation(
+        before: &SecretColumn,
+        after: &SecretColumn,
+        coalition: &[u64],
+    ) -> Option<Vec<usize>> {
+        let (bv, av) = (
+            coalition_view(before, coalition),
+            coalition_view(after, coalition),
+        );
+        let mut out = Vec::with_capacity(av.len());
+        for a in &av {
+            let hits: Vec<usize> = bv
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| *b == a)
+                .map(|(i, _)| i)
+                .collect();
+            if hits.len() != 1 {
+                return None;
+            }
+            out.push(hits[0]);
+        }
+        Some(out)
+    }
+
+    /// Route and apply the network WITHOUT re-randomising — the verbatim
+    /// share-vector move, as the POSITIVE CONTROL for the linkability test below.
+    /// This is a test-local reimplementation on purpose: it is the behaviour the
+    /// shuffle must NOT have, so it must not exist in the shipped code.
+    fn verbatim_shuffle(
+        dealer: &mut ShamirDealer,
+        mut col: SecretColumn,
+    ) -> (SecretColumn, Vec<usize>) {
+        let n = col.len();
+        let net = WaksmanNetwork::new(n);
+        let perm = random_permutation(dealer, n).unwrap();
+        let bits = net.route(&perm).unwrap();
+        net.apply(&mut col, &bits).unwrap();
+        (col, perm)
+    }
+
+    /// **THE linkability guard.** A coalition of `t` parties must not be able to
+    /// pair output positions with input positions using the share values it holds.
+    ///
+    /// The coalition's only value-level move is to look for its own shares again in
+    /// the output. The POSITIVE CONTROL shows that move works on a verbatim
+    /// switch-network move: `verbatim_shuffle` hands back the input share vectors
+    /// reordered, so the coalition recovers the whole permutation, in every trial.
+    /// Against [`shuffle`] it recovers nothing in any trial — not one output
+    /// position's coalition shares coincide with any input position's — so the
+    /// coalition is left guessing among the `m` positions.
+    #[test]
+    fn a_t_coalition_cannot_pair_output_elements_with_input_elements() {
+        let (n, m) = (5usize, 6usize);
+        let vals: Vec<u64> = (1..=m as u64).map(|v| v * 1000).collect();
+        // Parties 1 and 2: a full threshold-sized coalition at n = 5 (t = 2).
+        let coalition = [1u64, 2];
+
+        // Positive control: the verbatim move IS linkable, every trial.
+        let mut control_recovered = 0usize;
+        for seed in 0..32u64 {
+            let b = ShamirBackend::new_seeded(n, 0x5100 + seed).unwrap();
+            assert_eq!(b.threshold(), coalition.len());
+            let mut dealer = b.dealer();
+            let before = share_col(&mut dealer, &vals);
+            let (after, perm) = verbatim_shuffle(&mut dealer, before.clone());
+            let recovered = coalition_recovered_permutation(&before, &after, &coalition)
+                .expect("the verbatim move must be fully linkable — the control is the point");
+            // `perm[i] = o` means input `i` lands at output `o`; the recovered
+            // vector is indexed the other way round.
+            let mut expect = vec![0usize; m];
+            for (i, &o) in perm.iter().enumerate() {
+                expect[o] = i;
+            }
+            assert_eq!(
+                recovered, expect,
+                "seed {seed}: control must recover the permutation"
+            );
+            control_recovered += 1;
+        }
+        assert_eq!(control_recovered, 32);
+
+        // The shipped shuffle: nothing to pair up, any trial.
+        for seed in 0..32u64 {
+            let b = ShamirBackend::new_seeded(n, 0x5200 + seed).unwrap();
+            let mut dealer = b.dealer();
+            let before = share_col(&mut dealer, &vals);
+            let (after, _) = shuffle(&mut dealer, before.clone()).unwrap();
+            assert!(
+                coalition_recovered_permutation(&before, &after, &coalition).is_none(),
+                "seed {seed}: a t-coalition recovered the permutation from its share values"
+            );
+            // Stronger than "not all of it": not a SINGLE position pairs up.
+            let (bv, av) = (
+                coalition_view(&before, &coalition),
+                coalition_view(&after, &coalition),
+            );
+            for (k, a) in av.iter().enumerate() {
+                assert!(
+                    !bv.contains(a),
+                    "seed {seed}: output {k}'s coalition shares are an input element's"
+                );
+            }
+        }
+    }
+
+    /// The coalition's view of a FIXED input varies across runs, so no function of
+    /// it is a function of the element: the same column shuffled under different
+    /// masking keystreams gives the coalition a different view every time, and the
+    /// multiset of its shares is never the input's.
+    #[test]
+    fn the_coalition_view_of_a_fixed_column_varies_across_runs() {
+        let vals = vec![7u64, 8, 9, 10];
+        let coalition = [1u64, 2];
+        let mut seen: std::collections::BTreeSet<Vec<Vec<u64>>> = std::collections::BTreeSet::new();
+        let mut input_views: std::collections::BTreeSet<Vec<Vec<u64>>> =
+            std::collections::BTreeSet::new();
+        for seed in 0..16u64 {
+            let b = ShamirBackend::new_seeded(5, 0x5300 + seed).unwrap();
+            let mut dealer = b.dealer();
+            let before = share_col(&mut dealer, &vals);
+            let (after, _) = shuffle(&mut dealer, before.clone()).unwrap();
+            let mut v = coalition_view(&after, &coalition);
+            v.sort();
+            seen.insert(v);
+            let mut iv = coalition_view(&before, &coalition);
+            iv.sort();
+            input_views.insert(iv);
+        }
+        assert_eq!(seen.len(), 16, "the coalition's view repeated across runs");
+        assert!(
+            seen.is_disjoint(&input_views),
+            "a run handed the coalition back its own input view"
+        );
+    }
+
+    /// Every output element interpolates to a polynomial of degree at most `t`:
+    /// the re-randomisation adds a degree-`t` ZERO-sharing, so it moves no value
+    /// and raises no degree.
+    #[test]
+    fn every_shuffle_output_element_stays_degree_at_most_t() {
+        for n in [3usize, 5, 7] {
+            let b = ShamirBackend::new_seeded(n, 0x5400 + n as u64).unwrap();
+            let t = b.threshold();
+            let mut dealer = b.dealer();
+            let col = share_col(&mut dealer, &[1u64, 2, 3, 4, 5]);
+            let (after, _) = shuffle(&mut dealer, col).unwrap();
+            for (k, entry) in after.iter().enumerate() {
+                assert_eq!(entry.len(), n, "n={n}, entry {k}: width");
+                // A degree-`<= t` sharing is one all `n` points agree on: the
+                // interpolation through the first `t+1` must reproduce the rest.
+                let v = crate::shamir::reconstruct_degree(&entry[..t + 1], t).unwrap();
+                assert_eq!(
+                    crate::shamir::reconstruct_degree(entry, t).unwrap(),
+                    v,
+                    "n={n}, entry {k}: the whole sharing must agree with its first t+1 points"
+                );
+            }
+        }
+    }
+
+    /// A PACKED entry's elements are re-randomised INDEPENDENTLY: the difference
+    /// between two elements of one entry is not preserved, so a coalition cannot
+    /// pair entries up by their internal differences either.
+    #[test]
+    fn packed_elements_are_re_randomised_independently() {
+        let n = 5usize;
+        let b = ShamirBackend::new_seeded(n, 0x5500).unwrap();
+        let t = b.threshold();
+        let mut dealer = b.dealer();
+        // Three entries, each packing two elements with the SAME difference.
+        let mut col: SecretColumn = Vec::new();
+        for k in 0..3u64 {
+            let mut entry = dealer.share(Fp::new(100 + k));
+            entry.extend(dealer.share(Fp::new(500 + k)));
+            col.push(entry);
+        }
+        let diffs = |c: &SecretColumn| -> Vec<Vec<u64>> {
+            c.iter()
+                .map(|e| {
+                    e[..n]
+                        .iter()
+                        .zip(&e[n..])
+                        .map(|(a, b)| a.y.sub(b.y).value())
+                        .collect()
+                })
+                .collect()
+        };
+        let before = diffs(&col);
+        let (after, cost) = shuffle(&mut dealer, col).unwrap();
+        // Two elements per entry, three entries.
+        assert_eq!(cost.fresh_sharings, 6);
+        for (k, d) in diffs(&after).iter().enumerate() {
+            assert!(
+                !before.contains(d),
+                "entry {k}: the per-element share differences survived the shuffle"
+            );
+        }
+        // And the values still reconstruct, element by element.
+        let mut got: Vec<(u64, u64)> = after
+            .iter()
+            .map(|e| {
+                (
+                    crate::shamir::reconstruct_degree(&e[..n], t)
+                        .unwrap()
+                        .value(),
+                    crate::shamir::reconstruct_degree(&e[n..], t)
+                        .unwrap()
+                        .value(),
+                )
+            })
+            .collect();
+        got.sort_unstable();
+        assert_eq!(got, vec![(100, 500), (101, 501), (102, 502)]);
+    }
+
+    /// An entry whose width is not a whole number of `n`-party sharings is refused
+    /// rather than masked by position — a per-position mask on a mis-aligned entry
+    /// would corrupt values silently.
+    #[test]
+    fn a_misaligned_entry_width_is_refused() {
+        let b = ShamirBackend::new_seeded(5, 0x5600).unwrap();
+        let mut dealer = b.dealer();
+        let mut col = share_col(&mut dealer, &[1u64, 2]);
+        col[0].pop();
+        let err = shuffle(&mut dealer, col).unwrap_err();
+        match err {
+            MpcError::Protocol(m) => assert!(
+                m.contains("whole") && m.contains("sharings"),
+                "wrong refusal: {m}"
+            ),
+            other => panic!("must fail closed, got {other:?}"),
+        }
+    }
+
     // ---- Oblivious shuffle: valid permutation of the multiset -------------
 
     #[test]

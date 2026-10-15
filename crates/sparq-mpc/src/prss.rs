@@ -260,7 +260,10 @@ impl std::fmt::Debug for PrssRandomness {
         f.debug_struct("PrssRandomness")
             .field("n", &self.n)
             .field("t", &self.t)
-            .field("seeds", &format_args!("{} × <replicated seed>", self.seeds.len()))
+            .field(
+                "seeds",
+                &format_args!("{} × <replicated seed>", self.seeds.len()),
+            )
             .field("counter", &self.counter)
             .finish()
     }
@@ -1260,7 +1263,10 @@ mod tests {
         let err = PrssRandomness::with_seeded_setup(10, 1).expect_err("must refuse n = 10");
         match err {
             MpcError::Protocol(m) => {
-                assert!(m.contains("coin-toss"), "refusal must name the fallback: {m}")
+                assert!(
+                    m.contains("coin-toss"),
+                    "refusal must name the fallback: {m}"
+                )
             }
             other => panic!("expected a Protocol refusal, got {other:?}"),
         }
@@ -1281,7 +1287,10 @@ mod tests {
 
     #[test]
     fn unqualified_sets_are_the_t_subsets_in_order() {
-        assert_eq!(unqualified_sets(4, 1), vec![vec![1], vec![2], vec![3], vec![4]]);
+        assert_eq!(
+            unqualified_sets(4, 1),
+            vec![vec![1], vec![2], vec![3], vec![4]]
+        );
         assert_eq!(
             unqualified_sets(4, 2),
             vec![
@@ -1389,14 +1398,19 @@ mod tests {
                 assert_eq!(held.len(), source.seeds_per_party());
                 // The party-local view carries key material for EXACTLY those
                 // seeds — a forbidden key is not merely unused, it is absent.
-                let carried: BTreeSet<usize> =
-                    source.party_view(party).held.iter().map(|h| h.idx).collect();
+                let carried: BTreeSet<usize> = source
+                    .party_view(party)
+                    .held
+                    .iter()
+                    .map(|h| h.idx)
+                    .collect();
                 assert_eq!(
                     carried, held,
                     "party {party} (n = {n}) must be handed EXACTLY its own key material"
                 );
                 assert_eq!(
-                    accessed[party as usize - 1], held,
+                    accessed[party as usize - 1],
+                    held,
                     "party {party} (n = {n}) must generate from EXACTLY its own seed view"
                 );
             }
@@ -1470,7 +1484,9 @@ mod tests {
                 // Reconstruction (which for n > t+1 also RS-checks that all n
                 // points lie on ONE degree-t polynomial) yields Σ_A PRF(k_A, ctr).
                 assert_eq!(
-                    backend.reconstruct(&shares).expect("consistent degree-t sharing"),
+                    backend
+                        .reconstruct(&shares)
+                        .expect("consistent degree-t sharing"),
                     value,
                     "n = {n}, ctr = {ctr}"
                 );
@@ -1495,7 +1511,10 @@ mod tests {
         }
         let strided: Vec<Share> = shares.iter().step_by(2).copied().take(t + 1).collect();
         assert_eq!(strided.len(), t + 1);
-        assert_eq!(backend.reconstruct(&strided).expect("strided quorum"), value);
+        assert_eq!(
+            backend.reconstruct(&strided).expect("strided quorum"),
+            value
+        );
     }
 
     #[test]
@@ -1558,7 +1577,10 @@ mod tests {
             accept_if_nonzero(Fp::one(), shares.clone()),
             Some(shares.clone())
         );
-        assert_eq!(accept_if_nonzero(Fp::new(12345), shares.clone()), Some(shares));
+        assert_eq!(
+            accept_if_nonzero(Fp::new(12345), shares.clone()),
+            Some(shares)
+        );
     }
 
     #[test]
@@ -1587,7 +1609,11 @@ mod tests {
         let k1 = [1u8; 32];
         let k2 = [2u8; 32];
         assert_ne!(prf_fp(&k1, 0), prf_fp(&k2, 0), "distinct seeds must differ");
-        assert_ne!(prf_fp(&k1, 0), prf_fp(&k1, 1), "distinct counters must differ");
+        assert_ne!(
+            prf_fp(&k1, 0),
+            prf_fp(&k1, 1),
+            "distinct counters must differ"
+        );
         // Deterministic in (seed, counter) — the whole construction depends on
         // every holder of `k_A` deriving the SAME PRF output locally.
         assert_eq!(prf_fp(&k1, 7), prf_fp(&k1, 7));
@@ -2132,6 +2158,41 @@ mod tests {
             "every output entry must be a fresh sharing, not an input share vector"
         );
         assert_eq!(cost.fresh_sharings, rows.len() * 3);
+    }
+
+    /// The PRSS construction's output is unlinkable to its input for the same
+    /// reason, by a different mechanism: it permutes by RESHARING, so every output
+    /// element is a fresh sharing already. A coalition of `t` parties looking for
+    /// its own share values again in the output finds none of them.
+    #[test]
+    fn a_t_coalition_cannot_pair_prss_output_elements_with_input_elements() {
+        let n = 5;
+        let backend = ShamirBackend::new_seeded(n, 0x0DB).unwrap();
+        let coalition = [1u64, 2];
+        assert_eq!(backend.threshold(), coalition.len());
+        let view = |col: &crate::oblivious::SecretColumn| -> BTreeSet<Vec<u64>> {
+            col.iter()
+                .map(|e| {
+                    e.iter()
+                        .filter(|sh| coalition.contains(&sh.x))
+                        .map(|sh| sh.y.value())
+                        .collect()
+                })
+                .collect()
+        };
+        for seed in 0..8u64 {
+            let mut dealer = backend.dealer();
+            let col: crate::oblivious::SecretColumn =
+                (0..4u64).map(|k| dealer.share(Fp::new(1000 + k))).collect();
+            let before = view(&col);
+            let mut source = PrssRandomness::with_seeded_setup(n, 0x0DC + seed).unwrap();
+            let (after, cost) = source.oblivious_shuffle(col).unwrap();
+            assert_eq!(cost.fresh_sharings, 4, "one fresh sharing per element");
+            assert!(
+                view(&after).is_disjoint(&before),
+                "seed {seed}: an output element carried an input element's coalition shares"
+            );
+        }
     }
 
     // ---- The shuffle's SECURITY properties, each pinned against a weakening

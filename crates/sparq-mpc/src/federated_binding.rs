@@ -228,7 +228,11 @@ pub enum BindingError {
     /// verifier always checks against its own fresh value, never the prover's.
     ChallengeMismatch,
     /// The statement is outside its validity window at the supplied instant.
-    OutsideValidityWindow { now: u64, not_before: u64, not_after: u64 },
+    OutsideValidityWindow {
+        now: u64,
+        not_before: u64,
+        not_after: u64,
+    },
     /// `not_after < not_before` — an unsatisfiable window is refused at
     /// construction rather than silently never matching.
     InvertedValidityWindow { not_before: u64, not_after: u64 },
@@ -942,7 +946,10 @@ mod tests {
         // words `[challenge, query_digest, key_set_digest, freshness_tag,
         // holder_count, holder_tag, k_i, r_i, ...]`, so dropping indices 6..8
         // removes the arity and index 3 removes the freshness tag.
-        assert_eq!(six.public_input_word_count(), three.public_input_word_count());
+        assert_eq!(
+            six.public_input_word_count(),
+            three.public_input_word_count()
+        );
         let strip_arity_and_freshness = |bytes: Vec<u8>| {
             let mut words: Vec<Vec<u8>> =
                 bytes.chunks_exact(WORD_BYTES).map(<[u8]>::to_vec).collect();
@@ -1344,7 +1351,10 @@ mod tests {
 
     #[test]
     fn digests_are_canonical_field_elements() {
-        assert_eq!(FieldWord::digest(FRESHNESS_DOMAIN_TAG, &[b"x"]).as_be_bytes()[0], 0);
+        assert_eq!(
+            FieldWord::digest(FRESHNESS_DOMAIN_TAG, &[b"x"]).as_be_bytes()[0],
+            0
+        );
         // Domain separation: the same pre-image under a different tag differs.
         assert_ne!(
             FieldWord::digest(FRESHNESS_DOMAIN_TAG, &[b"x"]),
