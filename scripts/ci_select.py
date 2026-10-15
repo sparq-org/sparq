@@ -390,6 +390,7 @@ _LANE_SEEDS: dict[str, list[str]] = {
         "sparq-rsp-wasm",
         "sparq-text-wasm",
         "sparq-shacl-wasm",
+        "sparq-dl-wasm",
         "sparq-introspect",
         "sparq-solid",
         # sq-98c: not a bundle crate — the wasm job build+clippy-gates that

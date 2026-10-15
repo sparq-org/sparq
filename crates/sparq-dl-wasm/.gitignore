@@ -1,0 +1,2 @@
+# wasm-pack output (`npm run build:wasm:dl` in js/ copies it into js/wasm-dl/).
+/pkg
