@@ -176,19 +176,40 @@ fn data_properties_are_decided_and_ill_typed_literals_are_inconsistent() {
 }
 
 #[test]
-fn nominals_are_out_of_fragment_with_the_offending_triple() {
-    let r = run(&format!(
-        "{ALCHIQ} :ann a owl:NamedIndividual . :Ann owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] ."
-    ));
+fn nominals_are_decided() {
+    let ann = format!(
+        "{ALCHIQ} :ann a owl:NamedIndividual , :Woman . :Ann a owl:Class ; owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] ."
+    );
+    let r = run(&ann);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(true));
+    assert_eq!(s(get(&r, "classification")), "complete");
+    // `Ann ≡ {ann}` and `Woman(ann)`: `Ann ⊑ Woman`, which only the ABox says.
+    assert!(
+        pairs(get(&r, "inferredSubClassOf")).contains(&("http://ex/Ann", "http://ex/Woman")),
+        "{r:?}"
+    );
+    let r = run_with(&ann, Some(":ann a :Man ."), None);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(false));
+}
+
+#[test]
+fn keys_are_out_of_fragment_with_the_offending_triples() {
+    let r = run(&format!("{ALCHIQ} :Person owl:hasKey ( :hasMother ) ."));
     assert_eq!(s(get(&r, "consistent")), "unknown");
     let reason = get(&r, "reason");
     assert_eq!(s(get(reason, "kind")), "OutOfFragment");
-    assert!(!s(get(reason, "construct")).is_empty());
+    assert_eq!(s(get(reason, "construct")), "HasKey");
     let triples = strs(get(reason, "triples"));
-    assert!(!triples.is_empty());
+    assert!(
+        triples
+            .iter()
+            .any(|t| t.starts_with("<http://ex/Person> <http://www.w3.org/2002/07/owl#hasKey> ")),
+        "{triples:?}"
+    );
     for t in &triples {
         assert!(t.ends_with(" ."), "{t}");
     }
+    assert_eq!(get(get(&r, "profile"), "dl"), &Value::Bool(true));
     assert_eq!(get(&r, "classification"), &Value::Null);
 }
 

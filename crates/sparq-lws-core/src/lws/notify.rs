@@ -1549,6 +1549,11 @@ async fn subscribe<S: Store + 'static>(
     };
     for topic in &topics {
         let resource = topic.strip_suffix(META_SUFFIX).unwrap_or(topic);
+        // A linkset's record is no resource, and has no linkset: whatever is stored, it is not
+        // there to read.
+        if super::names_record(resource) {
+            return cannot_read();
+        }
         // The lock of a visible topic that nobody is changing is taken at once, without a wait:
         // then the one check under it says nothing of its state. Otherwise the topic is checked
         // first, without it.

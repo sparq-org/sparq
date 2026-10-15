@@ -579,6 +579,14 @@ pub struct ResourceMeta {
     pub pending: bool,
 }
 
+/// Whether `iri` names a linkset's stored record rather than a resource: no resource's name ends
+/// in [`META_SUFFIX`], in any case (see `resources::sanitize_slug`), so whatever is stored under
+/// such a name is never served, listed, followed or subscribed to as a resource.
+pub(crate) fn names_record(iri: &str) -> bool {
+    let n = META_SUFFIX.len();
+    iri.len() >= n && iri.as_bytes()[iri.len() - n..].eq_ignore_ascii_case(META_SUFFIX.as_bytes())
+}
+
 /// The store key of a resource's LWS metadata, which is also its linkset's URI (the draft's own
 /// convention): `/a/b` maps to `/a/b.meta` and the container `/a/b/` to `/a/b/.meta`. Clients can
 /// never create a resource whose name ends with `.meta` or starts with a dot, so the keys never
@@ -1629,6 +1637,16 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         parent: Option<&str>,
     ) -> Result<crate::store::DeleteOutcome, crate::error::ServerError> {
         let Some((body, meta)) = self.prior(iri).await? else {
+            // A record a legacy edge lists may be gone already (its subject's removal took it):
+            // the edge, which is all that is left, goes too, so it keeps no container from being
+            // empty. Nothing is there to put back.
+            if let (true, Some(parent)) = (names_record(iri), parent) {
+                self.durable().await?;
+                match self.state.store.delete(iri, Some(parent)).await {
+                    Ok(()) | Err(crate::error::ServerError::NotFound) => {}
+                    Err(e) => return Err(e),
+                }
+            }
             return Ok(crate::store::DeleteOutcome::NotFound);
         };
         self.durable().await?;
