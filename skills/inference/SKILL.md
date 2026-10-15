@@ -776,6 +776,10 @@ properties and datatypes; the constructs where HermiT departs from the Direct Se
 (ill-typed literals, float zeros, `NegativeDataPropertyAssertion` compared by lexical
 form, data booleans and single-value intervals under data cardinalities) are kept out of
 that corpus and pinned by hand-written tests instead.
+From JavaScript the same pipeline (parse, `extract`, `check`) is `checkOwlDl(tbox, abox?,
+options?)` in `@sparq-org/sparq`, backed by the separate, lazily-loaded `crates/sparq-dl-wasm`
+bundle; it returns the report as JSON with the offending triples as N-Triples lines — see
+[`../javascript-wasm/references/owl-dl.md`](../javascript-wasm/references/owl-dl.md).
 `owl2dl::data_ranges` answers the datatype questions the tableau asks of a data range
 (`DataRangeExpr`: a datatype, a facet restriction, `OneOf`, `And`, `Or`, `Not`):
 `is_empty`, `contains`, `has_at_least(r, n)` for data cardinalities, and

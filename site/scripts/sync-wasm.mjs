@@ -57,6 +57,27 @@ for (const f of runtimeFiles) {
   manifest[f] = hashed;
 }
 
+// #7031 — also sync the OWL 2 DL bundle behind `checkOwlDl` (crates/sparq-dl-wasm, built
+// into js/wasm-dl by `js/`'s `build:wasm:dl`). The self-hosted ESM entry /wasm/sparq.js
+// (scripts/bundle-wasm-esm.mjs) imports it dynamically as the sibling `./sparq_dl_wasm.js`, and
+// that glue fetches `sparq_dl_wasm_bg.wasm` next to itself, so both are copied into public/wasm/
+// unhashed, like the main glue the entry imports. OPTIONAL: when it has not been built, WARN
+// and skip; `checkOwlDl` from the hosted entry then rejects with a load error.
+const dlSrc = join(here, "..", "..", "js", "wasm-dl");
+const dlFiles = ["sparq_dl_wasm.js", "sparq_dl_wasm_bg.wasm"];
+try {
+  await access(join(dlSrc, "sparq_dl_wasm_bg.wasm"));
+  for (const f of dlFiles) {
+    await copyFile(join(dlSrc, f), join(dest, f));
+  }
+  console.log(`[sync-wasm] copied ${dlFiles.length} files → public/wasm/ (OWL 2 DL)`);
+} catch {
+  console.warn(
+    `[sync-wasm] OWL 2 DL bundle not found at ${dlSrc}; checkOwlDl from /wasm/sparq.js will\n` +
+      `            not load. Build it:  (cd ../js && npm run build:wasm:dl)`,
+  );
+}
+
 // [OPUS-4.8] sq-0po6 — also sync the tier-b "W-reason" bundle that drives
 // /surface/inference (crates/sparq-reason-wasm, built with `--features explain` by
 // `js/`'s `build:reason-wasm`). Its wasm-pack output stays in the crate's own pkg/
