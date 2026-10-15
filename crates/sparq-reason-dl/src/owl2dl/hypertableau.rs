@@ -549,21 +549,25 @@ impl<'c> Tableau<'c> {
         if self.c.keys.is_empty() {
             return KeyStep::Done;
         }
-        let mut named: Vec<Node> = self
+        // A named individual's canonical node stands for it only given the merges on the way.
+        let mut named: Vec<(Node, Dep)> = self
             .named
             .iter()
-            .map(|&n| self.canonical(n))
-            .filter(|&n| self.nodes[n as usize].active)
+            .map(|&n| self.canonical_dep(n))
+            .filter(|&(n, _)| self.nodes[n as usize].active)
             .collect();
-        named.sort_unstable();
-        named.dedup();
+        named.sort_unstable_by_key(|&(n, _)| n);
+        named.dedup_by_key(|&mut (n, _)| n);
         let mut unsure = false;
         for key in &self.c.keys {
             let members: Vec<(Node, Dep)> = named
                 .iter()
-                .filter_map(|&n| match key.class {
-                    None => Some((n, Dep::default())),
-                    Some(a) => self.nodes[n as usize].label.get(&a).map(|d| (n, d.clone())),
+                .filter_map(|(n, dn)| match key.class {
+                    None => Some((*n, dn.clone())),
+                    Some(a) => self.nodes[*n as usize]
+                        .label
+                        .get(&a)
+                        .map(|d| (*n, d.union(dn))),
                 })
                 .collect();
             for (i, (x, dx)) in members.iter().enumerate() {
@@ -592,16 +596,20 @@ impl<'c> Tableau<'c> {
     }
 
     /// Whether `x` and `y` share a value on every property of `key`, and on what.
-    fn key_shared(&self, key: &Key, x: Node, y: Node, named: &[Node]) -> Shared {
+    fn key_shared(&self, key: &Key, x: Node, y: Node, named: &[(Node, Dep)]) -> Shared {
         let mut deps = Dep::default();
         for &r in &key.roles {
             let z = named
                 .iter()
-                .copied()
-                .find(|&z| self.has_role(r, x, z) && self.has_role(r, y, z));
+                .find(|&&(z, _)| self.has_role(r, x, z) && self.has_role(r, y, z));
             match z {
-                Some(z) => {
-                    deps = deps.union(&self.role_dep(r, x, z).union(&self.role_dep(r, y, z)))
+                Some((z, dz)) => {
+                    deps = deps.union(
+                        &self
+                            .role_dep(r, x, *z)
+                            .union(&self.role_dep(r, y, *z))
+                            .union(dz),
+                    )
                 }
                 None => return Shared::No,
             }
