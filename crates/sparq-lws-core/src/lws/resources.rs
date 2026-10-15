@@ -2479,6 +2479,13 @@ async fn update<S: Store + 'static>(
     if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
         return r;
     }
+    // A replace keeps what is stored beside the content (the declared types, the links, the
+    // content type when none is sent), and that decides whether it is admitted. So a writer that
+    // may not read the resource is refused before anything stored answers, and one that may is
+    // told why a write is refused.
+    if !state.allowed(Action::Read, uri, agent).await {
+        return state.deny(agent);
+    }
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -2494,17 +2501,9 @@ async fn update<S: Store + 'static>(
     ) {
         return problem(StatusCode::PRECONDITION_FAILED, None);
     }
-    // What the write keeps from before (the stored content type, the declared types, the stored
-    // links) can decide whether it is admitted. A writer that may not read the resource is told
-    // nothing about those: what would refuse the write for what it keeps is the refusal it would
-    // get without Modify, and a PUT that would keep the stored content type is refused outright.
-    // Nor does the new tag, which covers the content type, go to it.
-    let reader = state.allowed(Action::Read, uri, agent).await;
-    let unread = |refused: Response| if reader { refused } else { state.deny(agent) };
     let content_type = match req.header(header::CONTENT_TYPE) {
         Some(ty) => ty.to_string(),
-        None if reader => meta.content_type.clone(),
-        None => return state.deny(agent),
+        None => meta.content_type.clone(),
     };
     let set_linkset = prefers_set_linkset(req);
     let old_rmeta = match stored_meta(state, uri).await {
@@ -2540,7 +2539,7 @@ async fn update<S: Store + 'static>(
             match state.store.read_at(uri, &meta).await {
                 Ok(b) => match content_types(uri, &meta.content_type, &b) {
                     Ok(t) => t,
-                    Err(r) => return unread(r),
+                    Err(r) => return r,
                 },
                 Err(e) => return store_error(e),
             }
@@ -2565,20 +2564,7 @@ async fn update<S: Store + 'static>(
     // The linkset as it would be served, the stored one's links and attributes with it.
     let format = (!uri.ends_with('/')).then_some(content_type.as_str());
     if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &rmeta, format) {
-        return unread(refused);
-    }
-    // So is what the metadata could not hold, which the stored links and types count toward,
-    // when the write changes it (metadata it leaves as stored is not written again; see
-    // [`write_with_meta`]).
-    let unchanged = {
-        let mut new = rmeta.clone();
-        new.pending = false;
-        old_rmeta.clone().unwrap_or_default() == new
-    };
-    if !unchanged {
-        if let Err(e) = super::encode_meta(&rmeta) {
-            return unread(store_error(e));
-        }
+        return refused;
     }
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
@@ -2597,9 +2583,7 @@ async fn update<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     let mut resp = StatusCode::NO_CONTENT.into_response();
-    if reader {
-        set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
-    }
+    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
     if set_linkset {
         set(
             resp.headers_mut(),
@@ -3624,6 +3608,15 @@ async fn delete<S: Store + 'static>(
     if uri == storage {
         return method_not_allowed(&allow_for(uri, true));
     }
+    // How a container's delete ends follows from what it holds (whether it is empty, whether a
+    // member is busy or may be deleted by the requester), so it also needs Read on the
+    // container, decided before any member is looked at. Both are decided again under the lock.
+    if uri.ends_with('/')
+        && !(state.allowed(Action::Delete, uri, agent).await
+            && state.allowed(Action::Read, uri, agent).await)
+    {
+        return state.deny(agent);
+    }
     let parent = parent_of(uri, &storage);
     // Every resource the delete may remove is locked before anything is decided, so the
     // precondition, the permission check of each descendant and the removal see one state: no
@@ -3642,6 +3635,11 @@ async fn delete<S: Store + 'static>(
     // validators, its members) answers it.
     if let Err(r) = recheck(state, Action::Delete, uri, agent).await {
         return r;
+    }
+    if uri.ends_with('/') {
+        if let Err(r) = recheck(state, Action::Read, uri, agent).await {
+            return r;
+        }
     }
     let meta = match current(state, uri).await {
         Ok(m) => m,
@@ -4721,12 +4719,11 @@ async fn linkset<S: Store + 'static>(
             problem(StatusCode::NOT_FOUND, None)
         };
     }
-    // A patch reads the linkset it patches (see [`patch`]), so it needs Read; a whole linkset
-    // replaces it, and needs Read only to compare it.
-    let read_check = if req.method == Method::PATCH {
+    // A patch reads the linkset it patches (see [`patch`]), so it needs Read; so does a whole
+    // linkset, which keeps the server-managed part of the stored one, and that decides whether
+    // it is admitted.
+    let read_check = if writes {
         recheck(state, Action::Read, uri, agent).await
-    } else if writes {
-        precondition_read_check(state, req, uri, agent, false).await
     } else {
         Ok(())
     };
@@ -4838,7 +4835,6 @@ async fn linkset<S: Store + 'static>(
                 patched,
                 locks,
                 LinksetValidator::Sent,
-                |refused| refused,
             )
             .await
         }
@@ -4867,11 +4863,6 @@ async fn linkset<S: Store + 'static>(
                     Some("a linkset is replaced with application/linkset+json"),
                 );
             }
-            if let Err(r) = precondition_read_check(state, req, uri, agent, false).await {
-                return r;
-            }
-            // A writer need not be able to read the linkset, so a 412 carries no tag of it, as
-            // for a PATCH.
             if let Precondition::Failed = evaluate(&req.headers, Some(&etag), None, false) {
                 return problem(StatusCode::PRECONDITION_FAILED, None);
             }
@@ -4902,8 +4893,6 @@ async fn linkset<S: Store + 'static>(
             // What is stored is not what was sent (references resolved, the server-managed links
             // restored), so a successful PUT carries no validator (RFC 9110 section 9.3.4): the
             // linkset and its tag are read with a GET.
-            // A patch needs Read; a whole linkset does not (see above).
-            let reader = state.allowed(Action::Read, uri, agent).await;
             store_linkset(
                 state,
                 req,
@@ -4912,7 +4901,6 @@ async fn linkset<S: Store + 'static>(
                 document,
                 locks,
                 LinksetValidator::Withheld,
-                |refused| if reader { refused } else { state.deny(agent) },
             )
             .await
         }
@@ -4932,9 +4920,7 @@ async fn linkset<S: Store + 'static>(
 /// user-managed links, holding `locks` (the resource's, exclusive, and its listing's) through the
 /// write. It must be a linkset ([`valid_linkset`]); relative references are resolved against the
 /// linkset's own URI, and the result is checked as it will be served and stored before anything
-/// is written. `204`, with the new tag as `validator` says, or the refusal, passed through
-/// `unread` when it follows from what is stored.
-#[allow(clippy::too_many_arguments)]
+/// is written. `204`, with the new tag as `validator` says, or the refusal.
 async fn store_linkset<S, L>(
     state: &LwsState<S>,
     req: &LwsRequest,
@@ -4943,7 +4929,6 @@ async fn store_linkset<S, L>(
     document: Value,
     locks: L,
     validator: LinksetValidator,
-    unread: impl Fn(Response) -> Response,
 ) -> Response
 where
     S: Store + 'static,
@@ -4985,10 +4970,8 @@ where
             Err(e) => return store_error(e),
         }
     };
-    // What the stored format and types refuse, with the links, is refused to a writer that may
-    // not read the resource as a write without access is: it learns nothing of them.
     if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &meta, format.as_deref()) {
-        return unread(refused);
+        return refused;
     }
     // The linkset is checked whole, as it will be stored: inside the metadata it nests a
     // level deeper than in the patched document, and metadata that does not read back
@@ -4996,16 +4979,16 @@ where
     match super::encode_meta(&meta) {
         Ok(_) => {}
         Err(ServerError::Conflict(_)) => {
-            return unread(problem(
+            return problem(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 Some("the resource's metadata would be too large"),
-            ))
+            )
         }
         Err(_) => {
-            return unread(problem(
+            return problem(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 Some("the linkset nests too deeply to be stored"),
-            ))
+            )
         }
     }
     // The tag of the document as written, once it is admitted: the stored links with the
@@ -6639,6 +6622,8 @@ mod tests {
             .await;
             assert_eq!(status, StatusCode::FORBIDDEN, "{method}");
         }
+        // Nor is a whole linkset replaced without Read, whatever it is sent with: it keeps the
+        // server-managed part of the stored one.
         let status = send(
             dave.clone(),
             "PUT",
@@ -6646,7 +6631,7 @@ mod tests {
             vec![("if-unmodified-since", date.clone())],
         )
         .await;
-        assert!(status.is_success(), "{status}");
+        assert_eq!(status, StatusCode::FORBIDDEN);
         // A conditional create is compared with the container's listing; at the storage root
         // without an Accept, with the storage description, which is public.
         let c = create(
@@ -6691,9 +6676,17 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         // With an `If-Match`, a date is not evaluated (RFC 9110 section 13.2.2), so `*` alone
-        // decides: no comparison, and no Read asked.
+        // decides, with no comparison; a replace needs Read in any case, so a reader is asked.
         let status = send(
             dave.clone(),
+            "PUT",
+            p.clone(),
+            vec![("if-match", "*".into())],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = send(
+            bob.clone(),
             "PUT",
             p.clone(),
             vec![
@@ -6720,8 +6713,17 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        // A container's delete needs Read in any case.
         let status = send(
             dave.clone(),
+            "DELETE",
+            format!("{g}?page=99"),
+            vec![("if-match", "*".into())],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = send(
+            bob.clone(),
             "DELETE",
             format!("{g}?page=99"),
             vec![("if-match", "*".into())],
@@ -6755,11 +6757,11 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let status = send(erin, "POST", c.clone(), other()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        // A new tag describes content only a reader may learn, the content type among it.
-        for (who, sent) in [(&dave, false), (&bob, true)] {
+        // A replace needs Read in any case; a reader gets the new tag.
+        for (who, ok) in [(&dave, false), (&bob, true)] {
             let r = handle(&st, &request("PUT", &p, &[("content-type", JSON)], "{}"), who).await;
-            assert_eq!(r.status(), StatusCode::NO_CONTENT);
-            assert_eq!(r.headers().contains_key("etag"), sent, "PUT {who:?}");
+            assert_eq!(r.status().is_success(), ok, "PUT {who:?}");
+            assert_eq!(r.headers().contains_key("etag"), ok, "PUT {who:?}");
         }
         // A patch needs Read in any case; a reader gets the new tag.
         for (who, ok) in [(&dave, false), (&bob, true)] {
@@ -6774,15 +6776,9 @@ mod tests {
                 assert_eq!(r.headers().contains_key("etag"), ok, "{path} {who:?}");
             }
         }
-        // `*` stays open to a writer that may not read.
-        for (method, path) in [
-            ("PUT", meta.clone()),
-            ("PUT", p.clone()),
-            ("DELETE", p.clone()),
-        ] {
-            let status = send(dave.clone(), method, path, vec![("if-match", "*".into())]).await;
-            assert!(status.is_success(), "{method} {status}");
-        }
+        // `*` stays open to a writer that may not read, where the method is.
+        let status = send(dave.clone(), "DELETE", p.clone(), vec![("if-match", "*".into())]).await;
+        assert!(status.is_success(), "DELETE {status}");
         // A `Slug` names the member only for a writer that may list the container: the name
         // would otherwise say whether one by that name is there.
         let named = |who: Agent| {
@@ -12878,7 +12874,9 @@ mod tests {
         ];
         let r = handle(&st, &req(Method::POST, "/", &h, ""), &agent(eve)).await;
         assert_eq!(r.status(), StatusCode::CREATED);
-        let e = st.cfg.absolute("/e/");
+        // A writer that may not read the container gets a name of the server's, not its slug.
+        let e = r.headers()[header::LOCATION].to_str().unwrap().to_string();
+        let e_path = e.strip_prefix(st.cfg.storage().trim_end_matches('/')).unwrap().to_string();
         st.store
             .create_in_container(
                 &e,
@@ -12888,7 +12886,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let r = handle(&st, &req(Method::DELETE, "/e/", &[], ""), &agent(eve)).await;
+        let r = handle(&st, &req(Method::DELETE, &e_path, &[], ""), &agent(eve)).await;
         assert!(r.status().is_success(), "{}", r.status());
         assert!(!st.store.exists(&format!("{e}x.meta")).await.unwrap());
         let r = handle(&st, &req(Method::DELETE, "/c/", &[], ""), &agent(OWNER)).await;

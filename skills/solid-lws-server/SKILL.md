@@ -107,10 +107,11 @@ but does not bypass WAC; the applicable resource or inherited container ACL
 must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
 it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
-the new `ETag` only to a writer that may read the target. An insert-only `PATCH` that cannot
-apply (a target that is not RDF, or does not parse) is refused to an `acl:Append` writer without
-`acl:Read` as a write without access is; only a reader is told why (whether the insert applies
-still says whether the target is RDF). A `POST` names its member
+the new `ETag` only to a writer that may read the target. An insert-only `PATCH` by a writer
+without `acl:Read` appends the statements to a stored Turtle, N-Triples or N-Quads document
+without reading it, so its outcome does not depend on what is stored; any other stored type is
+refused to it as a write without access is. Deleting a container also needs `acl:Read` on it
+(whether it may go depends on what it holds). A `POST` names its member
 with the slug and a random suffix, so the name says nothing of what else was created.
 
 A rule may name its subject with `acl:agent`, `acl:agentClass foaf:Agent` (public)
@@ -581,11 +582,10 @@ What the server exposes, all discoverable from the storage description
   nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
   root compares its public storage description, which needs no Read. A data `PUT`'s, or any
   `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
-  that may read the result; a linkset `PUT`'s `204` carries none. Nor is such a writer told
-  anything a write keeps from before: a `PUT` without `Content-Type` (which would keep the stored
-  type), a `PATCH` whose outcome depends on the content, and a write that the stored links, types
-  or content would refuse are all refused as a write without Modify is (whether such a write is
-  admitted can still follow from how much room the stored links and types leave it). A `Slug`
+  that may read the result; a linkset `PUT`'s `204` carries none. A write whose outcome would
+  follow from what is stored needs Read as well as Modify (or Delete): a `PUT` replacing a data
+  resource (it keeps the stored links and types, which decide whether it is admitted), a whole
+  linkset `PUT`, every `PATCH`, and a container `DELETE`. A `Slug`
   names a new member only for a writer that may read the container; anyone else's member gets a
   name the server chooses, so the name says nothing about which members are there. A
   subscriber's subscription listing, and its `ETag`, change only with its own subscriptions.
