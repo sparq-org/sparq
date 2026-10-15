@@ -209,7 +209,7 @@ pub fn lane_const(datatype: &str, params: &str) -> Fr {
 }
 
 /// The V2 `DATATYPE_CONST` of a DEGENERATE literal (`xsd:string`,
-/// `rdf:langString`, every opaque datatype, and the unrouted lanes): the PLAIN
+/// `rdf:langString`, and every opaque datatype): the PLAIN
 /// `blake3_field(datatype string)` — deliberately identical to
 /// [`crate::dual_leaf::datatype_const`].
 ///
@@ -1341,6 +1341,11 @@ mod tests {
             field_to_hex(&c.commitment),
             "0x14b6f74c39dc120f3b9729bfd4144773deb5b0831b41181960ea39a24dc844f9",
             "routing the three lanes re-bases a graph that contains them"
+        );
+        assert_eq!(
+            field_to_hex(&c.commitment),
+            "0x27dd150d0a008b946a91384ee79f59598753f27a993b345b6ae38f8ec1f60462",
+            "the routed commitment is pinned too"
         );
     }
 

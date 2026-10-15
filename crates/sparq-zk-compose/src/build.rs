@@ -840,7 +840,7 @@ impl std::fmt::Display for BuildValueDlV2Error {
             ),
             BuildValueDlV2Error::DecimalScaleNotRepresentable { value, bound } => write!(
                 f,
-                "the FILTER constant {} cannot be carried exactly at the scale the committed literal {} was encoded at",
+                "the FILTER constant {} and the committed literal {} have no admitted scale at which both are carried exactly",
                 bound, value
             ),
         }

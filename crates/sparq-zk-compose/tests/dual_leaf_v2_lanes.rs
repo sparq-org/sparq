@@ -2582,8 +2582,7 @@ fn hook_witness_of(
 /// SIGN-FOLDED `xsd:decimal` lane, each proved through the checked typed path
 /// (`prove_value_lane`, which renders its own `Prover.toml` from the validated
 /// typed fields) and verified with `bb`. A flipped proof byte is the control that
-/// `verify` decides something, and a LYING disclosed verdict must not even solve
-/// a witness.
+/// `verify` decides something. The lying-verdict check is the next test.
 #[test]
 fn full_prove_verify_the_numeric_build_helpers() {
     use sparq_zk_compose::build::{build_filter_value_dl_decimal, build_filter_value_dl_int};

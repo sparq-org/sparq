@@ -637,7 +637,8 @@ fn a_builder_output_assembles_typed_inputs_and_a_tampered_one_does_not() {
         .expect("a V2 integer lane renders under NewIssuance");
     assert!(toml.contains("bound"), "the member's bound is rendered");
 
-    // A member swapped after the build is refused by the typed assembly.
+    // A member swapped after the build still assembles (it is a value-lane
+    // variant), but the checked render refuses it below.
     let tampered = sparq_zk_compose::build::BuiltFilterValueDlNumeric {
         inputs: on_another_member(&built.inputs),
         witness: built.witness.clone(),
