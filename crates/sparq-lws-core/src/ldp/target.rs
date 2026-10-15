@@ -26,19 +26,18 @@ pub struct LdpTarget {
 /// which is not built for every target this module is).
 const LINKSET_RECORD_SUFFIX: &str = ".meta";
 
-/// Whether `path` names, or lies under, a linkset record of the LWS surface: any segment ends in
-/// `.meta` (ASCII case-insensitive), as sent or %-decoded. A container `X.meta/` and anything
-/// under it are refused too, so a stored record decides no LDP outcome (the slash rule would
-/// otherwise probe it). `path` is the path alone, without query or fragment. Used only to refuse.
-pub(crate) fn is_linkset_record_path(path: &str) -> bool {
-    let names_record = |path: &str| {
-        path.split('/').any(|seg| {
-            seg.len() >= LINKSET_RECORD_SUFFIX.len()
-                && seg.as_bytes()[seg.len() - LINKSET_RECORD_SUFFIX.len()..]
-                    .eq_ignore_ascii_case(LINKSET_RECORD_SUFFIX.as_bytes())
-        })
+/// Whether `key` (a request path without query or fragment, or a store key) names a linkset
+/// record of the LWS surface: a non-container whose last segment ends in `.meta` (ASCII
+/// case-insensitive), as sent or %-decoded. A container `X.meta/` and what lies under it are
+/// ordinary resources. Used to refuse such a target, and to keep a stored record from deciding
+/// an LDP outcome (the slash rule, listings, group documents).
+pub(crate) fn is_linkset_record_path(key: &str) -> bool {
+    let names_record = |key: &str| {
+        key.len() >= LINKSET_RECORD_SUFFIX.len()
+            && key.as_bytes()[key.len() - LINKSET_RECORD_SUFFIX.len()..]
+                .eq_ignore_ascii_case(LINKSET_RECORD_SUFFIX.as_bytes())
     };
-    names_record(path) || names_record(&crate::identity::percent_decode_lossy(path))
+    names_record(key) || names_record(&crate::identity::percent_decode_lossy(key))
 }
 
 /// The segment under which the LWS surface keeps its service records (grants, access requests,
@@ -88,8 +87,8 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
 
     // The LWS surface keeps each resource's linkset record at `{resource}.meta` in the same
     // store (`crate::lws::META_SUFFIX`). Where both surfaces share a store, such a name is that
-    // record and never an LDP resource, so it, and any path through such a name, is refused
-    // OUTRIGHT here as well: 404, in any case, %-decoded too, whichever surfaces are enabled.
+    // record and never an LDP resource, so it is refused OUTRIGHT here as well: 404, in any case,
+    // %-decoded too, whichever surfaces are enabled.
     if is_linkset_record_path(path_only) {
         return Err(ServerError::NotFound);
     }

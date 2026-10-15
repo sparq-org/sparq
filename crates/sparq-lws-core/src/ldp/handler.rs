@@ -2113,6 +2113,8 @@ async fn sorted_children<S: Store>(
     container_iri: &str,
 ) -> Result<Vec<crate::store::ValidatedChildIri>, ServerError> {
     let mut children = state.store.list_children(container_iri).await?;
+    // A linkset record of the LWS surface is no member, whatever an edge to it says.
+    children.retain(|c| !crate::ldp::target::is_linkset_record_path(c.as_str()));
     children.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
     Ok(children)
 }
@@ -2191,9 +2193,13 @@ async fn ensure_ancestor_containers<S: Store>(
         prefix.push_str(seg);
         let container = format!("{prefix}/");
 
-        // A pre-existing NON-container at this path (the slash-less form) ⇒ conflict.
+        // A pre-existing NON-container at this path (the slash-less form) ⇒ conflict. A slash-less
+        // form naming a linkset record of the LWS surface is no resource, so it is not consulted.
         let slashless = prefix.clone();
-        if state.store.exists(&slashless).await? && !state.store.exists(&container).await? {
+        if !crate::ldp::target::is_linkset_record_path(&slashless)
+            && state.store.exists(&slashless).await?
+            && !state.store.exists(&container).await?
+        {
             return Err(ServerError::Conflict(
                 "an ancestor path already exists as a non-container resource".into(),
             ));
@@ -2230,6 +2236,11 @@ async fn reject_slash_semantics_conflict<S: Store>(
         // Resource `…/foo` collides with container `…/foo/`.
         format!("{}/", target.iri)
     };
+    // A linkset record of the LWS surface is no resource, so its name never conflicts (and is not
+    // consulted): a container `X.meta/` sits beside the record `X.meta`.
+    if crate::ldp::target::is_linkset_record_path(&opposite) {
+        return Ok(());
+    }
     if state.store.exists(&opposite).await? {
         return Err(ServerError::Conflict(
             "a resource and a container cannot share the same path (trailing-slash semantics)"

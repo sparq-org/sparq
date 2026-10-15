@@ -88,16 +88,22 @@ fn a_linkset_record_name_is_not_a_target() {
         "/alice/c/.meta",
         "/alice/doc%2Emeta",
         "/alice/doc%2emeta?x=1",
-        "/alice/doc.meta/",
-        "/alice/x.meta/y",
-        "/alice/X.Meta/y/",
+        "/alice/x.meta/y.META",
     ] {
         assert!(
             matches!(parse_target(BASE, path), Err(ServerError::NotFound)),
             "{path}"
         );
     }
-    for path in ["/alice/doc.metadata", "/alice/meta", "/alice/x.metas/y"] {
+    // A container named like a record, and what lies under it, is an ordinary target.
+    for path in [
+        "/alice/doc.metadata",
+        "/alice/meta",
+        "/alice/x.metas/y",
+        "/alice/doc.meta/",
+        "/alice/x.meta/y",
+        "/alice/X.Meta/y/",
+    ] {
         assert!(parse_target(BASE, path).is_ok(), "{path}");
     }
 }

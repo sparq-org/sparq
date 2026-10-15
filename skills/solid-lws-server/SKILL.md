@@ -209,8 +209,10 @@ Use a trailing slash for containers. A resource and container cannot coexist at
 slash-equivalent paths. ACL resources use the sibling `.acl` convention and
 are themselves protected by `acl:Control`. A name ending in `.meta` (any case, %-decoded too)
 is where the LWS surface keeps a resource's linkset record, so the LDP surface answers `404` for
-it, for a container of that name and for anything under one, on every method a request is routed
-for (a CORS preflight is answered before routing), whichever surfaces are enabled. So is any
+it on every method a request is routed for (a CORS preflight is answered before routing),
+whichever surfaces are enabled. A container of that name (`X.meta/`) and what lies under it are
+ordinary resources: a stored record never lists as a member, conflicts with that container or
+serves as a group document. So is any
 path through a `.lws` segment, where the LWS surface keeps its grants, access requests and
 subscriptions. A path with an empty segment (`//`) is a `400`.
 

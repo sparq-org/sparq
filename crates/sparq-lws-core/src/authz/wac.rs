@@ -684,7 +684,8 @@ impl<'a, S: Store> WacAuthorizer<'a, S> {
 
         let mut members: Vec<String> = Vec::new();
         for doc in documents {
-            if !self.is_local(doc) {
+            // A linkset record of the LWS surface is no group document.
+            if !self.is_local(doc) || crate::ldp::target::is_linkset_record_path(doc) {
                 continue;
             }
             let Some(triples) = self.read_and_parse_acl(doc).await? else {
