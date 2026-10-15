@@ -742,7 +742,9 @@ none, which happens when the shared classification budget runs out).
 `is_satisfiable(iri)` / `is_subclass_of(sub_iri, sup_iri)` queries by class IRI
 (`Option<bool>`; `owl:Thing`, `owl:Nothing` and
 classes no axiom mentions included; `None` when an unloaded import could change a negative
-answer). The decided fragment is SHOIQ(D) with `hasSelf` and `R∘R ⊑ R`: nominals
+answer). The decided fragment is SROIQ(D) without the top and bottom properties: regular
+property chains (`owl:propertyChainAxiom`, transitivity; each non-simple property gets an
+automaton over the property words that imply it, and `∀R.C` follows its states), nominals
 (`ObjectOneOf`, `ObjectHasValue`; a node labelled `{a}` is merged into `a`'s node, and with
 nominals every class test runs with the ABox), number restrictions up to
 `MAX_CARDINALITY`, and data properties: domain, range, sub- /
@@ -778,7 +780,9 @@ assertions, `DataHasValue`); a pair that might share a value not fixed yet close
 branch as unconfirmed. A key on an object property with a transitive sub-property
 (a non-simple one) is `OutOfFragment`: the values it compares would lie along paths.
 Still out of the fragment, as
-`Unknown(OutOfFragment { construct, source })`: other chains, the top and bottom object and data properties
+`Unknown(OutOfFragment { construct, source })`: a hierarchy the automaton construction finds
+irregular or too large (`MAX_AUTOMATON_STATES`; the profile check reports irregular ones as
+`NotInDl` first), the top and bottom object and data properties
 in axioms (except `SubDataPropertyOf(D owl:topDataProperty)`), datatypes outside the map
 without exactly one definition, cyclic or repeated definitions, literals of datatypes
 outside the map, and a property used both as an object and as a data property. A data

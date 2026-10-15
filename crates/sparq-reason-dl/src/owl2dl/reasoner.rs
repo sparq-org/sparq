@@ -7,9 +7,10 @@
 //! [`Unknown`](Consistency::Unknown) with the reason, and the triples behind it when there are
 //! any.
 //!
-//! The fragment is currently SHOIQ(D) plus the OWL 2 role characteristics and ABox:
+//! The fragment is currently SROIQ(D) without the top and bottom properties, with the ABox:
 //! classes and all class constructors including nominals (`ObjectOneOf`,
-//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity,
+//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity and
+//! regular property chains (encoded by automata, see the clausifier),
 //! functionality, reflexivity, irreflexivity, symmetry, asymmetry and disjointness,
 //! `hasSelf`, qualified cardinality, class / object-property / negative-property / same /
 //! different assertions, and data properties: domain, range, sub- / equivalent / disjoint
@@ -18,9 +19,9 @@
 //! OWL 2 datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
 //! `DataUnionOf`, `DataComplementOf` and acyclic `DatatypeDefinition`s), decided by
 //! [`super::data_ranges`], and keys (`HasKey`, over named individuals; a key whose data
-//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on an
-//! object property with a transitive sub-property, property chains other than `R∘R ⊑ R`,
-//! the top and bottom
+//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on a
+//! non-simple object property, a property hierarchy the automata cannot encode, the top and
+//! bottom
 //! properties, datatypes outside the map, and number restrictions above
 //! [`MAX_CARDINALITY`] answer `Unknown(OutOfFragment)`; a datatype question the oracle cannot
 //! decide answers `Unknown(DatatypeUnknown)`. An ill-typed literal in an assertion,

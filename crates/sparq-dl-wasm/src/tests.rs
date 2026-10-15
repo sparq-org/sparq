@@ -203,19 +203,35 @@ fn keys_are_decided() {
 }
 
 #[test]
-fn chains_are_out_of_fragment_with_the_offending_triples() {
-    let r = run(&format!(
-        "{ALCHIQ} :hasGrandparent a owl:ObjectProperty ; owl:propertyChainAxiom ( :hasParent :hasParent ) ."
-    ));
+fn chains_are_decided() {
+    let chain = format!(
+        "{ALCHIQ} :hasGrandparent a owl:ObjectProperty ; owl:propertyChainAxiom ( :hasParent :hasParent ) .
+         :ann :hasParent :bob . :bob :hasParent :cat . :cat a :Woman ."
+    );
+    assert_eq!(get(&run(&chain), "consistent"), &Value::Bool(true));
+    let r = run_with(
+        &chain,
+        Some(":ann a [ a owl:Restriction ; owl:onProperty :hasGrandparent ; owl:allValuesFrom :Man ] ."),
+        None,
+    );
+    assert_eq!(get(&r, "consistent"), &Value::Bool(false));
+}
+
+#[test]
+fn top_properties_are_out_of_fragment_with_the_offending_triples() {
+    let r = run(&format!("{ALCHIQ} :Person rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :Company ] ."));
     assert_eq!(s(get(&r, "consistent")), "unknown");
     let reason = get(&r, "reason");
     assert_eq!(s(get(reason, "kind")), "OutOfFragment");
-    assert_eq!(s(get(reason, "construct")), "ObjectPropertyChain");
+    assert_eq!(
+        s(get(reason, "construct")),
+        "owl:topObjectProperty / owl:bottomObjectProperty"
+    );
     let triples = strs(get(reason, "triples"));
     assert!(
-        triples.iter().any(|t| t.starts_with(
-            "<http://ex/hasGrandparent> <http://www.w3.org/2002/07/owl#propertyChainAxiom> "
-        )),
+        triples
+            .iter()
+            .any(|t| t.ends_with("<http://www.w3.org/2002/07/owl#topObjectProperty> .")),
         "{triples:?}"
     );
     for t in &triples {

@@ -52,9 +52,9 @@ Most callers want the typed wrapper instead: `import { checkOwlDl } from '@sparq
   [`skills/javascript-wasm/references/owl-dl.md`](../../skills/javascript-wasm/references/owl-dl.md).
 - **Fail-closed.** An ontology the reverse mapping refuses is a result
   (`"consistent": "unknown"` with the refusal as `reason`), not an error; only a parse error
-  or malformed options throw. Property chains other than `R∘R ⊑ R`, the top and bottom properties,
+  or malformed options throw. The top and bottom properties,
   datatypes outside the OWL 2 map and object/data property punning are outside the decided
-  fragment (SHOIQ(D)) and answer `"unknown"` with reason `OutOfFragment`; an undecided
+  fragment (SROIQ(D) without them) and answer `"unknown"` with reason `OutOfFragment`; an undecided
   datatype question answers `DatatypeUnknown`, and a model with nominals the reasoner
   cannot confirm `Unconfirmed`.
 - **No serde.** The JSON is written (and the options object parsed) by a small hand-written,

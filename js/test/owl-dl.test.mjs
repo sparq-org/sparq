@@ -105,18 +105,20 @@ test('keys are decided over named individuals', async () => {
   assert.equal((await checkOwlDl(tbox, `${PRE} :ann owl:differentFrom :bea .`)).consistent, false);
 });
 
-test('other property chains are out of fragment: unknown, with the offending triples', async () => {
-  const r = await checkOwlDl(
-    `${TBOX} :hasGrandparent a owl:ObjectProperty ; owl:propertyChainAxiom ( :hasParent :hasParent ) .`,
-  );
+test('property chains are decided', async () => {
+  const chain = `${TBOX} :hasGrandparent a owl:ObjectProperty ; owl:propertyChainAxiom ( :hasParent :hasParent ) .
+    :ann :hasParent :bob . :bob :hasParent :cat . :cat a :Woman .`;
+  assert.equal((await checkOwlDl(chain)).consistent, true);
+  const only = `${PRE} :ann a [ a owl:Restriction ; owl:onProperty :hasGrandparent ; owl:allValuesFrom :Man ] .`;
+  assert.equal((await checkOwlDl(chain, only)).consistent, false);
+});
+
+test('the top and bottom properties are out of fragment: unknown, with the offending triples', async () => {
+  const r = await checkOwlDl(`${TBOX} :Person rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :Company ] .`);
   assert.equal(r.consistent, 'unknown');
   assert.equal(r.reason.kind, 'OutOfFragment');
-  assert.equal(r.reason.construct, 'ObjectPropertyChain');
-  assert.ok(
-    r.reason.triples.some((t) =>
-      t.startsWith('<http://ex/hasGrandparent> <http://www.w3.org/2002/07/owl#propertyChainAxiom> '),
-    ),
-  );
+  assert.equal(r.reason.construct, 'owl:topObjectProperty / owl:bottomObjectProperty');
+  assert.ok(r.reason.triples.some((t) => t.endsWith('<http://www.w3.org/2002/07/owl#topObjectProperty> .')));
   for (const t of r.reason.triples) assert.match(t, / \.$/);
   assert.equal(r.profile.dl, true);
   assert.equal(r.classification, null);

@@ -293,10 +293,12 @@ fn unsatisfiable_classes() {
 
 #[test]
 fn out_of_fragment_constructs_answer_unknown() {
-    let (_, r) = run(&format!("{DECL} :t owl:propertyChainAxiom ( :r :s ) ."));
+    let (_, r) = run(&format!(
+        "{DECL} :A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :B ] ."
+    ));
     match r.consistency {
         Consistency::Unknown(UnknownReason::OutOfFragment { construct, source }) => {
-            assert_eq!(construct, "ObjectPropertyChain");
+            assert_eq!(construct, "owl:topObjectProperty / owl:bottomObjectProperty");
             assert!(!source.is_empty());
         }
         other => panic!("expected OutOfFragment, got {other:?}"),
@@ -2199,6 +2201,116 @@ fn oracle_differential_focused() {
         focused,
         FOCUSED_SEEDS,
         include_str!("data/owl2dl_oracle_focused_expected.txt"),
+        None,
+    );
+}
+
+/// A corpus of regular property chains: roles `r0 < r1 < …` with sub-property axioms and
+/// chains `S₁ ∘ … ∘ Sₙ ⊑ R`, `R ∘ S ⊑ R`, `S ∘ R ⊑ R` and transitivity whose `Sᵢ` (or their
+/// inverses) are below `R` in that order, so the hierarchy is regular. The TBox has
+/// universal restrictions over the chained roles, and the ABox a path of role assertions,
+/// so chains actually compose, plus negative property assertions along it. Every role is
+/// non-simple for the generator: no number restriction or `hasSelf`.
+fn chains_corpus(seed: u64) -> String {
+    let mut rng = Rng(seed.wrapping_mul(0xA24B_AED4_963E_E407) | 1);
+    let n_classes = 3 + rng.below(4);
+    let n_roles = 2 + rng.below(3);
+    let mut out = String::new();
+    let _ = writeln!(out, "<http://ex/ch{seed}> a owl:Ontology .");
+    for i in 0..n_classes {
+        let _ = writeln!(out, ":C{i} a owl:Class .");
+    }
+    for i in 0..n_roles {
+        let _ = writeln!(out, ":r{i} a owl:ObjectProperty .");
+    }
+    let below = |rng: &mut Rng, j: usize| {
+        let i = rng.below(j);
+        if rng.chance(25) {
+            format!("[ owl:inverseOf :r{i} ]")
+        } else {
+            format!(":r{i}")
+        }
+    };
+    for _ in 0..(1 + rng.below(4)) {
+        let j = 1 + rng.below(n_roles - 1);
+        let line = match rng.below(6) {
+            0 => format!(":r{} rdfs:subPropertyOf :r{j} .", rng.below(j)),
+            1 => format!(":r{j} a owl:TransitiveProperty ."),
+            2 => format!(
+                ":r{j} owl:propertyChainAxiom ( :r{j} {} ) .",
+                below(&mut rng, j)
+            ),
+            3 => format!(
+                ":r{j} owl:propertyChainAxiom ( {} :r{j} ) .",
+                below(&mut rng, j)
+            ),
+            4 => format!(
+                ":r{j} owl:propertyChainAxiom ( {} {} {} ) .",
+                below(&mut rng, j),
+                below(&mut rng, j),
+                below(&mut rng, j)
+            ),
+            _ => format!(
+                ":r{j} owl:propertyChainAxiom ( {} {} ) .",
+                below(&mut rng, j),
+                below(&mut rng, j)
+            ),
+        };
+        let _ = writeln!(out, "{line}");
+    }
+    let mut g = Gen {
+        rng,
+        n_classes,
+        n_roles,
+        simple: vec![false; n_roles],
+        nominals: 0,
+    };
+    for _ in 0..(1 + g.rng.below(3)) {
+        let (a, r, c) = (g.class(), g.role(false).unwrap(), g.class());
+        let _ = writeln!(
+            out,
+            "{a} rdfs:subClassOf [ a owl:Restriction ; owl:onProperty {r} ; owl:allValuesFrom {c} ] ."
+        );
+    }
+    for _ in 0..g.rng.below(3) {
+        let (a, b) = (g.class(), g.concept(2));
+        let _ = writeln!(out, "{a} rdfs:subClassOf {b} .");
+    }
+    let n_ind = 3 + g.rng.below(4);
+    for i in 0..n_ind {
+        let _ = writeln!(out, ":i{i} a owl:NamedIndividual .");
+    }
+    for i in 0..n_ind - 1 {
+        let r = g.rng.below(n_roles);
+        if g.rng.chance(25) {
+            let _ = writeln!(out, ":i{} :r{r} :i{i} .", i + 1);
+        } else {
+            let _ = writeln!(out, ":i{i} :r{r} :i{} .", i + 1);
+        }
+    }
+    for _ in 0..(1 + g.rng.below(3)) {
+        let a = g.rng.below(n_ind);
+        let c = g.concept(1);
+        let _ = writeln!(out, ":i{a} a {c} .");
+    }
+    for _ in 0..g.rng.below(3) {
+        let a = g.rng.below(n_ind - 1);
+        let b = a + 1 + g.rng.below(n_ind - 1 - a);
+        let r = g.rng.below(n_roles);
+        let _ = writeln!(out, "[ a owl:NegativePropertyAssertion ; owl:sourceIndividual :i{a} ; owl:assertionProperty :r{r} ; owl:targetIndividual :i{b} ] .");
+    }
+    out
+}
+
+const CHAIN_SEEDS: u64 = 400;
+
+#[test]
+fn oracle_differential_chains() {
+    differential(
+        "chains",
+        chains_corpus,
+        CHAIN_SEEDS,
+        include_str!("data/owl2dl_oracle_chains_expected.txt"),
         None,
     );
 }

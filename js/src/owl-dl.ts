@@ -67,7 +67,7 @@ export type OwlDlRefusalKind = 'Unparsed' | 'Malformed' | 'Ambiguous' | 'Unsuppo
 
 /** The reason attached to `consistent: "unknown"`. */
 export type OwlDlReason =
-  /** A construct outside the decided fragment (e.g. a key or a property chain). */
+  /** A construct outside the decided fragment (e.g. `owl:topObjectProperty`). */
   | { kind: 'OutOfFragment'; construct: string; triples: OwlDlTriple[] }
   /** A blocking OWL 2 DL violation (a non-simple property where a simple one is required, or an irregular property hierarchy). */
   | { kind: 'NotInDl'; violations: OwlDlViolation[] }
@@ -218,11 +218,11 @@ export function normaliseOwlDlOptions(
  * the graph as OWL 2, runs the OWL 2 DL profile check, consistency, and — for a consistent
  * ontology — classification.
  *
- * Decided fragment: SHOIQ(D) — classes and every class constructor including nominals,
- * object properties with inverses, hierarchies, transitivity, `R∘R ⊑ R` chains, the role
- * characteristics, `hasSelf`, qualified cardinality up to a fixed bound, data properties over
- * the OWL 2 datatype map, keys over named individuals, and the ABox. Keys on a non-simple
- * property, other property chains, the top and bottom
+ * Decided fragment: SROIQ(D) without the top and bottom properties — classes and every
+ * class constructor including nominals, object properties with inverses, hierarchies,
+ * transitivity and regular property chains, the role characteristics, `hasSelf`, qualified
+ * cardinality up to a fixed bound, data properties over the OWL 2 datatype map, keys over
+ * named individuals, and the ABox. Keys on a non-simple property, the top and bottom
  * properties, datatypes outside the map and object/data property punning answer
  * `consistent: "unknown"` with reason `OutOfFragment` and the triples; an undecided datatype
  * question answers `DatatypeUnknown`, and an unconfirmed model with nominals `Unconfirmed`.
