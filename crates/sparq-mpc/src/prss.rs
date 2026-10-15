@@ -574,6 +574,10 @@ impl PrssRandomness {
                     items: m,
                     switches: 0,
                     depth_rounds: 0,
+                    // No resharing round runs, so the input share vectors come
+                    // straight back. With at most one entry there is no position
+                    // for them to be paired with.
+                    fresh_sharings: 0,
                 },
             ));
         }
@@ -591,6 +595,10 @@ impl PrssRandomness {
                 switches: 0,
                 // One resharing round per maximal unqualified set.
                 depth_rounds: rounds,
+                // Every element of every entry comes back as a fresh sharing: the
+                // last resharing round masks it with randomness from each group
+                // member's own private key.
+                fresh_sharings: m.saturating_mul(elements),
             },
         ))
     }
@@ -2069,10 +2077,13 @@ mod tests {
         );
     }
 
-    /// The dealer's switch-network shuffle only moves whole entries and never
-    /// reads a share, so it stays degree-AGNOSTIC: the same mixed-degree packed
-    /// column the PRSS source refuses must still go through it unchanged, as a
-    /// permutation of the input entries. (The output stage's seeded pins in
+    /// The dealer's switch-network shuffle routes whole entries and never
+    /// interpolates one, so it stays degree-AGNOSTIC: the same mixed-degree packed
+    /// column the PRSS source refuses must still go through it, as a permutation
+    /// of the input entries' VALUES. The shares themselves come back fresh — the
+    /// dealer re-randomises every output element — so the property is asserted on
+    /// the reconstructed values, element by element, and the share vectors are
+    /// asserted to have CHANGED. (The output stage's seeded pins in
     /// `oblivious_join` cover the same property end to end.)
     #[test]
     fn the_dealer_shuffle_still_accepts_the_mixed_degree_layout() {
@@ -2085,7 +2096,19 @@ mod tests {
             (0, vec![41, 42]),
         ];
         let col = mixed_degree_column(&backend, &rows);
-        let before: BTreeSet<Vec<u64>> = col
+        let t = backend.threshold();
+        // Each entry's VALUES: the tag element opens at degree 2t, the limbs at t.
+        let values = |e: &[crate::shamir::Share]| -> Vec<u64> {
+            let mut v = vec![crate::shamir::reconstruct_degree(&e[..n], 2 * t)
+                .unwrap()
+                .value()];
+            for el in e[n..].chunks(n) {
+                v.push(crate::shamir::reconstruct_degree(el, t).unwrap().value());
+            }
+            v
+        };
+        let before_values: BTreeSet<Vec<u64>> = col.iter().map(|e| values(e)).collect();
+        let before_shares: BTreeSet<Vec<u64>> = col
             .iter()
             .map(|e| e.iter().map(|sh| sh.y.value()).collect())
             .collect();
@@ -2094,14 +2117,21 @@ mod tests {
         assert_eq!(cost.items, rows.len());
         // A switch network really is routed here, unlike the PRSS construction.
         assert!(cost.switches > 0);
-        let after: BTreeSet<Vec<u64>> = shuffled
+        let after_values: BTreeSet<Vec<u64>> = shuffled.iter().map(|e| values(e)).collect();
+        assert_eq!(
+            before_values, after_values,
+            "the switch-network shuffle must carry mixed-degree entries through as a \
+             permutation of their values"
+        );
+        let after_shares: BTreeSet<Vec<u64>> = shuffled
             .iter()
             .map(|e| e.iter().map(|sh| sh.y.value()).collect())
             .collect();
-        assert_eq!(
-            before, after,
-            "the switch-network shuffle must carry mixed-degree entries through untouched"
+        assert!(
+            after_shares.is_disjoint(&before_shares),
+            "every output entry must be a fresh sharing, not an input share vector"
         );
+        assert_eq!(cost.fresh_sharings, rows.len() * 3);
     }
 
     // ---- The shuffle's SECURITY properties, each pinned against a weakening

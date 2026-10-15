@@ -2945,7 +2945,7 @@ mod randomness_seam_tests {
             ),
             (3, 3, 3, 3, 12, 3)
         );
-        assert_eq!(dealer.draw_fp().value(), 2161249352783106125);
+        assert_eq!(dealer.draw_fp().value(), 1985712154807401802);
 
         let b = ShamirBackend::new_seeded(3, 0xBA7C2).unwrap();
         let join = HiddenValueJoin::new(b.clone());
@@ -2957,7 +2957,7 @@ mod randomness_seam_tests {
             (cost.bound, cost.shuffle.items, cost.shuffle.switches),
             (2, 2, 4)
         );
-        assert_eq!(dealer.draw_fp().value(), 1407478561319806175);
+        assert_eq!(dealer.draw_fp().value(), 2292455923086310036);
     }
 
     /// The COMPLETE seam transcript of a batched join — both key columns (left
@@ -2985,7 +2985,9 @@ mod randomness_seam_tests {
     /// same pre-routing pin as the `B = 3` case.
     #[test]
     fn seeded_batched_join_transcripts_are_pinned() {
-        use crate::randomness::test_sources::{fingerprint, RecordingSource};
+        use crate::randomness::test_sources::{
+            fingerprint, prefix_before_first_shuffle, RecordingSource,
+        };
         let b = ShamirBackend::new_seeded(5, 0xBA7C1).unwrap();
         let join = HiddenValueJoin::new(b.clone());
         let (l, r) = positional_pair();
@@ -3009,7 +3011,14 @@ mod randomness_seam_tests {
         );
         // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
         assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
-        assert_eq!(fingerprint(&rec.log), 0x1522_2b64_f255_3b1f);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x35e4_8905_57b6_816d
+        );
+        assert_eq!(fingerprint(&rec.log), 0xf563_03af_2cc8_0641);
 
         let b = ShamirBackend::new_seeded(3, 0xBA7C2).unwrap();
         let join = HiddenValueJoin::new(b.clone());
@@ -3031,7 +3040,14 @@ mod randomness_seam_tests {
             .concat()
         );
         assert_eq!(fingerprint(&rec.log[..6]), 0xbd36_3090_bbad_ff3c);
-        assert_eq!(fingerprint(&rec.log), 0xa975_f38b_2f6e_c6e8);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x1ac1_763a_ba2c_84a9
+        );
+        assert_eq!(fingerprint(&rec.log), 0x4d93_31c7_2de2_08e0);
 
         // `B = 5` over the SAME three candidates: the output stage pads with two
         // PURE-DUMMY slots on top of the three real ones. That padding branch is
@@ -3060,7 +3076,14 @@ mod randomness_seam_tests {
         );
         // Same prefix pin as `B = 3`: `B` changes only the output suffix.
         assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
-        assert_eq!(fingerprint(&rec.log), 0x348e_74ee_9564_b8cc);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x33be_42c1_760b_6dbe
+        );
+        assert_eq!(fingerprint(&rec.log), 0xebc2_32c7_b6b7_cb63);
     }
 
     /// Every key sharing (any row of either column), every equality mask AND every
@@ -3196,7 +3219,7 @@ mod randomness_seam_tests {
         // One degree reduction per selected element: the tag plus its three limbs,
         // over four slots.
         assert_eq!(cost.degree_reductions, 16);
-        assert_eq!(dealer.draw_fp().value(), 529688288171226898);
+        assert_eq!(dealer.draw_fp().value(), 982498321419405726);
 
         // The public entry point mints its own dealer from the same seeded
         // backend, so it reproduces the same run.
@@ -3233,7 +3256,7 @@ mod randomness_seam_tests {
             ]
             .concat()
         );
-        assert_eq!(fingerprint(suffix), 0xb7ce_9855_44a5_f58e);
+        assert_eq!(fingerprint(suffix), 0xefb1_95a0_08bb_d36e);
     }
 
     /// A source whose `(n, t)` differs from the backend's is refused before the

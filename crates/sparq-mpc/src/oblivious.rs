@@ -661,6 +661,14 @@ pub struct ShuffleCost {
     /// simulation). A source with a different construction reports its own round
     /// count here — see the type docs.
     pub depth_rounds: usize,
+    /// Output sharings made FRESH by the construction: one per secret element of
+    /// every output entry, so `items · entry_width` for a packed column. Each one
+    /// costs a degree-`t` zero-sharing (or, for a resharing construction, the
+    /// resharing itself), which is what makes an output element's share vector
+    /// independent of the input element's — see [`rerandomise_sharings`]. `0`
+    /// means the construction handed back the input share vectors unchanged,
+    /// which only happens where there is nothing to permute (`items <= 1`).
+    pub fresh_sharings: usize,
 }
 
 impl ShuffleCost {
@@ -677,7 +685,18 @@ impl ShuffleCost {
             items: n,
             switches,
             depth_rounds,
+            // One secret element per item is the width-1 default; a packed column
+            // overrides it with `with_fresh_sharings`.
+            fresh_sharings: n,
         }
+    }
+
+    /// Override [`Self::fresh_sharings`] for a column whose entries pack SEVERAL
+    /// secret elements each: the re-randomisation is per element, not per entry,
+    /// so a width-`w` column of `n` items makes `n · w` fresh sharings.
+    pub fn with_fresh_sharings(mut self, fresh_sharings: usize) -> Self {
+        self.fresh_sharings = fresh_sharings;
+        self
     }
 }
 
@@ -710,13 +729,91 @@ pub fn shuffle(
 ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
     let n = col.len();
     let net = WaksmanNetwork::new(n);
-    if n <= 1 {
+    if n == 0 {
         return Ok((col, ShuffleCost::model(n, net.switch_count())));
     }
-    let perm = random_permutation(dealer, n)?;
-    let bits = net.route(&perm)?;
-    net.apply(&mut col, &bits)?;
-    Ok((col, ShuffleCost::model(n, net.switch_count())))
+    if n > 1 {
+        let perm = random_permutation(dealer, n)?;
+        let bits = net.route(&perm)?;
+        net.apply(&mut col, &bits)?;
+    }
+    // Every output element is handed back as a FRESH sharing. A switch moves a
+    // share vector verbatim, so without this step an output element's shares are
+    // the input element's shares and a party holding its own share of each input
+    // could pair the two up by value — the position the permutation determines.
+    // Adding an independent degree-`t` zero-sharing per output element keeps the
+    // value and the degree and makes the share vector independent of the input's.
+    let fresh = rerandomise_sharings(dealer, &mut col)?;
+    Ok((
+        col,
+        ShuffleCost::model(n, net.switch_count()).with_fresh_sharings(fresh),
+    ))
+}
+
+/// Re-randomise EVERY secret element of a secret-shared column in place: add an
+/// independent, freshly drawn degree-`t` **zero-sharing** to each one. Returns how
+/// many elements were re-randomised.
+///
+/// This is what makes a switch-network shuffle's output unlinkable to its input.
+/// A switch moves a share vector verbatim, so the output element at a given
+/// position holds the very share values the input element held; a party that keeps
+/// its own share of each input element can therefore pair output positions with
+/// input positions by comparing values. Adding a fresh zero-sharing leaves the
+/// reconstructed value and the degree untouched and replaces the share vector with
+/// one whose non-constant coefficients are independent of the input's, so the
+/// values a party sees carry no information about which input element it holds.
+///
+/// ## Per ELEMENT, never per entry
+///
+/// An entry may PACK several secret elements (the oblivious output stage packs a
+/// slot tag plus its payload limbs into one entry), and each element gets its OWN
+/// zero-sharing. One mask shared across an entry's elements would preserve every
+/// difference between them, and those differences are as linkable as the shares.
+/// An entry is therefore required to be a whole number of `n`-party sharings, and
+/// a width that is not is refused rather than masked by position.
+///
+/// The zero-sharing is evaluated at each share's OWN `x`, so a column on
+/// non-canonical evaluation points is re-randomised correctly too (the caller's
+/// own shape checks decide whether such a column is acceptable at all).
+///
+/// The transport tier routes the network itself
+/// ([`sample_random_permutation`] + [`WaksmanNetwork::apply`]) and must call this
+/// on the routed column for the same reason.
+pub fn rerandomise_sharings(
+    dealer: &mut ShamirDealer,
+    col: &mut SecretColumn,
+) -> Result<usize, MpcError> {
+    let n = dealer.parties();
+    let t = dealer.threshold();
+    let mut count = 0usize;
+    for (j, entry) in col.iter_mut().enumerate() {
+        if n == 0 || entry.len() % n != 0 {
+            return Err(MpcError::Protocol(format!(
+                "rerandomise_sharings: entry {} is {} shares wide, which is not a whole \
+                 number of {}-party sharings; cannot re-randomise element by element",
+                j,
+                entry.len(),
+                n
+            )));
+        }
+        for element in entry.chunks_mut(n) {
+            // A fresh degree-`t` polynomial with a ZERO constant term: `t` uniform
+            // coefficients, independent of every other element's.
+            let coeffs: Vec<Fp> = (0..t).map(|_| dealer.draw_fp()).collect();
+            for share in element.iter_mut() {
+                let x = Fp::new(share.x);
+                let mut pow = x;
+                let mut acc = Fp::zero();
+                for c in &coeffs {
+                    acc = acc.add(c.mul(pow));
+                    pow = pow.mul(x);
+                }
+                share.y = share.y.add(acc);
+            }
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 /// Public wrapper over the private `random_permutation` sampler so the

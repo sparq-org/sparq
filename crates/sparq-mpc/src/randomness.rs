@@ -1028,6 +1028,23 @@ pub(crate) mod test_sources {
     /// method name's bytes, a `0` separator byte, then each `y` as 8
     /// little-endian bytes. Any change to which method was called, what it
     /// returned, or the ORDER of the draws changes the digest.
+    /// The transcript PREFIX that runs before the first oblivious shuffle, for a
+    /// prefix-equality pin.
+    ///
+    /// The shuffle is the one seam call whose RECORDED payload is its own output,
+    /// so a change to what the shuffle hands back moves the whole-log fingerprint
+    /// while leaving every earlier entry untouched. Pinning this prefix separately
+    /// states that: the draws an operator makes before it shuffles are byte-for-byte
+    /// what they were, and only the shuffle's output and the draws after it moved.
+    /// Returns the whole log when it contains no shuffle.
+    pub(crate) fn prefix_before_first_shuffle(log: &[Entry]) -> &[Entry] {
+        let cut = log
+            .iter()
+            .position(|e| e.0 == SeamMethod::ObliviousShuffle.name())
+            .unwrap_or(log.len());
+        &log[..cut]
+    }
+
     pub(crate) fn fingerprint(log: &[Entry]) -> u64 {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         let mut eat = |b: u8| {

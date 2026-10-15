@@ -1051,6 +1051,9 @@ fn shuffle_with_payloads(
         items: base_cost.items,
         switches: base_cost.switches.saturating_mul(entry_width),
         depth_rounds: base_cost.depth_rounds,
+        // The shuffle already counted one fresh sharing per packed ELEMENT, so
+        // this is its own count, not a widened one.
+        fresh_sharings: base_cost.fresh_sharings,
     };
 
     // Split each shuffled entry into (tag shares, limb shares...) and OPEN the
@@ -2407,9 +2410,9 @@ mod output_randomness_seam_tests {
     use super::*;
     use crate::prss::PrssRandomness;
     use crate::randomness::test_sources::{
-        fingerprint, MalformedShuffleSource, MalformedSource, MisreportedThresholdSource,
-        RecordingSource, SeamMethod, ALL_MALFORMATIONS, ALL_SHUFFLE_MALFORMATIONS,
-        SHUFFLE_SHAPE_REFUSAL,
+        fingerprint, prefix_before_first_shuffle, MalformedShuffleSource, MalformedSource,
+        MisreportedThresholdSource, RecordingSource, SeamMethod, ALL_MALFORMATIONS,
+        ALL_SHUFFLE_MALFORMATIONS, SHUFFLE_SHAPE_REFUSAL,
     };
 
     /// The refusal [`crate::randomness::require_source_matches`] raises.
@@ -2502,7 +2505,7 @@ mod output_randomness_seam_tests {
         // One degree reduction per selected element: the tag plus its two limbs,
         // over five slots.
         assert_eq!(cost.degree_reductions, 15);
-        assert_eq!(dealer.draw_fp().value(), 1078180862379801218);
+        assert_eq!(dealer.draw_fp().value(), 898054212019563094);
 
         // The public entry point mints its own dealer from the same seeded
         // backend, so it reproduces the same run.
@@ -2535,7 +2538,14 @@ mod output_randomness_seam_tests {
             ]
             .concat()
         );
-        assert_eq!(fingerprint(&rec.log), 0xbc3b_153a_661c_8597);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x7879_d28b_d1c8_0440
+        );
+        assert_eq!(fingerprint(&rec.log), 0x10b2_92a3_6547_7e25);
     }
 
     /// Every sharing the output stage draws — selector, real tag, pure-dummy
@@ -2706,7 +2716,14 @@ mod output_randomness_seam_tests {
         // is pinned equal to its pre-change value; the full-log fingerprint is the
         // new pin.
         assert_eq!(fingerprint(&rec.log[..4293]), 0x94ae_8e7b_302d_0377);
-        assert_eq!(fingerprint(&rec.log), 0x784e_bacd_9c30_b830);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x0946_3640_b70d_c468
+        );
+        assert_eq!(fingerprint(&rec.log), 0x5fe0_5647_7c3b_9594);
         let tail: Vec<&str> = rec.log[4293..].iter().map(|(m, _)| *m).collect();
         assert_eq!(
             tail,
