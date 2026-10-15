@@ -3028,6 +3028,7 @@ mod randomness_seam_tests {
     //!    because PRSS refuses `vss_own_input` rather than faking an unverified
     //!    sharing.
     use super::*;
+    use crate::oblivious::{SecretColumn, ShuffleCost};
     use crate::prss::PrssRandomness;
     use crate::shamir::ShamirBackend;
 
@@ -3274,6 +3275,12 @@ mod randomness_seam_tests {
         }
         fn vss_own_input(&mut self, secret: Fp) -> Result<Vec<Share>, MpcError> {
             self.inner.vss_own_input(secret)
+        }
+        fn oblivious_shuffle(
+            &mut self,
+            col: SecretColumn,
+        ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+            self.inner.oblivious_shuffle(col)
         }
     }
 

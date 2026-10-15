@@ -36,6 +36,8 @@ use rat::Rat;
 use region::{f32_key, f64_key, int_range, Region, Sp};
 use strings::{Atom, Space, StrKind, F};
 
+pub(crate) use strings::is_lang_tag;
+
 /// A three-valued answer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tri {
