@@ -1637,6 +1637,16 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         parent: Option<&str>,
     ) -> Result<crate::store::DeleteOutcome, crate::error::ServerError> {
         let Some((body, meta)) = self.prior(iri).await? else {
+            // A record a legacy edge lists may be gone already (its subject's removal took it):
+            // the edge, which is all that is left, goes too, so it keeps no container from being
+            // empty. Nothing is there to put back.
+            if let (true, Some(parent)) = (names_record(iri), parent) {
+                self.durable().await?;
+                match self.state.store.delete(iri, Some(parent)).await {
+                    Ok(()) | Err(crate::error::ServerError::NotFound) => {}
+                    Err(e) => return Err(e),
+                }
+            }
             return Ok(crate::store::DeleteOutcome::NotFound);
         };
         self.durable().await?;
