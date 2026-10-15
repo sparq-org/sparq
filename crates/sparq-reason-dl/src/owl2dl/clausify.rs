@@ -10,8 +10,12 @@
 //! 3. each such disjunction is read as a DL-clause `U₁ ∧ … ∧ Uₘ → V₁ ∨ … ∨ Vₙ` over a central
 //!    variable `x` and neighbour variables `yᵢ`.
 //!
-//! Transitivity is eliminated by encoding (`∀R.C` with a transitive `S ⊑* R` gets a fresh
-//! `Q ⊑ ∀S.Q ⊓ C` chain), so the tableau never sees a transitive role. The role hierarchy is
+//! Property chains and transitivity are eliminated by encoding (Horrocks and Sattler,
+//! "Decidability of SHIQ with complex role inclusion axioms", AIJ 160, 2004; Motik et al.
+//! §5): every non-simple role `R` gets a finite automaton accepting the role words that imply
+//! `R`, and `∀R.C` becomes one fresh concept `X_q` per automaton state, with
+//! `X_q(x) ∧ S(x, y) → X_q'(y)` per transition, `X_q ⊑ X_q'` per ε-transition and
+//! `X_f ⊑ C` for the final state; so the tableau never sees a chain. The role hierarchy is
 //! not translated to clauses: the tableau materialises super-role facts directly.
 //!
 //! Data properties are roles too (never inverted, never transitive) whose edges end in
@@ -25,9 +29,9 @@
 //! or a datatype has more than one). The tableau's datatype check decides the labels with
 //! [`super::data_ranges`].
 //!
-//! Everything outside the supported fragment (property chains other than `R∘R ⊑ R`, keys on
-//! non-simple roles, the universal roles, datatypes outside the datatype map) is refused with [`Unsupported`],
-//! naming the axiom's source triples, so the reasoner can answer `Unknown(OutOfFragment)`
+//! Everything outside the supported fragment (keys on non-simple roles, the universal
+//! roles, datatypes outside the datatype map, an irregular or too large role hierarchy) is
+//! refused with [`Unsupported`], naming the axiom's source triples, so the reasoner can answer `Unknown(OutOfFragment)`
 //! instead of a wrong verdict; a data range or literal the datatype oracle cannot decide is
 //! refused as a datatype question (`Unknown(DatatypeUnknown)`).
 
@@ -285,13 +289,18 @@ struct Builder<'a> {
     class_atoms: FxHashMap<Id, Atom>,
     role_idx: FxHashMap<Id, u32>,
     inclusions: Vec<(Role, Role)>,
-    transitive: FxHashSet<Role>,
+    /// Role inclusions `S₁ ∘ … ∘ Sₙ ⊑ R` with `n ≥ 2` (transitivity is `R ∘ R ⊑ R`), each
+    /// also with its inverse `Sₙ⁻ ∘ … ∘ S₁⁻ ⊑ R⁻`, and their axiom.
+    chains: Vec<(Vec<Role>, Role, usize)>,
+    /// The roles with a chain below them (`w ⊑ S ⊑* R`, `|w| ≥ 2`).
+    nonsimple: FxHashSet<Role>,
+    /// The automaton of each non-simple role, by the least role equivalent to it.
+    automata: FxHashMap<Role, Nfa>,
     individuals: FxHashMap<Individual, u32>,
     at_least_atoms: FxHashMap<(u32, Role, Option<Atom>), Atom>,
     define_pos: FxHashMap<Nnf, Atom>,
     define_neg: FxHashMap<Nnf, Atom>,
-    transitive_all: FxHashMap<(Role, Nnf), Atom>,
-    trans_carrier: FxHashMap<(Role, Nnf), Atom>,
+    chain_all: FxHashMap<(Role, Nnf), Atom>,
     /// GCIs `⊤ ⊑ C` waiting for clausification, with their axiom index.
     gcis: Vec<(Nnf, u32)>,
     /// The axiom whose clause would exceed [`MAX_CLAUSE_VARS`], if any.
@@ -312,6 +321,38 @@ struct Builder<'a> {
 /// The largest cardinality in a number restriction the clausifier translates.
 pub const MAX_CARDINALITY: u32 = 64;
 
+/// The most states the automaton of one non-simple role may have.
+pub const MAX_AUTOMATON_STATES: u32 = 4096;
+
+/// A finite automaton over roles: state 0 is initial and state 1 final.
+#[derive(Clone, Debug)]
+struct Nfa {
+    states: u32,
+    trans: Vec<(u32, Role, u32)>,
+    eps: Vec<(u32, u32)>,
+}
+
+impl Nfa {
+    /// Whether the automaton is past [`MAX_AUTOMATON_STATES`] (or its transitions past a
+    /// small multiple of it).
+    fn too_big(&self) -> bool {
+        self.states > MAX_AUTOMATON_STATES
+            || self.trans.len() + self.eps.len() > 4 * MAX_AUTOMATON_STATES as usize
+    }
+
+    /// Adds a copy of `sub` read between `from` and `to`.
+    fn embed(&mut self, sub: &Nfa, from: u32, to: u32) {
+        let o = self.states;
+        self.states += sub.states;
+        self.trans
+            .extend(sub.trans.iter().map(|&(q, s, q2)| (q + o, s, q2 + o)));
+        self.eps
+            .extend(sub.eps.iter().map(|&(q, q2)| (q + o, q2 + o)));
+        self.eps.push((from, o));
+        self.eps.push((o + 1, to));
+    }
+}
+
 /// The most successor variables one DL-clause may have.
 const MAX_CLAUSE_VARS: u32 = 1024;
 
@@ -328,13 +369,14 @@ pub(crate) fn clausify(
         class_atoms: FxHashMap::default(),
         role_idx: FxHashMap::default(),
         inclusions: Vec::new(),
-        transitive: FxHashSet::default(),
+        chains: Vec::new(),
+        nonsimple: FxHashSet::default(),
+        automata: FxHashMap::default(),
         individuals: FxHashMap::default(),
         at_least_atoms: FxHashMap::default(),
         define_pos: FxHashMap::default(),
         define_neg: FxHashMap::default(),
-        transitive_all: FxHashMap::default(),
-        trans_carrier: FxHashMap::default(),
+        chain_all: FxHashMap::default(),
         gcis: Vec::new(),
         too_wide: None,
         axiom: 0,
@@ -365,12 +407,13 @@ pub(crate) fn clausify(
             }
         }
     }
-    // Role axioms first: the transitivity encoding of `∀` needs the whole hierarchy.
+    // Role axioms first: the automata encoding of `∀` needs the whole hierarchy.
     for (i, rec) in onto.axioms.iter().enumerate() {
         b.axiom = i;
         b.role_axiom(&rec.axiom)?;
     }
     b.close_hierarchy();
+    b.build_automata()?;
     for (i, rec) in onto.axioms.iter().enumerate() {
         b.axiom = i;
         b.class_axiom(&rec.axiom)?;
@@ -641,15 +684,14 @@ impl Builder<'_> {
         match ax {
             Axiom::SubObjectPropertyOf(chain, sup) => {
                 let s = self.role(sup)?;
-                if let [r] = chain.as_slice() {
-                    let r = self.role(r)?;
-                    self.include(r, s);
-                } else if chain.len() == 2 && chain[0] == *sup && chain[1] == *sup {
-                    // `R ∘ R ⊑ R` is transitivity.
-                    self.transitive.insert(s);
-                    self.transitive.insert(s.inverse());
+                let w = chain
+                    .iter()
+                    .map(|r| self.role(r))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if let [r] = w.as_slice() {
+                    self.include(*r, s);
                 } else {
-                    return Err(self.unsupported("ObjectPropertyChain"));
+                    self.chain(w, s);
                 }
             }
             Axiom::EquivalentObjectProperties(ps) => {
@@ -673,8 +715,7 @@ impl Builder<'_> {
             }
             Axiom::TransitiveObjectProperty(p) => {
                 let r = self.role(p)?;
-                self.transitive.insert(r);
-                self.transitive.insert(r.inverse());
+                self.chain(vec![r, r], r);
             }
             // Every data property is below owl:topDataProperty: nothing to add.
             Axiom::SubDataPropertyOf(_, e) if *e == self.v.top_data_property => {}
@@ -725,16 +766,134 @@ impl Builder<'_> {
         self.out.supers = supers;
     }
 
-    /// The transitive roles `S` with `S ⊑* r`.
-    fn transitive_subroles(&self, r: Role) -> Vec<Role> {
-        let mut out: Vec<Role> = self
-            .transitive
+    /// Records `w ⊑ s` and its inverse.
+    fn chain(&mut self, w: Vec<Role>, s: Role) {
+        let inv = w.iter().rev().map(|r| r.inverse()).collect();
+        self.chains.push((w, s, self.axiom));
+        self.chains.push((inv, s.inverse(), self.axiom));
+    }
+
+    /// Whether `r` and `s` imply each other (`r ⊑* s ⊑* r`).
+    fn equivalent(&self, r: Role, s: Role) -> bool {
+        self.out.supers(r).contains(&s) && self.out.supers(s).contains(&r)
+    }
+
+    /// The least role equivalent to `r`.
+    fn representative(&self, r: Role) -> Role {
+        self.out
+            .supers(r)
             .iter()
             .copied()
-            .filter(|&s| self.out.supers(s).contains(&r))
+            .filter(|&s| self.equivalent(r, s))
+            .min()
+            .unwrap_or(r)
+    }
+
+    /// Marks the non-simple roles and builds their automata, on the hierarchy of the role
+    /// axioms (a role first mentioned by a class axiom has nothing below it).
+    fn build_automata(&mut self) -> Result<(), Unsupported> {
+        for i in 0..self.chains.len() {
+            let above = self.out.supers(self.chains[i].1).to_vec();
+            self.nonsimple.extend(above);
+        }
+        let mut roles: Vec<Role> = self.nonsimple.iter().copied().collect();
+        roles.sort();
+        for r in roles {
+            let k = self.representative(r);
+            self.automaton(k, &mut Vec::new())?;
+        }
+        Ok(())
+    }
+
+    /// The automaton of the representative `k`: state 0 initial, state 1 final, accepting
+    /// the role words `w` with `w ⊑* k`. The words of a non-simple role met on the way are
+    /// those of its own automaton, embedded between ε-transitions; a simple role is one
+    /// transition, since the tableau materialises the hierarchy. A hierarchy on which the
+    /// construction does not terminate (not regular) or grows past [`MAX_AUTOMATON_STATES`]
+    /// is refused.
+    fn automaton(&mut self, k: Role, stack: &mut Vec<Role>) -> Result<Nfa, Unsupported> {
+        if let Some(a) = self.automata.get(&k) {
+            return Ok(a.clone());
+        }
+        let too_big = |b: &Self| {
+            b.unsupported("a property hierarchy whose automaton exceeds MAX_AUTOMATON_STATES")
+        };
+        if stack.contains(&k) {
+            return Err(self.unsupported("an irregular property hierarchy"));
+        }
+        stack.push(k);
+        let mut a = Nfa {
+            states: 2,
+            trans: vec![(0, k, 1)],
+            eps: Vec::new(),
+        };
+        // `S ⊑ R` with a non-simple `S`: the words of `S`.
+        let mut subs: Vec<Role> = self
+            .inclusions
+            .iter()
+            .filter(|&&(s, t)| {
+                self.equivalent(t, k) && !self.equivalent(s, k) && self.nonsimple.contains(&s)
+            })
+            .map(|&(s, _)| self.representative(s))
             .collect();
-        out.sort();
-        out
+        subs.sort();
+        subs.dedup();
+        for s in subs {
+            let sub = self.automaton(s, stack)?;
+            a.embed(&sub, 0, 1);
+            if a.too_big() {
+                return Err(too_big(self));
+            }
+        }
+        let chains: Vec<(Vec<Role>, usize)> = self
+            .chains
+            .iter()
+            .filter(|(_, t, _)| self.equivalent(*t, k))
+            .map(|(w, _, ax)| (w.clone(), *ax))
+            .collect();
+        for (w, ax) in chains {
+            self.axiom = ax;
+            let n = w.len();
+            let (first, last) = (self.equivalent(w[0], k), self.equivalent(w[n - 1], k));
+            let middle = &w[usize::from(first)..n - usize::from(last)];
+            if middle.iter().any(|&s| self.equivalent(s, k)) {
+                return Err(self.unsupported("an irregular property hierarchy"));
+            }
+            let (from, to) = match (first, last) {
+                // `R ∘ R ⊑ R`.
+                (true, true) if middle.is_empty() => {
+                    a.eps.push((1, 0));
+                    continue;
+                }
+                (true, true) => return Err(self.unsupported("an irregular property hierarchy")),
+                // `R ∘ S₁ ∘ … ⊑ R` loops on the final state, `… ∘ Sₙ ∘ R ⊑ R` on the initial.
+                (true, false) => (1, 1),
+                (false, true) => (0, 0),
+                (false, false) => (0, 1),
+            };
+            let mut cur = from;
+            for (j, &s) in middle.iter().enumerate() {
+                let next = if j + 1 == middle.len() {
+                    to
+                } else {
+                    a.states += 1;
+                    a.states - 1
+                };
+                if self.nonsimple.contains(&s) {
+                    let sub = self.automaton(self.representative(s), stack)?;
+                    a.embed(&sub, cur, next);
+                } else {
+                    a.trans.push((cur, s, next));
+                }
+                if a.too_big() {
+                    return Err(too_big(self));
+                }
+                cur = next;
+            }
+        }
+        stack.pop();
+        self.automata.insert(k, a.clone());
+        Ok(a)
     }
 
     fn src(&self) -> u32 {
@@ -877,8 +1036,8 @@ impl Builder<'_> {
             }
             Axiom::NegativeObjectPropertyAssertion(p, a, b) => {
                 // `Mₐ ⊑ ∀R.¬M_b` with markers on `a` and `b` only (they follow merges). As a
-                // universal it goes through the transitivity encoding, so an `R`-path made of
-                // a transitive sub-property's edges is caught too.
+                // universal it goes through `R`'s automaton, so an `R`-path made of
+                // sub-property or chain edges is caught too.
                 let r = self.role(p)?;
                 let (a, b) = (self.individual(a), self.individual(b));
                 let (ma, mb) = (self.fresh(AtomKind::Fresh), self.fresh(AtomKind::Fresh));
@@ -895,12 +1054,9 @@ impl Builder<'_> {
                     .iter()
                     .map(|p| self.role(p))
                     .collect::<Result<Vec<_>, _>>()?;
-                // A key on a role with a transitive sub-role would have to see the values
-                // reached along paths, which the tableau does not materialise.
-                if roles
-                    .iter()
-                    .any(|&r| !self.transitive_subroles(r).is_empty())
-                {
+                // A key on a non-simple role would have to see the values reached along
+                // paths, which the tableau does not materialise.
+                if roles.iter().any(|r| self.nonsimple.contains(r)) {
                     return Err(self.unsupported("HasKey on a non-simple object property"));
                 }
                 let data = ds
@@ -1180,13 +1336,12 @@ impl Builder<'_> {
                     cl.head.push(Head::Concept(a, Var::X));
                 }
                 Nnf::All(r, f) => {
-                    let trans = self.transitive_subroles(r);
-                    if trans.is_empty() {
+                    if !self.nonsimple.contains(&r) {
                         if !self.all_into(&mut cl, r, *f) {
                             return;
                         }
                     } else {
-                        let p = self.transitive_all(r, *f, &trans);
+                        let p = self.chain_all(r, *f);
                         cl.head.push(Head::Concept(p, Var::X));
                     }
                 }
@@ -1279,47 +1434,34 @@ impl Builder<'_> {
         true
     }
 
-    /// A fresh `P ⊑ ∀r.f` that also carries `f` along every transitive `S ⊑* r`:
-    /// `P ⊑ ∀S.Q`, `Q ⊑ ∀S.Q`, `Q ⊑ f`.
-    fn transitive_all(&mut self, r: Role, f: Nnf, trans: &[Role]) -> Atom {
-        if let Some(&p) = self.transitive_all.get(&(r, f.clone())) {
+    /// A fresh `P ⊑ ∀r.f` for a non-simple `r`: `P` is the initial state's concept of `r`'s
+    /// automaton run over the graph, and the final state's concept implies `f`.
+    fn chain_all(&mut self, r: Role, f: Nnf) -> Atom {
+        let k = self.representative(r);
+        if let Some(&p) = self.chain_all.get(&(k, f.clone())) {
             return p;
         }
-        let p = self.fresh(AtomKind::Fresh);
-        self.transitive_all.insert((r, f.clone()), p);
-        let mut cl = Clause {
-            body_x: vec![p],
-            ..Clause::default()
-        };
-        if self.all_into(&mut cl, r, f.clone()) {
-            self.push_clause(cl);
-        }
-        for &s in trans {
-            let q = match self.trans_carrier.get(&(s, f.clone())) {
-                Some(&q) => q,
-                None => {
-                    let q = self.fresh(AtomKind::Fresh);
-                    self.trans_carrier.insert((s, f.clone()), q);
-                    self.push_clause(Clause {
-                        body_x: vec![q],
-                        body_roles: vec![(s, 0)],
-                        head: vec![Head::Concept(q, Var::Y(0))],
-                        n_y: 1,
-                        ..Clause::default()
-                    });
-                    self.gci(Nnf::Or(vec![Nnf::Not(q), f.clone()]));
-                    q
-                }
-            };
+        let a = self.automata[&k].clone();
+        let x: Vec<Atom> = (0..a.states).map(|_| self.fresh(AtomKind::Fresh)).collect();
+        self.chain_all.insert((k, f.clone()), x[0]);
+        for &(q, s, q2) in &a.trans {
             self.push_clause(Clause {
-                body_x: vec![p],
+                body_x: vec![x[q as usize]],
                 body_roles: vec![(s, 0)],
-                head: vec![Head::Concept(q, Var::Y(0))],
+                head: vec![Head::Concept(x[q2 as usize], Var::Y(0))],
                 n_y: 1,
                 ..Clause::default()
             });
         }
-        p
+        for &(q, q2) in &a.eps {
+            self.push_clause(Clause {
+                body_x: vec![x[q as usize]],
+                head: vec![Head::Concept(x[q2 as usize], Var::X)],
+                ..Clause::default()
+            });
+        }
+        self.gci(Nnf::Or(vec![Nnf::Not(x[1]), f]));
+        x[0]
     }
 }
 
