@@ -90,15 +90,23 @@ test('data properties are decided; an ill-typed literal is inconsistent', async 
   assert.equal((await checkOwlDl(tbox, `${PRE} :ann :age "sixteen"^^xsd:nonNegativeInteger .`)).consistent, false);
 });
 
-test('nominals are out of fragment: unknown, with the offending triples', async () => {
-  const r = await checkOwlDl(
-    `${TBOX} :ann a owl:NamedIndividual . :Ann owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] .`,
-  );
+test('nominals are decided, and class tests see the ABox', async () => {
+  const tbox = `${TBOX} :ann a owl:NamedIndividual , :Woman . :Ann a owl:Class ; owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] .`;
+  const r = await checkOwlDl(tbox);
+  assert.equal(r.consistent, true);
+  assert.equal(r.classification, 'complete');
+  assert.ok(r.inferredSubClassOf.some(([a, b]) => a === 'http://ex/Ann' && b === 'http://ex/Woman'));
+  assert.equal((await checkOwlDl(tbox, `${PRE} :ann a :Man .`)).consistent, false);
+});
+
+test('keys are out of fragment: unknown, with the offending triples', async () => {
+  const r = await checkOwlDl(`${TBOX} :Person owl:hasKey ( :hasMother ) .`);
   assert.equal(r.consistent, 'unknown');
   assert.equal(r.reason.kind, 'OutOfFragment');
-  assert.equal(typeof r.reason.construct, 'string');
-  assert.ok(r.reason.triples.length > 0);
+  assert.equal(r.reason.construct, 'HasKey');
+  assert.ok(r.reason.triples.some((t) => t.startsWith('<http://ex/Person> <http://www.w3.org/2002/07/owl#hasKey> ')));
   for (const t of r.reason.triples) assert.match(t, / \.$/);
+  assert.equal(r.profile.dl, true);
   assert.equal(r.classification, null);
 });
 
