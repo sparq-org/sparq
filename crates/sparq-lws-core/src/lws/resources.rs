@@ -3636,7 +3636,9 @@ async fn delete<S: Store + 'static>(
     // Every resource the delete may remove is locked before anything is decided, so the
     // precondition, the permission check of each descendant and the removal see one state: no
     // member can be created in, written to, or deleted from the subtree in between.
-    let (guards, doomed) = match lock_subtree(state, uri, parent.clone()).await {
+    // Only what the agent may read is listed for it: a container it may not read is refused
+    // before what it holds is looked at.
+    let (guards, doomed) = match lock_subtree(state, uri, parent.clone(), Some(agent)).await {
         Ok(locked) => locked,
         Err(r) => return r,
     };
@@ -3710,6 +3712,11 @@ async fn delete<S: Store + 'static>(
         if let Err(r) = recheck(state, Action::Delete, node, agent).await {
             return r;
         }
+        if node.ends_with('/') {
+            if let Err(r) = recheck(state, Action::Read, node, agent).await {
+                return r;
+            }
+        }
     }
     // The removals, the notifications of those that happened and the touch of the container run
     // in a task that holds the subtree's locks, and the listing lock, until the removals are
@@ -3773,11 +3780,14 @@ async fn delete<S: Store + 'static>(
 }
 
 /// `uri` and everything under it, each with the container it is in: descendants before the
-/// containers that hold them, `uri` last.
+/// containers that hold them, `uri` last. With `reader`, a container is listed only when that
+/// agent may read it (else [`ServerError::Forbidden`]), so what a container it may not read
+/// holds is never looked at for it.
 async fn subtree<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
     parent: Option<String>,
+    reader: Option<&Agent>,
 ) -> Result<Vec<(String, Option<String>)>, ServerError> {
     let mut out = Vec::new();
     let mut stack = vec![(uri.to_string(), parent, false)];
@@ -3785,6 +3795,11 @@ async fn subtree<S: Store + 'static>(
         if expanded || !node.ends_with('/') {
             out.push((node, origin));
             continue;
+        }
+        if let Some(agent) = reader {
+            if !state.allowed(Action::Read, &node, agent).await {
+                return Err(ServerError::Forbidden);
+            }
         }
         let children = state.store.list_children(&node).await?;
         stack.push((node.clone(), origin, true));
@@ -3810,7 +3825,12 @@ async fn lock_subtree<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
     parent: Option<String>,
+    reader: Option<&Agent>,
 ) -> Result<(Vec<IriGuard>, Vec<(String, Option<String>)>), Response> {
+    let listed_error = |e: ServerError| match (e, reader) {
+        (ServerError::Forbidden, Some(agent)) => state.deny(agent),
+        (e, _) => store_error(e),
+    };
     let sorted = |tree: &[(String, Option<String>)]| {
         let mut iris: Vec<String> = tree.iter().map(|(n, _)| n.clone()).collect();
         iris.sort_by(|a, b| lock_order(a, b));
@@ -3818,8 +3838,8 @@ async fn lock_subtree<S: Store + 'static>(
         iris
     };
     for _ in 0..8 {
-        let listed = subtree(state, uri, parent.clone()).await;
-        let before = sorted(&listed.map_err(store_error)?);
+        let listed = subtree(state, uri, parent.clone(), reader).await;
+        let before = sorted(&listed.map_err(listed_error)?);
         let mut guards = Vec::with_capacity(before.len());
         for iri in &before {
             guards.push(
@@ -3830,9 +3850,9 @@ async fn lock_subtree<S: Store + 'static>(
                     .ok_or_else(set_aside_meanwhile)?,
             );
         }
-        let after = subtree(state, uri, parent.clone())
+        let after = subtree(state, uri, parent.clone(), reader)
             .await
-            .map_err(store_error)?;
+            .map_err(listed_error)?;
         if sorted(&after) == before {
             return Ok((guards, after));
         }
@@ -6866,6 +6886,31 @@ mod tests {
         }
     }
 
+    /// A recursive delete lists a container's members only for an agent that may read it: Alice
+    /// is refused for Bob's container inside hers before what it holds is looked at (here, where
+    /// listing it would fail).
+    #[tokio::test]
+    async fn recursive_delete_lists_only_what_may_be_read() {
+        let store = FlakyStore::new();
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let (alice, bob) = (
+            agent("https://alice.example/#me"),
+            agent("https://bob.example/#me"),
+        );
+        let root = st.cfg.storage();
+        let shared = create_as(&st, &alice, &root, "shared", true).await;
+        let sub = create_as(&st, &bob, &shared, "sub", true).await;
+        create_as(&st, &bob, &sub, "bob.txt", false).await;
+        assert!(!st.allowed(Action::Read, &sub, &alice).await);
+        *store.fail_list_of.lock().unwrap() = Some(sub.clone());
+        let req = request("DELETE", path_of(&shared), &[("depth", "infinity")], "");
+        let r = handle(&st, &req, &alice).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        assert!(st.store.exists(&sub).await.unwrap());
+    }
+
     #[tokio::test]
     async fn recursive_delete_holds_the_subtree_locks() {
         let st = state().await;
@@ -9551,7 +9596,7 @@ mod tests {
             (at("d/e/"), Some(at("d/"))),
             (at("d/"), Some(root.clone())),
         ];
-        let Ok((guards, _)) = lock_subtree(&st, &at("d/"), Some(root.clone())).await else {
+        let Ok((guards, _)) = lock_subtree(&st, &at("d/"), Some(root.clone()), None).await else {
             panic!("locked");
         };
         *store.fail_delete_of.lock().unwrap() = Some(at("d/e/z"));
