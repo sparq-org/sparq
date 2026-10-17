@@ -2234,19 +2234,18 @@ mod tests {
         assert_eq!(depth(&Term::Formula(Vec::new())), 1);
     }
 
-    /// #6844: `walked_atom` resolves every variable of a goal to the END of its chain,
-    /// inside lists and quoted triples, keeps a quoted formula as the value it is, and
-    /// stops a chain that walks back into itself instead of following it forever.
-    /// `walked_atom_cow` is the walk the evaluation runs, and `walked_atom` is it plus a
-    /// clone of each term. They must agree on the terms AND on the refusals, because the
-    /// three `walked_atom` tests beside this one pin the walk through the owning form while
-    /// `backward_prove` goes through the borrowing one.
+    /// WHICH terms the walk borrows: a term it left as it found it is `Borrowed`, and only
+    /// a compound it rebuilt member by member is `Owned`. That is the whole content of
+    /// `walked_atom_cow`, and an ordinary goal's three terms are leaves, so an ordinary
+    /// goal copies nothing.
     ///
-    /// It also pins WHICH terms are borrowed, since that is the whole point: a term the
-    /// walk left as it found it is borrowed, and only a rebuilt compound is owned. An
-    /// ordinary goal's three terms are leaves, so an ordinary goal copies nothing.
+    /// This test deliberately does NOT claim to check the two walks against each other on
+    /// the terms or the refusals: `walked_atom` IS `walked_atom_cow(..).map(into_owned)`,
+    /// so comparing them would pass whatever the one implementation did. What pins the
+    /// walk's terms and refusals is the three `walked_atom` tests below, which run through
+    /// that same single implementation.
     #[test]
-    fn walked_atom_cow_borrows_what_walked_atom_copied() {
+    fn walked_atom_cow_borrows_every_term_it_did_not_rebuild() {
         use std::borrow::Cow;
         let iri = |s: &str| Term::Iri(s.to_string());
         let var = |s: &str| Term::Var(s.to_string());
@@ -2271,30 +2270,29 @@ mod tests {
                 iri("http://ex/o"),
             ],
         ];
+        // Every goal here is admissible under the default limits; a refused one would
+        // carry no terms to classify, and what the walk refuses is pinned by the
+        // `walked_atom` tests below.
         for g in &goals {
-            let owned = walked_atom(g, &b, &run);
-            let borrowed = walked_atom_cow(g, &b, &run);
-            match (&owned, &borrowed) {
-                (Some(o), Some(c)) => {
-                    for (i, (ot, ct)) in o.iter().zip(c.iter()).enumerate() {
-                        assert_eq!(ot, ct.as_ref(), "term {i} of {g:?}");
-                        // A leaf the walk did not rebuild is BORROWED; a compound it built
-                        // member by member is OWNED.
-                        let compound =
-                            matches!(ot, Term::List(_) | Term::Triple(_) | Term::Formula(_));
-                        assert_eq!(
-                            matches!(ct, Cow::Owned(_)),
-                            compound,
-                            "term {i} of {g:?} is owned exactly when it was rebuilt"
-                        );
-                    }
-                }
-                (None, None) => {}
-                _ => panic!("the two walks disagreed on whether {g:?} is admissible"),
+            let walked = walked_atom_cow(g, &b, &run).expect("admissible under the defaults");
+            for (i, ct) in walked.iter().enumerate() {
+                // A term the walk did not rebuild is BORROWED; a compound it built member
+                // by member is OWNED. The resolved term's own shape decides which, so this
+                // reads the shape off the walked term rather than off the input.
+                let compound =
+                    matches!(ct.as_ref(), Term::List(_) | Term::Triple(_) | Term::Formula(_));
+                assert_eq!(
+                    matches!(ct, Cow::Owned(_)),
+                    compound,
+                    "term {i} of {g:?} is owned exactly when it was rebuilt"
+                );
             }
         }
     }
 
+    /// #6844: `walked_atom` resolves every variable of a goal to the END of its chain,
+    /// inside lists and quoted triples, keeps a quoted formula as the value it is, and
+    /// stops a chain that walks back into itself instead of following it forever.
     #[test]
     fn walked_atom_resolves_chains_and_stops_a_cyclic_one() {
         use super::super::{Binding, Term};

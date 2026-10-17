@@ -135,7 +135,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **sparq-reason (N3 backward chaining):** the per-goal cost of naming a backward renaming by
-  its proof-tree fingerprint is reduced, with no change to any name, answer or refusal. A goal's
+  its proof-tree fingerprint is reduced, with no change to any name or answer. A goal's
   canonical identity key is built into one pre-sized buffer with the length prefix written
   straight into it, instead of a fresh string per term and a fresh string per length; the walk
   that resolves a goal's variables to the end of their chains now BORROWS the terms it did not
@@ -146,6 +146,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the run's backward identity allowance nor grows the run's tables, and the salt's value is
   unchanged either way. Every `__bw<n>_` name, derived fact, proof, `why()` string and
   `sparq-prov` IRI is byte-identical, and the W3C N3 inference conformance report is unchanged.
+
+  **This does change which runs are refused, in the direction of refusing fewer.** Nested
+  closures accumulate their salts run-wide against `max_join_rows × max_rounds` while each
+  closure gets a fresh join/round allowance of its own, so a document with no `<=` rule
+  anywhere but a deep CHAIN of nested `log:conclusion` closures could be refused with the
+  `backward proof-node limit exceeded` cut for backward naming it can never perform. Such a
+  document now answers under limits that previously refused it. A document that DOES have a
+  backward rule and also nests forward-only closures can still be refused under tight limits,
+  but the cut it is refused with may change from `backward proof-node limit exceeded` to a
+  forward-closure limit. Wherever both the old and the new behaviour answer, the answers are
+  identical; no run that previously answered is now refused.
 
 - **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
   recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that

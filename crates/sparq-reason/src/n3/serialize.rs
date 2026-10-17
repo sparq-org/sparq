@@ -1625,11 +1625,6 @@ mod tests {
         assert_eq!(fnv1a64("foobar"), 0x8594_4171_f739_67e8);
     }
 
-    /// A nested closure's scope salt is a value, not a hash of a memory layout: its fold is
-    /// pinned to a CONSTANT here, the way the FNV vectors above are, so a change that makes
-    /// it depend on the target's pointer width (as `n3::formula_key`'s `FxHasher` does)
-    /// cannot pass. The names a `log:conclusion` closure mints carry this salt, so the whole
-    /// native-vs-`wasm32` guarantee rests on it.
     /// A corpus for the framing differential below: shapes that cross every branch of
     /// `enc_term` and every digit boundary of the length prefix a part is framed behind.
     fn framing_corpus() -> Vec<[Term; 3]> {
@@ -1719,6 +1714,11 @@ mod tests {
         }
     }
 
+    /// A nested closure's scope salt is a value, not a hash of a memory layout: its fold is
+    /// pinned to a CONSTANT here, the way the FNV vectors above are, so a change that makes
+    /// it depend on the target's pointer width (as `n3::formula_key`'s `FxHasher` does)
+    /// cannot pass. The names a `log:conclusion` closure mints carry this salt, so the whole
+    /// native-vs-`wasm32` guarantee rests on it.
     #[test]
     fn the_nested_closure_salt_is_a_pinned_width_independent_constant() {
         let iri = |s: &str| Term::Iri(s.to_string());

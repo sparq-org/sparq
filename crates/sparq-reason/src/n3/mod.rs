@@ -5370,8 +5370,12 @@ fn with_formula_closure<R>(
     // backward rule the closure renames nothing — its `BwCtx` is `unnamed()` and hands its
     // paths out unregistered — so registering the salt only spent the run's backward
     // identity allowance on a purely forward closure, and a run inside its own join-work
-    // limit could be refused for it. The fold is the SAME either way, so what any name
-    // minted elsewhere in the run is built from does not move.
+    // limit WAS refused for it: each nested closure gets a fresh join/round allowance, but
+    // the salts accumulate run-wide against `bounded::proof_nodes`, so a deep CHAIN of
+    // forward-only closures was refused with the backward proof-node cut in a document
+    // that cannot mint a single name (`a_deep_forward_only_closure_chain_answers_at_a_
+    // tight_limit`). The fold is the SAME either way, so what any name minted elsewhere in
+    // the run is built from does not move.
     //
     // `_salt` puts the enclosing closure's salt back however this function leaves.
     let canon = serialize::formula_canonical_key(ts);
@@ -10534,6 +10538,74 @@ mod tests {
         assert_eq!(named.borrow().node_count(), 2, "registered, because a name can be minted");
     }
 
+    /// The lazy nested-closure salt DOES change which runs are refused, and this pins the
+    /// direction: strictly fewer. A document with NO `<=` rule anywhere, built as a CHAIN of
+    /// nested forward-only `log:conclusion` closures, used to be refused with the
+    /// `backward proof-node limit exceeded` cut and now answers.
+    ///
+    /// Why a chain and not siblings: each nested closure gets a FRESH join/round allowance
+    /// (`bounded::enter_closure`), but the salts every level registered accumulated
+    /// RUN-WIDE against `bounded::proof_nodes` — `max_join_rows × max_rounds`. So ten
+    /// levels of nesting registered ten identities against an allowance of three, and were
+    /// refused for backward naming in a document that cannot mint a single name. Sibling
+    /// closures do not show this, which is why the first version of this work reported the
+    /// refusal as unreachable; it is reachable, by depth.
+    ///
+    /// The answers are unchanged wherever both sides answer — what changes is only that
+    /// fewer runs are refused.
+    #[test]
+    fn a_deep_forward_only_closure_chain_answers_at_a_tight_limit() {
+        // Ten levels, each wrapping the one below in a `log:conclusion` whose outer rule
+        // concludes from it. No `<=` rule at any level.
+        let depth = 10;
+        let mut inner = format!(":k{depth} :p :v .");
+        for k in (0..depth).rev() {
+            inner = format!(
+                ":k{k} :p :v . {{ {{ {inner} }} log:conclusion ?c{k} }} => {{ :r{k} :is ?c{k} }} ."
+            );
+        }
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n{inner}\n"
+        );
+        // Tight enough that ten accumulated salts would exceed the allowance
+        // (`proof_nodes` = 1 × 3 = 3), and loose enough for the closure's own forward work.
+        let limits =
+            ClosureLimits { max_rounds: 3, max_join_rows: 1, ..ClosureLimits::default() };
+        let out = reason_n3_terms_with_limits(
+            &src,
+            None,
+            None,
+            NegationCycles::Reject,
+            limits,
+        )
+        .expect("a document that can mint no name is not refused for backward naming");
+        // The outer rule fired from the nested closure's result, and that result is the
+        // formula term the closure built.
+        let concluded = out
+            .facts
+            .iter()
+            .find(|[_, p, _]| matches!(p, Term::Iri(i) if i == "http://ex/is"))
+            .expect("the outer rule concluded :r0 :is <the nested closure>");
+        assert!(
+            matches!(&concluded[0], Term::Iri(i) if i == "http://ex/r0"),
+            "concluded about :r0, got {:?}",
+            concluded[0]
+        );
+        assert!(
+            matches!(&concluded[2], Term::Formula(rows) if !rows.is_empty()),
+            "log:conclusion is formula-valued and the closure is not empty: {:?}",
+            concluded[2]
+        );
+        // And the document's own asserted fact is still there, so this is the whole answer
+        // and not a truncated one.
+        assert!(
+            out.facts.iter().any(|[sub, p, o]| matches!((sub, p, o), (Term::Iri(a), Term::Iri(b), Term::Iri(c))
+                if a == "http://ex/k0" && b == "http://ex/p" && c == "http://ex/v")),
+            "the top-level asserted fact survives"
+        );
+    }
+
     /// `walk_ref` resolves the chain `walk` resolved, and `walk` is it plus a clone: the
     /// same answer for an unbound variable, a one-hop chain, a long chain, a chain ending
     /// in a compound, a non-variable, and a CYCLE — where the answer is whatever the
@@ -10617,7 +10689,10 @@ mod tests {
     /// own join-work limit could be refused for it.
     ///
     /// This is the same shape as `a_forward_only_evaluation_registers_no_proof_nodes` and
-    /// asserts the same thing: the ACCOUNTING. The salt's VALUE is unchanged, which is the
+    /// asserts the same thing: the ACCOUNTING. What that accounting lets through is pinned
+    /// separately, by `a_deep_forward_only_closure_chain_answers_at_a_tight_limit` — the
+    /// refusal here is reachable, by nesting DEPTH rather than by sibling count. The salt's
+    /// VALUE is unchanged, which is the
     /// other half — a closure that does have a `<=` rule registers that same fold, so no
     /// name minted anywhere in the run moves.
     #[test]
