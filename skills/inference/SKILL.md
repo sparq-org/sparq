@@ -246,12 +246,36 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // are stable AND its why() tree always cites the same :q witness. A log:conclusion formula's
 // derived rows, and the rdf:first/rest cell labels interning a list value mints (_l<k>_<n>),
 // are likewise sorted / numbered in a canonical term order, not in a fact set's traversal order.
-// Labels are still NOT canonical across reordered isomorphic
+// A backward-chaining copy's __bw<n>_ prefix is the FINGERPRINT of the derivation that
+// standardized that rule application apart: a 64-bit fold of where the application sits in the
+// proof tree, the goal it is proving and the evaluation scope (and, for a nested closure, that
+// document's own canonical key, folded width-independently) - so a renamed variable that
+// reaches a derived fact (a quoted formula value carrying one) names the same term every run and
+// on every target, instead of counting applications in evaluation order (GH #6844). Two proofs
+// of DIFFERENT goals therefore stay different terms, and two derivations that fold alike fail
+// the run rather than share a name - checked over the whole top-level run, so a collision
+// between a closure, a query's evaluation and a nested closure is caught too, and every part
+// a name is built from is registered the same way (a goal enters it as an interned id, not a
+// bare fold, and is identified from its fully resolved form - every variable walked to the end
+// of its binding chain through lists, triple terms AND quoted formulas, so two goals that differ
+// only past one binding, or only in a formula variable the caller bound, stay two goals; two
+// branches reaching the SAME resolved goal do share one renaming, so a query projecting only the
+// proved value can return one row where the counter returned two). The nodes and identities a run registers are charged to
+// ClosureLimits::max_join_rows x max_rounds (per-round rows times the rounds the run may take,
+// since the tables accumulate across rounds), and a site is registered only once its conclusion
+// unifies, so a run that SET that limit can be refused with a cut only for registrations it
+// actually used; the default max_join_rows is unbounded and never is, and an evaluation with no
+// <= rule registers nothing at all. Resolving a goal leaves a variable the resolution is already
+// inside the expansion of as it is (a formula bound to ?x may name ?x itself, which is the
+// formula's own name), so a self-naming formula resolves to a finite term; a goal the resolution
+// REFUSES for its depth or term size fails the run with that reason instead of coming back as an
+// empty proof. A side effect: the GH #6757 programs whose only growth was
+// that counter now SATURATE instead of being refused at the closure limit, because re-proving
+// one goal at one node mints one name. Labels are still NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,
 // and a label depends on the other firings in its round), and they hold only while the binding
-// values and firing sets are themselves stable. Values that still carry traversal order -
-// log:collectAllIn lists, and backward-renamed __bw<n> terms (that counter is still assigned in
-// evaluation order) - can reorder ranks and so labels (GH #6844).
+// values and firing sets are themselves stable. A log:collectAllIn list still carries traversal
+// order and can reorder ranks and so labels (GH #6844).
 pub struct ExplainOpts { pub max_depth: usize, pub max_nodes: usize } // why_with(.., opts)
 ```
 

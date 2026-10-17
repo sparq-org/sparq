@@ -98,8 +98,11 @@ pub(super) fn formula_universal(v: &str) -> Option<(usize, &str)> {
     Some((n.bytes().fold(0, |a, b| a * 10 + usize::from(b - b'0')), iri))
 }
 
-/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, possibly
-/// repeated) stripped, when what remains is an `@forAll` universal.
+/// `v` with the backward chainer's freshened-copy prefixes (`__bw<n>_`, one chunk per rule
+/// application the variable was standardized apart by, `<n>` the FINGERPRINT of the proof-tree
+/// node that application sits at — `BwPath`) stripped, when what remains is an `@forAll`
+/// universal. Each chunk's digits are read by maximal munch, so a name decomposes only one
+/// way.
 fn universal_base(v: &str) -> Option<&str> {
     let mut rest = v;
     loop {
@@ -667,10 +670,13 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
 /// only as reproducible as the TERMS. For the same parsed input, an existential's skolem
 /// label (`__sk<n>_<label>`) does not depend on hash-set traversal or hasher width: it is
 /// numbered in the sorted order of each round's firing keys (GH #6749), and a
-/// `log:conclusion` formula's derived rows are sorted under [`row_cmp`] (GH #6844). It is
-/// not canonical across reordered isomorphic documents, and binding values that still carry
-/// traversal order (`log:collectAllIn` lists; backward-renamed terms, whose `__bw<n>_`
-/// prefix is numbered in evaluation order) can still move it (GH #6844).
+/// `log:conclusion` formula's derived rows are sorted under [`row_cmp`] (GH #6844). A
+/// backward-chaining copy's `__bw<n>_` prefix is likewise the fingerprint of the derivation
+/// that standardized that rule application apart — its evaluation scope, its place in the
+/// proof tree and the goal it was proving — not how many applications ran before it
+/// (GH #6844). It is not canonical across reordered isomorphic documents, and a binding value
+/// that still carries traversal order (a `log:collectAllIn` list) can still move it (GH
+/// #6844).
 fn term_key(t: &Term) -> String {
     fn quoted(s: &str, out: &mut String) {
         out.push('"');
@@ -731,6 +737,86 @@ fn term_key(t: &Term) -> String {
     let mut s = String::new();
     enc(t, &mut s);
     s
+}
+
+/// A backward proof GOAL's canonical identity string: each term's `term_key` written behind
+/// its byte length, so the concatenation of three of them is injective over the goal's terms
+/// without resting on a key being self-delimiting (today's keys are, being tagged and
+/// quoted; this does not need them to stay so).
+///
+/// This goes into the identity of a proof-tree node (`BwPath`), which NAMES a
+/// standardize-apart space; it is not provenance, so it is deliberately not counted as a
+/// keyed call (`KEY_CALLS`): the plain materialization paths stay unkeyed, and a document
+/// with no `<=` rule never reaches this.
+pub(super) fn goal_key(g: &[Term; 3]) -> String {
+    let mut out = String::new();
+    for t in g {
+        let k = term_key(t);
+        out.push_str(&k.len().to_string());
+        out.push(':');
+        out.push_str(&k);
+    }
+    out
+}
+
+/// FNV-1a over `s`'s bytes in explicit `u64` arithmetic, so the value does not depend on
+/// the target's word size (native vs `wasm32`) the way a `usize`-wide hasher would. What a
+/// proof-tree node's identity is folded to for its name (`BwCtx::node`, which refuses to
+/// hand one fold to two identities).
+pub(super) fn fnv1a64(s: &str) -> u64 {
+    fold_bytes(FNV_OFFSET, s.as_bytes())
+}
+
+/// FNV-1a's 64-bit offset basis.
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+
+/// FNV-1a over `bytes`, continuing from `h` — `fnv1a64`'s loop, usable incrementally.
+fn fold_bytes(mut h: u64, bytes: &[u8]) -> u64 {
+    for &b in bytes {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// A proof-tree node key's fold: FNV-1a over `tag`, then each of `parts` big-endian, so
+/// the value is the same on `wasm32` as on a 64-bit target. The tag separates the key
+/// SHAPES (`NodeKey`), so a root, a step and a site cannot be read as one another, and
+/// every part is a fixed eight bytes, so no part's digits can run into the next's.
+///
+/// This is what names a node WITHOUT building its identity as a string: a key's parts
+/// already carry the parent node's fold, so the whole path above it is accounted for by
+/// one `u64` however deep the proof goes. It is not collision-free — nothing 64 bits wide
+/// is — which is why every fold handed out is registered against the exact key it came
+/// from, and a second, different key with the same fold fails the run (`BwCtx::node`).
+pub(super) fn fold_key(tag: u8, parts: &[u64]) -> u64 {
+    let mut h = fold_bytes(FNV_OFFSET, &[tag]);
+    for p in parts {
+        h = fold_bytes(h, &p.to_be_bytes());
+    }
+    h
+}
+
+/// The canonical identity string of a FORMULA, for the salt a nested `log:conclusion`
+/// closure's root identities carry (`BwCtx::scope_salt`): each row's `goal_key` behind its
+/// byte length, so the concatenation is injective over the rows in order.
+///
+/// It exists because `n3::formula_key` — the import-cycle guard's key — is `FxHasher` over
+/// `[[Term; 3]]::hash`, and rustc-hash picks its multiplier by `target_pointer_width` and
+/// does extra rounds on a 32-bit target. That value is fine for a guard that only has to
+/// agree with itself inside one run, and WRONG for anything a NAME is built from: it would
+/// make the names minted inside a nested closure differ between a 64-bit target and
+/// `wasm32`, which is the whole property GH #6844 is about. This is explicit `u64`
+/// arithmetic over `term_key`s and so is the same on every target.
+pub(super) fn formula_canonical_key(ts: &[[Term; 3]]) -> String {
+    let mut out = String::from("F");
+    for row in ts {
+        let k = goal_key(row);
+        out.push_str(&k.len().to_string());
+        out.push(':');
+        out.push_str(&k);
+    }
+    out
 }
 
 /// The identity keys of one statement's three terms (`term_key`): equal exactly when the
@@ -1420,6 +1506,70 @@ mod tests {
     }
 
     const LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
+    #[test]
+    fn a_goal_key_is_injective_over_the_goals_terms() {
+        // Goals that differ in any term get different keys, so the proof-tree node
+        // identities holding them differ and their fingerprints name different
+        // standardize-apart spaces (`BwPath`); equal goals get one key, which is what lets a
+        // goal re-proved in a later round take the name it had.
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let a = [iri("http://ex/ab"), iri("http://ex/p"), iri("http://ex/c")];
+        // Different in the subject only, and the difference is exactly where one term's key
+        // ends and the next one's begins.
+        let b = [iri("http://ex/a"), iri("http://ex/bp"), iri("http://ex/c")];
+        assert_ne!(goal_key(&a), goal_key(&b), "{}", goal_key(&a));
+        // Different in the predicate only.
+        let c = [iri("http://ex/ab"), iri("http://ex/q"), iri("http://ex/c")];
+        assert_ne!(goal_key(&a), goal_key(&c), "{}", goal_key(&c));
+        // Same goal, same key: the name a later round mints for a goal it has proved before
+        // is the same name, which is what lets a closure saturate.
+        assert_eq!(goal_key(&a), goal_key(&a.clone()));
+        // A variable in the goal is part of its identity: resolving `?f` is a different goal
+        // from resolving a bound value.
+        let with_var = [iri("http://ex/ab"), iri("http://ex/p"), Term::Var("f".into())];
+        assert_ne!(goal_key(&a), goal_key(&with_var));
+    }
+
+    #[test]
+    fn the_node_fold_is_the_specified_fnv1a_in_u64_arithmetic() {
+        // Pinned against the published FNV-1a 64 test vectors, so a proof-tree node's
+        // fingerprint is the same value on a 32-bit target (`wasm32`) as on a 64-bit one —
+        // a `usize`-wide hasher is not.
+        assert_eq!(fnv1a64(""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a64("a"), 0xaf63_dc4c_8601_ec8c);
+        assert_eq!(fnv1a64("foobar"), 0x8594_4171_f739_67e8);
+    }
+
+    /// A nested closure's scope salt is a value, not a hash of a memory layout: its fold is
+    /// pinned to a CONSTANT here, the way the FNV vectors above are, so a change that makes
+    /// it depend on the target's pointer width (as `n3::formula_key`'s `FxHasher` does)
+    /// cannot pass. The names a `log:conclusion` closure mints carry this salt, so the whole
+    /// native-vs-`wasm32` guarantee rests on it.
+    #[test]
+    fn the_nested_closure_salt_is_a_pinned_width_independent_constant() {
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let ts = vec![
+            [iri("http://ex/a"), iri("http://ex/p"), iri("http://ex/b")],
+            [iri("http://ex/b"), iri("http://ex/p"), Term::Var("y".into())],
+        ];
+        let canon = formula_canonical_key(&ts);
+        assert_eq!(
+            canon,
+            concat!(
+                r#"F51:14:I"http://ex/a"14:I"http://ex/p"14:I"http://ex/b""#,
+                r#"40:14:I"http://ex/b"14:I"http://ex/p"4:V"y""#
+            )
+        );
+        assert_eq!(fnv1a64(&canon), 0xffca_1a3f_df5f_9f49);
+        // The rows are read in ORDER, and a formula is an ordered vector of rows to the
+        // engine, so swapping two rows is a different formula and a different salt.
+        let mut swapped = ts.clone();
+        swapped.swap(0, 1);
+        assert_ne!(formula_canonical_key(&swapped), canon);
+        // And every row is read, not just the first.
+        assert_ne!(formula_canonical_key(&ts[..1]), canon);
+    }
 
     #[test]
     fn writes_each_term_kind() {
