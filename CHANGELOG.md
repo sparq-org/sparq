@@ -132,8 +132,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decimal and double lanes have V2 host encoders and V2 renderers but no V2 `build` helper yet. No
   soundness or privacy claim.
 
+- **sparq-zk-compose (opt-in `successful-results`):** METHOD-BOUND successful-result issuance,
+  added beside the retained contract rather than replacing it. Two new members,
+  `result_v5_k1_n16_p3_r4_f0_d10` and `result_v5_k2_n16_p3_r4_f0_d10`, compile a new
+  `compose_core::result_m5::result_check_m5` relation that folds the METHOD-BOUND presentation
+  message `sig::presentation_message_with_status_and_scheme(root, salt, status_ref,
+  scheme_iri_to_field(CommitmentMethod::StringCanonicalV1.scheme_iri()))` (`ZKSIG_M5`), so the
+  issuer attests the string-canonical commitment METHOD and not merely the commitment. The scheme
+  digest is a compile-time constant of the relation, so the public ABI is the version-1 f=0 one
+  unchanged and the verifier's public-input reconstruction does not move. `prepare_result` selects
+  these members by default at one or two credentials with no private predicate and status depth 10,
+  and refuses any other bucket by name instead of silently issuing a method-unbound proof.
+  `compose_core::result` and `compose_core::result_public` are byte-for-byte as they were, so every
+  shipped version-1 to version-4 member keeps its compiled circuit, ABI and verification-key bytes
+  and the fixed-foundation rebuild check passes unchanged.
+  `crates/sparq-zk-compose/tests/result_scheme_pin.rs` pins the new relation as the legacy one with
+  only the signed message substituted, with a control test that the substitution does change it.
+  Gate-count baselines and the constraint-count pack cover the two members. Research grade, NOT
+  externally audited (`sq-qhy4`). No soundness or privacy claim.
+  <!-- privacy-claims-allow: describes an added method-bound relation and its retained legacy contract; the external audit is named as an OPEN obligation and the downgrade is written down; asserts no soundness/privacy property; sq-qhy4 -->
+
 ### Changed
 
+- **sparq-zk-compose (BREAKING for `successful-results` users):** successful-result issuance and
+  verification are METHOD-BOUND by default. A method-UNBOUND (`ZKSIG_C3`) credential, which attests
+  no commitment method at all, is refused with a named error, and the new
+  `ResultPolicy::admit_unbound_legacy` field (a public struct field, so constructing `ResultPolicy`
+  requires it) is the written-down opt-in that acts on already-issued unbound material and issues
+  through the retained legacy members. It has the same shape and meaning as
+  `MethodPolicy::admit_unbound`: under it the commitment method rests on trusted-issuer honesty
+  rather than an attestation the circuit recomputes. The signed (`result_v3_*`) and public-pattern
+  (`result_v4_*`) families have no method-bound member yet, so they need that opt-in. Each selected
+  credential is now witnessed under the message the SELECTED member's relation folds, and an
+  incoherent pairing — a method-bound attestation through a legacy member, or the reverse — is
+  refused by name rather than witnessed into a proof that could not succeed. Legacy proofs stay
+  verifiable; nothing previously refused is admitted.
 - **sparq-zk-compose (BREAKING for a relying party on default settings):** `MethodPolicy::current()`
   — the default policy on `verifier::KeySet` — now **REFUSES** a method-UNBOUND commitment
   attestation (`CheckError::MethodNotAuthenticated`) instead of accepting one. A commitment whose

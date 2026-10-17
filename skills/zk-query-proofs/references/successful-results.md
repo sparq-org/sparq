@@ -31,19 +31,34 @@ and result size remain observable. Public issuer slots are ordered canonically;
 individual list references are not disclosed. Each signature binds its own
 private status index, list and version, and that list/version/root must belong to
 the relying party's freshness-curated policy. Only clear-index status-bound
-Schnorr credentials are accepted in this wire contract, and the signature must be
-over the METHOD-BOUND presentation message
+Schnorr credentials are accepted in this wire contract. New issuance goes through
+the METHOD-BOUND `result_v5_*` members (contract version 5), whose relation folds
 `sig::presentation_message_with_status_and_scheme(root, salt, status_ref,
 scheme_iri_to_field(CommitmentMethod::StringCanonicalV1.scheme_iri()))`
 (`ZKSIG_M5`), so the issuer ATTESTS the string-canonical commitment method and not
 merely the commitment. The relation proves string-canonical leaves only, so that
 scheme digest is a compile-time constant in the circuit
-(`compose_core::result::SCHEME_STRING_CANONICAL_V1`) rather than a public input,
+(`compose_core::result_m5::SCHEME_STRING_CANONICAL_V1`) rather than a public input,
 and the host refuses per cause: an attested method that is not string-canonical,
 and a method-UNBOUND (`ZKSIG_C3`) attestation, which attests no method at all.
-There is no opt-in for the unbound case here, because the circuit side has no
-unbound message to recompute. `crates/sparq-zk-compose/tests/result_scheme_pin.rs`
-pins the circuit literal to the host derivation.
+
+The shipped version-one to version-four members are RETAINED and unchanged: their
+relation folds the method-unbound `ZKSIG_C3` commitment message, their compiled
+bytes did not move, and proofs already issued against them keep verifying.
+`ResultPolicy::admit_unbound_legacy` is the explicit opt-in that acts on
+method-unbound material and issues through those members; by default they are
+refused with a named error. It has the same shape and the same written-down
+meaning as `MethodPolicy::admit_unbound`: under it the commitment method rests on
+trusted-issuer honesty instead of an issuer attestation the circuit recomputes.
+Method-bound members exist at one or two credentials, no private predicate and
+status depth 10; every other unsigned capacity bucket, and the signed and
+public-pattern families, have none yet and are refused by name unless the opt-in
+is written down. Each selected credential is witnessed under the message the
+SELECTED member's relation folds, so a method-bound attestation is never
+witnessed into a legacy member nor the reverse; an incoherent pairing is refused.
+`crates/sparq-zk-compose/tests/result_scheme_pin.rs` pins the circuit literal to
+the host derivation, and pins the bound relation as the legacy one with only the
+signed message substituted.
 
 `PreparedResult` has no Debug or serialization implementation. Its local work
 counts identify selected credentials, shared leaves, witness uses and residual
@@ -149,13 +164,16 @@ claim. Canonical signed `i64` uses the separately versioned
 numeric datatypes remain outside these integer profiles.
 
 Depth-ten small profiles retain version-one members and the legacy serialized
-shape. Expanded profiles use version two. The verifier derives the member from
+shape. Expanded profiles use version two, and the method-bound profiles version
+five. The verifier derives the member from
 the issuer-slot count, query-derived private-filter count, integer capacity and
 its own status depth, rejecting a version mismatch. The presentation carries no
 prover-supplied key or status-depth override. Member suffix `i64` denotes the
 unsigned integer width in bits, not signed `i64` support. With the pinned
 Noir/bb toolchain, all original version-one members retain the foundation
-circuit, ABI and verification-key bytes. The [compatibility evidence](../../../bench/zk-compose/result_v1_compatibility.json)
+circuit, ABI and verification-key bytes; the version-five members are additions
+beside them, carrying the version-one public ABI unchanged while folding a
+different signed message. The [compatibility evidence](../../../bench/zk-compose/result_v1_compatibility.json)
 records actual comparisons against the baseline archive. The required ZK toolchain
 lane, triggered by ZK paths, runs the ignored key test explicitly and compares each
 regenerated legacy key with those baseline bytes. It also independently fetches
