@@ -30,8 +30,20 @@ term encodings stay in the private witness. Issuer identities, fixed capacities
 and result size remain observable. Public issuer slots are ordered canonically;
 individual list references are not disclosed. Each signature binds its own
 private status index, list and version, and that list/version/root must belong to
-the relying party's freshness-curated policy. Only existing clear-index
-status-bound Schnorr credentials are accepted in this first wire contract.
+the relying party's freshness-curated policy. Only clear-index status-bound
+Schnorr credentials are accepted in this wire contract, and the signature must be
+over the METHOD-BOUND presentation message
+`sig::presentation_message_with_status_and_scheme(root, salt, status_ref,
+scheme_iri_to_field(CommitmentMethod::StringCanonicalV1.scheme_iri()))`
+(`ZKSIG_M5`), so the issuer ATTESTS the string-canonical commitment method and not
+merely the commitment. The relation proves string-canonical leaves only, so that
+scheme digest is a compile-time constant in the circuit
+(`compose_core::result::SCHEME_STRING_CANONICAL_V1`) rather than a public input,
+and the host refuses per cause: an attested method that is not string-canonical,
+and a method-UNBOUND (`ZKSIG_C3`) attestation, which attests no method at all.
+There is no opt-in for the unbound case here, because the circuit side has no
+unbound message to recompute. `crates/sparq-zk-compose/tests/result_scheme_pin.rs`
+pins the circuit literal to the host derivation.
 
 `PreparedResult` has no Debug or serialization implementation. Its local work
 counts identify selected credentials, shared leaves, witness uses and residual

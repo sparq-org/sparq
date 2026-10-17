@@ -6160,8 +6160,19 @@ fn hi_message(commitment: &Fr, salt: &Fr) -> Fr {
     )
 }
 
+/// The LEGACY method-UNBOUND (`ZKSIG_C3`) counterpart of [`hi_message`] -- the
+/// message a credential issued before the method-bound shapes existed carries.
+/// Used only by the test whose SUBJECT is the method policy's treatment of such
+/// a credential.
+fn hi_message_unbound(commitment: &Fr, salt: &Fr) -> Fr {
+    let list_id = sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST);
+    let status_ref = sparq_zk::sig::status_ref_digest(&list_id, FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION);
+    sparq_zk::sig::commitment_message_with_status(commitment, salt, &status_ref)
+}
+
 /// Prove the hidden_issuer_d4 circuit: `signer_sk` signed `m` (the status-bound
-/// message over `commitment`/`salt`); membership is proved against the tree of
+/// message over `commitment`/`salt`; METHOD-BOUND unless `method_bound` is
+/// false, which selects the legacy unbound message); membership is proved against the tree of
 /// `keyset`. `keyset` MUST be the canonical-order key set both prover and verifier
 /// use; the signer's index is its position there. Returns the assembled manifest
 /// field. (For the out-of-set test, the signer is NOT in `keyset` and we must
@@ -6177,17 +6188,31 @@ fn prove_hidden_issuer(
     commitment: &Fr,
     salt: &Fr,
     challenge: &Fr,
+    method_bound: bool,
     tag: &str,
 ) -> HiddenIssuerAttestation {
-    let m = hi_message(commitment, salt);
-    let sig = sparq_zk::sig::signature_from_hex(&signer_sk.sign_presentation_with_status_and_scheme(
-        commitment, salt,
-        &sparq_zk::sig::status_ref_digest(
-            &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
-            FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
-        ),
-        &string_canonical_scheme(),
-    )).unwrap();
+    let status_ref = sparq_zk::sig::status_ref_digest(
+        &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
+        FIXTURE_STATUS_INDEX,
+        FIXTURE_STATUS_VERSION,
+    );
+    let (m, sig_hex) = if method_bound {
+        (
+            hi_message(commitment, salt),
+            signer_sk.sign_presentation_with_status_and_scheme(
+                commitment,
+                salt,
+                &status_ref,
+                &string_canonical_scheme(),
+            ),
+        )
+    } else {
+        (
+            hi_message_unbound(commitment, salt),
+            signer_sk.sign_commitment_with_status(commitment, salt, &status_ref),
+        )
+    };
+    let sig = sparq_zk::sig::signature_from_hex(&sig_hex).unwrap();
     let schnorr = sparq_zk::sig::in_circuit_witness(&signer_sk.public_key(), &m, &sig).unwrap();
     let pks: Vec<_> = keys_in_order.iter().map(|s| s.public_key()).collect();
     let root = key_set_root(&pks, HI_DEPTH).expect("root");
@@ -6250,7 +6275,7 @@ fn hidden_issuer_in_set_verifies_and_key_is_private() {
     let signer_index = keyset.member_index(&signer_hex).expect("signer in K") as u64;
 
     let hidden = prove_hidden_issuer(
-        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, "hi_ok",
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, true, "hi_ok",
     );
 
     // --- KEY-NOT-DISCLOSED assertion (the privacy goal). ---
@@ -6362,7 +6387,7 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
     assert!(manifest.key_set.is_empty(), "no declared key_set");
 
     let hidden = prove_hidden_issuer(
-        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, "hi_only",
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, true, "hi_only",
     );
     // The hidden entry MUST carry the salt so the verifier can recompute m for a
     // hidden-only commitment (no clear attestation to read it from).
@@ -6417,10 +6442,12 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
         .member_index(&public_key_to_hex(&signer.public_key()))
         .expect("signer in K") as u64;
     let hidden = prove_hidden_issuer(
-        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, "hi_policy",
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, false, "hi_policy",
     );
     manifest.hidden_issuer_attestations = vec![hidden];
-    let strict = hi_keyset().with_method_policy(MethodPolicy::current().require_method_bound());
+    // The hidden entry declares the LEGACY method-UNBOUND message, so the
+    // default policy must refuse it and only the written-down downgrade accepts.
+    let permissive = hi_keyset().with_method_policy(MethodPolicy::current().admit_unbound());
 
     let run = |m: &ProofManifest, ks: &KeySet, tag: &str| {
         verify_manifest(
@@ -6431,12 +6458,12 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
         )
     };
 
-    run(&manifest, &keyset, "hi_policy_default")
-        .expect("the honest hidden-only presentation still verifies by default");
-    match run(&manifest, &strict, "hi_policy_strict") {
+    match run(&manifest, &keyset, "hi_policy_default") {
         Err(CheckError::MethodNotAuthenticated { .. }) => {}
-        other => panic!("expected MethodNotAuthenticated under require_method_bound, got {other:?}"),
+        other => panic!("expected MethodNotAuthenticated under the default policy, got {other:?}"),
     }
+    run(&manifest, &permissive, "hi_policy_permissive")
+        .expect("admit_unbound accepts the honest method-unbound hidden-only presentation");
 
     // The SAME proof, with the declared message replaced by a non-candidate value.
     let mut mutated = manifest.clone();
@@ -6448,7 +6475,7 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
         round_tripped.hidden_issuer_attestations[0].message,
         mutated.hidden_issuer_attestations[0].message
     );
-    for (label, ks) in [("default", keyset.clone()), ("require_method_bound", strict.clone())] {
+    for (label, ks) in [("default", keyset.clone()), ("admit_unbound", permissive.clone())] {
         match run(&round_tripped, &ks, "hi_policy_mutated") {
             Err(CheckError::HiddenIssuerMessageMismatch { .. }) => {}
             other => panic!("[{label}] expected HiddenIssuerMessageMismatch, got {other:?}"),
