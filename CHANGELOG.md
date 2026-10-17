@@ -134,6 +134,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-zk-compose / zk (sq-j506, #7103):** the `DualLeafV2` **component-witnessed** scan and
+  hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir
+  members, `scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16`, recompute each graph's per-slot
+  term encodings from witnessed V2 leaf components through
+  `compose_core::dual_leaf_v2_leaf::recompute_term` — applying the reserved-sentinel band check
+  and the reserved language-tag check at the witnessed component sites — and then run the
+  UNCHANGED `scan_check` / `join_eq_check` bodies. The shipped `scan_*` / `join_eq_*` members and
+  the relation sources are byte-unchanged, so existing verification keys and all issued material
+  stay valid; each new member's public-input vector is its shipped counterpart's, and the two are
+  told apart by their verification keys. `verifier::encode_pattern_slot` now folds a query pattern
+  constant with the encoder the scan's AUTHENTICATED commitment method selects, with no fallback,
+  and `bind_scan_pattern_methods` adds two named refusals — `CheckError::ScanPatternMethodsMixed`
+  (a `K > 1` scan whose commitments select different encoders: one pattern constant cannot match
+  two encodings) and `CheckError::ScanPatternMethodNotEncodable`. `verifier::bind_fragment_scans`
+  takes the authenticated-method map as a second argument. The value-lane and V2-scan verifier
+  gates stay CLOSED: nothing becomes acceptable, and every change here only adds refusals.
+  Research-grade, not externally audited (sq-qhy4).
+
 - **sparq-zk-compose (BREAKING for a relying party on default settings):** `MethodPolicy::current()`
   — the default policy on `verifier::KeySet` — now **REFUSES** a method-UNBOUND commitment
   attestation (`CheckError::MethodNotAuthenticated`) instead of accepting one. A commitment whose
