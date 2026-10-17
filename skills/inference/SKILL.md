@@ -257,10 +257,14 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // between a closure, a query's evaluation and a nested closure is caught too, and every part
 // a name is built from is registered the same way (a goal enters it as an interned id, not a
 // bare fold, and is identified from its fully resolved form - every variable walked to the end
-// of its binding chain through lists and triple terms, a quoted formula left opaque - so two
-// goals that differ only past one binding stay two goals). The nodes and identities a run registers are charged to
-// ClosureLimits::max_join_rows over the whole run, so a run that SET that limit can now be
-// refused with a cut for registering one too many; the default is unbounded and never is. A side effect: the GH #6757 programs whose only growth was
+// of its binding chain through lists, triple terms AND quoted formulas, so two goals that differ
+// only past one binding, or only in a formula variable the caller bound, stay two goals; two
+// branches reaching the SAME resolved goal do share one renaming, so a query projecting only the
+// proved value can return one row where the counter returned two). The nodes and identities a run registers are charged to
+// ClosureLimits::max_join_rows x max_rounds (per-round rows times the rounds the run may take,
+// since the tables accumulate across rounds), and a site is registered only once its conclusion
+// unifies, so a run that SET that limit can be refused with a cut only for registrations it
+// actually used; the default max_join_rows is unbounded and never is. A side effect: the GH #6757 programs whose only growth was
 // that counter now SATURATE instead of being refused at the closure limit, because re-proving
 // one goal at one node mints one name. Labels are still NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,

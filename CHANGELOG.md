@@ -448,17 +448,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `log:conclusion` closure is caught too. Every part a name is built from is registered the
   same way, the goal included: it enters the name as an INTERNED id, not as a bare fold, so
   two different goals cannot merge by folding alike, and it is identified from its FULLY
-  RESOLVED form — every variable walked to the end of its binding chain, through lists and
-  triple terms, a quoted formula left opaque — so two goals that differ only past one
-  binding (a repeated query variable aliasing two renamed ones) stay two goals instead of
-  merging and losing a row. Sibling nested closures at one nesting
+  RESOLVED form — every variable walked to the end of its binding chain, through lists,
+  triple terms AND quoted formulas — so two goals that differ only past one binding (a
+  repeated query variable aliasing two renamed ones), or only inside a quoted formula whose
+  variable the caller bound and a `log:includes` premise reads, stay two goals instead of
+  merging and losing a row. Two branches that reach the SAME resolved goal do share one
+  renaming: their proofs' formula values are then one term rather than two α-variants, so a
+  query projecting only the proved value can return one row where the counter returned two
+  — the same collapse that makes the #6757 programs saturate. A branch the conclusion
+  projects still gets its own row. Sibling nested closures at one nesting
   depth are also told apart, by the nested document's canonical key — its `term_key`s folded
   in explicit `u64` arithmetic, NOT the pointer-width-dependent hash the import-cycle guard
   uses, so a nested closure's names agree between native and `wasm32` as well. **A run can
   now be refused for this:** the nodes and identities a run registers are charged to
-  `ClosureLimits::max_join_rows`, counted over the whole run rather than per round, and the
-  entry that would be one too many fails the run with a cut; the DEFAULT `max_join_rows`
-  is the unbounded sentinel, so a default-limits run is never refused for it. Three
+  `ClosureLimits::max_join_rows` × `ClosureLimits::max_rounds` — the per-round row allowance
+  times the rounds the run may take, since the tables accumulate over every round — and the
+  entry that would be one too many fails the run with a cut; a `(rule, conclusion)` site is
+  registered only once its conclusion unifies with the goal, so the sites a search rejects
+  cost nothing, and the DEFAULT `max_join_rows` is the unbounded sentinel, so a
+  default-limits run is never refused for it. Three
   consequences: a fact carrying
   a renamed variable has a different identity than before, so regenerate stored `sparq-prov`
   IRIs for such facts; proofs of different goals keep the distinct values they had, including

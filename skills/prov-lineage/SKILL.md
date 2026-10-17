@@ -213,7 +213,7 @@ width (native vs `wasm32`; GH #6749). A `log:conclusion` formula's derived rows,
 list-cell labels (`_l<k>_<n>`) interning a list value mints, are sorted / numbered in a
 canonical term order for the same reason (GH #6844). A backward-chaining copy's `__bw<n>_`
 prefix is the fingerprint of the derivation that standardized that rule application apart — a
-64-bit fold of its place in the proof tree, the fully resolved goal proved and the evaluation
+64-bit fold of its place in the proof tree, the fully resolved goal proved (quoted formulas included) and the evaluation
 scope (a nested
 closure's own canonical key included, folded width-independently) — instead
 of counting applications in evaluation order, so a fact carrying one has a stable IRI too, and

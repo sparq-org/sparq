@@ -3378,9 +3378,12 @@ fn backward_prove(
                 }
             };
             let key = NodeKey::Site { parent: path.fold, goal: id, site: at };
-            let Some(fold) = bw.node(key) else {
-                return Vec::new();
-            };
+            // The fold is COMPUTED here and REGISTERED below, once the conclusion has
+            // unified. A site whose conclusion does not unify mints no name that survives
+            // (`rc` and `subst` are dropped), so registering it would only charge the run's
+            // tables for search it rejected — a document with many `<=` sites per predicate
+            // reached the allowance that way (GH #6844 review round 4).
+            let fold = key.fold();
             let pfx = format!("__bw{fold}_");
             let n = pfx.as_str();
             let rc = [rename_vars(&concl[0], n), rename_vars(&concl[1], n), rename_vars(&concl[2], n)];
@@ -3390,6 +3393,11 @@ fn backward_prove(
                 && unify_walked(&goal[2], &rc[2], &mut subst))
             {
                 continue;
+            }
+            // Registered now: this node's name is about to go into a proof, so a second,
+            // different key on this fold must fail the run ([`BwCtx::node`]).
+            if bw.node(key).is_none() {
+                return Vec::new();
             }
             let prem: Vec<[Term; 3]> = rule
                 .premise
@@ -10081,7 +10089,10 @@ mod tests {
     #[test]
     fn registering_more_than_the_allowance_fails_the_run() {
         use super::{run_shared::RunShared, BwCtx, ClosureLimits, NodeKey, Truncation};
-        let limits = ClosureLimits { max_join_rows: 2, ..ClosureLimits::default() };
+        // The allowance is the per-round rows TIMES the rounds the run may take, so a
+        // two-entry allowance is two rows in one round.
+        let limits =
+            ClosureLimits { max_join_rows: 2, max_rounds: 1, ..ClosureLimits::default() };
         let bw =
             BwCtx::new(&[], Truncation::top_level_with(limits), RunShared::for_sources(&[]));
         // The root is the first entry; one site key is the second.
@@ -10200,6 +10211,109 @@ mod tests {
             "and not the cycle guard's pointer-width-dependent hash"
         );
         assert_eq!(bw.visited.borrow().scope_salt(), outer, "put back on the way out");
+    }
+
+    /// GH #6844 review round 4 (independent finding N1): a goal's identity must resolve the
+    /// caller's bindings INSIDE a quoted formula too. The proof runs with the caller's whole
+    /// binding, and a `log:includes` premise reads the formula through it, so two goals that
+    /// differ only inside a quoted formula prove different things — here `{ :a :q :z }` and
+    /// `{ :b :q :z }`. Leaving formulas opaque in the identity gave both one name, their two
+    /// formula-valued answers became one term, and a row was lost (the base derives two).
+    #[test]
+    fn a_caller_binding_inside_a_quoted_formula_tells_two_goals_apart() {
+        let data = "@prefix : <http://ex/> .\n\
+                    @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                    :a :p :va .\n:b :p :vb .\n\
+                    { ?f :val { ?m :inner ?w } } <= { ?f log:includes { ?m :q ?n } } .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { ?y :p ?any . { ?y :q :z } :val ?g } => { :all :vals ?g } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows.len(), 2, "one row per formula-held binding: {rows:?}");
+        assert_ne!(rows[0], rows[1], "{rows:?}");
+    }
+
+    /// GH #6844 review round 4 (Codex finding 1), pinned as INTENDED rather than fixed: two
+    /// branches that reach the SAME walked goal (`:a :has ?f` under `:s0` and under `:s1`)
+    /// share one renaming, so their two formula values are one term and the projection, which
+    /// keeps only `?f`, yields ONE row where the counter gave two. The two rows the base
+    /// gives are α-variants of each other — the variables inside the quoted formula are bound
+    /// by the formula, so the terms are equal up to renaming — and collapsing them is the
+    /// same saturation property that makes the GH #6757 programs terminate.
+    #[test]
+    fn two_branches_proving_one_goal_share_one_renaming() {
+        let rows = derived_rows(BRANCHES_DATA, BRANCHES_QUERY_UNPROJECTED);
+        assert_eq!(rows.len(), 1, "α-variants of one goal's proof are one row: {rows:?}");
+    }
+
+    /// The other half of the condition on sharing: what is shared is the renaming of
+    /// variables SCOPED INSIDE the quoted formula, not the branch. Project the branch
+    /// (`?s`) and both rows survive — the shared name never merges two answers that differ
+    /// outside the formula.
+    #[test]
+    fn a_shared_renaming_keeps_both_rows_when_the_branch_is_projected() {
+        let query = "@prefix : <http://ex/> .\n\
+                     { ?s :q :yes . :a :has ?f } => { ?s :vals ?f } .\n";
+        let rows = derived_rows(BRANCHES_DATA, query);
+        assert_eq!(rows.len(), 2, "one row per branch: {rows:?}");
+        assert_ne!(rows[0], rows[1], "{rows:?}");
+    }
+
+    /// And the soundness condition on it: a head-only fresh term asserted at TOP level is
+    /// not a formula-scoped variable, so sharing a renaming must not make two derivations
+    /// share it. Two branches assert the blank of `[ :inner ?y ]`, which the proof projects
+    /// out as `?f`: both rows survive, and the term each carries is what the base engine
+    /// gives — the blank's label comes from the parser's document-wide table, which no part
+    /// of this change touches, and is the same label on both sides of this branch. The test
+    /// is here so that making the name part of a blank's identity could not change it
+    /// silently.
+    #[test]
+    fn a_head_only_fresh_term_is_what_the_base_engine_derives() {
+        let data = "@prefix : <http://ex/> .\n\
+                    :s0 :q :yes .\n:s1 :q :yes .\n:a :p :v .\n\
+                    { ?x :has [ :inner ?y ] } <= { ?x :p ?y } .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { ?s :q :yes . :a :has ?f } => { ?s :got ?f } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows.len(), 2, "one row per branch: {rows:?}");
+        let blank = |r: &str| r.split("Blank(").nth(1).map(str::to_string);
+        assert!(blank(&rows[0]).is_some(), "the fresh term is a blank: {rows:?}");
+        assert_eq!(blank(&rows[0]), blank(&rows[1]), "the base's label, unchanged: {rows:?}");
+    }
+
+    /// Two branches of one query reaching one backward goal, for the three tests above.
+    const BRANCHES_DATA: &str = "@prefix : <http://ex/> .\n\
+         :s0 :q :yes .\n:s1 :q :yes .\n:a :p :v .\n\
+         { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n";
+    /// The query of [`BRANCHES_DATA`] that projects only the proved value.
+    const BRANCHES_QUERY_UNPROJECTED: &str = "@prefix : <http://ex/> .\n\
+         { ?s :q :yes . :a :has ?f } => { :all :vals ?f } .\n";
+
+    /// GH #6844 review round 4 (independent finding N2): the registration allowance is
+    /// run-wide while `max_join_rows` bounds one ROUND, so charging the per-round number
+    /// refused a program the base answers. This is that program — 40 `<=` sites that cannot
+    /// unify, one that can, 200 subjects — and it answers under a `max_join_rows` of 1500,
+    /// both because a site is registered only once its conclusion unifies and because the
+    /// allowance is now the per-round rows times the rounds the run may take.
+    #[test]
+    fn a_wide_backward_search_answers_under_a_set_join_row_limit() {
+        let mut src = String::from("@prefix : <http://ex/> .\n");
+        for i in 0..40 {
+            src.push_str(&format!("{{ ?x :has :c{} }} <= {{ ?x :p :nomatch }} .\n", i));
+        }
+        src.push_str("{ ?x :has ?y } <= { ?x :p ?y } .\n");
+        for i in 0..200 {
+            src.push_str(&format!(":s{} :q :yes .\n:s{} :p :v .\n", i, i));
+        }
+        src.push_str("{ ?x :q :yes . ?x :has ?f } => { ?x :d ?f } .\n");
+        let limits = bounded::ClosureLimits { max_join_rows: 1500, ..Default::default() };
+        let closed = reason_n3_terms_with_limits(&src, None, None, NegationCycles::default(), limits)
+            .expect("the run answers instead of being refused");
+        let derived = closed
+            .derived
+            .iter()
+            .filter(|t| t[1] == Term::Iri("http://ex/d".into()))
+            .count();
+        assert_eq!(derived, 200, "one derivation per subject");
     }
 
     /// Every `:derived` row of a query run, as `subject object` debug strings, sorted — so
