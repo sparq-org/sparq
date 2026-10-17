@@ -341,7 +341,8 @@ what it waits on is a change to its own subscriptions, the inline purge of its o
 above, or the owner's conditional create (which holds the container alone, and once queued keeps
 later shared holders waiting behind it, so then, for at most the lock wait, another
 subscriber's change too), never another subscriber's create or removal otherwise, and never
-the sweeper's removal of anyone else's expired subscription, which is listed nowhere. An access document nested too deeply to store and read back gets 400. A
+the sweeper's removal of anyone else's expired subscription, which is listed nowhere (once seen
+expired, a subscription stays expired, even if the clock is stepped back). An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
@@ -496,7 +497,9 @@ What the server exposes, all discoverable from the storage description
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
   way. At most 256 record changes are in progress or being settled at once; past that, a new
-  create or removal answers `503` with `Retry-After`. The tasks that settle them belong to the
+  create or removal answers `503` with `Retry-After`. Residual: requests and the settling of
+  outcomes the store left unknown share those 256 places, so while many outcomes wait to be
+  settled (a store that keeps failing), any caller's create or removal can get that `503`. The tasks that settle them belong to the
   server's state and end when it is dropped, leaving the record as the store has it for the next
   start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)

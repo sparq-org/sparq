@@ -56,7 +56,14 @@
 //!   exponential in the PUBLIC bound, the unroller refuses any repetition whose
 //!   projected chain count exceeds [`MAX_UNROLL_CHAINS`] (a controlled
 //!   `MpcError::Protocol`, checked BEFORE any allocation), so a large public
-//!   `{m,k}`/alternation cannot become a CPU/memory denial-of-service.
+//!   `{m,k}`/alternation cannot become a CPU/memory denial-of-service. The per-chain
+//!   HOP count is bounded first, by [`MAX_UNROLL_HOPS`]: a one-way step unrolls to
+//!   `k - m + 1` chains however large `k` is, so the chain cap does not bind on it,
+//!   while each chain of length `ℓ` is still an `ℓ`-hop join fold. Those two caps
+//!   bound the unroll's SHAPE; what bounds a single chain's cost is that the fold
+//!   projects to `(subject, reached)` and dedups after every hop, so its
+//!   accumulator holds endpoint PAIRS (at most `|V|²`) and never one row per walk.
+//!   See [`MAX_UNROLL_HOPS`] for what the caps do and do not promise.
 //!
 //! Composition: a [`BoundedRepetition`] is a repetition `{m,k}` of a single
 //! [`PathStep`] (a named predicate or an alternation of named predicates); a
@@ -188,6 +195,46 @@ impl PathForm {
 /// guard, not a tuning knob; a query that exceeds it is malformed/abusive for this
 /// regime, not merely slow.
 pub const MAX_UNROLL_CHAINS: u64 = 1 << 20; // 1_048_576
+
+/// Largest per-chain HOP count a `(step){m,k}` repetition may unroll to, checked
+/// before [`MAX_UNROLL_CHAINS`].
+///
+/// The chain cap alone does not bound the work, because the chain count is not the
+/// only thing `k` grows. A ONE-way step (a plain predicate, no alternation) unrolls
+/// to just `k - m + 1` chains however large `k` is, so the chain cap never binds on
+/// it — yet chain `ℓ` is an `ℓ`-hop join fold, so the union evaluates `Σ_{ℓ=m..=k} ℓ`
+/// joins and allocates an `ℓ`-long predicate sequence per chain. A single-predicate
+/// `{0,k}` with a huge public `k` was therefore unbounded work that the chain cap
+/// waved through. It also reached `projected_chain_count`, whose own `a^ℓ` loop
+/// runs `ℓ` times per length, so even deciding to refuse grew with `k`.
+///
+/// Bounding the hop count first fixes both: with `a >= 2` alternatives the chain cap
+/// already forces `k <= 20`, so this guard is what covers the one-way case, and it
+/// keeps the projection's own loops short. Like the chain cap it is a protocol
+/// guard, not a tuning knob: it sits far above any property path a query plans, and
+/// a repetition that exceeds it is malformed for this regime rather than merely
+/// slow.
+///
+/// ## What the two caps guarantee, and what they do not
+///
+/// They bound the SHAPE of the unroll, nothing else:
+///
+/// - [`MAX_UNROLL_CHAINS`] bounds how many fixed chains the union evaluates.
+/// - `MAX_UNROLL_HOPS` bounds how long each of those chains is.
+///
+/// Per-chain cost is what makes those two enough. `eval_fixed_chain` projects to
+/// `(subject, reached)` and dedups after EVERY hop, so one chain costs at most
+/// `hops · |V| · |E|` and its accumulator holds at most `|V|²` rows. Without that
+/// projection the accumulator would hold one row per WALK, which no cap on the
+/// shape can bound — a 64-hop chain on a dense graph is exponential in the hop
+/// count even though its ANSWER has at most `|V|²` rows.
+///
+/// So total work is bounded by `chains · hops · |V| · |E|`, and at both caps at
+/// once that product is large: a near-cap alternation such as `(p|q){1,19}` is
+/// about `2^20` chains of up to 19 hops each, which is deliberately still accepted
+/// and is a heavy run, not a quick one. What the caps rule out is the UNBOUNDED
+/// case, not an expensive one.
+pub const MAX_UNROLL_HOPS: usize = 64;
 
 /// Closed-form count of fixed-length chains a single `(step){m,k}` repetition
 /// unrolls to: `Σ_{ℓ=m..=k} a^ℓ` where `a = alternatives.len()` (length-0 adds the
@@ -440,6 +487,20 @@ fn eval_repetition(
     // evaluating any chain — otherwise a large public `{m,k}`/alternation is a
     // CPU/memory DoS (huge `Vec` growth, or a `usize` overflow in a `with_capacity`)
     // on this public API surface.
+    // HOP-COUNT GUARD: bound the unroll work before planning it. The chain cap
+    // below is computed per chain and does not bind on a one-way step, whose chain
+    // count is `k - m + 1` whatever `k` is, so without this a single-predicate
+    // `{m,k}` would fold `Σ_{ℓ=m..=k} ℓ` joins. Checking it FIRST also keeps
+    // `projected_chain_count`'s per-length loop short. No holder data is touched and
+    // nothing is allocated.
+    if rep.max > MAX_UNROLL_HOPS {
+        return Err(MpcError::Protocol(format!(
+            "bounded path {{{},{}}} exceeds the MAX_UNROLL_HOPS cap of {} hops per chain \
+             — refusing to evaluate (each chain of length L is an L-hop join fold, so \
+             the unrolled work grows with the public bound even for a one-way step)",
+            rep.min, rep.max, MAX_UNROLL_HOPS
+        )));
+    }
     let projected = projected_chain_count(rep.step.alternatives.len(), rep.min, rep.max);
     match projected {
         Some(count) if count <= MAX_UNROLL_CHAINS => {}
@@ -490,6 +551,11 @@ fn eval_repetition(
 /// Every fixed predicate sequence of `length` hops obtained by choosing, at each
 /// position, one of the step's alternatives (the §2.4 distribution). For a
 /// single-predicate step this is just the one `length`-long sequence.
+///
+/// The caller caps the chain COUNT before reaching here ([`MAX_UNROLL_HOPS`] on the
+/// length, then [`MAX_UNROLL_CHAINS`] on `Σ_ℓ a^ℓ`), so the number of sequences is
+/// bounded. Nothing bounds their WIDTHS — a predicate IRI's length is unbounded —
+/// and width caps are follow-up work, not a property this path provides.
 fn alternation_chains(step: &PathStep, length: usize) -> Vec<Vec<NamedNode>> {
     let mut chains: Vec<Vec<NamedNode>> = vec![Vec::new()];
     for _ in 0..length {
@@ -545,7 +611,18 @@ fn eval_fixed_chain(
     // First hop's edge relation: (?__pp_a, ?z1).
     let mut acc = edges.relation_for(&chain[0], &hop_var(0), &hop_var(1));
 
-    // Fold remaining hops via DisclosedKeyJoin on the shared intermediate var.
+    // Fold remaining hops via DisclosedKeyJoin on the shared intermediate var,
+    // collapsing the accumulator to `(subject, reached)` after EVERY hop.
+    //
+    // Carrying the intermediate columns to the end instead would make the
+    // accumulator hold one row per distinct WALK, which grows as the number of
+    // paths, not as the number of endpoint pairs — exponential in the chain length
+    // on a dense graph, even though the projected result has at most `|V|²` rows.
+    // Projecting and deduping per hop keeps the accumulator at most `|V|²` rows and
+    // each hop's join at most `|V|·|E|`, and the RESULT is unchanged: only the
+    // endpoints are ever returned (this function's one caller unions endpoint
+    // pairs), and endpoint reachability is a set — two walks reaching the same
+    // `(subject, reached)` pair continue identically.
     let join = DisclosedKeyJoin::new();
     for (idx, pred) in chain.iter().enumerate().skip(1) {
         let next = edges.relation_for(pred, &hop_var(idx), &hop_var(idx + 1));
@@ -554,10 +631,18 @@ fn eval_fixed_chain(
             join_var,
             key_disclosed: true,
         };
-        acc = join.join(&[acc, next], &plan)?;
+        let joined = join.join(&[acc, next], &plan)?;
+        let reached = hop_var(idx + 1);
+        acc = dedup_endpoint_pairs(
+            project_endpoints(&joined, subject, &reached)?,
+            subject,
+            &reached,
+        );
     }
 
-    // Project onto (subject, object), dropping the intermediate columns.
+    // Project onto (subject, object), dropping any intermediate column. After the
+    // fold above the accumulator is already `(subject, object)`; this also covers
+    // the single-hop case, which never entered the loop.
     project_endpoints(&acc, subject, object)
 }
 

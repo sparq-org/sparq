@@ -88,13 +88,16 @@ fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
 /// **What the refusal discloses.** The same as the semi-honest twin
 /// `compare::check_in_range`: that an operand was out of range and which one (by
 /// `label`), never its value.
+///
+/// As in [`crate::compare`]'s twin, the operand is PRIVATE, so the range error
+/// reports the bound only: the public bit-width / exclusive bound and `label` — the
+/// operand POSITION, a fixed parameter name from the call site, never caller data.
 fn check_in_range(label: &str, v: Fp) -> Result<(), MpcError> {
     if v.value() >= (1u64 << COMPARE_BITS) {
         return Err(MpcError::Protocol(format!(
-            // The operand is the secret under comparison: name it and the public
-            // bound, never its value.
-            "tamper-evident comparison operand `{label}` is out of range (must be < 2^{} = {}); \
-             the bit-decomposition would wrap and the verdict would be wrong",
+            "tamper-evident comparison operand `{}` is out of range (must be < 2^{} = {}); the \
+             bit-decomposition would wrap and the verdict would be wrong",
+            label,
             COMPARE_BITS,
             1u64 << COMPARE_BITS
         )));
@@ -785,6 +788,41 @@ mod tests {
             malicious_threshold(&backend, over, Fp::new(1)),
             Err(MpcError::Protocol(_))
         ));
+    }
+
+    /// The range error reports the bound only: the public bit-width / exclusive
+    /// bound and the operand POSITION, never the private operand's own value in
+    /// decimal or hex.
+    #[test]
+    fn range_error_message_carries_no_operand_value() {
+        const DISTINCTIVE: u64 = 0x1DEA_DBEE_FCAF_E777;
+        const { assert!(DISTINCTIVE >= (1u64 << COMPARE_BITS) && DISTINCTIVE < P) };
+        let forbidden = [
+            format!("{}", DISTINCTIVE),
+            format!("{:x}", DISTINCTIVE),
+            format!("{:X}", DISTINCTIVE),
+        ];
+        let backend = ShamirBackend::new_seeded(5, 1).unwrap();
+        let refusals = [
+            malicious_greater_than(&backend, Fp::new(DISTINCTIVE), Fp::new(1)),
+            malicious_greater_than(&backend, Fp::new(1), Fp::new(DISTINCTIVE)),
+        ];
+        for refusal in refusals {
+            let msg = match refusal.unwrap_err() {
+                MpcError::Protocol(m) => m,
+                other => panic!("expected a Protocol range error, got {:?}", other),
+            };
+            assert!(msg.contains("out of range"), "not a range error: {}", msg);
+            assert!(msg.contains("2^60"), "the bound is missing from: {}", msg);
+            for form in &forbidden {
+                assert!(
+                    !msg.contains(form.as_str()),
+                    "the range error carried the operand value {}: {}",
+                    form,
+                    msg
+                );
+            }
+        }
     }
 
     /// The empty MAC-check is a no-op pass (nothing to verify before nothing is
