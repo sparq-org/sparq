@@ -24,9 +24,10 @@
 //! individual `s` counts the blockable node `w`, the **NI-rule** applies: `w` is one of at
 //! most `n` elements, so a branch point chooses which, `i ≤ n`, and merges `w` into a root
 //! introduced for (`s`, the restriction, `i`) with the restriction's roles from `s` and its
-//! filler. Only at-most clauses with nothing else in their head take part (the restriction
-//! must hold at `s`). Otherwise the branch is closed and, if no branch gives a model, the run
-//! returns [`Stop::Unconfirmed`], never a verdict.
+//! filler. A clause takes part when its head is one at-most restriction and disjuncts at
+//! `s` ([`NiShape`]): those disjuncts are further alternatives, since the restriction holds
+//! at `s` unless one of them does. Otherwise the branch is closed and, if no branch gives a
+//! model, the run returns [`Stop::Unconfirmed`], never a verdict.
 //!
 //! **Termination.** HermiT's NI-rule (Motik, Shearer and Horrocks, JAIR 36, 2009) fires on
 //! an annotated equality: an at-most restriction at a root forcing two nodes to merge. This
@@ -68,7 +69,7 @@
 //! [`Stop::Undecided`] instead of "unsatisfiable" when one of them was undecided. Only a
 //! clash-free, complete branch whose datatype check succeeded is reported satisfiable.
 
-use super::clausify::{Atom, AtomKind, Clauses, Head, Key, Role, Var};
+use super::clausify::{Atom, AtomKind, Clause, Clauses, Head, Key, Role, Var};
 use super::data_ranges::{self, DataRangeExpr, Tri};
 use super::datatypes::Value;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -183,8 +184,8 @@ pub(crate) enum Stop {
     /// Every branch closed, but at least one only because its completion graph could not
     /// be confirmed to be a model: nominals connect a copied or blocked part of the graph
     /// to a node whose number restrictions the copies could break, where the NI-rule does
-    /// not apply (the restriction shares its clause with other disjuncts, or none counts the
-    /// node), or two individuals might share a key's data value that is not fixed.
+    /// not apply (the clause is not an [`NiShape`], or none counts the node), or two
+    /// individuals might share a key's data value that is not fixed.
     Unconfirmed,
 }
 
@@ -193,7 +194,7 @@ pub(crate) enum Stop {
 type YVar = (Vec<Role>, Vec<Atom>, bool);
 
 /// Where the NI-rule applies: a root, a blockable neighbour, the at-most clause counting
-/// it, and what that match depends on.
+/// it (an index into `ClauseIndex::ni`), and what that match depends on.
 type NiMatch = (Node, Node, u32, Dep);
 
 /// Where the clauses applicable at a central node are found.
@@ -210,10 +211,63 @@ pub(crate) struct ClauseIndex {
     ys: Vec<Vec<YVar>>,
     /// The clauses with two or more neighbour variables (number restrictions).
     multi_y: Vec<u32>,
-    /// The clauses that are only an at-most restriction `≤n R.A`: one group of
-    /// interchangeable neighbour variables with the same atoms, a head of their equalities.
-    /// The NI-rule applies to these.
-    pure_at_most: Vec<u32>,
+    /// The clauses the NI-rule applies to, in clause order, with their shape.
+    ni: Vec<(u32, NiShape)>,
+}
+
+/// An at-most restriction `≤n R.A` inside a clause: `body → ≤n R.A ∨ D₁(x) ∨ …`, where the
+/// body may also bind neighbour variables of its own (context) that no head mentions.
+#[derive(Debug, Clone)]
+struct NiShape {
+    /// The restriction's `n + 1` interchangeable neighbour variables (same roles and atoms).
+    group: Vec<u16>,
+    /// The other neighbour variables, bound by the body only.
+    context: Vec<u16>,
+    /// The head disjuncts that are not equalities of the group: concepts or a self-loop at
+    /// the central node.
+    extra: Vec<Head>,
+}
+
+impl NiShape {
+    /// The shape of `cl`, when it has exactly one at-most group and nothing else in its
+    /// head but disjuncts at the central node.
+    fn of(cl: &Clause, ys: &[YVar]) -> Option<NiShape> {
+        // A group starts at `v - 1` for every ordered `v` whose predecessor is not ordered.
+        let starts: Vec<u16> = cl
+            .ordered
+            .iter()
+            .filter(|&&v| !cl.ordered.contains(&(v - 1)))
+            .map(|&v| v - 1)
+            .collect();
+        let [start] = starts[..] else {
+            return None;
+        };
+        let mut group = vec![start];
+        while cl.ordered.contains(&(group[group.len() - 1] + 1)) {
+            group.push(group[group.len() - 1] + 1);
+        }
+        let (roles, atoms, _) = &ys[start as usize];
+        if group
+            .iter()
+            .any(|&v| ys[v as usize].0 != *roles || ys[v as usize].1 != *atoms)
+        {
+            return None;
+        }
+        let mut extra = Vec::new();
+        for h in &cl.head {
+            match *h {
+                Head::Eq(Var::Y(a), Var::Y(b)) if group.contains(&a) && group.contains(&b) => {}
+                Head::Concept(_, Var::X) | Head::SelfLoop(_) => extra.push(h.clone()),
+                _ => return None,
+            }
+        }
+        let context = (0..cl.n_y).filter(|v| !group.contains(v)).collect();
+        Some(NiShape {
+            group,
+            context,
+            extra,
+        })
+    }
 }
 
 impl ClauseIndex {
@@ -246,14 +300,8 @@ impl ClauseIndex {
             idx.ys.push(ys);
             if cl.n_y >= 2 {
                 idx.multi_y.push(i);
-                let ys = &idx.ys[i as usize];
-                let (roles, atoms, _) = &ys[0];
-                if cl.body_self.is_empty()
-                    && cl.ordered.len() + 1 == ys.len()
-                    && cl.head.iter().all(|h| matches!(h, Head::Eq(..)))
-                    && ys.iter().all(|(r, a, _)| r == roles && a == atoms)
-                {
-                    idx.pure_at_most.push(i);
+                if let Some(shape) = NiShape::of(cl, &idx.ys[i as usize]) {
+                    idx.ni.push((i, shape));
                 }
             }
         }
@@ -299,12 +347,13 @@ enum Undo {
 enum Choice {
     /// The disjuncts of a clause's head.
     Clause(Instance),
-    /// The NI-rule: which of root `s`'s at most `n` neighbours that `clause` (an at-most
-    /// restriction) counts blockable node `w` is; `deps` is what the match depends on.
+    /// The NI-rule: which of root `s`'s at most `n` neighbours that clause `ClauseIndex::ni[ni]`
+    /// (an at-most restriction) counts blockable node `w` is, or which of the clause's other
+    /// disjuncts holds at `s` instead; `deps` is what the match depends on.
     Ni {
         s: Node,
         w: Node,
-        clause: u32,
+        ni: u32,
         deps: Dep,
     },
 }
@@ -600,8 +649,8 @@ impl<'c> Tableau<'c> {
             }
             match unravels {
                 Ok(()) => return Ok(true),
-                Err(Some((s, w, clause, deps))) => {
-                    self.open(Choice::Ni { s, w, clause, deps });
+                Err(Some((s, w, ni, deps))) => {
+                    self.open(Choice::Ni { s, w, ni, deps });
                 }
                 Err(None) => self.close_unconfirmed(),
             }
@@ -1414,7 +1463,10 @@ impl<'c> Tableau<'c> {
         match choice {
             Choice::Clause(inst) => self.c.clauses[inst.clause as usize].head.len(),
             // `≤n R.A` has `n + 1` neighbour variables.
-            Choice::Ni { clause, .. } => self.c.clauses[*clause as usize].n_y as usize - 1,
+            Choice::Ni { ni, .. } => {
+                let shape = &self.index.ni[*ni as usize].1;
+                shape.group.len() - 1 + shape.extra.len()
+            }
         }
     }
 
@@ -1431,7 +1483,16 @@ impl<'c> Tableau<'c> {
                 let h = self.c.clauses[inst.clause as usize].head[alt].clone();
                 self.apply(inst, &h, d);
             }
-            Choice::Ni { s, w, clause, .. } => self.ni_merge(*s, *w, *clause, alt as u32, d),
+            &Choice::Ni { s, w, ni, .. } => {
+                let shape = &self.index.ni[ni as usize].1;
+                let n = shape.group.len() - 1;
+                // Past the restriction's `n` alternatives, a disjunct at `s` holds instead.
+                match alt.checked_sub(n).map(|e| shape.extra[e].clone()) {
+                    Some(Head::Concept(a, _)) => self.add_concept(s, a, d),
+                    Some(Head::SelfLoop(r)) => self.add_role(r, s, s, d),
+                    _ => self.ni_merge(s, w, ni, alt as u32, d),
+                }
+            }
         }
     }
 
@@ -1640,7 +1701,7 @@ impl<'c> Tableau<'c> {
                     // the root's few neighbours: the NI-rule names them.
                     match self.ni_clause(u as Node, v) {
                         Some((clause, deps)) => return Err(Some((u as Node, v, clause, deps))),
-                        None if self.index.pure_at_most.is_empty() => return Err(None),
+                        None if self.index.ni.is_empty() => return Err(None),
                         None => unconfirmed = true,
                     }
                 }
@@ -1681,21 +1742,27 @@ impl<'c> Tableau<'c> {
         true
     }
 
-    /// A clause that is only an at-most restriction `≤n R.A` (one group of interchangeable
-    /// neighbour variables, a head of their equalities) whose body holds at root `s` and
-    /// whose neighbour variables match `w`, with what that depends on. The restriction then
-    /// holds at `s`, so `w` is one of at most `n` elements.
+    /// A clause with an at-most restriction `≤n R.A` (see [`NiShape`]) whose body holds at
+    /// root `s`, whose other disjuncts do not hold there yet, and whose restriction's
+    /// variables match `w`, with what that depends on. Unless another disjunct comes to hold
+    /// at `s`, the restriction holds there, so `w` is one of at most `n` elements.
     fn ni_clause(&self, s: Node, w: Node) -> Option<(u32, Dep)> {
         let (sn, wn) = (&self.nodes[s as usize], &self.nodes[w as usize]);
         let rs = sn.adj.get(&w)?;
-        'clause: for &ci in &self.index.pure_at_most {
+        'clause: for (k, (ci, shape)) in self.index.ni.iter().enumerate() {
             if self.probe() {
                 return None;
             }
-            let cl = &self.c.clauses[ci as usize];
-            let (roles, atoms, _) = &self.index.ys[ci as usize][0];
+            let cl = &self.c.clauses[*ci as usize];
+            let ys = &self.index.ys[*ci as usize];
+            let (roles, atoms, _) = &ys[shape.group[0] as usize];
             if !roles.iter().all(|r| rs.contains(r))
                 || !atoms.iter().all(|a| wn.label.contains_key(a))
+                || shape.extra.iter().any(|h| match *h {
+                    Head::Concept(a, _) => sn.label.contains_key(&a),
+                    Head::SelfLoop(r) => self.has_role(r, s, s),
+                    _ => false,
+                })
             {
                 continue;
             }
@@ -1706,21 +1773,57 @@ impl<'c> Tableau<'c> {
                     None => continue 'clause,
                 }
             }
+            for &r in &cl.body_self {
+                if !self.has_role(r, s, s) {
+                    continue 'clause;
+                }
+                d = d.union(&self.role_dep(r, s, s));
+            }
+            for &v in &shape.context {
+                match self.context_match(s, &ys[v as usize]) {
+                    Some(dv) => d = d.union(&dv),
+                    None => continue 'clause,
+                }
+            }
             for &r in roles {
                 d = d.union(&self.role_dep(r, s, w));
             }
             for a in atoms {
                 d = d.union(&wn.label[a]);
             }
-            return Some((ci, d));
+            return Some((k as u32, d));
+        }
+        None
+    }
+
+    /// A neighbour of `s` that body-only variable `y` binds, with what the binding depends on.
+    fn context_match(&self, s: Node, (roles, atoms, _): &YVar) -> Option<Dep> {
+        let sn = &self.nodes[s as usize];
+        for (&u, rs) in &sn.adj {
+            self.charge(1);
+            let un = &self.nodes[u as usize];
+            if roles.iter().all(|r| rs.contains(r))
+                && atoms.iter().all(|a| un.label.contains_key(a))
+            {
+                let mut d = Dep::default();
+                for &r in roles {
+                    d = d.union(&self.role_dep(r, s, u));
+                }
+                for a in atoms {
+                    d = d.union(&un.label[a]);
+                }
+                return Some(d);
+            }
         }
         None
     }
 
     /// The NI-rule's `i`-th alternative: `w` is the `i`-th of root `s`'s neighbours that
-    /// at-most `clause` counts, a root introduced for it (once per branch) with the
-    /// clause's roles from `s` and its filler.
-    fn ni_merge(&mut self, s: Node, w: Node, clause: u32, i: u32, d: &Dep) {
+    /// at-most clause `ClauseIndex::ni[ni]` counts, a root introduced for it (once per
+    /// branch) with the restriction's roles from `s` and its filler.
+    fn ni_merge(&mut self, s: Node, w: Node, ni: u32, i: u32, d: &Dep) {
+        let (clause, ref shape) = self.index.ni[ni as usize];
+        let v = shape.group[0];
         let (z, dz) = match self.ni_nodes.get(&(s, clause, i)) {
             Some(&z) => self.canonical_dep(z),
             None => {
@@ -1731,7 +1834,7 @@ impl<'c> Tableau<'c> {
             }
         };
         let d = d.union(&dz);
-        let (roles, atoms, _) = self.index.ys[clause as usize][0].clone();
+        let (roles, atoms, _) = self.index.ys[clause as usize][v as usize].clone();
         for r in roles {
             self.add_role(r, s, z, &d);
         }
@@ -1772,21 +1875,26 @@ impl<'c> Tableau<'c> {
             // A clause whose body fails at `s`, or whose head already holds there, counts
             // nothing.
             if !cl.body_x.iter().all(|a| sn.label.contains_key(a))
-                || cl
-                    .head
-                    .iter()
-                    .any(|h| matches!(*h, Head::Concept(a, Var::X) if sn.label.contains_key(&a)))
+                || cl.head.iter().any(|h| match *h {
+                    Head::Concept(a, Var::X) => sn.label.contains_key(&a),
+                    Head::SelfLoop(r) => self.has_role(r, s, s),
+                    _ => false,
+                })
             {
                 continue;
             }
-            let fits = self.index.ys[ci as usize]
-                .iter()
-                .filter(|(roles, atoms, _)| {
-                    roles.iter().all(|r| rs.contains(r))
-                        && atoms.iter().all(|a| wn.label.contains_key(a))
-                })
-                .count();
-            if fits >= 2 {
+            let ys = &self.index.ys[ci as usize];
+            let fit = |(roles, atoms, _): &YVar| {
+                roles.iter().all(|r| rs.contains(r))
+                    && atoms.iter().all(|a| wn.label.contains_key(a))
+            };
+            // The variables `w` cannot bind need a neighbour of `s` (copies have the labels
+            // and edges of the nodes they copy).
+            if ys.iter().filter(|y| fit(y)).count() >= 2
+                && ys
+                    .iter()
+                    .all(|y| fit(y) || self.context_match(s, y).is_some())
+            {
                 return true;
             }
         }

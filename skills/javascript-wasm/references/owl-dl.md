@@ -146,7 +146,7 @@ question the reasoner does not decide (for example an XSD pattern with a block e
 answers `reason.kind: 'DatatypeUnknown'` with the triples involved. Nominals are decided
 with SHOIQ's NI-rule; when nominals tie a part of the candidate model that blocking
 repeats to an individual whose number restrictions the repetition could break and the
-rule does not apply (the at-most restriction is one disjunct of a union), the answer is
+rule does not apply (for example, one axiom holds two at-most restrictions), the answer is
 `reason.kind: 'Unconfirmed'` instead of a verdict. The answer is never a guess: every verdict is either
 decided or `'unknown'` with a reason. Budgets are deterministic work counts (`maxSteps`: rule applications, `maxNodes`: completion-graph
 nodes, at most 2^32 - 1), not time limits; the defaults are those of `sparq_reason_dl::owl2dl::Budget::default()`.
