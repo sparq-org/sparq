@@ -1921,6 +1921,27 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   published snapshot, and a recovered write is durable across a restart — covered for a transient
   burst, a permanent jam, AND (sq-bif.14) an INTERLEAVED recover→fail→recover sequence whose final
   durable set is exactly the successful writes (no refused write resurrects).
+- **One UPDATE body = one durable commit, graph SET included (`sq-ycle`).** A multi-operation
+  UPDATE body is resolved into ONE redo-journal frame (`DIR/txn.log`) that is fsync'd before any
+  per-graph WAL is touched, so a crash part-way through materialising it recovers the whole body
+  or none of it. The frame now records graph-EXISTENCE changes as well as triples: `CREATE GRAPH
+  <g>` of a new empty graph and `DROP GRAPH <g>` of an empty one carry no triples at all, so
+  without those records a crash between the commit and the materialisation could come back with a
+  different graph SET from the one the `204` acknowledged. Records replay in commit order, so a
+  create and a drop of the same graph in one body recover with the last one winning. A journal
+  written by an older build (before the existence records) is still replayed, not discarded.
+- **A failed materialisation freezes the WHOLE store until a restart.** If a body's commit
+  succeeds but materialising it fails, the frame is KEPT for the next open to replay and every
+  durable write in that store — the default graph, every named graph, a graph create or drop, a
+  compaction, a vacuum, and the journal clear itself — is refused until the store is reopened
+  (`503` over HTTP). Accepting a write in that window would let the recovery redo silently undo
+  or reorder something already acknowledged. The refusal is tree-wide in both directions: a frame
+  retained by a named graph freezes the root too.
+- **One writer per `--persist DIR`.** The durable store assumes a single writing process and a
+  single writing handle per directory; two writers on one directory corrupt it and nothing
+  currently detects that. Writer exclusion is designed in
+  [`research/core-versioned-store-design.md`](../../research/core-versioned-store-design.md) and
+  is not implemented yet.
 - **Online backup/restore — opt-in `backup` feature (default OFF).** Build with
   `--features backup` to mount the WRITE-gated, POST-only `/admin/backup` (stream a
   self-describing snapshot artifact of the live store WITHOUT stopping the world) and

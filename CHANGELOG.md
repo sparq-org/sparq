@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-core / sparq-engine (`sq-ycle`):** the durable redo journal records GRAPH-EXISTENCE
+  changes, not only triples. New public `sparq_core::TxnOp` (`Insert` / `Delete` / `Create` /
+  `Drop`) plus `Graph::commit_txn_ops` and `Graph::commit_txn_ops_checked` commit a whole UPDATE
+  body as one frame over that vocabulary; `commit_txn`/`commit_txn_checked` keep their tuple
+  signatures and now delegate to them. `CREATE GRAPH <g>` of a new empty graph and `DROP GRAPH
+  <g>` of an empty one resolve to no triple record at all, so a data-only frame carried no trace
+  of them and a crash between the commit and the materialisation could recover a dataset whose
+  graph SET differed from the one the commit had acknowledged; the engine's effect resolver now
+  emits a `Create` for each CREATE and, after its retractions, a `Drop` for each dropped named
+  graph, and `Graph::open` redoes a frame's records in commit order. The frame magic moves to
+  `WTX2`; a `WTX1` frame left by an older build is still replayed (data records only). A CLEAR
+  emits no existence record, and the default graph never gets one.
+
 - **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
   and the host builds every lane's value-lane sub-proof inputs from typed operands.
   `dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route `xsd:boolean`,
@@ -133,6 +146,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   soundness or privacy claim.
 
 ### Changed
+
+- **sparq-core (`sq-ycle`):** a kept journal frame now freezes the WHOLE graph tree. State shared
+  by a root and its named sub-graphs carries the "a committed frame is kept for the reopen" flag,
+  and every durable mutation passes one central gate before writing a byte: a delta on the root or
+  on any named graph, a graph create or drop, a compaction, a vacuum, and `clear_txn` itself are
+  all refused until the store is reopened — previously only compaction and vacuum were, so a
+  direct write could be acknowledged and then undone or reordered by the recovery redo. The
+  refusal propagates in both directions: a frame retained by a named graph refuses the root's
+  writes too. `clear_txn` is gated like an append because truncating the journal destroys
+  committed records.
 
 - **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
   recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that
