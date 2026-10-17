@@ -198,26 +198,6 @@ pub trait SparqClient: Send + Sync {
         Ok(false)
     }
 
-    /// Take, or renew, the lease `key` for `holder` until `until` (seconds since the epoch), in
-    /// one atomic step that finds no other holder's lease standing at `now`: `Ok(false)`, with
-    /// nothing changed, when one does. A server takes its storage's lease before it starts, and
-    /// renews it while it serves, so two processes never serve one storage at once over a shared
-    /// index (see the `lws` module's lease).
-    ///
-    /// The DEFAULT grants every lease: an index held in one process (in memory) has no other
-    /// process to exclude, and one opened from a directory is locked to its process when it is
-    /// opened ([`EmbeddedSparqClient::open`](super::embedded::EmbeddedSparqClient::open)).
-    async fn take_lease(
-        &self,
-        key: &str,
-        holder: &str,
-        until: i64,
-        now: i64,
-    ) -> Result<bool, SparqError> {
-        let _ = (key, holder, until, now);
-        Ok(true)
-    }
-
     /// Stop naming `blob_key` as being reclaimed ([`begin_reclaim`](Self::begin_reclaim)).
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         let _ = blob_key;

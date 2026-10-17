@@ -335,17 +335,6 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.begin_reclaim(blob_key).await
     }
 
-    async fn take_lease(
-        &self,
-        key: &str,
-        holder: &str,
-        until: i64,
-        now: i64,
-    ) -> Result<bool, SparqError> {
-        let _g = self.counters.op_guard();
-        self.inner.take_lease(key, holder, until, now).await
-    }
-
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         let _g = self.counters.op_guard();
         self.counters.count_update();

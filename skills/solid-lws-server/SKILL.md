@@ -589,17 +589,8 @@ What the server exposes, all discoverable from the storage description
   outcome are independent of the content of the resources a change touches, not of their
   metadata, of the room others leave in the shared quota, or of the backends' and the index's
   own work. A start
-  settles every intent of its storage and releases holds as if no other process served it, and
-  one storage is served by one process at a time: before it reads or writes anything, a start
-  takes its storage's lease, and refuses to start while another process's stands (an index
-  opened from a directory is locked to its process first, on a Unix host, through a `{dir}.lock`
-  file beside it; over a shared index the lease is a record taken and renewed in one atomic
-  step, standing 30 seconds and renewed every 5). A process that has not renewed its lease for
-  20 seconds, or finds another holder's, answers every request `503` (`Retry-After`), probes
-  included, until it is started again. Residuals: the lease's term is read from each process's
-  own clock, so it holds while their clocks agree within 10 seconds; and a request already under
-  way when the lease is lost, or a change being put back in the background, may still complete.
-  When putting back fails too, it is tried a few more times with the
+  settles every intent of its storage and releases holds as if no other process served it: one
+  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees

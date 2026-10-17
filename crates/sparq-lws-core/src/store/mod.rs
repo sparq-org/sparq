@@ -259,20 +259,6 @@ pub trait Store: Send + Sync {
         Ok(())
     }
 
-    /// Take, or renew, the lease `key` for `holder` until `until`, unless another holder's
-    /// stands at `now` ([`SparqClient::take_lease`]). The default grants it: a store with no
-    /// index shared between processes has nobody to exclude.
-    async fn take_lease(
-        &self,
-        key: &str,
-        holder: &str,
-        until: i64,
-        now: i64,
-    ) -> ServerResult<bool> {
-        let _ = (key, holder, until, now);
-        Ok(true)
-    }
-
     /// Delete a resource: remove its index record + its bytes, and detach it from `parent`'s
     /// containment (if `parent` is given). The caller is responsible for the existence (404) and
     /// empty-container (409) decisions; this performs the removal.
@@ -1055,19 +1041,6 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         Ok(held)
     }
 
-    async fn take_lease(
-        &self,
-        key: &str,
-        holder: &str,
-        until: i64,
-        now: i64,
-    ) -> ServerResult<bool> {
-        self.sparq
-            .take_lease(key, holder, until, now)
-            .await
-            .map_err(map_sparq)
-    }
-
     async fn finish_reclaims(&self) -> ServerResult<()> {
         for key in self.sparq.reclaiming().await.map_err(map_sparq)? {
             match self.blob.delete(&key).await {
@@ -1601,15 +1574,6 @@ mod tests {
         }
         async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
             self.0.begin_reclaim(blob_key).await
-        }
-        async fn take_lease(
-            &self,
-            key: &str,
-            holder: &str,
-            until: i64,
-            now: i64,
-        ) -> Result<bool, SparqError> {
-            self.0.take_lease(key, holder, until, now).await
         }
         async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
             self.0.end_reclaim(blob_key).await

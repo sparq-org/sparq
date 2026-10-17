@@ -198,9 +198,6 @@ pub struct EmbeddedSparqClient {
     /// logical backend). Exposed via [`Self::engine_round_trips`] for benchmarks/tests; not on the hot
     /// path beyond one relaxed atomic increment.
     round_trips: Arc<AtomicU64>,
-    /// The exclusive lock the directory was opened under ([`Self::open`]), held for as long as
-    /// any clone is; `None` over an in-memory graph.
-    _lock: Option<Arc<std::fs::File>>,
 }
 
 impl EmbeddedSparqClient {
@@ -217,20 +214,11 @@ impl EmbeddedSparqClient {
 
     /// Build a client over a DIRECTORY-BACKED [`Graph`] loaded from `dir` (a previously-`save`d
     /// snapshot). The on-disk path the persistence option selects.
-    ///
-    /// The directory is locked to this process first, before opening it finishes anything a
-    /// stop cut short: an exclusive lock on a file beside it (`{dir}.lock`, so it outlives a
-    /// swap of the directory itself), held until the last clone is dropped. A directory another
-    /// process holds is refused, so one process at a time serves what it stores, and recovers
-    /// it (on a Unix host; elsewhere it is not locked).
     pub fn open(dir: &Path) -> Result<Self, SparqError> {
-        let lock = lock_dir(dir)?;
         let graph = Graph::open(dir).map_err(|e| {
             SparqError::Backend(format!("fatal: graph open({}) failed: {e}", dir.display()))
         })?;
-        let mut client = Self::over(graph)?;
-        client._lock = lock.map(Arc::new);
-        Ok(client)
+        Self::over(graph)
     }
 
     /// Hand `graph` to a freshly-spawned [`GraphActor`] and wrap it as a client. The single place a
@@ -239,7 +227,6 @@ impl EmbeddedSparqClient {
         Ok(Self {
             actor: Arc::new(GraphActor::spawn(graph)?),
             round_trips: Arc::new(AtomicU64::new(0)),
-            _lock: None,
         })
     }
 
@@ -320,38 +307,6 @@ impl EmbeddedSparqClient {
             })
             .await
     }
-}
-
-/// Lock the index directory `dir` to this process (see [`EmbeddedSparqClient::open`]): the lock
-/// file's handle, which keeps the lock while it is open.
-#[cfg(unix)]
-fn lock_dir(dir: &Path) -> Result<Option<std::fs::File>, SparqError> {
-    let mut name = dir.as_os_str().to_owned();
-    name.push(".lock");
-    let path = std::path::PathBuf::from(name);
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(&path)
-        .map_err(|e| {
-            SparqError::Backend(format!("fatal: lock file {} failed: {e}", path.display()))
-        })?;
-    rustix::fs::flock(&file, rustix::fs::FlockOperation::NonBlockingLockExclusive).map_err(
-        |e| {
-            SparqError::Backend(format!(
-                "fatal: {} is in use by another process ({}): {e}",
-                dir.display(),
-                path.display()
-            ))
-        },
-    )?;
-    Ok(Some(file))
-}
-
-#[cfg(not(unix))]
-fn lock_dir(_dir: &Path) -> Result<Option<std::fs::File>, SparqError> {
-    Ok(None)
 }
 
 /// Map an engine error string (the `Result<_, String>` the `sparq-engine` entry points return) into
@@ -845,36 +800,6 @@ mod tests {
             etag: etag.into(),
             last_modified: None,
         }
-    }
-
-    /// A directory is served by one process at a time: while one client holds it open, another
-    /// open is refused (as a second process's would be: the lock is per open file), and once
-    /// every clone is gone it opens again.
-    #[cfg(unix)]
-    #[test]
-    fn a_directory_is_opened_by_one_holder_at_a_time() {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir =
-            std::env::temp_dir().join(format!("sparq-lws-lock-{}-{nanos}", std::process::id()));
-        block_on(client().save(&dir)).expect("saved");
-        let first = EmbeddedSparqClient::open(&dir).expect("opens");
-        let clone = first.clone();
-        let refused = EmbeddedSparqClient::open(&dir).err().expect("refused");
-        assert!(refused.to_string().contains("in use"), "{refused}");
-        drop(first);
-        assert!(
-            EmbeddedSparqClient::open(&dir).is_err(),
-            "a clone still holds it"
-        );
-        drop(clone);
-        EmbeddedSparqClient::open(&dir).expect("opens again");
-        let _ = std::fs::remove_dir_all(&dir);
-        let mut lock = dir.into_os_string();
-        lock.push(".lock");
-        let _ = std::fs::remove_file(lock);
     }
 
     /// Identify the thread a closure is running on: its `ThreadId` (unique for a live thread) plus

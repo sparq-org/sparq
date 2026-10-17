@@ -5314,7 +5314,6 @@ dependencies = [
  "rand_core 0.6.4",
  "redis",
  "reqwest",
- "rustix",
  "rustls",
  "serde",
  "serde_json",

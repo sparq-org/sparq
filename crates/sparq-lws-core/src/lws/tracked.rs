@@ -233,16 +233,6 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.finish_reclaims().await
     }
 
-    async fn take_lease(
-        &self,
-        key: &str,
-        holder: &str,
-        until: i64,
-        now: i64,
-    ) -> ServerResult<bool> {
-        self.inner.take_lease(key, holder, until, now).await
-    }
-
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
         let _m = self.gens.mutating(&keys);

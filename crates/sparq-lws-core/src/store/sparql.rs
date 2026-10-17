@@ -251,55 +251,6 @@ pub fn select_reclaiming() -> String {
     )
 }
 
-/// The graph where each storage's lease is kept ([`update_take_lease`]): outside every storage,
-/// so no request can name it.
-pub const LEASES: &str = "urn:x-sparq-lws:leases";
-
-/// Predicate: who holds a lease (a literal, on the lease's key, in [`LEASES`]).
-pub fn p_lease_holder() -> String {
-    format!("{PSS_NS}leaseHolder")
-}
-
-/// Predicate: until when a lease stands, in seconds since the epoch (an integer).
-pub fn p_lease_until() -> String {
-    format!("{PSS_NS}leaseUntil")
-}
-
-/// UPDATE: give the lease `key` to `holder` until `until`, only while nobody else's stands at
-/// `now` (none is recorded, `holder` holds it, or it ran out before `now`): one atomic
-/// `DELETE … INSERT … WHERE`, so two holders can never both take it (the caller reads
-/// [`ask_lease`] back to tell whether it did).
-pub fn update_take_lease(
-    key: &str,
-    holder: &str,
-    until: i64,
-    now: i64,
-) -> Result<String, BuildError> {
-    Ok(format!(
-        "DELETE {{ GRAPH {l} {{ {k} {ph} ?h . {k} {pu} ?u }} }} \
-         INSERT {{ GRAPH {l} {{ {k} {ph} {h} . {k} {pu} {until} }} }} \
-         WHERE {{ OPTIONAL {{ GRAPH {l} {{ {k} {ph} ?h . {k} {pu} ?u }} }} \
-         FILTER(!BOUND(?h) || ?h = {h} || ?u < {now}) }}",
-        l = iri_const(LEASES),
-        k = iri(key)?,
-        ph = iri_const(&p_lease_holder()),
-        pu = iri_const(&p_lease_until()),
-        h = literal(holder),
-    ))
-}
-
-/// ASK whether `holder` holds the lease `key` until `until`.
-pub fn ask_lease(key: &str, holder: &str, until: i64) -> Result<String, BuildError> {
-    Ok(format!(
-        "ASK {{ GRAPH {l} {{ {k} {ph} {h} . {k} {pu} {until} }} }}",
-        l = iri_const(LEASES),
-        k = iri(key)?,
-        ph = iri_const(&p_lease_holder()),
-        pu = iri_const(&p_lease_until()),
-        h = literal(holder),
-    ))
-}
-
 /// ASK whether a resource is indexed: its graph holds the reserved index record.
 pub fn ask_exists(resource: &str) -> Result<String, BuildError> {
     Ok(format!(
@@ -1632,39 +1583,6 @@ mod tests {
         assert_eq!(rows, 1);
         run(&mut g, &update_end_reclaim("k2")).unwrap();
         assert!(!ask(&g, &ask_reclaiming("k2")));
-    }
-
-    /// A lease goes to one holder at a time, on the engine `sparq-server` runs: another holder
-    /// takes it only once it has run out, and its holder renews it.
-    #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
-    #[test]
-    fn a_lease_has_one_holder_on_the_engine() {
-        let mut g = sparq_core::Graph::load_str("", "ntriples").unwrap();
-        let run = |g: &mut sparq_core::Graph, u: &str| sparq_engine::update_in_place_atomic(g, u);
-        let ask = |g: &sparq_core::Graph, q: &str| sparq_engine::ask(g, q).unwrap();
-        let key = "http://pod/";
-        let take = |g: &mut sparq_core::Graph, holder: &str, until: i64, now: i64| {
-            run(g, &update_take_lease(key, holder, until, now).unwrap()).unwrap();
-            ask(g, &ask_lease(key, holder, until).unwrap())
-        };
-        assert!(take(&mut g, "a", 130, 100), "nobody held it");
-        assert!(!take(&mut g, "b", 140, 110), "a's stands");
-        assert!(take(&mut g, "a", 150, 120), "renewed");
-        assert!(
-            !ask(&g, &ask_lease(key, "a", 130).unwrap()),
-            "the old term went"
-        );
-        assert!(!take(&mut g, "b", 160, 150), "a's stands until it runs out");
-        assert!(take(&mut g, "b", 190, 151), "ran out");
-        assert!(!take(&mut g, "a", 200, 160), "taken");
-        let rows = sparq_engine::query(
-            &g,
-            &format!("SELECT ?p ?o WHERE {{ GRAPH <{LEASES}> {{ <{key}> ?p ?o }} }}"),
-        )
-        .unwrap()
-        .rows
-        .len();
-        assert_eq!(rows, 2, "one holder and one term");
     }
 
     /// Issue #6836: the fenced create and delete do nothing once fenced, and as before otherwise,
