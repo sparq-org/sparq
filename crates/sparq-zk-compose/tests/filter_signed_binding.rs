@@ -19,13 +19,7 @@ use sparq_zk_compose::manifest::FieldHex;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn nargo_available() -> bool {
-    Command::new("nargo")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+mod support;
 
 /// `crates/sparq-zk-compose` -> `../../zk/compose`.
 fn compose_dir() -> PathBuf {
@@ -125,8 +119,7 @@ fn try_witness(pkg: &str, toml: &str, tag: &str) -> bool {
 
 #[test]
 fn signed_int_binding_matches_real_encode() {
-    if !nargo_available() {
-        eprintln!("nargo absent; skipping signed-int binding anchor");
+    if !support::require_toolchain("signed_int_binding_matches_real_encode", &["nargo"]) {
         return;
     }
     // value = -42 committed by the REAL pipeline; the circuit must re-derive its
@@ -143,8 +136,7 @@ fn signed_int_binding_matches_real_encode() {
 
 #[test]
 fn signed_int_binding_rejects_sign_lie() {
-    if !nargo_available() {
-        eprintln!("nargo absent; skipping signed-int sign-lie anchor");
+    if !support::require_toolchain("signed_int_binding_rejects_sign_lie", &["nargo"]) {
         return;
     }
     // Anchor encoding is for -42, but the prover witnesses +42 (neg=false). The
@@ -160,8 +152,7 @@ fn signed_int_binding_rejects_sign_lie() {
 
 #[test]
 fn decimal_binding_matches_real_encode() {
-    if !nargo_available() {
-        eprintln!("nargo absent; skipping decimal binding anchor");
+    if !support::require_toolchain("decimal_binding_matches_real_encode", &["nargo"]) {
         return;
     }
     // value = 123.45 committed by the REAL pipeline (ID=3, FD=2).
@@ -177,8 +168,7 @@ fn decimal_binding_matches_real_encode() {
 
 #[test]
 fn decimal_binding_rejects_fraction_lie() {
-    if !nargo_available() {
-        eprintln!("nargo absent; skipping decimal fraction-lie anchor");
+    if !support::require_toolchain("decimal_binding_rejects_fraction_lie", &["nargo"]) {
         return;
     }
     // Anchor encoding is for 123.45; prover witnesses 123.99 fraction digits. The

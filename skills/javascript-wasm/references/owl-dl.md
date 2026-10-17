@@ -117,7 +117,12 @@ kept version's terms. The raw glue class is `OwlDlSession`
 
 ## Scope (honest)
 
-The decided fragment is SROIQ(D) without the top and bottom properties: regular property
+The decided fragment is SROIQ(D), including the built-in properties (`owl:topObjectProperty`,
+whose restrictions reach every individual, so an ontology using it is classified with the ABox
+and more often answers `'Unconfirmed'`; `owl:bottomObjectProperty` and `owl:bottomDataProperty`,
+which relate nothing; a property above `owl:topObjectProperty`, the top property in a chain
+body, equivalent or inverse to an ordinary property, or in a key, and `owl:topDataProperty`
+anywhere but as a super-property, are `OutOfFragment`): regular property
 chains (`owl:propertyChainAxiom`) and transitivity, every class constructor
 including nominals (`oneOf`, `hasValue` on object properties; with nominals the ABox takes
 part in classification, so `A ≡ {a}` and `a ∈ B` give `A ⊑ B`), object properties with inverses and hierarchies, the role
@@ -133,14 +138,15 @@ literal in an assertion makes the ontology inconsistent (`"sixteen"^^xsd:nonNega
 Keys (`hasKey`) are decided over named individuals; a key whose data values are not
 fixed to literals answers `'Unconfirmed'`. **Keys on a non-simple object property (transitive,
 or implied by a chain or a transitive sub-property), a property hierarchy whose automaton
-would exceed a fixed size, the top/bottom properties in axioms,
+would exceed a fixed size,
 datatypes and literals outside the OWL 2 datatype map, and a property used as both an
 object and a data property currently answer `consistent: 'unknown'` with
 `reason.kind: 'OutOfFragment'`** and the triples of the axiom that uses them; a datatype
 question the reasoner does not decide (for example an XSD pattern with a block escape)
 answers `reason.kind: 'DatatypeUnknown'` with the triples involved. Nominals are decided
-without SHOIQ's NI-rule: when nominals tie a part of the candidate model that blocking
-repeats to an individual whose number restrictions the repetition could break, the
-answer is `reason.kind: 'Unconfirmed'` instead of a verdict. The answer is never a guess: every verdict is either
+with SHOIQ's NI-rule; when nominals tie a part of the candidate model that blocking
+repeats to an individual whose number restrictions the repetition could break and the
+rule does not apply (the at-most restriction is one disjunct of a union), the answer is
+`reason.kind: 'Unconfirmed'` instead of a verdict. The answer is never a guess: every verdict is either
 decided or `'unknown'` with a reason. Budgets are deterministic work counts (`maxSteps`: rule applications, `maxNodes`: completion-graph
 nodes, at most 2^32 - 1), not time limits; the defaults are those of `sparq_reason_dl::owl2dl::Budget::default()`.

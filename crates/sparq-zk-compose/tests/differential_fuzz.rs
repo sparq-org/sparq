@@ -72,16 +72,7 @@ fn base_seed() -> u64 {
         .unwrap_or(0x5EED_C0FFEE_u64)
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -420,8 +411,7 @@ fn run_differential(iters: u64, full_prove: bool) -> u64 {
 /// verdict is UNprovable (soundness). Skips cleanly if nargo/bb absent.
 #[test]
 fn differential_fuzz_witness_path() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping differential fuzzer");
+    if !support::require_toolchain("differential_fuzz_witness_path", &["nargo", "bb"]) {
         return;
     }
     let n = run_differential(DEFAULT_ITERS, false);
@@ -441,8 +431,7 @@ fn differential_fuzz_witness_path() {
 #[test]
 #[ignore = "slow: full bb prove per fuzz case (sq-61g heavy variant)"]
 fn differential_fuzz_full_prove() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping heavy differential fuzzer");
+    if !support::require_toolchain("differential_fuzz_full_prove", &["nargo", "bb"]) {
         return;
     }
     let n = run_differential(HEAVY_ITERS, true);
@@ -478,8 +467,7 @@ use sparq_zk_compose::manifest::CircuitId;
 /// preserved by the new member).
 #[test]
 fn sq_wto_three_digit_operand_proves_not_silently_unprovable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-wto 3-digit prove test");
+    if !support::require_toolchain("sq_wto_three_digit_operand_proves_not_silently_unprovable", &["nargo", "bb"]) {
         return;
     }
     let value: u64 = 123; // 3 digits — the old smallest-bucket bug's witness.
