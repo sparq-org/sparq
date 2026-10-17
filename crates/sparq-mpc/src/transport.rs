@@ -939,7 +939,7 @@ pub fn run_cell_networked(
 ) -> Result<NetworkCell, MpcError> {
     if query_class == QueryClass::ObliviousShuffle && public_permutation.is_none() {
         return Err(MpcError::Protocol(
-            "run_cell_networked: QueryClass::ObliviousShuffle drives the transport              shuffle, whose PERMUTATION IS PUBLIC - every party is sent each switch's              endpoints and its control bit in the clear. A caller that accepts that              passes `Some(PublicPermutation::acknowledged())`; a private-output path              needs secret control bits, which this tier does not have"
+            "run_cell_networked: QueryClass::ObliviousShuffle drives the transport shuffle, whose PERMUTATION IS PUBLIC - every party is sent each switch's endpoints and its control bit in the clear. A caller that accepts that passes `Some(PublicPermutation::acknowledged())`; a private-output path needs secret control bits, which this tier does not have"
                 .to_string(),
         ));
     }
@@ -1005,8 +1005,9 @@ pub fn run_cell_networked(
             // The caller's own token, checked for presence above: this function
             // never builds one.
             let ack = public_permutation.ok_or_else(|| {
-                MpcError::Protocol("run_cell_networked: missing public-permutation                                     acknowledgement"
-                    .to_string())
+                MpcError::Protocol(
+                    "run_cell_networked: missing public-permutation acknowledgement".to_string(),
+                )
             })?;
             let (opened, gates) = coord.shuffle_public_permutation(dealer, &col_values, ack)?;
             (opened.iter().copied().sum(), gates)

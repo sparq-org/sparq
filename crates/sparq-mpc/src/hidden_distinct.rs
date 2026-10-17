@@ -71,7 +71,7 @@
 //!   every per-comparison swap bit and every adjacent-equality `dup` bit
 //!   (secret-shared, never opened); WHICH rows were duplicates of which (the
 //!   multiplicity structure); the input→output position linkage (the final shuffle
-//!   destroys it); the input→output linkage of the surviving rows.
+//!   destroys it).
 //! - **Disclosed:** the row count `N` and the public padded bound `B` (the sort
 //!   network width and the output slot count are public, the standard MPC
 //!   assumption); the endpoint TERMS of the surviving distinct pairs (the result the

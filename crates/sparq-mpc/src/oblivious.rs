@@ -818,8 +818,10 @@ pub fn shuffle(
 /// a width that is not is refused rather than masked by position.
 ///
 /// The zero-sharing is evaluated at each share's OWN `x`, so a column on
-/// non-canonical evaluation points is re-randomised correctly too (the caller's
-/// own shape checks decide whether such a column is acceptable at all).
+/// non-canonical evaluation points is re-randomised correctly too. Whether such a
+/// column is acceptable at all is decided by the layout checks that run before any
+/// draw: one common point vector, distinct and non-zero mod p, and degree at most
+/// `t`.
 ///
 /// ## `t = 0` re-randomises nothing, and is counted as nothing
 ///
