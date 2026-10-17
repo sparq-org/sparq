@@ -23,6 +23,7 @@ members = [
     "result_v1_k2_n16_p3_r4_f0",
     "result_v1_k2_n16_p3_r4_f2",
     "scan_k1_n16_r4",
+    "scan_v2dl_k1_n16_r4",
     # [OPUS-4.8] sq-pzet: remaining scan (k,n,r)-lattice members the family could
     # derive but that had no compiled package (silent-unprovability gap, sq-wto
     # class). NOT a soundness change (verifier remains NOT-yet-sound, sq-qhy4).
@@ -102,6 +103,7 @@ members = [
     # (sq-qhy4) -- the verifier remains NOT-yet-sound; this is not a soundness change.
     "holder_set_d4",
     "join_eq_na16_nb16",
+    "join_eq_v2dl_na16_nb16",
     # [OPUS-4.8] sq-pzet: remaining hidden-join graph-size members (the N=64
     # bucket) so a join composes with an n=64 scan.
     "join_eq_na16_nb64",

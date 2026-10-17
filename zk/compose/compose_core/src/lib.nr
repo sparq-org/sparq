@@ -45,6 +45,10 @@ pub mod issuer;
 pub mod holder;
 // [OPUS-4.8] sq-bwwl (hidden-join sq-8mwz): in-circuit hidden cross-credential JOIN.
 pub mod join;
+// sq-j506 (#7103): the DualLeafV2 component-witnessed variants of the scan and
+// hidden-join relations -- the shipped bodies, fed encodings recomputed from
+// witnessed leaf components under the S3.3 band and S14.1 reserved-tag checks.
+pub mod v2_dual_leaf_relations;
 // [FABLE-5] sq-3kd2g.2 (#1591): bounded-depth path reachability -- property
 // paths `p+`/`p*` under the bounded existence-only statement of
 // research/zksparql-fragment-extension.md sec 4 (depth D a compile-time constant
