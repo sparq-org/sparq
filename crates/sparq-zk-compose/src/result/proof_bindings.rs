@@ -57,6 +57,9 @@ fn fixture(job: &Value) -> Fallible<(Vec<ResultCredential>, ResultPolicy)> {
         }],
         min_version: 7,
         max_version: 7,
+        // sq-j506: this corpus fixture exercises the capacity profiles and the v4
+        // statement, not method binding, so it takes the legacy downgrade.
+        admit_unbound_legacy: true,
     };
     if triples.is_empty() {
         return Ok((vec![], policy));

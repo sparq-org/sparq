@@ -89,19 +89,31 @@ impl NumericContract {
 
     fn accepts_version(self, version: u32) -> bool {
         match self {
-            Self::Unsigned(_) => matches!(version, 1 | 2),
+            Self::Unsigned(_) => matches!(version, 1 | 2 | BOUND_VERSION),
             Self::Signed => version == signed::VERSION,
             Self::PublicPattern => version == PUBLIC_PATTERN_VERSION,
         }
     }
 
+    /// The member this contract issues through.
+    ///
+    /// sq-j506: for the UNSIGNED family, the default selects a METHOD-BOUND
+    /// `result_v5_*` member and refuses a capacity bucket that has none, rather
+    /// than silently issuing through a method-unbound legacy member.
+    /// `admit_unbound_legacy` routes back to the legacy map. The signed and
+    /// public-pattern families have no method-bound member yet, so they are
+    /// unchanged and stay legacy-only (tracked on sq-j506).
     fn package(
         self,
         credentials: usize,
         filters: usize,
         depth: u32,
+        admit_unbound_legacy: bool,
     ) -> Result<(&'static str, u32), ResultError> {
         match self {
+            Self::Unsigned(capacity) if !admit_unbound_legacy => {
+                bound_package(credentials, filters, capacity, depth)
+            }
             Self::Unsigned(capacity) => package(credentials, filters, capacity, depth),
             Self::Signed => signed::package(credentials, filters, depth),
             Self::PublicPattern => public_pattern_package(credentials, filters, depth),
@@ -248,6 +260,22 @@ pub struct ResultPolicy {
     pub min_version: u64,
     /// Newest accepted publication version.
     pub max_version: u64,
+    /// sq-j506: act on method-UNBOUND legacy credentials, and issue through the
+    /// legacy members.
+    ///
+    /// `false` — the default — acts only on a credential whose issuer attested
+    /// the string-canonical commitment METHOD (the `ZKSIG_M5` presentation
+    /// message the `result_v5_*` members authenticate over). A method-unbound
+    /// `ZKSIG_C3` attestation is refused with a named error.
+    ///
+    /// `true` is the written-down downgrade, the same shape as
+    /// [`crate::method_auth::MethodPolicy::admit_unbound`]. It exists because
+    /// the unbound members are a RETAINED contract: 30 are shipped and the four
+    /// `result_v1_*` ones are pinned to an immutable verification-key baseline,
+    /// so proofs already issued against them must keep verifying. Taking it
+    /// means acting on a credential that names no commitment method, which is
+    /// the property the method-bound family exists to remove.
+    pub admit_unbound_legacy: bool,
 }
 
 // Capacity is public; the exact decimal length remains a private witness.
@@ -413,6 +441,7 @@ fn result_presentation_message(commitment: &Fr, salt: &Fr, status_ref: &Fr) -> F
 /// On success the returned field is the exact message the in-circuit Schnorr
 /// check runs against, so host acceptance and circuit acceptance cannot diverge.
 fn authenticate_string_canonical(
+    admit_unbound_legacy: bool,
     issuer: &PublicKey,
     signature: &Signature,
     commitment: &Fr,
@@ -435,8 +464,16 @@ fn authenticate_string_canonical(
             "the authenticated commitment method {} is not the string-canonical method this relation proves",
             m.scheme_iri()
         ))),
+        // sq-j506: the method-UNBOUND `ZKSIG_C3` attestation is what the RETAINED
+        // `result_v1_*` / `result_v2_*` / `result_v3_*` members recompute, so the
+        // written-down downgrade returns exactly that message -- host acceptance
+        // and circuit acceptance still cannot diverge, because the message
+        // returned is the one the selected member's relation folds.
+        AuthenticatedMethod::Unbound if admit_unbound_legacy => {
+            Ok(sig::commitment_message_with_status(commitment, salt, status_ref))
+        }
         AuthenticatedMethod::Unbound => Err(reject(
-            "the issuer signature attests no commitment method; this relation requires an attested string-canonical commitment",
+            "the issuer signature attests no commitment method; this relation requires an attested string-canonical commitment (ResultPolicy::admit_unbound_legacy is the written-down downgrade for already-issued material)",
         )),
     }
 }
@@ -501,6 +538,37 @@ impl ResultPolicy {
             .collect()
     }
 }
+
+/// The METHOD-BOUND member for a capacity bucket, or a named refusal.
+///
+/// Only the two `(K, 0, 10)` buckets have a `result_v5_*` member so far; every
+/// other bucket is refused rather than silently issued through a method-unbound
+/// legacy member. The remaining capacity points are tracked on sq-j506.
+fn bound_package(
+    credentials: usize,
+    hidden_filters: usize,
+    capacity: PrivateIntegerCapacity,
+    depth: u32,
+) -> Result<(&'static str, u32), ResultError> {
+    let bits = match (hidden_filters == 0, capacity) {
+        (true, PrivateIntegerCapacity::TwoDigits) => 0,
+        (true, PrivateIntegerCapacity::FullU64) => {
+            return Err(reject("numeric capacity without a private predicate"))
+        }
+        (false, PrivateIntegerCapacity::TwoDigits) => 8,
+        (false, PrivateIntegerCapacity::FullU64) => 64,
+    };
+    match (credentials, bits, depth) {
+        (1, 0, 10) => Ok(("result_v5_k1_n16_p3_r4_f0_d10", BOUND_VERSION)),
+        (2, 0, 10) => Ok(("result_v5_k2_n16_p3_r4_f0_d10", BOUND_VERSION)),
+        _ => Err(reject(
+            "no method-bound successful-result member at this capacity bucket;              issue at (credentials in {1,2}, no private predicate, status depth 10),              or take the written-down ResultPolicy::admit_unbound_legacy downgrade",
+        )),
+    }
+}
+
+/// Contract version of the method-bound `result_v5_*` members.
+pub const BOUND_VERSION: u32 = 5;
 
 fn package(
     credentials: usize,
@@ -721,7 +789,12 @@ fn public_statement_for(
     let entries = policy.entries()?;
     let status_depth = policy.status_depth()?;
     let (package, version) =
-        contract.package(p.issuer_slots.len(), hidden_filters.len(), status_depth)?;
+        contract.package(
+            p.issuer_slots.len(),
+            hidden_filters.len(),
+            status_depth,
+            policy.admit_unbound_legacy,
+        )?;
     if p.version != version {
         return Err(reject(
             "version does not match independently derived capacity profile",
@@ -1082,6 +1155,7 @@ fn prepare_result_contract(
             // signature as valid: a dual-leaf credential's leaves are not the
             // shape this relation proves.
             authenticate_string_canonical(
+                policy.admit_unbound_legacy,
                 &c.issuer,
                 &c.signature,
                 &c.graph.commitment,
@@ -1223,7 +1297,8 @@ fn prepare_result_contract(
         NumericProfile::Unsigned => NumericContract::Unsigned(integer_capacity),
         NumericProfile::Signed => NumericContract::Signed,
     };
-    let (_, version) = contract.package(used.len(), hidden_filters, status_depth)?;
+    let (_, version) =
+        contract.package(used.len(), hidden_filters, status_depth, policy.admit_unbound_legacy)?;
     // Shared private storage only: the signed wrapper emits its separate wire
     // type, omitting this unsigned-only capacity field, after proving succeeds.
     let presentation = ResultPresentation {
@@ -1290,6 +1365,7 @@ fn prepare_result_contract(
         let list = sig::status_list_id_to_field(&c.status_list);
         let reference = sig::status_ref_digest(&list, c.status_index, c.status_version);
         let message = authenticate_string_canonical(
+            policy.admit_unbound_legacy,
             &c.issuer,
             &c.signature,
             &c.graph.commitment,
@@ -1650,6 +1726,12 @@ mod tests {
             ],
             min_version: 7,
             max_version: 7,
+            // sq-j506: these fixtures exercise the CAPACITY buckets, most of which
+            // have no method-bound member yet, so they take the written-down
+            // legacy downgrade. The method-binding behaviour has its own guards
+            // (`issuance_selects_a_method_bound_member_or_refuses_by_name`,
+            // `the_written_down_downgrade_accepts_method_unbound_legacy_material`).
+            admit_unbound_legacy: true,
         };
         let nonce = VerifierNonce::from_field(Fr::from(424242u64));
         let rows = vec![BTreeMap::from([(
@@ -1765,6 +1847,7 @@ mod tests {
             c.status_version,
         );
         let message = authenticate_string_canonical(
+            false,
             &c.issuer,
             &c.signature,
             &c.graph.commitment,
@@ -1812,6 +1895,7 @@ mod tests {
             &c.signature
         ));
         let err = authenticate_string_canonical(
+            false,
             &c.issuer,
             &c.signature,
             &c.graph.commitment,
@@ -1824,6 +1908,93 @@ mod tests {
             "unexpected refusal: {}",
             err
         );
+    }
+
+    /// THE OPT-IN. The same method-unbound credential the test above refuses is
+    /// ACCEPTED under `ResultPolicy::admit_unbound_legacy`, and the message it
+    /// returns is the legacy `ZKSIG_C3` one -- exactly what the retained
+    /// `result_v1_*` / `result_v2_*` / `result_v3_*` relations recompute, so host
+    /// and circuit still cannot diverge. The opt-in is the whole difference.
+    #[test]
+    fn the_written_down_downgrade_accepts_method_unbound_legacy_material() {
+        let c = credential_signed_over(
+            vec![triple(
+                "urn:alice",
+                "urn:name",
+                Term::Literal(Literal::new_simple_literal("Alice")),
+            )],
+            1,
+            3,
+            "urn:status:people",
+            sig::commitment_message_with_status,
+        );
+        let reference = sig::status_ref_digest(
+            &sig::status_list_id_to_field(&c.status_list),
+            c.status_index,
+            c.status_version,
+        );
+        let message = authenticate_string_canonical(
+            true,
+            &c.issuer,
+            &c.signature,
+            &c.graph.commitment,
+            &c.graph.salt,
+            &reference,
+        )
+        .expect("the written-down downgrade accepts already-issued unbound material");
+        assert_eq!(
+            field_to_hex(&message),
+            field_to_hex(&sig::commitment_message_with_status(
+                &c.graph.commitment,
+                &c.graph.salt,
+                &reference
+            )),
+            "the downgrade must return the legacy ZKSIG_C3 message the retained relations fold"
+        );
+        // And NOT the method-bound one, so the two paths stay distinguishable.
+        assert_ne!(
+            field_to_hex(&message),
+            field_to_hex(&result_presentation_message(
+                &c.graph.commitment,
+                &c.graph.salt,
+                &reference
+            ))
+        );
+    }
+
+    /// Issuance is METHOD-BOUND by default: a covered capacity bucket selects a
+    /// `result_v5_*` member at contract version 5, and an uncovered one is
+    /// refused by name rather than silently issued through a method-unbound
+    /// legacy member.
+    #[test]
+    fn issuance_selects_a_method_bound_member_or_refuses_by_name() {
+        let unsigned = NumericContract::Unsigned(PrivateIntegerCapacity::TwoDigits);
+        for credentials in [1usize, 2] {
+            let (package, version) = unsigned
+                .package(credentials, 0, 10, false)
+                .expect("the covered buckets have a method-bound member");
+            assert_eq!(version, BOUND_VERSION);
+            assert!(
+                package.starts_with("result_v5_"),
+                "default issuance must select a method-bound member, got {}",
+                package
+            );
+        }
+        // An uncovered bucket: status depth 17 has no method-bound member yet.
+        let err = unsigned
+            .package(1, 0, 17, false)
+            .expect_err("an uncovered bucket must be refused, not silently downgraded");
+        assert!(
+            err.to_string().contains("no method-bound successful-result member"),
+            "unexpected refusal: {}",
+            err
+        );
+        // ...and the written-down downgrade routes it back to the legacy member.
+        let (legacy, legacy_version) = unsigned
+            .package(1, 0, 17, true)
+            .expect("the downgrade issues through the legacy map");
+        assert_eq!(legacy_version, 2);
+        assert_eq!(legacy, "result_v2_k1_n16_p3_r4_f0_i0_d17");
     }
 
     /// A credential whose issuer attested a DIFFERENT method is refused even
@@ -1859,6 +2030,7 @@ mod tests {
                 c.status_version,
             );
             let err = authenticate_string_canonical(
+                false,
                 &c.issuer,
                 &c.signature,
                 &c.graph.commitment,
@@ -1897,7 +2069,15 @@ mod tests {
             prepare_result(QUERY, &honest, &rows, &policy, &nonce).is_ok(),
             "the honest wallet must prepare, or the refusal below is vacuous"
         );
-        assert!(prepare_result(QUERY, &legacy, &rows, &policy, &nonce).is_err());
+        // sq-j506: the shared fixture policy takes the legacy downgrade (most
+        // capacity buckets have no method-bound member yet), so this refusal is
+        // asserted under the DEFAULT method-bound policy -- which is the policy
+        // the refusal is a property of.
+        let bound = ResultPolicy { admit_unbound_legacy: false, ..policy.clone() };
+        assert!(prepare_result(QUERY, &legacy, &rows, &bound, &nonce).is_err());
+        // ...and the SAME legacy credentials prepare under the written-down
+        // downgrade, so the refusal is about the policy and not about the wallet.
+        assert!(prepare_result(QUERY, &legacy, &rows, &policy, &nonce).is_ok());
     }
 
     #[test]
@@ -2823,6 +3003,12 @@ mod tests {
             }],
             min_version: 7,
             max_version: 7,
+            // sq-j506: these fixtures exercise the CAPACITY buckets, most of which
+            // have no method-bound member yet, so they take the written-down
+            // legacy downgrade. The method-binding behaviour has its own guards
+            // (`issuance_selects_a_method_bound_member_or_refuses_by_name`,
+            // `the_written_down_downgrade_accepts_method_unbound_legacy_material`).
+            admit_unbound_legacy: true,
         };
         (
             c,
