@@ -13,6 +13,15 @@
 //!   `R`-neighbours in `A`, creates `n` fresh successors.
 //! - **≈**: `s ≈ t` merges the later node into the earlier one (a blockable node into a root),
 //!   pruning the merged node's descendants; `s ≉ s` is a clash.
+//! - **o**: a node labelled with the nominal `{a}` is merged into `a`'s node (the ABox
+//!   asserts `{a}(a)`). These merges are queued and done before anything else, so none is
+//!   pending when a branch point is created.
+//!
+//! **Nominals without the NI-rule.** A nominal can leave an edge between an individual and a
+//! blockable node that is not its child. A complete, clash-free graph is reported
+//! satisfiable only when it provably unravels into a model despite such edges (see
+//! [`Tableau::unravels`]); otherwise the branch is closed and, if no branch gives a model,
+//! the run returns [`Stop::Unconfirmed`], never a verdict.
 //!
 //! Blocking is pairwise anywhere blocking over full labels, recomputed whenever the `≥`-rule
 //! runs, which makes the calculus terminate in the presence of inverse roles and number
@@ -46,7 +55,7 @@
 //! [`Stop::Undecided`] instead of "unsatisfiable" when one of them was undecided. Only a
 //! clash-free, complete branch whose datatype check succeeded is reported satisfiable.
 
-use super::clausify::{Atom, AtomKind, Clauses, Head, Role, Var};
+use super::clausify::{Atom, AtomKind, Clauses, Head, Key, Role, Var};
 use super::data_ranges::{self, DataRangeExpr, Tri};
 use super::datatypes::Value;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -58,6 +67,11 @@ pub(crate) type Node = u32;
 /// The branch points a fact depends on, sorted ascending.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Dep(Option<Rc<[u32]>>);
+
+/// A pseudo branch point no branch has: the dependency of a branch closed without a
+/// clash (undecided or unconfirmed). Backtracking never removes it, so whatever is derived
+/// on the alternatives after such a close keeps it, and is never read as forced.
+const UNCERTAIN: u32 = u32::MAX;
 
 impl Dep {
     fn single(b: u32) -> Dep {
@@ -153,6 +167,12 @@ pub(crate) enum Stop {
     /// undecided. Carries the axioms (indices into the ontology) of the data ranges
     /// involved in the first undecided check.
     Undecided(Vec<u32>),
+    /// Every branch closed, but at least one only because its completion graph could not
+    /// be confirmed to be a model: nominals connect a copied or blocked part of the graph
+    /// to a node whose number restrictions the copies could break (the case the NI-rule of
+    /// SHOIQ handles, which this calculus does not implement), or two individuals might
+    /// share a key's data value that is not fixed.
+    Unconfirmed,
 }
 
 /// A clause's neighbour variable: its role atoms, its concept atoms, and whether it binds
@@ -171,6 +191,8 @@ pub(crate) struct ClauseIndex {
     /// Per clause, per neighbour variable: its role atoms, its concept atoms, and whether it
     /// binds only nodes after the previous variable's.
     ys: Vec<Vec<YVar>>,
+    /// The clauses with two or more neighbour variables (number restrictions).
+    multi_y: Vec<u32>,
 }
 
 impl ClauseIndex {
@@ -201,6 +223,9 @@ impl ClauseIndex {
                 ys[y as usize].1.push(a);
             }
             idx.ys.push(ys);
+            if cl.n_y >= 2 {
+                idx.multi_y.push(i);
+            }
         }
         idx
     }
@@ -253,8 +278,8 @@ pub(crate) struct Tableau<'c> {
     nodes: Vec<NodeData>,
     roles: FxHashMap<(u32, Node, Node), Dep>,
     ineq: FxHashMap<(Node, Node), Dep>,
-    /// `t → s` for every merged node `t`.
-    merges: FxHashMap<Node, Node>,
+    /// `t → s` for every merged node `t`, with what the merge depends on.
+    merges: FxHashMap<Node, (Node, Dep)>,
     trail: Vec<Undo>,
     pending: Vec<Instance>,
     branches: Vec<Branch>,
@@ -279,6 +304,29 @@ pub(crate) struct Tableau<'c> {
     count_memo: FxHashMap<(Vec<Atom>, usize, Vec<Value>), Tri>,
     /// `contains` answers, by (data atom, value).
     contains_memo: FxHashMap<(Atom, Value), Tri>,
+    /// Nodes that gained a nominal atom `{a}` and may have to be merged into `a`'s node.
+    nominal_todo: Vec<Node>,
+    /// A complete, clash-free branch was closed because it could not be confirmed to
+    /// be a model ([`Stop::Unconfirmed`]).
+    unconfirmed: bool,
+    /// The nodes of the named individuals.
+    named: Vec<Node>,
+}
+
+/// What the key rule did.
+enum KeyStep {
+    /// It merged two individuals (or the budget ran out).
+    Merged,
+    /// Nothing to merge, but some pair might share an unfixed data value.
+    Unsure,
+    Done,
+}
+
+/// Whether two individuals share a key's values.
+enum Shared {
+    No,
+    Maybe,
+    Yes(Dep),
 }
 
 /// The outcome of the datatype check of one component.
@@ -324,6 +372,9 @@ impl<'c> Tableau<'c> {
             undecided: None,
             count_memo: FxHashMap::default(),
             contains_memo: FxHashMap::default(),
+            nominal_todo: Vec::new(),
+            unconfirmed: false,
+            named: Vec::new(),
         }
     }
 
@@ -361,6 +412,9 @@ impl<'c> Tableau<'c> {
         let mut nodes: FxHashMap<(Node, &Value), Node> = FxHashMap::default();
         let mut by_ind: FxHashMap<Node, Vec<Node>> = FxHashMap::default();
         for (r, a, atom, v) in facts {
+            if self.over_budget() || self.nodes.len() > self.budget.max_nodes {
+                return;
+            }
             let a = self.canonical(*a);
             let y = match nodes.get(&(a, v)) {
                 Some(&y) => y,
@@ -376,6 +430,15 @@ impl<'c> Tableau<'c> {
         }
         let mut inds: Vec<Node> = by_ind.keys().copied().collect();
         inds.sort_unstable();
+        // The pairwise inequalities are quadratic in an individual's values: charge them
+        // before making them (`run` reports the exhaustion before using anything).
+        let pairs = inds
+            .iter()
+            .map(|a| by_ind[a].len().saturating_mul(by_ind[a].len()) / 2)
+            .fold(0usize, usize::saturating_add);
+        if self.charge(pairs) || self.nodes.len() > self.budget.max_nodes {
+            return;
+        }
         for a in inds {
             let ys = by_ind[&a].clone();
             for (i, &y) in ys.iter().enumerate() {
@@ -389,10 +452,13 @@ impl<'c> Tableau<'c> {
     /// The label of a root node after a satisfiable run: each atom, and whether it holds
     /// without depending on any branch choice.
     pub(crate) fn root_label(&self, n: Node) -> Vec<(Atom, bool)> {
-        let mut out: Vec<(Atom, bool)> = self.nodes[n as usize]
+        // A root a nominal merged into another node has that node's label; its facts hold
+        // of `n` only given the merges on the way.
+        let (s, dm) = self.canonical_dep(n);
+        let mut out: Vec<(Atom, bool)> = self.nodes[s as usize]
             .label
             .iter()
-            .map(|(&a, d)| (a, d.is_empty()))
+            .map(|(&a, d)| (a, dm.is_empty() && d.is_empty()))
             .collect();
         out.sort_unstable();
         out
@@ -400,10 +466,21 @@ impl<'c> Tableau<'c> {
 
     /// The node `n` was (transitively) merged into, or `n` itself.
     fn canonical(&self, mut n: Node) -> Node {
-        while let Some(&s) = self.merges.get(&n) {
-            n = s;
+        while let Some((s, _)) = self.merges.get(&n) {
+            n = *s;
         }
         n
+    }
+
+    /// [`canonical`](Self::canonical), with the branch points the merges on the way depend
+    /// on: a fact found at the canonical node holds of `n` only given those merges.
+    fn canonical_dep(&self, mut n: Node) -> (Node, Dep) {
+        let mut d = Dep::default();
+        while let Some((s, dd)) = self.merges.get(&n) {
+            d = d.union(dd);
+            n = *s;
+        }
+        (n, d)
     }
 
     /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
@@ -416,10 +493,15 @@ impl<'c> Tableau<'c> {
             if let Some(d) = self.clash.take() {
                 if !self.backtrack(d) {
                     return match self.undecided.take() {
-                        None => Ok(false),
                         Some(atoms) => Err(Stop::Undecided(self.data_axioms(&atoms))),
+                        None if self.unconfirmed => Err(Stop::Unconfirmed),
+                        None => Ok(false),
                     };
                 }
+                continue;
+            }
+            if let Some(n) = self.nominal_todo.pop() {
+                self.merge_nominal(n);
                 continue;
             }
             if let Some(x) = self.dirty.pop() {
@@ -443,8 +525,164 @@ impl<'c> Tableau<'c> {
             if self.expand() {
                 continue;
             }
+            match self.apply_keys() {
+                KeyStep::Merged => continue,
+                KeyStep::Unsure => {
+                    self.close_unconfirmed();
+                    continue;
+                }
+                KeyStep::Done => {}
+            }
+            let unravels = self.unravels();
+            if self.over_budget() {
+                // The confirmation itself ran out: no verdict.
+                return Err(Stop::Exhausted);
+            }
+            if !unravels {
+                self.close_unconfirmed();
+                continue;
+            }
             return Ok(true);
         }
+    }
+
+    /// Closes a complete branch that is not a verdict either way, on every choice made so
+    /// far (chronological backtracking), so the search looks for a branch that is.
+    fn close_unconfirmed(&mut self) {
+        self.unconfirmed = true;
+        let mut all: Vec<u32> = (0..self.branches.len() as u32).collect();
+        all.push(UNCERTAIN);
+        self.set_clash(Dep(Some(Rc::from(all))));
+    }
+
+    /// Marks `n` as a named individual's node (keys apply to named individuals only).
+    pub(crate) fn mark_named(&mut self, n: Node) {
+        self.named.push(n);
+    }
+
+    /// The key rule, on a complete graph: two named individuals in a key's class that share
+    /// a named value on every object property and a value on every data property of the key
+    /// are merged. A data value is known only when its node is fixed to one literal; a pair
+    /// that might share an unfixed value is [`KeyStep::Unsure`].
+    fn apply_keys(&mut self) -> KeyStep {
+        if self.c.keys.is_empty() {
+            return KeyStep::Done;
+        }
+        // A named individual's canonical node stands for it only given the merges on the way.
+        let mut named: Vec<(Node, Dep)> = self
+            .named
+            .iter()
+            .map(|&n| self.canonical_dep(n))
+            .filter(|&(n, _)| self.nodes[n as usize].active)
+            .collect();
+        named.sort_unstable_by_key(|&(n, _)| n);
+        named.dedup_by_key(|&mut (n, _)| n);
+        let mut unsure = false;
+        for key in &self.c.keys {
+            let members: Vec<(Node, Dep)> = named
+                .iter()
+                .filter_map(|(n, dn)| match key.class {
+                    None => Some((*n, dn.clone())),
+                    Some(a) => self.nodes[*n as usize]
+                        .label
+                        .get(&a)
+                        .map(|d| (*n, d.union(dn))),
+                })
+                .collect();
+            for (i, (x, dx)) in members.iter().enumerate() {
+                for (y, dy) in &members[i + 1..] {
+                    // A pair scans the named individuals once per object property.
+                    if self.charge(1 + key.roles.len() * named.len()) {
+                        // `run` reports the exhaustion before using anything.
+                        return KeyStep::Merged;
+                    }
+                    match self.key_shared(key, *x, *y, &named) {
+                        Shared::No => {}
+                        Shared::Maybe => unsure = true,
+                        Shared::Yes(d) => {
+                            let d = d.union(dx).union(dy);
+                            self.merge(*x, *y, &d);
+                            return KeyStep::Merged;
+                        }
+                    }
+                }
+            }
+        }
+        if unsure {
+            KeyStep::Unsure
+        } else {
+            KeyStep::Done
+        }
+    }
+
+    /// Whether `x` and `y` share a value on every property of `key`, and on what.
+    fn key_shared(&self, key: &Key, x: Node, y: Node, named: &[(Node, Dep)]) -> Shared {
+        let mut deps = Dep::default();
+        for &r in &key.roles {
+            let z = named
+                .iter()
+                .find(|&&(z, _)| self.has_role(r, x, z) && self.has_role(r, y, z));
+            match z {
+                Some((z, dz)) => {
+                    deps = deps.union(
+                        &self
+                            .role_dep(r, x, *z)
+                            .union(&self.role_dep(r, y, *z))
+                            .union(dz),
+                    )
+                }
+                None => return Shared::No,
+            }
+        }
+        let mut maybe = false;
+        for &d in &key.data {
+            let (vx, ux) = self.data_values(d, x);
+            let (vy, uy) = self.data_values(d, y);
+            let common = vx
+                .iter()
+                .find_map(|(v, da)| vy.iter().find(|(w, _)| w == v).map(|(_, db)| da.union(db)));
+            match common {
+                Some(dv) => deps = deps.union(&dv),
+                // An unfixed value on one side may equal any value on the other.
+                None if (ux && (uy || !vy.is_empty())) || (uy && !vx.is_empty()) => maybe = true,
+                None => return Shared::No,
+            }
+        }
+        if maybe {
+            Shared::Maybe
+        } else {
+            Shared::Yes(deps)
+        }
+    }
+
+    /// The `d`-values of `x`: those of concrete neighbours fixed to one literal (with what
+    /// that depends on), and whether some neighbour's value is not fixed.
+    fn data_values(&self, d: Role, x: Node) -> (Vec<(Value, Dep)>, bool) {
+        let mut fixed = Vec::new();
+        let mut unfixed = false;
+        for (&n, rs) in &self.nodes[x as usize].adj {
+            let node = &self.nodes[n as usize];
+            if !node.active || !node.concrete || !rs.contains(&d) {
+                continue;
+            }
+            let one = node
+                .label
+                .iter()
+                .find_map(|(&a, da)| match self.c.atoms[a as usize] {
+                    AtomKind::Data(i) => match &self.c.data[i as usize] {
+                        DataRangeExpr::OneOf(vs) if vs.len() == 1 => {
+                            Some((vs[0].clone(), da.clone()))
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                });
+            match one {
+                Some((v, da)) => fixed.push((v, da.union(&self.role_dep(d, x, n)))),
+                None => unfixed = true,
+            }
+        }
+        (fixed, unfixed)
     }
 
     fn over_budget(&self) -> bool {
@@ -528,10 +766,43 @@ impl<'c> Tableau<'c> {
         }
         self.trail.push(Undo::Concept(n, a));
         self.steps += 1;
-        if self.forbidden == Some((n, a)) {
-            self.set_clash(d.clone());
+        if let Some((f, fa)) = self.forbidden {
+            let (cf, df) = self.canonical_dep(f);
+            if fa == a && cf == n {
+                self.set_clash(d.union(&df));
+            }
+        }
+        if matches!(self.c.atoms[a as usize], AtomKind::Nominal(_)) {
+            self.nominal_todo.push(n);
         }
         self.mark_with_neighbours(n);
+    }
+
+    /// The nominal rule: a node labelled `{a}` is `a`'s node, so it is merged into it.
+    fn merge_nominal(&mut self, n: Node) {
+        if !self.nodes[n as usize].active {
+            // Merged away: its labels moved to the node it was merged into, which is queued
+            // in turn if it gained a nominal.
+            return;
+        }
+        let mut found: Option<(Node, Dep)> = None;
+        for (&a, d) in &self.nodes[n as usize].label {
+            if let AtomKind::Nominal(i) = self.c.atoms[a as usize] {
+                let (s, ds) = self.canonical_dep(i as Node);
+                if s != n {
+                    found = Some((s, d.union(&ds)));
+                    break;
+                }
+            }
+        }
+        self.charge(self.nodes[n as usize].label.len());
+        if let Some((s, d)) = found {
+            self.merge(n, s, &d);
+            // `n` may have survived (a root with a smaller id) and carry another nominal.
+            if self.nodes[n as usize].active {
+                self.nominal_todo.push(n);
+            }
+        }
     }
 
     fn has_role(&self, r: Role, a: Node, b: Node) -> bool {
@@ -615,6 +886,17 @@ impl<'c> Tableau<'c> {
             self.set_clash(clash);
             return;
         }
+        if let Some((f, fa)) = self.forbidden {
+            // The forbidden node becomes `s`: a forbidden atom `s` already has is a clash.
+            let (cf, df) = self.canonical_dep(f);
+            if cf == t {
+                if let Some(ds) = self.nodes[s as usize].label.get(&fa) {
+                    let clash = d.union(ds).union(&df);
+                    self.set_clash(clash);
+                    return;
+                }
+            }
+        }
         self.prune_descendants(t);
         let label: Vec<(Atom, Dep)> = self.nodes[t as usize]
             .label
@@ -642,7 +924,7 @@ impl<'c> Tableau<'c> {
             .collect();
         self.nodes[t as usize].active = false;
         self.trail.push(Undo::Deactivate(t));
-        self.merges.insert(t, s);
+        self.merges.insert(t, (s, d.clone()));
         self.trail.push(Undo::Merge(t));
         for (a, dd) in label {
             self.add_concept(s, a, &dd);
@@ -960,14 +1242,24 @@ impl<'c> Tableau<'c> {
             }
         }
         self.touched.clear();
+        // Nominal merges are done before any branch point is created, so a queued one is
+        // about a fact the undo just removed.
+        self.nominal_todo.clear();
         self.recheck_all = true;
     }
 
     // ---- ≥-rule and blocking -----------------------------------------------------------
 
     fn blocked(&self) -> Vec<bool> {
+        self.blocking().0
+    }
+
+    /// Per node: whether it is blocked (directly or through its parent), and whether it
+    /// blocks some node.
+    fn blocking(&self) -> (Vec<bool>, Vec<bool>) {
         let len = self.nodes.len();
         let mut blocked = vec![false; len];
+        let mut blocker = vec![false; len];
         let mut seen: FxHashMap<Vec<u32>, Node> = FxHashMap::default();
         for n in 0..len {
             let node = &self.nodes[n];
@@ -987,10 +1279,103 @@ impl<'c> Tableau<'c> {
                 std::collections::hash_map::Entry::Vacant(e) => {
                     e.insert(n as Node);
                 }
-                std::collections::hash_map::Entry::Occupied(_) => blocked[n] = true,
+                std::collections::hash_map::Entry::Occupied(e) => {
+                    blocked[n] = true;
+                    blocker[*e.get() as usize] = true;
+                }
             }
         }
-        blocked
+        (blocked, blocker)
+    }
+
+    /// Whether a complete, clash-free graph is known to unravel into a model.
+    ///
+    /// Without nominals every edge is a tree edge (parent to child) or joins two roots, and
+    /// pairwise blocking unravels the graph: each blocked node is replaced by a copy of its
+    /// blocker's subtree. A nominal merges a blockable node into a root, which leaves an edge
+    /// between a root and a blockable node that is not its child. Such an edge is copied with
+    /// the subtree it hangs from, and the model is still one as long as
+    ///
+    /// - no blocked node has one (it is dropped by the unravelling, together with what it
+    ///   gave the root),
+    /// - no edge joins two blockable nodes outside the tree (an at-most restriction at a
+    ///   root merged nodes of different subtrees), and
+    /// - where the blockable end is copied, no number restriction at the root can match two
+    ///   of its copies.
+    ///
+    /// Otherwise the answer is unconfirmed (SHOIQ needs the NI-rule here). A graph with no
+    /// blocked node is a finite model as it stands.
+    fn unravels(&self) -> bool {
+        let (blocked, blocker) = self.blocking();
+        if !blocked.contains(&true) {
+            return true;
+        }
+        let len = self.nodes.len();
+        // Copied: a blocker or inside a blocker's subtree (parents have smaller ids).
+        let mut copied = vec![false; len];
+        for n in 0..len {
+            let node = &self.nodes[n];
+            if !node.active || node.root {
+                continue;
+            }
+            copied[n] = blocker[n] || node.parent.is_some_and(|p| copied[p as usize]);
+        }
+        for (u, node) in self.nodes.iter().enumerate() {
+            if !node.active || node.concrete {
+                continue;
+            }
+            self.charge(node.adj.len());
+            for &v in node.adj.keys() {
+                let vn = &self.nodes[v as usize];
+                if v as usize == u || !vn.active {
+                    continue;
+                }
+                let tree = node.parent == Some(v) || vn.parent == Some(u as Node);
+                if tree || (node.root && vn.root) {
+                    continue;
+                }
+                // Only a root's edge to a blockable node is understood (each edge is seen
+                // from both ends; take it from the root's).
+                if vn.concrete || !(node.root || vn.root) {
+                    return false;
+                }
+                if !node.root {
+                    continue;
+                }
+                let w = v as usize;
+                if blocked[w] || (copied[w] && self.counts_copies(u as Node, v)) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Whether a clause with several neighbour variables (a number restriction) can apply
+    /// at root `s` with two of its variables bound to copies of `w`.
+    fn counts_copies(&self, s: Node, w: Node) -> bool {
+        let (sn, wn) = (&self.nodes[s as usize], &self.nodes[w as usize]);
+        let Some(rs) = sn.adj.get(&w) else {
+            return false;
+        };
+        for &ci in &self.index.multi_y {
+            self.probe();
+            let cl = &self.c.clauses[ci as usize];
+            if !cl.body_x.iter().all(|a| sn.label.contains_key(a)) {
+                continue;
+            }
+            let fits = self.index.ys[ci as usize]
+                .iter()
+                .filter(|(roles, atoms, _)| {
+                    roles.iter().all(|r| rs.contains(r))
+                        && atoms.iter().all(|a| wn.label.contains_key(a))
+                })
+                .count();
+            if fits >= 2 {
+                return true;
+            }
+        }
+        false
     }
 
     fn signature(&self, n: Node, p: Node) -> Vec<u32> {
@@ -1211,7 +1596,7 @@ impl<'c> Tableau<'c> {
         }
         if let Some((d, atoms)) = undecided {
             self.undecided.get_or_insert(atoms);
-            self.set_clash(d);
+            self.set_clash(d.union(&Dep::single(UNCERTAIN)));
         }
     }
 

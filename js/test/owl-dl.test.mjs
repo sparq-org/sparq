@@ -6,7 +6,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { checkOwlDl, SparqStore } from '../dist/index.js';
+import { checkOwlDl, openOwlDlSession, SparqStore } from '../dist/index.js';
 
 const distDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'dist');
 
@@ -90,15 +90,37 @@ test('data properties are decided; an ill-typed literal is inconsistent', async 
   assert.equal((await checkOwlDl(tbox, `${PRE} :ann :age "sixteen"^^xsd:nonNegativeInteger .`)).consistent, false);
 });
 
-test('nominals are out of fragment: unknown, with the offending triples', async () => {
-  const r = await checkOwlDl(
-    `${TBOX} :ann a owl:NamedIndividual . :Ann owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] .`,
-  );
+test('nominals are decided, and class tests see the ABox', async () => {
+  const tbox = `${TBOX} :ann a owl:NamedIndividual , :Woman . :Ann a owl:Class ; owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] .`;
+  const r = await checkOwlDl(tbox);
+  assert.equal(r.consistent, true);
+  assert.equal(r.classification, 'complete');
+  assert.ok(r.inferredSubClassOf.some(([a, b]) => a === 'http://ex/Ann' && b === 'http://ex/Woman'));
+  assert.equal((await checkOwlDl(tbox, `${PRE} :ann a :Man .`)).consistent, false);
+});
+
+test('keys are decided over named individuals', async () => {
+  const tbox = `${TBOX} :Person owl:hasKey ( :hasMother ) . :ann a :Person ; :hasMother :eve . :bea a :Person ; :hasMother :eve .`;
+  assert.equal((await checkOwlDl(tbox)).consistent, true);
+  assert.equal((await checkOwlDl(tbox, `${PRE} :ann owl:differentFrom :bea .`)).consistent, false);
+});
+
+test('property chains are decided', async () => {
+  const chain = `${TBOX} :hasGrandparent a owl:ObjectProperty ; owl:propertyChainAxiom ( :hasParent :hasParent ) .
+    :ann :hasParent :bob . :bob :hasParent :cat . :cat a :Woman .`;
+  assert.equal((await checkOwlDl(chain)).consistent, true);
+  const only = `${PRE} :ann a [ a owl:Restriction ; owl:onProperty :hasGrandparent ; owl:allValuesFrom :Man ] .`;
+  assert.equal((await checkOwlDl(chain, only)).consistent, false);
+});
+
+test('the top and bottom properties are out of fragment: unknown, with the offending triples', async () => {
+  const r = await checkOwlDl(`${TBOX} :Person rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :Company ] .`);
   assert.equal(r.consistent, 'unknown');
   assert.equal(r.reason.kind, 'OutOfFragment');
-  assert.equal(typeof r.reason.construct, 'string');
-  assert.ok(r.reason.triples.length > 0);
+  assert.equal(r.reason.construct, 'owl:topObjectProperty / owl:bottomObjectProperty');
+  assert.ok(r.reason.triples.some((t) => t.endsWith('<http://www.w3.org/2002/07/owl#topObjectProperty> .')));
   for (const t of r.reason.triples) assert.match(t, / \.$/);
+  assert.equal(r.profile.dl, true);
   assert.equal(r.classification, null);
 });
 
@@ -231,4 +253,22 @@ test('options are read from own plain data properties only, and forwarded canoni
   const viaStore = await store.checkOwlDl(`${PRE} :alice a :Mother .`, starved);
   const direct = await checkOwlDl(store.serialize('turtle', { pretty: false }), `${PRE} :alice a :Mother .`, starved);
   assert.deepEqual(viaStore, direct);
+});
+
+test('a session reuses identical and extended versions and answers as checkOwlDl does', async () => {
+  const session = await openOwlDlSession();
+  const strip = ({ reuse, ...rest }) => rest;
+  const first = session.check(TBOX);
+  assert.equal(first.reuse, 'none');
+  assert.deepEqual(strip(first), await checkOwlDl(TBOX));
+  assert.equal(session.check(TBOX).reuse, 'identical');
+  const abox = `${PRE} :alice a :Woman , :Man .`;
+  const bad = session.check(TBOX, abox);
+  assert.equal(bad.reuse, 'extension');
+  assert.deepEqual(strip(bad), await checkOwlDl(TBOX, abox));
+  assert.equal(bad.consistent, false);
+  assert.equal(session.check(TBOX).reuse, 'none');
+  assert.throws(() => session.check(TBOX, undefined, { budget: { maxSteps: -1 } }), TypeError);
+  session.free();
+  assert.throws(() => session.check(TBOX), /after free/);
 });

@@ -72,10 +72,18 @@
 //! counter until the result lies outside the band, and [`is_in_handle_band`] is
 //! the predicate this module's tests assert it against. V1's `VALUE_NONE = 2`
 //! lies inside the band, so V1 retains the in-band sentinel and V2 discharges
-//! this §14.1 requirement ON THE HOST SIDE. The in-circuit half is still OPEN:
-//! no Noir global or assert names the V2 sentinel, so nothing in a member
-//! enforces the band exclusion — the committer does, and the members reject the
-//! out-of-band value only because their `u64` range decomposition (and
+//! this §14.1 requirement ON THE HOST SIDE.
+//!
+//! The §14.1 requirement also has an IN-CIRCUIT half, and that half is PARTLY
+//! discharged. `zk/dual-leaf-v2/src/lib.nr` now carries the sentinel and the
+//! scale-free lane constants as Noir `global`s, re-checks the band exclusion in
+//! Noir (`nargo test`), and exports the `assert_handle_not_value_none` /
+//! `assert_handle_in_band` assertions a leaf recompute would call;
+//! `crates/sparq-zk/tests/dual_leaf_v2_noir_pin.rs` pins each Noir literal to
+//! its host derivation here. What is still OPEN is the ENFORCEMENT: no member
+//! in `zk/compose` imports that library, so no shipped circuit asserts the band
+//! exclusion on a witnessed hook. The committer does, and the members reject
+//! the out-of-band value only because their `u64` range decomposition (and
 //! `filter_value_dl_bool`'s `{0, 1}` constraint) cannot represent it.
 //!
 //! The §14.1 **`LANG_NONE` separation** is enforced on the HOST side, not by
@@ -94,9 +102,10 @@
 //! ([`boolean_lane_const`]), and the dedicated `filter_value_dl_bool` Noir member
 //! additionally constrains both the witnessed handle and the public bound to
 //! `{0, 1}` in-circuit — so a handle of `2` denotes nothing and the member itself
-//! refuses it. The boolean lane remains part of the documented UNROUTED seam for
-//! whole-graph commitments (see [`is_hookable_datatype`]): V2 routes exactly the
-//! datatypes V1 routes.
+//! refuses it. Under V2 the boolean lane is ROUTED by the whole-graph builder,
+//! as are `xsd:dateTime` and `xsd:date` — see [`is_hookable_datatype`] for what
+//! routing all six lanes narrows and what it re-bases. V1's routing is
+//! unchanged.
 //!
 //! # Honesty (load-bearing — unchanged from V1)
 //!
@@ -208,7 +217,7 @@ pub fn lane_const(datatype: &str, params: &str) -> Fr {
 }
 
 /// The V2 `DATATYPE_CONST` of a DEGENERATE literal (`xsd:string`,
-/// `rdf:langString`, every opaque datatype, and the unrouted lanes): the PLAIN
+/// `rdf:langString`, and every opaque datatype): the PLAIN
 /// `blake3_field(datatype string)` — deliberately identical to
 /// [`crate::dual_leaf::datatype_const`].
 ///
@@ -319,9 +328,11 @@ pub fn is_in_handle_band(f: &Fr) -> bool {
 /// reserved-tag requirement ON THE HOST SIDE: the tag is a domain-separated
 /// constant whose band exclusion is a CHECKABLE invariant (asserted by this
 /// module's tests) rather than an argument about where a hash output lands. V1's
-/// `crate::dual_leaf::VALUE_NONE` retains the in-band value. The in-circuit half
-/// of the requirement remains OPEN — there is no Noir global or assert for this
-/// sentinel yet (see the module docs).
+/// `crate::dual_leaf::VALUE_NONE` retains the in-band value. The in-circuit
+/// MIRROR of this constant is `zk/dual-leaf-v2/src/lib.nr`'s `VALUE_NONE_V2`
+/// global, pinned to this function by `tests/dual_leaf_v2_noir_pin.rs`; its
+/// ENFORCEMENT remains open, because no member imports that library (see the
+/// module docs).
 ///
 /// A re-derivation is expected never to be needed (the band is a vanishing
 /// fraction of the field); the counter exists so the construction is TOTAL rather
@@ -354,21 +365,44 @@ pub fn no_value() -> Fr {
 /// encoder (and so applies the §6 fail-closed rule) rather than to the degenerate
 /// lane.
 ///
-/// **V2 routes exactly what V1 routes** (`xsd:integer`, `xsd:decimal`,
-/// `xsd:double`). The `xsd:boolean` and `xsd:dateTime`/`xsd:date` lanes remain
-/// the documented UNROUTED seam, because routing them narrows what a committed
-/// graph may CONTAIN (an XSD-legal but non-canonical `"1"^^xsd:boolean` becomes
-/// uncommittable) and re-bases those leaves — a separate decision from the
-/// versioned constant derivation. Their standalone encoders ([`encode_boolean`] /
-/// [`encode_datetime`] / [`encode_date`]) exist and feed the value-lane FILTER
-/// members; they just do not participate in whole-graph leaf routing.
+/// **V2 routes all six value lanes**: `xsd:integer`, `xsd:decimal`,
+/// `xsd:double`, `xsd:boolean`, `xsd:dateTime` and `xsd:date`. So a graph
+/// committed under V2 carries a real value hook, under the routed datatype's own
+/// lane constant, for every literal on those six datatypes — which is what a
+/// value-lane FILTER member needs the committed leaf to be.
 ///
-/// Under V2 the unrouted seam needs no value-dependent argument: a degenerate
-/// fold and a lane constant are in separate BLAKE3 hash domains for EVERY
-/// datatype string, so an unrouted lane's degenerate leaf does not open on its
-/// lane constant whatever hook a member would accept.
+/// Two consequences, both deliberate and both V2-only (`crate::dual_leaf`'s V1
+/// predicate is unchanged, so an already-issued V1 graph is unaffected):
+///
+/// 1. **It narrows what a V2 graph may CONTAIN.** The three newly routed lanes
+///    inherit the §6 fail-closed rule, so any lexical outside those lanes'
+///    §13.2 value domain now fails the WHOLE commitment instead of taking the
+///    degenerate string lane. That covers non-canonical spellings
+///    (`"1"^^xsd:boolean`, a `24:00:00` instant) AND XSD-canonical forms the
+///    domain excludes: an untimezoned or non-`Z` `xsd:dateTime` / `xsd:date`,
+///    and more than three fraction digits. A graph holding such values cannot
+///    be committed under V2; it stays committable under the string-canonical
+///    method. Failing closed is chosen over a silent string-lane fallback,
+///    under which equal instants spelled differently would sit on different
+///    lanes. The integer, decimal and double lanes already made this bargain.
+/// 2. **It re-bases those leaves.** A V2 commitment over a graph containing an
+///    `xsd:boolean` / `xsd:dateTime` / `xsd:date` literal differs from what the
+///    same graph committed to before these lanes were routed. Every leaf on the
+///    three lanes that were ALREADY routed, and every degenerate string-lane
+///    leaf, is byte-unchanged (a fixed-vector test pins both halves).
+///
+/// Routing does not rest on a value-dependent argument: a degenerate fold and a
+/// lane constant are in separate BLAKE3 hash domains for EVERY datatype string,
+/// so a string-lane leaf does not open on any lane constant whatever hook a
+/// member would accept. Routing does widen the set of leaves that carry an
+/// in-band hook, so which MEMBER may open a routed leaf still rests on the
+/// relying party pinning the lane constant to the member (see above), as it
+/// already did for the decimal lane.
 pub fn is_hookable_datatype(datatype: &str) -> bool {
-    matches!(datatype, XSD_INTEGER | XSD_DECIMAL | XSD_DOUBLE)
+    matches!(
+        datatype,
+        XSD_INTEGER | XSD_DECIMAL | XSD_DOUBLE | XSD_BOOLEAN | XSD_DATE_TIME | XSD_DATE
+    )
 }
 
 /// Encodes an `xsd:integer` literal under V2 — V1's fail-closed canonical-lexical
@@ -508,8 +542,9 @@ fn degenerate_value_component_with(
     Ok(poseidon2::hash(&[value_none(), degenerate_datatype_const(datatype), lang]))
 }
 
-/// Encodes a literal to its V2 leaf, routing by datatype exactly as V1 does
-/// ([`is_hookable_datatype`]).
+/// Encodes a literal to its V2 leaf, routing by datatype through
+/// [`is_hookable_datatype`] — all six V2 value lanes, which is MORE than V1
+/// routes.
 ///
 /// **Fail-closed (§6):** a hookable-datatyped literal whose lexical form the lane
 /// encoder rejects returns that encoder's [`DualLeafError`]; it is NEVER
@@ -521,9 +556,13 @@ pub fn encode_literal(literal: &Literal) -> Result<Fr, DualLeafError> {
         XSD_INTEGER => Some(encode_integer(literal)?),
         XSD_DECIMAL => Some(encode_decimal(literal)?),
         XSD_DOUBLE => Some(encode_double(literal)?),
-        // The `xsd:boolean` / `xsd:dateTime` / `xsd:date` lanes are the
-        // documented unrouted seam — see `is_hookable_datatype`. Adding an arm
-        // here MUST also extend that predicate (a test pins the two together).
+        XSD_BOOLEAN => Some(encode_boolean(literal)?),
+        XSD_DATE_TIME => Some(encode_datetime(literal)?),
+        XSD_DATE => Some(encode_date(literal)?),
+        // Every arm here MUST also be in `is_hookable_datatype` (a test pins the
+        // two together), because that predicate is what the host and the relying
+        // party read to decide whether a committed leaf on a datatype carries a
+        // value hook at all.
         _ => None,
     };
     Ok(match components {
@@ -622,6 +661,7 @@ mod tests {
     use super::*;
     use crate::dual_leaf;
     use crate::encode::salt_from_bytes;
+    use crate::field::field_to_hex;
     use oxrdf::{BlankNode, NamedNode};
     use std::collections::HashSet;
 
@@ -1091,7 +1131,14 @@ mod tests {
         // `is_hookable_datatype` must agree with what `encode_literal` routes: a
         // hookable datatype fails closed on a bad lexical, a non-hookable one
         // takes the degenerate lane. Includes non-IRI datatype strings.
-        for iri in [XSD_INTEGER, XSD_DECIMAL, XSD_DOUBLE] {
+        for iri in [
+            XSD_INTEGER,
+            XSD_DECIMAL,
+            XSD_DOUBLE,
+            XSD_BOOLEAN,
+            XSD_DATE_TIME,
+            XSD_DATE,
+        ] {
             assert!(is_hookable_datatype(iri));
             assert!(
                 encode_literal(&typed("!!", iri)).is_err(),
@@ -1101,9 +1148,6 @@ mod tests {
         for iri in [
             XSD_STRING,
             RDF_LANG_STRING,
-            XSD_BOOLEAN,
-            XSD_DATE_TIME,
-            XSD_DATE,
             "http://ex/dt",
             "http://ex/dt x",
             "pre\0post",
@@ -1121,6 +1165,206 @@ mod tests {
                 "{iri:?} must take the degenerate lane"
             );
         }
+    }
+
+    /// The three newly routed lanes commit the leaf their OWN lane encoder
+    /// produces — hook, lane constant and lexical hash — not a degenerate one.
+    /// That is what makes a value-lane FILTER on a V2-committed graph meaningful:
+    /// the member recomputes `h3(hook, lane_const, LANG_NONE)` and that has to be
+    /// the committed leaf's value component.
+    #[test]
+    fn the_three_newly_routed_lanes_commit_their_lane_encoder_leaf() {
+        type LaneEncoder = fn(&Literal) -> Result<DualLeafComponents, DualLeafError>;
+        let cases: [(&str, &str, LaneEncoder); 3] = [
+            (XSD_BOOLEAN, "true", encode_boolean),
+            (XSD_DATE_TIME, "2024-01-02T03:04:05Z", encode_datetime),
+            (XSD_DATE, "2024-01-02Z", encode_date),
+        ];
+        for (iri, lexical, encode) in cases {
+            let lit = typed(lexical, iri);
+            let components = encode(&lit).expect("the lane encoder accepts a canonical lexical");
+            assert_eq!(
+                encode_literal(&lit).unwrap(),
+                components.leaf(),
+                "{} must commit its lane encoder's leaf",
+                iri
+            );
+            // And NOT the degenerate leaf it committed before routing.
+            let degenerate = poseidon2::hash(&[
+                degenerate_value_component(iri, None).unwrap(),
+                blake3_field(lit.to_string().as_bytes()),
+                Fr::from(TYPE_CODE_LITERAL),
+            ]);
+            assert_ne!(encode_literal(&lit).unwrap(), degenerate, "{}", iri);
+            // The value component is exactly what a member recomputes.
+            assert_eq!(
+                components.value_component(),
+                poseidon2::hash(&[
+                    components.value_hook,
+                    components.datatype_const,
+                    Fr::from(LANG_NONE)
+                ]),
+                "{}",
+                iri
+            );
+        }
+    }
+
+    /// Routing the three lanes NARROWS what a V2 graph may contain: a whole
+    /// commitment over a graph holding an XSD-legal but non-canonical lexical on
+    /// one of them now fails closed, instead of silently committing a degenerate
+    /// string-lane leaf for it.
+    #[test]
+    fn routing_the_three_lanes_makes_their_non_canonical_lexicals_uncommittable() {
+        let salt = salt_from_bytes(&[7u8; 32]);
+        for (iri, lexical) in [
+            // XSD-legal `xsd:boolean`, but not the canonical spelling.
+            (XSD_BOOLEAN, "1"),
+            // Un-timezoned: the §13.2 hookable domain is `Z` only.
+            (XSD_DATE_TIME, "2024-01-02T03:04:05"),
+            (XSD_DATE, "2024-01-02"),
+        ] {
+            let lit = typed(lexical, iri);
+            assert!(
+                encode_literal(&lit).is_err(),
+                "{} {} must fail closed, not downgrade",
+                iri,
+                lexical
+            );
+            let g = vec![Triple::new(
+                NamedOrBlankNode::NamedNode(NamedNode::new("http://ex/s").unwrap()),
+                NamedNode::new("http://ex/p").unwrap(),
+                Term::Literal(lit),
+            )];
+            assert!(
+                commit_triples(&g, salt).is_err(),
+                "the WHOLE commitment must fail for {} {}",
+                iri,
+                lexical
+            );
+        }
+    }
+
+    /// The graph the unchanged-commitment vector below is taken over: one leaf on
+    /// each of the three lanes that were ALREADY routed, one degenerate
+    /// string-lane leaf, and one IRI object.
+    fn previously_routed_graph() -> Vec<Triple> {
+        let b = BlankNode::new("b0").unwrap();
+        let lit = |l: &str, dt: &str| Term::Literal(typed(l, dt));
+        let p = |iri: &str| NamedNode::new(iri).unwrap();
+        vec![
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b.clone()),
+                p("http://ex/age"),
+                lit("18", XSD_INTEGER),
+            ),
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b.clone()),
+                p("http://ex/price"),
+                lit("1.50", XSD_DECIMAL),
+            ),
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b.clone()),
+                p("http://ex/ratio"),
+                lit("2.5E0", XSD_DOUBLE),
+            ),
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b.clone()),
+                p("http://ex/name"),
+                Term::Literal(Literal::new_simple_literal("n")),
+            ),
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b),
+                p("http://ex/kind"),
+                Term::NamedNode(NamedNode::new("http://ex/o").unwrap()),
+            ),
+        ]
+    }
+
+    /// FIXED VECTOR: routing the three new lanes leaves every ALREADY-routed V2
+    /// leaf, every degenerate string-lane leaf and the whole-graph commitment over
+    /// them BYTE-IDENTICAL.
+    ///
+    /// The hexes were captured from the V2 encoder BEFORE the three lanes were
+    /// routed, so this is a regression vector against re-basing an existing V2
+    /// commitment, not a restatement of the current code.
+    #[test]
+    fn routing_leaves_the_previously_routed_lanes_byte_identical() {
+        let leaf = |l: &str, dt: &str| field_to_hex(&encode_literal(&typed(l, dt)).unwrap());
+        assert_eq!(
+            leaf("18", XSD_INTEGER),
+            "0x24b404f6f6ff0fe562fb3225dcea7a09e8297d2c8402a9232657d538aff8d676"
+        );
+        assert_eq!(
+            leaf("1.50", XSD_DECIMAL),
+            "0x0cd7794d618060e65675ddedcb0a5b71092935829c6608822a0d32ffaed65297"
+        );
+        assert_eq!(
+            leaf("2.5E0", XSD_DOUBLE),
+            "0x1edafff298b727c4807a71ef6a03cc9b15bd6e8b99bdab32adbdf8de344d1566"
+        );
+        assert_eq!(
+            leaf("plain", XSD_STRING),
+            "0x0b1b78e946eaebbba7920f9ee38f94e3827dd0c4d279a513587f99e10ab2a891"
+        );
+        assert_eq!(
+            leaf("x", "http://example.org/opaque"),
+            "0x02ad72917181b695bdc3e2cf966a7fdfe8f40060660e4ea7590ccabf83c33e54"
+        );
+
+        let c = commit_triples(&previously_routed_graph(), salt_from_bytes(&[7u8; 32])).unwrap();
+        assert_eq!(
+            c.leaves.iter().map(field_to_hex).collect::<Vec<_>>(),
+            vec![
+                "0x0ebd56976b07bace8824bca4ccd9df8763c4cc00e58f27ad59e222a938a950c3",
+                "0x0a6bb1766eac255ef018c8b94c9bac9da6b12c68e3fd9e99b1fed858534f11c0",
+                "0x0a5a05e1c7d9c2a24e1058b41a451ebcb1a4d04495221894a3dd6207fd5e0ce1",
+                "0x18df9b099888aaa9007ec7485c0673a82c2fbfabafb41699be8fcac277941bed",
+                "0x0536eefaff8179ea1356f873892ca8478f94709377c69201942932bc2a5cfd2c",
+            ]
+        );
+        assert_eq!(
+            field_to_hex(&c.commitment),
+            "0x258033eecd5cb851571493f429a5f5fa0858dd31486bea077b35a578c35cb9c2"
+        );
+    }
+
+    /// The other half, stated plainly: a V2 commitment over a graph that DOES
+    /// contain a literal on one of the three newly routed lanes CHANGES. The hex
+    /// is the commitment the same graph had before routing.
+    #[test]
+    fn routing_re_bases_a_graph_that_contains_the_three_new_lanes() {
+        let b = BlankNode::new("b1").unwrap();
+        let p = |iri: &str| NamedNode::new(iri).unwrap();
+        let lit = |l: &str, dt: &str| Term::Literal(typed(l, dt));
+        let g = vec![
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b.clone()),
+                p("http://ex/flag"),
+                lit("true", XSD_BOOLEAN),
+            ),
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b.clone()),
+                p("http://ex/at"),
+                lit("2024-01-02T03:04:05Z", XSD_DATE_TIME),
+            ),
+            Triple::new(
+                NamedOrBlankNode::BlankNode(b),
+                p("http://ex/on"),
+                lit("2024-01-02Z", XSD_DATE),
+            ),
+        ];
+        let c = commit_triples(&g, salt_from_bytes(&[7u8; 32])).unwrap();
+        assert_ne!(
+            field_to_hex(&c.commitment),
+            "0x14b6f74c39dc120f3b9729bfd4144773deb5b0831b41181960ea39a24dc844f9",
+            "routing the three lanes re-bases a graph that contains them"
+        );
+        assert_eq!(
+            field_to_hex(&c.commitment),
+            "0x27dd150d0a008b946a91384ee79f59598753f27a993b345b6ae38f8ec1f60462",
+            "the routed commitment is pinned too"
+        );
     }
 
     #[test]

@@ -587,21 +587,21 @@ fn seeded_exact_k_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
         ]
     );
     assert_eq!(dealer.draw_fp().value(), 641842556892271371);
-    // The REVEALED slot ORDER moved in #6117 step 6 (it was
-    // ["dummy", "dummy", "<http://ex/a> <http://ex/c>", "dummy", "dummy"]): the
-    // output stage now draws its sharings and its shuffle from the SAME source as
-    // the chain stage instead of minting a second dealer, so the shuffle samples a
-    // different point of one continuous keystream. The order is the shuffle's
-    // secret permutation and carries no result meaning — the canonicalised
-    // multiset below is byte-identical to the pre-routing capture.
+    // The REVEALED slot ORDER has moved twice: first in #6117 step 6 (the output
+    // stage draws its sharings and its shuffle from the SAME source as the chain
+    // stage instead of minting a second dealer), then again when the output stage's
+    // per-element degree reduction added its re-sharings, so the shuffle samples a
+    // later point of one continuous keystream. The order is the shuffle's secret
+    // permutation and carries no result meaning — the canonicalised multiset below
+    // is byte-identical to the pre-routing capture.
     let (slots, cost) = eval_exact_k_chain_hidden_slots(&backend, &edges, 2, 5).unwrap();
     assert_eq!(
         slot_strings(&slots),
         [
-            "dummy",
-            "dummy",
-            "dummy",
             "<http://ex/a> <http://ex/c>",
+            "dummy",
+            "dummy",
+            "dummy",
             "dummy"
         ]
     );
@@ -691,7 +691,7 @@ fn rejected_two_hop_pairs_payloads_open_to_the_dummy_encoding() {
 /// order-sensitive fingerprint over every method and returned `y`).
 ///
 /// **This is the #6117-step-6 guard.** The transcript now ends in the output
-/// stage's 36 `vss_own_input` draws and its `oblivious_shuffle`: if
+/// stage's 141 `vss_own_input` draws and its `oblivious_shuffle`: if
 /// `eval_exact_k_chain_hidden_slots_through` went back to minting its own dealer
 /// for the output stage the log would stop at 1920 entries and both the length and
 /// the suffix assertion would fail.
@@ -699,7 +699,8 @@ fn rejected_two_hop_pairs_payloads_open_to_the_dummy_encoding() {
 /// The 1920-entry PREFIX is the pre-routing whole-log pin
 /// (`0x1013_9382_581b_a7e3`, captured on the pre-routing code), asserted here
 /// unchanged: the routing appended an output-stage SUFFIX and moved nothing in the
-/// chain part. The full-log fingerprint is the new pin.
+/// chain part, and the output stage's per-element degree reduction only grew that
+/// suffix. The full-log fingerprint is the new pin.
 #[test]
 fn seeded_exact_k_stage_transcript_is_pinned() {
     use crate::randomness::test_sources::{fingerprint, RecordingSource};
@@ -707,13 +708,14 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
     let (edges, _) = hidden_edges(&PIN_EDGES);
     let mut rec = RecordingSource::new(backend.dealer());
     eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 5).unwrap();
-    assert_eq!(rec.log.len(), 1957);
-    // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
+    assert_eq!(rec.log.len(), 2062);
+    // Prefix unchanged from the pre-routing pin; the whole move is in the output
+    // suffix, which grew by the per-element degree reductions.
     assert_eq!(fingerprint(&rec.log[..1920]), 0x1013_9382_581b_a7e3);
-    assert_eq!(fingerprint(&rec.log), 0xbea3_3cb0_9754_016e);
+    assert_eq!(fingerprint(&rec.log), 0x896e_88fa_cc9f_51f3);
     let suffix: Vec<&str> = rec.log[1920..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,
-        [["vss_own_input"; 36].as_slice(), &["oblivious_shuffle"]].concat()
+        [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }

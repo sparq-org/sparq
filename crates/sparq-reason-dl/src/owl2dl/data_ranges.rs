@@ -19,8 +19,9 @@
 //!   basic language ranges, well-formed BCP 47 tags and enumerated values; emptiness and
 //!   counting walk the product automaton.
 //!
-//! The data domain is the union of the datatype map's value spaces, so `Not` is taken
-//! relative to it.
+//! The data domain holds the datatype map's value spaces and, as the Direct Semantics
+//! allows, infinitely many values outside all of them; `Not` is taken relative to it, so
+//! the complement of every datatype of the map is not empty.
 
 mod cuts;
 mod rat;

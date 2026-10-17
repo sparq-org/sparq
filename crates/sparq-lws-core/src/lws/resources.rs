@@ -3648,8 +3648,8 @@ async fn delete<S: Store + 'static>(
         return refused;
     }
     // A linkset record a legacy edge makes a member is no member: it neither keeps a container
-    // from being empty nor needs a permission of its own, and is removed with the container
-    // when it is there.
+    // from being empty nor needs a permission of its own, and goes with the container (its edge
+    // too, when the record itself is already gone).
     let members = || doomed.iter().filter(|(n, _)| !super::names_record(n));
     if uri.ends_with('/') && members().count() > 1 {
         let infinity = req
@@ -8304,12 +8304,10 @@ mod tests {
         assert!(!st.locks.changing(&gone));
     }
 
-    /// Review findings: a create's metadata write that landed but reported a failure was left in
-    /// place, and a create the store answered unsettled was put back without being fenced, so it
-    /// could commit afterwards. Either way the member was then decided, for a caller refused
-    /// before the lock, on what the create wrote. What a failed create may have written is put
-    /// back (an unsettled write fenced first), and until it is, the member stays in flight with
-    /// nothing there before it.
+    /// Review finding: `a_failed_create_leaves_nothing_of_it_behind` let an unsettled write commit
+    /// only once it was fenced, so a create whose unsettled write was never removed, or was
+    /// removed before it was fenced, passed it. Here the write commits while it cannot be fenced,
+    /// and the undo still removes it.
     #[tokio::test]
     async fn an_unsettled_create_that_commits_before_its_fence_is_removed() {
         use super::super::test_store::{agent, closed_state, request as req, OWNER};
@@ -8360,6 +8358,10 @@ mod tests {
         assert!(!st.locks.changing(&early));
     }
 
+    /// Review finding: a create whose metadata write and its removal both failed set aside its
+    /// container with it, so the storage description, the root listing and every other create
+    /// into the root waited on the store for as long as it stayed down, though no content was
+    /// written and no listing could show the member.
     #[tokio::test]
     async fn a_create_whose_content_was_never_written_hides_no_container() {
         use super::super::test_store::{agent, closed_state, request as req, OWNER};
@@ -8387,6 +8389,25 @@ mod tests {
         assert_eq!(r.status(), StatusCode::OK);
         let r = handle(&st, &post("y.txt"), &agent(OWNER)).await;
         assert_eq!(r.status(), StatusCode::CREATED);
+        // Nor is the container's lock held: a conditional create into it, which takes it whole,
+        // is answered meanwhile.
+        let conditional = req(
+            Method::POST,
+            "/",
+            &[
+                ("slug", "z.txt"),
+                ("content-type", "text/plain"),
+                ("if-match", "*"),
+            ],
+            "z",
+        );
+        let r = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            handle(&st, &conditional, &agent(OWNER)),
+        )
+        .await
+        .expect("answered while the member is set aside");
+        assert_eq!(r.status(), StatusCode::CREATED);
         *store.fail_delete_of.lock().unwrap() = None;
         for _ in 0..500 {
             if st.visible(&x) {
@@ -8398,6 +8419,12 @@ mod tests {
         assert!(!st.locks.changing(&x));
     }
 
+    /// Review findings: a create's metadata write that landed but reported a failure was left in
+    /// place, and a create the store answered unsettled was put back without being fenced, so it
+    /// could commit afterwards. Either way the member was then decided, for a caller refused
+    /// before the lock, on what the create wrote. What a failed create may have written is put
+    /// back (an unsettled write fenced first), and until it is, the member stays in flight with
+    /// nothing there before it.
     #[tokio::test]
     async fn a_failed_create_leaves_nothing_of_it_behind() {
         use super::super::test_store::{agent, closed_state, request as req, OWNER};
@@ -12731,5 +12758,90 @@ mod tests {
         let r = handle(&st, &req(Method::DELETE, "/c/", &[], ""), &agent(OWNER)).await;
         assert!(r.status().is_success(), "{}", r.status());
         assert!(!st.store.exists(&format!("{c}x.meta")).await.unwrap());
+    }
+
+    /// Review finding: a linkset record that a legacy edge listed in its container kept the
+    /// edge once its subject's removal took the record, and so did one whose subject went first
+    /// in a recursive delete: the container then could never be deleted. An edge to a record
+    /// that is gone goes with the container.
+    #[tokio::test]
+    async fn a_legacy_record_edge_goes_with_its_record() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, _store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let container = |slug: &'static str| {
+            req(
+                Method::POST,
+                "/",
+                &[
+                    ("slug", slug),
+                    (
+                        "link",
+                        "<https://www.w3.org/ns/lws#Container>; rel=\"type\"",
+                    ),
+                ],
+                "",
+            )
+        };
+        let member = |into: &'static str, slug: &'static str| {
+            req(
+                Method::POST,
+                into,
+                &[("slug", slug), ("content-type", "text/plain")],
+                "x",
+            )
+        };
+        // The subject goes alone, then its container.
+        for slug in ["c", "d"] {
+            let r = handle(&st, &container(slug), &agent(OWNER)).await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let (c, d) = (st.cfg.absolute("/c/"), st.cfg.absolute("/d/"));
+        let r = handle(&st, &member("/c/", "x.txt"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let x = format!("{c}x.txt");
+        let record = st.store.read(&meta_key(&x)).await.unwrap();
+        st.store.delete(&meta_key(&x), None).await.unwrap();
+        st.store
+            .create_in_container(&c, &meta_key(&x), record.body, &record.meta.content_type)
+            .await
+            .unwrap();
+        let r = handle(
+            &st,
+            &req(Method::DELETE, "/c/x.txt", &[], ""),
+            &agent(OWNER),
+        )
+        .await;
+        assert!(r.status().is_success(), "{}", r.status());
+        // An edge an older server left to a record already gone goes with the container.
+        let gone = format!("{c}z.txt.meta");
+        st.store
+            .create_in_container(&c, &gone, Bytes::from_static(b"{}"), "application/json")
+            .await
+            .unwrap();
+        st.store.delete(&gone, None).await.unwrap();
+        assert_eq!(st.store.list_children(&c).await.unwrap().len(), 2);
+        let r = handle(&st, &req(Method::DELETE, "/c/", &[], ""), &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        // A recursive delete, the record's edge listed before its subject.
+        let y = format!("{d}y.txt");
+        st.store
+            .create_in_container(
+                &d,
+                &meta_key(&y),
+                Bytes::from_static(b"{}"),
+                "application/json",
+            )
+            .await
+            .unwrap();
+        let r = handle(&st, &member("/d/", "y.txt"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let depth = [("depth", "infinity")];
+        let r = handle(&st, &req(Method::DELETE, "/d/", &depth, ""), &agent(OWNER)).await;
+        assert!(r.status().is_success(), "{}", r.status());
+        for gone in [&y, &meta_key(&y), &d] {
+            assert!(!st.store.exists(gone).await.unwrap(), "{gone}");
+        }
+        assert!(st.visible(&root));
     }
 }

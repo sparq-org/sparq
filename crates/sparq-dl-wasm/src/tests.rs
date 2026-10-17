@@ -1,8 +1,8 @@
 //! Native tests of the JSON-producing core (`check_owl_dl_json`). Each result is parsed back
 //! with the crate's own strict JSON parser, so a malformed document fails every test.
 
-use super::check_owl_dl_json;
 use super::json::{parse, Value};
+use super::{check_owl_dl_json, OwlDlSessionCore};
 
 const PRE: &str = r#"
 @prefix : <http://ex/> .
@@ -176,19 +176,68 @@ fn data_properties_are_decided_and_ill_typed_literals_are_inconsistent() {
 }
 
 #[test]
-fn nominals_are_out_of_fragment_with_the_offending_triple() {
-    let r = run(&format!(
-        "{ALCHIQ} :ann a owl:NamedIndividual . :Ann owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] ."
-    ));
+fn nominals_are_decided() {
+    let ann = format!(
+        "{ALCHIQ} :ann a owl:NamedIndividual , :Woman . :Ann a owl:Class ; owl:equivalentClass [ a owl:Class ; owl:oneOf ( :ann ) ] ."
+    );
+    let r = run(&ann);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(true));
+    assert_eq!(s(get(&r, "classification")), "complete");
+    // `Ann ≡ {ann}` and `Woman(ann)`: `Ann ⊑ Woman`, which only the ABox says.
+    assert!(
+        pairs(get(&r, "inferredSubClassOf")).contains(&("http://ex/Ann", "http://ex/Woman")),
+        "{r:?}"
+    );
+    let r = run_with(&ann, Some(":ann a :Man ."), None);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(false));
+}
+
+#[test]
+fn keys_are_decided() {
+    let key = format!(
+        "{ALCHIQ} :Person owl:hasKey ( :hasMother ) . :ann a :Person ; :hasMother :eve . :bea a :Person ; :hasMother :eve ."
+    );
+    assert_eq!(get(&run(&key), "consistent"), &Value::Bool(true));
+    let r = run_with(&key, Some(":ann owl:differentFrom :bea ."), None);
+    assert_eq!(get(&r, "consistent"), &Value::Bool(false));
+}
+
+#[test]
+fn chains_are_decided() {
+    let chain = format!(
+        "{ALCHIQ} :hasGrandparent a owl:ObjectProperty ; owl:propertyChainAxiom ( :hasParent :hasParent ) .
+         :ann :hasParent :bob . :bob :hasParent :cat . :cat a :Woman ."
+    );
+    assert_eq!(get(&run(&chain), "consistent"), &Value::Bool(true));
+    let r = run_with(
+        &chain,
+        Some(":ann a [ a owl:Restriction ; owl:onProperty :hasGrandparent ; owl:allValuesFrom :Man ] ."),
+        None,
+    );
+    assert_eq!(get(&r, "consistent"), &Value::Bool(false));
+}
+
+#[test]
+fn top_properties_are_out_of_fragment_with_the_offending_triples() {
+    let r = run(&format!("{ALCHIQ} :Person rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :Company ] ."));
     assert_eq!(s(get(&r, "consistent")), "unknown");
     let reason = get(&r, "reason");
     assert_eq!(s(get(reason, "kind")), "OutOfFragment");
-    assert!(!s(get(reason, "construct")).is_empty());
+    assert_eq!(
+        s(get(reason, "construct")),
+        "owl:topObjectProperty / owl:bottomObjectProperty"
+    );
     let triples = strs(get(reason, "triples"));
-    assert!(!triples.is_empty());
+    assert!(
+        triples
+            .iter()
+            .any(|t| t.ends_with("<http://www.w3.org/2002/07/owl#topObjectProperty> .")),
+        "{triples:?}"
+    );
     for t in &triples {
         assert!(t.ends_with(" ."), "{t}");
     }
+    assert_eq!(get(get(&r, "profile"), "dl"), &Value::Bool(true));
     assert_eq!(get(&r, "classification"), &Value::Null);
 }
 
@@ -335,4 +384,43 @@ fn rendered_triples_escape_hostile_literals() {
     let triples = strs(get(v, "triples"));
     assert_eq!(triples.len(), 1);
     assert!(triples[0].contains(r#""x\"y\\z\nw""#), "{}", triples[0]);
+}
+
+#[test]
+fn a_session_reuses_identical_and_extended_versions() {
+    let mut session = OwlDlSessionCore::default();
+    let mut next = |tbox: &str| {
+        let out = session
+            .check_json(&format!("{PRE}{tbox}"), None, "turtle", None)
+            .expect("checked");
+        parse(&out).unwrap_or_else(|e| panic!("result is not JSON ({e}): {out}"))
+    };
+    let base = format!(
+        "{ALCHIQ} :A a owl:Class . :B a owl:Class . :C a owl:Class . :D a owl:Class .
+         :A rdfs:subClassOf :B . :B rdfs:subClassOf :C ."
+    );
+    let r = next(&base);
+    assert_eq!(s(get(&r, "reuse")), "none");
+    let fresh = run(&base);
+    fn without_reuse(v: &Value) -> Vec<&(String, Value)> {
+        match v {
+            Value::Object(m) => m.iter().filter(|(k, _)| k != "reuse").collect(),
+            _ => panic!("not an object"),
+        }
+    }
+    assert_eq!(without_reuse(&r), without_reuse(&fresh));
+    assert_eq!(s(get(&next(&base), "reuse")), "identical");
+    let more = format!("{base} :C rdfs:subClassOf :D . :D owl:disjointWith :A .");
+    let r = next(&more);
+    assert_eq!(s(get(&r, "reuse")), "extension");
+    assert_eq!(without_reuse(&r), without_reuse(&run(&more)));
+    assert!(strs(get(&r, "unsatisfiable")).contains(&"http://ex/A"));
+    let r = next(&base);
+    assert_eq!(s(get(&r, "reuse")), "none");
+    assert_eq!(without_reuse(&r), without_reuse(&fresh));
+    // A refused version answers "none" and keeps the kept answer.
+    let r = next(&format!("{base} :A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :B ] ."));
+    assert_eq!(s(get(&r, "consistent")), "unknown");
+    assert_eq!(s(get(&r, "reuse")), "none");
+    assert_eq!(s(get(&next(&base), "reuse")), "identical");
 }

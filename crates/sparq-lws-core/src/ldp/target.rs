@@ -26,19 +26,51 @@ pub struct LdpTarget {
 /// which is not built for every target this module is).
 const LINKSET_RECORD_SUFFIX: &str = ".meta";
 
-/// Whether `path` names, or lies under, a linkset record of the LWS surface: any segment ends in
-/// `.meta` (ASCII case-insensitive), as sent or %-decoded. A container `X.meta/` and anything
-/// under it are refused too, so a stored record decides no LDP outcome (the slash rule would
-/// otherwise probe it). `path` is the path alone, without query or fragment. Used only to refuse.
+/// Whether the store key `key` is a linkset record of the LWS surface: a non-container whose last
+/// segment ends in `.meta` (ASCII case-insensitive). Store keys are raw, so nothing is decoded. A
+/// container `X.meta/` and what lies under it are ordinary resources. Used to keep a stored record
+/// from deciding an LDP outcome (the slash rule, listings, group documents).
+pub(crate) fn names_linkset_record(key: &str) -> bool {
+    key.len() >= LINKSET_RECORD_SUFFIX.len()
+        && key.as_bytes()[key.len() - LINKSET_RECORD_SUFFIX.len()..]
+            .eq_ignore_ascii_case(LINKSET_RECORD_SUFFIX.as_bytes())
+}
+
+/// Whether the request path `path` (without query or fragment) names a linkset record of the LWS
+/// surface ([`names_linkset_record`]), as sent or %-decoded. Used only to refuse a target.
 pub(crate) fn is_linkset_record_path(path: &str) -> bool {
-    let names_record = |path: &str| {
-        path.split('/').any(|seg| {
-            seg.len() >= LINKSET_RECORD_SUFFIX.len()
-                && seg.as_bytes()[seg.len() - LINKSET_RECORD_SUFFIX.len()..]
-                    .eq_ignore_ascii_case(LINKSET_RECORD_SUFFIX.as_bytes())
-        })
-    };
-    names_record(path) || names_record(&crate::identity::percent_decode_lossy(path))
+    names_linkset_record(path) || names_linkset_record(&crate::identity::percent_decode_lossy(path))
+}
+
+/// The segment under which the LWS surface keeps its service records (grants, access requests,
+/// subscriptions) in the store, directly below its storage root (`crate::lws::GRANTS_PATH` and its
+/// siblings).
+const LWS_SERVICE_SEGMENT: &str = ".lws";
+
+/// Whether `path` (a path from the storage root, starting with `/`) lies in the LWS surface's
+/// service namespace: its first non-empty segment is `.lws` (ASCII case-insensitive), so a
+/// repeated leading slash does not take a path out of it.
+fn names_lws_service(path: &str) -> bool {
+    path.starts_with('/')
+        && path
+            .trim_start_matches('/')
+            .split('/')
+            .next()
+            .is_some_and(|seg| seg.eq_ignore_ascii_case(LWS_SERVICE_SEGMENT))
+}
+
+/// Whether the request path `path` (without query or fragment) lies in the LWS surface's service
+/// namespace ([`names_lws_service`]), as sent or %-decoded. A `.lws` segment deeper down is an
+/// ordinary name. Used only to refuse a target.
+pub(crate) fn is_lws_service_path(path: &str) -> bool {
+    names_lws_service(path) || names_lws_service(&crate::identity::percent_decode_lossy(path))
+}
+
+/// Whether the store key `key` is a service record of the LWS surface kept under `base` (the
+/// public base URL): its path from `base` lies in the service namespace. Raw, like every store key.
+pub(crate) fn names_lws_service_record(key: &str, base: &str) -> bool {
+    key.strip_prefix(base.trim_end_matches('/'))
+        .is_some_and(names_lws_service)
 }
 
 /// Parse a request path against the public base URL into an [`LdpTarget`].
@@ -73,9 +105,15 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
 
     // The LWS surface keeps each resource's linkset record at `{resource}.meta` in the same
     // store (`crate::lws::META_SUFFIX`). Where both surfaces share a store, such a name is that
-    // record and never an LDP resource, so it, and any path through such a name, is refused
-    // OUTRIGHT here as well: 404, in any case, %-decoded too, whichever surfaces are enabled.
+    // record and never an LDP resource, so it is refused OUTRIGHT here as well: 404, in any case,
+    // %-decoded too, whichever surfaces are enabled.
     if is_linkset_record_path(path_only) {
+        return Err(ServerError::NotFound);
+    }
+
+    // Nor is anything in its service namespace (`.lws/`), where it keeps grants, access requests
+    // and subscriptions in the same store.
+    if is_lws_service_path(path_only) {
         return Err(ServerError::NotFound);
     }
 
@@ -84,9 +122,9 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     // plain resource).
     let is_container = path_only.ends_with('/');
 
-    // Split into interior segments: drop the leading empty segment (before the first '/') and a
-    // single trailing empty segment (the container slash). Any remaining empty segment is an
-    // interior "//", which is rejected. "." / ".." in any segment is path traversal — rejected.
+    // Split into interior segments: leading and trailing slashes are dropped for this check (the
+    // store key keeps them). Any remaining empty segment is an interior "//", which is rejected.
+    // "." / ".." in any segment is path traversal — rejected.
     let trimmed = path_only.trim_start_matches('/').trim_end_matches('/');
     if !trimmed.is_empty() {
         for seg in trimmed.split('/') {
@@ -107,4 +145,52 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
         iri,
         is_container,
     })
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    #[test]
+    fn the_reserved_names_are_the_lws_surfaces() {
+        assert_eq!(super::LINKSET_RECORD_SUFFIX, crate::lws::META_SUFFIX);
+        for path in [
+            crate::lws::GRANTS_PATH,
+            crate::lws::REQUESTS_PATH,
+            crate::lws::SUBSCRIPTIONS_PATH,
+        ] {
+            assert!(path.starts_with(&format!("/{}/", super::LWS_SERVICE_SEGMENT)));
+        }
+    }
+
+    /// Store keys are raw: an encoded name is not the record's key, though a request naming it
+    /// is refused.
+    #[test]
+    fn a_store_key_is_matched_as_stored() {
+        let base = "https://pod.example";
+        assert!(super::names_linkset_record(
+            "https://pod.example/a/doc.META"
+        ));
+        assert!(!super::names_linkset_record(
+            "https://pod.example/a/doc%2Emeta"
+        ));
+        assert!(!super::names_linkset_record(
+            "https://pod.example/a/doc.meta/"
+        ));
+        assert!(super::is_linkset_record_path("/a/doc%2Emeta"));
+        assert!(super::names_lws_service_record(
+            "https://pod.example/.lws/requests/r",
+            base
+        ));
+        assert!(!super::names_lws_service_record(
+            "https://pod.example/%2Elws/requests/r",
+            base
+        ));
+        assert!(!super::names_lws_service_record(
+            "https://pod.example/a/.lws/r",
+            base
+        ));
+        assert!(!super::names_lws_service_record(
+            "https://other.example/.lws/r",
+            base
+        ));
+    }
 }

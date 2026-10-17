@@ -79,7 +79,8 @@ pub fn is_acl_resource(iri: &str) -> bool {
 /// load-bearing: the WAC resolver consults `<resource>.acl`, and the PUT/PATCH create paths only
 /// special-case `.acl`. A name ending in `.meta` is the LWS surface's linkset record, and
 /// `ldp::target::parse_target` refuses it, and any path through it, for every LDP method; a POST
-/// mints `<stem>-<random>`, never such a name, so this mint guard need not cover it.
+/// mints the stem with a suffix of its own, never such a name, so this mint guard need not
+/// cover it.
 ///
 /// FORWARD-LOOKING INVARIANT: if/when `.meta` (or any other auxiliary) becomes load-bearing — i.e.
 /// the resolver or a metadata path starts consulting it — it MUST be guarded UNIFORMLY across the

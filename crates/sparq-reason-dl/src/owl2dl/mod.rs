@@ -18,12 +18,14 @@ pub mod datatypes;
 pub mod dl_profile;
 pub mod extract;
 pub(crate) mod hypertableau;
+pub mod incremental;
 pub mod model;
 pub mod reasoner;
 pub(crate) mod vocab;
 
 pub use dl_profile::{check_dl, DlProfileReport, Unchecked, Violation, ViolationKind};
 pub use extract::{extract, ExtractError, ExtractErrorKind};
+pub use incremental::{IncrementalChecker, Reuse};
 pub use model::Ontology;
 pub use reasoner::{
     check, Budget, Classification, Consistency, DlReport, Reasoner, UnknownReason, MAX_CARDINALITY,

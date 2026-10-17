@@ -399,9 +399,14 @@ impl RegistryEntry {
     }
 
     /// An attested entry whose signature ALSO binds the credential's status-list
-    /// reference (audit #12): the issuer signs
-    /// `commitment_message_with_status(C(G), salt, status_ref_digest)` where
-    /// `status_ref_digest = status_ref_digest(H(status_list), index, version)`.
+    /// reference (audit #12): the issuer signs the METHOD-BOUND
+    /// [`crate::sig::commitment_message_with_status_and_scheme`] (`ZKSIG_M3`)
+    /// over `(C(G), salt, status_ref_digest, scheme_digest)`, where
+    /// `status_ref_digest = status_ref_digest(H(status_list), index, version)`
+    /// and `scheme_digest` is the [`crate::sig::scheme_iri_to_field`] digest of
+    /// the recorded method's scheme IRI — NOT the method-unbound
+    /// `commitment_message_with_status` (`ZKSIG_C3`), which a registry entry is
+    /// never verified over.
     /// So the reference (which list, which index, which version) is
     /// issuer-attested and cannot be omitted or forged by the prover on the
     /// verify path. Same deterministic `(sk, m)` nonce discipline as

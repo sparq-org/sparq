@@ -5,11 +5,14 @@
 //! with a dynamic `import()` on the first `checkOwlDl` call, so a page that never calls it
 //! never fetches it.
 //!
-//! The one export, [`check_owl_dl`] (`checkOwlDl` in JS), parses a TBox document and an
+//! The main export, [`check_owl_dl`] (`checkOwlDl` in JS), parses a TBox document and an
 //! optional ABox document into one graph, reads it as an OWL 2 ontology (the fail-closed
 //! reverse RDF mapping), runs the OWL 2 DL profile check, consistency and classification,
 //! and returns the result as a JSON string. Every answer is three-valued: `"unknown"` comes
 //! with the reason and, where there are any, the offending input triples as N-Triples lines.
+//!
+//! [`OwlDlSession`] rechecks successive versions of an ontology, reusing the last decided
+//! answer ([`OwlDlSessionCore`] is its native core).
 //!
 //! No serde: the JSON is written by hand (the private `json` module), and all the logic is in
 //! [`check_owl_dl_json`], which is plain Rust and unit-tested natively; the
@@ -28,8 +31,8 @@ use oxrdf::{BlankNode, NamedOrBlankNode, Term, Triple};
 use sparq_core::dict::{Dict, Id, NO_ID};
 use sparq_core::Graph;
 use sparq_reason_dl::owl2dl::{
-    check, extract, Consistency, DlProfileReport, DlReport, ExtractError, ExtractErrorKind,
-    UnknownReason, Violation, ViolationKind,
+    check, extract, Budget, Consistency, DlProfileReport, DlReport, ExtractError, ExtractErrorKind,
+    IncrementalChecker, Ontology, Reuse, UnknownReason, Violation, ViolationKind,
 };
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -185,6 +188,7 @@ fn reason_kind(reason: &UnknownReason) -> &'static str {
         UnknownReason::ResourceBudget => "ResourceBudget",
         UnknownReason::ImportsNotLoaded(_) => "ImportsNotLoaded",
         UnknownReason::DatatypeUnknown { .. } => "DatatypeUnknown",
+        UnknownReason::Unconfirmed => "Unconfirmed",
     }
 }
 
@@ -268,7 +272,7 @@ impl Writer<'_> {
                 self.key("triples");
                 self.triples(source);
             }
-            UnknownReason::ResourceBudget => {}
+            UnknownReason::ResourceBudget | UnknownReason::Unconfirmed => {}
         }
         self.raw("}");
     }
@@ -412,6 +416,21 @@ pub fn check_owl_dl_json(
     format: &str,
     options: Option<&str>,
 ) -> Result<String, String> {
+    check_with(tbox, abox, format, options, false, |dict, onto, budget| {
+        (check(dict, onto, budget), None)
+    })
+}
+
+/// [`check_owl_dl_json`] with `run` doing the check; with `session`, a `"reuse"` key says
+/// what `run` reused (`"none"` for a graph the OWL mapping refuses).
+fn check_with(
+    tbox: &str,
+    abox: Option<&str>,
+    format: &str,
+    options: Option<&str>,
+    session: bool,
+    run: impl FnOnce(&Dict, &Ontology, Budget) -> (DlReport, Option<Reuse>),
+) -> Result<String, String> {
     let budget = json::budget_from_options(options)?;
     let format = if format.is_empty() { "turtle" } else { format };
     let (dict, triples) = parse_input(tbox, abox, format)?;
@@ -420,14 +439,59 @@ pub fn check_owl_dl_json(
         triples: &triples,
         out: String::new(),
     };
-    match extract(&dict, &triples) {
+    let reuse = match extract(&dict, &triples) {
         Ok(onto) => {
-            let report = check(&dict, &onto, budget);
+            let (report, reuse) = run(&dict, &onto, budget);
             w.result(Ok(&report));
+            reuse
         }
-        Err(e) => w.result(Err(&e)),
+        Err(e) => {
+            w.result(Err(&e));
+            session.then_some(Reuse::None)
+        }
+    };
+    if let Some(reuse) = reuse {
+        w.out.pop();
+        w.raw(",");
+        w.key("reuse");
+        w.str(match reuse {
+            Reuse::None => "none",
+            Reuse::Identical => "identical",
+            Reuse::Extension => "extension",
+        });
+        w.raw("}");
     }
     Ok(w.out)
+}
+
+/// A session that rechecks successive versions of an ontology, reusing the last decided
+/// answer when the next version has the same axioms or adds to them (see
+/// `sparq_reason_dl::owl2dl::IncrementalChecker`). Not shared between threads.
+#[derive(Default)]
+pub struct OwlDlSessionCore {
+    checker: IncrementalChecker,
+}
+
+impl OwlDlSessionCore {
+    /// [`check_owl_dl_json`] for the next version, with a `"reuse"` key: `"none"`,
+    /// `"identical"` or `"extension"`. An unreadable or refused version leaves the session's
+    /// kept answer as it was.
+    ///
+    /// # Errors
+    /// As [`check_owl_dl_json`].
+    pub fn check_json(
+        &mut self,
+        tbox: &str,
+        abox: Option<&str>,
+        format: &str,
+        options: Option<&str>,
+    ) -> Result<String, String> {
+        let checker = &mut self.checker;
+        check_with(tbox, abox, format, options, true, |dict, onto, budget| {
+            let (report, reuse) = checker.check(dict, onto, budget);
+            (report, Some(reuse))
+        })
+    }
 }
 
 /// JS: `checkOwlDl(tbox, abox?, format, optionsJson?) -> string` — the JSON result of
@@ -441,6 +505,36 @@ pub fn check_owl_dl(
 ) -> Result<String, JsError> {
     check_owl_dl_json(tbox, abox.as_deref(), format, options_json.as_deref())
         .map_err(|e| JsError::new(&e))
+}
+
+/// JS: `new OwlDlSession()`, then `session.check(tbox, abox?, format, optionsJson?) -> string`
+/// — [`OwlDlSessionCore::check_json`]. `free()` releases it.
+#[wasm_bindgen(js_name = OwlDlSession)]
+#[derive(Default)]
+pub struct OwlDlSession {
+    core: OwlDlSessionCore,
+}
+
+#[wasm_bindgen(js_class = OwlDlSession)]
+impl OwlDlSession {
+    #[wasm_bindgen(constructor)]
+    #[must_use]
+    pub fn new() -> OwlDlSession {
+        OwlDlSession::default()
+    }
+
+    /// Throws on a parse error or malformed options.
+    pub fn check(
+        &mut self,
+        tbox: &str,
+        abox: Option<String>,
+        format: &str,
+        options_json: Option<String>,
+    ) -> Result<String, JsError> {
+        self.core
+            .check_json(tbox, abox.as_deref(), format, options_json.as_deref())
+            .map_err(|e| JsError::new(&e))
+    }
 }
 
 #[cfg(test)]
