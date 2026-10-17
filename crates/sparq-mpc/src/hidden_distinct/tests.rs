@@ -586,14 +586,15 @@ fn an_over_cap_bound_is_refused_before_any_draw() {
             .expect_err("an over-cap bound must be refused");
         match &err {
             MpcError::Protocol(m) => {
-                assert!(m.contains("MAX_OUTPUT_BOUND"), "B={bound}: {m}")
+                assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m)
             }
-            other => panic!("B={bound}: expected a Protocol refusal, got {other:?}"),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
         }
         assert_eq!(
             counted.draws(),
             0,
-            "B={bound}: the bound must be refused before any draw"
+            "B={}: the bound must be refused before any draw",
+            bound
         );
     }
     // A legal bound over the same input still runs.

@@ -261,7 +261,7 @@ fn comm_counter_refuses_an_over_cap_bound() {
     for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
         match plan.comm_counter(5, bound) {
             Err(MpcError::Protocol(m)) => {
-                assert!(m.contains("MAX_OUTPUT_BOUND"), "B={bound}: {m}")
+                assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m)
             }
             other => panic!(
                 "B={bound}: an over-cap bound must be a Protocol refusal, got {:?}",

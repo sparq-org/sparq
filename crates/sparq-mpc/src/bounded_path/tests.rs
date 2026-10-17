@@ -633,7 +633,8 @@ fn per_hop_projection_matches_the_naive_fold_at_small_lengths() {
             let naive = naive_fixed_chain(&edges, &chain, &s, &o);
             assert_eq!(
                 shipped.rows, naive.rows,
-                "graph {g}, L={len}: the per-hop projection changed the answer"
+                "graph {}, L={}: the per-hop projection changed the answer",
+                g, len
             );
         }
     }
@@ -704,9 +705,13 @@ fn over_hop_cap_unroll_is_refused_before_planning() {
         match &err {
             MpcError::Protocol(msg) => assert!(
                 msg.contains("MAX_UNROLL_HOPS") && msg.contains("hops per chain"),
-                "the error should name the hop cap, got: {msg}"
+                "the error should name the hop cap, got: {}",
+                msg
             ),
-            other => panic!("an over-hop-cap unroll must be a Protocol error, got {other:?}"),
+            other => panic!(
+                "an over-hop-cap unroll must be a Protocol error, got {:?}",
+                other
+            ),
         }
     }
 

@@ -849,13 +849,14 @@ fn an_over_cap_output_bound_is_refused_before_any_draw() {
             eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, bound)
                 .expect_err("an over-cap bound must be refused");
         match &err {
-            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={bound}: {m}"),
-            other => panic!("B={bound}: expected a Protocol refusal, got {other:?}"),
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
         }
         assert_eq!(
             counted.draws(),
             0,
-            "B={bound}: the bound must be refused before any draw"
+            "B={}: the bound must be refused before any draw",
+            bound
         );
     }
     assert!(eval_bounded_path_hidden(&backend, &edges, &form, 4).is_ok());

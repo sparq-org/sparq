@@ -1206,7 +1206,9 @@ fn candidate_pair_count(
         (RowBinding::Positional, RowBinding::Positional) => {
             if llen != rlen {
                 return Err(MpcError::Protocol(format!(
-                    "batched_join (Positional): left has {llen} rows but right has {rlen} —                      index-correlated columns must be equal length"
+                    "batched_join (Positional): left has {} rows but right has {} — \
+                     index-correlated columns must be equal length",
+                    llen, rlen
                 )));
             }
             Ok(llen)
@@ -1221,7 +1223,8 @@ fn candidate_pair_count(
                 if let Some(c) = right_counts.get(k.as_str()) {
                     total = total.checked_add(*c).ok_or_else(|| {
                         MpcError::Protocol(
-                            "batched_join (Keyed): the candidate fan-out overflows usize —                              refusing before any allocation or draw"
+                            "batched_join (Keyed): the candidate fan-out overflows usize \
+                             — refusing before any allocation or draw"
                                 .to_string(),
                         )
                     })?;

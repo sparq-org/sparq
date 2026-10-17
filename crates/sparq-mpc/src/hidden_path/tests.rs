@@ -751,8 +751,8 @@ fn an_over_cap_bound_is_refused_before_any_draw() {
         let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, bound)
             .expect_err("an over-cap bound must be refused");
         match &err {
-            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={bound}: {m}"),
-            other => panic!("B={bound}: expected a Protocol refusal, got {other:?}"),
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
         }
         assert_eq!(counted.draws(), 0, "slots_through B={bound}");
 
@@ -762,8 +762,8 @@ fn an_over_cap_bound_is_refused_before_any_draw() {
             exact_k_chain_candidates_and_opened_rows(&mut counted, &backend, &edges, 2, bound)
                 .expect_err("the instrumented entry must refuse it too");
         match &err {
-            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={bound}: {m}"),
-            other => panic!("B={bound}: expected a Protocol refusal, got {other:?}"),
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
         }
         assert_eq!(counted.draws(), 0, "candidates_and_opened_rows B={bound}");
     }
