@@ -706,16 +706,7 @@ fn every_hidden_entry_declared_message_is_checked_in_either_order() {
 
 // --------------------------------------------------------- live toolchain lane
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("sparq_method_auth_{name}_{}", std::process::id()));
@@ -733,7 +724,8 @@ fn scratch(name: &str) -> std::path::PathBuf {
 /// nonce binding, the reconstruction byte-compare or the proof verification.
 ///
 /// `#[ignore]` so the toolchain lane's `cargo test -- --ignored` step actually
-/// executes it; the default lane has no `nargo`/`bb` and would only skip.
+/// executes it; the default lane has no `nargo`/`bb` and declares that with
+/// `SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN=1`.
 #[test]
 #[ignore = "slow: full bb prove + verify of a scan member"]
 fn live_verify_manifest_with_an_m5_attestation() {
@@ -744,8 +736,7 @@ fn live_verify_manifest_with_an_m5_attestation() {
         InMemorySeenNonces, VerifierNonce,
     };
 
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping the live M5 verify_manifest");
+    if !support::require_toolchain("live_verify_manifest_with_an_m5_attestation", &["nargo", "bb"]) {
         return;
     }
     let sk = SecretKey::from_seed(1);
@@ -823,8 +814,7 @@ fn live_hidden_issuer_proof_over_the_m5_message() {
         InMemorySeenNonces, VerifierNonce,
     };
 
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping the live hidden-issuer M5 test");
+    if !support::require_toolchain("live_hidden_issuer_proof_over_the_m5_message", &["nargo", "bb"]) {
         return;
     }
     const DEPTH: u32 = 4;
@@ -952,8 +942,7 @@ fn live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message() 
         InMemorySeenNonces, VerifierNonce,
     };
 
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping the live additive hidden-issuer M5 test");
+    if !support::require_toolchain("live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message", &["nargo", "bb"]) {
         return;
     }
     const DEPTH: u32 = 4;

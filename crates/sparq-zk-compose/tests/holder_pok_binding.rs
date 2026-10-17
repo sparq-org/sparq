@@ -26,8 +26,9 @@
 //!
 //! ## Toolchain
 //! The serde + no-toolchain structural tests run WITHOUT nargo/bb. The full
-//! prove→verify→tamper→invalid-witness round-trips are `#[ignore]` + toolchain-gated
-//! (skip cleanly when nargo/bb are absent), mirroring `family_members_pzet.rs` /
+//! prove→verify→tamper→invalid-witness round-trips are `#[ignore]` + LIVE (they fail
+//! loud when nargo/bb are absent, unless the lane declares itself toolchain-free),
+//! mirroring `family_members_pzet.rs` /
 //! the `holder_pop_valid_verifies_end_to_end` e2e test.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
@@ -187,16 +188,7 @@ fn holder_pop(holder_sk: &SecretKey) -> String {
     holder_sk.sign_holder_pop(&challenge_fr)
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 // =========================================================================
 // NO-TOOLCHAIN: serde + new manifest field
@@ -560,8 +552,7 @@ fn verify_full(
 #[test]
 #[ignore = "slow: full bb prove of scan + holder_pok members (sq-c2ql)"]
 fn holder_pok_valid_binding_verifies_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-c2ql holder PoK happy path");
+    if !support::require_toolchain("holder_pok_valid_binding_verifies_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let issuer = test_issuer_sk(1);
@@ -597,8 +588,7 @@ fn holder_pok_valid_binding_verifies_end_to_end() {
 #[test]
 #[ignore = "slow: full bb prove of scan + holder_pok members (sq-c2ql)"]
 fn holder_pok_wrong_holder_rejected_digest_mismatch() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-c2ql wrong-holder PoK");
+    if !support::require_toolchain("holder_pok_wrong_holder_rejected_digest_mismatch", &["nargo", "bb"]) {
         return;
     }
     let issuer = test_issuer_sk(1);
@@ -645,8 +635,7 @@ fn holder_pok_wrong_holder_rejected_digest_mismatch() {
 #[test]
 #[ignore = "slow: full bb prove of scan + holder_pok members (sq-c2ql)"]
 fn holder_pok_tampered_proof_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-c2ql tampered PoK");
+    if !support::require_toolchain("holder_pok_tampered_proof_rejected", &["nargo", "bb"]) {
         return;
     }
     let issuer = test_issuer_sk(1);
@@ -696,8 +685,7 @@ fn holder_pok_tampered_proof_rejected() {
 #[test]
 #[ignore = "slow: full bb prove of a scan member (sq-c2ql)"]
 fn holder_pok_required_but_absent_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping sq-c2ql mandated-PoK-absent");
+    if !support::require_toolchain("holder_pok_required_but_absent_rejected", &["nargo", "bb"]) {
         return;
     }
     let issuer = test_issuer_sk(1);

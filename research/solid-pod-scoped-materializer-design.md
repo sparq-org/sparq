@@ -76,11 +76,10 @@ either
   loader-emitted by naming convention, `<R>` ↦ `<R + ".acl">` (`loader.rs:229-232`), so
   `origin(?acl) = origin(?r)` by construction; or
 - `?r solidx:inheritedAcl ?acl . ?r solidx:inheritsFrom ?c . … ?auth acl:default ?c` —
-  `inheritedAcl` walks `solidx:parent` (`wac.n3:27-33`), and `parent` is
-  `common.n3:23-27`: a `string:scrape` of `^(.*/)[^/]+/?$` **filtered by
-  `?p solidx:isResource true`**.
+  `inheritedAcl` walks `solidx:parent` (`wac.n3:27-33`), and `parent` is emitted by the
+  loader from `parent_iri`, **only when the parent is itself a resource**.
 
-The scrape capture is always a *prefix* of the input, so it can only shorten the path, never
+`parent_iri` always returns a *prefix* of its input, so it can only shorten the path, never
 change the authority. The walk terminates at the pod root because the only shorter prefix is
 the authority-less `https://`, which is never in the loader's `resources` set
 (`loader.rs:214-222` seeds it from graph names and `parent_iri`, and `parent_iri` returns

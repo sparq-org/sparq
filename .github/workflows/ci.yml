@@ -93,6 +93,14 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+  # No job in this workflow installs the pinned Noir toolchain (nargo/bb) — the LIVE
+  # ZK suites belong to zk-toolchain.yml, which installs it. The live tests in
+  # crates/sparq-zk-compose/tests/ now FAIL rather than return early when a tool is
+  # missing (so a toolchain lane whose install silently broke can no longer report
+  # PASS for bodies that never ran), so this workflow DECLARES itself toolchain-free
+  # here and gets a printed, named skip per live test instead. Never set this in a
+  # lane that is supposed to have the toolchain — that would re-open the false green.
+  SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN: "1"
 
 jobs:
   # BUILD-ONCE for the sharded test suite (sq-vyxy folded in). The old

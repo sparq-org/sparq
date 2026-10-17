@@ -44,7 +44,7 @@
 //! the DEFAULT `cargo test` with no prover toolchain. Findings whose forgery
 //! requires a GENUINE (forged) `bb` proof to even be CONSTRUCTED — #1 and #2 (and
 //! the proof-bound variants of #7/#11) — are gated behind `#[ignore]` and
-//! `toolchain_available()`; they are written so the separate toolchain CI lane
+//! the shared LIVE gate in `tests/support/mod.rs`; they are written so the separate toolchain CI lane
 //! (bead **sq-f9tl**) can run them with `-- --ignored`. Each `#[ignore]` carries
 //! the reason inline.
 //!
@@ -169,16 +169,7 @@ fn attest_full(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestatio
     }
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "sparq_zk_compose_auditmap_{name}_{}",
@@ -934,8 +925,7 @@ fn composed_manifest(
 #[test]
 #[ignore = "toolchain lane (sq-f9tl): needs a real bb prove to forge a genuine-proof-over-different-statement (#1)"]
 fn finding_01_public_input_statement_substitution_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping #1 toolchain forge");
+    if !support::require_toolchain("finding_01_public_input_statement_substitution_rejected", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex(CHALLENGE_HEX.into());
@@ -967,8 +957,7 @@ fn finding_01_public_input_statement_substitution_rejected() {
 #[test]
 #[ignore = "toolchain lane (sq-f9tl): needs a real bb prove/verify to exercise the canonical-vk path (#2)"]
 fn finding_02_canonical_vk_used_not_prover_vk() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping #2 toolchain control");
+    if !support::require_toolchain("finding_02_canonical_vk_used_not_prover_vk", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex(CHALLENGE_HEX.into());
@@ -994,8 +983,7 @@ fn finding_02_canonical_vk_used_not_prover_vk() {
 #[test]
 #[ignore = "toolchain lane (sq-f9tl): needs a real bb prove to forge a genuine filter proof over a substituted operand (#7)"]
 fn finding_07_operand_substitution_bb_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping #7 bb forge");
+    if !support::require_toolchain("finding_07_operand_substitution_bb_rejected", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex(CHALLENGE_HEX.into());
@@ -1029,8 +1017,7 @@ fn finding_07_operand_substitution_bb_rejected() {
 #[test]
 #[ignore = "toolchain lane (sq-f9tl): needs a real bb prove against the scan_k2_n64_r8 member to forge the n-relabel (#11 bb variant)"]
 fn finding_11_n_relabel_bb_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping #11 bb n-relabel forge");
+    if !support::require_toolchain("finding_11_n_relabel_bb_rejected", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex(CHALLENGE_HEX.into());
