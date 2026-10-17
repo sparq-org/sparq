@@ -602,7 +602,9 @@ fn malformed_draws_in_the_or_fold_are_refused() {
     let form = HiddenBoundedPath::optional(P);
     for how in ALL_MALFORMATIONS {
         let mut src = MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, 0, how);
-        match eval_bounded_path_hidden_slots_through(&mut src, &backend, &edges, &form, 2) {
+        // B = 3 is the public candidate bound for `{0,1}` over one edge
+        // (`2*|E|` diagonal + `|E|` length-1), so the run reaches the OR-fold.
+        match eval_bounded_path_hidden_slots_through(&mut src, &backend, &edges, &form, 3) {
             Err(MpcError::Protocol(m)) => {
                 assert!(
                     m.contains("re-sharing that is not the canonical"),
@@ -748,15 +750,23 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
     // later point of one continuous keystream. The order is the shuffle's secret
     // permutation and carries no result meaning — the canonicalised multiset below
     // is byte-identical to the pre-routing capture.
-    let (slots, cost) = eval_bounded_path_hidden_slots(&backend, &edges, &form, 5).unwrap();
+    // `B` is the public candidate bound for this form and edge count (`2*|E|` +
+    // `|E|` + `|E|^2` = 10 over two edges), which is what the pre-build guard now
+    // requires; the four real pairs are the same, the rest of the slots are dummies.
+    let (slots, cost) = eval_bounded_path_hidden_slots(&backend, &edges, &form, 10).unwrap();
     assert_eq!(
         slot_strings(&slots),
         [
-            "<http://ex/b> <http://ex/b>",
-            "dummy",
             "<http://ex/a> <http://ex/a>",
             "<http://ex/a> <http://ex/b>",
-            "<http://ex/b> <http://ex/a>"
+            "<http://ex/b> <http://ex/a>",
+            "dummy",
+            "dummy",
+            "dummy",
+            "dummy",
+            "<http://ex/b> <http://ex/b>",
+            "dummy",
+            "dummy"
         ]
     );
     let mut sorted = slot_strings(&slots);
@@ -768,9 +778,14 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
             "<http://ex/a> <http://ex/b>",
             "<http://ex/b> <http://ex/a>",
             "<http://ex/b> <http://ex/b>",
+            "dummy",
+            "dummy",
+            "dummy",
+            "dummy",
+            "dummy",
             "dummy"
         ],
-        "revealed multiset must be unchanged"
+        "the four REAL pairs are unchanged; the extra slots are dummies"
     );
     assert_eq!(
         (
@@ -781,7 +796,7 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
             cost.shuffle.switches,
             cost.shuffle.depth_rounds
         ),
-        (5, 5, 5, 5, 56, 5)
+        (10, 10, 10, 10, 175, 7)
     );
 }
 
@@ -808,23 +823,26 @@ fn seeded_bounded_stage_transcript_is_pinned() {
     let edges = pin_edges();
     let form = HiddenBoundedPath::range("p", 0, 2);
     let mut rec = RecordingSource::new(backend.dealer());
-    eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 5).unwrap();
-    assert_eq!(rec.log.len(), 2074);
+    eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 10).unwrap();
+    assert_eq!(rec.log.len(), 2219);
     // Prefix unchanged from the pre-routing pin; the whole move is in the output
     // suffix, which grew by the per-element degree reductions.
     assert_eq!(fingerprint(&rec.log[..1932]), 0x690e_cad1_cdf7_7eb0);
-    // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
-    // fingerprint is the value the pre-re-randomisation code produced, so only
-    // the shuffle's own output and the draws after it moved.
+    // The pre-shuffle prefix covers the union stage AND the output stage's per-slot
+    // sharings, so it moved when `B` was raised to the public candidate bound (the
+    // pre-build guard now requires it); the 1932-entry UNION prefix above is the
+    // part that is still the pre-routing capture. This pins the pre-shuffle draws
+    // at the current `B`, so a later change to the output stage's own draw order
+    // still shows up separately from the shuffle's output.
     assert_eq!(
         fingerprint(prefix_before_first_shuffle(&rec.log)),
-        0xa6c3_51d1_ad54_0fc2
+        0xf7a2_78e9_72f9_9d7e
     );
-    assert_eq!(fingerprint(&rec.log), 0xd1f8_cf68_6b5c_ba26);
+    assert_eq!(fingerprint(&rec.log), 0xc481_3cba_9fcd_bc4d);
     let suffix: Vec<&str> = rec.log[1932..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,
-        [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
+        [["vss_own_input"; 286].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }
 
@@ -859,7 +877,9 @@ fn an_over_cap_output_bound_is_refused_before_any_draw() {
             bound
         );
     }
-    assert!(eval_bounded_path_hidden(&backend, &edges, &form, 4).is_ok());
+    // The legal tail: a bound that clears the public candidate bound for this
+    // form and edge count (`|E| + |E|^2` for `{1,2}` over two edges).
+    assert!(eval_bounded_path_hidden(&backend, &edges, &form, 6).is_ok());
 }
 
 /// The coverage half of the bound contract, before any draw, for the bounded form.
@@ -884,20 +904,21 @@ fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
         (P, "http://ex/b", "http://ex/c"),
     ]);
 
-    // {1,1}: only the edge pairs, (a,b) and (b,c) — 2.
-    // {1,2}: the 2x2 product (a,b),(a,c),(b,b),(b,c) — 4 — which already CONTAINS
-    //        both edge pairs, so a sum of the arms would say 6.
-    // {0,2}: that product plus the reflexive (a,a),(b,b),(c,c) — but (b,b) is in
-    //        BOTH, so the union is 6 and a sum would say 7.
+    // The bound sums the arms' PUBLIC sizes, each a function of |E| = 2 alone:
+    // {1,1}: the length-1 arm only — |E| = 2.
+    // {1,2}: length 1 plus any length >= 2 — |E| + |E|^2 = 6. The exact key set is
+    //        4 pairs; the bound over-counts because the arms overlap, which is the
+    //        fail-closed direction and the price of not looking at the edge data.
+    // {0,2}: the same plus the reflexive diagonal over at most 2*|E| nodes — 10.
     for (form, expected) in [
         (HiddenBoundedPath::range(P, 1, 1), 2usize),
-        (HiddenBoundedPath::range(P, 1, 2), 4),
-        (HiddenBoundedPath::range(P, 0, 2), 6),
+        (HiddenBoundedPath::range(P, 1, 2), 6),
+        (HiddenBoundedPath::range(P, 0, 2), 10),
     ] {
-        let count = projected_bounded_candidate_count(&edges, &form).unwrap();
+        let count = public_bounded_candidate_pair_bound(edges.len(), &form).unwrap();
         assert_eq!(
             count, expected,
-            "the projection must be the union, not the sum of its arms"
+            "the bound must be the sum of the arms' PUBLIC sizes, from |E| alone"
         );
 
         let mut dealer = backend.dealer();
@@ -905,14 +926,18 @@ fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
         let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 1)
             .expect_err("a bound below the candidate count must be refused");
         match &err {
-            MpcError::Protocol(m) => assert!(m.contains("candidate count"), "{}", m),
+            MpcError::Protocol(m) => {
+                assert!(m.contains("public candidate bound"), "{}", m);
+                // B and the public bound only — no candidate count.
+                assert!(!m.contains("candidate count {"), "{}", m);
+            }
             other => panic!("expected a Protocol refusal, got {:?}", other),
         }
         assert_eq!(counted.draws(), 0, "refused before any draw");
 
-        // A bound equal to the projection runs, which is what makes it exact rather
-        // than a bound that quietly refuses legal work.
+        // A bound equal to the public bound runs: the guard refuses a short `B`,
+        // not every `B`.
         eval_bounded_path_hidden(&backend, &edges, &form, count)
-            .expect("B = the exact candidate count must run");
+            .expect("B = the public candidate bound must run");
     }
 }

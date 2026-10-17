@@ -298,10 +298,56 @@ pub(crate) fn check_output_bound_cap(bound: usize) -> Result<(), MpcError> {
     Ok(())
 }
 
+/// The bound contract settled from PUBLIC dimensions only: `B` within
+/// [`MAX_OUTPUT_BOUND`], and `B` covering `public_bound` — an upper bound on the
+/// candidate count derived from public sizes alone (an edge count, a hop count),
+/// never from a statistic over the caller's data.
+///
+/// Use this wherever the exact candidate count is a function of HIDDEN or
+/// unmatched data, as it is for the hidden property-path builders: comparing `B`
+/// against such a count would make the accept/refuse decision — and so the fact
+/// of the refusal — depend on a quantity the operator does not disclose. An
+/// upper bound from public dimensions refuses in the fail-closed direction
+/// instead: `B` must be provisioned for the public worst case, and a `B` that
+/// clears it also clears the exact count, so nothing is ever truncated.
+///
+/// The message carries `B` and the public bound, both already public, and no
+/// candidate count.
+pub(crate) fn check_public_output_bound(
+    what: &str,
+    bound: usize,
+    public_bound: usize,
+) -> Result<(), MpcError> {
+    check_output_bound_cap(bound)?;
+    if public_bound > MAX_OUTPUT_BOUND {
+        return Err(MpcError::Protocol(format!(
+            "{}: the public candidate bound {} exceeds the MAX_OUTPUT_BOUND cap of {} — \
+             refusing (every candidate becomes one materialised slot, so no legal B could \
+             cover the public worst case)",
+            what, public_bound, MAX_OUTPUT_BOUND
+        )));
+    }
+    if bound < public_bound {
+        return Err(MpcError::Protocol(format!(
+            "{}: padded bound B={} < the public candidate bound {} derived from the public \
+             input sizes — refusing before any draw (B must cover the public worst case, or a \
+             candidate could be truncated and a true match dropped)",
+            what, bound, public_bound
+        )));
+    }
+    Ok(())
+}
+
 /// The whole fail-closed bound contract: `B` within [`MAX_OUTPUT_BOUND`] (checked
 /// first, since it is the one that would otherwise reach an allocation), the
 /// candidate COUNT within the same cap, and `B` covering every candidate so no
 /// match is ever silently truncated.
+///
+/// Its messages name the candidate count, so call it only where that count is
+/// something the CALLER already holds — it owns the candidate slice, or the count
+/// is a product of public input lengths. Where the count is a statistic over
+/// hidden or unmatched data, use `check_public_output_bound` instead, so neither
+/// the message nor the fact of the refusal depends on undisclosed data.
 pub(crate) fn check_output_bound(bound: usize, candidates: usize) -> Result<(), MpcError> {
     check_output_bound_cap(bound)?;
     if candidates > MAX_OUTPUT_BOUND {

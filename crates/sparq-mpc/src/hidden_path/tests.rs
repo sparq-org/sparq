@@ -798,9 +798,10 @@ fn an_over_cap_bound_is_refused_before_any_draw() {
 /// `k = 18` the builder drew one secure equality per hop of every one of the
 /// `2^18` tuples, about 2.1 billion draws over roughly seventeen minutes, and only
 /// THEN discovered that `B = 1` could not hold the answer. The count is decidable
-/// from the disclosed endpoint terms in `O(|E| log |E|)`, so it is now decided
-/// first. A `k = 18` fixture is used deliberately: with the guard in place the test
-/// finishes instantly, and without it the enumeration is the cost being avoided.
+/// decidable from the PUBLIC input sizes — the edge count and `k` — so it is now
+/// decided first. A `k = 18` fixture is used deliberately: with the guard in place
+/// the test finishes instantly, and without it the enumeration is the cost being
+/// avoided.
 #[test]
 fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
     use crate::randomness::test_sources::DrawCountingSource;
@@ -813,9 +814,9 @@ fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
         ("http://ex/b", "http://ex/c"),
     ]);
     assert_eq!(
-        projected_candidate_count(&edges, 18).unwrap(),
+        public_candidate_pair_bound(edges.len(), 18).unwrap(),
         4,
-        "the projection must agree with the builder's grouping"
+        "the public bound for k >= 2 is |E|^2, from the edge count alone"
     );
 
     for k in [2usize, 18] {
@@ -824,15 +825,20 @@ fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
         let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, k, 1)
             .expect_err("a bound below the candidate count must be refused");
         match &err {
-            MpcError::Protocol(m) => assert!(m.contains("candidate count"), "k={}: {}", k, m),
+            MpcError::Protocol(m) => {
+                assert!(m.contains("public candidate bound"), "k={}: {}", k, m);
+                // The refusal names B and the public bound, and no candidate count.
+                assert!(!m.contains("candidate count {"), "k={}: {}", k, m);
+            }
             other => panic!("k={}: expected a Protocol refusal, got {:?}", k, other),
         }
         assert_eq!(counted.draws(), 0, "k={}: refused before any draw", k);
     }
 
-    // k = 1 groups by the edges' own (subject, object) pairs, so the count is 2 and
-    // B = 1 is still short — the projection must track `k`, not assume the product.
-    assert_eq!(projected_candidate_count(&edges, 1).unwrap(), 2);
+    // k = 1 groups by the edges' own (subject, object) pairs, so at most one key per
+    // edge: the public bound is |E| = 2 and B = 1 is still short. The bound must
+    // track `k`, not assume the product.
+    assert_eq!(public_candidate_pair_bound(edges.len(), 1).unwrap(), 2);
     let mut dealer = backend.dealer();
     let mut counted = DrawCountingSource::new(&mut dealer);
     assert!(
@@ -841,8 +847,18 @@ fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
     );
     assert_eq!(counted.draws(), 0);
 
-    // And the projection is EXACT, not merely an upper bound: a bound equal to it
-    // runs, for both the k = 1 and the k >= 2 grouping.
-    eval_exact_k_chain_hidden(&backend, &edges, 1, 2).expect("B = exact count runs at k=1");
-    eval_exact_k_chain_hidden(&backend, &edges, 2, 4).expect("B = exact count runs at k=2");
+    // And a bound equal to the PUBLIC bound runs, for both the k = 1 and the
+    // k >= 2 grouping — the guard refuses short bounds, not every bound.
+    eval_exact_k_chain_hidden(&backend, &edges, 1, 2).expect("B = the public bound runs at k=1");
+    eval_exact_k_chain_hidden(&backend, &edges, 2, 4).expect("B = the public bound runs at k=2");
+
+    // The test-only instrumentation entry carries the SAME guard, so a short `B`
+    // cannot reach the builder through it either.
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    assert!(
+        exact_k_chain_candidates_and_opened_rows(&mut counted, &backend, &edges, 2, 1).is_err(),
+        "the instrumentation entry must refuse a short B too"
+    );
+    assert_eq!(counted.draws(), 0);
 }
