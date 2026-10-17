@@ -27,11 +27,13 @@
 //! decide answers `Unknown(DatatypeUnknown)`. An ill-typed literal in an assertion,
 //! `DataHasValue` or `DataOneOf` has no value, so the ontology has no model: `Inconsistent`.
 //!
-//! Nominals are decided without SHOIQ's NI-rule. A candidate model is accepted only when
-//! its completion graph provably unravels into a model (see the tableau's `unravels`); when
-//! nominals tie a repeated part of the graph to an individual whose number restrictions the
-//! repetition could break, that branch is closed as unconfirmed, and if no other branch
-//! gives a model the answer is `Unknown(Unconfirmed)`, never a guess.
+//! Nominals are decided with SHOIQ's NI-rule. A candidate model is accepted only when its
+//! completion graph provably unravels into a model (see the tableau's `unravels`); when
+//! nominals tie a repeated part of the graph to an individual whose at-most restriction
+//! the repetition could break, the NI-rule makes that part one of the individual's few
+//! neighbours. Where it does not apply (the restriction is a disjunct of a larger clause,
+//! or no restriction counts the part), the branch is closed as unconfirmed, and if no other
+//! branch gives a model the answer is `Unknown(Unconfirmed)`, never a guess.
 //!
 //! Classification is TBox-only when the ontology has no nominals, which is exact for a
 //! consistent ontology: for SHIQ(D) the ABox cannot change a subsumption between classes.
@@ -78,7 +80,7 @@ pub enum UnknownReason {
     ImportsNotLoaded(Vec<Id>),
     /// The tableau built a candidate model that it could not confirm: nominals tie a part of
     /// the completion graph that blocking repeats to an individual whose number
-    /// restrictions the repetitions could break (SHOIQ's NI-rule case, not implemented), or
+    /// restrictions the repetitions could break, where the NI-rule does not apply, or
     /// a key compares data values the tableau has not fixed.
     Unconfirmed,
 }
