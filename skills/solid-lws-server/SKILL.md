@@ -297,18 +297,30 @@ that; the owner's subscriptions are not counted), and each such request body is 
 holds never makes it smaller, and the count behind a 429 is read from the requester's own
 records alone. The server holds at most 512 access requests and 512 subscriptions in all (507),
 the storage owner's subscriptions counted apart against 512 of its own. Those totals are
-resource bounds, not capacities: the records share the storage's store, which is finite, so a
-507 says the storage is full of subscriptions (or of access requests) **whoever filled it** —
-a newcomer holding none is refused the same, and without the total the first refusal would
-come from the store itself, which the rest of the storage shares. One subscriber cannot reach a
-total on its own, being held to 16. A type-search filter is at most 8 KiB and an
+resource bounds, not capacities: a 507 says the storage is full of subscriptions (or of access
+requests) **whoever filled it** — a newcomer holding none is refused the same. One subscriber
+cannot reach a total on its own, being held to 16.
+**Subscriptions have storage of their own.** In the in-memory store they are admitted against a
+service pool (`in_service_pool`, `InMemoryStoreLimits::max_pool_resource_count` and
+`max_pool_bytes`, sized for the 1,024 the notification service admits) and take nothing from the
+content ceilings (`max_resource_count`, `max_total_bytes`), so no number of subscriptions, from
+any number of identities, can make a write of content answer 507. A full pool refuses a
+subscription create (507) and nothing else. **Residual:** that 507 is an aggregate-occupancy
+signal — a requester well under its own 16 learns from it that the pool is full, which is
+something about how many subscriptions others hold. It is the occupancy of a bounded shared
+resource, as the access-request total is, and it carries no subscriber, topic or inbox; it is
+the signal a shared resource bound cannot avoid giving, kept to the subscription pool so it
+never reaches a content write.
+A type-search filter is at most 8 KiB and an
 access grant 256 KiB; these limits apply while the body is read. Stored requests or subscriptions
 past these bounds at startup (stored
 before one was lowered, or written to the store directly) are all loaded and none is removed;
 the start logs a line naming the container and what is past which bound, and no new one is
-admitted to a bound until it is under it. A subscription request also removes up to 16 expired
-subscriptions, anyone's, before it is counted, so expired records cannot hold the total against
-everyone. An access document nested too deeply to store and read back gets 400. A
+admitted to a bound until it is under it. A subscription create removes up to 16 expired
+subscriptions **of its own subscriber's** before it is counted, so the purging it waits for is
+its own records'. Everyone else's are swept on a task of its own, started by a create that goes
+through once its locks are released; what that does not reach the next create's sweep takes,
+from where the last one stopped, and a start removes every expired subscription it loads. An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
@@ -520,10 +532,13 @@ What the server exposes, all discoverable from the storage description
   1,024). That caps the number of checks, not their cost: each reads from one snapshot of the
   resource's access taken for the change, so its metadata is read and the grants are scanned
   once per change. Taking a place in the delivery queue, parsing each inbox and running each
-  delivery happen off the response path, on a task of their own (`Notifier::send`), so a
-  delivery target that never answers holds up neither that change nor the next, and the change
-  is answered without the per-delivery work of however many subscriptions it has. Who hears of
-  the change is still decided on the response path, while its locks are held.
+  delivery leave the request's task before any of them is queued, on a task of their own
+  (`Notifier::send`), so a delivery target that never answers holds up neither that change nor
+  the next, and the request does not do the per-delivery work of however many subscriptions the
+  change has. When the runtime runs that task is the runtime's business: the deliveries are off
+  the request's task, which is not a promise that they happen after the response reaches the
+  client. Who hears of the change is still decided on the request's task, while its locks are
+  held.
   A recursive delete too large to put back is refused before any of its
   notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`

@@ -9,10 +9,10 @@
 //! inbox as an `application/lws+json` Notification, provided the subscriber may read the
 //! resource when the event occurs (section 10.3.3).
 //!
-//! Deliveries leave the request path (`tokio::spawn`) before any of them takes a place in the
+//! Deliveries leave the request's task (`tokio::spawn`) before any of them takes a place in the
 //! delivery queue, so a change waits neither on how slow an inbox is nor on the per-delivery
-//! work of however many subscriptions it has; who hears of the change is still decided while
-//! the change's locks are held. They are signed per RFC 9421 with the key the
+//! work of however many subscriptions it has; who hears of the change is still decided on the
+//! request's task, while the change's locks are held. They are signed per RFC 9421 with the key the
 //! storage description publishes (covering `@method`, `@scheme`, `@authority`, `@path`,
 //! `content-type` and an RFC 9530 `content-digest`), are tried again on a 5xx or an unreachable
 //! inbox, and a subscription whose inbox answers 410 Gone, or fails repeatedly, is deactivated
@@ -245,6 +245,22 @@ pub const MAX_SUBSCRIPTIONS_PER_SUBSCRIBER: usize = 16;
 /// Largest subscription request body, in bytes.
 pub const MAX_SUBSCRIPTION_BYTES: usize = 16 * 1024;
 
+/// The store holds these records in a pool of its own, apart from stored content, so that pool
+/// must have room for every subscription this service admits, each as large as a request may
+/// leave it. The store spells the service's path itself, its module being built where this one
+/// is not; the test `the_store_pools_what_the_notification_service_bounds` holds the two
+/// spellings to each other.
+const _: () = {
+    assert!(
+        crate::store::DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT
+            > MAX_SUBSCRIPTIONS + MAX_OWNER_SUBSCRIPTIONS
+    );
+    assert!(
+        crate::store::DEFAULT_IN_MEMORY_MAX_POOL_BYTES
+            >= crate::store::DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT * MAX_SUBSCRIPTION_BYTES
+    );
+};
+
 /// Most expired subscriptions a new subscription removes before it is counted.
 const EXPIRED_REMOVED_PER_SUBSCRIBE: usize = 16;
 
@@ -416,6 +432,16 @@ impl Subs {
     /// How many subscriptions `subscriber` holds, expired ones included.
     fn count_of(&self, subscriber: Option<&str>) -> usize {
         self.mine(subscriber).count()
+    }
+
+    /// The ids of `subscriber`'s own expired subscriptions, at most `most` of them, read
+    /// through the subscriber index: no other subscriber's record is touched.
+    fn expired_of(&self, subscriber: Option<&str>, now: i64, most: usize) -> Vec<String> {
+        self.mine(subscriber)
+            .filter(|s| s.expired(now))
+            .take(most)
+            .map(|s| s.id.clone())
+            .collect()
     }
 
     fn mine(&self, subscriber: Option<&str>) -> impl Iterator<Item = &Subscription> {
@@ -826,8 +852,8 @@ impl Notifier {
         // takes the resource's access from one snapshot taken for the change
         // ([`access::ResourceAccess`]), so the resource's metadata is read and the grants (which
         // have no quota) are scanned once per change, not once per check. What the checks admit
-        // is bounded by `limit`, and the deliveries they make are queued off the response path
-        // ([`Notifier::send`]). Stored subscriptions loaded past a bound are reported at the
+        // is bounded by `limit`, and the deliveries they make leave the request's task before
+        // any of them is queued ([`Notifier::send`]). Stored subscriptions loaded past a bound are reported at the
         // start, and admit no new one to it until it is under it.
         let candidates: Vec<Subscription> = {
             let subs = self.subs.read().expect("lock");
@@ -944,12 +970,13 @@ impl Notifier {
         if prepared.pending.is_empty() {
             return;
         }
-        // The deliveries themselves are queued on the runtime, not on the path that answers the
-        // change: taking a place in the delivery queue, parsing each inbox, building and signing
-        // each body and running each delivery is work per subscription, and how many
-        // subscriptions one change has is no business of the request that made it. One task
-        // takes the queue for all of them, in the order they were prepared, so a subscription's
-        // notifications still go out in that order.
+        // The deliveries themselves leave this task: taking a place in the delivery queue,
+        // parsing each inbox, building and signing each body and running each delivery is work
+        // per subscription, and how many subscriptions one change has is no business of the
+        // request that made it. One task takes the queue for all of them, in the order they
+        // were prepared, so a subscription's notifications still go out in that order. When the
+        // runtime runs that task is the runtime's business: this says the request does not do
+        // the work, not that the work happens after the response reaches the client.
         let state = state.clone();
         tokio::spawn(async move {
             for p in prepared.pending {
@@ -1555,8 +1582,40 @@ fn listing<S: Store + 'static>(
     resp
 }
 
-/// Remove a few expired subscriptions ([`EXPIRED_REMOVED_PER_SUBSCRIBE`]), as a new one is
-/// requested: never while the request holds the listing alone, since a removal waits for it.
+/// Remove the requester's own expired subscriptions, as a new one is requested: at most
+/// [`EXPIRED_REMOVED_PER_SUBSCRIBE`], all of them `subscriber`'s own, read through the
+/// subscriber index. This is the only purging the request waits for, so the work it does here
+/// is bounded by its own records; everyone else's are swept on a task of their own
+/// ([`spawn_purge_expired`]). Never while the request holds the listing alone, since a removal
+/// waits for it.
+async fn purge_own_expired<S: Store + 'static>(
+    state: &LwsState<S>,
+    subscriber: Option<&str>,
+    admission: Option<crate::overload::AdmissionSlot>,
+) {
+    let now = jose::now_secs();
+    let expired = {
+        let subs = state.notify.subs.read().expect("lock");
+        subs.expired_of(subscriber, now, EXPIRED_REMOVED_PER_SUBSCRIBE)
+    };
+    for id in expired {
+        let _ = state.notify.remove(state, &id, admission.clone()).await;
+    }
+}
+
+/// Sweep a few of everyone's expired subscriptions ([`purge_expired`]) on a task of its own.
+///
+/// Started by a create that goes through, once its locks are released, so the sweep neither
+/// waits on the listing that request held nor makes the request wait on records that are not
+/// its own. What it does not reach is tried by the next create's sweep, from where this one
+/// stopped, and by the next start, which removes every expired subscription it loads.
+fn spawn_purge_expired<S: Store + 'static>(state: &LwsState<S>) {
+    let state = state.clone();
+    tokio::spawn(async move { purge_expired(&state, None).await });
+}
+
+/// Remove a few expired subscriptions ([`EXPIRED_REMOVED_PER_SUBSCRIBE`]), anyone's: never while
+/// a request holds the listing alone, since a removal waits for it.
 async fn purge_expired<S: Store + 'static>(
     state: &LwsState<S>,
     admission: Option<crate::overload::AdmissionSlot>,
@@ -1763,14 +1822,15 @@ async fn subscribe<S: Store + 'static>(
     // locks): before the listing a conditional create is evaluated against is held, and before
     // this one is counted.
     //
-    // That purge is work other subscribers' records put on this request: up to
-    // EXPIRED_REMOVED_PER_SUBSCRIBE of them, anyone's, are removed here, each waiting on its own
-    // lock. It is bounded and it is what keeps expired records from holding the store's bound
-    // against everyone, but it is not work this request's own records asked for.
+    // Only the requester's own expired subscriptions are removed here, at most
+    // EXPIRED_REMOVED_PER_SUBSCRIBE of them: the work this request waits for is its own
+    // records'. Everyone else's are swept by the task a create that goes through starts at the
+    // end (see [`spawn_purge_expired`]), so no request waits on a sweep of records that are not
+    // its own, and no sweep waits on the listing a request is holding.
     if let Some(refused) = super::resources::unavailable(state, req) {
         return refused;
     }
-    purge_expired(state, req.admission.clone()).await;
+    purge_own_expired(state, agent.subject.as_deref(), req.admission.clone()).await;
     // A conditional create is evaluated against the listing, held exclusively from here until
     // the subscription is registered. Taken only once every topic has been checked (and its
     // lock released): a topic naming the subscriptions container itself, or its linkset, would
@@ -1866,6 +1926,10 @@ async fn subscribe<S: Store + 'static>(
     if let Err(refused) = created.await {
         return refused;
     }
+    // The listing and the new record's locks are gone with the create, so the sweep of
+    // everyone's expired subscriptions can run now without waiting on this request, and this
+    // request answers without waiting on it.
+    spawn_purge_expired(state);
     let mut resp = super::json_response(StatusCode::CREATED, LWS_JSON, &doc);
     set(resp.headers_mut(), header::LOCATION, &iri);
     service_links(&state.cfg, resp.headers_mut(), &iri, &container);
@@ -3959,11 +4023,13 @@ mod tests {
         );
     }
 
-    /// A change's deliveries are queued on the runtime, not on the path that answers it: when
-    /// the change is answered no place in the delivery queue has been taken for it yet, and a
-    /// delivery target that never answers holds up neither that change nor the next.
+    /// A change's deliveries leave the request's task before any of them is queued: when the
+    /// task that made the change goes on, no place in the delivery queue has been taken for it,
+    /// and a delivery target that never answers holds up neither that change nor the next. (The
+    /// runtime decides when the delivery task runs, so this says the request does not do that
+    /// work, not that the deliveries happen after the response reaches the client.)
     #[tokio::test]
-    async fn a_changes_deliveries_are_queued_after_it_is_answered() {
+    async fn a_changes_deliveries_leave_the_request_task() {
         // An inbox that accepts a delivery and never answers it.
         let app = axum::Router::new().route(
             "/inbox",
@@ -4031,13 +4097,225 @@ mod tests {
         assert_eq!(state.notify.dropped(), 0);
         // They follow in the background: one takes the single place, two find none.
         drained(2).await;
-        // That one delivery is now out to an inbox that never answers. The next change is
-        // answered all the same, and queues its deliveries after it too.
+        // That one delivery is now out to an inbox that never answers. The next change gets
+        // through all the same, and its deliveries leave its task too.
         let prepared = state.notify.prepare_at_most(&state, &event, 3).await;
         assert_eq!(prepared.len(), 3);
         state.notify.send(&state, prepared);
         assert_eq!(state.notify.dropped(), 2, "none queued on the way out");
         drained(5).await;
+    }
+
+    /// The store's service pool is the one these bounds are for: it names the same container,
+    /// and takes this service's records and nothing else. (That it is large enough is held to
+    /// the bounds here at compile time; see the `const _` beside them.) The store spells the
+    /// path itself, its module being built where `lws` is not, so the two are held to each
+    /// other here.
+    #[test]
+    fn the_store_pools_what_the_notification_service_bounds() {
+        use crate::store::{in_service_pool, SERVICE_POOL_PATH};
+        assert_eq!(SERVICE_POOL_PATH, SUBSCRIPTIONS_PATH);
+        let cfg = LwsConfig::new("http://localhost:3000");
+        let container = cfg.absolute(SUBSCRIPTIONS_PATH);
+        assert!(in_service_pool(&container));
+        assert!(in_service_pool(&format!("{}abc", container)));
+        assert!(!in_service_pool(&format!("{}doc.txt", cfg.storage())));
+        assert!(!in_service_pool(&cfg.absolute(super::super::GRANTS_PATH)));
+    }
+
+    /// Subscription records are admitted against a pool of their own, so however many stand, a
+    /// write of content is admitted exactly as it would be with none: here more subscriptions
+    /// are held than the whole content ceiling, and content writes go on being admitted.
+    #[tokio::test]
+    async fn subscriptions_past_the_content_ceiling_leave_content_writes_admitted() {
+        let content_slots = 32;
+        let limits = crate::store::InMemoryStoreLimits::new(16 << 20, content_slots)
+            .with_pool(512, 16 << 20);
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        let state = LwsState::new(test_store::FlakyStore::with_limits(limits), cfg)
+            .await
+            .unwrap();
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        // More subscriptions than the whole content ceiling, from as many subscribers as it
+        // takes (each is held to its own capacity).
+        let wanted = 2 * content_slots;
+        let mut made = 0;
+        for i in 0..wanted.div_ceil(MAX_SUBSCRIPTIONS_PER_SUBSCRIBER) {
+            let who = test_store::agent(&format!("https://p{}.example/#me", i));
+            for _ in 0..MAX_SUBSCRIPTIONS_PER_SUBSCRIBER {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                assert_eq!(
+                    handle(&state, &req, &who).await.status(),
+                    StatusCode::CREATED
+                );
+                made += 1;
+            }
+        }
+        assert!(made > content_slots, "{made} subscriptions stand");
+        assert_eq!(state.notify.subs.read().unwrap().len(), made);
+        // Content is written as it would be with none of them.
+        for i in 0..4 {
+            let iri = format!("{}doc{}", state.cfg.storage(), i);
+            state
+                .store
+                .create_in_container(&state.cfg.storage(), &iri, Bytes::from("x"), "text/plain")
+                .await
+                .unwrap_or_else(|e| panic!("content write refused with {made} subscriptions: {e}"));
+        }
+    }
+
+    /// The subscription pool is bounded in its own right: once it is full a subscription create
+    /// is refused `507`, and content writes are admitted all the same.
+    #[tokio::test]
+    async fn a_full_subscription_pool_refuses_only_subscriptions() {
+        // Room for the service container and two subscription records.
+        let limits = crate::store::InMemoryStoreLimits::new(16 << 20, 64).with_pool(3, 16 << 20);
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        cfg.allow_insecure_fetch = true;
+        let state = LwsState::new(test_store::FlakyStore::with_limits(limits), cfg)
+            .await
+            .unwrap();
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = |who: Agent| {
+            let (state, body) = (state.clone(), body.clone());
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                handle(&state, &req, &who).await.status()
+            }
+        };
+        let me = test_store::agent("https://alice.example/#me");
+        let mut created = 0;
+        let mut full = None;
+        for _ in 0..MAX_SUBSCRIPTIONS_PER_SUBSCRIBER {
+            match post(me.clone()).await {
+                StatusCode::CREATED => created += 1,
+                other => {
+                    full = Some(other);
+                    break;
+                }
+            }
+        }
+        assert!(created > 0, "the pool held nothing at all");
+        assert_eq!(
+            full,
+            Some(StatusCode::INSUFFICIENT_STORAGE),
+            "a full pool refuses a subscription create"
+        );
+        // The pool is full and this subscriber is nowhere near its own capacity; content is
+        // written all the same.
+        assert!(created < MAX_SUBSCRIPTIONS_PER_SUBSCRIBER);
+        let iri = format!("{}doc", state.cfg.storage());
+        state
+            .store
+            .create_in_container(&state.cfg.storage(), &iri, Bytes::from("x"), "text/plain")
+            .await
+            .expect("content write refused while the subscription pool is full");
+    }
+
+    /// A subscription create waits only on its own expired subscriptions: at most
+    /// [`EXPIRED_REMOVED_PER_SUBSCRIBE`] of them, all its own, go before it is answered.
+    /// Everyone else's are swept on a task of their own, which this request does not wait for.
+    #[tokio::test]
+    async fn a_create_waits_only_on_its_own_expired_subscriptions() {
+        let (state, _store) = test_store::state(100).await;
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = |who: &Agent| {
+            let (state, body, who) = (state.clone(), body.clone(), who.clone());
+            async move {
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &[("content-type", LWS_JSON)],
+                    &body,
+                );
+                handle(&state, &req, &who).await.status()
+            }
+        };
+        let (me, them) = (
+            test_store::agent("https://alice.example/#me"),
+            test_store::agent("https://bob.example/#me"),
+        );
+        assert_eq!(post(&me).await, StatusCode::CREATED);
+        for _ in 0..3 {
+            assert_eq!(post(&them).await, StatusCode::CREATED);
+        }
+        // Let the sweeps those creates left behind finish before anything expires, so what is
+        // removed from here on is this test's doing and not theirs.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Everyone's subscriptions expire.
+        let (mine, theirs): (Vec<String>, Vec<String>) = {
+            let mut subs = state.notify.subs.write().unwrap();
+            for s in subs.values_mut() {
+                s.expires_at = Some(1);
+            }
+            let ids: Vec<(String, Option<String>)> = subs
+                .values()
+                .map(|s| (s.id.clone(), s.subscriber.clone()))
+                .collect();
+            let mine = ids
+                .iter()
+                .filter(|(_, who)| who.as_deref() == me.subject.as_deref())
+                .map(|(id, _)| id.clone())
+                .collect();
+            let theirs = ids
+                .iter()
+                .filter(|(_, who)| who.as_deref() == them.subject.as_deref())
+                .map(|(id, _)| id.clone())
+                .collect();
+            (mine, theirs)
+        };
+        assert_eq!((mine.len(), theirs.len()), (1, 3));
+        // A create by this subscriber takes its own expired subscription with it. Nothing has
+        // yielded between the create being answered and this check, so nothing else can have
+        // run: the other subscriber's are all still standing, none of them removed on this
+        // request's way through.
+        assert_eq!(post(&me).await, StatusCode::CREATED);
+        let standing = |ids: &[String]| {
+            let subs = state.notify.subs.read().unwrap();
+            ids.iter().filter(|id| subs.contains_key(id)).count()
+        };
+        assert_eq!(standing(&mine), 0, "its own went with its create");
+        assert_eq!(
+            standing(&theirs),
+            theirs.len(),
+            "another subscriber's were removed on this request"
+        );
+        // They are swept on a task of their own, which the request did not wait for.
+        for _ in 0..200 {
+            if standing(&theirs) == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(standing(&theirs), 0, "the sweep never ran");
     }
 
     /// Review findings: a topic's lock was waited for without bound, so a write stalled on a
