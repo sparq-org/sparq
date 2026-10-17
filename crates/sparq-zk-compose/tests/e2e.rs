@@ -74,6 +74,22 @@ const FIXTURE_STATUS_INDEX: u64 = 3;
 /// The status-list version the fixtures bind + the relying party accepts.
 const FIXTURE_STATUS_VERSION: u64 = 1;
 
+/// The STRING-CANONICAL commitment method's `zk:scheme` digest -- the method
+/// every fixture here commits under, and the one its issuer now ATTESTS.
+///
+/// The fixtures sign the METHOD-BOUND shapes (`ZKSIG_M5` for a bearer
+/// attestation, `ZKSIG_M4` for a holder-bound one) rather than the
+/// method-unbound `ZKSIG_C3` / `ZKSIG_C4`, because `MethodPolicy::current` now
+/// refuses an unbound attestation. A test whose SUBJECT is legacy unbound
+/// material keeps an unbound fixture and states `MethodPolicy::admit_unbound`
+/// explicitly instead.
+fn string_canonical_scheme() -> Fr {
+    sparq_zk::sig::scheme_iri_to_field(
+        sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+    )
+}
+
+
 /// The relying party's revocation policy accepting the fixture version (window 0)
 /// AND carrying a fresh, NON-revoked AUTHORITATIVE snapshot. This is the external
 /// authoritative bitstring the verifier reads the liveness bit from (re-audit
@@ -206,7 +222,12 @@ fn attest_with_status(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef {
@@ -278,7 +299,12 @@ fn attest_with_status_commit(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef {
@@ -1522,7 +1548,13 @@ fn attest_with_holder(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_holder(&commitment, &salt, &status_ref, &holder_digest),
+        signature: sk.sign_commitment_with_holder_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &holder_digest,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1
             .cryptosuite_iri()
             .to_string(),
@@ -5323,7 +5355,12 @@ fn attest_with_status_fully_hidden(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef::fully_hidden(ref_commitment, index_commitment)),
@@ -6115,7 +6152,12 @@ fn hi_scan_manifest(prover: &CircuitProver, signer_sk: &SecretKey, tag: &str) ->
 fn hi_message(commitment: &Fr, salt: &Fr) -> Fr {
     let list_id = sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST);
     let status_ref = sparq_zk::sig::status_ref_digest(&list_id, FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION);
-    sparq_zk::sig::commitment_message_with_status(commitment, salt, &status_ref)
+    sparq_zk::sig::presentation_message_with_status_and_scheme(
+        commitment,
+        salt,
+        &status_ref,
+        &string_canonical_scheme(),
+    )
 }
 
 /// Prove the hidden_issuer_d4 circuit: `signer_sk` signed `m` (the status-bound
@@ -6138,12 +6180,13 @@ fn prove_hidden_issuer(
     tag: &str,
 ) -> HiddenIssuerAttestation {
     let m = hi_message(commitment, salt);
-    let sig = sparq_zk::sig::signature_from_hex(&signer_sk.sign_commitment_with_status(
+    let sig = sparq_zk::sig::signature_from_hex(&signer_sk.sign_presentation_with_status_and_scheme(
         commitment, salt,
         &sparq_zk::sig::status_ref_digest(
             &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
             FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
         ),
+        &string_canonical_scheme(),
     )).unwrap();
     let schnorr = sparq_zk::sig::in_circuit_witness(&signer_sk.public_key(), &m, &sig).unwrap();
     let pks: Vec<_> = keys_in_order.iter().map(|s| s.public_key()).collect();
@@ -6436,7 +6479,7 @@ fn hidden_issuer_out_of_set_key_is_unprovable() {
         &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
-    let sig = sparq_zk::sig::signature_from_hex(&outsider.sign_commitment_with_status(&c, &salt, &sref)).unwrap();
+    let sig = sparq_zk::sig::signature_from_hex(&outsider.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
     // The outsider's signature is itself VALID (control: verify it).
     assert!(sparq_zk::sig::verify(&outsider.public_key(), &m, &sig), "outsider's sig is valid");
     let schnorr = sparq_zk::sig::in_circuit_witness(&outsider.public_key(), &m, &sig).unwrap();
@@ -6477,7 +6520,7 @@ fn hidden_issuer_forged_signature_is_unprovable() {
         &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
-    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_commitment_with_status(&c, &salt, &sref)).unwrap();
+    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
     let mut schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
     // Tamper s: now s*G != R + e*pk, the in-circuit equation is unsatisfiable.
     schnorr.s += Fr::from(1u64);
@@ -6524,7 +6567,7 @@ fn hidden_issuer_forged_root_rejected() {
         &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
-    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_commitment_with_status(&c, &salt, &sref)).unwrap();
+    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
     let schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
     let siblings = key_membership_witness(&forged_pks, HI_DEPTH, 0).unwrap();
     let witness = HiddenIssuerWitness { schnorr, index: 0, siblings };
