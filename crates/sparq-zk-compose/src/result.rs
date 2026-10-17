@@ -95,14 +95,16 @@ impl NumericContract {
         }
     }
 
-    /// The member this contract issues through.
+    /// The member this contract issues and verifies through.
     ///
     /// sq-j506: for the UNSIGNED family, the default selects a METHOD-BOUND
     /// `result_v5_*` member and refuses a capacity bucket that has none, rather
-    /// than silently issuing through a method-unbound legacy member.
-    /// `admit_unbound_legacy` routes back to the legacy map. The signed and
-    /// public-pattern families have no method-bound member yet, so they are
-    /// unchanged and stay legacy-only (tracked on sq-j506).
+    /// than silently using a method-unbound legacy member. `admit_unbound_legacy`
+    /// routes back to the legacy map. Whatever family selected it, the chosen
+    /// member then passes through the single boundness check in
+    /// `require_method_bound_or_opt_in`, so the signed and public-pattern
+    /// families — which have no method-bound member yet (sq-j506) — are refused
+    /// by default and reachable only under the written-down opt-in.
     fn package(
         self,
         credentials: usize,
@@ -110,15 +112,69 @@ impl NumericContract {
         depth: u32,
         admit_unbound_legacy: bool,
     ) -> Result<(&'static str, u32), ResultError> {
-        match self {
+        let selected = match self {
             Self::Unsigned(capacity) if !admit_unbound_legacy => {
                 bound_package(credentials, filters, capacity, depth)
             }
             Self::Unsigned(capacity) => package(credentials, filters, capacity, depth),
             Self::Signed => signed::package(credentials, filters, depth),
             Self::PublicPattern => public_pattern_package(credentials, filters, depth),
-        }
+        }?;
+        require_method_bound_or_opt_in(selected, admit_unbound_legacy)
     }
+
+    /// Every contract variant, for the exhaustive boundness test.
+    ///
+    /// The match below is the enforcement: adding a variant makes it
+    /// non-exhaustive, so this cannot silently go stale, and the per-arm
+    /// coverage assertion fails if a variant is missing from the list.
+    #[cfg(test)]
+    fn every() -> Vec<Self> {
+        let all = vec![
+            Self::Unsigned(PrivateIntegerCapacity::TwoDigits),
+            Self::Unsigned(PrivateIntegerCapacity::FullU64),
+            Self::Signed,
+            Self::PublicPattern,
+        ];
+        let mut covered = [false; 3];
+        for contract in &all {
+            match contract {
+                Self::Unsigned(_) => covered[0] = true,
+                Self::Signed => covered[1] = true,
+                Self::PublicPattern => covered[2] = true,
+            }
+        }
+        assert!(
+            covered.iter().all(|seen| *seen),
+            "NumericContract::every() does not list every variant"
+        );
+        all
+    }
+}
+
+/// The one boundness check every selected successful-result member passes through.
+///
+/// A member folds the method-bound presentation message only when its contract
+/// version is [`BOUND_VERSION`]; every other version folds the method-unbound
+/// message, so using it attests no commitment method and is the written-down
+/// downgrade `ResultPolicy::admit_unbound_legacy` names. Keeping this as a single
+/// check on the SELECTED member — rather than one arm per contract family — means
+/// a family added later is refused by default until it has a method-bound member,
+/// instead of inheriting the legacy behaviour by omission.
+fn require_method_bound_or_opt_in(
+    selected: (&'static str, u32),
+    admit_unbound_legacy: bool,
+) -> Result<(&'static str, u32), ResultError> {
+    if selected.1 != BOUND_VERSION && !admit_unbound_legacy {
+        return Err(reject(format!(
+            "the successful-result member {} folds the method-unbound message, so it \
+attests no commitment method; this contract family has no method-bound member \
+(ResultPolicy::admit_unbound_legacy is the written-down downgrade for \
+already-issued material)",
+            selected.0
+        )));
+    }
+    Ok(selected)
 }
 
 // beadzkp-15.1: version-four public-pattern contract. Research-grade,
@@ -2149,6 +2205,110 @@ mod tests {
         assert_eq!(legacy, "result_v2_k1_n16_p3_r4_f0_i0_d17");
     }
 
+    /// Exhaustive: under the DEFAULT policy, NO contract variant and no capacity
+    /// point may select a method-unbound member.
+    ///
+    /// The variants come from [`NumericContract::every`], whose match stops
+    /// compiling when one is added, and the capacity points are swept from the
+    /// contract's own parameter space — credential slots, hidden-filter slots and
+    /// status depths, each one past its bound — so every member family is reached
+    /// without a hand-maintained list of member names. Whatever the written-down
+    /// downgrade can reach must be refused by name without it.
+    #[test]
+    fn no_contract_selects_a_method_unbound_member_under_the_default_policy() {
+        let depths: Vec<u32> = STATUS_DEPTHS
+            .iter()
+            .copied()
+            .chain([0, POLICY_DEPTH, PUBLIC_PATTERN_STATUS_DEPTH])
+            .collect();
+        let (mut bound, mut refused) = (0usize, 0usize);
+        for contract in NumericContract::every() {
+            for credentials in 0..=MAX_CREDENTIALS + 1 {
+                for filters in 0..=F + 1 {
+                    for depth in depths.iter().copied() {
+                        let default = contract.package(credentials, filters, depth, false);
+                        let legacy = contract.package(credentials, filters, depth, true);
+                        match (&default, &legacy) {
+                            (Ok((member, version)), _) => {
+                                assert_eq!(
+                                    *version, BOUND_VERSION,
+                                    "default policy selected unbound member {}",
+                                    member
+                                );
+                                assert!(
+                                    member.starts_with("result_v5_"),
+                                    "default policy selected unbound member {}",
+                                    member
+                                );
+                                bound += 1;
+                            }
+                            // Reachable only through the opt-in: the default must
+                            // refuse it, and say why by name.
+                            (Err(e), Ok((member, version))) => {
+                                assert_ne!(
+                                    *version, BOUND_VERSION,
+                                    "a method-bound member must not need the opt-in: {}",
+                                    member
+                                );
+                                let text = e.to_string();
+                                assert!(
+                                    text.contains("no method-bound successful-result member")
+                                        || (text.contains("folds the method-unbound message")
+                                            && text.contains(member)),
+                                    "unexpected refusal for {}: {}",
+                                    member,
+                                    text
+                                );
+                                refused += 1;
+                            }
+                            // Outside every contract's capacity: refused either way.
+                            (Err(_), Err(_)) => {}
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            bound > 0 && refused > 0,
+            "the sweep reached {} bound and {} downgrade-only capacity points",
+            bound,
+            refused
+        );
+    }
+
+    /// `challenge` carries no arithmetic constraint of its own, so the host pins
+    /// it twice: by equality against the relying party's own nonce in
+    /// `public_statement_for`, and as a public input the proof is checked
+    /// against. Swapping the envelope alone trips the first pin; swapping the
+    /// verifier nonce with it passes that equality, and the second pin is what
+    /// refuses it — the reconstructed public inputs no longer match the ones the
+    /// proof was produced over.
+    #[test]
+    fn a_swapped_challenge_moves_the_public_inputs_the_proof_is_checked_against() {
+        let (credentials, policy, nonce, rows) = fixture();
+        let prepared = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        let honest = &prepared.presentation;
+        assert_eq!(
+            statement_bytes(honest, &policy, &nonce).unwrap(),
+            prepared.public_inputs
+        );
+        let fresh = VerifierNonce::from_field(Fr::from(999_999u64));
+        let mut swapped = honest.clone();
+        swapped.challenge = fresh.as_field_hex();
+        assert!(
+            matches!(
+                public_statement(&swapped, &policy, &nonce),
+                Err(ResultError::Rejected(ref s)) if s == "version or challenge mismatch"
+            ),
+            "the equality pin must refuse a swapped envelope challenge"
+        );
+        assert_ne!(
+            statement_bytes(&swapped, &policy, &fresh).unwrap(),
+            prepared.public_inputs,
+            "the challenge must enter the public inputs the proof is checked against"
+        );
+    }
+
     /// A credential whose issuer attested a DIFFERENT method is refused even
     /// though its method-bound signature is valid: its leaves are not the shape
     /// this relation proves.
@@ -2342,6 +2502,36 @@ mod tests {
         };
         let statement = public_statement(&slots, &policy, &nonce).unwrap();
         assert_eq!(statement.package, "result_v4_k2_n16_p3_r4_f0_d10");
+    }
+
+    /// VERIFICATION side, version-four family: a `result_v4_*` member folds the
+    /// method-unbound message, so the verifier's own statement derivation refuses
+    /// it under the default policy and names the member it selected; only the
+    /// written-down downgrade admits it. sq-j506: the boundness check runs on the
+    /// SELECTED member, so a family with no method-bound member cannot inherit
+    /// the legacy behaviour by omission.
+    #[test]
+    fn public_pattern_verification_requires_the_written_down_downgrade() {
+        let (credentials, policy, nonce, _) = fixture();
+        let rows = alice_name_rows();
+        let prepared =
+            prepare_public(PUBLIC_NAME_QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        let bound = ResultPolicy {
+            admit_unbound_legacy: false,
+            ..policy.clone()
+        };
+        let err = public_statement(&prepared.presentation, &bound, &nonce)
+            .expect_err("a method-unbound member needs the written-down opt-in");
+        let text = err.to_string();
+        assert!(
+            text.contains("folds the method-unbound message")
+                && text.contains("result_v4_k1_n16_p3_r4_f0_d10"),
+            "the refusal must name the selected member: {}",
+            text
+        );
+        let statement = public_statement(&prepared.presentation, &policy, &nonce)
+            .expect("the downgrade admits already-issued version-four material");
+        assert_eq!(statement.package, "result_v4_k1_n16_p3_r4_f0_d10");
     }
 
     #[test]

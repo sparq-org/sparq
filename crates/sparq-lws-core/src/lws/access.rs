@@ -1130,15 +1130,18 @@ pub async fn handle<S: Store + 'static>(
                 if !owner && super::resources::compares_state(&req.headers, false) {
                     return state.deny(agent);
                 }
-                let held =
-                    match super::records::service_preconditions(state, req, &container, |get| {
-                        listing(state, get, grants)
-                    })
-                    .await
-                    {
-                        Ok(held) => held,
-                        Err(refused) => return refused,
-                    };
+                let held = match super::records::service_preconditions(
+                    state,
+                    req,
+                    &container,
+                    None,
+                    |get| listing(state, get, grants),
+                )
+                .await
+                {
+                    Ok(held) => held,
+                    Err(refused) => return refused,
+                };
                 create(state, req, agent, grants, held).await
             }
             _ => method_not_allowed("GET, HEAD, POST"),
@@ -1237,6 +1240,8 @@ pub async fn handle<S: Store + 'static>(
                 &container,
                 &iri,
                 what,
+                super::records::Listed::InContainer,
+                super::records::Remover::Request,
                 req.admission.clone(),
                 set_aside,
                 settle,
@@ -1278,7 +1283,7 @@ async fn create<S: Store + 'static>(
     req: &LwsRequest,
     agent: &Agent,
     grants: bool,
-    held: Option<super::resources::IriGuard>,
+    held: Option<super::records::ListingLocks>,
 ) -> Response {
     // Anyone authenticated may ask for access, so a request is held to its size before it is
     // parsed; grants come from the owner and are held to the request body ceiling.
@@ -1406,6 +1411,7 @@ async fn create<S: Store + 'static>(
         &iri,
         Bytes::from(stored.to_string()),
         req.admission.clone(),
+        super::records::Listed::InContainer,
         held,
         agent.subject.clone(),
         register,
