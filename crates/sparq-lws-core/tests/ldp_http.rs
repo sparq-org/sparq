@@ -572,6 +572,82 @@ _:p solid:inserts { <urn:a> <urn:b> <urn:c> . }.\n"
         }
     }
     assert_eq!(listing(&h).await, before);
+    // Nor does the slash rule look for a twin by a name nothing authorized: a create below a
+    // document's name with a repeated slash is refused alike whether that document exists.
+    for path in ["/alice/secret//", "/alice/nosecret//"] {
+        if path == "/alice/secret//" {
+            let r = h
+                .request(
+                    "PUT",
+                    "/alice/secret",
+                    Some("text/turtle"),
+                    Body::from(TURTLE),
+                )
+                .await;
+            assert_eq!(r.status(), StatusCode::CREATED);
+        }
+        let r = h
+            .request("PUT", path, Some("text/turtle"), Body::from(TURTLE))
+            .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "PUT {path}");
+    }
+}
+
+/// Nothing is written under a name with a repeated slash, a container left with one (from before
+/// such names were refused) included: a `POST` into one, or a `PUT` or `PATCH` of one, is refused
+/// on the name alone, and what is stored is unchanged.
+#[tokio::test]
+async fn nothing_is_written_under_a_repeated_slash() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let alice = "https://pod.example/alice/";
+    let odd = "https://pod.example/alice/c//";
+    store
+        .write(
+            "https://pod.example/",
+            axum::body::Bytes::new(),
+            "text/turtle",
+        )
+        .await
+        .expect("seed the root");
+    for (parent, child) in [("https://pod.example/", alice), (alice, odd)] {
+        store
+            .create_in_container(parent, child, axum::body::Bytes::new(), "text/turtle")
+            .await
+            .expect("seed a container");
+    }
+    let h = Harness::with_store(store).await;
+    async fn listing(h: &Harness, path: &str) -> axum::body::Bytes {
+        let r = h.request("GET", path, None, Body::empty()).await;
+        to_bytes(r.into_body(), usize::MAX).await.unwrap()
+    }
+    let before = (listing(&h, "/").await, listing(&h, "/alice/").await);
+    for (method, path) in [
+        ("POST", "//alice/"),
+        ("POST", "/alice//"),
+        ("POST", "/alice/c//"),
+        ("POST", "//"),
+        ("PUT", "/alice/c//"),
+        ("PATCH", "/alice/c//"),
+    ] {
+        let (ct, body) = match method {
+            "PATCH" => (
+                "text/n3",
+                "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <urn:a> <urn:b> <urn:c> . }.\n"
+                    .to_string(),
+            ),
+            _ => ("text/turtle", TURTLE.to_string()),
+        };
+        let r = h.request(method, path, Some(ct), Body::from(body)).await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{method} {path}");
+    }
+    assert_eq!(
+        (listing(&h, "/").await, listing(&h, "/alice/").await),
+        before
+    );
+    let r = h.request("GET", "/alice/c//", None, Body::empty()).await;
+    assert_eq!(r.status(), StatusCode::OK);
 }
 
 #[tokio::test]
