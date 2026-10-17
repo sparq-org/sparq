@@ -352,6 +352,7 @@ async fn create_child_commits_metadata_and_membership_atomically() {
     let meta = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "k".into(),
+        appended: Vec::new(),
         etag: "\"e\"".into(),
         last_modified: None,
     };
@@ -611,6 +612,7 @@ async fn delete_meta_if_empty_on_the_sparq_client_is_atomic() {
     let meta = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "k".into(),
+        appended: Vec::new(),
         etag: "\"e\"".into(),
         last_modified: None,
     };
@@ -660,6 +662,7 @@ async fn delete_meta_if_empty_folds_the_parent_detach_into_the_one_op() {
     let meta = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "k".into(),
+        appended: Vec::new(),
         etag: "\"e\"".into(),
         last_modified: None,
     };

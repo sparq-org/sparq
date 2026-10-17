@@ -358,11 +358,17 @@ fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, 
     let last_modified = var_col(result, "mod")
         .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
         .and_then(|s| timestamp::from_xsd_datetime(&s));
+    let appended = sparql::appended_keys(
+        var_col(result, "app")
+            .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
+            .as_deref(),
+    );
     Ok(ResourceMeta {
         content_type,
         blob_key,
         etag,
         last_modified,
+        appended,
     })
 }
 
@@ -391,6 +397,7 @@ impl SparqClient for EmbeddedSparqClient {
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            &meta.appended,
         )?;
         self.dispatch(move |graph| {
             sparq_engine::update_in_place_atomic(graph, &u).map_err(|e| engine_err("put_meta", e))
@@ -413,6 +420,7 @@ impl SparqClient for EmbeddedSparqClient {
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            &meta.appended,
         )?;
         self.dispatch(move |graph| {
             let result =
@@ -425,6 +433,39 @@ impl SparqClient for EmbeddedSparqClient {
             sparq_engine::update_in_place_atomic(graph, &u)
                 .map_err(|e| engine_err("put_meta", e))?;
             Ok(previous)
+        })
+        .await
+    }
+
+    async fn replace_meta_if(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        meta: ResourceMeta,
+    ) -> Result<bool, SparqError> {
+        // Read, compared and written in ONE actor job, so nothing interleaves.
+        let q = sparql::select_meta(iri)?;
+        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
+        let u = sparql::update_put_meta(
+            iri,
+            &meta.content_type,
+            &meta.blob_key,
+            &meta.etag,
+            modified.as_deref(),
+            &meta.appended,
+        )?;
+        let expected = expected.clone();
+        self.dispatch(move |graph| {
+            let result =
+                sparq_engine::query(graph, &q).map_err(|e| engine_err("select_meta", e))?;
+            match meta_from_result(&result) {
+                Ok(now) if now.same_version(&expected) => {}
+                Ok(_) | Err(SparqError::NotFound) => return Ok(false),
+                Err(e) => return Err(e),
+            }
+            sparq_engine::update_in_place_atomic(graph, &u)
+                .map_err(|e| engine_err("put_meta", e))?;
+            Ok(true)
         })
         .await
     }
@@ -553,6 +594,7 @@ impl SparqClient for EmbeddedSparqClient {
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            &meta.appended,
             &nonce,
         )?;
         self.dispatch(move |graph| {
@@ -654,7 +696,8 @@ impl SparqClient for EmbeddedSparqClient {
                         "fatal: referenced-blob-keys row missing the 'bk' binding".into(),
                     )
                 })?;
-                keys.insert(bk);
+                // An appended-segment literal names several keys, space-separated (keys hold none).
+                keys.extend(bk.split_ascii_whitespace().map(str::to_string));
             }
             Ok(keys)
         })
@@ -703,6 +746,7 @@ impl SparqClient for EmbeddedSparqClient {
                 SparqError::Backend("fatal: read-plan result missing ?etag column".into())
             })?;
             let mod_col = var_col(&result, "mod"); // OPTIONAL — may be absent from the header.
+            let app_col = var_col(&result, "app"); // OPTIONAL — absent when nothing is appended.
 
             // Key each row by its graph IRI. First row per graph wins (the record is single-valued
             // per graph — `update_put_meta`/`update_create_child` keep it so — mirroring
@@ -732,11 +776,17 @@ impl SparqClient for EmbeddedSparqClient {
                 let last_modified = mod_col
                     .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
                     .and_then(|s| timestamp::from_xsd_datetime(&s));
+                let appended = sparql::appended_keys(
+                    app_col
+                        .and_then(|col| term_value(row.get(col).and_then(|c| c.as_ref())))
+                        .as_deref(),
+                );
                 by_graph.entry(graph_iri).or_insert(ResourceMeta {
                     content_type,
                     blob_key,
                     etag,
                     last_modified,
+                    appended,
                 });
             }
 
@@ -797,6 +847,7 @@ mod tests {
         ResourceMeta {
             content_type: ct.into(),
             blob_key: bk.into(),
+            appended: Vec::new(),
             etag: etag.into(),
             last_modified: None,
         }
@@ -1212,6 +1263,48 @@ mod tests {
             assert_eq!(c.reclaiming().await.unwrap(), ["k2"]);
             c.end_reclaim("k2").await.unwrap();
             assert!(c.reclaiming().await.unwrap().is_empty());
+        });
+    }
+
+    /// What was appended to a record round-trips through the index in order, counts as
+    /// referenced, and a guarded replace lands only on the version it names (its tag and its
+    /// key together).
+    #[test]
+    fn appended_segments_round_trip_and_guard_replaces() {
+        block_on(async {
+            let c = client();
+            let a = "http://pod/a";
+            let mut v1 = meta("text/turtle", "k1", "\"e\"");
+            c.put_meta(a, v1.clone()).await.unwrap();
+            let v2 = ResourceMeta {
+                appended: vec!["s1".into(), "s2".into()],
+                etag: "\"e2\"".into(),
+                ..v1.clone()
+            };
+            assert!(c.replace_meta_if(a, &v1, v2.clone()).await.unwrap());
+            assert_eq!(c.get_meta(a).await.unwrap().appended, v2.appended);
+            let plan = c.read_plan(a, &[]).await.unwrap();
+            assert_eq!(plan.target.expect("present").appended, v2.appended);
+            let keys = c.referenced_blob_keys().await.unwrap();
+            assert!(
+                ["k1", "s1", "s2"].iter().all(|k| keys.contains(*k)),
+                "{keys:?}"
+            );
+            // A stale version (the old tag), or the same tag over other bytes, changes nothing.
+            assert!(!c.replace_meta_if(a, &v1, v1.clone()).await.unwrap());
+            v1.etag = v2.etag.clone();
+            v1.blob_key = "k9".into();
+            assert!(!c.replace_meta_if(a, &v1, v1.clone()).await.unwrap());
+            assert!(!c
+                .replace_meta_if("http://pod/none", &v2, v2.clone())
+                .await
+                .unwrap());
+            assert_eq!(c.get_meta(a).await.unwrap(), v2);
+            // A rewrite clears what was appended.
+            c.put_meta(a, meta("text/turtle", "k3", "\"e3\""))
+                .await
+                .unwrap();
+            assert!(c.get_meta(a).await.unwrap().appended.is_empty());
         });
     }
 

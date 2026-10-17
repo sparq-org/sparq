@@ -197,6 +197,7 @@ async fn create_child_commits_metadata_and_membership_atomically_on_the_engine()
     let meta = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "k".into(),
+        appended: Vec::new(),
         etag: "\"e\"".into(),
         last_modified: None,
     };
@@ -233,6 +234,7 @@ async fn modified_time_round_trips_through_the_real_engine() {
     let meta = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "k".into(),
+        appended: Vec::new(),
         etag: "\"e\"".into(),
         last_modified: Some(t),
     };
@@ -249,6 +251,7 @@ async fn modified_time_round_trips_through_the_real_engine() {
     let meta2 = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "k2".into(),
+        appended: Vec::new(),
         etag: "\"e2\"".into(),
         last_modified: Some(t2),
     };
@@ -265,6 +268,7 @@ async fn modified_time_round_trips_through_the_real_engine() {
     let meta_none = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "k3".into(),
+        appended: Vec::new(),
         etag: "\"e3\"".into(),
         last_modified: None,
     };
@@ -504,6 +508,7 @@ async fn referenced_blob_keys_on_the_embedded_client_collects_all_pointers() {
     let m = |bk: &str| ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: bk.into(),
+        appended: Vec::new(),
         etag: "\"e\"".into(),
         last_modified: None,
     };
@@ -544,6 +549,7 @@ async fn named_graph_isolation_mutating_one_resource_never_bleeds_into_another()
     let m = |bk: &str, etag: &str| ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: bk.into(),
+        appended: Vec::new(),
         etag: format!("\"{etag}\""),
         last_modified: None,
     };
@@ -600,6 +606,7 @@ async fn concurrent_same_child_creates_commit_exactly_one_untorn_record() {
             ResourceMeta {
                 content_type: "text/turtle".into(),
                 blob_key: "kc".into(),
+                appended: Vec::new(),
                 etag: "\"ec\"".into(),
                 last_modified: None,
             },
@@ -618,6 +625,7 @@ async fn concurrent_same_child_creates_commit_exactly_one_untorn_record() {
                     ResourceMeta {
                         content_type: "text/turtle".into(),
                         blob_key: format!("k{i}"),
+                        appended: Vec::new(),
                         etag: format!("\"e{i}\""),
                         last_modified: None,
                     },
@@ -663,6 +671,7 @@ async fn concurrent_delete_if_empty_vs_create_child_never_leaves_a_torn_state() 
         let m = |bk: &str| ResourceMeta {
             content_type: "text/turtle".into(),
             blob_key: bk.into(),
+            appended: Vec::new(),
             etag: "\"e\"".into(),
             last_modified: None,
         };

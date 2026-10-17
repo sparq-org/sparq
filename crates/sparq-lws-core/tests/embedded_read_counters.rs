@@ -426,6 +426,7 @@ fn meta(bk: &str) -> ResourceMeta {
     ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: bk.into(),
+        appended: Vec::new(),
         etag: "\"e1\"".into(),
         last_modified: None,
     }

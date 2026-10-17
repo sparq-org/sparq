@@ -108,10 +108,17 @@ must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
 it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
 the new `ETag` only to a writer that may read the target. An insert-only `PATCH` by a writer
-without `acl:Read` appends the statements as N-Triples lines to a stored Turtle, N-Triples or
-N-Quads document without parsing it, so whether it succeeds does not depend on what is stored;
-any other stored type (JSON-LD, ...) is refused to it as a write without access is. The stored
-bytes are still read and rewritten whole, so the time an append takes follows their size. A
+without `acl:Read` appends the statements, as N-Triples lines stored on their own, to whatever
+is stored, without reading or rewriting it: only the resource's record is read, so whether it
+succeeds, and the time and room it takes, do not depend on what is stored (its type, size or
+whether it parses). Reads show the appended statements after a Turtle, N-Triples or N-Quads
+document's own (the last into its default graph), and merged into a JSON-LD document, which is
+then served re-serialised (its named graphs dropped, as a `PATCH` drops them; one that does not
+parse is served as stored); a document of any other type is served as stored, what was appended
+to it kept but not shown. Once 16 appends stand they are merged into the document in the
+background, content and validators unchanged; past 64 not yet merged, an append is answered
+`503` (`Retry-After`) until they are. Residual: that `503` follows how many others appended
+meanwhile. A
 reader's `PATCH` reads the document by the same stored type, keeps that type, and leaves an
 N-Quads document's named graphs as stored: a `PATCH` changes the default graph. Blank nodes a
 `PATCH` inserts are always new ones. Deleting a container also needs `acl:Read` on it

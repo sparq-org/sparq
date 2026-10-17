@@ -1723,8 +1723,9 @@ _:p solid:inserts { <https://pod.example/alice/drop/doc#me> foaf:nick \"A\" . }.
         .await;
     assert!(r.status().is_success(), "{}", r.status());
     assert!(!r.headers().contains_key("etag"));
-    // Nor is it told the target's format: an insert into text it may not read, which cannot be
-    // patched, is refused as a write without access is, where a reader is told why.
+    // Nor is it told the target's format: an insert into text it may not read is appended as into
+    // any other document (kept with it, not shown in it), where a reader is told why it cannot be
+    // patched.
     let note = h
         .request(
             "PUT",
@@ -1771,9 +1772,10 @@ _:p solid:inserts { <https://pod.example/alice/drop/note#a> <https://e.example/p
             Body::from(insert),
         )
         .await;
-    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    assert!(r.status().is_success(), "{}", r.status());
     // Text it may not read is not parsed for it either: text that happens to parse as Turtle is
-    // refused the same way, and stays as it was.
+    // answered the same way (that it stays as it was is
+    // `store::tests::appended_statements_merge_by_stored_type`'s).
     let text = "<#a> <https://e.example/p> 0 .";
     let r = h
         .request(
@@ -1802,12 +1804,12 @@ _:p solid:inserts { <https://pod.example/alice/drop/note#a> <https://e.example/p
             Body::from(insert),
         )
         .await;
-    assert_eq!(r.status(), StatusCode::FORBIDDEN);
+    assert!(r.status().is_success(), "{}", r.status());
 }
 
 /// A writer that may append but not read gets the same answer whatever the target holds: an
-/// insert is appended without the stored document being read, so one that does not parse, or is
-/// large, answers as a small well-formed one does.
+/// insert is appended without the stored document being read, so one that does not parse, is
+/// large, or is stored as another type (JSON-LD, text), answers as a small well-formed one does.
 #[tokio::test]
 async fn an_append_without_read_follows_the_request_alone() {
     use sparq_lws_core::store::Store;
@@ -1815,17 +1817,28 @@ async fn an_append_without_read_follows_the_request_alone() {
     let large: String = (0..2000)
         .map(|i| format!("<#s{i}> <https://e.example/p> {i} .\n"))
         .collect();
-    for (name, body) in [
-        ("good", "<#a> <https://e.example/p> 0 .".to_string()),
+    for (name, body, ct) in [
+        (
+            "good",
+            "<#a> <https://e.example/p> 0 .".to_string(),
+            "text/turtle",
+        ),
         (
             "broken",
             "<#a> <https://e.example/p> \"unterminated".to_string(),
+            "text/turtle",
         ),
-        ("large", large),
+        ("large", large, "text/turtle"),
+        (
+            "jsonld",
+            r#"{"https://e.example/p": "0"}"#.to_string(),
+            "application/ld+json",
+        ),
+        ("text", "not rdf {".to_string(), "text/plain"),
     ] {
         let iri = format!("https://pod.example/alice/{name}");
         store
-            .write(&iri, axum::body::Bytes::from(body), "text/turtle")
+            .write(&iri, axum::body::Bytes::from(body), ct)
             .await
             .expect("seed a document");
         let acl = format!(
@@ -1844,7 +1857,7 @@ async fn an_append_without_read_follows_the_request_alone() {
     }
     let h = Harness::with_store(store).await;
     let mut answers = Vec::new();
-    for name in ["good", "broken", "large"] {
+    for name in ["good", "broken", "large", "jsonld", "text"] {
         let insert = format!(
             "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
 _:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> \"v\" . }}.\n"
@@ -1871,11 +1884,49 @@ _:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> 
     assert!(answers[0].0.is_success(), "{:?}", answers[0]);
     assert_eq!(answers[0], answers[1], "a document that does not parse");
     assert_eq!(answers[0], answers[2], "a large document");
+    assert_eq!(answers[0], answers[3], "a JSON-LD document");
+    assert_eq!(answers[0], answers[4], "a document that is not RDF");
 }
 
-/// A writer without Read appends to a stored N-Triples or N-Quads document as to a Turtle one, and
-/// is refused for a type it cannot append to (that the result is well formed is
-/// `ldp::patch::tests::an_appended_insert_is_the_union`'s).
+/// An append without Read needs room for what it appends, never for what is stored: a large
+/// document in a storage without room for a second copy of it still takes a small insert.
+#[tokio::test]
+async fn an_append_without_read_needs_no_room_for_the_stored_document() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::in_memory_with_limits(InMemoryStoreLimits::new(64 * 1024, 16));
+    let iri = "https://pod.example/alice/large";
+    let large: String = (0..1000)
+        .map(|i| format!("<#s{i}> <https://e.example/p> {i} .\n"))
+        .collect();
+    assert!(large.len() > 32 * 1024);
+    store
+        .write(iri, axum::body::Bytes::from(large), "text/turtle")
+        .await
+        .expect("seed a document");
+    let acl = format!(
+        r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#a> a acl:Authorization; acl:agent <{webid}>; acl:accessTo <{iri}>; acl:mode acl:Append."#,
+        webid = common::WEBID
+    );
+    store
+        .write(
+            &format!("{iri}.acl"),
+            axum::body::Bytes::from(acl),
+            "text/turtle",
+        )
+        .await
+        .expect("seed its acl");
+    let h = Harness::with_store(store).await;
+    let insert = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <https://pod.example/alice/large#b> <https://e.example/q> \"v\" . }.\n";
+    let r = h
+        .request("PATCH", "/alice/large", Some("text/n3"), Body::from(insert))
+        .await;
+    assert!(r.status().is_success(), "{}", r.status());
+}
+
+/// A writer without Read appends to a stored N-Triples, N-Quads or JSON-LD document as to a Turtle
+/// one (what each then holds is `store::tests::appended_statements_merge_by_stored_type`'s).
 #[tokio::test]
 async fn an_append_without_read_takes_line_formats() {
     use sparq_lws_core::store::Store;
@@ -1931,10 +1982,6 @@ _:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> 
                 Body::from(insert),
             )
             .await;
-        if name == "jsonld" {
-            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{name}");
-            continue;
-        }
         assert!(r.status().is_success(), "{name}: {}", r.status());
     }
 }

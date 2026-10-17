@@ -1633,7 +1633,7 @@ pub async fn delete_handler<S: Store>(
 /// multiple solutions ⇒ 409), and the result re-serialised in the resource's stored format. PATCH on
 /// a missing resource that only inserts creates it (the LDP "create on PATCH" convention); a PATCH
 /// with deletes on a missing resource is a 409. `If-Match` is honoured. Fail-closed (public ⇒ 403).
-pub async fn patch_handler<S: Store>(
+pub async fn patch_handler<S: Store + 'static>(
     State(state): State<Arc<LdpState<S>>>,
     Extension(token): Extension<VerifiedToken>,
     uri: axum::http::Uri,
@@ -1744,10 +1744,23 @@ pub async fn patch_handler<S: Store>(
     // A non-`NotFound` store error goes only to a caller permitted to read the target; an
     // insert-only writer that may not gets the refusal above. (`ServerError` is not `Clone`; we
     // distinguish present/absent via `current`.)
-    let current: Option<crate::store::Resource> = match state.store.read(&target.iri).await {
-        Ok(r) => Some(r),
-        Err(ServerError::NotFound) => None,
-        Err(e) => return Err(unread(e)),
+    //
+    // A writer that may not read the target appends to it without what is stored being read at
+    // all: only its record is (see `append_unread`).
+    let current: Option<crate::store::Resource> = if reader {
+        match state.store.read(&target.iri).await {
+            Ok(r) => Some(r),
+            Err(ServerError::NotFound) => None,
+            Err(e) => return Err(e),
+        }
+    } else {
+        match state.store.meta(&target.iri).await {
+            Ok(Some(meta)) => {
+                return append_unread(&state, &target, &headers, &patch, meta, unread).await;
+            }
+            Ok(None) => None,
+            Err(e) => return Err(unread(e)),
+        }
     };
 
     // Apply preconditions against the current state's tag and modification time.
@@ -1765,40 +1778,6 @@ pub async fn patch_handler<S: Store>(
         current_etag.as_deref(),
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
-
-    // A writer that may not read the target appends to it without its content being parsed: the
-    // inserted statements are appended as text to a Turtle, N-Triples or N-Quads document (each
-    // takes N-Triples lines, the last into its default graph), so the outcome follows the
-    // request, the requester's permissions and the stored type alone, never what is stored
-    // (whether it parses, what its graph holds). Any other stored type is refused to it. (Only an
-    // unconditional insert-only patch gets here without Read.) The stored bytes are still read
-    // and rewritten whole, so the time this takes follows their size.
-    if let (Some(res), false) = (&current, reader) {
-        let appendable = matches!(
-            stored_format(&res.meta.content_type),
-            Some(RdfFormat::Turtle | RdfFormat::NTriples | RdfFormat::NQuads)
-        );
-        let Some(text) = appended_ntriples(&patch).filter(|_| appendable) else {
-            return Err(unread(ServerError::Forbidden));
-        };
-        let text = text?;
-        let mut body = Vec::with_capacity(res.body.len() + text.len() + 1);
-        body.extend_from_slice(&res.body);
-        if !body.is_empty() && !body.ends_with(b"\n") {
-            body.push(b'\n');
-        }
-        body.extend_from_slice(text.as_bytes());
-        let meta = state
-            .store
-            .write(&target.iri, Bytes::from(body), &res.meta.content_type)
-            .await?;
-        #[cfg(not(target_arch = "wasm32"))]
-        state
-            .notifications
-            .notify(&target.iri, ActivityType::Update, None)
-            .await;
-        return Ok(write_response(true, &meta, &target, false));
-    }
 
     // Determine the existing triples + the stored format (default Turtle for a new resource).
     let (existing_triples, stored_as) = match &current {
@@ -1902,6 +1881,83 @@ pub async fn patch_handler<S: Store>(
 
     let reader = may_read(&target.iri, &granted);
     Ok(write_response(existed, &meta, &target, reader))
+}
+
+/// A `PATCH` by a writer that may not read the target, which exists (`meta` is its record): the
+/// inserted statements are appended to what it holds ([`Store::append`]) as N-Triples lines,
+/// without what is stored being read or rewritten, whatever its type. So the outcome follows the
+/// request, the requester's permissions and the record alone, never what is stored (its type,
+/// its size, whether it parses, what its graph holds). Only an unconditional insert-only patch
+/// gets here (any other needs Read); one that is not is refused as a write without access is.
+async fn append_unread<S: Store + 'static>(
+    state: &Arc<LdpState<S>>,
+    target: &LdpTarget,
+    headers: &HeaderMap,
+    patch: &crate::ldp::patch::N3Patch,
+    meta: ResourceMeta,
+    unread: impl Fn(ServerError) -> ServerError,
+) -> Result<Response, ServerError> {
+    let current_etag = write_validator(state, target, headers, Some(meta.etag.as_str())).await?;
+    conditional::require(conditional::evaluate_write(
+        crate::entity_tag::field(headers, header::IF_MATCH).as_deref(),
+        crate::entity_tag::field(headers, header::IF_NONE_MATCH).as_deref(),
+        crate::http_date::single_line(headers, header::IF_UNMODIFIED_SINCE),
+        current_etag.as_deref(),
+        write_precondition_time(target, meta.last_modified),
+    ))?;
+    let Some(text) = appended_ntriples(patch) else {
+        return Err(unread(ServerError::Forbidden));
+    };
+    let segment = Bytes::from(text?);
+    let mut expected = meta;
+    for _ in 0..=crate::store::READ_RACE_RETRIES {
+        let appended = match state
+            .store
+            .append(&target.iri, &expected, segment.clone())
+            .await
+        {
+            Ok(appended) => appended,
+            Err(e) => {
+                // Full: merged in the background, and asked again later.
+                if expected.appended.len() >= crate::store::APPEND_LIMIT {
+                    compact_later(state, &target.iri);
+                }
+                return Err(e);
+            }
+        };
+        if let Some(meta) = appended {
+            if meta.appended.len() % crate::store::APPEND_COMPACT_AT == 0 {
+                compact_later(state, &target.iri);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            state
+                .notifications
+                .notify(&target.iri, ActivityType::Update, None)
+                .await;
+            return Ok(write_response(true, &meta, target, false));
+        }
+        // Changed meanwhile (appended to, rewritten): appended to what stands now. The
+        // preconditions a writer without Read may send compare no state, so they still hold.
+        expected = match state.store.meta(&target.iri).await.map_err(&unread)? {
+            Some(meta) => meta,
+            None => break,
+        };
+    }
+    Err(ServerError::ResourceChanged)
+}
+
+/// Merge what was appended to `iri` into its bytes, in the background ([`Store::compact`]).
+fn compact_later<S: Store + 'static>(state: &Arc<LdpState<S>>, iri: &str) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let state = Arc::clone(state);
+        let iri = iri.to_string();
+        tokio::spawn(async move {
+            let _ = state.store.compact(&iri).await;
+        });
+    }
+    #[cfg(target_arch = "wasm32")]
+    let _ = (state, iri);
 }
 
 /// `OPTIONS /{path}` — advertise the methods + write media types for a target (RFC 9110 §9.3.7 +
@@ -3226,6 +3282,7 @@ mod tests {
                 let meta = ResourceMeta {
                     content_type: "text/turtle".into(),
                     blob_key: "k".into(),
+                    appended: Vec::new(),
                     etag: "\"acl\"".into(),
                     last_modified: None,
                 };
@@ -3250,6 +3307,7 @@ mod tests {
                 return Ok(Some(ResourceMeta {
                     content_type: "text/turtle".into(),
                     blob_key: "k".into(),
+                    appended: Vec::new(),
                     etag: "\"acl\"".into(),
                     last_modified: None,
                 }));
@@ -4552,6 +4610,7 @@ mod tests {
             ResourceMeta {
                 content_type: "text/turtle".into(),
                 blob_key: "k".into(),
+                appended: Vec::new(),
                 etag: "\"acl\"".into(),
                 last_modified: None,
             }
@@ -4892,6 +4951,7 @@ mod tests {
             ResourceMeta {
                 content_type: "text/turtle".into(),
                 blob_key: "b".into(),
+                appended: Vec::new(),
                 etag: "\"fixed\"".into(),
                 last_modified: self.last_modified,
             }
@@ -4900,6 +4960,7 @@ mod tests {
             ResourceMeta {
                 content_type: "text/turtle".into(),
                 blob_key: "bacl".into(),
+                appended: Vec::new(),
                 etag: "\"acl\"".into(),
                 last_modified: None,
             }
@@ -6259,7 +6320,8 @@ mod tests {
         // sq-10ty4: an honoured JSON-LD `profile` changes which bytes are served, so it changes
         // the validator too — exactly when the bytes differ.
         let stored = "\"5-abc123\"";
-        const EXPANDED: &str = "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#expanded\"";
+        const EXPANDED: &str =
+            "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#expanded\"";
         const COMPACTED: &str =
             "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#compacted\"";
         // Compacted output differs from the default JSON-LD serialisation ⇒ its own variant tag.
@@ -6312,10 +6374,7 @@ mod tests {
         let resp = get_with(&state, owner_token(), "/alice/doc", accept.clone()).await;
         assert_eq!(resp.status(), StatusCode::OK);
         // The honoured profile is echoed back in the Content-Type (JSON-LD 1.1 IANA registration).
-        assert_eq!(
-            resp.headers().get(header::CONTENT_TYPE).unwrap(),
-            COMPACTED
-        );
+        assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), COMPACTED);
         let compacted_tag = etag_of(&resp);
         assert_ne!(
             compacted_tag, plain_tag,
@@ -6363,7 +6422,8 @@ mod tests {
         // sq-10ty4: the serialiser's default output IS the expanded document form, so the expanded
         // profile is honoured with byte-identical output — same variant ETag, but the Content-Type
         // echoes the honoured profile.
-        const EXPANDED: &str = "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#expanded\"";
+        const EXPANDED: &str =
+            "application/ld+json;profile=\"http://www.w3.org/ns/json-ld#expanded\"";
         let state = state_with_owner_resource("/alice/doc", COND_DOC).await;
 
         let mut accept_plain = HeaderMap::new();
@@ -6408,10 +6468,7 @@ mod tests {
         accept.insert(header::ACCEPT, HeaderValue::from_static(COMPACTED));
         let resp = get_with(&state, owner_token(), "/alice/c/", accept).await;
         assert_eq!(resp.status(), StatusCode::OK);
-        assert_eq!(
-            resp.headers().get(header::CONTENT_TYPE).unwrap(),
-            COMPACTED
-        );
+        assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), COMPACTED);
         assert_ne!(etag_of(&resp), plain_tag);
         // The single-subject container listing compacts to the bare node object; its containment
         // triple compacts to a single node reference.
