@@ -411,9 +411,9 @@ pub use join::{
 };
 pub use metrics::{CommCounter, FIELD_BYTES};
 pub use oblivious::{
-    rerandomise_sharings, shuffle, sort_by, sort_with_keys, AccessPattern, Comparator,
-    SecretColumn, ShuffleCost, SortByResult, SortCost, SortWithKeysResult, SortingNetwork, Switch,
-    WaksmanNetwork,
+    rerandomise_sharings, sample_random_permutation, shuffle, sort_by, sort_with_keys,
+    AccessPattern, Comparator, SecretColumn, ShuffleCost, SortByResult, SortCost,
+    SortWithKeysResult, SortingNetwork, Switch, WaksmanNetwork, MAX_NETWORK_WIDTH,
 };
 pub use partial::{HolderId, MpcError, PartialResult};
 // sq-dl81: the collision-resistant Term->Fp join-key encoder surface.
