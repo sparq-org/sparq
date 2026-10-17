@@ -28,6 +28,14 @@
 //! must hold at `s`). Otherwise the branch is closed and, if no branch gives a model, the run
 //! returns [`Stop::Unconfirmed`], never a verdict.
 //!
+//! **Termination.** HermiT's NI-rule (Motik, Shearer and Horrocks, JAIR 36, 2009) fires on
+//! an annotated equality: an at-most restriction at a root forcing two nodes to merge. This
+//! one fires at completion, on an edge [`Tableau::unravels`] refuses. The roots it
+//! introduces can introduce further roots, so the JAIR termination argument does not carry
+//! over as it stands. Termination is backed by the [`Budget`]: every rule application and
+//! every new node counts against it, and running out is [`Stop::Exhausted`]
+//! (`Unknown(ResourceBudget)`), never a verdict.
+//!
 //! Blocking is pairwise anywhere blocking over full labels, recomputed whenever the `≥`-rule
 //! runs, which makes the calculus terminate in the presence of inverse roles and number
 //! restrictions. Super-role facts are materialised when a role fact is added.
@@ -1562,9 +1570,12 @@ impl<'c> Tableau<'c> {
     /// between a root and a blockable node that is not its child. Such an edge is copied with
     /// the subtree it hangs from, and the model is still one as long as
     ///
-    /// - a blocked node has one only if its blocker has the same edge to the same root (the
-    ///   unravelling drops the blocked node, and the copy of its blocker that takes its
-    ///   place gives the root the same neighbour: the two have the same label),
+    /// - a blocked node's edge is kept when its direct blocker has the same edge to the same
+    ///   root (the copy of the blocker that takes its place gives the root the same
+    ///   neighbour: the two have the same label) and no number restriction at the root
+    ///   counts the blocker's copies; any other blocked node's edge is dropped with the
+    ///   node, and the root must keep its at-least restrictions without it (dropping a
+    ///   neighbour can break nothing else at the root),
     /// - no edge joins two blockable nodes outside the tree (an at-most restriction at a
     ///   root merged nodes of different subtrees), and
     /// - where the blockable end is copied, no number restriction at the root can match two
@@ -1579,6 +1590,8 @@ impl<'c> Tableau<'c> {
             return Ok(());
         }
         let mut unconfirmed = false;
+        // (root, blocked neighbour) edges the unravelling drops.
+        let mut dropped: Vec<(Node, Node)> = Vec::new();
         let len = self.nodes.len();
         // Copied: a blocker or inside a blocker's subtree (parents have smaller ids).
         let mut copied = vec![false; len];
@@ -1612,9 +1625,17 @@ impl<'c> Tableau<'c> {
                     continue;
                 }
                 let w = v as usize;
-                if (blocked[w] && !self.replaced_alike(u as Node, v, blocked_by[w]))
-                    || (!blocked[w] && copied[w] && self.counts_copies(u as Node, v))
-                {
+                if blocked[w] && !self.same_edge(u as Node, v, blocked_by[w]) {
+                    // The unravelling drops the edge: the root must not need it.
+                    dropped.push((u as Node, v));
+                    continue;
+                }
+                let counted = if blocked[w] {
+                    blocked_by[w].is_some_and(|b| self.counts_copies(u as Node, b))
+                } else {
+                    copied[w] && self.counts_copies(u as Node, v)
+                };
+                if counted {
                     // An at-most restriction at the root that counts the node makes it one of
                     // the root's few neighbours: the NI-rule names them.
                     match self.ni_clause(u as Node, v) {
@@ -1625,11 +1646,39 @@ impl<'c> Tableau<'c> {
                 }
             }
         }
-        if unconfirmed {
+        if unconfirmed || !self.keeps_at_least(&mut dropped) {
             Err(None)
         } else {
             Ok(())
         }
+    }
+
+    /// Whether every root keeps its at-least restrictions without the blocked neighbours
+    /// the unravelling drops (`(root, neighbour)` pairs). Dropping a neighbour removes body
+    /// matches of the root's clauses only, so the at-least restrictions are all it can
+    /// break.
+    fn keeps_at_least(&self, dropped: &mut [(Node, Node)]) -> bool {
+        dropped.sort_unstable();
+        for group in dropped.chunk_by(|a, b| a.0 == b.0) {
+            let s = group[0].0;
+            let gone: Vec<Node> = group.iter().map(|&(_, w)| w).collect();
+            let mut atoms: Vec<Atom> = self.nodes[s as usize]
+                .label
+                .keys()
+                .copied()
+                .filter(|&a| matches!(self.c.atoms[a as usize], AtomKind::AtLeast { .. }))
+                .collect();
+            atoms.sort_unstable();
+            for a in atoms {
+                let AtomKind::AtLeast { n: k, role, filler } = self.c.atoms[a as usize] else {
+                    unreachable!("filtered");
+                };
+                if !self.at_least_holds_without(s, k, role, filler, &gone) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// A clause that is only an at-most restriction `≤n R.A` (one group of interchangeable
@@ -1692,10 +1741,10 @@ impl<'c> Tableau<'c> {
         self.merge(w, z, &d);
     }
 
-    /// Whether blocked node `w`, with an edge to root `s`, is blocked directly by a node with
-    /// the same roles to `s` that no number restriction at `s` counts twice (one unit per
-    /// role compared).
-    fn replaced_alike(&self, s: Node, w: Node, by: Option<Node>) -> bool {
+    /// Whether blocked node `w`'s edge to root `s` survives the unravelling: `w` is blocked
+    /// directly by a node with the same roles to `s`, whose copy takes `w`'s place (one
+    /// unit per role compared).
+    fn same_edge(&self, s: Node, w: Node, by: Option<Node>) -> bool {
         let Some(b) = by else {
             return false;
         };
@@ -1707,8 +1756,7 @@ impl<'c> Tableau<'c> {
             return false;
         };
         self.charge(rw.len() + rb.len());
-        // The copies of `b` all reach `s`, even where `b` itself is `s`'s child.
-        rw.len() == rb.len() && rw.iter().all(|r| rb.contains(r)) && !self.counts_copies(s, b)
+        rw.len() == rb.len() && rw.iter().all(|r| rb.contains(r))
     }
 
     /// Whether a clause with several neighbour variables (a number restriction) can apply
@@ -1818,11 +1866,24 @@ impl<'c> Tableau<'c> {
     }
 
     fn at_least_holds(&self, x: Node, k: u32, r: Role, filler: Option<Atom>) -> bool {
+        self.at_least_holds_without(x, k, r, filler, &[])
+    }
+
+    /// [`at_least_holds`](Self::at_least_holds) with the neighbours `gone` left out.
+    fn at_least_holds_without(
+        &self,
+        x: Node,
+        k: u32,
+        r: Role,
+        filler: Option<Atom>,
+        gone: &[Node],
+    ) -> bool {
         let mut cands: Vec<Node> = self.nodes[x as usize]
             .adj
             .iter()
             .filter(|(&n, rs)| {
                 self.nodes[n as usize].active
+                    && !gone.contains(&n)
                     && rs.contains(&r)
                     && filler.is_none_or(|f| self.nodes[n as usize].label.contains_key(&f))
             })
