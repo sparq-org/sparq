@@ -448,4 +448,6 @@ pub use shamir::{MacSession, ShamirBackend, Share};
 // sq-tg6b: the network-tier surface — the real loopback transport
 // (Tier 2) and the tc/netem LAN/WAN profiles (Tier 3, privilege-gated).
 pub use netprofiles::NetemProfile;
-pub use transport::{run_cell_networked, Channel, Coordinator, Message, NetworkCell, StepCode};
+pub use transport::{
+    run_cell_networked, Channel, Coordinator, Message, NetworkCell, PublicPermutation, StepCode,
+};
