@@ -1307,6 +1307,47 @@ mod tests {
         (coord, handles)
     }
 
+    /// `Coordinator::hidden_join`'s OWN cap, tested directly on a Coordinator
+    /// rather than through `run_cell_networked`.
+    ///
+    /// Through the wire cell the two caps mask each other: the cell's own
+    /// preflight refuses first, so disabling either one alone leaves the other to
+    /// catch it and neither mutant shows. Driving the Coordinator directly isolates
+    /// this one, so it is pinned on its own terms.
+    #[test]
+    fn the_coordinators_hidden_join_caps_its_own_scale() {
+        let backend = ShamirBackend::new_seeded(3, 0xE9).unwrap();
+        let (mut coord, handles) = loopback_coordinator(&backend);
+        let mut dealer = backend.dealer();
+
+        // `scale^2` over the cap with `scale` itself under it, and the overflowing
+        // case. Both must be a typed refusal, not a wrapped length or an allocation.
+        // `scale` itself is legal (1024 is far below MAX_OUTPUT_BOUND); it is the
+        // SQUARE that is not, which is what distinguishes this cap from a width one.
+        for scale in [1usize << 10, usize::MAX] {
+            let err = coord
+                .hidden_join(&mut dealer, scale)
+                .expect_err("an over-cap pair count must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m)
+                    if m.contains("MAX_OUTPUT_BOUND") || m.contains("overflows usize")),
+                "scale={}: {:?}",
+                scale,
+                err
+            );
+        }
+        // A legal scale still runs the real wire join over the same Coordinator, so
+        // the cap refuses a size and not the operation.
+        let matches = coord
+            .hidden_join(&mut dealer, 4)
+            .expect("a legal scale still runs");
+        assert_eq!(matches, 4, "keys 0..4 on both sides match pairwise");
+
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+    }
+
     #[test]
     fn networked_shuffle_preserves_multiset_over_the_wire() {
         // A networked oblivious shuffle must open to a PERMUTATION of the input

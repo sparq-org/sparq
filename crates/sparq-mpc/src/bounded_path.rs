@@ -543,6 +543,11 @@ fn eval_repetition(
 /// Every fixed predicate sequence of `length` hops obtained by choosing, at each
 /// position, one of the step's alternatives (the §2.4 distribution). For a
 /// single-predicate step this is just the one `length`-long sequence.
+///
+/// The caller caps the chain COUNT before reaching here ([`MAX_UNROLL_HOPS`] on the
+/// length, then [`MAX_UNROLL_CHAINS`] on `Σ_ℓ a^ℓ`), so the number of sequences is
+/// bounded. Nothing bounds their WIDTHS — a predicate IRI's length is unbounded —
+/// and width caps are follow-up work, not a property this path provides.
 fn alternation_chains(step: &PathStep, length: usize) -> Vec<Vec<NamedNode>> {
     let mut chains: Vec<Vec<NamedNode>> = vec![Vec::new()];
     for _ in 0..length {
