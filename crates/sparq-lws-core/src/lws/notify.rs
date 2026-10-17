@@ -31,7 +31,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
 
@@ -298,11 +298,37 @@ pub struct Subscription {
     /// when the subscription goes, and a delivery that finishes later finds nothing to count.
     #[serde(skip)]
     pub failures: u32,
+    /// Whether it has been seen expired, in memory only (see [`Subscription::expired`]).
+    #[serde(skip)]
+    pub lapsed: Lapsed,
+}
+
+/// Set once a [`Subscription`] is seen expired, shared by its copies: from then on it stays
+/// expired, whatever the clock says later.
+#[derive(Debug, Clone, Default)]
+pub struct Lapsed(Arc<AtomicBool>);
+
+impl PartialEq for Lapsed {
+    /// What a subscription is, not what has been seen of it.
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
 }
 
 impl Subscription {
+    /// Whether it has expired by `now`, or was seen expired before: expiry is never undone, so
+    /// a clock stepped back cannot list again one whose removal began while it was expired
+    /// (that removal holds no listing's lock, and would then change a listing a conditional
+    /// create holds).
     fn expired(&self, now: i64) -> bool {
-        self.expires_at.is_some_and(|t| t <= now)
+        if self.lapsed.0.load(Ordering::Acquire) {
+            return true;
+        }
+        let expired = self.expires_at.is_some_and(|t| t <= now);
+        if expired {
+            self.lapsed.0.store(true, Ordering::Release);
+        }
+        expired
     }
 
     fn covers(&self, uri: &str) -> bool {
@@ -495,7 +521,7 @@ pub struct Notifier {
     sweep_now: Arc<tokio::sync::Notify>,
     /// Keeps the expiry sweeper from sweeping, for a test that sweeps itself.
     #[cfg(test)]
-    sweeper_off: Arc<std::sync::atomic::AtomicBool>,
+    sweeper_off: Arc<AtomicBool>,
     /// Stored subscriptions the start did not load because a change to them was still being
     /// settled, or their removal failed. Each is counted against both shares until the next
     /// start, as it may still be stored.
@@ -523,6 +549,7 @@ impl Notifier {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         self.subs.write().expect("lock").insert("test".into(), sub);
     }
@@ -2116,6 +2143,7 @@ async fn subscribe<S: Store + 'static>(
         expires,
         expires_at,
         failures: 0,
+        lapsed: Lapsed::default(),
     };
     let stored = serde_json::to_vec(&sub).unwrap_or_default();
     let doc = document(state, &sub);
@@ -2179,6 +2207,7 @@ mod tests {
             expires: None,
             expires_at: Some(1),
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         let iri = format!("{container}old");
         let body = Bytes::from(serde_json::to_vec(&sub).unwrap());
@@ -2275,6 +2304,45 @@ mod tests {
         let r = handle(&state, &post(&body), &reader).await;
         assert_eq!(r.status(), StatusCode::CREATED);
         assert!(!state.notify.subs.read().unwrap().contains_key(&mine));
+    }
+
+    /// Review finding: a removal of an expired subscription holds no listing's lock; with the
+    /// clock stepped back while it waited on the store, the subscription was listed again, and
+    /// its removal then changed a listing a conditional create held. Once seen expired, it
+    /// stays expired.
+    #[tokio::test]
+    async fn an_expiry_is_never_undone() {
+        let (state, _store) = test_store::state(4).await;
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let reader = Agent {
+            subject: Some("https://reader.example/#me".into()),
+            ..Agent::anonymous()
+        };
+        let post = test_store::request(
+            Method::POST,
+            SUBSCRIPTIONS_PATH,
+            &[("content-type", LWS_JSON)],
+            &body,
+        );
+        let r = handle(&state, &post, &reader).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let me = &state.notify;
+        let id = me.subs.read().unwrap().keys().next().cloned().unwrap();
+        let set_expiry = |at: i64| {
+            me.subs.write().unwrap().get_mut(&id).unwrap().expires_at = Some(at);
+        };
+        set_expiry(1);
+        assert!(!me.is_live(&id));
+        // The clock steps back past its expiry: as if it had not come yet.
+        set_expiry(jose::now_secs() + 3600);
+        assert!(!me.is_live(&id), "listed again");
+        assert!(me.live_for(reader.subject.as_deref(), false).is_empty());
+        assert!(me.live_for(None, true).is_empty());
     }
 
     /// Review finding: expired subscriptions kept their subscriber's places, and a conditional
@@ -2468,6 +2536,7 @@ mod tests {
                         expires: None,
                         expires_at: None,
                         failures: 0,
+                        lapsed: Lapsed::default(),
                     },
                 );
             }
@@ -2542,6 +2611,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state
                 .notify
@@ -2652,6 +2722,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         // A first boot makes the containers; the subscription is stored after it and before
         // the boot under test, which loads it.
@@ -2726,6 +2797,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -2791,6 +2863,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         state
             .notify
@@ -2846,6 +2919,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         let iri = format!("{container}{id}");
         state
@@ -3238,6 +3312,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         state
             .store
@@ -3404,6 +3479,7 @@ mod tests {
             expires: None,
             expires_at: None,
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         state
             .notify
@@ -3465,6 +3541,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3512,6 +3589,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3619,6 +3697,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3709,6 +3788,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3940,6 +4020,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state.notify.subs.write().unwrap().insert(id.into(), sub);
         }
@@ -3997,6 +4078,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             let body = Bytes::from(serde_json::to_vec(&sub).unwrap());
             store
@@ -4099,6 +4181,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             let iri = format!("{}s{:04}", container, i);
             if subscriber == alice {
@@ -4285,6 +4368,7 @@ mod tests {
                 expires: None,
                 expires_at: None,
                 failures: 0,
+                lapsed: Lapsed::default(),
             };
             state
                 .notify
@@ -4808,6 +4892,7 @@ mod tests {
                         expires: None,
                         expires_at: Some(1),
                         failures: 0,
+                        lapsed: Lapsed::default(),
                     },
                 );
                 id
@@ -5596,6 +5681,7 @@ mod tests {
             expires: None,
             expires_at: Some(1),
             failures: 0,
+            lapsed: Lapsed::default(),
         };
         state
             .store
