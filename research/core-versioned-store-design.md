@@ -18,6 +18,14 @@ every published base is immutable, all coordination state lives on stable inodes
 that root, and the only mutation that changes which bytes are canonical is one rename of
 a pointer file.
 
+**Creating the root is itself a durable act** (S4). `R` is only as durable as the directory
+entry that names it, so creating a store fsyncs **`R`'s parent, and every ancestor the
+create had to make**, from the deepest new directory upward, before the store is
+acknowledged as existing. Without that, a crash can lose the whole root — including a
+`CURRENT` that was fsynced inside it — and a caller that was told the store exists reopens
+to nothing. An existing-parent create syncs just that parent; `mkdir -p`-style creation
+syncs each level it created, in order.
+
 ## 1. On-disk shape
 
 ```text
@@ -31,7 +39,7 @@ R/                        the store root; created once, never renamed
     numerics.bin temporals-v4.bin
     wal.log               this version's write-ahead log (append-only)
     txn.log               the tree's central commit log (append-only)
-    COMMIT                two checksummed slots: the durable commit sequence
+    COMMIT.a COMMIT.b     the watermark: two checksummed slots, separate files
     IDENTITY              which store and version these bytes belong to
     named.bin             ownership manifest: the named graphs of THIS version
     named/0/ named/1/ …   one directory per named graph, same shape recursively
@@ -48,6 +56,28 @@ makes it stable: a sibling path is derived from a directory this design renames 
 but still rebuilds beside, whereas `R` exists for the store's whole life, so every writer
 of every version contends on the same inode. This design therefore adds **no second lock**,
 and depends on #7136 taking its lock location as a parameter.
+
+**Lock order across the migration boundary** (S3). A legacy root has #7136's
+**canonicalised sibling lock**; a versioned root has `R/LOCK`. While both can exist for one
+store the two are not interchangeable, so the rules are:
+
+1. **Fixed order.** Anyone touching a root that still has legacy artefacts takes the
+   **sibling lock first, then `R/LOCK`** — always that order, never the reverse, so two
+   processes arriving from different directions cannot deadlock.
+2. **The migrator holds both, continuously**, from before it builds `v0` through
+   publication, the deletion of the legacy files, and its own adoption of the new root —
+   it does not drop one to take the other, because a window between them is exactly where a
+   legacy-shaped writer and a versioned-shaped writer could both believe they hold the
+   store.
+3. **Once no legacy artefacts remain**, a versioned writer takes **only `R/LOCK`**. That is
+   what makes the double-take a migration-era cost rather than a permanent one, and the
+   test is the artefacts' presence, not a flag.
+4. **Pre-#7136 binaries take no lock at all** and are therefore **unsupported** against a
+   store any of this applies to; nothing here can exclude a process that does not
+   participate.
+5. **`R/LOCK` is never unlinked or recreated.** Its inode is the rendezvous (round 4 (d)),
+   and replacing the file would let two processes hold locks on different inodes and both
+   proceed.
 
 `R` holds no base files of its own. Everything a reader loads sits under one `v<N>`. A
 child directory holds its own `wal.log` and **no** `txn.log`: the version's single
@@ -94,6 +124,23 @@ start empty. The one in-place shortening still permitted is the removal of an **
 trailing record** under the writer lock — bytes no reader ever folded, because an
 incomplete record is below every reader's boundary by definition.
 
+**A retirement is itself a sequenced commit** (S1). A retire record must not be visible to
+a reader that cannot yet see the materialisation it stands for. The hole: a reader whose
+boundary includes frame F may load graph A *before* F is materialised into A's WAL, then
+reach `txn.log`, see `retire(F)` and skip the redo — losing F's effect on A entirely. So:
+
+- the retire record is written **after every affected WAL is durable** — every graph the
+  frame touches has its materialised records appended and fsynced first;
+- the retirement takes a **fresh sequence** of its own, strictly greater than F's, and is
+  published through the watermark like any other commit;
+- a reader **honours a retire record only if the retire sequence is at or below its
+  boundary**. A reader whose boundary sits between F and `retire(F)` redoes F from
+  `txn.log` — which is safe and is the point: redo is idempotent, so a reader that redoes a
+  frame already present in the WALs it loaded gets the same result either way.
+
+A retirement is therefore an optimisation that removes redo work from *future* readers,
+never a statement that changes what a *current* reader must do.
+
 **One sequence authority.** The version's `txn.log` is the **only** source of commit
 sequence numbers, and EVERY durable write takes one from it — a multi-graph frame and a
 plain single-graph `apply_delta` alike. A standalone write therefore appends its own
@@ -107,15 +154,62 @@ frame is fsynced; it is *visible* only once the writer publishes it. Publication
 **checksummed header slot**, not a file length:
 
 ```text
-R/v<N>/COMMIT        two fixed-size slots, written alternately
+R/v<N>/COMMIT.a      one fixed-size slot
+R/v<N>/COMMIT.b      the other; the two are written alternately
                      each: [seq u64][version id u64][CRC-32C u32]
 ```
 
-The writer appends the frame to `txn.log`, fsyncs `txn.log`, then writes the inactive
-`COMMIT` slot with the new `seq` and fsyncs `COMMIT`. A reader preads both slots and takes
-the valid slot with the higher `seq`; a slot whose checksum fails is ignored, and if both
-fail the store is reported unreadable rather than guessed. Because the slots alternate, a
-crash mid-write always leaves the previous slot intact.
+**The slots are two separate files** (S2), not two records in one. In one file they share
+a page, a block and an inode, so a single torn sector-level write, a failed in-place
+overwrite or a filesystem that zeroes a partially-written block can damage **both** slots
+at once and leave the store with no valid watermark — which is exactly the failure the
+alternation exists to prevent. Separate files give each slot its own blocks and its own
+metadata, so a torn write to one cannot reach the other. The fsync cost is unchanged: one
+slot is written and fsynced per commit either way, and the alternation means the file being
+synced is the one that is *not* currently authoritative.
+
+The writer appends the frame to `txn.log`, fsyncs `txn.log`, then writes the inactive slot
+file with the new `seq` and fsyncs it. A reader preads both files and takes the valid slot
+with the higher `seq`; a slot whose checksum fails is ignored, and if both fail the store
+is reported unreadable rather than guessed.
+
+**The assumption these overwrites rest on, stated.** A slot write is an **in-place
+overwrite** of a fixed-size record, so the design assumes what SQLite calls *powersafe
+overwrite*: writing a sector-aligned, sector-sized region damages no bytes outside that
+region. The same assumption covers a log **append** that lands inside a partially-filled
+final block — a torn append must not corrupt records already durable earlier in the block.
+Where the assumption does not hold the slot's checksum catches the damaged slot (the other
+slot survives, because it is a different file) and a log's per-record checksum catches the
+damaged record, so the failure mode is a fail-closed read or a discarded tail rather than
+silent corruption. Both are recorded here because they are assumptions about the storage
+stack, not properties this design can establish.
+
+**The watermark state machine** (S5). The slots are not just a pair of numbers; the rules
+below are normative.
+
+1. **Creation.** A new version writes **both** slots and fsyncs them as part of building
+   the version (§4 step 3/4), before publication. A published version therefore never has
+   an absent or uninitialised watermark, and a reader never has to treat "no valid slot"
+   as "sequence zero".
+2. **Selection.** The valid slot with the higher `seq` wins. Two valid slots with **equal
+   `seq` but conflicting tuples** are a contradiction the store cannot resolve, so it
+   **fails closed** with an error naming the version rather than preferring either.
+3. **Arithmetic.** Sequence allocation is **checked `u64`**. On overflow the writer
+   **refuses the write** — it does not wrap and does not saturate — and the error says the
+   version's sequence space is exhausted (the remedy is a new version, whose logs and
+   watermark start fresh).
+4. **Roll-forward on recovery.** The best valid slot is a *lower bound*, not the truth: a
+   commit may be durable in `txn.log` while the slot naming it was lost. Recovery therefore
+   starts from the best slot and **rolls the watermark forward over contiguous, complete,
+   checksummed journal records** beyond it, stopping at the first gap, incomplete record or
+   checksum failure. This is sound in one direction only because `txn.log` is **fsynced
+   before any slot names it**: a commit a reader could have seen is in the journal, so a
+   torn or lost slot costs the watermark nothing permanent.
+5. **A failed slot write means no acknowledgement.** If the slot write or its fsync fails,
+   the commit is **not** acknowledged to the caller, the handle is **poisoned**, and the
+   reconciliation happens at reopen by the roll-forward of rule 4 — **before any slot is
+   written again**. Reusing a slot before rolling forward could publish a sequence lower
+   than one a reader already observed.
 
 *Why a header slot rather than a shared-lock capture.* Both were considered. A capture
 protocol (the reader takes a shared lock that the writer briefly excludes) makes every
@@ -130,11 +224,11 @@ and the only new syscall in the design's commit path.
 `len=100 → 80 → 100` can repeat a value that denotes different content (ABA), and a reader
 that captured 100 could be reading either. The durable commit sequence only increases, so:
 
-- **The reader's boundary** (§3) is the `seq` it reads from `COMMIT` before it loads
+- **The reader's boundary** (§3) is the `seq` it reads from the watermark before it loads
   anything. For the whole load, in every file, a record tagged with a higher sequence is
   ignored.
 - **The writer revision** (§4) is the pair **(version id, durable commit seq)**. Both are
-  monotonic and both are read from `COMMIT` plus `CURRENT` under the lock.
+  monotonic and both are read from the watermark plus `CURRENT` under the lock.
 
 Torn-tail truncation under the lock is then safe by construction: an incomplete trailing
 record was never covered by a published `seq`, so removing it cannot remove durable state
@@ -155,7 +249,7 @@ reach `R`:
 | live version | `R/CURRENT` | yes |
 | reader pins | `R/pin/v<N>` | yes, per version |
 | store and version identity | `R/v<N>/IDENTITY` and each descendant's | yes, per directory |
-| durable commit sequence | `R/v<N>/COMMIT` (two checksummed slots) | yes |
+| durable commit sequence | `R/v<N>/COMMIT.a` and `COMMIT.b` (two checksummed slots, separate files) | yes |
 | writer generation / seqlock counter | — | **no** |
 
 Because `R` is never renamed, a lock file inside it is never moved, never replaced and
@@ -174,21 +268,42 @@ an **allowlist**: `fstatfs` on the opened root directory's descriptor, compared 
 known-local types, and **fail closed** on an inspection error and on any type not on the
 list — FUSE included, since a FUSE mount can be anything.
 
-- Linux: `f_type` (ext4, xfs, btrfs, zfs, f2fs, tmpfs, and overlayfs — see below).
+- Linux: `f_type` (ext4, xfs, btrfs, zfs, f2fs, tmpfs — see the scope note — and
+  overlayfs, conditionally; see below).
 - macOS: `f_fstypename` (apfs, hfs).
 - Any other target the crate supports today gets the same test through its own equivalent;
   a supported target must have one rather than be refused for lack of a mapping. On a
   target with no `statfs` equivalent at all the check is documented as unavailable and the
   durable store refuses to open rather than assuming.
 
-**overlayfs is allowed explicitly.** It is where container builds and many CI jobs run, and
-the usual overlay hazards do not apply here: the design renames only **files** inside one
-directory (`CURRENT.tmp` → `CURRENT`), never a directory, so there is no directory-rename
-or `EXDEV` case; every version directory is **created fresh** and written once, so there is
-no copy-up of a large pre-existing file on first write; and hardlinks are created inside a
-single layer, with the copy fallback (§1) covering a refusal. What overlayfs does not give
-is `fsync` durability of the *lower* layer, which is irrelevant: a store on an overlay is
-as durable as its upper layer, and that is the volume the operator chose.
+**overlayfs is allowed conditionally.** It is where container builds and many CI jobs run,
+and the usual overlay hazards do not apply here: the design renames only **files** inside
+one directory (`CURRENT.tmp` → `CURRENT`), never a directory, so there is no
+directory-rename or `EXDEV` case; every version directory is **created fresh** and written
+once, so there is no copy-up of a large pre-existing file on first write; and hardlinks are
+created inside a single layer, with the copy fallback (§1) covering a refusal. What
+overlayfs does not give is `fsync` durability of the *lower* layer, which is irrelevant: a
+store on an overlay is as durable as its upper layer.
+
+Two refusals qualify that (S8):
+
+- **`volatile` is rejected.** An overlay mounted `volatile` **skips `fsync` entirely** on
+  the upper layer, so every durability step in this design silently becomes a no-op while
+  returning success. A store there cannot be made crash-safe by any protocol, so the
+  durable open is refused with an error naming the option.
+- **An overlay whose mount options cannot be read is rejected.** `f_type` alone cannot
+  distinguish a safe overlay from a `volatile` one; the options come from the mount table
+  (`/proc/self/mountinfo` for the mount containing the root). If that cannot be read,
+  parsed, or matched to the root's mount, the check **fails closed** — consistent with the
+  allowlist's treatment of an unknown type, and the only alternative would be assuming the
+  safe case.
+
+**tmpfs is allowed, scoped.** It is on the list so tests, fixtures and ephemeral workloads
+work, and the scope is stated rather than implied: on tmpfs this design gives
+**process-crash durability only**. A store there survives the process dying — the data is
+in the page cache the kernel owns, so a reopen sees every acknowledged commit — and does
+**not** survive the machine. Every fsync in the design is honoured in the only sense tmpfs
+has one; nothing promises more than the medium.
 
 **The generation counter does not survive.** It exists today because a committed
 transaction is materialised into the live directory graph by graph, so a reader can
@@ -205,8 +320,8 @@ replaces the counter; the two are not kept side by side.
 2. Read CURRENT. Take the shared pin for that version (§7), then re-read CURRENT; if it
    moved, drop the pin and retry a bounded number of times. This is a reader's only retry
    loop.
-3. **Capture the boundary**: pread both `v<N>/COMMIT` slots and take the valid one with
-   the higher `seq` (§1). The boundary **is that sequence number** — not a file length
+3. **Capture the boundary**: pread `v<N>/COMMIT.a` and `COMMIT.b` and take the valid slot
+   with the higher `seq` (§1). The boundary **is that sequence number** — not a file length
    (R2) — and it is honoured in every file for the whole load. This happens *before* any
    base file or WAL is loaded, and it is the snapshot, not CURRENT alone (D1).
 4. Load the base files, `named.bin`, `IDENTITY` and the children of that version.
@@ -218,8 +333,9 @@ replaces the counter; the two are not kept side by side.
 6. `txn.log` up to the boundary: a **complete**, non-retired frame is redone over what was
    loaded, in memory, with the same idempotent helpers the locked replay uses. A frame may
    already be materialised in the WALs, wholly or partly; redo is idempotent, so the result
-   is the same either way. A frame beyond the boundary, a torn frame and a frame a retire
-   record consumed at or below the boundary are all ignored.
+   is the same either way. A frame beyond the boundary and a torn frame are ignored. A
+   retire record is honoured **only when its own sequence is at or below the boundary**
+   (S1); a retirement above the boundary is ignored and its frame is redone.
 
 Steps 3, 5 and 6 together are the snapshot: because one log issues every sequence (R1) and
 the reader applies the same sequence bound to every file it reads, every transaction at or
@@ -240,7 +356,7 @@ accepts a write or collects anything:
   cannot) under the lock (D6). A failure here is fail-closed: the handle refuses durable
   writes and says the store's pointer could not be made durable.
 - **Revalidate.** It re-reads its revision — `(version id, durable commit seq)`, from
-  CURRENT and `COMMIT` (§1). If either component differs from
+  CURRENT and the watermark (§1). If either component differs from
   what this handle loaded, the handle **reloads the tree under the lock** before its first
   write; a reload that fails is likewise fail-closed. A version comparison alone is not
   enough, because ordinary commits advance the sequence without moving CURRENT (D2).
@@ -249,10 +365,32 @@ accepts a write or collects anything:
 Compaction and every other version build therefore build only from state loaded or
 revalidated under the lock.
 
-**Per-commit, inside the live version.** `apply_delta`, `apply_delta_nquads`, a journal
-commit, its materialisation and `clear_txn` **append** to `v<N>/wal.log` and
-`v<N>/txn.log` and mutate nothing else: no version is built, nothing is renamed, no
-control file is written, no fsync is added beyond the log fsyncs that exist today.
+**The commit recipe (normative).** Every durable write inside the live version —
+`apply_delta`, `apply_delta_nquads`, a journal commit, its materialisation, `clear_txn` —
+follows exactly these steps, and no other text in this record overrides them (S6):
+
+1. under the write gate, allocate the next sequence (checked `u64`, §1);
+2. append the frame to `v<N>/txn.log` and **fsync `txn.log`**;
+3. append the materialised records to each affected `wal.log` and **fsync** each;
+4. write the inactive watermark slot file with the new `seq` and **fsync** it;
+5. acknowledge. A failure at any step before 5 means no acknowledgement, and a failure in
+   step 4 poisons the handle (§1 rule 5).
+
+A retirement is one of these commits, with its own sequence, after step 3 has made every
+affected WAL durable (§1). No version is built, nothing is renamed and no directory is
+synced on this path. The earlier claim that the commit path adds *no* fsync beyond those
+already present is **withdrawn**: it adds the step-4 fsync, and §13 prices it.
+
+**The publication recipe (normative).** Every flip — a version build, a structural frame,
+migration, recovery — publishes by exactly these steps:
+
+1. write `R/CURRENT.tmp` and fsync it;
+2. **fsync `R`** (the pre-rename sync, §1);
+3. rename `CURRENT.tmp` over `CURRENT`;
+4. **fsync `R`** again.
+
+Any error from step 3 onward keeps both versions and collects nothing (R5). Where another
+section says "flip CURRENT and fsync `R`", it means these four steps.
 
 **Version-building operations** — compaction, vacuum, restore, named-graph creation, and
 the renumbering a named-graph drop performs:
@@ -260,14 +398,14 @@ the renumbering a named-graph drop performs:
 1. take the lock (or hold it already), with the three steps above;
 2. remove any stale `v<N+1>`;
 3. build `v<N+1>` **completely**, in this order: `IDENTITY` and ownership markers, then
-   manifests, then base files and logs;
+   manifests, then base files and logs, then **both watermark slots** (§1 rule 1);
 4. make it durable, bottom-up: **fsync every file's contents** — written and copied alike
    — then fsync the version's directories from the deepest child up to `v<N+1>`. The save
    helpers today flush without syncing, which is not enough: a durable CURRENT flip must
    not be able to name incomplete indexes, dictionaries or markers (D3);
-5. publish: write and fsync `CURRENT.tmp`, rename it over `CURRENT`, fsync `R`;
+5. publish by the **publication recipe** above;
 6. switch this handle to the new version, and set its revision to that version's id and
-   the sequence its `COMMIT` publishes;
+   the sequence its watermark publishes;
 7. collect `v<N>` when nothing pins it, else leave it for a later locked operation.
 
 A failure in step 5 **before** the rename is fail-closed: the handle refuses further
@@ -369,9 +507,11 @@ A legacy store is a root with base files directly inside it and no CURRENT.
   build `v0` beside the legacy files by hardlinking (or copying) the existing base files
   and children into it, **folding in every legacy WAL — the root's and every child's — and
   every complete committed journal frame**, so nothing acknowledged is left behind in a
-  file about to be deleted; make `v0` durable (§4 step 4); flip CURRENT and fsync `R`.
-  **Only then** delete the legacy files. One flip, after which the store is
-  indistinguishable from a new one.
+  file about to be deleted; make `v0` durable (§4 step 4); publish by the publication
+  recipe (§4). **Only then** delete the legacy files. One flip, after which the store is
+  indistinguishable from a new one. The migrator holds **both** the sibling lock and
+  `R/LOCK`, in that order, across all of it — build, publication, cleanup and adoption
+  (§1, S3).
 - **An unlocked open still reads a legacy store, but validates the read.** It records that
   CURRENT was absent, loads the legacy layout, then re-reads CURRENT **and** re-checks that
   every legacy file it relied on is still present. If CURRENT has appeared or a file has
@@ -400,8 +540,16 @@ a duplicated descriptor shares the same lock and so a duplicate can only **lengt
 never shorten it — the failure that matters (an early release while a mapping is live) is
 not reachable by duplication. Concretely:
 
-- the pin descriptor is opened `O_CLOEXEC`, so an `exec` in this process does not leak a
-  pin into an unrelated program that would hold the version forever;
+- **the pin is released only by the final close of the last descriptor on that open file**
+  — never by an explicit `LOCK_UN`, and never by converting the lock (shared to exclusive
+  or back). Nothing in the pinning path calls `flock(…, LOCK_UN)` on a pin descriptor, and
+  a conversion is not used, because `flock` releases on conversion in between and a
+  collector could take the exclusive lock in that gap and delete the version under a live
+  mapping (S7);
+- the pin descriptor is opened `O_CLOEXEC`, **and every duplicate of it carries
+  `FD_CLOEXEC` too** (`F_DUPFD_CLOEXEC`, not plain `dup`), so an `exec` in this process
+  cannot leak a pin — through the original or a copy — into an unrelated program that would
+  hold the version forever;
 - a `fork` **without** exec does inherit it, and the pin then lasts until the last of
   parent and child closes it. This is correct for the pin's purpose and is called out
   because it means a forked child silently extends a pin; a child that does not intend to
@@ -409,6 +557,13 @@ not reachable by duplication. Concretely:
 - the pin lasts until **every** `Graph` handle and **every** mapping derived from it is
   dropped — releasing it at handle drop while an `Mmap` outlives the handle would let a
   version be deleted under a live mapping;
+- **an inherited writable handle refuses to act as a writer** (S7). A `fork` copies a
+  writable handle along with its locks, and the child's kernel-held locks are
+  indistinguishable from the parent's, so the child would pass every exclusion check while
+  a second writer was live. The handle therefore records the **pid that opened it** and
+  checks it on every durable write: a write from a different pid is refused with an error
+  saying the handle was inherited across a fork and must be reopened. This is the one place
+  a pid is used, and it is used to *refuse*, never to infer liveness;
 - the collector opens its **own** descriptor on the pin file for the exclusive attempt and
   closes it when done. It never reuses or inspects a reader's descriptor, so a reader in
   the same process does not accidentally satisfy — or block — the collector through a
@@ -540,16 +695,33 @@ test is listed in §11.
 | # | Finding | Call | Kind |
 |---|---|---|---|
 | R1 | Standalone single-graph writes took no commit sequence, so "the complete prefix" of an untagged log was undefined and a reader could fold one graph's write while missing another's | One sequence authority: the version's `txn.log` issues a sequence for **every** durable write, a standalone write appends its own one-record frame, and the boundary is a sequence honoured in every file for the whole load (§1, §3) | Test |
-| R2 | The writer revision and the reader boundary were byte lengths, which a torn-tail truncation makes non-monotonic (ABA) | The revision is `(version id, durable commit seq)` and the boundary is a seq, both published through the checksummed `COMMIT` slots and never a file length; truncating an unpublished trailing record under the lock is then safe by construction (§1) | Test |
+| R2 | The writer revision and the reader boundary were byte lengths, which a torn-tail truncation makes non-monotonic (ABA) | The revision is `(version id, durable commit seq)` and the boundary is a seq, both published through the checksummed watermark slots and never a file length; truncating an unpublished trailing record under the lock is then safe by construction (§1) | Test |
 | R3 | `CURRENT.tmp` was fsynced but `R` was not fsynced before the rename, so a crash just after the rename could leave CURRENT naming a link that was never durable | fsync `R` **before** the rename as well as after (§1) | Structural |
 | R4 | Replaying a retained frame into the new version's logs left the same frame live in two versions and gave recovery two authorities | Fold the whole frame into the new base with **empty logs**; recovery discards any unpublished version and redoes from the old version's journal; the old version retires only through pinned collection after the flip is durable; the replay-into-new-logs path is deleted and §14 closes (§4, §5, §14) | Test |
 | R5 | A failed publication could delete a version that CURRENT already named, and a collector could trust a CURRENT it had not made durable | Any error from the rename onward keeps **both** versions and collects nothing; GC never removes the version CURRENT names, and removes an older version only when the superseding CURRENT was made durable by the collecting lock holder itself (§4, §7) | Test |
 | R6 | Pin-descriptor ownership was unspecified: duplication, `exec`, `fork` and the collector's own open were all undefined | Keep `flock` (a duplicate can only lengthen a pin); open `O_CLOEXEC`; forked-child inheritance is stated; the pin lasts until every handle **and** mapping is dropped; the collector uses its own descriptors (§7) | Test |
 | R7 | A blocklist of network filesystems does not establish that a filesystem is local | `fstatfs` **allowlist** of known-local types, fail closed on an inspection error, an unknown type and FUSE; overlayfs allowed explicitly with the reason; `f_type` on Linux, `f_fstypename` on macOS, the equivalent defined per supported target (§2) | Test |
 
-Two MED items are folded into the same sections: the `COMMIT` publication mechanism is
+Two MED items are folded into the same sections: the watermark publication mechanism is
 justified against a shared-lock capture protocol in §1, and the per-commit cost it adds is
 stated honestly in §13 rather than claimed to be free.
+
+### Design-audit findings (round 3, against `8eab9bf4`)
+
+The definitive round found **no structural HIGH**: the single sequence authority and the
+watermark stand, and rounds R1, R4 and R5 are closed. These eight are specification gaps
+in that design, fixed in the sections named, with the tests above.
+
+| # | Finding | Call | Kind |
+|---|---|---|---|
+| S1 | A reader whose boundary included frame F could load a graph before F was materialised there, then see `retire(F)` and skip the redo | A retirement is a commit at a **fresh** sequence, written only after every affected WAL is durable, and honoured only by readers whose boundary is at or above the retire seq (§1, §3) | Test |
+| S2 | Two slots in one file share blocks and an inode, so one torn write could destroy both | The slots are **separate files** written alternately, at unchanged fsync cost; the powersafe-overwrite assumption the slot writes and in-block log appends rest on is stated (§1) | Test |
+| S3 | The legacy sibling lock and `R/LOCK` could both be held, in either order, with a window between them | Fixed order (sibling, then `R/LOCK`) for any root with legacy artefacts; the migrator holds both continuously through publication, cleanup and adoption; versioned-only roots take just `R/LOCK`; pre-#7136 binaries are unsupported; `R/LOCK` is never unlinked or recreated (§1, §6) | Test |
+| S4 | A newly created root was never made durable, so a crash could lose the store after the create was acknowledged | fsync `R`'s parent and every newly created ancestor, deepest first, before acknowledging (§1) | Test |
+| S5 | The watermark had no state machine: initialisation, equal-seq conflicts, overflow, a lost slot and a failed slot write were all undefined | Both slots written and fsynced during version creation; equal seq with conflicting tuples fails closed; checked `u64` with refusal on overflow; recovery rolls forward over contiguous complete checksummed journal records past the best slot (sound because the journal is fsynced before any slot names it); a slot write or fsync error means no ack, poison, and roll-forward before any slot is reused (§1) | Test |
+| S6 | Three sections described the commit and the flip differently, and one still claimed the commit path adds no fsync | One normative **commit recipe** and one normative **publication recipe**, with "fsync `R` before the rename" in both and everywhere they are referenced; the no-extra-fsync claim is withdrawn and priced in §13; slice 4's "only logs" acceptance is corrected (§4, §12, §13) | Structural |
+| S7 | Pin release, duplicated descriptors and inherited writable handles were unspecified | The pin is released only by the final close — never `LOCK_UN`, never a lock conversion; duplicates carry `FD_CLOEXEC`; a handle records its opener's pid and refuses a durable write from another pid as inherited across a fork (§7) | Test |
+| S8 | overlayfs was allowed unconditionally, and tmpfs's durability was implied rather than scoped | Reject overlayfs mounted `volatile` (it skips fsync outright) and reject it whenever its mount options cannot be read; tmpfs stays allowed, scoped explicitly to process-crash durability (§2) | Test |
 
 ## 11. Crash-point tests to port
 
@@ -605,6 +777,40 @@ New tests the round-R calls require:
   an allowlisted type (including overlayfs) is accepted; the refusal path is also taken when
   the type cannot be determined (R7).
 
+New tests the round-3 calls require:
+
+- **ABA with a stale handle, an equal-length real commit and compaction.** A handle loads,
+  a second writer commits exactly enough bytes to restore an earlier log length, and the
+  stale handle then compacts: it must reload instead, and the test must fail if the
+  staleness check is reduced to a length comparison (R2, S5);
+- **the fork test in both close orders, plus an explicit unlock.** Parent-closes-first and
+  child-closes-first both keep the version pinned until the last close; a deliberate
+  `LOCK_UN` or lock conversion on a pin descriptor must not release the pin, and the
+  inherited writable handle's durable write is refused by the opener-pid check (S7);
+- **a slot tear.** Corrupt one slot file's bytes: the store still reads, selects the other
+  slot, and a reader sees every acknowledged commit — then corrupt the *same* bytes in a
+  single-file layout fixture to show the separation is what saves it (S2);
+- **conflicting slots.** Two valid slots with equal `seq` and different tuples: the open
+  fails closed with an error naming the version, and does not prefer either (S5);
+- **sequence exhaustion.** A version whose watermark is at `u64::MAX`: the next write is
+  refused with the exhaustion error, nothing wraps, and the store stays readable (S5);
+- **an interrupted publication with writer replacement.** Crash between the rename and the
+  second `fsync R`, then open from a *different* process: both versions are present, the
+  new writer makes the observed CURRENT durable before accepting a write, and the
+  watermark rolls forward over journal records the lost slot never named (S5, S6, R5);
+- **the lock handoff.** A legacy root with a concurrent legacy-shaped writer and a
+  versioned-shaped writer: the migrator holds both locks across build, publication, cleanup
+  and adoption, neither other process proceeds meanwhile, and after migration a versioned
+  writer takes only `R/LOCK`; a reversed acquisition order is what the test would catch
+  (S3);
+- **the new-root parent sync.** Create a store in a newly created directory tree, inject a
+  crash after the create is acknowledged, and assert the root and its `CURRENT` are still
+  there — the test fails if the parent and the created ancestors are not fsynced (S4);
+- **retirement visibility.** A reader whose boundary sits between frame F and `retire(F)`
+  redoes F and sees its effect on every graph, including a graph whose WAL was loaded
+  before F was materialised there; and no retire record is written before every affected
+  WAL is durable (S1).
+
 ## 12. Slices
 
 One PR each, green in both feature states, with its own tests. **Each slice must be safe
@@ -649,7 +855,8 @@ locked operation collects it; a garbage `v<N+1>` from a crash is collected.
 
 **Slice 4 — deletions.** Remove everything in §9's discard list and rewrite the invariant
 table. *Acceptance:* the ported crash-point tests pass; no `.compact-*` or `writer.gen`
-path remains in the crate; the per-commit path writes only logs.
+path remains in the crate; the per-commit path writes the logs and one watermark slot and
+nothing else (§4's commit recipe).
 
 Slices 0 to 3 keep the old machinery alive beside the new, so each lands independently;
 the gates above are what make "beside" safe rather than merely compiling.
@@ -662,8 +869,9 @@ Learned from measuring #7115's commit path. No figures here by design — work-b
 are not canonical — but the constraints are binding:
 
 - **The per-commit path adds exactly one small pwrite and one fsync, and nothing else.**
-  It touches `wal.log`, `txn.log` and the `COMMIT` slot (§1) — no `openat` (the slot's
-  descriptor is cached with the handle), no path derivation, no directory operation. The
+  It touches `wal.log`, `txn.log` and one watermark slot file (§1) — no `openat` (both
+  slot descriptors are cached with the handle), no path derivation, no directory
+  operation. The
   second fsync is the price of publishing a sequence instead of a file length (R1/R2), and
   it is the design's only per-commit addition over #7115; a slice that introduces it must
   be measured as its own A/B against the preceding slice, because the commit path is
@@ -677,7 +885,7 @@ are not canonical — but the constraints are binding:
   re-opening it per transaction.
 - **Do a per-operation check, not a per-nested-gate check.** The revision check that
   replaces the identity check runs once per public durable operation — one CURRENT read and
-  one `COMMIT` pread — not once per nested gate; the old check ran per gate, and one
+  one watermark pread — not once per nested gate; the old check ran per gate, and one
   transaction passes several.
 - **Append-only logs cost nothing extra on the write path.** Retiring a frame by appending
   an intra-version record rather than truncating is the same one small append plus the
@@ -738,7 +946,7 @@ dependency rather than protocol we write and test. It was evaluated concretely a
    target where we would most want one implementation.
 
 **What is worth borrowing, and was.** redb's commit is a small checksummed header written
-alternately into two slots, which is precisely the mechanism adopted for `COMMIT` in §1 over
+alternately into two slots, which is precisely the mechanism adopted for the watermark in §1 over
 a shared-lock capture protocol. Taking the idea costs one pwrite and one fsync per commit
 and no dependency; taking the crate costs all of the above. If the per-commit metadata ever
 grows beyond a sequence and a version id — a secondary index over versions, say — the
