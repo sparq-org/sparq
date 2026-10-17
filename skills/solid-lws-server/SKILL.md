@@ -492,7 +492,11 @@ What the server exposes, all discoverable from the storage description
   may still apply) is fenced first: the client writes a fence that the update, if it has not
   been applied yet, finds and then does nothing. Only a listing read after the fence counts
   as "not listed"; until the fence lands, the create answers `500` "not known" and keeps the
-  record's lock and quota place, and the record is put in force if it landed. A fence is
+  record's lock and quota place, and the record is put in force if it landed. Until it is
+  settled, the record's narrowest listing stays held, shared: a subscriber's own listing for
+  a subscription, the container's for a grant, a request or an owner's subscription. So a
+  conditional create evaluated on that listing waits for the outcome (`503` past the lock
+  wait), and two with one entity tag cannot both register. A fence is
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
   way. At most 256 record changes are in progress or being settled at once; past that, a new
