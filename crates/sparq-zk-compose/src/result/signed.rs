@@ -375,6 +375,36 @@ mod tests {
         );
     }
 
+    /// VERIFICATION side, version-three family: a `result_v3_*` member folds the
+    /// method-unbound message, so the verifier's own statement derivation refuses
+    /// it under the default policy and names the member it selected; only the
+    /// written-down downgrade admits it. sq-j506: the boundness check runs on the
+    /// SELECTED member, so this family cannot inherit the legacy behaviour by
+    /// omission.
+    #[test]
+    fn signed_verification_requires_the_written_down_downgrade() {
+        let (c, policy, nonce, rows) = numeric_fixture(integer("42"), 3, 128);
+        let q = query("?v >= 18");
+        let p = prepare_signed_result(&q, &[c], &rows, &policy, &nonce).unwrap();
+        let wire = presentation(&p);
+        let bound = ResultPolicy {
+            admit_unbound_legacy: false,
+            ..policy.clone()
+        };
+        let err = public_statement_for(wire.view(), NumericContract::Signed, &bound, &nonce)
+            .expect_err("a method-unbound member needs the written-down opt-in");
+        let text = err.to_string();
+        assert!(
+            text.contains("folds the method-unbound message")
+                && text.contains("result_v3_k1_n16_p3_r4_f2_s64_d10"),
+            "the refusal must name the selected member: {}",
+            text
+        );
+        let statement = public_statement_for(wire.view(), NumericContract::Signed, &policy, &nonce)
+            .expect("the downgrade admits already-issued version-three material");
+        assert_eq!(statement.package, "result_v3_k1_n16_p3_r4_f2_s64_d10");
+    }
+
     #[test]
     fn signed_type_and_version_do_not_extend_unsigned_wire_acceptance() {
         let (c, policy, nonce, rows) = numeric_fixture(integer("42"), 3, 128);

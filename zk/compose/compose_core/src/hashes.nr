@@ -35,6 +35,15 @@ pub fn h4(a: Field, b: Field, c: Field, d: Field) -> Field {
     Poseidon2::hash([a, b, c, d], 4)
 }
 
+/// Five-input hash -- the arity the METHOD-BOUND presentation attestation
+/// message needs. Mirrors `sparq_zk::poseidon2::hash(&[a, b, c, d, e])`, which
+/// is what `sig::presentation_message_with_status_and_scheme` folds
+/// (`[ZKSIG_M5, C(G), salt, status_ref, scheme_digest]`). One permutation, same
+/// cost class as `h2`/`h3`/`h4`.
+pub fn h5(a: Field, b: Field, c: Field, d: Field, e: Field) -> Field {
+    Poseidon2::hash([a, b, c, d, e], 5)
+}
+
 /// Flat per-graph commitment fold over the first `count` leaves.
 pub fn commit_fold<let N: u32>(leaves: [Field; N], count: u32) -> Field {
     Poseidon2::hash(leaves, count)

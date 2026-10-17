@@ -135,9 +135,16 @@ fn is_value_lane(member: &str) -> bool {
 
 /// Kept in lockstep with `RESULT_PREFIXES` in `bb_gates_matrix.py`.
 ///
-/// zkp-15.1 adds the version-4 public-pattern members.
+/// zkp-15.1 adds the version-4 public-pattern members, sq-j506 the method-bound
+/// version-5 ones.
 fn is_successful_result(member: &str) -> bool {
-    ["result_v1_", "result_v2_", "result_v3_", "result_v4_"]
+    [
+        "result_v1_",
+        "result_v2_",
+        "result_v3_",
+        "result_v4_",
+        "result_v5_",
+    ]
         .iter()
         .any(|prefix| member.starts_with(prefix))
 }
@@ -551,8 +558,9 @@ fn successful_result_members_only_admit_string_canonical_commitments() {
         .iter()
         .filter(|(member, _)| is_successful_result(member))
         .collect();
-    // zkp-15.1: 30 v1-v3 buckets plus exactly the two measured v4 buckets.
-    assert_eq!(members.len(), 32);
+    // zkp-15.1: 30 v1-v3 buckets plus exactly the two measured v4 buckets;
+    // sq-j506 adds the two method-bound v5 buckets.
+    assert_eq!(members.len(), 34);
     let v4: Vec<&str> = members
         .iter()
         .map(|(member, _)| member.as_str())
@@ -563,6 +571,18 @@ fn successful_result_members_only_admit_string_canonical_commitments() {
         [
             "result_v4_k1_n16_p3_r4_f0_d10",
             "result_v4_k2_n16_p3_r4_f0_d10"
+        ]
+    );
+    let v5: Vec<&str> = members
+        .iter()
+        .map(|(member, _)| member.as_str())
+        .filter(|member| member.starts_with("result_v5_"))
+        .collect();
+    assert_eq!(
+        v5,
+        [
+            "result_v5_k1_n16_p3_r4_f0_d10",
+            "result_v5_k2_n16_p3_r4_f0_d10"
         ]
     );
     for (_, row) in members {

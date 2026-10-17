@@ -8851,7 +8851,19 @@ fn test_attestation_at_index(
     crate::manifest::CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: sparq_zk::sig::public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        // The fixtures attest the STRING-CANONICAL method (the METHOD-BOUND
+        // `ZKSIG_M5` message), because `MethodPolicy::current` now refuses an
+        // attestation that attests no method. A test whose subject IS legacy
+        // unbound material builds an unbound message directly and states
+        // `MethodPolicy::admit_unbound`.
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &sparq_zk::sig::scheme_iri_to_field(
+                sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+            ),
+        ),
         cryptosuite: sparq_zk::sig::SignatureScheme::Poseidon2SchnorrV1
             .cryptosuite_iri()
             .to_string(),
@@ -9844,19 +9856,19 @@ mod tests {
 
         let unbound =
             with(&sparq_zk::sig::commitment_message_with_status(&c, &salt, &status_ref));
-        assert!(
-            bind_issuer_attestations(&unbound, &keys(), &covered).is_ok(),
-            "the default policy accepts an unbound hidden `m`"
-        );
-        let err = bind_issuer_attestations(
-            &unbound,
-            &keys().with_method_policy(MethodPolicy::current().require_method_bound()),
-            &covered,
-        )
-        .unwrap_err();
+        let err = bind_issuer_attestations(&unbound, &keys(), &covered).unwrap_err();
         assert!(
             matches!(err, CheckError::MethodNotAuthenticated { .. }),
-            "require_method_bound refuses an unbound hidden `m`, got {err:?}"
+            "the default policy refuses an unbound hidden `m`, got {err:?}"
+        );
+        assert!(
+            bind_issuer_attestations(
+                &unbound,
+                &keys().with_method_policy(MethodPolicy::current().admit_unbound()),
+                &covered,
+            )
+            .is_ok(),
+            "the admit_unbound downgrade accepts an unbound hidden `m`"
         );
 
         assert!(
