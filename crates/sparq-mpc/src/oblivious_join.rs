@@ -356,6 +356,9 @@ pub(crate) fn check_candidate_pairs_within_bound(
     left: usize,
     right: usize,
 ) -> Result<usize, MpcError> {
+    // The bound's own cap first, so the ordering is the same at every entry: no
+    // caller-sized work of any kind happens ahead of it.
+    check_output_bound_cap(bound)?;
     let count = checked_candidate_pairs(left, right)?;
     check_output_bound(bound, count)?;
     Ok(count)

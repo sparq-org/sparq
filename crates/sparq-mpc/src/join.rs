@@ -737,19 +737,26 @@ impl BatchedHiddenInput {
 pub type BatchedJoinOutput = (PartialResult, ObliviousOutputCost);
 
 impl HiddenValueJoin {
-    /// The bound contract every candidate-materialising entry runs FIRST: count the
-    /// candidates the binding permits without enumerating them, then require `B`
-    /// within [`oblivious_join::MAX_OUTPUT_BOUND`] and covering that count.
+    /// The bound contract every candidate-materialising entry runs FIRST: refuse an
+    /// over-cap `B`, then count the candidates the binding permits without
+    /// enumerating them, then require `B` to cover that count.
     ///
     /// Each candidate costs one equality sharing on the way to the output stage and
     /// one materialised slot inside it, so leaving the cardinality to the output
     /// stage's own check means the work is already done by the time it refuses.
+    ///
+    /// The `B` cap comes FIRST and on its own, because counting is not free: a
+    /// `Keyed` binding counts the fan-out through a map keyed by the right-hand
+    /// rows, so an over-cap `B` would otherwise allocate that map before being
+    /// refused. Once the cap has passed, the map is sized by the caller's own row
+    /// count — work they asked for — and the coverage check follows the count.
     fn preflight_candidate_bound(
         &self,
         left: &BatchedHiddenInput,
         right: &BatchedHiddenInput,
         bound: usize,
     ) -> Result<usize, MpcError> {
+        oblivious_join::check_output_bound_cap(bound)?;
         let count = candidate_pair_count(&left.binding, &right.binding, left.len(), right.len())?;
         oblivious_join::check_output_bound(bound, count)?;
         Ok(count)
@@ -1194,6 +1201,9 @@ fn candidate_pairs(
 /// [`usize::checked_add`] and refuses on overflow, touching no holder data and
 /// allocating only the key buckets a clear-text equi-join needs anyway.
 ///
+/// Those buckets ARE an allocation, sized by the caller's own row count, so the
+/// caller runs the `B` cap before calling this — see `preflight_candidate_bound`.
+///
 /// It mirrors [`candidate_pairs`] exactly, and
 /// `candidate_pair_count_matches_candidate_pairs` pins that it does.
 fn candidate_pair_count(
@@ -1224,7 +1234,8 @@ fn candidate_pair_count(
                     total = total.checked_add(*c).ok_or_else(|| {
                         MpcError::Protocol(
                             "batched_join (Keyed): the candidate fan-out overflows usize \
-                             — refusing before any allocation or draw"
+                             — refusing before any candidate is materialised or any \
+                             sharing drawn"
                                 .to_string(),
                         )
                     })?;
@@ -1959,6 +1970,77 @@ mod batched_hidden_value_tests {
     /// refused the same way, and so is a `Keyed` fan-out that overflows. The three
     /// entries are `batched_join_through`, `fully_oblivious_batched_join_through`
     /// and the test-only `fully_oblivious_candidates_and_opened_rows`.
+    /// The `B` cap runs before `candidate_pair_count` is CALLED, not just before
+    /// the draws — and the only way to observe "before the call" from outside is
+    /// the refusal's identity. So each case below is invalid in TWO ways at once:
+    /// the bound is over the cap, and the bindings are something the counter itself
+    /// would reject. A cap-first preflight names `MAX_OUTPUT_BOUND`; a
+    /// count-first one names the binding instead. That distinction is what pins the
+    /// ordering, and with it the fact that the counter's key-bucket map — the one
+    /// allocation in the preflight, sized by the caller's rows — is never built for
+    /// a run that is already refused.
+    #[test]
+    fn the_bound_cap_precedes_the_candidate_count_and_its_allocation() {
+        use crate::oblivious_join::MAX_OUTPUT_BOUND;
+        use crate::randomness::test_sources::DrawCountingSource;
+
+        let backend = ShamirBackend::new_seeded(5, 0xB0C1).unwrap();
+        let join = HiddenValueJoin::new(backend.clone());
+
+        // (a) Positional columns of DIFFERENT length: the counter's own refusal.
+        let short = positional("l", &["x"], &[(7, vec![lit("a")])]);
+        let long = positional(
+            "r",
+            &["y"],
+            &[
+                (7, vec![lit("c")]),
+                (9, vec![lit("d")]),
+                (11, vec![lit("e")]),
+            ],
+        );
+        // (b) MIXED bindings: also the counter's own refusal.
+        let as_keyed = keyed("r", &["y"], &[("k", 7, vec![lit("c")])]);
+
+        for (label, l, r) in [
+            ("positional length mismatch", &short, &long),
+            ("mixed bindings", &short, &as_keyed),
+        ] {
+            // The counter really does refuse these on its own, with its own words —
+            // otherwise the discriminator below would prove nothing.
+            let legal = join
+                .batched_join_through(&mut DrawCountingSource::new(&mut backend.dealer()), l, r, 4)
+                .expect_err("a legal bound still leaves the binding invalid");
+            assert!(
+                matches!(&legal, MpcError::Protocol(m) if !m.contains("MAX_OUTPUT_BOUND")),
+                "{}: the binding refusal should not mention the cap: {:?}",
+                label,
+                legal
+            );
+
+            for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+                let mut dealer = backend.dealer();
+                let mut counted = DrawCountingSource::new(&mut dealer);
+                let err = join
+                    .batched_join_through(&mut counted, l, r, bound)
+                    .expect_err("an over-cap bound must be refused");
+                assert!(
+                    matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                    "{} B={}: the cap must refuse BEFORE the count, got {:?}",
+                    label,
+                    bound,
+                    err
+                );
+                assert_eq!(
+                    counted.draws(),
+                    0,
+                    "{} B={}: refused before any draw",
+                    label,
+                    bound
+                );
+            }
+        }
+    }
+
     #[test]
     fn every_batched_entry_refuses_an_over_cap_bound_before_any_draw() {
         use crate::oblivious_join::MAX_OUTPUT_BOUND;
