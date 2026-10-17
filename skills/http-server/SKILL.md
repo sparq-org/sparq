@@ -1921,15 +1921,23 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   published snapshot, and a recovered write is durable across a restart — covered for a transient
   burst, a permanent jam, AND (sq-bif.14) an INTERLEAVED recover→fail→recover sequence whose final
   durable set is exactly the successful writes (no refused write resurrects).
-- **One writer per `--persist DIR` (enforced, `sq-ycle`).** A durable directory is opened with an
-  **exclusive advisory lock** (`DIR/.writer.lock`, unix `flock`), held for the life of the open
-  store. A second writer of the same directory — another `sparq-server`, a `sparq-cli compact`
-  against a live server's dir, or a second `Graph::open` in one process — now fails with a clear
-  error naming the directory instead of interleaving its WAL/journal appends with the running
-  writer's. So stop the server before an offline `sparq-cli compact` on its dir (which the
-  compaction note above already advises). The lock is released when the store is dropped and by
-  the kernel on process exit however it exits, so a crash never leaves it stale. Unix only: on a
-  non-unix target the open proceeds unlocked and a second writer is not detected.
+- **One WRITER per `--persist DIR`, readers free (enforced, `sq-ycle`).** A durable
+  directory may have one writer and any number of readers. The exclusive advisory lock
+  (`DIR/.writer.lock`, unix `flock`) is taken on the store's **first durable write**, not at open,
+  and then held for the life of the store. So a read-only open — a `sparq-cli query-mmap` on the
+  directory, or a second server that only serves queries — still works beside a running writer,
+  while a **second writer's first write** fails with a clear error naming the directory instead of
+  interleaving its WAL/journal appends with the running writer's. A store that opened *before*
+  another writer changed the directory is also refused (`changed since open`) rather than appending
+  a delta computed against a stale view — reopen to continue. An `open` that must **repair** the
+  directory first (a torn log tail, a kept journal frame, an interrupted directory swap) does take
+  the lock up front, and fails if a writer holds it: a torn-looking tail can be a live writer
+  mid-append. The lock is released when the store is dropped and by the kernel on process exit
+  however it exits, so a crash never leaves it stale. Unix only: on a non-unix target writes
+  proceed unlocked and a second writer is not detected. An offline `sparq-cli compact` on a live
+  server's dir still needs the server stopped, exactly as the compaction note above advises: it
+  fails cleanly once the server holds the lock (i.e. has taken a write), but a server that has
+  only served queries holds nothing, so the lock is not a substitute for stopping it.
 - **A refused durable commit fails CLOSED until restart (`sq-ycle`).** When an UPDATE body is
   committed to the transaction journal but its materialisation then fails, the frame is KEPT for
   the next `Graph::open` to redo — and until that restart **every** durable mutation of the store
