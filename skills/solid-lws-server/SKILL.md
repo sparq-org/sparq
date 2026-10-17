@@ -573,8 +573,10 @@ What the server exposes, all discoverable from the storage description
   reclaimed in two steps through the index, whichever server instance acts: they are first named
   as being reclaimed, in one step that also finds no record naming them (a resource's, or a
   hold's), so none can come to name them again; only then are they deleted (a reclaim a stop cut
-  short is finished at the next start). The holds go once the change is kept or put back, and a
-  start releases any of this storage's holds whose change's intent is gone. So no delete is
+  short is finished at the next start). That step relies on the index applying updates one at a
+  time: the embedded store or sparq-server; another SPARQL endpoint is not supported behind a
+  storage that holds bytes. The holds go once the change is kept or put back, and a start
+  releases any of this storage's holds whose change's intent is gone or says it was kept. So no delete is
   refused for the size of what is stored, and none answers `507` for want of room to copy it.
   Residuals: what bounds a recursive delete (`409`) is how many resources it removes and the size
   of their metadata (types, links and linkset, which it reads to decide who may act on them while
@@ -583,7 +585,10 @@ What the server exposes, all discoverable from the storage description
   metadata records it would put back), so in a storage at its ceiling a change that needs one is
   refused with `507`; a store that fails may fail the change (`5xx`, below) whatever was asked;
   and a hold whose release fails keeps its bytes until the maintenance sweeper releases it again
-  (or, the process stopping first, the next start). A start
+  (or, the process stopping first, the next start); and a response's status, timing and quota
+  outcome are independent of the content of the resources a change touches, not of their
+  metadata, of the room others leave in the shared quota, or of the backends' and the index's
+  own work. A start
   settles every intent of its storage and releases holds as if no other process served it: one
   storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources

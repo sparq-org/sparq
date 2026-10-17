@@ -291,16 +291,20 @@ pub(crate) async fn recover<S: Store + 'static>(
         }
     }
     // This storage's holds no change still needs: each holder is an intent's IRI, so a hold
-    // whose intent is gone is nobody's (a change kept, or put back, before its holds were
-    // released; a journal cut short before its intent was stored). Another storage's holds
-    // over the same backends are its own start's to sweep. Each is withdrawn alone: its bytes,
-    // once no record names them, are the reconciler's to collect. Best effort: a hold left
-    // behind only keeps bytes, so a failure here does not stop the start.
+    // whose intent is gone, or says its change was kept, is nobody's (a change kept, or put
+    // back, before its holds were released; a journal cut short before its intent was stored).
+    // Another storage's holds over the same backends are its own start's to sweep. Each is
+    // withdrawn alone: its bytes, once no record names them, are the reconciler's to collect.
+    // Best effort: a release that fails is tried again by the maintenance sweeper, and a hold
+    // left behind only keeps bytes, so a failure here does not stop the start.
     match store.holds().await {
         Ok(held) => {
             for (holder, meta) in held.iter().filter(|(h, _)| h.starts_with(&container)) {
-                if matches!(store.exists(holder).await, Ok(false)) {
-                    let _ = store.release(meta, holder).await;
+                let kept = touches.iter().any(|(record, _)| record == holder);
+                if (kept || matches!(store.exists(holder).await, Ok(false)))
+                    && store.release(meta, holder).await.is_err()
+                {
+                    state.release_later(holder, meta);
                 }
             }
         }
@@ -462,6 +466,36 @@ mod tests {
         assert!(st.store.holds().await.unwrap().is_empty());
         let after = snapshot(&st, &store, std::slice::from_ref(&d), &[]).await;
         assert_eq!(after, before);
+    }
+
+    /// Review finding: a start left the holds of a change whose intent says it was kept, and
+    /// then cleared that intent, so nothing would ever release them. They go at start, or wait
+    /// for the maintenance sweeper when that release fails.
+    #[tokio::test]
+    async fn a_kept_changes_holds_are_released_at_start() {
+        for failing in [false, true] {
+            let (st, store, d, _) = typed_doc().await;
+            let mut journal = st.journal();
+            journal.stage(&d).await.unwrap();
+            std::mem::forget(journal);
+            let held = st.store.holds().await.unwrap();
+            assert_eq!(held.len(), 1);
+            // Its intent stored as kept, naming only a container to touch.
+            let root = st.cfg.storage();
+            super::store(&st, &held[0].0, false, &[], std::slice::from_ref(&root))
+                .await
+                .unwrap();
+            store.fail_release.store(failing, Ordering::SeqCst);
+            let st = restart(&store).await;
+            store.fail_release.store(false, Ordering::SeqCst);
+            if failing {
+                assert!(st.has_unreleased(), "neither released nor queued");
+                st.release_unreleased().await;
+            }
+            assert!(st.store.holds().await.unwrap().is_empty());
+            until(&st, "no touch owed", |st| !st.owes_touch(&root)).await;
+            assert_eq!(intents_left(&st).await, 0);
+        }
     }
 
     /// A start sweeps only its own storage's holds: another storage over the same backends
