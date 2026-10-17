@@ -457,6 +457,14 @@ enum ReindexScope {
     Origin,
 }
 
+/// The stored facts a failed commit judges (see [`PodStore::touched_with_facts`]).
+enum TouchedFacts {
+    /// Every resource, judged against the resources before the commit.
+    All(loader::ResourceGraphs),
+    /// These resources, and whether each existed before the commit.
+    Some { resources: Vec<String>, held: Vec<bool> },
+}
+
 impl PodStore {
     /// Wrap a loaded dataset (e.g. `Graph::load_dataset(nquads, "nquads")`). No auth
     /// view yet — every session sees nothing until a `materialize_*` call (fail-closed).
@@ -512,10 +520,11 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// Returns `Err` if any agent / group-member / origin IRI in the ACL or group
-    /// documents collides with the reserved principal encoding (starts with
-    /// `urn:sparq:` or contains the literal `&client=`), or if the N3 reasoner fails.
-    /// On error the previous auth view (if any) is left in place.
+    /// Returns `Err` if the N3 reasoner fails. On error the previous auth view (if any) is
+    /// left in place. A document stating a triple it may not (one about a node outside it, a
+    /// minted name, a reserved principal such as a `urn:sparq:` IRI or one containing
+    /// `&client=`, or view vocabulary) is not an error: the loader rejects it whole and the
+    /// resources it governs get no grant from any source.
     pub fn materialize_wac(&mut self) -> Result<MaterializeStats, String> {
         self.materialize_wac_scoped(ReindexScope::Full)
     }
@@ -567,8 +576,8 @@ impl PodStore {
     ///
     /// # Errors
     ///
-    /// As [`PodStore::materialize_wac`] (reserved-encoding collisions in
-    /// agent/client IRIs; reasoner failure).
+    /// As [`PodStore::materialize_wac`]; also a reserved name in trusted provenance or
+    /// credentials.
     ///
     /// The view uses the trusted context (provenance and credentials) last passed to
     /// [`PodStore::materialize_acp_with`] or [`PodStore::materialize_acp_with_credentials`],
@@ -663,12 +672,18 @@ impl PodStore {
         }
     }
 
-    /// Forget the stored facts of every resource `effects` may have removed or brought back:
-    /// each graph they name, the resource an `.acr` among them governs, and every container
-    /// above either; all of them for a `CLEAR`/`DROP` of more than one graph.
-    fn forget_touched(&mut self, effects: &[sparq_engine::UpdateEffect]) {
+    /// The resources whose stored facts a commit of `effects` that fails past its commit point
+    /// is to judge, and which of them exist now: each resource with a fact among the graphs
+    /// `effects` name, the resources an `.acr` among them governs, and every container above
+    /// either; every resource for a `CLEAR`/`DROP` of more than one graph. `None` when no
+    /// facts are stored, so nothing is to be judged.
+    fn touched_with_facts(&self, effects: &[sparq_engine::UpdateEffect]) -> Option<TouchedFacts> {
         use sparq_engine::UpdateEffect;
         use spargebra::algebra::GraphTarget;
+        let provenance = &self.acp_context.0;
+        if provenance.is_empty() {
+            return None;
+        }
         let mut names: Vec<&str> = Vec::new();
         for effect in effects {
             match effect {
@@ -677,19 +692,45 @@ impl PodStore {
                 UpdateEffect::Clear(t) | UpdateEffect::Drop(t) => match t {
                     GraphTarget::NamedNode(n) => names.push(n.as_str()),
                     GraphTarget::DefaultGraph => {}
-                    _ => {
-                        self.acp_context.0 = AccessProvenance::new();
-                        return;
-                    }
+                    _ => return Some(TouchedFacts::All(loader::ResourceGraphs::of(&self.graph))),
                 },
                 _ => {}
             }
         }
+        let mut resources: Vec<String> = Vec::new();
         for name in names {
             let mut r = Some(name.strip_suffix(loader::ACR_SUFFIX).unwrap_or(name));
             while let Some(at) = r {
-                self.acp_context.0.forget(at);
+                if (provenance.creator(at).is_some() || provenance.owner(at).is_some())
+                    && !resources.iter().any(|known| known == at)
+                {
+                    resources.push(at.to_owned());
+                }
                 r = loader::parent_iri(at);
+            }
+        }
+        let held = loader::held(&self.graph, &resources);
+        Some(TouchedFacts::Some { resources, held })
+    }
+
+    /// After a commit that fails past its commit point, forget the stored facts of every
+    /// resource in `touched` (see [`PodStore::touched_with_facts`]) except one that exists
+    /// both before the update and now: as for a committed change, a resource that exists
+    /// before and after it keeps its creator and owner, whatever happened in between.
+    fn forget_touched(&mut self, touched: Option<TouchedFacts>) {
+        match touched {
+            None => {}
+            Some(TouchedFacts::All(before)) => {
+                let after = loader::ResourceGraphs::of(&self.graph);
+                self.acp_context.0.retain(|r| before.holds(r) && after.holds(r));
+            }
+            Some(TouchedFacts::Some { resources, held }) => {
+                let now = loader::held(&self.graph, &resources);
+                for (r, (before, after)) in resources.iter().zip(held.into_iter().zip(now)) {
+                    if !(before && after) {
+                        self.acp_context.0.forget(r);
+                    }
+                }
             }
         }
     }
@@ -799,7 +840,8 @@ impl PodStore {
     /// [`PodStore::acp_provenance`] passed back, to refresh the credentials or after a failed
     /// update) is judged as stored: if it does not exist, its facts are kept only if its
     /// `.acr` was stored at the last install (after a commit that fails past its commit point,
-    /// none is, and the facts of every resource the update touched are already forgotten). A
+    /// none is, and the facts of every resource the update touched are already forgotten
+    /// unless it existed both before the update and after the failure). A
     /// resource whose creator or owner differs is taken as given in full.
     ///
     /// # Errors
@@ -1210,6 +1252,7 @@ impl PodStore {
             self.odrl.grants(session, m, target) && !self.auth.denies(session, m, target)
         };
         self.statically_covered.contains(target)
+            && !self.auth.is_withheld(target)
             && (mode == Mode::Read || !self.group_docs().contains(target))
             && match mode {
                 // `Append` through a `Write` grant needs that grant to stand, an explicit deny
@@ -1269,6 +1312,9 @@ impl PodStore {
             self.usable_acp_context()
                 .map_err(|e| format!("update denied: {e}; nothing was changed"))?;
         }
+        // The stored facts a commit that fails past its commit point is to judge, and which of
+        // their resources exist before it.
+        let touched = self.touched_with_facts(effects);
         #[cfg(test)]
         let committed = update_path_tests::injected_failure_before_commit()
             .map_err(|e| sparq_engine::ApplyError {
@@ -1301,11 +1347,11 @@ impl PodStore {
             // view nor the stored provenance is known to describe the store any more, whatever
             // the update's net effect would have been.
             self.acp_context_stale = true;
-            // Nor is any `.acr` known to have been stored throughout, nor any resource the
-            // update touched known to have existed throughout: provenance passed back keeps
-            // the facts of existing resources the update did not touch only.
+            // Nor is any `.acr` known to have been stored throughout: provenance passed back
+            // keeps the facts of a resource the update touched only if it exists both before
+            // the update and now.
             self.acr_controlled.clear();
-            self.forget_touched(effects);
+            self.forget_touched(touched);
             self.drop_auth_view();
             return Err(format!("the update could not be committed: {e}"));
         }
@@ -1981,6 +2027,54 @@ impl PodStore {
         // in force before it.
         let wrote_rules =
             update::check_effects(&self.graph, &auth, s, &effects, self.group_docs(), &odrl)?;
+        // A statement an access-control document may not make is refused here, rather than
+        // left for the loader to reject the whole document (and with it its writer's Control).
+        // Judged in the state the update leaves, by what it leaves added: a statement it adds
+        // and removes again later in the update is not checked.
+        let control_writes = loader::ControlWrites::new(&candidate, acp);
+        let is_control = |doc: &str| doc.ends_with(loader::ACL_SUFFIX) || doc.ends_with(loader::ACR_SUFFIX);
+        let mut added: Vec<(&str, Vec<&[Term; 3]>)> = Vec::new();
+        for effect in &effects {
+            match effect {
+                sparq_engine::UpdateEffect::Delta {
+                    slot: Some(Term::NamedNode(doc)),
+                    inserts,
+                    deletes,
+                } if is_control(doc.as_str()) => {
+                    let doc = doc.as_str();
+                    let at = match added.iter().position(|(d, _)| *d == doc) {
+                        Some(at) => at,
+                        None => {
+                            added.push((doc, Vec::new()));
+                            added.len() - 1
+                        }
+                    };
+                    // Deletes first, then inserts, as the effect applies them.
+                    let pending = &mut added[at].1;
+                    pending.retain(|t| !deletes.contains(t));
+                    pending.extend(inserts.iter());
+                }
+                sparq_engine::UpdateEffect::Clear(target) | sparq_engine::UpdateEffect::Drop(target) => {
+                    for (doc, pending) in &mut added {
+                        let hit = match target {
+                            spargebra::algebra::GraphTarget::NamedNode(n) => n.as_str() == *doc,
+                            spargebra::algebra::GraphTarget::DefaultGraph => false,
+                            _ => true,
+                        };
+                        if hit {
+                            pending.clear();
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (doc, pending) in added {
+            let surviving: Vec<[Term; 3]> = pending.into_iter().cloned().collect();
+            control_writes
+                .check(doc, &surviving)
+                .map_err(|e| format!("update denied: {e}"))?;
+        }
         // The ACP view is built from trusted provenance too: an update that ends or begins a
         // resource's life stages the provenance that follows, and rebuilds the view with it
         // when the view depends on it.
@@ -2088,6 +2182,10 @@ impl PodStore {
     /// FIRST if you also want the static WAC/ACP grants present; the bridge adds to
     /// whatever auth view currently exists (or creates a fresh one holding just the
     /// bridged grant).
+    ///
+    /// As with [`PodStore::attach_odrl_policy`], `policy` and `request` are trusted input
+    /// from the embedding application: the store never reads them from pod content, so pass
+    /// only a policy the application itself vetted.
     #[cfg(feature = "odrl-bridge")]
     pub fn materialize_odrl_permission(
         &mut self,
@@ -2402,6 +2500,10 @@ impl PodStore {
     /// authoritative and does not explicitly deny it, and refuses a mode some attached
     /// prohibition applies to. See [`odrl_enforce`] for the action-to-mode mapping and the graphs it
     /// never touches.
+    ///
+    /// The policy is trusted input from the embedding application, like the
+    /// [`AccessProvenance`] and [`VerifiedCredentials`] channels: nothing a session writes
+    /// into the pod is ever attached, so pass only policies the application itself vetted.
     ///
     /// # Errors
     ///

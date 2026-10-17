@@ -223,7 +223,7 @@ pub fn admit(
             // a source trusted for schema:age cannot launder a solidx:/urn:sparq:/acl
             // internal triple in (§3.3 item 2). This mirrors sparq-solid's
             // `is_reserved_derivation_predicate` / `validate_principal_iri` guards.
-            if is_reserved_predicate(&t.predicate) {
+            if is_reserved_triple(t) {
                 continue;
             }
             // §2.3.2 statement-type scoping via the SHACL shape (forShape /
@@ -311,7 +311,7 @@ pub fn admit_static(
 
         for t in &cred.graph {
             // The reserved-predicate guard stays in force UNDER admission (STATIC).
-            if is_reserved_predicate(&t.predicate) {
+            if is_reserved_triple(t) {
                 continue;
             }
             // §2.3.2 statement-type scoping via the SHACL shape (STATIC).
@@ -405,13 +405,23 @@ pub fn scope_covers(scope: &NamedNode, target: &NamedNode) -> bool {
 /// guard — the analogue of `sparq-solid`'s reserved-predicate guard). A trust rule
 /// cannot grant a source the right to launder these in (§3.3 item 2).
 fn is_reserved_predicate(p: &NamedNode) -> bool {
-    let s = p.as_str();
+    is_reserved_iri(p.as_str())
+}
+
+fn is_reserved_iri(s: &str) -> bool {
     s.starts_with("https://sparq.dev/ns/solidx#")
         || s.starts_with("https://sparq.dev/ns/auth#")
         || s.starts_with("urn:sparq:")
         || s.starts_with("http://www.w3.org/ns/auth/acl#")
         || s.starts_with("http://www.w3.org/ns/solid/acp#")
         || s == vocab::ADMITTED
+}
+
+/// [`is_reserved_predicate`], or an `rdf:type` naming a class in the same reserved space.
+fn is_reserved_triple(t: &oxrdf::Triple) -> bool {
+    is_reserved_predicate(&t.predicate)
+        || (t.predicate.as_str() == "http://www.w3.org/1999/02/22-rdf-syntax-ns#type"
+            && matches!(&t.object, oxrdf::Term::NamedNode(o) if is_reserved_iri(o.as_str())))
 }
 
 /// `shape_admits(shape, t, G)` — does the SHACL shape admit triple `t` in the context
@@ -1400,5 +1410,15 @@ mod tests {
         )));
         assert!(is_reserved_predicate(&iri(vocab::ADMITTED)));
         assert!(!is_reserved_predicate(&iri("http://schema.org/age")));
+        let typed = |class: &str| {
+            oxrdf::Triple::new(
+                iri("https://alice.ex/card#me"),
+                iri("http://www.w3.org/1999/02/22-rdf-syntax-ns#type"),
+                iri(class),
+            )
+        };
+        assert!(is_reserved_triple(&typed("https://sparq.dev/ns/auth#ConditionalGrant")));
+        assert!(is_reserved_triple(&typed("http://www.w3.org/ns/auth/acl#Authorization")));
+        assert!(!is_reserved_triple(&typed("http://schema.org/Person")));
     }
 }

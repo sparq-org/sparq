@@ -7,9 +7,10 @@
 //! [`Unknown`](Consistency::Unknown) with the reason, and the triples behind it when there are
 //! any.
 //!
-//! The fragment is currently SHOIQ(D) plus the OWL 2 role characteristics and ABox:
+//! The fragment is currently SROIQ(D) without the top and bottom properties, with the ABox:
 //! classes and all class constructors including nominals (`ObjectOneOf`,
-//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity,
+//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity and
+//! regular property chains (encoded by automata, see the clausifier),
 //! functionality, reflexivity, irreflexivity, symmetry, asymmetry and disjointness,
 //! `hasSelf`, qualified cardinality, class / object-property / negative-property / same /
 //! different assertions, and data properties: domain, range, sub- / equivalent / disjoint
@@ -18,9 +19,9 @@
 //! OWL 2 datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
 //! `DataUnionOf`, `DataComplementOf` and acyclic `DatatypeDefinition`s), decided by
 //! [`super::data_ranges`], and keys (`HasKey`, over named individuals; a key whose data
-//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on an
-//! object property with a transitive sub-property, property chains other than `R∘R ⊑ R`,
-//! the top and bottom
+//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on a
+//! non-simple object property, a property hierarchy the automata cannot encode, the top and
+//! bottom
 //! properties, datatypes outside the map, and number restrictions above
 //! [`MAX_CARDINALITY`] answer `Unknown(OutOfFragment)`; a datatype question the oracle cannot
 //! decide answers `Unknown(DatatypeUnknown)`. An ill-typed literal in an assertion,
@@ -106,6 +107,13 @@ pub struct Classification {
     pub inferred: Vec<(Id, Id)>,
 }
 
+/// Entailments known before a classification (from a check of a subset of the axioms).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Known {
+    pub unsatisfiable: FxHashSet<Id>,
+    pub subsumptions: FxHashSet<(Id, Id)>,
+}
+
 /// Everything [`check`] found out about an ontology.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DlReport {
@@ -148,7 +156,7 @@ impl Reasoner {
         Self::with_profile(dict, onto, &check_dl(dict, onto), budget)
     }
 
-    fn with_profile(
+    pub(crate) fn with_profile(
         dict: &Dict,
         onto: &Ontology,
         profile: &DlProfileReport,
@@ -384,11 +392,15 @@ impl Reasoner {
         if !self.imports.is_empty() || !self.abox_model()? {
             return None;
         }
-        self.classify_consistent().ok()
+        self.classify_consistent(&Known::default()).ok()
     }
 
-    /// Classifies a consistent ontology, or says why it could not.
-    fn classify_consistent(&self) -> Result<Classification, UnknownReason> {
+    /// Classifies a consistent ontology, or says why it could not. What `known` holds is
+    /// taken as entailed without a test (it must be: entailments of a subset of the axioms).
+    pub(crate) fn classify_consistent(
+        &self,
+        known: &Known,
+    ) -> Result<Classification, UnknownReason> {
         let classes = &self.clauses.classes;
         let is_class = |a: u32| matches!(self.clauses.atoms[a as usize], AtomKind::Class(_));
         let mut out = Classification::default();
@@ -397,6 +409,10 @@ impl Reasoner {
         let left = Cell::new(self.budget.max_steps);
         let pool = Some(&left);
         for &(id, a) in classes {
+            if known.unsatisfiable.contains(&id) {
+                out.unsatisfiable.push(id);
+                continue;
+            }
             let mut t = self.tableau(pool);
             let root = t.add_root();
             t.assert_concept(root, a);
@@ -415,8 +431,9 @@ impl Reasoner {
                 let AtomKind::Class(bid) = self.clauses.atoms[b as usize] else {
                     unreachable!("checked")
                 };
-                let entailed =
-                    deterministic || self.below(Concept::Atom(a), Concept::Atom(b), false, pool)?;
+                let entailed = deterministic
+                    || known.subsumptions.contains(&(id, bid))
+                    || self.below(Concept::Atom(a), Concept::Atom(b), false, pool)?;
                 if entailed {
                     subs.insert((id, bid));
                 }
@@ -506,7 +523,7 @@ pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
     };
     let consistency = reasoner.consistency();
     let (classification, classification_unknown) = if consistency == Consistency::Consistent {
-        match reasoner.classify_consistent() {
+        match reasoner.classify_consistent(&Known::default()) {
             Ok(c) => (Some(c), None),
             Err(reason) => (None, Some(reason)),
         }
@@ -557,6 +574,273 @@ mod tests {
             if t.run() == Ok(true) {
                 assert!(t.work() <= max_steps, "{} > {max_steps}", t.work());
             }
+        }
+    }
+
+    /// Data-key matching is metered: the value scans and the value index count towards the
+    /// budget, so a budget below them answers `ResourceBudget`.
+    #[test]
+    fn data_key_matching_is_inside_the_budget() {
+        let (n, k) = (6usize, 8usize);
+        let mut body = String::from(
+            r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            :P a owl:Class . :d a owl:DatatypeProperty . :P owl:hasKey ( :d ) .
+            "#,
+        );
+        for i in 0..n {
+            body.push_str(&format!(":i{i} a owl:NamedIndividual , :P"));
+            for j in 0..k {
+                body.push_str(&format!(" ; :d {}", i * k + j));
+            }
+            body.push_str(" .\n");
+        }
+        let work = |body: &str| {
+            let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            let full = Reasoner::new(&d, &o, Budget::default()).unwrap();
+            let mut t = Tableau::new(&full.clauses, &full.index, full.budget);
+            full.load_abox(&mut t);
+            assert_eq!(t.run(), Ok(true));
+            t.work()
+        };
+        let needed = work(&body);
+        let without_key = work(&body.replace(":P owl:hasKey ( :d ) .", ""));
+        // Every member's `k` values are read and indexed.
+        let comparisons = (n * k) as u64;
+        assert!(
+            needed - without_key >= comparisons,
+            "{needed} - {without_key} < {comparisons}"
+        );
+        let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        // Every budget that runs out between the work without the key and the work with it,
+        // so inside the member scan, the value cache, the index and the pairs.
+        for max_steps in without_key..needed {
+            let budget = Budget {
+                max_steps,
+                ..Budget::default()
+            };
+            let r = check(&d, &o, budget);
+            assert_eq!(
+                r.consistency,
+                Consistency::Unknown(UnknownReason::ResourceBudget),
+                "max_steps {max_steps}"
+            );
+        }
+    }
+
+    /// Metering keys does not cost a modest ABox its answer: each member's values are read
+    /// once per key, and only members sharing a value are compared, so neither many members
+    /// nor many merges run the default budget out.
+    #[test]
+    fn data_keys_on_a_modest_abox_are_decided_under_the_default_budget() {
+        let n = 300;
+        let mut body = String::from(
+            r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :P a owl:Class . :d a owl:DatatypeProperty . :r a owl:ObjectProperty .
+            :P owl:hasKey ( :d ) .
+            "#,
+        );
+        for i in 0..n {
+            body.push_str(&format!(":i{i} a owl:NamedIndividual , :P ; :d {i}"));
+            for j in 1..=10 {
+                body.push_str(&format!(" ; :r :i{}", (i + j) % n));
+            }
+            body.push_str(" .\n");
+        }
+        let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        assert_eq!(
+            check(&d, &o, Budget::default()).consistency,
+            Consistency::Consistent
+        );
+        // Many merges: each pair of individuals shares its value, so the key merges half of
+        // them, one rule application at a time.
+        let mut body = String::from(
+            r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :P a owl:Class . :d a owl:DatatypeProperty . :P owl:hasKey ( :d ) .
+            "#,
+        );
+        for i in 0..n {
+            body.push_str(&format!(
+                ":i{i} a owl:NamedIndividual , :P ; :d {} .\n",
+                i / 2
+            ));
+        }
+        let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        assert_eq!(
+            check(&d, &o, Budget::default()).consistency,
+            Consistency::Consistent
+        );
+    }
+
+    /// Records deduplicated through a key are decided under the default budget: all of 300
+    /// individuals sharing one value (each merge's survivor keeps every duplicate's value),
+    /// and 300 in groups of 10, with and without object edges between them. A round merges
+    /// every pair it identifies, so the rounds do not grow with the merges.
+    #[test]
+    fn data_keys_deduplicating_large_groups_are_decided_under_the_default_budget() {
+        for (group, edges) in [(300, 0), (10, 0), (300, 10), (10, 30)] {
+            let mut body = String::from(
+                r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+                :P a owl:Class . :d a owl:DatatypeProperty . :r a owl:ObjectProperty .
+                :P owl:hasKey ( :d ) .
+                "#,
+            );
+            for i in 0..300 {
+                body.push_str(&format!(
+                    ":i{i} a owl:NamedIndividual , :P ; :d {} .\n",
+                    i / group
+                ));
+                for k in 1..=edges {
+                    body.push_str(&format!(":i{i} :r :i{} .\n", (i + k) % 300));
+                }
+            }
+            let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            assert_eq!(
+                check(&d, &o, Budget::default()).consistency,
+                Consistency::Consistent,
+                "groups of {group}, {edges} edges each"
+            );
+        }
+    }
+
+    /// Comparing values not fixed to a literal is charged: with every member's values unfixed,
+    /// a second key property costs at least one unit per pair over the first alone, and
+    /// every budget running out inside the comparisons answers `ResourceBudget`.
+    #[test]
+    fn unfixed_key_value_comparisons_are_inside_the_budget() {
+        let n = 24;
+        let ontology = |key: &str| {
+            let mut body = format!(
+                r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+                @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+                :P a owl:Class . :d a owl:DatatypeProperty . :e a owl:DatatypeProperty .
+                :P owl:hasKey ( {key} ) .
+                :Q a owl:Class ; owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+                    [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom xsd:integer ]
+                    [ a owl:Restriction ; owl:onProperty :e ; owl:someValuesFrom xsd:integer ]
+                ) ] .
+                "#
+            );
+            for i in 0..n {
+                body.push_str(&format!(":i{i} a owl:NamedIndividual , :P , :Q .\n"));
+            }
+            let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            (d, o)
+        };
+        let work = |(d, o): &(_, _)| {
+            let full = Reasoner::new(d, o, Budget::default()).unwrap();
+            let mut t = Tableau::new(&full.clauses, &full.index, full.budget);
+            full.load_abox(&mut t);
+            let _ = t.run();
+            t.work()
+        };
+        let (both, first) = (ontology(":d :e"), ontology(":d"));
+        let (needed, one) = (work(&both), work(&first));
+        // The second property's comparison, once per pair (its value lists are empty).
+        assert!(needed - one >= (n * (n - 1) / 2) as u64, "{needed} - {one}");
+        let (d, o) = &both;
+        for max_steps in one..needed {
+            let budget = Budget {
+                max_steps,
+                ..Budget::default()
+            };
+            assert_eq!(
+                check(d, o, budget).consistency,
+                Consistency::Unknown(UnknownReason::ResourceBudget),
+                "max_steps {max_steps}"
+            );
+        }
+    }
+
+    /// A key matches on any shared value: two individuals sharing only their second value of
+    /// the first key property, or only one of several values of a second key property, are
+    /// identified (the value index holds every value, not just the first).
+    #[test]
+    fn data_keys_match_on_any_shared_value() {
+        let answer = |abox: &str| {
+            let body = format!(
+                r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+                :P a owl:Class . :d a owl:DatatypeProperty . :e a owl:DatatypeProperty .
+                :s a owl:ObjectProperty . :o a owl:NamedIndividual .
+                :a a owl:NamedIndividual , :P . :b a owl:NamedIndividual , :P .
+                :a owl:differentFrom :b .
+                {abox}"#
+            );
+            let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            check(&d, &o, Budget::default()).consistency
+        };
+        // Shared second value of the first key property.
+        assert_eq!(
+            answer(":P owl:hasKey ( :d ) . :a :d 1 , 2 . :b :d 3 , 2 ."),
+            Consistency::Inconsistent
+        );
+        // Two data properties, the second matching on one of several values.
+        assert_eq!(
+            answer(":P owl:hasKey ( :d :e ) . :a :d 1 ; :e 5 , 6 . :b :d 1 ; :e 7 , 6 ."),
+            Consistency::Inconsistent
+        );
+        assert_eq!(
+            answer(":P owl:hasKey ( :d :e ) . :a :d 1 ; :e 5 . :b :d 1 ; :e 7 ."),
+            Consistency::Consistent
+        );
+        // An object property first, then a data property.
+        assert_eq!(
+            answer(":P owl:hasKey ( :s :d ) . :a :s :o ; :d 1 , 2 . :b :s :o ; :d 2 ."),
+            Consistency::Inconsistent
+        );
+        // Object properties only.
+        assert_eq!(
+            answer(":P owl:hasKey ( :s ) . :a :s :o . :b :s :o ."),
+            Consistency::Inconsistent
+        );
+    }
+
+    /// Many candidate pairs (every member shares one value) are generated and sorted inside
+    /// the budget: every budget between the work without the key and with it answers
+    /// `ResourceBudget`, including those running out while the candidates are built.
+    #[test]
+    fn key_partners_are_built_inside_the_budget() {
+        let n = 16;
+        let mut body = String::from(
+            r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :P a owl:Class . :d a owl:DatatypeProperty . :P owl:hasKey ( :d ) .
+            "#,
+        );
+        for i in 0..n {
+            body.push_str(&format!(":i{i} a owl:NamedIndividual , :P ; :d 1 .\n"));
+        }
+        let work = |body: &str| {
+            let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            let full = Reasoner::new(&d, &o, Budget::default()).unwrap();
+            let mut t = Tableau::new(&full.clauses, &full.index, full.budget);
+            full.load_abox(&mut t);
+            assert_eq!(t.run(), Ok(true));
+            t.work()
+        };
+        let needed = work(&body);
+        let without_key = work(&body.replace(":P owl:hasKey ( :d ) .", ""));
+        // Every round's partner list for the first member has every later member.
+        assert!(needed - without_key >= (n * (n - 1) / 2) as u64);
+        let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        for max_steps in without_key..needed {
+            let budget = Budget {
+                max_steps,
+                ..Budget::default()
+            };
+            assert_eq!(
+                check(&d, &o, budget).consistency,
+                Consistency::Unknown(UnknownReason::ResourceBudget),
+                "max_steps {max_steps}"
+            );
         }
     }
 }

@@ -1490,7 +1490,7 @@ impl SolidMcpServer {
         self.gate_write(&url, Mode::Write)?;
 
         // PARSE FIRST — a malformed body is rejected before anything mutates.
-        let new_graph = Graph::load_str(&content, fmt)
+        let new_graph = Graph::load_str_with_base(&content, fmt, &url)
             .map_err(|e| format!("content for <{url}> did not parse as {fmt}: {e}"))?;
         let triples = new_graph.len();
 

@@ -48,11 +48,15 @@ pub(crate) fn is_linkset_record_path(path: &str) -> bool {
 const LWS_SERVICE_SEGMENT: &str = ".lws";
 
 /// Whether `path` (a path from the storage root, starting with `/`) lies in the LWS surface's
-/// service namespace: its first segment is `.lws` (ASCII case-insensitive).
+/// service namespace: its first non-empty segment is `.lws` (ASCII case-insensitive), so a
+/// repeated leading slash does not take a path out of it.
 fn names_lws_service(path: &str) -> bool {
-    path.strip_prefix('/')
-        .and_then(|rest| rest.split('/').next())
-        .is_some_and(|seg| seg.eq_ignore_ascii_case(LWS_SERVICE_SEGMENT))
+    path.starts_with('/')
+        && path
+            .trim_start_matches('/')
+            .split('/')
+            .next()
+            .is_some_and(|seg| seg.eq_ignore_ascii_case(LWS_SERVICE_SEGMENT))
 }
 
 /// Whether the request path `path` (without query or fragment) lies in the LWS surface's service
@@ -118,15 +122,9 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     // plain resource).
     let is_container = path_only.ends_with('/');
 
-    // Split into interior segments: drop the leading empty segment (before the first '/') and a
-    // single trailing empty segment (the container slash). Any remaining empty segment is a
-    // "//" (leading, interior or trailing), which is rejected. "." / ".." in any segment is path
-    // traversal — rejected.
-    if path_only.contains("//") {
-        return Err(ServerError::BadRequest(
-            "empty path segment rejected".into(),
-        ));
-    }
+    // Split into interior segments: leading and trailing slashes are dropped for this check (the
+    // store key keeps them). Any remaining empty segment is an interior "//", which is rejected.
+    // "." / ".." in any segment is path traversal — rejected.
     let trimmed = path_only.trim_start_matches('/').trim_end_matches('/');
     if !trimmed.is_empty() {
         for seg in trimmed.split('/') {
