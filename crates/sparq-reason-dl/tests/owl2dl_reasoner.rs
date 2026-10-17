@@ -2721,7 +2721,7 @@ fn incremental_rechecks_agree_with_fresh_checks() {
             let lines: Vec<&str> = whole.lines().collect();
             let half = lines[..lines.len() / 2].join("\n");
             let mut checker = IncrementalChecker::new();
-            let mut prev: Option<(bool, bool)> = None;
+            let mut kept: Option<bool> = None;
             for (step, (body, is_whole)) in [
                 (&half, false),
                 (&whole, true),
@@ -2736,9 +2736,10 @@ fn incremental_rechecks_agree_with_fresh_checks() {
                 let o = extract(&d, &t).unwrap();
                 let fresh = check(&d, &o, Budget::default());
                 let (got, reuse) = checker.check(&d, &o, Budget::default());
-                let want_reuse = match prev {
-                    Some((true, was_whole)) if was_whole == is_whole => Reuse::Identical,
-                    Some((true, false)) if is_whole => Reuse::Extension,
+                // Against the last decided version (an undecided one keeps it).
+                let want_reuse = match kept {
+                    Some(was_whole) if was_whole == is_whole => Reuse::Identical,
+                    Some(false) if is_whole => Reuse::Extension,
                     _ => Reuse::None,
                 };
                 // A refusal is never reused; otherwise the axioms decide.
@@ -2764,7 +2765,9 @@ fn incremental_rechecks_agree_with_fresh_checks() {
                         "{corpus} {seed} step {step} ({reuse:?}):\n--- fresh\n{fresh:?}\n--- got\n{got:?}\n{body}"
                     ));
                 }
-                prev = Some((decided(&got), is_whole));
+                if decided(&got) {
+                    kept = Some(is_whole);
+                }
             }
         }
     }
@@ -2823,4 +2826,47 @@ fn an_automaton_past_the_state_cap_is_refused() {
     assert!(start.elapsed() < std::time::Duration::from_secs(30));
     // A small instance of the same shape is decided.
     assert!(consistent(&doubling(3)));
+}
+
+/// A deep acyclic hierarchy of non-simple properties (each a sub-property of the next above
+/// a transitive one) and a transitive-heavy one (thousands of transitive sub-properties of
+/// one property) are refused as out of the fragment, not built past the automaton bounds.
+#[test]
+fn deep_and_transitive_heavy_hierarchies_are_refused() {
+    let refused = |body: &str| {
+        let (_, r) = run(body);
+        assert!(
+            matches!(
+                r.consistency,
+                Consistency::Unknown(UnknownReason::OutOfFragment { .. })
+            ),
+            "{:?}",
+            r.consistency
+        );
+    };
+    // Declared top first, so the automata are built from the top down, recursively.
+    let mut deep = String::new();
+    for i in (1..=400).rev() {
+        deep.push_str(&format!(
+            ":r{i} a owl:ObjectProperty . :r{} rdfs:subPropertyOf :r{i} .\n",
+            i - 1
+        ));
+    }
+    deep.push_str(":r0 a owl:ObjectProperty , owl:TransitiveProperty .\n");
+    deep.push_str(&format!(
+        ":C0 a owl:Class . :C1 a owl:Class . :C0 rdfs:subClassOf {} .",
+        all(":r400", ":C1")
+    ));
+    refused(&deep);
+    let mut heavy = String::from(":t a owl:ObjectProperty .\n");
+    for i in 0..3000 {
+        heavy.push_str(&format!(
+            ":s{i} a owl:ObjectProperty , owl:TransitiveProperty ; rdfs:subPropertyOf :t .\n"
+        ));
+    }
+    heavy.push_str(&format!(
+        ":C0 a owl:Class . :C1 a owl:Class . :C0 rdfs:subClassOf {} .",
+        all(":t", ":C1")
+    ));
+    refused(&heavy);
 }

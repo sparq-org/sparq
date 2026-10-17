@@ -7,9 +7,11 @@
 //! takes without a test (it still tests everything else). Any removed or changed axiom
 //! means a full check. Axioms are compared structurally, by the terms they name, so the two
 //! ontologies may be read into different dictionaries; an anonymous individual is compared
-//! by its blank-node label, so relabelled blank nodes count as a change. The profile check
-//! and the translation into clauses run every time (a refusal is never skipped), and only a
-//! decided answer is kept: an `Unknown` one is recomputed.
+//! by its blank-node label, so relabelled blank nodes count as a change. What is compared is
+//! the logical axioms, the declarations and the imports. The profile check and the
+//! translation into clauses run every time (a refusal is never skipped), and only a decided
+//! answer is kept: a refused or undecided version leaves the kept answer as it was. A
+//! reused answer may be decided where a fresh check would run out of budget or abstain.
 
 use super::dl_profile::check_dl;
 use super::model::{Axiom, MapIds, Ontology};
@@ -71,6 +73,7 @@ impl IncrementalChecker {
         let reasoner = match Reasoner::with_profile(dict, onto, &profile, budget) {
             Ok(r) => r,
             Err(reason) => {
+                self.compact();
                 let report = DlReport {
                     profile,
                     consistency: Consistency::Unknown(reason),
@@ -80,21 +83,23 @@ impl IncrementalChecker {
                 return (report, Reuse::None);
             }
         };
-        // A refused version keeps the kept answer for the next one.
-        let last = self.last.take();
-        let reuse = match &last {
+        let reuse = match &self.last {
             Some(l) if l.axioms == axioms && l.imports == imports => Reuse::Identical,
             Some(l) if l.axioms.is_subset(&axioms) && l.imports.is_subset(&imports) => {
                 Reuse::Extension
             }
             _ => Reuse::None,
         };
-        let decided = last.filter(|_| reuse != Reuse::None).map(|l| l.decided);
+        let decided = self
+            .last
+            .as_ref()
+            .filter(|_| reuse != Reuse::None)
+            .map(|l| &l.decided);
         let theirs = |own: &Dict, id: Id| dict.lookup(&own.term(id));
         let (consistency, classification, classification_unknown) = match (reuse, decided) {
             (_, Some(Decided::Inconsistent)) => (Consistency::Inconsistent, None, None),
             (Reuse::Identical, Some(Decided::Classified(c))) => {
-                let c = remap(&c, &mut |id| theirs(&self.dict, id));
+                let c = remap(c, &mut |id| theirs(&self.dict, id));
                 (Consistency::Consistent, Some(c), None)
             }
             (_, decided) => {
@@ -134,11 +139,15 @@ impl IncrementalChecker {
             }
             _ => None,
         };
-        self.last = kept.map(|decided| Last {
-            axioms,
-            imports,
-            decided,
-        });
+        // An undecided version, like a refused one, keeps the kept answer.
+        if let Some(decided) = kept {
+            self.last = Some(Last {
+                axioms,
+                imports,
+                decided,
+            });
+        }
+        self.compact();
         let report = DlReport {
             profile,
             consistency,
@@ -146,6 +155,22 @@ impl IncrementalChecker {
             classification_unknown,
         };
         (report, reuse)
+    }
+
+    /// Re-interns the kept answer into a fresh dictionary, so the terms of versions not
+    /// kept (fresh blank-node labels on every parse, refused versions) do not accumulate.
+    fn compact(&mut self) {
+        let old = std::mem::take(&mut self.dict);
+        let new = &mut self.dict;
+        let mut f = |id: Id| new.intern(&old.term(id));
+        self.last = self.last.take().map(|l| Last {
+            axioms: l.axioms.iter().map(|a| a.map_ids(&mut f)).collect(),
+            imports: l.imports.iter().map(|&i| f(i)).collect(),
+            decided: match l.decided {
+                Decided::Inconsistent => Decided::Inconsistent,
+                Decided::Classified(c) => Decided::Classified(remap(&c, &mut f)),
+            },
+        });
     }
 }
 
@@ -174,5 +199,60 @@ fn remap(c: &Classification, f: &mut impl FnMut(Id) -> Id) -> Classification {
         unsatisfiable,
         subsumptions,
         inferred,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::owl2dl::extract;
+    use sparq_core::Graph;
+
+    fn read(body: &str) -> (Dict, Ontology) {
+        let body = format!(
+            "@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+             @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+             :A a owl:Class . :B a owl:Class . :A rdfs:subClassOf :B . {body}"
+        );
+        let (d, t) = Graph::parse_to_triples(&body, "turtle").unwrap();
+        let o = extract(&d, &t).unwrap();
+        (d, o)
+    }
+
+    /// An undecided version (here: out of budget) keeps the kept answer for the next one.
+    #[test]
+    fn an_undecided_version_keeps_the_kept_answer() {
+        let mut c = IncrementalChecker::new();
+        let (d, o) = read("");
+        assert_eq!(c.check(&d, &o, Budget::default()).1, Reuse::None);
+        let (d2, o2) = read(":C a owl:Class . :C rdfs:subClassOf :A .");
+        let tiny = Budget {
+            max_steps: 0,
+            ..Budget::default()
+        };
+        let (r, _) = c.check(&d2, &o2, tiny);
+        assert!(matches!(r.consistency, Consistency::Unknown(_)));
+        assert_eq!(c.check(&d, &o, Budget::default()).1, Reuse::Identical);
+    }
+
+    /// The checker's dictionary holds the kept answer's terms only: versions with fresh
+    /// blank nodes do not make it grow.
+    #[test]
+    fn the_dictionary_does_not_grow_with_unkept_versions() {
+        let mut c = IncrementalChecker::new();
+        let (d, o) = read("");
+        c.check(&d, &o, Budget::default());
+        let size = c.dict.len();
+        for i in 0..50 {
+            let (d2, o2) = read(&format!(
+                "[] a :A . :C{i} a owl:Class . :C{i} rdfs:subClassOf :A , :B ."
+            ));
+            let tiny = Budget {
+                max_steps: 0,
+                ..Budget::default()
+            };
+            c.check(&d2, &o2, tiny);
+        }
+        assert_eq!(c.dict.len(), size);
     }
 }

@@ -257,8 +257,9 @@ export interface OwlDlSessionResult extends OwlDlResult {
 
 /**
  * Rechecks successive versions of an ontology (a working draft plus small edits), keeping the
- * last decided answer to reuse. Results are exactly what {@link checkOwlDl} would answer,
- * except that a reused answer may be decided where a fresh check ran out of budget. Axioms are
+ * last decided answer to reuse (a refused or undecided version keeps it). Results are what
+ * {@link checkOwlDl} would answer, except that a reused answer may be decided where a fresh
+ * check would run out of budget or abstain. The axioms, declarations and imports are
  * compared by the terms they name; an anonymous individual by its blank-node label, so a
  * relabelled blank node counts as a change. Call {@link OwlDlSession.free} when done.
  */
@@ -279,9 +280,9 @@ export async function openOwlDlSession(): Promise<OwlDlSession> {
   return {
     check(tbox: string, abox?: string, options?: OwlDlOptions): OwlDlSessionResult {
       if (!inner) throw new TypeError('OwlDlSession: used after free()');
-      if (typeof tbox !== 'string') throw new TypeError('checkOwlDl: tbox must be a string');
+      if (typeof tbox !== 'string') throw new TypeError('OwlDlSession.check: tbox must be a string');
       if (abox !== undefined && abox !== null && typeof abox !== 'string') {
-        throw new TypeError('checkOwlDl: abox must be a string when given');
+        throw new TypeError('OwlDlSession.check: abox must be a string when given');
       }
       const { format, optionsJson } = normaliseOwlDlOptions(options);
       return JSON.parse(inner.check(tbox, abox ?? undefined, format, optionsJson)) as OwlDlSessionResult;

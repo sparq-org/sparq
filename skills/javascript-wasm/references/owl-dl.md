@@ -53,15 +53,17 @@ r = session.check(draftPlusEditTurtle);     // r.reuse: 'none' | 'identical' | '
 session.free();
 ```
 
-A session keeps the last decided answer. `session.check` answers exactly what `checkOwlDl`
-would, plus `reuse`: `'identical'` when the logical axioms are the last decided version's (the
+A session keeps the last decided answer. `session.check` answers what `checkOwlDl`
+would, plus `reuse`: `'identical'` when the logical axioms, declarations and imports are the
+last decided version's (the
 answer is returned without reasoning), `'extension'` when they are a superset (OWL 2 is
 monotone, so the old inconsistency, unsatisfiable classes and subsumptions carry over and only
-the rest is tested; such an answer may be decided where a fresh check ran out of budget), and
+the rest is tested; such an answer may be decided where a fresh check would run out of budget or abstain), and
 `'none'` otherwise (a removed or changed axiom, or nothing decided kept). Axioms are compared by
 the terms they name, an anonymous individual by its blank-node label, so `[]` nodes (which get
-fresh labels on every parse) make every version count as changed. A version that is refused or
-does not parse leaves the kept answer as it was. The raw glue class is `OwlDlSession`
+fresh labels on every parse) make every version count as changed. A version that is refused,
+undecided or does not parse leaves the kept answer as it was, and the session holds only the
+kept version's terms. The raw glue class is `OwlDlSession`
 (`new OwlDlSession()`, `.check(tbox, abox, format, optionsJson) -> string`, `.free()`).
 
 ## Result shape (`OwlDlResult`)
