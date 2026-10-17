@@ -1760,16 +1760,14 @@ pub async fn patch_handler<S: Store>(
     ))?;
 
     // A writer that may not read the target appends to it without its content being parsed: the
-    // inserted statements are appended as text to a Turtle document, so the outcome follows the
+    // inserted statements are appended as text to a Turtle, N-Triples or N-Quads document (each
+    // takes N-Triples lines, the last into its default graph), so the outcome follows the
     // request, the requester's permissions and the stored type alone, never what is stored
     // (whether it parses, what its graph holds). Any other stored type is refused to it. (Only an
     // unconditional insert-only patch gets here without Read.) The stored bytes are still read
     // and rewritten whole, so the time this takes follows their size.
     if let (Some(res), false) = (&current, reader) {
-        let appendable = matches!(
-            classify(Some(&res.meta.content_type)),
-            Ok(RdfFormat::Turtle)
-        );
+        let appendable = appends_ntriples(&res.meta.content_type);
         let Some(text) = appended_ntriples(&patch).filter(|_| appendable) else {
             return Err(unread(ServerError::Forbidden));
         };
@@ -2325,6 +2323,16 @@ async fn reject_slash_semantics_conflict<S: Store>(
         ));
     }
     Ok(())
+}
+
+/// Whether a document stored as `content_type` stays well formed, its graph the union, with
+/// N-Triples lines appended on a line of their own: Turtle, N-Triples and N-Quads (the lines go
+/// into its default graph).
+fn appends_ntriples(content_type: &str) -> bool {
+    let essence = content_type.split(';').next().unwrap_or("").trim();
+    ["text/turtle", "application/n-triples", "application/n-quads"]
+        .iter()
+        .any(|t| essence.eq_ignore_ascii_case(t))
 }
 
 /// Whether `granted` lets the requester read `target_iri`'s representation: Control for an `.acl`,

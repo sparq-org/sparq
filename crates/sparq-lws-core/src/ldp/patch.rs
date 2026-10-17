@@ -1555,6 +1555,26 @@ _:p solid:inserts { <#b> <https://e.example/q> \"v\\n\" , 3 . }.",
         let got = parse_to_triples(RdfFormat::Turtle, body.as_bytes(), base).unwrap();
         assert_eq!(got.len(), 2);
         assert_ne!(got[0].subject, got[1].subject);
+        // N-Triples and N-Quads documents take the same lines, into the default graph.
+        for stored in [
+            "<https://e.example/a> <https://e.example/p> \"x\" .",
+            "<https://e.example/a> <https://e.example/p> \"x\" <https://e.example/g> .",
+        ] {
+            let body = format!("{stored}\n{text}");
+            let quads: Vec<_> = oxttl::NQuadsParser::new()
+                .for_slice(body.as_bytes())
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(quads.len(), 2, "{body}");
+            assert!(quads[1].graph_name.is_default_graph());
+            if !stored.contains("/g>") {
+                let triples: Vec<_> = oxttl::NTriplesParser::new()
+                    .for_slice(body.as_bytes())
+                    .collect::<Result<_, _>>()
+                    .unwrap();
+                assert_eq!(triples.len(), 2, "{body}");
+            }
+        }
         // A reader's patch inserts them fresh too, one node per label across the request.
         let two = parse_sparql_update(
             b"INSERT DATA { _:b1 <https://e.example/p> \"a\" . } ; \

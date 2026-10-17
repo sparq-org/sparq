@@ -1627,6 +1627,72 @@ _:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> 
     assert_eq!(answers[0], answers[2], "a large document");
 }
 
+/// A writer without Read appends to a stored N-Triples or N-Quads document as to a Turtle one, and
+/// is refused for a type it cannot append to (that the result is well formed is
+/// `ldp::patch::tests::an_appended_insert_is_the_union`'s).
+#[tokio::test]
+async fn an_append_without_read_takes_line_formats() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let docs = [
+        (
+            "nt",
+            "application/n-triples",
+            "<https://pod.example/alice/nt#a> <https://e.example/p> \"x\" .",
+        ),
+        (
+            "nq",
+            "application/n-quads",
+            "<https://pod.example/alice/nq#a> <https://e.example/p> \"x\" <https://e.example/g> .",
+        ),
+        (
+            "jsonld",
+            "application/ld+json",
+            r#"{"@id": "https://pod.example/alice/jsonld#a", "https://e.example/p": "x"}"#,
+        ),
+    ];
+    for (name, ct, body) in docs {
+        let iri = format!("https://pod.example/alice/{name}");
+        store
+            .write(&iri, axum::body::Bytes::from(body), ct)
+            .await
+            .expect("seed a document");
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#a> a acl:Authorization; acl:agent <{webid}>; acl:accessTo <{iri}>; acl:mode acl:Append."#,
+            webid = common::WEBID
+        );
+        store
+            .write(
+                &format!("{iri}.acl"),
+                axum::body::Bytes::from(acl),
+                "text/turtle",
+            )
+            .await
+            .expect("seed its acl");
+    }
+    let h = Harness::with_store(store).await;
+    for (name, _, _) in docs {
+        let insert = format!(
+            "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> \"v\" . }}.\n"
+        );
+        let r = h
+            .request(
+                "PATCH",
+                &format!("/alice/{name}"),
+                Some("text/n3"),
+                Body::from(insert),
+            )
+            .await;
+        if name == "jsonld" {
+            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{name}");
+            continue;
+        }
+        assert!(r.status().is_success(), "{name}: {}", r.status());
+    }
+}
+
 /// Whether a container may be deleted depends on what it holds, so a writer that may not read it
 /// gets the denial for an empty one and a full one alike.
 #[tokio::test]
