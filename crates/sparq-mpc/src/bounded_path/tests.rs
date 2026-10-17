@@ -564,6 +564,125 @@ fn min_greater_than_max_is_protocol_error() {
     assert!(matches!(err, MpcError::Protocol(_)));
 }
 
+/// The naive fold the unroller must NOT do: carry every intermediate column to the
+/// end and project once. Test-local on purpose — it is the shape whose accumulator
+/// holds one row per WALK, so it is the differential REFERENCE at small `L` and
+/// must never be what ships.
+fn naive_fixed_chain(
+    edges: &DisclosedEdges,
+    chain: &[NamedNode],
+    subject: &Variable,
+    object: &Variable,
+) -> PartialResult {
+    let n = chain.len();
+    let hop_var = |i: usize| -> Variable {
+        if i == 0 {
+            subject.clone()
+        } else if i == n {
+            object.clone()
+        } else {
+            Variable::new_unchecked(format!("{INTERMEDIATE_PREFIX}{i}"))
+        }
+    };
+    let mut acc = edges.relation_for(&chain[0], &hop_var(0), &hop_var(1));
+    let join = DisclosedKeyJoin::new();
+    for (idx, pred) in chain.iter().enumerate().skip(1) {
+        let next = edges.relation_for(pred, &hop_var(idx), &hop_var(idx + 1));
+        let plan = JoinPlan {
+            join_var: hop_var(idx),
+            key_disclosed: true,
+        };
+        acc = join.join(&[acc, next], &plan).unwrap();
+    }
+    dedup_endpoint_pairs(
+        project_endpoints(&acc, subject, object).unwrap(),
+        subject,
+        object,
+    )
+}
+
+/// The per-hop projection must not change the ANSWER, only the work: for chain
+/// lengths 1..=8 over three graphs (dense 2-node, a line, a line with a back edge)
+/// the shipped fold and the naive walk-carrying fold agree row for row.
+#[test]
+fn per_hop_projection_matches_the_naive_fold_at_small_lengths() {
+    let graphs: [&[(&str, &[&str])]; 3] = [
+        &[(
+            "ex:a ex:p ex:a . ex:a ex:p ex:b . ex:b ex:p ex:a . ex:b ex:p ex:b .",
+            &["http://ex/p"],
+        )],
+        &[(
+            "ex:a ex:p ex:b . ex:b ex:p ex:c . ex:c ex:p ex:d .",
+            &["http://ex/p"],
+        )],
+        &[(
+            "ex:a ex:p ex:b . ex:b ex:p ex:c . ex:c ex:p ex:a .",
+            &["http://ex/p"],
+        )],
+    ];
+    let (s, o) = (
+        Variable::new_unchecked(SUBJECT_VAR),
+        Variable::new_unchecked(OBJECT_VAR),
+    );
+    for (g, docs) in graphs.iter().enumerate() {
+        let edges = disclosed_edges(docs);
+        for len in 1..=8usize {
+            let chain: Vec<NamedNode> = (0..len).map(|_| nn("http://ex/p")).collect();
+            let shipped =
+                dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o).unwrap(), &s, &o);
+            let naive = naive_fixed_chain(&edges, &chain, &s, &o);
+            assert_eq!(
+                shipped.rows, naive.rows,
+                "graph {g}, L={len}: the per-hop projection changed the answer"
+            );
+        }
+    }
+}
+
+/// The work must follow the ENDPOINT count, not the walk count: on the dense
+/// 2-node graph (all four `p` edges) the answer is the same four pairs at every
+/// length, and a chain at the hop cap evaluates. Carrying the intermediates
+/// instead would make this the exponential case — finishing at all is the witness,
+/// and nothing here asserts a timing.
+#[test]
+fn a_dense_graph_evaluates_at_the_hop_cap() {
+    let edges = disclosed_edges(&[(
+        "ex:a ex:p ex:a . ex:a ex:p ex:b . ex:b ex:p ex:a . ex:b ex:p ex:b .",
+        &["http://ex/p"],
+    )]);
+    let (s, o) = (
+        Variable::new_unchecked(SUBJECT_VAR),
+        Variable::new_unchecked(OBJECT_VAR),
+    );
+    let short = dedup_endpoint_pairs(
+        eval_fixed_chain(&edges, &[nn("http://ex/p")], &s, &o).unwrap(),
+        &s,
+        &o,
+    );
+    assert_eq!(short.rows.len(), 4, "the dense 2-node graph has 4 pairs");
+
+    let chain: Vec<NamedNode> = (0..MAX_UNROLL_HOPS).map(|_| nn("http://ex/p")).collect();
+    let long = dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o).unwrap(), &s, &o);
+    assert_eq!(
+        long.rows, short.rows,
+        "every length reaches the same four endpoint pairs on this graph"
+    );
+}
+
+/// AT the hop cap, through the PUBLIC entry: `{64,64}` over a single edge is
+/// accepted (the cap is a cap, not an off-by-one) and has no 64-hop walk to find.
+#[test]
+fn a_repetition_at_the_hop_cap_is_accepted() {
+    let edges = disclosed_edges(&[("ex:a ex:p ex:b .", &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), MAX_UNROLL_HOPS, MAX_UNROLL_HOPS);
+    let got = eval_bounded_path_disclosed(&edges, &form).unwrap();
+    assert!(
+        got.rows.is_empty(),
+        "a single edge has no {MAX_UNROLL_HOPS}-hop chain, got {:?}",
+        got.rows
+    );
+}
+
 /// HOP-COUNT GUARD: the chain cap does not bind on a ONE-way step, whose projected
 /// chain count is `k - m + 1` however large the public `k` is — yet each chain of
 /// length `L` is an `L`-hop join fold, so the unrolled work still grows with `k`.

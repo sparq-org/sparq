@@ -59,7 +59,11 @@
 //!   `{m,k}`/alternation cannot become a CPU/memory denial-of-service. The per-chain
 //!   HOP count is bounded first, by [`MAX_UNROLL_HOPS`]: a one-way step unrolls to
 //!   `k - m + 1` chains however large `k` is, so the chain cap does not bind on it,
-//!   while each chain of length `ℓ` is still an `ℓ`-hop join fold.
+//!   while each chain of length `ℓ` is still an `ℓ`-hop join fold. Those two caps
+//!   bound the unroll's SHAPE; what bounds a single chain's cost is that the fold
+//!   projects to `(subject, reached)` and dedups after every hop, so its
+//!   accumulator holds endpoint PAIRS (at most `|V|²`) and never one row per walk.
+//!   See [`MAX_UNROLL_HOPS`] for what the caps do and do not promise.
 //!
 //! Composition: a [`BoundedRepetition`] is a repetition `{m,k}` of a single
 //! [`PathStep`] (a named predicate or an alternation of named predicates); a
@@ -210,6 +214,26 @@ pub const MAX_UNROLL_CHAINS: u64 = 1 << 20; // 1_048_576
 /// guard, not a tuning knob: it sits far above any property path a query plans, and
 /// a repetition that exceeds it is malformed for this regime rather than merely
 /// slow.
+///
+/// ## What the two caps guarantee, and what they do not
+///
+/// They bound the SHAPE of the unroll, nothing else:
+///
+/// - [`MAX_UNROLL_CHAINS`] bounds how many fixed chains the union evaluates.
+/// - `MAX_UNROLL_HOPS` bounds how long each of those chains is.
+///
+/// Per-chain cost is what makes those two enough. `eval_fixed_chain` projects to
+/// `(subject, reached)` and dedups after EVERY hop, so one chain costs at most
+/// `hops · |V| · |E|` and its accumulator holds at most `|V|²` rows. Without that
+/// projection the accumulator would hold one row per WALK, which no cap on the
+/// shape can bound — a 64-hop chain on a dense graph is exponential in the hop
+/// count even though its ANSWER has at most `|V|²` rows.
+///
+/// So total work is bounded by `chains · hops · |V| · |E|`, and at both caps at
+/// once that product is large: a near-cap alternation such as `(p|q){1,19}` is
+/// about `2^20` chains of up to 19 hops each, which is deliberately still accepted
+/// and is a heavy run, not a quick one. What the caps rule out is the UNBOUNDED
+/// case, not an expensive one.
 pub const MAX_UNROLL_HOPS: usize = 64;
 
 /// Closed-form count of fixed-length chains a single `(step){m,k}` repetition
@@ -574,7 +598,18 @@ fn eval_fixed_chain(
     // First hop's edge relation: (?__pp_a, ?z1).
     let mut acc = edges.relation_for(&chain[0], &hop_var(0), &hop_var(1));
 
-    // Fold remaining hops via DisclosedKeyJoin on the shared intermediate var.
+    // Fold remaining hops via DisclosedKeyJoin on the shared intermediate var,
+    // collapsing the accumulator to `(subject, reached)` after EVERY hop.
+    //
+    // Carrying the intermediate columns to the end instead would make the
+    // accumulator hold one row per distinct WALK, which grows as the number of
+    // paths, not as the number of endpoint pairs — exponential in the chain length
+    // on a dense graph, even though the projected result has at most `|V|²` rows.
+    // Projecting and deduping per hop keeps the accumulator at most `|V|²` rows and
+    // each hop's join at most `|V|·|E|`, and the RESULT is unchanged: only the
+    // endpoints are ever returned (this function's one caller unions endpoint
+    // pairs), and endpoint reachability is a set — two walks reaching the same
+    // `(subject, reached)` pair continue identically.
     let join = DisclosedKeyJoin::new();
     for (idx, pred) in chain.iter().enumerate().skip(1) {
         let next = edges.relation_for(pred, &hop_var(idx), &hop_var(idx + 1));
@@ -583,10 +618,18 @@ fn eval_fixed_chain(
             join_var,
             key_disclosed: true,
         };
-        acc = join.join(&[acc, next], &plan)?;
+        let joined = join.join(&[acc, next], &plan)?;
+        let reached = hop_var(idx + 1);
+        acc = dedup_endpoint_pairs(
+            project_endpoints(&joined, subject, &reached)?,
+            subject,
+            &reached,
+        );
     }
 
-    // Project onto (subject, object), dropping the intermediate columns.
+    // Project onto (subject, object), dropping any intermediate column. After the
+    // fold above the accumulator is already `(subject, object)`; this also covers
+    // the single-hop case, which never entered the loop.
     project_endpoints(&acc, subject, object)
 }
 
