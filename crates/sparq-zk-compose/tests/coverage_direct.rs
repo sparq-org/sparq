@@ -268,20 +268,42 @@ fn nonexistent_dir(tag: &str) -> std::path::PathBuf {
     p
 }
 
-/// `compile` spawns `nargo` in the workspace dir; against a NON-EXISTENT
-/// `compose_dir` the spawn cannot even chdir, so it fails closed with a typed
-/// `DriverError::Spawn` naming `nargo` — never a panic, and distinct from the io
-/// arm. (Toolchain-independent: absent-cwd fails the spawn with or without nargo.)
+/// Whether `nargo` can be spawned here. These tests run in lanes with and without
+/// the toolchain, and the typed error a missing workspace produces depends on it.
+fn nargo_on_path() -> bool {
+    std::process::Command::new("nargo")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// The typed, fail-closed error a call against a missing workspace must return:
+/// without `nargo` the spawn fails (`Spawn`); with it, `nargo` runs and refuses the
+/// absent program dir (`Tool`). Either way it names `nargo` and is never a panic or
+/// the io arm.
+fn assert_missing_workspace_error(err: DriverError) {
+    match (nargo_on_path(), err) {
+        (false, DriverError::Spawn { tool, .. }) => assert_eq!(tool, "nargo", "Spawn names the tool"),
+        (true, DriverError::Tool { tool, .. }) => assert_eq!(tool, "nargo", "Tool names the tool"),
+        (present, other) => panic!(
+            "expected {} naming nargo, got {:?}",
+            if present { "Tool" } else { "Spawn" },
+            other
+        ),
+    }
+}
+
+/// `compile` runs `nargo` against the workspace dir; against a NON-EXISTENT
+/// `compose_dir` it fails closed with a typed error naming `nargo` (see
+/// [`assert_missing_workspace_error`]) — never a panic, and distinct from the io arm.
 #[test]
 fn compile_without_workspace_is_spawn_error_naming_nargo() {
     let prover = CircuitProver::new(nonexistent_dir("compile"));
     let err = prover
         .compile(&CircuitId::FilterInt { d: 1 })
         .expect_err("compile must surface an error, never spawn a proof");
-    match err {
-        DriverError::Spawn { tool, .. } => assert_eq!(tool, "nargo", "Spawn names the tool"),
-        other => panic!("expected Spawn classification, got {:?}", other),
-    }
+    assert_missing_workspace_error(err);
 }
 
 /// `gen_witness` writes the per-member `Prover.toml` BEFORE spawning nargo; when
@@ -302,7 +324,7 @@ fn gen_witness_without_package_dir_is_io_error() {
 }
 
 /// `prove` (via `prove_in`) compiles FIRST, so with no workspace it fails closed at
-/// the compile spawn — a typed `DriverError::Spawn`, never a panic, and never a
+/// the compile step — a typed error naming `nargo`, never a panic, and never a
 /// partial artifact read.
 #[test]
 fn prove_without_workspace_is_spawn_error() {
@@ -310,21 +332,21 @@ fn prove_without_workspace_is_spawn_error() {
     let out = nonexistent_dir("prove-out");
     let err = prover
         .prove(&CircuitId::FilterInt { d: 1 }, "challenge = \"0x1\"\n", &out)
-        .expect_err("prove must fail closed without a toolchain");
-    assert!(matches!(err, DriverError::Spawn { .. }), "got {:?}", err);
+        .expect_err("prove must fail closed without a workspace");
+    assert_missing_workspace_error(err);
 }
 
 /// `canonical_vk` (the verifier-side authentic-vk path, audit #2) also compiles
-/// first, so it fails closed at the compile spawn without the toolchain — a typed
-/// error, never a prover-supplied vk fallback.
+/// first, so with no workspace it fails closed at the compile step — a typed error
+/// naming `nargo`, never a prover-supplied vk fallback.
 #[test]
 fn canonical_vk_without_workspace_is_spawn_error() {
     let prover = CircuitProver::new(nonexistent_dir("vk"));
     let work = nonexistent_dir("vk-work");
     let err = prover
         .canonical_vk(&CircuitId::FilterInt { d: 1 }, &work)
-        .expect_err("canonical_vk must fail closed without a toolchain");
-    assert!(matches!(err, DriverError::Spawn { .. }), "got {:?}", err);
+        .expect_err("canonical_vk must fail closed without a workspace");
+    assert_missing_workspace_error(err);
 }
 
 /// `verify_with` (and its `verify` wrapper) create the scratch dir first; when the
