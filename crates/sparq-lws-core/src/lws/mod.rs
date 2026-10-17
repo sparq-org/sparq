@@ -30,6 +30,7 @@ pub mod authz_server;
 pub mod index;
 mod intents;
 pub use sparq_lws_authn::jose;
+mod lease;
 pub mod notify;
 mod records;
 pub mod resources;
@@ -639,6 +640,8 @@ pub struct Inner<S: Store> {
     /// Holds whose release failed, each with its holder: tried again by the maintenance
     /// sweeper (see [`LwsState::unreleased`]).
     unreleased: std::sync::Mutex<Vec<(String, StoredMeta)>>,
+    /// This process's hold on its storage's lease ([`lease`]).
+    lease: lease::Lease,
 }
 
 /// An [`LwsState`] that does not keep it alive: what a task the state owns holds (see
@@ -693,6 +696,9 @@ impl<S: Store + 'static> LwsState<S> {
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
+        // Nothing is read, written or put back before this process holds the storage's lease:
+        // a start while another process serves the storage changes nothing ([`lease`]).
+        let lease = lease::Lease::take(&store, &root).await?;
         if !store
             .exists(&root)
             .await
@@ -722,6 +728,7 @@ impl<S: Store + 'static> LwsState<S> {
                 owed_touches: Default::default(),
                 settlements: Default::default(),
                 unreleased: Default::default(),
+                lease,
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
@@ -738,6 +745,7 @@ impl<S: Store + 'static> LwsState<S> {
             .await?;
         state.access.replace(loaded);
         state.settle_hidden(hidden);
+        lease::spawn_keeper(&state, closed.clone());
         notify::spawn_expiry_sweeper(&state, closed);
         Ok(state)
     }
@@ -2287,6 +2295,10 @@ impl axum::body::HttpBody for NoContent {
 }
 
 async fn route<S: Store + 'static>(state: &LwsState<S>, req: LwsRequest) -> Response {
+    // A process that may no longer hold its storage's lease serves nothing ([`lease`]).
+    if state.lease.lost() {
+        return resources::retry_later("the storage is not served by this process now");
+    }
     let path = req.path.as_str();
     // Unauthenticated liveness and readiness probes, as the Solid surface serves them.
     if matches!(path, "/livez" | "/readyz") && matches!(req.method, Method::GET | Method::HEAD) {
@@ -2769,6 +2781,10 @@ pub(crate) mod test_store {
         pub fail_delete: Arc<AtomicBool>,
         /// Every `release` fails with a backend error, releasing nothing.
         pub fail_release: Arc<AtomicBool>,
+        /// Every `take_lease` finds another holder's lease standing.
+        pub refuse_lease: Arc<AtomicBool>,
+        /// Every `take_lease` fails with a backend error.
+        pub fail_lease: Arc<AtomicBool>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `read` of this IRI alone (or, one ending in `/`, of the members of that container)
@@ -2917,6 +2933,8 @@ pub(crate) mod test_store {
                 fences_tried: Default::default(),
                 hang_fence: Default::default(),
                 fail_release: Default::default(),
+                refuse_lease: Default::default(),
+                fail_lease: Default::default(),
                 last_unsettled: Default::default(),
                 unsettled: Default::default(),
                 fail_step: Default::default(),
@@ -3215,6 +3233,21 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             self.inner.reinstate(iri, container, held).await
+        }
+        async fn take_lease(
+            &self,
+            key: &str,
+            holder: &str,
+            until: i64,
+            now: i64,
+        ) -> ServerResult<bool> {
+            if self.fail_lease.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            if self.refuse_lease.load(Ordering::SeqCst) {
+                return Ok(false);
+            }
+            self.inner.take_lease(key, holder, until, now).await
         }
         async fn release(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
             if self.fail_release.load(Ordering::SeqCst) {

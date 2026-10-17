@@ -62,6 +62,16 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.begin_reclaim(blob_key).await
     }
 
+    async fn take_lease(
+        &self,
+        key: &str,
+        holder: &str,
+        until: i64,
+        now: i64,
+    ) -> Result<bool, SparqError> {
+        self.0.take_lease(key, holder, until, now).await
+    }
+
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         self.0.end_reclaim(blob_key).await
     }

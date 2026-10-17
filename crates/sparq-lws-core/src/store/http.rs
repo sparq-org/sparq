@@ -531,6 +531,26 @@ impl SparqClient for HttpSparqClient {
         parse_ask_json(&body).map_err(SparqHttpError::into_sparq)
     }
 
+    async fn take_lease(
+        &self,
+        key: &str,
+        holder: &str,
+        until: i64,
+        now: i64,
+    ) -> Result<bool, SparqError> {
+        // One guarded update, then read back, as for a reclaim.
+        let u = sparql::update_take_lease(key, holder, until, now)?;
+        self.update_raw(&u)
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        let q = sparql::ask_lease(key, holder, until)?;
+        let (body, _ct) = self
+            .query_raw(&q, ACCEPT_RESULTS_JSON)
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        parse_ask_json(&body).map_err(SparqHttpError::into_sparq)
+    }
+
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         self.update_raw(&sparql::update_end_reclaim(blob_key))
             .await

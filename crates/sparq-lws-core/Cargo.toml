@@ -216,6 +216,11 @@ itoa = "1"
 # (already true for the musl release build). Cargo.lock is committed for a reproducible, reviewable build.
 # Declared for native targets below.
 
+[target.'cfg(unix)'.dependencies]
+# The exclusive lock an embedded index directory is opened under (`store::embedded`), so one
+# process at a time serves it. Already in the resolved graph (via tempfile), so no new crate.
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Linked Web Storage (`src/lws/`): ES256 access tokens, did:key / CID / OpenID Connect subject
 # tokens and RFC 9421 notification signatures. p256 and reqwest are already in the resolved graph
