@@ -107,7 +107,16 @@ but does not bypass WAC; the applicable resource or inherited container ACL
 must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
 it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
-the new `ETag` only to a writer that may read the target.
+the new `ETag` only to a writer that may read the target. An insert-only `PATCH` by a writer
+without `acl:Read` appends the statements as N-Triples lines to a stored Turtle, N-Triples or
+N-Quads document without parsing it, so whether it succeeds does not depend on what is stored;
+any other stored type (JSON-LD, ...) is refused to it as a write without access is. The stored
+bytes are still read and rewritten whole, so the time an append takes follows their size. A
+reader's `PATCH` reads the document by the same stored type, keeps that type, and leaves an
+N-Quads document's named graphs as stored: a `PATCH` changes the default graph. Blank nodes a
+`PATCH` inserts are always new ones. Deleting a container also needs `acl:Read` on it
+(whether it may go depends on what it holds). A `POST` names its member
+with the slug and a random suffix, so the name says nothing of what else was created.
 
 A rule may name its subject with `acl:agent`, `acl:agentClass foaf:Agent` (public)
 or `acl:AuthenticatedAgent`, or `acl:agentGroup`. A group grant resolves only when
@@ -286,13 +295,35 @@ removals of service records (grants, requests, subscriptions), and a resource cr
 content write, are fenced against that (see below); other resource writes, and putting a
 failed change back, are not.
 Anyone authenticated may hold at most 16 access requests and 16 subscriptions (429 past
-that; the owner's subscriptions are not counted), the server at most 512 of each (507),
-and each such request body is at most 16 KiB (413). A type-search filter is at most 8 KiB and an
-access grant 256 KiB; these limits apply while the body is read. The owner's subscriptions have a
-separate share of 512. Stored requests or subscriptions past these quotas at startup (stored
-before a quota was lowered, or written to the store directly) are all loaded and none is removed;
-the start logs a line naming the container and what is past which quota, and no new one is
-admitted to a share until it is under its quota. An access document nested too deeply to store and read back gets 400. A
+that; the owner's subscriptions are not counted), and each such request body is at most 16 KiB
+(413). Every subscriber has that capacity of 16 in full: how many subscriptions anyone else
+holds never makes it smaller, and the count behind a 429 is read from the requester's own
+records alone. The server holds at most 512 access requests and 512 subscriptions in all (507),
+the storage owner's subscriptions counted apart against 512 of its own. Those totals are
+resource bounds, not capacities: a 507 says the storage is full of subscriptions (or of access
+requests) **whoever filled it** — a newcomer holding none is refused the same. One subscriber
+cannot reach a total on its own, being held to 16.
+**Subscriptions have storage of their own.** In the in-memory store they are admitted against a
+service pool (`in_service_pool`, `InMemoryStoreLimits::max_pool_resource_count` and
+`max_pool_bytes`, sized for the 1,024 the notification service admits) and take nothing from the
+content ceilings (`max_resource_count`, `max_total_bytes`), so no number of subscriptions, from
+any number of identities, can make a write of content answer 507. A full pool refuses a
+subscription create (507) and nothing else. **Residual:** that 507 is an aggregate-occupancy
+signal — a requester well under its own 16 learns from it that the pool is full, which is
+something about how many subscriptions others hold. It is the occupancy of a bounded shared
+resource, as the access-request total is, and it carries no subscriber, topic or inbox; it is
+the signal a shared resource bound cannot avoid giving, kept to the subscription pool so it
+never reaches a content write.
+A type-search filter is at most 8 KiB and an
+access grant 256 KiB; these limits apply while the body is read. Stored requests or subscriptions
+past these bounds at startup (stored
+before one was lowered, or written to the store directly) are all loaded and none is removed;
+the start logs a line naming the container and what is past which bound, and no new one is
+admitted to a bound until it is under it. A subscription create removes up to 16 expired
+subscriptions **of its own subscriber's** before it is counted, so the purging it waits for is
+its own records'. Everyone else's are swept on a task of its own, started by a create that goes
+through once its locks are released; what that does not reach the next create's sweep takes,
+from where the last one stopped, and a start removes every expired subscription it loads. An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
@@ -488,7 +519,7 @@ What the server exposes, all discoverable from the storage description
   subscriptions to its own service container (not to one to the storage root): the owner and the
   record's author may hear of it. A stored subscription that cannot be read stops the start; one
   whose stored body is not a subscription is quarantined as access records are: listed to the
-  owner, counted against both shares, `500` to a read, removed by the owner's `DELETE` as any
+  owner, counted against both totals, `500` to a read, removed by the owner's `DELETE` as any
   record is. A subscription is created and cancelled as an access record is, by the same code.
   Each topic of a new subscription is checked before its lock is taken: one the subscriber may
   not read is refused (`403`, or `401` anonymous) at once, whatever its state. One it may read
@@ -500,16 +531,28 @@ What the server exposes, all discoverable from the storage description
   owed. Both are counted in memory from the start, and only for a change that happened (a delete
   that fails counts nothing). The authorization for one change has no budget of its own (one
   party's subscriptions that may not read the resource could spend it before an authorized one is
-  reached): the subscription quotas cap it at one check per subscription in force (at most
+  reached): the subscription totals cap it at one check per subscription in force (at most
   1,024). That caps the number of checks, not their cost: each reads from one snapshot of the
   resource's access taken for the change, so its metadata is read and the grants are scanned
-  once per change. A recursive delete too large to put back is refused before any of its
+  once per change. Taking a place in the delivery queue, parsing each inbox and running each
+  delivery leave the request's task before any of them is queued, on a task of their own
+  (`Notifier::send`), so a delivery target that never answers holds up neither that change nor
+  the next, and the request does not do the per-delivery work of however many subscriptions the
+  change has. When the runtime runs that task is the runtime's business: the deliveries are off
+  the request's task, which is not a promise that they happen after the response reaches the
+  client. Who hears of the change is still decided on the request's task, while its locks are
+  held.
+  A recursive delete too large to put back is refused before any of its
   notifications is prepared.
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
-  `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
-  anything is removed. When putting back fails too, it is tried a few more times with the
+  `Last-Modified`) are as they were. A recursive delete too large to put back is refused with
+  `409` before anything is removed; one resource's delete is never refused for its size by that
+  bound. Residual: what a delete would put back is copied into the store first, so a store with
+  too little room for that copy refuses the delete (`507`), and whether it does follows the size
+  of what is stored, which the deleting writer may not be able to read; a recursive delete's
+  `409` follows the subtree's size the same way. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
@@ -581,7 +624,15 @@ What the server exposes, all discoverable from the storage description
   nor an `Accept` the listing cannot serve refuses the write. A conditional `POST` to the storage
   root compares its public storage description, which needs no Read. A data `PUT`'s, or any
   `PATCH`'s, `204` carries the new `ETag` (of the resource, or of its linkset) only to a writer
-  that may read the result; a linkset `PUT`'s `204` carries none.
+  that may read the result; a linkset `PUT`'s `204` carries none. A write whose outcome would
+  follow from what is stored needs Read as well as Modify (or Delete): a `PUT` replacing a data
+  resource (it keeps the stored links and types, which decide whether it is admitted), a whole
+  linkset `PUT`, every `PATCH`, and a container `DELETE`. A `Slug`
+  names a new member only for a writer that may read the container; anyone else's member gets a
+  name the server chooses, so the name says nothing about which members are there. A
+  subscriber's subscription listing, and its `ETag`, change only with its own subscriptions, and
+  are read through a per-subscriber index, so neither what it is shown nor the work taken to
+  show it grows with how many subscriptions anyone else holds.
 - A resource's types come from two places, kept apart: `Link: <…>; rel="type"` headers and
   `<> a <…>` statements in Turtle content. A PUT replaces the content-stated types, and replaces
   the header-declared types only if it sends `rel="type"` headers of its own. Other Link

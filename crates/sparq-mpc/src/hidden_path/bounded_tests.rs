@@ -753,7 +753,9 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
 /// suffix. The full-log fingerprint is the new pin.
 #[test]
 fn seeded_bounded_stage_transcript_is_pinned() {
-    use crate::randomness::test_sources::{fingerprint, RecordingSource};
+    use crate::randomness::test_sources::{
+        fingerprint, prefix_before_first_shuffle, RecordingSource,
+    };
     let backend = ShamirBackend::new_seeded(3, 0xB0B).unwrap();
     let edges = pin_edges();
     let form = HiddenBoundedPath::range("p", 0, 2);
@@ -763,7 +765,14 @@ fn seeded_bounded_stage_transcript_is_pinned() {
     // Prefix unchanged from the pre-routing pin; the whole move is in the output
     // suffix, which grew by the per-element degree reductions.
     assert_eq!(fingerprint(&rec.log[..1932]), 0x690e_cad1_cdf7_7eb0);
-    assert_eq!(fingerprint(&rec.log), 0x9585_8505_1ecb_a85b);
+    // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+    // fingerprint is the value the pre-re-randomisation code produced, so only
+    // the shuffle's own output and the draws after it moved.
+    assert_eq!(
+        fingerprint(prefix_before_first_shuffle(&rec.log)),
+        0xa6c3_51d1_ad54_0fc2
+    );
+    assert_eq!(fingerprint(&rec.log), 0xd1f8_cf68_6b5c_ba26);
     let suffix: Vec<&str> = rec.log[1932..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,
