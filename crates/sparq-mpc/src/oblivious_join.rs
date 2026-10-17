@@ -114,6 +114,11 @@
 //!   CLOSED (we never silently drop matches — a candidate count `> B` is an error,
 //!   never a truncation that would corrupt the result); choosing it loose costs `B`
 //!   opens. `B` leaks an upper bound on the result size by construction.
+//! - **What a REFUSAL discloses.** The refusals on this module's open/decode path
+//!   name public constants and positions only — the two permitted tag constants,
+//!   the column index of a payload limb that would not decode — so a refusal says
+//!   that a slot's selector or a column's encoding was malformed, and where, and
+//!   not what any opened tag or decoded term was.
 //! - **L3 (input cardinalities `|L|`, `|R|`) and the candidate count** are public
 //!   (standard MPC assumption; research record §4.1). We do not claim to hide them.
 //! - **The packed payload WIDTH is public.** Every slot is packed to one uniform
@@ -743,10 +748,12 @@ fn open_and_decode_slots(
             classes.push(false);
         } else {
             return Err(MpcError::Tampered {
+                // The opened tag is a reconstructed quantity, so the refusal
+                // names the two values it was allowed to be — both public
+                // constants — and not the one it actually was.
                 detail: format!(
-                    "oblivious_set_output: opened slot tag {} is neither REAL_TAG ({}) nor 0 — \
+                    "oblivious_set_output: an opened slot tag is neither REAL_TAG ({}) nor 0 — \
                      malformed selector or corrupted share; refusing rather than dropping a match",
-                    tag.value(),
                     Fp::one().value()
                 ),
                 cheaters: Vec::new(),
@@ -1113,14 +1120,19 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
                             "decode_payload_row: column {col} term not NUL-terminated (corrupt entry)"
                         ))
                     })?;
-                let s = std::str::from_utf8(&bytes[pos..end]).map_err(|e| {
+                // The decoded bytes are a joined row's PAYLOAD. Neither the text
+                // nor the underlying parse error (which quotes it) may appear in
+                // the refusal — the column position is the diagnosis.
+                let s = std::str::from_utf8(&bytes[pos..end]).map_err(|_| {
                     MpcError::Protocol(format!(
-                        "decode_payload_row: column {col} term is not valid UTF-8: {e}"
+                        "decode_payload_row: column {} term is not valid UTF-8",
+                        col
                     ))
                 })?;
-                let term = Term::from_str(s).map_err(|e| {
+                let term = Term::from_str(s).map_err(|_| {
                     MpcError::Protocol(format!(
-                        "decode_payload_row: column {col} term {s:?} did not re-parse: {e}"
+                        "decode_payload_row: column {} term did not re-parse",
+                        col
                     ))
                 })?;
                 out.push(Some(term));
@@ -3439,5 +3451,69 @@ mod output_randomness_seam_tests {
             oblivious_set_output_through(&mut prss, &b, &padded_candidates(), 1, 5),
             Err(MpcError::NotYetImplemented { .. })
         ));
+    }
+
+    /// The output-stage refusals carry no opened or decoded value.
+    ///
+    /// Two sites: the opened slot TAG (a reconstructed quantity) and the payload
+    /// decode (the joined row's own content). Both use a distinctive value and
+    /// assert it appears in neither `Display` nor `Debug` of the error.
+    #[test]
+    fn output_stage_refusals_render_no_opened_or_decoded_value() {
+        // (a) The opened tag. A selector sharing of a distinctive non-{0,1} value
+        // makes this slot's tag open to it.
+        let b = ShamirBackend::new_seeded(5, 0xE6).unwrap();
+        let mut dealer = b.dealer();
+        let odd_tag = dealer.share(Fp::new(313_131));
+        let cands = vec![
+            Candidate {
+                payload: vec![lit("fine")],
+                matched: MatchBit::Public(true),
+            },
+            Candidate {
+                payload: vec![lit("malformed-selector")],
+                matched: MatchBit::SecretShared(odd_tag),
+            },
+        ];
+        let err = oblivious_set_output_through(&mut dealer, &b, &cands, 1, 5).unwrap_err();
+        let text = format!("{} || {:?}", err, err);
+        assert!(
+            !text.contains("313131"),
+            "the opened tag must not be rendered: {}",
+            text
+        );
+        assert!(
+            text.contains("neither REAL_TAG"),
+            "the two permitted PUBLIC constants are still named: {}",
+            text
+        );
+
+        // (b) The payload decode. `flag = 1` then a NUL-terminated string that is
+        // not a term: the string IS the payload, so it must not be echoed.
+        let mut bytes = vec![1u8];
+        bytes.extend_from_slice(b"PATIENT-575757");
+        bytes.push(0);
+        let err = decode_payload_row(&bytes, 1).unwrap_err();
+        let text = format!("{} || {:?}", err, err);
+        assert!(
+            !text.contains("575757") && !text.contains("PATIENT"),
+            "the undecodable payload must not be rendered: {}",
+            text
+        );
+        assert!(
+            text.contains("column 0") && text.contains("did not re-parse"),
+            "the column position is still named: {}",
+            text
+        );
+
+        // The non-UTF-8 branch of the same column, likewise.
+        let err = decode_payload_row(&[1u8, 0xff, 0xfe, 0x00], 1).unwrap_err();
+        let text = format!("{} || {:?}", err, err);
+        assert!(
+            !text.contains("255") && !text.contains("xff") && !text.contains("\\xff"),
+            "the offending bytes must not be rendered: {}",
+            text
+        );
+        assert!(text.contains("not valid UTF-8"), "{}", text);
     }
 }

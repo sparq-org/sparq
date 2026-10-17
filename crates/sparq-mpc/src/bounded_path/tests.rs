@@ -636,3 +636,321 @@ fn absent_predicate_yields_empty_chain() {
     let got = eval_bounded_path_disclosed(&edges, &form).unwrap();
     assert!(got.rows.is_empty());
 }
+
+// =====================================================================
+// 8. NESTED SEQUENCES — each level's intermediate variables are its own
+// =====================================================================
+
+/// A `Sequence` nested inside a `Sequence` must not reuse the enclosing level's
+/// connecting variables.
+///
+/// Every level used to name them `__pp_zseq1`, `__pp_zseq2`, ..., so an inner
+/// sequence's FIRST connecting variable was `__pp_zseq1` — which was also the
+/// variable the outer level had handed it as an endpoint. Evaluating a sub-form
+/// onto a pair of identical variables constrains both ends to be equal, so the
+/// pairs that reach the inner sequence through distinct endpoints were silently
+/// dropped. A wrong answer, not an error, which is why it needs a differential
+/// test rather than a refusal test.
+///
+/// `(ex:p/ex:p)/ex:q` over `a-p-b-p-c-q-d`, with the first factor written as a
+/// nested `Sequence`, forces exactly that aliasing: the inner sequence's second
+/// element would be evaluated onto `(__pp_zseq1, __pp_zseq1)` and `(a,d)` would
+/// disappear.
+#[test]
+fn a_nested_sequence_does_not_alias_the_enclosing_levels_variables() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c .";
+    let h2 = "ex:c ex:q ex:d .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"]), (h2, &["http://ex/q"])]);
+
+    let form = PathForm::Sequence(vec![
+        // The nested level. Flattened this is just `ex:p/ex:p`.
+        PathForm::Sequence(vec![
+            PathForm::exact(nn("http://ex/p"), 1),
+            PathForm::exact(nn("http://ex/p"), 1),
+        ]),
+        PathForm::exact(nn("http://ex/q"), 1),
+    ]);
+    let got = federated_pairs(&edges, &form);
+    let want = clear_text_pairs(&[h1, h2], "ex:p/ex:p/ex:q");
+    assert_eq!(
+        got, want,
+        "a nested sequence must denote the same relation as the flattened path"
+    );
+    assert_eq!(got.len(), 1, "exactly (a,d): {got:?}");
+
+    // The same relation written WITHOUT nesting, to show the nesting is the only
+    // difference and the flat form was never affected.
+    let flat = PathForm::Sequence(vec![
+        PathForm::exact(nn("http://ex/p"), 1),
+        PathForm::exact(nn("http://ex/p"), 1),
+        PathForm::exact(nn("http://ex/q"), 1),
+    ]);
+    assert_eq!(
+        federated_pairs(&edges, &flat),
+        want,
+        "the flat form must agree too"
+    );
+
+    // Three levels deep, and nested in the LAST position as well as the first —
+    // one unique name per sequence CALL, not per depth.
+    let deep = PathForm::Sequence(vec![
+        PathForm::Sequence(vec![
+            PathForm::Sequence(vec![
+                PathForm::exact(nn("http://ex/p"), 1),
+                PathForm::exact(nn("http://ex/p"), 1),
+            ]),
+            PathForm::exact(nn("http://ex/q"), 1),
+        ]),
+        PathForm::range(nn("http://ex/p"), 0, 1),
+    ]);
+    assert_eq!(
+        federated_pairs(&edges, &deep),
+        clear_text_pairs(&[h1, h2], "ex:p/ex:p/ex:q/ex:p?"),
+        "three nested levels must still denote the flattened path"
+    );
+}
+
+// =====================================================================
+// 9. SEEDED DIFFERENTIAL FUZZ — nested forms against a composition oracle
+// =====================================================================
+
+/// splitmix64 — a fixed, dependency-free generator so the whole sweep below is
+/// reproducible from one seed.
+struct FuzzRng(u64);
+
+impl FuzzRng {
+    fn next_u64(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn below(&mut self, n: u64) -> u64 {
+        self.next_u64() % n
+    }
+
+    fn chance(&mut self, num: u64, den: u64) -> bool {
+        self.below(den) < num
+    }
+}
+
+/// The three predicates the fuzz graphs use. Every holder discloses all three,
+/// so the disclosed edge set — and with it the node domain a `{0,k}` form draws
+/// its identity pairs from — is exactly the generated graph.
+const FUZZ_PREDS: [&str; 3] = ["http://ex/f0", "http://ex/f1", "http://ex/f2"];
+
+/// An abstract generated form, so the generator can build the oracle's view and
+/// the [`PathForm`] from one value.
+#[derive(Debug, Clone)]
+enum FuzzForm {
+    /// `(p_i | ...){m,k}` — the alternatives are indices into [`FUZZ_PREDS`].
+    Rep(Vec<usize>, usize, usize),
+    Seq(Vec<FuzzForm>),
+}
+
+impl FuzzForm {
+    fn to_path_form(&self) -> PathForm {
+        match self {
+            FuzzForm::Rep(alts, m, k) => PathForm::repeat_step(
+                PathStep::alternation(alts.iter().map(|&i| nn(FUZZ_PREDS[i]))),
+                *m,
+                *k,
+            ),
+            FuzzForm::Seq(parts) => {
+                PathForm::Sequence(parts.iter().map(FuzzForm::to_path_form).collect())
+            }
+        }
+    }
+
+    fn has_nested_sequence(&self) -> bool {
+        match self {
+            FuzzForm::Rep(..) => false,
+            FuzzForm::Seq(parts) => parts
+                .iter()
+                .any(|p| matches!(p, FuzzForm::Seq(_)) || p.has_nested_sequence()),
+        }
+    }
+}
+
+/// Generate a form. `depth` bounds the nesting; the sizes are kept small so the
+/// projected chain count stays far below [`MAX_UNROLL_CHAINS`] and every case
+/// evaluates in microseconds.
+fn fuzz_form(rng: &mut FuzzRng, depth: usize) -> FuzzForm {
+    fn rep(rng: &mut FuzzRng) -> FuzzForm {
+        let n_alts = 1 + rng.below(2) as usize;
+        let alts: Vec<usize> = (0..n_alts).map(|_| rng.below(3) as usize).collect();
+        let m = rng.below(3) as usize;
+        let k = m + rng.below(2) as usize;
+        FuzzForm::Rep(alts, m, k)
+    }
+    if depth == 0 || rng.chance(1, 3) {
+        return rep(rng);
+    }
+    let n_parts = 2 + rng.below(2) as usize;
+    let parts = (0..n_parts)
+        .map(|_| {
+            // Nest a sequence inside a sequence often — that is the shape under
+            // test — but keep plain repetitions in the mix too.
+            if rng.chance(1, 2) {
+                fuzz_form(rng, depth - 1)
+            } else {
+                rep(rng)
+            }
+        })
+        .collect();
+    FuzzForm::Seq(parts)
+}
+
+/// `(s, predicate index, o)` over small integer node indices.
+type FuzzGraph = Vec<(usize, usize, usize)>;
+
+/// Generate a graph and split it across holders. Returns the per-holder edge
+/// lists; the union of them is the relation the oracle reasons about.
+fn fuzz_graph(rng: &mut FuzzRng) -> Vec<FuzzGraph> {
+    let v = 2 + rng.below(4) as usize;
+    let holders = 1 + rng.below(3) as usize;
+    let density = 1 + rng.below(4); // out of 8
+    let mut per_holder: Vec<FuzzGraph> = vec![Vec::new(); holders];
+    for s in 0..v {
+        for p in 0..FUZZ_PREDS.len() {
+            for o in 0..v {
+                if rng.chance(density, 8) {
+                    let h = rng.below(holders as u64) as usize;
+                    per_holder[h].push((s, p, o));
+                    // Occasionally disclose the same edge from a second holder,
+                    // so the fold has to dedup across members.
+                    if holders > 1 && rng.chance(1, 6) {
+                        let h2 = rng.below(holders as u64) as usize;
+                        per_holder[h2].push((s, p, o));
+                    }
+                }
+            }
+        }
+    }
+    per_holder
+}
+
+/// The IRI of fuzz node `i`.
+fn fuzz_node_iri(i: usize) -> String {
+    format!("http://ex/fn{}", i)
+}
+
+/// Turtle body disclosing one holder's edges.
+fn fuzz_turtle(g: &FuzzGraph) -> String {
+    let mut out = String::new();
+    for &(s, p, o) in g {
+        out.push_str(&format!(
+            "<{}> <{}> <{}> .\n",
+            fuzz_node_iri(s),
+            FUZZ_PREDS[p],
+            fuzz_node_iri(o)
+        ));
+    }
+    out
+}
+
+/// An independent semantic oracle: the endpoint relation of `f` as a set of
+/// node-index pairs, computed by relational composition over the union graph —
+/// no part of the unroller is involved.
+fn fuzz_oracle(f: &FuzzForm, per_holder: &[FuzzGraph]) -> BTreeSet<(usize, usize)> {
+    fn compose(
+        a: &BTreeSet<(usize, usize)>,
+        b: &BTreeSet<(usize, usize)>,
+    ) -> BTreeSet<(usize, usize)> {
+        let mut out = BTreeSet::new();
+        for &(x, y) in a {
+            for &(y2, z) in b {
+                if y == y2 {
+                    out.insert((x, z));
+                }
+            }
+        }
+        out
+    }
+    let all: BTreeSet<(usize, usize, usize)> = per_holder.iter().flatten().copied().collect();
+    // The node domain the length-0 identity pairs come from: every node named by
+    // any disclosed edge, under any predicate.
+    let domain: BTreeSet<usize> = all.iter().flat_map(|&(s, _, o)| [s, o]).collect();
+    match f {
+        FuzzForm::Rep(alts, m, k) => {
+            let step: BTreeSet<(usize, usize)> = all
+                .iter()
+                .filter(|(_, p, _)| alts.contains(p))
+                .map(|&(s, _, o)| (s, o))
+                .collect();
+            let mut out = BTreeSet::new();
+            let mut power: BTreeSet<(usize, usize)> = domain.iter().map(|&x| (x, x)).collect();
+            for len in 0..=*k {
+                if len > 0 {
+                    power = compose(&power, &step);
+                }
+                if len >= *m {
+                    out.extend(power.iter().copied());
+                }
+            }
+            out
+        }
+        FuzzForm::Seq(parts) => {
+            let mut acc = fuzz_oracle(&parts[0], per_holder);
+            for p in &parts[1..] {
+                acc = compose(&acc, &fuzz_oracle(p, per_holder));
+            }
+            acc
+        }
+    }
+}
+
+/// Render the oracle's node-index pairs in the same form [`pair_set`] produces,
+/// so the two sides are directly comparable.
+fn fuzz_oracle_pairs(s: &BTreeSet<(usize, usize)>) -> BTreeSet<(String, String)> {
+    let term = |i: usize| format!("{:?}", Term::NamedNode(nn(&fuzz_node_iri(i))));
+    s.iter().map(|&(a, b)| (term(a), term(b))).collect()
+}
+
+/// Seeded differential sweep: random nested forms over random multi-holder
+/// graphs, the disclosed-key unroll against the composition oracle above.
+///
+/// This is the general form of the regression test in section 8 — with the
+/// shared `{INTERMEDIATE_PREFIX}seq{i}` naming, every iteration whose form
+/// nests a sequence under a sequence can lose pairs. The sweep asserts the
+/// nested and the flat cases alike, and additionally asserts that nested forms
+/// actually OCCURRED, so a generator change cannot quietly empty it out.
+#[test]
+fn seeded_fuzz_nested_forms_match_the_composition_oracle() {
+    let mut rng = FuzzRng(0x5EED_B0A4);
+    let mut nested = 0usize;
+    let mut flat = 0usize;
+
+    for iter in 0..200 {
+        let per_holder = fuzz_graph(&mut rng);
+        let form = fuzz_form(&mut rng, 2);
+
+        let docs: Vec<String> = per_holder.iter().map(fuzz_turtle).collect();
+        let preds: Vec<&str> = FUZZ_PREDS.to_vec();
+        let args: Vec<(&str, &[&str])> = docs.iter().map(|d| (d.as_str(), &preds[..])).collect();
+        let edges = disclosed_edges(&args);
+
+        let got = federated_pairs(&edges, &form.to_path_form());
+        let want = fuzz_oracle_pairs(&fuzz_oracle(&form, &per_holder));
+        assert_eq!(
+            got, want,
+            "iter {}: the unroll disagrees with the oracle\n  form: {:?}\n  graph: {:?}",
+            iter, form, per_holder
+        );
+
+        if form.has_nested_sequence() {
+            nested += 1;
+        } else {
+            flat += 1;
+        }
+    }
+
+    assert!(
+        nested >= 20,
+        "the sweep must actually exercise nested sequences, saw {} of 200",
+        nested
+    );
+    assert!(flat > 0, "and flat forms too, saw {} of 200", flat);
+}

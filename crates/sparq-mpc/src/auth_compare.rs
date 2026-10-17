@@ -84,12 +84,17 @@ fn check_party_count(n: usize, t: usize) -> Result<(), MpcError> {
 
 /// Both operands must fit the [`COMPARE_BITS`] bit-decomposition so equality of the
 /// recovered bits is equality of the field values (no wrap). Fail-closed.
+///
+/// **What the refusal discloses.** The same as the semi-honest twin
+/// `compare::check_in_range`: that an operand was out of range and which one (by
+/// `label`), never its value.
 fn check_in_range(label: &str, v: Fp) -> Result<(), MpcError> {
     if v.value() >= (1u64 << COMPARE_BITS) {
         return Err(MpcError::Protocol(format!(
-            "tamper-evident comparison operand `{label}` = {} is out of range (must be < 2^{} = \
-             {}); the bit-decomposition would wrap and the verdict would be wrong",
-            v.value(),
+            // The operand is the secret under comparison: name it and the public
+            // bound, never its value.
+            "tamper-evident comparison operand `{label}` is out of range (must be < 2^{} = {}); \
+             the bit-decomposition would wrap and the verdict would be wrong",
             COMPARE_BITS,
             1u64 << COMPARE_BITS
         )));
@@ -308,11 +313,11 @@ fn verdict_bit(bit: Fp) -> Result<bool, MpcError> {
     } else if bit == Fp::one() {
         Ok(true)
     } else {
-        Err(MpcError::Protocol(format!(
-            "tamper-evident comparison verdict reconstructed to a non-boolean field element {} \
-             (expected 0 or 1) — refusing to coerce",
-            bit.value()
-        )))
+        Err(MpcError::Protocol(
+            "tamper-evident comparison verdict reconstructed to a non-boolean field element \
+             (expected 0 or 1) — refusing to coerce"
+                .to_string(),
+        ))
     }
 }
 
@@ -846,5 +851,31 @@ mod tests {
             })
             .collect();
         crate::authenticated::AuthenticatedShare::new(av.value_shares().to_vec(), mac).unwrap()
+    }
+
+    /// The tamper-evident path's twin refusals are value-free as well: the
+    /// operand range check and the non-boolean verdict coercion.
+    #[test]
+    fn tamper_evident_refusals_render_no_field_element() {
+        let shown = |e: &MpcError| format!("{} || {:?}", e, e);
+
+        let operand = (1u64 << COMPARE_BITS) + 838_383;
+        let err = check_in_range("threshold", Fp::new(operand)).unwrap_err();
+        let text = shown(&err);
+        assert!(
+            !text.contains("838383") && !text.contains(&operand.to_string()),
+            "the operand must not be rendered: {}",
+            text
+        );
+        assert!(
+            text.contains("`threshold`") && text.contains("out of range"),
+            "{}",
+            text
+        );
+
+        let err = verdict_bit(Fp::new(515_151)).unwrap_err();
+        let text = shown(&err);
+        assert!(!text.contains("515151"), "{}", text);
+        assert!(text.contains("non-boolean"), "{}", text);
     }
 }

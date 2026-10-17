@@ -382,7 +382,10 @@ pub fn eval_bounded_path_disclosed(
 
     // The pair RELATION over the canonical endpoint vars (?__pp_a, ?__pp_b),
     // computed by the unroll; then deduped to a set of endpoint pairs.
-    let relation = eval_form_relation(edges, form, &subject, &object)?;
+    // One counter for the whole evaluation, so every nested sequence gets its own
+    // intermediate-variable namespace (see `eval_sequence`).
+    let mut scope = 0usize;
+    let relation = eval_form_relation(edges, form, &subject, &object, &mut scope)?;
     Ok(dedup_endpoint_pairs(relation, &subject, &object))
 }
 
@@ -394,10 +397,15 @@ fn eval_form_relation(
     form: &PathForm,
     subject: &Variable,
     object: &Variable,
+    scope: &mut usize,
 ) -> Result<PartialResult, MpcError> {
     match form {
+        // A repetition's own hop variables are `__pp_z{i}`, a different namespace
+        // from a sequence's `__pp_zs{scope}_{i}`, and repetitions do not nest (a
+        // step carries predicates, not sub-forms), so they need no scope of their
+        // own.
         PathForm::Repetition(rep) => eval_repetition(edges, rep, subject, object),
-        PathForm::Sequence(parts) => eval_sequence(edges, parts, subject, object),
+        PathForm::Sequence(parts) => eval_sequence(edges, parts, subject, object, scope),
     }
 }
 
@@ -563,19 +571,33 @@ fn eval_sequence(
     parts: &[PathForm],
     subject: &Variable,
     object: &Variable,
+    scope: &mut usize,
 ) -> Result<PartialResult, MpcError> {
     if parts.is_empty() {
         return Err(MpcError::Protocol("empty path sequence".into()));
     }
     if parts.len() == 1 {
-        return eval_form_relation(edges, &parts[0], subject, object);
+        return eval_form_relation(edges, &parts[0], subject, object, scope);
     }
 
-    let mid_var = |i: usize| Variable::new_unchecked(format!("{INTERMEDIATE_PREFIX}seq{i}"));
+    // Claim a scope id for THIS call before recursing, so no two sequence calls in
+    // one evaluation share an intermediate name. Every level used to name its
+    // connecting variables `__pp_zseq1`, `__pp_zseq2`, ... so a sequence nested in
+    // a sequence reused the names of the level around it: the inner call's first
+    // connecting variable was `__pp_zseq1`, which was also the outer mid variable
+    // it had been handed as its SUBJECT. Evaluating a sub-form onto
+    // `(__pp_zseq1, __pp_zseq1)` constrains both endpoints to be equal, which
+    // silently drops the pairs that reach the inner sequence through distinct
+    // endpoints — a wrong answer, not an error.
+    *scope += 1;
+    let my_scope = *scope;
+    let mid_var = move |i: usize| {
+        Variable::new_unchecked(format!("{}s{}_{}", INTERMEDIATE_PREFIX, my_scope, i))
+    };
 
     // First sub-form onto (?__pp_a, mid1).
     let first_end = mid_var(1);
-    let mut acc = eval_form_relation(edges, &parts[0], subject, &first_end)?;
+    let mut acc = eval_form_relation(edges, &parts[0], subject, &first_end, scope)?;
     let mut prev_end = first_end;
 
     let join = DisclosedKeyJoin::new();
@@ -586,7 +608,7 @@ fn eval_sequence(
         } else {
             mid_var(idx + 1)
         };
-        let part_rel = eval_form_relation(edges, part, &prev_end, &this_end)?;
+        let part_rel = eval_form_relation(edges, part, &prev_end, &this_end, scope)?;
         // Dedup each sub-form's relation before joining so a sub-form's internal
         // multiplicity (e.g. two lengths reaching the same mid pair) does not
         // inflate the composition — endpoint relations are sets.
