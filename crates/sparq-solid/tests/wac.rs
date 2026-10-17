@@ -165,3 +165,20 @@ fn wac_allow_header_advertises_held_modes() {
     let bare = PodStore::new(Graph::load_dataset(&wac_fixture(), "nquads").expect("fixture loads"));
     assert_eq!(bare.wac_allow(&sess(Some(ALICE)), &pub1), r#"user="",public="""#);
 }
+
+/// A path with an empty segment (`/priv0//d.ttl`) inherits through the same container
+/// chain the store enumerates: the owner's root `acl:default` still reaches it, and an
+/// agent without a grant still gets nothing.
+#[test]
+fn wac_inherits_across_an_empty_path_segment() {
+    let mut nq = wac_fixture();
+    nq.push_str("<https://pod.ex/priv0//d.ttl#s> <urn:p> \"v\" <https://pod.ex/priv0//d.ttl> .\n");
+    let g = Graph::load_dataset(&nq, "nquads").expect("fixture loads");
+    let mut s = PodStore::new(g);
+    s.materialize_wac().expect("wac materializes");
+    let doc = "https://pod.ex/priv0//d.ttl";
+    assert!(can(&mut s, Some(ALICE), None, Mode::Read, doc));
+    assert!(can(&mut s, Some(ALICE), None, Mode::Write, doc));
+    assert!(!can(&mut s, Some(BOB), None, Mode::Read, doc));
+    assert!(!can(&mut s, None, None, Mode::Read, doc));
+}

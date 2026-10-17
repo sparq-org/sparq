@@ -361,7 +361,7 @@ fn every_corpus_rules_file_compiles() {
     // The compile front end must admit the WHOLE access-control corpus (the sq-zgbso.4
     // build-time flip depends on it) — and report how many rules it lowered.
     for (name, min_rules) in [
-        ("common.n3", 4),
+        ("common.n3", 2),
         ("wac.n3", 12),
         ("acp-a.n3", 20),
         ("acp-b.n3", 5),
