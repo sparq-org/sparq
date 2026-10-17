@@ -306,8 +306,11 @@ fn check_params(
             MAX_DISTINCT_ROWS
         )));
     }
-    // The output bound is validated before the sort-and-scan stage draws: the
-    // output stage materialises `B` slots and sizes its shuffle network from them.
+    // The guarantee is: BEFORE ANY DRAW OR ALLOCATION, not "first". The checks
+    // above it are parameter and shape refusals that draw nothing and allocate
+    // nothing, so they keep precedence deliberately; what matters is that no draw
+    // and no `B`-sized allocation can precede this. The sort-and-scan draws per
+    // comparison and the output stage materialises `B` slots.
     crate::oblivious_join::check_output_bound_cap(bound)?;
     if bound < pairs.len() {
         return Err(MpcError::Protocol(format!(

@@ -555,3 +555,38 @@ fn seeded_distinct_stage_transcript_is_pinned() {
         [["vss_own_input"; 113].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }
+
+/// The DISTINCT stage refuses an over-cap output bound before ANY draw, on a
+/// NON-EMPTY input: the sort-and-scan draws per comparison and the output stage
+/// materialises `B` slots, so the refusal has to precede both.
+#[test]
+fn an_over_cap_bound_is_refused_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x9D01).unwrap();
+    let pairs = vec![
+        pair(1, 2, "a", "b"),
+        pair(1, 2, "a", "b"),
+        pair(3, 4, "c", "d"),
+    ];
+    for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = distinct_hidden_pairs_slots_through(&mut counted, &backend, &pairs, bound)
+            .expect_err("an over-cap bound must be refused");
+        match &err {
+            MpcError::Protocol(m) => {
+                assert!(m.contains("MAX_OUTPUT_BOUND"), "B={bound}: {m}")
+            }
+            other => panic!("B={bound}: expected a Protocol refusal, got {other:?}"),
+        }
+        assert_eq!(
+            counted.draws(),
+            0,
+            "B={bound}: the bound must be refused before any draw"
+        );
+    }
+    // A legal bound over the same input still runs.
+    assert!(distinct_hidden_pairs(&backend, &pairs, 4).is_ok());
+}

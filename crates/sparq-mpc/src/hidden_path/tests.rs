@@ -719,3 +719,47 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
         [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }
+
+/// Both exactly-`k` entries — the public slot path and the test-only instrumented
+/// one — refuse an over-cap output bound before ANY draw, on a NON-EMPTY edge set.
+/// `build_candidates` draws per hop equality and the output stage materialises `B`
+/// slots, so the refusal has to precede both.
+#[test]
+fn an_over_cap_bound_is_refused_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C01).unwrap();
+    let (edges, _interner) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+        ("http://ex/c", "http://ex/d"),
+    ]);
+
+    for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, bound)
+            .expect_err("an over-cap bound must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={bound}: {m}"),
+            other => panic!("B={bound}: expected a Protocol refusal, got {other:?}"),
+        }
+        assert_eq!(counted.draws(), 0, "slots_through B={bound}");
+
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err =
+            exact_k_chain_candidates_and_opened_rows(&mut counted, &backend, &edges, 2, bound)
+                .expect_err("the instrumented entry must refuse it too");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={bound}: {m}"),
+            other => panic!("B={bound}: expected a Protocol refusal, got {other:?}"),
+        }
+        assert_eq!(counted.draws(), 0, "candidates_and_opened_rows B={bound}");
+    }
+
+    // A legal bound over the same edges still runs.
+    let legal = eval_exact_k_chain_hidden(&backend, &edges, 2, 16);
+    assert!(legal.is_ok(), "a legal bound must still run: {:?}", legal);
+}

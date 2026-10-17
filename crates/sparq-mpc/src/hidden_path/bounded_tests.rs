@@ -818,3 +818,36 @@ fn seeded_bounded_stage_transcript_is_pinned() {
         [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }
+
+/// The bounded-form entry refuses an over-cap output bound before ANY draw, on a
+/// NON-EMPTY edge set: `build_bounded_candidates` draws per hop equality and the
+/// output stage materialises `B` slots.
+#[test]
+fn an_over_cap_output_bound_is_refused_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7D01).unwrap();
+    let edges = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ]);
+    let form = HiddenBoundedPath::range(P, 1, 2);
+    for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err =
+            eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, bound)
+                .expect_err("an over-cap bound must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={bound}: {m}"),
+            other => panic!("B={bound}: expected a Protocol refusal, got {other:?}"),
+        }
+        assert_eq!(
+            counted.draws(),
+            0,
+            "B={bound}: the bound must be refused before any draw"
+        );
+    }
+    assert!(eval_bounded_path_hidden(&backend, &edges, &form, 4).is_ok());
+}
