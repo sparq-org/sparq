@@ -89,6 +89,21 @@ Use the [binding corpus and replay harness](../../bench/zk-bindings/README.md) t
 ## Prerequisites
 
 - **Noir toolchain on `PATH`** (the only way to prove/verify): `nargo` **1.0.0-beta.21** and Barretenberg `bb` **5.0.0-nightly.20260324** (bb target `noir-recursive`). Other versions may change the bb public-input byte layout the verifier reconstructs against. If `nargo`/`bb` are absent, the structural pre-filter and all host-side helpers still work, but `verify_manifest` / `CircuitProver` cannot.
+- **Running the LIVE test suites.** The integration suites in `crates/sparq-zk-compose/tests/`
+  split into a structural half (no external tooling) and a LIVE half that shells out to a real
+  `nargo execute` and/or `bb prove`/`bb verify`. The LIVE half shares one gate
+  (`tests/support/mod.rs`, `require_toolchain`) which **fails the test** when `nargo`/`bb` are
+  missing, naming the missing tool — a toolchain-free run can no longer report `ok` for a body
+  that never executed. Put the tools on `PATH` to run them (in a cloud container they are
+  installed outside `PATH`: `export PATH=$PATH:/root/.nargo/bin:/root/.bb`).
+  - `SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN` (default: unset) — set to a non-empty value other than
+    `0` to declare a lane deliberately toolchain-free. Each live test then prints
+    `SKIP <test>: …` to stderr and returns instead of failing (nextest hides that line for a
+    passing test unless `success-output` is set; the lane's environment is the declaration).
+    `ci.yml` and `feature-matrix.yml` set it at workflow level (neither installs the
+    toolchain); `zk-toolchain.yml`, which does install it, asserts the variable is **unset**
+    so a stray export cannot silently restore the old false green, and runs both the
+    `#[ignore]`d live suites and the default-run live tests with the toolchain on `PATH`.
 - **Compiled circuit family** lives at `zk/compose/` in the repo (a Nargo workspace, NOT linked — driven by subprocess). `CircuitProver::from_crate_root()` locates it as `../../zk/compose` relative to the crate.
 - **Cargo deps** (both crates are `publish = false`, non-default workspace members — nothing else in sparq depends on them, and there is **no `zk` cargo feature on these crates** to enable; just add them as path/git deps):
   ```toml

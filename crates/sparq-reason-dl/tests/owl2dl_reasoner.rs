@@ -434,7 +434,7 @@ fn facts_through_a_merge_depend_on_it() {
 }
 
 #[test]
-fn nominals_with_blocking_answer_or_abstain() {
+fn nominals_with_blocking_are_decided() {
     // Every person has a parent who is a person, and every person lives in `uk`.
     let base = format!(
         "{DECL} :hasParent a owl:ObjectProperty , owl:AsymmetricProperty , owl:IrreflexiveProperty .
@@ -446,17 +446,13 @@ fn nominals_with_blocking_answer_or_abstain() {
     // An infinite chain of persons all living in `c`: consistent.
     assert_eq!(verdict(&base), Consistency::Consistent);
     // At most two persons live in `c`, so the chain needs a 2-cycle or a loop, which
-    // asymmetry and irreflexivity forbid: inconsistent. Deciding it needs SHOIQ's NI-rule;
-    // the answer is Unknown, never Consistent.
+    // asymmetry and irreflexivity forbid: inconsistent. The NI-rule names the two.
     let capped = format!(
         "{base} {} rdfs:subClassOf {} .",
         object_one_of(":c"),
         max(2, "[ owl:inverseOf :livesIn ]", "owl:Thing")
     );
-    assert_eq!(
-        verdict(&capped),
-        Consistency::Unknown(UnknownReason::Unconfirmed)
-    );
+    assert_eq!(verdict(&capped), Consistency::Inconsistent);
     // With at most one, merging is forced at once: bob is his own parent, a clash.
     let one = format!(
         "{base} {} rdfs:subClassOf {} .",
@@ -3045,10 +3041,20 @@ fn a_blocked_node_may_reach_a_nominal_its_blocker_reaches() {
         (String::new(), true, true),
         (format!(":o a {} . :S a owl:IrreflexiveProperty .", max(1)), false, true),
         (format!(":o a {} .", max(1)), true, true),
-        // At most two `R`-predecessors of `:o`: no finite `S`-chain of `C0`s, asymmetric
-        // or irreflexive, fits; the copies are counted.
-        (format!(":o a {} . :S a owl:AsymmetricProperty .", max(2)), false, false),
-        (format!(":o a {} . :S a owl:IrreflexiveProperty .", max(2)), true, false),
+        // At most two `R`-predecessors of `:o`: the copies are counted, and the NI-rule
+        // makes the `C0`s two individuals, an `S`-cycle that asymmetry forbids.
+        (format!(":o a {} . :S a owl:AsymmetricProperty .", max(2)), false, true),
+        (format!(":o a {} . :S a owl:IrreflexiveProperty .", max(2)), true, true),
+        // The restriction is one disjunct of a union: the NI-rule does not apply, so the
+        // answer may be unconfirmed, never consistent.
+        (
+            format!(
+                ":D a owl:Class . :o a [ owl:complementOf :D ] , [ a owl:Class ; owl:unionOf ( {} :D ) ] . :S a owl:AsymmetricProperty .",
+                max(2)
+            ),
+            false,
+            false,
+        ),
         (
             ":C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :T ; owl:hasSelf true ] ."
                 .to_string(),
@@ -3114,6 +3120,176 @@ fn a_blocked_node_may_reach_a_nominal_its_blocker_reaches() {
         "C1"
     ));
 }
+
+/// The NI-rule corpus: cycles of existentials through classes that reach an individual,
+/// with at-most restrictions at the individual on the inverse roles (qualified or not,
+/// through super-roles), and role characteristics, universals, disjointness and
+/// assertions that decide how many elements the cycles may use.
+fn ni_corpus(seed: u64) -> String {
+    let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    let (n_classes, n_roles, n_inds) = (2 + rng.below(3), 2 + rng.below(2), 1 + rng.below(2));
+    let mut out = String::new();
+    let _ = writeln!(out, "<http://ex/ni{seed}> a owl:Ontology .");
+    for i in 0..n_classes {
+        let _ = writeln!(out, ":C{i} a owl:Class .");
+    }
+    for i in 0..n_roles {
+        let _ = writeln!(out, ":r{i} a owl:ObjectProperty .");
+    }
+    for i in 0..n_inds {
+        let _ = writeln!(out, ":i{i} a owl:NamedIndividual .");
+    }
+    let card = |n: usize| format!("\"{n}\"^^xsd:nonNegativeInteger");
+    let role = |rng: &mut Rng| {
+        let r = rng.below(n_roles);
+        if rng.chance(30) {
+            format!("[ owl:inverseOf :r{r} ]")
+        } else {
+            format!(":r{r}")
+        }
+    };
+    let inverse = |r: &str| match r.strip_prefix("[ owl:inverseOf ") {
+        Some(rest) => rest.trim_end_matches(" ]").to_string(),
+        None => format!("[ owl:inverseOf {r} ]"),
+    };
+    let filler = |rng: &mut Rng| match rng.below(4) {
+        0 => "owl:Thing".to_string(),
+        1 => format!("[ owl:complementOf :C{} ]", rng.below(n_classes)),
+        _ => format!(":C{}", rng.below(n_classes)),
+    };
+    // The cycle: each class needs a successor in another (or the same) class.
+    for _ in 0..1 + rng.below(3) {
+        let (c, d, r) = (rng.below(n_classes), rng.below(n_classes), role(&mut rng));
+        let _ = writeln!(
+            out,
+            ":C{c} rdfs:subClassOf [ a owl:Restriction ; owl:onProperty {r} ; owl:someValuesFrom :C{d} ] ."
+        );
+    }
+    // The cycle's classes reach the individuals.
+    let mut links = Vec::new();
+    for _ in 0..1 + rng.below(2) {
+        let (c, r, i) = (rng.below(n_classes), role(&mut rng), rng.below(n_inds));
+        let _ = writeln!(
+            out,
+            ":C{c} rdfs:subClassOf [ a owl:Restriction ; owl:onProperty {r} ; owl:hasValue :i{i} ] ."
+        );
+        links.push((r, i));
+    }
+    // At-most restrictions at the individuals on the inverse of a link (or a super-role).
+    for _ in 0..1 + rng.below(2) {
+        let (r, i) = links[rng.below(links.len())].clone();
+        let r = if rng.chance(25) {
+            let sup = rng.below(n_roles);
+            let _ = writeln!(out, "{r} rdfs:subPropertyOf :r{sup} .");
+            format!(":r{sup}")
+        } else {
+            r
+        };
+        let (n, f) = (1 + rng.below(3), filler(&mut rng));
+        let _ = writeln!(
+            out,
+            ":i{i} a [ a owl:Restriction ; owl:onProperty {} ; owl:maxQualifiedCardinality {} ; owl:onClass {f} ] .",
+            inverse(&r),
+            card(n)
+        );
+    }
+    for _ in 0..rng.below(5) {
+        match rng.below(9) {
+            0 => {
+                let r = rng.below(n_roles);
+                let ch = [
+                    "Asymmetric",
+                    "Irreflexive",
+                    "Functional",
+                    "InverseFunctional",
+                ][rng.below(4)];
+                let _ = writeln!(out, ":r{r} a owl:{ch}Property .");
+            }
+            1 => {
+                let (c, r, f) = (rng.below(n_classes), role(&mut rng), filler(&mut rng));
+                let _ = writeln!(
+                    out,
+                    ":C{c} rdfs:subClassOf [ a owl:Restriction ; owl:onProperty {r} ; owl:allValuesFrom {f} ] ."
+                );
+            }
+            2 => {
+                let (c, d) = (rng.below(n_classes), rng.below(n_classes));
+                if c != d {
+                    let _ = writeln!(out, ":C{c} owl:disjointWith :C{d} .");
+                }
+            }
+            3 => {
+                let (i, c) = (rng.below(n_inds), rng.below(n_classes));
+                let _ = writeln!(out, ":i{i} a :C{c} .");
+            }
+            4 => {
+                let (i, r, f, n) = (
+                    rng.below(n_inds),
+                    role(&mut rng),
+                    filler(&mut rng),
+                    rng.below(3),
+                );
+                let _ = writeln!(
+                    out,
+                    ":i{i} a [ a owl:Restriction ; owl:onProperty {r} ; owl:maxQualifiedCardinality {} ; owl:onClass {f} ] .",
+                    card(n)
+                );
+            }
+            5 => {
+                let (c, r, n) = (rng.below(n_classes), role(&mut rng), 1 + rng.below(2));
+                let _ = writeln!(
+                    out,
+                    ":C{c} rdfs:subClassOf [ a owl:Restriction ; owl:onProperty {r} ; owl:maxCardinality {} ] .",
+                    card(n)
+                );
+            }
+            6 => {
+                let (c, d, e) = (
+                    rng.below(n_classes),
+                    rng.below(n_classes),
+                    rng.below(n_classes),
+                );
+                let _ = writeln!(
+                    out,
+                    ":C{c} rdfs:subClassOf [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C{d} ] :C{e} ) ] ."
+                );
+            }
+            7 => {
+                let (a, b) = (rng.below(n_roles), rng.below(n_roles));
+                if a != b {
+                    let _ = writeln!(out, ":r{a} rdfs:subPropertyOf :r{b} .");
+                }
+            }
+            _ => {
+                let (c, r) = (rng.below(n_classes), rng.below(n_roles));
+                let _ = writeln!(
+                    out,
+                    ":C{c} rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r{r} ; owl:hasSelf true ] ."
+                );
+            }
+        }
+    }
+    // Something is in the cycle.
+    let _ = writeln!(
+        out,
+        ":a a owl:NamedIndividual , :C{} .",
+        rng.below(n_classes)
+    );
+    out
+}
+
+#[test]
+fn oracle_differential_ni() {
+    differential(
+        "ni",
+        ni_corpus,
+        NI_SEEDS,
+        include_str!("data/owl2dl_oracle_ni_expected.txt"),
+        Some(5),
+    );
+}
+
+const NI_SEEDS: u64 = 400;
 
 // ---- built-in properties ---------------------------------------------------------------
 
@@ -3349,4 +3525,29 @@ fn classes_under_a_bottom_property_are_classified() {
         let body = format!(":C1 a owl:Class . :C2 a owl:Class . {U} rdfs:domain :C1 . {body}");
         assert!(entails_sub(&body, "C0", "C1"), "{body}");
     }
+}
+
+/// An at-most restriction that is one disjunct of a union whose other disjunct holds at the
+/// individual counts no copies: classifying `C0` (a cycle reaching `:i2`) stays within the
+/// default budget, as HermiT answers it.
+#[test]
+fn a_satisfied_union_at_an_individual_counts_no_copies() {
+    let body = ":C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C5 a owl:Class .
+        :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty .
+        :i0 a owl:NamedIndividual . :i2 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] ,
+            [ a owl:Restriction ; owl:onProperty :r1 ; owl:hasValue :i2 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:allValuesFrom :C1 ] ,
+            [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ;
+              owl:maxQualifiedCardinality \"3\"^^xsd:nonNegativeInteger ;
+              owl:onClass [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C2 ] [ owl:complementOf :C0 ] ) ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( [ a owl:Restriction ; owl:onProperty :r0 ;
+            owl:maxQualifiedCardinality \"3\"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C1 ] ] :C5 ) ] .
+        :i2 a [ a owl:Class ; owl:unionOf ( [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ;
+            owl:maxQualifiedCardinality \"1\"^^xsd:nonNegativeInteger ; owl:onClass owl:Thing ] :C1 ) ] .";
+    let (d, t) = Graph::parse_to_triples(&format!("{PRE}{body}"), "turtle").unwrap();
+    let o = extract(&d, &t).unwrap();
+    let report = check(&d, &o, Budget::default());
+    assert_eq!(report.consistency, Consistency::Consistent);
+    assert_eq!(report.classification_unknown, None);
 }

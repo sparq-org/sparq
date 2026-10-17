@@ -147,16 +147,7 @@ fn attest_full(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestatio
     }
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("sparq_zk_compose_forge_{name}_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
@@ -595,8 +586,7 @@ fn composed_manifest(
 #[test]
 #[ignore = "slow: full bb prove of a scan + filter member (sq-ajl byte-binding control)"]
 fn forge_pubinput_positive_control_verifies() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_pubinput_positive_control_verifies", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex(CHALLENGE_HEX.into());
@@ -613,8 +603,7 @@ fn forge_pubinput_positive_control_verifies() {
 #[test]
 #[ignore = "slow: full bb prove of a scan + filter member (sq-ajl byte-binding forge)"]
 fn forge_pubinput_statement_substitution_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_pubinput_statement_substitution_rejected", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex(CHALLENGE_HEX.into());
@@ -639,8 +628,7 @@ fn forge_pubinput_statement_substitution_rejected() {
 #[test]
 #[ignore = "slow: full bb prove (sq-ajl byte-binding verdict forge)"]
 fn forge_pubinput_verdict_substitution_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_pubinput_verdict_substitution_rejected", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex(CHALLENGE_HEX.into());
@@ -854,8 +842,7 @@ fn honest_k2_scan_passes_strict_ordering_structural() {
 #[test]
 #[ignore = "slow/toolchain: real nargo witness-gen of a k=2 scan (sq-vxq8 strict-ordering circuit forge)"]
 fn forge_scan_duplicate_commitment_circuit_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("forge_scan_duplicate_commitment_circuit_rejected", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex(CHALLENGE_HEX.into());
@@ -900,8 +887,7 @@ fn forge_scan_duplicate_commitment_circuit_rejected() {
 #[test]
 #[ignore = "slow/toolchain: real bb prove+verify of an honest k=2 scan (sq-vxq8 strict-ordering positive control)"]
 fn honest_k2_distinct_scan_proves_and_verifies() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("honest_k2_distinct_scan_proves_and_verifies", &["nargo", "bb"]) {
         return;
     }
     let challenge = FieldHex(CHALLENGE_HEX.into());
