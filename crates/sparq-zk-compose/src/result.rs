@@ -1797,7 +1797,7 @@ mod tests {
             1,
             3,
             "urn:status:people",
-            |root, salt, status| sig::commitment_message_with_status(root, salt, status),
+            sig::commitment_message_with_status,
         );
         let reference = sig::status_ref_digest(
             &sig::status_list_id_to_field(&c.status_list),
@@ -1889,7 +1889,7 @@ mod tests {
                     (i + 1) as u64,
                     c.status_index,
                     &c.status_list,
-                    |root, salt, status| sig::commitment_message_with_status(root, salt, status),
+                    sig::commitment_message_with_status,
                 )
             })
             .collect();
