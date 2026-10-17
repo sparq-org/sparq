@@ -1140,6 +1140,7 @@ pub async fn put_handler<S: Store>(
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
     let target = parse_target(&state.base_url, uri.path())?;
+    refuse_repeated_slash_write(&state.base_url, &target)?;
 
     // WAC for PUT — EXISTENCE-NON-DISCLOSURE (`research/lws-design-records.md` §6): a PUT requires
     // `acl:Write` on the TARGET's effective ACL (inherited via `acl:default` for a not-yet-existing
@@ -1296,6 +1297,7 @@ pub async fn post_handler<S: Store>(
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
     let container = parse_target(&state.base_url, uri.path())?;
+    refuse_repeated_slash_write(&state.base_url, &container)?;
     // WAC: a POST to a container requires `acl:Append` on the container (a writer also satisfies it).
     // Anonymous ⇒ 401, authenticated-but-unauthorized ⇒ 403. Authorize BEFORE the container-shape /
     // existence checks so an unauthorized caller cannot probe existence (the read-access POST cases
@@ -1627,6 +1629,7 @@ pub async fn patch_handler<S: Store>(
     #[cfg(feature = "sparql-endpoint")]
     let _snapshot_guard = state.sparql_snapshot_write().await;
     let target = parse_target(&state.base_url, uri.path())?;
+    refuse_repeated_slash_write(&state.base_url, &target)?;
 
     // Select the PATCH language from the Content-Type (ABSENT ⇒ 400, unsupported ⇒ 415) and parse the
     // document. `text/n3` is the Solid N3 Patch; `application/sparql-update` is the INSERT/DELETE DATA
@@ -2176,6 +2179,28 @@ async fn write_validator<S: Store>(
 /// cannot have children — the slash-semantics invariant), this is a 409 Conflict (`containment`
 /// "conflicts when … turning resource into container"). The conflict is detected by the
 /// trailing-slash container record being absent while the slash-less resource record is present.
+/// A name with a repeated slash (only a leading or trailing one gets past `parse_target`) has no
+/// chain of containers to write in: authorization walks its key as named, while containment and
+/// the slash rule would read it with the slashes folded. So nothing is written under one (a `PUT`,
+/// `PATCH` or `POST` target, or the container a `POST` names), refused on the name alone before
+/// anything is authorized or looked up; what is stored under one can still be read and deleted.
+fn refuse_repeated_slash_write(base: &str, target: &LdpTarget) -> Result<(), ServerError> {
+    target
+        .iri
+        .strip_prefix(base.trim_end_matches('/'))
+        .map_or(Ok(()), refuse_repeated_slash)
+}
+
+/// [`refuse_repeated_slash_write`] for `rest`, a path below the base URL.
+fn refuse_repeated_slash(rest: &str) -> Result<(), ServerError> {
+    if rest.contains("//") {
+        return Err(ServerError::BadRequest(
+            "a repeated slash names no container to create a resource in".into(),
+        ));
+    }
+    Ok(())
+}
+
 async fn ensure_ancestor_containers<S: Store>(
     state: &LdpState<S>,
     iri: &str,
@@ -2184,14 +2209,7 @@ async fn ensure_ancestor_containers<S: Store>(
     let Some(rest) = iri.strip_prefix(base) else {
         return Ok(());
     };
-    // A name with a repeated slash (only a leading or trailing one gets this far) has no chain
-    // of containers to create it in: authorization walks its key as named, which the containers
-    // below would not match. So nothing is created for it, before anything is looked at.
-    if rest.contains("//") {
-        return Err(ServerError::BadRequest(
-            "a repeated slash names no container to create a resource in".into(),
-        ));
-    }
+    refuse_repeated_slash(rest)?;
 
     // The storage ROOT container `<base>/` is the ancestor of EVERYTHING; ensure it exists first (a
     // parentless write mints its record) so the walk below can wire each child into a present parent.
