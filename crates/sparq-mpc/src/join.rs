@@ -767,8 +767,12 @@ impl HiddenValueJoin {
     ///    randomness source as steps 1–3) with
     ///    [`MatchBit::Public`] bits and the public bound `B`: non-matches become
     ///    indistinguishable dummies, the slots are oblivious-shuffled, and exactly
-    ///    `B` are revealed — so the OUTPUT does not leak the true match count
-    ///    (bounded to `B`) or which input pair produced which row.
+    ///    `B` are revealed — so the OUTPUT does not leak which input pair produced
+    ///    which row, and the revealed output size is `B`. The true count depends on
+    ///    the OUTPUT MODE: this path takes the ALL-PARTY one, where every compute
+    ///    party opens the `B` tags and so learns the exact count; the recipient-only
+    ///    mode ([`crate::oblivious_join::oblivious_set_output_to_recipient`]) leaves
+    ///    the count to the designated recipient alone.
     ///
     /// ## Privacy property enforced (state it precisely — empirical-honesty rule)
     ///
@@ -777,9 +781,15 @@ impl HiddenValueJoin {
     ///   unequal keys `m` is uniform nonzero — it reveals ONLY the match bit, never
     ///   either key or their difference (the sq-dwb5 batched-Shamir hiding lifts this
     ///   to the whole column: ≤ t parties' views are independent of every key).
-    /// - **The OUTPUT cardinality + ordering are oblivious** to the protocol/parties:
-    ///   bounded to the public `B`, shuffled so position → candidate linkage is
-    ///   destroyed (`oblivious_join` L1-bounded / L2-destroyed at the OUTPUT).
+    /// - **The OUTPUT ordering is oblivious** to the protocol/parties: shuffled so
+    ///   position → candidate linkage is destroyed (`oblivious_join` L2-destroyed at
+    ///   the OUTPUT), and the cardinality is bounded to the public `B` (L1-bounded).
+    ///   The exact count is NOT hidden from the compute parties on this path: it is
+    ///   the all-party output mode, whose tag opens are in every compute party's
+    ///   transcript. Keeping the count out of their transcript is the recipient-only
+    ///   mode ([`crate::oblivious_join::oblivious_set_output_to_recipient`]); hiding
+    ///   it from the recipient as well is the separate DP-cardinality mode
+    ///   (bead sq-shk5).
     ///
     /// HONESTY (the gated half — NOT faked). The per-candidate match BIT is still
     /// *opened* by `secure_equal` (the same L2-at-decision leak the scalar
