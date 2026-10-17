@@ -71,11 +71,17 @@
 //!   every per-comparison swap bit and every adjacent-equality `dup` bit
 //!   (secret-shared, never opened); WHICH rows were duplicates of which (the
 //!   multiplicity structure); the input→output position linkage (the final shuffle
-//!   destroys it); the true distinct count beyond the public `B` (L1 bounded to `B`).
+//!   destroys it).
 //! - **Disclosed:** the row count `N` and the public padded bound `B` (the sort
 //!   network width and the output slot count are public, the standard MPC
 //!   assumption); the endpoint TERMS of the surviving distinct pairs (the result the
-//!   recipient asked for).
+//!   recipient asked for). The true DISTINCT COUNT is bounded by `B`, and whether it
+//!   is also disclosed depends on the output mode: this stage uses the ALL-PARTY
+//!   mode, where every compute party opens the `B` tags and therefore learns the
+//!   exact count; the recipient-only mode
+//!   ([`crate::oblivious_join::oblivious_set_output_to_recipient`]) keeps it out of
+//!   their transcript, and hiding it from the recipient too is the separate
+//!   DP-cardinality mode (bead sq-shk5).
 //!
 //! ## Security tier (HONESTY — privacy-claims gate, cite sq-qhy4)
 //!

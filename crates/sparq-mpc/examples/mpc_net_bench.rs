@@ -62,7 +62,7 @@ use std::process::{Child, Command, Stdio};
 #[cfg(feature = "insecure-test-rng")]
 use sparq_mpc::bench::{check_aggregate, check_hidden_join, QueryClass};
 #[cfg(feature = "insecure-test-rng")]
-use sparq_mpc::transport::{Channel, Coordinator, NetworkCell};
+use sparq_mpc::transport::{Channel, Coordinator, NetworkCell, PublicPermutation};
 #[cfg(feature = "insecure-test-rng")]
 use sparq_mpc::ShamirBackend;
 
@@ -205,7 +205,15 @@ fn run(
             // Same canonical input as the in-process reference; report the multiset-
             // invariant column sum + the per-switch round count. sq-bdbv.
             let col: Vec<u64> = (0..scale as u64).map(|i| i * 7 + 1).collect();
-            let (opened, gates) = coord.shuffle(&mut dealer, &col)?;
+            // This tier's permutation is public (every switch's endpoints and its
+            // control bit go to every party in the clear), so the entry point takes
+            // an explicit acknowledgement. A bench measures the switch network; it
+            // is not a private-output path.
+            let (opened, gates) = coord.shuffle_public_permutation(
+                &mut dealer,
+                &col,
+                PublicPermutation::acknowledged(),
+            )?;
             (opened.iter().copied().sum(), gates)
         }
         QueryClass::ObliviousSort => {
