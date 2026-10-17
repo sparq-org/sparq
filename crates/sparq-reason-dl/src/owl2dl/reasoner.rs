@@ -661,13 +661,15 @@ mod tests {
 
     /// Records deduplicated through a key are decided under the default budget: all of 300
     /// individuals sharing one value (each merge's survivor keeps every duplicate's value),
-    /// and 300 in groups of 10. A round pays only for the pairs before its merge.
+    /// and 300 in groups of 10, with and without object edges between them. A round merges
+    /// every pair it identifies, so the rounds do not grow with the merges.
     #[test]
     fn data_keys_deduplicating_large_groups_are_decided_under_the_default_budget() {
-        for group in [300, 10] {
+        for (group, edges) in [(300, 0), (10, 0), (300, 10), (10, 30)] {
             let mut body = String::from(
                 r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
-                :P a owl:Class . :d a owl:DatatypeProperty . :P owl:hasKey ( :d ) .
+                :P a owl:Class . :d a owl:DatatypeProperty . :r a owl:ObjectProperty .
+                :P owl:hasKey ( :d ) .
                 "#,
             );
             for i in 0..300 {
@@ -675,13 +677,16 @@ mod tests {
                     ":i{i} a owl:NamedIndividual , :P ; :d {} .\n",
                     i / group
                 ));
+                for k in 1..=edges {
+                    body.push_str(&format!(":i{i} :r :i{} .\n", (i + k) % 300));
+                }
             }
             let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
             let o = extract(&d, &triples).unwrap();
             assert_eq!(
                 check(&d, &o, Budget::default()).consistency,
                 Consistency::Consistent,
-                "groups of {group}"
+                "groups of {group}, {edges} edges each"
             );
         }
     }

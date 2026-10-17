@@ -315,7 +315,7 @@ pub(crate) struct Tableau<'c> {
 
 /// What the key rule did.
 enum KeyStep {
-    /// It merged two individuals (or the budget ran out).
+    /// It merged individuals (or the budget ran out).
     Merged,
     /// Nothing to merge, but some pair might share an unfixed data value.
     Unsure,
@@ -605,7 +605,7 @@ impl<'c> Tableau<'c> {
         }
         named.sort_unstable_by_key(|&(n, _)| n);
         named.dedup_by_key(|&mut (n, _)| n);
-        let mut unsure = false;
+        let (mut unsure, mut merged) = (false, false);
         for key in &self.c.keys {
             // The member scan, one unit per named individual, charged before it runs.
             if self.charge(named.len()) {
@@ -643,9 +643,13 @@ impl<'c> Tableau<'c> {
             if self.over_budget() {
                 return KeyStep::Merged;
             }
-            // Pairs in order, built one `i` at a time, so a round that merges pays only for
-            // the pairs before the first merge.
+            // Pairs in order, built one `i` at a time. Every identified pair is merged in the
+            // same round: the values read stay true of a survivor, and a pair with a member
+            // merged away waits for the next round, which rereads the values.
             for i in 0..n {
+                if !self.nodes[members[i].0 as usize].active {
+                    continue;
+                }
                 let partners: Box<dyn Iterator<Item = usize>> = match &index {
                     Some(index) => Box::new(self.key_partners(index, &values, i).into_iter()),
                     None => Box::new(i + 1..n),
@@ -659,6 +663,9 @@ impl<'c> Tableau<'c> {
                     if self.charge(1 + key.roles.len() * named.len()) {
                         return KeyStep::Merged;
                     }
+                    if !self.nodes[*x as usize].active || !self.nodes[*y as usize].active {
+                        continue;
+                    }
                     let shared = self.key_shared(key, *x, *y, &named, &values[i], &values[j]);
                     if self.over_budget() {
                         // The value comparisons ran out of budget part way.
@@ -670,13 +677,18 @@ impl<'c> Tableau<'c> {
                         Shared::Yes(d) => {
                             let d = d.union(dx).union(dy);
                             self.merge(*x, *y, &d);
-                            return KeyStep::Merged;
+                            merged = true;
+                            if self.clash.is_some() {
+                                return KeyStep::Merged;
+                            }
                         }
                     }
                 }
             }
         }
-        if unsure {
+        if merged {
+            KeyStep::Merged
+        } else if unsure {
             KeyStep::Unsure
         } else {
             KeyStep::Done
