@@ -334,10 +334,59 @@ impl Default for InMemorySparqClient {
     }
 }
 
+/// The metadata records, with how many of them are in the service pool
+/// ([`super::in_service_pool`]) kept as they change, so admission can hold the pool to its own
+/// ceiling without walking the map.
+#[derive(Default)]
+struct Meta {
+    map: HashMap<String, ResourceMeta>,
+    pooled: usize,
+}
+
+impl Meta {
+    fn get(&self, iri: &str) -> Option<&ResourceMeta> {
+        self.map.get(iri)
+    }
+
+    fn contains_key(&self, iri: &str) -> bool {
+        self.map.contains_key(iri)
+    }
+
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Records in the service pool.
+    fn pooled(&self) -> usize {
+        self.pooled
+    }
+
+    fn values(&self) -> std::collections::hash_map::Values<'_, String, ResourceMeta> {
+        self.map.values()
+    }
+
+    fn insert(&mut self, iri: String, meta: ResourceMeta) -> Option<ResourceMeta> {
+        let pooled = super::in_service_pool(&iri);
+        let replaced = self.map.insert(iri, meta);
+        if pooled && replaced.is_none() {
+            self.pooled += 1;
+        }
+        replaced
+    }
+
+    fn remove(&mut self, iri: &str) -> Option<ResourceMeta> {
+        let gone = self.map.remove(iri)?;
+        if super::in_service_pool(iri) {
+            self.pooled -= 1;
+        }
+        Some(gone)
+    }
+}
+
 /// The in-memory index state: metadata records + containment membership.
 #[derive(Default)]
 struct Index {
-    meta: HashMap<String, ResourceMeta>,
+    meta: Meta,
     /// container IRI → its direct children, kept in insertion order (a `Vec`, de-duplicated).
     children: HashMap<String, Vec<String>>,
 }
@@ -371,8 +420,21 @@ impl InMemorySparqClient {
     }
 
     /// Reserve a metadata slot for a new IRI, or fail without mutating the index.
+    ///
+    /// A record in the service pool ([`super::in_service_pool`]) is admitted against the pool's
+    /// own ceiling and counts towards nothing else, so no number of them makes a write of
+    /// content fail.
     fn admit_resource(&self, index: &Index, iri: &str) -> Result<(), SparqError> {
-        if !index.meta.contains_key(iri) && index.meta.len() >= self.limits.max_resource_count {
+        if index.meta.contains_key(iri) {
+            return Ok(());
+        }
+        let pooled = index.meta.pooled();
+        let (held, ceiling) = if super::in_service_pool(iri) {
+            (pooled, self.limits.max_pool_resource_count)
+        } else {
+            (index.meta.len() - pooled, self.limits.max_resource_count)
+        };
+        if held >= ceiling {
             return Err(SparqError::QuotaExceeded);
         }
         Ok(())

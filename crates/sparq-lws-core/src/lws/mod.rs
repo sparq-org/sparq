@@ -674,6 +674,13 @@ impl<S: Store + 'static> LwsState<S> {
         Journal::new(self, limit)
     }
 
+    /// A [`LwsState::journal`] with no bound on what it stages: for the delete of one resource,
+    /// whose outcome must not follow the size of what is stored (a writer may delete what it may
+    /// not read). What it stages is that one resource, which the store already holds whole.
+    pub(crate) fn journal_for_one(&self) -> Journal<'_, S> {
+        Journal::new(self, usize::MAX)
+    }
+
     /// Build the state: ensure the storage root and the service containers exist, put back any
     /// change a process stop cut short (see the `intents` module), and load the stored access
     /// grants, requests and subscriptions.

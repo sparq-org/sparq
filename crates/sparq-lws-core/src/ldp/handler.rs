@@ -45,11 +45,13 @@ use crate::authz::{mode_for_operation, AccessMode};
 use crate::error::ServerError;
 use crate::ldp::conditional;
 use crate::ldp::content::{
-    classify, label_blank_nodes_by_position, negotiate_accept_with_profile, parse_to_triples,
-    serialize_triples, serialize_triples_negotiated, validate_rdf, RdfFormat,
+    classify, label_blank_nodes_by_position, named_graph_nquads, negotiate_accept_with_profile,
+    parse_to_triples, serialize_triples, serialize_triples_negotiated, stored_format, validate_rdf,
+    RdfFormat,
 };
 use crate::ldp::patch::{
-    apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update, PatchKind,
+    appended_ntriples, apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update,
+    PatchKind,
 };
 use crate::ldp::range::{self, RangeOutcome};
 use crate::ldp::target::{parse_target, LdpTarget};
@@ -1137,10 +1139,11 @@ pub async fn put_handler<S: Store>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ServerError> {
-    #[cfg(feature = "sparql-endpoint")]
-    let _snapshot_guard = state.sparql_snapshot_write().await;
+    // The name alone decides this refusal, before any lock is taken.
     let target = parse_target(&state.base_url, uri.path())?;
     refuse_repeated_slash_write(&state.base_url, &target)?;
+    #[cfg(feature = "sparql-endpoint")]
+    let _snapshot_guard = state.sparql_snapshot_write().await;
 
     // WAC for PUT — EXISTENCE-NON-DISCLOSURE (`research/lws-design-records.md` §6): a PUT requires
     // `acl:Write` on the TARGET's effective ACL (inherited via `acl:default` for a not-yet-existing
@@ -1294,10 +1297,11 @@ pub async fn post_handler<S: Store>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ServerError> {
-    #[cfg(feature = "sparql-endpoint")]
-    let _snapshot_guard = state.sparql_snapshot_write().await;
+    // The name alone decides this refusal, before any lock is taken.
     let container = parse_target(&state.base_url, uri.path())?;
     refuse_repeated_slash_write(&state.base_url, &container)?;
+    #[cfg(feature = "sparql-endpoint")]
+    let _snapshot_guard = state.sparql_snapshot_write().await;
     // WAC: a POST to a container requires `acl:Append` on the container (a writer also satisfies it).
     // Anonymous ⇒ 401, authenticated-but-unauthorized ⇒ 403. Authorize BEFORE the container-shape /
     // existence checks so an unauthorized caller cannot probe existence (the read-access POST cases
@@ -1509,6 +1513,16 @@ pub async fn delete_handler<S: Store>(
     // outcome. Folded BEFORE the existence probe.
     state.guard_conditional_requires_read(&target.iri, &headers, &granted, &token)?;
 
+    // Whether a container may go depends on what it holds (a non-empty one is a 409), so deleting
+    // one also needs Read on it: without, the requester gets the denial, whatever it holds.
+    if target.is_container && !may_read(&target.iri, &granted) {
+        return Err(if token.web_id.is_none() {
+            state.unauthenticated()
+        } else {
+            ServerError::Forbidden
+        });
+    }
+
     let current = state.store.meta(&target.iri).await?;
     // A DELETE of a non-existent target is reported through the SAME denial surface as a permission
     // failure (401 anonymous / 403 authenticated), NOT a 404 — so a DELETE cannot be used as an
@@ -1626,10 +1640,11 @@ pub async fn patch_handler<S: Store>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ServerError> {
-    #[cfg(feature = "sparql-endpoint")]
-    let _snapshot_guard = state.sparql_snapshot_write().await;
+    // The name alone decides this refusal, before any lock is taken.
     let target = parse_target(&state.base_url, uri.path())?;
     refuse_repeated_slash_write(&state.base_url, &target)?;
+    #[cfg(feature = "sparql-endpoint")]
+    let _snapshot_guard = state.sparql_snapshot_write().await;
 
     // Select the PATCH language from the Content-Type (ABSENT ⇒ 400, unsupported ⇒ 415) and parse the
     // document. `text/n3` is the Solid N3 Patch; `application/sparql-update` is the INSERT/DELETE DATA
@@ -1713,14 +1728,26 @@ pub async fn patch_handler<S: Store>(
     //  - `Err(other)`       → a backend/blob inconsistency → surface the 500 (the caller is authorized,
     //                         so a 500 leaks nothing they could not already learn via a normal read).
     //
-    // Because authorization already ran above, a non-`NotFound` store error can be propagated
-    // immediately here WITHOUT an existence/state oracle: an UNAUTHORIZED caller never reaches this
-    // line (they returned the uniform 401/403 above), so a 500 is only ever seen by a caller permitted
-    // to read the target. (`ServerError` is not `Clone`; we distinguish present/absent via `current`.)
+    // An insert-only patch needs only Append, so a writer that may not read the target is told
+    // nothing about it when the patch cannot apply (its format, whether it parses, what the result
+    // would be): it gets the refusal it would get without access.
+    let reader = may_read(&target.iri, &granted);
+    let unread = |e: ServerError| {
+        if reader {
+            e
+        } else if token.web_id.is_none() {
+            state.unauthenticated()
+        } else {
+            ServerError::Forbidden
+        }
+    };
+    // A non-`NotFound` store error goes only to a caller permitted to read the target; an
+    // insert-only writer that may not gets the refusal above. (`ServerError` is not `Clone`; we
+    // distinguish present/absent via `current`.)
     let current: Option<crate::store::Resource> = match state.store.read(&target.iri).await {
         Ok(r) => Some(r),
         Err(ServerError::NotFound) => None,
-        Err(e) => return Err(e),
+        Err(e) => return Err(unread(e)),
     };
 
     // Apply preconditions against the current state's tag and modification time.
@@ -1739,10 +1766,44 @@ pub async fn patch_handler<S: Store>(
         write_precondition_time(&target, current.as_ref().and_then(|r| r.meta.last_modified)),
     ))?;
 
+    // A writer that may not read the target appends to it without its content being parsed: the
+    // inserted statements are appended as text to a Turtle, N-Triples or N-Quads document (each
+    // takes N-Triples lines, the last into its default graph), so the outcome follows the
+    // request, the requester's permissions and the stored type alone, never what is stored
+    // (whether it parses, what its graph holds). Any other stored type is refused to it. (Only an
+    // unconditional insert-only patch gets here without Read.) The stored bytes are still read
+    // and rewritten whole, so the time this takes follows their size.
+    if let (Some(res), false) = (&current, reader) {
+        let appendable = matches!(
+            stored_format(&res.meta.content_type),
+            Some(RdfFormat::Turtle | RdfFormat::NTriples | RdfFormat::NQuads)
+        );
+        let Some(text) = appended_ntriples(&patch).filter(|_| appendable) else {
+            return Err(unread(ServerError::Forbidden));
+        };
+        let text = text?;
+        let mut body = Vec::with_capacity(res.body.len() + text.len() + 1);
+        body.extend_from_slice(&res.body);
+        if !body.is_empty() && !body.ends_with(b"\n") {
+            body.push(b'\n');
+        }
+        body.extend_from_slice(text.as_bytes());
+        let meta = state
+            .store
+            .write(&target.iri, Bytes::from(body), &res.meta.content_type)
+            .await?;
+        #[cfg(not(target_arch = "wasm32"))]
+        state
+            .notifications
+            .notify(&target.iri, ActivityType::Update, None)
+            .await;
+        return Ok(write_response(true, &meta, &target, false));
+    }
+
     // Determine the existing triples + the stored format (default Turtle for a new resource).
-    let (existing_triples, stored_format) = match &current {
+    let (existing_triples, stored_as) = match &current {
         Some(res) => {
-            let fmt = classify(Some(&res.meta.content_type)).unwrap_or(RdfFormat::Turtle);
+            let fmt = stored_format(&res.meta.content_type).unwrap_or(RdfFormat::Turtle);
             (parse_to_triples(fmt, &res.body, &target.iri)?, fmt)
         }
         None => {
@@ -1752,8 +1813,12 @@ pub async fn patch_handler<S: Store>(
         }
     };
 
-    let patched = apply_patch(&existing_triples, &patch)?;
-    let new_body = serialize_triples(stored_format, &patched)?;
+    let patched = apply_patch(&existing_triples, &patch).map_err(unread)?;
+    let mut new_body = serialize_triples(stored_as, &patched).map_err(unread)?;
+    // An N-Quads document's named graphs are not the patch's: they are kept as stored.
+    if let (Some(res), RdfFormat::NQuads) = (&current, stored_as) {
+        new_body.extend(named_graph_nquads(&res.body)?);
+    }
 
     let existed = current.is_some();
     let parent = parent_container(&target);
@@ -1761,11 +1826,7 @@ pub async fn patch_handler<S: Store>(
     let meta = if existed {
         state
             .store
-            .write(
-                &target.iri,
-                Bytes::from(new_body),
-                stored_format.media_type(),
-            )
+            .write(&target.iri, Bytes::from(new_body), stored_as.media_type())
             .await?
     } else if crate::authz::is_acl_resource(&target.iri) {
         // Create-on-PATCH of an AUXILIARY `.acl` resource: it is NOT a contained child. Storing it via
@@ -1775,11 +1836,7 @@ pub async fn patch_handler<S: Store>(
         // containment edge. (Auth for `.acl` ops is Control, already enforced above.)
         state
             .store
-            .write(
-                &target.iri,
-                Bytes::from(new_body),
-                stored_format.media_type(),
-            )
+            .write(&target.iri, Bytes::from(new_body), stored_as.media_type())
             .await?
     } else {
         // Create-on-PATCH: like PUT, create intermediate containers + wire the new resource into its
@@ -1801,18 +1858,14 @@ pub async fn patch_handler<S: Store>(
                         p,
                         &target.iri,
                         Bytes::from(new_body),
-                        stored_format.media_type(),
+                        stored_as.media_type(),
                     )
                     .await?
             }
             None => {
                 state
                     .store
-                    .write(
-                        &target.iri,
-                        Bytes::from(new_body),
-                        stored_format.media_type(),
-                    )
+                    .write(&target.iri, Bytes::from(new_body), stored_as.media_type())
                     .await?
             }
         }
@@ -2457,29 +2510,23 @@ async fn mint_child_iri<S: Store>(
     generate_unique(store, base, stem, as_container).await
 }
 
-/// Generate a unique child IRI under `base`, optionally seeded by `stem`. Deterministic-but-unique:
-/// a monotonic counter + the stem, retried until the index reports it free. A container child gets a
-/// trailing slash.
+/// Generate a unique child IRI under `base`, optionally seeded by `stem`: the stem and a random
+/// suffix, retried until the index reports it free. Nothing in the name follows from what else was
+/// minted, here or in any other container, or when. A container child gets a trailing slash.
 async fn generate_unique<S: Store>(
     store: &S,
     base: &str,
     stem: Option<&str>,
     as_container: bool,
 ) -> Result<String, ServerError> {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::UNIX_EPOCH;
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-
     let prefix = stem.unwrap_or("resource");
     let suffix = if as_container { "/" } else { "" };
-    // Seed with a coarse timestamp so names are unique across process restarts too.
-    let seed = crate::clock::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
-    for attempt in 0..64u64 {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let candidate = format!("{base}/{prefix}-{seed:x}-{n:x}-{attempt:x}{suffix}");
+    for _ in 0..64 {
+        let mut random = [0u8; 12];
+        getrandom::getrandom(&mut random)
+            .map_err(|e| ServerError::Storage(format!("OS RNG unavailable: {e}")))?;
+        let id: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let candidate = format!("{base}/{prefix}-{id}{suffix}");
         if !store.exists(&candidate).await? {
             return Ok(candidate);
         }

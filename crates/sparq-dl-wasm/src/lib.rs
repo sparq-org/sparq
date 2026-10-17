@@ -474,8 +474,8 @@ pub struct OwlDlSessionCore {
 
 impl OwlDlSessionCore {
     /// [`check_owl_dl_json`] for the next version, with a `"reuse"` key: `"none"`,
-    /// `"identical"` or `"extension"`. An unreadable or refused version leaves the session's
-    /// kept answer as it was.
+    /// `"identical"` or `"extension"`. An unreadable, refused or undecided version leaves the
+    /// session's kept answer as it was.
     ///
     /// # Errors
     /// As [`check_owl_dl_json`].

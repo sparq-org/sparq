@@ -316,6 +316,18 @@ struct Builder<'a> {
     /// Work done expanding data ranges, against `max_work`.
     work: Cell<u64>,
     max_work: u64,
+    /// The encoding of `owl:topObjectProperty`, once a restriction uses it: see
+    /// [`Builder::universal`].
+    universal: Option<(Role, Atom)>,
+}
+
+/// One of the two built-in object properties.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Extreme {
+    /// `owl:topObjectProperty`, relating every pair of individuals.
+    Top,
+    /// `owl:bottomObjectProperty`, relating none.
+    Bottom,
 }
 
 /// The largest cardinality in a number restriction the clausifier translates.
@@ -390,6 +402,7 @@ pub(crate) fn clausify(
         annotated_repeats: FxHashSet::default(),
         work: Cell::new(0),
         max_work,
+        universal: None,
     };
     // Each datatype's distinct ranges, compared as the profile check compares them.
     let mut seen: FxHashMap<Id, Vec<(DataRange, bool)>> = FxHashMap::default();
@@ -482,6 +495,27 @@ impl Builder<'_> {
         a
     }
 
+    /// Gives every class `c` names an atom, for an expression the translation drops (one
+    /// on a bottom property): the classes are still classified.
+    fn name_classes(&mut self, c: &ClassExpression) {
+        use ClassExpression as C;
+        match c {
+            C::Class(id) => {
+                if *id != self.v.thing && *id != self.v.nothing {
+                    self.class(*id);
+                }
+            }
+            C::IntersectionOf(cs) | C::UnionOf(cs) => cs.iter().for_each(|c| self.name_classes(c)),
+            C::ComplementOf(c)
+            | C::SomeValuesFrom(_, c)
+            | C::AllValuesFrom(_, c)
+            | C::MinCardinality(_, _, c)
+            | C::MaxCardinality(_, _, c)
+            | C::ExactCardinality(_, _, c) => self.name_classes(c),
+            _ => {}
+        }
+    }
+
     fn role(&mut self, p: &ObjectProperty) -> Result<Role, Unsupported> {
         let id = p.named();
         if id == self.v.top_object_property || id == self.v.bottom_object_property {
@@ -492,6 +526,62 @@ impl Builder<'_> {
             idx,
             inv: p.is_inverse(),
         })
+    }
+
+    /// Which built-in object property `p` is (its inverse is itself), if any.
+    fn extreme(&self, p: &ObjectProperty) -> Option<Extreme> {
+        let id = p.named();
+        if id == self.v.top_object_property {
+            Some(Extreme::Top)
+        } else if id == self.v.bottom_object_property {
+            Some(Extreme::Bottom)
+        } else {
+            None
+        }
+    }
+
+    /// `⊤ ⊑ ∀P.⊥`: `P` relates nothing. Only an empty domain leaves the top property
+    /// empty, so that has no model.
+    fn empty_role(&mut self, p: &ObjectProperty) -> Result<(), Unsupported> {
+        match self.extreme(p) {
+            Some(Extreme::Bottom) => {}
+            Some(Extreme::Top) => self.gci(Nnf::Bottom),
+            None => {
+                let r = self.role(p)?;
+                self.gci(Nnf::All(r, Box::new(Nnf::Bottom)));
+            }
+        }
+        Ok(())
+    }
+
+    /// The encoding of `owl:topObjectProperty` `U`: a fresh role `W` (indexed by the top
+    /// property itself) and nominal `{o}` with `⊤ ⊑ ∃W.{o}`. Every element reaches `o`,
+    /// so `o`'s `W⁻`-successors are all elements, and a restriction `Q U.C` (`∃` or `∀`)
+    /// holds exactly where `∃W.({o} ⊓ Q W⁻.C)` does.
+    fn universal(&mut self) -> Result<(Role, Atom), Unsupported> {
+        if let Some(u) = self.universal {
+            return Ok(u);
+        }
+        let id = self.v.top_object_property;
+        let w = Role {
+            idx: self.role_index(id, false)?,
+            inv: false,
+        };
+        // An anonymous individual: no key applies to it, and no IRI can name it.
+        let o = self.nominal(&Individual::Anonymous(id));
+        self.gci(at_least(1, w, Nnf::Atom(o)));
+        self.universal = Some((w, o));
+        Ok((w, o))
+    }
+
+    /// `Q U.C` through [`universal`](Self::universal), for `Q W⁻.C` given by `inner`.
+    fn through_universal(&mut self, inner: impl FnOnce(Role) -> Nnf) -> Result<Nnf, Unsupported> {
+        let (w, o) = self.universal()?;
+        Ok(at_least(
+            1,
+            w,
+            Nnf::And(vec![Nnf::Atom(o), inner(w.inverse())]),
+        ))
     }
 
     /// The role of a data property.
@@ -686,6 +776,28 @@ impl Builder<'_> {
 
     fn role_axiom(&mut self, ax: &Axiom) -> Result<(), Unsupported> {
         match ax {
+            // Every property is below the top property; a chain through the bottom property
+            // relates nothing.
+            Axiom::SubObjectPropertyOf(_, sup) if self.extreme(sup) == Some(Extreme::Top) => {}
+            Axiom::SubObjectPropertyOf(chain, _)
+                if chain
+                    .iter()
+                    .any(|r| self.extreme(r) == Some(Extreme::Bottom)) => {}
+            Axiom::SubObjectPropertyOf(chain, sup)
+                if self.extreme(sup) == Some(Extreme::Bottom) =>
+            {
+                // No `R₁ ∘ … ∘ Rₙ`-path: `⊤ ⊑ ∀R₁.…∀Rₙ.⊥` (through the automata of
+                // non-simple ones).
+                let w = chain
+                    .iter()
+                    .map(|r| self.role(r))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let f = w
+                    .iter()
+                    .rev()
+                    .fold(Nnf::Bottom, |f, &r| Nnf::All(r, Box::new(f)));
+                self.gci(f);
+            }
             Axiom::SubObjectPropertyOf(chain, sup) => {
                 let s = self.role(sup)?;
                 let w = chain
@@ -698,6 +810,15 @@ impl Builder<'_> {
                     self.chain(w, s);
                 }
             }
+            Axiom::EquivalentObjectProperties(ps)
+                if ps.iter().any(|p| self.extreme(p) == Some(Extreme::Bottom)) =>
+            {
+                for p in ps {
+                    self.empty_role(p)?;
+                }
+            }
+            Axiom::EquivalentObjectProperties(ps)
+                if ps.iter().all(|p| self.extreme(p) == Some(Extreme::Top)) => {}
             Axiom::EquivalentObjectProperties(ps) => {
                 let rs = ps
                     .iter()
@@ -708,11 +829,23 @@ impl Builder<'_> {
                     self.include(w[1], w[0]);
                 }
             }
+            Axiom::InverseObjectProperties(p, q) if self.extreme(p) == Some(Extreme::Bottom) => {
+                self.empty_role(q)?;
+            }
+            Axiom::InverseObjectProperties(p, q) if self.extreme(q) == Some(Extreme::Bottom) => {
+                self.empty_role(p)?;
+            }
+            Axiom::InverseObjectProperties(p, q)
+                if self.extreme(p) == Some(Extreme::Top)
+                    && self.extreme(q) == Some(Extreme::Top) => {}
             Axiom::InverseObjectProperties(p, q) => {
                 let (r, s) = (self.role(p)?, self.role(q)?);
                 self.include(r, s.inverse());
                 self.include(s.inverse(), r);
             }
+            // Both built-in properties are symmetric and transitive.
+            Axiom::SymmetricObjectProperty(p) | Axiom::TransitiveObjectProperty(p)
+                if self.extreme(p).is_some() => {}
             Axiom::SymmetricObjectProperty(p) => {
                 let r = self.role(p)?;
                 self.include(r, r.inverse());
@@ -721,8 +854,21 @@ impl Builder<'_> {
                 let r = self.role(p)?;
                 self.chain(vec![r, r], r);
             }
-            // Every data property is below owl:topDataProperty: nothing to add.
+            // Every data property is below owl:topDataProperty, and owl:bottomDataProperty
+            // below every one: nothing to add.
             Axiom::SubDataPropertyOf(_, e) if *e == self.v.top_data_property => {}
+            Axiom::SubDataPropertyOf(d, _) if *d == self.v.bottom_data_property => {}
+            Axiom::SubDataPropertyOf(d, e) if *e == self.v.bottom_data_property => {
+                let r = self.data_role(*d)?;
+                self.gci(Nnf::All(r, Box::new(Nnf::Bottom)));
+            }
+            Axiom::EquivalentDataProperties(ds) if ds.contains(&self.v.bottom_data_property) => {
+                let bottom = self.v.bottom_data_property;
+                for &d in ds.iter().filter(|&&d| d != bottom) {
+                    let r = self.data_role(d)?;
+                    self.gci(Nnf::All(r, Box::new(Nnf::Bottom)));
+                }
+            }
             Axiom::SubDataPropertyOf(d, e) => {
                 let (r, s) = (self.data_role(*d)?, self.data_role(*e)?);
                 self.include(r, s);
@@ -825,7 +971,7 @@ impl Builder<'_> {
         if stack.contains(&k) {
             return Err(self.unsupported("an irregular property hierarchy"));
         }
-        if stack.len() >= MAX_AUTOMATON_DEPTH {
+        if stack.len() > MAX_AUTOMATON_DEPTH {
             return Err(
                 self.unsupported("a property hierarchy nested deeper than MAX_AUTOMATON_DEPTH")
             );
@@ -961,6 +1107,18 @@ impl Builder<'_> {
                 self.sub(&union, &a)?;
                 self.disjoint(cs)?;
             }
+            // The top property's domain and range are every element; the bottom one's empty.
+            Axiom::ObjectPropertyDomain(p, c) | Axiom::ObjectPropertyRange(p, c)
+                if self.extreme(p) == Some(Extreme::Top) =>
+            {
+                let c = self.nnf(c, true)?;
+                self.gci(c);
+            }
+            Axiom::ObjectPropertyDomain(p, c) | Axiom::ObjectPropertyRange(p, c)
+                if self.extreme(p) == Some(Extreme::Bottom) =>
+            {
+                self.name_classes(c);
+            }
             Axiom::ObjectPropertyDomain(p, c) => {
                 let r = self.role(p)?;
                 let c = self.nnf(c, true)?;
@@ -978,6 +1136,11 @@ impl Builder<'_> {
             Axiom::InverseFunctionalObjectProperty(p) => {
                 let r = self.role(p)?;
                 self.gci(at_most(1, r.inverse(), Nnf::Top));
+            }
+            // Every element relates to itself by the top property, and none by the bottom one.
+            Axiom::ReflexiveObjectProperty(p) if self.extreme(p) == Some(Extreme::Top) => {}
+            Axiom::ReflexiveObjectProperty(p) if self.extreme(p) == Some(Extreme::Bottom) => {
+                self.gci(Nnf::Bottom);
             }
             Axiom::ReflexiveObjectProperty(p) => {
                 let r = self.role(p)?;
@@ -1043,6 +1206,18 @@ impl Builder<'_> {
                 let src = self.src();
                 self.out.abox.concepts.push((atom, a, src));
             }
+            // The top property relates every pair, the bottom one none.
+            Axiom::ObjectPropertyAssertion(p, a, b)
+            | Axiom::NegativeObjectPropertyAssertion(p, a, b)
+                if self.extreme(p).is_some() =>
+            {
+                self.individual(a);
+                self.individual(b);
+                let positive = matches!(ax, Axiom::ObjectPropertyAssertion(..));
+                if positive != (self.extreme(p) == Some(Extreme::Top)) {
+                    self.gci(Nnf::Bottom);
+                }
+            }
             Axiom::ObjectPropertyAssertion(p, a, b) => {
                 let r = self.role(p)?;
                 let (a, b) = (self.individual(a), self.individual(b));
@@ -1063,6 +1238,13 @@ impl Builder<'_> {
                     Nnf::Not(ma),
                     Nnf::All(r, Box::new(Nnf::Not(mb))),
                 ]));
+            }
+            // No individual has a value on a bottom property: the key identifies nothing.
+            Axiom::HasKey(c, ps, ds)
+                if ps.iter().any(|p| self.extreme(p) == Some(Extreme::Bottom))
+                    || ds.contains(&self.v.bottom_data_property) =>
+            {
+                self.name_classes(c);
             }
             Axiom::HasKey(c, ps, ds) => {
                 let roles = ps
@@ -1105,8 +1287,11 @@ impl Builder<'_> {
                 self.data_expr(&DataRange::Datatype(*dt), &mut Vec::new())?;
             }
             Axiom::DisjointDataProperties(ds) => {
+                // The bottom data property is disjoint from every one.
+                let bottom = self.v.bottom_data_property;
                 let rs = ds
                     .iter()
+                    .filter(|&&d| d != bottom)
                     .map(|d| self.data_role(*d))
                     .collect::<Result<Vec<_>, _>>()?;
                 for (i, &r) in rs.iter().enumerate() {
@@ -1118,6 +1303,21 @@ impl Builder<'_> {
                             ..Clause::default()
                         });
                     }
+                }
+            }
+            // The bottom data property relates nothing.
+            Axiom::DataPropertyDomain(d, c) if *d == self.v.bottom_data_property => {
+                self.name_classes(c);
+            }
+            Axiom::DataPropertyRange(d, _) | Axiom::FunctionalDataProperty(d)
+                if *d == self.v.bottom_data_property => {}
+            Axiom::DataPropertyAssertion(d, a, _)
+            | Axiom::NegativeDataPropertyAssertion(d, a, _)
+                if *d == self.v.bottom_data_property =>
+            {
+                self.individual(a);
+                if matches!(ax, Axiom::DataPropertyAssertion(..)) {
+                    self.gci(Nnf::Bottom);
                 }
             }
             Axiom::DataPropertyDomain(d, c) => {
@@ -1209,6 +1409,25 @@ impl Builder<'_> {
                     .collect::<Result<_, _>>()?,
             ),
             C::ComplementOf(c) => return self.nnf(c, !positive),
+            C::HasValue(p, _) if self.extreme(p) == Some(Extreme::Bottom) => Nnf::Bottom,
+            C::SomeValuesFrom(p, f) if self.extreme(p) == Some(Extreme::Bottom) => {
+                self.name_classes(f);
+                Nnf::Bottom
+            }
+            C::AllValuesFrom(p, f) if self.extreme(p) == Some(Extreme::Bottom) => {
+                self.name_classes(f);
+                Nnf::Top
+            }
+            // Every individual is a value of the top property.
+            C::HasValue(p, _) if self.extreme(p) == Some(Extreme::Top) => Nnf::Top,
+            C::SomeValuesFrom(p, f) if self.extreme(p) == Some(Extreme::Top) => {
+                let f = self.nnf(f, true)?;
+                self.through_universal(|w| at_least(1, w, f))?
+            }
+            C::AllValuesFrom(p, f) if self.extreme(p) == Some(Extreme::Top) => {
+                let f = self.nnf(f, true)?;
+                self.through_universal(|w| Nnf::All(w, Box::new(f)))?
+            }
             C::SomeValuesFrom(p, f) => {
                 let (r, f) = (self.role(p)?, self.nnf(f, true)?);
                 at_least(1, r, f)
@@ -1237,6 +1456,26 @@ impl Builder<'_> {
             C::HasValue(p, a) => {
                 let r = self.role(p)?;
                 at_least(1, r, Nnf::Atom(self.nominal(a)))
+            }
+            // The bottom data property has no values.
+            C::DataSomeValuesFrom(d, _) | C::DataHasValue(d, _)
+                if *d == self.v.bottom_data_property =>
+            {
+                Nnf::Bottom
+            }
+            C::DataAllValuesFrom(d, _) | C::DataMaxCardinality(_, d, _)
+                if *d == self.v.bottom_data_property =>
+            {
+                Nnf::Top
+            }
+            C::DataMinCardinality(n, d, _) | C::DataExactCardinality(n, d, _)
+                if *d == self.v.bottom_data_property =>
+            {
+                if *n == 0 {
+                    Nnf::Top
+                } else {
+                    Nnf::Bottom
+                }
             }
             C::DataSomeValuesFrom(d, dr) => {
                 let (r, f) = (self.data_role(*d)?, self.data_nnf(dr)?);

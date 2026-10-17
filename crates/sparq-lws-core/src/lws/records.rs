@@ -124,7 +124,12 @@ where
         }
     };
     use crate::error::ServerError;
-    let failed = |e: ServerError| problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string()));
+    // A store with no room for the record is the same answer the record capacities give when
+    // they are full, and is told the same way: `507`, the storage is full, not `500`.
+    let failed = |e: ServerError| match e {
+        ServerError::InsufficientStorage => problem(StatusCode::INSUFFICIENT_STORAGE, None),
+        e => problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&e.to_string())),
+    };
     let Some(place) = state.settlements.reserve() else {
         return Err(settlements_full());
     };

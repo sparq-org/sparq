@@ -795,6 +795,138 @@ pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) ->
     }
 }
 
+/// Backward goal `g` with every variable resolved to the END of its binding chain in `b`
+/// ([`super::walk`]), through list members, quoted triples AND quoted formulas. A
+/// formula's OWN variables are not bound in `b`, so they are left as they are; what this
+/// resolves inside one is a variable the CALLER bound, which the proof can read (a
+/// `log:includes` premise walks into a quoted formula through the caller's binding, which
+/// `backward_prove` hands the proof whole), so two goals that differ only there derive
+/// different values and must not share a name.
+///
+/// This, and not [`substitute`], is what a goal's IDENTITY is built from. Substitution
+/// follows ONE binding, while the unification that resolves a goal
+/// ([`super::unify_walked`]) follows the whole chain, so two goals unification tells
+/// apart can substitute alike: a repeated goal variable (`{ (?t ?t) :outer ?f }`) aliases
+/// one renamed variable to another, and the two goals then differ only past that one
+/// binding. Naming both with one identity merges their answers and loses a row
+/// (GH #6844).
+///
+/// A variable whose expansion this is already INSIDE is left as it is: a formula bound to
+/// `?x` may itself name `?x` (`:s :p { ?x :q ?x }`, where the query binds `?x` to that
+/// formula), and that occurrence is the formula's OWN name, not the caller's binding of
+/// it. Resolving it would walk back into the same formula at every occurrence, round and
+/// round until the depth room ran out, which refused the goal and dropped the answer
+/// (GH #6844 review round 5). An occurs check on the walk stack stops that at the first
+/// re-entry, and it terminates for every binding: there are finitely many names, so an
+/// endless walk would have to expand one of them twice.
+///
+/// `None`, with the cut recorded, past the run's term allowance: its depth limit bounds
+/// the levels this recurses (as [`generated`] bounds what evaluation keeps) and each TERM
+/// it builds is charged against its size limit ([`substituted_refused`]), which is a
+/// per-term limit, so the three terms of an atom are counted apart as [`substitute`]
+/// counts them. A goal that has no identity cannot be named, so `backward_prove` fails
+/// the run on it rather than return an empty proof, which would read as "not provable".
+pub(crate) fn walked_atom(
+    g: &[Term; 3],
+    b: &super::Binding,
+    run: &Truncation,
+) -> Option<[Term; 3]> {
+    let room = run.term_depth.get();
+    // One byte counter PER TERM: `max_term_bytes` bounds one term, so three terms that are
+    // each admissible on their own must not refuse the atom by their sum. The occurs-check
+    // stack is per term too: it holds the variables THIS term's walk is inside.
+    let walk_term = |t: &Term| walked(t, b, run, room, &mut 0usize, &mut Vec::new());
+    Some([walk_term(&g[0])?, walk_term(&g[1])?, walk_term(&g[2])?])
+}
+
+/// One term of [`walked_atom`], `room` levels of nesting and `spent` bytes of the atom's
+/// allowance in, with `open` naming the variables whose expansion this walk is inside.
+/// Private: callers go through [`walked_atom`].
+fn walked(
+    t: &Term,
+    b: &super::Binding,
+    run: &Truncation,
+    room: usize,
+    spent: &mut usize,
+    open: &mut Vec<String>,
+) -> Option<Term> {
+    // The occurs check: a variable this walk is already inside the expansion of is the
+    // formula's own name and stays as it is.
+    let own = matches!(t, Term::Var(v) if open.iter().any(|o| o == v));
+    let resolved = if own { t.clone() } else { super::walk(t, b) };
+    let compound = matches!(resolved, Term::List(_) | Term::Triple(_) | Term::Formula(_));
+    // A compound is charged for its own node here and for its members as they resolve; a
+    // leaf is charged for all of itself at once.
+    let node = if compound { TERM_NODE_BYTES } else { term_bytes(&resolved) };
+    *spent = spent.saturating_add(node);
+    if substituted_refused(run, *spent) {
+        return None;
+    }
+    // Only a compound descends, so only a compound needs room to descend INTO, and only a
+    // compound may take a level off `room`: a leaf resolved at the boundary (`room` 0) is
+    // returned, not refused and not counted (which would underflow).
+    if !compound {
+        return Some(resolved);
+    }
+    if room == 0 {
+        return settle(run, Bounded::cut(None, TERM_DEPTH_CUT));
+    }
+    // Descending into the value of a variable: that variable is OPEN for the walk below,
+    // so an occurrence of it inside its own value is left alone by the check above. Popped
+    // after, and a refusal below abandons the whole atom, so the stack is never read again.
+    let expanded = match t {
+        Term::Var(v) if !own => {
+            open.push(v.clone());
+            true
+        }
+        _ => false,
+    };
+    let out = walked_members(resolved, b, run, room - 1, spent, open);
+    if expanded {
+        open.pop();
+    }
+    out
+}
+
+/// The members of compound `resolved`, each walked with `inner` levels of room left: the
+/// descending half of [`walked`], split out so its caller can pop the occurs-check stack
+/// on every path out of it.
+fn walked_members(
+    resolved: Term,
+    b: &super::Binding,
+    run: &Truncation,
+    inner: usize,
+    spent: &mut usize,
+    open: &mut Vec<String>,
+) -> Option<Term> {
+    Some(match resolved {
+        Term::List(ms) => {
+            let mut out = Vec::with_capacity(ms.len());
+            for m in &ms {
+                out.push(walked(m, b, run, inner, spent, open)?);
+            }
+            Term::List(out)
+        }
+        Term::Triple(tr) => Term::Triple(Box::new([
+            walked(&tr[0], b, run, inner, spent, open)?,
+            walked(&tr[1], b, run, inner, spent, open)?,
+            walked(&tr[2], b, run, inner, spent, open)?,
+        ])),
+        Term::Formula(ts) => {
+            let mut out = Vec::with_capacity(ts.len());
+            for r in &ts {
+                out.push([
+                    walked(&r[0], b, run, inner, spent, open)?,
+                    walked(&r[1], b, run, inner, spent, open)?,
+                    walked(&r[2], b, run, inner, spent, open)?,
+                ]);
+            }
+            Term::Formula(out)
+        }
+        other => other,
+    })
+}
+
 /// Whether compound `t`, substituted under `b`, is past the run's term-size limit
 /// (sized from the borrowed terms; the cut and the run's refusal are recorded). Kept out
 /// of line: a variable or atom, the common case, never reaches it.
@@ -974,6 +1106,52 @@ pub(crate) fn runtime_docs() -> usize {
         return n;
     }
     RUNTIME_DOCS
+}
+
+/// Why a run was stopped by [`proof_nodes`].
+const PROOF_NODES_CUT: &str = "backward proof-node limit exceeded";
+
+/// Distinct backward proof-tree nodes, and distinct string identities their keys are built
+/// from, that one top-level run may register (`run_shared::RunShared::node` /
+/// `intern`). The run keeps a constant-size entry per node, and a goal's or a nested
+/// formula's canonical key per identity, so this bounds those tables; the one that would be
+/// too many fails the run ([`proof_nodes_exceeded`]).
+///
+/// It is **[`ClosureLimits::max_join_rows`] × [`ClosureLimits::max_rounds`]**, with the
+/// units stated honestly: `max_join_rows` bounds ONE ROUND's rows and firings, while these
+/// tables accumulate over every round of the run, so the run-wide figure comparable to them
+/// is the per-round allowance times the rounds the run may take. Charging the per-round
+/// number alone conflated the two and refused a program a default-limits run answers (a
+/// document with many `<=` sites and a few hundred subjects reaches a few thousand
+/// registrations). No new field on `ClosureLimits`, which is public and built with struct
+/// literals.
+///
+/// `usize::MAX` — the DEFAULT `max_join_rows` — saturates the product, so a default-limits
+/// run is never refused for this, exactly as [`JoinWork`] is unbounded by default. Only a
+/// run that set `max_join_rows` can be refused here, and the CHANGELOG and
+/// `skills/inference/SKILL.md` say so.
+///
+/// It is not a charge against the [`JoinWork`] counter itself, because that one is
+/// refreshed at the start of every round ([`JoinWork::round`]) and so cannot bound tables
+/// that accumulate across all of them. A document with no `<=` rule registers nothing at
+/// all, so this is never reached on the forward-only path. Alongside the allowance, a
+/// `(rule, conclusion)` site is registered only once its conclusion UNIFIES with the goal
+/// (`backward_prove`), so a site rejected at unification costs nothing — which is a smaller
+/// saving than it sounds: a site whose conclusion carries a constant where the goal has a
+/// free variable DOES unify, and it is the premise that then fails, so a document with many
+/// such sites still registers one node per site per goal.
+pub(crate) fn proof_nodes(run: &Truncation) -> usize {
+    run.limits.max_join_rows.saturating_mul(run.limits.max_rounds.max(1))
+}
+
+/// The error of a run that has registered as many proof-tree nodes and identities as it
+/// may, the cut recorded on `cuts`.
+pub(crate) fn proof_nodes_exceeded(cuts: &impl Sink) -> String {
+    cuts.record(PROOF_NODES_CUT);
+    "n3: ".to_string()
+        + PROOF_NODES_CUT
+        + ": a run standardizes apart at most max_join_rows distinct backward proof-tree \
+           nodes and goal identities (raise ClosureLimits::max_join_rows to allow more)"
 }
 
 /// The error of a run whose runtime-document table is full, the cut recorded on `cuts`.
@@ -1490,11 +1668,44 @@ mod tests {
         (v, sink.get())
     }
 
-    /// The GH #6757 programs: a backward rule concludes a formula holding a variable (or
-    /// an `@forAll` universal), and a forward rule copies it out. Every backward proof
-    /// renames the variable apart, so each round derives a new, syntactically distinct
-    /// fact and the closure never saturates.
+    /// The GH #6757 shape, still diverging: a backward rule concludes a formula holding a
+    /// variable (or an `@forAll` universal), a forward rule nests that value one level
+    /// deeper, and a second forward rule feeds the deeper value back to the backward rule's
+    /// own predicate. Each round's value is one `{ :s :t … }` deeper than the last, so the
+    /// closure never saturates.
+    ///
+    /// The feedback is what diverges. The RENAMING no longer does: a `__bw…` name is the
+    /// fingerprint of the proof-tree node and the GOAL, so re-proving the same goal at the
+    /// same node in a later round mints the same name (GH #6844) — the four programs that
+    /// diverged on the counter alone now saturate, which
+    /// `the_gh_6757_renaming_programs_saturate` pins.
     const DIVERGING: [&str; 4] = [
+        "@prefix : <http://example.org/#>.\n\
+         { :a :p { ?x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r { :s :t ?f } } .\n\
+         { :a :r ?f } => { :a :p ?f } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r { :s :t ?f } } .\n\
+         { :a :r ?f } => { :a :p ?f } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :b :r { :s :t ?f } } .\n\
+         { :b :r ?f } => { :a :p ?f } .\n",
+        "@prefix : <http://example.org/#>.\n\
+         @forAll :x .\n\
+         { :a :p { :x :q :z } } <= true .\n\
+         { :a :p ?f } => { :a :r { :s :t { :s :u ?f } } } .\n\
+         { :a :r ?f } => { :a :p ?f } .\n",
+    ];
+
+    /// The four GH #6757 programs AS THEY WERE WRITTEN THERE: a backward rule concludes a
+    /// formula holding a variable (or an `@forAll` universal) and a forward rule copies it
+    /// out, with nothing feeding the copy back. Each round re-proves the same goal, so the
+    /// only thing that could differ between rounds was the freshened variable's name.
+    const GH_6757_RENAMING_ONLY: [&str; 4] = [
         "@prefix : <http://example.org/#>.\n\
          { :a :p { ?x :q :z } } <= true .\n\
          { :a :p ?f } => { :a :r ?f } .\n",
@@ -1576,6 +1787,25 @@ mod tests {
             every_entry_point_refuses(doc, 64, CLOSURE_FACTS);
             // The fact allowance trips on its own too.
             every_entry_point_refuses(doc, CLOSURE_ROUNDS, 32);
+        }
+    }
+
+    /// GH #6844 item 2: the backward chainer's freshened names no longer count
+    /// applications, so re-proving one goal in a later round derives the SAME fact and the
+    /// closure saturates. These four programs were refused at the closure limit before.
+    #[test]
+    fn the_gh_6757_renaming_programs_saturate() {
+        use crate::n3;
+        for doc in GH_6757_RENAMING_ONLY {
+            // Far below the old allowance: the closure is one fact, reached in a few rounds.
+            let closure = with_allowance(16, 8, || n3::reason_n3_terms(doc, None))
+                .unwrap_or_else(|e| panic!("still diverges: {e}\n{doc}"));
+            let derived: Vec<&[Term; 3]> = closure
+                .facts
+                .iter()
+                .filter(|[_, p, _]| matches!(p, Term::Iri(i) if i.ends_with("#r")))
+                .collect();
+            assert_eq!(derived.len(), 1, "{doc}: {derived:?}");
         }
     }
 
@@ -1973,5 +2203,114 @@ mod tests {
         }
         assert_eq!(depth(&Term::List(vec![Term::List(Vec::new())])), 2);
         assert_eq!(depth(&Term::Formula(Vec::new())), 1);
+    }
+
+    /// #6844: `walked_atom` resolves every variable of a goal to the END of its chain,
+    /// inside lists and quoted triples, keeps a quoted formula as the value it is, and
+    /// stops a chain that walks back into itself instead of following it forever.
+    #[test]
+    fn walked_atom_resolves_chains_and_stops_a_cyclic_one() {
+        use super::super::{Binding, Term};
+        let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
+        let var = |s: &str| Term::Var(s.to_string());
+        let mut b = Binding::default();
+        b.insert("x".into(), var("mid"));
+        b.insert("mid".into(), var("end"));
+        b.insert("end".into(), iri("v"));
+        b.insert("inner".into(), iri("leaked"));
+        let quoted = Term::Formula(vec![
+            [iri("s"), iri("p"), var("inner")],
+            [iri("s"), iri("q"), var("own")],
+        ]);
+        let goal = [
+            Term::List(vec![var("x"), Term::Triple(Box::new([iri("s"), iri("p"), var("x")]))]),
+            iri("has"),
+            quoted.clone(),
+        ];
+        let run = Truncation::top_level();
+        let walked = walked_atom(&goal, &b, &run).expect("within the run's allowance");
+        assert_eq!(
+            walked[0],
+            Term::List(vec![iri("v"), Term::Triple(Box::new([iri("s"), iri("p"), iri("v")]))]),
+            "the chain is followed to its end in a list member and in a quoted triple"
+        );
+        // A quoted formula is walked too (GH #6844 round 4): the variable the CALLER bound
+        // resolves, because the proof reads the formula through that binding, while the
+        // formula's OWN variable — not bound in `b` — is left as it is.
+        assert_eq!(
+            walked[2],
+            Term::Formula(vec![[iri("s"), iri("p"), iri("leaked")], [iri("s"), iri("q"), var("own")]]),
+            "the caller's binding inside the formula resolves; the formula's own does not"
+        );
+        assert_ne!(walked[2], quoted, "which is not the opaque value");
+        // Substitution follows ONE binding, which is what made two goals look alike.
+        assert_eq!(substitute(&goal[0], &b, &run), Some(apply(&goal[0], &b)));
+        assert_ne!(apply(&goal[0], &b), walked[0], "one binding is not the whole chain");
+
+        // A chain that walks back into itself stops at the re-entry (GH #6844 round 5): the
+        // occurs check leaves the second `?x` as the variable it is, so the walk is finite
+        // and the goal still HAS an identity instead of being refused for its depth.
+        let mut cyclic = Binding::default();
+        cyclic.insert("x".into(), Term::List(vec![var("x")]));
+        let cyclic_run = Truncation::top_level();
+        assert_eq!(
+            walked_atom(&[var("x"), iri("has"), iri("v")], &cyclic, &cyclic_run),
+            Some([Term::List(vec![var("x")]), iri("has"), iri("v")]),
+            "a cycle is stopped at its re-entry, not followed and not refused"
+        );
+        assert_eq!(cyclic_run.get(), None, "and the run is not cut short by it");
+    }
+
+    /// #6844 round 4: only a compound takes a level off the walker's room, so a goal
+    /// admitted AT the depth boundary — its innermost members are leaves reached with no
+    /// room left — is walked, not refused, and does not underflow the counter.
+    #[test]
+    fn walked_atom_walks_a_goal_at_the_depth_boundary() {
+        use super::super::{Binding, Term};
+        let run = Truncation::top_level();
+        let room = run.term_depth.get();
+        let mut t = Term::Iri("http://ex/deep".into());
+        for _ in 0..room {
+            t = Term::List(vec![t]);
+        }
+        assert_eq!(depth(&t), room, "nested to exactly the run's allowance");
+        assert!(fits(&t, room), "and admitted by the allowance");
+        let goal = [t.clone(), Term::Iri("http://ex/p".into()), Term::Iri("http://ex/o".into())];
+        let walked =
+            walked_atom(&goal, &Binding::default(), &run).expect("a goal at the boundary walks");
+        assert_eq!(walked[0], t, "nothing was bound, so nothing changed");
+        // One level deeper is past the allowance, and that is a refusal rather than a panic.
+        let deeper = [Term::List(vec![t]), goal[1].clone(), goal[2].clone()];
+        assert_eq!(walked_atom(&deeper, &Binding::default(), &run), None, "one level too deep");
+    }
+
+    /// #6844 round 4: `max_term_bytes` bounds ONE term, so the walker counts each term of a
+    /// goal on its own. Three terms that are each admissible and together are not must still
+    /// walk.
+    #[test]
+    fn walked_atom_counts_each_term_of_a_goal_on_its_own() {
+        use super::super::{Binding, Term};
+        let lit = |n: usize| {
+            Term::Lit("x".repeat(n), "http://www.w3.org/2001/XMLSchema#string".into(), None)
+        };
+        let limits = ClosureLimits { max_term_bytes: 2_000, ..ClosureLimits::default() };
+        let run = Truncation::top_level_with(limits);
+        let goal = [lit(900), Term::Iri("http://ex/p".into()), lit(900)];
+        assert!(
+            goal.iter().all(|t| term_bytes(t) <= 2_000),
+            "each term is admissible on its own"
+        );
+        assert!(
+            goal.iter().map(term_bytes).sum::<usize>() > 2_000,
+            "and their sum is not"
+        );
+        assert_eq!(
+            walked_atom(&goal, &Binding::default(), &run),
+            Some(goal.clone()),
+            "a per-term limit is not a per-atom one"
+        );
+        // A SINGLE term past the limit is still refused.
+        let big = [lit(3_000), goal[1].clone(), goal[2].clone()];
+        assert_eq!(walked_atom(&big, &Binding::default(), &run), None, "one term too large");
     }
 }
