@@ -279,38 +279,39 @@ pub trait DistributedRandomness {
     ///   reorder entries undetected. Semi-honest only; the consumer-side
     ///   `checked_oblivious_shuffle` adds a SHAPE check and nothing more.
     ///
-    /// ## An implementor MAY require degree-`t` entries — the caller's obligation
+    /// ## Every element must be a degree-`t` sharing — the caller's obligation
     ///
-    /// A shuffle that only moves whole entries never reads a share, so it is
-    /// **degree-agnostic**: [`ShamirDealer`]'s switch-network implementation
-    /// relabels share-vectors and carries any degree through untouched. A shuffle
+    /// An implementor requires that every element of every entry be a degree-`<= t`
+    /// sharing on the canonical points, and refuses with [`MpcError::Protocol`]
+    /// otherwise — both [`crate::prss::PrssRandomness`] and [`ShamirDealer`] do.
+    /// The reason differs by implementation but the obligation does not. A shuffle
     /// that *recombines* — converting each element between sharings, as a
     /// dealer-less source must — interpolates from `t+1` points, which is only
     /// faithful at degree `<= t`; handed a degree-`2t` element it would return a
     /// well-formed degree-`t` sharing of a DIFFERENT secret, which no later
-    /// reconstruction could detect.
+    /// reconstruction could detect. [`ShamirDealer`]'s switch network moves whole
+    /// share-vectors, so routing itself is degree-agnostic, but its mandatory
+    /// re-randomisation step adds a degree-`t` zero-sharing, which refreshes only
+    /// the coefficients up to `x^t` and so would leave a higher-degree element
+    /// partly linkable to its input; it therefore refuses the same inputs.
     ///
-    /// So an implementor is entitled to require that every element of every entry
-    /// be a degree-`<= t` sharing on the canonical points, and to refuse with
-    /// [`MpcError::Protocol`] otherwise — [`crate::prss::PrssRandomness`] does
-    /// exactly that. A caller holding degree-`2t` elements (the oblivious output
-    /// stage's `selector · real_tag` products) must **degree-reduce them first**
-    /// (`crate::shamir::degree_reduce_through`) before shuffling through a
-    /// recombining source. Which sources recombine is not something a generic
-    /// caller can inspect, so the safe discipline is: shuffle degree-`t` columns.
+    /// A caller holding degree-`2t` elements (the oblivious output stage's
+    /// `selector · real_tag` products) must **degree-reduce them first**
+    /// (`crate::shamir::degree_reduce_through`) before shuffling. The safe
+    /// discipline is simply: shuffle degree-`t` columns.
     ///
-    /// ## The returned shares may be FRESH — do not rely on share identity
+    /// ## The returned shares are FRESH — never rely on share identity
     ///
     /// What this method preserves is the **reconstructed values** and their
-    /// per-entry binding, not the share vectors themselves. A switch-network
-    /// implementor hands back the very same `Share`s in a new order, but a
-    /// recombining one returns **fresh sharings** of the permuted values — new
-    /// masking polynomials, so every `y` differs even though the entry
+    /// per-entry binding, not the share vectors themselves. Every implementor
+    /// returns **fresh sharings** of the permuted values — a recombining source by
+    /// re-sharing, [`ShamirDealer`] by re-randomising each routed element — so new
+    /// masking polynomials, and every `y` differs even though the entry
     /// reconstructs to the same tuple. A caller must therefore never match an
     /// output entry to an input entry by share equality, cache a share across the
     /// call, or assume the output is a sub-multiset of the input's share vectors.
-    /// (Fresh sharings are a feature, not a wart: re-randomising is what keeps a
-    /// resharing shuffle's output unlinkable to its input.)
+    /// (Fresh sharings are a feature, not a wart: re-randomising is what keeps the
+    /// shuffle's output unlinkable to its input.)
     ///
     /// ## Ordered delivery is a TRANSPORT obligation, not enforced here
     ///
@@ -1024,10 +1025,6 @@ pub(crate) mod test_sources {
         }
     }
 
-    /// Order-sensitive 64-bit FNV-1a digest of a transcript: for each entry, the
-    /// method name's bytes, a `0` separator byte, then each `y` as 8
-    /// little-endian bytes. Any change to which method was called, what it
-    /// returned, or the ORDER of the draws changes the digest.
     /// The transcript PREFIX that runs before the first oblivious shuffle, for a
     /// prefix-equality pin.
     ///
@@ -1045,6 +1042,10 @@ pub(crate) mod test_sources {
         &log[..cut]
     }
 
+    /// Order-sensitive 64-bit FNV-1a digest of a transcript: for each entry, the
+    /// method name's bytes, a `0` separator byte, then each `y` as 8
+    /// little-endian bytes. Any change to which method was called, what it
+    /// returned, or the ORDER of the draws changes the digest.
     pub(crate) fn fingerprint(log: &[Entry]) -> u64 {
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
         let mut eat = |b: u8| {
