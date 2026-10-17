@@ -342,7 +342,11 @@ above, or the owner's conditional create (which holds the container alone, and o
 later shared holders waiting behind it, so then, for at most the lock wait, another
 subscriber's change too), never another subscriber's create or removal otherwise, and never
 the sweeper's removal of anyone else's expired subscription, which is listed nowhere (once seen
-expired, a subscription stays expired, even if the clock is stepped back). An access document nested too deeply to store and read back gets 400. A
+expired, a subscription stays expired, even if the clock is stepped back; it is marked expired
+in the store before its removal begins, and none begins unless the mark is stored, so a start
+after a removal that failed or was cut short finds it expired whatever the clock says then; a
+delivery checks its subscription again once it has decided the subscriber may read the
+resource, with nothing waited on between that check and the send). An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.

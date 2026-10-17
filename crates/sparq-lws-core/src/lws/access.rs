@@ -1243,6 +1243,7 @@ pub async fn handle<S: Store + 'static>(
                 super::records::Listed::InContainer,
                 super::records::Remover::Request,
                 req.admission.clone(),
+                None,
                 set_aside,
                 settle,
             );
