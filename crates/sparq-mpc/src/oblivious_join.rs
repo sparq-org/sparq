@@ -304,7 +304,9 @@ pub(crate) fn check_output_bound(bound: usize, candidates: usize) -> Result<(), 
         // that large, which the cap refuses. Saying so names the cap rather than
         // leaving the caller with a `B < candidates` message it cannot act on.
         return Err(MpcError::Protocol(format!(
-            "oblivious output stage: candidate count {} exceeds the MAX_OUTPUT_BOUND cap of              {} — refusing (every candidate becomes one materialised slot, so no legal B              could cover this many)",
+            "oblivious output stage: candidate count {} exceeds the MAX_OUTPUT_BOUND cap \
+             of {} — refusing (every candidate becomes one materialised slot, so no \
+             legal B could cover this many)",
             candidates, MAX_OUTPUT_BOUND
         )));
     }
@@ -330,13 +332,17 @@ pub(crate) fn check_output_bound(bound: usize, candidates: usize) -> Result<(), 
 pub(crate) fn checked_candidate_pairs(left: usize, right: usize) -> Result<usize, MpcError> {
     let count = left.checked_mul(right).ok_or_else(|| {
         MpcError::Protocol(format!(
-            "oblivious output stage: candidate count {} x {} overflows usize — refusing before              any allocation or draw (each candidate pair becomes one materialised slot)",
+            "oblivious output stage: candidate count {} x {} overflows usize — refusing \
+             before any allocation or draw (each candidate pair becomes one \
+             materialised slot)",
             left, right
         ))
     })?;
     if count > MAX_OUTPUT_BOUND {
         return Err(MpcError::Protocol(format!(
-            "oblivious output stage: candidate count {} (= {} x {}) exceeds the              MAX_OUTPUT_BOUND cap of {} — refusing before any allocation or draw (each              candidate is materialised, selected, shuffled and opened)",
+            "oblivious output stage: candidate count {} (= {} x {}) exceeds the \
+             MAX_OUTPUT_BOUND cap of {} — refusing before any allocation or draw \
+             (each candidate is materialised, selected, shuffled and opened)",
             count, left, right, MAX_OUTPUT_BOUND
         )));
     }
@@ -481,6 +487,10 @@ pub fn oblivious_set_output(
     payload_arity: usize,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    // Preflight the bound BEFORE a dealer exists: `output_stage_shuffled_through`
+    // checks it again as its first statement, so this only keeps a refused run from
+    // creating keystream state.
+    check_output_bound(bound, candidates.len())?;
     // Mint ONE fresh dealer for this run (production: a fresh OS-seeded CSPRNG,
     // sq-1vt) and draw every sharing and the shuffle through the seam on it.
     oblivious_set_output_through(
@@ -696,6 +706,10 @@ pub fn oblivious_set_output_to_recipient(
     bound: usize,
     recipient: HolderId,
 ) -> Result<(RecipientOutputShares, ObliviousOutputCost), MpcError> {
+    // Same pre-dealer preflight as the all-party path: `B` sizes every per-slot
+    // allocation and the shuffle network, and the recipient-only mode runs the very
+    // same stage, so an over-cap or short `B` is refused here and again inside it.
+    check_output_bound(bound, candidates.len())?;
     oblivious_set_output_to_recipient_through(
         &mut backend.dealer(),
         backend,
@@ -1522,6 +1536,8 @@ pub fn oblivious_join_output(
     out_vars: Vec<Variable>,
     bound: usize,
 ) -> Result<(PartialResult, ObliviousOutputCost), MpcError> {
+    // Preflight the bound before the dealer exists; the stage re-checks it first.
+    check_output_bound(bound, candidates.len())?;
     // One fresh dealer for this run; every draw and the shuffle go through the seam.
     oblivious_join_output_through(&mut backend.dealer(), backend, candidates, out_vars, bound)
 }
@@ -1823,6 +1839,88 @@ mod tests {
         // And the recipient, who may reconstruct, does see the difference.
         assert_eq!(real_multiset(&s1.reconstruct().unwrap()).len(), 1);
         assert_eq!(real_multiset(&s3.reconstruct().unwrap()).len(), 3);
+    }
+
+    /// The recipient-only entry carries the SAME bound guard as the all-party one,
+    /// and it refuses before any draw or allocation: `B` sizes every per-slot
+    /// vector and the shuffle network, so a `usize::MAX` or over-cap `B` must not
+    /// reach them. Covered on both the `_through` entry (where the count is
+    /// observable) and the public wrapper.
+    #[test]
+    fn the_recipient_entry_refuses_an_over_cap_bound_before_any_draw() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x8E0B).unwrap();
+        let cands = recipient_candidates();
+        assert!(
+            !cands.is_empty(),
+            "a non-empty input, so draws are possible"
+        );
+
+        for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err = oblivious_set_output_to_recipient_through(
+                &mut counted,
+                &backend,
+                &cands,
+                1,
+                bound,
+                HolderId::new("recipient"),
+            )
+            .expect_err("an over-cap bound must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "B={}: {:?}",
+                bound,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "B={}: refused before any draw", bound);
+
+            let err = oblivious_set_output_to_recipient(
+                &backend,
+                &cands,
+                1,
+                bound,
+                HolderId::new("recipient"),
+            )
+            .expect_err("the public wrapper must refuse it too");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "wrapper B={}: {:?}",
+                bound,
+                err
+            );
+        }
+
+        // A short `B` is the other half of the contract: never truncate a match.
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_to_recipient_through(
+            &mut counted,
+            &backend,
+            &cands,
+            1,
+            cands.len() - 1,
+            HolderId::new("recipient"),
+        )
+        .expect_err("a bound below the candidate count must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("bound")),
+            "short bound: {:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "the short bound precedes every draw");
+
+        // And a legal bound over the same input still runs, so the guard is not
+        // refusing everything.
+        oblivious_set_output_to_recipient(
+            &backend,
+            &cands,
+            1,
+            cands.len(),
+            HolderId::new("recipient"),
+        )
+        .expect("a legal bound runs");
     }
 
     /// The recipient's reconstruction is not a weaker open: it applies the same
