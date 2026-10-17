@@ -185,6 +185,30 @@ pub trait SparqClient: Send + Sync {
     /// Whether the resource is indexed (the authoritative existence check — never an S3 HEAD).
     async fn exists(&self, iri: &str) -> Result<bool, SparqError>;
 
+    /// Name the bytes under `blob_key` as being reclaimed, in one atomic step that also finds no
+    /// record naming them as its bytes (a resource's, or a hold's): `Ok(false)`, with nothing
+    /// named, when one does. Keys are minted per write and only a record already naming them
+    /// (a hold's, by its holder) can bring a record back to them, so once named no record ever
+    /// names them again and they may be deleted; then [`end_reclaim`](Self::end_reclaim). A
+    /// reclaim cut short is found again with [`reclaiming`](Self::reclaiming).
+    ///
+    /// The DEFAULT never names any (the bytes are left to the orphan sweep).
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        let _ = blob_key;
+        Ok(false)
+    }
+
+    /// Stop naming `blob_key` as being reclaimed ([`begin_reclaim`](Self::begin_reclaim)).
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        let _ = blob_key;
+        Ok(())
+    }
+
+    /// Every blob key named as being reclaimed.
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        Ok(Vec::new())
+    }
+
     /// Remove a resource's metadata record. Idempotent: deleting an absent IRI is `Ok(())` (the
     /// caller's existence check governs the 404, so this is a no-op-on-absent at the index layer).
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError>;
@@ -341,6 +365,8 @@ impl Default for InMemorySparqClient {
 struct Meta {
     map: HashMap<String, ResourceMeta>,
     pooled: usize,
+    /// Records of holds ([`super::is_hold_record`]), admitted apart from every ceiling.
+    holds: usize,
 }
 
 impl Meta {
@@ -361,15 +387,22 @@ impl Meta {
         self.pooled
     }
 
+    /// Records of holds.
+    fn holds(&self) -> usize {
+        self.holds
+    }
+
     fn values(&self) -> std::collections::hash_map::Values<'_, String, ResourceMeta> {
         self.map.values()
     }
 
     fn insert(&mut self, iri: String, meta: ResourceMeta) -> Option<ResourceMeta> {
         let pooled = super::in_service_pool(&iri);
+        let hold = super::is_hold_record(&iri);
         let replaced = self.map.insert(iri, meta);
-        if pooled && replaced.is_none() {
-            self.pooled += 1;
+        if replaced.is_none() {
+            self.pooled += usize::from(pooled);
+            self.holds += usize::from(hold);
         }
         replaced
     }
@@ -378,6 +411,9 @@ impl Meta {
         let gone = self.map.remove(iri)?;
         if super::in_service_pool(iri) {
             self.pooled -= 1;
+        }
+        if super::is_hold_record(iri) {
+            self.holds -= 1;
         }
         Some(gone)
     }
@@ -389,6 +425,8 @@ struct Index {
     meta: Meta,
     /// container IRI → its direct children, kept in insertion order (a `Vec`, de-duplicated).
     children: HashMap<String, Vec<String>>,
+    /// The blob keys named as being reclaimed ([`SparqClient::begin_reclaim`]).
+    reclaiming: std::collections::BTreeSet<String>,
 }
 
 impl InMemorySparqClient {
@@ -425,14 +463,17 @@ impl InMemorySparqClient {
     /// own ceiling and counts towards nothing else, so no number of them makes a write of
     /// content fail.
     fn admit_resource(&self, index: &Index, iri: &str) -> Result<(), SparqError> {
-        if index.meta.contains_key(iri) {
+        if index.meta.contains_key(iri) || super::is_hold_record(iri) {
             return Ok(());
         }
         let pooled = index.meta.pooled();
         let (held, ceiling) = if super::in_service_pool(iri) {
             (pooled, self.limits.max_pool_resource_count)
         } else {
-            (index.meta.len() - pooled, self.limits.max_resource_count)
+            (
+                index.meta.len() - pooled - index.meta.holds(),
+                self.limits.max_resource_count,
+            )
         };
         if held >= ceiling {
             return Err(SparqError::QuotaExceeded);
@@ -488,6 +529,35 @@ impl SparqClient for InMemorySparqClient {
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         Ok(guard.meta.contains_key(iri))
+    }
+
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        if guard.meta.values().any(|m| m.blob_key == blob_key) {
+            return Ok(false);
+        }
+        guard.reclaiming.insert(blob_key.to_string());
+        Ok(true)
+    }
+
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        guard.reclaiming.remove(blob_key);
+        Ok(())
+    }
+
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        Ok(guard.reclaiming.iter().cloned().collect())
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {

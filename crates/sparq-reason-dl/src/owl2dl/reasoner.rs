@@ -579,6 +579,60 @@ mod tests {
         }
     }
 
+    /// The two attempts of a run with nominals and at-most restrictions stay within one
+    /// budget, including one the ABox already spent: an inconsistent ontology is never
+    /// answered consistent for lack of budget, and a model is never accepted past it.
+    #[test]
+    fn a_split_run_never_exceeds_the_budget() {
+        let body = r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            :C0 a owl:Class . :C1 a owl:Class . :R a owl:ObjectProperty .
+            :o a owl:NamedIndividual . :a a owl:NamedIndividual , :C0 .
+            :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :R ; owl:someValuesFrom :C0 ] ,
+                [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:hasValue :o ] .
+            :R a owl:IrreflexiveProperty .
+            :o a [ owl:unionOf ( [ a owl:Restriction ; owl:onProperty :R ;
+                    owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass :C0 ] :C1 ) ] .
+        "#;
+        for (extra, consistent) in [(":o a [ owl:complementOf :C1 ] .", false), ("", true)] {
+            let (d, triples) =
+                Graph::parse_to_triples(&format!("{body} {extra}"), "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            let full = Reasoner::new(&d, &o, Budget::default()).unwrap();
+            let mut t = Tableau::new(&full.clauses, &full.index, full.budget);
+            full.load_abox(&mut t);
+            assert_eq!(t.run(), Ok(consistent));
+            let needed = t.work();
+            let stride = (needed / 300).max(1);
+            let mut spent_loading = 0;
+            for max_steps in (0..64).chain((64..=needed + 2).step_by(stride as usize)) {
+                let budget = Budget {
+                    max_steps,
+                    ..Budget::default()
+                };
+                let r = Reasoner::new(&d, &o, budget).unwrap();
+                let mut t = Tableau::new(&r.clauses, &r.index, r.budget);
+                r.load_abox(&mut t);
+                let loaded = t.work();
+                match t.run() {
+                    // Loading the ABox alone spent the budget: no verdict.
+                    r if loaded > max_steps => {
+                        spent_loading += 1;
+                        assert_eq!(r, Err(Stop::Exhausted), "budget {max_steps}")
+                    }
+                    Ok(v) => {
+                        assert_eq!(v, consistent, "budget {max_steps}");
+                        assert!(t.work() <= max_steps, "{} > {max_steps}", t.work());
+                    }
+                    Err(e) => assert_eq!(e, Stop::Exhausted, "budget {max_steps}"),
+                }
+            }
+            assert!(spent_loading > 0);
+        }
+    }
+
     /// Data-key matching is metered: the value scans and the value index count towards the
     /// budget, so a budget below them answers `ResourceBudget`.
     #[test]

@@ -1779,6 +1779,9 @@ struct Sweeper {
     /// The subscriptions whose removal did not go through: when each may be tried again, and how
     /// many times it has not.
     backoff: HashMap<String, (tokio::time::Instant, u32)>,
+    /// Holds whose release failed, being released again (one task at a time; see
+    /// [`LwsState::release_unreleased`]), owned here so it goes with the sweeper.
+    releases: tokio::task::JoinSet<()>,
 }
 
 impl Sweeper {
@@ -1793,6 +1796,12 @@ impl Sweeper {
         let clock = tokio::time::Instant::now();
         while let Some(ended) = self.removals.try_join_next_with_id() {
             self.ended(ended, clock);
+        }
+        while self.releases.try_join_next().is_some() {}
+        if self.releases.is_empty() && state.has_unreleased() {
+            let state = state.clone();
+            self.releases
+                .spawn(async move { state.release_unreleased().await });
         }
         // Counted from the removals it owns, not from the places free now: a removal spawned
         // but not yet run has not taken its place, and one more started for it would find
@@ -5002,6 +5011,32 @@ mod tests {
             state.notify.subs.read().unwrap().len(),
             2 * MAINTENANCE_PLACES
         );
+    }
+
+    /// A hold whose release failed stays only until the sweeper releases it again.
+    #[tokio::test]
+    async fn a_hold_whose_release_failed_is_released_by_the_sweeper() {
+        let (state, store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let d = format!("{}doc", state.cfg.storage());
+        store
+            .write(&d, Bytes::from("x"), "text/plain")
+            .await
+            .unwrap();
+        store.fail_release.store(true, Ordering::SeqCst);
+        let mut journal = state.journal();
+        journal.stage(&d).await.unwrap();
+        assert!(journal.commit(None).await.is_ok());
+        assert_eq!(state.store.holds().await.unwrap().len(), 1);
+        let mut sweeper = Sweeper::default();
+        // Failing still: kept for the next sweep.
+        sweeper.sweep(&state);
+        while sweeper.releases.join_next().await.is_some() {}
+        assert_eq!(state.store.holds().await.unwrap().len(), 1);
+        store.fail_release.store(false, Ordering::SeqCst);
+        sweeper.sweep(&state);
+        while sweeper.releases.join_next().await.is_some() {}
+        assert!(state.store.holds().await.unwrap().is_empty());
     }
 
     /// A removal that fails is tried again only once its wait is over, and waits twice as long

@@ -38,7 +38,7 @@ use sparq_zk_compose::manifest::{
 use sparq_zk_compose::verifier::{
     prefilter_manifest_structure, CheckError, KeySet, RevocationPolicy,
 };
-use sparq_zk_compose::MethodPolicy;
+use sparq_zk_compose::{AuthenticatedMethod, MethodAuthError, MethodPolicy};
 
 const STATUS_LIST: &str = "http://ex/status/1";
 const STATUS_INDEX: u64 = 3;
@@ -183,17 +183,31 @@ fn trusted(sk: &SecretKey) -> KeySet {
 
 // ---------------------------------------------------------------- back-compat
 
-/// BACK-COMPAT: the attestation shape every existing manifest carries — a
-/// signature over the method-unbound `ZKSIG_C3` message — still passes the
-/// pre-filter under the DEFAULT policy, with no attestation field added or
-/// changed.
+/// The attestation shape every pre-method-binding manifest carries — a
+/// signature over the method-unbound `ZKSIG_C3` message — is now REFUSED under
+/// the DEFAULT policy, and passes the pre-filter only under the explicit
+/// `MethodPolicy::admit_unbound` opt-in.
+///
+/// Nothing about the attestation changes: no field is added or removed. What
+/// changed is the relying party's default answer to "this issuer attested no
+/// commitment method".
 #[test]
-fn an_existing_method_unbound_attestation_still_prefilters() {
+fn an_existing_method_unbound_attestation_needs_the_explicit_opt_in() {
     let sk = SecretKey::from_seed(1);
     let (mut m, c, salt) = scan_manifest();
     m.commitment_attestations.push(attest_unbound(c, salt, &sk));
-    prefilter_manifest_structure(&m, &trusted(&sk), &fresh_policy())
-        .expect("a method-unbound attestation is accepted under the default policy");
+
+    // Refused by default, and the refusal names its own cause rather than
+    // masquerading as a bad signature.
+    match prefilter_manifest_structure(&m, &trusted(&sk), &fresh_policy()) {
+        Err(CheckError::MethodNotAuthenticated { .. }) => {}
+        other => panic!("expected a method-not-authenticated refusal, got {:?}", other),
+    }
+
+    // Accepted under the written-down downgrade.
+    let permissive = trusted(&sk).with_method_policy(MethodPolicy::current().admit_unbound());
+    prefilter_manifest_structure(&m, &permissive, &fresh_policy())
+        .expect("admit_unbound accepts already-issued method-unbound material");
 }
 
 /// PRECEDENCE: a genuinely bad signature still yields `InvalidIssuerSignature`.
@@ -287,21 +301,52 @@ fn an_attested_legacy_method_needs_the_written_down_opt_in() {
 }
 
 /// The policy rides the `KeySet`, so the default is what an existing caller that
-/// never heard of it gets.
+/// never heard of it gets — and that default is now FAIL-CLOSED: an attestation
+/// that attests no commitment method is REFUSED unless the relying party says
+/// otherwise.
+///
+/// This is the sq-j506 prerequisite. A commitment whose method is not
+/// issuer-attested has no authenticated leaf shape, so there is nothing to pin a
+/// lane constant or a pattern-slot encoding against. It opens no value-lane
+/// gate: the Stage-0 value-lane refusals are untouched.
 #[test]
-fn the_key_sets_default_policy_is_the_back_compatible_one() {
+fn the_key_sets_default_policy_refuses_an_unbound_attestation() {
     assert_eq!(KeySet::empty().method_policy(), MethodPolicy::current());
-    assert!(KeySet::empty().method_policy().accepts_unbound());
+    assert!(
+        !KeySet::empty().method_policy().accepts_unbound(),
+        "the default policy must refuse a method-UNBOUND attestation"
+    );
+    // The refusal is a POLICY decision, so it names its own cause rather than
+    // being folded into an invalid-signature refusal.
+    assert_eq!(
+        MethodPolicy::current().admit(AuthenticatedMethod::Unbound),
+        Err(MethodAuthError::MethodNotAuthenticated)
+    );
+    // `admit_unbound` is the written-down opt-in back to the old behaviour, and
+    // `require_method_bound` takes the requirement back again.
+    let permissive = MethodPolicy::current().admit_unbound();
+    assert!(permissive.accepts_unbound());
+    assert_eq!(
+        permissive.admit(AuthenticatedMethod::Unbound),
+        Ok(AuthenticatedMethod::Unbound)
+    );
+    assert!(!permissive.require_method_bound().accepts_unbound());
+    // Opting in to unbound material does NOT also admit the superseded
+    // dual-leaf version: the two dials are independent.
+    assert_eq!(
+        permissive.admit(AuthenticatedMethod::Bound(CommitmentMethod::DualLeafV1)),
+        Err(MethodAuthError::MethodNotAdmitted(CommitmentMethod::DualLeafV1))
+    );
     assert_eq!(
         KeySet::empty()
-            .with_method_policy(MethodPolicy::current().require_method_bound())
+            .with_method_policy(MethodPolicy::current().admit_unbound())
             .method_policy(),
-        MethodPolicy::current().require_method_bound()
+        MethodPolicy::current().admit_unbound()
     );
     // `with_method_policy` does not disturb the keys or the hidden-issuer depth.
     let sk = SecretKey::from_seed(1);
     let ks = trusted(&sk).with_hidden_issuer_depth(4);
-    let with_policy = ks.clone().with_method_policy(MethodPolicy::current().require_method_bound());
+    let with_policy = ks.clone().with_method_policy(MethodPolicy::current().admit_unbound());
     assert_eq!(ks.signature_modes(), with_policy.signature_modes());
 }
 
@@ -408,19 +453,24 @@ fn an_unmatched_hidden_only_message_is_refused() {
         }];
         m
     };
-    let hidden_keys = || trusted(&sk).with_hidden_issuer_depth(HIDDEN_DEPTH);
-    let strict =
-        || hidden_keys().with_method_policy(MethodPolicy::current().require_method_bound());
+    let strict = || trusted(&sk).with_hidden_issuer_depth(HIDDEN_DEPTH);
+    let permissive =
+        || strict().with_method_policy(MethodPolicy::current().admit_unbound());
     let honest = sparq_zk::sig::commitment_message_with_status(&c, &salt, &fixture_status_ref());
 
-    prefilter_manifest_structure(&hidden(honest), &hidden_keys(), &fresh_policy())
-        .expect("the honest method-unbound hidden message still passes by default");
+    // An unbound hidden message is refused by the DEFAULT policy, and passes
+    // only under the explicit `admit_unbound` downgrade.
     match prefilter_manifest_structure(&hidden(honest), &strict(), &fresh_policy()) {
         Err(CheckError::MethodNotAuthenticated { .. }) => {}
         other => panic!("expected MethodNotAuthenticated for an unbound hidden message, got {other:?}"),
     }
+    prefilter_manifest_structure(&hidden(honest), &permissive(), &fresh_policy())
+        .expect("admit_unbound accepts the honest method-unbound hidden message");
 
-    for (label, ks) in [("default", hidden_keys()), ("require_method_bound", strict())] {
+    // The message-mismatch refusal precedes the method policy either way: a
+    // declared message matching no candidate is refused for THAT reason, under
+    // the strict default and under the downgrade alike.
+    for (label, ks) in [("default", strict()), ("admit_unbound", permissive())] {
         match prefilter_manifest_structure(&hidden(Fr::from(1u64)), &ks, &fresh_policy()) {
             Err(CheckError::HiddenIssuerMessageMismatch { .. }) => {}
             other => panic!("[{label}] expected HiddenIssuerMessageMismatch, got {other:?}"),
@@ -536,13 +586,16 @@ fn a_hidden_only_commitment_without_a_status_reference_is_refused_when_a_method_
             "expected MethodNotAuthenticated with no candidate set to bind a method, got {other:?}"
         ),
     }
-    // Control: the refusal is the policy's. The default policy does not refuse
-    // this commitment's method in the pre-filter.
-    let default = trusted(&sk).with_hidden_issuer_depth(HIDDEN_DEPTH);
-    let r = prefilter_manifest_structure(&m, &default, &fresh_policy());
+    // Control: the refusal is the POLICY's, not something structural about a
+    // hidden-only commitment. Under the `admit_unbound` downgrade the same
+    // manifest is not refused for its method.
+    let permissive = trusted(&sk)
+        .with_hidden_issuer_depth(HIDDEN_DEPTH)
+        .with_method_policy(MethodPolicy::current().admit_unbound());
+    let r = prefilter_manifest_structure(&m, &permissive, &fresh_policy());
     assert!(
         !matches!(r, Err(CheckError::MethodNotAuthenticated { .. })),
-        "the default policy accepts an unbound method, got {r:?}"
+        "admit_unbound accepts an unbound method, got {r:?}"
     );
 }
 
