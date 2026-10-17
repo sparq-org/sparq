@@ -29,7 +29,10 @@ use crate::verifier::{SeenNonces, VerifierNonce};
 use oxrdf::{NamedOrBlankNode, Term, Triple};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sparq_zk::commit::GraphCommitment;
+use crate::method_auth::{
+    candidate_messages, classify, AuthenticatedMethod, CommitmentMessageInputs,
+};
+use sparq_zk::commit::{CommitmentMethod, GraphCommitment};
 use sparq_zk::encode::encode_term;
 use sparq_zk::field::{
     field_from_hash_bytes, field_from_hex_str, field_to_be_bytes_32, field_to_hex, Fr,
@@ -206,9 +209,13 @@ fn parse_numeric_query(
 
 /// A private credential and its existing issuer-authenticated status reference.
 ///
-/// The signature must cover `commitment_message_with_status(root, salt,
-/// status_ref_digest(list, index, version))`. No signature conversion or holder
-/// re-attestation occurs. This type deliberately has no serialization or Debug.
+/// The signature must cover the METHOD-BOUND presentation message
+/// `presentation_message_with_status_and_scheme(root, salt,
+/// status_ref_digest(list, index, version), scheme_iri_to_field(
+/// CommitmentMethod::StringCanonicalV1.scheme_iri()))` (`ZKSIG_M5`) — so the
+/// issuer attests the STRING-CANONICAL commitment method, not just the
+/// commitment. A method-unbound (`ZKSIG_C3`) signature is refused. No signature
+/// conversion or holder re-attestation occurs. This type deliberately has no serialization or Debug.
 pub struct ResultCredential {
     /// Canonical string-encoded graph signed by the issuer.
     pub graph: GraphCommitment,
@@ -371,6 +378,69 @@ impl From<DriverError> for ResultError {
         Self::Driver(e)
     }
 }
+/// The METHOD-BOUND presentation message (`ZKSIG_M5`) this relation
+/// authenticates a credential over, and the one in-circuit
+/// `authenticate_credentials` / `result_check` recompute.
+///
+/// The folded scheme digest is the STRING-CANONICAL method's, fixed: the
+/// relation proves `h3(Enc(s), Enc(p), Enc(o))` leaves over the
+/// string-canonical term encoding and nothing else, so it is baked into the
+/// circuit as `compose_core::result::SCHEME_STRING_CANONICAL_V1` rather than
+/// taken as a public input. `tests/result_scheme_pin.rs` pins the Noir literal
+/// to this derivation.
+fn result_presentation_message(commitment: &Fr, salt: &Fr, status_ref: &Fr) -> Fr {
+    sig::presentation_message_with_status_and_scheme(
+        commitment,
+        salt,
+        status_ref,
+        &sig::scheme_iri_to_field(CommitmentMethod::StringCanonicalV1.scheme_iri()),
+    )
+}
+
+/// Authenticate one credential's COMMITMENT METHOD from its issuer signature and
+/// refuse anything that is not an attested string-canonical commitment.
+///
+/// Fail-closed, and the refusal is per-cause:
+/// - an attested method other than `StringCanonicalV1` (a dual-leaf credential,
+///   say) is refused even though its signature is perfectly valid — its leaves
+///   are not the shape this relation proves;
+/// - a method-UNBOUND attestation (the legacy `ZKSIG_C3`
+///   `commitment_message_with_status`) is refused: it attests the commitment,
+///   the salt and the status reference but NO method, and this relation will not
+///   substitute a default one. There is no opt-in here, because the circuit side
+///   has no unbound message to recompute.
+///
+/// On success the returned field is the exact message the in-circuit Schnorr
+/// check runs against, so host acceptance and circuit acceptance cannot diverge.
+fn authenticate_string_canonical(
+    issuer: &PublicKey,
+    signature: &Signature,
+    commitment: &Fr,
+    salt: &Fr,
+    status_ref: &Fr,
+) -> Result<Fr, ResultError> {
+    let candidates = candidate_messages(&CommitmentMessageInputs {
+        commitment,
+        salt,
+        status_ref,
+        holder_digest: None,
+    });
+    let authenticated = classify(&candidates, |m| sig::verify(issuer, m, signature))
+        .map_err(|e| reject(e.to_string()))?;
+    match authenticated {
+        AuthenticatedMethod::Bound(CommitmentMethod::StringCanonicalV1) => {
+            Ok(result_presentation_message(commitment, salt, status_ref))
+        }
+        AuthenticatedMethod::Bound(m) => Err(reject(format!(
+            "the authenticated commitment method {} is not the string-canonical method this relation proves",
+            m.scheme_iri()
+        ))),
+        AuthenticatedMethod::Unbound => Err(reject(
+            "the issuer signature attests no commitment method; this relation requires an attested string-canonical commitment",
+        )),
+    }
+}
+
 fn reject(message: impl Into<String>) -> ResultError {
     ResultError::Rejected(message.into())
 }
@@ -1008,9 +1078,17 @@ fn prepare_result_contract(
                 c.status_index,
                 c.status_version,
             );
-            let message =
-                sig::commitment_message_with_status(&c.graph.commitment, &c.graph.salt, &reference);
-            sig::verify(&c.issuer, &message, &c.signature)
+            // The METHOD must authenticate as string-canonical, not merely the
+            // signature as valid: a dual-leaf credential's leaves are not the
+            // shape this relation proves.
+            authenticate_string_canonical(
+                &c.issuer,
+                &c.signature,
+                &c.graph.commitment,
+                &c.graph.salt,
+                &reference,
+            )
+            .is_ok()
         })
         .collect();
     let graphs: Vec<_> = credentials.iter().map(|c| c.graph.clone()).collect();
@@ -1211,11 +1289,13 @@ fn prepare_result_contract(
         }
         let list = sig::status_list_id_to_field(&c.status_list);
         let reference = sig::status_ref_digest(&list, c.status_index, c.status_version);
-        let message =
-            sig::commitment_message_with_status(&c.graph.commitment, &c.graph.salt, &reference);
-        if !sig::verify(&c.issuer, &message, &c.signature) {
-            return Err(reject("credential issuer signature invalid"));
-        }
+        let message = authenticate_string_canonical(
+            &c.issuer,
+            &c.signature,
+            &c.graph.commitment,
+            &c.graph.salt,
+            &reference,
+        )?;
         let w = sig::in_circuit_witness(&c.issuer, &message, &c.signature)
             .ok_or_else(|| reject("issuer witness unavailable"))?;
         signatures.push([w.r_x, w.r_y, w.s, w.e, w.e_k].map(|f| field_to_hex(&f)));
@@ -1508,7 +1588,7 @@ mod tests {
         let graph = commit_triples(&triples, Fr::from(seed + 100)).unwrap();
         let sk = SecretKey::from_seed(seed);
         let status = sig::status_ref_digest(&sig::status_list_id_to_field(list), index, 7);
-        let message = sig::commitment_message_with_status(&graph.commitment, &graph.salt, &status);
+        let message = result_presentation_message(&graph.commitment, &graph.salt, &status);
         ResultCredential {
             graph,
             issuer: sk.public_key(),
@@ -1646,6 +1726,178 @@ mod tests {
         nonce: &VerifierNonce,
     ) -> Result<Vec<u8>, ResultError> {
         public_bytes(&public_statement(p, policy, nonce)?.fields)
+    }
+
+    /// A credential signed over a message OTHER than the method-bound
+    /// string-canonical one, built with the same fixture shape as
+    /// [`credential`] so only the signed object differs.
+    fn credential_signed_over(
+        triples: Vec<Triple>,
+        seed: u64,
+        index: u64,
+        list: &str,
+        message_of: impl Fn(&Fr, &Fr, &Fr) -> Fr,
+    ) -> ResultCredential {
+        let graph = commit_triples(&triples, Fr::from(seed + 100)).unwrap();
+        let sk = SecretKey::from_seed(seed);
+        let status = sig::status_ref_digest(&sig::status_list_id_to_field(list), index, 7);
+        let message = message_of(&graph.commitment, &graph.salt, &status);
+        ResultCredential {
+            graph,
+            issuer: sk.public_key(),
+            signature: sig::sign_deterministic(&sk, &message),
+            status_list: list.into(),
+            status_version: 7,
+            status_index: index,
+        }
+    }
+
+    /// The honest fixture authenticates as an attested string-canonical
+    /// commitment, and the message handed to the circuit is the one the host
+    /// verified. Without this the refusals below could pass vacuously.
+    #[test]
+    fn a_method_bound_string_canonical_credential_authenticates() {
+        let (credentials, _, _, _) = fixture();
+        let c = &credentials[0];
+        let reference = sig::status_ref_digest(
+            &sig::status_list_id_to_field(&c.status_list),
+            c.status_index,
+            c.status_version,
+        );
+        let message = authenticate_string_canonical(
+            &c.issuer,
+            &c.signature,
+            &c.graph.commitment,
+            &c.graph.salt,
+            &reference,
+        )
+        .expect("the fixture credential is method-bound string-canonical");
+        assert_eq!(
+            field_to_hex(&message),
+            field_to_hex(&result_presentation_message(
+                &c.graph.commitment,
+                &c.graph.salt,
+                &reference
+            ))
+        );
+        assert!(sig::verify(&c.issuer, &message, &c.signature));
+    }
+
+    /// A LEGACY method-unbound credential (`ZKSIG_C3`) is refused: its signature
+    /// is valid, but it attests no commitment method and this relation will not
+    /// substitute a default one.
+    #[test]
+    fn a_method_unbound_credential_is_refused() {
+        let c = credential_signed_over(
+            vec![triple(
+                "urn:alice",
+                "urn:name",
+                Term::Literal(Literal::new_simple_literal("Alice")),
+            )],
+            1,
+            3,
+            "urn:status:people",
+            |root, salt, status| sig::commitment_message_with_status(root, salt, status),
+        );
+        let reference = sig::status_ref_digest(
+            &sig::status_list_id_to_field(&c.status_list),
+            c.status_index,
+            c.status_version,
+        );
+        // The signature itself is perfectly valid over the object it was made
+        // against — the refusal is about WHICH object that is.
+        assert!(sig::verify(
+            &c.issuer,
+            &sig::commitment_message_with_status(&c.graph.commitment, &c.graph.salt, &reference),
+            &c.signature
+        ));
+        let err = authenticate_string_canonical(
+            &c.issuer,
+            &c.signature,
+            &c.graph.commitment,
+            &c.graph.salt,
+            &reference,
+        )
+        .expect_err("a method-unbound credential must not authenticate");
+        assert!(
+            err.to_string().contains("attests no commitment method"),
+            "unexpected refusal: {}",
+            err
+        );
+    }
+
+    /// A credential whose issuer attested a DIFFERENT method is refused even
+    /// though its method-bound signature is valid: its leaves are not the shape
+    /// this relation proves.
+    #[test]
+    fn a_credential_attesting_another_method_is_refused() {
+        for method in CommitmentMethod::recognised()
+            .iter()
+            .filter(|m| **m != CommitmentMethod::StringCanonicalV1)
+        {
+            let c = credential_signed_over(
+                vec![triple(
+                    "urn:alice",
+                    "urn:name",
+                    Term::Literal(Literal::new_simple_literal("Alice")),
+                )],
+                1,
+                3,
+                "urn:status:people",
+                |root, salt, status| {
+                    sig::presentation_message_with_status_and_scheme(
+                        root,
+                        salt,
+                        status,
+                        &sig::scheme_iri_to_field(method.scheme_iri()),
+                    )
+                },
+            );
+            let reference = sig::status_ref_digest(
+                &sig::status_list_id_to_field(&c.status_list),
+                c.status_index,
+                c.status_version,
+            );
+            let err = authenticate_string_canonical(
+                &c.issuer,
+                &c.signature,
+                &c.graph.commitment,
+                &c.graph.salt,
+                &reference,
+            )
+            .expect_err("only the string-canonical method may authenticate here");
+            assert!(
+                err.to_string().contains("is not the string-canonical method"),
+                "unexpected refusal for {}: {}",
+                method.scheme_iri(),
+                err
+            );
+        }
+    }
+
+    /// The refusal reaches the top-level entry point: a wallet of method-unbound
+    /// credentials prepares no result at all.
+    #[test]
+    fn preparing_a_result_from_method_unbound_credentials_fails() {
+        let (honest, policy, nonce, rows) = fixture();
+        let legacy: Vec<_> = honest
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                credential_signed_over(
+                    c.graph.canonical.triples.clone(),
+                    (i + 1) as u64,
+                    c.status_index,
+                    &c.status_list,
+                    |root, salt, status| sig::commitment_message_with_status(root, salt, status),
+                )
+            })
+            .collect();
+        assert!(
+            prepare_result(QUERY, &honest, &rows, &policy, &nonce).is_ok(),
+            "the honest wallet must prepare, or the refusal below is vacuous"
+        );
+        assert!(prepare_result(QUERY, &legacy, &rows, &policy, &nonce).is_err());
     }
 
     #[test]

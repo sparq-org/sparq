@@ -18,10 +18,10 @@
 //! below therefore mirror its authentication and generic-pattern checks; any
 //! divergence from `result_check` other than pattern zero is a bug.
 
-use crate::hashes::{commit_fold, h2, h3, h4};
+use crate::hashes::{commit_fold, h2, h3, h4, h5};
 use crate::issuer::{schnorr_verify, Point};
 use crate::revoke::revoke_unset_check;
-use crate::result::{N, P, R, V, POLICY_DEPTH};
+use crate::result::{N, P, R, V, POLICY_DEPTH, SCHEME_STRING_CANONICAL_V1};
 
 /// Exact public contract version for this relation; distinct from versions one to three.
 pub global PUBLIC_PATTERN_VERSION: u32 = 4;
@@ -29,7 +29,10 @@ pub global PUBLIC_PATTERN_VERSION: u32 = 4;
 pub global PUBLIC_PATTERN_STATUS_DEPTH: u32 = 10;
 // Same sig.rs domain tags as `result.nr`; changing either copy alone breaks proofs.
 global STATUS_REF: Field = 0x5a4b5349475f5352;
-global COMMITMENT_STATUS: Field = 0x5a4b5349475f4333;
+/// `ZKSIG_M5` -- the METHOD-BOUND presentation attestation tag, the same one
+/// `result.nr` authenticates over. See `result::SCHEME_STRING_CANONICAL_V1` for
+/// why the scheme digest is a constant in this relation.
+global PRESENTATION_STATUS_SCHEME: Field = 0x5a4b5349475f4d35;
 global ACCEPTED_STATUS: Field = 0x5a4b5349475f414c;
 
 /// Authenticates every credential slot: root, signature, policy leaf, and live status bit.
@@ -60,7 +63,13 @@ pub fn authenticate_credentials<let K: u32, let SD: u32>(
         let root = commit_fold(leaves, counts[g]);
         // Independently bind each credential's own list, version, and index.
         let reference = h4(STATUS_REF, status_lists[g], status_indices[g], status_versions[g] as Field);
-        let message = h4(COMMITMENT_STATUS, root, salts[g], reference);
+        let message = h5(
+            PRESENTATION_STATUS_SCHEME,
+            root,
+            salts[g],
+            reference,
+            SCHEME_STRING_CANONICAL_V1,
+        );
         let sig = signatures[g];
         schnorr_verify(
             Point { x: issuer_keys[g][0], y: issuer_keys[g][1] },

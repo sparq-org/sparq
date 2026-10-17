@@ -169,7 +169,14 @@ fn authenticate(inputs: Vec<Vec<Triple>>) -> Fallible<Fixture> {
             i as u64,
             7,
         );
-        let msg = sig::commitment_message_with_status(&graph.commitment, &graph.salt, &status);
+        let msg = sig::presentation_message_with_status_and_scheme(
+            &graph.commitment,
+            &graph.salt,
+            &status,
+            &sig::scheme_iri_to_field(
+                sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+            ),
+        );
         credentials.push(ResultCredential {
             graph,
             issuer: sk.public_key(),
