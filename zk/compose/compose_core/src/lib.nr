@@ -13,6 +13,14 @@
 //! the same fixture vectors from the Noir side.
 
 pub mod hashes;
+// The IN-CIRCUIT recompute of a DualLeafV2 term encoding from its components,
+// with the S3.3 reserved-sentinel band check and the S14.1 reserved
+// language-tag check at the witnessed component sites
+// (research/zk-field-native-encoding.md S11 bead 3 / S14). Consumed by the
+// `scan_v2dl_*` / `join_eq_v2dl_*` members; the shipped scan/join members are
+// byte-unchanged. Carries the documented INV-VL downgrade; NOT externally
+// audited (sq-qhy4).
+pub mod dual_leaf_v2_leaf;
 pub mod scan;
 pub mod filter_int;
 // Variable-length BLAKE3 opening of integer literals for the result profiles.
