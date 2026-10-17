@@ -325,8 +325,9 @@ its own records'. Everyone else's are removed by an expiry sweeper that runs eve
 (and when a create goes through) for as long as the server does, whether any create is admitted
 or refused. Each sweep looks at most at 256 subscriptions, from where the last one stopped, and
 starts at most 16 removals at once, in places of their own that request load cannot take; each
-removal is given up after 5 seconds (one that never completes in the store holds up no other),
-and one that fails, is given up or panics is tried again after a wait that doubles from 10
+removal is given up after 2 minutes, longer than a healthy store's calls take (one that never
+completes in the store holds up no other), and one that fails, is given up or (in a build that
+unwinds) panics is tried again after a wait that doubles from 10
 seconds to 10 minutes; a removal whose delete the store leaves unknown is settled within that
 same deadline, never handed on, so its place comes back with it. The sweeper stops, aborting
 the removals under way, as soon as the server's last handle is dropped. Removal is eventual, subject to the store making
@@ -338,7 +339,8 @@ registered (when the store leaves the create's outcome unknown, it holds that li
 until the outcome is settled, so the subscriber's other creates and removals go on meanwhile):
 what it waits on is a change to its own subscriptions, the inline purge of its own expired ones
 above, or the owner's conditional create (which holds the container alone, and once queued keeps
-later shared holders waiting behind it), never another subscriber's create or removal, and never
+later shared holders waiting behind it, so then, for at most the lock wait, another
+subscriber's change too), never another subscriber's create or removal otherwise, and never
 the sweeper's removal of anyone else's expired subscription, which is listed nowhere. An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most

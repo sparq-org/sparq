@@ -147,7 +147,7 @@ where
             "the record's name is taken".into(),
         )));
     };
-    let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
+    let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
         let ListingLocks {
@@ -231,7 +231,10 @@ where
 /// changes ([`ListingLocks`]), shared, from before its store step until it is settled, so a
 /// conditional create evaluated on one of them, holding that listing's lock alone
 /// ([`service_preconditions`]), sees nothing change in it between its check and its own
-/// registration, and waits on nothing that changes only other listings.
+/// registration, and waits on nothing that changes only other listings. A create whose outcome
+/// the store leaves unknown keeps that listing only shared while it is settled: the
+/// subscriber's other conditional creates still wait for the outcome, but its unconditional
+/// creates and removals go on, so the registration that settles it may follow them.
 #[derive(Clone, Copy)]
 pub(crate) enum Listed<'a> {
     /// Nowhere: an expired subscription, which every listing leaves out. Its removal changes no
@@ -424,7 +427,7 @@ where
         }
     };
     let in_container = listing.is_some();
-    let (state, container, iri) = (state.clone(), container.to_string(), iri.to_string());
+    let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
         let Some(held) = set_aside() else {
@@ -526,7 +529,10 @@ pub(crate) enum Remover {
     /// store has it, in force or gone, and memory as it was, to be tried again), in a place
     /// reserved for it ([`Settlements::reserve_maintenance`]), so no load of requests refuses it.
     /// A delete whose outcome is unknown is settled in those same steps, never in a task of the
-    /// state's, so the deadline bounds it, and the place, too.
+    /// state's, so the deadline bounds it, and the place, too. Only for a record whose
+    /// `set_aside` changes no memory (an expired subscription): dropped part way, nothing in
+    /// memory is left out of force, and a late delete removes only what was already gone from
+    /// every listing.
     Sweeper,
 }
 
@@ -579,7 +585,8 @@ impl Settlements {
         self.maintenance.clone().try_acquire_owned().ok()
     }
 
-    /// How many places reserved for the sweeper are free.
+    /// How many places reserved for the sweeper are free (tests).
+    #[cfg(test)]
     pub(crate) fn maintenance_free(&self) -> usize {
         self.maintenance.available_permits()
     }
@@ -629,6 +636,6 @@ pub(crate) fn announce_record<S: Store + 'static>(
         is_container: false,
         relation: Some((relation, container.to_string())),
     };
-    let state = state.clone();
+    let state = state.detached();
     tokio::spawn(async move { state.notify.announce_service(&state, event, author).await });
 }

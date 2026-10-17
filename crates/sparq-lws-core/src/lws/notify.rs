@@ -1010,7 +1010,7 @@ impl Notifier {
         // were prepared, so a subscription's notifications still go out in that order. When the
         // runtime runs that task is the runtime's business: this says the request does not do
         // the work, not that the work happens after the response reaches the client.
-        let state = state.clone();
+        let state = state.detached();
         tokio::spawn(async move {
             for p in prepared.pending {
                 state
@@ -1051,7 +1051,7 @@ impl Notifier {
         let Some(admitted) = self.admit_or_drop(&"an inbox still to be looked up") else {
             return;
         };
-        let state = state.clone();
+        let state = state.detached();
         tokio::spawn(async move {
             let Some(inbox) = find.await else { return };
             let Some(target) = inbox_url(&inbox, state.cfg.allow_insecure_fetch) else {
@@ -1112,7 +1112,7 @@ impl Notifier {
         let workers = self.workers.clone();
         let body = Bytes::from(envelope(&state.cfg.storage(), activity).to_string());
         let keyid = format!("{}#{}", state.cfg.storage(), state.cfg.notify_key.kid());
-        let state = state.clone();
+        let state = state.detached();
         tokio::spawn(async move {
             let _admitted = admitted;
             // The inbox's turn first, then a worker: a delivery waiting on a busy inbox holds no
@@ -1688,8 +1688,10 @@ const EXPIRY_SWEEP_EVERY: Duration = Duration::from_secs(2);
 /// How many subscriptions one sweep looks at, at most, from where the last one stopped.
 const SCANNED_PER_SWEEP: usize = 256;
 
-/// How long one of the sweeper's removals may take before it is given up, to be tried again.
-const SWEEP_REMOVAL_DEADLINE: Duration = Duration::from_secs(5);
+/// How long one of the sweeper's removals may take before it is given up, to be tried again:
+/// longer than the few store calls a removal makes can take while the store is healthy (an
+/// HTTP index allows each call 30 seconds), so only a store that stalls cuts one short.
+const SWEEP_REMOVAL_DEADLINE: Duration = Duration::from_secs(120);
 
 /// How long a subscription whose removal failed, was given up or panicked waits before it is
 /// tried again, the first time: doubled each time after, up to [`SWEEP_BACKOFF_MOST`].
@@ -1762,25 +1764,12 @@ impl Sweeper {
     fn sweep<S: Store + 'static>(&mut self, state: &LwsState<S>) {
         let clock = tokio::time::Instant::now();
         while let Some(ended) = self.removals.try_join_next_with_id() {
-            let (task, removed) = match ended {
-                Ok((task, removed)) => (task, removed),
-                Err(e) => (e.id(), false),
-            };
-            let Some(id) = self.by_task.remove(&task) else {
-                continue;
-            };
-            if removed {
-                self.backoff.remove(&id);
-            } else {
-                let entry = self.backoff.entry(id).or_insert((clock, 0));
-                entry.1 = entry.1.saturating_add(1);
-                let wait = SWEEP_BACKOFF_FIRST
-                    .saturating_mul(1 << entry.1.min(16).saturating_sub(1))
-                    .min(SWEEP_BACKOFF_MOST);
-                entry.0 = clock + wait;
-            }
+            self.ended(ended, clock);
         }
-        let room = state.settlements.maintenance_free();
+        // Counted from the removals it owns, not from the places free now: a removal spawned
+        // but not yet run has not taken its place, and one more started for it would find
+        // none, and be backed off without ever being tried.
+        let room = super::records::MAINTENANCE_PLACES.saturating_sub(self.removals.len());
         let now = jose::now_secs();
         let candidates: Vec<String> = {
             use std::ops::Bound::{Excluded, Unbounded};
@@ -1812,7 +1801,7 @@ impl Sweeper {
             found
         };
         for id in candidates {
-            let (state, sub) = (state.clone(), id.clone());
+            let (state, sub) = (state.detached(), id.clone());
             let removal = self.removals.spawn(async move {
                 let removal =
                     state
@@ -1827,10 +1816,38 @@ impl Sweeper {
         }
     }
 
-    /// Wait for every removal under way to end (tests).
+    /// Take in one removal that ended: one that did not remove its subscription waits before
+    /// it is tried again, longer each time.
+    fn ended(
+        &mut self,
+        ended: Result<(tokio::task::Id, bool), tokio::task::JoinError>,
+        clock: tokio::time::Instant,
+    ) {
+        let (task, removed) = match ended {
+            Ok((task, removed)) => (task, removed),
+            Err(e) => (e.id(), false),
+        };
+        let Some(id) = self.by_task.remove(&task) else {
+            return;
+        };
+        if removed {
+            self.backoff.remove(&id);
+        } else {
+            let entry = self.backoff.entry(id).or_insert((clock, 0));
+            entry.1 = entry.1.saturating_add(1);
+            let wait = SWEEP_BACKOFF_FIRST
+                .saturating_mul(1 << entry.1.min(16).saturating_sub(1))
+                .min(SWEEP_BACKOFF_MOST);
+            entry.0 = clock + wait;
+        }
+    }
+
+    /// Wait for every removal under way to end, and take each in (tests).
     #[cfg(test)]
     async fn settled(&mut self) {
-        while self.removals.join_next().await.is_some() {}
+        while let Some(ended) = self.removals.join_next_with_id().await {
+            self.ended(ended, tokio::time::Instant::now());
+        }
     }
 }
 
@@ -4878,6 +4895,84 @@ mod tests {
             "never tried again"
         );
         drop(gate);
+    }
+
+    /// Two sweeps in a row, the second before any removal of the first has run, start no more
+    /// removals than there are places: none is started only to find no place, and so none is
+    /// held back as if it had failed.
+    #[tokio::test(start_paused = true)]
+    async fn back_to_back_sweeps_start_no_more_removals_than_places() {
+        use super::super::records::MAINTENANCE_PLACES;
+        let (state, _store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        expired_subscriptions(&state, 3 * MAINTENANCE_PLACES);
+        let mut sweeper = Sweeper::default();
+        sweeper.sweep(&state);
+        sweeper.sweep(&state);
+        assert_eq!(sweeper.removals.len(), MAINTENANCE_PLACES);
+        sweeper.settled().await;
+        assert!(sweeper.backoff.is_empty(), "held back untried");
+        assert_eq!(
+            state.notify.subs.read().unwrap().len(),
+            2 * MAINTENANCE_PLACES
+        );
+    }
+
+    /// A removal that fails is tried again only once its wait is over, and waits twice as long
+    /// each time it fails again, up to [`SWEEP_BACKOFF_MOST`].
+    #[tokio::test(start_paused = true)]
+    async fn a_failing_removal_waits_longer_each_time() {
+        let (state, store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let ids = expired_subscriptions(&state, 1);
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        store
+            .create_in_container(
+                &container,
+                &format!("{container}{}", ids[0]),
+                Bytes::from("{}"),
+                LWS_JSON,
+            )
+            .await
+            .unwrap();
+        store.fail_delete.store(true, Ordering::SeqCst);
+        let mut sweeper = Sweeper::default();
+        let mut tries = 0;
+        for wait in [
+            SWEEP_BACKOFF_FIRST,
+            SWEEP_BACKOFF_FIRST * 2,
+            SWEEP_BACKOFF_FIRST * 4,
+        ] {
+            sweeper.sweep(&state);
+            assert_eq!(
+                sweeper.removals.len(),
+                1,
+                "not tried once its wait was over"
+            );
+            sweeper.settled().await;
+            tries += 1;
+            let (at, failed) = sweeper.backoff[&ids[0]];
+            assert_eq!(failed, tries);
+            assert_eq!(at - tokio::time::Instant::now(), wait);
+            // Not tried again while it waits.
+            tokio::time::sleep(wait - Duration::from_millis(1)).await;
+            sweeper.sweep(&state);
+            assert!(sweeper.removals.is_empty(), "tried while it waits");
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        // The wait stops growing at its cap.
+        sweeper.backoff.get_mut(&ids[0]).unwrap().1 = 40;
+        sweeper.sweep(&state);
+        sweeper.settled().await;
+        let (at, _) = sweeper.backoff[&ids[0]];
+        assert_eq!(at - tokio::time::Instant::now(), SWEEP_BACKOFF_MOST);
+        // Once the store lets it, it goes, and its wait with it.
+        store.fail_delete.store(false, Ordering::SeqCst);
+        tokio::time::sleep(SWEEP_BACKOFF_MOST).await;
+        sweeper.sweep(&state);
+        sweeper.settled().await;
+        assert!(state.notify.subs.read().unwrap().is_empty());
+        assert!(sweeper.backoff.is_empty());
     }
 
     /// The sweeper keeps no state alive: once every other handle is gone, the state goes, even

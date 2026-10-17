@@ -1786,7 +1786,7 @@ async fn create<S: Store + 'static>(
     // shared, so the task's scheduling holds up no other create in the container.
     let created = {
         let (state, parent, child, meta, admission) = (
-            state.clone(),
+            state.detached(),
             parent.to_string(),
             child.clone(),
             meta.clone(),
@@ -2340,7 +2340,7 @@ where
     F: std::future::Future<Output = (T, Option<super::Unsettled>)> + Send + 'static,
     C: FnOnce(&T) -> (Option<String>, Option<Event>) + Send + 'static,
 {
-    let state = state.clone();
+    let state = state.detached();
     tokio::spawn(async move {
         let _admission = admission;
         match writes.await {
