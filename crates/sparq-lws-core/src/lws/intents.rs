@@ -75,6 +75,7 @@ impl Prior {
         let mut meta = crate::store::ResourceMeta {
             content_type: self.content_type,
             blob_key: String::new(),
+            appended: Vec::new(),
             etag: self.etag,
             last_modified: self.modified.map(|(s, n)| UNIX_EPOCH + Duration::new(s, n)),
         };

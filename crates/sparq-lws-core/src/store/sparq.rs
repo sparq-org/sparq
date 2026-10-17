@@ -19,12 +19,18 @@ use async_trait::async_trait;
 use super::InMemoryStoreLimits;
 
 /// The authoritative metadata SPARQ holds for a resource (the index record, not the bytes).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResourceMeta {
     /// The RDF content type the resource was stored as (e.g. `text/turtle`).
     pub content_type: String,
     /// The opaque blob-store key the bytes live under (the `pss:s3Key` pointer).
     pub blob_key: String,
+    /// The blob-store keys of what was appended to those bytes since they were written, oldest
+    /// first (the `pss:appended` literal, space-separated): each a segment of statements added
+    /// without the bytes being read or rewritten ([`super::Store::append`]). What the resource
+    /// holds is its bytes merged with these, in order. Empty for a resource nothing was appended
+    /// to since its last write.
+    pub appended: Vec<String>,
     /// An opaque entity tag for conditional requests. M2: derived from the SPARQ index state.
     pub etag: String,
     /// The resource's server-recorded modification time (the `pss:modified` `xsd:dateTime` in the
@@ -37,6 +43,20 @@ pub struct ResourceMeta {
     /// [`super::Store::create_in_container`]) stamps it to the write instant, so a re-write bumps it
     /// and a subsequent `If-Modified-Since` correctly re-serves the changed representation.
     pub last_modified: Option<SystemTime>,
+}
+
+impl ResourceMeta {
+    /// Every blob-store key the resource's content lives under: its bytes', then each appended
+    /// segment's.
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.blob_key.as_str()).chain(self.appended.iter().map(String::as_str))
+    }
+
+    /// Whether `self` and `other` are one version of a record: the same entity tag over the same
+    /// bytes (a compaction keeps the tag but not the key, an append the key but not the tag).
+    pub fn same_version(&self, other: &ResourceMeta) -> bool {
+        self.etag == other.etag && self.blob_key == other.blob_key
+    }
 }
 
 /// The result of ONE combined read-plan lookup ([`SparqClient::read_plan`]) — the whole per-read
@@ -180,6 +200,28 @@ pub trait SparqClient: Send + Sync {
         };
         self.put_meta(iri, meta).await?;
         Ok(previous)
+    }
+
+    /// Upsert the metadata record for `iri` only while it is the version `expected` names (its
+    /// entity tag and blob key, together unique to a version): `Ok(false)`, with nothing changed,
+    /// when the record is absent or another version.
+    ///
+    /// The DEFAULT implementation is a [`get_meta`](Self::get_meta) followed by a
+    /// [`put_meta`](Self::put_meta), so a writer committing between them is overwritten; every
+    /// backend this crate ships overrides it with one indivisible step.
+    async fn replace_meta_if(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        meta: ResourceMeta,
+    ) -> Result<bool, SparqError> {
+        match self.get_meta(iri).await {
+            Ok(now) if now.same_version(expected) => {}
+            Ok(_) | Err(SparqError::NotFound) => return Ok(false),
+            Err(e) => return Err(e),
+        }
+        self.put_meta(iri, meta).await?;
+        Ok(true)
     }
 
     /// Whether the resource is indexed (the authoritative existence check — never an S3 HEAD).
@@ -523,6 +565,27 @@ impl SparqClient for InMemorySparqClient {
         Ok(guard.meta.insert(iri.to_string(), meta))
     }
 
+    async fn replace_meta_if(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        meta: ResourceMeta,
+    ) -> Result<bool, SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        if guard
+            .meta
+            .get(iri)
+            .is_none_or(|now| !now.same_version(expected))
+        {
+            return Ok(false);
+        }
+        guard.meta.insert(iri.to_string(), meta);
+        Ok(true)
+    }
+
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
         let guard = self
             .inner
@@ -536,7 +599,7 @@ impl SparqClient for InMemorySparqClient {
             .inner
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
-        if guard.meta.values().any(|m| m.blob_key == blob_key) {
+        if guard.meta.values().any(|m| m.keys().any(|k| k == blob_key)) {
             return Ok(false);
         }
         guard.reclaiming.insert(blob_key.to_string());
@@ -692,7 +755,13 @@ impl SparqClient for InMemorySparqClient {
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         // Every metadata record's `blob_key` is a live reference. Mirrors the live path's
         // `SELECT DISTINCT ?bk` over the `pss:blobKey` predicate across all graphs.
-        Ok(guard.meta.values().map(|m| m.blob_key.clone()).collect())
+        // Appended segments are referenced too.
+        Ok(guard
+            .meta
+            .values()
+            .flat_map(|m| std::iter::once(&m.blob_key).chain(&m.appended))
+            .cloned()
+            .collect())
     }
 
     async fn read_plan(
@@ -726,6 +795,7 @@ mod tests {
         ResourceMeta {
             content_type: "text/plain".into(),
             blob_key: blob_key.into(),
+            appended: Vec::new(),
             etag: "\"etag\"".into(),
             last_modified: None,
         }

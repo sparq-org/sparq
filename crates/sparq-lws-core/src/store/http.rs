@@ -495,11 +495,13 @@ impl SparqClient for HttpSparqClient {
         // `?mod` is OPTIONAL: absent ⇒ no recorded modification time; present-but-unparseable ⇒
         // `None` too (fail OPEN — never a spurious 304, per `timestamp::from_xsd_datetime`).
         let last_modified = row.get("mod").and_then(|m| timestamp::from_xsd_datetime(m));
+        let appended = sparql::appended_keys(row.get("app").map(String::as_str));
         Ok(ResourceMeta {
             content_type,
             blob_key,
             etag,
             last_modified,
+            appended,
         })
     }
 
@@ -511,6 +513,7 @@ impl SparqClient for HttpSparqClient {
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            &meta.appended,
         )?;
         self.update_raw(&u)
             .await
@@ -548,6 +551,35 @@ impl SparqClient for HttpSparqClient {
             .into_iter()
             .filter_map(|row| row.get("k").cloned())
             .collect())
+    }
+
+    async fn replace_meta_if(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        meta: ResourceMeta,
+    ) -> Result<bool, SparqError> {
+        // One guarded update, then read back: an HTTP update does not say whether its WHERE
+        // matched, and the new blob key is this write's own.
+        let modified = meta.last_modified.and_then(timestamp::to_xsd_datetime);
+        let u = sparql::update_put_meta_if(
+            iri,
+            &expected.etag,
+            &expected.blob_key,
+            &meta.content_type,
+            &meta.blob_key,
+            &meta.etag,
+            modified.as_deref(),
+            &meta.appended,
+        )?;
+        self.update_raw(&u)
+            .await
+            .map_err(SparqHttpError::into_sparq)?;
+        match self.get_meta(iri).await {
+            Ok(now) => Ok(now.same_version(&meta)),
+            Err(SparqError::NotFound) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
@@ -648,6 +680,7 @@ impl SparqClient for HttpSparqClient {
             &meta.blob_key,
             &meta.etag,
             modified.as_deref(),
+            &meta.appended,
             &nonce,
         )?;
         let fenced = self.update_fenced(&u, &nonce, &[container, child]).await?;
@@ -720,7 +753,8 @@ impl SparqClient for HttpSparqClient {
             // DELETE live bytes. Fail-closed (the reconciler aborts the whole sweep on this error).
             match row.get("bk") {
                 Some(bk) => {
-                    keys.insert(bk.clone());
+                    // An appended-segment literal names several keys, space-separated.
+                    keys.extend(bk.split_ascii_whitespace().map(str::to_string));
                 }
                 None => {
                     return Err(SparqHttpError::Malformed(
@@ -768,6 +802,7 @@ impl SparqClient for HttpSparqClient {
             let meta = ResourceMeta {
                 content_type: bind("ct")?,
                 blob_key: bind("bk")?,
+                appended: sparql::appended_keys(row.get("app").map(String::as_str)),
                 etag: bind("etag")?,
                 last_modified,
             };

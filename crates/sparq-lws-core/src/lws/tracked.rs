@@ -233,6 +233,21 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.finish_reclaims().await
     }
 
+    async fn append(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        segment: Bytes,
+    ) -> ServerResult<Option<ResourceMeta>> {
+        let _m = self.gens.mutating(&[iri]);
+        self.inner.append(iri, expected, segment).await
+    }
+
+    async fn compact(&self, iri: &str) -> ServerResult<bool> {
+        let _m = self.gens.mutating(&[iri]);
+        self.inner.compact(iri).await
+    }
+
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
         let _m = self.gens.mutating(&keys);

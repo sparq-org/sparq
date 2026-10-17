@@ -3228,6 +3228,18 @@ pub(crate) mod test_store {
         async fn finish_reclaims(&self) -> ServerResult<()> {
             self.inner.finish_reclaims().await
         }
+        async fn append(
+            &self,
+            iri: &str,
+            expected: &ResourceMeta,
+            segment: Bytes,
+        ) -> ServerResult<Option<ResourceMeta>> {
+            self.step()?;
+            self.inner.append(iri, expected, segment).await
+        }
+        async fn compact(&self, iri: &str) -> ServerResult<bool> {
+            self.inner.compact(iri).await
+        }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
             self.step()?;
             if parent.is_some() {

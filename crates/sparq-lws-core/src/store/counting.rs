@@ -513,6 +513,7 @@ mod tests {
         let meta = ResourceMeta {
             content_type: "text/turtle".into(),
             blob_key: "k1".into(),
+            appended: Vec::new(),
             etag: "\"e1\"".into(),
             last_modified: None,
         };

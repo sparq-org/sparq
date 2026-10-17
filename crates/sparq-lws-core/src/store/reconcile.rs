@@ -610,6 +610,7 @@ mod tests {
         ResourceMeta {
             content_type: "text/turtle".into(),
             blob_key: blob_key.to_string(),
+            appended: Vec::new(),
             etag: "\"e\"".into(),
             last_modified: None,
         }

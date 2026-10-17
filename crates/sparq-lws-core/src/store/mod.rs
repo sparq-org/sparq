@@ -259,6 +259,44 @@ pub trait Store: Send + Sync {
         Ok(())
     }
 
+    /// Append `segment` (N-Triples lines) to what `iri` holds, without reading or rewriting what is
+    /// stored: it is stored on its own and named in the record, while the record is still
+    /// `expected` (compared by entity tag). Reads serve the record's bytes merged with what was
+    /// appended to them, in order ([`merged`]). Returns the new record, or `None` when the record
+    /// is no longer `expected` (nothing is appended then). Once [`APPEND_LIMIT`] segments stand,
+    /// an append is refused with [`ServerError::ResourceChanged`] until [`compact`](Store::compact)
+    /// merges them.
+    ///
+    /// The DEFAULT reads what is stored and writes it back whole with the segment merged in (no
+    /// segment is kept, so it never refuses), not atomically: a store that keeps segments
+    /// ([`CompositeStore`]) overrides it.
+    async fn append(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        segment: Bytes,
+    ) -> ServerResult<Option<ResourceMeta>> {
+        let current = match self.read(iri).await {
+            Ok(current) => current,
+            Err(ServerError::NotFound) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        if !current.meta.same_version(expected) {
+            return Ok(None);
+        }
+        let ct = current.meta.content_type;
+        let body = merged(iri, &ct, vec![current.body, segment]);
+        self.write(iri, body, &ct).await.map(Some)
+    }
+
+    /// Merge what was appended to `iri` into its bytes: what it holds, and its validators, stay as
+    /// they are. Returns whether it did (not when nothing was appended, when another compaction
+    /// of it is running, or when appends keep landing meanwhile). The default does nothing.
+    async fn compact(&self, iri: &str) -> ServerResult<bool> {
+        let _ = iri;
+        Ok(false)
+    }
+
     /// Delete a resource: remove its index record + its bytes, and detach it from `parent`'s
     /// containment (if `parent` is given). The caller is responsible for the existence (404) and
     /// empty-container (409) decisions; this performs the removal.
@@ -403,8 +441,42 @@ pub struct CompositeStore<S: SparqClient, B: BlobStore> {
     /// The holds ([`Store::hold`]) taken through this instance and not yet released, counted by
     /// the blob key they hold: bytes this names are held, without asking the index. Bytes it does
     /// not name may still be held, through another instance over the same backends, so whether
-    /// they are is then asked of the index (see [`CompositeStore::reclaim_blob`]).
+    /// they are is then asked of the index (see [`CompositeStore::reclaim`]).
     holding: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    /// The resources a [`Store::compact`] through this instance is running on.
+    compacting: std::sync::Mutex<std::collections::HashSet<String>>,
+}
+
+/// A running [`Store::compact`] of one resource, ended when dropped.
+struct Compacting<'a> {
+    running: &'a std::sync::Mutex<std::collections::HashSet<String>>,
+    iri: String,
+}
+
+impl<'a> Compacting<'a> {
+    /// Start one on `iri`, unless one is running.
+    fn start(
+        running: &'a std::sync::Mutex<std::collections::HashSet<String>>,
+        iri: &str,
+    ) -> Option<Self> {
+        let started = running
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(iri.to_string());
+        started.then(|| Self {
+            running,
+            iri: iri.to_string(),
+        })
+    }
+}
+
+impl Drop for Compacting<'_> {
+    fn drop(&mut self) {
+        self.running
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.iri);
+    }
 }
 
 /// The container every hold's record is a member of ([`Store::hold`]): outside every storage (a
@@ -450,6 +522,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
             blob,
             body_cache,
             holding: Default::default(),
+            compacting: Default::default(),
         }
     }
 
@@ -459,16 +532,23 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// 1 → 0), never a decision — authorization has already run upstream of every caller (see
     /// [`body_cache`]'s no-bypass argument). `Ok(None)` means the blob is absent — see
     /// [`read_through`](Self::read_through) for why that is usually a benign race.
-    async fn try_fetch_body(&self, meta: &ResourceMeta) -> ServerResult<Option<Bytes>> {
+    ///
+    /// The bytes come merged with every segment appended to them ([`merged`]); the cache keeps
+    /// the merged body, whose entity tag is its own.
+    async fn try_fetch_body(&self, iri: &str, meta: &ResourceMeta) -> ServerResult<Option<Bytes>> {
         if let Some(body) = self.body_cache.get(&meta.blob_key, &meta.etag) {
             return Ok(Some(body));
         }
-        let body = match self.blob.get(&meta.blob_key).await {
-            Ok(body) => body,
-            Err(BlobError::NotFound) => return Ok(None),
-            Err(BlobError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
-            Err(BlobError::Backend(msg)) => return Err(ServerError::Storage(msg)),
-        };
+        let mut parts = Vec::with_capacity(1 + meta.appended.len());
+        for key in meta.keys() {
+            match self.blob.get(key).await {
+                Ok(part) => parts.push(part),
+                Err(BlobError::NotFound) => return Ok(None),
+                Err(BlobError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
+                Err(BlobError::Backend(msg)) => return Err(ServerError::Storage(msg)),
+            }
+        }
+        let body = merged(iri, &meta.content_type, parts);
         self.body_cache.insert(&meta.blob_key, &meta.etag, &body);
         Ok(Some(body))
     }
@@ -489,7 +569,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     async fn read_through(&self, iri: &str, mut meta: ResourceMeta) -> ServerResult<Resource> {
         let mut retries = 0;
         loop {
-            if let Some(body) = self.try_fetch_body(&meta).await? {
+            if let Some(body) = self.try_fetch_body(iri, &meta).await? {
                 return Ok(Resource { body, meta });
             }
             if retries == READ_RACE_RETRIES {
@@ -498,7 +578,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
             }
             retries += 1;
             let current = self.get_meta_mapped(iri).await?;
-            if current.blob_key == meta.blob_key {
+            if current.keys().eq(meta.keys()) {
                 // The index still points at the missing blob: not a race, a real inconsistency.
                 return Err(ServerError::Storage("byte/index inconsistency".into()));
             }
@@ -545,6 +625,20 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         }
     }
 
+    /// Reclaim, each as [`reclaim_blob`](Self::reclaim_blob), the bytes of `old` and what was
+    /// appended to them that `now` does not name. A hold's record names every segment of the
+    /// version it holds, so a held version's segments stay as its bytes do.
+    async fn reclaim(&self, old: &ResourceMeta, now: Option<&ResourceMeta>) {
+        let gone: Vec<String> = old
+            .keys()
+            .filter(|k| now.is_none_or(|now| now.keys().all(|n| n != *k)))
+            .map(str::to_string)
+            .collect();
+        for key in gone {
+            self.reclaim_blob(&key).await;
+        }
+    }
+
     /// Whether a hold taken through this instance on the bytes under `key` stands.
     fn holds_locally(&self, key: &str) -> bool {
         self.holding
@@ -566,11 +660,19 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
         }
     }
 
-    /// Commit `holder`'s record of a hold on `key`, creating the holds' containers when absent.
-    async fn publish_hold(&self, key: &str, holder: &str) -> ServerResult<()> {
+    /// Commit `holder`'s record of a hold on `held`'s bytes, creating the holds' containers when absent.
+    ///
+    /// The record names the bytes and every segment appended to them in the version held, so no
+    /// reclaim takes any of them while it stands ([`SparqClient::begin_reclaim`]).
+    async fn publish_hold(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
+        let key = held.blob_key.as_str();
         let record = |blob_key: &str, etag: &str| ResourceMeta {
             content_type: HELD_TYPE.to_string(),
             blob_key: blob_key.to_string(),
+            appended: match blob_key {
+                "" => Vec::new(),
+                _ => held.appended.clone(),
+            },
             // The holder, so a start can tell whose it is (see `Store::holds`).
             etag: etag.to_string(),
             last_modified: None,
@@ -816,6 +918,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // Stamp the write instant so `If-Modified-Since` sees a real Last-Modified: a re-write
             // bumps it, so a later conditional GET correctly re-serves the changed representation.
             last_modified: Some(crate::clock::now()),
+            appended: Vec::new(),
         };
         let previous = self
             .sparq
@@ -827,8 +930,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             })?;
         // The index now points at `blob_key`; the superseded body is unreferenced. Reclaim it so
         // sustained rewrites cannot fill the blob store with dead versions.
-        if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
-            self.reclaim_blob(&old.blob_key).await;
+        if let Some(old) = previous {
+            self.reclaim(&old, Some(&meta)).await;
         }
         Ok(meta)
     }
@@ -868,6 +971,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // Stamp the create instant (see `write`) — the new child's Last-Modified for
             // `If-Modified-Since`.
             last_modified: Some(crate::clock::now()),
+            appended: Vec::new(),
         };
         match self
             .sparq
@@ -912,8 +1016,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         };
         match committed {
             Ok(previous) => {
-                if let Some(old) = previous.filter(|old| old.blob_key != meta.blob_key) {
-                    self.reclaim_blob(&old.blob_key).await;
+                if let Some(old) = previous {
+                    self.reclaim(&old, Some(&meta)).await;
                 }
                 Ok(meta)
             }
@@ -927,7 +1031,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 match self.sparq.get_meta(iri).await {
                     Ok(now) if now.blob_key == meta.blob_key => return Ok(meta),
                     _ if matches!(e, SparqError::Unsettled { .. }) => {}
-                    Ok(_) | Err(SparqError::NotFound) => self.reclaim_blob(&meta.blob_key).await,
+                    Ok(_) | Err(SparqError::NotFound) => self.reclaim(&meta, None).await,
                     Err(_) => {}
                 }
                 Err(match e {
@@ -944,7 +1048,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
 
     async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
         // Published, then checked: a reclaim after the commit that leaves these bytes runs after
-        // this hold's record is visible, or this sees the record moved on (see `reclaim_blob`).
+        // this hold's record is visible, or this sees the record moved on (see `reclaim`).
         for _ in 0..=READ_RACE_RETRIES {
             let meta = match self.sparq.get_meta(iri).await {
                 Ok(meta) => meta,
@@ -954,7 +1058,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // Counted before it is published, so no reclaim through this instance meanwhile
             // misses it.
             self.count_hold(&meta.blob_key, true);
-            if let Err(e) = self.publish_hold(&meta.blob_key, holder).await {
+            if let Err(e) = self.publish_hold(&meta, holder).await {
                 // It may have landed (a lost reply): withdrawn, best effort, as the holder is
                 // told nothing is held (else the next start's sweep withdraws it).
                 let _ = self.withdraw_hold(&meta.blob_key, holder).await;
@@ -962,6 +1066,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 return Err(e);
             }
             match self.sparq.get_meta(iri).await {
+                // Appended to meanwhile, the version held (what its record names) is put back.
                 Ok(now) if now.blob_key == meta.blob_key => return Ok(Some(meta)),
                 // Rewritten or removed meanwhile: what was held may already be gone.
                 Ok(_) | Err(SparqError::NotFound) => {
@@ -992,8 +1097,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             None => self.sparq.replace_meta(iri, held.clone()).await,
         };
         let previous = committed.map_err(map_sparq)?;
-        if let Some(old) = previous.filter(|old| old.blob_key != held.blob_key) {
-            self.reclaim_blob(&old.blob_key).await;
+        if let Some(old) = previous {
+            self.reclaim(&old, Some(held)).await;
         }
         Ok(held.clone())
     }
@@ -1004,7 +1109,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         let withdrawn = self.withdraw_hold(&held.blob_key, holder).await;
         self.count_hold(&held.blob_key, false);
         withdrawn?;
-        self.reclaim_blob(&held.blob_key).await;
+        self.reclaim(held, None).await;
         Ok(())
     }
 
@@ -1053,10 +1158,106 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         Ok(())
     }
 
+    async fn append(
+        &self,
+        iri: &str,
+        expected: &ResourceMeta,
+        segment: Bytes,
+    ) -> ServerResult<Option<ResourceMeta>> {
+        if expected.appended.len() >= APPEND_LIMIT {
+            return Err(ServerError::ResourceChanged);
+        }
+        // Bytes first, then the record, as `write` does; the segment's key is minted per write.
+        let key = Self::mint_blob_key(iri)?;
+        self.blob.put(&key, segment).await.map_err(|e| match e {
+            BlobError::QuotaExceeded => ServerError::InsufficientStorage,
+            other => ServerError::Storage(format!("{other}")),
+        })?;
+        let mut appended = expected.appended.clone();
+        appended.push(key.clone());
+        let meta = ResourceMeta {
+            // A tag of its own, from the one it follows and the segment's key (unique per write),
+            // so no content needs reading to make it.
+            etag: format!(
+                "\"a{}-{}\"",
+                appended.len(),
+                fnv1a_chain(
+                    expected
+                        .etag
+                        .as_bytes()
+                        .iter()
+                        .chain(std::iter::once(&0xFF))
+                        .chain(key.as_bytes())
+                )
+            ),
+            last_modified: Some(crate::clock::now()),
+            appended,
+            ..expected.clone()
+        };
+        match self
+            .sparq
+            .replace_meta_if(iri, expected, meta.clone())
+            .await
+        {
+            Ok(true) => Ok(Some(meta)),
+            Ok(false) => {
+                // No record names the segment: it goes now.
+                let _ = self.blob.delete(&key).await;
+                Ok(None)
+            }
+            // The record may still land naming it: the segment is left to the reconciler.
+            Err(e) => Err(map_sparq(e)),
+        }
+    }
+
+    async fn compact(&self, iri: &str) -> ServerResult<bool> {
+        // One at a time per resource through this instance: callers may ask again and again.
+        let Some(_running) = Compacting::start(&self.compacting, iri) else {
+            return Ok(false);
+        };
+        for _ in 0..=READ_RACE_RETRIES {
+            let expected = match self.sparq.get_meta(iri).await {
+                Ok(meta) if !meta.appended.is_empty() => meta,
+                Ok(_) | Err(SparqError::NotFound) => return Ok(false),
+                Err(e) => return Err(map_sparq(e)),
+            };
+            let Some(body) = self.try_fetch_body(iri, &expected).await? else {
+                continue;
+            };
+            let blob_key = Self::mint_blob_key(iri)?;
+            self.blob.put(&blob_key, body).await.map_err(|e| match e {
+                BlobError::QuotaExceeded => ServerError::InsufficientStorage,
+                other => ServerError::Storage(format!("{other}")),
+            })?;
+            // The same content and validators, under one key.
+            let meta = ResourceMeta {
+                blob_key,
+                appended: Vec::new(),
+                ..expected.clone()
+            };
+            match self
+                .sparq
+                .replace_meta_if(iri, &expected, meta.clone())
+                .await
+            {
+                Ok(true) => {
+                    self.reclaim(&expected, Some(&meta)).await;
+                    return Ok(true);
+                }
+                // Appended to (or rewritten) meanwhile: tried again on what stands now.
+                Ok(false) => {
+                    let _ = self.blob.delete(&meta.blob_key).await;
+                }
+                Err(e) => return Err(map_sparq(e)),
+            }
+        }
+        Ok(false)
+    }
+
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         // Look up the byte-pointer from the authoritative index so we delete the right blob.
-        let blob_key = match self.sparq.get_meta(iri).await {
-            Ok(m) => Some(m.blob_key),
+        let old = match self.sparq.get_meta(iri).await {
+            Ok(m) => Some(m),
             Err(SparqError::NotFound) => None,
             Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
             Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
@@ -1079,8 +1280,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .delete_meta(iri)
             .await
             .map_err(|e| ServerError::Storage(format!("{e}")))?;
-        if let Some(key) = blob_key {
-            self.reclaim_blob(&key).await;
+        if let Some(old) = old {
+            self.reclaim(&old, None).await;
         }
         Ok(())
     }
@@ -1103,8 +1304,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // (`mint_blob_key`): a concurrent same-IRI rewrite or recreate between the lookup and the index
         // delete writes under a DIFFERENT key, so this can never clobber live bytes — at worst that
         // other key is the orphan the reconciler collects.
-        let blob_key = match self.sparq.get_meta(iri).await {
-            Ok(m) => Some(m.blob_key),
+        let old = match self.sparq.get_meta(iri).await {
+            Ok(m) => Some(m),
             Err(SparqError::NotFound) => None,
             Err(SparqError::QuotaExceeded) => return Err(ServerError::InsufficientStorage),
             Err(SparqError::Backend(e)) => return Err(ServerError::Storage(e)),
@@ -1124,8 +1325,8 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // NotEmpty / NotFound: nothing was deleted, so the bytes stay. Deleted: the record AND the parent
         // edge are gone atomically (above), so the bytes are unreferenced — reclaim them now.
         if outcome == DeleteOutcome::Deleted {
-            if let Some(key) = blob_key {
-                self.reclaim_blob(&key).await;
+            if let Some(old) = old {
+                self.reclaim(&old, None).await;
             }
         }
         Ok(outcome)
@@ -1158,13 +1359,13 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // path — through the read-4 body cache: the held `(blob_key, etag)` came from THIS request's
         // authoritative read-plan round, so a hit is exactly the bytes that metadata committed with
         // (the unique-per-write blob key names an immutable object).
-        if let Some(body) = self.try_fetch_body(meta).await? {
+        if let Some(body) = self.try_fetch_body(iri, meta).await? {
             return Ok(body);
         }
         // The blob is gone. Only now (the race path) re-read the index to say why — and NEVER serve
         // the current version's bytes in place of the authorized one (see the trait doc).
         let current = self.get_meta_mapped(iri).await?;
-        if current.blob_key == meta.blob_key {
+        if current.keys().eq(meta.keys()) {
             // The index still points at the missing blob: not a race, a real inconsistency.
             return Err(ServerError::Storage("byte/index inconsistency".into()));
         }
@@ -1192,6 +1393,48 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .map_err(|e| ServerError::Storage(format!("{e}")))?;
         Ok(raw.map(validated_children))
     }
+}
+
+/// How many segments a record keeps appended ([`Store::append`]) before they are merged into
+/// its bytes ([`Store::compact`]): the caller compacts in the background once this many stand.
+pub const APPEND_COMPACT_AT: usize = 16;
+
+/// How many segments a record may hold: an append past it is answered as a resource that keeps
+/// changing ([`ServerError::ResourceChanged`]) until a compaction lands.
+pub const APPEND_LIMIT: usize = 64;
+
+/// What a resource stored as `content_type` holds, from its bytes and the segments appended to
+/// them (each N-Triples lines, [`Store::append`]), in order (`parts`, the bytes first).
+///
+/// A JSON-LD document is read with them and written again as JSON-LD. Any other, and a JSON-LD
+/// document that does not read as JSON-LD, takes them as lines after its own bytes (in a Turtle,
+/// N-Triples or N-Quads document, the last statement of each into its default graph). So what
+/// was appended is always kept, compaction included.
+fn merged(iri: &str, content_type: &str, mut parts: Vec<Bytes>) -> Bytes {
+    use crate::ldp::content::{parse_to_triples, serialize_triples, stored_format, RdfFormat};
+    if parts.len() == 1 {
+        return parts.pop().unwrap_or_default();
+    }
+    if stored_format(content_type) == Some(RdfFormat::JsonLd) {
+        let all = || -> ServerResult<Vec<u8>> {
+            let mut triples = parse_to_triples(RdfFormat::JsonLd, &parts[0], iri)?;
+            for part in &parts[1..] {
+                triples.extend(parse_to_triples(RdfFormat::NTriples, part, iri)?);
+            }
+            serialize_triples(RdfFormat::JsonLd, &triples)
+        };
+        if let Ok(body) = all() {
+            return Bytes::from(body);
+        }
+    }
+    let mut body = Vec::with_capacity(parts.iter().map(|p| p.len() + 1).sum::<usize>());
+    for part in &parts {
+        if !body.is_empty() && !body.ends_with(b"\n") {
+            body.push(b'\n');
+        }
+        body.extend_from_slice(part);
+    }
+    Bytes::from(body)
 }
 
 /// A [`SparqError`] as the server reports it.
@@ -1252,6 +1495,7 @@ mod tests {
         let meta = ResourceMeta {
             content_type: "text/plain".into(),
             blob_key: String::new(),
+            appended: Vec::new(),
             etag: "\"e\"".into(),
             last_modified: None,
         };
@@ -1373,6 +1617,214 @@ mod tests {
             .contains(&held.blob_key));
         assert!(store.holds().await.unwrap().is_empty());
         assert!(!store.sparq.exists(&held_dir(&held.blob_key)).await.unwrap());
+    }
+
+    /// One N-Triples line, as a blind insert appends it.
+    fn line(o: &str) -> Bytes {
+        Bytes::from(format!(
+            "<https://pod.example/d#b> <https://e.example/q> \"{o}\" .\n"
+        ))
+    }
+
+    /// What was appended shows in each type a document can be stored as, after what it held, and
+    /// a compaction keeps it.
+    #[tokio::test]
+    async fn appended_statements_merge_by_stored_type() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let d = "https://pod.example/d";
+        let docs = [
+            ("text/turtle", "<#a> <https://e.example/p> 0 ."),
+            (
+                "application/n-triples",
+                "<https://pod.example/d#a> <https://e.example/p> \"0\" .",
+            ),
+            (
+                "application/n-quads",
+                "<https://pod.example/d#a> <https://e.example/p> \"0\" <https://e.example/g> .\n",
+            ),
+            (
+                "application/ld+json",
+                r##"{"@id": "#a", "https://e.example/p": "0"}"##,
+            ),
+            ("text/plain", "not rdf {"),
+            ("application/ld+json", "{ not json-ld"),
+        ];
+        for (ct, body) in docs {
+            let base = store.write(d, Bytes::from(body), ct).await.unwrap();
+            let one = store
+                .append(d, &base, line("1"))
+                .await
+                .unwrap()
+                .expect("appended");
+            let two = store
+                .append(d, &one, line("2"))
+                .await
+                .unwrap()
+                .expect("appended");
+            assert_eq!(
+                two.blob_key, base.blob_key,
+                "{ct}: the bytes were rewritten"
+            );
+            assert_eq!(two.appended.len(), 2);
+            assert_ne!(two.etag, one.etag);
+            let read = store.read(d).await.unwrap();
+            assert_eq!(read.meta, two);
+            assert_eq!(store.read_at(d, &two).await.unwrap(), read.body);
+            let text = String::from_utf8(read.body.to_vec()).unwrap();
+            match ct {
+                "application/ld+json" if body.starts_with("{\"") => {
+                    let triples = crate::ldp::content::parse_to_triples(
+                        crate::ldp::content::RdfFormat::JsonLd,
+                        text.as_bytes(),
+                        d,
+                    )
+                    .unwrap();
+                    assert_eq!(triples.len(), 3, "{text}");
+                }
+                _ => {
+                    assert!(text.starts_with(body.trim_end()), "{ct}: {text}");
+                    assert!(
+                        text.ends_with(&format!(
+                            "{}{}",
+                            std::str::from_utf8(&line("1")).unwrap(),
+                            std::str::from_utf8(&line("2")).unwrap()
+                        )),
+                        "{ct}: {text}"
+                    );
+                }
+            }
+            // A compaction keeps what was appended, whatever the type.
+            assert!(store.compact(d).await.unwrap(), "{ct}");
+            assert_eq!(store.read(d).await.unwrap().body, read.body, "{ct}");
+        }
+    }
+
+    /// An append neither reads nor rewrites what is stored: it lands with the stored bytes
+    /// unreadable, and only on the version it names.
+    #[tokio::test]
+    async fn an_append_reads_nothing_and_lands_only_on_its_version() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let d = "https://pod.example/d";
+        let base = store
+            .write(d, Bytes::from_static(b"<#a> <#p> 0 ."), "text/turtle")
+            .await
+            .unwrap();
+        store.blob.delete(&base.blob_key).await.unwrap();
+        let one = store.append(d, &base, line("1")).await.unwrap();
+        assert!(one.is_some(), "the stored bytes were read");
+        // A stale version appends nothing, and leaves no bytes behind.
+        let before = store.blob.list().await.unwrap().len();
+        assert!(store.append(d, &base, line("2")).await.unwrap().is_none());
+        assert_eq!(store.blob.list().await.unwrap().len(), before);
+        assert!(store
+            .append("https://pod.example/none", &base, line("2"))
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    /// A compaction merges what was appended into one set of bytes, keeping what the resource
+    /// holds and its validators; the bytes it replaced go, and an append made on the version
+    /// before it (the same tag, other bytes) lands nowhere.
+    #[tokio::test]
+    async fn a_compaction_keeps_content_and_validators() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let d = "https://pod.example/d";
+        let mut meta = store
+            .write(d, Bytes::from_static(b"<#a> <#p> 0 ."), "text/turtle")
+            .await
+            .unwrap();
+        let base = meta.clone();
+        for i in 0..3 {
+            meta = store
+                .append(d, &meta, line(&i.to_string()))
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        let before = store.read(d).await.unwrap();
+        assert!(!store.compact("https://pod.example/none").await.unwrap());
+        assert!(store.compact(d).await.unwrap());
+        let after = store.read(d).await.unwrap();
+        assert_eq!(after.body, before.body);
+        assert_eq!(after.meta.etag, before.meta.etag);
+        assert_eq!(after.meta.last_modified, before.meta.last_modified);
+        assert!(after.meta.appended.is_empty());
+        for key in meta.keys() {
+            assert!(!store.blob.exists(key).await.unwrap(), "{key} stayed");
+        }
+        assert_eq!(store.blob.list().await.unwrap().len(), 1);
+        assert!(store.append(d, &meta, line("x")).await.unwrap().is_none());
+        // Nothing appended: nothing to do.
+        assert!(!store.compact(d).await.unwrap());
+        let _ = base;
+    }
+
+    /// A hold on a record's bytes keeps what was appended to them too, until it is released.
+    #[tokio::test]
+    async fn a_hold_keeps_appended_segments() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let d = "https://pod.example/d";
+        let base = store
+            .write(d, Bytes::from_static(b"<#a> <#p> 0 ."), "text/turtle")
+            .await
+            .unwrap();
+        let one = store.append(d, &base, line("1")).await.unwrap().unwrap();
+        let held = store.hold(d, "urn:me").await.unwrap().expect("held");
+        assert_eq!(held, one);
+        let body = store.read(d).await.unwrap().body;
+        assert!(store.compact(d).await.unwrap());
+        store
+            .write(d, Bytes::from_static(b"<#a> <#p> 9 ."), "text/turtle")
+            .await
+            .unwrap();
+        for key in held.keys() {
+            assert!(store.blob.exists(key).await.unwrap(), "{key} went");
+        }
+        store.reinstate(d, None, &held).await.unwrap();
+        assert_eq!(store.read(d).await.unwrap().body, body);
+        store.release(&held, "urn:me").await.unwrap();
+        store
+            .write(d, Bytes::from_static(b"<#a> <#p> 9 ."), "text/turtle")
+            .await
+            .unwrap();
+        for key in held.keys() {
+            assert!(!store.blob.exists(key).await.unwrap(), "{key} stayed");
+        }
+    }
+
+    /// Past [`APPEND_LIMIT`] segments an append waits for a compaction; after one it lands.
+    #[tokio::test]
+    async fn appends_past_the_limit_wait_for_a_compaction() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let d = "https://pod.example/d";
+        let mut meta = store
+            .write(d, Bytes::from_static(b""), "application/n-triples")
+            .await
+            .unwrap();
+        for i in 0..APPEND_LIMIT {
+            meta = store
+                .append(d, &meta, line(&i.to_string()))
+                .await
+                .unwrap()
+                .unwrap();
+        }
+        assert!(matches!(
+            store.append(d, &meta, line("x")).await,
+            Err(ServerError::ResourceChanged)
+        ));
+        assert!(store.compact(d).await.unwrap());
+        let meta = store.meta(d).await.unwrap().unwrap();
+        assert!(store.append(d, &meta, line("x")).await.unwrap().is_some());
+        let lines = store
+            .read(d)
+            .await
+            .unwrap()
+            .body
+            .split(|b| *b == b'\n')
+            .filter(|l| !l.is_empty())
+            .count();
+        assert_eq!(lines, APPEND_LIMIT + 1);
     }
 
     /// Two holders of the same bytes each hold them: the first to release, however late, never

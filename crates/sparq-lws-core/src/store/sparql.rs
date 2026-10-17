@@ -46,6 +46,22 @@ pub fn p_etag() -> String {
 pub fn p_modified() -> String {
     format!("{PSS_NS}modified")
 }
+/// Predicate: the blob-store keys of the segments appended to a resource's bytes since they were
+/// written, oldest first, as one space-separated literal (see
+/// [`ResourceMeta::appended`](super::sparq::ResourceMeta::appended)). Reserved like the others.
+pub fn p_appended() -> String {
+    format!("{PSS_NS}appended")
+}
+/// The literal [`p_appended`] holds for `keys`, or `None` when there are none (no triple).
+pub fn appended_literal(keys: &[String]) -> Option<String> {
+    (!keys.is_empty()).then(|| keys.join(" "))
+}
+/// The keys a [`p_appended`] literal names, in order.
+pub fn appended_keys(literal: Option<&str>) -> Vec<String> {
+    literal
+        .map(|l| l.split_ascii_whitespace().map(str::to_string).collect())
+        .unwrap_or_default()
+}
 /// The `xsd:dateTime` datatype IRI — the datatype of the `pss:modified` literal.
 pub const XSD_DATETIME: &str = "http://www.w3.org/2001/XMLSchema#dateTime";
 /// Predicate: a per-operation create marker (a unique-nonce literal), written atomically with a
@@ -199,26 +215,36 @@ pub fn p_reclaiming() -> String {
 }
 
 /// UPDATE: name `blob_key` as being reclaimed, only while no record in any graph names it as its
-/// bytes (`pss:blobKey`, a hold's record included): one atomic `INSERT … WHERE`, so no record
-/// that names it can commit in between (the caller reads [`ask_reclaiming`] back to tell
-/// whether it did).
+/// bytes (`pss:blobKey`) or as a segment appended to them (`pss:appended`), a hold's record
+/// included: one atomic `INSERT … WHERE`, so no record that names it can commit in between (the
+/// caller reads [`ask_reclaiming`] back to tell whether it did).
 pub fn update_begin_reclaim(blob_key: &str) -> String {
     format!(
         "INSERT {{ GRAPH {r} {{ {r} {pr} {k} }} }} \
-         WHERE {{ FILTER NOT EXISTS {{ GRAPH ?g {{ ?s {pbk} {k} }} }} }}",
+         WHERE {{ FILTER NOT EXISTS {{ {named} }} }}",
         r = iri_const(RECLAIMING),
         pr = iri_const(&p_reclaiming()),
-        pbk = iri_const(&p_blob_key()),
         k = literal(blob_key),
+        named = blob_named(blob_key),
     )
 }
 
-/// ASK whether any record in any graph names `blob_key` as its bytes.
+/// ASK whether any record in any graph names `blob_key` as its bytes or as a segment appended to
+/// them.
 pub fn ask_blob_referenced(blob_key: &str) -> String {
+    format!("ASK {{ {} }}", blob_named(blob_key))
+}
+
+/// The pattern of a record naming `blob_key` as its bytes, or among its appended segments (a
+/// space-separated literal: matched as a whole word).
+fn blob_named(blob_key: &str) -> String {
     format!(
-        "ASK {{ GRAPH ?g {{ ?s {pbk} {k} }} }}",
+        "{{ GRAPH ?g {{ ?s {pbk} {k} }} }} UNION \
+         {{ GRAPH ?g {{ ?s {papp} ?app FILTER(CONTAINS(CONCAT(\" \", STR(?app), \" \"), {word})) }} }}",
         pbk = iri_const(&p_blob_key()),
+        papp = iri_const(&p_appended()),
         k = literal(blob_key),
+        word = literal(&format!(" {blob_key} ")),
     )
 }
 
@@ -305,15 +331,16 @@ pub fn ask_create_marker(child: &str, nonce: &str) -> Result<String, BuildError>
 /// `If-Modified-Since`, never a spurious 304.
 pub fn select_meta(resource: &str) -> Result<String, BuildError> {
     Ok(format!(
-        "SELECT ?ct ?bk ?etag ?mod WHERE {{ GRAPH {g} {{ \
+        "SELECT ?ct ?bk ?etag ?mod ?app WHERE {{ GRAPH {g} {{ \
             {s} {pct} ?ct ; {pbk} ?bk ; {pet} ?etag . \
-            OPTIONAL {{ {s} {pmod} ?mod }} }} }} LIMIT 1",
+            OPTIONAL {{ {s} {pmod} ?mod }} OPTIONAL {{ {s} {papp} ?app }} }} }} LIMIT 1",
         g = iri(resource)?,
         s = iri_const(&s_record()),
         pct = iri_const(&p_content_type()),
         pbk = iri_const(&p_blob_key()),
         pet = iri_const(&p_etag()),
         pmod = iri_const(&p_modified()),
+        papp = iri_const(&p_appended()),
     ))
 }
 
@@ -342,15 +369,16 @@ pub fn select_read_plan(target: &str, acl_candidates: &[String]) -> Result<Strin
         values.push_str(&iri(raw)?);
     }
     Ok(format!(
-        "SELECT ?g ?ct ?bk ?etag ?mod WHERE {{ VALUES ?g {{ {values} }} \
+        "SELECT ?g ?ct ?bk ?etag ?mod ?app WHERE {{ VALUES ?g {{ {values} }} \
             GRAPH ?g {{ {s} {pct} ?ct ; {pbk} ?bk ; {pet} ?etag . \
-            OPTIONAL {{ {s} {pmod} ?mod }} }} }}",
+            OPTIONAL {{ {s} {pmod} ?mod }} OPTIONAL {{ {s} {papp} ?app }} }} }}",
         values = values,
         s = iri_const(&s_record()),
         pct = iri_const(&p_content_type()),
         pbk = iri_const(&p_blob_key()),
         pet = iri_const(&p_etag()),
         pmod = iri_const(&p_modified()),
+        papp = iri_const(&p_appended()),
     ))
 }
 
@@ -393,11 +421,15 @@ pub fn select_children_limited(container: &str, limit: usize) -> Result<String, 
 ///
 /// It takes NO untrusted input — the predicate + subject are reserved-vocab constants — so it cannot
 /// be an injection vector and is infallible-by-construction (returned as `String`, not a `Result`).
+///
+/// A record's appended segments ([`p_appended`]) are referenced too: their literal comes back as a
+/// `?bk` of its own, which the caller splits ([`appended_keys`]).
 pub fn select_referenced_blob_keys() -> String {
     format!(
-        "SELECT DISTINCT ?bk WHERE {{ GRAPH ?g {{ {s} {p} ?bk }} }}",
+        "SELECT DISTINCT ?bk WHERE {{ GRAPH ?g {{ {{ {s} {p} ?bk }} UNION {{ {s} {papp} ?bk }} }} }}",
         s = iri_const(&s_record()),
         p = iri_const(&p_blob_key()),
+        papp = iri_const(&p_appended()),
     )
 }
 
@@ -423,6 +455,52 @@ pub fn update_put_meta(
     blob_key: &str,
     etag: &str,
     modified: Option<&str>,
+    appended: &[String],
+) -> Result<String, BuildError> {
+    put_meta_guarded(
+        resource,
+        content_type,
+        blob_key,
+        etag,
+        modified,
+        appended,
+        None,
+    )
+}
+
+/// [`update_put_meta`], made only while the record's entity tag is `expected` and its blob key
+/// `expected_bk`: one atomic `DELETE/INSERT … WHERE` whose `WHERE` requires them, so a record
+/// rewritten meanwhile is left as it is (the caller reads the record back to tell which happened).
+#[allow(clippy::too_many_arguments)]
+pub fn update_put_meta_if(
+    resource: &str,
+    expected: &str,
+    expected_bk: &str,
+    content_type: &str,
+    blob_key: &str,
+    etag: &str,
+    modified: Option<&str>,
+    appended: &[String],
+) -> Result<String, BuildError> {
+    put_meta_guarded(
+        resource,
+        content_type,
+        blob_key,
+        etag,
+        modified,
+        appended,
+        Some((expected, expected_bk)),
+    )
+}
+
+fn put_meta_guarded(
+    resource: &str,
+    content_type: &str,
+    blob_key: &str,
+    etag: &str,
+    modified: Option<&str>,
+    appended: &[String],
+    expected: Option<(&str, &str)>,
 ) -> Result<String, BuildError> {
     let g = iri(resource)?;
     let s = iri_const(&s_record());
@@ -439,12 +517,36 @@ pub fn update_put_meta(
         Some(m) => format!(" ; {pmod} {dt}", dt = datetime_literal(m)),
         None => String::new(),
     };
+    // `pss:appended` likewise: always cleared, written only when there are segments.
+    let papp = iri_const(&p_appended());
+    let app_insert = match appended_literal(appended) {
+        Some(a) => format!(" ; {papp} {l}", l = literal(&a)),
+        None => String::new(),
+    };
+    if let Some((expected, expected_bk)) = expected {
+        // One atomic modify whose WHERE requires the expected tag: no match, nothing changes.
+        return Ok(format!(
+            "DELETE {{ GRAPH {g} {{ {s} {pct} ?oldCt ; {pbk} ?oldBk ; {pet} ?oldEt ; \
+                {pmod} ?oldMod ; {papp} ?oldApp . }} }} \
+             INSERT {{ GRAPH {g} {{ {s} {pct} {ct} ; {pbk} {bk} ; {pet} {et}{mod_insert}{app_insert} . }} }} \
+             WHERE {{ GRAPH {g} {{ {s} {pet} {exp} ; {pbk} {exp_bk} ; {pct} ?oldCt ; {pbk} ?oldBk ; {pet} ?oldEt . \
+                OPTIONAL {{ {s} {pmod} ?oldMod }} OPTIONAL {{ {s} {papp} ?oldApp }} }} }}",
+            ct = literal(content_type),
+            bk = literal(blob_key),
+            et = literal(etag),
+            exp = literal(expected),
+            exp_bk = literal(expected_bk),
+        ));
+    }
     Ok(format!(
         "DELETE WHERE {{ GRAPH {g} {{ {s} {pmod} ?oldMod }} }} ; \
+         DELETE WHERE {{ GRAPH {g} {{ {s} {papp} ?oldApp }} }} ; \
          DELETE WHERE {{ GRAPH {g} {{ {s} {pct} ?oldCt }} }} ; \
          DELETE WHERE {{ GRAPH {g} {{ {s} {pbk} ?oldBk }} }} ; \
          DELETE WHERE {{ GRAPH {g} {{ {s} {pet} ?oldEt }} }} ; \
-         INSERT DATA {{ GRAPH {g} {{ {s} {pct} {ct} ; {pbk} {bk} ; {pet} {et}{mod_insert} . }} }}",
+         INSERT DATA {{ GRAPH {g} {{ {s} {pct} {ct} ; {pbk} {bk} ; {pet} {et}{mod_insert}{app_insert} . }} }}",
+        papp = papp,
+        app_insert = app_insert,
         g = g,
         s = s,
         pmod = pmod,
@@ -489,6 +591,7 @@ pub fn update_put_meta(
 /// harmless; pruning them is a reconciler-GC concern (M3-next). Only the single-valued record
 /// predicates (`contentType`/`blobKey`/`etag`) are DELETE-replaced (so `select_meta(... LIMIT 1)`
 /// stays deterministic — the round-3 finding); the marker is purely additive.
+#[allow(clippy::too_many_arguments)]
 pub fn update_create_child(
     container: &str,
     child: &str,
@@ -496,6 +599,7 @@ pub fn update_create_child(
     blob_key: &str,
     etag: &str,
     modified: Option<&str>,
+    appended: &[String],
     nonce: &str,
 ) -> Result<String, BuildError> {
     create_child_guarded(
@@ -505,6 +609,7 @@ pub fn update_create_child(
         blob_key,
         etag,
         modified,
+        appended,
         nonce,
         false,
     )
@@ -513,6 +618,7 @@ pub fn update_create_child(
 /// [`update_create_child`], which does nothing once its `nonce` is fenced ([`update_fence`]): the
 /// form a client sends when a failed update can still commit after it has answered (an HTTP
 /// update that timed out), so that a fence can make its outcome final.
+#[allow(clippy::too_many_arguments)]
 pub fn update_create_child_fenced(
     container: &str,
     child: &str,
@@ -520,6 +626,7 @@ pub fn update_create_child_fenced(
     blob_key: &str,
     etag: &str,
     modified: Option<&str>,
+    appended: &[String],
     nonce: &str,
 ) -> Result<String, BuildError> {
     create_child_guarded(
@@ -529,6 +636,7 @@ pub fn update_create_child_fenced(
         blob_key,
         etag,
         modified,
+        appended,
         nonce,
         true,
     )
@@ -542,6 +650,7 @@ fn create_child_guarded(
     blob_key: &str,
     etag: &str,
     modified: Option<&str>,
+    appended: &[String],
     nonce: &str,
     fenced: bool,
 ) -> Result<String, BuildError> {
@@ -566,6 +675,14 @@ fn create_child_guarded(
     let mod_ins = match modified {
         Some(m) => format!(" ; {pmod} {dt}", dt = datetime_literal(m)),
         None => String::new(),
+    };
+    // `pss:appended` is cleared and written the same way.
+    let papp = iri_const(&p_appended());
+    let mod_del = format!("{mod_del} ; {papp} ?oldApp");
+    let mod_opt = format!("{mod_opt}OPTIONAL {{ GRAPH {cg} {{ {crec} {papp} ?oldApp }} }} ");
+    let mod_ins = match appended_literal(appended) {
+        Some(a) => format!("{mod_ins} ; {papp} {l}", l = literal(&a)),
+        None => mod_ins,
     };
     Ok(format!(
         "DELETE {{ \
@@ -989,6 +1106,7 @@ mod tests {
             "blob-key",
             "\"etag\"",
             None,
+            &[],
             "op-1",
         )
         .unwrap();
@@ -1004,11 +1122,13 @@ mod tests {
         // An IRIREF-invalid child IRI is rejected, fail-closed (never escaped-and-aliased).
         let r = update_create_child(
             "http://pod/c/",
-            "http://pod/c/no te", // a space — invalid IRIREF
+            "http://pod/c/no te",
+            // a space — invalid IRIREF
             "text/turtle",
             "bk",
             "\"e\"",
             None,
+            &[],
             "op-1",
         );
         assert_eq!(r, Err(BuildError::InvalidIri));
@@ -1018,14 +1138,14 @@ mod tests {
     fn put_meta_does_not_drop_the_whole_graph() {
         // The metadata re-write must DELETE only the three reserved record predicates, never the
         // whole graph (which would erase containment edges + user RDF — the roborev finding).
-        let q = update_put_meta("http://pod/c/", "text/turtle", "bk", "\"e\"", None).unwrap();
+        let q = update_put_meta("http://pod/c/", "text/turtle", "bk", "\"e\"", None, &[]).unwrap();
         assert!(!q.contains("DROP"), "must not DROP the graph: {q}");
-        // It targets exactly the four single-valued reserved predicates for deletion (modified is
-        // ALWAYS cleared, even with None), then re-inserts.
+        // It targets exactly the five single-valued reserved predicates for deletion (modified and
+        // appended are ALWAYS cleared, even when absent), then re-inserts.
         assert_eq!(
             q.matches("DELETE WHERE").count(),
-            4,
-            "four targeted deletes (incl. modified): {q}"
+            5,
+            "five targeted deletes (incl. modified and appended): {q}"
         );
         assert!(q.contains("INSERT DATA"));
         assert!(q.contains(&iri_const(&p_content_type())));
@@ -1058,13 +1178,14 @@ mod tests {
             "bk",
             "\"e\"",
             Some("2026-07-05T12:34:56Z"),
+            &[],
         )
         .unwrap();
-        // Four targeted deletes now: the three record predicates + the old modified.
+        // Five targeted deletes: the three record predicates + the old modified + the old appended.
         assert_eq!(
             q.matches("DELETE WHERE").count(),
-            4,
-            "three record deletes + one modified delete: {q}"
+            5,
+            "three record deletes + modified + appended: {q}"
         );
         assert!(
             q.contains(&iri_const(&p_modified())),
@@ -1088,6 +1209,7 @@ mod tests {
             "bk",
             "\"e\"",
             Some("2026-07-05T12:34:56Z"),
+            &[],
             "op-1",
         )
         .unwrap();
@@ -1113,6 +1235,7 @@ mod tests {
             "bk",
             "\"e\"",
             None,
+            &[],
             "op-1",
         )
         .unwrap();
@@ -1246,6 +1369,7 @@ mod tests {
             "bk",
             "\"e\"",
             None,
+            &[],
             "op-1",
         )
         .unwrap();
@@ -1568,12 +1692,31 @@ mod tests {
         let ask = |g: &sparq_core::Graph, q: &str| sparq_engine::ask(g, q).unwrap();
         run(
             &mut g,
-            &update_put_meta("urn:x-sparq-lws:held/a/b", "x", "k1", "\"h\"", None).unwrap(),
+            &update_put_meta("urn:x-sparq-lws:held/a/b", "x", "k1", "\"h\"", None, &[]).unwrap(),
         )
         .unwrap();
         assert!(ask(&g, &ask_blob_referenced("k1")));
         run(&mut g, &update_begin_reclaim("k1")).unwrap();
         assert!(!ask(&g, &ask_reclaiming("k1")), "held bytes");
+        // A segment named among a record's appended ones is referenced; a key it only contains
+        // is not.
+        run(
+            &mut g,
+            &update_put_meta(
+                "http://pod/d",
+                "x",
+                "k0",
+                "\"d\"",
+                None,
+                &["s1".into(), "s22".into()],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(ask(&g, &ask_blob_referenced("s22")));
+        run(&mut g, &update_begin_reclaim("s1")).unwrap();
+        assert!(!ask(&g, &ask_reclaiming("s1")), "an appended segment");
+        assert!(!ask(&g, &ask_blob_referenced("s2")));
         run(&mut g, &update_begin_reclaim("k2")).unwrap();
         assert!(ask(&g, &ask_reclaiming("k2")));
         let rows = sparq_engine::query(&g, &select_reclaiming())
@@ -1604,7 +1747,8 @@ mod tests {
         )
         .unwrap();
         let create = |child: &str, nonce: &str| {
-            update_create_child_fenced(c, child, "text/turtle", "bk", "\"e\"", None, nonce).unwrap()
+            update_create_child_fenced(c, child, "text/turtle", "bk", "\"e\"", None, &[], nonce)
+                .unwrap()
         };
         // Not fenced: applied as the unfenced form is.
         run(&mut g, &create(a, "op-a")).unwrap();

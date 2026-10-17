@@ -217,6 +217,7 @@ async fn runtime_flag_controls_periodic_sweep_without_weakening_delete_safety() 
             ResourceMeta {
                 content_type: "text/turtle".into(),
                 blob_key: "referenced-live".into(),
+                appended: Vec::new(),
                 etag: "\"live\"".into(),
                 last_modified: Some(SystemTime::now()),
             },

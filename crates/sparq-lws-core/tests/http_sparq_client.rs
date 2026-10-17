@@ -683,6 +683,7 @@ fn meta() -> ResourceMeta {
     ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "blob-key-1".into(),
+        appended: Vec::new(),
         etag: "\"etag-1\"".into(),
         last_modified: None,
     }
@@ -726,6 +727,7 @@ async fn read_plan_is_one_protocol_request_carrying_target_and_all_candidates() 
     let root_acl_meta = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "blob-acl".into(),
+        appended: Vec::new(),
         etag: "\"etag-acl\"".into(),
         last_modified: None,
     };
@@ -961,6 +963,7 @@ async fn put_meta_rewrite_preserves_container_children() {
     let updated = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "blob-key-2".into(),
+        appended: Vec::new(),
         etag: "\"etag-2\"".into(),
         last_modified: None,
     };
@@ -1326,6 +1329,7 @@ async fn live_sparq_round_trip() {
     let m = ResourceMeta {
         content_type: "text/turtle".into(),
         blob_key: "live-blob-1".into(),
+        appended: Vec::new(),
         etag: "\"live-etag-1\"".into(),
         last_modified: None,
     };
