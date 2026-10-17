@@ -636,6 +636,9 @@ pub struct Inner<S: Store> {
     owed_touches: std::sync::Mutex<std::collections::HashMap<String, Vec<String>>>,
     /// The record changes being made or settled (see [`records::Settlements`]).
     pub(crate) settlements: records::Settlements,
+    /// Holds whose release failed, each with its holder: tried again by the maintenance
+    /// sweeper (see [`LwsState::unreleased`]).
+    unreleased: std::sync::Mutex<Vec<(String, StoredMeta)>>,
 }
 
 /// An [`LwsState`] that does not keep it alive: what a task the state owns holds (see
@@ -718,6 +721,7 @@ impl<S: Store + 'static> LwsState<S> {
                 untouched: Default::default(),
                 owed_touches: Default::default(),
                 settlements: Default::default(),
+                unreleased: Default::default(),
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
@@ -750,6 +754,35 @@ impl<S: Store + 'static> LwsState<S> {
     /// Record that the intent `record` of a kept change is to be cleared once the container
     /// `uri` is next touched: a stop before then leaves it, and the next start touches the
     /// container (see the `intents` module).
+    /// Keep `holder`'s hold on `meta`'s bytes, whose release failed, for the maintenance
+    /// sweeper to release ([`LwsState::release_unreleased`]).
+    pub(crate) fn release_later(&self, holder: &str, meta: &StoredMeta) {
+        let mut unreleased = self.unreleased.lock().unwrap_or_else(|e| e.into_inner());
+        if unreleased.len() < UNRELEASED_LIMIT {
+            unreleased.push((holder.to_string(), meta.clone()));
+        }
+    }
+
+    /// Whether a hold waits to be released again.
+    pub(crate) fn has_unreleased(&self) -> bool {
+        !self
+            .unreleased
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+    }
+
+    /// Release again every hold whose release failed; one that fails again waits for the next.
+    pub(crate) async fn release_unreleased(&self) {
+        let waiting =
+            std::mem::take(&mut *self.unreleased.lock().unwrap_or_else(|e| e.into_inner()));
+        for (holder, meta) in waiting {
+            if self.store.release(&meta, &holder).await.is_err() {
+                self.release_later(&holder, &meta);
+            }
+        }
+    }
+
     pub(crate) fn owe_touch(&self, uri: &str, record: String) {
         self.owed_touches
             .lock()
@@ -913,7 +946,7 @@ impl<S: Store + 'static> LwsState<S> {
                 }
             }
             // Released while its locks are held: nothing can stage what it put back meanwhile.
-            left.2.release(&state.store).await;
+            left.2.release(&state).await;
             drop(left);
             state.locks.show(&iris);
             state
@@ -1174,11 +1207,20 @@ pub(crate) struct Holding {
 }
 
 impl Holding {
-    /// Release every hold, best effort (see [`release_holds`]).
-    pub(crate) async fn release<S: Store>(&self, store: &S) {
-        release_holds(store, &self.holder, &self.held).await
+    /// Release every hold; one whose release fails is tried again by the maintenance sweeper
+    /// ([`LwsState::unreleased`]).
+    pub(crate) async fn release<S: Store + 'static>(&self, state: &LwsState<S>) {
+        for (_, meta) in &self.held {
+            if state.store.release(meta, &self.holder).await.is_err() {
+                state.release_later(&self.holder, meta);
+            }
+        }
     }
 }
+
+/// How many failed releases wait to be tried again at most: past it, one is left to the next
+/// start's sweep ([`intents::recover`]), as a hold that outlives its change only keeps bytes.
+const UNRELEASED_LIMIT: usize = 4096;
 
 impl<S: Store + 'static> Holds<S> {
     fn take(&mut self) -> Holding {
@@ -1196,7 +1238,7 @@ impl<S: Store + 'static> Drop for Holds<S> {
         }
         let (state, holding) = (self.state.clone(), self.take());
         if let Ok(rt) = tokio::runtime::Handle::try_current() {
-            rt.spawn(async move { holding.release(&state.store).await });
+            rt.spawn(async move { holding.release(&state).await });
         }
     }
 }
@@ -1276,18 +1318,6 @@ pub(crate) fn holds_of(undo: &[Undo]) -> Vec<(String, StoredMeta)> {
     out.sort_by(|a, b| a.1.blob_key.cmp(&b.1.blob_key));
     out.dedup_by(|a, b| a.1.blob_key == b.1.blob_key);
     out
-}
-
-/// Release `holder`'s `holds` (see [`holds_of`]), best effort: one whose release fails stays
-/// until the next start's sweep ([`intents::recover`]) releases it.
-pub(crate) async fn release_holds<S: Store>(
-    store: &S,
-    holder: &str,
-    holds: &[(String, StoredMeta)],
-) {
-    for (_, meta) in holds {
-        let _ = store.release(meta, holder).await;
-    }
 }
 
 /// Whether a store step with this outcome may have changed something: it succeeded, or failed in
@@ -1868,7 +1898,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         touch: Option<&str>,
     ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
         let Some(record) = self.intent.clone() else {
-            self.holds.take().release(&self.state.store).await;
+            self.holds.take().release(self.state).await;
             return Ok(());
         };
         let kept = match touch {
@@ -1889,7 +1919,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             }
         };
         if kept {
-            self.holds.take().release(&self.state.store).await;
+            self.holds.take().release(self.state).await;
             return Ok(());
         }
         // Whether the store did it anyway is read back from the intent: still holding its plan,
@@ -1901,7 +1931,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                     if let Some(container) = touch {
                         self.state.owe_touch(container, record);
                     }
-                    self.holds.take().release(&self.state.store).await;
+                    self.holds.take().release(self.state).await;
                     return Ok(());
                 }
                 Ok(false) => {
@@ -1972,7 +2002,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 Some(left)
             }
             None => {
-                holds.release(store).await;
+                holds.release(self.state).await;
                 None
             }
         }
@@ -2737,6 +2767,8 @@ pub(crate) mod test_store {
     pub struct FlakyStore {
         inner: Arc<CompositeStore<InMemorySparqClient, InMemoryBlobStore>>,
         pub fail_delete: Arc<AtomicBool>,
+        /// Every `release` fails with a backend error, releasing nothing.
+        pub fail_release: Arc<AtomicBool>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `read` of this IRI alone (or, one ending in `/`, of the members of that container)
@@ -2884,6 +2916,7 @@ pub(crate) mod test_store {
                 fail_fence: Default::default(),
                 fences_tried: Default::default(),
                 hang_fence: Default::default(),
+                fail_release: Default::default(),
                 last_unsettled: Default::default(),
                 unsettled: Default::default(),
                 fail_step: Default::default(),
@@ -3184,6 +3217,9 @@ pub(crate) mod test_store {
             self.inner.reinstate(iri, container, held).await
         }
         async fn release(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
+            if self.fail_release.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.release(held, holder).await
         }
         async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {

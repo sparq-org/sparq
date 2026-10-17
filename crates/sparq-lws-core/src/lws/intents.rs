@@ -287,7 +287,7 @@ pub(crate) async fn recover<S: Store + 'static>(
                 left.2 = holds;
                 set_aside.push(left);
             }
-            None => holds.release(store).await,
+            None => holds.release(state).await,
         }
     }
     // This storage's holds no change still needs: each holder is an intent's IRI, so a hold

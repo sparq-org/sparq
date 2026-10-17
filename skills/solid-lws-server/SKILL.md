@@ -582,7 +582,8 @@ What the server exposes, all discoverable from the storage description
   change touches) are not counted against the storage's quota, but intents are (each carries the
   metadata records it would put back), so in a storage at its ceiling a change that needs one is
   refused with `507`; a store that fails may fail the change (`5xx`, below) whatever was asked;
-  and the holds of a kept change whose release was cut short last until the next start. A start
+  and a hold whose release fails keeps its bytes until the maintenance sweeper releases it again
+  (or, the process stopping first, the next start). A start
   settles every intent of its storage and releases holds as if no other process served it: one
   storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
