@@ -333,7 +333,7 @@ impl BoundedPathPlan {
             c.record_mult();
             c.record_open();
         }
-        let net = WaksmanNetwork::new(bound);
+        let net = WaksmanNetwork::try_new(bound)?;
         c.record_shuffle(ShuffleCost::model(bound, net.switch_count()));
         Ok(c)
     }

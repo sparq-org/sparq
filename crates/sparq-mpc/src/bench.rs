@@ -427,34 +427,34 @@ fn model_hidden_join(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
 /// [`crate::oblivious::ShuffleCost`] (1 mult/switch, `O(log n)` depth) — no
 /// degree-`2t` open. We also deal the `scale` column values once (they enter
 /// secret-shared).
-fn model_shuffle(n: usize, scale: usize) -> CommCounter {
+fn model_shuffle(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
     let mut c = CommCounter::new(n);
     for _ in 0..scale {
         c.record_deal();
     }
-    let net = crate::oblivious::WaksmanNetwork::new(scale);
+    let net = crate::oblivious::WaksmanNetwork::try_new(scale)?;
     c.record_shuffle(crate::oblivious::ShuffleCost::model(
         scale,
         net.switch_count(),
     ));
-    c
+    Ok(c)
 }
 
 /// Model an oblivious sort of `scale` rows: fold in the crate's own
 /// [`crate::oblivious::SortCost`] (one secure comparison + conditional swap per
 /// compare-exchange, `O(log² n)` depth).
-fn model_sort(n: usize, scale: usize) -> CommCounter {
+fn model_sort(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
     let mut c = CommCounter::new(n);
     for _ in 0..scale {
         c.record_deal();
     }
-    let net = crate::oblivious::SortingNetwork::new(scale);
+    let net = crate::oblivious::SortingNetwork::try_new(scale)?;
     c.record_sort(crate::oblivious::SortCost {
         items: scale,
         compare_exchanges: net.gate_count(),
         depth_rounds: net.depth(),
     });
-    c
+    Ok(c)
 }
 
 /// Model the hidden bounded property path `(p){1,k}` over `scale` secret edges with
@@ -669,8 +669,8 @@ pub fn cell(query_class: QueryClass, n: usize, scale: usize) -> Result<MatrixCel
     let comm = match query_class {
         QueryClass::CumulativeSumAggregate => model_aggregate(n),
         QueryClass::HiddenValueEquiJoin => model_hidden_join(n, scale)?,
-        QueryClass::ObliviousShuffle => model_shuffle(n, scale),
-        QueryClass::ObliviousSort => model_sort(n, scale),
+        QueryClass::ObliviousShuffle => model_shuffle(n, scale)?,
+        QueryClass::ObliviousSort => model_sort(n, scale)?,
         QueryClass::HiddenBoundedPath => model_bounded_path(n, scale)?,
     };
     Ok(MatrixCell {

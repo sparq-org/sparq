@@ -210,9 +210,43 @@ pub struct WaksmanNetwork {
     switches: Vec<Switch>,
 }
 
+/// The largest width either network builder accepts through its checked entry.
+///
+/// Same number as [`crate::oblivious_join::MAX_OUTPUT_BOUND`], and for the same
+/// reason: the output stage's network is sized from the output bound, so one cap
+/// covers both. A width above it is refused rather than allocated — the Waksman
+/// topology holds `O(n log n)` switches and the sorting network `O(n log² n)`
+/// gates, so an unchecked caller-supplied width is an allocation the caller chose.
+pub const MAX_NETWORK_WIDTH: usize = crate::oblivious_join::MAX_OUTPUT_BOUND;
+
+/// Refuse a network width above [`MAX_NETWORK_WIDTH`], before anything is built.
+fn check_network_width(what: &str, n: usize) -> Result<(), MpcError> {
+    if n > MAX_NETWORK_WIDTH {
+        return Err(MpcError::Protocol(format!(
+            "{}: width {} exceeds MAX_NETWORK_WIDTH {}",
+            what, n, MAX_NETWORK_WIDTH
+        )));
+    }
+    Ok(())
+}
+
 impl WaksmanNetwork {
+    /// Build the network for `n` wires, refusing a width above
+    /// [`MAX_NETWORK_WIDTH`] **before anything is allocated**.
+    ///
+    /// This is the entry for a width that came from caller input. [`Self::new`]
+    /// stays for a width the crate has already bounded, and for tests at a known
+    /// small `n`.
+    pub fn try_new(n: usize) -> Result<Self, MpcError> {
+        check_network_width("WaksmanNetwork", n)?;
+        Ok(Self::new(n))
+    }
+
     /// Build the Waksman/Beneš network for `n` wires (`n >= 1`). `n <= 1` is the
     /// trivial empty network (nothing to route).
+    ///
+    /// Unchecked: the switch list grows as `O(n log n)`, so prefer
+    /// [`Self::try_new`] for a width taken from caller input.
     pub fn new(n: usize) -> Self {
         // Route the identity permutation to discover the switch topology. The set
         // of switch wire-pairs is permutation-independent (it is the recursion
@@ -768,7 +802,9 @@ pub fn shuffle(
     mut col: SecretColumn,
 ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
     let items = col.len();
-    let net = WaksmanNetwork::new(items);
+    // The width is the caller's column length: refuse an over-cap one before the
+    // topology is built, and so before any draw.
+    let net = WaksmanNetwork::try_new(items)?;
     // Fail closed BEFORE any draw: this construction can only hand back fresh
     // sharings for a degree-`<= t` column (see `require_shufflable_column`), and a
     // refused call must not consume a single field element of the keystream.
@@ -1148,7 +1184,7 @@ pub trait Comparator {
 /// gated on degree reduction for genuinely-secret keys — see the module note).
 pub fn sort_by<C: Comparator>(mut col: SecretColumn, cmp: &C) -> Result<SortByResult, MpcError> {
     let n = col.len();
-    let net = SortingNetwork::new(n);
+    let net = SortingNetwork::try_new(n)?;
     for &(i, j) in net.compare_exchanges() {
         if cmp.must_swap(&col, i, j)? {
             col.swap(i, j);
@@ -1178,7 +1214,20 @@ pub struct SortingNetwork {
 }
 
 impl SortingNetwork {
+    /// Build the network for `n` items, refusing a width above
+    /// [`MAX_NETWORK_WIDTH`] **before anything is allocated**.
+    ///
+    /// The entry for a width that came from caller input; [`Self::new`] stays for a
+    /// width the crate has already bounded.
+    pub fn try_new(n: usize) -> Result<Self, MpcError> {
+        check_network_width("SortingNetwork", n)?;
+        Ok(Self::new(n))
+    }
+
     /// Build the odd-even mergesort network for `n` items (`n >= 0`).
+    ///
+    /// Unchecked: the gate list grows as `O(n log² n)`, so prefer
+    /// [`Self::try_new`] for a width taken from caller input.
     pub fn new(n: usize) -> Self {
         let mut gates = Vec::new();
         if n >= 2 {
@@ -1321,7 +1370,7 @@ pub fn sort_with_keys(col: SecretColumn, keys: Vec<Fp>) -> Result<SortWithKeysRe
         )));
     }
     let n = col.len();
-    let net = SortingNetwork::new(n);
+    let net = SortingNetwork::try_new(n)?;
     let mut col = col;
     let mut keys = keys;
     for &(i, j) in net.compare_exchanges() {
@@ -1485,6 +1534,57 @@ mod tests {
         assert_eq!(WaksmanNetwork::new(4).switch_count(), 5);
         assert_eq!(WaksmanNetwork::new(8).switch_count(), 17);
         assert_eq!(WaksmanNetwork::new(16).switch_count(), 49);
+    }
+
+    /// Both checked constructors refuse an over-cap width, and the refusal happens
+    /// before the topology is built — which is the point, since the switch and gate
+    /// lists are the allocation a caller-supplied width would size. A width at or
+    /// below the cap still builds exactly what the unchecked constructor builds, so
+    /// the cap is a cap and not a wall.
+    #[test]
+    fn the_checked_network_constructors_refuse_an_over_cap_width() {
+        // The validator first, so a disabled cap fails fast and deterministically
+        // instead of grinding on the over-cap topology it would then build.
+        for n in [MAX_NETWORK_WIDTH + 1, usize::MAX] {
+            let err = check_network_width("WaksmanNetwork", n)
+                .expect_err("the width cap must refuse before anything is built");
+            assert!(matches!(err, MpcError::Protocol(_)), "n={}: {:?}", n, err);
+        }
+        assert!(check_network_width("WaksmanNetwork", MAX_NETWORK_WIDTH).is_ok());
+        for n in [MAX_NETWORK_WIDTH + 1, usize::MAX] {
+            let err = WaksmanNetwork::try_new(n).expect_err("over-cap width refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m)
+                    if m.contains("WaksmanNetwork") && m.contains("MAX_NETWORK_WIDTH")),
+                "n={}: {:?}",
+                n,
+                err
+            );
+            let err = SortingNetwork::try_new(n).expect_err("over-cap width refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m)
+                    if m.contains("SortingNetwork") && m.contains("MAX_NETWORK_WIDTH")),
+                "n={}: {:?}",
+                n,
+                err
+            );
+        }
+        for n in [0usize, 1, 2, 7, 16] {
+            assert_eq!(
+                WaksmanNetwork::try_new(n).unwrap().switch_count(),
+                WaksmanNetwork::new(n).switch_count(),
+                "n={}",
+                n
+            );
+            assert_eq!(
+                SortingNetwork::try_new(n).unwrap().gate_count(),
+                SortingNetwork::new(n).gate_count(),
+                "n={}",
+                n
+            );
+        }
+        // One cap covers the output stage's network and this one.
+        assert_eq!(MAX_NETWORK_WIDTH, crate::oblivious_join::MAX_OUTPUT_BOUND);
     }
 
     /// THE shuffle correctness + routing test: for every permutation of small n,

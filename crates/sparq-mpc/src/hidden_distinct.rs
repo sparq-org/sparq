@@ -365,7 +365,7 @@ fn build_distinct_candidates(
     }
 
     // --- Oblivious sort by the secret composite key. ---
-    let net = SortingNetwork::new(rows.len());
+    let net = SortingNetwork::try_new(rows.len())?;
     let mut compare_exchanges = 0usize;
     for &(i, j) in net.compare_exchanges() {
         // Plaintext composite keys (held by the simulation as the dealer; the secure

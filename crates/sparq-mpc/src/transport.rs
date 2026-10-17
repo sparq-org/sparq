@@ -750,7 +750,7 @@ impl<S: Read + Write> Coordinator<S> {
             return Err(MpcError::Protocol("shuffle: no rows (empty column)".into()));
         }
         let n_rows = values.len();
-        let net = crate::oblivious::WaksmanNetwork::new(n_rows);
+        let net = crate::oblivious::WaksmanNetwork::try_new(n_rows)?;
         // Sample the fresh secret permutation + route it to per-switch control bits.
         // Same unbiased sampler the in-process `shuffle` uses (no second RNG path).
         let perm = crate::oblivious::sample_random_permutation(dealer, n_rows)?;
@@ -787,7 +787,7 @@ impl<S: Read + Write> Coordinator<S> {
             return Err(MpcError::Protocol("sort: no rows (empty column)".into()));
         }
         let n_rows = values.len();
-        let net = crate::oblivious::SortingNetwork::new(n_rows);
+        let net = crate::oblivious::SortingNetwork::try_new(n_rows)?;
         // Disclosed keys = the row values (matches the in-process `sort_with_keys`
         // gate, which swaps on strict greater-than → stable ascending). The keys are
         // tracked in lockstep with the swap decisions so each gate's bit is the
