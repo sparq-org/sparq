@@ -869,7 +869,12 @@ fn live_hidden_issuer_proof_over_the_m5_message() {
         return;
     }
     const DEPTH: u32 = 4;
-    let method = CommitmentMethod::DualLeafV2;
+    // sq-j506: the scan proved below is over a STRING-CANONICAL commitment, so
+    // that is the method its attestation may name: the verifier compares the
+    // proved pattern constants under the attested method's encoder, and this
+    // test's subject is the method-BOUND (`ZKSIG_M5`) message, not which method
+    // it binds.
+    let method = CommitmentMethod::StringCanonicalV1;
     // ONE trusted issuer, so its canonical index is 0 and the order is trivial.
     let sk = SecretKey::from_seed(1);
     let keyset = trusted(&sk)
@@ -997,7 +1002,12 @@ fn live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message() 
         return;
     }
     const DEPTH: u32 = 4;
-    let method = CommitmentMethod::DualLeafV2;
+    // sq-j506: the scan proved below is over a STRING-CANONICAL commitment, so
+    // that is the method its attestation may name: the verifier compares the
+    // proved pattern constants under the attested method's encoder, and this
+    // test's subject is the method-BOUND (`ZKSIG_M5`) message, not which method
+    // it binds.
+    let method = CommitmentMethod::StringCanonicalV1;
     // ONE trusted issuer, so its canonical index is 0 and the order is trivial.
     let sk = SecretKey::from_seed(1);
     let keyset = trusted(&sk)
