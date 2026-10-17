@@ -1929,7 +1929,10 @@ impl Graph {
     /// rather than a silent misread, so an incompatible on-disk format is never opened as
     /// if it were valid.
     #[cfg(feature = "mmap")]
-    fn open_named(dir: &std::path::Path) -> std::io::Result<Vec<(Term, Graph)>> {
+    fn open_named(
+        dir: &std::path::Path,
+        ctx: &mut OpenCtx,
+    ) -> std::io::Result<Vec<(Term, Graph)>> {
         let manifest = dir.join(NAMED_MANIFEST);
         let bytes = match std::fs::read(&manifest) {
             Ok(b) => b,
@@ -1968,7 +1971,7 @@ impl Graph {
         for i in 0..count {
             let (name, next) = decode_graph_name(&bytes, pos).map_err(|m| bad(&m))?;
             pos = next;
-            let sub = Graph::open_inner(&named_dir.join(i.to_string()), None)?;
+            let sub = Graph::open_inner(&named_dir.join(i.to_string()), None, ctx)?;
             out.push((name, sub));
         }
         Ok(out)
@@ -1993,7 +1996,8 @@ impl Graph {
     /// WRITER at a time — the WAL and the redo journal are designed around that — but any number
     /// of READERS. So `open` itself takes NO lock: two read-only opens of one directory (two CLI
     /// queries, or a query beside a live server) both succeed, and the exclusive advisory lock
-    /// (`dir/.writer.lock`) is taken on the FIRST durable mutation and then held for the graph's
+    /// (`<parent>/.<dirname>.writer.lock`, a SIBLING of the directory so a compaction's renames
+    /// cannot move it) is taken on the FIRST durable mutation and then held for the graph's
     /// lifetime. A second writer's first write — in another process OR in this one — fails with
     /// an `Err` naming the directory instead of interleaving its appends with the first writer's,
     /// and so does a write from a graph that opened before another writer changed the directory
@@ -2004,18 +2008,29 @@ impl Graph {
     /// be read — a torn WAL tail to truncate, a kept journal frame to redo, an interrupted
     /// compaction or named-drop swap to finish. That rewrites the directory, and a tail can also
     /// merely LOOK torn because a live writer is mid-append, so if the lock is unavailable `open`
-    /// fails with an `Err` rather than repairing a directory someone else is writing.
+    /// fails with an `Err` rather than repairing a directory someone else is writing. With the
+    /// lock in hand any interrupted directory swap is finished first and the repair state is then
+    /// RE-PROBED before any log is rewritten, because the first probe was taken without the lock.
+    ///
+    /// (codex review finding 1) An `open` that takes NO lock never repairs: it loads
+    /// only fully-committed records and leaves every log exactly as it found it (the single
+    /// filesystem effect of an unlocked open is that an ABSENT `wal.log`/`txn.log` may be created
+    /// empty, which no concurrent writer can observe as a change to its own data). If such an
+    /// open does meet work it is not allowed to do — a torn tail, or a committed journal frame
+    /// that appeared after the probe — the graph is marked STALE FOR WRITING: it answers queries
+    /// from what it loaded, and its first durable write is refused with an `Err` telling the
+    /// caller to reopen.
     ///
     /// The lock is released when the graph is dropped, and by the kernel when the process exits
     /// however it exits, so it never goes stale after a crash. On a non-unix target it is a no-op
     /// (see `DirLock`).
     #[cfg(feature = "mmap")]
     pub fn open(dir: &std::path::Path) -> std::io::Result<Graph> {
-        // Does anything in this tree need REPAIRING (and so rewriting) before it can be read?
-        // Probed WITHOUT writing; see `open_repair_pending`.
-        let repair = open_repair_pending(dir)?;
         let acquire = |dir: &std::path::Path| {
             DirLock::acquire(dir).map_err(|e| {
+                if e.kind() != std::io::ErrorKind::WouldBlock {
+                    return e;
+                }
                 std::io::Error::new(
                     e.kind(),
                     format!(
@@ -2027,24 +2042,46 @@ impl Graph {
                 )
             })
         };
-        let mut lock = if repair && dir.exists() {
-            Some(acquire(dir)?)
-        } else {
-            None
+        // Does anything in this tree need REPAIRING (and so rewriting) before it can be read?
+        // Probed WITHOUT writing; see `open_repair_pending`. The lock lives OUTSIDE `dir`, so it
+        // can be taken even while an interrupted swap has `dir` renamed away.
+        let mut ctx = OpenCtx {
+            read_only: true,
+            saw_repair: false,
         };
-        if repair && lock.is_none() {
-            // `dir` itself is MISSING: an interrupted compaction swap renamed it away, so there
-            // is no directory to hold a lock file and no writer can be holding one. Let the
-            // deterministic swap recovery put `dir` back (it is idempotent and decided entirely
-            // by the surviving sibling), then take the lock before anything is replayed.
+        let (lock, generation) = if open_repair_pending(dir)? {
+            let lock = acquire(dir)?;
+            // Finish or roll back any interrupted directory swap, then RE-PROBE under the lock:
+            // the first probe was unlocked, so what looked torn may have been a live writer's
+            // append that has since completed. Only a repair the lock-holder can still see is a
+            // real one, and only then is this open allowed to rewrite anything.
             recover_compaction(dir)?;
             recover_named_drop(dir)?;
-            lock = Some(acquire(dir)?);
+            ctx.read_only = !open_repair_pending(dir)?;
+            // This open holds the lock for the graph's lifetime, so it IS this tree's writer:
+            // claim the next generation before touching anything, so every handle already open
+            // against the old value is refused from here on.
+            let generation = read_generation(dir) + 1;
+            write_generation(dir, generation)?;
+            (Some(lock), generation)
+        } else {
+            // Read the generation BEFORE probing for a live writer, and again after loading
+            // (below): a writer that claimed the directory before this read is caught by the
+            // probe, and one that claims it later is caught by the second read.
+            let generation = read_generation(dir);
+            if writer_active(dir)? {
+                ctx.saw_repair = true;
+            }
+            (None, generation)
+        };
+        let locked = lock.is_some();
+        let g = Self::open_inner(dir, Some(TreeState::rooted(dir, lock, generation)), &mut ctx)?;
+        if !locked && (ctx.saw_repair || read_generation(dir) != generation) {
+            // Another writer was active while this graph loaded, or it left work this unlocked
+            // open was not allowed to do. Reads are served from what was loaded; writing would
+            // need a view this open cannot vouch for.
+            g.tree.mark_stale();
         }
-        let g = Self::open_inner(dir, Some(TreeState::rooted(dir, lock)))?;
-        // Record what the logs looked like at the end of this open: the baseline the lazy lock
-        // acquisition compares against (see `TreeState`).
-        g.tree.record_fingerprint(tree_fingerprint(dir));
         Ok(g)
     }
 
@@ -2054,17 +2091,46 @@ impl Graph {
     /// [`share_tree`](Self::share_tree) — the lock and the poison flag are per TREE, not per
     /// graph, and a sub-graph's directory is never opened independently by another writer
     /// (reaching it requires the root).
+    ///
+    /// `ctx` carries whether this open holds the writer lock, and collects what a lockless open
+    /// had to leave alone; see `OpenCtx`.
     #[cfg(feature = "mmap")]
     fn open_inner(
         dir: &std::path::Path,
         tree: Option<std::sync::Arc<TreeState>>,
+        ctx: &mut OpenCtx,
     ) -> std::io::Result<Graph> {
-        // (review 1593) Finish or roll back any compaction directory swap that a
-        // crash interrupted, so `dir` is always present (never lost in the rename window).
-        recover_compaction(dir)?;
-        // (sq-glw2) Finish or roll back any named-graph DROP sub-tree swap a crash
-        // interrupted, so `named/` is always consistent with the manifest before `open_named`.
-        recover_named_drop(dir)?;
+        if ctx.read_only {
+            // (codex review finding 1) No writer lock: finishing a swap would rewrite
+            // the directory, and a staging sibling that appeared after the probe may belong to a
+            // writer that is mid-swap RIGHT NOW. Leave it alone and only note that this view
+            // cannot become a writer.
+            if dir.with_extension("compact-new").exists()
+                || dir.with_extension("compact-old").exists()
+                || dir
+                    .join(NAMED_SUBDIR)
+                    .with_extension("drop-new")
+                    .exists()
+                || dir
+                    .join(NAMED_SUBDIR)
+                    .with_extension("drop-old")
+                    .exists()
+                || dir
+                    .join(NAMED_SUBDIR)
+                    .join(NAMED_STAGED_MANIFEST)
+                    .exists()
+            {
+                ctx.saw_repair = true;
+            }
+        } else {
+            // (review 1593) Finish or roll back any compaction directory swap that a
+            // crash interrupted, so `dir` is always present (never lost in the rename window).
+            recover_compaction(dir)?;
+            // (sq-glw2) Finish or roll back any named-graph DROP sub-tree swap a crash
+            // interrupted, so `named/` is always consistent with the manifest before
+            // `open_named`.
+            recover_named_drop(dir)?;
+        }
         let store = TripleStore::open(dir)?;
         // (review 1325, sub-finding 2) Prefer the mmap dictionary format
         // (`dict-meta.bin`, written by `save_mmap`); fall back to the LEGACY single-file
@@ -2115,7 +2181,7 @@ impl Graph {
         // (sq-3ui0, gh-45) Restore the named graphs (each opened memory-mapped
         // with its own per-graph WAL) so a save→open round-trip is lossless for the whole
         // dataset. Empty for a default-graph-only / pre-named-graph directory.
-        let named = Self::open_named(dir)?;
+        let named = Self::open_named(dir, ctx)?;
         let mut g = Graph {
             dict,
             store,
@@ -2135,14 +2201,20 @@ impl Graph {
         // ROOT's lock (see the `tree` field docs).
         g.share_tree();
         // Replay any write-ahead log into the delta-overlay (recovery after a crash or a
-        // plain not-yet-compacted close), stopping cleanly at the first torn record and
-        // truncating the log there — then keep the log open for further appends.
-        for (insert, t) in Wal::replay(dir)? {
+        // plain not-yet-compacted close), stopping cleanly at the first torn record. With the
+        // writer lock held the torn tail is truncated; without it the tail is left in place and
+        // reported, because it may be a live writer's unfinished append (codex review
+        // finding 1) — then keep the log open for further appends.
+        let (wal_ops, torn) = Wal::replay(dir, ctx.read_only)?;
+        for (insert, t) in wal_ops {
             if insert {
                 g.apply_delta_mem(&[t], &[]);
             } else {
                 g.apply_delta_mem(&[], &[t]);
             }
+        }
+        if torn && ctx.read_only {
+            ctx.saw_repair = true;
         }
         g.wal = Some(Wal::open(dir)?);
         // (sq-ycle) AFTER the per-graph WALs are replayed (above + per named graph in
@@ -2169,14 +2241,30 @@ impl Graph {
         // data records — so a `CREATE GRAPH`/`DROP GRAPH` that resolves to no triple change is
         // recovered too, and a create/drop interleaved with inserts is recovered in the order it
         // was committed rather than being applied out of band during materialisation.
-        let txn_ops = TxnJournal::replay(dir)?;
-        for op in txn_ops {
-            g.redo_txn_op(op).map_err(std::io::Error::other)?;
+        //
+        // (codex review finding 1) Both halves — the redo INTO the per-graph WALs and
+        // the truncation of `txn.log` — write to the directory, so they run only with the writer
+        // lock held. `open` takes it whenever the probe found journal content, so the lockless
+        // path normally has nothing here; a frame that appeared after that probe is left for a
+        // writer to redo and merely marks this view unwritable.
+        if ctx.read_only {
+            if TxnJournal::has_content(dir)? {
+                ctx.saw_repair = true;
+            }
+        } else {
+            let txn_ops = TxnJournal::replay(dir)?;
+            for op in txn_ops {
+                g.redo_txn_op(op).map_err(std::io::Error::other)?;
+            }
         }
         // Every committed record is now durably in a per-graph WAL (fsync'd by `apply_delta`); only
         // NOW is it safe to truncate the journal that was the sole durable home of those records.
+        // (`truncate` is itself a no-op on an already-empty journal, so a lockless open writes
+        // nothing here either.)
         let mut journal = TxnJournal::open(dir)?;
-        journal.truncate()?;
+        if !ctx.read_only {
+            journal.truncate()?;
+        }
         g.txn = Some(journal);
         Ok(g)
     }
@@ -3380,12 +3468,30 @@ impl Graph {
     /// (sq-ycle) Clear the redo journal after its frame has been fully materialised into
     /// the per-graph state (the second half of `sparq_engine::apply_effects`'s journal-first
     /// protocol), so the next body starts from an empty journal and a clean reopen is a no-op. A
-    /// NO-OP for an in-memory graph (no journal). Refused (`Err`) once the journal is poisoned
-    /// ([`Graph::poison_txn`]): its frame is kept for the reopen.
+    /// NO-OP for an in-memory graph (no journal).
+    ///
+    /// Refused (`Err`), leaving the journal untouched, in every case a durable write is refused:
+    /// once a frame is kept for the reopen ([`Graph::poison_txn`]), when this graph does not hold
+    /// the store's single-writer lock, and when another writer has changed the directory since
+    /// this graph opened. Truncating the journal DESTROYS committed records, so it is gated
+    /// exactly like an append.
     pub fn clear_txn(&mut self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
-        if let Some(j) = &mut self.txn {
-            return j.truncate().map_err(|e| format!("txn journal clear failed: {e}"));
+        if self.txn.is_some() {
+            // (codex review finding 5) Truncating the journal DESTROYS committed
+            // records, so it is a durable mutation like any other and passes the same gate
+            // BEFORE the journal is borrowed: it is refused on a poisoned tree (whose frame is
+            // kept for the reopen), on a tree that does not hold the writer lock, and on a view
+            // another writer has moved past. Without this a second handle could truncate the
+            // journal of the handle that actually owns the directory, and recovery would lose
+            // that frame's remainder.
+            self.begin_durable_write()?;
+        }
+        #[cfg(feature = "mmap")]
+        if let Some(journal) = &mut self.txn {
+            return journal
+                .truncate()
+                .map_err(|e| format!("txn journal clear failed: {e}"));
         }
         Ok(())
     }
@@ -3623,6 +3729,17 @@ impl Graph {
     ///   recovered by [`recover_named_drop`]. The survivors' OWN handles are released before the
     ///   rename and re-acquired by re-`open`ing each from its new directory afterwards, so a live
     ///   map never points into the directory being renamed (Issue 2; Windows-safe).
+    ///
+    /// (codex review finding 4) THE SUB-TREE AND ITS MANIFEST ARE ONE ATOMIC UNIT. The
+    /// sub-tree swap renumbers the survivors, so the OLD `named.bin` does not describe the NEW
+    /// sub-tree: a crash between the swap and the manifest rewrite used to leave a manifest
+    /// naming N graphs over a sub-tree holding N-1, and the next `open` then failed in
+    /// `open_named` on the missing directory — before the committed drop frame in `txn.log` could
+    /// be replayed, so the store could not be opened at all. The shrunk manifest is therefore
+    /// written INSIDE the staging sub-tree (as `named/.manifest`, see [`NAMED_STAGED_MANIFEST`])
+    /// and fsync'd BEFORE the swap, so the rename carries it in with the directory it describes.
+    /// Publishing it over `named.bin` is the last step, and [`recover_named_drop`] finishes
+    /// exactly that step — before any named graph is opened — whenever a crash left it undone.
     #[cfg(feature = "mmap")]
     fn persist_named_after_drop(&mut self, dir: &std::path::Path) -> Result<(), String> {
         let named_dir = dir.join(NAMED_SUBDIR);
@@ -3650,6 +3767,9 @@ impl Graph {
             sub.save(&new_dir.join(i.to_string())).map_err(|e| e.to_string())?;
             names.push(name.clone());
         }
+        // (codex review finding 4) Stage the SHRUNK manifest inside the sub-tree it
+        // describes, and fsync it, so the swap below publishes the pair atomically.
+        write_staged_manifest(&new_dir, &names).map_err(|e| e.to_string())?;
         fsync_dir(&new_dir).map_err(|e| e.to_string())?;
         // (Copilot #123, Issue 2) RELEASE every survivor's live mmap/WAL handles
         // BEFORE the rename: each is now fully persisted under `new_dir`, so drop the in-memory
@@ -3663,18 +3783,27 @@ impl Graph {
         fsync_dir(dir).map_err(|e| e.to_string())?;
         std::fs::rename(&new_dir, &named_dir).map_err(|e| e.to_string())?;
         fsync_dir(dir).map_err(|e| e.to_string())?;
-        // The sub-tree is now the renumbered survivors. Commit the new set by rewriting the
-        // manifest (atomic temp+rename, fsyncs the parent dir) — the commit point for the set.
-        write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
+        // The sub-tree is now the renumbered survivors, carrying the staged manifest that
+        // describes them. Publish it over `named.bin` (atomic temp+rename, fsyncs the parent dir)
+        // and drop the staged copy — the commit point for the set. A crash before this leaves the
+        // staged copy for `recover_named_drop` to publish on the next open.
+        promote_staged_manifest(&named_dir, dir).map_err(|e| e.to_string())?;
         std::fs::remove_dir_all(&old_dir).ok();
         // Re-open survivors from their NEW directories so each carries a correctly-indexed WAL
-        // (and a fresh, correctly-targeted mmap into the swapped-in `named/`).
+        // (and a fresh, correctly-targeted mmap into the swapped-in `named/`). This runs under
+        // this tree's writer lock, so the opens may repair.
         for (i, name) in names.into_iter().enumerate() {
-            let mut sub = Graph::open_inner(&named_dir.join(i.to_string()), None)
-                .map_err(|e| e.to_string())?;
+            let mut sub =
+                Graph::open_inner(&named_dir.join(i.to_string()), None, &mut OpenCtx::repairing())
+                    .map_err(|e| e.to_string())?;
             // The re-opened survivor is still part of THIS tree, so it shares this tree's
             // state (an independent open would otherwise have minted it detached state).
+            // (codex review finding 6) `share_tree` propagates it to the survivor's OWN
+            // nested named graphs too: assigning `sub.tree` alone left every descendant on the
+            // detached state `open_inner` minted, so a nested graph went on accepting durable
+            // writes while this tree was poisoned or locked by someone else.
             sub.tree = std::sync::Arc::clone(&self.tree);
+            sub.share_tree();
             self.named.push((name, sub));
         }
         Ok(())
@@ -3794,8 +3923,9 @@ impl Graph {
         let mut names: Vec<Term> = self.named.iter().map(|(n, _)| n.clone()).collect();
         names.push(name.clone());
         write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
-        // UNLOCKED: a named sub-graph is reached only through its (locked) root directory.
-        Graph::open_inner(&sub_dir, None).map_err(|e| e.to_string())
+        // The caller holds this tree's writer lock (`ensure_named` -> `begin_durable_write`), so
+        // the open may repair; a named sub-graph is reached only through its root directory.
+        Graph::open_inner(&sub_dir, None, &mut OpenCtx::repairing()).map_err(|e| e.to_string())
     }
 
     /// (sq-7cxr, gh-44) Returns the index of the named sub-graph called `name`,
@@ -3958,24 +4088,20 @@ impl Graph {
         self.wal = None;
         // (sq-ycle) The swapped-in graph is the SAME durable tree — same directory, same
         // writer — so it keeps this tree's shared state (its lock and its poison flag) rather
-        // than the detached state a bare re-open would mint. When the directory being swapped is
-        // the tree's ROOT, the lock FILE is renamed away with it, so the lock is released for the
-        // swap window and re-taken on the new canonical directory after; a swap of a NAMED
-        // sub-graph's directory leaves the root's lock file alone.
+        // than the detached state a bare re-open would mint.
+        //
+        // (codex review finding 2) The lock is NOT released for the swap. It lives on a
+        // SIBLING path (`sibling_control_file`), not inside `dir`, so the renames below do not
+        // move it and one lock covers staging, both renames and the reopen. Releasing it — as the
+        // first version did, because the lock file used to live inside `dir` — let another handle
+        // acquire it and acknowledge writes into the directory this swap was about to replace,
+        // and re-taking a lock inside the NEW directory did not even conflict with a holder of
+        // the old one.
         let tree = std::sync::Arc::clone(&self.tree);
-        let swapping_root = tree.is_root_dir(dir);
-        let released = swapping_root && tree.release_for_swap();
         let mut reopened =
             swap_dir_to_new_base(dir, |new_dir| self.save(new_dir)).map_err(|e| e.to_string())?;
-        if released {
-            tree.retake_after_swap(dir).map_err(|e| e.to_string())?;
-        }
         reopened.tree = tree;
         reopened.share_tree();
-        // The swap REPLACED the logs the fingerprint named, so re-record it from the new base.
-        if let Some(root) = reopened.tree.dir.clone() {
-            reopened.tree.record_fingerprint(tree_fingerprint(&root));
-        }
         *self = reopened;
         Ok(())
     }
@@ -4015,9 +4141,13 @@ impl Graph {
         // write, exactly like a graph from [`open`](Self::open). (The swap ITSELF is not
         // lock-protected: the PRECONDITION above makes quiescing the directory's writer the
         // caller's responsibility, unchanged by the lock.)
-        restored.tree = TreeState::rooted(dir, None);
+        // The swap replaced the whole base, so every handle that loaded the OLD one is stale:
+        // claim the next writer generation (codex review finding 3) so their first write
+        // is refused instead of appending against a base that no longer exists.
+        let generation = read_generation(dir) + 1;
+        write_generation(dir, generation)?;
+        restored.tree = TreeState::rooted(dir, None, generation);
         restored.share_tree();
-        restored.tree.record_fingerprint(tree_fingerprint(dir));
         Ok(restored)
     }
 
@@ -4201,9 +4331,11 @@ where
     std::fs::rename(&new_dir, dir)?;
     fsync_dir(parent)?;
     // Re-open memory-mapped from the new base (fresh, empty WAL); only then drop the old files.
-    // UNLOCKED: the caller decides whether the returned graph takes the single-writer lock
-    // (`persist_swap` re-takes the one it released; `restore_into_durable` takes a fresh one).
-    let reopened = Graph::open_inner(dir, None)?;
+    // The returned graph carries DETACHED tree state: the caller attaches the real one
+    // (`persist_swap` hands it the tree whose lock it has held throughout — the lock file is a
+    // SIBLING of `dir`, so the renames above never moved it; `restore_into_durable` roots a fresh
+    // one and claims the next writer generation).
+    let reopened = Graph::open_inner(dir, None, &mut OpenCtx::repairing())?;
     std::fs::remove_dir_all(&old_dir).ok();
     Ok(reopened)
 }
@@ -4246,37 +4378,46 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<()> {
 /// Mirrors [`recover_compaction`] but scoped to the `named/` sub-tree (`named.drop-old` /
 /// `named.drop-new` siblings):
 ///
-/// - `named/` present: the swap completed (or never started) — drop any stale siblings. The
-///   manifest is then reconciled by [`open_named`](Graph::open_named) (it trusts the manifest's
-///   count; extra leftover sub-dirs beyond it are ignored, a missing one surfaces as a clean
-///   error).
 /// - `named/` MISSING, `named.drop-new` present: a crash between the two renames — the new
 ///   (renumbered survivor) sub-tree was fully written + fsync'd, so COMPLETE the swap by
-///   promoting it.
+///   promoting it. It carries the manifest that describes it as [`NAMED_STAGED_MANIFEST`],
+///   published below.
 /// - `named/` MISSING, only `named.drop-old` present: a crash before the new sub-tree was
-///   durable — ROLL BACK by restoring the old sub-tree (the manifest still matches it).
+///   durable — ROLL BACK by restoring the old sub-tree (`named.bin` still matches it).
+/// - `named/` present: the swap finished its renames, or never started.
 ///
-/// Run BEFORE [`open_named`](Graph::open_named) on every open. Best-effort and idempotent.
+/// (codex review finding 4) THEN, in every case, publish any manifest STAGED inside
+/// `named/`. The swap renumbers the survivors, so a crash between the rename-in and the manifest
+/// rewrite left `named.bin` describing the OLD sub-tree over the NEW one — and
+/// [`open_named`](Graph::open_named) then failed on a sub-directory position that no longer
+/// existed, BEFORE the committed drop frame in `txn.log` could be replayed, so the store would
+/// not open at all. Carrying the manifest inside the staged sub-tree makes the pair one atomic
+/// unit: whichever sub-tree ends up at `named/`, the manifest published here is the one that
+/// describes it.
+///
+/// Run BEFORE [`open_named`](Graph::open_named), and only on an open that holds the writer lock —
+/// it WRITES (see `OpenCtx`). Idempotent.
 #[cfg(feature = "mmap")]
 fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<()> {
     let named_dir = dir.join(NAMED_SUBDIR);
     let new_dir = named_dir.with_extension("drop-new");
     let old_dir = named_dir.with_extension("drop-old");
-    if named_dir.exists() {
-        std::fs::remove_dir_all(&new_dir).ok();
-        std::fs::remove_dir_all(&old_dir).ok();
-        return Ok(());
+    if !named_dir.exists() {
+        if new_dir.exists() {
+            // The new survivor sub-tree was fully written + fsync'd before the swap began.
+            std::fs::rename(&new_dir, &named_dir)?;
+            fsync_dir(dir)?;
+        } else if old_dir.exists() {
+            // The new sub-tree never reached durability: restore the previous one.
+            std::fs::rename(&old_dir, &named_dir)?;
+            fsync_dir(dir)?;
+        }
     }
-    if new_dir.exists() {
-        // The new survivor sub-tree was fully written + fsync'd before the swap began.
-        std::fs::rename(&new_dir, &named_dir)?;
-        fsync_dir(dir)?;
-        std::fs::remove_dir_all(&old_dir).ok();
-    } else if old_dir.exists() {
-        // The new sub-tree never reached durability: restore the previous one.
-        std::fs::rename(&old_dir, &named_dir)?;
-        fsync_dir(dir)?;
-    }
+    // Finish the swap's last step: publish the manifest describing whatever sub-tree is now at
+    // `named/`. A no-op when nothing is staged.
+    promote_staged_manifest(&named_dir, dir)?;
+    std::fs::remove_dir_all(&new_dir).ok();
+    std::fs::remove_dir_all(&old_dir).ok();
     Ok(())
 }
 
@@ -4291,6 +4432,13 @@ const NAMED_MANIFEST: &str = "named.bin";
 /// mid-write never leaves a partial/corrupt `named.bin`. See [`write_named_manifest`].
 #[cfg(feature = "mmap")]
 const NAMED_MANIFEST_TMP: &str = "named.bin.tmp";
+/// (codex review finding 4) Filename of the manifest STAGED INSIDE a named-graph
+/// sub-tree, so a renumbering swap publishes the sub-tree and the manifest that describes it as
+/// one atomic unit. Written by [`write_staged_manifest`], published over [`NAMED_MANIFEST`] by
+/// [`promote_staged_manifest`]. Not a numbered sub-directory, so `open_named` and `tree_dirs`
+/// ignore it.
+#[cfg(feature = "mmap")]
+const NAMED_STAGED_MANIFEST: &str = ".manifest";
 /// Manifest magic ("NMG1" little-endian) — identifies a named-graph manifest and lets a
 /// stray/legacy file be rejected rather than misread.
 #[cfg(feature = "mmap")]
@@ -4322,7 +4470,15 @@ const MIN_MANIFEST_ENTRY_BYTES: usize = 5;
 /// dir-fsync discipline the compaction directory-swap uses (`Graph::compact`).
 #[cfg(feature = "mmap")]
 fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Result<()> {
-    use std::io::Write;
+    publish_named_manifest(dir, &named_manifest_bytes(names))
+}
+
+/// (sq-3ui0) The manifest's on-disk image for `names`: magic + format version + count,
+/// then each graph name in order (see [`encode_graph_name`]). Factored out of
+/// [`write_named_manifest`] so the named-drop swap can STAGE the same bytes inside the sub-tree
+/// they describe (see [`write_staged_manifest`]).
+#[cfg(feature = "mmap")]
+fn named_manifest_bytes(names: &[Term]) -> Vec<u8> {
     let mut buf = Vec::with_capacity(12 + names.len() * 32);
     buf.extend_from_slice(&NAMED_MANIFEST_MAGIC.to_le_bytes());
     buf.extend_from_slice(&NAMED_FORMAT_VERSION.to_le_bytes());
@@ -4330,6 +4486,48 @@ fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Resul
     for name in names {
         encode_graph_name(&mut buf, name);
     }
+    buf
+}
+
+/// (codex review finding 4) Stage the manifest image for `names` INSIDE the staging
+/// sub-tree `subtree` (as [`NAMED_STAGED_MANIFEST`]) and fsync its bytes, so the rename that
+/// publishes the sub-tree carries the manifest that describes it in the same atomic step. The
+/// caller fsyncs `subtree` itself afterwards. Published over `named.bin` by
+/// [`promote_staged_manifest`].
+#[cfg(feature = "mmap")]
+fn write_staged_manifest(subtree: &std::path::Path, names: &[Term]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut f = std::fs::File::create(subtree.join(NAMED_STAGED_MANIFEST))?;
+    f.write_all(&named_manifest_bytes(names))?;
+    f.sync_all()
+}
+
+/// (codex review finding 4) Publish a manifest staged inside `named_dir` over
+/// `dir/named.bin` and remove the staged copy — the LAST step of the named-drop swap, and the one
+/// [`recover_named_drop`] finishes when a crash left the renumbered sub-tree in place under a
+/// manifest that still described the old one. Idempotent: a no-op when nothing is staged, so it
+/// can run on every open before any named graph is opened.
+#[cfg(feature = "mmap")]
+fn promote_staged_manifest(
+    named_dir: &std::path::Path,
+    dir: &std::path::Path,
+) -> std::io::Result<()> {
+    let staged = named_dir.join(NAMED_STAGED_MANIFEST);
+    let bytes = match std::fs::read(&staged) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    publish_named_manifest(dir, &bytes)?;
+    std::fs::remove_file(&staged)?;
+    fsync_dir(named_dir)
+}
+
+/// The atomic temp+rename+dir-fsync publication of a manifest image over `dir/named.bin`; see
+/// [`write_named_manifest`] for why it is never written in place.
+#[cfg(feature = "mmap")]
+fn publish_named_manifest(dir: &std::path::Path, buf: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
     let final_path = dir.join(NAMED_MANIFEST);
     let tmp_path = dir.join(NAMED_MANIFEST_TMP);
     // Write the full image to a sibling temp file and fsync its CONTENTS before the rename, so
@@ -4337,7 +4535,7 @@ fn write_named_manifest(dir: &std::path::Path, names: &[Term]) -> std::io::Resul
     // zero-length/partial file under the canonical name).
     {
         let mut f = std::fs::File::create(&tmp_path)?;
-        f.write_all(&buf)?;
+        f.write_all(buf)?;
         f.sync_all()?;
     }
     // Atomically publish: rename can't tear, so `named.bin` is always a COMPLETE manifest.
@@ -4422,6 +4620,10 @@ fn decode_graph_name(bytes: &[u8], pos: usize) -> Result<(Term, usize), String> 
 /// matches, and TRUNCATES the log at the start of the first batch that fails either check
 /// (the torn tail of an interrupted append). So replay applies exactly the batches that were
 /// fully durable — never a prefix of one. The whole batch is `write_all`'d then fsync'd once.
+/// One decoded write-ahead-log record set: `(is_insert, triple)` in append order.
+#[cfg(feature = "mmap")]
+type WalRecords = Vec<(bool, [Term; 3])>;
+
 #[cfg(feature = "mmap")]
 struct Wal {
     file: std::fs::File,
@@ -4500,25 +4702,33 @@ impl Wal {
         self.file.sync_data()
     }
 
-    /// Reads `dir`'s log into `(is_insert, triple)` ops in append order, batch by batch.
-    /// Only fully-committed batches (intact header + body + matching checksum + commit
-    /// marker) are applied; the file is TRUNCATED at the start of the first incomplete or
-    /// corrupt batch — the torn tail of an interrupted append — so the partial batch is
-    /// NEVER partially applied and subsequent appends start at a clean batch boundary.
-    fn replay(dir: &std::path::Path) -> std::io::Result<Vec<(bool, [Term; 3])>> {
+    /// Reads `dir`'s log into `(is_insert, triple)` ops in append order, batch by batch, and
+    /// reports whether the log ended in a TORN TAIL. Only fully-committed batches — an intact
+    /// header, body, matching checksum and commit marker — are returned, so a partial batch is
+    /// NEVER partially applied.
+    ///
+    /// (codex review finding 1) `read_only` decides what happens to that torn tail.
+    /// With the writer lock held (`read_only == false`) no other writer can be appending, so the
+    /// tail is genuinely torn: the file is TRUNCATED at the start of the first incomplete or
+    /// corrupt batch and subsequent appends start at a clean batch boundary. WITHOUT the lock the
+    /// tail is left exactly as it is — it may be a LIVE writer's unfinished append, and
+    /// truncating it would destroy that writer's record. The caller reports it instead (see
+    /// `OpenCtx`) and the resulting graph is refused as a writer until it is reopened.
+    fn replay(dir: &std::path::Path, read_only: bool) -> std::io::Result<(WalRecords, bool)> {
         let path = Self::path(dir);
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), false)),
             Err(e) => return Err(e),
         };
         let (ops, good) = Self::scan(&bytes);
-        if good < bytes.len() {
+        let torn = good < bytes.len();
+        if torn && !read_only {
             let f = std::fs::OpenOptions::new().write(true).open(&path)?;
             f.set_len(good as u64)?;
             f.sync_data()?;
         }
-        Ok(ops)
+        Ok((ops, torn))
     }
 
     /// (sq-ycle) READ-ONLY probe: would [`replay`](Self::replay) WRITE to `dir` — i.e.
@@ -4538,7 +4748,7 @@ impl Wal {
     /// The pure, side-effect-free half of [`replay`](Self::replay): decode `bytes` into the ops of
     /// every fully-committed batch, and return the offset just past the last of them — so
     /// `good < bytes.len()` means a torn/corrupt tail that the caller must truncate.
-    fn scan(bytes: &[u8]) -> (Vec<(bool, [Term; 3])>, usize) {
+    fn scan(bytes: &[u8]) -> (WalRecords, usize) {
         let mut ops = Vec::new();
         let mut good = 0usize; // end of the last fully-committed batch
         'batches: while good < bytes.len() {
@@ -4643,7 +4853,7 @@ pub enum TxnOp {
 /// * the POISON flag — set when a committed journal frame could not be materialised, so the
 ///   frame is kept for the next `open` to redo and no durable write may be accepted until then;
 /// * the LAZILY-taken exclusive SINGLE-WRITER lock on the root directory, plus the directory
-///   fingerprint taken when this tree opened.
+///   writer GENERATION this tree loaded against.
 ///
 /// WHY THE LOCK IS LAZY. The WAL and the redo journal are designed around a single WRITER;
 /// READERS are unaffected (a query touches no log). Taking the lock in `open` would therefore
@@ -4656,14 +4866,60 @@ pub enum TxnOp {
 /// also merely LOOK torn while a live writer is mid-append. An `open` with nothing to repair is
 /// purely a reader and takes nothing.
 ///
-/// WHY THE FINGERPRINT. A reader that opened earlier may become a writer much later, by which
-/// time another writer may have appended to, truncated or swapped the very files this graph's
-/// in-memory image was built from. Its first write would then append deltas (or a journal frame)
-/// computed against a stale view. So when the lock is first taken, the lengths of the logs this
-/// tree opened are compared with the lengths recorded at open; any difference fails the mutation
-/// with an `Err`, unwritten, telling the caller to reopen. The check is deliberately against the
-/// OPEN-time values, not the previous holder's, so the answer does not depend on whether the
-/// other writer has since exited.
+/// WHY A GENERATION, NOT A FINGERPRINT (codex review finding 3). A reader that opened
+/// earlier may become a writer much later, by which time another writer may have appended to,
+/// truncated or swapped the very files this graph's in-memory image was built from. Its first
+/// write would then append deltas (or a journal frame) computed against a stale view. The first
+/// attempt at detecting that compared the LENGTHS of the tree's logs across the lazy lock
+/// acquisition, and that is not sound: a writer that appends, compacts and exits leaves the logs
+/// EMPTY again, exactly as they were at the stale graph's open, so every length matches while the
+/// base underneath has been replaced and the stale graph's WAL file has been unlinked. Instead
+/// each writer bumps a persistent WRITER GENERATION (see `read_generation`) when it takes the
+/// lock, before its first byte. `open` records the generation it loaded against and
+/// [`ensure_writer`](Self::ensure_writer) re-reads it under the lock: a changed value means
+/// another writer has been through, whatever it did and whether or not it is still running, and
+/// the mutation is refused unwritten.
+///
+/// A generation bump is not visible to a graph that is loading WHILE a writer holds the lock, so
+/// `open` additionally probes for a live writer (`writer_active`) before loading, and re-reads
+/// the generation after loading. Either signal marks the tree STALE FOR WRITING: it may be read,
+/// but its first durable write is refused and the caller must reopen.
+/// (sq-ycle, codex review finding 1) What [`Graph::open_inner`] is allowed to do to the
+/// directory it is loading, and what it had to leave alone. Threaded through the whole recursive
+/// open (root plus every named sub-graph) so one answer covers the tree.
+///
+/// `read_only` is the invariant the finding is about: an open that holds NO writer lock must not
+/// repair anything — not truncate a torn WAL tail, not finish a staged directory swap, not redo a
+/// journal frame into the per-graph WALs, not truncate the journal — because another writer may
+/// be mid-append and what looks like damage may be its unfinished work.
+///
+/// `saw_repair` is how such an open reports work it declined to do. The caller marks the tree
+/// stale for writing (see [`TreeState::mark_stale`]): the loaded image still answers queries, but
+/// the first durable write is refused and the caller reopens, by which time the lock is taken up
+/// front and the repair is done properly.
+#[cfg(feature = "mmap")]
+struct OpenCtx {
+    /// `true` when this open holds no writer lock and so must not write to the directory.
+    read_only: bool,
+    /// Set by a read-only open that met a torn log tail, journal content or a staged swap
+    /// sibling — anything a locked open would have repaired.
+    saw_repair: bool,
+}
+
+#[cfg(feature = "mmap")]
+impl OpenCtx {
+    /// The context for an open made BY the writer that already holds this tree's lock (a
+    /// sub-graph open from `create_durable_named` / `persist_named_after_drop`, or the reopen at
+    /// the end of a directory swap): repairing is allowed, and nothing needs reporting because
+    /// the caller is the writer.
+    fn repairing() -> OpenCtx {
+        OpenCtx {
+            read_only: false,
+            saw_repair: false,
+        }
+    }
+}
+
 #[cfg(feature = "mmap")]
 struct TreeState {
     /// Set by [`Graph::poison_txn`] and by a failed journal append; cleared only by reopening.
@@ -4673,9 +4929,13 @@ struct TreeState {
     dir: Option<std::path::PathBuf>,
     /// The lock, once taken. `None` until the first durable mutation.
     lock: std::sync::Mutex<Option<DirLock>>,
-    /// `(path, length-or-absent)` for the root journal, the manifest and every WAL/journal this
-    /// tree opened, as they were at the end of `open`. Set once by the root.
-    fingerprint: std::sync::Mutex<Vec<(std::path::PathBuf, Option<u64>)>>,
+    /// The writer generation this tree's in-memory image was loaded against.
+    open_generation: std::sync::atomic::AtomicU64,
+    /// Set when the loaded view may already be behind the directory, so this tree may READ but
+    /// must never become a writer: a writer held the lock while it loaded, the generation moved
+    /// during the load, or an unlocked load met a torn tail / journal content it was not allowed
+    /// to repair.
+    stale: std::sync::atomic::AtomicBool,
 }
 
 #[cfg(feature = "mmap")]
@@ -4687,18 +4947,25 @@ impl TreeState {
             poisoned: std::sync::atomic::AtomicBool::new(false),
             dir: None,
             lock: std::sync::Mutex::new(None),
-            fingerprint: std::sync::Mutex::new(Vec::new()),
+            open_generation: std::sync::atomic::AtomicU64::new(0),
+            stale: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
-    /// State for a tree rooted at `dir`. `lock` is the lock `open` already had to take to replay
-    /// (see the type docs), or `None` for an `open` that wrote nothing.
-    fn rooted(dir: &std::path::Path, lock: Option<DirLock>) -> std::sync::Arc<TreeState> {
+    /// State for a tree rooted at `dir`. `lock` is the lock `open` already had to take to repair
+    /// the directory (see the type docs), or `None` for an `open` that wrote nothing;
+    /// `open_generation` is the writer generation the image was loaded against.
+    fn rooted(
+        dir: &std::path::Path,
+        lock: Option<DirLock>,
+        open_generation: u64,
+    ) -> std::sync::Arc<TreeState> {
         std::sync::Arc::new(TreeState {
             poisoned: std::sync::atomic::AtomicBool::new(false),
             dir: Some(dir.to_path_buf()),
             lock: std::sync::Mutex::new(lock),
-            fingerprint: std::sync::Mutex::new(Vec::new()),
+            open_generation: std::sync::atomic::AtomicU64::new(open_generation),
+            stale: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -4706,85 +4973,167 @@ impl TreeState {
         self.poisoned.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// Whether `dir` is the directory this tree's lock file lives in — so a directory swap of
-    /// `dir` moves the lock file and the lock must be released and re-taken around it. A swap of
-    /// a NAMED sub-graph's directory does not touch the root's lock file.
-    fn is_root_dir(&self, dir: &std::path::Path) -> bool {
-        self.dir.as_deref() == Some(dir)
-    }
-
     fn poison(&self) {
         self.poisoned
             .store(true, std::sync::atomic::Ordering::Release);
     }
 
-    /// Replace the recorded fingerprint. Called at the end of `open` (and after a directory swap
-    /// has replaced the files it names) by the writer that owns the tree.
-    fn record_fingerprint(&self, fp: Vec<(std::path::PathBuf, Option<u64>)>) {
-        *self.fingerprint.lock().unwrap_or_else(|e| e.into_inner()) = fp;
+    /// Mark this tree's loaded view STALE FOR WRITING (see the `stale` field): reads continue,
+    /// the first durable write is refused. One-way — only a reopen clears it.
+    fn mark_stale(&self) {
+        self.stale.store(true, std::sync::atomic::Ordering::Release);
     }
 
-    /// The path of the first fingerprinted file whose length no longer matches, if any.
-    fn changed_since_open(&self) -> Option<std::path::PathBuf> {
-        let fp = self.fingerprint.lock().unwrap_or_else(|e| e.into_inner());
-        fp.iter()
-            .find(|(path, len)| file_len(path) != *len)
-            .map(|(path, _)| path.clone())
-    }
-
-    /// Take the single-writer lock if this tree does not already hold it, and verify the
-    /// directory has not changed since this graph opened. Called by EVERY durable mutation
-    /// before it writes anything; a no-op for a directory-less graph and after the first call.
+    /// Take the single-writer lock if this tree does not already hold it, and verify no other
+    /// writer has been through the directory since this graph loaded. Called by EVERY durable
+    /// mutation before it writes anything; a no-op for a directory-less graph and after the
+    /// first successful call (the lock is then held for the tree's lifetime).
     ///
-    /// Fails (unwritten) when another writer holds the lock, and when the directory changed
-    /// under this graph — in which case the lock is released again rather than held while this
-    /// graph refuses to use it.
+    /// Fails (unwritten) when the view is already marked stale, when another writer holds the
+    /// lock, and when the writer generation has moved since this graph loaded — in which case the
+    /// lock is released again rather than held while this graph refuses to use it. On success the
+    /// generation is BUMPED before any data byte is written, so every other handle open against
+    /// the old value is refused from here on.
     fn ensure_writer(&self) -> Result<(), String> {
         let Some(dir) = &self.dir else { return Ok(()) };
         let mut held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         if held.is_some() {
             return Ok(());
         }
-        let lock = DirLock::acquire(dir).map_err(|e| format!("durable write refused: {}", e))?;
-        if let Some(path) = self.changed_since_open() {
-            drop(lock);
+        if self.stale.load(std::sync::atomic::Ordering::Acquire) {
             return Err(format!(
-                "durable write refused: {} changed since open (another writer wrote to {}); \
-                 reopen the graph",
-                path.display(),
+                "durable write refused: {} changed since open (another writer was active while \
+                 this graph loaded, or left work this graph may not repair); reopen the graph",
                 dir.display()
             ));
         }
+        let lock = DirLock::acquire(dir).map_err(|e| format!("durable write refused: {}", e))?;
+        let opened_at = self.open_generation.load(std::sync::atomic::Ordering::Acquire);
+        let current = read_generation(dir);
+        if current != opened_at {
+            drop(lock);
+            self.mark_stale();
+            return Err(format!(
+                "durable write refused: {} changed since open (writer generation {} -> {}); \
+                 reopen the graph",
+                dir.display(),
+                opened_at,
+                current
+            ));
+        }
+        // Publish THIS writer's claim before writing a byte, so a handle that loaded against
+        // `current` is refused even after this one exits.
+        write_generation(dir, current + 1).map_err(|e| {
+            format!(
+                "durable write refused: cannot record the writer generation for {}: {}",
+                dir.display(),
+                e
+            )
+        })?;
+        self.open_generation
+            .store(current + 1, std::sync::atomic::Ordering::Release);
         *held = Some(lock);
-        Ok(())
-    }
-
-    /// Release the lock (returning whether it was held) for the window in which a directory swap
-    /// renames the root directory — the lock FILE lives under it — and re-take it afterwards with
-    /// [`retake_after_swap`](Self::retake_after_swap).
-    fn release_for_swap(&self) -> bool {
-        self.lock
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
-            .is_some()
-    }
-
-    /// Re-take the lock on the (new) root directory after a swap this tree performed while
-    /// holding it. No fingerprint check: the swap REPLACED the fingerprinted files itself, and
-    /// the caller re-records the fingerprint from the new base.
-    fn retake_after_swap(&self, dir: &std::path::Path) -> std::io::Result<()> {
-        let lock = DirLock::acquire(dir)?;
-        *self.lock.lock().unwrap_or_else(|e| e.into_inner()) = Some(lock);
         Ok(())
     }
 }
 
-/// (sq-ycle) `path`'s length, or `None` when it does not exist — the cheap per-file
-/// fingerprint `TreeState` compares across the lazy lock acquisition.
+/// (sq-ycle, codex review finding 2) A CONTROL FILE for the store at `dir`, placed as a
+/// SIBLING of it: `<parent>/.<dirname>.<suffix>`. Used for the writer lock and the writer
+/// generation.
+///
+/// WHY OUTSIDE THE DIRECTORY. Compaction, vacuum and restore REPLACE the store by renaming `dir`
+/// away and renaming a freshly built directory into its place. A control file inside `dir` would
+/// travel with it, so the lock would have to be released for the swap and re-taken inside the NEW
+/// directory — and a lock on the new directory's lock file is a different inode, which does not
+/// conflict with a writer still holding the old one. Exclusion would lapse for the whole
+/// staging-and-swap window. A sibling path survives every rename of `dir`, so ONE lock is held
+/// continuously through staging, swapping and reopening.
+///
+/// CONSEQUENCE, worth knowing: these two small files live in `dir`'s PARENT, which must be
+/// writable, and `remove_dir_all(dir)` does not remove them. Both are harmless leftovers — the
+/// lock file's bytes are never read, and the generation only ever moves forward.
 #[cfg(feature = "mmap")]
-fn file_len(path: &std::path::Path) -> Option<u64> {
-    std::fs::metadata(path).ok().map(|m| m.len())
+fn sibling_control_file(dir: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+    match (dir.parent(), dir.file_name()) {
+        (Some(parent), Some(name)) => {
+            let parent = if parent.as_os_str().is_empty() {
+                std::path::Path::new(".")
+            } else {
+                parent
+            };
+            parent.join(format!(".{}.{}", name.to_string_lossy(), suffix))
+        }
+        // A path with no final component (`/`, `..`) has no stable sibling; fall back to a file
+        // inside it. Such a path is never a real store directory.
+        _ => dir.join(format!(".{}", suffix)),
+    }
+}
+
+/// (sq-ycle, codex review finding 3) The WRITER GENERATION of the store at `dir`: eight
+/// little-endian bytes in a control file beside the lock, bumped by every writer when it takes
+/// the lock and BEFORE its first data byte. See `TreeState` for why a counter and not a
+/// file-length fingerprint.
+///
+/// A store written before this file existed — and one whose control file was deleted — reads as
+/// `0`. That is the SMALLEST value, so a handle that recorded a higher one is refused rather than
+/// silently allowed to write against a view it can no longer vouch for.
+#[cfg(feature = "mmap")]
+fn read_generation(dir: &std::path::Path) -> u64 {
+    match std::fs::read(sibling_control_file(dir, "writer.gen")) {
+        Ok(b) if b.len() >= 8 => u64::from_le_bytes(b[..8].try_into().expect("8 bytes")),
+        _ => 0,
+    }
+}
+
+/// (sq-ycle) Durably set `dir`'s writer generation to `next`: the full value is written to
+/// a temp sibling, fsync'd, renamed over the canonical name and the parent directory fsync'd —
+/// the same atomic temp+rename+dir-fsync discipline as the named-graph manifest, so a crash never
+/// leaves a torn counter.
+#[cfg(feature = "mmap")]
+fn write_generation(dir: &std::path::Path, next: u64) -> std::io::Result<()> {
+    use std::io::Write;
+    let path = sibling_control_file(dir, "writer.gen");
+    let tmp = sibling_control_file(dir, "writer.gen.tmp");
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(&next.to_le_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, &path)?;
+    fsync_dir(path.parent().unwrap_or_else(|| std::path::Path::new(".")))
+}
+
+/// (sq-ycle, codex review finding 3) Is a WRITER holding `dir`'s exclusive lock RIGHT NOW?
+/// Probed with a non-blocking SHARED `flock` on the lock file, released immediately by closing
+/// it: a shared lock is granted unless someone holds the exclusive one, so a refusal means a live
+/// writer. `open` uses it before loading, because a writer that took the lock (and bumped the
+/// generation) BEFORE this graph read the generation would otherwise be invisible while it
+/// changes the directory under the load.
+///
+/// FAILS CLOSED: any non-zero `flock` return — not just `EWOULDBLOCK` — is reported as "a writer
+/// is active", so an unexpected failure marks the view stale for writing rather than letting it
+/// write.
+#[cfg(all(feature = "mmap", unix))]
+fn writer_active(dir: &std::path::Path) -> std::io::Result<bool> {
+    use std::os::unix::io::AsRawFd;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(DirLock::lock_path(dir))?;
+    // SAFETY: `flock` is called with a valid, open file descriptor owned by `file` (which
+    // outlives the call) and a valid operation bitmask. It only takes a lock on that descriptor —
+    // it neither reads nor writes memory.
+    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
+    // Closing the descriptor releases any lock the call took: this is a probe, not a reader lock.
+    drop(file);
+    Ok(rc != 0)
+}
+
+/// Non-unix fallback: there is no advisory lock to probe here, so no writer is ever reported
+/// (see `DirLock`'s BOUNDARY note).
+#[cfg(all(feature = "mmap", not(unix)))]
+fn writer_active(_dir: &std::path::Path) -> std::io::Result<bool> {
+    Ok(false)
 }
 
 /// (sq-ycle) Every directory of one durable TREE: the root, then each existing named
@@ -4805,24 +5154,6 @@ fn tree_dirs(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
         }
         out.extend(tree_dirs(&sub));
         i += 1;
-    }
-    out
-}
-
-/// (sq-ycle) The directory fingerprint recorded at `open` and re-checked when the lazy
-/// single-writer lock is first taken: the LENGTH of every log a writer of this tree appends to or
-/// truncates — each directory's redo journal and write-ahead log — plus each named-graph manifest
-/// (the file whose rewrite is the commit point for the graph SET). A length is the cheapest signal
-/// that covers what actually happens: an append grows a log, a compaction/clear truncates one, and
-/// a graph create/drop rewrites a manifest. `None` records a file that does not exist, so a log
-/// appearing or disappearing is a change too. See `TreeState`.
-#[cfg(feature = "mmap")]
-fn tree_fingerprint(dir: &std::path::Path) -> Vec<(std::path::PathBuf, Option<u64>)> {
-    let mut out = Vec::new();
-    for d in tree_dirs(dir) {
-        for path in [TxnJournal::path(&d), Wal::path(&d), d.join(NAMED_MANIFEST)] {
-            out.push((path.clone(), file_len(&path)));
-        }
     }
     out
 }
@@ -4851,7 +5182,13 @@ fn open_repair_pending(dir: &std::path::Path) -> std::io::Result<bool> {
             return Ok(true);
         }
         let named = d.join(NAMED_SUBDIR);
-        if named.with_extension("drop-new").exists() || named.with_extension("drop-old").exists() {
+        if named.with_extension("drop-new").exists()
+            || named.with_extension("drop-old").exists()
+            // (codex review finding 4) A manifest staged inside the sub-tree is the
+            // last step of a named-drop swap, still to be published over `named.bin`; until it
+            // is, the manifest on disk does not describe the sub-tree beside it.
+            || named.join(NAMED_STAGED_MANIFEST).exists()
+        {
             return Ok(true);
         }
         if TxnJournal::has_content(&d)? || Wal::tail_torn(&d)? {
@@ -4873,7 +5210,8 @@ fn open_repair_pending(dir: &std::path::Path) -> std::io::Result<bool> {
 /// writes of the other. A single-WRITER directory is the invariant the WAL and the redo journal
 /// are designed around; this makes it enforced rather than assumed.
 ///
-/// HOW. `dir/.writer.lock` is opened and `flock(2)`-ed `LOCK_EX | LOCK_NB`. `flock` locks the
+/// HOW. `<parent>/.<dirname>.writer.lock` — a SIBLING of the graph directory, see
+/// `sibling_control_file` — is opened and `flock(2)`-ed `LOCK_EX | LOCK_NB`. `flock` locks the
 /// OPEN FILE DESCRIPTION, not the process, so a second writer in the SAME process conflicts
 /// exactly as a second process does — which is what makes the in-process case an honest `Err`
 /// instead of silent interleaving. The lock is released when the file is closed: when the owning
@@ -4894,17 +5232,20 @@ struct DirLock {
 
 #[cfg(feature = "mmap")]
 impl DirLock {
-    /// The lock file's name inside the graph directory. A plain sentinel: it is never read or
-    /// written, only locked, and `save`/`open` ignore unknown files, so an older store that has
-    /// no such file simply gets one on its next open.
-    const FILE_NAME: &'static str = ".writer.lock";
+    /// (codex review finding 2) The lock file: a SIBLING of the graph directory, so it
+    /// keeps the same inode across the renames a compaction/vacuum/restore swap performs on
+    /// `dir` and one lock covers the whole operation. See `sibling_control_file`. A plain
+    /// sentinel: its bytes are never read or written, only locked.
+    fn lock_path(dir: &std::path::Path) -> std::path::PathBuf {
+        sibling_control_file(dir, "writer.lock")
+    }
 
     /// Takes the exclusive lock, or fails with a message naming the directory. Never blocks:
     /// `LOCK_NB` turns a held lock into an immediate `Err` rather than a hang.
     #[cfg(unix)]
     fn acquire(dir: &std::path::Path) -> std::io::Result<DirLock> {
         use std::os::unix::io::AsRawFd;
-        let path = dir.join(Self::FILE_NAME);
+        let path = Self::lock_path(dir);
         let file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -11271,6 +11612,32 @@ mod tests {
         Term::NamedNode(NamedNode::new_unchecked(format!("http://ex/{n}")))
     }
 
+    /// Remove a durable store AND its two sibling control files (the writer lock and the writer
+    /// generation live beside the directory, not inside it — see `sibling_control_file` — so
+    /// `remove_dir_all` alone would leave them behind).
+    #[cfg(feature = "mmap")]
+    fn clean_store(dir: &std::path::Path) {
+        std::fs::remove_dir_all(dir).ok();
+        std::fs::remove_file(DirLock::lock_path(dir)).ok();
+        std::fs::remove_file(sibling_control_file(dir, "writer.gen")).ok();
+    }
+
+    /// Recursive directory copy, for staging the exact on-disk state an interrupted swap leaves.
+    #[cfg(feature = "mmap")]
+    fn copy_dir_all(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let target = to.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                copy_dir_all(&entry.path(), &target)?;
+            } else {
+                std::fs::copy(entry.path(), &target)?;
+            }
+        }
+        Ok(())
+    }
+
     /// (sq-ycle) The single named-graph triple the torn-tail test starts with.
     #[cfg(feature = "mmap")]
     fn base_named() -> Vec<(String, String, String)> {
@@ -11748,9 +12115,9 @@ mod tests {
 
     /// (sq-ycle) GAP 3 — STALE WRITER. A graph that opened BEFORE another writer changed
     /// the directory must not write: its delta was computed against the state it read at open,
-    /// which is no longer what is on disk. The check is against the lengths recorded at THAT
-    /// open, so the answer does not depend on whether the other writer has since exited — the
-    /// refusal stands after it is dropped and the lock is free.
+    /// which is no longer what is on disk. The check is against the writer GENERATION recorded at
+    /// THAT open, so the answer does not depend on whether the other writer has since exited —
+    /// the refusal stands after it is dropped and the lock is free.
     #[cfg(unix)]
     #[cfg(feature = "mmap")]
     #[test]
@@ -11761,7 +12128,7 @@ mod tests {
             .unwrap()
             .save(&dir)
             .unwrap();
-        // BOTH open on the same (clean) directory, so both record the same fingerprint.
+        // BOTH open on the same (clean) directory, so both record the same writer generation.
         let stale = Graph::open(&dir).unwrap();
         let mut stale = stale;
         {
@@ -11896,7 +12263,7 @@ mod tests {
                 .is_err(),
             "the compacted graph still holds the lock"
         );
-        // And the compacted graph itself keeps writing (its own lock, its own fingerprint).
+        // And the compacted graph itself keeps writing: it never released the lock.
         g.apply_delta(
             &[[term_iri(6, "s"), term_iri(6, "p"), term_iri(6, "o")]],
             &[],
@@ -11912,6 +12279,408 @@ mod tests {
         );
         assert!(!nt.contains("http://ex/s5"), "{}", nt);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (codex review finding 1) An open that holds NO writer lock must leave every log
+    /// BYTE-IDENTICAL: a torn-looking tail may be a live writer's unfinished append, and
+    /// truncating it would destroy that writer's record. `Wal::replay` therefore reports the torn
+    /// tail instead of repairing it when `read_only` — and still repairs it when the caller holds
+    /// the lock.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_lockless_replay_reports_a_torn_tail_instead_of_truncating_it() {
+        let dir = txn_tmp_dir("readonly-replay");
+        clean_store(&dir);
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.apply_delta(
+                &[[term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")]],
+                &[],
+            )
+            .unwrap();
+        }
+        // Append an uncommitted frame header: exactly what a writer mid-append leaves behind.
+        {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(Wal::path(&dir))
+                .unwrap();
+            f.write_all(&Wal::BATCH_MAGIC.to_le_bytes()).unwrap();
+            f.write_all(&[0u8; 8]).unwrap();
+            f.sync_data().unwrap();
+        }
+        let before = std::fs::read(Wal::path(&dir)).unwrap();
+        let (ops, torn) = Wal::replay(&dir, true).expect("a lockless replay still loads the log");
+        assert!(torn, "the torn tail is REPORTED");
+        assert_eq!(ops.len(), 1, "only the committed batch is loaded: {:?}", ops);
+        assert_eq!(
+            std::fs::read(Wal::path(&dir)).unwrap(),
+            before,
+            "a lockless replay left the log byte-identical"
+        );
+        // With the lock held the same tail IS repaired, so appends resume at a clean boundary.
+        let (ops, torn) = Wal::replay(&dir, false).expect("a locked replay repairs");
+        assert!(torn);
+        assert_eq!(ops.len(), 1);
+        assert!(
+            std::fs::read(Wal::path(&dir)).unwrap().len() < before.len(),
+            "a locked replay truncated the torn tail"
+        );
+        clean_store(&dir);
+    }
+
+    /// (codex review findings 1+3) A graph that LOADED while another writer held the
+    /// lock cannot know whether the directory changed under it, so it may READ what it loaded but
+    /// its first durable write is refused — and the refusal stands after the other writer exits,
+    /// because the view it loaded is the stale thing, not the lock. (The writer bumped the
+    /// generation before this graph read it, so only the live-writer probe can catch this case.)
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_graph_that_loaded_beside_an_active_writer_may_read_but_never_write() {
+        let dir = txn_tmp_dir("loaded-beside-writer");
+        clean_store(&dir);
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut reader = {
+            let mut writer = Graph::open(&dir).unwrap();
+            writer
+                .apply_delta(
+                    &[[term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")]],
+                    &[],
+                )
+                .expect("the writer takes the lock");
+            // Opened while the writer holds the lock: the directory may move under this load.
+            Graph::open(&dir).expect("a reader still opens beside a live writer")
+        }; // the writer is dropped: the lock is free again.
+        assert!(
+            format!("{:?}", dump_terms(&reader)).contains("http://ex/base"),
+            "the view it loaded still answers queries"
+        );
+        let err = reader
+            .apply_delta(
+                &[[term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")]],
+                &[],
+            )
+            .expect_err("a view loaded beside an active writer must never become a writer");
+        assert!(err.contains("changed since open"), "clear refusal: {}", err);
+        drop(reader);
+        let nt = format!("{:?}", dump_terms(&Graph::open(&dir).unwrap()));
+        assert!(nt.contains("http://ex/s1"), "{}", nt);
+        assert!(!nt.contains("http://ex/s2"), "the refused write never landed: {}", nt);
+        clean_store(&dir);
+    }
+
+    /// (codex review finding 2) The writer lock must survive the RENAMES a compaction
+    /// performs on the store directory, so exclusion is continuous across staging, swap and
+    /// reopen. That is why the lock file is a SIBLING of the directory: a lock file inside it
+    /// would be renamed away mid-operation, and a lock re-taken inside the replacement directory
+    /// is a different inode that conflicts with nobody.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn the_writer_lock_file_lives_outside_the_directory_a_swap_renames() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = txn_tmp_dir("lock-outside-dir");
+        clean_store(&dir);
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let lock = DirLock::lock_path(&dir);
+        assert!(
+            !lock.starts_with(&dir),
+            "the lock file must not live inside the directory the swap renames: {}",
+            lock.display()
+        );
+        let mut g = Graph::open(&dir).unwrap();
+        g.apply_delta(
+            &[[term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")]],
+            &[],
+        )
+        .expect("the first write takes the lock");
+        let before = std::fs::metadata(&lock).unwrap().ino();
+        g.compact().expect("compaction runs under the held lock");
+        assert_eq!(
+            std::fs::metadata(&lock).unwrap().ino(),
+            before,
+            "the compaction neither moved nor replaced the locked file"
+        );
+        // The same lock still excludes another writer after the swap.
+        let mut other = Graph::open(&dir).unwrap();
+        assert!(
+            other
+                .apply_delta(
+                    &[[term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")]],
+                    &[],
+                )
+                .is_err(),
+            "exclusion held across the swap"
+        );
+        drop(other);
+        drop(g);
+        clean_store(&dir);
+    }
+
+    /// (codex review finding 3) A writer that COMPACTED the store away leaves the logs
+    /// as empty as they were at another handle's open, so comparing log LENGTHS across the lazy
+    /// lock acquisition cannot see it: the stale handle would write through a WAL descriptor
+    /// whose file was unlinked by the swap, and its acknowledged write would vanish on reopen.
+    /// The persistent writer GENERATION catches it.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_writer_is_refused_after_another_writer_compacted_the_store() {
+        let dir = txn_tmp_dir("stale-after-compaction");
+        clean_store(&dir);
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // Both handles open on a clean store whose logs are EMPTY.
+        let mut stale = Graph::open(&dir).unwrap();
+        assert_eq!(
+            std::fs::metadata(Wal::path(&dir)).map(|m| m.len()).unwrap_or(0),
+            0,
+            "the baseline the length fingerprint would have recorded is an empty log"
+        );
+        {
+            let mut other = Graph::open(&dir).unwrap();
+            other
+                .apply_delta(
+                    &[[term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")]],
+                    &[],
+                )
+                .unwrap();
+            other.compact().expect("the other writer folds its delta into a new base");
+        } // dropped: the lock is free and every log is empty again, exactly as at `stale`'s open.
+        assert_eq!(
+            std::fs::metadata(Wal::path(&dir)).map(|m| m.len()).unwrap_or(0),
+            0,
+            "the compaction left the log empty, so lengths alone show no change"
+        );
+        let err = stale
+            .apply_delta(
+                &[[term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")]],
+                &[],
+            )
+            .expect_err("a handle whose base was swapped out must not write");
+        assert!(err.contains("changed since open"), "clear refusal: {}", err);
+        drop(stale);
+        let nt = format!("{:?}", dump_terms(&Graph::open(&dir).unwrap()));
+        assert!(nt.contains("http://ex/s1"), "the compacted write survives: {}", nt);
+        assert!(!nt.contains("http://ex/s2"), "the stale write never landed: {}", nt);
+        clean_store(&dir);
+    }
+
+    /// (codex review finding 4) A named-drop swap RENUMBERS the survivors, so the old
+    /// `named.bin` does not describe the new sub-tree. The manifest therefore travels INSIDE the
+    /// staged sub-tree and is published as the swap's last step. Each crash point must leave a
+    /// store that still OPENS, with the manifest and the sub-tree agreeing — and with the
+    /// committed drop frame in `txn.log` still reachable, which is what used to break: `open`
+    /// failed in `open_named` on a sub-directory position the manifest named but the renumbered
+    /// sub-tree no longer had, before the frame could be replayed.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_interrupted_named_drop_swap_recovers_at_every_crash_point() {
+        let base = txn_tmp_dir("named-drop-crash");
+        // Builds a store at `dir` holding `graphs` as named graphs, in order.
+        let build = |dir: &std::path::Path, graphs: &[&str]| {
+            clean_store(dir);
+            let doc: String = graphs
+                .iter()
+                .map(|g| format!("<http://ex/s> <http://ex/p> <http://ex/{g}> <http://ex/{g}> .\n"))
+                .collect();
+            Graph::load_dataset(&doc, "nquads").unwrap().save(dir).unwrap();
+        };
+        // The store under test, and a donor whose `named/` is the renumbered SURVIVOR sub-tree
+        // (g1 dropped) that a real swap would have staged.
+        let dir = base.join("g");
+        let donor = base.join("survivors");
+        let survivors = [named("g0"), named("g2")];
+        // Stage `named.drop-new/` = the survivor sub-tree + the manifest that describes it.
+        let stage = |dir: &std::path::Path| {
+            build(dir, &["g0", "g1", "g2"]);
+            build(&donor, &["g0", "g2"]);
+            let new_dir = dir.join(NAMED_SUBDIR).with_extension("drop-new");
+            std::fs::remove_dir_all(&new_dir).ok();
+            copy_dir_all(&donor.join(NAMED_SUBDIR), &new_dir).unwrap();
+            write_staged_manifest(&new_dir, &survivors).unwrap();
+        };
+        let graph_names = |g: &Graph| {
+            let mut v: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+            v.sort();
+            v
+        };
+        let expected = vec!["<http://ex/g0>".to_owned(), "<http://ex/g2>".to_owned()];
+
+        // (a) Crash BETWEEN the two renames: `named/` missing, both staging siblings present,
+        //     `named.bin` still describing the OLD three-graph sub-tree.
+        stage(&dir);
+        let named_dir = dir.join(NAMED_SUBDIR);
+        std::fs::rename(&named_dir, named_dir.with_extension("drop-old")).unwrap();
+        {
+            let g = Graph::open(&dir).expect("promotes the staged sub-tree and its manifest");
+            assert_eq!(graph_names(&g), expected, "the survivors, renumbered");
+        }
+        // (b) Crash AFTER the rename-in, BEFORE the manifest was published: `named/` is the
+        //     renumbered sub-tree carrying the staged manifest, `named.bin` still names three
+        //     graphs. This is the state that used to be unopenable.
+        stage(&dir);
+        std::fs::remove_dir_all(&named_dir).unwrap();
+        std::fs::rename(named_dir.with_extension("drop-new"), &named_dir).unwrap();
+        assert!(named_dir.join(NAMED_STAGED_MANIFEST).exists());
+        {
+            // A committed drop frame is still in the journal: recovery must reach it, and the
+            // (idempotent) redo must leave the survivors alone.
+            let mut journal = TxnJournal::open(&dir).unwrap();
+            journal.append(std::slice::from_ref(&TxnOp::Drop(named("g1")))).unwrap();
+            drop(journal);
+            let g = Graph::open(&dir).expect("publishes the staged manifest, then replays");
+            assert_eq!(graph_names(&g), expected, "the survivors, renumbered");
+            assert!(
+                !named_dir.join(NAMED_STAGED_MANIFEST).exists(),
+                "the staged manifest was consumed"
+            );
+            assert!(
+                !TxnJournal::has_content(&dir).unwrap(),
+                "the committed frame was reached and redone, not stranded"
+            );
+        }
+        // The published manifest agrees with the sub-tree across a further reopen.
+        assert_eq!(graph_names(&Graph::open(&dir).unwrap()), expected);
+        // (c) Crash BEFORE the staged sub-tree was durable: `named/` missing, only `drop-old`
+        //     present. Roll back — `named.bin` still describes the OLD sub-tree.
+        stage(&dir);
+        std::fs::rename(&named_dir, named_dir.with_extension("drop-old")).unwrap();
+        std::fs::remove_dir_all(named_dir.with_extension("drop-new")).unwrap();
+        {
+            let g = Graph::open(&dir).expect("rolls back to the old sub-tree");
+            assert_eq!(
+                graph_names(&g),
+                vec![
+                    "<http://ex/g0>".to_owned(),
+                    "<http://ex/g1>".to_owned(),
+                    "<http://ex/g2>".to_owned()
+                ],
+                "all three graphs are back"
+            );
+        }
+        clean_store(&dir);
+        clean_store(&donor);
+        std::fs::remove_dir_all(&base).ok();
+    }
+
+    /// (codex review finding 5) Truncating the redo journal DESTROYS committed records,
+    /// so `clear_txn` is a durable mutation: a handle that does not hold the writer lock must not
+    /// erase the lock holder's frame, and the holder itself must not erase a frame that a failed
+    /// materialisation kept for the reopen.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn clear_txn_is_refused_without_the_lock_and_on_a_poisoned_tree() {
+        let dir = txn_tmp_dir("clear-txn-gate");
+        clean_store(&dir);
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut holder = Graph::open(&dir).unwrap();
+        let mut other = Graph::open(&dir).unwrap();
+        holder
+            .commit_txn_ops(&[TxnOp::Insert {
+                slot: None,
+                triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+            }])
+            .expect("the holder reaches the commit point");
+        let framed = std::fs::metadata(TxnJournal::path(&dir)).unwrap().len();
+        assert!(framed > 0, "the committed frame is on disk");
+        let err = other
+            .clear_txn()
+            .expect_err("a handle without the writer lock must not truncate the journal");
+        assert!(err.contains("refused"), "clear refusal: {}", err);
+        assert_eq!(
+            std::fs::metadata(TxnJournal::path(&dir)).unwrap().len(),
+            framed,
+            "the lock holder's committed frame is untouched"
+        );
+        // The holder itself is refused once its frame is kept for the reopen.
+        holder.poison_txn();
+        assert!(
+            holder.clear_txn().is_err(),
+            "a kept frame must not be erased by its own writer either"
+        );
+        assert_eq!(
+            std::fs::metadata(TxnJournal::path(&dir)).unwrap().len(),
+            framed,
+            "the kept frame survives"
+        );
+        drop(other);
+        drop(holder);
+        clean_store(&dir);
+    }
+
+    /// (codex review finding 6) After a named-graph drop each surviving sub-graph is
+    /// REOPENED, which mints it detached tree state. Assigning the shared state to the survivor
+    /// alone left its own NESTED named graphs detached, so they went on accepting durable writes
+    /// while the tree was poisoned — acknowledged writes that the kept root frame would then
+    /// remove. The survivor must hand the shared state all the way down.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_survivor_reopened_after_a_drop_shares_the_tree_with_its_nested_graphs() {
+        let dir = txn_tmp_dir("nested-survivor");
+        clean_store(&dir);
+        Graph::load_dataset(
+            "<http://ex/s> <http://ex/p> <http://ex/o> <http://ex/g0> .\n\
+             <http://ex/s> <http://ex/p> <http://ex/o> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        // Give the graph that will SURVIVE the drop a durable nested named graph of its own.
+        let g0 = g
+            .named
+            .iter()
+            .position(|(n, _)| *n == named("g0"))
+            .expect("g0 is present");
+        g.named[g0]
+            .1
+            .ensure_named(&named("nested"))
+            .expect("a nested named graph under g0");
+        // Drop the OTHER graph: the survivors are renumbered and reopened.
+        assert!(g.drop_named_durable(&named("g1")).unwrap());
+        // Poison the tree: NOTHING in it may accept a durable write until it is reopened.
+        g.poison_txn();
+        let survivor = g
+            .named
+            .iter()
+            .position(|(n, _)| *n == named("g0"))
+            .expect("g0 survived");
+        let nested = g.named[survivor]
+            .1
+            .named
+            .iter()
+            .position(|(n, _)| *n == named("nested"))
+            .expect("the nested graph came back with the survivor");
+        let err = g.named[survivor].1.named[nested]
+            .1
+            .apply_delta(
+                &[[term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")]],
+                &[],
+            )
+            .expect_err("a nested graph under a reopened survivor must refuse a durable write");
+        assert!(err.contains("refused"), "clear refusal: {}", err);
+        drop(g);
+        clean_store(&dir);
     }
 
     /// (sq-ycle) TORN-TAIL guarantee: a multi-slot redo frame (a default-graph record
@@ -12236,10 +13005,13 @@ mod tests {
         build(&dir.with_extension("compact-old"), "old");
         build(&dir.with_extension("compact-new"), "new");
         assert!(!dir.exists());
-        let g = Graph::open(&dir).unwrap();
-        assert!(dump_terms(&g).iter().any(|(s, _, _)| s.contains("/new")), "must promote compact-new");
-        assert!(!dir.with_extension("compact-new").exists());
-        assert!(!dir.with_extension("compact-old").exists());
+        {
+            let g = Graph::open(&dir).unwrap();
+            assert!(dump_terms(&g).iter().any(|(s, _, _)| s.contains("/new")), "must promote compact-new");
+            assert!(!dir.with_extension("compact-new").exists());
+            assert!(!dir.with_extension("compact-old").exists());
+        } // dropped: an open that REPAIRED the directory holds the writer lock for its lifetime,
+          // and the lock file is a sibling of `dir`, so it outlives the wipe below (finding 2).
 
         // (b) Crash BEFORE the new base was ready: dir missing, only compact-old present.
         //     Recovery must ROLL BACK by restoring compact-old.
@@ -13086,9 +13858,11 @@ mod tests {
         build(&dir.with_extension("compact-old"), "old");
         build(&dir.with_extension("compact-new"), "new");
         assert!(!dir.exists());
-        let g = Graph::open(&dir).unwrap();
-        assert!(dump_terms(&g).iter().any(|(s, _, _)| s.contains("/new")), "must promote the new base");
-        assert!(!dir.with_extension("compact-new").exists() && !dir.with_extension("compact-old").exists());
+        {
+            let g = Graph::open(&dir).unwrap();
+            assert!(dump_terms(&g).iter().any(|(s, _, _)| s.contains("/new")), "must promote the new base");
+            assert!(!dir.with_extension("compact-new").exists() && !dir.with_extension("compact-old").exists());
+        } // dropped: the repairing open holds the (sibling) writer lock for its lifetime.
         // (b) Crash BEFORE the new base was ready (dir missing, only old present): roll back.
         std::fs::remove_dir_all(&dir).ok();
         build(&dir.with_extension("compact-old"), "old");

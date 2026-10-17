@@ -176,15 +176,21 @@ cargo run --release -p sparq-cli --features hdt-write -- \
 - **One WRITER per store directory, readers free (`sq-ycle`).** Opening a saved/persist
   directory takes no lock, so **read-only commands coexist** — any number of `query-mmap` /
   `bench-mmap` runs on one directory, and beside a running `--persist` server. The exclusive
-  advisory lock (`<dir>/.writer.lock`, unix `flock`) is taken on the first durable WRITE, so the one
+  advisory lock (`<parent>/.<dirname>.writer.lock`, unix `flock` — a SIBLING of the store directory,
+  so a `compact`'s directory renames cannot move it mid-operation) is taken on the first durable WRITE, so the one
   command that WRITES to the directory it opened — `compact` — fails with a clear error rather
   than racing a running server or another writing invocation (`recompress` reads its source and
   writes a NEW directory, so it takes no lock on the source) — stop the server first, as the `compact` entry says. Two
   exceptions to "opening is free": a directory that needs **repair** (a torn log tail, a kept
   transaction-journal frame, an interrupted directory swap) is locked before it is read, so such
   an open fails while a writer holds the lock; and a command that opened before another writer
-  changed the directory is refused on its own write (`changed since open`) — rerun it. The lock is
-  advisory and unix-only, and it is released on process exit however the process exits.
+  changed the directory, or that opened *while* one was writing, is refused on its own write
+  (`changed since open`) — rerun it. That is decided by a small persistent **writer generation**
+  counter (`<parent>/.<dirname>.writer.gen`) that every writer bumps when it takes the lock, so a
+  writer that appended, compacted and exited is still detected. Both control files live in the
+  store directory's PARENT, which must be writable, and `rm -rf <dir>` leaves them behind
+  (harmless). The lock is advisory and unix-only, and it is released on process exit however the
+  process exits.
 - **`query` and `query-mmap` print RESULTS** (a table by default for SELECT; a boolean for ASK; N-Triples for CONSTRUCT/DESCRIBE) on stdout — load stats and reasoning/inconsistency reports go to stderr. Use `--format <table|tsv|csv|xml|json|ntriples>` to pick the SELECT/ASK serialisation, or `--count` for the legacy count-only line (`<n> solutions/triples in <ms>ms`). The two are at output parity (they share one emission core; `query-mmap` only differs in opening the indexes memory-mapped instead of loading into RAM). `bench`/`bench-mmap` are unchanged and emit TSV.
 - **No `--help`.** Run a subcommand with too few args to see its one-line usage; an unknown subcommand prints the top-level usage and exits 2. Query errors exit 1.
 - **`--reason <profile>` is a flag on `query`** (scanned anywhere in argv); the standalone `reason` subcommand instead takes the profile as the 3rd positional. Profiles: `rdfs`, `owl`, `n3`, and — with the opt-in features — `el` and `datalog:<rules.dlog>`. `datalog:` is the only profile that carries an ARGUMENT (its rules file), split on the FIRST `:`; a bare `datalog` is a usage error (exit 2) naming the syntax, in both feature states.

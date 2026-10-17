@@ -1923,16 +1923,24 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   durable set is exactly the successful writes (no refused write resurrects).
 - **One WRITER per `--persist DIR`, readers free (enforced, `sq-ycle`).** A durable
   directory may have one writer and any number of readers. The exclusive advisory lock
-  (`DIR/.writer.lock`, unix `flock`) is taken on the store's **first durable write**, not at open,
+  (`<parent>/.<DIR-name>.writer.lock`, unix `flock` — a SIBLING of `DIR`, so the directory renames a
+  compaction/vacuum/restore performs cannot move it and exclusion is continuous across the swap)
+  is taken on the store's **first durable write**, not at open,
   and then held for the life of the store. So a read-only open — a `sparq-cli query-mmap` on the
   directory, or a second server that only serves queries — still works beside a running writer,
   while a **second writer's first write** fails with a clear error naming the directory instead of
   interleaving its WAL/journal appends with the running writer's. A store that opened *before*
   another writer changed the directory is also refused (`changed since open`) rather than appending
-  a delta computed against a stale view — reopen to continue. An `open` that must **repair** the
-  directory first (a torn log tail, a kept journal frame, an interrupted directory swap) does take
-  the lock up front, and fails if a writer holds it: a torn-looking tail can be a live writer
-  mid-append. The lock is released when the store is dropped and by the kernel on process exit
+  a delta computed against a stale view — reopen to continue. So is a store that opened *while*
+  another writer held the lock. Both are decided by a persistent **writer generation** counter
+  (`<parent>/.<DIR-name>.writer.gen`, bumped by each writer as it takes the lock, before its first
+  byte) plus a shared-lock probe at open, so a writer that appended, **compacted** and exited is
+  detected even though it left every log as empty as it found it. An `open` that must **repair**
+  the directory first (a torn log tail, a kept journal frame, an interrupted directory swap) does
+  take the lock up front, re-checks what needs repairing under it, and fails if a writer holds it:
+  a torn-looking tail can be a live writer mid-append. An `open` that takes NO lock never repairs
+  anything — it loads only fully-committed records, leaves every log as it found it, and marks
+  itself unwritable if it meets work it was not allowed to do. The lock is released when the store is dropped and by the kernel on process exit
   however it exits, so a crash never leaves it stale. Unix only: on a non-unix target writes
   proceed unlocked and a second writer is not detected. An offline `sparq-cli compact` on a live
   server's dir still needs the server stopped, exactly as the compaction note above advises: it
