@@ -3551,3 +3551,45 @@ fn a_satisfied_union_at_an_individual_counts_no_copies() {
     assert_eq!(report.consistency, Consistency::Consistent);
     assert_eq!(report.classification_unknown, None);
 }
+
+/// A blocked node's edge to an individual that its blocker does not share is dropped with
+/// the node when it is unravelled; the graph is still a model when the individual keeps its
+/// at-least restrictions without it. Each case gives HermiT's answer.
+#[test]
+fn a_blocked_node_s_unshared_edge_to_an_individual_is_dropped() {
+    let decl = ":C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :R a owl:ObjectProperty . :S a owl:ObjectProperty . :T a owl:ObjectProperty . :Q a owl:ObjectProperty . :o a owl:NamedIndividual . :p a owl:NamedIndividual . :a a owl:NamedIndividual .";
+    // `C0`s in a `Q`-chain, each `R⁻`-related to `:o`, whose `R`-successors reach `:o`.
+    let up = ":a a :C0 . :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :Q ; owl:someValuesFrom :C0 ] , [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:hasValue :o ] . :o a [ a owl:Restriction ; owl:onProperty :R ; owl:allValuesFrom [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :S ] ; owl:hasValue :o ] ] .";
+    // `C0`s in an `S⁻`-chain, each an `R`-predecessor of `:o`.
+    let down = ":a a :C0 . :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :S ] ; owl:someValuesFrom :C0 ] , [ a owl:Restriction ; owl:onProperty :R ; owl:hasValue :o ] . :o a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:allValuesFrom [ a owl:Restriction ; owl:onProperty :S ; owl:allValuesFrom :C1 ] ] .";
+    let min = |n: u32, p: &str, c: &str| {
+        format!(
+            "[ a owl:Restriction ; owl:onProperty {p} ; owl:minQualifiedCardinality \"{n}\"^^xsd:nonNegativeInteger ; owl:onClass {c} ]"
+        )
+    };
+    let cases: Vec<(String, Consistency)> = vec![
+        (up.to_string(), Consistency::Consistent),
+        (down.to_string(), Consistency::Consistent),
+        (format!("{up} :o a {} .", min(3, ":R", "owl:Thing")), Consistency::Consistent),
+        (format!("{down} :C1 owl:disjointWith :C0 ."), Consistency::Inconsistent),
+        (
+            format!(
+                "{up} :Q a owl:AsymmetricProperty . :o a [ a owl:Restriction ; owl:onProperty :R ; owl:maxCardinality \"2\"^^xsd:nonNegativeInteger ] ."
+            ),
+            Consistency::Inconsistent,
+        ),
+        (
+            format!("{down} :o a {} .", min(2, "[ owl:inverseOf :R ]", ":C3")),
+            Consistency::Consistent,
+        ),
+        (
+            format!(
+                "{up} :o a [ a owl:Restriction ; owl:onProperty :S ; owl:someValuesFrom :C2 ] . :C2 owl:disjointWith :C0 ."
+            ),
+            Consistency::Consistent,
+        ),
+    ];
+    for (extra, want) in cases {
+        assert_eq!(verdict(&format!("{decl} {extra}")), want, "{extra}");
+    }
+}
