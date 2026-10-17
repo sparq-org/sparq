@@ -186,11 +186,13 @@ where
             Ok(false) | Err(_) => {
                 // Settled by a task the state owns, holding the record's own lock (a
                 // revocation of it waits), the quota place (`register` holds it), the lock of
-                // its own listing (so the subscriber's conditional creates wait for it, and
-                // nobody else's) and this change's place among those being settled; the
-                // container's lock is taken again only to register it. An unsettled write is
-                // fenced first, so the listing it then reads is final.
+                // its own listing, shared (so the subscriber's conditional creates wait for it,
+                // and nobody else's, while its other changes go on), and this change's place
+                // among those being settled; the container's lock is taken again only to
+                // register it. An unsettled write is fenced first, so the listing it then reads
+                // is final.
                 drop(container_lock);
+                let own_listing = own_listing.map(ListingGuard::shared);
                 let (weak, store, locks) =
                     (state.downgrade(), state.store.clone(), state.locks.clone());
                 state.settlements.spawn(async move {
@@ -237,8 +239,9 @@ pub(crate) enum Listed<'a> {
     Nowhere,
     /// In the container's listing alone.
     InContainer,
-    /// In the container's listing and in the listing whose lock is named here: a name that is
-    /// no IRI ([`resources::IriLocks`] holds it, apart from every IRI's lock).
+    /// In the container's listing and in the listing whose lock is named here: a name outside
+    /// the storage, so no request's target is it ([`resources::IriLocks`] holds it, apart from
+    /// every lock of a resource).
     AlsoIn(&'a str),
 }
 
@@ -255,6 +258,17 @@ enum ListingGuard {
     // Held for as long as the guard is; never read.
     Alone(#[allow(dead_code)] resources::IriGuard),
     Shared(#[allow(dead_code)] tokio::sync::OwnedRwLockReadGuard<()>),
+}
+
+impl ListingGuard {
+    /// The same lock, shared: a conditional create's, once its check is behind it, is only a
+    /// change to the listing.
+    fn shared(self) -> Self {
+        match self {
+            ListingGuard::Alone(guard) => ListingGuard::Shared(guard.downgrade()),
+            shared => shared,
+        }
+    }
 }
 
 impl ListingLocks {
@@ -424,6 +438,15 @@ where
             Err(crate::error::ServerError::Unsettled { fence, .. }) => {
                 match still_listed(&state.store, &iri, &container).await {
                     Ok(false) => Some(true),
+                    // The sweeper's removal is settled here, within its deadline, holding what
+                    // it holds: given up past it, it is dropped with everything it holds (its
+                    // place among them) and leaves the record in force, to be tried again.
+                    Ok(true) | Err(_) if by == Remover::Sweeper => {
+                        until_done(|| state.store.fence(&fence)).await;
+                        let listed =
+                            until_done(|| still_listed(&state.store, &iri, &container)).await;
+                        Some(!listed)
+                    }
                     Ok(true) | Err(_) => {
                         // Settled by a task the state owns, holding the record's own lock, its
                         // own listing's and this change's place among those being settled,
@@ -502,6 +525,8 @@ pub(crate) enum Remover {
     /// owns them and may give them up past a deadline (dropped, they leave the record as the
     /// store has it, in force or gone, and memory as it was, to be tried again), in a place
     /// reserved for it ([`Settlements::reserve_maintenance`]), so no load of requests refuses it.
+    /// A delete whose outcome is unknown is settled in those same steps, never in a task of the
+    /// state's, so the deadline bounds it, and the place, too.
     Sweeper,
 }
 
