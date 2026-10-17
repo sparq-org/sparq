@@ -34,8 +34,9 @@
 //! `HolderSetMalformedProof`, and a crafted-blob `HolderSetRootMismatch`, all
 //! reachable before any bb call because `bind_holder_set` runs after the
 //! per-sub-proof bb loop and these fire on EMPTY `sub_proofs`). The full
-//! prove→verify→tamper round-trips are `#[ignore]` + toolchain-gated (skip cleanly
-//! when nargo/bb are absent), mirroring `holder_pok_binding.rs` /
+//! prove→verify→tamper round-trips are `#[ignore]` + LIVE (they fail loud when
+//! nargo/bb are absent, unless the lane declares itself toolchain-free), mirroring
+//! `holder_pok_binding.rs` /
 //! `family_members_pzet.rs`.
 
 use oxrdf::{Literal, NamedNode, NamedOrBlankNode, Term, Triple};
@@ -203,16 +204,7 @@ fn attest_bearer(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestat
     }
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 /// A minimal `Challenge`-bound manifest carrying a single `HolderSetProof` and NO
 /// `sub_proofs` (so the bb sub-proof loop is a no-op and the structural
@@ -578,8 +570,7 @@ fn manifest_with_scan_and_set(
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_in_set_verifies_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("hidden_holder_set_in_set_verifies_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -630,8 +621,7 @@ fn hidden_holder_set_in_set_verifies_end_to_end() {
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_forged_set_root_rejected_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("hidden_holder_set_forged_set_root_rejected_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -694,8 +684,7 @@ fn hidden_holder_set_forged_set_root_rejected_end_to_end() {
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping");
+    if !support::require_toolchain("hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
