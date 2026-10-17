@@ -729,6 +729,7 @@ impl<S: Store + 'static> LwsState<S> {
             .await?;
         state.access.replace(loaded);
         state.settle_hidden(hidden);
+        notify::spawn_expiry_sweeper(&state);
         Ok(state)
     }
 

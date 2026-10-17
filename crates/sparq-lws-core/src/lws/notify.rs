@@ -729,6 +729,22 @@ impl Notifier {
     ) -> Result<(), Response> {
         let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
         let iri = format!("{container}{id}");
+        // An expired subscription is listed nowhere, so its removal holds no listing's lock and
+        // keeps no conditional create waiting; a live one is in its subscriber's listing too.
+        // (Expiry only ever comes: one expired now stays expired.)
+        let own_listing = {
+            let subs = self.subs.read().expect("lock");
+            match subs.get(id) {
+                Some(s) if !s.expired(jose::now_secs()) => {
+                    Some(listing_lock(&container, s.subscriber.as_deref()))
+                }
+                _ => None,
+            }
+        };
+        let listed = match &own_listing {
+            Some(name) => super::records::Listed::AlsoIn(name),
+            None => super::records::Listed::Nowhere,
+        };
         let set_aside = {
             let (state, id) = (state.clone(), id.to_string());
             move || {
@@ -762,6 +778,7 @@ impl Notifier {
             &container,
             &iri,
             "subscription",
+            listed,
             admission,
             set_aside,
             settle,
@@ -1515,6 +1532,8 @@ async fn quarantined<S: Store + 'static>(
                 &container,
                 &iri,
                 "subscription",
+                // Listed to the owner alone, in the container's listing.
+                super::records::Listed::InContainer,
                 req.admission.clone(),
                 set_aside,
                 settle,
@@ -1585,6 +1604,26 @@ fn listing<S: Store + 'static>(
     resp
 }
 
+/// The name of the lock of `subscriber`'s own listing of the subscriptions `container` holds
+/// (see `records::Listed`): no IRI, so it is never an IRI's lock, and one per subscriber
+/// (anonymous subscriptions share theirs, as they share their listing).
+fn listing_lock(container: &str, subscriber: Option<&str>) -> String {
+    use sha2::{Digest, Sha256};
+    let mut digest = Sha256::new();
+    digest.update(container.as_bytes());
+    digest.update([0xff]);
+    if let Some(s) = subscriber {
+        digest.update([1]);
+        digest.update(s.as_bytes());
+    }
+    let hex: String = digest
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("subscriber-listing:{hex}")
+}
+
 /// Remove the requester's own expired subscriptions, as a new one is requested: at most
 /// [`EXPIRED_REMOVED_PER_SUBSCRIBE`], all of them `subscriber`'s own, read through the
 /// subscriber index. This is the only purging the request waits for, so the work it does here
@@ -1614,14 +1653,39 @@ async fn purge_own_expired<S: Store + 'static>(
 /// stopped, and by the next start, which removes every expired subscription it loads.
 fn spawn_purge_expired<S: Store + 'static>(state: &LwsState<S>) {
     let state = state.clone();
-    tokio::spawn(async move { purge_expired(&state, None).await });
+    tokio::spawn(async move { purge_expired(&state, None, EXPIRED_REMOVED_PER_SUBSCRIBE).await });
 }
 
-/// Remove a few expired subscriptions ([`EXPIRED_REMOVED_PER_SUBSCRIBE`]), anyone's: never while
-/// a request holds the listing alone, since a removal waits for it.
+/// How long the expiry sweeper ([`spawn_expiry_sweeper`]) waits between sweeps.
+const EXPIRY_SWEEP_EVERY: Duration = Duration::from_secs(10);
+
+/// How many expired subscriptions one sweep of the expiry sweeper removes at most.
+const EXPIRED_REMOVED_PER_SWEEP: usize = 4 * EXPIRED_REMOVED_PER_SUBSCRIBE;
+
+/// Sweep expired subscriptions every [`EXPIRY_SWEEP_EVERY`], at most
+/// [`EXPIRED_REMOVED_PER_SWEEP`] at a time ([`purge_expired`]), on a task of its own for as
+/// long as the state lives: whatever requests come, and whether any is admitted or refused, an
+/// expired subscription holds its place in the totals for a bounded time. The task holds the
+/// state only while it sweeps.
+pub(crate) fn spawn_expiry_sweeper<S: Store + 'static>(state: &LwsState<S>) {
+    let weak = state.downgrade();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(EXPIRY_SWEEP_EVERY).await;
+            let Some(state) = weak.upgrade() else {
+                return;
+            };
+            purge_expired(&state, None, EXPIRED_REMOVED_PER_SWEEP).await;
+        }
+    });
+}
+
+/// Remove at most `most` expired subscriptions, anyone's. An expired subscription is listed
+/// nowhere, so its removal holds no listing's lock (see [`Notifier::remove`]).
 async fn purge_expired<S: Store + 'static>(
     state: &LwsState<S>,
     admission: Option<crate::overload::AdmissionSlot>,
+    most: usize,
 ) {
     let now = jose::now_secs();
     // Taken in turn, from after the last one tried round to it: one that cannot be removed is
@@ -1635,7 +1699,7 @@ async fn purge_expired<S: Store + 'static>(
             .chain(subs.range::<String, _>(..=&*cursor))
             .map(|(_, s)| s)
             .filter(|s| s.expired(now))
-            .take(EXPIRED_REMOVED_PER_SUBSCRIBE)
+            .take(most)
             .map(|s| s.id.clone())
             .collect();
         drop(cursor);
@@ -1828,8 +1892,9 @@ async fn subscribe<S: Store + 'static>(
     // Only the requester's own expired subscriptions are removed here, at most
     // EXPIRED_REMOVED_PER_SUBSCRIBE of them: the work this request waits for is its own
     // records'. Everyone else's are swept by the task a create that goes through starts at the
-    // end (see [`spawn_purge_expired`]), so no request waits on a sweep of records that are not
-    // its own, and no sweep waits on the listing a request is holding.
+    // end (see [`spawn_purge_expired`]) and by the expiry sweeper ([`spawn_expiry_sweeper`]),
+    // whatever is admitted, so no request waits on a sweep of records that are not its own, and
+    // no sweep takes a listing's lock.
     if let Some(refused) = super::resources::unavailable(state, req) {
         return refused;
     }
@@ -1839,9 +1904,16 @@ async fn subscribe<S: Store + 'static>(
     // lock released): a topic naming the subscriptions container itself, or its linkset, would
     // otherwise wait for the lock this holds.
     let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
-    let held = match super::records::service_preconditions(state, req, &container, |get| {
-        listing(state, get, agent, lister)
-    })
+    // The subscriber's own listing: what a subscriber that does not list them all compares
+    // against, and what every change to its subscriptions holds (see `records::Listed`).
+    let own_listing = listing_lock(&container, agent.subject.as_deref());
+    let held = match super::records::service_preconditions(
+        state,
+        req,
+        &container,
+        (!lister).then_some(own_listing.as_str()),
+        |get| listing(state, get, agent, lister),
+    )
     .await
     {
         Ok(held) => held,
@@ -1922,6 +1994,7 @@ async fn subscribe<S: Store + 'static>(
         &iri,
         Bytes::from(stored),
         req.admission.clone(),
+        super::records::Listed::AlsoIn(&own_listing),
         held,
         author,
         register,
@@ -2207,13 +2280,13 @@ mod tests {
         store
             .fail_delete
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        purge_expired(&state, None).await;
+        purge_expired(&state, None, EXPIRED_REMOVED_PER_SUBSCRIBE).await;
         store
             .fail_delete
             .store(false, std::sync::atomic::Ordering::SeqCst);
         assert_eq!(state.notify.subs.read().unwrap().len(), n);
         // The next purge starts with the ones after them.
-        purge_expired(&state, None).await;
+        purge_expired(&state, None, EXPIRED_REMOVED_PER_SUBSCRIBE).await;
         let left = state.notify.subs.read().unwrap();
         for id in &ids[EXPIRED_REMOVED_PER_SUBSCRIBE..] {
             assert!(!left.contains_key(id), "{id} never got its turn");
@@ -4347,6 +4420,210 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert_eq!(standing(&theirs), 0, "the sweep never ran");
+    }
+
+    /// A subscriber's conditional create holds its own listing alone, not the container's: a
+    /// removal of another subscriber's subscription stalled in the store, or a sweep of expired
+    /// subscriptions stalled the same way, neither delays it nor makes it `503`. A removal of
+    /// one of its own subscriptions, which changes its own listing, still keeps it waiting.
+    #[tokio::test(start_paused = true)]
+    async fn a_conditional_create_waits_only_on_its_own_listing() {
+        use test_store::{agent, closed_state, data, grant_read};
+        let (state, store) = closed_state(100).await;
+        let topic = data(&state, "doc").await;
+        let (alice, bob) = (
+            agent("https://alice.example/#me"),
+            agent("https://bob.example/#me"),
+        );
+        for who in [&alice, &bob] {
+            grant_read(&state, who.subject.as_deref().unwrap(), &[&topic]).await;
+        }
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [topic],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = |who: &Agent, headers: Vec<(&'static str, String)>| {
+            let (state, body, who) = (state.clone(), body.clone(), who.clone());
+            async move {
+                let mut h = vec![("content-type", LWS_JSON.to_string())];
+                h.extend(headers);
+                let h: Vec<(&str, &str)> = h.iter().map(|(k, v)| (*k, v.as_str())).collect();
+                let req = test_store::request(Method::POST, SUBSCRIPTIONS_PATH, &h, &body);
+                let r = handle(&state, &req, &who).await;
+                (
+                    r.status(),
+                    r.headers()
+                        .get(header::LOCATION)
+                        .map(|l| l.to_str().unwrap().to_string()),
+                )
+            }
+        };
+        let tag = |who: &Agent| {
+            let (state, who) = (state.clone(), who.clone());
+            async move {
+                let req = test_store::request(Method::GET, SUBSCRIPTIONS_PATH, &[], "");
+                let r = test_store::route_as(&state, req, &who).await;
+                r.headers()["etag"].to_str().unwrap().to_string()
+            }
+        };
+        let gated = |iri: &str| {
+            let gate = Arc::new(tokio::sync::Semaphore::new(0));
+            *store.hold_next_delete_of.lock().unwrap() = Some((iri.to_string(), gate.clone()));
+            gate
+        };
+        let reached = || async {
+            for _ in 0..1000 {
+                if store.hold_next_delete_of.lock().unwrap().is_none() {
+                    return;
+                }
+                tokio::task::yield_now().await;
+            }
+            panic!("the removal never reached the store");
+        };
+        let (status, mine) = post(&alice, vec![]).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let (status, theirs) = post(&bob, vec![]).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let (status, expired) = post(&bob, vec![]).await;
+        assert_eq!(status, StatusCode::CREATED);
+        let (mine, theirs, expired) = (mine.unwrap(), theirs.unwrap(), expired.unwrap());
+
+        // Bob's removal of his own subscription stalls in the store, holding his listing.
+        let gate = gated(&theirs);
+        let removal = {
+            let (state, bob) = (state.clone(), bob.clone());
+            let path = theirs
+                .strip_prefix(&state.cfg.base_url)
+                .unwrap()
+                .to_string();
+            tokio::spawn(async move {
+                let req = test_store::request(Method::DELETE, &path, &[], "");
+                handle(&state, &req, &bob).await.status()
+            })
+        };
+        reached().await;
+        let started = tokio::time::Instant::now();
+        let (status, _) = post(&alice, vec![("if-match", tag(&alice).await)]).await;
+        assert_eq!(status, StatusCode::CREATED, "held up by another's removal");
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "waited on it"
+        );
+        gate.add_permits(1);
+        assert_eq!(removal.await.unwrap(), StatusCode::NO_CONTENT);
+
+        // A sweep of Bob's expired subscription stalls in the store.
+        let id = expired.rsplit('/').next().unwrap().to_string();
+        state
+            .notify
+            .subs
+            .write()
+            .unwrap()
+            .get_mut(&id)
+            .unwrap()
+            .expires_at = Some(1);
+        let gate = gated(&expired);
+        let sweep = {
+            let state = state.clone();
+            tokio::spawn(
+                async move { purge_expired(&state, None, EXPIRED_REMOVED_PER_SWEEP).await },
+            )
+        };
+        reached().await;
+        let started = tokio::time::Instant::now();
+        let (status, _) = post(&alice, vec![("if-match", tag(&alice).await)]).await;
+        assert_eq!(status, StatusCode::CREATED, "held up by a sweep");
+        assert!(
+            started.elapsed() < Duration::from_millis(100),
+            "waited on it"
+        );
+        gate.add_permits(1);
+        sweep.await.unwrap();
+        assert!(!state.notify.subs.read().unwrap().contains_key(&id));
+
+        // Alice's own removal stalled the same way keeps her conditional create waiting: it
+        // changes the listing she compares against.
+        let gate = gated(&mine);
+        let removal = {
+            let (state, alice) = (state.clone(), alice.clone());
+            let path = mine.strip_prefix(&state.cfg.base_url).unwrap().to_string();
+            tokio::spawn(async move {
+                let req = test_store::request(Method::DELETE, &path, &[], "");
+                handle(&state, &req, &alice).await.status()
+            })
+        };
+        reached().await;
+        let etag = tag(&alice).await;
+        let (status, _) = post(&alice, vec![("if-match", etag)]).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        gate.add_permits(1);
+        assert_eq!(removal.await.unwrap(), StatusCode::NO_CONTENT);
+    }
+
+    /// Expired subscriptions go whatever requests come: with the totals full of them and every
+    /// create refused, the expiry sweeper still removes them, and their places come back.
+    #[tokio::test(start_paused = true)]
+    async fn expired_subscriptions_are_swept_without_any_create() {
+        let (state, _store) = test_store::state(100).await;
+        {
+            let mut subs = state.notify.subs.write().unwrap();
+            for i in 0..MAX_SUBSCRIPTIONS {
+                let id = format!("x{i}");
+                subs.insert(
+                    id.clone(),
+                    Subscription {
+                        id,
+                        subscriber: Some(format!("https://r{i}.example/#me")),
+                        client: None,
+                        topics: vec![state.cfg.storage()],
+                        inbox: "https://inbox.example/".into(),
+                        expires: None,
+                        expires_at: Some(1),
+                        failures: 0,
+                    },
+                );
+            }
+        }
+        let body = json!({
+            "type": WEBHOOK,
+            "topic": [state.cfg.storage()],
+            "inbox": "https://inbox.example/",
+        })
+        .to_string();
+        let post = || async {
+            let req = test_store::request(
+                Method::POST,
+                SUBSCRIPTIONS_PATH,
+                &[("content-type", LWS_JSON)],
+                &body,
+            );
+            handle(&state, &req, &test_store::agent("https://new.example/#me"))
+                .await
+                .status()
+        };
+        // The totals are full of expired subscriptions, and a create is refused.
+        assert_eq!(post().await, StatusCode::INSUFFICIENT_STORAGE);
+        let sweep = || async {
+            tokio::time::sleep(EXPIRY_SWEEP_EVERY).await;
+            for _ in 0..1000 {
+                tokio::task::yield_now().await;
+            }
+        };
+        // No create goes through, yet a sweep comes, and removes a bounded number.
+        sweep().await;
+        assert_eq!(
+            state.notify.subs.read().unwrap().len(),
+            MAX_SUBSCRIPTIONS - EXPIRED_REMOVED_PER_SWEEP,
+            "one sweep is bounded"
+        );
+        // Further sweeps take the rest, and the places come back.
+        for _ in 0..MAX_SUBSCRIPTIONS.div_ceil(EXPIRED_REMOVED_PER_SWEEP) {
+            sweep().await;
+        }
+        assert!(state.notify.subs.read().unwrap().is_empty(), "never swept");
+        assert_eq!(post().await, StatusCode::CREATED);
     }
 
     /// Review findings: a topic's lock was waited for without bound, so a write stalled on a

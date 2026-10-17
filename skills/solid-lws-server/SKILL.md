@@ -321,9 +321,15 @@ before one was lowered, or written to the store directly) are all loaded and non
 the start logs a line naming the container and what is past which bound, and no new one is
 admitted to a bound until it is under it. A subscription create removes up to 16 expired
 subscriptions **of its own subscriber's** before it is counted, so the purging it waits for is
-its own records'. Everyone else's are swept on a task of its own, started by a create that goes
-through once its locks are released; what that does not reach the next create's sweep takes,
-from where the last one stopped, and a start removes every expired subscription it loads. An access document nested too deeply to store and read back gets 400. A
+its own records'. Everyone else's are swept on tasks of their own: one started by a create that
+goes through once its locks are released, and a sweeper that runs every 10 seconds for as long
+as the server does, removing at most 64 at a time, whether any create is admitted or refused;
+each sweep starts from where the last one stopped, and a start removes every expired
+subscription it loads. A subscriber's conditional subscription create compares its own
+listing, and holds only that listing (and the container, shared) while it is evaluated and
+until the new subscription is registered: what it waits on is a change to its own
+subscriptions or the owner's conditional create, never another subscriber's create or removal,
+and never a sweep of expired subscriptions, which are listed nowhere. An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.

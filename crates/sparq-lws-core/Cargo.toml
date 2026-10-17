@@ -314,8 +314,9 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 # dev entry adds nothing to the graph. Same reasoning as `tokio-rustls` below.)
 # The HttpSparqClient unit tests run against an in-process mock SPARQL endpoint (an axum server on a
 # tokio listener) — no live SPARQ. `net` for the listener, `rt-multi-thread` so the client + server
-# run on the same multi-threaded runtime, `time` for the timeout test.
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "time", "io-util"] }
+# run on the same multi-threaded runtime, `time` for the timeout test. `test-util` lets a test
+# run on a paused clock (the expiry sweeper's period); it adds no crate.
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "time", "io-util", "test-util"] }
 http-body-util = "0.1"
 # The (default-`#[ignore]`d) live TLS handshake test drives a rustls client against the axum-server
 # HTTPS listener. tokio-rustls is the canonical rustls+tokio adapter and is ALREADY in the resolved
