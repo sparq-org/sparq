@@ -3657,3 +3657,42 @@ fn merges_at_an_individual_of_nodes_across_the_tree_are_decided() {
         :a a owl:NamedIndividual , :C0 ."#;
     assert_eq!(verdict(body), Consistency::Consistent);
 }
+
+/// A fuzz ontology where HermiT reports `C2` unsatisfiable, wrongly: `C2` has the model below
+/// (domain `{a, x, i0}`), which satisfies every axiom, and HermiT itself answers consistent
+/// once the model is added as assertions with `x : C2`.
+///
+/// `C0 = {a, x}`, `C1 = {a}`, `C2 = {x}`, `r0 = {(a,x), (a,i0), (x,x), (x,i0), (i0,x),
+/// (i0,a)}`, `r1 = {(i0,x)}`, `r2 = ∅`. For instance `i0 : ≤1 r0⁻.(C1 ⊔ ¬C2)` holds since
+/// of its `r0`-predecessors `a` and `x` only `a` counts, and `C2 ⊑ ≥3 r0⁻` holds at `x`
+/// with predecessors `a`, `x` and `i0`.
+#[test]
+fn a_class_hermit_misreports_unsatisfiable_has_a_model() {
+    let axioms = r#":C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :r2 a owl:ObjectProperty . :i0 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:someValuesFrom :C1 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C1 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :C0 [ owl:complementOf :C2 ] ) ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:allValuesFrom [ owl:complementOf :C1 ] ] .
+        :C2 owl:disjointWith :C1 .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:hasValue :i0 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C2 ] :C2 ) ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( :C1 [ owl:complementOf :C0 ] ) ] .
+        :i0 a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:unionOf ( :C1 [ owl:complementOf :C2 ] ) ] ] .
+        :r2 a owl:SymmetricProperty .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:minCardinality "3"^^xsd:nonNegativeInteger ] .
+        :r2 a owl:FunctionalProperty .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:hasValue :i0 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:hasValue :i0 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:hasValue :i0 ] .
+        :a a owl:NamedIndividual , :C0 ."#;
+    let model = ":x a owl:NamedIndividual , :C0 , :C2 , [ owl:complementOf :C1 ] . :a a :C1 , [ owl:complementOf :C2 ] . :i0 a [ owl:complementOf :C0 ] , [ owl:complementOf :C1 ] , [ owl:complementOf :C2 ] . :a :r0 :x , :i0 . :x :r0 :x , :i0 . :i0 :r0 :x , :a . :i0 :r1 :x . :a owl:differentFrom :x , :i0 . :x owl:differentFrom :i0 .";
+    let (d, r) = run(axioms);
+    assert_eq!(r.consistency, Consistency::Consistent);
+    let c = r.classification.expect("classified");
+    assert!(!c.unsatisfiable.contains(&ex(&d, "C2")));
+    assert_eq!(
+        verdict(&format!("{axioms} {model}")),
+        Consistency::Consistent
+    );
+}

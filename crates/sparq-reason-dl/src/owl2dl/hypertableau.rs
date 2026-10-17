@@ -602,20 +602,22 @@ impl<'c> Tableau<'c> {
     }
 
     /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
-    /// built, `Ok(false)` when every branch closed on a clash.
-    /// Runs to a verdict. With nominals and at-most restrictions, a first attempt on a
-    /// third of the budget merges the neighbours an at-most restriction at a root counts as
-    /// usual; when it runs out or cannot confirm its model, the run starts over with the
-    /// NI-rule applied to those merges too (`eager_ni`, as HermiT does), on the rest of the
-    /// budget. The eager rule settles graphs whose merges at a root would otherwise keep
-    /// joining parts of the tree, but slows some that the plain attempt decides.
+    /// built, `Ok(false)` when every branch closed on a clash. With nominals and at-most
+    /// restrictions, a first attempt on a third of the budget merges the neighbours an
+    /// at-most restriction at a root counts as usual; when it runs out or cannot confirm its
+    /// model, the run starts over with the NI-rule applied to those merges too (`eager_ni`,
+    /// as HermiT does), on the rest of the budget. The eager rule settles graphs whose
+    /// merges at a root would otherwise keep joining parts of the tree, but slows some that
+    /// the plain attempt decides.
     pub(crate) fn run(&mut self) -> Result<bool, Stop> {
-        if self.index.ni.is_empty() || self.eager_ni {
+        let (full, done) = (self.budget.max_steps, self.work());
+        // A budget already spent (by loading the ABox, say) is left to the run to report;
+        // the plain attempt's limit stays within the budget.
+        if self.index.ni.is_empty() || self.eager_ni || done >= full {
             return self.run_inner();
         }
         let start = self.clone();
-        let full = self.budget.max_steps;
-        self.budget.max_steps = start.work() + full.saturating_sub(start.work()) / 3;
+        self.budget.max_steps = done + (full - done) / 3;
         let r = self.run_inner();
         self.budget.max_steps = full;
         if !matches!(r, Err(Stop::Exhausted | Stop::Unconfirmed)) {
