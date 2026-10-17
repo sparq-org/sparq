@@ -799,8 +799,9 @@ impl<'c> Tableau<'c> {
         let mut maybe = false;
         for ((vx, ux), (vy, uy)) in values_x.iter().zip(values_y) {
             let (ux, uy) = (*ux, *uy);
-            // Comparing the two value lists through a hash map of one of them.
-            if self.charge(vx.len() + vy.len()) {
+            // Comparing the two value lists through a hash map of one of them, and one unit
+            // for the property itself (its lists may be empty).
+            if self.charge(1 + vx.len() + vy.len()) {
                 return Shared::Maybe;
             }
             let by_value: FxHashMap<&Value, &Dep> = vx.iter().map(|(v, da)| (v, da)).collect();

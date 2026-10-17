@@ -686,6 +686,56 @@ mod tests {
         }
     }
 
+    /// Comparing values not fixed to a literal is charged: with every member's values unfixed,
+    /// a second key property costs at least one unit per pair over the first alone, and
+    /// every budget running out inside the comparisons answers `ResourceBudget`.
+    #[test]
+    fn unfixed_key_value_comparisons_are_inside_the_budget() {
+        let n = 24;
+        let ontology = |key: &str| {
+            let mut body = format!(
+                r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+                @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+                :P a owl:Class . :d a owl:DatatypeProperty . :e a owl:DatatypeProperty .
+                :P owl:hasKey ( {key} ) .
+                :Q a owl:Class ; owl:equivalentClass [ a owl:Class ; owl:intersectionOf (
+                    [ a owl:Restriction ; owl:onProperty :d ; owl:someValuesFrom xsd:integer ]
+                    [ a owl:Restriction ; owl:onProperty :e ; owl:someValuesFrom xsd:integer ]
+                ) ] .
+                "#
+            );
+            for i in 0..n {
+                body.push_str(&format!(":i{i} a owl:NamedIndividual , :P , :Q .\n"));
+            }
+            let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            (d, o)
+        };
+        let work = |(d, o): &(_, _)| {
+            let full = Reasoner::new(d, o, Budget::default()).unwrap();
+            let mut t = Tableau::new(&full.clauses, &full.index, full.budget);
+            full.load_abox(&mut t);
+            let _ = t.run();
+            t.work()
+        };
+        let (both, first) = (ontology(":d :e"), ontology(":d"));
+        let (needed, one) = (work(&both), work(&first));
+        // The second property's comparison, once per pair (its value lists are empty).
+        assert!(needed - one >= (n * (n - 1) / 2) as u64, "{needed} - {one}");
+        let (d, o) = &both;
+        for max_steps in one..needed {
+            let budget = Budget {
+                max_steps,
+                ..Budget::default()
+            };
+            assert_eq!(
+                check(d, o, budget).consistency,
+                Consistency::Unknown(UnknownReason::ResourceBudget),
+                "max_steps {max_steps}"
+            );
+        }
+    }
+
     /// A key matches on any shared value: two individuals sharing only their second value of
     /// the first key property, or only one of several values of a second key property, are
     /// identified (the value index holds every value, not just the first).
