@@ -357,10 +357,10 @@ impl Subs {
         Some(gone)
     }
 
-    /// Drop `id` from `subscriber`'s ids, and the subscriber itself once it holds none. This
-    /// is housekeeping, not correctness: every read of the index goes on to look each id up by
-    /// id ([`Subs::mine`]), so an id left behind would be passed over rather than counted or
-    /// listed.
+    /// Drop `id` from `subscriber`'s ids, and the subscriber itself once it holds none. Every
+    /// change to `by_id` goes through [`Subs::insert`] or [`Subs::remove`], which keep the index
+    /// in step, so a subscriber's entry holds exactly its subscriptions ([`Subs::count_of`] is
+    /// its size).
     fn unindex(&mut self, id: &str, subscriber: &Option<String>) {
         if let Some(ids) = self.by_subscriber.get_mut(subscriber) {
             ids.remove(id);
@@ -430,8 +430,12 @@ impl Subs {
     }
 
     /// How many subscriptions `subscriber` holds, expired ones included.
+    /// How many subscriptions `subscriber` holds: the size of its index entry, so no record
+    /// (its own or anyone else's) is read to count them.
     fn count_of(&self, subscriber: Option<&str>) -> usize {
-        self.mine(subscriber).count()
+        self.by_subscriber
+            .get(&subscriber.map(str::to_string))
+            .map_or(0, |ids| ids.len())
     }
 
     /// The ids of `subscriber`'s own expired subscriptions, at most `most` of them, read
@@ -4178,6 +4182,33 @@ mod tests {
 
     /// The subscription pool is bounded in its own right: once it is full a subscription create
     /// is refused `507`, and content writes are admitted all the same.
+    #[tokio::test]
+    async fn content_named_like_the_pool_is_held_to_the_content_ceilings() {
+        // Few content entries, a roomy pool: content whose name merely holds the pool's segments
+        // fills the content ceiling, not the pool.
+        let limits = crate::store::InMemoryStoreLimits::new(16 << 20, 8).with_pool(512, 16 << 20);
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let state = LwsState::new(test_store::FlakyStore::with_limits(limits), cfg)
+            .await
+            .unwrap();
+        let root = state.cfg.storage();
+        let mut refused = false;
+        for i in 0..16 {
+            let iri = format!("{root}alice/.lws/subscriptions/x{i}");
+            if state
+                .store
+                .write(&iri, Bytes::from_static(b"x"), "text/plain")
+                .await
+                .is_err()
+            {
+                refused = true;
+                break;
+            }
+        }
+        assert!(refused, "lookalike content escaped the content ceiling");
+    }
+
     #[tokio::test]
     async fn a_full_subscription_pool_refuses_only_subscriptions() {
         // Room for the service container and two subscription records.

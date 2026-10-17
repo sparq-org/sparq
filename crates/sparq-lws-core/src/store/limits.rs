@@ -34,10 +34,14 @@ pub const DEFAULT_IN_MEMORY_MAX_POOL_BYTES: usize =
 /// or the service container that holds them.
 ///
 /// These are bounded by the notification service itself, so the store bounds them apart from
-/// stored content rather than letting them take its room. `/.lws/` is reserved, so nothing a
-/// client may name as content falls in here.
+/// stored content rather than letting them take its room. Only an IRI whose path, right after
+/// its origin, begins with the service's own path is in it: `/.lws/` directly below the storage
+/// root is reserved, so nothing a client may name as content falls in here (the same segment
+/// anywhere deeper is an ordinary name, and stays content).
 pub fn in_service_pool(iri: &str) -> bool {
-    iri.contains(SERVICE_POOL_PATH)
+    iri.split_once("://")
+        .and_then(|(_, rest)| rest.find('/').map(|at| &rest[at..]))
+        .is_some_and(|path| path.starts_with(SERVICE_POOL_PATH))
 }
 
 /// The mark [`crate::store::CompositeStore`] puts at the front of the blob key it mints for a
@@ -130,6 +134,15 @@ mod tests {
         let root = "http://localhost:3000/";
         assert!(in_service_pool(&format!("{}.lws/subscriptions/", root)));
         assert!(in_service_pool(&format!("{}.lws/subscriptions/abc", root)));
+        // Content that only names the same segments is content.
+        for content in [
+            format!("{}alice/.lws/subscriptions/x", root),
+            format!("{}alice/x/.lws/subscriptions/", root),
+            format!("{}%2Elws/subscriptions/x", root),
+            format!("{}.lws/subscriptionsx", root),
+        ] {
+            assert!(!in_service_pool(&content), "{content}");
+        }
         assert!(!in_service_pool(&format!("{}.lws/grants/abc", root)));
         assert!(!in_service_pool(&format!("{}doc.txt", root)));
         assert!(is_pooled_blob_key(&format!(

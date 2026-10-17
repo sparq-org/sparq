@@ -3803,8 +3803,10 @@ async fn subtree<S: Store + 'static>(
             out.push((node, origin));
             continue;
         }
+        // Decided as every check without the lock is: on what the container was before a
+        // change in flight to it began (see [`reads_stably`]).
         if let Some(agent) = reader {
-            if !state.allowed(Action::Read, &node, agent).await {
+            if !reads_stably(state, &node, agent).await {
                 return Err(ServerError::Forbidden);
             }
         }

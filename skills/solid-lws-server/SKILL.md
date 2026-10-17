@@ -547,8 +547,12 @@ What the server exposes, all discoverable from the storage description
 - Writes and deletes are **whole or not at all**: a PUT that changes metadata, a linkset PATCH or PUT and a `DELETE`
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
-  `Last-Modified`) are as they were. A delete too large to put back is refused with `409` before
-  anything is removed. When putting back fails too, it is tried a few more times with the
+  `Last-Modified`) are as they were. A recursive delete too large to put back is refused with
+  `409` before anything is removed; one resource's delete is never refused for its size by that
+  bound. Residual: what a delete would put back is copied into the store first, so a store with
+  too little room for that copy refuses the delete (`507`), and whether it does follows the size
+  of what is stored, which the deleting writer may not be able to read; a recursive delete's
+  `409` follows the subtree's size the same way. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
