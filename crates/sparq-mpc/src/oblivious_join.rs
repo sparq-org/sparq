@@ -234,11 +234,16 @@ pub enum MatchBit {
 /// any allocation or draw, so an over-cap `B` (including `usize::MAX`) is a
 /// controlled refusal rather than an allocation the stage cannot satisfy.
 ///
-/// The value is set to cover every in-tree producer of candidates for this stage:
-/// it matches [`crate::hidden_path::MAX_CHAIN_TUPLES`], the largest candidate count
-/// the hidden path operator can present, and sits well above
-/// [`crate::hidden_distinct::MAX_DISTINCT_ROWS`]. A protocol guard, not a tuning
-/// knob: `B` beyond it is not a workload this stage is built to run.
+/// The value is set to cover the in-tree producers of candidates for this stage: it
+/// matches [`crate::hidden_path::MAX_CHAIN_TUPLES`], the chain-tuple ceiling of the
+/// hidden path operator, and sits well above
+/// [`crate::hidden_distinct::MAX_DISTINCT_ROWS`]. It is NOT derived from those
+/// ceilings, though, and must not be read as "every producer is guaranteed to fit":
+/// a reflexive form such as `{0,k}` presents the chain tuples PLUS up to `|V|`
+/// identity pairs, so a producer's candidate count can exceed its own tuple
+/// ceiling. What is checked is the ACTUAL candidate count, here and in
+/// `check_output_bound`, never a producer's assumed maximum. A protocol guard,
+/// not a tuning knob: `B` beyond it is not a workload this stage is built to run.
 pub const MAX_OUTPUT_BOUND: usize = 1 << 18; // 262_144
 
 /// The cap half of the fail-closed bound contract, callable before a candidate set
@@ -257,10 +262,20 @@ pub(crate) fn check_output_bound_cap(bound: usize) -> Result<(), MpcError> {
 }
 
 /// The whole fail-closed bound contract: `B` within [`MAX_OUTPUT_BOUND`] (checked
-/// first, since it is the one that would otherwise reach an allocation) AND `B`
-/// covering every candidate so no match is ever silently truncated.
-fn check_output_bound(bound: usize, candidates: usize) -> Result<(), MpcError> {
+/// first, since it is the one that would otherwise reach an allocation), the
+/// candidate COUNT within the same cap, and `B` covering every candidate so no
+/// match is ever silently truncated.
+pub(crate) fn check_output_bound(bound: usize, candidates: usize) -> Result<(), MpcError> {
     check_output_bound_cap(bound)?;
+    if candidates > MAX_OUTPUT_BOUND {
+        // A count above the cap can never be served: it would need a `B` at least
+        // that large, which the cap refuses. Saying so names the cap rather than
+        // leaving the caller with a `B < candidates` message it cannot act on.
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: candidate count {} exceeds the MAX_OUTPUT_BOUND cap of              {} — refusing (every candidate becomes one materialised slot, so no legal B              could cover this many)",
+            candidates, MAX_OUTPUT_BOUND
+        )));
+    }
     if bound < candidates {
         return Err(MpcError::Protocol(format!(
             "oblivious_set_output: padded bound B={} < candidate count {} — would truncate \
@@ -269,6 +284,43 @@ fn check_output_bound(bound: usize, candidates: usize) -> Result<(), MpcError> {
         )));
     }
     Ok(())
+}
+
+/// The number of candidates an ALL-PAIRS builder would materialise, computed with
+/// CHECKED arithmetic and capped — callable before the candidate set exists.
+///
+/// `left · right` is a product of two caller-supplied lengths, so it can overflow
+/// `usize` (and an overflowed `Vec::with_capacity` is an allocation nobody asked
+/// for) and it can be enormous while still fitting. Both are refused here, so a
+/// builder can preflight the cardinality it is ABOUT to enumerate before it
+/// allocates a slot or draws a sharing. The cap is [`MAX_OUTPUT_BOUND`], the same
+/// ceiling the stage's own `B` has: each candidate becomes one materialised slot.
+pub(crate) fn checked_candidate_pairs(left: usize, right: usize) -> Result<usize, MpcError> {
+    let count = left.checked_mul(right).ok_or_else(|| {
+        MpcError::Protocol(format!(
+            "oblivious output stage: candidate count {} x {} overflows usize — refusing before              any allocation or draw (each candidate pair becomes one materialised slot)",
+            left, right
+        ))
+    })?;
+    if count > MAX_OUTPUT_BOUND {
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: candidate count {} (= {} x {}) exceeds the              MAX_OUTPUT_BOUND cap of {} — refusing before any allocation or draw (each              candidate is materialised, selected, shuffled and opened)",
+            count, left, right, MAX_OUTPUT_BOUND
+        )));
+    }
+    Ok(count)
+}
+
+/// [`checked_candidate_pairs`] plus the caller's own bound contract: the whole
+/// preflight an all-pairs builder needs before it enumerates anything.
+pub(crate) fn check_candidate_pairs_within_bound(
+    bound: usize,
+    left: usize,
+    right: usize,
+) -> Result<usize, MpcError> {
+    let count = checked_candidate_pairs(left, right)?;
+    check_output_bound(bound, count)?;
+    Ok(count)
 }
 
 /// MODELLED communication / round cost of one [`oblivious_set_output`] over `bound`
@@ -1252,6 +1304,10 @@ pub fn oblivious_set_output_hidden_keys(
     right_keys: &[Fp],
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    // Preflight the bound and the all-pairs cardinality BEFORE a dealer exists —
+    // minting one is cheap but it is still keystream state created for a run that
+    // is about to be refused.
+    check_candidate_pairs_within_bound(bound, left_keys.len(), right_keys.len())?;
     // ONE fresh dealer for this run (production: a fresh OS-seeded CSPRNG, sq-1vt)
     // covering BOTH the per-pair equality bits and the output stage.
     oblivious_set_output_hidden_keys_through(
@@ -1284,13 +1340,16 @@ pub(crate) fn oblivious_set_output_hidden_keys_through(
     right_keys: &[Fp],
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    // Up front, before anything is drawn (the equality chain below draws before
-    // the output stage's own checks would run).
-    check_output_bound_cap(bound)?;
+    // Up front, before anything is drawn OR allocated: `B` within the cap, the
+    // all-pairs cardinality computed with checked arithmetic, and `B` covering it.
+    // The equality chain below draws once per pair and the candidate vector is
+    // sized from the product, so neither may be reached on an over-cap or
+    // overflowing input.
+    let pairs = check_candidate_pairs_within_bound(bound, left_keys.len(), right_keys.len())?;
     require_source_matches(source, backend)?;
     // All-pairs candidates: each (i, j) becomes one slot whose match bit is the
     // SECRET-SHARED equality of the two private keys — never opened.
-    let mut candidates: Vec<Candidate> = Vec::with_capacity(left_keys.len() * right_keys.len());
+    let mut candidates: Vec<Candidate> = Vec::with_capacity(pairs);
     for (i, &lk) in left_keys.iter().enumerate() {
         for (j, &rk) in right_keys.iter().enumerate() {
             let match_bit = crate::compare::secure_equal_to_bit_through(source, lk, rk)?;
@@ -1550,6 +1609,72 @@ mod tests {
         let cands = public_candidates(&[(true, vec![lit("a")]), (true, vec![lit("b")])]);
         let err = oblivious_set_output(&backend, &cands, 1, 1).unwrap_err();
         assert!(matches!(err, MpcError::Protocol(m) if m.contains("truncate")));
+    }
+
+    /// The all-pairs hidden-keys builder refuses before ANY draw on a NON-EMPTY key
+    /// pair: an over-cap `B`, an over-cap `|L|·|R|`, and a product that overflows
+    /// `usize`. One equality sharing per pair would otherwise be drawn, and the
+    /// candidate vector is reserved from the product.
+    #[test]
+    fn the_hidden_keys_builder_refuses_before_any_draw() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x8F01).unwrap();
+        let left = [Fp::new(1), Fp::new(2)];
+        let right = [Fp::new(2), Fp::new(3)];
+
+        for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err = oblivious_set_output_hidden_keys_through(
+                &mut counted,
+                &backend,
+                &left,
+                &right,
+                bound,
+            )
+            .expect_err("an over-cap bound must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+                "B={}: {:?}",
+                bound,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "B={}: refused before any draw", bound);
+        }
+
+        // An over-cap all-pairs cardinality, with `B` itself inside the cap.
+        let big: Vec<Fp> = vec![Fp::new(5); 1024];
+        let also_big: Vec<Fp> = vec![Fp::new(5); 1024];
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_hidden_keys_through(
+            &mut counted,
+            &backend,
+            &big,
+            &also_big,
+            MAX_OUTPUT_BOUND,
+        )
+        .expect_err("an over-cap pair count must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+            "pair count: {:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "the pair count precedes every draw");
+
+        // And an OVERFLOWING product is a controlled refusal, not a wrapped length
+        // or an allocation nobody asked for. The lengths come from slice lengths, so
+        // the overflow case is exercised on the validator directly.
+        let err = checked_candidate_pairs(usize::MAX, 2).expect_err("must refuse on overflow");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("overflows usize")),
+            "overflow: {:?}",
+            err
+        );
+        assert!(
+            checked_candidate_pairs(512, 512).is_ok(),
+            "the cap is a cap"
+        );
     }
 
     /// A bound past [`MAX_OUTPUT_BOUND`] — including `usize::MAX`, which would

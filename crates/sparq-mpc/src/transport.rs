@@ -615,9 +615,12 @@ impl<S: Read + Write> Coordinator<S> {
             )));
         }
         // Build all candidate (d, r) sharings. d = keyL - keyR; r = fresh nonzero
-        // mask. Keys 0..scale on both sides. Pair count = scale².
-        let mut d_sharings: Vec<Vec<Share>> = Vec::with_capacity(scale * scale);
-        let mut r_sharings: Vec<Vec<Share>> = Vec::with_capacity(scale * scale);
+        // mask. Keys 0..scale on both sides. Pair count = scale², which is a product
+        // of a caller-chosen number with itself: counted with checked arithmetic and
+        // capped before either vector is reserved or a single mask is drawn.
+        let pairs = crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
+        let mut d_sharings: Vec<Vec<Share>> = Vec::with_capacity(pairs);
+        let mut r_sharings: Vec<Vec<Share>> = Vec::with_capacity(pairs);
         for lkey in 0..scale {
             for rkey in 0..scale {
                 let d = Fp::new(lkey as u64).sub(Fp::new(rkey as u64));
