@@ -46,8 +46,8 @@ use crate::error::ServerError;
 use crate::ldp::conditional;
 use crate::ldp::content::{
     classify, label_blank_nodes_by_position, named_graph_nquads, negotiate_accept_with_profile,
-    parse_to_triples, serialize_triples, serialize_triples_negotiated, stored_format,
-    validate_rdf, RdfFormat,
+    parse_to_triples, serialize_triples, serialize_triples_negotiated, stored_format, validate_rdf,
+    RdfFormat,
 };
 use crate::ldp::patch::{
     appended_ntriples, apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update,
@@ -1826,11 +1826,7 @@ pub async fn patch_handler<S: Store>(
     let meta = if existed {
         state
             .store
-            .write(
-                &target.iri,
-                Bytes::from(new_body),
-                stored_as.media_type(),
-            )
+            .write(&target.iri, Bytes::from(new_body), stored_as.media_type())
             .await?
     } else if crate::authz::is_acl_resource(&target.iri) {
         // Create-on-PATCH of an AUXILIARY `.acl` resource: it is NOT a contained child. Storing it via
@@ -1840,11 +1836,7 @@ pub async fn patch_handler<S: Store>(
         // containment edge. (Auth for `.acl` ops is Control, already enforced above.)
         state
             .store
-            .write(
-                &target.iri,
-                Bytes::from(new_body),
-                stored_as.media_type(),
-            )
+            .write(&target.iri, Bytes::from(new_body), stored_as.media_type())
             .await?
     } else {
         // Create-on-PATCH: like PUT, create intermediate containers + wire the new resource into its
@@ -1873,11 +1865,7 @@ pub async fn patch_handler<S: Store>(
             None => {
                 state
                     .store
-                    .write(
-                        &target.iri,
-                        Bytes::from(new_body),
-                        stored_as.media_type(),
-                    )
+                    .write(&target.iri, Bytes::from(new_body), stored_as.media_type())
                     .await?
             }
         }

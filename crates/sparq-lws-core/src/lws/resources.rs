@@ -6507,8 +6507,8 @@ mod tests {
     }
 
     /// Create a member of `parent` with `who` as its creator (only the creator matters here).
-    async fn create_as(
-        st: &LwsState<Mem>,
+    async fn create_as<S: Store + 'static>(
+        st: &LwsState<S>,
         who: &Agent,
         parent: &str,
         slug: &str,
@@ -6898,6 +6898,7 @@ mod tests {
     /// listing it would fail).
     #[tokio::test]
     async fn recursive_delete_lists_only_what_may_be_read() {
+        use super::super::test_store::FlakyStore;
         let store = FlakyStore::new();
         let mut cfg = super::super::LwsConfig::new(BASE);
         cfg.owner = Some("https://owner.example/#me".into());
