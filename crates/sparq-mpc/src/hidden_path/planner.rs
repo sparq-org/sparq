@@ -57,7 +57,7 @@
 //! COUNTED structurally — never a fabricated wall-clock (design §5, the
 //! counted-not-timed constraint).
 
-use super::{HiddenBoundedPath, MAX_CHAIN_TUPLES};
+use super::{HiddenBoundedPath, MAX_CHAIN_TUPLES, MAX_HOP_COUNT};
 use crate::metrics::CommCounter;
 use crate::oblivious::{ShuffleCost, WaksmanNetwork};
 use crate::partial::MpcError;
@@ -228,6 +228,17 @@ pub fn plan_hidden_bounded_path(
             req.min
         )));
     }
+    // Hop counts are capped before the projection, mirroring the operator's
+    // `check_bounded_params`: `project_bounded` below loops once per length and once
+    // per hop within each length, so its own cost grows with `max`.
+    if max > MAX_HOP_COUNT {
+        return Err(MpcError::Protocol(format!(
+            "hidden bounded path {{{},{}}} exceeds the MAX_HOP_COUNT cap of {} — refusing (the \
+             union runs one fixed-length chain family per length up to the upper bound, so the \
+             hop count is bounded before the enumeration is sized)",
+            req.min, max, MAX_HOP_COUNT
+        )));
+    }
     // (a) Statically-large unroll → reject (overflow OR over-cap), mirroring the
     // operator's `check_bounded_params` guard, computed from PUBLIC parameters.
     let (projected_tuples, secure_equalities) =
@@ -293,7 +304,14 @@ impl BoundedPathPlan {
     ///
     /// `bound` is the PUBLIC padded output bound `B`; it must be `>= 1` (the operator
     /// reveals exactly `B` slots). `parties` is the compute-party count `n`.
-    pub fn comm_counter(&self, parties: usize, bound: usize) -> CommCounter {
+    ///
+    /// `B` is capped by [`crate::oblivious_join::MAX_OUTPUT_BOUND`], refused before
+    /// any of the counting below: step (3) iterates `B` times and builds a real
+    /// [`WaksmanNetwork`] over `B` slots, so an unchecked `B` would do work (and
+    /// allocate a network) proportional to a number the caller chose. Counting the
+    /// cost of a run the stage itself would refuse is not a cost model either way.
+    pub fn comm_counter(&self, parties: usize, bound: usize) -> Result<CommCounter, MpcError> {
+        crate::oblivious_join::check_output_bound_cap(bound)?;
         let mut c = CommCounter::new(parties);
         // (1) The k×-join secure equalities — the cost center. Independent ACROSS
         // tuples (the matrix's `record_independent_equalities` batch shape).
@@ -315,9 +333,9 @@ impl BoundedPathPlan {
             c.record_mult();
             c.record_open();
         }
-        let net = WaksmanNetwork::new(bound);
+        let net = WaksmanNetwork::try_new(bound)?;
         c.record_shuffle(ShuffleCost::model(bound, net.switch_count()));
-        c
+        Ok(c)
     }
 }
 

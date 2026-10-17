@@ -430,7 +430,11 @@ fn bounded_empty_alternation_is_rejected() {
     assert!(matches!(err, MpcError::Protocol(m) if m.contains("no predicates")));
 }
 
-/// An over-large unroll (huge max) is rejected fail-closed BEFORE any crypto runs.
+/// An over-large unroll is rejected fail-closed BEFORE any crypto runs. An upper
+/// bound past [`MAX_HOP_COUNT`] is refused by the hop guard (which precedes the
+/// tuple accounting, since that accounting's own cost grows with the bound); an
+/// upper bound WITHIN the hop cap whose `Σ_ℓ (a^ℓ·|E|^ℓ)` is still too large is
+/// refused by [`MAX_CHAIN_TUPLES`].
 #[test]
 fn bounded_oversized_unroll_is_rejected() {
     let edges = predicated_edges(&[
@@ -439,9 +443,53 @@ fn bounded_oversized_unroll_is_rejected() {
         (P, "http://ex/c", "http://ex/a"),
     ]);
     let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+
+    // Upper bound past the hop cap → the hop guard.
     let form = HiddenBoundedPath::range(P, 1, 64);
     let err = eval_bounded_path_hidden(&backend, &edges, &form, 1 << 30).unwrap_err();
-    assert!(matches!(err, MpcError::Protocol(m) if m.contains("MAX_CHAIN_TUPLES")));
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
+        "expected the hop-count refusal, got {:?}",
+        err
+    );
+
+    // Upper bound AT the hop cap, so the hop guard passes; Σ_ℓ 3^ℓ over ℓ = 1..=18
+    // is far past MAX_CHAIN_TUPLES → the tuple guard.
+    let form = HiddenBoundedPath::range(P, 1, MAX_HOP_COUNT);
+    let err = eval_bounded_path_hidden(&backend, &edges, &form, 8).unwrap_err();
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_CHAIN_TUPLES")),
+        "expected the tuple-count refusal, got {:?}",
+        err
+    );
+}
+
+/// Hop counts are capped before evaluation on the bounded form too: an upper bound
+/// past [`MAX_HOP_COUNT`] — up to `usize::MAX`, where `check_bounded_params`'
+/// `Σ_ℓ` accumulation is quadratic in the bound — is refused with NO draw made.
+/// Finishing the test at all is the no-hang witness; nothing here asserts a timing.
+#[test]
+fn huge_upper_bound_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+    let edges = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ]);
+    let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+    for max in [MAX_HOP_COUNT + 1, 262_144, usize::MAX] {
+        let form = HiddenBoundedPath::range(P, 1, max);
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 8)
+            .expect_err("an upper bound past the cap must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
+            "max={}: expected the hop-count refusal, got {:?}",
+            max,
+            err
+        );
+        assert_eq!(counted.draws(), 0, "max={}: refused before any draw", max);
+    }
 }
 
 /// A bound `B` below the candidate count fails closed (never truncates a true match).
@@ -778,4 +826,93 @@ fn seeded_bounded_stage_transcript_is_pinned() {
         suffix,
         [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
     );
+}
+
+/// The bounded-form entry refuses an over-cap output bound before ANY draw, on a
+/// NON-EMPTY edge set: `build_bounded_candidates` draws per hop equality and the
+/// output stage materialises `B` slots.
+#[test]
+fn an_over_cap_output_bound_is_refused_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7D01).unwrap();
+    let edges = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ]);
+    let form = HiddenBoundedPath::range(P, 1, 2);
+    for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err =
+            eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, bound)
+                .expect_err("an over-cap bound must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
+        }
+        assert_eq!(
+            counted.draws(),
+            0,
+            "B={}: the bound must be refused before any draw",
+            bound
+        );
+    }
+    assert!(eval_bounded_path_hidden(&backend, &edges, &form, 4).is_ok());
+}
+
+/// The coverage half of the bound contract, before any draw, for the bounded form.
+///
+/// Same defect as the exactly-`k` entry: the builder enumerated every length's
+/// every tuple — `Σ_ℓ |E|^ℓ` secure equalities — and only then found that `B` was
+/// too small to hold the answer, a refusal decidable from the disclosed endpoint
+/// terms alone.
+///
+/// The projection has to be EXACT, not a sum of its arms: the reflexive diagonal,
+/// the length-1 edge pairs and the length-`>=2` product OVERLAP, and a sum would
+/// refuse bounds the operator should accept. So this pins the count for each shape
+/// and then runs a bound equal to it.
+#[test]
+fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7D07).unwrap();
+    // a->b, b->c: subjects {a,b}, objects {b,c}, nodes {a,b,c}.
+    let edges = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ]);
+
+    // {1,1}: only the edge pairs, (a,b) and (b,c) — 2.
+    // {1,2}: the 2x2 product (a,b),(a,c),(b,b),(b,c) — 4 — which already CONTAINS
+    //        both edge pairs, so a sum of the arms would say 6.
+    // {0,2}: that product plus the reflexive (a,a),(b,b),(c,c) — but (b,b) is in
+    //        BOTH, so the union is 6 and a sum would say 7.
+    for (form, expected) in [
+        (HiddenBoundedPath::range(P, 1, 1), 2usize),
+        (HiddenBoundedPath::range(P, 1, 2), 4),
+        (HiddenBoundedPath::range(P, 0, 2), 6),
+    ] {
+        let count = projected_bounded_candidate_count(&edges, &form).unwrap();
+        assert_eq!(
+            count, expected,
+            "the projection must be the union, not the sum of its arms"
+        );
+
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 1)
+            .expect_err("a bound below the candidate count must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("candidate count"), "{}", m),
+            other => panic!("expected a Protocol refusal, got {:?}", other),
+        }
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+
+        // A bound equal to the projection runs, which is what makes it exact rather
+        // than a bound that quietly refuses legal work.
+        eval_bounded_path_hidden(&backend, &edges, &form, count)
+            .expect("B = the exact candidate count must run");
+    }
 }
