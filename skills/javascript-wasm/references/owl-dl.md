@@ -120,7 +120,8 @@ kept version's terms. The raw glue class is `OwlDlSession`
 The decided fragment is SROIQ(D), including the built-in properties (`owl:topObjectProperty`,
 whose restrictions reach every individual, so an ontology using it is classified with the ABox
 and more often answers `'Unconfirmed'`; `owl:bottomObjectProperty` and `owl:bottomDataProperty`,
-which relate nothing): regular property
+which relate nothing; a property above `owl:topObjectProperty`, or a key or chain body
+using it, is `OutOfFragment`): regular property
 chains (`owl:propertyChainAxiom`) and transitivity, every class constructor
 including nominals (`oneOf`, `hasValue` on object properties; with nominals the ABox takes
 part in classification, so `A ≡ {a}` and `a ∈ B` give `A ⊑ B`), object properties with inverses and hierarchies, the role

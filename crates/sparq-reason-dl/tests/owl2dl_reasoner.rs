@@ -3201,3 +3201,23 @@ fn the_bottom_data_property_has_no_values() {
         Consistency::Consistent
     );
 }
+
+/// Reflexivity and keys on the built-in properties (answers checked with HermiT): the
+/// top property is reflexive by definition, a reflexive bottom property has no model, and
+/// a key on a bottom property identifies nothing (the last case is the control).
+#[test]
+fn reflexive_and_key_axioms_on_the_built_in_properties() {
+    let c = |body: &str| {
+        verdict(&format!(
+            "{DECL} :d a owl:DatatypeProperty . :a a :C ; :d 1 . :b a :C ; :d 1 . :a owl:differentFrom :b . {body}"
+        ))
+    };
+    assert_eq!(c(&format!("{U} a owl:ReflexiveProperty .")), Consistency::Consistent);
+    assert_eq!(c(&format!("{NONE} a owl:ReflexiveProperty .")), Consistency::Inconsistent);
+    assert_eq!(c(&format!(":C owl:hasKey ( {NONE} ) .")), Consistency::Consistent);
+    assert_eq!(
+        c(":C owl:hasKey ( owl:bottomDataProperty :d ) ."),
+        Consistency::Consistent
+    );
+    assert_eq!(c(":C owl:hasKey ( :d ) ."), Consistency::Inconsistent);
+}

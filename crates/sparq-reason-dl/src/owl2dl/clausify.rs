@@ -1113,6 +1113,11 @@ impl Builder<'_> {
                 let r = self.role(p)?;
                 self.gci(at_most(1, r.inverse(), Nnf::Top));
             }
+            // Every element relates to itself by the top property, and none by the bottom one.
+            Axiom::ReflexiveObjectProperty(p) if self.extreme(p) == Some(Extreme::Top) => {}
+            Axiom::ReflexiveObjectProperty(p) if self.extreme(p) == Some(Extreme::Bottom) => {
+                self.gci(Nnf::Bottom);
+            }
             Axiom::ReflexiveObjectProperty(p) => {
                 let r = self.role(p)?;
                 self.gci(Nnf::SelfLoop(r));
@@ -1210,6 +1215,10 @@ impl Builder<'_> {
                     Nnf::All(r, Box::new(Nnf::Not(mb))),
                 ]));
             }
+            // No individual has a value on a bottom property: the key identifies nothing.
+            Axiom::HasKey(_, ps, ds)
+                if ps.iter().any(|p| self.extreme(p) == Some(Extreme::Bottom))
+                    || ds.contains(&self.v.bottom_data_property) => {}
             Axiom::HasKey(c, ps, ds) => {
                 let roles = ps
                     .iter()
