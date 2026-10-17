@@ -2797,6 +2797,46 @@ fn prefilter_manifest_structure_impl(
         }
     }
 
+    // --- Stage 2d: issuer-signature / key-set binding (audit #3 / codex #1). ---
+    // sq-j506: runs HERE, ahead of the stage-1 query-binding gates, because the
+    // authenticated-method map it returns is what selects the pattern-constant
+    // encoder those gates compare under. It reads only the manifest and the
+    // EXTERNAL key set, so it depends on nothing the gates below establish. The
+    // gate SET is unchanged and every gate below still runs, so no manifest that
+    // was refused becomes acceptable; what changes is which refusal is reported
+    // first when a manifest fails both an attestation check and a pattern check.
+    // Every scan sub-proof's commitments[g] must carry a valid issuer signature
+    // whose key ∈ the EXTERNAL trusted K (the verifier's argument, NOT
+    // manifest.key_set). commitments[g] is byte-bound into the bb public inputs
+    // by the audit #1 reconstruction, so this verifier-side check ties the
+    // attested commitment to the proved statement. The issuer signature ALSO
+    // binds the credential's status-list reference (audit #12), so a scan-covering
+    // attestation that omits/forges the reference is rejected here.
+    //
+    // sq-xxg: a scan commitment may be covered EITHER by a clear
+    // attestation OR by a hidden-issuer proof (when the relying party enabled the
+    // hidden path). Compute the STRUCTURALLY hidden-covered commitments so the
+    // clear attestation is treated as NOT-REQUIRED for them; the fail-closed
+    // either-clear-or-hidden / never-neither rule is enforced inside
+    // `bind_issuer_attestations`. The hidden proof itself is cryptographically
+    // verified by `bind_hidden_issuer_attestations` in the bb stage of
+    // `verify_manifest` (which binds its public `key_set_root` to the relying
+    // party's authoritative KeySet and its `m` to the issuer-signed message), so a
+    // hidden-only commitment is no less attested than a clear one — only WHICH
+    // issuer signed is hidden.
+    // Stage 2d also AUTHENTICATES each commitment's commitment method from the
+    // issuer signature and applies the relying party's `MethodPolicy`; the map it
+    // returns is carried out of the pre-filter for the gates that must recompute
+    // an issuer-signed message later.
+    let methods = authenticated_methods_for(manifest, trusted_key_set)?;
+
+    // --- Stage 2d' (sq-j506): every scan's pattern constants must be encodable
+    // under ONE authenticated commitment method. Runs immediately after stage 2d,
+    // so a scan whose commitments mix encoders, or whose method has no encoder in
+    // this build, is refused BY NAME before any comparison site reads the map.
+    // ADDS two named refusals and opens nothing. ---
+    bind_scan_pattern_methods(manifest, &methods)?;
+
     // --- Stage 1a: query-fragment gate + (flat stage-1 only) cross-graph
     // obligations. ---
     let required = if skip_query_binding {
@@ -2821,7 +2861,7 @@ fn prefilter_manifest_structure_impl(
         // obligation is correctly required, while two scans over the SAME graph
         // still collapse (a same-graph bnode join is legitimate). See
         // `global_attributions` for the fail-closed edge cases.
-        let attributions = global_attributions(manifest, &AuthenticatedMethods::new());
+        let attributions = global_attributions(manifest, &methods);
         let declared: Vec<JoinEdge> = manifest
             .join_obligations
             .iter()
@@ -2959,21 +2999,14 @@ fn prefilter_manifest_structure_impl(
     // `join_obligations` on the disclosed path, `bind_joins` on the hidden path)
     // works across pattern PAIRS and so cannot see a within-pattern repeat. Placed
     // AFTER the gates above so their (already-pinned) error precedence is unchanged.
-    // sq-j506: the stage-1 pattern gates take the authenticated-method map that
-    // selects the pattern-constant encoder, but stage 2d -- the attestation gate
-    // that BUILDS that map -- has not run yet. They are fed an EMPTY map, under
-    // which every commitment reads as method-UNBOUND and every pattern constant
-    // is encoded string-canonically: byte-identical to the behaviour before the
-    // parameter existed, so no manifest changes verdict here. The method-aware
-    // refusals live in `bind_scan_pattern_methods`, which runs once the map
-    // exists. Making these gates method-aware for real needs stage 2d to move
-    // ahead of stage-1 query binding -- a gate-ORDER change, deliberately not
-    // taken here.
-    let stage1_methods = AuthenticatedMethods::new();
+    // sq-j506: these gates compare every pattern constant under the encoder of
+    // the commitment's AUTHENTICATED method, established by stage 2d above. A
+    // method with no pattern-constant encoding in this build was already refused
+    // by name in stage 2d'.
     if !skip_query_binding {
-        check_pattern_scans(manifest, &stage1_methods)?;
-        bind_query_correctness(manifest, &stage1_methods)?;
-        bind_repeated_pattern_slots(manifest, &stage1_methods)?;
+        check_pattern_scans(manifest, &methods)?;
+        bind_query_correctness(manifest, &methods)?;
+        bind_repeated_pattern_slots(manifest, &methods)?;
     }
 
     // --- Stage 2e: cross-graph attribution binding (audit #8). ---
@@ -2989,35 +3022,9 @@ fn prefilter_manifest_structure_impl(
     // patterns->scans, so the extended-fragment regime (`skip_query_binding`)
     // defers it to the per-branch routing (`dispatch_fragment`) + sq-1zf94.
     if !skip_query_binding {
-        bind_attributions(manifest, &stage1_methods)?;
+        bind_attributions(manifest, &methods)?;
     }
 
-    // --- Stage 2d: issuer-signature / key-set binding (audit #3 / codex #1). ---
-    // Every scan sub-proof's commitments[g] must carry a valid issuer signature
-    // whose key ∈ the EXTERNAL trusted K (the verifier's argument, NOT
-    // manifest.key_set). commitments[g] is byte-bound into the bb public inputs
-    // by the audit #1 reconstruction, so this verifier-side check ties the
-    // attested commitment to the proved statement. The issuer signature ALSO
-    // binds the credential's status-list reference (audit #12), so a scan-covering
-    // attestation that omits/forges the reference is rejected here.
-    //
-    // sq-xxg: a scan commitment may be covered EITHER by a clear
-    // attestation OR by a hidden-issuer proof (when the relying party enabled the
-    // hidden path). Compute the STRUCTURALLY hidden-covered commitments so the
-    // clear attestation is treated as NOT-REQUIRED for them; the fail-closed
-    // either-clear-or-hidden / never-neither rule is enforced inside
-    // `bind_issuer_attestations`. The hidden proof itself is cryptographically
-    // verified by `bind_hidden_issuer_attestations` in the bb stage of
-    // `verify_manifest` (which binds its public `key_set_root` to the relying
-    // party's authoritative KeySet and its `m` to the issuer-signed message), so a
-    // hidden-only commitment is no less attested than a clear one — only WHICH
-    // issuer signed is hidden.
-    let hidden_covered = hidden_issuer_covered_commitments(manifest, trusted_key_set);
-    // Stage 2d also AUTHENTICATES each commitment's commitment method from the
-    // issuer signature and applies the relying party's `MethodPolicy`; the map it
-    // returns is carried out of the pre-filter for the gates that must recompute
-    // an issuer-signed message later.
-    let methods = bind_issuer_attestations(manifest, trusted_key_set, &hidden_covered)?;
 
     // --- Stage 2f: revocation / freshness (audit #12). ---
     // The status reference is now issuer-bound (stage 2d); check the credential's
@@ -3048,14 +3055,9 @@ fn prefilter_manifest_structure_impl(
     // (`skip_query_binding`) defers it — the hidden-join slot binding over a
     // multi-branch query is part of the per-branch term binding (sq-1zf94).
     if !skip_query_binding {
-        bind_joins(manifest, &stage1_methods)?;
+        bind_joins(manifest, &methods)?;
     }
 
-    // --- Stage 2d' (sq-j506): every scan's pattern constants must be encodable
-    // under ONE authenticated commitment method. Runs HERE, after stage 2d has
-    // authenticated the methods, because it is the first point an authenticated
-    // map exists. ADDS two named refusals and opens nothing. ---
-    bind_scan_pattern_methods(manifest, &methods)?;
 
     Ok(Prefiltered { required, methods })
 }
@@ -3289,20 +3291,23 @@ enum HiddenOnlyMethod {
 ///
 /// # ⚠️ NOT A VERIFIER
 /// It runs ONE stage. It does not check the query binding, the circuit ids, the
-/// binding edges, the revocation state or any proof. Its only caller is the
-/// value-lane pin REPORT ([`crate::value_pin::value_lane_pin_report`]), which
-/// needs the authenticated methods of a manifest the full pre-filter would
-/// refuse outright at stage 0 (a value-lane sub-proof is unconditionally
-/// refused there, and that refusal is unchanged).
+/// binding edges, the revocation state or any proof. A caller that is not itself
+/// a verifier must not treat its answer as acceptance of anything.
+///
+/// sq-j506: it is how the structural gates that compare pattern constants obtain
+/// the authenticated map — `prefilter_manifest_structure` calls it as its stage
+/// 2d, ahead of the stage-1 query-binding gates, and the `extended-fragment`
+/// routing calls it ahead of `bind_fragment_scans`. The value-lane pin REPORT
+/// ([`crate::value_pin::value_lane_pin_report`]) also uses it, because it needs
+/// the authenticated methods of a manifest the full pre-filter would refuse
+/// outright at stage 0 (a value-lane sub-proof is unconditionally refused there,
+/// and that refusal is unchanged).
 ///
 /// In particular, because no proof is verified here, a HIDDEN-ONLY commitment's
 /// entry is the method its declared hidden-issuer message SELECTS — the method a
 /// hidden-issuer proof would then have to bind — and not a method any issuer is
 /// yet shown to have signed. Only the bb hidden-issuer stage establishes that, so
 /// nothing may treat this map as issuer-attested for a hidden-only commitment.
-// Its only caller is the `dual-leaf` pin REPORT, which is itself test-only, so
-// no shipped build carries this.
-#[cfg(all(test, feature = "dual-leaf"))]
 pub(crate) fn authenticated_methods_for(
     manifest: &ProofManifest,
     trusted_key_set: &KeySet,
@@ -8636,12 +8641,16 @@ pub fn verify_fragment_manifest(
     // value (re-derived from the query text + disclosed solution), and check join
     // coherence across scan atoms sharing a variable. Also before the nonce is burnt
     // or any bb runs.
-    // sq-j506: fed an EMPTY authenticated-method map, for the same reason as the
-    // flat stage-1 gates -- this routing stage runs before the crypto stage that
-    // authenticates methods. Every commitment reads as method-UNBOUND, so the
-    // string-canonical encoder applies exactly as it did before the parameter
-    // existed.
-    bind_fragment_scans(fm, &AuthenticatedMethods::new()).map_err(CheckError::FragmentScan)?;
+    // sq-j506: the authenticated-method map comes from stage 2d run alone over the
+    // EMBEDDED manifest, so this gate compares each pattern constant under the
+    // encoder of the commitment's attested method rather than string-canonically.
+    // Stage 2d reads only the manifest and the external key set, and the crypto
+    // stage below runs it again as part of the full pre-filter, so nothing is
+    // skipped: a refusal here is a refusal that stage would also raise, reported
+    // before the nonce is burnt.
+    let fragment_methods = authenticated_methods_for(&fm.manifest, trusted_key_set)?;
+    bind_scan_pattern_methods(&fm.manifest, &fragment_methods)?;
+    bind_fragment_scans(fm, &fragment_methods).map_err(CheckError::FragmentScan)?;
 
     // (2c) FAIL-CLOSED PER-BRANCH JOIN COHERENCE + cross-graph Q6 non-bnode
     // (sq-ygk6x): re-derive each branch's Q6 obligations from the proof-bound
@@ -11341,6 +11350,45 @@ mod fragment_dispatch_tests {
     const OUTSIDE: &str =
         "SELECT * WHERE { ?s <http://ex/p> ?o OPTIONAL { ?o <http://ex/q> ?r } }";
 
+    /// sq-j506: honestly attest every committed graph a routing fixture
+    /// references, with a distinct salt each, and return the key set that trusts
+    /// the issuer.
+    ///
+    /// Stage 2d — the issuer-attestation and method-authentication gate — now runs
+    /// ahead of the structural routing gates, because the authenticated method is
+    /// what selects the encoder a pattern constant is compared under. An
+    /// unattested fixture is therefore refused at stage 2d and never reaches the
+    /// gate under test, so these fixtures are attested and the routing forge is
+    /// the only thing wrong with them.
+    fn attest_routing_fixture(m: &mut ProofManifest) -> KeySet {
+        let sk = sparq_zk::sig::SecretKey::from_seed(1);
+        m.revocation = Some(test_revocation());
+        let referenced: Vec<FieldHex> = m
+            .sub_proofs
+            .iter()
+            .flat_map(|sp| match &sp.inputs {
+                ProofInputs::Scan { commitments, .. } => commitments.clone(),
+                ProofInputs::PathReach { commitments, .. } => commitments.clone(),
+                _ => Vec::new(),
+            })
+            .collect();
+        let mut salt = 1_000u64;
+        let mut seen = std::collections::BTreeSet::new();
+        for c in referenced {
+            let Some(f) = c.to_field() else { continue };
+            if seen.insert(field_to_hex(&f)) {
+                m.commitment_attestations.push(test_attestation(f, Fr::from(salt), &sk));
+                salt += 1;
+            }
+        }
+        KeySet::from_hex_keys([sparq_zk::sig::public_key_to_hex(&sk.public_key())])
+    }
+
+    /// [`attest_routing_fixture`] over the embedded manifest of a fragment fixture.
+    fn attest_fragment_fixture(m: &mut crate::manifest::FragmentManifest) -> KeySet {
+        attest_routing_fixture(&mut m.manifest)
+    }
+
     fn dummy_prover() -> CircuitProver {
         // Never invoked in these tests — every case rejects before the sub-proof
         // bb loop, so no nargo/bb toolchain is needed.
@@ -11424,10 +11472,15 @@ mod fragment_dispatch_tests {
             "fragment path must route past stage-1 into the attestation gate, got {frag_err:?}"
         );
         // NON-REGRESSION: the FLAT entry point still rejects the same query at
-        // stage-1 with the same structured error as before this bead.
-        let (p2, w2, ks2, rp2, hr2, hbp2, ep2, n2, seen2) = empty_verify_env();
+        // stage-1 with the same structured error as before this bead. sq-j506: the
+        // attestation gate now runs ahead of stage-1a, so this half is asserted on
+        // an ATTESTED copy — otherwise it would stop at the attestation gate and
+        // say nothing about the UNION refusal.
+        let mut attested = m.clone();
+        let ks_attested = attest_fragment_fixture(&mut attested);
+        let (p2, w2, _ks2, rp2, hr2, hbp2, ep2, n2, seen2) = empty_verify_env();
         let flat_err = verify_manifest(
-            &m.manifest, &p2, &w2, &ks2, &rp2, &hr2, &hbp2, &ep2, &n2, &seen2,
+            &attested.manifest, &p2, &w2, &ks_attested, &rp2, &hr2, &hbp2, &ep2, &n2, &seen2,
         )
         .unwrap_err();
         assert!(
@@ -11481,10 +11534,13 @@ mod fragment_dispatch_tests {
             depth_bound: 4,
             attribution: vec![true],
         };
-        let m = base_manifest(PLUS, vec![sub(bad)]);
+        let mut m = base_manifest(PLUS, vec![sub(bad)]);
+        // sq-j506: the attestation gate runs ahead of stage-1b now, so the fixture
+        // is attested and the id forge is the only thing wrong with it.
+        let k = attest_routing_fixture(&mut m);
         let err = prefilter_manifest_structure_impl(
             &m,
-            &KeySet::empty(),
+            &k,
             &RevocationPolicy::accept_version(1),
             true,
         )
@@ -12095,12 +12151,15 @@ mod fragment_dispatch_tests {
         // End-to-end: a scan row inconsistent with the disclosed solution is refused
         // as a structured CheckError::FragmentScan BEFORE the nonce is burnt or any
         // bb subprocess runs.
-        let m = fm(
+        let mut m = fm(
             SCANQ,
             vec![sub(scan_sp_o("http://ex/other"))],
             vec![bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
-        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        // sq-j506: attested, because the attestation gate now runs ahead of the
+        // structural routing gates; the routing forge is the only thing wrong.
+        let ks = attest_fragment_fixture(&mut m);
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
         let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
             .unwrap_err();
         assert!(
@@ -12315,12 +12374,15 @@ mod fragment_dispatch_tests {
             vec![[iri("http://ex/s1"), iri("http://ex/p"), iri("http://ex/x1")]],
         );
         let pa = path_real(4, 1, 16, false, "http://ex/q", "http://ex/zzz", "http://ex/o1");
-        let m = fm(
+        let mut m = fm(
             SCANPATH_SRC,
             vec![sub(sc), sub(pa)],
             vec![bw_full(0, vec![0], vec![1], vec![], vec![0], sol(&[("s", "http://ex/s1"), ("o", "http://ex/o1")]))],
         );
-        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        // sq-j506: attested, because the attestation gate now runs ahead of the
+        // structural routing gates; the routing forge is the only thing wrong.
+        let ks = attest_fragment_fixture(&mut m);
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
         let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
             .unwrap_err();
         assert!(
