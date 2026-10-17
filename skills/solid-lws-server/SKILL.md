@@ -137,9 +137,11 @@ an already-issued `receiveFrom` URL, and an open socket is closed (code 1008) on
 its subscriber loses read access. With the `odrl-authz` gate attached, its deny
 applies here exactly as it does to `GET`.
 Lacking the mode returns `403`, whether or not the topic exists. A topic outside this
-server's storage root is refused with `400` before the WAC gate runs, and a topic naming
-something the LDP surface keeps to itself — a linkset record (`X.meta`, in any case) or
-anything under `/.lws/` — gets the same `403` as a topic the caller may not read.
+server's storage root is refused with `400` before the WAC gate runs. A topic on it is taken
+in one canonical form, the IRI `parse_target` gives its path (query and fragment dropped), for
+the WAC check, the receive token and the notifications alike; a topic with none — a linkset
+record (`X.meta`, in any case), anything under `/.lws/`, a dot segment — gets the same `403`
+as a topic the caller may not read.
 
 ## Serve provider WebIDs off the pod (optional)
 

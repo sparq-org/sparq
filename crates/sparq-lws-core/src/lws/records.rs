@@ -392,11 +392,14 @@ pub(crate) enum Removed {
 ///   checked against the listing ([`still_listed`]); `settle` is told whether it is confirmed
 ///   gone, and removes it from memory or puts it back, giving the author to announce it to.
 /// - A delete that failed [unsettled](crate::error::ServerError::Unsettled) (an HTTP update that
-///   timed out) can still remove the record after the listing showed it. Still listed (or the
-///   listing unreadable), it is settled in the background: the record stays out of force, and
-///   its own lock and its own listing's held, until the delete is fenced ([`Store::fence`]) and
-///   the listing read again; `settle` is then told the outcome under the container's lock,
-///   shared (unless it is listed nowhere), and a record gone is announced. The answer is `500`, saying this is not known yet.
+///   timed out) can still land, so no listing read is final until its fence ([`Store::fence`])
+///   has succeeded, whatever the listing shows. The fence is tried in the steps, and once it
+///   succeeds the listing read after it settles the removal, every lock still held. One that
+///   does not succeed (or a listing that cannot be read after it) is settled in the background:
+///   the record stays out of force, and its own lock and its own listing's held, until the
+///   delete is fenced and the listing read again; `settle` is then told the outcome under the
+///   container's lock, shared (unless it is listed nowhere), and a record gone is announced.
+///   The answer is `500`, saying this is not known yet.
 /// - As for a create, the removal holds a place among those being made or settled
 ///   ([`Settlements`]) until it is settled (`503` when there is none), and the task that settles
 ///   it is the state's.
@@ -448,22 +451,28 @@ where
         };
         let gone = match delete_record(&state.store, &iri, &container).await {
             Ok(()) => Some(true),
-            // A record not listed is gone for good (a delete only removes, and the record's
-            // lock keeps a create of it out). One still listed may yet go: the delete failed
-            // unsettled and can still commit, until its fence succeeds.
+            // A delete that failed unsettled can still commit until its fence succeeds, so no
+            // listing read before then is final, whatever it shows: the fence is tried first
+            // (`delete_record` has tried it once; it may answer now), and the listing read
+            // after it settles the removal. Until then every lock this removal took stays held,
+            // so no create of the record can run while the delete may still land.
             Err(crate::error::ServerError::Unsettled { fence, .. }) => {
-                match still_listed(&state.store, &iri, &container).await {
-                    Ok(false) => Some(true),
+                let settled = match state.store.fence(&fence).await {
+                    Ok(()) => still_listed(&state.store, &iri, &container).await.ok(),
+                    Err(_) => None,
+                };
+                match settled {
+                    Some(listed) => Some(!listed),
                     // The sweeper's removal is settled here, within its deadline, holding what
                     // it holds: given up past it, it is dropped with everything it holds (its
                     // place among them) and leaves the record in force, to be tried again.
-                    Ok(true) | Err(_) if by == Remover::Sweeper => {
+                    None if by == Remover::Sweeper => {
                         until_done(|| state.store.fence(&fence)).await;
                         let listed =
                             until_done(|| still_listed(&state.store, &iri, &container)).await;
                         Some(!listed)
                     }
-                    Ok(true) | Err(_) => {
+                    None => {
                         // Settled by a task the state owns, holding the record's own lock, its
                         // own listing's and this change's place among those being settled,
                         // with the record out of force until then; the container's lock is
@@ -664,9 +673,9 @@ mod tests {
         Arc::new(tokio::sync::Semaphore::new(0))
     }
 
-    /// Review finding: a removal that failed unsettled was read back at once, so a record the
-    /// store did not hold was reported gone though the removal could still commit. The removal
-    /// is fenced first; a fence that fails leaves the error as it was.
+    /// A removal that failed unsettled is fenced before the record is read back, so a record the
+    /// store does not hold is reported gone only once the removal can no longer commit; a fence
+    /// that fails leaves the error as it was.
     #[tokio::test]
     async fn an_unsettled_removal_is_not_done_before_its_fence() {
         let store = super::super::test_store::FlakyStore::new();
@@ -688,5 +697,70 @@ mod tests {
         store.fail_fence.store(false, Ordering::SeqCst);
         assert!(delete_record(&store, &iri, container).await.is_ok());
         assert_eq!(store.fences_tried.load(Ordering::SeqCst), 2);
+    }
+
+    /// A removal whose delete failed unsettled is settled only from a listing read after the
+    /// delete's fence has succeeded, with every lock it took held until then. Here the record is
+    /// stored but its container's listing does not show it, so a listing read before the fence
+    /// would report it gone while the delete can still land. With the fence failing, the answer
+    /// is that the outcome is not known, nothing is settled and the record's lock stays held;
+    /// once the fence succeeds, it is settled as gone and the lock is released.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unsettled_removal_holds_its_locks_until_fenced() {
+        let (state, store) = super::super::test_store::state(100).await;
+        let container = format!("{}records/", state.cfg.storage());
+        let iri = format!("{container}r1");
+        state
+            .store
+            .write(&container, Bytes::new(), "text/turtle")
+            .await
+            .unwrap();
+        // Stored, but not a member of the container: no listing shows it.
+        state
+            .store
+            .write(&iri, Bytes::from_static(b"{}"), "application/json")
+            .await
+            .unwrap();
+        assert!(!still_listed(&state.store, &iri, &container).await.unwrap());
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let settled = Arc::new(std::sync::Mutex::new(None));
+        let told = settled.clone();
+        let r = remove_record(
+            &state,
+            &container,
+            &iri,
+            "record",
+            Listed::InContainer,
+            Remover::Request,
+            None,
+            || Some(()),
+            move |_: &LwsState<_>, gone: bool, ()| {
+                *told.lock().unwrap() = Some(gone);
+                None
+            },
+        )
+        .await;
+        let Err(r) = r else {
+            panic!("an unsettled removal was reported done before its fence succeeded");
+        };
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(*settled.lock().unwrap(), None);
+        assert!(
+            state.locks.try_lock(&iri).is_none(),
+            "the record's lock is held"
+        );
+        store.fail_fence.store(false, Ordering::SeqCst);
+        for _ in 0..250 {
+            if settled.lock().unwrap().is_some() && state.locks.try_lock(&iri).is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(*settled.lock().unwrap(), Some(true));
+        assert!(
+            state.locks.try_lock(&iri).is_some(),
+            "the record's lock is released"
+        );
     }
 }

@@ -920,11 +920,11 @@ mod tests {
         low
     }
 
-    /// Review finding: a container whose listing named a linkset record (what a legacy edge
-    /// leaves) had that record followed by the walk, charged to the budget and answered with
-    /// among a search's results, though no listing shows it and no request reads it. A child a
-    /// record's name names is neither followed nor charged for; a child of the same length that
-    /// is not one still is.
+    /// Regression guard for the record-name filter the walk already applies: a container whose
+    /// listing names a linkset record (what a legacy edge leaves) does not have that record
+    /// followed, charged to the budget or answered with among a search's results, since no
+    /// listing shows it and no request reads it. A child of the same length that is not a record
+    /// still is.
     #[tokio::test]
     async fn a_record_a_listing_names_is_not_walked() {
         let record = storage_with("doc.meta").await;

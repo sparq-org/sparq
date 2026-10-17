@@ -5705,9 +5705,10 @@ mod tests {
         assert_eq!(seen, want);
     }
 
-    /// Review finding: a recursive delete announced the removal of a linkset record a legacy
-    /// edge makes a member of a container — a record no listing shows and no request reads.
-    /// Such a record is announced to nobody; the container's own removal is.
+    /// Regression guard for the record-name filter announcements already apply: a recursive
+    /// delete of a container a legacy edge gives a linkset record as a member announces the
+    /// removal of that record to nobody (no listing shows it and no request reads it); the
+    /// container's own removal is announced.
     #[tokio::test]
     async fn a_removed_record_is_announced_to_nobody() {
         let st = state().await;
