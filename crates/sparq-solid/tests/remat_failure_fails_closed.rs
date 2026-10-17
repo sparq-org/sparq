@@ -231,7 +231,7 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
             &format!("INSERT DATA {{ GRAPH <{acr}> {{ {link} }} }}"),
         )
         .expect_err("the update is refused");
-    assert_refusal_says_nothing_of_the_other_document(&err, other);
+    assert_refusal_says_nothing_of_the_other_document(&err, &acr, other);
     assert_eq!(decisions(&store), before, "no decision changed");
     assert_eq!(snapshot(store.graph()), stored, "nothing was stored");
     // Added and removed again in the same update, it leaves nothing to refuse.
@@ -259,28 +259,35 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
     let err = store
         .put_acl_acp(&acr, &doc, "ntriples")
         .expect_err("the replace is refused");
-    assert_refusal_says_nothing_of_the_other_document(&err, other);
+    assert_refusal_says_nothing_of_the_other_document(&err, &acr, other);
     assert_eq!(decisions(&store), before, "no decision changed");
     assert_eq!(snapshot(store.graph()), stored, "nothing was stored");
 }
 
-/// A refusal for a statement reaching into another access-control document names the
-/// statement and says nothing about that document beyond its own IRI, which the writer sent:
-/// not that it is rejected, not admitted, nor anything else of its state.
-fn assert_refusal_says_nothing_of_the_other_document(err: &str, other: &str) {
-    assert!(err.contains("may not state"), "{err}");
-    assert!(
-        err.contains("uses a node of another access-control document"),
-        "{err}"
+/// A refusal for a write reaching into another access-control document is ONE uniform body:
+/// it names the document written and nothing else — not the statement, not the reference, and
+/// nothing about the state of the document reached into, which is a fact about another
+/// resource.
+fn assert_refusal_says_nothing_of_the_other_document(err: &str, doc: &str, other: &str) {
+    assert_eq!(
+        err.split_once(": ").map(|(_, body)| body),
+        Some(uniform_dependency_refusal(doc).as_str()),
+        "{}",
+        err
     );
-    for leak in ["not admitted", "rejected", "reject"] {
+    for leak in ["not admitted", "rejected", "reject", other] {
         assert!(!err.contains(leak), "the refusal states `{leak}`: {err}");
     }
-    assert_eq!(
-        err.matches(other).count(),
-        1,
-        "only the statement the writer sent names <{other}>: {err}"
-    );
+}
+
+/// The one refusal body for a write into `doc` that uses a node of another access-control
+/// document, whichever statement and whichever document that is.
+fn uniform_dependency_refusal(doc: &str) -> String {
+    format!(
+        "the access-control document <{}> may not use a node of another access-control \
+         document; nothing was changed",
+        doc
+    )
 }
 
 /// Every stored quad outside the reserved space, sorted.
@@ -434,7 +441,7 @@ fn an_acr_rejected_by_itself_or_through_another_can_be_replaced() {
         let err = store
             .put_acl_acp(&acr, &format!("{sound}{uses_bad}"), "ntriples")
             .expect_err("still using bad.acr");
-        assert!(err.contains("may not state"), "{why}: {err}");
+        assert!(err.contains("may not use a node of another"), "{why}: {err}");
         store
             .put_acl_acp(&acr, &sound, "ntriples")
             .unwrap_or_else(|e| panic!("{why}: the replacement is accepted: {e}"));
@@ -455,7 +462,7 @@ fn documents_the_loader_does_not_read_are_not_refused() {
         .expect("parses"));
         store.materialize_acp().expect("materializes");
         if let Err(e) = store.put_acl_acp(doc, stray, "ntriples") {
-            assert!(!e.contains("may not state"), "{doc}: {e}");
+            assert!(!e.contains("may not use a node of another"), "{doc}: {e}");
         }
     }
 }
@@ -510,6 +517,57 @@ fn an_update_is_judged_in_the_state_it_leaves() {
             ),
         )
         .expect_err("the update is refused");
-    assert!(err.contains("may not state"), "{err}");
+    assert!(err.contains("may not use a node of another"), "{err}");
     assert_eq!(snapshot(store.graph()), stored, "nothing was stored");
+}
+
+/// The refusal body is the same whichever reference fails: two writes into one
+/// access-control document that differ only in which other document they reach into are
+/// refused with identical text, so the text carries nothing about either of them.
+#[test]
+fn the_dependency_refusal_reads_the_same_whichever_reference_fails() {
+    const ACP: &str = "http://www.w3.org/ns/solid/acp#";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    let r = "https://pod.ex/r";
+    let acr = format!("{r}.acr");
+    let (first, second) = ("https://pod.ex/one.acr", "https://pod.ex/two.acr");
+    let mut nq = format!(
+        "<{r}#it> <https://ex.dev/ns#k> \"v\" <{r}> .\n\
+         <{acr}> <{ACP}accessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{ACP}apply> <{acr}#p> <{acr}> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Read> <{acr}> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Write> <{acr}> .\n\
+         <{acr}#p> <{ACP}allow> <{ACL}Control> <{acr}> .\n\
+         <{acr}#p> <{ACP}anyOf> <{acr}#m> <{acr}> .\n\
+         <{acr}#m> <{ACP}agent> <{ADMIN}> <{acr}> .\n\
+         <{acr}.acr> <{ACP}accessControl> <{acr}.acr#c> <{acr}.acr> .\n\
+         <{acr}.acr#c> <{ACP}apply> <{acr}.acr#p> <{acr}.acr> .\n\
+         <{acr}.acr#p> <{ACP}allow> <{ACL}Write> <{acr}.acr> .\n\
+         <{acr}.acr#p> <{ACP}anyOf> <{acr}.acr#m> <{acr}.acr> .\n\
+         <{acr}.acr#m> <{ACP}agent> <{ADMIN}> <{acr}.acr> .\n"
+    );
+    // Two documents the view does not admit, alike in every way but their names.
+    for other in [first, second] {
+        nq.push_str(&format!(
+            "<{other}#p> <{ACP}allow> <{ACL}Read> <{other}> .\n\
+             <https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{other}> .\n"
+        ));
+    }
+    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    store.materialize_acp().expect("materializes");
+
+    let refusal = |store: &mut PodStore, other: &str| {
+        store
+            .update_as_acp(
+                &sess(ADMIN),
+                &format!(
+                    "INSERT DATA {{ GRAPH <{acr}> {{ <{acr}#c> <{ACP}apply> <{other}#p> }} }}"
+                ),
+            )
+            .expect_err("the update is refused")
+    };
+    let (a, b) = (refusal(&mut store, first), refusal(&mut store, second));
+    assert_eq!(a, b, "the two refusals differ");
+    assert_refusal_says_nothing_of_the_other_document(&a, &acr, first);
+    assert_refusal_says_nothing_of_the_other_document(&b, &acr, second);
 }

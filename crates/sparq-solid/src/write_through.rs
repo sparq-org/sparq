@@ -237,6 +237,11 @@ impl PodStore {
                 acl_iri, ACL_SUFFIX, ACR_SUFFIX
             ));
         }
+        // Before the slot is touched: this call installs a view of the model it names, so a
+        // store whose view was built under the other one is left alone (see
+        // `PodStore::matching_model`).
+        self.matching_model(acp)
+            .map_err(|e| format!("put_acl denied: {}", e))?;
         let name = NamedNode::new(acl_iri)
             .map_err(|e| format!("put_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
         // PARSE FIRST — a malformed document is rejected before anything mutates.
@@ -289,6 +294,9 @@ impl PodStore {
                 acl_iri, ACL_SUFFIX, ACR_SUFFIX
             ));
         }
+        // Before the slot is touched, as in `put_acl_inner`.
+        self.matching_model(acp)
+            .map_err(|e| format!("delete_acl denied: {}", e))?;
         let name = NamedNode::new(acl_iri)
             .map_err(|e| format!("delete_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
         let term = Term::NamedNode(name.clone());
@@ -370,6 +378,10 @@ impl PodStore {
         acp: bool,
         scope: crate::ReindexScope,
     ) -> Result<(), String> {
+        debug_assert!(
+            self.matching_model(acp).is_ok(),
+            "an entry point rebuilds under the model its own view was built under"
+        );
         if acp {
             self.rematerialize_acp_scoped(scope).map(|_| ())
         } else {

@@ -626,6 +626,12 @@ impl PodStore {
     /// or after the view was dropped) is left to the caller, as it is today. An update that
     /// rebuilds nothing — one that leaves the access-control documents alone — is unaffected,
     /// whichever entry point it came through.
+    ///
+    /// This is the one check, and every entry point that installs a view calls it before it
+    /// changes anything: `PodStore::commit_update` (and so every `update_as*`),
+    /// `PodStore::put_acl_inner` (`put_acl`/`put_acl_acp`), `PodStore::delete_acl_inner`
+    /// (`delete_acl`/`delete_acl_acp`) and [`PodStore::rematerialize_after_edit`]. A refusal
+    /// therefore leaves the dataset, the stored provenance and the view all as they were.
     fn matching_model(&self, acp: bool) -> Result<(), String> {
         match self.installed_acp {
             Some(installed) if installed != acp => Err(format!(
@@ -1387,6 +1393,12 @@ impl PodStore {
         staged: Option<AccessProvenance>,
         rebuild: Option<bool>,
     ) -> Result<(), String> {
+        // Before any effect is applied: a rebuild under the model the view in force was not
+        // built under is refused here, so the refusal leaves the dataset, the stored
+        // provenance and the view exactly as they were.
+        if let Some(acp) = rebuild {
+            self.matching_model(acp)?;
+        }
         if rebuild == Some(true) {
             self.usable_acp_context()
                 .map_err(|e| format!("update denied: {e}; nothing was changed"))?;
@@ -1438,7 +1450,6 @@ impl PodStore {
             self.acp_context.0 = staged;
         }
         if let Some(acp) = rebuild {
-            self.matching_model(acp)?;
             let rebuilt = if acp {
                 self.materialize_acp().map(drop)
             } else {

@@ -266,18 +266,19 @@ impl<'g> ControlWrites<'g> {
             depends(t)
                 && matches!(&t[2], Term::NamedNode(o) if rejected.contains(group_doc_of(o.as_str())))
         };
-        let Some(t) = added.iter().find(uses_rejected) else {
+        if !added.iter().any(|t| uses_rejected(&t)) {
             return Ok(());
-        };
-        // The refusal names the statement the writer sent and nothing about the state of the
-        // document it reaches into: that state is a fact about ANOTHER resource, and a writer
-        // holding Control of `doc` need hold nothing over that one. (It cannot in fact be read
-        // either way: a resource whose own access-control document the view rejects is
-        // withheld every grant, so no session holds Control of it.)
+        }
+        // One body for every such refusal. It names neither the statement nor the reference
+        // that failed: WHICH of the writer's references the view does not resolve is a fact
+        // about ANOTHER resource, and a writer holding Control of `doc` need hold nothing over
+        // that one. One bit remains — this write is refused where an otherwise identical one
+        // is accepted — and is not closed here; a caller that must not expose even that
+        // orders its own writes so that a document is stored before one that uses its nodes.
         Err(format!(
-            "the access-control document <{doc}> may not state `{} {} {}`: it uses a node of \
-             another access-control document; nothing was changed",
-            t[0], t[1], t[2]
+            "the access-control document <{}> may not use a node of another \
+             access-control document; nothing was changed",
+            doc
         ))
     }
 }

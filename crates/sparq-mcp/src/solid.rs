@@ -819,6 +819,15 @@ impl SolidMcpServer {
     /// The configured model must be ACP ([`SolidServerConfig::acp`]); under WAC the view holds
     /// no such context and there is nothing to supply.
     ///
+    /// # Trusted embedder only
+    ///
+    /// This takes the facts at their word, as the store's own `materialize_acp_*` entry points
+    /// do: what it is given becomes the creator, owner and credential facts the view grants by.
+    /// It is for the embedder that owns this server, and it is the CALLER'S responsibility to
+    /// pass the context of THIS server's pod — nothing here ties a context to a store, so a
+    /// context restated for one pod and handed to another is installed as given. Do not reach
+    /// it from a request, a tool argument or pod content.
+    ///
     /// # Errors
     ///
     /// As [`PodStore::materialize_acp_with_credentials`], or when the server is configured for

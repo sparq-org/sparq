@@ -7,12 +7,14 @@
 //! rebuilds nothing and is unaffected, whichever entry point it came through.
 
 use sparq_core::Graph;
-use sparq_solid::{Mode, PodStore, Session};
+use sparq_engine::QueryBudget;
+use sparq_solid::{AccessProvenance, Mode, PodStore, Session};
 
 const ACP: &str = "http://www.w3.org/ns/solid/acp#";
 const ACL: &str = "http://www.w3.org/ns/auth/acl#";
 const ALICE: &str = "https://alice.ex/card#me";
 const DOC: &str = "https://pod.ex/a/d";
+const ACR: &str = "https://pod.ex/a/.acr";
 
 fn alice() -> Session<'static> {
     Session {
@@ -85,18 +87,7 @@ fn the_wac_update_entry_point_is_refused_on_a_store_whose_view_is_acp() {
 
 #[test]
 fn the_acp_update_entry_point_is_refused_on_a_store_whose_view_is_wac() {
-    let nq = format!(
-        "<{DOC}#it> <https://ex.dev/ns#k> \"v\" <{DOC}> .
-<https://pod.ex/.acl#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{ACL}Authorization> <https://pod.ex/.acl> .
-<https://pod.ex/.acl#a> <{ACL}default> <https://pod.ex/> <https://pod.ex/.acl> .
-<https://pod.ex/.acl#a> <{ACL}agent> <{ALICE}> <https://pod.ex/.acl> .
-<https://pod.ex/.acl#a> <{ACL}mode> <{ACL}Read> <https://pod.ex/.acl> .
-<https://pod.ex/.acl#a> <{ACL}mode> <{ACL}Write> <https://pod.ex/.acl> .
-<https://pod.ex/.acl#a> <{ACL}accessTo> <https://pod.ex/> <https://pod.ex/.acl> .
-<https://pod.ex/.acl#a> <{ACL}mode> <{ACL}Control> <https://pod.ex/.acl> .
-"
-    );
-    let mut store = PodStore::new(Graph::load_dataset(&nq, "nquads").expect("parses"));
+    let mut store = PodStore::new(Graph::load_dataset(&wac_pod(), "nquads").expect("parses"));
     store.materialize_wac().expect("wac materializes");
     assert!(store.decide(&alice(), DOC, Mode::Write).allow);
 
@@ -134,4 +125,127 @@ fn a_store_with_no_view_in_force_refuses_neither_entry_point_for_its_model() {
         .update_as(&alice(), &insert_rule("https://pod.ex/a/.acr"))
         .expect_err("no grants");
     assert!(!err.contains("authorization view was built under"), "{err}");
+}
+
+/// What a refusal must leave alone: every stored graph with its size, the stored creator/owner
+/// facts, and the decisions the view in force gives.
+fn snapshot(store: &PodStore) -> (Vec<(String, usize)>, AccessProvenance, Vec<bool>) {
+    let mut graphs: Vec<(String, usize)> = store
+        .graph()
+        .named
+        .iter()
+        .map(|(n, g)| (format!("{}", n), g.len()))
+        .collect();
+    graphs.sort();
+    let mut decisions = Vec::new();
+    for iri in [DOC, "https://pod.ex/a/", "https://pod.ex/", "https://pod.ex/a/.acr"] {
+        for mode in [Mode::Read, Mode::Write, Mode::Append, Mode::Control] {
+            decisions.push(store.decide(&alice(), iri, mode).allow);
+        }
+    }
+    (graphs, store.acp_provenance().clone(), decisions)
+}
+
+/// One call per entry point that rebuilds the view: `acp` is the model the call names, `doc`
+/// the access-control document it writes (the one the view in force reads).
+type Call = (&'static str, fn(&mut PodStore, bool, &str) -> Result<(), String>);
+
+fn doc_content(doc: &str) -> String {
+    format!("<{doc}#p> <{ACP}allow> <{ACL}Append> .\n")
+}
+
+fn rebuilding_entry_points() -> Vec<Call> {
+    vec![
+        ("update_as*", |store, acp, doc| {
+            let rule = insert_rule(doc);
+            if acp {
+                store.update_as_acp(&alice(), &rule)
+            } else {
+                store.update_as(&alice(), &rule)
+            }
+        }),
+        ("update_as*_with_budget", |store, acp, doc| {
+            let rule = insert_rule(doc);
+            let budget = QueryBudget::unlimited();
+            if acp {
+                store.update_as_acp_with_budget(&alice(), &rule, &budget)
+            } else {
+                store.update_as_with_budget(&alice(), &rule, &budget)
+            }
+        }),
+        ("put_acl*", |store, acp, doc| {
+            let content = doc_content(doc);
+            if acp {
+                store.put_acl_acp(doc, &content, "ntriples").map(|_| ())
+            } else {
+                store.put_acl(doc, &content, "ntriples").map(|_| ())
+            }
+        }),
+        ("delete_acl*", |store, acp, doc| {
+            if acp {
+                store.delete_acl_acp(doc).map(|_| ())
+            } else {
+                store.delete_acl(doc).map(|_| ())
+            }
+        }),
+        ("rematerialize_after_edit", |store, acp, _doc| {
+            let before = store.stored_graphs();
+            store
+                .rematerialize_after_edit(&before, None, &[], acp)
+                .map(|_| ())
+        }),
+    ]
+}
+
+/// The WAC pod of `the_acp_update_entry_point_is_refused_on_a_store_whose_view_is_wac`.
+fn wac_pod() -> String {
+    let acl = "https://pod.ex/.acl";
+    let rdf_type = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    format!(
+        "<{DOC}#it> <https://ex.dev/ns#k> \"v\" <{DOC}> .
+<{acl}#a> <{rdf_type}> <{ACL}Authorization> <{acl}> .
+<{acl}#a> <{ACL}default> <https://pod.ex/> <{acl}> .
+<{acl}#a> <{ACL}accessTo> <https://pod.ex/> <{acl}> .
+<{acl}#a> <{ACL}agent> <{ALICE}> <{acl}> .
+<{acl}#a> <{ACL}mode> <{ACL}Read> <{acl}> .
+<{acl}#a> <{ACL}mode> <{ACL}Write> <{acl}> .
+<{acl}#a> <{ACL}mode> <{ACL}Control> <{acl}> .
+"
+    )
+}
+
+/// Every entry point that rebuilds the authorization view refuses to rebuild under the model
+/// the view in force was not built under — and the refusal changes nothing: the stored graphs,
+/// the stored creator/owner facts and the decisions the view gives are all as they were.
+/// Both directions: each WAC call on an ACP view, and each ACP call on a WAC view.
+#[test]
+fn every_rebuilding_entry_point_refuses_a_mismatched_model_and_changes_nothing() {
+    for installed_acp in [true, false] {
+        for (name, call) in rebuilding_entry_points() {
+            let (nquads, doc) = if installed_acp {
+                (pod(), ACR)
+            } else {
+                (wac_pod(), "https://pod.ex/.acl")
+            };
+            let mut store = PodStore::new(Graph::load_dataset(&nquads, "nquads").expect("parses"));
+            if installed_acp {
+                store.materialize_acp().expect("acp materializes");
+            } else {
+                store.materialize_wac().expect("wac materializes");
+            }
+            assert!(store.decide(&alice(), DOC, Mode::Write).allow, "{}", name);
+            let before = snapshot(&store);
+
+            let err = call(&mut store, !installed_acp, doc)
+                .expect_err("the entry point is refused for the other model");
+            assert!(
+                err.contains(if installed_acp { "ACP" } else { "WAC" })
+                    && err.contains("authorization view was built under"),
+                "{}: {}",
+                name,
+                err
+            );
+            assert_eq!(snapshot(&store), before, "{} changed something", name);
+        }
+    }
 }
