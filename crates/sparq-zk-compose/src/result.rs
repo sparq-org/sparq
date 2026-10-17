@@ -425,22 +425,44 @@ fn result_presentation_message(commitment: &Fr, salt: &Fr, status_ref: &Fr) -> F
     )
 }
 
+/// Which issuer message the relation of the member in hand folds.
+///
+/// sq-j506: the returned message is fed straight to the in-circuit Schnorr
+/// check, so it has to be the message THAT member recomputes. Deriving it from
+/// the policy flag alone would hand a method-bound message to a legacy relation
+/// that folds the unbound one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum FoldedMessage {
+    /// A `result_v5_*` member: the method-bound `ZKSIG_M5` presentation message.
+    MethodBound,
+    /// A retained legacy member: the method-unbound `ZKSIG_C3` commitment message.
+    Unbound,
+    /// Candidate admission, before any member is selected: either message, so
+    /// eligibility is decided by the policy alone and the selected member's own
+    /// check still applies afterwards.
+    BeforeSelection,
+}
+
 /// Authenticate one credential's COMMITMENT METHOD from its issuer signature and
-/// refuse anything that is not an attested string-canonical commitment.
+/// refuse anything the member in hand cannot prove over.
 ///
 /// Fail-closed, and the refusal is per-cause:
 /// - an attested method other than `StringCanonicalV1` (a dual-leaf credential,
 ///   say) is refused even though its signature is perfectly valid — its leaves
 ///   are not the shape this relation proves;
 /// - a method-UNBOUND attestation (the legacy `ZKSIG_C3`
-///   `commitment_message_with_status`) is refused: it attests the commitment,
-///   the salt and the status reference but NO method, and this relation will not
-///   substitute a default one. There is no opt-in here, because the circuit side
-///   has no unbound message to recompute.
+///   `commitment_message_with_status`) is refused by default: it attests the
+///   commitment, the salt and the status reference but NO method, and this
+///   relation will not substitute a default one.
+///   `ResultPolicy::admit_unbound_legacy` is the written-down opt-in;
+/// - a credential whose attestation class does not match the message the
+///   selected member folds is refused, rather than witnessed into a proof that
+///   could not succeed.
 ///
 /// On success the returned field is the exact message the in-circuit Schnorr
 /// check runs against, so host acceptance and circuit acceptance cannot diverge.
 fn authenticate_string_canonical(
+    folds: FoldedMessage,
     admit_unbound_legacy: bool,
     issuer: &PublicKey,
     signature: &Signature,
@@ -457,6 +479,15 @@ fn authenticate_string_canonical(
     let authenticated = classify(&candidates, |m| sig::verify(issuer, m, signature))
         .map_err(|e| reject(e.to_string()))?;
     match authenticated {
+        AuthenticatedMethod::Bound(CommitmentMethod::StringCanonicalV1)
+            if folds == FoldedMessage::Unbound =>
+        {
+            Err(reject(
+                "the selected successful-result member folds the method-unbound message, \
+so a method-bound attestation cannot be presented through it; this capacity \
+bucket has no method-bound member",
+            ))
+        }
         AuthenticatedMethod::Bound(CommitmentMethod::StringCanonicalV1) => {
             Ok(result_presentation_message(commitment, salt, status_ref))
         }
@@ -465,11 +496,13 @@ fn authenticate_string_canonical(
             m.scheme_iri()
         ))),
         // sq-j506: the method-UNBOUND `ZKSIG_C3` attestation is what the RETAINED
-        // `result_v1_*` / `result_v2_*` / `result_v3_*` members recompute, so the
-        // written-down downgrade returns exactly that message -- host acceptance
-        // and circuit acceptance still cannot diverge, because the message
-        // returned is the one the selected member's relation folds.
-        AuthenticatedMethod::Unbound if admit_unbound_legacy => {
+        // `result_v1_*` / `result_v2_*` / `result_v3_*` / `result_v4_*` members
+        // recompute, so the written-down downgrade returns exactly that message
+        // -- host acceptance and circuit acceptance still cannot diverge,
+        // because the message returned is the one the member in hand folds.
+        AuthenticatedMethod::Unbound
+            if admit_unbound_legacy && folds != FoldedMessage::MethodBound =>
+        {
             Ok(sig::commitment_message_with_status(commitment, salt, status_ref))
         }
         AuthenticatedMethod::Unbound => Err(reject(
@@ -562,7 +595,9 @@ fn bound_package(
         (1, 0, 10) => Ok(("result_v5_k1_n16_p3_r4_f0_d10", BOUND_VERSION)),
         (2, 0, 10) => Ok(("result_v5_k2_n16_p3_r4_f0_d10", BOUND_VERSION)),
         _ => Err(reject(
-            "no method-bound successful-result member at this capacity bucket;              issue at (credentials in {1,2}, no private predicate, status depth 10),              or take the written-down ResultPolicy::admit_unbound_legacy downgrade",
+            "no method-bound successful-result member at this capacity bucket; \
+issue at one or two credentials with no private predicate and status depth 10, \
+or take the written-down ResultPolicy::admit_unbound_legacy downgrade",
         )),
     }
 }
@@ -1155,6 +1190,7 @@ fn prepare_result_contract(
             // signature as valid: a dual-leaf credential's leaves are not the
             // shape this relation proves.
             authenticate_string_canonical(
+                FoldedMessage::BeforeSelection,
                 policy.admit_unbound_legacy,
                 &c.issuer,
                 &c.signature,
@@ -1299,6 +1335,14 @@ fn prepare_result_contract(
     };
     let (_, version) =
         contract.package(used.len(), hidden_filters, status_depth, policy.admit_unbound_legacy)?;
+    // sq-j506: the issuer message every selected credential is witnessed under is
+    // the one THIS member's relation folds, so a method-bound attestation is never
+    // witnessed into a legacy member (or the reverse).
+    let folded = if version == BOUND_VERSION {
+        FoldedMessage::MethodBound
+    } else {
+        FoldedMessage::Unbound
+    };
     // Shared private storage only: the signed wrapper emits its separate wire
     // type, omitting this unsigned-only capacity field, after proving succeeds.
     let presentation = ResultPresentation {
@@ -1365,6 +1409,7 @@ fn prepare_result_contract(
         let list = sig::status_list_id_to_field(&c.status_list);
         let reference = sig::status_ref_digest(&list, c.status_index, c.status_version);
         let message = authenticate_string_canonical(
+            folded,
             policy.admit_unbound_legacy,
             &c.issuer,
             &c.signature,
@@ -1660,11 +1705,16 @@ mod tests {
     fn triple(s: &str, p: &str, o: Term) -> Triple {
         Triple::new(iri(s), iri(p), o)
     }
+    /// sq-j506: signs the method-UNBOUND `ZKSIG_C3` message, because
+    /// [`fixture`]'s policy takes the `admit_unbound_legacy` downgrade and so
+    /// selects a RETAINED legacy member, whose relation folds exactly that
+    /// message. Method-bound fixtures are built with
+    /// [`credential_signed_over`] and a default policy.
     fn credential(triples: Vec<Triple>, seed: u64, index: u64, list: &str) -> ResultCredential {
         let graph = commit_triples(&triples, Fr::from(seed + 100)).unwrap();
         let sk = SecretKey::from_seed(seed);
         let status = sig::status_ref_digest(&sig::status_list_id_to_field(list), index, 7);
-        let message = result_presentation_message(&graph.commitment, &graph.salt, &status);
+        let message = sig::commitment_message_with_status(&graph.commitment, &graph.salt, &status);
         ResultCredential {
             graph,
             issuer: sk.public_key(),
@@ -1839,14 +1889,25 @@ mod tests {
     /// verified. Without this the refusals below could pass vacuously.
     #[test]
     fn a_method_bound_string_canonical_credential_authenticates() {
-        let (credentials, _, _, _) = fixture();
-        let c = &credentials[0];
+        let c = credential_signed_over(
+            vec![triple(
+                "urn:alice",
+                "urn:name",
+                Term::Literal(Literal::new_simple_literal("Alice")),
+            )],
+            1,
+            3,
+            "urn:status:people",
+            result_presentation_message,
+        );
+        let c = &c;
         let reference = sig::status_ref_digest(
             &sig::status_list_id_to_field(&c.status_list),
             c.status_index,
             c.status_version,
         );
         let message = authenticate_string_canonical(
+            FoldedMessage::MethodBound,
             false,
             &c.issuer,
             &c.signature,
@@ -1854,7 +1915,7 @@ mod tests {
             &c.graph.salt,
             &reference,
         )
-        .expect("the fixture credential is method-bound string-canonical");
+        .expect("a method-bound string-canonical credential authenticates");
         assert_eq!(
             field_to_hex(&message),
             field_to_hex(&result_presentation_message(
@@ -1895,6 +1956,7 @@ mod tests {
             &c.signature
         ));
         let err = authenticate_string_canonical(
+            FoldedMessage::MethodBound,
             false,
             &c.issuer,
             &c.signature,
@@ -1934,6 +1996,7 @@ mod tests {
             c.status_version,
         );
         let message = authenticate_string_canonical(
+            FoldedMessage::Unbound,
             true,
             &c.issuer,
             &c.signature,
@@ -1960,6 +2023,95 @@ mod tests {
                 &reference
             ))
         );
+    }
+
+    /// The returned message follows the MEMBER, not the policy flag. A
+    /// method-bound attestation presented through a retained legacy member is
+    /// refused by name: that relation folds the method-unbound message, so
+    /// witnessing the bound message into it could not prove anyway, and the
+    /// reverse pairing is refused too.
+    #[test]
+    fn the_message_follows_the_selected_member_in_both_directions() {
+        let bound = credential_signed_over(
+            vec![triple(
+                "urn:alice",
+                "urn:name",
+                Term::Literal(Literal::new_simple_literal("Alice")),
+            )],
+            1,
+            3,
+            "urn:status:people",
+            result_presentation_message,
+        );
+        let unbound = credential_signed_over(
+            vec![triple(
+                "urn:alice",
+                "urn:name",
+                Term::Literal(Literal::new_simple_literal("Alice")),
+            )],
+            1,
+            3,
+            "urn:status:people",
+            sig::commitment_message_with_status,
+        );
+        let reference = sig::status_ref_digest(
+            &sig::status_list_id_to_field(&bound.status_list),
+            bound.status_index,
+            bound.status_version,
+        );
+        // A method-bound credential through a legacy member -- refused even
+        // though the downgrade is taken, because the pairing is incoherent.
+        let err = authenticate_string_canonical(
+            FoldedMessage::Unbound,
+            true,
+            &bound.issuer,
+            &bound.signature,
+            &bound.graph.commitment,
+            &bound.graph.salt,
+            &reference,
+        )
+        .expect_err("a bound attestation must not be witnessed into a legacy relation");
+        assert!(
+            err.to_string().contains("folds the method-unbound message"),
+            "unexpected refusal: {}",
+            err
+        );
+        // And an unbound credential through a method-bound member, downgrade or
+        // not.
+        for admit in [false, true] {
+            let err = authenticate_string_canonical(
+                FoldedMessage::MethodBound,
+                admit,
+                &unbound.issuer,
+                &unbound.signature,
+                &unbound.graph.commitment,
+                &unbound.graph.salt,
+                &reference,
+            )
+            .expect_err("the downgrade must not reach a method-bound member");
+            assert!(
+                err.to_string().contains("attests no commitment method"),
+                "unexpected refusal: {}",
+                err
+            );
+        }
+        // Each is accepted in its own coherent pairing, so neither refusal
+        // above is vacuous.
+        for (c, folds, admit) in [
+            (&bound, FoldedMessage::MethodBound, false),
+            (&unbound, FoldedMessage::Unbound, true),
+        ] {
+            authenticate_string_canonical(
+                folds,
+                admit,
+                &c.issuer,
+                &c.signature,
+                &c.graph.commitment,
+                &c.graph.salt,
+                &reference,
+            )
+            .expect("the coherent pairing authenticates");
+        }
     }
 
     /// Issuance is METHOD-BOUND by default: a covered capacity bucket selects a
@@ -2030,6 +2182,7 @@ mod tests {
                 c.status_version,
             );
             let err = authenticate_string_canonical(
+                FoldedMessage::MethodBound,
                 false,
                 &c.issuer,
                 &c.signature,
