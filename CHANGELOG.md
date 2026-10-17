@@ -134,6 +134,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-reason (N3 backward chaining):** the per-goal cost of naming a backward renaming by
+  its proof-tree fingerprint is reduced, with no change to any name, answer or refusal. A goal's
+  canonical identity key is built into one pre-sized buffer with the length prefix written
+  straight into it, instead of a fresh string per term and a fresh string per length; the walk
+  that resolves a goal's variables to the end of their chains now BORROWS the terms it did not
+  have to rebuild, and keeps its occurs-check stack by reference; a candidate rule application
+  folds its node key once rather than three times, and renders its `__bw<n>_` prefix without
+  allocating. `log:conclusion` on a nested formula with no `<=` rule no longer registers that
+  formula's scope salt: a purely forward nested closure can mint no name, so it no longer spends
+  the run's backward identity allowance nor grows the run's tables, and the salt's value is
+  unchanged either way. Every `__bw<n>_` name, derived fact, proof, `why()` string and
+  `sparq-prov` IRI is byte-identical, and the W3C N3 inference conformance report is unchanged.
+
 - **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
   recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that
   commitment, instead of from whichever entry the prover listed first. All such entries must carry

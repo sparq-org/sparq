@@ -826,38 +826,63 @@ pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) ->
 /// per-term limit, so the three terms of an atom are counted apart as [`substitute`]
 /// counts them. A goal that has no identity cannot be named, so `backward_prove` fails
 /// the run on it rather than return an empty proof, which would read as "not provable".
+///
+/// The OWNING form, which is what this module's tests pin the walk through; the evaluation
+/// itself goes through [`walked_atom_cow`], of which this is a clone of each term.
+#[cfg(test)]
 pub(crate) fn walked_atom(
     g: &[Term; 3],
     b: &super::Binding,
     run: &Truncation,
 ) -> Option<[Term; 3]> {
+    walked_atom_cow(g, b, run).map(|ts| ts.map(std::borrow::Cow::into_owned))
+}
+
+/// [`walked_atom`] without copying the terms it did not have to build: each term comes back
+/// BORROWED when the walk left it as it found it (a leaf, resolved or not — which is every
+/// term of an ordinary goal) and OWNED only where a compound was rebuilt member by member.
+///
+/// [`walked_atom`] is this plus a clone of each, and is what a caller that needs the atom
+/// itself uses. A caller that only READS the walked goal — building its canonical key, which
+/// is all `backward_prove` wants it for — takes this instead, because cloning three terms
+/// per goal of the proof search was a per-goal allocation GH #7095 added for nothing
+/// (GH #6844 follow-up). One walk, one set of refusals: there is no second implementation of
+/// the walk to drift from this one.
+pub(crate) fn walked_atom_cow<'a>(
+    g: &'a [Term; 3],
+    b: &'a super::Binding,
+    run: &Truncation,
+) -> Option<[std::borrow::Cow<'a, Term>; 3]> {
     let room = run.term_depth.get();
     // One byte counter PER TERM: `max_term_bytes` bounds one term, so three terms that are
     // each admissible on their own must not refuse the atom by their sum. The occurs-check
     // stack is per term too: it holds the variables THIS term's walk is inside.
-    let walk_term = |t: &Term| walked(t, b, run, room, &mut 0usize, &mut Vec::new());
+    let walk_term = |t: &'a Term| walked(t, b, run, room, &mut 0usize, &mut Vec::new());
     Some([walk_term(&g[0])?, walk_term(&g[1])?, walk_term(&g[2])?])
 }
 
 /// One term of [`walked_atom`], `room` levels of nesting and `spent` bytes of the atom's
 /// allowance in, with `open` naming the variables whose expansion this walk is inside.
 /// Private: callers go through [`walked_atom`].
-fn walked(
-    t: &Term,
-    b: &super::Binding,
+fn walked<'a>(
+    t: &'a Term,
+    b: &'a super::Binding,
     run: &Truncation,
     room: usize,
     spent: &mut usize,
-    open: &mut Vec<String>,
-) -> Option<Term> {
+    open: &mut Vec<&'a str>,
+) -> Option<std::borrow::Cow<'a, Term>> {
     // The occurs check: a variable this walk is already inside the expansion of is the
     // formula's own name and stays as it is.
-    let own = matches!(t, Term::Var(v) if open.iter().any(|o| o == v));
-    let resolved = if own { t.clone() } else { super::walk(t, b) };
+    let own = matches!(t, Term::Var(v) if open.iter().any(|o| *o == v));
+    // BORROWED ([`super::walk_ref`]): the resolved term is only read here, and a compound is
+    // rebuilt member by member below, so cloning it first deep-copied a formula or a list
+    // that was then thrown away (GH #6844 follow-up).
+    let resolved: &Term = if own { t } else { super::walk_ref(t, b) };
     let compound = matches!(resolved, Term::List(_) | Term::Triple(_) | Term::Formula(_));
     // A compound is charged for its own node here and for its members as they resolve; a
     // leaf is charged for all of itself at once.
-    let node = if compound { TERM_NODE_BYTES } else { term_bytes(&resolved) };
+    let node = if compound { TERM_NODE_BYTES } else { term_bytes(resolved) };
     *spent = spent.saturating_add(node);
     if substituted_refused(run, *spent) {
         return None;
@@ -866,7 +891,7 @@ fn walked(
     // compound may take a level off `room`: a leaf resolved at the boundary (`room` 0) is
     // returned, not refused and not counted (which would underflow).
     if !compound {
-        return Some(resolved);
+        return Some(std::borrow::Cow::Borrowed(resolved));
     }
     if room == 0 {
         return settle(run, Bounded::cut(None, TERM_DEPTH_CUT));
@@ -874,14 +899,16 @@ fn walked(
     // Descending into the value of a variable: that variable is OPEN for the walk below,
     // so an occurrence of it inside its own value is left alone by the check above. Popped
     // after, and a refusal below abandons the whole atom, so the stack is never read again.
+    // `&str`, not an owned `String`: the name lives in `t`, which outlives this walk, so
+    // the occurs-check stack no longer copies a variable name per descent.
     let expanded = match t {
         Term::Var(v) if !own => {
-            open.push(v.clone());
+            open.push(v.as_str());
             true
         }
         _ => false,
     };
-    let out = walked_members(resolved, b, run, room - 1, spent, open);
+    let out = walked_members(resolved, b, run, room - 1, spent, open).map(std::borrow::Cow::Owned);
     if expanded {
         open.pop();
     }
@@ -891,39 +918,41 @@ fn walked(
 /// The members of compound `resolved`, each walked with `inner` levels of room left: the
 /// descending half of [`walked`], split out so its caller can pop the occurs-check stack
 /// on every path out of it.
-fn walked_members(
-    resolved: Term,
-    b: &super::Binding,
+fn walked_members<'a>(
+    resolved: &'a Term,
+    b: &'a super::Binding,
     run: &Truncation,
     inner: usize,
     spent: &mut usize,
-    open: &mut Vec<String>,
+    open: &mut Vec<&'a str>,
 ) -> Option<Term> {
     Some(match resolved {
         Term::List(ms) => {
             let mut out = Vec::with_capacity(ms.len());
-            for m in &ms {
-                out.push(walked(m, b, run, inner, spent, open)?);
+            for m in ms {
+                out.push(walked(m, b, run, inner, spent, open)?.into_owned());
             }
             Term::List(out)
         }
         Term::Triple(tr) => Term::Triple(Box::new([
-            walked(&tr[0], b, run, inner, spent, open)?,
-            walked(&tr[1], b, run, inner, spent, open)?,
-            walked(&tr[2], b, run, inner, spent, open)?,
+            walked(&tr[0], b, run, inner, spent, open)?.into_owned(),
+            walked(&tr[1], b, run, inner, spent, open)?.into_owned(),
+            walked(&tr[2], b, run, inner, spent, open)?.into_owned(),
         ])),
         Term::Formula(ts) => {
             let mut out = Vec::with_capacity(ts.len());
-            for r in &ts {
+            for r in ts {
                 out.push([
-                    walked(&r[0], b, run, inner, spent, open)?,
-                    walked(&r[1], b, run, inner, spent, open)?,
-                    walked(&r[2], b, run, inner, spent, open)?,
+                    walked(&r[0], b, run, inner, spent, open)?.into_owned(),
+                    walked(&r[1], b, run, inner, spent, open)?.into_owned(),
+                    walked(&r[2], b, run, inner, spent, open)?.into_owned(),
                 ]);
             }
             Term::Formula(out)
         }
-        other => other,
+        // Not reachable: only a compound descends here. Cloned rather than moved now that
+        // the compound is borrowed, which costs nothing on a path nothing takes.
+        other => other.clone(),
     })
 }
 
@@ -2208,6 +2237,64 @@ mod tests {
     /// #6844: `walked_atom` resolves every variable of a goal to the END of its chain,
     /// inside lists and quoted triples, keeps a quoted formula as the value it is, and
     /// stops a chain that walks back into itself instead of following it forever.
+    /// `walked_atom_cow` is the walk the evaluation runs, and `walked_atom` is it plus a
+    /// clone of each term. They must agree on the terms AND on the refusals, because the
+    /// three `walked_atom` tests beside this one pin the walk through the owning form while
+    /// `backward_prove` goes through the borrowing one.
+    ///
+    /// It also pins WHICH terms are borrowed, since that is the whole point: a term the
+    /// walk left as it found it is borrowed, and only a rebuilt compound is owned. An
+    /// ordinary goal's three terms are leaves, so an ordinary goal copies nothing.
+    #[test]
+    fn walked_atom_cow_borrows_what_walked_atom_copied() {
+        use std::borrow::Cow;
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let var = |s: &str| Term::Var(s.to_string());
+        let run = Truncation::top_level();
+        let mut b = super::super::Binding::default();
+        b.insert("bound".into(), iri("http://ex/v"));
+        b.insert("chain".into(), var("bound"));
+        b.insert("list".into(), Term::List(vec![var("chain"), iri("http://ex/w")]));
+        b.insert("cyc".into(), Term::Formula(vec![[var("cyc"), iri("http://ex/q"), var("bound")]]));
+        let goals = vec![
+            // Every term a leaf: nothing is copied.
+            [iri("http://ex/a"), iri("http://ex/p"), var("free")],
+            [var("bound"), iri("http://ex/p"), var("chain")],
+            // A compound is rebuilt, so it is owned; its siblings are still borrowed.
+            [var("list"), iri("http://ex/p"), var("bound")],
+            [Term::List(vec![var("chain"), var("chain")]), iri("http://ex/p"), var("free")],
+            // The cyclic formula the occurs check stops.
+            [var("cyc"), iri("http://ex/p"), var("free")],
+            [
+                Term::Triple(Box::new([var("bound"), iri("http://ex/p"), var("free")])),
+                iri("http://ex/p"),
+                iri("http://ex/o"),
+            ],
+        ];
+        for g in &goals {
+            let owned = walked_atom(g, &b, &run);
+            let borrowed = walked_atom_cow(g, &b, &run);
+            match (&owned, &borrowed) {
+                (Some(o), Some(c)) => {
+                    for (i, (ot, ct)) in o.iter().zip(c.iter()).enumerate() {
+                        assert_eq!(ot, ct.as_ref(), "term {i} of {g:?}");
+                        // A leaf the walk did not rebuild is BORROWED; a compound it built
+                        // member by member is OWNED.
+                        let compound =
+                            matches!(ot, Term::List(_) | Term::Triple(_) | Term::Formula(_));
+                        assert_eq!(
+                            matches!(ct, Cow::Owned(_)),
+                            compound,
+                            "term {i} of {g:?} is owned exactly when it was rebuilt"
+                        );
+                    }
+                }
+                (None, None) => {}
+                _ => panic!("the two walks disagreed on whether {g:?} is admissible"),
+            }
+        }
+    }
+
     #[test]
     fn walked_atom_resolves_chains_and_stops_a_cyclic_one() {
         use super::super::{Binding, Term};
