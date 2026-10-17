@@ -324,6 +324,10 @@ pub const MAX_CARDINALITY: u32 = 64;
 /// The most states the automaton of one non-simple role may have.
 pub const MAX_AUTOMATON_STATES: u32 = 4096;
 
+/// The deepest nesting of non-simple roles one automaton may embed (each level is a
+/// recursive construction step).
+pub const MAX_AUTOMATON_DEPTH: usize = 256;
+
 /// A finite automaton over roles: state 0 is initial and state 1 final.
 #[derive(Clone, Debug)]
 struct Nfa {
@@ -821,6 +825,11 @@ impl Builder<'_> {
         if stack.contains(&k) {
             return Err(self.unsupported("an irregular property hierarchy"));
         }
+        if stack.len() >= MAX_AUTOMATON_DEPTH {
+            return Err(
+                self.unsupported("a property hierarchy nested deeper than MAX_AUTOMATON_DEPTH")
+            );
+        }
         stack.push(k);
         let mut a = Nfa {
             states: 2,
@@ -863,6 +872,9 @@ impl Builder<'_> {
                 // `R ∘ R ⊑ R`.
                 (true, true) if middle.is_empty() => {
                     a.eps.push((1, 0));
+                    if a.too_big() {
+                        return Err(too_big(self));
+                    }
                     continue;
                 }
                 (true, true) => return Err(self.unsupported("an irregular property hierarchy")),
@@ -892,6 +904,9 @@ impl Builder<'_> {
             }
         }
         stack.pop();
+        if a.too_big() {
+            return Err(too_big(self));
+        }
         self.automata.insert(k, a.clone());
         Ok(a)
     }
