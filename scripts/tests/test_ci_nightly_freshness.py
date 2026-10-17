@@ -173,12 +173,26 @@ class Admission(unittest.TestCase):
         self.blocked(api, "conclusion")
         self.assertEqual(len(api.calls), 1)
 
-    def test_active_or_unreadable_same_head_never_admits(self):
-        for status, conclusion in [("in_progress", None), ("queued", None), ("completed", None)]:
+    def test_active_same_head_stands_down_and_unreadable_blocks(self):
+        # A Saturday sweep still running at Sunday's tick: no admission, but no red gate either.
+        for status in freshness.ACTIVE_STATUSES:
+            with self.subTest(status=status):
+                api = FakeAPI([run(status=status, conclusion=None)])
+                fresh, reason = self.readable_decision(api)
+                self.assertFalse(fresh)
+                self.assertIn("still active", reason)
+                self.assertEqual(len(api.calls), 1)
+        for status, conclusion in [("completed", None), ("mystery", None), ("in_progress", "success")]:
             with self.subTest(status=status, conclusion=conclusion):
                 api = FakeAPI([run(status=status, conclusion=conclusion)])
                 self.blocked(api)
                 self.assertEqual(len(api.calls), 1)
+        # An active run beside any unreadable one still blocks.
+        for status, conclusion in [("mystery", None), ("completed", None), ("queued", "success")]:
+            with self.subTest(beside_active=(status, conclusion)):
+                api = FakeAPI([run(status="in_progress", conclusion=None),
+                               run(998, status=status, conclusion=conclusion)])
+                self.blocked(api, "unreadable")
 
     def test_manual_force_and_other_events_never_read_history(self):
         for event in ["workflow_dispatch", "merge_group", "push", "pull_request", "unknown", ""]:
@@ -461,14 +475,18 @@ class ProductionWiring(unittest.TestCase):
         for key in ["coverage-nightly", "mutants-nightly-advisory"]:
             self.assertEqual(self.jobs[key]["needs"], "nightly-gate")
         self.assertEqual(self.jobs["coverage-nightly"]["if"], "needs.nightly-gate.outputs.fresh == 'true'")
-        # The mutation sweep is weekly: the Saturday cron (or a manual force) behind the same gate.
+        # The mutation sweep is weekly: the Saturday cron, or a dispatch that opts in, behind
+        # the same gate. A plain dispatch of the full suite must not start a sweep.
         self.assertEqual(self.mutation["if"],
-                         "needs.nightly-gate.outputs.fresh == 'true' && (github.event_name == "
-                         "'workflow_dispatch' || github.event.schedule == '17 3 * * 6')")
+                         "needs.nightly-gate.outputs.fresh == 'true' && ((github.event_name == "
+                         "'workflow_dispatch' && inputs.mutation_sweep) || github.event.schedule "
+                         "== '17 3 * * 6')")
+        opt_in = self.workflow[True]["workflow_dispatch"]["inputs"]["mutation_sweep"]
+        self.assertEqual((opt_in["type"], opt_in["default"]), ("boolean", False))
         # PyYAML reads the `on:` key as True.
         crons = [s["cron"] for s in self.workflow[True]["schedule"]]
         self.assertEqual(crons, ["17 3 * * 0-5", "17 3 * * 6"])
-        self.assertEqual(self.mutation["strategy"]["max-parallel"], 8)
+        self.assertEqual(self.mutation["strategy"]["max-parallel"], 3)
         self.assertFalse(self.mutation["strategy"]["fail-fast"])
         self.assertTrue(self.mutation["continue-on-error"])
         self.assertTrue(self.producer["continue-on-error"])
@@ -477,6 +495,24 @@ class ProductionWiring(unittest.TestCase):
                          (10, 100, 2))
         self.assertEqual(freshness.ACTIVE_STATUSES,
                          ("queued", "in_progress", "waiting", "requested", "pending"))
+
+    def test_saturday_sweep_has_its_own_concurrency_group(self):
+        # At three runners the sweep outlives Sunday's tick. Evaluate the group expression for
+        # each trigger: weekday ticks share a group (a newer nightly supersedes the last one),
+        # while the Saturday tick and a dispatch each get their own, so neither cancels a sweep.
+        concurrency = self.workflow["concurrency"]
+        self.assertIs(concurrency["cancel-in-progress"], True)
+        group = concurrency["group"]
+        self.assertEqual(group, "ci-${{ github.ref }}-${{ github.event.schedule || github.event_name }}")
+
+        def resolve(event, schedule=""):
+            return (group.replace("${{ github.ref }}", "refs/heads/main")
+                    .replace("${{ github.event.schedule || github.event_name }}", schedule or event))
+
+        weekday = resolve("schedule", "17 3 * * 0-5")
+        saturday = resolve("schedule", "17 3 * * 6")
+        dispatch = resolve("workflow_dispatch")
+        self.assertEqual(len({weekday, saturday, dispatch}), 3)
 
     def test_expected_matrix_count_matches_live_expansion(self):
         matrix = self.mutation["strategy"]["matrix"]
