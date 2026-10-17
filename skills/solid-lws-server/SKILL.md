@@ -112,10 +112,9 @@ without `acl:Read` appends the statements, as N-Triples lines stored on their ow
 is stored, without reading or rewriting it: only the resource's record is read, so whether it
 succeeds, and the time and room it takes, do not depend on what is stored (its type, size or
 whether it parses). Reads show the appended statements after a Turtle, N-Triples or N-Quads
-document's own (the last into its default graph), and merged into a JSON-LD document, which is
-then served re-serialised (its named graphs dropped, as a `PATCH` drops them; one that does not
-parse is served as stored); a document of any other type is served as stored, what was appended
-to it kept but not shown. Once 16 appends stand they are merged into the document in the
+document's own (the last into its default graph), merged into a JSON-LD document, which is
+then served re-serialised (its named graphs dropped, as a `PATCH` drops them), and as lines after
+the bytes of a document of any other type, or of a JSON-LD document that does not parse. Once 16 appends stand they are merged into the document in the
 background, content and validators unchanged; past 64 not yet merged, an append is answered
 `503` (`Retry-After`) until they are. Residual: that `503` follows how many others appended
 meanwhile. A

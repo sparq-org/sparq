@@ -1406,40 +1406,35 @@ pub const APPEND_LIMIT: usize = 64;
 /// What a resource stored as `content_type` holds, from its bytes and the segments appended to
 /// them (each N-Triples lines, [`Store::append`]), in order (`parts`, the bytes first).
 ///
-/// A Turtle, N-Triples or N-Quads document takes them as lines after its own (the last statement
-/// of each into its default graph). A JSON-LD document is read with them and written again as
-/// JSON-LD; one that does not read as JSON-LD stays as it is. Any other type keeps its bytes: what
-/// was appended to it is kept, never shown.
+/// A JSON-LD document is read with them and written again as JSON-LD. Any other, and a JSON-LD
+/// document that does not read as JSON-LD, takes them as lines after its own bytes (in a Turtle,
+/// N-Triples or N-Quads document, the last statement of each into its default graph). So what
+/// was appended is always kept, compaction included.
 fn merged(iri: &str, content_type: &str, mut parts: Vec<Bytes>) -> Bytes {
     use crate::ldp::content::{parse_to_triples, serialize_triples, stored_format, RdfFormat};
     if parts.len() == 1 {
         return parts.pop().unwrap_or_default();
     }
-    let base = parts.remove(0);
-    match stored_format(content_type) {
-        Some(RdfFormat::Turtle | RdfFormat::NTriples | RdfFormat::NQuads) => {
-            let mut body =
-                Vec::with_capacity(base.len() + parts.iter().map(|p| p.len() + 1).sum::<usize>());
-            for part in std::iter::once(&base).chain(&parts) {
-                if !body.is_empty() && !body.ends_with(b"\n") {
-                    body.push(b'\n');
-                }
-                body.extend_from_slice(part);
+    if stored_format(content_type) == Some(RdfFormat::JsonLd) {
+        let all = || -> ServerResult<Vec<u8>> {
+            let mut triples = parse_to_triples(RdfFormat::JsonLd, &parts[0], iri)?;
+            for part in &parts[1..] {
+                triples.extend(parse_to_triples(RdfFormat::NTriples, part, iri)?);
             }
-            Bytes::from(body)
+            serialize_triples(RdfFormat::JsonLd, &triples)
+        };
+        if let Ok(body) = all() {
+            return Bytes::from(body);
         }
-        Some(RdfFormat::JsonLd) => {
-            let all = || -> ServerResult<Vec<u8>> {
-                let mut triples = parse_to_triples(RdfFormat::JsonLd, &base, iri)?;
-                for part in &parts {
-                    triples.extend(parse_to_triples(RdfFormat::NTriples, part, iri)?);
-                }
-                serialize_triples(RdfFormat::JsonLd, &triples)
-            };
-            all().map(Bytes::from).unwrap_or(base)
-        }
-        _ => base,
     }
+    let mut body = Vec::with_capacity(parts.iter().map(|p| p.len() + 1).sum::<usize>());
+    for part in &parts {
+        if !body.is_empty() && !body.ends_with(b"\n") {
+            body.push(b'\n');
+        }
+        body.extend_from_slice(part);
+    }
+    Bytes::from(body)
 }
 
 /// A [`SparqError`] as the server reports it.
@@ -1631,8 +1626,8 @@ mod tests {
         ))
     }
 
-    /// What was appended shows in each RDF type a document can be stored as, after what it held;
-    /// any other type keeps its bytes as they were.
+    /// What was appended shows in each type a document can be stored as, after what it held, and
+    /// a compaction keeps it.
     #[tokio::test]
     async fn appended_statements_merge_by_stored_type() {
         let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
@@ -1652,6 +1647,7 @@ mod tests {
                 r##"{"@id": "#a", "https://e.example/p": "0"}"##,
             ),
             ("text/plain", "not rdf {"),
+            ("application/ld+json", "{ not json-ld"),
         ];
         for (ct, body) in docs {
             let base = store.write(d, Bytes::from(body), ct).await.unwrap();
@@ -1676,8 +1672,7 @@ mod tests {
             assert_eq!(store.read_at(d, &two).await.unwrap(), read.body);
             let text = String::from_utf8(read.body.to_vec()).unwrap();
             match ct {
-                "text/plain" => assert_eq!(text, body),
-                "application/ld+json" => {
+                "application/ld+json" if body.starts_with("{\"") => {
                     let triples = crate::ldp::content::parse_to_triples(
                         crate::ldp::content::RdfFormat::JsonLd,
                         text.as_bytes(),
@@ -1698,6 +1693,9 @@ mod tests {
                     );
                 }
             }
+            // A compaction keeps what was appended, whatever the type.
+            assert!(store.compact(d).await.unwrap(), "{ct}");
+            assert_eq!(store.read(d).await.unwrap().body, read.body, "{ct}");
         }
     }
 
