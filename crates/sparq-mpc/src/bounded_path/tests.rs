@@ -564,6 +564,43 @@ fn min_greater_than_max_is_protocol_error() {
     assert!(matches!(err, MpcError::Protocol(_)));
 }
 
+/// HOP-COUNT GUARD: the chain cap does not bind on a ONE-way step, whose projected
+/// chain count is `k - m + 1` however large the public `k` is — yet each chain of
+/// length `L` is an `L`-hop join fold, so the unrolled work still grows with `k`.
+/// [`MAX_UNROLL_HOPS`] refuses that before the chain projection is even computed.
+#[test]
+fn over_hop_cap_unroll_is_refused_before_planning() {
+    let edges = disclosed_edges(&[("ex:a ex:p ex:b .", &["http://ex/p"])]);
+    let one_way = || PathStep::predicate(nn("http://ex/p"));
+
+    for max in [MAX_UNROLL_HOPS + 1, 1_000_000] {
+        // The chain cap would ACCEPT this path, so the refusal below is the hop
+        // cap's alone: a one-way step projects to `max` chains for `{1,max}`.
+        assert!(
+            (max as u64) <= MAX_UNROLL_CHAINS,
+            "the projected chain count must sit under the chain cap for this case"
+        );
+        let form = PathForm::repeat_step(one_way(), 1, max);
+        let err = eval_bounded_path_disclosed(&edges, &form).unwrap_err();
+        match &err {
+            MpcError::Protocol(msg) => assert!(
+                msg.contains("MAX_UNROLL_HOPS") && msg.contains("hops per chain"),
+                "the error should name the hop cap, got: {msg}"
+            ),
+            other => panic!("an over-hop-cap unroll must be a Protocol error, got {other:?}"),
+        }
+    }
+
+    // Under the cap, a one-way repetition still evaluates.
+    let form = PathForm::repeat_step(one_way(), 1, 1);
+    let got = eval_bounded_path_disclosed(&edges, &form).unwrap();
+    assert_eq!(
+        got.rows.len(),
+        1,
+        "a 1-hop one-way repetition must still evaluate"
+    );
+}
+
 /// UNROLL-SIZE GUARD: a bounded path whose alternation unroll would exceed
 /// [`MAX_UNROLL_CHAINS`] is rejected with a controlled `MpcError::Protocol` BEFORE
 /// any chain is generated — no panic, no OOM, no `usize`-overflow `with_capacity`.
