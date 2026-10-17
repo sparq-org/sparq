@@ -1675,6 +1675,27 @@ mod tests {
             checked_candidate_pairs(512, 512).is_ok(),
             "the cap is a cap"
         );
+
+        // The combined preflight the builders call: it refuses the overflow, the
+        // over-cap product and a `B` that cannot cover the product, and hands back
+        // the count on the way through.
+        assert!(
+            check_candidate_pairs_within_bound(MAX_OUTPUT_BOUND, usize::MAX, 2).is_err(),
+            "the preflight must refuse an overflowing product"
+        );
+        assert!(
+            check_candidate_pairs_within_bound(MAX_OUTPUT_BOUND, 1024, 1024).is_err(),
+            "the preflight must refuse an over-cap product"
+        );
+        assert!(
+            check_candidate_pairs_within_bound(3, 2, 2).is_err(),
+            "the preflight must refuse a bound that cannot cover the product"
+        );
+        assert_eq!(
+            check_candidate_pairs_within_bound(4, 2, 2).unwrap(),
+            4,
+            "and it hands back the count it checked"
+        );
     }
 
     /// A bound past [`MAX_OUTPUT_BOUND`] — including `usize::MAX`, which would
