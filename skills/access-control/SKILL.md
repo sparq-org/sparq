@@ -141,19 +141,26 @@ Materialize the authorization view from the access-control documents, then enfor
   installed, and is not removed at any point in it; it loses them otherwise (so an `.acr`
   stored by an edit the store was not told of keeps nothing). So the facts of a dropped document, or of an emptied container, are
   kept with its `.acr` and come back with the resource only while that `.acr` stays stored
-  (a `.acl` keeps nothing, as the ACP view never reads one). A SPARQL update and the MCP
-  server never record a creator; a direct edit (below)
-  records its agent as creator of a new resource whose own `.acr` was not already
-  stored. A commit refused at its
+  (a `.acl` keeps nothing, as the ACP view never reads one). A SPARQL update never records a
+  creator; a direct edit (below) records its agent as creator of the resources it names that
+  the edit brings into being, unless the resource's own `.acr` was already stored. A container
+  the edit brings into being alongside a resource it names — an ancestor with nothing stored
+  below it before — is not one of them, so a writer never becomes the creator of a container
+  above what it wrote. A commit refused at its
   commit point unwritten changes nothing; any other failed commit (part of the update may be
   applied, or journaled for a reopen to replay) drops the view, and `materialize_acp()`
-  refuses until the context is passed again. A caller that edits `store.graph` directly
-  takes `store.stored_graphs()` first and then calls
-  `store.rematerialize_after_edit(&before, creator, acp)` (the MCP server does, with no
-  creator), which
-  applies the same rule and installs the view and provenance together only on success.
+  refuses until the context is passed again. The dataset is read through `store.graph()`; a
+  caller that edits it through `store.graph_unchecked_mut()` takes `store.stored_graphs()`
+  first and then calls
+  `store.rematerialize_after_edit(&before, creator, created, acp)` — `created` naming the
+  resources `creator` created — which
+  applies the same rule and installs the view and provenance together only on success. It
+  refuses when `acp` is not the model the view in force was built under, as the update entry
+  points do, rather than replacing that view (the MCP server passes its session agent and the
+  resource its call created). `store.holds_resource(iri)` asks whether `iri` is a resource of
+  the view, the store's own enumeration.
   `store.acp_provenance()` reads the stored provenance. A resource removed by editing
-  `store.graph` without that call is forgotten at the next rebuild, WAC or ACP (unless its
+  the dataset without that call is forgotten at the next rebuild, WAC or ACP (unless its
   own `.acr` is stored and was at the previous install; facts passed back unchanged to
   `materialize_acp_with*` are judged the same way), so rebuild before creating it again. The view is rebuilt for a provenance change only when its `.acr`
   documents name `acp:CreatorAgent` or `acp:OwnerAgent`.

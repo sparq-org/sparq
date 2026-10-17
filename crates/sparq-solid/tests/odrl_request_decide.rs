@@ -853,7 +853,7 @@ fn grants_need_a_current_covered_graph() {
         "nquads",
     )
     .expect("loads");
-    s.graph.named.extend(added.named);
+    s.graph_unchecked_mut().named.extend(added.named);
     assert!(!s.decide(&bob, fresh, Mode::Read).allow, "created since the materialization");
     assert!(!reads(&s, &bob, fresh));
     s.materialize_wac().expect("wac");

@@ -119,18 +119,18 @@ fn deleting_last_matcher_attribute_revokes_cached_query_access() {
     assert_read(&store, Some(RECIPIENT), true);
     assert_read(&store, None, false);
 
-    sparq_engine::update_in_place(&mut store.graph, &format!("DELETE DATA {{ {body} }}")).unwrap();
+    sparq_engine::update_in_place(store.graph_unchecked_mut(), &format!("DELETE DATA {{ {body} }}")).unwrap();
     store.materialize_acp().unwrap();
     assert_read(&store, Some(RECIPIENT), false);
     assert_read(&store, None, false);
 
     // Rebuild from the stored graph as well: denial must not depend on a warm cache.
-    let mut reopened = PodStore::new(store.graph.fork());
+    let mut reopened = PodStore::new(store.graph().fork());
     reopened.materialize_acp().unwrap();
     assert_read(&reopened, Some(RECIPIENT), false);
     assert_read(&reopened, None, false);
 
-    sparq_engine::update_in_place(&mut reopened.graph, &format!("INSERT DATA {{ {body} }}"))
+    sparq_engine::update_in_place(reopened.graph_unchecked_mut(), &format!("INSERT DATA {{ {body} }}"))
         .unwrap();
     reopened.materialize_acp().unwrap();
     assert_read(&reopened, Some(RECIPIENT), true);

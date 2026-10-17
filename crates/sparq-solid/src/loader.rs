@@ -179,7 +179,8 @@ fn refuse_inadmissible(doc: &str, added: &[[Term; 3]]) -> Result<(), String> {
 /// ACP store, a statement that uses (as an access control, a policy or a matcher) a node of
 /// another access-control resource the loader would reject in the state the write leaves,
 /// which would reject the written one with it. The rejected set is computed at most once per
-/// write.
+/// write. The refusal names the statement the write sent and says nothing about the state of
+/// the document it reaches into.
 pub(crate) struct ControlWrites<'g> {
     graph: &'g Graph,
     acp: bool,
@@ -265,14 +266,19 @@ impl<'g> ControlWrites<'g> {
             depends(t)
                 && matches!(&t[2], Term::NamedNode(o) if rejected.contains(group_doc_of(o.as_str())))
         };
-        match added.iter().find(uses_rejected) {
-            None => Ok(()),
-            Some(t) => Err(format!(
-                "the access-control document <{doc}> may not state `{} {} {}`: it uses a node \
-                 of an access-control document that is not admitted; nothing was changed",
-                t[0], t[1], t[2]
-            )),
-        }
+        let Some(t) = added.iter().find(uses_rejected) else {
+            return Ok(());
+        };
+        // The refusal names the statement the writer sent and nothing about the state of the
+        // document it reaches into: that state is a fact about ANOTHER resource, and a writer
+        // holding Control of `doc` need hold nothing over that one. (It cannot in fact be read
+        // either way: a resource whose own access-control document the view rejects is
+        // withheld every grant, so no session holds Control of it.)
+        Err(format!(
+            "the access-control document <{doc}> may not state `{} {} {}`: it uses a node of \
+             another access-control document; nothing was changed",
+            t[0], t[1], t[2]
+        ))
     }
 }
 
@@ -1173,7 +1179,7 @@ mod tests {
 
     fn skolem_iris(store: &PodStore) -> FxHashSet<Term> {
         assemble_facts(
-            &store.graph,
+            store.graph(),
             System::Acp,
             &AccessProvenance::new(),
             &VerifiedCredentials::default(),
@@ -1194,7 +1200,7 @@ mod tests {
             assert_eq!(before.len(), 2, "both anonymous matchers are present");
             let old_auth = store.auth.clone();
             let auth_graph = &store
-                .graph
+                .graph()
                 .named
                 .iter()
                 .find(|(n, _)| *n == named(AUTH_GRAPH))

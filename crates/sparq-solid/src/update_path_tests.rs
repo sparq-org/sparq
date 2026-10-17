@@ -115,7 +115,7 @@ fn patch(to: &str) -> String {
 
 fn titles(store: &PodStore) -> Vec<String> {
     let q = format!("SELECT ?t WHERE {{ GRAPH <{N1}> {{ <{N1}#it> <{TITLE}> ?t }} }}");
-    let r = sparq_engine::query(&store.graph, &q).expect("query");
+    let r = sparq_engine::query(store.graph(), &q).expect("query");
     r.rows
         .iter()
         .map(|row| row[0].as_ref().expect("bound").to_string())
@@ -126,7 +126,7 @@ fn titles(store: &PodStore) -> Vec<String> {
 fn a_permitted_where_update_commits_without_a_fork() {
     let mut store = pod();
     // The engine's own in-place apply of the same update is the reference result.
-    let mut reference = store.graph.fork();
+    let mut reference = store.graph().fork();
     sparq_engine::update_in_place(&mut reference, &patch("new")).expect("reference apply");
     let before = forks();
     store
@@ -139,7 +139,7 @@ fn a_permitted_where_update_commits_without_a_fork() {
     );
     assert_eq!(titles(&store), ["\"new\""]);
     assert_eq!(
-        snapshot(&store.graph).0,
+        snapshot(store.graph()).0,
         snapshot(&reference).0,
         "fast path diverges from the in-place apply"
     );
@@ -148,20 +148,20 @@ fn a_permitted_where_update_commits_without_a_fork() {
 #[test]
 fn a_where_update_matching_nothing_changes_nothing() {
     let mut store = pod();
-    let before = (snapshot(&store.graph), forks());
+    let before = (snapshot(store.graph()), forks());
     let upd = format!(
         "DELETE {{ GRAPH <{N1}> {{ ?s ?p ?o }} }} WHERE {{ GRAPH <{N1}> {{ ?s ?p ?o FILTER(false) }} }}"
     );
     store
         .update_as(&session(ALICE), &upd)
         .expect("alice may write");
-    assert_eq!((snapshot(&store.graph), forks()), before);
+    assert_eq!((snapshot(store.graph()), forks()), before);
 }
 
 #[test]
 fn a_refused_where_update_on_the_fast_path_changes_nothing() {
     let mut store = pod();
-    let before = (snapshot(&store.graph), forks());
+    let before = (snapshot(store.graph()), forks());
 
     // Over budget: the WHERE is evaluated (on the live store, read-only) and aborts.
     let flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
@@ -171,7 +171,7 @@ fn a_refused_where_update_on_the_fast_path_changes_nothing() {
         .expect_err("a cancelled budget aborts the update");
     assert!(e.contains("query budget exceeded"), "{e}");
     assert_eq!(
-        (snapshot(&store.graph), forks()),
+        (snapshot(store.graph()), forks()),
         before,
         "an aborted PATCH changed the store"
     );
@@ -182,7 +182,7 @@ fn a_refused_where_update_on_the_fast_path_changes_nothing() {
         .expect_err("bob may not delete");
     assert!(e.contains("update denied"), "{e}");
     assert_eq!(
-        (snapshot(&store.graph), forks()),
+        (snapshot(store.graph()), forks()),
         before,
         "a denied PATCH changed the store"
     );
@@ -197,7 +197,7 @@ fn a_refused_where_update_on_the_fast_path_changes_nothing() {
         .expect_err("an unreadable WHERE is denied");
     assert!(e.contains("update denied"), "{e}");
     assert_eq!(
-        (snapshot(&store.graph), forks()),
+        (snapshot(store.graph()), forks()),
         before,
         "a denied PATCH changed the store"
     );
@@ -422,7 +422,7 @@ fn an_update_never_takes_over_a_resource() {
 fn a_failed_drop_of_every_graph_keeps_the_facts_of_a_resource_there_throughout() {
     let n2 = "https://pod.ex/notes/n2";
     let mut store = pod();
-    store.graph.named.extend(
+    store.graph_unchecked_mut().named.extend(
         Graph::load_dataset(&format!("<{n2}#x> <{TITLE}> \"y\" <{n2}> .\n"), "nquads").expect("nq").named,
     );
     let mut prov = AccessProvenance::new();
@@ -460,7 +460,7 @@ fn a_failed_commit_under_wac_leaves_its_rebuild_usable() {
         .expect_err("the commit fails");
     let names = store.stored_graphs();
     store
-        .rematerialize_after_edit(&names, Some(ALICE), false)
+        .rematerialize_after_edit(&names, Some(ALICE), &[N1], false)
         .expect("a WAC rebuild does not use the provenance");
     assert!(
         store.decide(&session(BOB), N1, Mode::Read).allow,
@@ -500,8 +500,8 @@ fn a_failed_update_leaves_no_acr_kept_for_provenance_passed_back() {
     let back = store.acp_provenance().clone();
     store.materialize_acp_with(&back).expect("passed back");
     let names = store.stored_graphs();
-    store.graph.named.extend(Graph::load_dataset(&format!("<{D0}#x> <{TITLE}> \"y\" <{D0}> .\n"), "nquads").expect("nq").named);
-    store.rematerialize_after_edit(&names, None, true).expect("d0 again");
+    store.graph_unchecked_mut().named.extend(Graph::load_dataset(&format!("<{D0}#x> <{TITLE}> \"y\" <{D0}> .\n"), "nquads").expect("nq").named);
+    store.rematerialize_after_edit(&names, None, &[], true).expect("d0 again");
     assert_eq!(store.acp_provenance().creator(D0), None);
     assert!(!reads_d0(&store, ALICE), "no creator grant");
 }

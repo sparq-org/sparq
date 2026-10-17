@@ -119,12 +119,12 @@ fn a_loaded_acl_naming_a_reserved_agent_governs_with_no_grants() {
     let mut store = store();
     let iri = |s: &str| oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(s));
     let slot = store
-        .graph
+        .graph_unchecked_mut()
         .named
         .iter()
         .position(|(n, _)| *n == iri("https://pod.ex/bob/.acl"))
         .expect("bob's acl");
-    let _ = store.graph.named[slot].1.insert_triple(
+    let _ = store.graph_unchecked_mut().named[slot].1.insert_triple(
         iri("https://pod.ex/bob/.acl#bad"),
         iri("http://www.w3.org/ns/auth/acl#agent"),
         iri("urn:sparq:forged"),
@@ -184,7 +184,9 @@ fn one_controller_cannot_deny_the_whole_store() {
 
 /// Under ACP, a controller cannot make its own access-control resource use a policy of one
 /// the store already rejects (which would reject it too, and with it the controller's
-/// Control): the write is refused, by update and by replace, and nothing changes.
+/// Control): the write is refused, by update and by replace, and nothing changes. The refusal
+/// names the statement the writer sent and nothing about the state of the document it reaches
+/// into, which is a fact about another resource.
 #[test]
 fn an_acr_cannot_take_up_a_rejected_documents_policy() {
     const ACP: &str = "http://www.w3.org/ns/solid/acp#";
@@ -220,7 +222,7 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
             })
             .collect::<Vec<bool>>()
     };
-    let (before, stored) = (decisions(&store), snapshot(&store.graph));
+    let (before, stored) = (decisions(&store), snapshot(store.graph()));
     assert!(store.decide(&sess(ADMIN), r, Mode::Control).allow, "control: ADMIN controls r");
     let link = format!("<{acr}#c> <{ACP}apply> <{other}#p>");
     let err = store
@@ -229,9 +231,9 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
             &format!("INSERT DATA {{ GRAPH <{acr}> {{ {link} }} }}"),
         )
         .expect_err("the update is refused");
-    assert!(err.contains("not admitted"), "{err}");
+    assert_refusal_says_nothing_of_the_other_document(&err, other);
     assert_eq!(decisions(&store), before, "no decision changed");
-    assert_eq!(snapshot(&store.graph), stored, "nothing was stored");
+    assert_eq!(snapshot(store.graph()), stored, "nothing was stored");
     // Added and removed again in the same update, it leaves nothing to refuse.
     store
         .update_as_acp(
@@ -243,7 +245,7 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
         )
         .expect("nothing it leaves uses the rejected document");
     assert_eq!(decisions(&store), before);
-    assert_eq!(snapshot(&store.graph), stored);
+    assert_eq!(snapshot(store.graph()), stored);
     let doc = format!(
         "<{acr}> <{ACP}accessControl> <{acr}#c> .\n\
          <{acr}#c> <{ACP}apply> <{acr}#p> .\n\
@@ -257,9 +259,28 @@ fn an_acr_cannot_take_up_a_rejected_documents_policy() {
     let err = store
         .put_acl_acp(&acr, &doc, "ntriples")
         .expect_err("the replace is refused");
-    assert!(err.contains("not admitted"), "{err}");
+    assert_refusal_says_nothing_of_the_other_document(&err, other);
     assert_eq!(decisions(&store), before, "no decision changed");
-    assert_eq!(snapshot(&store.graph), stored, "nothing was stored");
+    assert_eq!(snapshot(store.graph()), stored, "nothing was stored");
+}
+
+/// A refusal for a statement reaching into another access-control document names the
+/// statement and says nothing about that document beyond its own IRI, which the writer sent:
+/// not that it is rejected, not admitted, nor anything else of its state.
+fn assert_refusal_says_nothing_of_the_other_document(err: &str, other: &str) {
+    assert!(err.contains("may not state"), "{err}");
+    assert!(
+        err.contains("uses a node of another access-control document"),
+        "{err}"
+    );
+    for leak in ["not admitted", "rejected", "reject"] {
+        assert!(!err.contains(leak), "the refusal states `{leak}`: {err}");
+    }
+    assert_eq!(
+        err.matches(other).count(),
+        1,
+        "only the statement the writer sent names <{other}>: {err}"
+    );
 }
 
 /// Every stored quad outside the reserved space, sorted.
@@ -413,7 +434,7 @@ fn an_acr_rejected_by_itself_or_through_another_can_be_replaced() {
         let err = store
             .put_acl_acp(&acr, &format!("{sound}{uses_bad}"), "ntriples")
             .expect_err("still using bad.acr");
-        assert!(err.contains("not admitted"), "{why}: {err}");
+        assert!(err.contains("may not state"), "{why}: {err}");
         store
             .put_acl_acp(&acr, &sound, "ntriples")
             .unwrap_or_else(|e| panic!("{why}: the replacement is accepted: {e}"));
@@ -479,7 +500,7 @@ fn an_update_is_judged_in_the_state_it_leaves() {
     // refused, whichever order the update makes them in.
     let mut store = nq();
     store.materialize_acp().expect("materializes");
-    let stored = snapshot(&store.graph);
+    let stored = snapshot(store.graph());
     let err = store
         .update_as_acp(
             &sess(ADMIN),
@@ -490,5 +511,5 @@ fn an_update_is_judged_in_the_state_it_leaves() {
         )
         .expect_err("the update is refused");
     assert!(err.contains("may not state"), "{err}");
-    assert_eq!(snapshot(&store.graph), stored, "nothing was stored");
+    assert_eq!(snapshot(store.graph()), stored, "nothing was stored");
 }
