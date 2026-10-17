@@ -158,8 +158,9 @@ Materialize the authorization view from the access-control documents, then enfor
   refuses when `acp` is not the model the view in force was built under, rather than replacing
   that view. Every entry point that installs a view does, and before it changes anything, so
   the refusal leaves the dataset, the stored provenance and the view as they were:
-  `update_as*` when the update changes the access-control documents (one that leaves them
-  alone rebuilds nothing and is unaffected), and `put_acl*`/`delete_acl*` always (the MCP server passes its session agent and the
+  every `update_as*` (whether or not the update changes the access-control documents: what it
+  writes and the facts it stages are installed over the view in force either way), and
+  `put_acl*`/`delete_acl*` (the MCP server passes its session agent and the
   resource its call created). `store.holds_resource(iri)` asks whether `iri` is a resource of
   the view, the store's own enumeration.
   `store.acp_provenance()` reads the stored provenance. A resource removed by editing

@@ -240,7 +240,8 @@ impl PodStore {
         // Before the slot is touched: this call installs a view of the model it names, so a
         // store whose view was built under the other one is left alone (see
         // `PodStore::matching_model`).
-        self.matching_model(acp)
+        let checked = self
+            .matching_model(acp)
             .map_err(|e| format!("put_acl denied: {}", e))?;
         let name = NamedNode::new(acl_iri)
             .map_err(|e| format!("put_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
@@ -275,8 +276,8 @@ impl PodStore {
         // fix). Every other pod's cached view stays warm if its grants are unaffected.
         // The rollback path stays a full clear (conservative).
         let scope = crate::ReindexScope::Origin;
-        if let Err(e) = self.rematerialize_scoped(acp, scope) {
-            return Err(self.restore_named_slot(&term, prior, acp, e));
+        if let Err(e) = self.rematerialize_scoped(acp, scope, checked) {
+            return Err(self.restore_named_slot(&term, prior, acp, checked, e));
         }
         Ok(AclWriteOutcome {
             acl: name,
@@ -295,7 +296,8 @@ impl PodStore {
             ));
         }
         // Before the slot is touched, as in `put_acl_inner`.
-        self.matching_model(acp)
+        let checked = self
+            .matching_model(acp)
             .map_err(|e| format!("delete_acl denied: {}", e))?;
         let name = NamedNode::new(acl_iri)
             .map_err(|e| format!("delete_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
@@ -306,8 +308,8 @@ impl PodStore {
         // sq-b7k7u: use diff-based invalidation — reindex_with diffs old vs new
         // AuthIndex per-origin and invalidates exactly the origins whose buckets changed.
         let scope = crate::ReindexScope::Origin;
-        if let Err(e) = self.rematerialize_scoped(acp, scope) {
-            return Err(self.restore_named_slot(&term, prior, acp, e));
+        if let Err(e) = self.rematerialize_scoped(acp, scope, checked) {
+            return Err(self.restore_named_slot(&term, prior, acp, checked, e));
         }
         Ok(AclWriteOutcome {
             acl: name,
@@ -335,6 +337,7 @@ impl PodStore {
         name: &Term,
         prior: Option<Graph>,
         acp: bool,
+        checked: crate::ModelChecked,
         failed: String,
     ) -> String {
         // Drop whatever is currently in the slot (the new content that failed) and put the
@@ -343,7 +346,7 @@ impl PodStore {
         if let Some(g) = prior {
             self.graph.named.push((name.clone(), g));
         }
-        match self.rematerialize(acp) {
+        match self.rematerialize(acp, checked) {
             Ok(()) => failed,
             Err(e) => {
                 self.drop_auth_view();
@@ -357,12 +360,8 @@ impl PodStore {
 
     /// Re-materialize the WAC or ACP view with a FULL session-cache clear (the rollback
     /// path uses this — conservative is correct when restoring prior rules).
-    fn rematerialize(&mut self, acp: bool) -> Result<(), String> {
-        if acp {
-            self.materialize_acp().map(|_| ())
-        } else {
-            self.materialize_wac().map(|_| ())
-        }
+    fn rematerialize(&mut self, acp: bool, checked: crate::ModelChecked) -> Result<(), String> {
+        self.install_model(acp, checked).map(|_| ())
     }
 
     /// sq-b7k7u (issue #1571) — re-materialize the WAC or ACP view with
@@ -377,11 +376,8 @@ impl PodStore {
         &mut self,
         acp: bool,
         scope: crate::ReindexScope,
+        _checked: crate::ModelChecked,
     ) -> Result<(), String> {
-        debug_assert!(
-            self.matching_model(acp).is_ok(),
-            "an entry point rebuilds under the model its own view was built under"
-        );
         if acp {
             self.rematerialize_acp_scoped(scope).map(|_| ())
         } else {

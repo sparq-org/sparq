@@ -4,11 +4,12 @@
 //! that view — a WAC rebuild of an ACP pod would drop every grant and deny its `.acr` rules
 //! decide (and the trusted creator/owner facts they rest on), and an ACP rebuild of a WAC pod
 //! would drop everything its `.acl` rules decide. An update that leaves those documents alone
-//! rebuilds nothing and is unaffected, whichever entry point it came through.
+//! rebuilds no rules, but what it stages is still installed over the view in force, so it is
+//! refused the same way. A store with no view in force is left to its caller.
 
 use sparq_core::Graph;
 use sparq_engine::QueryBudget;
-use sparq_solid::{AccessProvenance, Mode, PodStore, Session};
+use sparq_solid::{AccessProvenance, Mode, PodStore, Session, VerifiedCredentials};
 
 const ACP: &str = "http://www.w3.org/ns/solid/acp#";
 const ACL: &str = "http://www.w3.org/ns/auth/acl#";
@@ -64,10 +65,11 @@ fn the_wac_update_entry_point_is_refused_on_a_store_whose_view_is_acp() {
     store.materialize_acp().expect("acp materializes");
     assert!(store.decide(&alice(), DOC, Mode::Write).allow);
 
-    // A data update rebuilds nothing, so either entry point writes it.
-    store
+    // A data update rebuilds no rules, and is refused on this view just the same.
+    let err = store
         .update_as(&alice(), &insert())
-        .expect("a data update rebuilds nothing");
+        .expect_err("a WAC-named update is refused on an ACP view");
+    assert!(err.contains("ACP"), "{err}");
 
     let acr = "https://pod.ex/a/.acr";
     let err = store
@@ -91,9 +93,10 @@ fn the_acp_update_entry_point_is_refused_on_a_store_whose_view_is_wac() {
     store.materialize_wac().expect("wac materializes");
     assert!(store.decide(&alice(), DOC, Mode::Write).allow);
 
-    store
+    let err = store
         .update_as_acp(&alice(), &insert())
-        .expect("a data update rebuilds nothing");
+        .expect_err("an ACP-named update is refused on a WAC view");
+    assert!(err.contains("WAC"), "{err}");
 
     let acl = "https://pod.ex/.acl";
     let rule = format!(
@@ -246,6 +249,77 @@ fn every_rebuilding_entry_point_refuses_a_mismatched_model_and_changes_nothing()
                 err
             );
             assert_eq!(snapshot(&store), before, "{} changed something", name);
+        }
+    }
+}
+
+/// A pod whose rules give creators a mode, so the view in force decides by the stored
+/// creator/owner facts: `/a/d` is readable and writable by its creator, nobody else.
+fn creator_pod() -> String {
+    let acr = "https://pod.ex/a/.acr";
+    format!(
+        "<{DOC}#it> <https://ex.dev/ns#k> \"v\" <{DOC}> .
+<{acr}> <{ACP}memberAccessControl> <{acr}#c> <{acr}> .
+<{acr}#c> <{ACP}apply> <{acr}#p> <{acr}> .
+<{acr}#p> <{ACP}allow> <{ACL}Read> <{acr}> .
+<{acr}#p> <{ACP}allow> <{ACL}Write> <{acr}> .
+<{acr}#p> <{ACP}anyOf> <{acr}#m> <{acr}> .
+<{acr}#m> <{ACP}agent> <{ACP}CreatorAgent> <{acr}> .
+"
+    )
+}
+
+/// An update that rebuilds no rules still installs what it stages over the view in force, so
+/// the model it names is checked just the same: a mismatched call is refused and the stored
+/// graphs, the stored facts and the decisions are left as they were. Covers an update that
+/// ends a resource whose grants rest on those facts (and the resource written again after it),
+/// a plain data update, both store kinds and both method families.
+#[test]
+fn a_mismatched_update_that_rebuilds_no_rules_is_refused_and_changes_nothing() {
+    let drop_doc = format!("DROP GRAPH <{DOC}>");
+    let recreate =
+        format!("INSERT DATA {{ GRAPH <{DOC}> {{ <{DOC}#it> <https://ex.dev/ns#k> \"w\" }} }}");
+    let data = insert();
+    for sparql in [&drop_doc, &recreate, &data] {
+        for budgeted in [false, true] {
+            // An ACP view built from a creator fact: a WAC-named update is refused.
+            let mut store =
+                PodStore::new(Graph::load_dataset(&creator_pod(), "nquads").expect("parses"));
+            let mut prov = AccessProvenance::new();
+            prov.set_creator(DOC, ALICE);
+            prov.set_owner(DOC, ALICE);
+            store
+                .materialize_acp_with_credentials(&prov, &VerifiedCredentials::new())
+                .expect("acp materializes");
+            assert!(store.decide(&alice(), DOC, Mode::Write).allow, "creator writes");
+            let before = snapshot(&store);
+            let err = if budgeted {
+                store.update_as_with_budget(&alice(), sparql, &QueryBudget::unlimited())
+            } else {
+                store.update_as(&alice(), sparql)
+            }
+            .expect_err("a WAC-named update is refused on an ACP view");
+            assert!(err.contains("ACP"), "{}", err);
+            assert_eq!(snapshot(&store), before, "a refused update changed something");
+            assert_eq!(
+                store.acp_provenance().creator(DOC),
+                Some(ALICE),
+                "the stored creator fact is as it was"
+            );
+
+            // And the other way round: an ACP-named update on a WAC view.
+            let mut store =
+                PodStore::new(Graph::load_dataset(&wac_pod(), "nquads").expect("parses"));
+            store.materialize_wac().expect("wac materializes");
+            let before = snapshot(&store);
+            let err = if budgeted {
+                store.update_as_acp_with_budget(&alice(), sparql, &QueryBudget::unlimited())
+            } else {
+                store.update_as_acp(&alice(), sparql)
+            }
+            .expect_err("an ACP-named update is refused on a WAC view");
+            assert!(err.contains("WAC"), "{}", err);
+            assert_eq!(snapshot(&store), before, "a refused update changed something");
         }
     }
 }
