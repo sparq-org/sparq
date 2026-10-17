@@ -2890,6 +2890,15 @@ fn a_blocked_node_may_reach_a_nominal_its_blocker_reaches() {
     };
     let chain = ":P owl:propertyChainAxiom ( :R [ owl:inverseOf :R ] ) .
         :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :P ; owl:allValuesFrom :C1 ] .";
+    // At most one `R`-predecessor of `:o` in `:D`: the copies count only if they are `D`s.
+    let qmax = ":D a owl:Class . :o a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ;
+        owl:maxQualifiedCardinality \"1\"^^xsd:nonNegativeInteger ; owl:onClass :D ] .";
+    // At most one `Q`-predecessor, `R` below `Q`: the copies count through the super-role.
+    let smax = ":Q a owl:ObjectProperty . :R rdfs:subPropertyOf :Q . :o a [ a owl:Restriction ;
+        owl:onProperty [ owl:inverseOf :Q ] ; owl:maxCardinality \"1\"^^xsd:nonNegativeInteger ] .";
+    // Every `R`-predecessor of `:o` is `:a`: the `C0`s are merged into the nominal.
+    let only_a = ":o a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ;
+        owl:allValuesFrom [ owl:oneOf ( :a ) ] ] .";
     let cases: Vec<(String, bool, bool)> = vec![
         (String::new(), true, true),
         (format!(":o a {} . :S a owl:IrreflexiveProperty .", max(1)), false, true),
@@ -2918,6 +2927,24 @@ fn a_blocked_node_may_reach_a_nominal_its_blocker_reaches() {
             ":S rdfs:subPropertyOf [ owl:inverseOf :T ] . :o a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:allValuesFrom [ a owl:Restriction ; owl:onProperty :T ; owl:someValuesFrom :C1 ] ] ."
                 .to_string(),
             true,
+            true,
+        ),
+        (format!("{qmax} :S a owl:IrreflexiveProperty ."), true, true),
+        (
+            format!("{qmax} :S a owl:IrreflexiveProperty . :C0 rdfs:subClassOf :D ."),
+            false,
+            true,
+        ),
+        (format!("{qmax} :C0 rdfs:subClassOf :D ."), true, true),
+        (format!("{smax} :S a owl:IrreflexiveProperty ."), false, true),
+        (smax.to_string(), true, true),
+        (only_a.to_string(), true, true),
+        (format!("{only_a} :S a owl:IrreflexiveProperty ."), false, true),
+        (
+            format!(
+                "{only_a} :a a [ owl:complementOf [ a owl:Restriction ; owl:onProperty :S ; owl:hasSelf true ] ] ."
+            ),
+            false,
             true,
         ),
     ];
