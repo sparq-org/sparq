@@ -1508,11 +1508,10 @@ fn trust_authz_decide(
 /// (sq-pfae.17) Build a `PodStore` with admitted trust facts injected into the
 /// dataset. Admitted facts are emitted into TWO positions so they reach the WAC/ACP materialiser:
 ///
-/// 1. **Named-graph position** (`resource + ".acl"` graph) — the WAC loader ONLY reads named
-///    graphs ending in `.acl`/`.acr`; injecting into that graph makes the facts visible to the
-///    N3 reasoner. The convention `resource + ".acl"` matches Solid's ACL-by-naming-convention:
-///    every resource `R` is governed by `R.acl` (or its nearest ancestor), and the loader emits
-///    `<R> solidx:ownAcl <R.acl>` from a present `<R.acl>` graph.
+/// 1. **Named-graph position** (the subject's document, e.g. `<https://ex/g>` for a fact about
+///    `<https://ex/g#team>`) — the WAC loader reads a group document named by an
+///    `acl:agentGroup` reference and keeps only its statements about its own nodes, so a
+///    membership fact about group `G` reaches the reasoner from `G`'s document.
 ///
 /// 2. **Default-graph position** (no graph IRI) — belt-and-braces; the engine SPARQL query path
 ///    (`query_as` / `view_for`) sees the default graph alongside named graphs so trust-injected
@@ -1534,26 +1533,28 @@ fn trust_authz_decide(
 fn build_store_with_admitted(
     req: &AuthzRequest,
     admitted: &[sparq_trust::AdmittedFact],
-    resource: &str,
+    _resource: &str,
     _full_body: &serde_json::Value,
 ) -> Result<sparq_solid::PodStore, Response> {
     use std::fmt::Write as _;
-    // The ACL graph IRI for this resource (Solid naming convention: resource + ".acl").
-    // Admitted facts emitted into this named graph are seen by the WAC N3 loader
-    // (assemble_input processes all graphs whose name ends in ".acl").
     // POSITIONAL format args throughout (CodeQL rust/unused-variable guard).
-    let acl_graph = format!("{}.acl", resource);
     let mut augmented = req.dataset.clone();
     for fact in admitted {
-        // Named-graph position: reaches the WAC N3 reasoner via the .acl graph path.
-        let _ = writeln!(
-            &mut augmented,
-            "{} {} {} <{}> .",
-            fact.triple.subject,
-            fact.triple.predicate,
-            fact.triple.object,
-            acl_graph,
-        );
+        // Named-graph position: the document of the fact's subject (a group IRI's group
+        // document, which may itself be an `.acl`), the only document whose statements about
+        // that node the loader keeps. The loader applies the same confinement to it as to the
+        // rest of that document.
+        if let oxrdf::NamedOrBlankNode::NamedNode(group) = &fact.triple.subject {
+            let doc = group.as_str().split('#').next().unwrap_or(group.as_str());
+            let _ = writeln!(
+                &mut augmented,
+                "{} {} {} <{}> .",
+                fact.triple.subject,
+                fact.triple.predicate,
+                fact.triple.object,
+                doc,
+            );
+        }
         // Default-graph position: reachable via SPARQL query on the full dataset.
         let _ = writeln!(
             &mut augmented,
@@ -1573,7 +1574,9 @@ fn build_store_with_admitted(
         client: req.client.clone(),
         issuer: req.issuer.clone(),
         now: req.now.clone(),
-        view: req.view,
+        // The model is the request's own: inferred from its dataset before any fact is added,
+        // so an admitted fact never switches it.
+        view: Some(req.view.unwrap_or_else(|| infer_view(&req.dataset))),
     };
     build_store(&augmented_req)
 }
@@ -2177,6 +2180,52 @@ mod tests {
         let body = Bytes::from(r#"{"dataset":"","view":"nonsense"}"#);
         let err = parse_request(&body).unwrap_err();
         assert_eq!(err.status(), StatusCode::BAD_REQUEST);
+    }
+
+    /// An admitted fact whose subject's document is named like an access-control resource
+    /// leaves a WAC request's inferred model in place.
+    #[cfg(feature = "solid-authz-trust")]
+    #[test]
+    fn admitted_facts_keep_the_requests_model() {
+        let acl = "https://pod.ex/.acl";
+        let dataset = format!(
+            "<{acl}#r> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/ns/auth/acl#Authorization> <{acl}> .\n\
+             <{acl}#r> <http://www.w3.org/ns/auth/acl#agent> <https://bob.ex/card#me> <{acl}> .\n\
+             <{acl}#r> <http://www.w3.org/ns/auth/acl#default> <https://pod.ex/> <{acl}> .\n\
+             <{acl}#r> <http://www.w3.org/ns/auth/acl#mode> <http://www.w3.org/ns/auth/acl#Read> <{acl}> .\n\
+             <https://pod.ex/doc#it> <https://ex.dev/ns#k> \"v\" <https://pod.ex/doc> .\n"
+        );
+        let body = Bytes::from(
+            serde_json::json!({
+                "dataset": dataset,
+                "session": {"agent": "https://bob.ex/card#me"},
+            })
+            .to_string(),
+        );
+        let req = parse_request(&body).unwrap();
+        assert_eq!(req.view, None, "the model is inferred");
+        let fact = sparq_trust::AdmittedFact {
+            triple: oxrdf::Triple::new(
+                oxrdf::NamedNode::new("https://pod.ex/g.acr#team").unwrap(),
+                oxrdf::NamedNode::new("http://www.w3.org/2006/vcard/ns#hasMember").unwrap(),
+                oxrdf::NamedNode::new("https://bob.ex/card#me").unwrap(),
+            ),
+            issuer: oxrdf::NamedNode::new("https://issuer.ex/").unwrap(),
+        };
+        let store = super::build_store_with_admitted(
+            &req,
+            &[fact],
+            "https://pod.ex/doc",
+            &serde_json::Value::Null,
+        )
+        .unwrap_or_else(|_| panic!("the store builds"));
+        let session = req.session();
+        assert!(
+            store
+                .decide(&session, "https://pod.ex/doc", sparq_solid::Mode::Read)
+                .allow,
+            "the WAC rules still decide"
+        );
     }
 
     #[test]

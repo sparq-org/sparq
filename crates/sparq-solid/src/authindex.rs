@@ -267,6 +267,75 @@ struct ConditionalGrant {
 /// assert!(index.accessible(&alice, Mode::Write).is_empty()); // fail-closed
 /// # Ok::<(), String>(())
 /// ```
+/// The auth-view predicate marking a resource whose ACP access-control document the loader
+/// rejected (`<r> auth:withheld true`), covering what is below it too; only the loader emits
+/// it. (WAC uses [`REJECTED_ACL`] and [`ACCEPTED_ACL`] instead.)
+pub(crate) const WITHHELD: &str = "https://sparq.dev/ns/auth#withheld";
+/// The auth-view predicate marking a resource whose own WAC ACL the loader rejected
+/// (`<r> auth:rejectedAcl true`). It governs the resource and everything below it down to
+/// the next resource with an ACL of its own, whether or not those exist yet.
+pub(crate) const REJECTED_ACL: &str = "https://sparq.dev/ns/auth#rejectedAcl";
+/// The auth-view predicate marking a resource whose own WAC ACL the loader accepted
+/// (`<r> auth:acceptedAcl true`), emitted when some ACL was rejected: where the walk up from
+/// a resource to its governing ACL stops.
+pub(crate) const ACCEPTED_ACL: &str = "https://sparq.dev/ns/auth#acceptedAcl";
+
+/// The resources withheld from every grant source.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Withheld {
+    /// ACP: resources (and, for a container, everything below it) whose access-control
+    /// document was rejected.
+    acp: FxHashSet<String>,
+    /// WAC: resources whose own ACL was rejected.
+    rejected_acl: FxHashSet<String>,
+    /// WAC: resources whose own ACL was accepted (only kept when an ACL was rejected).
+    accepted_acl: FxHashSet<String>,
+}
+
+impl Withheld {
+    fn is_empty(&self) -> bool {
+        self.acp.is_empty() && self.rejected_acl.is_empty()
+    }
+
+    /// Whether `graph` (stored or not) is withheld: in or below a withheld ACP resource, or
+    /// governed by a rejected WAC ACL (the nearest one at or above it, as WAC resolves it). An
+    /// access-control document counts as the resource it controls.
+    fn holds(&self, graph: &str) -> bool {
+        // An access-control document is governed through the resource it controls (Control
+        // on that resource reads and writes it); under ACP it is also a resource of its own,
+        // governed by its own access-control resource.
+        let governed = graph
+            .strip_suffix(crate::loader::ACL_SUFFIX)
+            .or_else(|| graph.strip_suffix(crate::loader::ACR_SUFFIX))
+            .unwrap_or(graph);
+        let blocked = |g: &str| {
+            self.acp.contains(g)
+                || g.match_indices('/')
+                    .any(|(i, _)| self.acp.contains(&g[..=i]))
+        };
+        if !self.acp.is_empty() && (blocked(graph) || blocked(governed)) {
+            return true;
+        }
+        let graph = governed;
+        if self.rejected_acl.is_empty() {
+            return false;
+        }
+        let mut cur = graph;
+        loop {
+            if self.rejected_acl.contains(cur) {
+                return true;
+            }
+            if self.accepted_acl.contains(cur) {
+                return false;
+            }
+            match crate::loader::parent_iri(cur) {
+                Some(parent) => cur = parent,
+                None => return false,
+            }
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct AuthIndex {
     /// (principal IRI, mode) → per-graph-ORIGIN → graphs, for simple allow / deny triples.
@@ -294,6 +363,9 @@ pub struct AuthIndex {
     matcher_clients: FxHashMap<String, FxHashSet<String>>,
     /// sq-3jtd.6 — the issuer-dimension twin of `matcher_clients`.
     matcher_issuers: FxHashMap<String, FxHashSet<String>>,
+    /// Resources whose access-control document the loader rejected: no grant applies to
+    /// them, whichever source installed it.
+    withheld: Withheld,
 }
 
 impl AuthIndex {
@@ -316,6 +388,21 @@ impl AuthIndex {
                 Term::NamedNode(n) => n.as_str().to_owned(),
                 _ => continue,
             };
+            match p.as_str() {
+                WITHHELD => {
+                    ix.withheld.acp.insert(subj);
+                    continue;
+                }
+                REJECTED_ACL => {
+                    ix.withheld.rejected_acl.insert(subj);
+                    continue;
+                }
+                ACCEPTED_ACL => {
+                    ix.withheld.accepted_acl.insert(subj);
+                    continue;
+                }
+                _ => {}
+            }
             if let Some((mode, is_allow)) = Mode::from_pred(p.as_str()) {
                 if let Term::NamedNode(g) = &t[2] {
                     let map = if is_allow { &mut ix.allow } else { &mut ix.deny };
@@ -371,7 +458,28 @@ impl AuthIndex {
             let origin = g.graph.as_ref().map(|n| crate::loader::iri_origin(n.as_str()).to_owned()).unwrap_or_default();
             ix.cond.entry(origin).or_default().push(g);
         }
+        // Withheld resources get no grant from any source; denies stay.
+        if !ix.withheld.is_empty() {
+            let withheld = std::mem::take(&mut ix.withheld);
+            let open = |g: &NamedNode| !withheld.holds(g.as_str());
+            for buckets in ix.allow.values_mut() {
+                for graphs in buckets.values_mut() {
+                    graphs.retain(open);
+                }
+            }
+            for grants in ix.cond.values_mut() {
+                grants.retain(|g| !g.allow || g.graph.as_ref().is_none_or(open));
+            }
+            ix.withheld = withheld;
+        }
         ix
+    }
+
+    /// Whether `graph` is withheld: its access-control document, or a container's above
+    /// it, was rejected, so no grant applies to it whatever its source.
+    #[cfg_attr(not(feature = "odrl-bridge"), allow(dead_code))]
+    pub(crate) fn is_withheld(&self, graph: &str) -> bool {
+        self.withheld.holds(graph)
     }
 
     /// The session's agent-dimension principals (most-specific last).
@@ -589,6 +697,7 @@ impl AuthIndex {
         self.matcher_agents == other.matcher_agents
             && self.matcher_clients == other.matcher_clients
             && self.matcher_issuers == other.matcher_issuers
+            && self.withheld == other.withheld
     }
 
     /// Whether the auth view explicitly denies `mode` on `graph` to this session: a deny

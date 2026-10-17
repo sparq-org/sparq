@@ -346,3 +346,31 @@ fn strict_additivity_no_admission_is_unchanged_wac() {
     assert!(!jesse_can_read_resource_x(&mut a));
     // No admission call was made → the auth view is the plain WAC view.
 }
+
+/// A resource whose access control document cannot be used gets no trust grant either:
+/// the admitted credential installs its grant, and the resource stays withheld.
+#[test]
+fn trust_grants_do_not_apply_to_a_withheld_resource() {
+    let acp = "http://www.w3.org/ns/solid/acp#";
+    let acl = "http://www.w3.org/ns/auth/acl#";
+    let acr = format!("{RESOURCE_X}.acr");
+    let pod = format!(
+        "<{RESOURCE_X}#it> <https://ex.dev/ns#title> \"x\" <{RESOURCE_X}> .\n\
+         <{acr}> <{acp}accessControl> <{acr}#c> <{acr}> .\n\
+         <{acr}#c> <{acp}apply> <{acr}#p> <{acr}> .\n\
+         <{acr}#p> <{acp}allow> <{acl}Read> <{acr}> .\n\
+         <{acr}#p> <{acp}anyOf> <{acr}#m> <{acr}> .\n\
+         <{acr}#m> <{acp}agent> <https://alice.ex/card#me> <{acr}> .\n\
+         <https://elsewhere.ex/x#n> <https://ex.dev/ns#t> \"t\" <{acr}> .\n"
+    );
+    let (sk, pk) = gov_key();
+    let mut store = PodStore::new(Graph::load_dataset(&pod, "nquads").unwrap());
+    store.materialize_acp().unwrap();
+    let cred = signed_cred(&sk, "25");
+    let rules = gov_age_rules(GOV_ISSUER, &pk);
+    let outcome = store
+        .admit_trust_credential_static(&cred, &rules, &iri(RESOURCE_X), ACR_ABAC_RULE)
+        .unwrap();
+    assert_eq!(outcome.installed_count, 1, "the grant is installed");
+    assert!(!read_at(&mut store, JESSE, &at(NOW)), "the withheld resource stays closed");
+}

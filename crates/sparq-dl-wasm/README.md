@@ -30,7 +30,7 @@ Most callers want the typed wrapper instead: `import { checkOwlDl } from '@sparq
 
 ## ✨ Features
 
-- **One stateless export.** `checkOwlDl` parses the TBox and the optional ABox into ONE
+- **A stateless export.** `checkOwlDl` parses the TBox and the optional ABox into ONE
   graph (blank-node labels never join across the two documents), runs
   `owl2dl::extract` then `owl2dl::check` (which runs the profile check itself), and returns
   the result as a JSON string:
@@ -50,11 +50,15 @@ Most callers want the typed wrapper instead: `import { checkOwlDl } from '@sparq
 
   `triples` are the input triples behind each answer as N-Triples lines (blank-node labels may be renamed or generated). Field-by-field semantics:
   [`skills/javascript-wasm/references/owl-dl.md`](../../skills/javascript-wasm/references/owl-dl.md).
+- **A session for drafts.** `new OwlDlSession()` and `.check(tbox, abox, format, optionsJson)`
+  answer as `checkOwlDl` with a `"reuse"` key (`"none"`, `"identical"`, `"extension"`),
+  reusing the last decided answer when the next version has the same or more axioms
+  (`owl2dl::IncrementalChecker`).
 - **Fail-closed.** An ontology the reverse mapping refuses is a result
   (`"consistent": "unknown"` with the refusal as `reason`), not an error; only a parse error
-  or malformed options throw. Property chains other than `R∘R ⊑ R`, the top and bottom properties,
+  or malformed options throw. The top and bottom properties,
   datatypes outside the OWL 2 map and object/data property punning are outside the decided
-  fragment (SHOIQ(D)) and answer `"unknown"` with reason `OutOfFragment`; an undecided
+  fragment (SROIQ(D) without them) and answer `"unknown"` with reason `OutOfFragment`; an undecided
   datatype question answers `DatatypeUnknown`, and a model with nominals the reasoner
   cannot confirm `Unconfirmed`.
 - **No serde.** The JSON is written (and the options object parsed) by a small hand-written,

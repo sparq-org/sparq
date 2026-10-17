@@ -1749,6 +1749,70 @@ fn resources_requests_reject_a_missing_uri_parameter() {
     }
 }
 
+/// An `.acl` written through `resource_put` speaks only for its own nodes: one that also
+/// states something about the root ACL's authorization grants nothing at all, while the
+/// same document without that statement takes effect.
+#[test]
+fn acl_put_cannot_extend_another_documents_authorization() {
+    const MALLORY: &str = "https://mallory.ex/card#me";
+    const ACL: &str = "http://www.w3.org/ns/auth/acl#";
+    const TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
+    // Mallory controls `m/` through its own ACL, and nothing else.
+    let control = format!(
+        "{POD_NQ}\
+<https://pod.ex/m/x#it> <https://ex.dev/ns#title> \"m\" <https://pod.ex/m/x> .
+<https://pod.ex/m/.acl#c> <{TYPE}> <{ACL}Authorization> <https://pod.ex/m/.acl> .
+<https://pod.ex/m/.acl#c> <{ACL}accessTo> <https://pod.ex/m/> <https://pod.ex/m/.acl> .
+<https://pod.ex/m/.acl#c> <{ACL}agent> <{MALLORY}> <https://pod.ex/m/.acl> .
+<https://pod.ex/m/.acl#c> <{ACL}mode> <{ACL}Control> <https://pod.ex/m/.acl> .
+"
+    );
+    let config = SolidServerConfig {
+        agent: Some(MALLORY.to_string()),
+        allow_update: true,
+        ..SolidServerConfig::default()
+    };
+    let store = PodStore::new(Graph::load_dataset(&control, "nquads").expect("fixture parses"));
+    let mut s = SolidMcpServer::with_config(store, config).expect("materializes");
+    let own = format!(
+        "<https://pod.ex/m/.acl#own> <{TYPE}> <{ACL}Authorization> .
+<https://pod.ex/m/.acl#own> <{ACL}accessTo> <https://pod.ex/m/> .
+<https://pod.ex/m/.acl#own> <{ACL}default> <https://pod.ex/m/> .
+<https://pod.ex/m/.acl#own> <{ACL}agent> <{MALLORY}> .
+<https://pod.ex/m/.acl#own> <{ACL}mode> <{ACL}Read> .
+<https://pod.ex/m/.acl#own> <{ACL}mode> <{ACL}Control> .
+"
+    );
+    let put = |s: &mut SolidMcpServer, body: &str| {
+        let args = json!({"url": "https://pod.ex/m/.acl", "content": body,
+                          "content_type": "application/n-triples"});
+        let (text, is_err) = tool(s, "resource_put", args);
+        assert!(!is_err, "mallory holds Control on m/: {text}");
+    };
+    put(&mut s, &own);
+    let (text, is_err) = tool(&mut s, "resource_get", json!({"url": "https://pod.ex/m/x"}));
+    assert!(!is_err, "the document's own authorization applies: {text}");
+    let args = json!({"url": "https://pod.ex/m/.acl",
+                      "content": format!("{own}<https://pod.ex/.acl#owner> <{ACL}agent> <{MALLORY}> .\n"),
+                      "content_type": "application/n-triples"});
+    let (text, is_err) = tool(&mut s, "resource_put", args);
+    assert!(
+        is_err && text.contains("may not state"),
+        "the write is refused: {text}"
+    );
+    let (text, is_err) = tool(
+        &mut s,
+        "resource_get",
+        json!({"url": "https://pod.ex/notes/n1"}),
+    );
+    assert!(
+        is_err,
+        "a statement about the root authorization granted access: {text}"
+    );
+    let (text, is_err) = tool(&mut s, "resource_get", json!({"url": "https://pod.ex/m/x"}));
+    assert!(!is_err, "mallory's own ACL is unchanged: {text}");
+}
+
 /// The trusted ACP context the embedder materialized the store with stays in force after
 /// a write through the server: a credential-keyed deny still applies once another
 /// session's authorized `.acr` update has rebuilt the view.

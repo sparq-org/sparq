@@ -67,9 +67,9 @@ on:
       # zk/xpath trees were externalized to the sparq-org/noir_IEEE754 and
       # sparq-org/noir_XPath face repos (#1599), whose own CI covers their nargo tests
       # and the ieee754 differential oracle. zk/compose is the only in-tree Noir tree that
-# PROVES anything; zk/dual-leaf-v2 (the DualLeafV2 sentinel/constants mirror, no deps,
-# imported by no member) is the one other in-tree Noir package and runs its nargo tests
-# in this lane too.
+      # PROVES anything; zk/dual-leaf-v2 (the DualLeafV2 sentinel/constants mirror, no deps,
+      # imported by no member) is the one other in-tree Noir package and runs its nargo tests
+      # in this lane too.
       - "zk/compose/**"
       - "zk/dual-leaf-v2/**"
       - "bench/zk-compose/campaigns/**"
@@ -154,7 +154,7 @@ jobs:
       # any ZK-relevant path; the heavy steps below are gated on its `zk` output.
       #
       # The path set MUST stay in lock-step with the `pull_request`/`push` paths filter
-      # above (crates/sparq-zk/**, crates/sparq-zk-compose/**, zk/compose/**, this workflow).
+      # above (crates/sparq-zk/**, crates/sparq-zk-compose/**, zk/compose/**, zk/dual-leaf-v2/**, this workflow).
       #
       # SAFE-BY-DEFAULT: zk defaults to "true". Only the `merge_group` branch can flip it
       # to "false", and only after a SUCCESSFUL diff that found no ZK paths. So:
@@ -197,7 +197,7 @@ jobs:
               # ZK-relevant paths — SAME set as the pull_request/push paths filter.
               # sq-5reoy: zk/ narrowed to zk/compose/ (ieee754/xpath externalized, #1599).
               if printf '%s\n' "${changed}" | grep -Eq \
-                '^(crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$)'; then
+                '^(crates/sparq-zk/|crates/sparq-zk-compose/|zk/compose/|zk/dual-leaf-v2/|bench/zk-compose/campaigns/|bench/zk-bindings/|crates/sparq-conformance/examples/proof_corpus\.rs$|zk/sparql-evaluator/model/|\.github/workflows/zk-toolchain\.yml$)'; then
                 zk=true
               else
                 zk=false

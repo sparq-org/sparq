@@ -293,10 +293,15 @@ fn unsatisfiable_classes() {
 
 #[test]
 fn out_of_fragment_constructs_answer_unknown() {
-    let (_, r) = run(&format!("{DECL} :t owl:propertyChainAxiom ( :r :s ) ."));
+    let (_, r) = run(&format!(
+        "{DECL} :A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :B ] ."
+    ));
     match r.consistency {
         Consistency::Unknown(UnknownReason::OutOfFragment { construct, source }) => {
-            assert_eq!(construct, "ObjectPropertyChain");
+            assert_eq!(
+                construct,
+                "owl:topObjectProperty / owl:bottomObjectProperty"
+            );
             assert!(!source.is_empty());
         }
         other => panic!("expected OutOfFragment, got {other:?}"),
@@ -981,7 +986,10 @@ fn the_data_domain_is_more_than_the_datatype_map() {
         verdict(&format!("{DDECL} :a a {} .", dsome(":d", &outside))),
         Consistency::Consistent
     );
-    assert!(!data_unsat(&format!(":X owl:equivalentClass {} .", dsome(":d", &outside)), "X"));
+    assert!(!data_unsat(
+        &format!(":X owl:equivalentClass {} .", dsome(":d", &outside)),
+        "X"
+    ));
     // Two of them are not forced equal: there are infinitely many.
     assert_eq!(
         verdict(&format!(
@@ -995,7 +1003,10 @@ fn the_data_domain_is_more_than_the_datatype_map() {
     assert_eq!(
         verdict(&format!(
             "{DDECL} :a a {} .",
-            dsome(":d", "[ a rdfs:Datatype ; owl:datatypeComplementOf rdfs:Literal ]")
+            dsome(
+                ":d",
+                "[ a rdfs:Datatype ; owl:datatypeComplementOf rdfs:Literal ]"
+            )
         )),
         Consistency::Inconsistent
     );
@@ -2203,6 +2214,116 @@ fn oracle_differential_focused() {
     );
 }
 
+/// A corpus of regular property chains: roles `r0 < r1 < …` with sub-property axioms and
+/// chains `S₁ ∘ … ∘ Sₙ ⊑ R`, `R ∘ S ⊑ R`, `S ∘ R ⊑ R` and transitivity whose `Sᵢ` (or their
+/// inverses) are below `R` in that order, so the hierarchy is regular. The TBox has
+/// universal restrictions over the chained roles, and the ABox a path of role assertions,
+/// so chains actually compose, plus negative property assertions along it. Every role is
+/// non-simple for the generator: no number restriction or `hasSelf`.
+fn chains_corpus(seed: u64) -> String {
+    let mut rng = Rng(seed.wrapping_mul(0xA24B_AED4_963E_E407) | 1);
+    let n_classes = 3 + rng.below(4);
+    let n_roles = 2 + rng.below(3);
+    let mut out = String::new();
+    let _ = writeln!(out, "<http://ex/ch{seed}> a owl:Ontology .");
+    for i in 0..n_classes {
+        let _ = writeln!(out, ":C{i} a owl:Class .");
+    }
+    for i in 0..n_roles {
+        let _ = writeln!(out, ":r{i} a owl:ObjectProperty .");
+    }
+    let below = |rng: &mut Rng, j: usize| {
+        let i = rng.below(j);
+        if rng.chance(25) {
+            format!("[ owl:inverseOf :r{i} ]")
+        } else {
+            format!(":r{i}")
+        }
+    };
+    for _ in 0..(1 + rng.below(4)) {
+        let j = 1 + rng.below(n_roles - 1);
+        let line = match rng.below(6) {
+            0 => format!(":r{} rdfs:subPropertyOf :r{j} .", rng.below(j)),
+            1 => format!(":r{j} a owl:TransitiveProperty ."),
+            2 => format!(
+                ":r{j} owl:propertyChainAxiom ( :r{j} {} ) .",
+                below(&mut rng, j)
+            ),
+            3 => format!(
+                ":r{j} owl:propertyChainAxiom ( {} :r{j} ) .",
+                below(&mut rng, j)
+            ),
+            4 => format!(
+                ":r{j} owl:propertyChainAxiom ( {} {} {} ) .",
+                below(&mut rng, j),
+                below(&mut rng, j),
+                below(&mut rng, j)
+            ),
+            _ => format!(
+                ":r{j} owl:propertyChainAxiom ( {} {} ) .",
+                below(&mut rng, j),
+                below(&mut rng, j)
+            ),
+        };
+        let _ = writeln!(out, "{line}");
+    }
+    let mut g = Gen {
+        rng,
+        n_classes,
+        n_roles,
+        simple: vec![false; n_roles],
+        nominals: 0,
+    };
+    for _ in 0..(1 + g.rng.below(3)) {
+        let (a, r, c) = (g.class(), g.role(false).unwrap(), g.class());
+        let _ = writeln!(
+            out,
+            "{a} rdfs:subClassOf [ a owl:Restriction ; owl:onProperty {r} ; owl:allValuesFrom {c} ] ."
+        );
+    }
+    for _ in 0..g.rng.below(3) {
+        let (a, b) = (g.class(), g.concept(2));
+        let _ = writeln!(out, "{a} rdfs:subClassOf {b} .");
+    }
+    let n_ind = 3 + g.rng.below(4);
+    for i in 0..n_ind {
+        let _ = writeln!(out, ":i{i} a owl:NamedIndividual .");
+    }
+    for i in 0..n_ind - 1 {
+        let r = g.rng.below(n_roles);
+        if g.rng.chance(25) {
+            let _ = writeln!(out, ":i{} :r{r} :i{i} .", i + 1);
+        } else {
+            let _ = writeln!(out, ":i{i} :r{r} :i{} .", i + 1);
+        }
+    }
+    for _ in 0..(1 + g.rng.below(3)) {
+        let a = g.rng.below(n_ind);
+        let c = g.concept(1);
+        let _ = writeln!(out, ":i{a} a {c} .");
+    }
+    for _ in 0..g.rng.below(3) {
+        let a = g.rng.below(n_ind - 1);
+        let b = a + 1 + g.rng.below(n_ind - 1 - a);
+        let r = g.rng.below(n_roles);
+        let _ = writeln!(out, "[ a owl:NegativePropertyAssertion ; owl:sourceIndividual :i{a} ; owl:assertionProperty :r{r} ; owl:targetIndividual :i{b} ] .");
+    }
+    out
+}
+
+const CHAIN_SEEDS: u64 = 400;
+
+#[test]
+fn oracle_differential_chains() {
+    differential(
+        "chains",
+        chains_corpus,
+        CHAIN_SEEDS,
+        include_str!("data/owl2dl_oracle_chains_expected.txt"),
+        None,
+    );
+}
+
 /// A corpus of data properties and datatypes: data property axioms, data restrictions
 /// over integer, decimal, string and boolean ranges (facet restrictions, `DataOneOf`, the
 /// data booleans, a `DatatypeDefinition`), and data assertions whose literals denote the
@@ -2565,4 +2686,141 @@ fn oracle_differential_datatypes() {
         include_str!("data/owl2dl_oracle_datatypes_expected.txt"),
         Some(10),
     );
+}
+
+// ---- incremental rechecks ------------------------------------------------------------------
+
+/// Rechecking with [`IncrementalChecker`] answers what a fresh [`check`] does: over every
+/// corpus, each seed's ontology and its first half are checked in the order half, whole,
+/// whole, half, whole, each read into its own dictionary, so the checker reuses an
+/// extension, an identical ontology, nothing (axioms removed), and an extension again. A
+/// reused answer may be decided where the fresh check ran out of budget (it skips tests),
+/// but never differs from a decided fresh answer.
+#[test]
+fn incremental_rechecks_agree_with_fresh_checks() {
+    use sparq_reason_dl::owl2dl::{IncrementalChecker, Reuse};
+    type Corpus = (&'static str, fn(u64) -> String);
+    let corpora: [Corpus; 6] = [
+        ("shiq", Gen::ontology),
+        ("nominals", |s| Gen::ontology_with(s, true)),
+        ("focused", focused),
+        ("keys", keys_corpus),
+        ("chains", chains_corpus),
+        ("datatypes", datatypes_corpus),
+    ];
+    let decided = |r: &DlReport| match r.consistency {
+        Consistency::Inconsistent => true,
+        Consistency::Consistent => r.classification.is_some(),
+        Consistency::Unknown(_) => false,
+    };
+    let mut failures = Vec::new();
+    let mut reused = [0usize; 2];
+    for (corpus, generate) in corpora {
+        for seed in 0..100 {
+            let whole = generate(seed);
+            let lines: Vec<&str> = whole.lines().collect();
+            let half = lines[..lines.len() / 2].join("\n");
+            let mut checker = IncrementalChecker::new();
+            let mut prev: Option<(bool, bool)> = None;
+            for (step, (body, is_whole)) in [
+                (&half, false),
+                (&whole, true),
+                (&whole, true),
+                (&half, false),
+                (&whole, true),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let (d, t) = Graph::parse_to_triples(&format!("{PRE}{body}"), "turtle").unwrap();
+                let o = extract(&d, &t).unwrap();
+                let fresh = check(&d, &o, Budget::default());
+                let (got, reuse) = checker.check(&d, &o, Budget::default());
+                let want_reuse = match prev {
+                    Some((true, was_whole)) if was_whole == is_whole => Reuse::Identical,
+                    Some((true, false)) if is_whole => Reuse::Extension,
+                    _ => Reuse::None,
+                };
+                // A refusal is never reused; otherwise the axioms decide.
+                let refused =
+                    matches!(fresh.consistency, Consistency::Unknown(_)) && reuse == Reuse::None;
+                if reuse != want_reuse && !refused {
+                    failures.push(format!(
+                        "{corpus} {seed} step {step}: {reuse:?}, want {want_reuse:?}"
+                    ));
+                }
+                match reuse {
+                    Reuse::Identical => reused[0] += 1,
+                    Reuse::Extension => reused[1] += 1,
+                    Reuse::None => {}
+                }
+                let agrees = if decided(&fresh) {
+                    got == fresh
+                } else {
+                    got.profile == fresh.profile && (got == fresh || decided(&got))
+                };
+                if !agrees {
+                    failures.push(format!(
+                        "{corpus} {seed} step {step} ({reuse:?}):\n--- fresh\n{fresh:?}\n--- got\n{got:?}\n{body}"
+                    ));
+                }
+                prev = Some((decided(&got), is_whole));
+            }
+        }
+    }
+    eprintln!(
+        "incremental: {} identical, {} extension reuses",
+        reused[0], reused[1]
+    );
+    assert!(
+        reused[0] > 300 && reused[1] > 300,
+        "too little reuse: {reused:?}"
+    );
+    assert!(
+        failures.is_empty(),
+        "{} disagreements:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+/// An automaton that grows past `MAX_AUTOMATON_STATES` by embedding non-simple sub-roles
+/// (each `r{i+1}` has two sub-roles that are both above `r{i}`, so its automaton doubles)
+/// is refused quickly, not built.
+#[test]
+fn an_automaton_past_the_state_cap_is_refused() {
+    let doubling = |n: usize| {
+        let mut body = String::from(":r0 a owl:ObjectProperty , owl:TransitiveProperty .\n");
+        for i in 0..n {
+            let j = i + 1;
+            body.push_str(&format!(
+            ":a{i} a owl:ObjectProperty . :b{i} a owl:ObjectProperty . :r{j} a owl:ObjectProperty .
+             :r{i} rdfs:subPropertyOf :a{i} , :b{i} . :a{i} rdfs:subPropertyOf :r{j} . :b{i} rdfs:subPropertyOf :r{j} .\n"
+        ));
+        }
+        body.push_str(&format!(
+            ":C0 a owl:Class . :C1 a owl:Class . :C0 rdfs:subClassOf {} .",
+            all(&format!(":r{n}"), ":C1")
+        ));
+        body
+    };
+    let body = doubling(24);
+    let start = std::time::Instant::now();
+    let (_, r) = run(&body);
+    assert!(
+        matches!(
+            r.consistency,
+            Consistency::Unknown(UnknownReason::OutOfFragment { .. })
+        ),
+        "{:?}",
+        r.consistency
+    );
+    assert!(start.elapsed() < std::time::Duration::from_secs(30));
+    // A small instance of the same shape is decided.
+    assert!(consistent(&doubling(3)));
 }
