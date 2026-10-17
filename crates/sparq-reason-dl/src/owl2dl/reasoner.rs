@@ -659,6 +659,33 @@ mod tests {
         );
     }
 
+    /// Records deduplicated through a key are decided under the default budget: all of 300
+    /// individuals sharing one value (each merge's survivor keeps every duplicate's value),
+    /// and 300 in groups of 10. A round pays only for the pairs before its merge.
+    #[test]
+    fn data_keys_deduplicating_large_groups_are_decided_under_the_default_budget() {
+        for group in [300, 10] {
+            let mut body = String::from(
+                r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+                :P a owl:Class . :d a owl:DatatypeProperty . :P owl:hasKey ( :d ) .
+                "#,
+            );
+            for i in 0..300 {
+                body.push_str(&format!(
+                    ":i{i} a owl:NamedIndividual , :P ; :d {} .\n",
+                    i / group
+                ));
+            }
+            let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
+            let o = extract(&d, &triples).unwrap();
+            assert_eq!(
+                check(&d, &o, Budget::default()).consistency,
+                Consistency::Consistent,
+                "groups of {group}"
+            );
+        }
+    }
+
     /// A key matches on any shared value: two individuals sharing only their second value of
     /// the first key property, or only one of several values of a second key property, are
     /// identified (the value index holds every value, not just the first).
@@ -707,7 +734,7 @@ mod tests {
     /// the budget: every budget between the work without the key and with it answers
     /// `ResourceBudget`, including those running out while the candidates are built.
     #[test]
-    fn key_candidates_are_built_inside_the_budget() {
+    fn key_partners_are_built_inside_the_budget() {
         let n = 16;
         let mut body = String::from(
             r#"@prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
@@ -728,7 +755,7 @@ mod tests {
         };
         let needed = work(&body);
         let without_key = work(&body.replace(":P owl:hasKey ( :d ) .", ""));
-        // The first candidate list alone has `n (n - 1) / 2` pairs.
+        // Every round's partner list for the first member has every later member.
         assert!(needed - without_key >= (n * (n - 1) / 2) as u64);
         let (d, triples) = Graph::parse_to_triples(&body, "turtle").unwrap();
         let o = extract(&d, &triples).unwrap();

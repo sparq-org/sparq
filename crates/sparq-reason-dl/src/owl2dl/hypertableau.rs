@@ -326,6 +326,13 @@ enum KeyStep {
 /// depends on), and whether some value is not fixed.
 type DataValues = (Vec<(Value, Dep)>, bool);
 
+/// A key's members indexed by their values on its first data property.
+#[derive(Default)]
+struct KeyIndex<'v> {
+    by_value: FxHashMap<&'v Value, Vec<usize>>,
+    unfixed: Vec<usize>,
+}
+
 /// Whether two individuals share a key's values.
 enum Shared {
     No,
@@ -572,17 +579,39 @@ impl<'c> Tableau<'c> {
         if self.c.keys.is_empty() {
             return KeyStep::Done;
         }
-        // A named individual's canonical node stands for it only given the merges on the way.
-        let mut named: Vec<(Node, Dep)> = self
-            .named
-            .iter()
-            .map(|&n| self.canonical_dep(n))
-            .filter(|&(n, _)| self.nodes[n as usize].active)
-            .collect();
+        // A named individual's canonical node stands for it only given the merges on the way
+        // (one unit per individual and per merge followed).
+        let mut named: Vec<(Node, Dep)> = Vec::with_capacity(self.named.len());
+        for &n in &self.named {
+            let (mut n, mut d) = (n, Dep::default());
+            if self.probe() {
+                return KeyStep::Merged;
+            }
+            while let Some((s, ds)) = self.merges.get(&n) {
+                if self.probe() {
+                    return KeyStep::Merged;
+                }
+                d = d.union(ds);
+                n = *s;
+            }
+            if self.nodes[n as usize].active {
+                named.push((n, d));
+            }
+        }
+        // Sorting, `n log n` units, charged before it runs.
+        let m = named.len();
+        if self.charge(m.saturating_mul(m.max(2).ilog2() as usize)) {
+            return KeyStep::Merged;
+        }
         named.sort_unstable_by_key(|&(n, _)| n);
         named.dedup_by_key(|&mut (n, _)| n);
         let mut unsure = false;
         for key in &self.c.keys {
+            // The member scan, one unit per named individual, charged before it runs.
+            if self.charge(named.len()) {
+                // `run` reports the exhaustion before using anything.
+                return KeyStep::Merged;
+            }
             let members: Vec<(Node, Dep)> = named
                 .iter()
                 .filter_map(|(n, dn)| match key.class {
@@ -593,11 +622,6 @@ impl<'c> Tableau<'c> {
                         .map(|d| (*n, d.union(dn))),
                 })
                 .collect();
-            // The member scan, one unit per named individual.
-            if self.charge(named.len()) {
-                // `run` reports the exhaustion before using anything.
-                return KeyStep::Merged;
-            }
             // Each member's values on the key's data properties, read once per key (one unit
             // per entry, besides the scans).
             let mut values: Vec<Vec<DataValues>> = Vec::with_capacity(members.len());
@@ -615,32 +639,39 @@ impl<'c> Tableau<'c> {
                 values.push(row);
             }
             let n = members.len();
-            let indexed = self.key_candidates(&values);
+            let index = self.key_index(&values);
             if self.over_budget() {
                 return KeyStep::Merged;
             }
-            let pairs: Box<dyn Iterator<Item = (usize, usize)>> = match indexed {
-                Some(pairs) => Box::new(pairs.into_iter()),
-                None => Box::new((0..n).flat_map(move |i| (i + 1..n).map(move |j| (i, j)))),
-            };
-            for (i, j) in pairs {
-                let ((x, dx), (y, dy)) = (&members[i], &members[j]);
-                // A pair scans the named individuals once per object property.
-                if self.charge(1 + key.roles.len() * named.len()) {
-                    return KeyStep::Merged;
-                }
-                let shared = self.key_shared(key, *x, *y, &named, &values[i], &values[j]);
+            // Pairs in order, built one `i` at a time, so a round that merges pays only for
+            // the pairs before the first merge.
+            for i in 0..n {
+                let partners: Box<dyn Iterator<Item = usize>> = match &index {
+                    Some(index) => Box::new(self.key_partners(index, &values, i).into_iter()),
+                    None => Box::new(i + 1..n),
+                };
                 if self.over_budget() {
-                    // The value comparisons ran out of budget part way.
                     return KeyStep::Merged;
                 }
-                match shared {
-                    Shared::No => {}
-                    Shared::Maybe => unsure = true,
-                    Shared::Yes(d) => {
-                        let d = d.union(dx).union(dy);
-                        self.merge(*x, *y, &d);
+                for j in partners {
+                    let ((x, dx), (y, dy)) = (&members[i], &members[j]);
+                    // A pair scans the named individuals once per object property.
+                    if self.charge(1 + key.roles.len() * named.len()) {
                         return KeyStep::Merged;
+                    }
+                    let shared = self.key_shared(key, *x, *y, &named, &values[i], &values[j]);
+                    if self.over_budget() {
+                        // The value comparisons ran out of budget part way.
+                        return KeyStep::Merged;
+                    }
+                    match shared {
+                        Shared::No => {}
+                        Shared::Maybe => unsure = true,
+                        Shared::Yes(d) => {
+                            let d = d.union(dx).union(dy);
+                            self.merge(*x, *y, &d);
+                            return KeyStep::Merged;
+                        }
                     }
                 }
             }
@@ -652,60 +683,90 @@ impl<'c> Tableau<'c> {
         }
     }
 
-    /// The member pairs `(i, j)`, `i < j`, in order, that a key with a data property might
-    /// identify: those sharing a fixed value on its first data property, or with a value not
-    /// fixed there on one side and any value on the other. Other pairs share no value there,
-    /// so [`key_shared`](Self::key_shared) would answer [`Shared::No`]. `None` (every pair)
-    /// for a key without data properties. One unit per value indexed, per candidate pair
-    /// generated (charged before it is), and `n log n` for sorting them.
-    fn key_candidates(&self, values: &[Vec<DataValues>]) -> Option<Vec<(usize, usize)>> {
+    /// The members by each fixed value of a key's first data property (ascending), and those
+    /// with a value not fixed there (ascending). `None` for a key without data properties,
+    /// whose every pair is a candidate. One unit per value indexed.
+    fn key_index<'v>(&self, values: &'v [Vec<DataValues>]) -> Option<KeyIndex<'v>> {
         if values.first().is_none_or(|v| v.is_empty()) {
             return None;
         }
-        let mut by_value: FxHashMap<&Value, Vec<usize>> = FxHashMap::default();
-        let mut unfixed = Vec::new();
+        let mut index = KeyIndex::default();
         for (i, v) in values.iter().enumerate() {
             let (fixed, open) = &v[0];
             if self.charge(fixed.len()) {
-                return Some(Vec::new());
+                break;
             }
             for (value, _) in fixed {
-                by_value.entry(value).or_default().push(i);
+                // Once per member, though several neighbours may carry the value.
+                let ms = index.by_value.entry(value).or_default();
+                if ms.last() != Some(&i) {
+                    ms.push(i);
+                }
             }
             if *open {
-                unfixed.push(i);
+                index.unfixed.push(i);
             }
         }
-        let mut pairs: Vec<(usize, usize)> = Vec::new();
-        for ms in by_value.values() {
-            for (a, &i) in ms.iter().enumerate() {
-                for &j in ms[a + 1..].iter().filter(|&&j| j != i) {
-                    if self.probe() {
-                        return Some(Vec::new());
-                    }
-                    pairs.push((i.min(j), i.max(j)));
-                }
+        Some(index)
+    }
+
+    /// The members `j > i`, ascending and once each, that might share a value with member
+    /// `i` on the key's first data property: those sharing a fixed value, and those with an
+    /// unfixed value on one side and any value on the other. Others share no value there,
+    /// so [`key_shared`](Self::key_shared) would answer [`Shared::No`]. One unit per
+    /// value of `i` and per partner generated (charged before it is), and `m log m` for sorting `m` of them; empty
+    /// once the budget is spent.
+    fn key_partners(
+        &self,
+        index: &KeyIndex<'_>,
+        values: &[Vec<DataValues>],
+        i: usize,
+    ) -> Vec<usize> {
+        let mut js = Vec::new();
+        let (fixed, open) = &values[i][0];
+        let mut seen: FxHashSet<&Value> = FxHashSet::default();
+        for (value, _) in fixed {
+            // Each distinct value once (a merged individual keeps its duplicates' values).
+            if self.probe() {
+                return Vec::new();
             }
-        }
-        // An unfixed value may equal any value, fixed or not, on the other side.
-        for &i in &unfixed {
-            for (j, v) in values.iter().enumerate() {
+            if !seen.insert(value) {
+                continue;
+            }
+            let ms = index.by_value.get(value).map_or(&[][..], Vec::as_slice);
+            for &j in &ms[ms.partition_point(|&j| j <= i)..] {
                 if self.probe() {
-                    return Some(Vec::new());
+                    return Vec::new();
                 }
-                if j != i && (v[0].1 || !v[0].0.is_empty()) {
-                    pairs.push((i.min(j), i.max(j)));
-                }
+                js.push(j);
             }
         }
-        // Sorting, `n log n` units, charged before it runs.
-        let n = pairs.len();
-        if self.charge(n.saturating_mul(n.max(2).ilog2() as usize)) {
-            return Some(Vec::new());
+        if *open {
+            // An unfixed value may equal any value, fixed or not, on the other side.
+            for (j, v) in values.iter().enumerate().skip(i + 1) {
+                if self.probe() {
+                    return Vec::new();
+                }
+                if v[0].1 || !v[0].0.is_empty() {
+                    js.push(j);
+                }
+            }
+        } else if !fixed.is_empty() {
+            let us = &index.unfixed[index.unfixed.partition_point(|&j| j <= i)..];
+            for &j in us {
+                if self.probe() {
+                    return Vec::new();
+                }
+                js.push(j);
+            }
         }
-        pairs.sort_unstable();
-        pairs.dedup();
-        Some(pairs)
+        let m = js.len();
+        if self.charge(m.saturating_mul(m.max(2).ilog2() as usize)) {
+            return Vec::new();
+        }
+        js.sort_unstable();
+        js.dedup();
+        js
     }
 
     /// Whether `x` and `y` share a value on every property of `key`, and on what.
@@ -765,13 +826,13 @@ impl<'c> Tableau<'c> {
     fn data_values(&self, d: Role, x: Node) -> DataValues {
         let mut fixed = Vec::new();
         let mut unfixed = false;
-        for (&n, rs) in &self.nodes[x as usize].adj {
+        for &n in self.nodes[x as usize].adj.keys() {
             let node = &self.nodes[n as usize];
             // One unit per neighbour, and one per label entry of a matching one.
             if self.probe() {
                 break;
             }
-            if !node.active || !node.concrete || !rs.contains(&d) {
+            if !node.active || !node.concrete || !self.has_role(d, x, n) {
                 continue;
             }
             if self.charge(node.label.len()) {
@@ -917,11 +978,10 @@ impl<'c> Tableau<'c> {
         }
     }
 
+    /// Whether `a` has an `r`-edge to `b`: one lookup, however many roles the edge carries.
     fn has_role(&self, r: Role, a: Node, b: Node) -> bool {
-        self.nodes[a as usize]
-            .adj
-            .get(&b)
-            .is_some_and(|rs| rs.contains(&r))
+        let key = if r.inv { (r.idx, b, a) } else { (r.idx, a, b) };
+        self.roles.contains_key(&key)
     }
 
     fn role_dep(&self, r: Role, a: Node, b: Node) -> Dep {
