@@ -68,9 +68,13 @@
 //! same single-sourced constants its own `assert_handle_in_band` uses -- rather
 //! than the unconditional assert, which cannot be predicated.
 //!
-//! `crates/sparq-zk/tests/dual_leaf_v2_recompute_pin.rs` pins this recompute to
-//! the host `dual_leaf_v2::encode_term` for every term kind and both literal
-//! lanes, so the two sides cannot drift apart silently.
+//! `crates/sparq-zk/tests/dual_leaf_v2_noir_pin.rs` pins this recompute to the
+//! host encoder in two halves: a Rust mirror of the folds below, fed the
+//! constants parsed out of the Noir sources and asserted equal to the host leaf
+//! for a value-lane literal (the VALUES), plus a source-text assertion that the
+//! two folds are still the expressions that mirror models (the SHAPE). The
+//! IRI / blank-node shapes reduce to the sentinel and type-code pins in the same
+//! file, because their leaf is the identity folded under those two constants.
 
 use crate::hashes::{h3, TYPE_CODE_BLANK_NODE, TYPE_CODE_IRI, TYPE_CODE_LITERAL};
 use sparq_dual_leaf_v2::{in_handle_band, LANG_NONE, VALUE_NONE_V2};
