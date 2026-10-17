@@ -861,3 +861,58 @@ fn an_over_cap_output_bound_is_refused_before_any_draw() {
     }
     assert!(eval_bounded_path_hidden(&backend, &edges, &form, 4).is_ok());
 }
+
+/// The coverage half of the bound contract, before any draw, for the bounded form.
+///
+/// Same defect as the exactly-`k` entry: the builder enumerated every length's
+/// every tuple — `Σ_ℓ |E|^ℓ` secure equalities — and only then found that `B` was
+/// too small to hold the answer, a refusal decidable from the disclosed endpoint
+/// terms alone.
+///
+/// The projection has to be EXACT, not a sum of its arms: the reflexive diagonal,
+/// the length-1 edge pairs and the length-`>=2` product OVERLAP, and a sum would
+/// refuse bounds the operator should accept. So this pins the count for each shape
+/// and then runs a bound equal to it.
+#[test]
+fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7D07).unwrap();
+    // a->b, b->c: subjects {a,b}, objects {b,c}, nodes {a,b,c}.
+    let edges = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ]);
+
+    // {1,1}: only the edge pairs, (a,b) and (b,c) — 2.
+    // {1,2}: the 2x2 product (a,b),(a,c),(b,b),(b,c) — 4 — which already CONTAINS
+    //        both edge pairs, so a sum of the arms would say 6.
+    // {0,2}: that product plus the reflexive (a,a),(b,b),(c,c) — but (b,b) is in
+    //        BOTH, so the union is 6 and a sum would say 7.
+    for (form, expected) in [
+        (HiddenBoundedPath::range(P, 1, 1), 2usize),
+        (HiddenBoundedPath::range(P, 1, 2), 4),
+        (HiddenBoundedPath::range(P, 0, 2), 6),
+    ] {
+        let count = projected_bounded_candidate_count(&edges, &form).unwrap();
+        assert_eq!(
+            count, expected,
+            "the projection must be the union, not the sum of its arms"
+        );
+
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 1)
+            .expect_err("a bound below the candidate count must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("candidate count"), "{}", m),
+            other => panic!("expected a Protocol refusal, got {:?}", other),
+        }
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+
+        // A bound equal to the projection runs, which is what makes it exact rather
+        // than a bound that quietly refuses legal work.
+        eval_bounded_path_hidden(&backend, &edges, &form, count)
+            .expect("B = the exact candidate count must run");
+    }
+}
