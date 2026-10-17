@@ -517,7 +517,20 @@ mod run_shared {
         /// standardize-apart spaces, and growing the table without an allowance would let
         /// a search of unbounded width keep memory.
         pub(super) fn node(&mut self, key: NodeKey, room: usize) -> Result<u64, NodeFault> {
-            let fold = key.fold();
+            self.node_at(key, key.fold(), room)
+        }
+
+        /// [`RunShared::node`] with `key`'s fold already computed, for the one caller that
+        /// has to check the fold before it uses it and then register it after
+        /// ([`super::backward_prove`]): folding the same key three times per candidate site
+        /// was pure repeat work. `fold` must be `key.fold()`, which the assert pins.
+        pub(super) fn node_at(
+            &mut self,
+            key: NodeKey,
+            fold: u64,
+            room: usize,
+        ) -> Result<u64, NodeFault> {
+            debug_assert_eq!(fold, key.fold(), "node_at was given a fold that is not this key's");
             if let Some(prev) = self.nodes.get(&fold) {
                 return if *prev == key { Ok(fold) } else { Err(NodeFault::Collision) };
             }
@@ -532,23 +545,29 @@ mod run_shared {
         /// would refuse, asked without charging the allowance or inserting anything, so a
         /// caller that uses a fold before it registers it can refuse the collision at the
         /// point of USE ([`super::BwCtx::conflicts`]).
-        pub(super) fn conflicts(&self, key: &NodeKey) -> bool {
-            self.nodes.get(&key.fold()).is_some_and(|prev| prev != key)
+        /// `fold` must be `key.fold()`, which the assert pins.
+        pub(super) fn conflicts(&self, key: &NodeKey, fold: u64) -> bool {
+            debug_assert_eq!(fold, key.fold(), "conflicts was given a fold that is not this key's");
+            self.nodes.get(&fold).is_some_and(|prev| prev != key)
         }
 
         /// The id of the string identity `canon`, registered against it so it can never
         /// name a second, different string ([`RunShared::ids`]). The same refusals as
         /// [`RunShared::node`], and the same allowance: this is how a goal or a nested
         /// closure's formula enters a [`NodeKey`] EXACTLY rather than as a bare fold.
-        pub(super) fn intern(&mut self, canon: &str, room: usize) -> Result<u64, NodeFault> {
-            let fold = super::serialize::fnv1a64(canon);
+        ///
+        /// `canon` is taken BY VALUE because the table keeps it on the registering call:
+        /// borrowing it meant copying the whole canonical key again into the table, once
+        /// per distinct goal of the run, and every caller here builds it to hand over.
+        pub(super) fn intern(&mut self, canon: String, room: usize) -> Result<u64, NodeFault> {
+            let fold = super::serialize::fnv1a64(&canon);
             if let Some(prev) = self.ids.get(&fold) {
-                return if prev == canon { Ok(fold) } else { Err(NodeFault::Collision) };
+                return if *prev == canon { Ok(fold) } else { Err(NodeFault::Collision) };
             }
             if self.registered() >= room {
                 return Err(NodeFault::Full);
             }
-            self.ids.insert(fold, canon.to_string());
+            self.ids.insert(fold, canon);
             Ok(fold)
         }
 
@@ -562,6 +581,13 @@ mod run_shared {
         #[cfg(test)]
         pub(super) fn node_count(&self) -> usize {
             self.nodes.len()
+        }
+
+        /// Everything this run has registered, nodes and string identities together: what
+        /// the allowance counts ([`RunShared::registered`]).
+        #[cfg(test)]
+        pub(super) fn registered_count(&self) -> usize {
+            self.registered()
         }
 
         /// Registers `canon` under `fold`, whatever its own fold is: how a test forces an
@@ -831,7 +857,7 @@ impl<'a> BwCtx<'a> {
     /// ([`run_shared::RunShared::intern`]): how a goal and a nested closure's formula enter
     /// a [`NodeKey`] exactly instead of as a bare, unchecked fold. The same refusals as
     /// [`BwCtx::node`].
-    fn intern(&self, canon: &str) -> Option<u64> {
+    fn intern(&self, canon: String) -> Option<u64> {
         let made = self.visited.borrow_mut().intern(canon, bounded::proof_nodes(&self.truncated));
         self.registered(made)
     }
@@ -890,12 +916,19 @@ impl<'a> BwCtx<'a> {
     /// would be the ancestor's, the caller's inherited bindings would capture them,
     /// unification would fail and the site would be skipped with no error at all
     /// (GH #6844 review round 5).
-    fn conflicts(&self, key: NodeKey) -> bool {
-        if self.unnamed() || !self.visited.borrow().conflicts(&key) {
+    fn conflicts(&self, key: NodeKey, fold: u64) -> bool {
+        if self.unnamed() || !self.visited.borrow().conflicts(&key, fold) {
             return false;
         }
         self.registered(Err(run_shared::NodeFault::Collision));
         true
+    }
+
+    /// [`BwCtx::node`] with `key`'s fold already in hand ([`run_shared::RunShared::node_at`]).
+    fn node_at(&self, key: NodeKey, fold: u64) -> Option<u64> {
+        let made =
+            self.visited.borrow_mut().node_at(key, fold, bounded::proof_nodes(&self.truncated));
+        self.registered(made)
     }
 }
 
@@ -3407,7 +3440,10 @@ fn backward_prove(
                     // substituted one binding deep, while the `unify_walked` below follows
                     // the whole chain, so two goals this resolution tells apart can
                     // substitute alike and one identity over both would merge them.
-                    let Some(resolved) = bounded::walked_atom(&goal, b, &bw.truncated) else {
+                    // `walked_atom_cow`: the walked goal is only READ here, to build its
+                    // canonical key, so its terms come back borrowed where the walk left
+                    // them as it found them instead of copied.
+                    let Some(resolved) = bounded::walked_atom_cow(&goal, b, &bw.truncated) else {
                         // The walker refused the goal for its depth or its size, so the
                         // goal has NO identity and no name can be minted for its proof.
                         // The run fails with that reason: an empty proof here reads as
@@ -3429,13 +3465,17 @@ fn backward_prove(
                         }
                         return Vec::new();
                     };
-                    let Some(id) = bw.intern(&serialize::goal_key(&resolved)) else {
+                    let Some(id) = bw.intern(serialize::goal_key_of(&resolved)) else {
                         return Vec::new();
                     };
                     *goal_id.insert(id)
                 }
             };
             let key = NodeKey::Site { parent: path.fold, goal: id, site: at };
+            // Folded ONCE for this site: the collision check below, the renaming prefix and
+            // the registration after unification all read this one value, where each used
+            // to fold the key again.
+            let fold = key.fold();
             // The fold is COMPUTED here and REGISTERED below, once the conclusion has
             // unified. A site whose conclusion does not unify mints no name that survives
             // (`rc` and `subst` are dropped), so registering it would only charge the run's
@@ -3446,12 +3486,11 @@ fn backward_prove(
             // names the inherited bindings already hold, so unification fails on the capture
             // and `continue` below would leave the collision unseen and the proof lost with
             // no error (GH #6844 review round 5).
-            if bw.conflicts(key) {
+            if bw.conflicts(key, fold) {
                 return Vec::new();
             }
-            let fold = key.fold();
-            let pfx = format!("__bw{fold}_");
-            let n = pfx.as_str();
+            let mut pfx = BwPrefix::EMPTY;
+            let n = pfx.render(fold);
             let rc = [rename_vars(&concl[0], n), rename_vars(&concl[1], n), rename_vars(&concl[2], n)];
             let mut subst = b.clone();
             if !(unify_walked(&goal[0], &rc[0], &mut subst)
@@ -3462,7 +3501,7 @@ fn backward_prove(
             }
             // Registered now: this node's name is about to go into a proof, so a second,
             // different key on this fold must fail the run ([`BwCtx::node`]).
-            if bw.node(key).is_none() {
+            if bw.node_at(key, fold).is_none() {
                 return Vec::new();
             }
             let prem: Vec<[Term; 3]> = rule
@@ -3479,7 +3518,11 @@ fn backward_prove(
                     if let Term::Var(_) = g {
                         // Deep-resolve: walk the chain, then substitute inside
                         // any list structure the value carries.
-                        let Some(val) = bounded::substitute(&walk(g, &sol), &sol, &bw.truncated)
+                        // `walk_ref`, not `walk`: `substitute` reads the resolved term and
+                        // builds its own, so cloning it first was a deep copy of whatever
+                        // the proof bound — a quoted formula, on the path this rule leaks
+                        // its renamed variables through.
+                        let Some(val) = bounded::substitute(walk_ref(g, &sol), &sol, &bw.truncated)
                         else {
                             ok = false;
                             break;
@@ -3629,6 +3672,41 @@ impl NodeKey {
     }
 }
 
+/// The buffer a node's renaming prefix `__bw<fold>_` is rendered into, on the STACK: the
+/// rendering is at most `__bw` plus twenty decimal digits of a `u64` plus `_`, so it has a
+/// fixed upper bound and never needed a heap `String` of its own. One per candidate site on
+/// the backward path, where `format!` took an allocation and a free each time.
+///
+/// It renders the same bytes as `format!("__bw{fold}_")`, which `rename_vars` prefixes and
+/// `serialize::universal_base` reads back.
+struct BwPrefix([u8; 25]);
+
+impl BwPrefix {
+    const EMPTY: BwPrefix = BwPrefix([0u8; 25]);
+
+    /// `__bw<fold>_`, borrowed from this buffer.
+    fn render(&mut self, fold: u64) -> &str {
+        self.0[..4].copy_from_slice(b"__bw");
+        let mut at = self.0.len();
+        let mut rest = fold;
+        loop {
+            at -= 1;
+            self.0[at] = b'0' + (rest % 10) as u8;
+            rest /= 10;
+            if rest == 0 {
+                break;
+            }
+        }
+        // The digits were written to the END of the buffer, so shift them up against the
+        // `__bw` and put the trailing `_` after them.
+        let digits = self.0.len() - at;
+        self.0.copy_within(at.., 4);
+        self.0[4 + digits] = b'_';
+        // ASCII by construction, so the `from_utf8` cannot fail.
+        std::str::from_utf8(&self.0[..4 + digits + 1]).unwrap_or_default()
+    }
+}
+
 impl BwPath {
     /// The path that is just the node `fold` names.
     fn at(fold: u64) -> BwPath {
@@ -3650,11 +3728,23 @@ impl BwPath {
 
 /// Resolve `t` through any chain of variable bindings in `s` (bounded against cycles).
 fn walk(t: &Term, s: &Binding) -> Term {
-    let mut cur = t.clone();
+    walk_ref(t, s).clone()
+}
+
+/// [`walk`] without copying anything: the term at the END of `t`'s binding chain in `s`,
+/// BORROWED from `t` or from `s`. The same chain, the same cycle bound, the same answer —
+/// `walk` is this plus one clone.
+///
+/// It exists because `walk` cloned at every hop and then again for its result, so a caller
+/// that only reads the resolved term (or only needs it to build something else) paid a deep
+/// copy of a quoted formula or a list for nothing. That is on the per-goal backward-naming
+/// path and on the per-solution projection below (GH #6844 follow-up).
+fn walk_ref<'a>(t: &'a Term, s: &'a Binding) -> &'a Term {
+    let mut cur = t;
     for _ in 0..s.len() + 1 {
-        match &cur {
+        match cur {
             Term::Var(v) => match s.get(v) {
-                Some(next) => cur = next.clone(),
+                Some(next) => cur = next,
                 None => break,
             },
             _ => break,
@@ -5234,20 +5324,6 @@ fn with_formula_closure<R>(
     // depth, one after the other, and would otherwise number their rules into the same
     // names while both sets of derived facts reach the outer substitution.
     //
-    // It is NOT `key` above. That one is `FxHasher` over `[[Term; 3]]::hash`, whose value
-    // depends on the target's pointer width, which is exactly the dependence GH #6844
-    // removes — it is fine for the cycle guard, which only has to agree with itself inside
-    // one run, and wrong for anything a name is built from. The salt is the INTERNED
-    // `serialize::formula_canonical_key` instead: explicit `u64` arithmetic over `term_key`s,
-    // the same on `wasm32` as on a 64-bit target, and registered exactly so it cannot be a
-    // bare fold two formulas share. `_salt` puts the enclosing closure's salt back however
-    // this function leaves.
-    let Some(salt) = bw.intern(&serialize::formula_canonical_key(ts)) else {
-        bw.visited.borrow_mut().docs.remove(&key);
-        return f(&ts.iter().collect::<Vec<_>>());
-    };
-    let _salt = ScopeSalt::swapped_in(&bw.visited, salt);
-
     let mut facts: Vec<[Term; 3]> = Vec::new();
     let mut rules: Vec<Rule> = Vec::new();
     let mut backward: Vec<Rule> = Vec::new();
@@ -5275,6 +5351,44 @@ fn with_formula_closure<R>(
             _ => facts.push(row),
         }
     }
+    // This document's own canonical identity salts the root identities the nested closure
+    // mints ([`BwCtx::scope_salt`]). Nesting DEPTH alone does not tell two closures apart:
+    // two sibling `log:conclusion` formulas of one outer document are closed at the same
+    // depth, one after the other, and would otherwise number their rules into the same
+    // names while both sets of derived facts reach the outer substitution.
+    //
+    // It is NOT `key` above. That one is `FxHasher` over `[[Term; 3]]::hash`, whose value
+    // depends on the target's pointer width, which is exactly the dependence GH #6844
+    // removes — it is fine for the cycle guard, which only has to agree with itself inside
+    // one run, and wrong for anything a name is built from. The salt is
+    // `serialize::formula_canonical_key`'s fold instead: explicit `u64` arithmetic over
+    // `term_key`s, the same on `wasm32` as on a 64-bit target.
+    //
+    // It is REGISTERED ([`BwCtx::intern`], which refuses a fold a different identity
+    // already holds and fails the run) exactly when this nested document has a `<=` rule,
+    // and so can mint a name the registration has to keep apart from every other. With no
+    // backward rule the closure renames nothing — its `BwCtx` is `unnamed()` and hands its
+    // paths out unregistered — so registering the salt only spent the run's backward
+    // identity allowance on a purely forward closure, and a run inside its own join-work
+    // limit WAS refused for it: each nested closure gets a fresh join/round allowance, but
+    // the salts accumulate run-wide against `bounded::proof_nodes`, so a deep CHAIN of
+    // forward-only closures was refused with the backward proof-node cut in a document
+    // that cannot mint a single name (`a_deep_forward_only_closure_chain_answers_at_a_
+    // tight_limit`). The fold is the SAME either way, so what any name minted elsewhere in
+    // the run is built from does not move.
+    //
+    // `_salt` puts the enclosing closure's salt back however this function leaves.
+    let canon = serialize::formula_canonical_key(ts);
+    let salt = if backward.is_empty() {
+        serialize::fnv1a64(&canon)
+    } else {
+        let Some(salt) = bw.intern(canon) else {
+            bw.visited.borrow_mut().docs.remove(&key);
+            return f(&ts.iter().collect::<Vec<_>>());
+        };
+        salt
+    };
+    let _salt = ScopeSalt::swapped_in(&bw.visited, salt);
     let parsed =
         parser::Parsed { facts, rules, backward_rules: backward, base: bw.base.clone() };
     // Inherit the parent's import-cycle guard ([`VisitedDocs`]) so a `log:semantics` /
@@ -10186,15 +10300,15 @@ mod tests {
         let tight =
             BwCtx::new(&rules, Truncation::top_level_with(limits), RunShared::for_sources(&[]));
         tight.root_path(0).expect("a root");
-        tight.intern("G1").expect("the second entry");
-        assert_eq!(tight.intern("G2"), None, "interning is charged to the same allowance");
+        tight.intern("G1".to_string()).expect("the second entry");
+        assert_eq!(tight.intern("G2".to_string()), None, "interning is charged to the same allowance");
         // The DEFAULT allowance is the unbounded sentinel: nothing is refused.
         let open = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
         let open_root = open.root_path(0).expect("a root");
         for g in 0..64 {
             open.node(NodeKey::Site { parent: open_root.fold, goal: g, site: 0 })
                 .expect("the default refuses nothing");
-            open.intern(&format!("G{}", g)).expect("nor any identity");
+            open.intern(format!("G{}", g)).expect("nor any identity");
         }
         assert!(open.nested_error.borrow().is_none());
     }
@@ -10218,11 +10332,11 @@ mod tests {
             Term::Var("y".into()),
         ]);
         assert_ne!(mine, theirs, "two different goals");
-        let id = bw.intern(&mine).expect("the first goal interns");
-        assert_eq!(bw.intern(&mine), Some(id), "and interns to the same id again");
+        let id = bw.intern(mine.clone()).expect("the first goal interns");
+        assert_eq!(bw.intern(mine.clone()), Some(id), "and interns to the same id again");
         // Force the fold collision: the other goal's fold is already taken by this one.
         bw.visited.borrow_mut().force_id_fold(serialize::fnv1a64(&theirs), &mine);
-        assert_eq!(bw.intern(&theirs), None, "a goal-fold collision is refused");
+        assert_eq!(bw.intern(theirs.clone()), None, "a goal-fold collision is refused");
         assert!(
             bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("64-bit fold")),
             "{:?}",
@@ -10422,6 +10536,212 @@ mod tests {
         let b_step = b_root.child(&backward, 0).expect("a premise step");
         assert_eq!((b_root.fold, b_step.fold), (root.fold, step.fold), "the same two nodes");
         assert_eq!(named.borrow().node_count(), 2, "registered, because a name can be minted");
+    }
+
+    /// The lazy nested-closure salt DOES change which runs are refused, and this pins the
+    /// direction: strictly fewer. A document with NO `<=` rule anywhere, built as a CHAIN of
+    /// nested forward-only `log:conclusion` closures, used to be refused with the
+    /// `backward proof-node limit exceeded` cut and now answers.
+    ///
+    /// Why a chain and not siblings: each nested closure gets a FRESH join/round allowance
+    /// (`bounded::enter_closure`), but the salts every level registered accumulated
+    /// RUN-WIDE against `bounded::proof_nodes` — `max_join_rows × max_rounds`. So ten
+    /// levels of nesting registered ten identities against an allowance of three, and were
+    /// refused for backward naming in a document that cannot mint a single name. Sibling
+    /// closures do not show this, which is why the first version of this work reported the
+    /// refusal as unreachable; it is reachable, by depth.
+    ///
+    /// The answers are unchanged wherever both sides answer — what changes is only that
+    /// fewer runs are refused.
+    #[test]
+    fn a_deep_forward_only_closure_chain_answers_at_a_tight_limit() {
+        // Ten levels, each wrapping the one below in a `log:conclusion` whose outer rule
+        // concludes from it. No `<=` rule at any level.
+        let depth = 10;
+        let mut inner = format!(":k{depth} :p :v .");
+        for k in (0..depth).rev() {
+            inner = format!(
+                ":k{k} :p :v . {{ {{ {inner} }} log:conclusion ?c{k} }} => {{ :r{k} :is ?c{k} }} ."
+            );
+        }
+        let src = format!(
+            "@prefix : <http://ex/> .\n\
+             @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n{inner}\n"
+        );
+        // Tight enough that ten accumulated salts would exceed the allowance
+        // (`proof_nodes` = 1 × 3 = 3), and loose enough for the closure's own forward work.
+        let limits =
+            ClosureLimits { max_rounds: 3, max_join_rows: 1, ..ClosureLimits::default() };
+        let out = reason_n3_terms_with_limits(
+            &src,
+            None,
+            None,
+            NegationCycles::Reject,
+            limits,
+        )
+        .expect("a document that can mint no name is not refused for backward naming");
+        // The outer rule fired from the nested closure's result, and that result is the
+        // formula term the closure built.
+        let concluded = out
+            .facts
+            .iter()
+            .find(|[_, p, _]| matches!(p, Term::Iri(i) if i == "http://ex/is"))
+            .expect("the outer rule concluded :r0 :is <the nested closure>");
+        assert!(
+            matches!(&concluded[0], Term::Iri(i) if i == "http://ex/r0"),
+            "concluded about :r0, got {:?}",
+            concluded[0]
+        );
+        assert!(
+            matches!(&concluded[2], Term::Formula(rows) if !rows.is_empty()),
+            "log:conclusion is formula-valued and the closure is not empty: {:?}",
+            concluded[2]
+        );
+        // And the document's own asserted fact is still there, so this is the whole answer
+        // and not a truncated one.
+        assert!(
+            out.facts.iter().any(|[sub, p, o]| matches!((sub, p, o), (Term::Iri(a), Term::Iri(b), Term::Iri(c))
+                if a == "http://ex/k0" && b == "http://ex/p" && c == "http://ex/v")),
+            "the top-level asserted fact survives"
+        );
+    }
+
+    /// `walk_ref` resolves the chain `walk` resolved, and `walk` is it plus a clone: the
+    /// same answer for an unbound variable, a one-hop chain, a long chain, a chain ending
+    /// in a compound, a non-variable, and a CYCLE — where the answer is whatever the
+    /// shared iteration bound (`s.len() + 1` hops) lands on, so the two must agree there
+    /// too or a cyclic binding would resolve differently than it used to.
+    #[test]
+    fn walk_ref_resolves_what_walk_resolved() {
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let var = |s: &str| Term::Var(s.to_string());
+        let mut b = Binding::default();
+        b.insert("one".into(), iri("http://ex/v"));
+        b.insert("two".into(), var("one"));
+        b.insert("three".into(), var("two"));
+        b.insert("deep".into(), Term::List(vec![var("three"), iri("http://ex/w")]));
+        b.insert("toDeep".into(), var("deep"));
+        // A two-variable cycle, and a self-cycle.
+        b.insert("loopA".into(), var("loopB"));
+        b.insert("loopB".into(), var("loopA"));
+        b.insert("self".into(), var("self"));
+        let probes = vec![
+            var("one"),
+            var("two"),
+            var("three"),
+            var("deep"),
+            var("toDeep"),
+            var("unbound"),
+            var("loopA"),
+            var("loopB"),
+            var("self"),
+            iri("http://ex/plain"),
+            Term::List(vec![var("two")]),
+            Term::Formula(vec![[var("two"), iri("http://ex/p"), var("one")]]),
+        ];
+        // The reference is the cloning loop `walk` WAS, spelled out: `walk` now delegates
+        // to `walk_ref`, so comparing the two against each other would pass whatever
+        // `walk_ref` did.
+        let reference = |t: &Term| -> Term {
+            let mut cur = t.clone();
+            for _ in 0..b.len() + 1 {
+                match &cur {
+                    Term::Var(v) => match b.get(v) {
+                        Some(next) => cur = next.clone(),
+                        None => break,
+                    },
+                    _ => break,
+                }
+            }
+            cur
+        };
+        for t in &probes {
+            assert_eq!(walk_ref(t, &b), &reference(t), "walk_ref disagreed on {t:?}");
+            assert_eq!(walk(t, &b), reference(t), "walk disagreed on {t:?}");
+        }
+    }
+
+    /// `BwPrefix::render` writes the bytes `format!("__bw{fold}_")` wrote. That rendering is
+    /// the one `__bw<n>_` chunk `serialize::universal_base` reads back and that every
+    /// renamed variable carries, so a drift here would rename every standardize-apart
+    /// space. Checked at the digit-count boundaries and at both extremes of a `u64`.
+    #[test]
+    fn the_renaming_prefix_renders_what_format_rendered() {
+        let mut folds: Vec<u64> = vec![0, 1, 9, 10, 11, 99, 100, 999, 1000, u64::MAX, u64::MAX - 1];
+        // A spread of wide values, including one of every digit count.
+        let mut at = 1u64;
+        while at <= u64::MAX / 10 {
+            folds.push(at);
+            folds.push(at * 9);
+            at *= 10;
+        }
+        for f in folds {
+            let mut pfx = BwPrefix::EMPTY;
+            assert_eq!(pfx.render(f), format!("__bw{f}_"), "BwPrefix::render({f})");
+        }
+    }
+
+    /// A purely FORWARD nested closure must not spend the run's backward identity
+    /// allowance. `with_formula_closure` interned the nested document's scope salt before
+    /// it knew whether that document had a `<=` rule at all, so a forward-only
+    /// `log:conclusion` closure registered an identity no name could ever be built from —
+    /// charging `bounded::proof_nodes` and growing the run's table — and a run inside its
+    /// own join-work limit could be refused for it.
+    ///
+    /// This is the same shape as `a_forward_only_evaluation_registers_no_proof_nodes` and
+    /// asserts the same thing: the ACCOUNTING. What that accounting lets through is pinned
+    /// separately, by `a_deep_forward_only_closure_chain_answers_at_a_tight_limit` — the
+    /// refusal here is reachable, by nesting DEPTH rather than by sibling count. The salt's
+    /// VALUE is unchanged, which is the
+    /// other half — a closure that does have a `<=` rule registers that same fold, so no
+    /// name minted anywhere in the run moves.
+    #[test]
+    fn a_forward_only_nested_closure_registers_no_identity() {
+        let nested = |rule: &str| {
+            format!(
+                "@prefix : <http://ex/> .\n\
+                 @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                 {{ {{ :a :p :v . {rule} }} log:conclusion ?c }} => {{ :result :is ?c }} .\n"
+            )
+        };
+        // A run's registrations are not reachable from the public entry points, so the
+        // closure is driven through one and the table read from the run it was given.
+        let registered = |src: &str| {
+            let shared = run_shared::RunShared::for_sources(&[]);
+            let parsed = bounded::parse_n3(src, "", &Truncation::top_level()).expect("parses");
+            let out = run_closure_in(
+                parsed,
+                None,
+                Some(shared.clone()),
+                &Truncation::top_level(),
+                StepMode::None,
+                NegationCycles::Reject,
+                None,
+                "",
+            )
+            .expect("closes");
+            drop(out);
+            // Bound, not returned straight out: the `Ref` has to be dropped before
+            // `shared` is.
+            let registered = shared.borrow().registered_count();
+            registered
+        };
+        let fwd_src = nested("{ ?x :p :v } => { ?x :q :w } .");
+        assert_eq!(registered(&fwd_src), 0, "a forward-only nested closure registers nothing");
+        // And it still answers: the closure runs, and the outer rule concludes from it.
+        let out = reason_n3_terms(&fwd_src, None).expect("the forward-only document reasons");
+        assert!(
+            out.facts.iter().any(
+                |[_, p, _]| matches!(p, Term::Iri(i) if i == "http://ex/is")
+            ),
+            "the nested closure's result reached the outer conclusion"
+        );
+        // The same document with a BACKWARD rule in the nested formula DOES register the
+        // salt, because a name can then be minted inside that closure.
+        assert!(
+            registered(&nested("{ ?x :q :w } <= { ?x :p :v } .")) > 0,
+            "a nested closure that can mint a name registers its salt"
+        );
     }
 
     /// The other half of finding R4-1: a goal the walker REFUSES — it has no identity, so
