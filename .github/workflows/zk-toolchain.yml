@@ -443,6 +443,15 @@ jobs:
         run: |
           cargo test -p sparq-zk-compose -p sparq-zk -- --ignored --test-threads=1
 
+      # The live tests that are NOT `#[ignore]`d (e2e forge-reject cases, the signed
+      # filter bindings, the family members, the differential fuzz, the car-hire capture)
+      # run in the default lanes only as declared skips, because those lanes have no
+      # toolchain. This is the lane that has it, so run them here too.
+      - name: Run the default-run live ZK tests (real nargo/bb)
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          cargo test -p sparq-zk-compose -- --test-threads=1
+
       # Rebuild the immutable foundation separately from the PR candidate.
       # This independently checks the provenance of all four legacy key goldens.
       - name: Rebuild fixed foundation result keys independently
