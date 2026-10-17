@@ -1241,6 +1241,7 @@ pub async fn handle<S: Store + 'static>(
                 &iri,
                 what,
                 super::records::Listed::InContainer,
+                super::records::Remover::Request,
                 req.admission.clone(),
                 set_aside,
                 settle,

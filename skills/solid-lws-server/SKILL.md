@@ -321,15 +321,22 @@ before one was lowered, or written to the store directly) are all loaded and non
 the start logs a line naming the container and what is past which bound, and no new one is
 admitted to a bound until it is under it. A subscription create removes up to 16 expired
 subscriptions **of its own subscriber's** before it is counted, so the purging it waits for is
-its own records'. Everyone else's are swept on tasks of their own: one started by a create that
-goes through once its locks are released, and a sweeper that runs every 10 seconds for as long
-as the server does, removing at most 64 at a time, whether any create is admitted or refused;
-each sweep starts from where the last one stopped, and a start removes every expired
-subscription it loads. A subscriber's conditional subscription create compares its own
-listing, and holds only that listing (and the container, shared) while it is evaluated and
-until the new subscription is registered: what it waits on is a change to its own
-subscriptions or the owner's conditional create, never another subscriber's create or removal,
-and never a sweep of expired subscriptions, which are listed nowhere. An access document nested too deeply to store and read back gets 400. A
+its own records'. Everyone else's are removed by an expiry sweeper that runs every 2 seconds
+(and when a create goes through) for as long as the server does, whether any create is admitted
+or refused. Each sweep looks at most at 256 subscriptions, from where the last one stopped, and
+starts at most 16 removals at once, in places of their own that request load cannot take; each
+removal is given up after 5 seconds (one that never completes in the store holds up no other),
+and one that fails, is given up or panics is tried again after a wait that doubles from 10
+seconds to 10 minutes. The sweeper holds the server's state only while a removal runs, so the
+state goes once the server's handles do. Removal is eventual, subject to the store making
+progress: removals contend with requests for the store and its index, and a store that never
+answers delays them indefinitely. A start removes every expired subscription it loads. A
+subscriber's conditional subscription create compares its own listing, and holds only that
+listing (and the container, shared) while it is evaluated and until the new subscription is
+registered: what it waits on is a change to its own subscriptions or the owner's conditional
+create (which holds the container alone, and once queued keeps later shared holders waiting
+behind it), never another subscriber's create or removal, and never the removal of an expired
+subscription, which is listed nowhere. An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.

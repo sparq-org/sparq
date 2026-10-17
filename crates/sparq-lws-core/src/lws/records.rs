@@ -380,6 +380,7 @@ pub(crate) async fn remove_record<S, H, A, Z>(
     iri: &str,
     what: &'static str,
     listed: Listed<'_>,
+    by: Remover,
     admission: Option<crate::overload::AdmissionSlot>,
     set_aside: A,
     settle: Z,
@@ -390,7 +391,11 @@ where
     A: FnOnce() -> Option<H> + Send + 'static,
     Z: FnOnce(&LwsState<S>, bool, H) -> Option<String> + Send + 'static,
 {
-    let Some(place) = state.settlements.reserve() else {
+    let place = match by {
+        Remover::Request => state.settlements.reserve(),
+        Remover::Sweeper => state.settlements.reserve_maintenance(),
+    };
+    let Some(place) = place else {
         return Err(settlements_full());
     };
     let own_listing = match listed {
@@ -477,20 +482,37 @@ where
             )),
         }
     };
-    match tokio::spawn(task).await {
+    let done = match by {
+        Remover::Request => tokio::spawn(task).await.map_err(|e| e.to_string()),
+        Remover::Sweeper => Ok(task.await),
+    };
+    match done {
         Ok(Ok(removed)) => Ok(removed),
-        Ok(Err(why)) => Err(problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&why))),
-        Err(e) => Err(problem(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Some(&e.to_string()),
-        )),
+        Ok(Err(why)) | Err(why) => Err(problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&why))),
     }
+}
+
+/// Who removes a record ([`remove_record`]), and so how its steps run.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Remover {
+    /// A request: the steps run in a task of their own, so a client that goes away cannot cut
+    /// them short, in a place among those [`Settlements`] has for every change.
+    Request,
+    /// The expiry sweeper (`notify::spawn_expiry_sweeper`): the steps run in its own task, which
+    /// owns them and may give them up past a deadline (dropped, they leave the record as the
+    /// store has it, in force or gone, and memory as it was, to be tried again), in a place
+    /// reserved for it ([`Settlements::reserve_maintenance`]), so no load of requests refuses it.
+    Sweeper,
 }
 
 /// How many record changes (creates and removals of grants, requests and subscriptions) may be
 /// in progress or waiting to be settled at once. Past it, a new one is refused with `503`: a
 /// store that keeps failing cannot pile up settlement tasks, and the records and locks they hold.
 pub(crate) const MAX_SETTLING: usize = 256;
+
+/// How many of the expiry sweeper's removals may be in progress or being settled at once, in
+/// places of their own (see [`Remover::Sweeper`]).
+pub(crate) const MAINTENANCE_PLACES: usize = 16;
 
 /// The record changes in progress or being settled, owned by the state: each change holds a
 /// place ([`Settlements::reserve`]) from its request until it is settled, and the tasks that
@@ -504,6 +526,8 @@ pub(crate) const MAX_SETTLING: usize = 256;
 /// way is left as the store has it, which the next start loads.
 pub(crate) struct Settlements {
     places: Arc<tokio::sync::Semaphore>,
+    /// The places reserved for the expiry sweeper's removals ([`Remover::Sweeper`]).
+    maintenance: Arc<tokio::sync::Semaphore>,
     tasks: std::sync::Mutex<tokio::task::JoinSet<()>>,
 }
 
@@ -518,8 +542,21 @@ impl Settlements {
     pub(crate) fn with_capacity(places: usize) -> Self {
         Self {
             places: Arc::new(tokio::sync::Semaphore::new(places)),
+            maintenance: Arc::new(tokio::sync::Semaphore::new(MAINTENANCE_PLACES)),
             tasks: Default::default(),
         }
+    }
+
+    /// A place reserved for one of the expiry sweeper's removals: `None` when they are all
+    /// taken. No request takes one, so however many changes requests have in progress, the
+    /// sweeper keeps [`MAINTENANCE_PLACES`].
+    pub(crate) fn reserve_maintenance(&self) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        self.maintenance.clone().try_acquire_owned().ok()
+    }
+
+    /// How many places reserved for the sweeper are free.
+    pub(crate) fn maintenance_free(&self) -> usize {
+        self.maintenance.available_permits()
     }
 
     /// A place for one record change, held until it is settled: `None` when there is none
