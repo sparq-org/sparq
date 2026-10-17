@@ -162,7 +162,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the retained legacy members. It has the same shape and meaning as
   `MethodPolicy::admit_unbound`: under it the commitment method rests on trusted-issuer honesty
   rather than an attestation the circuit recomputes. The signed (`result_v3_*`) and public-pattern
-  (`result_v4_*`) families have no method-bound member yet, so they need that opt-in. Each selected
+  (`result_v4_*`) families have no method-bound member yet, so they need that opt-in. The
+  requirement is ONE boundness check on the SELECTED member, not one arm per contract family, so a
+  family added later cannot inherit the legacy behaviour by omission. Each selected
   credential is now witnessed under the message the SELECTED member's relation folds, and an
   incoherent pairing — a method-bound attestation through a legacy member, or the reverse — is
   refused by name rather than witnessed into a proof that could not succeed. Legacy proofs stay
