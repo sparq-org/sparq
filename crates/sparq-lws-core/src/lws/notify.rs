@@ -193,24 +193,38 @@ impl Watch {
         if !state.notify.is_live(&self.subscription) {
             return false;
         }
-        if let Some(author) = &self.service {
-            return reads_service_record(state, &self.agent, author);
-        }
-        match &self.snapshot {
-            Some(s) => access::allowed_as(state, Action::Read, &self.uri, &self.agent, s).await,
-            None => {
-                // A resource that is not visible is not read (its lock is held until it is put
-                // back): the delivery fails its check rather than wait, including when the
-                // resource is set aside while the delivery waits for its lock.
-                let Some(_guard) = state.locks.read(&self.uri).await else {
-                    return false;
-                };
-                // The subscription may have been cancelled, or expired, meanwhile.
-                state.notify.is_live(&self.subscription)
-                    && state.allowed(Action::Read, &self.uri, &self.agent).await
+        let allowed = if let Some(author) = &self.service {
+            reads_service_record(state, &self.agent, author)
+        } else {
+            match &self.snapshot {
+                Some(s) => {
+                    access::allowed_as(state, Action::Read, &self.uri, &self.agent, s).await
+                }
+                None => {
+                    // A resource that is not visible is not read (its lock is held until it is
+                    // put back): the delivery fails its check rather than wait, including when
+                    // the resource is set aside while the delivery waits for its lock.
+                    let Some(_guard) = state.locks.read(&self.uri).await else {
+                        return false;
+                    };
+                    // The subscription may have been cancelled, or expired, meanwhile.
+                    state.notify.is_live(&self.subscription)
+                        && state.allowed(Action::Read, &self.uri, &self.agent).await
+                }
             }
-        }
+        };
+        // Deciding may have waited (on a read of metadata): the subscription may have been
+        // cancelled, or expired, meanwhile. Nothing waits between this and the send.
+        allowed && state.notify.is_live(&self.subscription)
     }
+}
+
+/// Whether a stored subscription is marked expired already ([`Subscription::tombstone`]).
+fn stored_lapsed(body: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|v| v.get("lapsed")?.as_bool())
+        .unwrap_or(false)
 }
 
 /// Most distinct topics one subscription may name.
@@ -298,8 +312,9 @@ pub struct Subscription {
     /// when the subscription goes, and a delivery that finishes later finds nothing to count.
     #[serde(skip)]
     pub failures: u32,
-    /// Whether it has been seen expired, in memory only (see [`Subscription::expired`]).
-    #[serde(skip)]
+    /// Whether it has been seen expired (see [`Subscription::expired`]): stored only once its
+    /// removal is to begin ([`Subscription::tombstone`]).
+    #[serde(default, skip_serializing_if = "Lapsed::is_unset")]
     pub lapsed: Lapsed,
 }
 
@@ -307,6 +322,24 @@ pub struct Subscription {
 /// expired, whatever the clock says later.
 #[derive(Debug, Clone, Default)]
 pub struct Lapsed(Arc<AtomicBool>);
+
+impl Lapsed {
+    fn is_unset(&self) -> bool {
+        !self.0.load(Ordering::Acquire)
+    }
+}
+
+impl Serialize for Lapsed {
+    fn serialize<Z: serde::Serializer>(&self, to: Z) -> Result<Z::Ok, Z::Error> {
+        to.serialize_bool(!self.is_unset())
+    }
+}
+
+impl<'de> Deserialize<'de> for Lapsed {
+    fn deserialize<D: serde::Deserializer<'de>>(from: D) -> Result<Self, D::Error> {
+        Ok(Self(Arc::new(AtomicBool::new(bool::deserialize(from)?))))
+    }
+}
 
 impl PartialEq for Lapsed {
     /// What a subscription is, not what has been seen of it.
@@ -329,6 +362,14 @@ impl Subscription {
             self.lapsed.0.store(true, Ordering::Release);
         }
         expired
+    }
+
+    /// What is stored over an expired subscription before its removal begins: the subscription,
+    /// marked expired, so that a start after a removal that failed or was cut short finds it
+    /// expired whatever the clock says then. `None` when it is not expired.
+    fn tombstone(&self, now: i64) -> Option<Bytes> {
+        self.expired(now)
+            .then(|| Bytes::from(serde_json::to_vec(self).unwrap_or_default()))
     }
 
     fn covers(&self, uri: &str) -> bool {
@@ -662,8 +703,20 @@ impl Notifier {
                 continue;
             };
             sub.id = id;
-            // An expired subscription is purged; one that cannot be removed stays loaded and
-            // counted (no delivery goes to it: every attempt checks expiry) until it can be.
+            // An expired subscription is purged, marked expired first; one that cannot be marked
+            // or removed stays loaded and counted (no delivery goes to it: every attempt checks
+            // expiry) until it can be.
+            if let Some(tombstone) = sub.tombstone(now).filter(|_| !stored_lapsed(&read.body))
+            {
+                if store
+                    .write(child.as_str(), tombstone, LWS_JSON)
+                    .await
+                    .is_err()
+                {
+                    subs.insert(sub.id.clone(), sub);
+                    continue;
+                }
+            }
             if sub.expired(now)
                 && matches!(
                     super::remove_member(store, child.as_str(), Some(&container)).await,
@@ -782,6 +835,17 @@ impl Notifier {
             Some(name) => super::records::Listed::AlsoIn(name),
             None => super::records::Listed::Nowhere,
         };
+        // An expired one is marked expired in the store before its removal begins.
+        let tombstone = match own_listing {
+            Some(_) => None,
+            None => self
+                .subs
+                .read()
+                .expect("lock")
+                .get(id)
+                .and_then(|s| s.tombstone(jose::now_secs()))
+                .map(|body| (body, LWS_JSON)),
+        };
         let set_aside = {
             let (state, id) = (state.clone(), id.to_string());
             let unlisted = own_listing.is_none();
@@ -820,6 +884,7 @@ impl Notifier {
             listed,
             by,
             admission,
+            tombstone,
             set_aside,
             settle,
         )
@@ -1582,6 +1647,7 @@ async fn quarantined<S: Store + 'static>(
                 super::records::Listed::InContainer,
                 super::records::Remover::Request,
                 req.admission.clone(),
+                None,
                 set_aside,
                 settle,
             );
@@ -2187,6 +2253,183 @@ mod tests {
     use p256::ecdsa::{Signature, VerifyingKey};
 
     use super::super::test_store;
+
+    fn sub_until(expires_at: i64) -> Subscription {
+        Subscription {
+            id: String::new(),
+            subscriber: None,
+            client: None,
+            topics: vec!["http://localhost:3000/".into()],
+            inbox: "https://a/inbox".into(),
+            expires: None,
+            expires_at: Some(expires_at),
+            failures: 0,
+            lapsed: Lapsed::default(),
+        }
+    }
+
+    /// Review finding: the latch that keeps a subscription expired was in memory only, so a
+    /// start after a removal that failed, with the clock stepped back, served it again. An
+    /// expired subscription is marked expired in the store before its removal begins, and a
+    /// start honours the mark whatever the clock says. Copies share the latch.
+    #[tokio::test]
+    async fn a_subscription_marked_expired_stays_expired_after_a_restart() {
+        let copy = sub_until(1);
+        let other = copy.clone();
+        assert!(copy.expired(jose::now_secs()));
+        assert!(other.expired(0), "a copy forgot");
+        assert!(sub_until(1).tombstone(0).is_none(), "not expired by then");
+
+        let store = test_store::FlakyStore::new();
+        let cfg = LwsConfig::new("http://localhost:3000");
+        let container = cfg.absolute(SUBSCRIPTIONS_PATH);
+        Notifier::load(&store, &cfg).await.unwrap();
+        // Seen expired at a start whose removal of it fails: it is marked first.
+        let iri = format!("{container}old");
+        let body = Bytes::from(serde_json::to_vec(&sub_until(1)).unwrap());
+        store
+            .create_in_container(&container, &iri, body, LWS_JSON)
+            .await
+            .unwrap();
+        *store.fail_delete_of.lock().unwrap() = Some(iri.clone());
+        Notifier::load(&store, &cfg).await.unwrap();
+        let stored = store.read(&iri).await.unwrap().body;
+        assert!(stored_lapsed(&stored), "not marked");
+        // The clock stepped back: the mark stands for it, and the next start still finds it
+        // expired, kept (and counted) only while it cannot be removed.
+        let mut back: Value = serde_json::from_slice(&stored).unwrap();
+        back["expires_at"] = json!(jose::now_secs() + 3600);
+        store
+            .write(&iri, Bytes::from(back.to_string()), LWS_JSON)
+            .await
+            .unwrap();
+        let loaded = Notifier::load(&store, &cfg).await.unwrap();
+        assert_eq!(loaded.subs.read().unwrap().len(), 1, "kept while stored");
+        assert!(!loaded.is_live("old"), "served again");
+        *store.fail_delete_of.lock().unwrap() = None;
+        let loaded = Notifier::load(&store, &cfg).await.unwrap();
+        assert!(loaded.subs.read().unwrap().is_empty(), "purged");
+    }
+
+    /// A removal of an expired subscription marks it expired in the store before it removes
+    /// it; one that cannot be marked is not removed, and stays expired.
+    #[tokio::test]
+    async fn an_expired_subscription_is_marked_before_its_removal() {
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let state = LwsState::new(test_store::FlakyStore::new(), cfg)
+            .await
+            .unwrap();
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        let iri = format!("{container}gone");
+        let mut sub = sub_until(jose::now_secs() + 3600);
+        let body = Bytes::from(serde_json::to_vec(&sub).unwrap());
+        state
+            .store
+            .create_in_container(&container, &iri, body, LWS_JSON)
+            .await
+            .unwrap();
+        sub.id = "gone".into();
+        sub.lapsed.0.store(true, Ordering::SeqCst);
+        state
+            .notify
+            .subs
+            .write()
+            .unwrap()
+            .insert(sub.id.clone(), sub);
+        // The mark cannot be stored: nothing is removed.
+        *state.store.fail_write_of.lock().unwrap() = Some(iri.clone());
+        let removed = state
+            .notify
+            .remove(&state, "gone", None, super::super::records::Remover::Sweeper)
+            .await;
+        assert!(removed.is_err());
+        assert!(state.store.exists(&iri).await.unwrap());
+        assert!(!state.notify.is_live("gone"));
+        // Marked, then the removal fails: the mark stays.
+        *state.store.fail_write_of.lock().unwrap() = None;
+        *state.store.fail_delete_of.lock().unwrap() = Some(iri.clone());
+        let removed = state
+            .notify
+            .remove(&state, "gone", None, super::super::records::Remover::Sweeper)
+            .await;
+        assert!(removed.is_err());
+        assert!(stored_lapsed(&state.store.read(&iri).await.unwrap().body));
+        *state.store.fail_delete_of.lock().unwrap() = None;
+        state
+            .notify
+            .remove(&state, "gone", None, super::super::records::Remover::Sweeper)
+            .await
+            .unwrap();
+        assert!(!state.store.exists(&iri).await.unwrap());
+    }
+
+    /// Review finding: a delivery checked its subscription before deciding whether its
+    /// subscriber may read the resource, and that decision can wait on a read of metadata; a
+    /// subscription that expired meanwhile still got the notification. It is checked again
+    /// once the decision is made.
+    #[tokio::test]
+    async fn a_delivery_whose_subscription_expires_while_it_is_decided_is_not_sent() {
+        let state = LwsState::new(
+            test_store::FlakyStore::new(),
+            LwsConfig::new("http://localhost:3000"),
+        )
+        .await
+        .unwrap();
+        let bob = "https://bob.example/#me";
+        let d = state.cfg.absolute("/d");
+        state
+            .store
+            .write(&d, Bytes::from("d"), "text/plain")
+            .await
+            .unwrap();
+        let meta = super::super::ResourceMeta {
+            creator: Some(bob.into()),
+            ..Default::default()
+        };
+        state.put_resource_meta(&d, &meta).await.unwrap();
+        let mut sub = sub_until(jose::now_secs() + 3600);
+        sub.id = "s".into();
+        sub.subscriber = Some(bob.into());
+        state
+            .notify
+            .subs
+            .write()
+            .unwrap()
+            .insert("s".into(), sub);
+        let watch = Watch {
+            subscription: "s".into(),
+            uri: d.clone(),
+            agent: Agent {
+                subject: Some(bob.into()),
+                client: None,
+            },
+            snapshot: None,
+            service: None,
+        };
+        let decided = |latch: bool| {
+            let (state, watch, d) = (state.clone(), watch.clone(), d.clone());
+            async move {
+                let gate = Arc::new(tokio::sync::Semaphore::new(0));
+                *state.store.hold_next_read_reply_of.lock().unwrap() =
+                    Some((super::super::meta_key(&d), gate.clone()));
+                let check = tokio::spawn({
+                    let state = state.clone();
+                    async move { watch.stands(&state).await }
+                });
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                assert!(!check.is_finished(), "the decision did not wait");
+                if latch {
+                    let subs = state.notify.subs.read().unwrap();
+                    subs.get("s").unwrap().lapsed.0.store(true, Ordering::SeqCst);
+                }
+                gate.add_permits(1);
+                check.await.unwrap()
+            }
+        };
+        assert!(decided(false).await, "the subscriber may read it");
+        assert!(!decided(true).await, "sent after it expired");
+    }
 
     /// Review finding: at startup an expired subscription whose removal failed was dropped from
     /// memory though it stayed stored, and one that could not be read was skipped: both escaped

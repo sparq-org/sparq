@@ -399,6 +399,7 @@ pub(crate) async fn remove_record<S, H, A, Z>(
     listed: Listed<'_>,
     by: Remover,
     admission: Option<crate::overload::AdmissionSlot>,
+    tombstone: Option<(Bytes, &'static str)>,
     set_aside: A,
     settle: Z,
 ) -> Result<Removed, Response>
@@ -433,6 +434,15 @@ where
         let Some(held) = set_aside() else {
             return Ok(Removed::Absent);
         };
+        // Stored over the record before anything is removed, the record's lock held: a removal
+        // that fails or is cut short leaves it, and none begins unless it is stored.
+        if let Some((body, content_type)) = tombstone {
+            if let Err(e) = state.store.write(&iri, body, content_type).await {
+                let author = settle(&state, false, held);
+                drop((own, listing, place, own_listing, author));
+                return Err(format!("the {what} could not be removed: {e}"));
+            }
+        }
         let gone = match delete_record(&state.store, &iri, &container).await {
             Ok(()) => Some(true),
             // A record not listed is gone for good (a delete only removes, and the record's
