@@ -413,10 +413,14 @@ fn model_aggregate(n: usize) -> CommCounter {
 /// (key_L, key_R, mask) + 1 multiplication + 1 open. This is the cost center: the
 /// opens / mults grow as the PRODUCT of the row counts (the round-count explosion
 /// the literature flags).
-fn model_hidden_join(n: usize, scale: usize) -> CommCounter {
+/// `scale²` is a product of a caller-chosen number with itself, so it is counted
+/// with checked arithmetic and capped: an over-cap or overflowing scale is a
+/// controlled refusal, not a debug-build overflow panic on a public entry.
+fn model_hidden_join(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
+    let pairs = crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
     let mut c = CommCounter::new(n);
-    c.record_independent_equalities((scale * scale) as u64);
-    c
+    c.record_independent_equalities(pairs as u64);
+    Ok(c)
 }
 
 /// Model an oblivious shuffle of `scale` rows: fold in the crate's own
@@ -468,7 +472,7 @@ fn model_bounded_path(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
     let req = HiddenPathRequest::range("p", 1, BOUNDED_PATH_K);
     let plan = plan_hidden_bounded_path(&req, scale)?;
     // B = scale (cover up to `scale` distinct endpoint pairs); at least 1 slot.
-    Ok(plan.comm_counter(n, scale.max(1)))
+    plan.comm_counter(n, scale.max(1))
 }
 
 // =============================================================================
@@ -664,7 +668,7 @@ pub fn cell(query_class: QueryClass, n: usize, scale: usize) -> Result<MatrixCel
     let security = CellSecurity::read(&backend, query_class.operator_class());
     let comm = match query_class {
         QueryClass::CumulativeSumAggregate => model_aggregate(n),
-        QueryClass::HiddenValueEquiJoin => model_hidden_join(n, scale),
+        QueryClass::HiddenValueEquiJoin => model_hidden_join(n, scale)?,
         QueryClass::ObliviousShuffle => model_shuffle(n, scale),
         QueryClass::ObliviousSort => model_sort(n, scale),
         QueryClass::HiddenBoundedPath => model_bounded_path(n, scale)?,

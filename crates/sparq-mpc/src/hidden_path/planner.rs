@@ -294,7 +294,14 @@ impl BoundedPathPlan {
     ///
     /// `bound` is the PUBLIC padded output bound `B`; it must be `>= 1` (the operator
     /// reveals exactly `B` slots). `parties` is the compute-party count `n`.
-    pub fn comm_counter(&self, parties: usize, bound: usize) -> CommCounter {
+    ///
+    /// `B` is capped by [`crate::oblivious_join::MAX_OUTPUT_BOUND`], refused before
+    /// any of the counting below: step (3) iterates `B` times and builds a real
+    /// [`WaksmanNetwork`] over `B` slots, so an unchecked `B` would do work (and
+    /// allocate a network) proportional to a number the caller chose. Counting the
+    /// cost of a run the stage itself would refuse is not a cost model either way.
+    pub fn comm_counter(&self, parties: usize, bound: usize) -> Result<CommCounter, MpcError> {
+        crate::oblivious_join::check_output_bound_cap(bound)?;
         let mut c = CommCounter::new(parties);
         // (1) The k×-join secure equalities — the cost center. Independent ACROSS
         // tuples (the matrix's `record_independent_equalities` batch shape).
@@ -314,7 +321,7 @@ impl BoundedPathPlan {
         }
         let net = WaksmanNetwork::new(bound);
         c.record_shuffle(ShuffleCost::model(bound, net.switch_count()));
-        c
+        Ok(c)
     }
 }
 
