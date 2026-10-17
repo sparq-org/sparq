@@ -1948,23 +1948,40 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   a committed frame (and across a multi-graph `apply_delta_nquads` batch) and EVEN after. An
   `open` reads it, loads the whole dataset, re-reads it, and accepts the image only if the value
   did not move and was not odd; after a bounded number of retries it fails with
-  `ErrorKind::WouldBlock` ("busy") rather than answering from a mixed state. The odd/even writes
-  are plain 8-byte in-place writes with **no fsync** — they only need to be visible to other
+  `ErrorKind::WouldBlock` ("busy") rather than answering from a mixed state. **A DIRECTORY SWAP
+  is inside the same window**: compaction, vacuum and restore replace a base wholesale by rename,
+  and an open that read the generation before the first rename could otherwise load the old base's
+  indexes together with the new base's empty WAL — losing the writes the old WAL held. The odd/even
+  writes are plain 8-byte in-place writes with **no fsync** — they only need to be visible to other
   processes, not durable — so a committed transaction pays two page-cache writes and the hot
-  single-graph `apply_delta` path pays no seqlock cost at all (its one added cost is the identity
-  `stat` in the next bullet); only the per-acquisition bump is fsync'd. A crash can leave the
-  counter odd, and the next **locked** open resets it to even once it has finished repairing. A
-  store no writer has ever locked has no counter at all and reads as `0` (even), and an in-memory
-  graph has none of this.
+  single-graph `apply_delta` path pays no seqlock cost at all (its added cost is the identity
+  `stat` below); only the per-acquisition bump is fsync'd. The counter's control path is derived
+  once when the store is opened, not per write. A store no writer has ever locked has no
+  counter at all and reads as `0` (even), and an in-memory graph has none of this.
+- **An interrupted window is recovered, never a wedge (`sq-ycle`).** A crash between a
+  transaction's last materialising step and the window's close leaves the counter odd over clean
+  logs, and nothing on disk would bring it back. An open that exhausts its retries and finds **no
+  writer holding the lock** therefore takes the lock itself, repairs whatever is there, and settles
+  the counter to an even value. A writer that really is mid-transaction still holds the lock, and
+  that case is still answered as retryable. An empty UPDATE body commits nothing and opens no
+  window, and the window is closed when the tree's last handle is dropped, so a caller that commits
+  and returns cannot strand the store either.
+- **Recovery probing covers every swap crash point (`sq-ycle`).** The read-only probe that decides
+  whether an open must repair (and so lock) enumerates **named-graph positions whose directory is
+  absent but whose swap staging sibling survives** — the state a crash inside a NAMED graph's own
+  compaction leaves. Missing that, the probe reported nothing to repair, the open took the lockless
+  reader path, which may not repair, and the store then failed to load at all.
 - **A durable restore runs under the store's writer lock (`sq-ycle`).** `Graph::restore_into_durable`
   takes the exclusive lock itself and returns busy if another handle holds it — replacing the
   directory under an idle lock holder left that holder appending to an unlinked WAL. The live
   writer uses `Graph::restore_in_place`, which swaps under the lock **it already holds**, so
   exclusion is continuous from before the staging directory is written until after the reopen
   (`flock` is per open file description, so a writer cannot re-acquire its own lock). As a
-  backstop, every durable write costs one `stat`: the store directory's `(device, inode)` must
-  still be the one this handle locked, so a swapped-out handle is poisoned on its next write even
-  if some future path forgets the lock.
+  backstop, a durable write costs one `stat` per durable-write gate it passes (two for a
+  one-graph N-Quads batch: the batch and the per-graph apply): the ROOT store directory's
+  `(device, inode)` must still be the one this handle locked, so a swapped-out handle is poisoned
+  on its next write even if some future path forgets the lock. A named sub-graph's own swap leaves
+  that identity alone — it does not replace the root.
 - **One store, one lock, whatever you call it (`sq-ycle`).** The store directory is
   `canonicalize`d once at open and every control path is derived from that, so a symlink, a bind
   mount or a `./`-and-`..` detour cannot hand one store two locks and two generations — and two
@@ -2049,4 +2066,32 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   rationale: the `sparq_server::status_contract` crate doc, asserted by `tests/status_contract.rs`.
 - **The versioned HTTP wire contract (sq-fdurb / gh-1416, PSS ask).** The endpoints,
   params, media types, negotiation rules, status codes and error-body shape an **HTTP-only
-  consumer** may rely on are enumerated as t
+  consumer** may rely on are enumerated as the **v1 wire contract** in
+  [`docs/http-wire-contract.md`](../../docs/http-wire-contract.md) — frozen-vs-unstable
+  partition, plus the wire-semver policy (breaking vs additive). Pinned end-to-end by the
+  served-surface snapshot suite `tests/wire_contract.rs` (one direct test per documented
+  endpoint behaviour / error class), so an accidental wire break fails CI. Status: **PROPOSED**
+  — the freeze ratification is the maintainer's call, like the embedding freeze in
+  [`docs/api-stability.md`](../../docs/api-stability.md).
+- **Error bodies are sanitized — no information leak (sq-cz89 / sq-j9zs).** On the
+  no-auth-by-default path an error body carries only a **stable, generic CLASS message**
+  (e.g. `malformed query`, `malformed RDF body`, `malformed gzip body`,
+  `query execution error`, `update failed: invalid SPARQL update`). It deliberately does
+  **NOT** echo the caller's submitted query/UPDATE/RDF text, a fragment of the loaded RDF
+  (parsers like `oxttl`/`spargebra` quote the offending token — that would confirm loaded
+  triples), or any server-side filesystem path (e.g. a `--persist` mirror's path inside a
+  transient durable-write `503`). The full detailed cause is preserved for the **operator**
+  via the server-side `tracing` log (target `sparq_server`), surfaced only through the
+  opt-in `--verbose` / `RUST_LOG` subscriber — never the HTTP response. Status semantics
+  (the `400`/`413`/`415`/`503`/`500` classification) are unchanged; only the prose detail
+  is withheld. Regression tests assert a sentinel token never appears in any error body.
+- **mimalloc** is the binary's global allocator (matters under concurrent load).
+
+## See also
+
+- `serve` — the underlying `sparq-serve` generation-ring + sequenced group-commit writer
+  (the concurrency primitives `router`/`AppState` wire up).
+- `engine` — `sparq-engine` query/ask/construct/describe + `QueryBudget` the server drives.
+- `cli` — the `sparq` command-line surface over the same engine.
+- `geo` — the `geof:` GeoSPARQL extension functions enabled by `--features geo`.
+- `core` — `sparq_core::Graph` (`Graph::load_str`) the dataset is loaded into.

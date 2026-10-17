@@ -2023,11 +2023,23 @@ impl Graph {
     ///
     /// (I7) A SELF-CONSISTENT VIEW, or none. The writer generation doubles as a
     /// seqlock: a writer holds it ODD while it materialises a committed transaction across the
-    /// graphs of the tree. `open` reads it, loads the WHOLE tree, re-reads it, and accepts the
-    /// image only if the value neither was odd nor moved — otherwise a load could take one named
-    /// graph from before the transaction and the default graph from after it. After a bounded
-    /// number of retries it returns an `Err` of kind `WouldBlock` ("busy") rather than hand back
-    /// such a mix.
+    /// graphs of the tree, AND across a directory swap (compaction, vacuum, restore) that
+    /// replaces a base wholesale. `open` reads it, loads the WHOLE tree, re-reads it, and accepts
+    /// the image only if the value neither was odd nor moved — otherwise a load could take one
+    /// named graph from before the transaction and the default graph from after it, or the old
+    /// base's indexes together with the new base's empty WAL. After a bounded number of retries
+    /// it returns an `Err` of kind `WouldBlock` ("busy") rather than hand back such a mix.
+    ///
+    /// (I11) AN ABANDONED WINDOW IS RECOVERED, NOT A WEDGE. A crash between a
+    /// transaction's last step and the window's close leaves the counter odd over clean logs, and
+    /// nothing on disk would bring it back. When the retries are exhausted and no writer holds
+    /// the lock, this open takes the lock itself, repairs whatever is there and settles the
+    /// counter even. A writer that really is mid-transaction still holds the lock, and that case
+    /// is still reported as busy.
+    ///
+    /// (I12) RECOVERY PROBING COVERS EVERY SWAP CRASH POINT, including a crash
+    /// inside a NAMED graph's own compaction, which leaves that position's directory absent with
+    /// a staging sibling beside it (see `tree_dirs`).
     ///
     /// (I8) ONE STORE, ONE LOCK. `dir` is canonicalised once here and every control
     /// path is derived from the result, so a symlink or `..` alias cannot give one store a second
@@ -2069,33 +2081,7 @@ impl Graph {
         // Probed WITHOUT writing; see `open_repair_pending`. The lock lives OUTSIDE `dir`, so it
         // can be taken even while an interrupted swap has `dir` renamed away.
         if open_repair_pending(dir)? {
-            let lock = acquire(dir)?;
-            // Finish or roll back any interrupted directory swap, then RE-PROBE under the lock:
-            // the first probe was unlocked, so what looked torn may have been a live writer's
-            // append that has since completed. Only a repair the lock-holder can still see is a
-            // real one, and only then is this open allowed to rewrite anything.
-            recover_compaction(dir)?;
-            recover_named_drop(dir)?;
-            let mut ctx = OpenCtx {
-                read_only: !open_repair_pending(dir)?,
-                saw_repair: false,
-            };
-            // This open holds the lock for the graph's lifetime, so it IS this tree's writer:
-            // claim the next generation before touching anything, so every handle already open
-            // against the old value is refused from here on. (I7) The claim is
-            // published as the ODD value one below it, which holds the seqlock window OPEN for
-            // the whole repair — a reader must not load a tree whose journal frame is being
-            // redone into it — and is settled to the even value once the repair is done. A crash
-            // in between leaves it odd, and leaves the journal content that brings the next open
-            // back here.
-            let claimed = next_even_generation(dir);
-            write_generation(dir, claimed - 1)?;
-            let tree = TreeState::rooted(dir, Some(lock), claimed);
-            tree.record_identity(dir);
-            let g = Self::open_inner(dir, Some(std::sync::Arc::clone(&tree)), &mut ctx)?;
-            write_subgraph_markers(dir);
-            set_generation_in_place(dir, claimed)?;
-            return Ok(g);
+            return Self::open_locked_repair(dir, acquire(dir)?);
         }
         // No repair pending: this open writes nothing and takes no lock, so any number of
         // readers coexist. (I7) The generation is a SEQLOCK: read it, load the
@@ -2133,6 +2119,22 @@ impl Graph {
             }
             reader_seq_backoff(attempt);
         }
+        // (I11) The loop only exhausts while the generation stays ODD throughout.
+        // That is either a live writer materialising transaction after transaction — retry — or
+        // an ABANDONED window: a crash between `clear_txn`'s truncate and the window close
+        // leaves an odd counter over CLEAN logs, and nothing on disk then brings the counter
+        // back, so every later open would retry and fail for ever. Tell the two apart with the
+        // lock: if no writer holds it, the odd value is abandoned, and the locked repair below
+        // recovers whatever is actually there and settles the counter to an even value.
+        if !writer_active(dir)? {
+            match DirLock::acquire(dir) {
+                Ok(lock) => return Self::open_locked_repair(dir, lock),
+                // Raced with a writer that took the lock between the probe and here: that is the
+                // genuine in-progress case, reported as busy (retryable) below.
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(e) => return Err(e),
+            }
+        }
         Err(std::io::Error::new(
             std::io::ErrorKind::WouldBlock,
             format!(
@@ -2141,6 +2143,42 @@ impl Graph {
                 dir.display()
             ),
         ))
+    }
+
+    /// (I7, I11, I12) The REPAIRING open: this handle holds `dir`'s exclusive writer
+    /// lock, so it may rewrite the store to make it readable — finish or roll back an interrupted
+    /// directory swap, redo a committed journal frame, truncate a torn tail — and it keeps the
+    /// lock for the returned graph's lifetime, so it IS this tree's writer.
+    ///
+    /// Reached from two places: an [`open`](Self::open) whose unlocked probe found repair work,
+    /// and an `open` that found the seqlock window open with no writer behind it (I11).
+    ///
+    /// The whole repair runs INSIDE the seqlock window: the claimed generation is published as
+    /// the ODD value one below it before anything is touched — which both refuses every handle
+    /// still open against the old value and stops an unlocked open loading a tree whose frame is
+    /// being redone into it — and settled to the even value once the repair is done. A crash in
+    /// between leaves the counter odd; the next open comes back here, through the probe (on-disk
+    /// repair work) or through the abandoned-window path.
+    #[cfg(feature = "mmap")]
+    fn open_locked_repair(dir: &std::path::Path, lock: DirLock) -> std::io::Result<Graph> {
+        let claimed = next_even_generation(dir);
+        write_generation(dir, claimed - 1)?;
+        // Finish or roll back any interrupted directory swap, then RE-PROBE under the lock: the
+        // first probe was unlocked, so what looked torn may have been a live writer's append that
+        // has since completed. Only a repair the lock-holder can still see is a real one, and only
+        // then is this open allowed to rewrite anything.
+        recover_compaction(dir)?;
+        recover_named_drop(dir)?;
+        let mut ctx = OpenCtx {
+            read_only: !open_repair_pending(dir)?,
+            saw_repair: false,
+        };
+        let tree = TreeState::rooted(dir, Some(lock), claimed);
+        tree.record_identity(dir);
+        let g = Self::open_inner(dir, Some(std::sync::Arc::clone(&tree)), &mut ctx)?;
+        write_subgraph_markers(dir);
+        set_generation_in_place(dir, claimed)?;
+        Ok(g)
     }
 
     /// [`open`](Self::open) with the shared [`TreeState`] supplied: the ROOT open passes its own
@@ -3498,6 +3536,13 @@ impl Graph {
                         .to_owned(),
                 ));
             }
+            // (I11) An EMPTY body commits nothing: there is no frame to redo and
+            // nothing will be materialised, so opening the reader-consistency window here would
+            // leave it open until a `clear_txn` that the caller has no reason to make. Return
+            // before the window (and before the lock), having kept the poison check above.
+            if ops.is_empty() {
+                return Ok(());
+            }
             // The commit point is a durable write: take this tree's single-writer lock (lazily,
             // once) and verify the directory has not changed since this graph opened. Both
             // failures leave the journal untouched, hence `applied: false`.
@@ -3859,6 +3904,12 @@ impl Graph {
         // after the swap. Renaming/removing a directory with mapped files into it fails on
         // Windows; releasing first makes the swap safe on every platform (mirrors `compact`, which
         // likewise drops its handles via `*self = Graph::open(..)` after its swap).
+        // (I7) The sub-tree swap below replaces `named/` wholesale by rename and
+        // then re-opens every survivor: the same mixed-state window a base swap has. Hold the
+        // seqlock window from before the first rename until this function returns (the guard is
+        // bound to a clone of the shared state, so `self` stays mutably usable below).
+        let window_tree = std::sync::Arc::clone(&self.tree);
+        let _window = window_tree.seq_window()?;
         self.named.clear();
         // Rollback-safe swap (mirrors `compact`): old aside, new in, parent fsync each rename.
         std::fs::rename(&named_dir, &old_dir).map_err(|e| e.to_string())?;
@@ -4205,14 +4256,18 @@ impl Graph {
         // and re-taking a lock inside the NEW directory did not even conflict with a holder of
         // the old one.
         let tree = std::sync::Arc::clone(&self.tree);
-        let mut reopened =
-            swap_dir_to_new_base(dir, |new_dir| self.save(new_dir)).map_err(|e| e.to_string())?;
+        let mut reopened = swap_dir_to_new_base(dir, Some(&tree), |new_dir| self.save(new_dir))
+            .map_err(|e| e.to_string())?;
         reopened.tree = tree;
         reopened.share_tree();
-        // (I10) The swap replaced the directory by rename, so its inode changed:
-        // re-record the identity this tree's per-write check compares against. The markers are
-        // re-stamped because `save` wrote a fresh sub-tree without them.
-        reopened.tree.record_identity(dir);
+        // (I10) Re-record the identity ONLY when the ROOT directory was replaced.
+        // This also runs for a NAMED sub-graph's own compaction, whose `dir` is a child: recording
+        // the child's inode in the tree's SHARED identity made the next write to the root compare
+        // the root's inode against the child's, fail, and mark the whole tree stale. A child swap
+        // does not change the root's inode, so there is nothing to re-record.
+        if reopened.tree.dir.as_deref() == Some(dir) {
+            reopened.tree.record_identity(dir);
+        }
         if let Some(root) = reopened.tree.dir.clone() {
             write_subgraph_markers(&root);
         }
@@ -4275,11 +4330,14 @@ impl Graph {
                 ),
             )
         })?;
-        let mut restored = swap_dir_to_new_base(dir, |new_dir| fresh.save(new_dir))?;
-        // The swap replaced the whole base, so every handle that loaded the OLD one is stale:
-        // claim the next writer generation (codex review finding 3) so their first write
-        // is refused instead of appending against a base that no longer exists.
+        // (I7) This swap has no `TreeState` yet (one is minted below), so publish
+        // the window's ODD value here: from now until the even value is published, an unlocked
+        // open retries instead of loading a half-replaced store. The claimed generation also
+        // refuses the first write of every handle that loaded the OLD base (codex review
+        // finding 3), which no longer exists.
         let generation = next_even_generation(dir);
+        write_generation(dir, generation - 1)?;
+        let mut restored = swap_dir_to_new_base(dir, None, |new_dir| fresh.save(new_dir))?;
         write_generation(dir, generation)?;
         restored.tree = TreeState::rooted(dir, Some(lock), generation);
         restored.share_tree();
@@ -4311,11 +4369,15 @@ impl Graph {
         // Close this graph's WAL before the swap renames its `wal.log` away with the directory.
         self.wal = None;
         let tree = std::sync::Arc::clone(&self.tree);
-        let mut reopened =
-            swap_dir_to_new_base(&dir, |new_dir| fresh.save(new_dir)).map_err(|e| e.to_string())?;
+        let mut reopened = swap_dir_to_new_base(&dir, Some(&tree), |new_dir| fresh.save(new_dir))
+            .map_err(|e| e.to_string())?;
         reopened.tree = tree;
         reopened.share_tree();
-        reopened.tree.record_identity(&dir);
+        // (I10) Root swaps only — see `persist_swap`: a child restore leaves the
+        // root's inode alone, and recording the child's would make the next root write stale.
+        if reopened.tree.dir.as_deref() == Some(dir.as_path()) {
+            reopened.tree.record_identity(&dir);
+        }
         write_subgraph_markers(&dir);
         *self = reopened;
         Ok(())
@@ -4483,10 +4545,27 @@ fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// renames is healed by [`recover_compaction`] on the next [`open`](Graph::open), which promotes
 /// `compact-new` or rolls back to `compact-old` — `dir` is never lost.
 #[cfg(feature = "mmap")]
-fn swap_dir_to_new_base<F>(dir: &std::path::Path, write_new_base: F) -> std::io::Result<Graph>
+fn swap_dir_to_new_base<F>(
+    dir: &std::path::Path,
+    window: Option<&TreeState>,
+    write_new_base: F,
+) -> std::io::Result<Graph>
 where
     F: FnOnce(&std::path::Path) -> std::io::Result<()>,
 {
+    // (I7) THE swap is a mixed-state window exactly as a transaction is: between
+    // the two renames below the base is being replaced wholesale, and an unlocked open that read
+    // the generation before the first rename could load the OLD base's indexes and then the NEW
+    // base's empty WAL — losing every acknowledged write the old WAL held. Hold the seqlock
+    // window across both renames AND the reopen, so such a reader sees the generation move and
+    // retries. The guard closes it on every path out, including the `?`s below.
+    //
+    // `window` is `None` only for a swap whose tree does not exist yet (`restore_into_durable`
+    // mints one after the swap); that path publishes the odd generation itself.
+    let _window = window
+        .map(TreeState::seq_window)
+        .transpose()
+        .map_err(std::io::Error::other)?;
     let new_dir = dir.with_extension("compact-new");
     let old_dir = dir.with_extension("compact-old");
     std::fs::remove_dir_all(&new_dir).ok();
@@ -5105,6 +5184,13 @@ struct TreeState {
     /// seqlock's odd value is set when the count rises from zero and cleared when it returns to
     /// zero, so a commit inside a commit does not reopen the window early.
     seq_depth: std::sync::Mutex<u32>,
+    /// (I7, round-3 cost work) The writer-generation control file's path, derived
+    /// ONCE from the canonical store directory when this tree was rooted. The seqlock's enter and
+    /// leave writes go straight here: deriving the path per write re-`canonicalize`d the store
+    /// directory, which is a `readlink` per path component — six syscalls per transaction on this
+    /// box, for a path that cannot change while this tree holds the lock. `None` for a tree with
+    /// no directory.
+    gen_path: Option<std::path::PathBuf>,
     /// (I10) The store directory's `(device, inode)` as it was when this tree took
     /// the writer lock, re-recorded after a swap this tree performed. `None` before the lock is
     /// taken, and on a target with no inodes.
@@ -5128,6 +5214,7 @@ impl TreeState {
             open_generation: std::sync::atomic::AtomicU64::new(0),
             stale: std::sync::atomic::AtomicBool::new(false),
             seq_depth: std::sync::Mutex::new(0),
+            gen_path: None,
             identity: std::sync::Mutex::new(None),
         })
     }
@@ -5147,6 +5234,7 @@ impl TreeState {
             open_generation: std::sync::atomic::AtomicU64::new(open_generation),
             stale: std::sync::atomic::AtomicBool::new(false),
             seq_depth: std::sync::Mutex::new(0),
+            gen_path: Some(sibling_control_file(dir, "writer.gen")),
             identity: std::sync::Mutex::new(None),
         })
     }
@@ -5265,13 +5353,21 @@ impl TreeState {
         let Some(dir) = &self.dir else { return Ok(()) };
         let mut depth = self.seq_depth.lock().unwrap_or_else(|e| e.into_inner());
         if *depth == 0 {
-            set_generation_in_place(dir, read_generation(dir) | 1).map_err(|e| {
+            // The generation is NOT re-read here. Every `seq_enter` runs on a path that has
+            // already taken this tree's exclusive writer lock, and no one else may change the
+            // counter while it is held, so `open_generation` — the value this tree last
+            // published — is authoritative and the read would only cost an open + a read per
+            // transaction.
+            let odd = self.open_generation.load(std::sync::atomic::Ordering::Acquire) | 1;
+            set_generation_at(self.gen_path.as_deref(), odd).map_err(|e| {
                 format!(
                     "durable write refused: cannot open the reader-consistency window for {}: {}",
                     dir.display(),
                     e
                 )
             })?;
+            self.open_generation
+                .store(odd, std::sync::atomic::Ordering::Release);
         }
         *depth += 1;
         Ok(())
@@ -5288,14 +5384,71 @@ impl TreeState {
         if *depth > 0 {
             return Ok(());
         }
-        set_generation_in_place(dir, next_even_generation(dir)).map_err(|e| {
+        let even = (self.open_generation.load(std::sync::atomic::Ordering::Acquire) | 1) + 1;
+        set_generation_at(self.gen_path.as_deref(), even).map_err(|e| {
             self.mark_stale();
             format!(
                 "cannot close the reader-consistency window for {}: {}",
                 dir.display(),
                 e
             )
-        })
+        })?;
+        self.open_generation
+            .store(even, std::sync::atomic::Ordering::Release);
+        Ok(())
+    }
+
+    /// (I7, I11) [`seq_enter`](Self::seq_enter) as an RAII guard: the window is
+    /// closed when the returned `SeqWindow` is dropped, on every path out of the scope —
+    /// including an early `?` return. Every DIRECTORY SWAP is bracketed with this, because a swap
+    /// replaces the whole base by rename and an unlocked open could otherwise load the old base's
+    /// indexes together with the new base's empty WAL.
+    fn seq_window(&self) -> Result<SeqWindow<'_>, String> {
+        self.seq_enter()?;
+        Ok(SeqWindow { tree: self })
+    }
+}
+
+/// (I7) The open seqlock window as a value: dropping it closes the window. Used for
+/// the SCOPED windows (directory swaps); the transaction window spans the commit and the
+/// materialisation that follows it, so it is opened by `commit_txn_ops_checked` and closed by
+/// `clear_txn` instead — with `TreeState`'s own `Drop` as the backstop.
+#[cfg(feature = "mmap")]
+struct SeqWindow<'a> {
+    tree: &'a TreeState,
+}
+
+#[cfg(feature = "mmap")]
+impl Drop for SeqWindow<'_> {
+    fn drop(&mut self) {
+        // A failure to close marks the tree stale and leaves the window open; the next locked
+        // open settles it (I11). Nothing here can usefully propagate an error.
+        let _ = self.tree.seq_leave();
+    }
+}
+
+#[cfg(feature = "mmap")]
+impl Drop for TreeState {
+    /// (I11) BACKSTOP: a tree whose writer goes away must not leave the seqlock
+    /// window open, or every later open would see an odd generation and have to repair a store
+    /// that is in fact quiescent. `clear_txn` closes the window on the normal path; this closes
+    /// it when the last handle of the tree is dropped first — a caller that committed and then
+    /// dropped the graph, or an empty commit on an older path. The writer lock is still held
+    /// here (fields drop after this body), so no other writer can be mid-transaction.
+    ///
+    /// It settles the COUNTER only. A kept journal frame, a torn tail or an interrupted swap is
+    /// still on disk and is still found by `open_repair_pending`, so real recovery work is not
+    /// lost by closing the window.
+    fn drop(&mut self) {
+        if self.dir.is_none() {
+            return;
+        }
+        let depth = self.seq_depth.lock().unwrap_or_else(|e| e.into_inner());
+        if *depth == 0 {
+            return;
+        }
+        let even = (self.open_generation.load(std::sync::atomic::Ordering::Acquire) | 1) + 1;
+        let _ = set_generation_at(self.gen_path.as_deref(), even);
     }
 }
 
@@ -5575,9 +5728,17 @@ fn next_even_generation(dir: &std::path::Path) -> u64 {
 /// generation to move, and a reader of it reads `0` (even, quiescent).
 #[cfg(feature = "mmap")]
 fn set_generation_in_place(dir: &std::path::Path, next: u64) -> std::io::Result<()> {
+    set_generation_at(Some(&sibling_control_file(dir, "writer.gen")), next)
+}
+
+/// [`set_generation_in_place`] on an ALREADY-DERIVED control path — what `TreeState` caches, so
+/// the seqlock's enter/leave do not re-`canonicalize` the store directory per transaction. `None`
+/// (a tree with no directory) is a no-op, as a missing file is.
+#[cfg(feature = "mmap")]
+fn set_generation_at(path: Option<&std::path::Path>, next: u64) -> std::io::Result<()> {
     use std::io::Write;
-    let path = sibling_control_file(dir, "writer.gen");
-    let mut f = match std::fs::OpenOptions::new().write(true).open(&path) {
+    let Some(path) = path else { return Ok(()) };
+    let mut f = match std::fs::OpenOptions::new().write(true).open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
@@ -5641,12 +5802,21 @@ fn writer_active(_dir: &std::path::Path) -> std::io::Result<bool> {
     Ok(false)
 }
 
-/// (sq-ycle) Every directory of one durable TREE: the root, then each existing named
-/// sub-graph directory, recursively. Enumerated from the FILESYSTEM (`named/0`, `named/1`, … while
-/// the next one exists) rather than from `named.bin`, so it needs no manifest parse and a hostile
-/// or stale `count` field can neither drive an unbounded walk nor hide a directory. The root is
-/// always included, even when it does not exist (an interrupted compaction swap can have renamed
-/// it away — which is exactly the case the caller must detect).
+/// (sq-ycle) Every directory of one durable TREE: the root, then each named sub-graph
+/// position, recursively. Enumerated from the FILESYSTEM (`named/0`, `named/1`, …) rather than
+/// from `named.bin`, so it needs no manifest parse and a hostile or stale `count` field can
+/// neither drive an unbounded walk nor hide a directory. The root is always included, even when it
+/// does not exist (an interrupted compaction swap can have renamed it away — which is exactly the
+/// case the caller must detect).
+///
+/// (I12) A POSITION WHOSE DIRECTORY IS ABSENT IS INCLUDED, AND DOES NOT STOP THE
+/// SCAN, when a swap sibling of it survives (`named/<i>.compact-new` / `.compact-old`). A crash
+/// between the two renames of a NAMED graph's own compaction leaves exactly that: the position's
+/// canonical directory gone and its staging sibling beside it. Stopping at the first absent
+/// position hid that crash point from [`open_repair_pending`], so the open took the lockless
+/// reader path, performed no recovery, and then failed to load the root — a store that could not
+/// be opened at all until something else happened to repair it. The scan still ends at the first
+/// position with neither a directory nor a sibling, so it remains bounded by what is on disk.
 #[cfg(feature = "mmap")]
 fn tree_dirs(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = vec![dir.to_path_buf()];
@@ -5654,13 +5824,26 @@ fn tree_dirs(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut i = 0usize;
     loop {
         let sub = named.join(i.to_string());
-        if !sub.is_dir() {
+        if sub.is_dir() {
+            out.extend(tree_dirs(&sub));
+        } else if swap_sibling_pending(&sub) {
+            // Mid-compaction at this position: report it (the caller sees a directory that does
+            // not exist) and keep scanning, because the later positions still exist.
+            out.push(sub);
+        } else {
             break;
         }
-        out.extend(tree_dirs(&sub));
         i += 1;
     }
     out
+}
+
+/// (I12) Does a directory-swap staging sibling of `dir` survive — i.e. did a crash
+/// interrupt a swap of this exact position? The two siblings [`swap_dir_to_new_base`] uses, which
+/// [`recover_compaction`] completes or rolls back.
+#[cfg(feature = "mmap")]
+fn swap_sibling_pending(dir: &std::path::Path) -> bool {
+    dir.with_extension("compact-new").exists() || dir.with_extension("compact-old").exists()
 }
 
 /// (sq-ycle) READ-ONLY probe: would opening `dir` REPAIR it — i.e. WRITE to it — rather
@@ -5675,15 +5858,18 @@ fn tree_dirs(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 ///
 /// A clean directory with pending (fully-committed) WAL deltas — the normal state of a live
 /// store — is NOT repair-pending, so a read-only `open` of it takes no lock and any number of
-/// readers coexist. This probe only reads; `open` takes the writer lock before acting on a `true`,
+/// readers coexist.
+///
+/// (I11) AN ODD WRITER GENERATION IS NOT PROBED HERE, deliberately. It usually
+/// means a live writer is mid-transaction, which a reader should RETRY rather than take the
+/// writer lock for; [`Graph::open`] therefore retries the generation first and only treats an odd
+/// value as recovery work once its bounded retries are exhausted AND the lock probe shows no
+/// writer behind it. This probe only reads; `open` takes the writer lock before acting on a `true`,
 /// because a tail can also merely LOOK torn while a live writer is mid-append.
 #[cfg(feature = "mmap")]
 fn open_repair_pending(dir: &std::path::Path) -> std::io::Result<bool> {
     for d in tree_dirs(dir) {
-        if !d.exists()
-            || d.with_extension("compact-new").exists()
-            || d.with_extension("compact-old").exists()
-        {
+        if !d.exists() || swap_sibling_pending(&d) {
             return Ok(true);
         }
         let named = d.join(NAMED_SUBDIR);
@@ -13431,6 +13617,262 @@ mod tests {
         );
         drop(holder);
         std::fs::remove_dir_all(&swapped).ok();
+        clean_store(&dir);
+    }
+
+    /// (I7, round-3 review finding 1) A DIRECTORY SWAP IS INSIDE THE READER WINDOW.
+    /// Compaction, vacuum and restore replace the base wholesale by rename; while they do, an
+    /// unlocked open could load the OLD base's indexes and then the NEW base's empty WAL, which
+    /// loses every acknowledged write the old WAL held. The window is the mechanism that makes
+    /// such a reader retry, and entering plus leaving it moves the generation by exactly two —
+    /// so a swap that moves it by nothing never opened the window at all.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_directory_swap_runs_inside_the_reader_window() {
+        let dir = txn_tmp_dir("swap-window");
+        clean_store(&dir);
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        // Take the lock and leave an overlay, so `compact` really swaps the directory. The
+        // acquisition's own generation bump happens here, before the baseline is read.
+        g.apply_delta_nquads("<http://ex/wal> <http://ex/p> <http://ex/o> .", "")
+            .unwrap();
+        let before = read_generation(&dir);
+        assert!(before.is_multiple_of(2), "quiescent before the swap");
+        g.compact().expect("the compaction swap runs");
+        assert_eq!(
+            read_generation(&dir),
+            before + 2,
+            "the compaction swap opened the reader window and closed it again"
+        );
+        // The same must hold for the restore swap, which replaces the base from outside.
+        let before = read_generation(&dir);
+        g.restore_in_place(
+            Graph::load_dataset("<http://ex/new> <http://ex/p> <http://ex/o> .", "nquads").unwrap(),
+        )
+        .expect("the restore swap runs");
+        assert_eq!(
+            read_generation(&dir),
+            before + 2,
+            "the restore swap opened the reader window and closed it again"
+        );
+        // And a reader is served again afterwards: the window is CLOSED, not merely entered.
+        drop(g);
+        let reader = Graph::open(&dir).expect("the store is readable once the swap is done");
+        assert!(
+            format!("{:?}", dump_terms(&reader)).contains("http://ex/new"),
+            "the reader sees the swapped-in base"
+        );
+        drop(reader);
+        clean_store(&dir);
+    }
+
+    /// (I11, round-3 review finding 2) AN ABANDONED WINDOW IS RECOVERED, NOT A WEDGE.
+    /// A crash between a transaction's last materialising step and the window's close leaves the
+    /// generation ODD over CLEAN logs. Nothing on disk then brings it back, so every later open
+    /// retried its bounded attempts and failed with `WouldBlock` — for ever, on a store that was
+    /// in fact intact. An open that finds no writer behind the odd value now takes the lock,
+    /// repairs whatever is there, and settles the counter.
+    ///
+    /// The second half pins the case that MUST still be busy: a live writer really mid-transaction
+    /// holds the lock, and a reader is told to retry rather than "repairing" underneath it.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_abandoned_reader_window_is_recovered_and_a_live_one_is_still_busy() {
+        let dir = txn_tmp_dir("abandoned-window");
+        clean_store(&dir);
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut writer = Graph::open(&dir).unwrap();
+        writer
+            .apply_delta_nquads("<http://ex/kept> <http://ex/p> <http://ex/o> .", "")
+            .unwrap();
+        drop(writer);
+        // The crash: an odd counter with clean logs and no lock holder.
+        set_generation_in_place(&dir, read_generation(&dir) | 1).unwrap();
+        assert_eq!(read_generation(&dir) % 2, 1, "the window is left open");
+        let recovered = Graph::open(&dir).expect("an abandoned window must not wedge the store");
+        let terms = format!("{:?}", dump_terms(&recovered));
+        assert!(terms.contains("http://ex/kept"), "no data was lost: {}", terms);
+        assert_eq!(
+            read_generation(&dir) % 2,
+            0,
+            "the recovering open settled the counter to an even value"
+        );
+        drop(recovered);
+
+        // A LIVE writer mid-transaction: the odd value is genuine, so a reader gets busy.
+        let mut live = Graph::open(&dir).unwrap();
+        live.commit_txn_ops(&[TxnOp::Insert {
+            slot: None,
+            triple: [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")],
+        }])
+        .expect("the commit point is reached");
+        assert_eq!(read_generation(&dir) % 2, 1, "a real transaction is open");
+        let Err(err) = Graph::open(&dir) else {
+            panic!("a reader must not repair a store whose writer is mid-transaction")
+        };
+        // Either refusal is the retryable one — the lock-holder's frame makes this open
+        // repair-pending, and the lock says the repair is not this open's to do.
+        assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock, "{}", err);
+        let text = err.to_string();
+        assert!(
+            text.contains("busy") || text.contains("open for writing elsewhere"),
+            "the reader is told to retry, not handed a mixed view: {}",
+            text
+        );
+        assert_eq!(
+            read_generation(&dir) % 2,
+            1,
+            "the live writer's window was NOT settled behind its back"
+        );
+        drop(live);
+        clean_store(&dir);
+    }
+
+    /// (I11, round-3 review finding 2) An EMPTY commit must not open the window: it
+    /// materialises nothing, so there is no `clear_txn` to close it, and the store would be left
+    /// looking mid-transaction. The dropped-handle backstop is checked too: a window left open by
+    /// a committed-but-never-cleared frame is closed when the tree's last handle goes away, so
+    /// the counter cannot be stranded odd by a caller that simply returns.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn an_empty_commit_leaves_the_window_closed_and_a_dropped_writer_closes_it() {
+        let dir = txn_tmp_dir("empty-commit");
+        clean_store(&dir);
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        g.apply_delta_nquads("<http://ex/w> <http://ex/p> <http://ex/o> .", "")
+            .unwrap();
+        g.commit_txn_ops(&[]).expect("an empty commit is accepted");
+        assert_eq!(
+            read_generation(&dir) % 2,
+            0,
+            "an empty commit left no window open"
+        );
+        Graph::open(&dir).expect("a reader is served beside an empty commit");
+        // A real commit that is never cleared: the window is open until the handle goes away.
+        g.commit_txn_ops(&[TxnOp::Insert {
+            slot: None,
+            triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+        }])
+        .unwrap();
+        assert_eq!(read_generation(&dir) % 2, 1, "the window is open");
+        drop(g);
+        assert_eq!(
+            read_generation(&dir) % 2,
+            0,
+            "dropping the tree's last handle closed the window"
+        );
+        clean_store(&dir);
+    }
+
+    /// (I12, round-3 review finding 3) THE RECOVERY PROBE COVERS A NAMED GRAPH'S OWN
+    /// COMPACTION. A crash between that swap's two renames leaves the child's canonical directory
+    /// GONE with its staging sibling beside it. The probe enumerated child positions only while
+    /// they existed, so it stopped at the hole, reported nothing to repair, and the open took the
+    /// lockless reader path — which may not repair — and then failed to load the root at all.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_crash_inside_a_named_graphs_compaction_is_recovered() {
+        let dir = txn_tmp_dir("child-swap-crash");
+        clean_store(&dir);
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let child = dir.join(NAMED_SUBDIR).join("0");
+        assert!(child.is_dir(), "the first named graph has its own directory");
+        // Stage exactly what a crash between the two renames of `named/0`'s compaction leaves:
+        // the new base fully written beside the position, the canonical directory renamed away.
+        let staged = child.with_extension("compact-new");
+        std::fs::remove_dir_all(&staged).ok();
+        copy_dir_all(&child, &staged).unwrap();
+        std::fs::remove_dir_all(&child).unwrap();
+        assert!(!child.exists() && staged.is_dir(), "the crash state is staged");
+        // The probe must see this position, so the open takes the lock and completes the swap.
+        assert!(
+            open_repair_pending(&dir).unwrap(),
+            "a position mid-swap is recovery work"
+        );
+        let g = Graph::open(&dir).expect("the interrupted child swap is recovered on open");
+        let terms = format!("{:?}", dump_terms(g.named_graph(&named("g0")).expect("g0")));
+        assert!(terms.contains("http://ex/n0"), "the child's triples survive: {}", terms);
+        let terms1 = format!("{:?}", dump_terms(g.named_graph(&named("g1")).expect("g1")));
+        assert!(terms1.contains("http://ex/n1"), "the later positions still load: {}", terms1);
+        assert!(child.is_dir(), "the canonical child directory is back");
+        drop(g);
+        clean_store(&dir);
+    }
+
+    /// (I10, round-3 review finding 4) A CHILD SWAP MUST NOT OVERWRITE THE ROOT'S
+    /// IDENTITY. The per-write check compares the ROOT directory's `(device, inode)` against the
+    /// one recorded when the tree took its lock. A named graph's own compaction recorded the
+    /// CHILD's inode into that shared slot, so the root's very next durable write compared the
+    /// root against the child, failed, and marked the whole tree permanently stale.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_named_sub_graph_swap_keeps_the_roots_identity() {
+        let dir = txn_tmp_dir("child-swap-identity");
+        clean_store(&dir);
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        // An overlay in the CHILD, so compacting it performs a real directory swap of `named/0`.
+        g.apply_delta_nquads(
+            "<http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g0> .",
+            "",
+        )
+        .unwrap();
+        g.named[0].1.compact().expect("the child compacts");
+        // Both the ROOT and the child must still be writable: the tree's identity still names
+        // the root directory, which the child's swap never touched.
+        g.apply_delta_nquads("<http://ex/after> <http://ex/p> <http://ex/o> .", "")
+            .expect("the root is still writable after a child swap");
+        g.apply_delta_nquads(
+            "<http://ex/n2> <http://ex/p> <http://ex/o2> <http://ex/g0> .",
+            "",
+        )
+        .expect("the child is still writable after its own swap");
+        // The same for a child RESTORE, the other swap that runs on a child directory.
+        g.named[0]
+            .1
+            .restore_in_place(
+                Graph::load_dataset("<http://ex/fresh> <http://ex/p> <http://ex/o> .", "nquads")
+                    .unwrap(),
+            )
+            .expect("the child restores in place");
+        g.apply_delta_nquads("<http://ex/after2> <http://ex/p> <http://ex/o> .", "")
+            .expect("the root is still writable after a child restore");
+        drop(g);
         clean_store(&dir);
     }
 

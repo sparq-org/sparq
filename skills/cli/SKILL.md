@@ -198,8 +198,10 @@ cargo run --release -p sparq-cli --features hdt-write -- \
   dataset, and opening it directly would give it a second writer lock and a second redo journal
   over the same tree. Open the store root and select the graph in the query.
 - **An open can report the store BUSY.** While a writer is materialising a committed multi-graph
-  transaction, no self-consistent view of the dataset exists; an open retries briefly and then
-  fails rather than answering from a half-applied one. Rerun the command.
+  transaction, or replacing the base in a compaction/vacuum/restore swap, no self-consistent view
+  of the dataset exists; an open retries briefly and then fails rather than answering from a
+  half-applied one. Rerun the command. A store left mid-transaction by a CRASH is not busy for
+  ever: the next command that can take the writer lock repairs it and carries on.
 - **`query` and `query-mmap` print RESULTS** (a table by default for SELECT; a boolean for ASK; N-Triples for CONSTRUCT/DESCRIBE) on stdout — load stats and reasoning/inconsistency reports go to stderr. Use `--format <table|tsv|csv|xml|json|ntriples>` to pick the SELECT/ASK serialisation, or `--count` for the legacy count-only line (`<n> solutions/triples in <ms>ms`). The two are at output parity (they share one emission core; `query-mmap` only differs in opening the indexes memory-mapped instead of loading into RAM). `bench`/`bench-mmap` are unchanged and emit TSV.
 - **No `--help`.** Run a subcommand with too few args to see its one-line usage; an unknown subcommand prints the top-level usage and exits 2. Query errors exit 1.
 - **`--reason <profile>` is a flag on `query`** (scanned anywhere in argv); the standalone `reason` subcommand instead takes the profile as the 3rd positional. Profiles: `rdfs`, `owl`, `n3`, and — with the opt-in features — `el` and `datalog:<rules.dlog>`. `datalog:` is the only profile that carries an ARGUMENT (its rules file), split on the FIRST `:`; a bare `datalog` is a usage error (exit 2) naming the syntax, in both feature states.
