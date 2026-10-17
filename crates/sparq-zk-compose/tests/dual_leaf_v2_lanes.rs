@@ -691,13 +691,7 @@ fn raw_value_lane_toml(
     )
 }
 
-fn toolchain_available() -> bool {
-    std::process::Command::new("nargo")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+mod support;
 
 /// Solve the given member's witness for the given public/private assignment,
 /// using the shared value-lane renderer (whose layout the dedicated member
@@ -733,8 +727,7 @@ fn member_accepts(
 /// disclosed verdict is not.
 #[test]
 fn in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping in-circuit V2 boolean-lane vectors");
+    if !support::require_toolchain("in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict", &["nargo"]) {
         return;
     }
     let built = build_filter_value_dl_bool(&bool_lit(true), FilterOp::Gt, false).unwrap();
@@ -809,8 +802,7 @@ fn in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict()
 /// binds, so only `assert_bit(bound)` can refuse.
 #[test]
 fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping in-circuit V2 bit-domain vectors");
+    if !support::require_toolchain("in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain", &["nargo"]) {
         return;
     }
     let dt = boolean_lane_const_v2();
@@ -877,8 +869,7 @@ fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
 /// while the control under the real lane constant is accepted.
 #[test]
 fn in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_constant() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping in-circuit V2 opaque-datatype vectors");
+    if !support::require_toolchain("in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_constant", &["nargo"]) {
         return;
     }
     let built = build_filter_value_dl_bool(&bool_lit(true), FilterOp::Eq, true).unwrap();
@@ -941,8 +932,7 @@ fn in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_cons
 /// is what makes it a guard rather than a restatement.
 #[test]
 fn in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witness() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping the in-circuit hook bit-constraint vector");
+    if !support::require_toolchain("in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witness", &["nargo"]) {
         return;
     }
     // An honest committed `false` leaf and its honest public inputs.
@@ -1009,8 +999,7 @@ fn in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witne
 /// dedicated boolean member's `{0, 1}` constraint rejects it.
 #[test]
 fn in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping the in-circuit V2 string-lane vector");
+    if !support::require_toolchain("in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members", &["nargo"]) {
         return;
     }
     // A real V2 string-lane literal: an opaque datatype, so `encode_literal` takes
@@ -1268,16 +1257,6 @@ fn the_verifier_prefilter_rejects_the_crossed_lane_member_pairing() {
     }
 }
 
-/// Whether `bb` is on PATH too — the prove+verify vector needs it, while the
-/// witness-solving vectors need only `nargo`.
-fn bb_available() -> bool {
-    std::process::Command::new("bb")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 /// LIVE prove+verify on the dedicated bit-domain member: `nargo execute` +
 /// `bb prove` + `bb verify`, through the TYPED checked prove entry
 /// (`prove_value_lane`, which renders its own `Prover.toml`), for an honest TRUE
@@ -1291,8 +1270,7 @@ fn bb_available() -> bool {
 /// standard control that `verify` is actually deciding something.
 #[test]
 fn full_prove_verify_filter_value_dl_bool() {
-    if !toolchain_available() || !bb_available() {
-        eprintln!("nargo/bb absent; skipping the live V2 boolean prove+verify");
+    if !support::require_toolchain("full_prove_verify_filter_value_dl_bool", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -2586,8 +2564,7 @@ fn hook_witness_of(
 #[test]
 fn full_prove_verify_the_numeric_build_helpers() {
     use sparq_zk_compose::build::{build_filter_value_dl_decimal, build_filter_value_dl_int};
-    if !toolchain_available() || !bb_available() {
-        eprintln!("nargo/bb absent; skipping the live numeric value-lane prove+verify");
+    if !support::require_toolchain("full_prove_verify_the_numeric_build_helpers", &["nargo", "bb"]) {
         return;
     }
     let prover = CircuitProver::from_crate_root();
@@ -2641,8 +2618,7 @@ fn full_prove_verify_the_numeric_build_helpers() {
 #[test]
 fn in_circuit_a_lying_verdict_on_the_integer_build_helper_is_refused() {
     use sparq_zk_compose::build::build_filter_value_dl_int;
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping the in-circuit numeric integer-lane vector");
+    if !support::require_toolchain("in_circuit_a_lying_verdict_on_the_integer_build_helper_is_refused", &["nargo"]) {
         return;
     }
     let built = build_filter_value_dl_int(

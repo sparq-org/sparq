@@ -492,9 +492,16 @@ pub(crate) fn assemble_facts(
             && (blocked.contains(r)
                 || r.match_indices('/').any(|(i, _)| blocked.contains(&r[..=i])))
     };
+    // Each resource's Solid slash-semantics parent, when that is a resource too: the one
+    // container traversal ([`parent_iri`]) the store and the MCP server use, so the rules
+    // walk exactly the containers the resource enumeration made.
+    let parent_p = named(&format!("{SOLIDX_NS}parent"));
     for r in &resources {
         if !is_blocked(r) {
             out.push([named(r), is_resource.clone(), xsd_true()]);
+            if let Some(p) = parent_iri(r).filter(|p| resources.contains(*p) && !is_blocked(p)) {
+                out.push([named(r), parent_p.clone(), named(p)]);
+            }
         }
     }
     // The auth view carries the blocked resources too, so no other grant source (an

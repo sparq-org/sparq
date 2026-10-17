@@ -14,7 +14,8 @@
 // soundness question, untouched here.
 //
 // Most cryptographic round-trips are `#[ignore]` (a full bb prove is slow) and
-// toolchain-gated (skip cleanly without nargo + bb), mirroring the existing
+// LIVE (they fail loud without nargo + bb unless the lane declares itself
+// toolchain-free), mirroring the existing
 // e2e / join_forge full-prove suites. The FAMILY-COMPLETENESS gate
 // (`every_derivable_id_has_a_compiled_member`) runs WITHOUT the toolchain — it is
 // the regression guard for the silent-unprovability gap this bead closed (a
@@ -48,16 +49,7 @@ fn blinding() -> Fr {
     field_from_hex_str("0x1234abcd").expect("blinder parses")
 }
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("sparq_zk_family_{name}_{}", std::process::id()));
@@ -176,8 +168,7 @@ fn build_scan_derives_new_k1_r8_member() {
 /// execute only, no proving). Toolchain-gated.
 #[test]
 fn scan_k1_n16_r8_witness_satisfiable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping scan_k1_n16_r8 witness-gen");
+    if !support::require_toolchain("scan_k1_n16_r8_witness_satisfiable", &["nargo", "bb"]) {
         return;
     }
     let commit = age_graph(5, 7);
@@ -205,8 +196,7 @@ fn scan_k1_n16_r8_witness_satisfiable() {
 /// Toolchain-gated.
 #[test]
 fn scan_k1_n16_r8_rejects_fabricated_row() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping scan_k1_n16_r8 invalid-witness");
+    if !support::require_toolchain("scan_k1_n16_r8_rejects_fabricated_row", &["nargo", "bb"]) {
         return;
     }
     let commit = age_graph(5, 7);
@@ -260,8 +250,7 @@ fn scan_k1_n16_r8_rejects_fabricated_row() {
 #[test]
 #[ignore = "slow: full bb prove of the new scan_k1_n16_r8 member"]
 fn scan_k1_n16_r8_full_prove_verify_round_trip() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping scan_k1_n16_r8 full prove/verify");
+    if !support::require_toolchain("scan_k1_n16_r8_full_prove_verify_round_trip", &["nargo", "bb"]) {
         return;
     }
     let commit = age_graph(5, 7);
@@ -355,8 +344,7 @@ fn build_join_derives_new_n64_member() {
 /// execute only). Toolchain-gated.
 #[test]
 fn join_eq_na64_nb64_witness_satisfiable() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping join_eq_na64_nb64 witness-gen");
+    if !support::require_toolchain("join_eq_na64_nb64_witness_satisfiable", &["nargo", "bb"]) {
         return;
     }
     let built =
@@ -393,8 +381,7 @@ fn join_eq_na64_nb64_rejects_unequal_values() {
 #[test]
 #[ignore = "slow: full bb prove of the new join_eq_na64_nb64 member"]
 fn join_eq_na64_nb64_full_prove_verify_round_trip() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping join_eq_na64_nb64 full prove/verify");
+    if !support::require_toolchain("join_eq_na64_nb64_full_prove_verify_round_trip", &["nargo", "bb"]) {
         return;
     }
     let built =

@@ -67,7 +67,7 @@ export type OwlDlRefusalKind = 'Unparsed' | 'Malformed' | 'Ambiguous' | 'Unsuppo
 
 /** The reason attached to `consistent: "unknown"`. */
 export type OwlDlReason =
-  /** A construct outside the decided fragment (e.g. `owl:topObjectProperty`). */
+  /** A construct outside the decided fragment (e.g. a key on a transitive property). */
   | { kind: 'OutOfFragment'; construct: string; triples: OwlDlTriple[] }
   /** A blocking OWL 2 DL violation (a non-simple property where a simple one is required, or an irregular property hierarchy). */
   | { kind: 'NotInDl'; violations: OwlDlViolation[] }

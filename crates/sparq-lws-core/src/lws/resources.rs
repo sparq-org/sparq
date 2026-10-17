@@ -1786,7 +1786,7 @@ async fn create<S: Store + 'static>(
     // shared, so the task's scheduling holds up no other create in the container.
     let created = {
         let (state, parent, child, meta, admission) = (
-            state.clone(),
+            state.detached(),
             parent.to_string(),
             child.clone(),
             meta.clone(),
@@ -2340,7 +2340,7 @@ where
     F: std::future::Future<Output = (T, Option<super::Unsettled>)> + Send + 'static,
     C: FnOnce(&T) -> (Option<String>, Option<Event>) + Send + 'static,
 {
-    let state = state.clone();
+    let state = state.detached();
     tokio::spawn(async move {
         let _admission = admission;
         match writes.await {
@@ -2437,7 +2437,7 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
     let (state, uri, content_type) = (state.clone(), uri.to_string(), content_type.to_string());
     let Some((new, old)) = changed else {
         let write = {
-            let state = state.clone();
+            let state = state.detached();
             async move { (state.store.write(&uri, body, &content_type).await, None) }
         };
         let after =
@@ -2448,7 +2448,7 @@ async fn write_with_meta<S: Store + 'static, L: Send + 'static>(
         };
     };
     let writes = {
-        let (state, parent) = (state.clone(), parent.clone());
+        let (state, parent) = (state.detached(), parent.clone());
         async move {
             let mut journal = state.journal();
             let steps = async {
@@ -3724,7 +3724,7 @@ async fn delete<S: Store + 'static>(
     // over (see [`hold_locks`]). A removal that was put back changed nothing; what could not be
     // is in `removed`.
     let removal = {
-        let state = state.clone();
+        let state = state.detached();
         async move {
             // A subtree too large to remove atomically is refused before anything is removed,
             // and before anyone's notifications are prepared: an oversized delete does none of
@@ -5045,7 +5045,7 @@ where
     // The write runs in a task that holds the lock and the listing's, and then touches
     // the container when the write may have landed (see [`hold_locks`]).
     let write = {
-        let (state, uri, meta) = (state.clone(), uri.to_string(), meta.clone());
+        let (state, uri, meta) = (state.detached(), uri.to_string(), meta.clone());
         async move { (state.put_resource_meta(&uri, &meta).await, None) }
     };
     let parent = parent_of(uri, &state.cfg.storage());

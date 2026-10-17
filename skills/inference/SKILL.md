@@ -776,7 +776,15 @@ Axioms are compared by the terms they name (each check may use its own `Dict`; a
 individual by its blank-node label); the profile check and clausification always run, and a
 refused or undecided version keeps the kept answer. The automaton construction is bounded
 (`MAX_AUTOMATON_STATES` states, `MAX_AUTOMATON_DEPTH` nested non-simple properties); a
-hierarchy past either is `OutOfFragment`. The decided fragment is SROIQ(D) without the top and bottom properties: regular
+hierarchy past either is `OutOfFragment`. The decided fragment is SROIQ(D) with the built-in properties: `owl:bottomObjectProperty` and
+`owl:bottomDataProperty` relate nothing (a restriction on them is `⊤` or `⊥`, a sub-property of them is empty, a key
+on them identifies nothing, declaring one reflexive is inconsistent),
+and `owl:topObjectProperty` `U` is encoded through a fresh role `W` and one fresh anonymous nominal `{o}` with
+`⊤ ⊑ ∃W.{o}`, so `∃U.C` / `∀U.C` become `∃W.({o} ⊓ ∃W⁻.C)` / `∃W.({o} ⊓ ∀W⁻.C)`; every element then reaches that
+nominal, so an ontology using `U` in a restriction is classified with the ABox and more often answers
+`Unconfirmed`. A property above `U`, `U` in a chain body or equivalent or inverse to an ordinary property, and a
+key on `U` are `OutOfFragment` (OWL 2 DL admits `owl:topDataProperty` only as a super-property, where it says
+nothing, and the built-in object properties nowhere a simple property is required). Regular
 property chains (`owl:propertyChainAxiom`, transitivity; each non-simple property gets an
 automaton over the property words that imply it, and `∀R.C` follows its states), nominals
 (`ObjectOneOf`, `ObjectHasValue`; a node labelled `{a}` is merged into `a`'s node, and with
@@ -801,11 +809,15 @@ the data domain has values outside every datatype of the map (the Direct Semanti
 them), so the complement of the whole map is not empty, while `rdfs:Literal` is the whole
 domain. A branch closed as undecided or unconfirmed never makes the alternatives after it
 look forced: no subsumption is read off them.
-Nominals are decided without SHOIQ's NI-rule: a complete branch is accepted only when its
-graph provably unravels into a model (no blocked node keeps an edge to an individual, no
+Nominals are decided with SHOIQ's NI-rule: a complete branch is accepted only when its
+graph provably unravels into a model (a blocked node keeps an edge to an individual only
+when the node blocking it has the same edge, no
 edge outside the tree joins two blockable nodes, and no number restriction at an
-individual can count two copies of a repeated node). Otherwise the branch is closed as
-unconfirmed, and when no other branch gives a model the answer is `Unknown(Unconfirmed)`.
+individual can count two copies of a repeated node). Where an at-most restriction
+`≤n R.A` at the individual counts the repeated node, the NI-rule makes it one of `n`
+named neighbours instead. Where it cannot (the restriction is a disjunct, as in
+`≤1 R ⊔ B`, or nothing counts the node), the branch is closed as unconfirmed, and when no
+other branch gives a model the answer is `Unknown(Unconfirmed)`.
 Keys (`HasKey`, object property expressions including inverses, and data properties)
 apply to named individuals only, as OWL 2 specifies: two named members of the key class
 sharing a named value on every object property and a value on every data property are
@@ -816,8 +828,9 @@ implied by a chain or a transitive sub-property) is `OutOfFragment`: the values 
 Still out of the fragment, as
 `Unknown(OutOfFragment { construct, source })`: a hierarchy the automaton construction finds
 irregular or too large (`MAX_AUTOMATON_STATES`; the profile check reports irregular ones as
-`NotInDl` first), the top and bottom object and data properties
-in axioms (except `SubDataPropertyOf(D owl:topDataProperty)`), datatypes outside the map
+`NotInDl` first), a property above `owl:topObjectProperty`, the top object property in a
+chain body, equivalent or inverse to an ordinary property, or in a key, `owl:topDataProperty`
+anywhere but as a super-property, datatypes outside the map
 without exactly one definition, cyclic or repeated definitions, literals of datatypes
 outside the map, and a property used both as an object and as a data property. A data
 question the oracle answers Unknown for (an XSD pattern with a block escape, a facet bound
