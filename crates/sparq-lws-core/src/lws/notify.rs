@@ -429,8 +429,8 @@ impl Subs {
         self.mine(subscriber).filter(|s| !s.expired(now)).count()
     }
 
-    /// How many subscriptions `subscriber` holds, expired ones included.
-    /// How many subscriptions `subscriber` holds: the size of its index entry, so no record
+    /// How many subscriptions `subscriber` holds, expired ones included: the size of its index
+    /// entry, so no record
     /// (its own or anyone else's) is read to count them.
     fn count_of(&self, subscriber: Option<&str>) -> usize {
         self.by_subscriber
@@ -4180,8 +4180,7 @@ mod tests {
         }
     }
 
-    /// The subscription pool is bounded in its own right: once it is full a subscription create
-    /// is refused `507`, and content writes are admitted all the same.
+    /// Content whose name only holds the pool's segments is content, held to its ceilings.
     #[tokio::test]
     async fn content_named_like_the_pool_is_held_to_the_content_ceilings() {
         // Few content entries, a roomy pool: content whose name merely holds the pool's segments
@@ -4209,6 +4208,8 @@ mod tests {
         assert!(refused, "lookalike content escaped the content ceiling");
     }
 
+    /// The subscription pool is bounded in its own right: once it is full a subscription create
+    /// is refused `507`, and content writes are admitted all the same.
     #[tokio::test]
     async fn a_full_subscription_pool_refuses_only_subscriptions() {
         // Room for the service container and two subscription records.
