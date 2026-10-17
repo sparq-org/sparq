@@ -206,6 +206,29 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.restore(iri, container, body, meta).await
     }
 
+    async fn hold(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+        self.inner.hold(iri).await
+    }
+
+    async fn reinstate(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        held: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        let keys: Vec<&str> = std::iter::once(iri).chain(container).collect();
+        let _m = self.gens.mutating(&keys);
+        self.inner.reinstate(iri, container, held).await
+    }
+
+    async fn release(&self, held: &ResourceMeta, iri: Option<&str>) -> ServerResult<()> {
+        self.inner.release(held, iri).await
+    }
+
+    async fn holds(&self) -> ServerResult<Vec<ResourceMeta>> {
+        self.inner.holds().await
+    }
+
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         let keys: Vec<&str> = std::iter::once(iri).chain(parent).collect();
         let _m = self.gens.mutating(&keys);

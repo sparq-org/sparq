@@ -196,6 +196,59 @@ pub trait Store: Send + Sync {
         ))
     }
 
+    /// Hold the bytes `iri`'s record points at now: until [`release`](Store::release)d, the
+    /// store keeps them, whatever later rewrites or removes the record, so the record can be put
+    /// back as it was ([`reinstate`](Store::reinstate)) without its bytes being copied or read.
+    /// Returns the record's metadata (its blob key names the held bytes), or `None` when `iri`
+    /// has no record. A hold is itself stored, so it outlives the process: a process that starts
+    /// over the store finds the holds a stop left with [`holds`](Store::holds).
+    ///
+    /// The default refuses: a store that cannot keep bytes past their record cannot put a record
+    /// back by reference.
+    async fn hold(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+        let _ = iri;
+        Err(ServerError::Storage(
+            "this store cannot hold a record's bytes".into(),
+        ))
+    }
+
+    /// Put `iri`'s record back as `held` says, pointing at the bytes a [`hold`](Store::hold)
+    /// kept, validators included: as a member of `container` when one is given (the
+    /// [`create_in_container`](Store::create_in_container) path), in place otherwise (the
+    /// [`write`](Store::write) path). The hold stays until released. A record that is put back
+    /// this way may be removed or rewritten again, and put back again, as long as the hold stands.
+    ///
+    /// The default refuses (see [`hold`](Store::hold)).
+    async fn reinstate(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        held: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        let _ = (iri, container, held);
+        Err(ServerError::Storage(
+            "this store cannot hold a record's bytes".into(),
+        ))
+    }
+
+    /// End a [`hold`](Store::hold): the held bytes go once no record points at them. When `iri`
+    /// is given (the record the hold was taken on), they go now unless that record points at them
+    /// (it was put back); otherwise they are left to the orphan sweep. Idempotent.
+    async fn release(&self, held: &ResourceMeta, iri: Option<&str>) -> ServerResult<()> {
+        let _ = (held, iri);
+        Err(ServerError::Storage(
+            "this store cannot hold a record's bytes".into(),
+        ))
+    }
+
+    /// Every hold that stands ([`hold`](Store::hold)): what each holds (its blob key), so a
+    /// process that starts over the store can release those nothing needs any longer.
+    async fn holds(&self) -> ServerResult<Vec<ResourceMeta>> {
+        Err(ServerError::Storage(
+            "this store cannot hold a record's bytes".into(),
+        ))
+    }
+
     /// Delete a resource: remove its index record + its bytes, and detach it from `parent`'s
     /// containment (if `parent` is given). The caller is responsible for the existence (404) and
     /// empty-container (409) decisions; this performs the removal.
@@ -337,6 +390,26 @@ pub struct CompositeStore<S: SparqClient, B: BlobStore> {
     /// request's authoritative index metadata, so a hit is provably the bytes that metadata
     /// committed with — never stale, never an authz surface (see [`body_cache`]'s module docs).
     body_cache: BodyCache,
+    /// How many holds ([`Store::hold`]) may stand that this instance knows of: taken through it,
+    /// or found by [`Store::holds`] (which a process starting over the store calls first). While
+    /// none may, reclaiming bytes asks the index nothing more; otherwise it asks whether they are
+    /// held. Never below the holds that stand, so it errs only towards asking.
+    holding: std::sync::atomic::AtomicUsize,
+}
+
+/// The container every hold's record is a member of ([`Store::hold`]): outside every storage (a
+/// `urn:`), so no request can name it and no listing shows it.
+pub const HELD_CONTAINER: &str = "urn:x-sparq-lws:held/";
+
+/// The media type a hold's record is stored with.
+const HELD_TYPE: &str = "application/x-sparq-lws-held";
+
+/// The record of a hold on the bytes under `blob_key`: one per key.
+fn held_record(blob_key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(blob_key.as_bytes());
+    let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
+    format!("{HELD_CONTAINER}{hex}")
 }
 
 impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
@@ -354,6 +427,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
             sparq,
             blob,
             body_cache,
+            holding: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
@@ -427,8 +501,65 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// missing bytes. Safe against concurrent writers because keys are minted unique per write and an
     /// index pointer never moves back to a key it has left. A failed delete is ignored: the bytes stay
     /// as an orphan for the reconciler, exactly as before this inline reclaim existed.
+    ///
+    /// Bytes a hold keeps ([`Store::hold`]) are not reclaimed: they go when the hold is released.
+    /// A hold is published (its record committed) before the holder checks that the record it
+    /// holds still points at them, and this runs after the commit that left them, so either this
+    /// sees the hold or the holder sees the record moved on and gives the hold up. When whether
+    /// they are held cannot be read, they stay, for the orphan sweep (which keeps held bytes too:
+    /// a hold's record references them).
     async fn reclaim_blob(&self, key: &str) {
+        if self.holding.load(std::sync::atomic::Ordering::SeqCst) > 0
+            && !matches!(self.sparq.exists(&held_record(key)).await, Ok(false))
+        {
+            return;
+        }
         let _ = self.blob.delete(key).await;
+    }
+
+    /// Commit the record of a hold on `key`, creating the holds' container when it is absent.
+    async fn publish_hold(&self, key: &str) -> ServerResult<()> {
+        let record = held_record(key);
+        let meta = ResourceMeta {
+            content_type: HELD_TYPE.to_string(),
+            blob_key: key.to_string(),
+            etag: "\"held\"".to_string(),
+            last_modified: None,
+        };
+        for _ in 0..2 {
+            match self
+                .sparq
+                .create_child(HELD_CONTAINER, &record, meta.clone())
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(SparqError::NotFound) => {
+                    self.write(HELD_CONTAINER, Bytes::new(), HELD_TYPE).await?;
+                }
+                Err(e) => return Err(map_sparq(e)),
+            }
+        }
+        Err(ServerError::Storage(
+            "the holds' container could not be created".into(),
+        ))
+    }
+
+    /// Remove the record of a hold on `key` (absent is fine).
+    async fn withdraw_hold(&self, key: &str) -> ServerResult<()> {
+        let outcome = self
+            .sparq
+            .delete_meta_if_empty(&held_record(key), Some(HELD_CONTAINER))
+            .await
+            .map_err(map_sparq)?;
+        if outcome != DeleteOutcome::Deleted {
+            return Ok(());
+        }
+        let _ = self.holding.fetch_update(
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+            |n| n.checked_sub(1),
+        );
+        Ok(())
     }
 
     /// Mint a fresh, **unique-per-write** opaque blob-store key for an IRI.
@@ -751,6 +882,92 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         }
     }
 
+    async fn hold(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+        // Published, then checked: a reclaim after the commit that leaves these bytes runs after
+        // this hold's record is visible, or this sees the record moved on (see `reclaim_blob`).
+        for _ in 0..=READ_RACE_RETRIES {
+            let meta = match self.sparq.get_meta(iri).await {
+                Ok(meta) => meta,
+                Err(SparqError::NotFound) => return Ok(None),
+                Err(e) => return Err(map_sparq(e)),
+            };
+            // Counted before it is published, so no reclaim meanwhile skips asking.
+            self.holding
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            // A failure may follow a hold that landed (a lost reply): left counted, and found
+            // and released by the next start's sweep of holds nothing needs.
+            self.publish_hold(&meta.blob_key).await?;
+            match self.sparq.get_meta(iri).await {
+                Ok(now) if now.blob_key == meta.blob_key => return Ok(Some(meta)),
+                // Rewritten or removed meanwhile: what was held may already be gone.
+                Ok(_) | Err(SparqError::NotFound) => {
+                    let _ = self.release(&meta, Some(iri)).await;
+                }
+                Err(e) => {
+                    let _ = self.release(&meta, Some(iri)).await;
+                    return Err(map_sparq(e));
+                }
+            }
+        }
+        Err(ServerError::ResourceChanged)
+    }
+
+    async fn reinstate(
+        &self,
+        iri: &str,
+        container: Option<&str>,
+        held: &ResourceMeta,
+    ) -> ServerResult<ResourceMeta> {
+        // As `restore`, pointing at the held bytes rather than a copy: the hold keeps them.
+        let committed = match container {
+            Some(c) => self
+                .sparq
+                .create_child(c, iri, held.clone())
+                .await
+                .map(|()| None),
+            None => self.sparq.replace_meta(iri, held.clone()).await,
+        };
+        let previous = committed.map_err(map_sparq)?;
+        if let Some(old) = previous.filter(|old| old.blob_key != held.blob_key) {
+            self.reclaim_blob(&old.blob_key).await;
+        }
+        Ok(held.clone())
+    }
+
+    async fn release(&self, held: &ResourceMeta, iri: Option<&str>) -> ServerResult<()> {
+        self.withdraw_hold(&held.blob_key).await?;
+        let Some(iri) = iri else {
+            return Ok(());
+        };
+        // No record but `iri`'s can point at them: keys are minted per write, and only `iri`'s
+        // record is ever put back on them.
+        match self.sparq.get_meta(iri).await {
+            Ok(now) if now.blob_key == held.blob_key => {}
+            Ok(_) | Err(SparqError::NotFound) => self.reclaim_blob(&held.blob_key).await,
+            Err(_) => {}
+        }
+        Ok(())
+    }
+
+    async fn holds(&self) -> ServerResult<Vec<ResourceMeta>> {
+        let records = match self.sparq.list_children(HELD_CONTAINER).await {
+            Ok(records) => records,
+            Err(SparqError::NotFound) => Vec::new(),
+            Err(e) => return Err(map_sparq(e)),
+        };
+        let mut held = Vec::with_capacity(records.len());
+        for record in records {
+            match self.sparq.get_meta(&record).await {
+                Ok(meta) => held.push(meta),
+                Err(SparqError::NotFound) => {}
+                Err(e) => return Err(map_sparq(e)),
+            }
+        }
+        self.holding
+            .fetch_max(held.len(), std::sync::atomic::Ordering::SeqCst);
+        Ok(held)
+    }
+
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
         // Look up the byte-pointer from the authoritative index so we delete the right blob.
         let blob_key = match self.sparq.get_meta(iri).await {
@@ -893,6 +1110,16 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
 }
 
 /// The child IRIs of `raw` that are RFC 3987 IRIs.
+/// A [`SparqError`] as the server reports it.
+fn map_sparq(e: SparqError) -> ServerError {
+    match e {
+        SparqError::NotFound => ServerError::NotFound,
+        SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+        SparqError::Backend(e) => ServerError::Storage(e),
+        SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
+    }
+}
+
 fn validated_children(raw: Vec<String>) -> Vec<ValidatedChildIri> {
     // Validate each raw child IRI (full RFC-3987) at THIS boundary — the point where a
     // malformed/injected row from storage first crosses into the server's own logic. A malformed
@@ -955,6 +1182,71 @@ mod tests {
             assert!(matches!(r, Err(ServerError::NotFound)), "{r:?}");
         }
         assert!(store.blob.list().await.unwrap().is_empty());
+    }
+
+    /// A hold keeps a record's bytes through a rewrite and a removal, so the record is put back
+    /// pointing at them, validators included, with nothing copied; released, the bytes go unless
+    /// the record points at them again, and a hold that outlives its process is found again.
+    #[tokio::test]
+    async fn held_bytes_outlive_their_record_until_released() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let (c, x) = ("https://pod.example/c/", "https://pod.example/c/x");
+        store.write(c, Bytes::new(), "text/turtle").await.unwrap();
+        let first = store
+            .create_in_container(c, x, Bytes::from_static(b"one"), "text/plain")
+            .await
+            .unwrap();
+        assert!(store
+            .hold("https://pod.example/c/none")
+            .await
+            .unwrap()
+            .is_none());
+        let held = store.hold(x).await.unwrap().expect("held");
+        assert_eq!(held.blob_key, first.blob_key);
+        // Rewritten, then removed: the held bytes stay.
+        let second = store
+            .write(x, Bytes::from_static(b"two"), "text/plain")
+            .await
+            .unwrap();
+        store.delete_container_if_empty(x, Some(c)).await.unwrap();
+        assert_eq!(&store.read_at(x, &held).await.unwrap()[..], b"one");
+        // The rewrite's own bytes, held by nothing, went with the removal.
+        assert!(!store.blob.exists(&second.blob_key).await.unwrap());
+        let holds: Vec<String> = store
+            .holds()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|h| h.blob_key)
+            .collect();
+        assert_eq!(holds, std::slice::from_ref(&held.blob_key));
+        // Put back by reference, as it was.
+        store.reinstate(x, Some(c), &held).await.unwrap();
+        let back = store.read(x).await.unwrap();
+        assert_eq!(&back.body[..], b"one");
+        assert_eq!(back.meta.etag, first.etag);
+        assert!(store
+            .list_children(c)
+            .await
+            .unwrap()
+            .iter()
+            .any(|m| m.as_str() == x));
+        // Released while the record points at them, they stay; released after a rewrite, they
+        // go.
+        store.release(&held, Some(x)).await.unwrap();
+        assert!(store.holds().await.unwrap().is_empty());
+        assert!(store.blob.exists(&held.blob_key).await.unwrap());
+        let again = store.hold(x).await.unwrap().expect("held");
+        store
+            .write(x, Bytes::from_static(b"three"), "text/plain")
+            .await
+            .unwrap();
+        assert!(store.blob.exists(&again.blob_key).await.unwrap());
+        store.release(&again, Some(x)).await.unwrap();
+        assert!(!store.blob.exists(&again.blob_key).await.unwrap());
+        // Releasing again does nothing.
+        store.release(&again, Some(x)).await.unwrap();
+        assert_eq!(&store.read(x).await.unwrap().body[..], b"three");
     }
 
     #[test]

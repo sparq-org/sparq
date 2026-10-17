@@ -662,23 +662,9 @@ impl<S: Store> std::ops::Deref for LwsState<S> {
 }
 
 impl<S: Store + 'static> LwsState<S> {
-    /// A [`Journal`] for one mutation, bounded to what any one write could need to put back (a
-    /// body at the limit and its metadata, twice) and never below 64 MiB.
+    /// A [`Journal`] for one mutation, bounded to [`JOURNAL_LIMIT`] (see [`Journal::stage`]).
     pub(crate) fn journal(&self) -> Journal<'_, S> {
-        let limit = (64usize << 20).max(
-            self.cfg
-                .max_body
-                .saturating_add(MAX_META_BYTES)
-                .saturating_mul(2),
-        );
-        Journal::new(self, limit)
-    }
-
-    /// A [`LwsState::journal`] with no bound on what it stages: for the delete of one resource,
-    /// whose outcome must not follow the size of what is stored (a writer may delete what it may
-    /// not read). What it stages is that one resource, which the store already holds whole.
-    pub(crate) fn journal_for_one(&self) -> Journal<'_, S> {
-        Journal::new(self, usize::MAX)
+        Journal::new(self, JOURNAL_LIMIT)
     }
 
     /// Build the state: ensure the storage root and the service containers exist, put back any
@@ -906,6 +892,8 @@ impl<S: Store + 'static> LwsState<S> {
                     state.owe_touch(container, record.clone());
                 }
             }
+            // Released while its locks are held: nothing can stage what it put back meanwhile.
+            release_holds(&state.store, &left.2).await;
             drop(left);
             state.locks.show(&iris);
             state
@@ -1104,17 +1092,33 @@ pub(crate) async fn remove_member<S: Store>(
     store.delete_container_if_empty(iri, parent).await
 }
 
+/// What a [`Journal`] may hold to put a change back: what each resource it stages costs it
+/// ([`Journal::stage`]) comes to at most this. 64 MiB.
+pub(crate) const JOURNAL_LIMIT: usize = 64 << 20;
+
+/// What staging one resource costs a [`Journal`], besides its name and, for a metadata record,
+/// its bytes: what the store's hold on its bytes and their metadata take in memory, counted at a
+/// fixed size so that it follows neither.
+const STAGED_ENTRY_BYTES: usize = 512;
+
 /// One mutation's store changes, each recorded with what it replaced, so that a failure part way
 /// puts back everything done before it ([`Journal::rollback`]). Every mutation of more than one
 /// store step goes through one: a write or delete that fails leaves content, metadata and
 /// membership as they were, validators included (records are put back with
-/// [`Store::restore`]). What a journal holds to put things back is bounded (`limit` bytes); a
-/// change that would need more is refused, and one that knows its whole extent up front
-/// ([`Journal::stage`]) is refused before it changes anything.
+/// [`Store::reinstate`], pointing at the bytes the store held for them, see [`Journal::stage`]).
+/// What a journal holds to put things back is bounded (`limit` bytes); a change that would need
+/// more is refused, and one that knows its whole extent up front ([`Journal::stage`]) is refused
+/// before it changes anything.
+///
+/// The holds it takes are released once nothing can need them: when the change is kept or put
+/// back and its intent cleared, or, for a change set aside, once it is settled
+/// ([`Unsettled`] carries them). A journal dropped before its intent was stored releases them
+/// on a task of its own; one dropped after leaves them to the intent, which the next start
+/// settles.
 pub(crate) struct Journal<'a, S: Store + 'static> {
     state: &'a LwsState<S>,
     undo: Vec<Undo>,
-    staged: std::collections::HashMap<String, Option<(Bytes, StoredMeta)>>,
+    staged: std::collections::HashMap<String, Option<Kept>>,
     held: usize,
     limit: usize,
     /// What putting back each resource staged so far takes, in the order staged: the durable
@@ -1127,9 +1131,121 @@ pub(crate) struct Journal<'a, S: Store + 'static> {
     intent: Option<String>,
     /// The resources staged so far, published as in flight from before the first step.
     in_flight: Option<InFlight>,
+    /// The holds staged so far (see [`Kept::Held`]).
+    holds: Holds<S>,
+}
+
+/// The holds a [`Journal`] took, released when it is dropped before its intent was stored (a
+/// change that panicked part way): once it is stored, the intent keeps them, and the next start
+/// settles it and releases them ([`intents::recover`]).
+struct Holds<S: Store + 'static> {
+    state: LwsState<S>,
+    held: Vec<(String, StoredMeta)>,
+    intended: bool,
+}
+
+impl<S: Store + 'static> Holds<S> {
+    fn take(&mut self) -> Vec<(String, StoredMeta)> {
+        std::mem::take(&mut self.held)
+    }
+}
+
+impl<S: Store + 'static> Drop for Holds<S> {
+    fn drop(&mut self) {
+        if self.held.is_empty() || self.intended {
+            return;
+        }
+        let (state, held) = (self.state.clone(), self.take());
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async move { release_holds(&state.store, &held).await });
+        }
+    }
 }
 
 type StoredMeta = crate::store::ResourceMeta;
+
+/// What a resource held before a change, to put it back to.
+#[derive(Clone)]
+pub(crate) enum Kept {
+    /// Its record's metadata, whose blob key names bytes the store holds for it
+    /// ([`Store::hold`]), and, for a resource's metadata record, those bytes too (`peek`): who
+    /// may act on the resource while the change is in flight is decided on them ([`Prior`]).
+    Held {
+        meta: StoredMeta,
+        peek: Option<Bytes>,
+    },
+    /// Its bytes themselves, with its record's metadata: put back by a copy
+    /// ([`Store::restore`]). Only an intent stored before the store held bytes reads back so.
+    Copied { body: Bytes, meta: StoredMeta },
+}
+
+impl Kept {
+    fn meta(&self) -> &StoredMeta {
+        match self {
+            Kept::Held { meta, .. } | Kept::Copied { meta, .. } => meta,
+        }
+    }
+
+    /// The bytes of a metadata record, when they are known.
+    fn body(&self) -> Option<&Bytes> {
+        match self {
+            Kept::Held { peek, .. } => peek.as_ref(),
+            Kept::Copied { body, .. } => Some(body),
+        }
+    }
+
+    /// About how many bytes it takes in memory.
+    fn bytes(&self) -> usize {
+        STAGED_ENTRY_BYTES.saturating_add(self.body().map_or(0, Bytes::len))
+    }
+
+    /// Put `iri` back as this says: a member of `container` when one is given.
+    async fn put_back<S: Store>(
+        &self,
+        store: &S,
+        iri: &str,
+        container: Option<&str>,
+    ) -> Result<(), crate::error::ServerError> {
+        match self {
+            Kept::Held { meta, .. } => store.reinstate(iri, container, meta).await.map(drop),
+            Kept::Copied { body, meta } => store
+                .restore(iri, container, body.clone(), meta)
+                .await
+                .map(drop),
+        }
+    }
+}
+
+/// The holds `undo` names (see [`Kept::Held`]): each resource's, once.
+pub(crate) fn holds_of(undo: &[Undo]) -> Vec<(String, StoredMeta)> {
+    let mut out = Vec::new();
+    for step in undo {
+        match step {
+            Undo::Restore {
+                key,
+                prior: Some(Kept::Held { meta, .. }),
+            } => out.push((key.clone(), meta.clone())),
+            Undo::Recreate {
+                iri,
+                kept: Kept::Held { meta, .. },
+                ..
+            } => out.push((iri.clone(), meta.clone())),
+            Undo::Resolve { undo, .. } => out.extend(holds_of(undo)),
+            _ => {}
+        }
+    }
+    out.sort_by(|a, b| a.1.blob_key.cmp(&b.1.blob_key));
+    out.dedup_by(|a, b| a.1.blob_key == b.1.blob_key);
+    out
+}
+
+/// Release `holds` (see [`holds_of`]), best effort: one whose release fails stays until the next
+/// start's sweep ([`intents::recover`]) releases it.
+pub(crate) async fn release_holds<S: Store>(store: &S, holds: &[(String, StoredMeta)]) {
+    for (iri, meta) in holds {
+        let _ = store.release(meta, Some(iri)).await;
+    }
+}
 
 /// Whether a store step with this outcome may have changed something: it succeeded, or failed in
 /// the backend, where the change may have landed before the failure was reported.
@@ -1145,16 +1261,12 @@ pub(crate) fn may_have_happened<T>(outcome: &Result<T, crate::error::ServerError
 /// How to put back one change a [`Journal`] made.
 pub(crate) enum Undo {
     /// `key` as it was: its bytes and record, or absent.
-    Restore {
-        key: String,
-        prior: Option<(Bytes, StoredMeta)>,
-    },
+    Restore { key: String, prior: Option<Kept> },
     /// A removed member, recreated in its container as it was.
     Recreate {
         iri: String,
         parent: Option<String>,
-        body: Bytes,
-        meta: StoredMeta,
+        kept: Kept,
     },
     /// A member that may have been created, removed from its container (see [`records::delete_record`]).
     Remove { iri: String, parent: String },
@@ -1190,28 +1302,19 @@ impl Undo {
         match self {
             Undo::Restore {
                 key,
-                prior: Some((body, meta)),
-                ..
-            } => store.restore(key, None, body.clone(), meta).await.map(drop),
+                prior: Some(kept),
+            } => kept.put_back(store, key, None).await,
             Undo::Restore {
                 key, prior: None, ..
             } => match store.delete(key, None).await {
                 Ok(()) | Err(crate::error::ServerError::NotFound) => Ok(()),
                 Err(e) => Err(e),
             },
-            Undo::Recreate {
-                iri,
-                parent,
-                body,
-                meta,
-            } => {
+            Undo::Recreate { iri, parent, kept } => {
                 if store.exists(iri).await? {
                     return Ok(());
                 }
-                store
-                    .restore(iri, parent.as_deref(), body.clone(), meta)
-                    .await
-                    .map(drop)
+                kept.put_back(store, iri, parent.as_deref()).await
             }
             Undo::Remove { iri, parent } => records::delete_record(store, iri, parent).await,
             Undo::Fence { fence } => store.fence(fence).await,
@@ -1247,8 +1350,8 @@ impl Undo {
 }
 
 /// What is left to put back of a change that could not be put back after a few tries, the next
-/// to apply first.
-pub(crate) struct Unsettled(Vec<Undo>, Option<InFlight>);
+/// to apply first, and the holds of its journal (see [`Journal`]), released once it is put back.
+pub(crate) struct Unsettled(Vec<Undo>, Option<InFlight>, Vec<(String, StoredMeta)>);
 
 /// A journaled change's resources published as in flight ([`IriLocks::changing`]), with what
 /// each was before the change began, until this is dropped: from before the change's first
@@ -1275,7 +1378,8 @@ pub(crate) struct Hidden(Vec<(Unsettled, (Vec<String>, usize))>);
 
 impl Unsettled {
     pub(crate) fn new(undo: Vec<Undo>) -> Self {
-        Self(undo, None)
+        let holds = holds_of(&undo);
+        Self(undo, None, holds)
     }
 
     /// About how many bytes it holds to put back: each body, and each record at its limit.
@@ -1301,10 +1405,9 @@ fn bytes_of(undo: &[Undo]) -> usize {
     undo.iter()
         .map(|u| match u {
             Undo::Restore {
-                prior: Some((body, _)),
-                ..
+                prior: Some(kept), ..
             }
-            | Undo::Recreate { body, .. } => body.len().saturating_add(MAX_META_BYTES),
+            | Undo::Recreate { kept, .. } => kept.bytes().saturating_add(MAX_META_BYTES),
             Undo::Fence { .. } | Undo::Locked { .. } | Undo::Forget { .. } => 0,
             Undo::Resolve { undo, .. } => bytes_of(undo),
             _ => MAX_META_BYTES,
@@ -1362,10 +1465,13 @@ fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) 
             Undo::Restore { key, prior } => match key.strip_suffix(META_SUFFIX) {
                 Some(iri) => {
                     let meta = match prior {
-                        Some((body, _)) => parse_meta(iri, body).unwrap_or(ResourceMeta {
-                            pending: true,
-                            ..ResourceMeta::default()
-                        }),
+                        Some(kept) => kept
+                            .body()
+                            .and_then(|body| parse_meta(iri, body).ok())
+                            .unwrap_or(ResourceMeta {
+                                pending: true,
+                                ..ResourceMeta::default()
+                            }),
                         None => ResourceMeta::default(),
                     };
                     (
@@ -1380,16 +1486,16 @@ fn priors_of(undo: &[Undo], out: &mut std::collections::HashMap<String, Prior>) 
                     key.clone(),
                     Prior {
                         existed: Some(prior.is_some()),
-                        format: Some(prior.as_ref().and_then(|(_, m)| format(key, m))),
+                        format: Some(prior.as_ref().and_then(|k| format(key, k.meta()))),
                         ..Prior::default()
                     },
                 ),
             },
-            Undo::Recreate { iri, meta, .. } => (
+            Undo::Recreate { iri, kept, .. } => (
                 iri.clone(),
                 Prior {
                     existed: Some(true),
-                    format: Some(format(iri, meta)),
+                    format: Some(format(iri, kept.meta())),
                     ..Prior::default()
                 },
             ),
@@ -1487,24 +1593,40 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             persisted: 0,
             intent: None,
             in_flight: None,
+            holds: Holds {
+                state: state.clone(),
+                held: Vec::new(),
+                intended: false,
+            },
         }
     }
 
-    /// Read what is stored at `key` now, to put back later, and charge it to the journal's
-    /// bound: a change staged whole before its first step is refused, if too large, before it
-    /// changes anything.
+    /// Have the store hold what is stored at `key` now ([`Store::hold`]), to put back later
+    /// without a copy, and charge it to the journal's bound: a change staged whole before its
+    /// first step is refused, if too large, before it changes anything. What a resource costs is
+    /// its name and a fixed size ([`STAGED_ENTRY_BYTES`]), and for a metadata record its bytes,
+    /// read too (who may act on the resource while the change is in flight is decided on them):
+    /// never the size of its content.
     pub(crate) async fn stage(&mut self, key: &str) -> Result<(), crate::error::ServerError> {
         if self.staged.contains_key(key) {
             return Ok(());
         }
-        let prior = match self.state.store.read(key).await {
-            Ok(r) => Some((r.body, r.meta)),
-            Err(crate::error::ServerError::NotFound) => None,
-            Err(e) => return Err(e),
+        let prior = match self.state.store.hold(key).await? {
+            Some(meta) => {
+                // Held from here on: released with the journal's holds, whatever follows.
+                self.holds.held.push((key.to_string(), meta.clone()));
+                let peek = match key.ends_with(META_SUFFIX) {
+                    true => Some(self.state.store.read_at(key, &meta).await?),
+                    false => None,
+                };
+                Some(Kept::Held { meta, peek })
+            }
+            None => None,
         };
-        self.held = self
-            .held
-            .saturating_add(key.len() + prior.as_ref().map_or(0, |(b, _)| b.len()));
+        self.held = self.held.saturating_add(
+            key.len()
+                .saturating_add(prior.as_ref().map_or(STAGED_ENTRY_BYTES, Kept::bytes)),
+        );
         if self.held > self.limit {
             return Err(crate::error::ServerError::Conflict(
                 "the change is too large to make atomically".into(),
@@ -1535,11 +1657,10 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 unreachable!("stage plans a restore")
             };
             self.planned.push(match (prior, parent) {
-                (Some((body, meta)), _) => Undo::Recreate {
+                (Some(kept), _) => Undo::Recreate {
                     iri: key,
                     parent: parent.map(str::to_string),
-                    body,
-                    meta,
+                    kept,
                 },
                 (None, Some(parent)) => Undo::Remove {
                     iri: key,
@@ -1574,16 +1695,15 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         });
         in_flight.iris.extend(iris);
         let undo: Vec<&Undo> = self.planned.iter().rev().collect();
+        // From here on the intent may be stored (a lost reply), and keeps the holds.
+        self.holds.intended = true;
         intents::store(self.state, &record, existing, &undo, &[]).await?;
         self.persisted = self.planned.len();
         Ok(())
     }
 
     /// What was stored at `key` before this step (staged now if it was not already).
-    async fn prior(
-        &mut self,
-        key: &str,
-    ) -> Result<Option<(Bytes, StoredMeta)>, crate::error::ServerError> {
+    async fn prior(&mut self, key: &str) -> Result<Option<Kept>, crate::error::ServerError> {
         self.stage(key).await?;
         Ok(self.staged.remove(key).flatten())
     }
@@ -1645,7 +1765,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         iri: &str,
         parent: Option<&str>,
     ) -> Result<crate::store::DeleteOutcome, crate::error::ServerError> {
-        let Some((body, meta)) = self.prior(iri).await? else {
+        let Some(kept) = self.prior(iri).await? else {
             // A record a legacy edge lists may be gone already (its subject's removal took it):
             // the edge, which is all that is left, goes too, so it keeps no container from being
             // empty. The edge is not put back if the change is (it names nothing, and no LWS
@@ -1672,8 +1792,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             self.undo.push(Undo::Recreate {
                 iri: iri.to_string(),
                 parent: parent.map(str::to_string),
-                body,
-                meta,
+                kept,
             });
         }
         outcome
@@ -1691,10 +1810,11 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     /// fails with an [`Undo::Resolve`], to set aside with the locks, which settles it the same
     /// way later; meanwhile the container's listing has no date, as after a touch that failed.
     pub(crate) async fn commit(
-        self,
+        mut self,
         touch: Option<&str>,
     ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
         let Some(record) = self.intent.clone() else {
+            release_holds(&self.state.store, &self.holds.take()).await;
             return Ok(());
         };
         let kept = match touch {
@@ -1715,6 +1835,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             }
         };
         if kept {
+            release_holds(&self.state.store, &self.holds.take()).await;
             return Ok(());
         }
         // Whether the store did it anyway is read back from the intent: still holding its plan,
@@ -1726,6 +1847,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                     if let Some(container) = touch {
                         self.state.owe_touch(container, record);
                     }
+                    release_holds(&self.state.store, &self.holds.take()).await;
                     return Ok(());
                 }
                 Ok(false) => {
@@ -1755,7 +1877,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         };
         Err((
             crate::error::ServerError::Storage("the change could not be recorded as kept".into()),
-            Some(Unsettled(vec![resolve], self.in_flight)),
+            Some(Unsettled(vec![resolve], self.in_flight, self.holds.take())),
         ))
     }
 
@@ -1769,18 +1891,35 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
     ///
     /// Once it is all put back its intent is cleared; until then the intent stays, and goes with
     /// what is left (so its resources stay set aside until it is cleared too).
-    pub(crate) async fn rollback(self) -> Option<Unsettled> {
-        let forget = self.intent.map(|record| Undo::Forget {
+    pub(crate) async fn rollback(mut self) -> Option<Unsettled> {
+        let forget = self.intent.take().map(|record| Undo::Forget {
             record,
             iris: iris_of(&self.planned),
         });
+        let holds = self.holds.take();
         let store = &self.state.store;
-        match settle(store, self.undo.into_iter().rev().collect()).await {
+        let left = match settle(
+            store,
+            std::mem::take(&mut self.undo).into_iter().rev().collect(),
+        )
+        .await
+        {
             None => settle(store, forget.into_iter().collect()).await,
             Some(mut left) => {
                 left.0.extend(forget);
-                left.1 = self.in_flight;
                 Some(left)
+            }
+        };
+        match left {
+            // Every hold the journal took, a superset of those its steps left name.
+            Some(mut left) => {
+                left.1 = self.in_flight.take();
+                left.2 = holds;
+                Some(left)
+            }
+            None => {
+                release_holds(store, &holds).await;
+                None
             }
         }
     }
@@ -2701,6 +2840,23 @@ pub(crate) mod test_store {
         }
 
         /// Count a store step against [`FlakyStore::fail_step`].
+        /// Whether a read (or a hold) of `iri` is to fail.
+        fn read_fails(&self, iri: &str) -> bool {
+            self.fail_read_of
+                .lock()
+                .unwrap()
+                .as_deref()
+                .is_some_and(|of| {
+                    of == iri || (of.ends_with('/') && iri.starts_with(of) && iri != of)
+                })
+                || self
+                    .fail_read_of_any
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|of| of == iri)
+        }
+
         fn step(&self) -> ServerResult<()> {
             let countdown = |slot: &mut Option<usize>| match slot.as_mut() {
                 Some(0) => {
@@ -2778,21 +2934,7 @@ pub(crate) mod test_store {
     #[async_trait]
     impl Store for FlakyStore {
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
-            let failing = self
-                .fail_read_of
-                .lock()
-                .unwrap()
-                .as_deref()
-                .is_some_and(|of| {
-                    of == iri || (of.ends_with('/') && iri.starts_with(of) && iri != of)
-                })
-                || self
-                    .fail_read_of_any
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .any(|of| of == iri);
-            if failing {
+            if self.read_fails(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             let read = self.inner.read(iri).await;
@@ -2965,6 +3107,33 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
             self.inner.restore(iri, container, body, meta).await
+        }
+        async fn hold(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+            // What a journal stages is held, not read: the read hooks apply to it alike.
+            if self.read_fails(iri) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.hold(iri).await
+        }
+        async fn reinstate(
+            &self,
+            iri: &str,
+            container: Option<&str>,
+            held: &ResourceMeta,
+        ) -> ServerResult<ResourceMeta> {
+            // A record put back, as `restore` is: counted as a step, and failed by the same hook.
+            self.restores.fetch_add(1, Ordering::SeqCst);
+            self.step()?;
+            if self.fail_restore_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.reinstate(iri, container, held).await
+        }
+        async fn release(&self, held: &ResourceMeta, iri: Option<&str>) -> ServerResult<()> {
+            self.inner.release(held, iri).await
+        }
+        async fn holds(&self) -> ServerResult<Vec<ResourceMeta>> {
+            self.inner.holds().await
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
             self.step()?;
@@ -3325,7 +3494,15 @@ pub(crate) mod test_store {
     /// Set `iri` aside, as a stuck write of its content is: putting back what it holds now
     /// (removing it, when it holds nothing: a stuck create) keeps failing until [`unstick`].
     pub async fn stick(state: &super::LwsState<FlakyStore>, store: &FlakyStore, iri: &str) {
-        let prior = state.store.read(iri).await.ok().map(|r| (r.body, r.meta));
+        let prior = state
+            .store
+            .read(iri)
+            .await
+            .ok()
+            .map(|r| super::Kept::Copied {
+                body: r.body,
+                meta: r.meta,
+            });
         if prior.is_some() {
             *store.fail_restore_of.lock().unwrap() = Some(iri.to_string());
         } else {

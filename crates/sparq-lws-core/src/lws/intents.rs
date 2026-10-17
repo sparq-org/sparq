@@ -18,7 +18,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, UNIX_EPOCH};
 
-use super::{LwsState, Undo};
+use super::{Kept, LwsState, Undo};
 use crate::error::ServerError;
 use crate::store::Store;
 
@@ -35,19 +35,29 @@ pub(crate) fn container(storage: &str) -> String {
     format!("{PREFIX}{id}/")
 }
 
-/// A record as it is to be put back: its bytes and the validators [`Store::restore`] keeps.
+/// A record as it is to be put back, with the validators the store keeps: the bytes the store
+/// holds for it (`blob`, see [`Store::hold`]), with, for a metadata record, those bytes too; or,
+/// as an intent stored before the store held bytes reads, the bytes alone.
 #[derive(Serialize, Deserialize)]
 struct Prior {
-    body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    blob: Option<String>,
     content_type: String,
     etag: String,
     modified: Option<(u64, u32)>,
 }
 
 impl Prior {
-    fn of(body: &Bytes, meta: &crate::store::ResourceMeta) -> Self {
+    fn of(kept: &Kept) -> Self {
+        let (blob, meta) = match kept {
+            Kept::Held { meta, .. } => (Some(meta.blob_key.clone()), meta),
+            Kept::Copied { meta, .. } => (None, meta),
+        };
         Self {
-            body: super::jose::b64url(body),
+            body: kept.body().map(|b| super::jose::b64url(b)),
+            blob,
             content_type: meta.content_type.clone(),
             etag: meta.etag.clone(),
             modified: meta.last_modified.and_then(|t| {
@@ -57,15 +67,24 @@ impl Prior {
         }
     }
 
-    fn into_parts(self) -> Option<(Bytes, crate::store::ResourceMeta)> {
-        let body = super::jose::b64url_decode(&self.body)?;
-        let meta = crate::store::ResourceMeta {
+    fn into_kept(self) -> Option<Kept> {
+        let body = match &self.body {
+            Some(b) => Some(Bytes::from(super::jose::b64url_decode(b)?)),
+            None => None,
+        };
+        let mut meta = crate::store::ResourceMeta {
             content_type: self.content_type,
             blob_key: String::new(),
             etag: self.etag,
             last_modified: self.modified.map(|(s, n)| UNIX_EPOCH + Duration::new(s, n)),
         };
-        Some((Bytes::from(body), meta))
+        Some(match self.blob {
+            Some(blob) => {
+                meta.blob_key = blob;
+                Kept::Held { meta, peek: body }
+            }
+            None => Kept::Copied { body: body?, meta },
+        })
     }
 }
 
@@ -90,17 +109,12 @@ impl Step {
         Some(match undo {
             Undo::Restore { key, prior } => Step::Restore {
                 key: key.clone(),
-                prior: prior.as_ref().map(|(b, m)| Prior::of(b, m)),
+                prior: prior.as_ref().map(Prior::of),
             },
-            Undo::Recreate {
-                iri,
-                parent,
-                body,
-                meta,
-            } => Step::Recreate {
+            Undo::Recreate { iri, parent, kept } => Step::Recreate {
                 iri: iri.clone(),
                 parent: parent.clone(),
-                prior: Prior::of(body, meta),
+                prior: Prior::of(kept),
             },
             Undo::Remove { iri, parent } => Step::Remove {
                 iri: iri.clone(),
@@ -118,19 +132,15 @@ impl Step {
             Step::Restore { key, prior } => Undo::Restore {
                 key,
                 prior: match prior {
-                    Some(p) => Some(p.into_parts()?),
+                    Some(p) => Some(p.into_kept()?),
                     None => None,
                 },
             },
-            Step::Recreate { iri, parent, prior } => {
-                let (body, meta) = prior.into_parts()?;
-                Undo::Recreate {
-                    iri,
-                    parent,
-                    body,
-                    meta,
-                }
-            }
+            Step::Recreate { iri, parent, prior } => Undo::Recreate {
+                iri,
+                parent,
+                kept: prior.into_kept()?,
+            },
             Step::Remove { iri, parent } => Undo::Remove { iri, parent },
         })
     }
@@ -243,7 +253,7 @@ pub(crate) async fn recover<S: Store + 'static>(
             .into_iter()
             .map(Step::into_undo)
             .collect::<Option<Vec<_>>>()
-            .ok_or_else(|| unreadable("a body is not base64".into()))?;
+            .ok_or_else(|| unreadable("a body is not base64, or is missing".into()))?;
         read.push((record, undo, stored.touch));
     }
     // Changes cut short are put back first: one may restore a container's metadata from
@@ -256,6 +266,7 @@ pub(crate) async fn recover<S: Store + 'static>(
             continue;
         }
         let iris = super::iris_of(&undo);
+        let holds = super::holds_of(&undo);
         let forget = Undo::Forget {
             record: record.clone(),
             iris,
@@ -267,7 +278,32 @@ pub(crate) async fn recover<S: Store + 'static>(
                 Some(left)
             }
         };
-        set_aside.extend(left);
+        // What is set aside keeps every hold its intent names, released once it is settled.
+        match left {
+            Some(mut left) => {
+                left.2 = holds;
+                set_aside.push(left);
+            }
+            None => super::release_holds(store, &holds).await,
+        }
+    }
+    // Holds no change still needs: those of changes kept (their intents name none), of intents
+    // cleared before their holds were released, and of journals cut short before their intent
+    // was stored. Each is withdrawn alone: its bytes, once no record names them, are the
+    // reconciler's to collect.
+    let needed: std::collections::HashSet<&str> = set_aside
+        .iter()
+        .flat_map(|left| left.2.iter().map(|(_, meta)| meta.blob_key.as_str()))
+        .collect();
+    let held = store.holds().await.map_err(|e| format!("holds: {e}"))?;
+    for meta in held
+        .iter()
+        .filter(|m| !needed.contains(m.blob_key.as_str()))
+    {
+        store
+            .release(meta, None)
+            .await
+            .map_err(|e| format!("holds: {e}"))?;
     }
     // Kept changes: their containers are touched and the intents go once they are. While a
     // change is still being put back in the background it could restore a container's metadata
@@ -402,6 +438,58 @@ mod tests {
         assert_ne!(snapshot(&st, &store, &all, &listings).await, before);
         let st = restart(&store).await;
         assert_eq!(snapshot(&st, &store, &all, &listings).await, before);
+        assert_eq!(intents_left(&st).await, 0);
+        // Put back by reference to the bytes it held, which nothing holds now.
+        assert!(st.store.holds().await.unwrap().is_empty());
+    }
+
+    /// A journal cut short before its intent was stored changed nothing, but left its holds: the
+    /// next start releases them, and nothing else changes.
+    #[tokio::test]
+    async fn holds_a_stop_left_are_released_at_start() {
+        let (st, store, d, before) = typed_doc().await;
+        let mut journal = st.journal();
+        journal.stage(&d).await.unwrap();
+        journal.stage(&meta_key(&d)).await.unwrap();
+        std::mem::forget(journal);
+        assert!(!st.store.holds().await.unwrap().is_empty());
+        let st = restart(&store).await;
+        assert!(st.store.holds().await.unwrap().is_empty());
+        let after = snapshot(&st, &store, std::slice::from_ref(&d), &[]).await;
+        assert_eq!(after, before);
+    }
+
+    /// An intent stored before the store held bytes names the bytes themselves; it is still put
+    /// back at start, by a copy.
+    #[tokio::test]
+    async fn an_intent_naming_bytes_is_put_back_at_start() {
+        let (st, store, d, before) = typed_doc().await;
+        let old = st.store.read(&d).await.unwrap();
+        let record = mint(&st.cfg.storage());
+        let undo = Undo::Restore {
+            key: d.clone(),
+            prior: Some(Kept::Copied {
+                body: old.body.clone(),
+                meta: old.meta.clone(),
+            }),
+        };
+        super::store(&st, &record, false, &[&undo], &[])
+            .await
+            .unwrap();
+        let stored = st.store.read(&record).await.unwrap().body;
+        let stored: serde_json::Value = serde_json::from_slice(&stored).unwrap();
+        assert!(stored["steps"][0]["prior"]["body"].is_string(), "{stored}");
+        assert!(
+            stored["steps"][0]["prior"].get("blob").is_none(),
+            "{stored}"
+        );
+        st.store
+            .write(&d, Bytes::from_static(b"<> a <urn:b> ."), "text/turtle")
+            .await
+            .unwrap();
+        let st = restart(&store).await;
+        let after = snapshot(&st, &store, std::slice::from_ref(&d), &[]).await;
+        assert_eq!(after, before);
         assert_eq!(intents_left(&st).await, 0);
     }
 
