@@ -3593,3 +3593,44 @@ fn a_blocked_node_s_unshared_edge_to_an_individual_is_dropped() {
         assert_eq!(verdict(&format!("{decl} {extra}")), want, "{extra}");
     }
 }
+
+#[test]
+fn an_at_most_restriction_in_a_union_or_under_a_condition_counts_its_neighbours() {
+    let decl = ":C0 a owl:Class . :C1 a owl:Class . :D a owl:Class . :R a owl:ObjectProperty . :P a owl:ObjectProperty . :o a owl:NamedIndividual . :p a owl:NamedIndividual . :a a owl:NamedIndividual .";
+    // An `R`-chain of `C0`s, each an `R`-successor of `:o`.
+    let chain = ":a a :C0 . :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :R ; owl:someValuesFrom :C0 ] , [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:hasValue :o ] .";
+    let max = |n: u32| {
+        format!(
+            "[ a owl:Restriction ; owl:onProperty :R ; owl:maxQualifiedCardinality \"{n}\"^^xsd:nonNegativeInteger ; owl:onClass :C0 ]"
+        )
+    };
+    let irr = ":R a owl:IrreflexiveProperty .";
+    let not_c1 = ":o a [ owl:complementOf :C1 ] .";
+    let has_d = "[ a owl:Restriction ; owl:onProperty :P ; owl:someValuesFrom :D ]";
+    let self_p = "[ a owl:Restriction ; owl:onProperty :P ; owl:hasSelf true ]";
+    // Each verdict agrees with HermiT.
+    let cases: Vec<(String, Consistency)> = vec![
+        (format!(":o a [ owl:unionOf ( {} :C1 ) ] .", max(3)), Consistency::Consistent),
+        (format!(":o a [ owl:unionOf ( {} :C1 ) ] . {irr}", max(1)), Consistency::Consistent),
+        (format!(":o a [ owl:unionOf ( {} :C1 ) ] . {not_c1} {irr}", max(1)), Consistency::Inconsistent),
+        (format!(":o a [ owl:unionOf ( {} :C1 ) ] . {not_c1} {irr}", max(2)), Consistency::Consistent),
+        (
+            format!(":o a [ owl:unionOf ( {} :C1 ) ] . {not_c1} :R a owl:AsymmetricProperty .", max(2)),
+            Consistency::Inconsistent,
+        ),
+        (format!(":o a [ owl:unionOf ( {} {self_p} ) ] . {irr}", max(1)), Consistency::Consistent),
+        (
+            format!(":o a [ owl:unionOf ( {} {self_p} ) ] . :P a owl:IrreflexiveProperty . {irr}", max(1)),
+            Consistency::Inconsistent,
+        ),
+        (format!("{has_d} rdfs:subClassOf {} . :o :P :p . :p a :D . {irr}", max(1)), Consistency::Inconsistent),
+        (format!("{has_d} rdfs:subClassOf {} . :o :P :p . {irr}", max(1)), Consistency::Consistent),
+        (
+            format!("{has_d} rdfs:subClassOf [ owl:unionOf ( {} :C1 ) ] . :o :P :p . :p a :D . {not_c1} {irr}", max(1)),
+            Consistency::Inconsistent,
+        ),
+    ];
+    for (extra, want) in cases {
+        assert_eq!(verdict(&format!("{decl} {chain} {extra}")), want, "{extra}");
+    }
+}
