@@ -2870,3 +2870,78 @@ fn deep_and_transitive_heavy_hierarchies_are_refused() {
     ));
     refused(&heavy);
 }
+
+/// A blocked node's edge to a nominal, when its blocker has the same edge: every `C0`
+/// reaches `:o` and an `S`-successor in `C0`, so the graph blocks with edges to `:o` on
+/// both ends. Each case gives HermiT's answer and whether this reasoner must decide it;
+/// with an at-most restriction at `:o` on the inverse role (which counts the copies the
+/// unravelling would add) the answer may stay `Unconfirmed`, but is never wrong.
+#[test]
+fn a_blocked_node_may_reach_a_nominal_its_blocker_reaches() {
+    let pre = ":C0 a owl:Class . :C1 a owl:Class . :R a owl:ObjectProperty .
+        :S a owl:ObjectProperty . :T a owl:ObjectProperty . :P a owl:ObjectProperty .
+        :o a owl:NamedIndividual . :a a owl:NamedIndividual , :C0 .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :S ; owl:someValuesFrom :C0 ] ,
+            [ a owl:Restriction ; owl:onProperty :R ; owl:hasValue :o ] .";
+    let max = |n: u32| {
+        format!(
+            "[ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:maxCardinality \"{n}\"^^xsd:nonNegativeInteger ]"
+        )
+    };
+    let chain = ":P owl:propertyChainAxiom ( :R [ owl:inverseOf :R ] ) .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :P ; owl:allValuesFrom :C1 ] .";
+    let cases: Vec<(String, bool, bool)> = vec![
+        (String::new(), true, true),
+        (format!(":o a {} . :S a owl:IrreflexiveProperty .", max(1)), false, true),
+        (format!(":o a {} .", max(1)), true, true),
+        // At most two `R`-predecessors of `:o`: no finite `S`-chain of `C0`s, asymmetric
+        // or irreflexive, fits; the copies are counted.
+        (format!(":o a {} . :S a owl:AsymmetricProperty .", max(2)), false, false),
+        (format!(":o a {} . :S a owl:IrreflexiveProperty .", max(2)), true, false),
+        (
+            ":C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :T ; owl:hasSelf true ] ."
+                .to_string(),
+            true,
+            true,
+        ),
+        // Through a chain via the nominal: every `C0` is `C1`.
+        (format!("{chain} :b a :C0 , [ owl:complementOf :C1 ] ."), false, true),
+        (format!("{chain} :b a [ owl:complementOf :C1 ] ."), true, true),
+        (
+            format!(
+                "{chain} :o a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:allValuesFrom :C0 ] ."
+            ),
+            true,
+            true,
+        ),
+        (
+            ":S rdfs:subPropertyOf [ owl:inverseOf :T ] . :o a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:allValuesFrom [ a owl:Restriction ; owl:onProperty :T ; owl:someValuesFrom :C1 ] ] ."
+                .to_string(),
+            true,
+            true,
+        ),
+    ];
+    for (extra, consistent, decided) in cases {
+        let body = format!("{pre} {extra}");
+        let got = verdict(&body);
+        let want = if consistent {
+            Consistency::Consistent
+        } else {
+            Consistency::Inconsistent
+        };
+        if decided {
+            assert_eq!(got, want, "{extra}");
+        } else {
+            assert!(
+                got == want || got == Consistency::Unknown(UnknownReason::Unconfirmed),
+                "{extra}: {got:?}"
+            );
+        }
+    }
+    // The chain cases classify `C0 ⊑ C1`, as HermiT does.
+    assert!(entails_sub(
+        &format!("{pre} {chain} :b a [ owl:complementOf :C1 ] ."),
+        "C0",
+        "C1"
+    ));
+}

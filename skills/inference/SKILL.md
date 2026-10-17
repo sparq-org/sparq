@@ -778,7 +778,8 @@ them), so the complement of the whole map is not empty, while `rdfs:Literal` is 
 domain. A branch closed as undecided or unconfirmed never makes the alternatives after it
 look forced: no subsumption is read off them.
 Nominals are decided without SHOIQ's NI-rule: a complete branch is accepted only when its
-graph provably unravels into a model (no blocked node keeps an edge to an individual, no
+graph provably unravels into a model (a blocked node keeps an edge to an individual only
+when the node blocking it has the same edge, no
 edge outside the tree joins two blockable nodes, and no number restriction at an
 individual can count two copies of a repeated node). Otherwise the branch is closed as
 unconfirmed, and when no other branch gives a model the answer is `Unknown(Unconfirmed)`.
