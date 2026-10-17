@@ -71,7 +71,10 @@ pub async fn cors_middleware(req: Request, next: Next) -> Response {
         .map(str::to_string);
 
     // A PREFLIGHT (OPTIONS + Access-Control-Request-Method) is answered HERE with an empty 204 — it
-    // does not reach the inner service (a browser preflight carries no credentials).
+    // does not reach the inner service (a browser preflight carries no credentials). So it is
+    // exempt from target parsing on purpose: its answer depends only on the request's Origin and
+    // requested headers, never on the target path or on anything stored (a reserved name, a
+    // record, whether the target exists).
     if is_options && acrm_present {
         let mut resp = StatusCode::NO_CONTENT.into_response();
         let h = resp.headers_mut();

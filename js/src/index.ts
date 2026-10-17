@@ -33,6 +33,10 @@ export { init } from './wasm.js';
 // #7031 — OWL 2 DL reasoning; its wasm bundle (wasm-dl/) loads lazily on the first call.
 export {
   checkOwlDl,
+  openOwlDlSession,
+  type OwlDlSession,
+  type OwlDlSessionResult,
+  type OwlDlReuse,
   type OwlDlResult,
   type OwlDlOptions,
   type OwlDlBudget,

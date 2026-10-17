@@ -7,9 +7,10 @@
 //! [`Unknown`](Consistency::Unknown) with the reason, and the triples behind it when there are
 //! any.
 //!
-//! The fragment is currently SHOIQ(D) plus the OWL 2 role characteristics and ABox:
+//! The fragment is currently SROIQ(D) without the top and bottom properties, with the ABox:
 //! classes and all class constructors including nominals (`ObjectOneOf`,
-//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity,
+//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity and
+//! regular property chains (encoded by automata, see the clausifier),
 //! functionality, reflexivity, irreflexivity, symmetry, asymmetry and disjointness,
 //! `hasSelf`, qualified cardinality, class / object-property / negative-property / same /
 //! different assertions, and data properties: domain, range, sub- / equivalent / disjoint
@@ -18,9 +19,9 @@
 //! OWL 2 datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
 //! `DataUnionOf`, `DataComplementOf` and acyclic `DatatypeDefinition`s), decided by
 //! [`super::data_ranges`], and keys (`HasKey`, over named individuals; a key whose data
-//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on an
-//! object property with a transitive sub-property, property chains other than `R∘R ⊑ R`,
-//! the top and bottom
+//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on a
+//! non-simple object property, a property hierarchy the automata cannot encode, the top and
+//! bottom
 //! properties, datatypes outside the map, and number restrictions above
 //! [`MAX_CARDINALITY`] answer `Unknown(OutOfFragment)`; a datatype question the oracle cannot
 //! decide answers `Unknown(DatatypeUnknown)`. An ill-typed literal in an assertion,
@@ -106,6 +107,13 @@ pub struct Classification {
     pub inferred: Vec<(Id, Id)>,
 }
 
+/// Entailments known before a classification (from a check of a subset of the axioms).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Known {
+    pub unsatisfiable: FxHashSet<Id>,
+    pub subsumptions: FxHashSet<(Id, Id)>,
+}
+
 /// Everything [`check`] found out about an ontology.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DlReport {
@@ -148,7 +156,7 @@ impl Reasoner {
         Self::with_profile(dict, onto, &check_dl(dict, onto), budget)
     }
 
-    fn with_profile(
+    pub(crate) fn with_profile(
         dict: &Dict,
         onto: &Ontology,
         profile: &DlProfileReport,
@@ -384,11 +392,15 @@ impl Reasoner {
         if !self.imports.is_empty() || !self.abox_model()? {
             return None;
         }
-        self.classify_consistent().ok()
+        self.classify_consistent(&Known::default()).ok()
     }
 
-    /// Classifies a consistent ontology, or says why it could not.
-    fn classify_consistent(&self) -> Result<Classification, UnknownReason> {
+    /// Classifies a consistent ontology, or says why it could not. What `known` holds is
+    /// taken as entailed without a test (it must be: entailments of a subset of the axioms).
+    pub(crate) fn classify_consistent(
+        &self,
+        known: &Known,
+    ) -> Result<Classification, UnknownReason> {
         let classes = &self.clauses.classes;
         let is_class = |a: u32| matches!(self.clauses.atoms[a as usize], AtomKind::Class(_));
         let mut out = Classification::default();
@@ -397,6 +409,10 @@ impl Reasoner {
         let left = Cell::new(self.budget.max_steps);
         let pool = Some(&left);
         for &(id, a) in classes {
+            if known.unsatisfiable.contains(&id) {
+                out.unsatisfiable.push(id);
+                continue;
+            }
             let mut t = self.tableau(pool);
             let root = t.add_root();
             t.assert_concept(root, a);
@@ -415,8 +431,9 @@ impl Reasoner {
                 let AtomKind::Class(bid) = self.clauses.atoms[b as usize] else {
                     unreachable!("checked")
                 };
-                let entailed =
-                    deterministic || self.below(Concept::Atom(a), Concept::Atom(b), false, pool)?;
+                let entailed = deterministic
+                    || known.subsumptions.contains(&(id, bid))
+                    || self.below(Concept::Atom(a), Concept::Atom(b), false, pool)?;
                 if entailed {
                     subs.insert((id, bid));
                 }
@@ -506,7 +523,7 @@ pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
     };
     let consistency = reasoner.consistency();
     let (classification, classification_unknown) = if consistency == Consistency::Consistent {
-        match reasoner.classify_consistent() {
+        match reasoner.classify_consistent(&Known::default()) {
             Ok(c) => (Some(c), None),
             Err(reason) => (None, Some(reason)),
         }
