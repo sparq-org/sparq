@@ -10894,6 +10894,183 @@ mod tests {
         );
     }
 
+    /// THE SITE-LEVEL RULE (sq-j506): the query-binding gates compare each pattern
+    /// constant under the encoder of the scan's AUTHENTICATED method.
+    ///
+    /// A dual-leaf-attested scan whose constants are STRING-CANONICAL-encoded
+    /// therefore answers no pattern and is refused, and the same scan with
+    /// V2-encoded constants is accepted — while a string-canonical-attested scan
+    /// with string-canonical constants is still accepted, so the refusal is about
+    /// the method and not about the encoding. Under the empty map these gates
+    /// compared string-canonically whatever the attested method was, so the first
+    /// case was accepted and the second refused: exactly backwards.
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn the_pattern_gates_compare_constants_under_the_authenticated_method() {
+        use sparq_zk::commit::CommitmentMethod;
+        const Q: &str = "SELECT * WHERE { ?s <http://ex/p> ?o }";
+        let commitment = Fr::from(100u64);
+        let predicate = Some(oxrdf::Term::NamedNode(
+            oxrdf::NamedNode::new("http://ex/p").expect("a valid IRI"),
+        ));
+        let encoded = |m: CommitmentMethod| {
+            encode_pattern_slot(&predicate, AuthenticatedMethod::Bound(m))
+                .expect("every method here encodes an IRI")
+        };
+        let scan_with = |enc: FieldHex| ProofInputs::Scan {
+            id: CircuitId::Scan { k: 1, n: 16, r: 4 },
+            commitments: vec![FieldHex::from_field(&commitment)],
+            pattern_is_const: [false, true, false],
+            pattern_const_enc: [fh("0x0"), enc, fh("0x0")],
+            rows: vec![],
+            row_count: 0,
+            attribution: vec![false],
+        };
+        let under = |m: CommitmentMethod| {
+            let mut methods = AuthenticatedMethods::new();
+            methods.insert(field_to_hex(&commitment), AuthenticatedMethod::Bound(m));
+            methods
+        };
+        let manifest_with = |enc: FieldHex| {
+            let mut m = minimal_manifest(Q);
+            m.sub_proofs = vec![crate::manifest::SubProof {
+                inputs: scan_with(enc),
+                proof_hex: String::new(),
+            }];
+            m
+        };
+
+        // A correctly encoded scan passes for EVERY method with an encoder here.
+        for method in [
+            CommitmentMethod::StringCanonicalV1,
+            CommitmentMethod::DualLeafV1,
+            CommitmentMethod::DualLeafV2,
+        ] {
+            let m = manifest_with(encoded(method));
+            assert!(
+                bind_query_correctness(&m, &under(method)).is_ok(),
+                "a correctly encoded scan must pass under {:?}",
+                method
+            );
+        }
+
+        // The SAME scan, string-canonical-encoded, under a dual-leaf-attested
+        // commitment: refused, because it answers no pattern.
+        let canonical = encoded(CommitmentMethod::StringCanonicalV1);
+        let v2 = encoded(CommitmentMethod::DualLeafV2);
+        assert_ne!(canonical, v2, "the two encodings must differ, or this is vacuous");
+        let m = manifest_with(canonical);
+        let v2_methods = under(CommitmentMethod::DualLeafV2);
+        assert!(
+            bind_query_correctness(&m, &v2_methods).is_err(),
+            "a dual-leaf-attested scan with string-canonical constants must be refused"
+        );
+
+        // The DECLARATION gate reads the same map: declaring this scan as the one
+        // answering pattern 0 is consistent only under the attested encoder, so the
+        // string-canonical scan is refused there too, and the V2 one is accepted.
+        let mut declared = m.clone();
+        declared.pattern_scans = vec![vec![0]];
+        assert!(
+            check_pattern_scans(&declared, &v2_methods).is_err(),
+            "a declaration naming a scan whose constants are encoded under another \
+method must be refused"
+        );
+        let mut declared_ok = manifest_with(v2);
+        declared_ok.pattern_scans = vec![vec![0]];
+        assert!(
+            check_pattern_scans(&declared_ok, &v2_methods).is_ok(),
+            "the same declaration under the attested encoder must be accepted"
+        );
+    }
+
+    /// THE WIRING (sq-j506): the same rule through `prefilter_manifest_structure`,
+    /// where the map the gates read is the one stage 2d authenticated.
+    ///
+    /// The scan's commitment is attested under the V2 DUAL-LEAF scheme, so the
+    /// pre-filter must compare its pattern constants under the V2 encoder: the
+    /// string-canonical-encoded scan is refused and the V2-encoded one passes the
+    /// pattern gates. Replacing the map at any comparison site with an empty one
+    /// swaps both verdicts, so this test covers the wiring and not only the gate.
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn the_prefilter_feeds_the_pattern_gates_the_authenticated_map() {
+        use sparq_zk::commit::CommitmentMethod;
+        const Q: &str = "SELECT * WHERE { ?s <http://ex/p> ?o }";
+        let sk = sparq_zk::sig::SecretKey::from_seed(1);
+        let key_set =
+            KeySet::from_hex_keys([sparq_zk::sig::public_key_to_hex(&sk.public_key())]);
+        let commitment = Fr::from(100u64);
+        let salt = Fr::from(7u64);
+        let predicate = Some(oxrdf::Term::NamedNode(
+            oxrdf::NamedNode::new("http://ex/p").expect("a valid IRI"),
+        ));
+        // An attestation over the V2 DUAL-LEAF scheme, so stage 2d authenticates
+        // that method rather than the string-canonical one the other fixtures use.
+        let list_id = sparq_zk::sig::status_list_id_to_field(TEST_STATUS_LIST);
+        let status_ref =
+            sparq_zk::sig::status_ref_digest(&list_id, TEST_STATUS_INDEX, TEST_STATUS_VERSION);
+        let attestation = crate::manifest::CommitmentAttestation {
+            commitment: FieldHex::from_field(&commitment),
+            issuer_public_key: sparq_zk::sig::public_key_to_hex(&sk.public_key()),
+            signature: sk.sign_presentation_with_status_and_scheme(
+                &commitment,
+                &salt,
+                &status_ref,
+                &sparq_zk::sig::scheme_iri_to_field(
+                    CommitmentMethod::DualLeafV2.scheme_iri(),
+                ),
+            ),
+            cryptosuite: sparq_zk::sig::SignatureScheme::Poseidon2SchnorrV1
+                .cryptosuite_iri()
+                .to_string(),
+            salt: Some(FieldHex::from_field(&salt)),
+            status: Some(crate::manifest::AttestedStatusRef {
+                index: Some(TEST_STATUS_INDEX),
+                version: Some(TEST_STATUS_VERSION),
+                index_commitment: None,
+                ref_commitment: None,
+            }),
+            holder: None,
+        };
+        let manifest_with = |method: CommitmentMethod| {
+            let enc = encode_pattern_slot(&predicate, AuthenticatedMethod::Bound(method))
+                .expect("every method here encodes an IRI");
+            let mut m = minimal_manifest(Q);
+            m.revocation = Some(test_revocation());
+            m.commitment_attestations = vec![attestation.clone()];
+            m.attributions = vec![vec![0]];
+            m.sub_proofs = vec![crate::manifest::SubProof {
+                inputs: ProofInputs::Scan {
+                    id: CircuitId::Scan { k: 1, n: 16, r: 4 },
+                    commitments: vec![FieldHex::from_field(&commitment)],
+                    pattern_is_const: [false, true, false],
+                    pattern_const_enc: [fh("0x0"), enc, fh("0x0")],
+                    rows: vec![],
+                    row_count: 0,
+                    attribution: vec![false],
+                },
+                proof_hex: String::new(),
+            }];
+            m
+        };
+        let policy = RevocationPolicy::accept_version(TEST_STATUS_VERSION).with_snapshot(
+            status_snapshot(TEST_STATUS_LIST, TEST_STATUS_VERSION, vec![0u8, 0]),
+        );
+        // Correctly encoded for the ATTESTED method: the pattern gates pass.
+        let good = manifest_with(CommitmentMethod::DualLeafV2);
+        assert!(
+            prefilter_manifest_structure(&good, &key_set, &policy).is_ok(),
+            "a V2-attested scan with V2-encoded constants must pass the pre-filter"
+        );
+        // String-canonical constants under the SAME V2 attestation: refused.
+        let bad = manifest_with(CommitmentMethod::StringCanonicalV1);
+        assert!(
+            prefilter_manifest_structure(&bad, &key_set, &policy).is_err(),
+            "a V2-attested scan with string-canonical constants must be refused"
+        );
+    }
+
     /// THE SECOND NAMED REFUSAL: a method with no pattern-constant encoding is
     /// refused rather than compared under an encoder it was never derived under.
     #[cfg(feature = "commitment-value-only")]
