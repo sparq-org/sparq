@@ -650,6 +650,72 @@ _:p solid:inserts { <urn:a> <urn:b> <urn:c> . }.\n"
     assert_eq!(r.status(), StatusCode::OK);
 }
 
+/// What is stored under a leftover repeated-slash name can still be deleted.
+#[tokio::test]
+async fn a_repeated_slash_name_left_over_can_be_deleted() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let alice = "https://pod.example/alice/";
+    store
+        .write(
+            "https://pod.example/",
+            axum::body::Bytes::new(),
+            "text/turtle",
+        )
+        .await
+        .expect("seed the root");
+    for (parent, child) in [
+        ("https://pod.example/", alice),
+        (alice, "https://pod.example/alice/c//"),
+    ] {
+        store
+            .create_in_container(parent, child, axum::body::Bytes::new(), "text/turtle")
+            .await
+            .expect("seed a container");
+    }
+    let h = Harness::with_store(store).await;
+    let r = h.request("DELETE", "/alice/c//", None, Body::empty()).await;
+    assert!(r.status().is_success(), "{}", r.status());
+    let r = h.request("GET", "/alice/c//", None, Body::empty()).await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    let r = h.request("GET", "/alice/", None, Body::empty()).await;
+    let listing = to_bytes(r.into_body(), usize::MAX).await.unwrap();
+    assert!(
+        !String::from_utf8_lossy(&listing).contains("c//"),
+        "{listing:?}"
+    );
+}
+
+/// An encoded separator or dot segment is part of a name, never decoded into a path: the write
+/// lands at the name as sent, which reads back, and nothing appears at the decoded path. A raw
+/// dot segment is refused.
+#[tokio::test]
+async fn encoded_separators_and_dots_are_literal_names() {
+    let h = Harness::new().await;
+    for (sent, decoded) in [
+        ("/alice/a%2Fb", "/alice/a/b"),
+        ("/alice/c%2fd", "/alice/c/d"),
+        ("/alice/e%2F/f", "/alice/e//f"),
+        ("/alice/%2E%2E/g", "/g"),
+        ("/alice/%2e/h", "/alice/h"),
+    ] {
+        let r = h
+            .request("PUT", sent, Some("text/turtle"), Body::from(TURTLE))
+            .await;
+        assert_eq!(r.status(), StatusCode::CREATED, "PUT {sent}");
+        let r = h.request("GET", sent, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::OK, "GET {sent}");
+        let r = h.request("GET", decoded, None, Body::empty()).await;
+        assert_ne!(r.status(), StatusCode::OK, "GET {decoded}");
+    }
+    for raw in ["/alice/../x", "/alice/./x"] {
+        let r = h
+            .request("PUT", raw, Some("text/turtle"), Body::from(TURTLE))
+            .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "PUT {raw}");
+    }
+}
+
 #[tokio::test]
 async fn put_twice_is_a_replace_with_no_content() {
     let h = Harness::new().await;
@@ -1870,6 +1936,84 @@ _:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> 
             continue;
         }
         assert!(r.status().is_success(), "{name}: {}", r.status());
+    }
+}
+
+/// A reader's PATCH reads a stored N-Triples or N-Quads document by the same classification an
+/// append without Read goes by, keeps its type, and leaves an N-Quads document's named graphs as
+/// they are (a PATCH changes the default graph).
+#[tokio::test]
+async fn a_patch_keeps_line_formats_and_named_graphs() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let docs = [
+        (
+            "nt",
+            "application/n-triples",
+            "<https://pod.example/alice/nt#a> <https://e.example/p> \"x\" .\n",
+        ),
+        (
+            "nq",
+            "application/n-quads",
+            "<https://pod.example/alice/nq#a> <https://e.example/p> \"x\" .\n\
+<https://pod.example/alice/nq#a> <https://e.example/p> \"kept\" <https://e.example/g> .\n",
+        ),
+    ];
+    for (name, ct, body) in docs {
+        let iri = format!("https://pod.example/alice/{name}");
+        store
+            .write(&iri, axum::body::Bytes::from(body), ct)
+            .await
+            .expect("seed a document");
+        let acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#a> a acl:Authorization; acl:agent <{webid}>; acl:accessTo <{iri}>;
+     acl:mode acl:Read, acl:Write."#,
+            webid = common::WEBID
+        );
+        store
+            .write(
+                &format!("{iri}.acl"),
+                axum::body::Bytes::from(acl),
+                "text/turtle",
+            )
+            .await
+            .expect("seed its acl");
+    }
+    let h = Harness::with_store(store).await;
+    for (name, ct, _) in docs {
+        let insert = format!(
+            "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts {{ <https://pod.example/alice/{name}#b> <https://e.example/q> \"v\" . }}.\n"
+        );
+        let r = h
+            .request(
+                "PATCH",
+                &format!("/alice/{name}"),
+                Some("text/n3"),
+                Body::from(insert),
+            )
+            .await;
+        assert!(r.status().is_success(), "{name}: {}", r.status());
+        let r = h
+            .request("GET", &format!("/alice/{name}"), None, Body::empty())
+            .await;
+        assert_eq!(r.status(), StatusCode::OK, "{name}");
+        let got_type = r.headers()[axum::http::header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .to_string();
+        let body = to_bytes(r.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(got_type.starts_with(ct), "{name}: {got_type}");
+        assert!(body.contains("\"v\""), "{name}: {body}");
+        assert!(body.contains("\"x\""), "{name}: {body}");
+        if name == "nq" {
+            assert!(
+                body.contains("\"kept\" <https://e.example/g>"),
+                "{name}: {body}"
+            );
+        }
     }
 }
 

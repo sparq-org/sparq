@@ -1645,15 +1645,6 @@ async fn create<S: Store + 'static>(
             && l.param("rel")
                 .is_some_and(|r| r.split_whitespace().any(|r| r.eq_ignore_ascii_case("type")))
     });
-    // A `Slug` is a hint the server may ignore, and does for a writer that may not list the
-    // container: the name it would get (the slug, or the slug numbered past one taken) would
-    // say which members the container has.
-    let slug = match req.header("slug") {
-        Some(slug) if state.allowed(Action::Read, parent, agent).await => sanitize_slug(Some(slug)),
-        _ => None,
-    };
-    let base_name =
-        slug.unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
     // The container's lock is held shared from the choice of a free name through the create and
     // the new member's creator metadata. Shared, because creates in one container do not need to
     // exclude each other: what keeps two POSTs with one Slug from both taking a name is the new
@@ -1720,6 +1711,16 @@ async fn create<S: Store + 'static>(
             return refused;
         }
     }
+    // A `Slug` is a hint the server may ignore, and does for a writer that may not list the
+    // container: the name it would get (the slug, or the slug numbered past one taken) would
+    // say which members the container has. Decided under the container's lock, on the state the
+    // name is chosen in.
+    let slug = match req.header("slug") {
+        Some(slug) if state.allowed(Action::Read, parent, agent).await => sanitize_slug(Some(slug)),
+        _ => None,
+    };
+    let base_name =
+        slug.unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
     let (name, child_guards) = match free_name(state, parent, &base_name).await {
         Ok(found) => found,
         Err(r) => return r,
@@ -3728,7 +3729,13 @@ async fn delete<S: Store + 'static>(
             // A subtree too large to remove atomically is refused before anything is removed,
             // and before anyone's notifications are prepared: an oversized delete does none of
             // that work.
-            let mut journal = state.journal();
+            // One resource's delete (a data resource, or an empty container) is staged whatever
+            // its size, so whether it may go never follows what is stored.
+            let mut journal = if doomed.len() == 1 {
+                state.journal_for_one()
+            } else {
+                state.journal()
+            };
             if let Err(e) = stage_removal(&mut journal, &doomed).await {
                 return ((Vec::new(), Err(e)), None);
             }
@@ -10061,6 +10068,15 @@ mod tests {
         let r = delete("/d/a", &[]).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
         assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 1);
+        // One resource's delete goes whatever its size, even past the bound a journal holds.
+        let huge = Bytes::from(vec![b'x'; 66 << 20]);
+        st.store
+            .create_in_container(&d, &format!("{d}huge"), huge, "text/plain")
+            .await
+            .unwrap();
+        let r = delete("/d/huge", &[]).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert!(!st.store.exists(&format!("{d}huge")).await.unwrap());
     }
 
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described

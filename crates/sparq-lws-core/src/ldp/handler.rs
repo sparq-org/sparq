@@ -45,8 +45,9 @@ use crate::authz::{mode_for_operation, AccessMode};
 use crate::error::ServerError;
 use crate::ldp::conditional;
 use crate::ldp::content::{
-    classify, label_blank_nodes_by_position, negotiate_accept_with_profile, parse_to_triples,
-    serialize_triples, serialize_triples_negotiated, validate_rdf, RdfFormat,
+    classify, label_blank_nodes_by_position, named_graph_nquads, negotiate_accept_with_profile,
+    parse_to_triples, serialize_triples, serialize_triples_negotiated, stored_format,
+    validate_rdf, RdfFormat,
 };
 use crate::ldp::patch::{
     appended_ntriples, apply_patch, classify_patch_media_type, parse_n3_patch, parse_sparql_update,
@@ -1138,10 +1139,11 @@ pub async fn put_handler<S: Store>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ServerError> {
-    #[cfg(feature = "sparql-endpoint")]
-    let _snapshot_guard = state.sparql_snapshot_write().await;
+    // The name alone decides this refusal, before any lock is taken.
     let target = parse_target(&state.base_url, uri.path())?;
     refuse_repeated_slash_write(&state.base_url, &target)?;
+    #[cfg(feature = "sparql-endpoint")]
+    let _snapshot_guard = state.sparql_snapshot_write().await;
 
     // WAC for PUT — EXISTENCE-NON-DISCLOSURE (`research/lws-design-records.md` §6): a PUT requires
     // `acl:Write` on the TARGET's effective ACL (inherited via `acl:default` for a not-yet-existing
@@ -1295,10 +1297,11 @@ pub async fn post_handler<S: Store>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ServerError> {
-    #[cfg(feature = "sparql-endpoint")]
-    let _snapshot_guard = state.sparql_snapshot_write().await;
+    // The name alone decides this refusal, before any lock is taken.
     let container = parse_target(&state.base_url, uri.path())?;
     refuse_repeated_slash_write(&state.base_url, &container)?;
+    #[cfg(feature = "sparql-endpoint")]
+    let _snapshot_guard = state.sparql_snapshot_write().await;
     // WAC: a POST to a container requires `acl:Append` on the container (a writer also satisfies it).
     // Anonymous ⇒ 401, authenticated-but-unauthorized ⇒ 403. Authorize BEFORE the container-shape /
     // existence checks so an unauthorized caller cannot probe existence (the read-access POST cases
@@ -1637,10 +1640,11 @@ pub async fn patch_handler<S: Store>(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, ServerError> {
-    #[cfg(feature = "sparql-endpoint")]
-    let _snapshot_guard = state.sparql_snapshot_write().await;
+    // The name alone decides this refusal, before any lock is taken.
     let target = parse_target(&state.base_url, uri.path())?;
     refuse_repeated_slash_write(&state.base_url, &target)?;
+    #[cfg(feature = "sparql-endpoint")]
+    let _snapshot_guard = state.sparql_snapshot_write().await;
 
     // Select the PATCH language from the Content-Type (ABSENT ⇒ 400, unsupported ⇒ 415) and parse the
     // document. `text/n3` is the Solid N3 Patch; `application/sparql-update` is the INSERT/DELETE DATA
@@ -1770,7 +1774,10 @@ pub async fn patch_handler<S: Store>(
     // unconditional insert-only patch gets here without Read.) The stored bytes are still read
     // and rewritten whole, so the time this takes follows their size.
     if let (Some(res), false) = (&current, reader) {
-        let appendable = appends_ntriples(&res.meta.content_type);
+        let appendable = matches!(
+            stored_format(&res.meta.content_type),
+            Some(RdfFormat::Turtle | RdfFormat::NTriples | RdfFormat::NQuads)
+        );
         let Some(text) = appended_ntriples(&patch).filter(|_| appendable) else {
             return Err(unread(ServerError::Forbidden));
         };
@@ -1794,9 +1801,9 @@ pub async fn patch_handler<S: Store>(
     }
 
     // Determine the existing triples + the stored format (default Turtle for a new resource).
-    let (existing_triples, stored_format) = match &current {
+    let (existing_triples, stored_as) = match &current {
         Some(res) => {
-            let fmt = classify(Some(&res.meta.content_type)).unwrap_or(RdfFormat::Turtle);
+            let fmt = stored_format(&res.meta.content_type).unwrap_or(RdfFormat::Turtle);
             (parse_to_triples(fmt, &res.body, &target.iri)?, fmt)
         }
         None => {
@@ -1807,7 +1814,11 @@ pub async fn patch_handler<S: Store>(
     };
 
     let patched = apply_patch(&existing_triples, &patch).map_err(unread)?;
-    let new_body = serialize_triples(stored_format, &patched).map_err(unread)?;
+    let mut new_body = serialize_triples(stored_as, &patched).map_err(unread)?;
+    // An N-Quads document's named graphs are not the patch's: they are kept as stored.
+    if let (Some(res), RdfFormat::NQuads) = (&current, stored_as) {
+        new_body.extend(named_graph_nquads(&res.body)?);
+    }
 
     let existed = current.is_some();
     let parent = parent_container(&target);
@@ -1818,7 +1829,7 @@ pub async fn patch_handler<S: Store>(
             .write(
                 &target.iri,
                 Bytes::from(new_body),
-                stored_format.media_type(),
+                stored_as.media_type(),
             )
             .await?
     } else if crate::authz::is_acl_resource(&target.iri) {
@@ -1832,7 +1843,7 @@ pub async fn patch_handler<S: Store>(
             .write(
                 &target.iri,
                 Bytes::from(new_body),
-                stored_format.media_type(),
+                stored_as.media_type(),
             )
             .await?
     } else {
@@ -1855,7 +1866,7 @@ pub async fn patch_handler<S: Store>(
                         p,
                         &target.iri,
                         Bytes::from(new_body),
-                        stored_format.media_type(),
+                        stored_as.media_type(),
                     )
                     .await?
             }
@@ -1865,7 +1876,7 @@ pub async fn patch_handler<S: Store>(
                     .write(
                         &target.iri,
                         Bytes::from(new_body),
-                        stored_format.media_type(),
+                        stored_as.media_type(),
                     )
                     .await?
             }
@@ -2349,16 +2360,6 @@ async fn reject_slash_semantics_conflict<S: Store>(
         ));
     }
     Ok(())
-}
-
-/// Whether a document stored as `content_type` stays well formed, its graph the union, with
-/// N-Triples lines appended on a line of their own: Turtle, N-Triples and N-Quads (the lines go
-/// into its default graph).
-fn appends_ntriples(content_type: &str) -> bool {
-    let essence = content_type.split(';').next().unwrap_or("").trim();
-    ["text/turtle", "application/n-triples", "application/n-quads"]
-        .iter()
-        .any(|t| essence.eq_ignore_ascii_case(t))
 }
 
 /// Whether `granted` lets the requester read `target_iri`'s representation: Control for an `.acl`,
