@@ -13,6 +13,12 @@ use super::*;
 /// longer exists (what failed was the cleanup of its bytes, which the reconciler collects), the
 /// record is gone. One that still exists after a failure is not shown to stay unless the failure
 /// is settled (see [`still_listed`]): the error is returned as it is, so the caller can tell.
+///
+/// A removal that failed [unsettled](crate::error::ServerError::Unsettled) can still commit, so
+/// what the store says of the record is not yet final: its fence ([`Store::fence`]) is made to
+/// succeed first, and only then is the record read. A fence that does not succeed leaves the
+/// removal where it was, and the original error is returned rather than the record being
+/// reported gone.
 pub(crate) async fn delete_record<S: Store>(
     store: &S,
     iri: &str,
@@ -20,10 +26,17 @@ pub(crate) async fn delete_record<S: Store>(
 ) -> Result<(), crate::error::ServerError> {
     match remove_member(store, iri, Some(container)).await {
         Ok(_) | Err(crate::error::ServerError::NotFound) => Ok(()),
-        Err(e) => match store.exists(iri).await {
-            Ok(false) => Ok(()),
-            _ => Err(e),
-        },
+        Err(e) => {
+            if let crate::error::ServerError::Unsettled { fence, .. } = &e {
+                if store.fence(fence).await.is_err() {
+                    return Err(e);
+                }
+            }
+            match store.exists(iri).await {
+                Ok(false) => Ok(()),
+                _ => Err(e),
+            }
+        }
     }
 }
 
@@ -638,4 +651,42 @@ pub(crate) fn announce_record<S: Store + 'static>(
     };
     let state = state.detached();
     tokio::spawn(async move { state.notify.announce_service(&state, event, author).await });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+    use std::sync::Arc;
+
+    /// A gate that is never opened: the unsettled write it holds is still to come.
+    fn shut() -> Arc<tokio::sync::Semaphore> {
+        Arc::new(tokio::sync::Semaphore::new(0))
+    }
+
+    /// Review finding: a removal that failed unsettled was read back at once, so a record the
+    /// store did not hold was reported gone though the removal could still commit. The removal
+    /// is fenced first; a fence that fails leaves the error as it was.
+    #[tokio::test]
+    async fn an_unsettled_removal_is_not_done_before_its_fence() {
+        let store = super::super::test_store::FlakyStore::new();
+        let container = "http://localhost:3000/.lws/grants/";
+        let iri = format!("{container}g1");
+        // The removal of a record the store does not hold fails unsettled: what `exists` says
+        // of it is not final until the fence has succeeded.
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let r = delete_record(&store, &iri, container).await;
+        assert!(
+            matches!(r, Err(crate::error::ServerError::Unsettled { .. })),
+            "{:?}",
+            r
+        );
+        assert_eq!(store.fences_tried.load(Ordering::SeqCst), 1);
+        // Once the fence succeeds, the same removal is reported done.
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        store.fail_fence.store(false, Ordering::SeqCst);
+        assert!(delete_record(&store, &iri, container).await.is_ok());
+        assert_eq!(store.fences_tried.load(Ordering::SeqCst), 2);
+    }
 }

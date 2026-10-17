@@ -211,6 +211,21 @@ impl<S: Store> NotifyState<S> {
             .is_some_and(|rest| rest.starts_with('/'))
     }
 
+    /// Whether `topic` names something the LDP surface keeps to itself: a linkset record
+    /// (`X.meta`, in any case, as sent or %-decoded) or anything in the `/.lws/` service
+    /// namespace. `crate::ldp::target::parse_target` refuses both for every LDP method, so no
+    /// GET of such a topic is ever answered — and a subscription to one is answered exactly as
+    /// one the caller may not make ([`topic_denied`]), rather than minted. The topic's path is
+    /// taken from the storage root, so this is only asked of a topic on this storage.
+    fn names_reserved(&self, topic: &str) -> bool {
+        let base = self.base_url.trim_end_matches('/');
+        let Some(path) = topic.strip_prefix(base) else {
+            return false;
+        };
+        crate::ldp::target::is_linkset_record_path(path)
+            || crate::ldp::target::is_lws_service_path(path)
+    }
+
     /// The `receiveFrom` WebSocket URL for a topic, carrying the minted receive `token`. The base
     /// URL's scheme is mapped http→ws / https→wss (WebSocketChannel2023 §receiveFrom — the receive
     /// endpoint is a WebSocket URL). The token authorizes the WS upgrade for this topic (a browser
@@ -314,6 +329,14 @@ pub async fn subscribe_handler<S: Store>(
             "topic is not a resource on this storage",
         )
             .into_response();
+    }
+
+    // A topic the LDP surface keeps to itself (a linkset record, the `/.lws/` service namespace)
+    // is answered exactly as one this caller may not watch: the same `403`, no token minted. The
+    // answer is the denial rather than a shape error so that which of the two a topic is cannot
+    // be told apart from the response.
+    if state.names_reserved(topic) {
+        return topic_denied();
     }
 
     // Per-resource WAC: this authenticated WebID must be able to READ the topic. A denial returns
@@ -794,6 +817,45 @@ mod tests {
         }
         // The pod's own root is on this storage.
         assert!(s.is_on_this_storage("https://pod.example/"));
+    }
+
+    /// Review finding: a topic naming a linkset record (`X.meta`, in any case) or the `/.lws/`
+    /// service namespace was taken as an ordinary topic, though `parse_target` refuses both for
+    /// every LDP method. Such a topic is answered exactly as one the caller may not watch —
+    /// byte for byte the denial — and nothing is minted or registered for it.
+    #[tokio::test]
+    async fn subscribe_handler_refuses_a_reserved_topic_as_a_denial() {
+        // Alice owns the pod, so nothing but the topic's own name refuses her.
+        let s = state_owned_by(ALICE).await;
+        let denied = body_to_string(topic_denied()).await;
+        for topic in [
+            "https://pod.example/alice/doc.meta",
+            "https://pod.example/alice/DOC.META",
+            "https://pod.example/alice/doc%2Emeta",
+            "https://pod.example/.lws/grants/g1",
+            "https://pod.example/.LWS/subscriptions/s1",
+        ] {
+            let resp = subscribe_handler(
+                State(s.clone()),
+                Extension(web_id_token(ALICE)),
+                HeaderMap::new(),
+                Json(subscribe_to(topic)),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::FORBIDDEN, "{topic}");
+            assert_eq!(body_to_string(resp).await, denied, "{topic}");
+            assert_eq!(s.hub.subscriber_count(topic).await, 0, "{topic}");
+        }
+        // The same owner subscribing to an ordinary topic is answered with a channel, so it is
+        // the name that refuses, not the caller.
+        let resp = subscribe_handler(
+            State(s.clone()),
+            Extension(web_id_token(ALICE)),
+            HeaderMap::new(),
+            Json(subscribe_to("https://pod.example/alice/doc")),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     /// Fail-closed: with NO ACL anywhere, even an authenticated caller is denied (WAC grants nothing
