@@ -276,10 +276,20 @@ impl BoundedPathPlan {
     ///    out. It is folded in as `secure_equalities` AND/degree-reduce
     ///    multiplications (one reduction per chained bit), so the mult-round counter
     ///    reflects the reduction-round cost.
-    /// 3. **The `B`-slot oblivious output.** The select multiplications (one per
-    ///    slot), the degree-`2t` opens (one per slot), and the shuffle over `B`
-    ///    slots — exactly what [`crate::oblivious_join::oblivious_set_output`] would
-    ///    pay, derived from the built [`WaksmanNetwork`] (no hard-coded numbers).
+    /// 3. **The `B`-slot oblivious output — a LOWER BOUND.** One select
+    ///    multiplication and one degree-`t` open per slot, plus the shuffle over
+    ///    `B` slots, derived from the built [`WaksmanNetwork`] (no hard-coded
+    ///    numbers). [`crate::oblivious_join::oblivious_set_output`] pays MORE than
+    ///    this: it selects, reduces and opens the slot tag AND each packed payload
+    ///    limb, so its true cost is `B · (1 + limb_capacity)` selects, the same
+    ///    number of degree reductions (each `2t + 1` re-sharings through the
+    ///    randomness seam) and the same number of degree-`t` opens, with the
+    ///    shuffle's switch count scaled by the packed-entry width. `limb_capacity`
+    ///    is the longest candidate payload encoding rounded up to whole limbs,
+    ///    which this planner does not have — it plans over the hop structure, not
+    ///    over the payload bytes — so the counter charges the tag column only and
+    ///    is a lower bound on the output stage. The stage's own
+    ///    [`crate::oblivious_join::ObliviousOutputCost`] reports the full count.
     ///
     /// `bound` is the PUBLIC padded output bound `B`; it must be `>= 1` (the operator
     /// reveals exactly `B` slots). `parties` is the compute-party count `n`.
@@ -295,8 +305,12 @@ impl BoundedPathPlan {
         for _ in 0..self.secure_equalities {
             c.record_mult();
         }
-        // (3) The B-slot oblivious output: one select mult + one open per slot, plus
-        // the shuffle over B slots (switch count + depth from the real network).
+        // (3) The B-slot oblivious output, as a LOWER BOUND: one select mult + one
+        // degree-`t` open per slot — the TAG column only — plus the shuffle over B
+        // slots (switch count + depth from the real network). The per-limb selects,
+        // their degree reductions and their opens are not charged, because
+        // `limb_capacity` is a property of the payload bytes this planner does not
+        // see. See the doc above.
         for _ in 0..bound {
             c.record_mult();
             c.record_open();

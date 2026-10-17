@@ -512,8 +512,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has several triples firing under distinct bindings, two different rules, or the transitivity
   fast path walking several intermediate paths — the proof step records the derivation with the
   least premise vector rather than whichever one arrived first, so `why()` names the same
-  supporting facts every run. The `__bw<n>_` backward-renaming counter
-  is still assigned in evaluation order and stays tracked on #6844. (refs #6844)
+  supporting facts every run. (refs #6844)
+
+- **sparq-reason (N3):** the backward chainer's freshened variable names (`__bw<n>_`) now
+  address the DERIVATION they standardize apart, instead of counting applications. A rule
+  conclusion can bind a goal variable to a quoted formula that still holds that application's
+  renamed variables, and that value reaches a derived fact — so the name was part of the
+  fact's term identity (its `term_key` / `statement_keys`, its `why()` string, its
+  `sparq-prov` IRI) while the counter's value depended on how many applications had run
+  before it, and so on a fact set's traversal order and the hasher's width (native vs
+  `wasm32`). A name is now the FINGERPRINT of the derivation: a 64-bit fold of the evaluation
+  scope, the node's place in the proof tree (the premise-atom index, then the
+  `(rule, conclusion)` site index, plus a scoped operator's clause position) and the goal
+  being proved — folded step by step, each step from the one above it, so neither the name nor
+  the work of building it grows with the depth of the proof — rendered in the `__bw<n>_` form the readers already accept, so no writer, key
+  or refusal changes shape, and a name's length no longer grows with the depth of the proof.
+  Two derivations that fold alike are refused — the run fails rather than let them share one
+  set of renamed variables, and the table that detects it belongs to the whole top-level run,
+  so a collision between a data closure, a query's own evaluation and a nested
+  `log:conclusion` closure is caught too. Every part a name is built from is registered the
+  same way, the goal included: it enters the name as an INTERNED id, not as a bare fold, so
+  two different goals cannot merge by folding alike, and it is identified from its FULLY
+  RESOLVED form — every variable walked to the end of its binding chain, through lists,
+  triple terms AND quoted formulas — so two goals that differ only past one binding (a
+  repeated query variable aliasing two renamed ones), or only inside a quoted formula whose
+  variable the caller bound and a `log:includes` premise reads, stay two goals instead of
+  merging and losing a row. Two branches that reach the SAME resolved goal do share one
+  renaming: their proofs' formula values are then one term rather than two α-variants, so a
+  query projecting only the proved value can return one row where the counter returned two
+  — the same collapse that makes the #6757 programs saturate. A branch the conclusion
+  projects still gets its own row. Sibling nested closures at one nesting
+  depth are also told apart, by the nested document's canonical key — its `term_key`s folded
+  in explicit `u64` arithmetic, NOT the pointer-width-dependent hash the import-cycle guard
+  uses, so a nested closure's names agree between native and `wasm32` as well. **A run can
+  now be refused for this:** the nodes and identities a run registers are charged to
+  `ClosureLimits::max_join_rows` × `ClosureLimits::max_rounds` — the per-round row allowance
+  times the rounds the run may take, since the tables accumulate over every round — and the
+  entry that would be one too many fails the run with a cut; a `(rule, conclusion)` site is
+  registered only once its conclusion unifies with the goal, so the sites a search rejects
+  cost nothing, and the DEFAULT `max_join_rows` is the unbounded sentinel, so a
+  default-limits run is never refused for it, and an evaluation with no `<=` rule in it
+  registers nothing at all, since no name it could mint would ever rename a variable. The
+  resolution that identifies a goal leaves a variable it is already inside the expansion of
+  as it is — a formula bound to `?x` may name `?x` itself, and that occurrence is the
+  formula's own — so a self-naming formula resolves to a finite term instead of being
+  refused; a goal the resolution does refuse (its depth or its term size) now FAILS the run
+  with that reason, where it used to come back as an empty proof that read as "not
+  provable"; and a site's fingerprint is checked against the run's table before it renames
+  anything, since a fold already held by another key renames the conclusion into names the
+  inherited bindings hold, which fails unification and would otherwise skip the check
+  entirely. Three
+  consequences: a fact carrying
+  a renamed variable has a different identity than before, so regenerate stored `sparq-prov`
+  IRIs for such facts; proofs of different goals keep the distinct values they had, including
+  values inside a quoted formula, which substitution does not reach; and a program whose only
+  round-to-round growth was that counter (the #6757 shape: a backward rule concluding a
+  formula with a variable, a forward rule copying it out) now SATURATES instead of being
+  refused at the closure limit, because re-proving one goal mints one name. A program that
+  diverges by growing its terms is still refused. (#6844)
 
 - **sparq-reason:** `MaterializedN3Graph::new` / `with_limits` now ignore a `base_facts`
   entry with a variable outside a formula, as `insert` already does, instead of adding it
