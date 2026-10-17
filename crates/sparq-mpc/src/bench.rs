@@ -509,6 +509,9 @@ pub fn check_aggregate(backend: &ShamirBackend, values: &[u64]) -> Result<u64, M
 /// `0..scale` on both sides, so exactly `scale` matches) and return the number of
 /// joined rows — the correctness gate for the hidden-join cost cell.
 pub fn check_hidden_join(backend: &ShamirBackend, scale: usize) -> Result<usize, MpcError> {
+    // `scale` is an operator-chosen size and the harness runs the REAL protocol over
+    // `scale x scale` pairs, so cap the cardinality before either table is built.
+    crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
     let join = HiddenValueJoin::new(backend.clone());
     let left = synthetic_table(HolderId::new("left"), scale);
     let right = synthetic_table(HolderId::new("right"), scale);
@@ -540,6 +543,9 @@ fn synthetic_table(holder: HolderId, scale: usize) -> HiddenKeyedRows {
 /// Run the REAL oblivious shuffle over `scale` secret-shared rows and assert it
 /// preserves the multiset — the correctness gate for the shuffle cost cell.
 pub fn check_shuffle(dealer: &mut ShamirDealer, t: usize, scale: usize) -> Result<bool, MpcError> {
+    // Cap the operator-chosen size before the column is dealt; `shuffle` would
+    // refuse the same width, but only after `scale` sharings had been drawn.
+    crate::oblivious::check_network_width("bench::check_shuffle", scale)?;
     let values: Vec<Fp> = (0..scale).map(|i| Fp::new((i * 7 + 1) as u64)).collect();
     let col = secret_column(dealer, &values);
     let (shuffled, _cost) = shuffle(dealer, col)?;
@@ -551,6 +557,8 @@ pub fn check_shuffle(dealer: &mut ShamirDealer, t: usize, scale: usize) -> Resul
 /// opened result is ascending and a permutation of the input — the correctness
 /// gate for the sort cost cell.
 pub fn check_sort(dealer: &mut ShamirDealer, t: usize, scale: usize) -> Result<bool, MpcError> {
+    // Same reason as `check_shuffle`: refuse the size before the column is dealt.
+    crate::oblivious::check_network_width("bench::check_sort", scale)?;
     // Reverse-sorted input so the sort has work to do.
     let values: Vec<Fp> = (0..scale).map(|i| Fp::new((scale - i) as u64)).collect();
     let col = secret_column(dealer, &values);
@@ -584,6 +592,15 @@ pub fn check_bounded_path(backend: &ShamirBackend, scale: usize) -> Result<usize
     if scale == 0 {
         return Ok(0);
     }
+    // The bound this harness derives is `Σ_ℓ scale^ℓ` over `ℓ = 1..=BOUNDED_PATH_K`,
+    // which grows fast in the operator-chosen `scale`. Refuse it up front, against
+    // the same cap the operator itself applies, rather than after building the chain
+    // and dealing its edges.
+    crate::oblivious_join::check_output_bound_cap(
+        (1..=BOUNDED_PATH_K)
+            .map(|len| scale.saturating_pow(len as u32))
+            .fold(0usize, |a, b| a.saturating_add(b)),
+    )?;
     // Build the chain n_0 →p n_1 →p … →p n_scale (scale edges, scale+1 nodes).
     let node = |i: usize| -> HiddenNode {
         HiddenNode {
@@ -720,6 +737,87 @@ pub fn run_matrix(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Each `check_*` harness runs the REAL protocol over an operator-chosen
+    /// `scale`, so each caps that size at the top. The refusal has to come before
+    /// the synthetic table is built and before the column is dealt, which is what
+    /// the keystream shows: a refused call must leave the dealer untouched, so a
+    /// legal run taken afterwards matches one taken from a fresh dealer of the same
+    /// seed. The legal runs are kept small and are asserted to succeed, so the
+    /// caps are not refusing everything.
+    #[test]
+    fn every_bench_harness_refuses_an_over_cap_scale_before_dealing() {
+        use crate::oblivious::MAX_NETWORK_WIDTH;
+        use crate::oblivious_join::MAX_OUTPUT_BOUND;
+
+        let backend = ShamirBackend::new_seeded(5, 0xBE0C).unwrap();
+        let t = backend.threshold();
+
+        // `scale^2` over the cap, with `scale` itself far below it.
+        let join_scale = 1usize << 10;
+        assert!(join_scale < MAX_OUTPUT_BOUND);
+        let err = check_hidden_join(&backend, join_scale)
+            .expect_err("an over-cap pair count must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+            "check_hidden_join: {:?}",
+            err
+        );
+        assert_eq!(
+            check_hidden_join(&backend, 6).expect("a legal scale runs"),
+            6
+        );
+
+        // The two network harnesses: an over-cap width is refused with the dealer
+        // left untouched.
+        let reference = {
+            let mut d = backend.dealer();
+            check_shuffle(&mut d, t, 8).expect("a legal scale runs")
+        };
+        assert!(reference, "the legal shuffle must actually verify");
+        for scale in [MAX_NETWORK_WIDTH + 1, usize::MAX] {
+            let mut dealer = backend.dealer();
+            let err = check_shuffle(&mut dealer, t, scale)
+                .expect_err("an over-cap scale must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_NETWORK_WIDTH")),
+                "check_shuffle scale={}: {:?}",
+                scale,
+                err
+            );
+            assert_eq!(
+                check_shuffle(&mut dealer, t, 8).expect("still usable"),
+                reference,
+                "check_shuffle scale={}: the refusal dealt before refusing",
+                scale
+            );
+
+            let mut dealer = backend.dealer();
+            let err =
+                check_sort(&mut dealer, t, scale).expect_err("an over-cap scale must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_NETWORK_WIDTH")),
+                "check_sort scale={}: {:?}",
+                scale,
+                err
+            );
+        }
+        let mut d = backend.dealer();
+        assert!(check_sort(&mut d, t, 8).expect("a legal scale runs"));
+
+        // The bounded-path harness derives `Σ_ℓ scale^ℓ` over `ℓ = 1..=K`, so a
+        // modest `scale` already exceeds the output cap.
+        let path_scale = 1usize << 7;
+        assert!(path_scale.saturating_pow(BOUNDED_PATH_K as u32) > MAX_OUTPUT_BOUND);
+        let err = check_bounded_path(&backend, path_scale)
+            .expect_err("an over-cap derived bound must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_BOUND")),
+            "check_bounded_path: {:?}",
+            err
+        );
+        check_bounded_path(&backend, 4).expect("a legal scale runs");
+    }
 
     // --- The matrix builds and is deterministic. ---------------------------
     #[test]

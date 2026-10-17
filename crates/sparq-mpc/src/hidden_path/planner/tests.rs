@@ -258,13 +258,17 @@ fn comm_counter_refuses_an_over_cap_bound() {
     use crate::oblivious_join::MAX_OUTPUT_BOUND;
     let req = HiddenPathRequest::range("p", 1, 3);
     let plan = plan_hidden_bounded_path(&req, 3).unwrap();
-    for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+    // `MAX_OUTPUT_BOUND + 1` first on purpose: with the cap removed, that case
+    // fails in a moment, whereas `usize::MAX` would instead build a `usize::MAX`
+    // wide modelled network and never finish. A mutant should go red, not hang.
+    for bound in [MAX_OUTPUT_BOUND + 1, usize::MAX] {
         match plan.comm_counter(5, bound) {
             Err(MpcError::Protocol(m)) => {
                 assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m)
             }
             other => panic!(
-                "B={bound}: an over-cap bound must be a Protocol refusal, got {:?}",
+                "B={}: an over-cap bound must be a Protocol refusal, got {:?}",
+                bound,
                 other.map(|c| c.multiplications)
             ),
         }
