@@ -334,8 +334,10 @@ fn wac_pod() -> Vec<[Term; 3]> {
     for c in 0..n_containers {
         let cont = format!("c{c}/");
         f.push([res(&cont), solidx("isResource"), b_true.clone()]);
+        f.push([res(&cont), solidx("parent"), res("")]);
         for d in 0..5 {
             f.push([res(&format!("{cont}doc{d}")), solidx("isResource"), b_true.clone()]);
+            f.push([res(&format!("{cont}doc{d}")), solidx("parent"), res(&cont)]);
         }
         if c % 10 == 0 {
             let acl_doc = res(&format!("{cont}.acl"));

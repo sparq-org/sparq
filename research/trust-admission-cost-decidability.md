@@ -36,7 +36,8 @@ Verified against the code on `main`:
 **(a) The "two-unbound-atom seeding blow-up" is NOT confined to the incremental counting
 path.** §7.1 C′ says the war story "belongs to the **incremental counting path**, not the
 path solid runs". That is wrong. The canonical recorded instance of it lives in
-[`crates/sparq-solid/rules/common.n3:20-27`](../crates/sparq-solid/rules/common.n3) — a
+`crates/sparq-solid/rules/common.n3` as it stood when this record was written (the
+`parentCand`/`parent` pair; the loader now emits `solidx:parent` directly) — a
 **full-evaluator** rule file — whose own header comment records that a single rule with two
 unbound join atoms made semi-naive evaluation "enumerate the full `?r × ?p` cross product"
 on the access-control fixture, and that the rule was **split into candidate + filter on
@@ -188,8 +189,7 @@ phase 7). `n` = join-atom count.
 | Ruleset / rule | n | OSB | Note |
 |---|---|---|---|
 | P-1 PoC `.acr` rule `{ ?x schema:age ?y . ?y math:greaterThan 18 } => { ?x auth:read <r> }` (`wire.rs:72`, and the `tests/*_e2e.rs` fixtures) | 1 | **pass** | single join atom; `math:greaterThan` is a comparison, both sides bound when reached |
-| `common.n3` `parentCand` | 1 | **pass** | the post-split form; `?p` arrives via `log:uri` |
-| `common.n3` `parent` | 2 | **pass** | the hand-split filter; both directions share `?p` |
+| `solidx:parent` | — | n/a | loader-emitted from `loader::parent_iri`, no longer a rule; it replaced the hand-split `parentCand` (n=1, pass) and `parent` (n=2, pass) pair |
 | `common.n3` `ancestor` (base) | 1 | **pass** | — |
 | `common.n3` `ancestor` (recursive) | 2 | **pass** | seed either atom, the other shares `?p` |
 | `wac.n3` `inheritedAcl` base + recursive | 2, 3 | n/a | `log:notIncludes` ⇒ `needs_full`: no seeding directions (§2.3); source order is bound-connected anyway |
@@ -339,7 +339,7 @@ one.
 |---|---|---|
 | P-1 / P-2 with the PoC `.acr` rule | yes | closure = input facts plus at most one grant per admitted fact; 2 rounds. P-2 runs one closure **per** admitted fact — linear in admitted-fact count, and the *only* super-linear term in the trust crate's own evaluation |
 | P-1 / P-2 with an **arbitrary** caller rule | **unknown — nothing checks** | none; see §6 |
-| P-3, WAC stratum (`common.n3` + `wac.n3`) | yes, **by construction** | `string:scrape`/`concatenation`/`encodeForUri` mint terms but their head predicates (`parentCand`, `auth:*` pair principals) are off every cycle, satisfying (4). Every conclusion in both files has a ground IRI predicate and no compound term, satisfying (3) and (6). Closure bounded by resources × authorizations × principals |
+| P-3, WAC stratum (`common.n3` + `wac.n3`) | yes, **by construction** | `concatenation`/`encodeForUri` mint terms but their head predicates (the `auth:*` pair principals) are off every cycle, satisfying (4). Every conclusion in both files has a ground IRI predicate and no compound term, satisfying (3) and (6). Closure bounded by resources × authorizations × principals |
 | P-3, ACP + ODRL strata (`acp-*.n3`, `odrl-*.n3`) | **not audited** | outside this record (§8 phase 7). Compilation by `n3::compiled::compile` establishes BAF (1)(2)(5)(6) for them — `sym` rejects list-, formula- and non-ground-quoted-triple constants outright (`compiled.rs:397-404`), which is (6) — but **not** (4), and **not** (3) on conclusions: a `Term::Var` in conclusion predicate position compiles as an ordinary bound slot (`compiled.rs:825-831`) |
 | P-4 cert-graph closure | n/a (no reasoner) | signature verifications proportional to depth × anchors × certification edges; the shipped implementation is depth-1 (`bench/trust-admission/README.md`) |
 | P-5 admissibility ruleset | yes | active domain = the 32 level IRIs + 7 leftOperand IRIs of `LEVEL_ORDERS` plus the policy's constraints; transitive closure over chains of length ≤ 4 |

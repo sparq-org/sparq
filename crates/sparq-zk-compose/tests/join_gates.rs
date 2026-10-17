@@ -805,16 +805,7 @@ use sparq_zk_compose::verifier::{
     InMemorySeenNonces, VerifierNonce,
 };
 
-fn toolchain_available() -> bool {
-    fn on_path(tool: &str) -> bool {
-        std::process::Command::new(tool)
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    }
-    on_path("nargo") && on_path("bb")
-}
+mod support;
 
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir =
@@ -837,8 +828,7 @@ fn nonce_for(hex: &str) -> VerifierNonce {
             Runs via `cargo nextest run -p sparq-zk-compose --run-ignored all` (or \
             `cargo test -- --ignored`) on a box with nargo+bb; sq-r2s8."]
 fn full_bb_join_accept_real_proof() {
-    if !toolchain_available() {
-        eprintln!("nargo/bb absent; skipping full-bb join accept");
+    if !support::require_toolchain("full_bb_join_accept_real_proof", &["nargo", "bb"]) {
         return;
     }
 

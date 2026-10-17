@@ -678,6 +678,15 @@ fn write_declarations<'a>(iris: impl Iterator<Item = &'a str>, out: &mut String)
 /// that still carries traversal order (a `log:collectAllIn` list) can still move it (GH
 /// #6844).
 fn term_key(t: &Term) -> String {
+    let mut s = String::new();
+    enc_term(t, &mut s);
+    s
+}
+
+/// `t`'s [`term_key`] bytes APPENDED to `out`: the encoder itself, so a caller building a
+/// longer key can write one term into a buffer it already owns instead of taking a fresh
+/// `String` per term ([`goal_key`], [`formula_canonical_key`]).
+fn enc_term(t: &Term, out: &mut String) {
     fn quoted(s: &str, out: &mut String) {
         out.push('"');
         for c in s.chars() {
@@ -688,55 +697,82 @@ fn term_key(t: &Term) -> String {
         }
         out.push('"');
     }
-    fn enc(t: &Term, out: &mut String) {
-        match t {
-            Term::Iri(i) => {
-                out.push('I');
-                quoted(i, out);
-            }
-            Term::Lit(v, dt, lang) => {
-                out.push('L');
-                quoted(v, out);
-                quoted(dt, out);
-                match lang {
-                    Some(l) => {
-                        out.push('@');
-                        quoted(l, out);
-                    }
-                    None => out.push('-'),
+    match t {
+        Term::Iri(i) => {
+            out.push('I');
+            quoted(i, out);
+        }
+        Term::Lit(v, dt, lang) => {
+            out.push('L');
+            quoted(v, out);
+            quoted(dt, out);
+            match lang {
+                Some(l) => {
+                    out.push('@');
+                    quoted(l, out);
                 }
-            }
-            Term::Blank(b) => {
-                out.push('B');
-                quoted(b, out);
-            }
-            Term::Var(v) => {
-                out.push('V');
-                quoted(v, out);
-            }
-            Term::List(ms) => {
-                out.push('(');
-                ms.iter().for_each(|m| enc(m, out));
-                out.push(')');
-            }
-            Term::Formula(ts) => {
-                out.push('{');
-                for row in ts {
-                    row.iter().for_each(|m| enc(m, out));
-                    out.push(';');
-                }
-                out.push('}');
-            }
-            Term::Triple(tr) => {
-                out.push('<');
-                tr.iter().for_each(|m| enc(m, out));
-                out.push('>');
+                None => out.push('-'),
             }
         }
+        Term::Blank(b) => {
+            out.push('B');
+            quoted(b, out);
+        }
+        Term::Var(v) => {
+            out.push('V');
+            quoted(v, out);
+        }
+        Term::List(ms) => {
+            out.push('(');
+            ms.iter().for_each(|m| enc_term(m, out));
+            out.push(')');
+        }
+        Term::Formula(ts) => {
+            out.push('{');
+            for row in ts {
+                row.iter().for_each(|m| enc_term(m, out));
+                out.push(';');
+            }
+            out.push('}');
+        }
+        Term::Triple(tr) => {
+            out.push('<');
+            tr.iter().for_each(|m| enc_term(m, out));
+            out.push('>');
+        }
     }
-    let mut s = String::new();
-    enc(t, &mut s);
-    s
+}
+
+/// `body` appended to `out` behind its byte length and a `:` — the length-prefixed framing
+/// [`goal_key`] and [`formula_canonical_key`] share. The digits go straight into `out`, so
+/// framing a part allocates nothing of its own.
+fn push_framed(body: &str, out: &mut String) {
+    push_len(body.len(), out);
+    out.push(':');
+    out.push_str(body);
+}
+
+/// `n`'s decimal digits appended to `out` with no intermediate `String` — what
+/// `n.to_string()` allocated, once per part of every key built here.
+fn push_len(n: usize, out: &mut String) {
+    // `n` is always a byte length, so twenty digits is the most a 64-bit `usize` can
+    // produce and the buffer is never the limit.
+    let mut buf = [0u8; 20];
+    let mut at = buf.len();
+    let mut rest = n;
+    loop {
+        at -= 1;
+        buf[at] = b'0' + (rest % 10) as u8;
+        rest /= 10;
+        if rest == 0 {
+            break;
+        }
+    }
+    // Pushed as `char`s: each is ASCII, so each is one byte, and this needs no UTF-8
+    // validation pass over the digits the way building a `&str` from the buffer would.
+    for &d in &buf[at..] {
+        out.push(d as char);
+    }
 }
 
 /// A backward proof GOAL's canonical identity string: each term's `term_key` written behind
@@ -748,16 +784,50 @@ fn term_key(t: &Term) -> String {
 /// standardize-apart space; it is not provenance, so it is deliberately not counted as a
 /// keyed call (`KEY_CALLS`): the plain materialization paths stay unkeyed, and a document
 /// with no `<=` rule never reaches this.
+///
+/// The form over OWNED terms, which is what this module's tests pin the key through; the
+/// evaluation itself goes through [`goal_key_of`], of which this is the `T = Term` case.
+#[cfg(test)]
 pub(super) fn goal_key(g: &[Term; 3]) -> String {
-    let mut out = String::new();
-    for t in g {
-        let k = term_key(t);
-        out.push_str(&k.len().to_string());
-        out.push(':');
-        out.push_str(&k);
+    goal_key_of(g)
+}
+
+/// [`goal_key`] over three terms held however the caller holds them — owned, or borrowed
+/// from the walk that resolved them ([`super::bounded::walked_atom_cow`]), which is what
+/// lets the backward path key a goal without first copying its terms. ONE implementation:
+/// [`goal_key`] is this at `T = Term`, so the two cannot produce different keys.
+pub(super) fn goal_key_of<T: std::borrow::Borrow<Term>>(g: &[T; 3]) -> String {
+    // The framing needs a term's byte length BEFORE its bytes, so the three terms are
+    // encoded end to end into ONE scratch buffer with their boundaries recorded, and the
+    // framing is then written into an `out` sized from what they came to. That is two
+    // allocations for the whole goal — and for an ordinary goal neither of them grows as it
+    // is written — where a fresh `term_key` `String` plus a fresh `len().to_string()` per
+    // term was six that each grew from nothing. This runs once per goal of every backward
+    // proof search, and that growth was a substantial part of the cost GH #7095 added
+    // (GH #6844 follow-up).
+    let mut part = String::with_capacity(KEY_SCRATCH);
+    let mut ends = [0usize; 3];
+    for (t, end) in g.iter().zip(ends.iter_mut()) {
+        enc_term(t.borrow(), &mut part);
+        *end = part.len();
+    }
+    let mut out = String::with_capacity(part.len() + 3 * FRAME_MAX);
+    let mut from = 0;
+    for end in ends {
+        push_framed(&part[from..end], &mut out);
+        from = end;
     }
     out
 }
+
+/// What the key builders here reserve for the terms they are about to encode, before they
+/// know how long those come to: enough that an ordinary goal or row never grows the buffer,
+/// and only terms far larger than those pay one growth.
+const KEY_SCRATCH: usize = 192;
+
+/// The most [`push_framed`] can add beyond the body itself: twenty digits of a `usize` byte
+/// length and the `:`.
+const FRAME_MAX: usize = 21;
 
 /// FNV-1a over `s`'s bytes in explicit `u64` arithmetic, so the value does not depend on
 /// the target's word size (native vs `wasm32`) the way a `usize`-wide hasher would. What a
@@ -810,11 +880,25 @@ pub(super) fn fold_key(tag: u8, parts: &[u64]) -> u64 {
 /// arithmetic over `term_key`s and so is the same on every target.
 pub(super) fn formula_canonical_key(ts: &[[Term; 3]]) -> String {
     let mut out = String::from("F");
+    // Two reused, pre-sized buffers, as [`goal_key`]: one for the row being framed and one
+    // for the terms being framed into it. Byte-for-byte what a nested `goal_key` per row
+    // gave.
+    let mut row_buf = String::with_capacity(KEY_SCRATCH + 3 * FRAME_MAX);
+    let mut part = String::with_capacity(KEY_SCRATCH);
     for row in ts {
-        let k = goal_key(row);
-        out.push_str(&k.len().to_string());
-        out.push(':');
-        out.push_str(&k);
+        row_buf.clear();
+        part.clear();
+        let mut ends = [0usize; 3];
+        for (t, end) in row.iter().zip(ends.iter_mut()) {
+            enc_term(t, &mut part);
+            *end = part.len();
+        }
+        let mut from = 0;
+        for end in ends {
+            push_framed(&part[from..end], &mut row_buf);
+            from = end;
+        }
+        push_framed(&row_buf, &mut out);
     }
     out
 }
@@ -1539,6 +1623,95 @@ mod tests {
         assert_eq!(fnv1a64(""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a64("a"), 0xaf63_dc4c_8601_ec8c);
         assert_eq!(fnv1a64("foobar"), 0x8594_4171_f739_67e8);
+    }
+
+    /// A corpus for the framing differential below: shapes that cross every branch of
+    /// `enc_term` and every digit boundary of the length prefix a part is framed behind.
+    fn framing_corpus() -> Vec<[Term; 3]> {
+        let iri = |s: &str| Term::Iri(s.to_string());
+        let var = |s: &str| Term::Var(s.to_string());
+        let lit = |v: &str, d: &str| Term::Lit(v.to_string(), d.to_string(), None);
+        let lang = |v: &str, l: &str| {
+            Term::Lit(v.to_string(), "http://ex/dt".into(), Some(l.to_string()))
+        };
+        vec![
+            // A one-byte part, so the prefix is one digit.
+            [Term::List(vec![]), iri(""), var("")],
+            [iri("http://ex/a"), iri("http://ex/p"), var("y")],
+            // Parts whose encodings straddle 9/10 and 99/100 bytes, where the number of
+            // digits in the length prefix changes.
+            [iri(&"x".repeat(6)), iri(&"y".repeat(7)), iri(&"z".repeat(8))],
+            [iri(&"x".repeat(95)), iri(&"y".repeat(96)), iri(&"z".repeat(97))],
+            [iri(&"x".repeat(9995)), iri("http://ex/p"), var("y")],
+            // The characters `quoted` escapes, which change a part's length.
+            [iri(r#"a"b\c"#), lit(r#"q"\"#, r#"d"t"#), lang(r#""#, r#"e"n"#)],
+            // Every compound arm, nested.
+            [
+                Term::List(vec![iri("http://ex/a"), Term::List(vec![var("m"), lit("1", "int")])]),
+                Term::Triple(Box::new([var("s"), iri("http://ex/p"), Term::List(vec![])])),
+                Term::Formula(vec![
+                    [var("x"), iri("http://ex/q"), iri("http://ex/z")],
+                    [Term::Blank("b0".into()), iri("http://ex/r"), var("x")],
+                ]),
+            ],
+            [Term::Formula(vec![]), Term::Blank("b1".into()), lang("hi", "en-GB")],
+        ]
+    }
+
+    /// The framing is BYTE-IDENTICAL to the `term_key(t)` behind `k.len().to_string()`
+    /// that `goal_key` and `formula_canonical_key` were written as before they were made to
+    /// reuse one pre-sized buffer and to write the length's digits straight into the
+    /// output. The reference here IS that arithmetic, spelled out, so the two are compared
+    /// rather than the new one being trusted — and a fold is only as stable as these bytes,
+    /// so a drift would move every `__bw<n>_` name the engine mints.
+    #[test]
+    fn the_framing_is_byte_identical_to_the_arithmetic_it_replaced() {
+        let reference_goal = |g: &[Term; 3]| {
+            let mut out = String::new();
+            for t in g {
+                let k = term_key(t);
+                out.push_str(&k.len().to_string());
+                out.push(':');
+                out.push_str(&k);
+            }
+            out
+        };
+        let corpus = framing_corpus();
+        for g in &corpus {
+            assert_eq!(goal_key(g), reference_goal(g), "goal_key framing moved");
+        }
+        // And the formula key, which frames each ROW behind its own length in turn.
+        let reference_formula = |ts: &[[Term; 3]]| {
+            let mut out = String::from("F");
+            for row in ts {
+                let k = reference_goal(row);
+                out.push_str(&k.len().to_string());
+                out.push(':');
+                out.push_str(&k);
+            }
+            out
+        };
+        for n in [0usize, 1, 2, corpus.len()] {
+            let ts = &corpus[..n];
+            assert_eq!(
+                formula_canonical_key(ts),
+                reference_formula(ts),
+                "formula_canonical_key framing moved at {n} rows"
+            );
+        }
+    }
+
+    /// `push_len` writes the decimal digits `usize::to_string` wrote, at the boundaries
+    /// where the digit count changes and at the extremes.
+    #[test]
+    fn push_len_writes_the_decimal_digits_to_string_wrote() {
+        let mut cases: Vec<usize> = vec![0, 1, 9, 10, 11, 99, 100, 101, 999, 1000, usize::MAX];
+        cases.push(usize::MAX - 1);
+        for n in cases {
+            let mut got = String::new();
+            push_len(n, &mut got);
+            assert_eq!(got, n.to_string(), "push_len({n})");
+        }
     }
 
     /// A nested closure's scope salt is a value, not a hash of a memory layout: its fold is

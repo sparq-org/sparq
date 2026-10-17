@@ -124,19 +124,29 @@ fn wac_auth(
 /// policy shapes (root owner; per-subtree public / group / agent / authenticated /
 /// origin-pair variants; a deep override; a resource-specific ACL) as assemble_input-
 /// style facts.
+/// The loader's per-resource facts: `solidx:isResource`, and `solidx:parent` to the
+/// slash-semantics parent when that is a resource too (sparq-solid `loader::parent_iri`).
+fn resource_facts(out: &mut String, resources: &[String]) {
+    let set: std::collections::HashSet<&str> = resources.iter().map(String::as_str).collect();
+    for r in resources {
+        tru(out, r, &format!("{SOLIDX}isResource"));
+        let trimmed = r.strip_suffix('/').unwrap_or(r);
+        if let Some(cut) = trimmed.rfind('/').filter(|&c| c >= POD.len() - 1) {
+            let p = &r[..cut + 1];
+            if p != r.as_str() && set.contains(p) {
+                iri3(out, r, &format!("{SOLIDX}parent"), p);
+            }
+        }
+    }
+}
+
 pub fn wac_facts(sc: &Scale) -> String {
     let t = tree(sc);
     let mut out = String::with_capacity(1 << 18);
-    for r in &t.resources {
-        tru(&mut out, r, &format!("{SOLIDX}isResource"));
-    }
     // The group document is a pod resource too (with its structural container).
-    tru(
-        &mut out,
-        "https://pod.ex/groups/",
-        &format!("{SOLIDX}isResource"),
-    );
-    tru(&mut out, TEAM_GROUP_DOC, &format!("{SOLIDX}isResource"));
+    let mut resources = t.resources.clone();
+    resources.extend(["https://pod.ex/groups/".to_string(), TEAM_GROUP_DOC.to_string()]);
+    resource_facts(&mut out, &resources);
     let group = format!("{TEAM_GROUP_DOC}#g");
     iri3(&mut out, &group, RDF_TYPE, &format!("{VCARD}Group"));
     iri3(&mut out, &group, &format!("{VCARD}hasMember"), BOB);
@@ -393,9 +403,7 @@ fn acp_policy(
 pub fn acp_facts(sc: &Scale) -> String {
     let t = tree(sc);
     let mut out = String::with_capacity(1 << 18);
-    for r in &t.resources {
-        tru(&mut out, r, &format!("{SOLIDX}isResource"));
-    }
+    resource_facts(&mut out, &t.resources);
     let public = format!("{ACP}PublicAgent");
     // Root: alice everything, on the root itself AND all members.
     acp_policy(
