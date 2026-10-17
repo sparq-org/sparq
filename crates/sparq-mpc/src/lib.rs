@@ -411,8 +411,9 @@ pub use join::{
 };
 pub use metrics::{CommCounter, FIELD_BYTES};
 pub use oblivious::{
-    shuffle, sort_by, sort_with_keys, AccessPattern, Comparator, SecretColumn, ShuffleCost,
-    SortByResult, SortCost, SortWithKeysResult, SortingNetwork, Switch, WaksmanNetwork,
+    rerandomise_sharings, shuffle, sort_by, sort_with_keys, AccessPattern, Comparator,
+    SecretColumn, ShuffleCost, SortByResult, SortCost, SortWithKeysResult, SortingNetwork, Switch,
+    WaksmanNetwork,
 };
 pub use partial::{HolderId, MpcError, PartialResult};
 // sq-dl81: the collision-resistant Term->Fp join-key encoder surface.
@@ -433,8 +434,9 @@ pub use federated_binding::{
 };
 // sq-jnkm: the oblivious set-returning output path surface.
 pub use oblivious_join::{
-    oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys, Candidate,
-    MatchBit, ObliviousOutput, ObliviousOutputCost, OutputSlot, MAX_OUTPUT_BOUND,
+    oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys,
+    oblivious_set_output_to_recipient, Candidate, MatchBit, ObliviousOutput, ObliviousOutputCost,
+    OutputSlot, RecipientOutputShares, MAX_OUTPUT_BOUND,
 };
 pub use rng::{MpcRng, SecureRng};
 // sq-yyro: the dealer-less correlated-randomness seam surface.
@@ -446,4 +448,6 @@ pub use shamir::{MacSession, ShamirBackend, Share};
 // sq-tg6b: the network-tier surface — the real loopback transport
 // (Tier 2) and the tc/netem LAN/WAN profiles (Tier 3, privilege-gated).
 pub use netprofiles::NetemProfile;
-pub use transport::{run_cell_networked, Channel, Coordinator, Message, NetworkCell, StepCode};
+pub use transport::{
+    run_cell_networked, Channel, Coordinator, Message, NetworkCell, PublicPermutation, StepCode,
+};

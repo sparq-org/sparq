@@ -44,11 +44,13 @@
 //! - **The oblivious output TRANSFORM** — steps 2–4 above — given a secret-shared
 //!   match bit per candidate. The per-slot select `bit·real_tag` is a **single**
 //!   Shamir multiplication ([`crate::shamir::mul_shares_raw`]) plus local adds: no
-//!   multiplication CHAIN, so it needs **no degree reduction** and is buildable on
-//!   the single-product backend — exactly like
-//!   `crate::join::HiddenValueJoin::secure_equal`. Each product IS re-randomised
-//!   through [`crate::shamir::degree_reduce_through`] before the shuffle, so the
-//!   shuffled column is degree `t`. The shuffle is the sound substrate; the
+//!   multiplication CHAIN, so it is buildable on the single-product backend —
+//!   exactly like `crate::join::HiddenValueJoin::secure_equal`, which needs no
+//!   reduction to keep MULTIPLYING. Each product is nonetheless re-randomised
+//!   through [`crate::shamir::degree_reduce_through`] before the shuffle: the
+//!   reduction is there for what the OPEN would otherwise reveal, not to feed a
+//!   further multiplication. So the shuffled column is degree `t`. The shuffle is
+//!   the sound substrate; the
 //!   padded-prefix reveal is a degree-`t` open of `B` slots. This
 //!   is the structural obliviousness the bead asks for, and it holds at the
 //!   honest-majority Shamir layer.
@@ -56,9 +58,15 @@
 //!   [`oblivious_join_output`] from a candidate whose match bit was decided by a
 //!   **public / disclosed-key** equi-join (computed OUTSIDE the crypto core,
 //!   convention #4). The bit is public so we lift it to a trivial sharing with NO
-//!   secure comparison; the transform then hides, from the parties, *which*
-//!   candidates matched and the exact count (only `B` is revealed). This is fully
-//!   sound and shippable now.
+//!   secure comparison; the transform then hides *which* candidates matched —
+//!   output position is independent of input position and a dummy slot is
+//!   indistinguishable from a non-match. **What it reveals depends on the output
+//!   mode:** on the all-party path ([`oblivious_set_output`] /
+//!   [`oblivious_join_output`]) the tags are opened by every compute party, so
+//!   each of them also learns the exact count; on the recipient-only path
+//!   ([`oblivious_set_output_to_recipient`]) the compute parties open nothing and
+//!   the count reaches the designated recipient alone. Either way the revealed
+//!   OUTPUT SIZE is `B`. This is fully sound and shippable now.
 //!
 //! ### sq-xhaw — the HIDDEN-key match bit is now REALISED (gate landed)
 //!
@@ -91,12 +99,14 @@
 //!   the shuffle destroyed position→candidate linkage, and a dummy slot's opened
 //!   payload is the pad whether it came from a non-match or from padding. So L2 is
 //!   destroyed and L1 is bounded to `B` in the OUTPUT SIZE, but the count itself is
-//!   in the transcript. Revealing the tags only to the authorized recipient — a
-//!   reconstruction the compute parties cannot read — is a later change, not this
-//!   stage's behaviour.
+//!   in the transcript. **That is the ALL-PARTY output mode.** The recipient-only
+//!   mode ([`oblivious_set_output_to_recipient`]) runs the identical protocol and
+//!   then has the compute parties open NOTHING, so no opened tag and no count is in
+//!   their transcript; the designated recipient reconstructs alone. Which mode a
+//!   caller is in decides which of these two bullets applies to it.
 //! - **To the authorized RESULT RECIPIENT** (who must filter the tagged dummies to
-//!   use the result): the true count IS learned too — it equals the number of
-//!   non-dummy rows after filtering. This is inherent to a padded-bound scheme: the
+//!   use the result): the true count IS learned, in BOTH output modes — it equals
+//!   the number of non-dummy rows after filtering. This is inherent to a padded-bound scheme: the
 //!   consumer of a result set learns its size. Hiding the count from the *recipient*
 //!   too is exactly the job of the DP cardinality mode (sq-shk5), which adds noise
 //!   + extra dummies on top of this transform; it is out of scope here.
@@ -115,9 +125,31 @@
 //!   encoding and does not say which candidate reached it. A caller-agreed public
 //!   width bound, failing closed above it, is a follow-up; this stage does not
 //!   have one.
-//! - Malicious security is unchanged from the Shamir layer: at `n = 2t + 1` the
-//!   degree-`t` opens have zero RS redundancy (research record §4.1 D×A; bead
-//!   sq-6d6g IT-MAC is the named fix). Semi-honest only.
+//! - Malicious security is unchanged from the Shamir layer. The opens themselves
+//!   carry the degree-`t` sharing's own RS redundancy: `n` points on a degree-`t`
+//!   polynomial leave `n - t - 1` redundant shares, which at `n = 2t + 1` is `t`,
+//!   so up to `⌊t/2⌋` corrupted shares are CORRECTED (at `n = 3`, `t = 1`, there is
+//!   no correction budget at all and the decoder is detect-only — see
+//!   [`crate::shamir::ShamirBackend::malicious_security`]). **Correcting is what
+//!   costs the detection claim.** This is bounded-distance decoding, so a
+//!   COORDINATED set of more than `⌊t/2⌋` corrupted shares can force a wrong
+//!   value: the received vector lands within the correction budget of a DIFFERENT
+//!   valid codeword and the open returns that codeword's value with no
+//!   [`MpcError::Tampered`] at all. At `n = 5`, `t = 2`, two parties adding the
+//!   evaluations of `δ(x) = (x - 4)(x - 5)` (`+12` at `x = 1`, `+6` at `x = 2`)
+//!   get back `s + δ(0) = s + 20`, unflagged; the test
+//!   `two_coordinated_share_errors_can_force_a_wrong_open_at_n5` pins it. So
+//!   unconditional detection of up to `t` corrupted shares holds for a DETECT-ONLY
+//!   decoder; with correction on, only INDEPENDENT errors are caught with the
+//!   overwhelming probability [`crate::robust`]'s residual miscorrection note
+//!   quantifies.
+//! - What has no verification at all is everything BEFORE the open: nothing checks
+//!   that a selector is a sharing of 0 or 1, that a select multiplication was
+//!   computed honestly, that a degree reduction re-shared the value it was handed,
+//!   or that the shuffle permuted anything. A deviation there produces a
+//!   well-formed degree-`t` sharing of a different value that no open can flag, so
+//!   the protocol stays **semi-honest only** (research record §4.1 D×A; bead
+//!   sq-6d6g IT-MAC is the named fix).
 //!
 //! ## Communication / round cost (MODELLED — counted, not measured)
 //!
@@ -342,10 +374,11 @@ pub struct ObliviousOutputCost {
     /// candidate encoding rounded up to whole limbs and is public to the parties
     /// (see the module's residual-leakage section).
     pub payload_select_mults: usize,
-    /// Degree-reduction rounds: one per SELECTED element — the slot tag and each
-    /// of its payload limbs — so `bound · (1 + limb_capacity)` in all. Each one is
-    /// a [`shamir::degree_reduce_through`] that costs `2t + 1` re-sharings through
-    /// the seam; they are independent, so they run in one round. Every selected
+    /// Degree reductions: one per SELECTED element — the slot tag and each of its
+    /// payload limbs — so `bound · (1 + limb_capacity)` in all. This counts the
+    /// REDUCTIONS, not rounds: each one is a [`shamir::degree_reduce_through`] that
+    /// costs `2t + 1` re-sharings through the seam, and they are independent, so
+    /// all of them run in ONE round. Every selected
     /// element is a product sharing, and a product sharing opened without
     /// re-randomisation reveals more than its value, so this is not optional work.
     pub degree_reductions: usize,
@@ -413,18 +446,31 @@ pub type ObliviousOutput = (Vec<OutputSlot>, ObliviousOutputCost);
 ///    tag and the payload agree on what the slot is.
 /// 4. **Oblivious-shuffle** the (tag, payload-limbs) entry together so output
 ///    position is independent of input position (substrate `shuffle`).
-/// 5. **Open exactly `B` tags** at degree `2t` (and the payload limbs, also at
-///    degree `2t`, in the same shuffled order); emit [`OutputSlot::Row`] where the
-///    tag is the real sentinel, [`OutputSlot::Dummy`] where it is `0`, and FAIL
-///    CLOSED on any other value.
+/// 5. **Open and classify all `B` tags FIRST**, then the payload limbs — every
+///    open at degree `t`, since every selected element is degree-reduced before
+///    the shuffle. A tag outside `{0, REAL_TAG}` FAILS CLOSED before a single
+///    limb of any slot is opened. Then each slot's limbs are opened in the same
+///    shuffled order, and a slot the tag called a dummy must carry the pad block
+///    EXACTLY — the comparison is on the opened limb VECTOR, not on the decoded
+///    row — or the call refuses. Decoding is strict. Emit [`OutputSlot::Row`]
+///    where the tag was the real sentinel and [`OutputSlot::Dummy`] where it was
+///    `0`.
+///
+/// ## Who opens, and what that reveals
+///
+/// On THIS path the opens are the compute parties': every compute party opens all
+/// `B` tags, so every one of them learns which slots are real and therefore the
+/// exact match count. That is unchanged behaviour, stated plainly. For the
+/// arrangement where the compute parties open nothing and one designated recipient
+/// reconstructs alone, use [`oblivious_set_output_to_recipient`].
 ///
 /// ## Fail-closed bound contract
 ///
 /// `B` must be `>= candidates.len()` so every candidate gets a slot — we NEVER
 /// silently truncate candidates (that could drop a true match and corrupt the
 /// result). A `B < candidates.len()` is a [`MpcError::Protocol`] error. (The
-/// caller sizes `B` from the public candidate count `|L|·|R|`, optionally padded;
-/// the true MATCH count stays hidden.)
+/// caller sizes `B` from the public candidate count `|L|·|R|`, optionally padded,
+/// so `B` never tracks the true MATCH count.)
 ///
 /// `B` must also be `<= `[`MAX_OUTPUT_BOUND`]. Both halves are checked **before any
 /// allocation or draw** — the stage materialises `B` slots, so the bound is
@@ -447,9 +493,12 @@ pub fn oblivious_set_output(
 }
 
 /// [`oblivious_set_output`] with every sharing and the shuffle drawn through
-/// `source` — the selector sharings, the real-tag sharings, the pure-dummy
-/// selectors, the payload-limb sharings and the oblivious shuffle itself, in that
-/// order.
+/// `source`, in this order: per candidate its selector sharing, its real-tag
+/// sharing and then the `2t + 1` re-sharings of the degree reduction that
+/// re-randomises its tag select; then the same triple for each pure-dummy padding
+/// slot; then, per slot and per packed limb, the limb sharing followed by the
+/// `2t + 1` re-sharings of that limb's reduction; and last the oblivious shuffle
+/// itself.
 ///
 /// Refuses a source whose `(n, t)` differs from `backend`'s
 /// ([`require_source_matches`]) **before any draw**, since every sharing is later
@@ -495,13 +544,212 @@ pub(crate) fn oblivious_set_output_through(
 ) -> Result<ObliviousOutput, MpcError> {
     let (decoded, cost) =
         oblivious_set_output_decoded_through(source, backend, candidates, payload_arity, bound)?;
-    // A slot whose tag is the dummy sentinel carries the dummy limb block (the
-    // per-limb select against the dummy encoding put it there — see
-    // `shuffle_with_payloads`), so its decode is the all-unbound row. We CHECK that
-    // rather than assume it: the tag and the payload must agree on what the slot
-    // is, and a disagreement is a refusal, not a quietly-emitted `Dummy`.
+    Ok((narrow_decoded_slots(decoded, payload_arity)?, cost))
+}
+
+/// The output stage's result as the compute parties leave it: the `B` slots'
+/// degree-`t` SHARINGS, addressed to one designated recipient, with nothing opened.
+///
+/// ## What this is for
+///
+/// On the all-party path ([`oblivious_set_output`]) every compute party opens the
+/// `B` slot tags, so every compute party learns which slots are real and therefore
+/// the exact match count. This type is the other arrangement: the compute parties
+/// run the whole stage — selectors, selects, degree reductions, the oblivious
+/// shuffle — and then **open nothing**. Each party sends its own share of each
+/// slot to the designated recipient, who reconstructs alone with
+/// [`Self::reconstruct`]. The compute parties' transcript contains no opened tag
+/// and no opened payload limb, so the match count is not in it.
+///
+/// ## Honest boundary: what this does and does not change
+///
+/// - The **recipient** learns exactly what the all-party path's recipient learned:
+///   the `B` slots, hence the true count. Hiding the count from the recipient too
+///   is the separate DP-cardinality mode (bead **sq-shk5**), not this.
+/// - This crate is an **in-process simulation**: one process plays every party, so
+///   "each party sends its share" is this one value carrying all `n` shares. A real
+///   deployment sends `n` messages, one per party, each holding only that party's
+///   share — the per-party split is a transport concern and there is no wire format
+///   for it yet, so it is recorded here rather than faked. Nothing in this type
+///   enforces that a party sent only its own share.
+/// - Honest-majority, **semi-honest only**, unchanged (external soundness sign-off
+///   is still pending, sq-qhy4). A recipient that reconstructs alone has no second
+///   opinion on the shares it was sent beyond the degree-`t` sharing's own RS
+///   redundancy, which is what [`crate::robust`] already gives the all-party path.
+/// - The [`std::fmt::Debug`] rendering is **redacting**: it prints the recipient,
+///   the bound and the payload arity, and no share values. A derived `Debug` would
+///   print every share this value carries, and a debug print is where
+///   secret-shared data escapes a type by accident — a log line, a panic message,
+///   an `assert_eq!` failure.
+#[derive(Clone)]
+pub struct RecipientOutputShares {
+    recipient: HolderId,
+    bound: usize,
+    payload_arity: usize,
+    threshold: usize,
+    /// Per slot: the tag sharing and its payload-limb sharings, in shuffled order.
+    slots: Vec<(Vec<Share>, Vec<Vec<Share>>)>,
+    /// The PUBLIC dummy limb block every slot was selected against. Public by
+    /// construction — it depends only on the payload arity — so carrying it to the
+    /// recipient reveals nothing about the rows.
+    dummy_block: Vec<Fp>,
+}
+
+/// Redacting: the public shape only, never a share value. See the type's docs.
+impl std::fmt::Debug for RecipientOutputShares {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RecipientOutputShares")
+            .field("recipient", &self.recipient)
+            .field("bound", &self.bound)
+            .field("payload_arity", &self.payload_arity)
+            .field("slots", &"<redacted>")
+            .finish_non_exhaustive()
+    }
+}
+
+impl RecipientOutputShares {
+    /// The holder the shares are addressed to.
+    pub fn recipient(&self) -> &HolderId {
+        &self.recipient
+    }
+
+    /// The public padded bound `B` — the number of slots carried.
+    pub fn bound(&self) -> usize {
+        self.bound
+    }
+
+    /// The payload arity the slots decode to.
+    pub fn payload_arity(&self) -> usize {
+        self.payload_arity
+    }
+
+    /// Reconstruct the `B` slots. **The recipient runs this; no compute party
+    /// does.**
+    ///
+    /// Applies exactly what the all-party path applies at step 5: all `B` tags are
+    /// opened and classified before any payload limb is opened, a tag outside
+    /// `{0, REAL_TAG}` is a [`MpcError::Tampered`] refusal, a dummy-tagged slot's
+    /// opened limb vector must equal the dummy block exactly, and decoding is
+    /// strict. Nothing is weakened by moving the open to one party.
+    pub fn reconstruct(&self) -> Result<Vec<OutputSlot>, MpcError> {
+        let tags: Vec<Vec<Share>> = self.slots.iter().map(|(t, _)| t.clone()).collect();
+        let limbs: Vec<Vec<Vec<Share>>> = self.slots.iter().map(|(_, l)| l.clone()).collect();
+        let decoded = open_and_decode_slots(
+            &tags,
+            &limbs,
+            &self.dummy_block,
+            self.payload_arity,
+            self.threshold,
+        )?;
+        narrow_decoded_slots(decoded, self.payload_arity)
+    }
+
+    /// [`Self::reconstruct`] assembled into a [`PartialResult`]: dummies filtered,
+    /// rows canonicalised, attributed to the `federation` holder — the same shape
+    /// [`oblivious_join_output`] returns on the all-party path.
+    ///
+    /// Fails closed ([`MpcError::Protocol`]) unless `out_vars.len()` equals the
+    /// [`Self::payload_arity`] the slots were built with, **before reconstructing
+    /// anything**. On the all-party path the arity cannot disagree because
+    /// [`oblivious_join_output`] DERIVES it from `out_vars`; here the arity was
+    /// fixed when the compute parties ran the stage, so a caller can hand in a
+    /// different variable list. Accepting one would return a `PartialResult` whose
+    /// `vars` and row widths disagree — a result the consumer would read with the
+    /// columns misaligned, or short.
+    pub fn reconstruct_partial_result(
+        &self,
+        out_vars: Vec<Variable>,
+    ) -> Result<PartialResult, MpcError> {
+        if out_vars.len() != self.payload_arity {
+            return Err(MpcError::Protocol(format!(
+                "RecipientOutputShares::reconstruct_partial_result: {} output variable(s) \
+                 for slots of payload arity {}; the variable list must match the arity the \
+                 compute parties packed",
+                out_vars.len(),
+                self.payload_arity
+            )));
+        }
+        Ok(partial_result_from_slots(self.reconstruct()?, out_vars))
+    }
+}
+
+/// **Recipient-only output reconstruction.** Runs the whole oblivious output stage
+/// and hands back the `B` slots' degree-`t` sharings WITHOUT opening anything, for
+/// the designated `recipient` to reconstruct alone
+/// ([`RecipientOutputShares::reconstruct`]).
+///
+/// This is [`oblivious_set_output`] with step 5 moved off the compute parties. The
+/// protocol up to and including the shuffle is byte-for-byte the same; what changes
+/// is who opens. The compute parties open nothing, so the reported
+/// [`ObliviousOutputCost::opens`] is `0` for this path — the `B` tag opens are the
+/// recipient's, not theirs — and the match count is not in their transcript.
+///
+/// Both paths ship: the all-party [`oblivious_set_output`] is what every in-crate
+/// operator calls today and is unchanged, and its docs say plainly that it reveals
+/// the match count to the compute parties. See [`RecipientOutputShares`] for the
+/// honest boundary — in particular that this crate is an in-process simulation, so
+/// the per-party message split is a transport concern that does not exist yet.
+pub fn oblivious_set_output_to_recipient(
+    backend: &ShamirBackend,
+    candidates: &[Candidate],
+    payload_arity: usize,
+    bound: usize,
+    recipient: HolderId,
+) -> Result<(RecipientOutputShares, ObliviousOutputCost), MpcError> {
+    oblivious_set_output_to_recipient_through(
+        &mut backend.dealer(),
+        backend,
+        candidates,
+        payload_arity,
+        bound,
+        recipient,
+    )
+}
+
+/// [`oblivious_set_output_to_recipient`] with every sharing and the shuffle drawn
+/// through a caller-supplied [`DistributedRandomness`] source, so one source covers
+/// an operator end to end (#6117 step 6).
+pub(crate) fn oblivious_set_output_to_recipient_through(
+    source: &mut dyn DistributedRandomness,
+    backend: &ShamirBackend,
+    candidates: &[Candidate],
+    payload_arity: usize,
+    bound: usize,
+    recipient: HolderId,
+) -> Result<(RecipientOutputShares, ObliviousOutputCost), MpcError> {
+    let (tags, limb_blocks, dummy_block, mut cost) =
+        output_stage_shuffled_through(source, backend, candidates, payload_arity, bound)?;
+    // The compute parties opened nothing: the `B` tag opens belong to the recipient.
+    cost.opens = 0;
+    Ok((
+        RecipientOutputShares {
+            recipient,
+            bound,
+            payload_arity,
+            threshold: backend.threshold(),
+            slots: tags.into_iter().zip(limb_blocks).collect(),
+            dummy_block,
+        },
+        cost,
+    ))
+}
+
+/// Narrow the opened slots to the public [`OutputSlot`] shape.
+///
+/// A slot whose tag is the dummy sentinel carries the dummy limb block (the
+/// per-limb select against the dummy encoding put it there — see
+/// `shuffle_with_payloads`), so its decode is the all-unbound row. We CHECK that
+/// rather than assume it: the tag and the payload must agree on what the slot is,
+/// and a disagreement is a refusal, not a quietly-emitted `Dummy`.
+///
+/// Shared by the all-party path and by the recipient's own reconstruction
+/// ([`RecipientOutputShares::reconstruct`]), so both apply the same refusal.
+fn narrow_decoded_slots(
+    decoded: Vec<DecodedSlot>,
+    payload_arity: usize,
+) -> Result<Vec<OutputSlot>, MpcError> {
     let dummy_row: PayloadRow = vec![None; payload_arity];
-    let mut out: Vec<OutputSlot> = Vec::with_capacity(bound);
+    let mut out: Vec<OutputSlot> = Vec::with_capacity(decoded.len());
     for (is_real, row) in decoded {
         if is_real {
             out.push(OutputSlot::Row(row));
@@ -517,7 +765,7 @@ pub(crate) fn oblivious_set_output_through(
             });
         }
     }
-    Ok((out, cost))
+    Ok(out)
 }
 
 /// One opened slot of the output stage before it is narrowed to an
@@ -552,7 +800,30 @@ fn oblivious_set_output_decoded_through(
 ) -> Result<(Vec<DecodedSlot>, ObliviousOutputCost), MpcError> {
     let (tags, limb_blocks, dummy_block, cost) =
         output_stage_shuffled_through(source, backend, candidates, payload_arity, bound)?;
-    let t = backend.threshold();
+    let decoded = open_and_decode_slots(
+        &tags,
+        &limb_blocks,
+        &dummy_block,
+        payload_arity,
+        backend.threshold(),
+    )?;
+    Ok((decoded, cost))
+}
+
+/// Open the `B` slots' sharings and decode them — the stage's step 5, as its own
+/// function because TWO parties may run it: every compute party on the all-party
+/// path, or the designated recipient alone on the recipient-only path
+/// ([`RecipientOutputShares::reconstruct`]). Whoever runs it applies the same
+/// classification, the same exact dummy-block comparison and the same strict
+/// decode.
+fn open_and_decode_slots(
+    tags: &[Vec<Share>],
+    limb_blocks: &[Vec<Vec<Share>>],
+    dummy_block: &[Fp],
+    payload_arity: usize,
+    t: usize,
+) -> Result<Vec<DecodedSlot>, MpcError> {
+    let bound = tags.len();
 
     // --- Step 5a: open ALL `B` tags at degree `t` and classify every slot, before
     // a single payload limb is opened. ---
@@ -568,8 +839,8 @@ fn oblivious_set_output_decoded_through(
     // Opening the limbs slot by slot as the tags were checked would have opened the
     // limbs of every slot ahead of the bad one before refusing.
     let mut classes: Vec<bool> = Vec::with_capacity(bound);
-    for tag_share in &tags {
-        let tag = shamir::reconstruct_degree(tag_share, t)?;
+    for tag_share in tags {
+        let tag = open_tag(tag_share, t)?;
         if tag == Fp::one() {
             classes.push(true);
         } else if tag == Fp::zero() {
@@ -597,7 +868,7 @@ fn oblivious_set_output_decoded_through(
     // than a quietly-emitted `Dummy`.
     let mut out: Vec<DecodedSlot> = Vec::with_capacity(bound);
     for (&is_real, limbs) in classes.iter().zip(limb_blocks) {
-        let values = open_limb_block(&limbs, t)?;
+        let values = open_limb_block(limbs, t)?;
         if !is_real && values != dummy_block {
             return Err(MpcError::Tampered {
                 detail: "oblivious_set_output: a slot tagged as a dummy did not carry the dummy \
@@ -610,7 +881,45 @@ fn oblivious_set_output_decoded_through(
         let bytes = limbs_to_bytes(&values)?;
         out.push((is_real, decode_payload_row(&bytes, payload_arity)?));
     }
-    Ok((out, cost))
+    Ok(out)
+}
+
+/// Open one slot's TAG at degree `t`.
+///
+/// Its own function so the test-only tally below can observe every tag open and a
+/// test can state that a path performed NONE — which is the whole point of the
+/// recipient-only path.
+fn open_tag(tag: &[Share], t: usize) -> Result<Fp, MpcError> {
+    #[cfg(test)]
+    tag_opens::bump();
+    shamir::reconstruct_degree(tag, t)
+}
+
+/// A test-only tally of slot-TAG opens, the same shape as [`limb_opens`]: the
+/// counter is `#[cfg(test)]` and write-only from [`open_tag`], so it observes the
+/// open and changes nothing about it.
+#[cfg(test)]
+pub(crate) mod tag_opens {
+    use std::cell::Cell;
+
+    thread_local! {
+        static OPENS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Record one tag open. Called by [`super::open_tag`].
+    pub(crate) fn bump() {
+        OPENS.with(|c| c.set(c.get() + 1));
+    }
+
+    /// Clear the tally for this thread.
+    pub(crate) fn reset() {
+        OPENS.with(|c| c.set(0));
+    }
+
+    /// The tally for this thread.
+    pub(crate) fn count() -> usize {
+        OPENS.with(|c| c.get())
+    }
 }
 
 /// Open one slot's payload-limb block: every limb at degree `t`, since every
@@ -1149,6 +1458,9 @@ fn shuffle_with_payloads(
         items: base_cost.items,
         switches: base_cost.switches.saturating_mul(entry_width),
         depth_rounds: base_cost.depth_rounds,
+        // The shuffle already counted one fresh sharing per packed ELEMENT, so
+        // this is its own count, not a widened one.
+        fresh_sharings: base_cost.fresh_sharings,
     };
 
     // Split each shuffled entry into (tag shares, limb shares...) and OPEN the
@@ -1390,6 +1702,343 @@ mod tests {
                 matched: MatchBit::Public(*m),
             })
             .collect()
+    }
+
+    // ---- Recipient-only output reconstruction -----------------------------
+
+    /// The fixture for the recipient-only tests: two matches and two non-matches
+    /// at a bound that also adds padding slots.
+    fn recipient_candidates() -> Vec<Candidate> {
+        public_candidates(&[
+            (true, vec![lit("kept-a")]),
+            (false, vec![lit("rejected-b")]),
+            (true, vec![lit("kept-c")]),
+            (false, vec![lit("rejected-d")]),
+        ])
+    }
+
+    /// **THE recipient-only guard.** The compute parties open NOTHING: running the
+    /// recipient-only path performs zero tag opens and zero payload-limb opens, so
+    /// no opened tag value — and therefore no match count — is in their view. The
+    /// `B` opens happen only when the RECIPIENT reconstructs.
+    ///
+    /// The all-party path is measured in the same test with the same counters, so
+    /// the comparison is between two real runs, not against a remembered number.
+    #[test]
+    fn the_compute_parties_open_nothing_on_the_recipient_only_path() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E01).unwrap();
+        let cands = recipient_candidates();
+
+        // The all-party path: every compute party opens every slot.
+        tag_opens::reset();
+        limb_opens::reset();
+        let (all_party, all_cost) = oblivious_set_output(&backend, &cands, 1, 6).unwrap();
+        let (all_tags, all_limbs) = (tag_opens::count(), limb_opens::count());
+        assert_eq!(all_tags, 6, "the all-party path opens one tag per slot");
+        assert!(all_limbs > 0, "the all-party path opens the payload limbs");
+        assert_eq!(all_cost.opens, 6);
+
+        // The recipient-only path: the compute phase opens nothing at all.
+        tag_opens::reset();
+        limb_opens::reset();
+        let (shares, cost) =
+            oblivious_set_output_to_recipient(&backend, &cands, 1, 6, HolderId::new("recipient"))
+                .unwrap();
+        assert_eq!(
+            (tag_opens::count(), limb_opens::count()),
+            (0, 0),
+            "the compute parties opened something on the recipient-only path"
+        );
+        assert_eq!(
+            cost.opens, 0,
+            "the reported opens must be the compute parties', and they made none"
+        );
+        assert_eq!(shares.bound(), 6);
+        assert_eq!(shares.payload_arity(), 1);
+        assert_eq!(shares.recipient(), &HolderId::new("recipient"));
+        // Every other modelled cost is the all-party path's: the protocol up to
+        // and including the shuffle is the same.
+        assert_eq!(
+            (
+                cost.bound,
+                cost.select_mults,
+                cost.payload_select_mults,
+                cost.degree_reductions,
+                cost.shuffle
+            ),
+            (
+                all_cost.bound,
+                all_cost.select_mults,
+                all_cost.payload_select_mults,
+                all_cost.degree_reductions,
+                all_cost.shuffle
+            )
+        );
+
+        // Now the RECIPIENT reconstructs, alone — and that is where the opens are.
+        let slots = shares.reconstruct().unwrap();
+        assert_eq!(
+            tag_opens::count(),
+            6,
+            "the recipient opens one tag per slot"
+        );
+        assert_eq!(limb_opens::count(), all_limbs);
+        // The same result the all-party path reveals: two real rows, the rest dummy.
+        assert_eq!(slots.len(), 6);
+        assert_eq!(
+            real_multiset(&slots),
+            vec![
+                format!("{:?}", vec![lit("kept-a")]),
+                format!("{:?}", vec![lit("kept-c")])
+            ]
+        );
+        assert_eq!(real_multiset(&slots), real_multiset(&all_party));
+    }
+
+    /// The shares handed to the recipient are not the match count in disguise: the
+    /// struct carries exactly `B` slots whatever the true count is, and the compute
+    /// parties' cost report is identical for two candidate sets with DIFFERENT true
+    /// counts.
+    #[test]
+    fn the_recipient_shares_carry_b_slots_whatever_the_true_count() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E02).unwrap();
+        let one = public_candidates(&[
+            (true, vec![lit("a")]),
+            (false, vec![lit("b")]),
+            (false, vec![lit("c")]),
+        ]);
+        let three = public_candidates(&[
+            (true, vec![lit("a")]),
+            (true, vec![lit("b")]),
+            (true, vec![lit("c")]),
+        ]);
+        let r = |c: &[Candidate]| {
+            oblivious_set_output_to_recipient(&backend, c, 1, 5, HolderId::new("recipient"))
+                .unwrap()
+        };
+        let (s1, c1) = r(&one);
+        let (s3, c3) = r(&three);
+        assert_eq!((s1.bound(), s3.bound()), (5, 5));
+        assert_eq!(c1, c3, "the compute parties' cost must not track the count");
+        // And the recipient, who may reconstruct, does see the difference.
+        assert_eq!(real_multiset(&s1.reconstruct().unwrap()).len(), 1);
+        assert_eq!(real_multiset(&s3.reconstruct().unwrap()).len(), 3);
+    }
+
+    /// The recipient's reconstruction is not a weaker open: it applies the same
+    /// refusals. A dummy-tagged slot whose limbs were tampered with after the
+    /// compute phase is refused, and the refusal comes from the recipient's own
+    /// check.
+    #[test]
+    fn the_recipients_reconstruction_refuses_a_tampered_dummy_slot() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E03).unwrap();
+        let cands = recipient_candidates();
+        let (mut shares, _) =
+            oblivious_set_output_to_recipient(&backend, &cands, 1, 6, HolderId::new("recipient"))
+                .unwrap();
+        shares.reconstruct().expect("the untouched shares decode");
+        // Find a dummy-tagged slot and move one of its limbs off the pad block.
+        let t = backend.threshold();
+        let k = shares
+            .slots
+            .iter()
+            .position(|(tag, _)| shamir::reconstruct_degree(tag, t).unwrap() == Fp::zero())
+            .expect("the fixture has dummy slots");
+        let bumped = shamir::add_constant(&shares.slots[k].1[0], Fp::one());
+        shares.slots[k].1[0] = bumped;
+        match shares.reconstruct() {
+            Err(MpcError::Tampered { detail, .. }) => assert!(
+                detail.contains("did not carry the dummy"),
+                "wrong refusal: {}",
+                detail
+            ),
+            other => panic!("the recipient must fail closed, got {:?}", other),
+        }
+    }
+
+    /// The recipient can take the result in `PartialResult` shape, which is what a
+    /// federated caller consumes — same rows as the all-party wrapper.
+    #[test]
+    fn the_recipient_can_reconstruct_a_partial_result() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E04).unwrap();
+        let cands = recipient_candidates();
+        let vars = vec![var("x")];
+        let (public, _) = oblivious_join_output(&backend, &cands, vars.clone(), 6).unwrap();
+        let (shares, _) =
+            oblivious_set_output_to_recipient(&backend, &cands, 1, 6, HolderId::new("recipient"))
+                .unwrap();
+        let mine = shares.reconstruct_partial_result(vars).unwrap();
+        assert_eq!(mine.rows, public.rows);
+        assert_eq!(mine.vars, public.vars);
+        assert_eq!(mine.holder, public.holder);
+    }
+
+    /// Corrupting payload-limb shares exercises the degree-`t` open's RS
+    /// redundancy, which is what pins the opens to degree `t`.
+    ///
+    /// At `n = 5`, `t = 2`, a degree-`t` sharing has `n - t - 1 = 2` redundant
+    /// shares, so Berlekamp–Welch CORRECTS one corrupted share and DETECTS two.
+    /// Both halves are asserted on the real path:
+    ///
+    /// - ONE corrupted share: the open corrects it and the revealed slots are
+    ///   byte-identical to the untouched run. That is the load-bearing half for the
+    ///   degree: opened at degree `2t = 4` the sharing would have `n - 2t - 1 = 0`
+    ///   redundant shares, the corrupted share would be absorbed into a DIFFERENT
+    ///   value, and the slots could not come back unchanged.
+    /// - TWO corrupted shares: past the correction budget, so the call refuses
+    ///   rather than emitting a slot built from a value nobody shared. **This half
+    ///   holds for the deltas used here, not for every pair of errors.** Two
+    ///   *coordinated* errors can instead land the vector within correcting
+    ///   distance of a different valid codeword, and the open then returns that
+    ///   codeword's value with no refusal at all —
+    ///   `two_coordinated_share_errors_can_force_a_wrong_open_at_n5` pins exactly
+    ///   that window.
+    #[test]
+    fn corrupted_limb_shares_are_corrected_then_refused_at_n5() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E05).unwrap();
+        assert_eq!(backend.threshold(), 2);
+        let cands = recipient_candidates();
+        let fresh = || {
+            oblivious_set_output_to_recipient(&backend, &cands, 1, 6, HolderId::new("recipient"))
+                .unwrap()
+                .0
+        };
+        let clean = fresh().reconstruct().expect("the untouched sharings open");
+
+        // One corrupted share: corrected, same result.
+        let mut one = fresh();
+        one.slots[0].1[0][2].y = one.slots[0].1[0][2].y.add(Fp::one());
+        assert_eq!(
+            one.reconstruct()
+                .expect("one corrupted share must be corrected"),
+            clean,
+            "the degree-t open must correct one corrupted share to the same value"
+        );
+
+        // Two corrupted shares: past the budget, so the call must fail closed.
+        let mut two = fresh();
+        two.slots[0].1[0][2].y = two.slots[0].1[0][2].y.add(Fp::one());
+        two.slots[0].1[0][3].y = two.slots[0].1[0][3].y.add(Fp::new(7));
+        match two.reconstruct() {
+            Err(MpcError::Tampered { .. }) | Err(MpcError::Protocol(_)) => {}
+            other => panic!("two corrupted limb shares must be refused, got {:?}", other),
+        }
+    }
+
+    /// A debug print of the recipient's shares must not put share values in a log
+    /// line or a panic message: the rendering carries the PUBLIC shape only.
+    #[test]
+    fn the_recipient_shares_debug_prints_no_share_values() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E07).unwrap();
+        let cands = recipient_candidates();
+        let (shares, _) =
+            oblivious_set_output_to_recipient(&backend, &cands, 1, 6, HolderId::new("recipient"))
+                .unwrap();
+        let rendered = format!("{:?}", shares);
+        assert!(
+            rendered.contains("recipient") && rendered.contains('6') && rendered.contains("1"),
+            "the public shape must still be there: {}",
+            rendered
+        );
+        for (tag, limbs) in &shares.slots {
+            for sh in tag.iter().chain(limbs.iter().flatten()) {
+                assert!(
+                    !rendered.contains(&sh.y.value().to_string()),
+                    "a share value reached the debug rendering: {}",
+                    rendered
+                );
+            }
+        }
+    }
+
+    /// **A documented LIMITATION, not a guarantee.** The opens decode with
+    /// correction, and bounded-distance decoding has a miscorrection window: a
+    /// coordinated set of errors larger than the correctable budget can place the
+    /// received vector within that budget of a DIFFERENT valid codeword, which the
+    /// open then returns as a wrong value with no [`MpcError::Tampered`].
+    ///
+    /// The concrete instance at `n = 5`, `t = 2`: two parties, at `x = 1` and
+    /// `x = 2`, add the evaluations of `δ(x) = (x - 4)(x - 5)`, i.e. `+12` and
+    /// `+6`. The received vector then agrees with the valid degree-`2` codeword
+    /// `f + δ` at four of the five points, so it is one correction away from it and
+    /// the open hands back `f(0) + δ(0) = s + 20` — a value nobody shared, flagged
+    /// as nothing. Two corrupted shares out of five is within the DETECTION budget
+    /// (`t = 2`), so this is the cost of correcting at all; detection of up to `t`
+    /// errors is unconditional only in a detect-only decoder.
+    ///
+    /// Asserting `Ok(wrong)` is the point: it is what makes the module doc's
+    /// qualification of the RS claim load-bearing rather than prose. If a future
+    /// decoder change (detect-only, or verified opens — bead sq-6d6g) closes this
+    /// window, this test goes red and is the place to record that it did.
+    #[test]
+    fn two_coordinated_share_errors_can_force_a_wrong_open_at_n5() {
+        let t = 2usize;
+        let (s, a, b) = (Fp::new(1_234_567), Fp::new(77), Fp::new(9));
+        let f = |x: Fp| s.add(a.mul(x)).add(b.mul(x.mul(x)));
+        let honest: Vec<Share> = (1..=5u64)
+            .map(|x| Share {
+                x,
+                y: f(Fp::new(x)),
+            })
+            .collect();
+        assert_eq!(
+            shamir::reconstruct_degree(&honest, t).unwrap(),
+            s,
+            "the honest sharing must open to the secret"
+        );
+
+        // delta(x) = (x - 4)(x - 5): delta(1) = 12, delta(2) = 6, delta(0) = 20.
+        let mut forged = honest.clone();
+        forged[0].y = forged[0].y.add(Fp::new(12));
+        forged[1].y = forged[1].y.add(Fp::new(6));
+        let got = shamir::reconstruct_degree(&forged, t)
+            .expect("the miscorrection window: this open does NOT refuse");
+        assert_eq!(
+            got,
+            s.add(Fp::new(20)),
+            "the open must return the other codeword's value, s + delta(0)"
+        );
+        assert_ne!(got, s, "and that value is not the secret");
+    }
+
+    /// A variable list that does not match the slots' payload arity is refused
+    /// before anything is reconstructed — a `PartialResult` whose `vars` and row
+    /// widths disagree would be read with its columns misaligned.
+    #[test]
+    fn reconstruct_partial_result_refuses_a_mismatched_output_arity() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E06).unwrap();
+        let cands = recipient_candidates();
+        let (shares, _) =
+            oblivious_set_output_to_recipient(&backend, &cands, 1, 6, HolderId::new("recipient"))
+                .unwrap();
+        assert_eq!(shares.payload_arity(), 1);
+        for vars in [vec![], vec![var("x"), var("y")]] {
+            tag_opens::reset();
+            let wanted = vars.len();
+            match shares.reconstruct_partial_result(vars) {
+                Err(MpcError::Protocol(m)) => {
+                    assert!(
+                        m.contains("payload arity") && m.contains(&wanted.to_string()),
+                        "wrong refusal: {}",
+                        m
+                    );
+                    assert_eq!(
+                        tag_opens::count(),
+                        0,
+                        "the refusal must land before anything is reconstructed"
+                    );
+                }
+                other => panic!("must fail closed for {} var(s), got {:?}", wanted, other),
+            }
+        }
+        // The matching arity still works.
+        assert_eq!(
+            shares
+                .reconstruct_partial_result(vec![var("x")])
+                .unwrap()
+                .vars,
+            vec![var("x")]
+        );
     }
 
     /// The real (non-dummy) rows of an output, as an order-independent multiset.
@@ -2377,7 +3026,8 @@ mod tests {
             let recovered = pad.add(x_coeff(&h_limb).mul(x_coeff(&h_tag).inv()));
             assert_eq!(
                 recovered, limb,
-                "the recovery formula must work on an unreduced product sharing —                  otherwise the assertions below prove nothing"
+                "the recovery formula must work on an unreduced product sharing \
+                 — otherwise the assertions below prove nothing"
             );
         }
         // The real path: 64 trials, the same formula, never the rejected row.
@@ -2662,9 +3312,9 @@ mod output_randomness_seam_tests {
     use super::*;
     use crate::prss::PrssRandomness;
     use crate::randomness::test_sources::{
-        fingerprint, MalformedShuffleSource, MalformedSource, MisreportedThresholdSource,
-        RecordingSource, SeamMethod, ALL_MALFORMATIONS, ALL_SHUFFLE_MALFORMATIONS,
-        SHUFFLE_SHAPE_REFUSAL,
+        fingerprint, prefix_before_first_shuffle, MalformedShuffleSource, MalformedSource,
+        MisreportedThresholdSource, RecordingSource, SeamMethod, ALL_MALFORMATIONS,
+        ALL_SHUFFLE_MALFORMATIONS, SHUFFLE_SHAPE_REFUSAL,
     };
 
     /// The refusal [`crate::randomness::require_source_matches`] raises.
@@ -2757,7 +3407,7 @@ mod output_randomness_seam_tests {
         // One degree reduction per selected element: the tag plus its two limbs,
         // over five slots.
         assert_eq!(cost.degree_reductions, 15);
-        assert_eq!(dealer.draw_fp().value(), 1078180862379801218);
+        assert_eq!(dealer.draw_fp().value(), 898054212019563094);
 
         // The public entry point mints its own dealer from the same seeded
         // backend, so it reproduces the same run.
@@ -2790,7 +3440,14 @@ mod output_randomness_seam_tests {
             ]
             .concat()
         );
-        assert_eq!(fingerprint(&rec.log), 0xbc3b_153a_661c_8597);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x7879_d28b_d1c8_0440
+        );
+        assert_eq!(fingerprint(&rec.log), 0x10b2_92a3_6547_7e25);
     }
 
     /// Every sharing the output stage draws — selector, real tag, pure-dummy
@@ -2961,7 +3618,14 @@ mod output_randomness_seam_tests {
         // is pinned equal to its pre-change value; the full-log fingerprint is the
         // new pin.
         assert_eq!(fingerprint(&rec.log[..4293]), 0x94ae_8e7b_302d_0377);
-        assert_eq!(fingerprint(&rec.log), 0x784e_bacd_9c30_b830);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x0946_3640_b70d_c468
+        );
+        assert_eq!(fingerprint(&rec.log), 0x5fe0_5647_7c3b_9594);
         let tail: Vec<&str> = rec.log[4293..].iter().map(|(m, _)| *m).collect();
         assert_eq!(
             tail,

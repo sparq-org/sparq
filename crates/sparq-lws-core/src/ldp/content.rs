@@ -89,6 +89,36 @@ pub fn classify(content_type: Option<&str>) -> Result<RdfFormat, ServerError> {
     }
 }
 
+/// The RDF format a document stored as `content_type` is read and patched in: Turtle, JSON-LD,
+/// N-Triples or N-Quads by its media type (case-insensitive, parameters ignored); `None` for any
+/// other type. One classification serves every PATCH, whether it parses what is stored or only
+/// appends to it.
+pub fn stored_format(content_type: &str) -> Option<RdfFormat> {
+    let essence = content_type.split(';').next().unwrap_or("").trim();
+    [
+        RdfFormat::Turtle,
+        RdfFormat::JsonLd,
+        RdfFormat::NTriples,
+        RdfFormat::NQuads,
+    ]
+    .into_iter()
+    .find(|f| essence.eq_ignore_ascii_case(f.media_type()))
+}
+
+/// The named-graph statements of an N-Quads document, as N-Quads lines. A PATCH changes a
+/// document's default graph only, so these are kept as they are when it is rewritten.
+pub fn named_graph_nquads(body: &[u8]) -> Result<Vec<u8>, ServerError> {
+    let mut ser = NQuadsSerializer::new().for_writer(Vec::new());
+    for quad in NQuadsParser::new().for_slice(body) {
+        let q = quad.map_err(|e| ServerError::BadRequest(format!("invalid N-Quads: {e}")))?;
+        if q.graph_name != oxrdf::GraphName::DefaultGraph {
+            ser.serialize_quad(&q)
+                .map_err(|e| ServerError::Storage(format!("n-quads serialise: {e}")))?;
+        }
+    }
+    Ok(ser.finish())
+}
+
 /// Validate that `body` parses as RDF in `format`, returning the number of triples/quads parsed.
 ///
 /// `base_iri` is the resource's own IRI: per the LDP/RDF convention a server resolves relative IRIs

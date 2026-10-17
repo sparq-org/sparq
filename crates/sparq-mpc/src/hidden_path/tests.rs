@@ -703,7 +703,9 @@ fn rejected_two_hop_pairs_payloads_open_to_the_dummy_encoding() {
 /// suffix. The full-log fingerprint is the new pin.
 #[test]
 fn seeded_exact_k_stage_transcript_is_pinned() {
-    use crate::randomness::test_sources::{fingerprint, RecordingSource};
+    use crate::randomness::test_sources::{
+        fingerprint, prefix_before_first_shuffle, RecordingSource,
+    };
     let backend = ShamirBackend::new_seeded(3, 0x9A7B).unwrap();
     let (edges, _) = hidden_edges(&PIN_EDGES);
     let mut rec = RecordingSource::new(backend.dealer());
@@ -712,7 +714,14 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
     // Prefix unchanged from the pre-routing pin; the whole move is in the output
     // suffix, which grew by the per-element degree reductions.
     assert_eq!(fingerprint(&rec.log[..1920]), 0x1013_9382_581b_a7e3);
-    assert_eq!(fingerprint(&rec.log), 0x896e_88fa_cc9f_51f3);
+    // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+    // fingerprint is the value the pre-re-randomisation code produced, so only
+    // the shuffle's own output and the draws after it moved.
+    assert_eq!(
+        fingerprint(prefix_before_first_shuffle(&rec.log)),
+        0x57c8_25d3_c07f_3fe9
+    );
+    assert_eq!(fingerprint(&rec.log), 0x33fc_792d_1e0b_566a);
     let suffix: Vec<&str> = rec.log[1920..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,

@@ -68,11 +68,15 @@
 //!
 //! - **Hidden:** every intermediate node key `z_i` (never reconstructed); every
 //!   per-hop and per-pair match bit (secret-shared, never opened); the realized
-//!   chain that connected a pair (the OR-fold collapses multiplicity); the true
-//!   result cardinality beyond the public `B` (L1 bounded to `B`).
+//!   chain that connected a pair (the OR-fold collapses multiplicity).
 //! - **Disclosed:** the public bound `k`; the public candidate-tuple count `|E|^k`
 //!   (standard MPC assumption); the endpoint TERMS of the matched pairs (the result
-//!   the recipient asked for); the public padded bound `B`.
+//!   the recipient asked for); the public padded bound `B`. The true result
+//!   cardinality is bounded by `B`, and whether it is also disclosed depends on the
+//!   output mode: this stage uses the ALL-PARTY mode, where every compute party
+//!   opens the `B` tags and therefore learns the exact count; the recipient-only
+//!   mode ([`crate::oblivious_join::oblivious_set_output_to_recipient`]) keeps it out
+//!   of the compute parties' transcripts.
 //!
 //! ## Security tier (HONESTY — privacy-claims gate, cite sq-qhy4)
 //!

@@ -210,6 +210,45 @@ pub fn parse_n3_patch(body: &[u8], base_iri: &str) -> Result<N3Patch, ServerErro
     })
 }
 
+/// The N-Triples text an unconditional, insert-only `patch` appends to a Turtle document: one
+/// statement a line. Appending it, on a line of its own, to a well-formed Turtle document gives a
+/// well-formed document whose graph is the union, without parsing what is stored: every blank
+/// node the patch inserts (a SPARQL `INSERT DATA` may hold them, triple terms included) is given
+/// a fresh random label, so none can meet a label the document uses. `None` for any other patch.
+pub fn appended_ntriples(patch: &N3Patch) -> Option<Result<String, ServerError>> {
+    if !patch.conditions.is_empty() || !patch.deletes.is_empty() {
+        return None;
+    }
+    Some(
+        instantiate_all(&patch.inserts, &Binding::default()).map(|inserts| {
+            let mut fresh = HashMap::new();
+            let mut text = String::new();
+            for t in inserts {
+                text.push_str(&relabeled(&t, &mut fresh).to_string());
+                text.push_str(" .\n");
+            }
+            text
+        }),
+    )
+}
+
+/// `t` with each blank node in it, triple terms included, replaced by the fresh one `fresh` holds
+/// for its label (made on first use).
+fn relabeled(t: &Triple, fresh: &mut HashMap<oxrdf::BlankNode, oxrdf::BlankNode>) -> Triple {
+    let subject = match &t.subject {
+        NamedOrBlankNode::BlankNode(b) => {
+            NamedOrBlankNode::BlankNode(fresh.entry(b.clone()).or_default().clone())
+        }
+        other => other.clone(),
+    };
+    let object = match &t.object {
+        Term::BlankNode(b) => Term::BlankNode(fresh.entry(b.clone()).or_default().clone()),
+        Term::Triple(inner) => Term::Triple(Box::new(relabeled(inner, fresh))),
+        other => other.clone(),
+    };
+    Triple::new(subject, t.predicate.clone(), object)
+}
+
 /// Apply a parsed patch to the target's existing triples, returning the new triple set.
 ///
 /// Semantics (Solid-Protocol-aligned):
@@ -625,6 +664,7 @@ pub fn parse_sparql_update(body: &[u8], base_iri: &str) -> Result<N3Patch, Serve
 
     let mut inserts: Vec<PatTriple> = Vec::new();
     let mut deletes: Vec<PatTriple> = Vec::new();
+    let mut fresh = HashMap::new();
     let mut saw_any = false;
     // Collected SPARQL prologue declarations, translated to Turtle so the `oxttl` parser of each DATA
     // group sees the prefixes. A SPARQL `PREFIX p: <iri>` becomes Turtle `@prefix p: <iri> .`; a
@@ -718,7 +758,11 @@ pub fn parse_sparql_update(body: &[u8], base_iri: &str) -> Result<N3Patch, Serve
         let group = &text[group_start..group_start + close_rel];
         // Parse the group as Turtle WITH the collected prologue prepended (so prefixed names resolve).
         let with_prologue = format!("{prologue}{group}");
-        let triples = parse_to_concrete_triples(&with_prologue, base_iri)?;
+        let triples = parse_to_concrete_triples(
+            &with_prologue,
+            base_iri,
+            (!is_delete).then_some(&mut fresh),
+        )?;
         if is_delete {
             deletes.extend(triples);
         } else {
@@ -742,8 +786,14 @@ pub fn parse_sparql_update(body: &[u8], base_iri: &str) -> Result<N3Patch, Serve
 }
 
 /// Parse a Turtle triple block into concrete (variable-free) [`PatTriple`]s, resolving relative IRIs
-/// against `base_iri`. Used by the SPARQL-Update `INSERT/DELETE DATA` path.
-fn parse_to_concrete_triples(group: &str, base_iri: &str) -> Result<Vec<PatTriple>, ServerError> {
+/// against `base_iri`. Used by the SPARQL-Update `INSERT/DELETE DATA` path. With `fresh`, each
+/// blank node (triple terms included) becomes a new one, one per label across the request, so an
+/// inserted blank node never merges with one the target document holds.
+fn parse_to_concrete_triples(
+    group: &str,
+    base_iri: &str,
+    mut fresh: Option<&mut HashMap<oxrdf::BlankNode, oxrdf::BlankNode>>,
+) -> Result<Vec<PatTriple>, ServerError> {
     use oxttl::TurtleParser;
     let parser = TurtleParser::new()
         .with_base_iri(base_iri)
@@ -753,6 +803,10 @@ fn parse_to_concrete_triples(group: &str, base_iri: &str) -> Result<Vec<PatTripl
         let t = t.map_err(|e| {
             ServerError::UnprocessablePatch(format!("invalid SPARQL-Update DATA triple: {e}"))
         })?;
+        let t = match fresh.as_deref_mut() {
+            Some(fresh) => relabeled(&t, fresh),
+            None => t,
+        };
         // A DATA block holds GROUND triples; every term is carried through as a concrete
         // [`PatTerm::Term`] (the apply engine treats these as ground, with the empty binding). The
         // containment scenarios use only IRIs/literals.
@@ -1461,5 +1515,98 @@ mod tests {
             }
             other => panic!("expected UnprocessablePatch, got {other:?}"),
         }
+    }
+
+    /// The appended text joins the stored document's graph: the union, whatever prefixes, base
+    /// and final comment the document has.
+    #[test]
+    fn an_appended_insert_is_the_union() {
+        use crate::ldp::content::{parse_to_triples, RdfFormat};
+        let base = "https://pod.example/doc";
+        let stored = "@prefix ex: <https://e.example/> .\n@base <https://other.example/> .\n\
+<#a> ex:p \"x\"@en . # no newline after this comment";
+        let patch = parse_n3_patch(
+            b"@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <#b> <https://e.example/q> \"v\\n\" , 3 . }.",
+            base,
+        )
+        .unwrap();
+        let text = appended_ntriples(&patch).unwrap().unwrap();
+        let mut body = stored.as_bytes().to_vec();
+        body.push(b'\n');
+        body.extend_from_slice(text.as_bytes());
+        let mut got = parse_to_triples(RdfFormat::Turtle, &body, base).unwrap();
+        let mut want = parse_to_triples(RdfFormat::Turtle, stored.as_bytes(), base).unwrap();
+        want.extend(apply_patch(&[], &patch).unwrap());
+        let key = |t: &Triple| t.to_string();
+        got.sort_by_key(key);
+        want.sort_by_key(key);
+        assert_eq!(got, want);
+        // A blank node an INSERT DATA holds stays apart from one the document labels alike.
+        let stored = "_:b1 <https://e.example/p> \"old\" .";
+        let patch_b = parse_sparql_update(
+            b"INSERT DATA { _:b1 <https://e.example/p> \"new\" . }",
+            base,
+        )
+        .unwrap();
+        let text = appended_ntriples(&patch_b).unwrap().unwrap();
+        assert!(!text.contains("_:b1 "), "{text}");
+        let body = format!("{stored}\n{text}");
+        let got = parse_to_triples(RdfFormat::Turtle, body.as_bytes(), base).unwrap();
+        assert_eq!(got.len(), 2);
+        assert_ne!(got[0].subject, got[1].subject);
+        // N-Triples and N-Quads documents take the same lines, into the default graph.
+        for stored in [
+            "<https://e.example/a> <https://e.example/p> \"x\" .",
+            "<https://e.example/a> <https://e.example/p> \"x\" <https://e.example/g> .",
+        ] {
+            let body = format!("{stored}\n{text}");
+            let quads: Vec<_> = oxttl::NQuadsParser::new()
+                .for_slice(body.as_bytes())
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert_eq!(quads.len(), 2, "{body}");
+            assert!(quads[1].graph_name.is_default_graph());
+            if !stored.contains("/g>") {
+                let triples: Vec<_> = oxttl::NTriplesParser::new()
+                    .for_slice(body.as_bytes())
+                    .collect::<Result<_, _>>()
+                    .unwrap();
+                assert_eq!(triples.len(), 2, "{body}");
+            }
+        }
+        // A reader's patch inserts them fresh too, one node per label across the request.
+        let two = parse_sparql_update(
+            b"INSERT DATA { _:b1 <https://e.example/p> \"a\" . } ; \
+              INSERT DATA { _:b1 <https://e.example/p> \"b\" . }",
+            base,
+        )
+        .unwrap();
+        let stored_b1 = Triple::new(
+            oxrdf::BlankNode::new("b1").unwrap(),
+            oxrdf::NamedNode::new("https://e.example/p").unwrap(),
+            oxrdf::Literal::new_simple_literal("old"),
+        );
+        let got = apply_patch(std::slice::from_ref(&stored_b1), &two).unwrap();
+        assert_eq!(got.len(), 3);
+        assert_eq!(got[1].subject, got[2].subject);
+        assert_ne!(got[0].subject, got[1].subject);
+        // Inside a triple term too, one label stays one fresh node.
+        let b1 = oxrdf::BlankNode::new("b1").unwrap();
+        let p = oxrdf::NamedNode::new("https://e.example/p").unwrap();
+        let inner = Triple::new(b1.clone(), p.clone(), Term::from(b1.clone()));
+        let outer = Triple::new(b1.clone(), p, Term::Triple(Box::new(inner)));
+        let got = relabeled(&outer, &mut HashMap::new());
+        let Term::Triple(got_inner) = &got.object else {
+            panic!("{got}")
+        };
+        assert!(!got.to_string().contains("_:b1 "), "{got}");
+        assert_eq!(got.subject, got_inner.subject);
+        assert_eq!(Term::from(got.subject.clone()), got_inner.object);
+        let deleting = N3Patch {
+            deletes: patch.inserts.clone(),
+            ..patch
+        };
+        assert!(appended_ntriples(&deleting).is_none());
     }
 }
