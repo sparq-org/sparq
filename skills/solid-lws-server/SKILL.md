@@ -108,10 +108,13 @@ must grant the requested `acl:Read`, `acl:Write`, `acl:Append`, or
 `acl:Control` mode. An N3 `PATCH` with a `solid:where` or `solid:deletes` reads the target, so
 it needs `acl:Read` too (`acl:Control` for an `.acl`). A `PUT`'s or `PATCH`'s response carries
 the new `ETag` only to a writer that may read the target. An insert-only `PATCH` by a writer
-without `acl:Read` appends the statements as text to a stored Turtle document without parsing
-it, so whether it succeeds does not depend on what is stored; any other stored type (JSON-LD,
-N-Triples, ...) is refused to it as a write without access is. The stored bytes are still read
-and rewritten whole, so the time an append takes follows their size. Deleting a container also needs `acl:Read` on it
+without `acl:Read` appends the statements as N-Triples lines to a stored Turtle, N-Triples or
+N-Quads document without parsing it, so whether it succeeds does not depend on what is stored;
+any other stored type (JSON-LD, ...) is refused to it as a write without access is. The stored
+bytes are still read and rewritten whole, so the time an append takes follows their size. A
+reader's `PATCH` reads the document by the same stored type, keeps that type, and leaves an
+N-Quads document's named graphs as stored: a `PATCH` changes the default graph. Blank nodes a
+`PATCH` inserts are always new ones. Deleting a container also needs `acl:Read` on it
 (whether it may go depends on what it holds). A `POST` names its member
 with the slug and a random suffix, so the name says nothing of what else was created.
 
