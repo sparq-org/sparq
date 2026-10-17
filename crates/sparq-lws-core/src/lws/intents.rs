@@ -300,11 +300,15 @@ pub(crate) async fn recover<S: Store + 'static>(
         Ok(held) => {
             for (holder, meta) in held.iter().filter(|(h, _)| h.starts_with(&container)) {
                 if matches!(store.exists(holder).await, Ok(false)) {
-                    let _ = store.release(meta, holder, None).await;
+                    let _ = store.release(meta, holder).await;
                 }
             }
         }
         Err(e) => eprintln!("lws: the holds a stop left could not be listed: {e}"),
+    }
+    // Reclaims a stop cut short, finished (best effort too: their bytes are named by no record).
+    if let Err(e) = store.finish_reclaims().await {
+        eprintln!("lws: the reclaims a stop left could not be finished: {e}");
     }
     // Kept changes: their containers are touched and the intents go once they are. While a
     // change is still being put back in the background it could restore a container's metadata

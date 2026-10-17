@@ -185,6 +185,30 @@ pub trait SparqClient: Send + Sync {
     /// Whether the resource is indexed (the authoritative existence check — never an S3 HEAD).
     async fn exists(&self, iri: &str) -> Result<bool, SparqError>;
 
+    /// Name the bytes under `blob_key` as being reclaimed, in one atomic step that also finds no
+    /// record naming them as its bytes (a resource's, or a hold's): `Ok(false)`, with nothing
+    /// named, when one does. Keys are minted per write and only a record already naming them
+    /// (a hold's, by its holder) can bring a record back to them, so once named no record ever
+    /// names them again and they may be deleted; then [`end_reclaim`](Self::end_reclaim). A
+    /// reclaim cut short is found again with [`reclaiming`](Self::reclaiming).
+    ///
+    /// The DEFAULT never names any (the bytes are left to the orphan sweep).
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        let _ = blob_key;
+        Ok(false)
+    }
+
+    /// Stop naming `blob_key` as being reclaimed ([`begin_reclaim`](Self::begin_reclaim)).
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        let _ = blob_key;
+        Ok(())
+    }
+
+    /// Every blob key named as being reclaimed.
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        Ok(Vec::new())
+    }
+
     /// Remove a resource's metadata record. Idempotent: deleting an absent IRI is `Ok(())` (the
     /// caller's existence check governs the 404, so this is a no-op-on-absent at the index layer).
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError>;
@@ -401,6 +425,8 @@ struct Index {
     meta: Meta,
     /// container IRI → its direct children, kept in insertion order (a `Vec`, de-duplicated).
     children: HashMap<String, Vec<String>>,
+    /// The blob keys named as being reclaimed ([`SparqClient::begin_reclaim`]).
+    reclaiming: std::collections::BTreeSet<String>,
 }
 
 impl InMemorySparqClient {
@@ -503,6 +529,35 @@ impl SparqClient for InMemorySparqClient {
             .lock()
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         Ok(guard.meta.contains_key(iri))
+    }
+
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        if guard.meta.values().any(|m| m.blob_key == blob_key) {
+            return Ok(false);
+        }
+        guard.reclaiming.insert(blob_key.to_string());
+        Ok(true)
+    }
+
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        guard.reclaiming.remove(blob_key);
+        Ok(())
+    }
+
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        let guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        Ok(guard.reclaiming.iter().cloned().collect())
     }
 
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {

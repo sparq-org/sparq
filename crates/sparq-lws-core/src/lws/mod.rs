@@ -1265,8 +1265,8 @@ pub(crate) async fn release_holds<S: Store>(
     holder: &str,
     holds: &[(String, StoredMeta)],
 ) {
-    for (iri, meta) in holds {
-        let _ = store.release(meta, holder, Some(iri)).await;
+    for (_, meta) in holds {
+        let _ = store.release(meta, holder).await;
     }
 }
 
@@ -3163,16 +3163,14 @@ pub(crate) mod test_store {
             }
             self.inner.reinstate(iri, container, held).await
         }
-        async fn release(
-            &self,
-            held: &ResourceMeta,
-            holder: &str,
-            iri: Option<&str>,
-        ) -> ServerResult<()> {
-            self.inner.release(held, holder, iri).await
+        async fn release(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
+            self.inner.release(held, holder).await
         }
         async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
             self.inner.holds().await
+        }
+        async fn finish_reclaims(&self) -> ServerResult<()> {
+            self.inner.finish_reclaims().await
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
             self.step()?;

@@ -1061,6 +1061,12 @@ impl SparqClient for StaleOnceSparq {
     async fn referenced_blob_keys(&self) -> Result<std::collections::HashSet<String>, SparqError> {
         self.inner.referenced_blob_keys().await
     }
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        self.inner.begin_reclaim(blob_key).await
+    }
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        self.inner.end_reclaim(blob_key).await
+    }
 }
 
 type StaleSlot = Arc<std::sync::Mutex<Option<ResourceMeta>>>;

@@ -58,6 +58,18 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.exists(iri).await
     }
 
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        self.0.begin_reclaim(blob_key).await
+    }
+
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        self.0.end_reclaim(blob_key).await
+    }
+
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        self.0.reclaiming().await
+    }
+
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
         self.0.delete_meta(iri).await
     }

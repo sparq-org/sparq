@@ -221,17 +221,16 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.reinstate(iri, container, held).await
     }
 
-    async fn release(
-        &self,
-        held: &ResourceMeta,
-        holder: &str,
-        iri: Option<&str>,
-    ) -> ServerResult<()> {
-        self.inner.release(held, holder, iri).await
+    async fn release(&self, held: &ResourceMeta, holder: &str) -> ServerResult<()> {
+        self.inner.release(held, holder).await
     }
 
     async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
         self.inner.holds().await
+    }
+
+    async fn finish_reclaims(&self) -> ServerResult<()> {
+        self.inner.finish_reclaims().await
     }
 
     async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {

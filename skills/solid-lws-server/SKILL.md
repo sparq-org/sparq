@@ -551,17 +551,22 @@ What the server exposes, all discoverable from the storage description
   `409` before anything is removed. Nothing is copied to put a resource back: the store holds
   the bytes its record points at (a hold, itself stored, so a stop leaves nothing unaccounted
   for) and the record is put back pointing at them, validators included. Each change's holds are
-  its own (two changes holding the same bytes each release only theirs), and bytes are reclaimed
-  only once the index shows no hold on them, whichever server instance took it. The holds go once
-  the change is kept or put back, and a start releases any of this storage's holds whose change's
-  intent is gone (their bytes are then the orphan sweep's); the holds of a kept change whose
-  release was cut short last until its intent goes and the next start. Hold records (a few fixed
-  fields per resource a change touches) are not counted against the storage's quota; intents are,
-  so in a storage at its ceiling a change that needs one is refused with `507`. So no delete is refused for the size of what is
-  stored, and none answers `507` for want of room to copy it. Residual: what bounds a recursive
-  delete (`409`) is how many resources it removes and the size of their metadata (types, links
-  and linkset, which it reads to decide who may act on them while the delete is in flight),
-  never their content. When putting back fails too, it is tried a few more times with the
+  its own (two changes holding the same bytes each release only theirs). Bytes a record leaves are
+  reclaimed in two steps through the index, whichever server instance acts: they are first named
+  as being reclaimed, in one step that also finds no record naming them (a resource's, or a
+  hold's), so none can come to name them again; only then are they deleted (a reclaim a stop cut
+  short is finished at the next start). The holds go once the change is kept or put back, and a
+  start releases any of this storage's holds whose change's intent is gone. So no delete is
+  refused for the size of what is stored, and none answers `507` for want of room to copy it.
+  Residuals: what bounds a recursive delete (`409`) is how many resources it removes and the size
+  of their metadata (types, links and linkset, which it reads to decide who may act on them while
+  the delete is in flight), never their content; hold records (a few fixed fields per resource a
+  change touches) are not counted against the storage's quota, but intents are (each carries the
+  metadata records it would put back), so in a storage at its ceiling a change that needs one is
+  refused with `507`; a store that fails may fail the change (`5xx`, below) whatever was asked;
+  and the holds of a kept change whose release was cut short last until the next start. A start
+  settles every intent of its storage and releases holds as if no other process served it: one
+  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
