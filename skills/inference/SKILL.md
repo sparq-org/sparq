@@ -752,7 +752,12 @@ Axioms are compared by the terms they name (each check may use its own `Dict`; a
 individual by its blank-node label); the profile check and clausification always run, and a
 refused or undecided version keeps the kept answer. The automaton construction is bounded
 (`MAX_AUTOMATON_STATES` states, `MAX_AUTOMATON_DEPTH` nested non-simple properties); a
-hierarchy past either is `OutOfFragment`. The decided fragment is SROIQ(D) without the top and bottom properties: regular
+hierarchy past either is `OutOfFragment`. The decided fragment is SROIQ(D) with the built-in properties: `owl:bottomObjectProperty` and
+`owl:bottomDataProperty` relate nothing (a restriction on them is `⊤` or `⊥`, a sub-property of them is empty),
+and `owl:topObjectProperty` `U` is encoded through a fresh role `W` and one fresh anonymous nominal `{o}` with
+`⊤ ⊑ ∃W.{o}`, so `∃U.C` / `∀U.C` become `∃W.({o} ⊓ ∃W⁻.C)` / `∃W.({o} ⊓ ∀W⁻.C)`; every element then reaches that
+nominal, so an ontology using `U` in a restriction is classified with the ABox and more often answers
+`Unconfirmed` (OWL 2 DL admits `owl:topDataProperty` only as a super-property, where it says nothing). Regular
 property chains (`owl:propertyChainAxiom`, transitivity; each non-simple property gets an
 automaton over the property words that imply it, and `∀R.C` follows its states), nominals
 (`ObjectOneOf`, `ObjectHasValue`; a node labelled `{a}` is merged into `a`'s node, and with
