@@ -58,9 +58,15 @@
 //!   [`oblivious_join_output`] from a candidate whose match bit was decided by a
 //!   **public / disclosed-key** equi-join (computed OUTSIDE the crypto core,
 //!   convention #4). The bit is public so we lift it to a trivial sharing with NO
-//!   secure comparison; the transform then hides, from the parties, *which*
-//!   candidates matched and the exact count (only `B` is revealed). This is fully
-//!   sound and shippable now.
+//!   secure comparison; the transform then hides *which* candidates matched —
+//!   output position is independent of input position and a dummy slot is
+//!   indistinguishable from a non-match. **What it reveals depends on the output
+//!   mode:** on the all-party path ([`oblivious_set_output`] /
+//!   [`oblivious_join_output`]) the tags are opened by every compute party, so
+//!   each of them also learns the exact count; on the recipient-only path
+//!   ([`oblivious_set_output_to_recipient`]) the compute parties open nothing and
+//!   the count reaches the designated recipient alone. Either way the revealed
+//!   OUTPUT SIZE is `B`. This is fully sound and shippable now.
 //!
 //! ### sq-xhaw — the HIDDEN-key match bit is now REALISED (gate landed)
 //!
@@ -93,12 +99,14 @@
 //!   the shuffle destroyed position→candidate linkage, and a dummy slot's opened
 //!   payload is the pad whether it came from a non-match or from padding. So L2 is
 //!   destroyed and L1 is bounded to `B` in the OUTPUT SIZE, but the count itself is
-//!   in the transcript. Revealing the tags only to the authorized recipient — a
-//!   reconstruction the compute parties cannot read — is a later change, not this
-//!   stage's behaviour.
+//!   in the transcript. **That is the ALL-PARTY output mode.** The recipient-only
+//!   mode ([`oblivious_set_output_to_recipient`]) runs the identical protocol and
+//!   then has the compute parties open NOTHING, so no opened tag and no count is in
+//!   their transcript; the designated recipient reconstructs alone. Which mode a
+//!   caller is in decides which of these two bullets applies to it.
 //! - **To the authorized RESULT RECIPIENT** (who must filter the tagged dummies to
-//!   use the result): the true count IS learned too — it equals the number of
-//!   non-dummy rows after filtering. This is inherent to a padded-bound scheme: the
+//!   use the result): the true count IS learned, in BOTH output modes — it equals
+//!   the number of non-dummy rows after filtering. This is inherent to a padded-bound scheme: the
 //!   consumer of a result set learns its size. Hiding the count from the *recipient*
 //!   too is exactly the job of the DP cardinality mode (sq-shk5), which adds noise
 //!   + extra dummies on top of this transform; it is out of scope here.
@@ -120,16 +128,28 @@
 //! - Malicious security is unchanged from the Shamir layer. The opens themselves
 //!   carry the degree-`t` sharing's own RS redundancy: `n` points on a degree-`t`
 //!   polynomial leave `n - t - 1` redundant shares, which at `n = 2t + 1` is `t`,
-//!   so up to `t` corrupted shares are DETECTED and up to `⌊t/2⌋` are corrected
-//!   (at `n = 3`, `t = 1`, that is detect-only — see
-//!   [`crate::shamir::ShamirBackend::malicious_security`]). What has no
-//!   verification is everything BEFORE the open: nothing checks that a selector is
-//!   a sharing of 0 or 1, that a select multiplication was computed honestly, that
-//!   a degree reduction re-shared the value it was handed, or that the shuffle
-//!   permuted anything. A deviation there produces a well-formed degree-`t`
-//!   sharing of a different value that the open cannot flag, so the protocol stays
-//!   **semi-honest only** (research record §4.1 D×A; bead sq-6d6g IT-MAC is the
-//!   named fix).
+//!   so up to `⌊t/2⌋` corrupted shares are CORRECTED (at `n = 3`, `t = 1`, there is
+//!   no correction budget at all and the decoder is detect-only — see
+//!   [`crate::shamir::ShamirBackend::malicious_security`]). **Correcting is what
+//!   costs the detection claim.** This is bounded-distance decoding, so a
+//!   COORDINATED set of more than `⌊t/2⌋` corrupted shares can force a wrong
+//!   value: the received vector lands within the correction budget of a DIFFERENT
+//!   valid codeword and the open returns that codeword's value with no
+//!   [`MpcError::Tampered`] at all. At `n = 5`, `t = 2`, two parties adding the
+//!   evaluations of `δ(x) = (x - 4)(x - 5)` (`+12` at `x = 1`, `+6` at `x = 2`)
+//!   get back `s + δ(0) = s + 20`, unflagged; the test
+//!   `two_coordinated_share_errors_can_force_a_wrong_open_at_n5` pins it. So
+//!   unconditional detection of up to `t` corrupted shares holds for a DETECT-ONLY
+//!   decoder; with correction on, only INDEPENDENT errors are caught with the
+//!   overwhelming probability [`crate::robust`]'s residual miscorrection note
+//!   quantifies.
+//! - What has no verification at all is everything BEFORE the open: nothing checks
+//!   that a selector is a sharing of 0 or 1, that a select multiplication was
+//!   computed honestly, that a degree reduction re-shared the value it was handed,
+//!   or that the shuffle permuted anything. A deviation there produces a
+//!   well-formed degree-`t` sharing of a different value that no open can flag, so
+//!   the protocol stays **semi-honest only** (research record §4.1 D×A; bead
+//!   sq-6d6g IT-MAC is the named fix).
 //!
 //! ## Communication / round cost (MODELLED — counted, not measured)
 //!
@@ -452,7 +472,12 @@ pub(crate) fn oblivious_set_output_through(
 ///   is still pending, sq-qhy4). A recipient that reconstructs alone has no second
 ///   opinion on the shares it was sent beyond the degree-`t` sharing's own RS
 ///   redundancy, which is what [`crate::robust`] already gives the all-party path.
-#[derive(Debug, Clone)]
+/// - The [`std::fmt::Debug`] rendering is **redacting**: it prints the recipient,
+///   the bound and the payload arity, and no share values. A derived `Debug` would
+///   print every share this value carries, and a debug print is where
+///   secret-shared data escapes a type by accident — a log line, a panic message,
+///   an `assert_eq!` failure.
+#[derive(Clone)]
 pub struct RecipientOutputShares {
     recipient: HolderId,
     bound: usize,
@@ -464,6 +489,18 @@ pub struct RecipientOutputShares {
     /// construction — it depends only on the payload arity — so carrying it to the
     /// recipient reveals nothing about the rows.
     dummy_block: Vec<Fp>,
+}
+
+/// Redacting: the public shape only, never a share value. See the type's docs.
+impl std::fmt::Debug for RecipientOutputShares {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RecipientOutputShares")
+            .field("recipient", &self.recipient)
+            .field("bound", &self.bound)
+            .field("payload_arity", &self.payload_arity)
+            .field("slots", &"<redacted>")
+            .finish_non_exhaustive()
+    }
 }
 
 impl RecipientOutputShares {
@@ -506,10 +543,28 @@ impl RecipientOutputShares {
     /// [`Self::reconstruct`] assembled into a [`PartialResult`]: dummies filtered,
     /// rows canonicalised, attributed to the `federation` holder — the same shape
     /// [`oblivious_join_output`] returns on the all-party path.
+    ///
+    /// Fails closed ([`MpcError::Protocol`]) unless `out_vars.len()` equals the
+    /// [`Self::payload_arity`] the slots were built with, **before reconstructing
+    /// anything**. On the all-party path the arity cannot disagree because
+    /// [`oblivious_join_output`] DERIVES it from `out_vars`; here the arity was
+    /// fixed when the compute parties ran the stage, so a caller can hand in a
+    /// different variable list. Accepting one would return a `PartialResult` whose
+    /// `vars` and row widths disagree — a result the consumer would read with the
+    /// columns misaligned, or short.
     pub fn reconstruct_partial_result(
         &self,
         out_vars: Vec<Variable>,
     ) -> Result<PartialResult, MpcError> {
+        if out_vars.len() != self.payload_arity {
+            return Err(MpcError::Protocol(format!(
+                "RecipientOutputShares::reconstruct_partial_result: {} output variable(s) \
+                 for slots of payload arity {}; the variable list must match the arity the \
+                 compute parties packed",
+                out_vars.len(),
+                self.payload_arity
+            )));
+        }
         Ok(partial_result_from_slots(self.reconstruct()?, out_vars))
     }
 }
@@ -1725,7 +1780,13 @@ mod tests {
     ///   redundant shares, the corrupted share would be absorbed into a DIFFERENT
     ///   value, and the slots could not come back unchanged.
     /// - TWO corrupted shares: past the correction budget, so the call refuses
-    ///   rather than emitting a slot built from a value nobody shared.
+    ///   rather than emitting a slot built from a value nobody shared. **This half
+    ///   holds for the deltas used here, not for every pair of errors.** Two
+    ///   *coordinated* errors can instead land the vector within correcting
+    ///   distance of a different valid codeword, and the open then returns that
+    ///   codeword's value with no refusal at all —
+    ///   `two_coordinated_share_errors_can_force_a_wrong_open_at_n5` pins exactly
+    ///   that window.
     #[test]
     fn corrupted_limb_shares_are_corrected_then_refused_at_n5() {
         let backend = ShamirBackend::new_seeded(5, 0x8E05).unwrap();
@@ -1756,6 +1817,122 @@ mod tests {
             Err(MpcError::Tampered { .. }) | Err(MpcError::Protocol(_)) => {}
             other => panic!("two corrupted limb shares must be refused, got {:?}", other),
         }
+    }
+
+    /// A debug print of the recipient's shares must not put share values in a log
+    /// line or a panic message: the rendering carries the PUBLIC shape only.
+    #[test]
+    fn the_recipient_shares_debug_prints_no_share_values() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E07).unwrap();
+        let cands = recipient_candidates();
+        let (shares, _) =
+            oblivious_set_output_to_recipient(&backend, &cands, 1, 6, HolderId::new("recipient"))
+                .unwrap();
+        let rendered = format!("{:?}", shares);
+        assert!(
+            rendered.contains("recipient") && rendered.contains('6') && rendered.contains("1"),
+            "the public shape must still be there: {}",
+            rendered
+        );
+        for (tag, limbs) in &shares.slots {
+            for sh in tag.iter().chain(limbs.iter().flatten()) {
+                assert!(
+                    !rendered.contains(&sh.y.value().to_string()),
+                    "a share value reached the debug rendering: {}",
+                    rendered
+                );
+            }
+        }
+    }
+
+    /// **A documented LIMITATION, not a guarantee.** The opens decode with
+    /// correction, and bounded-distance decoding has a miscorrection window: a
+    /// coordinated set of errors larger than the correctable budget can place the
+    /// received vector within that budget of a DIFFERENT valid codeword, which the
+    /// open then returns as a wrong value with no [`MpcError::Tampered`].
+    ///
+    /// The concrete instance at `n = 5`, `t = 2`: two parties, at `x = 1` and
+    /// `x = 2`, add the evaluations of `δ(x) = (x - 4)(x - 5)`, i.e. `+12` and
+    /// `+6`. The received vector then agrees with the valid degree-`2` codeword
+    /// `f + δ` at four of the five points, so it is one correction away from it and
+    /// the open hands back `f(0) + δ(0) = s + 20` — a value nobody shared, flagged
+    /// as nothing. Two corrupted shares out of five is within the DETECTION budget
+    /// (`t = 2`), so this is the cost of correcting at all; detection of up to `t`
+    /// errors is unconditional only in a detect-only decoder.
+    ///
+    /// Asserting `Ok(wrong)` is the point: it is what makes the module doc's
+    /// qualification of the RS claim load-bearing rather than prose. If a future
+    /// decoder change (detect-only, or verified opens — bead sq-6d6g) closes this
+    /// window, this test goes red and is the place to record that it did.
+    #[test]
+    fn two_coordinated_share_errors_can_force_a_wrong_open_at_n5() {
+        let t = 2usize;
+        let (s, a, b) = (Fp::new(1_234_567), Fp::new(77), Fp::new(9));
+        let f = |x: Fp| s.add(a.mul(x)).add(b.mul(x.mul(x)));
+        let honest: Vec<Share> = (1..=5u64)
+            .map(|x| Share {
+                x,
+                y: f(Fp::new(x)),
+            })
+            .collect();
+        assert_eq!(
+            shamir::reconstruct_degree(&honest, t).unwrap(),
+            s,
+            "the honest sharing must open to the secret"
+        );
+
+        // delta(x) = (x - 4)(x - 5): delta(1) = 12, delta(2) = 6, delta(0) = 20.
+        let mut forged = honest.clone();
+        forged[0].y = forged[0].y.add(Fp::new(12));
+        forged[1].y = forged[1].y.add(Fp::new(6));
+        let got = shamir::reconstruct_degree(&forged, t)
+            .expect("the miscorrection window: this open does NOT refuse");
+        assert_eq!(
+            got,
+            s.add(Fp::new(20)),
+            "the open must return the other codeword's value, s + delta(0)"
+        );
+        assert_ne!(got, s, "and that value is not the secret");
+    }
+
+    /// A variable list that does not match the slots' payload arity is refused
+    /// before anything is reconstructed — a `PartialResult` whose `vars` and row
+    /// widths disagree would be read with its columns misaligned.
+    #[test]
+    fn reconstruct_partial_result_refuses_a_mismatched_output_arity() {
+        let backend = ShamirBackend::new_seeded(5, 0x8E06).unwrap();
+        let cands = recipient_candidates();
+        let (shares, _) =
+            oblivious_set_output_to_recipient(&backend, &cands, 1, 6, HolderId::new("recipient"))
+                .unwrap();
+        assert_eq!(shares.payload_arity(), 1);
+        for vars in [vec![], vec![var("x"), var("y")]] {
+            tag_opens::reset();
+            let wanted = vars.len();
+            match shares.reconstruct_partial_result(vars) {
+                Err(MpcError::Protocol(m)) => {
+                    assert!(
+                        m.contains("payload arity") && m.contains(&wanted.to_string()),
+                        "wrong refusal: {}",
+                        m
+                    );
+                    assert_eq!(
+                        tag_opens::count(),
+                        0,
+                        "the refusal must land before anything is reconstructed"
+                    );
+                }
+                other => panic!("must fail closed for {} var(s), got {:?}", wanted, other),
+            }
+        }
+        // The matching arity still works.
+        assert_eq!(
+            shares
+                .reconstruct_partial_result(vec![var("x")])
+                .unwrap()
+                .vars,
+            vec![var("x")]
+        );
     }
 
     /// The real (non-dummy) rows of an output, as an order-independent multiset.
