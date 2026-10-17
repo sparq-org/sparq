@@ -430,8 +430,7 @@ impl Subs {
     }
 
     /// How many subscriptions `subscriber` holds, expired ones included: the size of its index
-    /// entry, so no record
-    /// (its own or anyone else's) is read to count them.
+    /// entry, so no record (its own or anyone else's) is read to count them.
     fn count_of(&self, subscriber: Option<&str>) -> usize {
         self.by_subscriber
             .get(&subscriber.map(str::to_string))
