@@ -3212,12 +3212,39 @@ fn reflexive_and_key_axioms_on_the_built_in_properties() {
             "{DECL} :d a owl:DatatypeProperty . :a a :C ; :d 1 . :b a :C ; :d 1 . :a owl:differentFrom :b . {body}"
         ))
     };
-    assert_eq!(c(&format!("{U} a owl:ReflexiveProperty .")), Consistency::Consistent);
-    assert_eq!(c(&format!("{NONE} a owl:ReflexiveProperty .")), Consistency::Inconsistent);
-    assert_eq!(c(&format!(":C owl:hasKey ( {NONE} ) .")), Consistency::Consistent);
+    assert_eq!(
+        c(&format!("{U} a owl:ReflexiveProperty .")),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        c(&format!("{NONE} a owl:ReflexiveProperty .")),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":C owl:hasKey ( {NONE} ) .")),
+        Consistency::Consistent
+    );
     assert_eq!(
         c(":C owl:hasKey ( owl:bottomDataProperty :d ) ."),
         Consistency::Consistent
     );
     assert_eq!(c(":C owl:hasKey ( :d ) ."), Consistency::Inconsistent);
+}
+
+/// A class named only inside an expression on a bottom property, which the translation
+/// drops, is still classified: with `⊤ ⊑ C1` (the top property's domain), `C0 ⊑ C1`.
+/// HermiT lists it for the first three; the OWL API does not read the undeclared `:C0` in
+/// a domain axiom as a class, so it leaves the last two out of its signature.
+#[test]
+fn classes_under_a_bottom_property_are_classified() {
+    for body in [
+        format!(":C1 rdfs:subClassOf {} .", all(NONE, ":C0")),
+        format!("{} rdfs:subClassOf :C2 .", some(NONE, ":C0")),
+        format!(":C0 owl:hasKey ( {NONE} ) ."),
+        format!("{NONE} rdfs:domain :C0 ."),
+        "owl:bottomDataProperty rdfs:domain :C0 .".to_string(),
+    ] {
+        let body = format!(":C1 a owl:Class . :C2 a owl:Class . {U} rdfs:domain :C1 . {body}");
+        assert!(entails_sub(&body, "C0", "C1"), "{body}");
+    }
 }

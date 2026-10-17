@@ -495,6 +495,27 @@ impl Builder<'_> {
         a
     }
 
+    /// Gives every class `c` names an atom, for an expression the translation drops (one
+    /// on a bottom property): the classes are still classified.
+    fn name_classes(&mut self, c: &ClassExpression) {
+        use ClassExpression as C;
+        match c {
+            C::Class(id) => {
+                if *id != self.v.thing && *id != self.v.nothing {
+                    self.class(*id);
+                }
+            }
+            C::IntersectionOf(cs) | C::UnionOf(cs) => cs.iter().for_each(|c| self.name_classes(c)),
+            C::ComplementOf(c)
+            | C::SomeValuesFrom(_, c)
+            | C::AllValuesFrom(_, c)
+            | C::MinCardinality(_, _, c)
+            | C::MaxCardinality(_, _, c)
+            | C::ExactCardinality(_, _, c) => self.name_classes(c),
+            _ => {}
+        }
+    }
+
     fn role(&mut self, p: &ObjectProperty) -> Result<Role, Unsupported> {
         let id = p.named();
         if id == self.v.top_object_property || id == self.v.bottom_object_property {
@@ -1093,8 +1114,11 @@ impl Builder<'_> {
                 let c = self.nnf(c, true)?;
                 self.gci(c);
             }
-            Axiom::ObjectPropertyDomain(p, _) | Axiom::ObjectPropertyRange(p, _)
-                if self.extreme(p) == Some(Extreme::Bottom) => {}
+            Axiom::ObjectPropertyDomain(p, c) | Axiom::ObjectPropertyRange(p, c)
+                if self.extreme(p) == Some(Extreme::Bottom) =>
+            {
+                self.name_classes(c);
+            }
             Axiom::ObjectPropertyDomain(p, c) => {
                 let r = self.role(p)?;
                 let c = self.nnf(c, true)?;
@@ -1216,9 +1240,12 @@ impl Builder<'_> {
                 ]));
             }
             // No individual has a value on a bottom property: the key identifies nothing.
-            Axiom::HasKey(_, ps, ds)
+            Axiom::HasKey(c, ps, ds)
                 if ps.iter().any(|p| self.extreme(p) == Some(Extreme::Bottom))
-                    || ds.contains(&self.v.bottom_data_property) => {}
+                    || ds.contains(&self.v.bottom_data_property) =>
+            {
+                self.name_classes(c);
+            }
             Axiom::HasKey(c, ps, ds) => {
                 let roles = ps
                     .iter()
@@ -1279,9 +1306,10 @@ impl Builder<'_> {
                 }
             }
             // The bottom data property relates nothing.
-            Axiom::DataPropertyDomain(d, _)
-            | Axiom::DataPropertyRange(d, _)
-            | Axiom::FunctionalDataProperty(d)
+            Axiom::DataPropertyDomain(d, c) if *d == self.v.bottom_data_property => {
+                self.name_classes(c);
+            }
+            Axiom::DataPropertyRange(d, _) | Axiom::FunctionalDataProperty(d)
                 if *d == self.v.bottom_data_property => {}
             Axiom::DataPropertyAssertion(d, a, _)
             | Axiom::NegativeDataPropertyAssertion(d, a, _)
@@ -1381,12 +1409,15 @@ impl Builder<'_> {
                     .collect::<Result<_, _>>()?,
             ),
             C::ComplementOf(c) => return self.nnf(c, !positive),
-            C::SomeValuesFrom(p, _) | C::HasValue(p, _)
-                if self.extreme(p) == Some(Extreme::Bottom) =>
-            {
+            C::HasValue(p, _) if self.extreme(p) == Some(Extreme::Bottom) => Nnf::Bottom,
+            C::SomeValuesFrom(p, f) if self.extreme(p) == Some(Extreme::Bottom) => {
+                self.name_classes(f);
                 Nnf::Bottom
             }
-            C::AllValuesFrom(p, _) if self.extreme(p) == Some(Extreme::Bottom) => Nnf::Top,
+            C::AllValuesFrom(p, f) if self.extreme(p) == Some(Extreme::Bottom) => {
+                self.name_classes(f);
+                Nnf::Top
+            }
             // Every individual is a value of the top property.
             C::HasValue(p, _) if self.extreme(p) == Some(Extreme::Top) => Nnf::Top,
             C::SomeValuesFrom(p, f) if self.extreme(p) == Some(Extreme::Top) => {
