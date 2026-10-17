@@ -298,7 +298,7 @@ pub struct Subscription {
     /// when the subscription goes, and a delivery that finishes later finds nothing to count.
     #[serde(skip)]
     pub failures: u32,
-    /// Whether it has been seen expired, in memory only (see [`Subscription::expired`]).
+    /// Whether it has been seen expired, in memory only (see `Subscription::expired`).
     #[serde(skip)]
     pub lapsed: Lapsed,
 }
