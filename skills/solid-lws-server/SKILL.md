@@ -554,9 +554,10 @@ What the server exposes, all discoverable from the storage description
   its own (two changes holding the same bytes each release only theirs), and bytes are reclaimed
   only once the index shows no hold on them, whichever server instance took it. The holds go once
   the change is kept or put back, and a start releases any of this storage's holds whose change's
-  intent is gone (their bytes are then the orphan sweep's). Residual: hold records and intents are
-  a few fixed fields per resource a change touches and are not counted against the storage's
-  quota. So no delete is refused for the size of what is
+  intent is gone (their bytes are then the orphan sweep's); the holds of a kept change whose
+  release was cut short last until its intent goes and the next start. Hold records (a few fixed
+  fields per resource a change touches) are not counted against the storage's quota; intents are,
+  so in a storage at its ceiling a change that needs one is refused with `507`. So no delete is refused for the size of what is
   stored, and none answers `507` for want of room to copy it. Residual: what bounds a recursive
   delete (`409`) is how many resources it removes and the size of their metadata (types, links
   and linkset, which it reads to decide who may act on them while the delete is in flight),

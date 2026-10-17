@@ -770,6 +770,11 @@ mod tests {
         *store.fail_restore_of.lock().unwrap() = Some(d.clone());
         let st = restart(&store).await;
         assert!(st.is_untouched(&root), "the touch waits");
+        // The change set aside still needs what it held: the start's sweep leaves it.
+        assert!(
+            !st.store.holds().await.unwrap().is_empty(),
+            "its holds went"
+        );
         assert_eq!(st.resource_meta(&root).await.unwrap().version, dated);
         *store.fail_restore_of.lock().unwrap() = None;
         until(&st, "no touch owed", |st| {

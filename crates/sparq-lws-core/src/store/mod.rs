@@ -252,7 +252,8 @@ pub trait Store: Send + Sync {
 
     /// Every hold that stands ([`hold`](Store::hold)), whichever storage's: its holder, and what
     /// it holds (its blob key), so a process that starts over the store can release those of its
-    /// own that nothing needs any longer.
+    /// own that nothing needs any longer. The container of a key no hold is left on (a release
+    /// cut short between its two steps) is removed as it is found.
     async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
         Err(ServerError::Storage(
             "this store cannot hold a record's bytes".into(),
@@ -532,11 +533,17 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
     /// they are held cannot be read, they stay, for the orphan sweep (which keeps held bytes too:
     /// a hold's record references them).
     async fn reclaim_blob(&self, key: &str) {
-        if self.holds_locally(key) || !matches!(self.sparq.exists(&held_dir(key)).await, Ok(false))
-        {
-            return;
+        if !self.held(key).await {
+            let _ = self.blob.delete(key).await;
         }
-        let _ = self.blob.delete(key).await;
+    }
+
+    /// Whether a hold stands on the bytes under `key`, through any instance; `true` when the
+    /// index cannot say. (A key's container left empty by a cut-short release reads as held
+    /// until a start removes it ([`Store::holds`]); it names no bytes, so the orphan sweep
+    /// collects them meanwhile.)
+    async fn held(&self, key: &str) -> bool {
+        self.holds_locally(key) || !matches!(self.sparq.exists(&held_dir(key)).await, Ok(false))
     }
 
     /// Whether a hold taken through this instance on the bytes under `key` stands.
@@ -584,7 +591,8 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
             // it meanwhile): created, under the holds' container, created first if need be.
             match self
                 .sparq
-                .create_child(HELD_CONTAINER, &dir, record(key, ""))
+                // It names no bytes: only its records keep them from the orphan sweep.
+                .create_child(HELD_CONTAINER, &dir, record("", ""))
                 .await
             {
                 Ok(()) => {}
@@ -997,16 +1005,26 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         holder: &str,
         iri: Option<&str>,
     ) -> ServerResult<()> {
-        self.withdraw_hold(&held.blob_key, holder).await?;
+        // Uncounted whatever the withdrawal's outcome: a record left behind still holds them,
+        // through the index.
+        let withdrawn = self.withdraw_hold(&held.blob_key, holder).await;
         self.count_hold(&held.blob_key, false);
+        withdrawn?;
         let Some(iri) = iri else {
             return Ok(());
         };
         // No record but `iri`'s can point at them: keys are minted per write, and only `iri`'s
-        // record is ever put back on them. Another hold on them keeps them (`reclaim_blob`).
+        // record is ever put back on them, by a holder while its hold stands. So whether another
+        // hold stands is asked first, and the record read after: a holder that put the record
+        // back and released meanwhile is seen pointing at them.
+        if self.held(&held.blob_key).await {
+            return Ok(());
+        }
         match self.sparq.get_meta(iri).await {
             Ok(now) if now.blob_key == held.blob_key => {}
-            Ok(_) | Err(SparqError::NotFound) => self.reclaim_blob(&held.blob_key).await,
+            Ok(_) | Err(SparqError::NotFound) => {
+                let _ = self.blob.delete(&held.blob_key).await;
+            }
             Err(_) => {}
         }
         Ok(())
@@ -1022,7 +1040,16 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         };
         let mut held = Vec::new();
         for dir in list(HELD_CONTAINER.to_string()).await? {
-            for record in list(dir).await? {
+            let records = list(dir.clone()).await?;
+            if records.is_empty() {
+                // Left by a release or a publication cut short: removed (best effort) while
+                // still empty, as a hold published meanwhile recreates it.
+                let _ = self
+                    .sparq
+                    .delete_meta_if_empty(&dir, Some(HELD_CONTAINER))
+                    .await;
+            }
+            for record in records {
                 match self.sparq.get_meta(&record).await {
                     Ok(mut meta) => {
                         let holder = std::mem::take(&mut meta.etag);
@@ -1322,6 +1349,42 @@ mod tests {
         assert_eq!(&store.read(x).await.unwrap().body[..], b"three");
     }
 
+    /// A release cut short after its record went leaves the key's container: it names no bytes
+    /// (so the orphan sweep may collect them), and a start's listing of the holds removes it.
+    #[tokio::test]
+    async fn a_holds_container_left_behind_names_no_bytes_and_goes_at_start() {
+        let store = S::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        let x = "https://pod.example/x";
+        store
+            .write(x, Bytes::from_static(b"one"), "text/plain")
+            .await
+            .unwrap();
+        let held = store.hold(x, "urn:me").await.unwrap().expect("held");
+        // Only the record is withdrawn: the process stops before the container goes.
+        store
+            .sparq
+            .delete_meta_if_empty(
+                &held_record(&held.blob_key, "urn:me"),
+                Some(&held_dir(&held.blob_key)),
+            )
+            .await
+            .unwrap();
+        store.count_hold(&held.blob_key, false);
+        store
+            .write(x, Bytes::from_static(b"two"), "text/plain")
+            .await
+            .unwrap();
+        assert!(store.sparq.exists(&held_dir(&held.blob_key)).await.unwrap());
+        assert!(!store
+            .sparq
+            .referenced_blob_keys()
+            .await
+            .unwrap()
+            .contains(&held.blob_key));
+        assert!(store.holds().await.unwrap().is_empty());
+        assert!(!store.sparq.exists(&held_dir(&held.blob_key)).await.unwrap());
+    }
+
     /// Two holders of the same bytes each hold them: the first to release, however late, never
     /// ends the other's hold, and the bytes go only once both have.
     #[tokio::test]
@@ -1339,6 +1402,18 @@ mod tests {
         store.delete_container_if_empty(x, Some(c)).await.unwrap();
         // The earlier holder's release comes late, after the record went.
         store.release(&a, "urn:a", Some(x)).await.unwrap();
+        let holds: Vec<(String, String)> = store
+            .holds()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(holder, h)| (holder, h.blob_key))
+            .collect();
+        assert_eq!(
+            holds,
+            [("urn:b".to_string(), b.blob_key.clone())],
+            "b's record went"
+        );
         assert!(
             store.blob.exists(&b.blob_key).await.unwrap(),
             "b's hold ended"
