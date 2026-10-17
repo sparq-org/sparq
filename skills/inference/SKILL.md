@@ -800,8 +800,9 @@ implied by a chain or a transitive sub-property) is `OutOfFragment`: the values 
 Still out of the fragment, as
 `Unknown(OutOfFragment { construct, source })`: a hierarchy the automaton construction finds
 irregular or too large (`MAX_AUTOMATON_STATES`; the profile check reports irregular ones as
-`NotInDl` first), the top and bottom object and data properties
-in axioms (except `SubDataPropertyOf(D owl:topDataProperty)`), datatypes outside the map
+`NotInDl` first), a property above `owl:topObjectProperty`, the top object property in a
+chain body, equivalent or inverse to an ordinary property, or in a key, `owl:topDataProperty`
+anywhere but as a super-property, datatypes outside the map
 without exactly one definition, cyclic or repeated definitions, literals of datatypes
 outside the map, and a property used both as an object and as a data property. A data
 question the oracle answers Unknown for (an XSD pattern with a block escape, a facet bound
