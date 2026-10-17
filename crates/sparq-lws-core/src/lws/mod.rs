@@ -598,12 +598,18 @@ pub fn meta_key(iri: &str) -> String {
 /// Shared server state; cheap to clone.
 pub struct LwsState<S: Store> {
     inner: Arc<Inner<S>>,
+    /// Held by the handle [`LwsState::new`] returns and every clone of it, never by a task the
+    /// state runs for itself ([`LwsState::detached`]): once the last is dropped, the state's
+    /// maintenance (the expiry sweeper, see `notify::spawn_expiry_sweeper`) stops, whatever
+    /// its tasks still hold.
+    owner: Option<Arc<tokio::sync::watch::Sender<()>>>,
 }
 
 impl<S: Store> Clone for LwsState<S> {
     fn clone(&self) -> Self {
         Self {
             inner: Arc::clone(&self.inner),
+            owner: self.owner.clone(),
         }
     }
 }
@@ -641,11 +647,22 @@ pub(crate) struct WeakState<S: Store> {
 impl<S: Store> WeakState<S> {
     /// The state, while anything else still holds it.
     pub(crate) fn upgrade(&self) -> Option<LwsState<S>> {
-        self.inner.upgrade().map(|inner| LwsState { inner })
+        self.inner
+            .upgrade()
+            .map(|inner| LwsState { inner, owner: None })
     }
 }
 
 impl<S: Store> LwsState<S> {
+    /// A handle to the state for a task the state runs for itself: it keeps the state alive,
+    /// but not its maintenance (see [`LwsState`]'s `owner`).
+    pub(crate) fn detached(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            owner: None,
+        }
+    }
+
     /// A handle to the state that does not keep it alive.
     pub(crate) fn downgrade(&self) -> WeakState<S> {
         WeakState {
@@ -701,7 +718,9 @@ impl<S: Store + 'static> LwsState<S> {
         // record's create or removal among them).
         let access = access::AccessStore::empty();
         let notify = notify::Notifier::new(&cfg)?;
+        let (owner, closed) = tokio::sync::watch::channel(());
         let state = Self {
+            owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
                 store: tracked::Tracked::new(store, cfg.storage()),
                 cfg,
@@ -729,6 +748,7 @@ impl<S: Store + 'static> LwsState<S> {
             .await?;
         state.access.replace(loaded);
         state.settle_hidden(hidden);
+        notify::spawn_expiry_sweeper(&state, closed);
         Ok(state)
     }
 
@@ -891,7 +911,7 @@ impl<S: Store + 'static> LwsState<S> {
         locks: L,
     ) {
         let (iris, bytes) = hidden;
-        let state = self.clone();
+        let state = self.detached();
         tokio::spawn(async move {
             for undo in &left.0 {
                 until_done(|| undo.apply(&state.store)).await;
