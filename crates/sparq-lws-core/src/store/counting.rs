@@ -327,6 +327,26 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.exists(iri).await
     }
 
+    async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
+        let _g = self.counters.op_guard();
+        // The live client: the guarded update, then the ASK that reads it back.
+        self.counters.count_update();
+        self.counters.count_queries(1);
+        self.inner.begin_reclaim(blob_key).await
+    }
+
+    async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
+        self.inner.end_reclaim(blob_key).await
+    }
+
+    async fn reclaiming(&self) -> Result<Vec<String>, SparqError> {
+        let _g = self.counters.op_guard();
+        self.counters.count_queries(1);
+        self.inner.reclaiming().await
+    }
+
     async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
         let _g = self.counters.op_guard();
         self.counters.count_update();

@@ -189,6 +189,68 @@ fn iri_const(value: &str) -> String {
     iri(value).expect("reserved-vocab IRI must be a valid IRIREF (build-time invariant)")
 }
 
+/// The graph, and its subject, where the blob keys whose bytes are being reclaimed are named
+/// ([`update_begin_reclaim`]): outside every storage, so no request can name it.
+pub const RECLAIMING: &str = "urn:x-sparq-lws:reclaiming";
+
+/// Predicate: a blob key whose bytes are being reclaimed (a literal, on [`RECLAIMING`]).
+pub fn p_reclaiming() -> String {
+    format!("{PSS_NS}reclaiming")
+}
+
+/// UPDATE: name `blob_key` as being reclaimed, only while no record in any graph names it as its
+/// bytes (`pss:blobKey`, a hold's record included): one atomic `INSERT … WHERE`, so no record
+/// that names it can commit in between (the caller reads [`ask_reclaiming`] back to tell
+/// whether it did).
+pub fn update_begin_reclaim(blob_key: &str) -> String {
+    format!(
+        "INSERT {{ GRAPH {r} {{ {r} {pr} {k} }} }} \
+         WHERE {{ FILTER NOT EXISTS {{ GRAPH ?g {{ ?s {pbk} {k} }} }} }}",
+        r = iri_const(RECLAIMING),
+        pr = iri_const(&p_reclaiming()),
+        pbk = iri_const(&p_blob_key()),
+        k = literal(blob_key),
+    )
+}
+
+/// ASK whether any record in any graph names `blob_key` as its bytes.
+pub fn ask_blob_referenced(blob_key: &str) -> String {
+    format!(
+        "ASK {{ GRAPH ?g {{ ?s {pbk} {k} }} }}",
+        pbk = iri_const(&p_blob_key()),
+        k = literal(blob_key),
+    )
+}
+
+/// ASK whether `blob_key` is named as being reclaimed.
+pub fn ask_reclaiming(blob_key: &str) -> String {
+    format!(
+        "ASK {{ GRAPH {r} {{ {r} {pr} {k} }} }}",
+        r = iri_const(RECLAIMING),
+        pr = iri_const(&p_reclaiming()),
+        k = literal(blob_key),
+    )
+}
+
+/// UPDATE: stop naming `blob_key` as being reclaimed (its bytes are gone).
+pub fn update_end_reclaim(blob_key: &str) -> String {
+    format!(
+        "DELETE DATA {{ GRAPH {r} {{ {r} {pr} {k} }} }}",
+        r = iri_const(RECLAIMING),
+        pr = iri_const(&p_reclaiming()),
+        k = literal(blob_key),
+    )
+}
+
+/// SELECT every blob key named as being reclaimed (`?k`).
+pub fn select_reclaiming() -> String {
+    format!(
+        "SELECT ?k WHERE {{ GRAPH {r} {{ {r} {pr} ?k }} }}",
+        r = iri_const(RECLAIMING),
+        pr = iri_const(&p_reclaiming()),
+    )
+}
+
 /// ASK whether a resource is indexed: its graph holds the reserved index record.
 pub fn ask_exists(resource: &str) -> Result<String, BuildError> {
     Ok(format!(
@@ -1494,6 +1556,33 @@ mod tests {
         assert_eq!(validate_lang("en-"), Err(BuildError::InvalidLangTag));
         assert_eq!(validate_lang("en--US"), Err(BuildError::InvalidLangTag));
         assert_eq!(validate_lang("-en"), Err(BuildError::InvalidLangTag));
+    }
+
+    /// A reclaim is named only while no record names the bytes, a hold's record included, on the
+    /// engine `sparq-server` runs.
+    #[cfg(all(feature = "embedded-sparq", not(target_arch = "wasm32")))]
+    #[test]
+    fn a_reclaim_begins_only_on_unreferenced_bytes_on_the_engine() {
+        let mut g = sparq_core::Graph::load_str("", "ntriples").unwrap();
+        let run = |g: &mut sparq_core::Graph, u: &str| sparq_engine::update_in_place_atomic(g, u);
+        let ask = |g: &sparq_core::Graph, q: &str| sparq_engine::ask(g, q).unwrap();
+        run(
+            &mut g,
+            &update_put_meta("urn:x-sparq-lws:held/a/b", "x", "k1", "\"h\"", None).unwrap(),
+        )
+        .unwrap();
+        assert!(ask(&g, &ask_blob_referenced("k1")));
+        run(&mut g, &update_begin_reclaim("k1")).unwrap();
+        assert!(!ask(&g, &ask_reclaiming("k1")), "held bytes");
+        run(&mut g, &update_begin_reclaim("k2")).unwrap();
+        assert!(ask(&g, &ask_reclaiming("k2")));
+        let rows = sparq_engine::query(&g, &select_reclaiming())
+            .unwrap()
+            .rows
+            .len();
+        assert_eq!(rows, 1);
+        run(&mut g, &update_end_reclaim("k2")).unwrap();
+        assert!(!ask(&g, &ask_reclaiming("k2")));
     }
 
     /// Issue #6836: the fenced create and delete do nothing once fenced, and as before otherwise,
