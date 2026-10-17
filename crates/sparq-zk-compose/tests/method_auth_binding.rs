@@ -33,9 +33,10 @@ use sparq_zk::sig::{
 use sparq_zk_compose::build::{build_scan, Pattern, Slot};
 use sparq_zk_compose::manifest::{
     AttestedStatusRef, BindingMode, CommitmentAttestation, EntailmentRegime, FieldHex,
-    HiddenIssuerAttestation, ProofInputs, ProofManifest, RevocationStatus, StatusListSnapshot,
-    SubProof,
+    HiddenIssuerAttestation, ProofManifest, RevocationStatus, StatusListSnapshot, SubProof,
 };
+#[cfg(feature = "dual-leaf")]
+use sparq_zk_compose::manifest::ProofInputs;
 use sparq_zk_compose::verifier::{
     prefilter_manifest_structure, CheckError, KeySet, RevocationPolicy,
 };
@@ -592,6 +593,7 @@ fn an_unmatched_hidden_only_message_is_refused() {
     // sq-j506: a hidden-only commitment's method comes from its declared message,
     // and the pattern constants are compared under that method's encoder, so this
     // half re-encodes them the same way the clear-attestation fixtures do.
+    #[cfg_attr(not(feature = "dual-leaf"), allow(unused_mut))]
     let mut bound_manifest = hidden(bound);
     #[cfg(feature = "dual-leaf")]
     reencode_pattern_constants(&mut bound_manifest, bound_method());
