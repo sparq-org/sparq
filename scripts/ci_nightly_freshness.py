@@ -213,6 +213,13 @@ def decide(event, repo, head, current_id, get=gh_json):
         raise EvidenceError("newer same-head schedule exists")
     prior = sorted((r for r in runs if r["id"] != current_id),
                    key=lambda r: r["id"], reverse=True)
+    # The Saturday sweep has its own concurrency group and can outlive the next tick. A
+    # readable active same-head run is doing this head's heavy work already, so this tick
+    # stands down cleanly; an unreadable status still blocks.
+    if any(r.get("status") in ACTIVE_STATUSES and r.get("conclusion") is None for r in prior):
+        if any(r.get("status") not in ACTIVE_STATUSES + ("completed",) for r in prior):
+            raise EvidenceError("same-head schedule status unreadable")
+        return False, "a same-head schedule is still active; it carries this head's heavy work"
     if any(r.get("status") != "completed" for r in prior):
         raise EvidenceError("same-head schedule still active or status unreadable")
     for run in prior:

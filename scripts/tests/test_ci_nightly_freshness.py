@@ -173,12 +173,23 @@ class Admission(unittest.TestCase):
         self.blocked(api, "conclusion")
         self.assertEqual(len(api.calls), 1)
 
-    def test_active_or_unreadable_same_head_never_admits(self):
-        for status, conclusion in [("in_progress", None), ("queued", None), ("completed", None)]:
+    def test_active_same_head_stands_down_and_unreadable_blocks(self):
+        # A Saturday sweep still running at Sunday's tick: no admission, but no red gate either.
+        for status in freshness.ACTIVE_STATUSES:
+            with self.subTest(status=status):
+                api = FakeAPI([run(status=status, conclusion=None)])
+                fresh, reason = self.readable_decision(api)
+                self.assertFalse(fresh)
+                self.assertIn("still active", reason)
+                self.assertEqual(len(api.calls), 1)
+        for status, conclusion in [("completed", None), ("mystery", None), ("in_progress", "success")]:
             with self.subTest(status=status, conclusion=conclusion):
                 api = FakeAPI([run(status=status, conclusion=conclusion)])
                 self.blocked(api)
                 self.assertEqual(len(api.calls), 1)
+        # An active run beside an unreadable one still blocks.
+        api = FakeAPI([run(status="in_progress", conclusion=None), run(998, status="mystery", conclusion=None)])
+        self.blocked(api, "unreadable")
 
     def test_manual_force_and_other_events_never_read_history(self):
         for event in ["workflow_dispatch", "merge_group", "push", "pull_request", "unknown", ""]:
