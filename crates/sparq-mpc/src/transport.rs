@@ -526,9 +526,6 @@ impl NetworkCell {
     }
 }
 
-/// The coordinator drives one cell over `n` already-connected party channels.
-/// Generic over the stream type so the same logic runs over TCP loopback or a
-/// Unix socket (and, under netem, over a shaped loopback — same code).
 /// Acknowledgement that a shuffle's PERMUTATION IS PUBLIC, required by
 /// [`Coordinator::shuffle_public_permutation`].
 ///
@@ -543,6 +540,10 @@ impl NetworkCell {
 /// Pass it from a measurement or correctness harness. Do NOT pass it from a path
 /// whose output is meant to hide which row went where — that needs secret control
 /// bits, which this tier does not have.
+///
+/// [`run_cell_networked`] does not build one on a caller's behalf either: it takes
+/// `Option<PublicPermutation>` and refuses [`QueryClass::ObliviousShuffle`] when it
+/// is `None`.
 #[derive(Debug, Clone, Copy)]
 pub struct PublicPermutation {
     /// Private, so the struct cannot be built by a literal elsewhere.
@@ -558,6 +559,9 @@ impl PublicPermutation {
     }
 }
 
+/// The coordinator drives one cell over `n` already-connected party channels.
+/// Generic over the stream type so the same logic runs over TCP loopback or a
+/// Unix socket (and, under netem, over a shaped loopback — same code).
 pub struct Coordinator<S: Read + Write> {
     channels: Vec<Channel<S>>,
     backend: ShamirBackend,
@@ -706,7 +710,8 @@ impl<S: Read + Write> Coordinator<S> {
     /// that, and building it is not in scope here.
     #[deprecated(
         since = "0.1.7",
-        note = "the permutation is public; call shuffle_public_permutation with                 PublicPermutation::acknowledged()"
+        note = "the permutation is public; call shuffle_public_permutation with \
+                PublicPermutation::acknowledged()"
     )]
     pub fn shuffle(
         &mut self,
@@ -917,13 +922,27 @@ fn reconstruct_rows(opened: &[Vec<Share>], t: usize) -> Result<Vec<u64>, MpcErro
 /// processes (see the module note); the example binaries run real processes.
 ///
 /// `values` is consulted for the aggregate; `scale` for the hidden join.
+///
+/// [`QueryClass::ObliviousShuffle`] runs this tier's PUBLIC-permutation shuffle, so
+/// it is the caller that must acknowledge it: pass
+/// `Some(PublicPermutation::acknowledged())`. With `None` that class is refused and
+/// nothing is driven over the wire — the token is not manufactured here, or this
+/// function would be a way around [`Coordinator::shuffle_public_permutation`]'s
+/// opt-in. Every other class ignores the argument.
 pub fn run_cell_networked(
     query_class: QueryClass,
     backend: &ShamirBackend,
     dealer: &mut ShamirDealer,
     values: &[u64],
     scale: usize,
+    public_permutation: Option<PublicPermutation>,
 ) -> Result<NetworkCell, MpcError> {
+    if query_class == QueryClass::ObliviousShuffle && public_permutation.is_none() {
+        return Err(MpcError::Protocol(
+            "run_cell_networked: QueryClass::ObliviousShuffle drives the transport              shuffle, whose PERMUTATION IS PUBLIC - every party is sent each switch's              endpoints and its control bit in the clear. A caller that accepts that              passes `Some(PublicPermutation::acknowledged())`; a private-output path              needs secret control bits, which this tier does not have"
+                .to_string(),
+        ));
+    }
     let n = backend.parties();
     // Bind a loopback listener; parties connect to it. Port 0 ⇒ OS-assigned.
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -980,13 +999,16 @@ pub fn run_cell_networked(
             // duplicated, or corrupted), the load-bearing correctness anchor for a
             // shuffle (which must not reveal — or alter — the multiset). The full
             // permuted column + permutation-of-input check lives in the in-crate
-            // tests that call `Coordinator::shuffle` directly. sq-bdbv.
+            // tests that call `Coordinator::shuffle_public_permutation` directly.
+            // sq-bdbv.
             let col_values: Vec<u64> = (0..scale as u64).map(|i| i * 7 + 1).collect();
-            let (opened, gates) = coord.shuffle_public_permutation(
-                dealer,
-                &col_values,
-                PublicPermutation::acknowledged(),
-            )?;
+            // The caller's own token, checked for presence above: this function
+            // never builds one.
+            let ack = public_permutation.ok_or_else(|| {
+                MpcError::Protocol("run_cell_networked: missing public-permutation                                     acknowledgement"
+                    .to_string())
+            })?;
+            let (opened, gates) = coord.shuffle_public_permutation(dealer, &col_values, ack)?;
             (opened.iter().copied().sum(), gates)
         }
         QueryClass::ObliviousSort => {
@@ -1117,6 +1139,7 @@ mod tests {
                 &mut dealer,
                 &values,
                 1,
+                None,
             )
             .unwrap();
             assert_eq!(
@@ -1149,6 +1172,7 @@ mod tests {
                 &mut dealer,
                 &[],
                 scale,
+                None,
             )
             .unwrap();
             assert_eq!(
@@ -1175,6 +1199,7 @@ mod tests {
             &mut dealer,
             &[],
             3,
+            None,
         )
         .unwrap();
         assert_eq!(cell.result as usize, 3);
@@ -1326,9 +1351,15 @@ mod tests {
             assert!(check_shuffle(&mut dealer, backend.threshold(), 8).unwrap());
             // Networked: the column-sum result equals the canonical input sum.
             let mut dealer2 = backend.dealer();
-            let cell =
-                run_cell_networked(QueryClass::ObliviousShuffle, &backend, &mut dealer2, &[], 8)
-                    .unwrap();
+            let cell = run_cell_networked(
+                QueryClass::ObliviousShuffle,
+                &backend,
+                &mut dealer2,
+                &[],
+                8,
+                Some(PublicPermutation::acknowledged()),
+            )
+            .unwrap();
             let want: u64 = (0..8u64).map(|i| i * 7 + 1).sum();
             assert_eq!(cell.result, want, "n={n}: networked shuffle multiset sum");
             assert!(cell.total_bytes() > 0);
@@ -1344,9 +1375,15 @@ mod tests {
             let mut dealer = backend.dealer();
             assert!(check_sort(&mut dealer, backend.threshold(), 9).unwrap());
             let mut dealer2 = backend.dealer();
-            let cell =
-                run_cell_networked(QueryClass::ObliviousSort, &backend, &mut dealer2, &[], 9)
-                    .unwrap();
+            let cell = run_cell_networked(
+                QueryClass::ObliviousSort,
+                &backend,
+                &mut dealer2,
+                &[],
+                9,
+                None,
+            )
+            .unwrap();
             let want: u64 = (1..=9u64).sum();
             assert_eq!(cell.result, want, "n={n}: networked sort multiset sum");
             assert!(cell.total_bytes() > 0);
@@ -1357,13 +1394,59 @@ mod tests {
         }
     }
 
+    /// `run_cell_networked` is public and drives the public-permutation shuffle, so
+    /// it must not manufacture the acknowledgement for its caller. Without the token
+    /// the shuffle class is refused, and the refusal lands before any wire work.
+    #[test]
+    fn run_cell_networked_refuses_the_shuffle_class_without_the_opt_in() {
+        let backend = ShamirBackend::new_seeded(3, 0xE7).unwrap();
+        let mut dealer = backend.dealer();
+        let err = run_cell_networked(
+            QueryClass::ObliviousShuffle,
+            &backend,
+            &mut dealer,
+            &[],
+            8,
+            None,
+        )
+        .unwrap_err();
+        match err {
+            MpcError::Protocol(msg) => assert!(
+                msg.contains("PERMUTATION IS PUBLIC")
+                    && msg.contains("PublicPermutation::acknowledged"),
+                "got: {}",
+                msg
+            ),
+            other => panic!("expected a Protocol refusal, got {:?}", other),
+        }
+        // And the same cell goes through once the caller names it.
+        let mut dealer = backend.dealer();
+        let cell = run_cell_networked(
+            QueryClass::ObliviousShuffle,
+            &backend,
+            &mut dealer,
+            &[],
+            8,
+            Some(PublicPermutation::acknowledged()),
+        )
+        .unwrap();
+        assert_eq!(cell.result, (0..8u64).map(|i| i * 7 + 1).sum::<u64>());
+    }
+
     #[test]
     fn networked_shuffle_rejects_empty_column() {
         // Empty input must FAIL CLOSED (mirrors the aggregate empty-input guard).
         let backend = ShamirBackend::new_seeded(3, 0xE3).unwrap();
         let mut dealer = backend.dealer();
-        let err = run_cell_networked(QueryClass::ObliviousShuffle, &backend, &mut dealer, &[], 0)
-            .unwrap_err();
+        let err = run_cell_networked(
+            QueryClass::ObliviousShuffle,
+            &backend,
+            &mut dealer,
+            &[],
+            0,
+            Some(PublicPermutation::acknowledged()),
+        )
+        .unwrap_err();
         match err {
             MpcError::Protocol(msg) => assert!(msg.contains("no rows"), "got: {msg}"),
             other => panic!("expected Protocol error, got {other:?}"),
@@ -1383,6 +1466,7 @@ mod tests {
             &mut dealer,
             &[],
             1,
+            None,
         )
         .unwrap_err();
         match err {
