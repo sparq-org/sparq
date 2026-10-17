@@ -33,15 +33,16 @@
 //! 2. the prior control-graph slot is captured, then the new content is swapped in (or the
 //!    slot removed, for `delete_acl`);
 //! 3. the auth view is re-materialized. On success the store reflects the new rules.
-//! 4. **on any re-materialization error** (e.g. the new ACL names a reserved-encoding
-//!    principal) the captured prior slot is RESTORED and the auth view rebuilt from it, so
+//! 4. **on any re-materialization error** the captured prior slot is RESTORED and the auth view rebuilt from it, so
 //!    the call leaves the store exactly as it found it and returns `Err` — never a control
 //!    graph updated without its matching auth view, and never a partial write.
 //!
 //! # Fail-closed
 //!
 //! Every error path leaves the PRIOR (already-validated) authorization in force, never a
-//! wider one: a rejected content parse, a reserved-encoding principal, or a non-control
+//! wider one: a rejected content parse, a document stating a triple it may not (one about a
+//! node outside it, a minted name, a reserved principal or view vocabulary, or, under ACP,
+//! one that uses a node of an access-control resource the loader rejects), or a non-control
 //! target IRI all return `Err` with the previous auth view intact. A successful `delete_acl`
 //! REMOVES grants (it can only narrow access — the deleted rules no longer grant anything),
 //! and a successful `put_acl` replaces the old rules wholesale with the new ones.
@@ -99,10 +100,10 @@ impl PodStore {
     ///
     /// # Atomicity & fail-closed
     ///
-    /// All-or-nothing: the content is parsed FIRST (a malformed document is rejected before
-    /// anything mutates), then the graph is swapped and the view rebuilt. If
-    /// re-materialization fails (e.g. the new ACL names a reserved-encoding principal) the
-    /// PRIOR control graph + auth view are RESTORED and `Err` is returned — the store is left
+    /// All-or-nothing: the content is parsed FIRST (a malformed document, or one stating a
+    /// triple it may not, is rejected before anything mutates), then the graph is swapped and
+    /// the view rebuilt. If re-materialization fails the PRIOR control graph + auth view are
+    /// RESTORED and `Err` is returned — the store is left
     /// exactly as it was, and the previous (already-validated) authorization stays in force.
     ///
     /// For an **ACP** pod (`.acr` documents, three-stratum view) use
@@ -111,7 +112,7 @@ impl PodStore {
     /// # Errors
     ///
     /// `Err` if `acl_iri` is not an `.acl`/`.acr` document IRI, if `content` does not parse
-    /// in `format`, or if re-materializing the resulting view fails (the store is rolled back
+    /// in `format` or states a triple the document may not, or if re-materializing the resulting view fails (the store is rolled back
     /// to its prior state first).
     ///
     /// # Examples
@@ -239,18 +240,27 @@ impl PodStore {
         let name = NamedNode::new(acl_iri)
             .map_err(|e| format!("put_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
         // PARSE FIRST — a malformed document is rejected before anything mutates.
-        let new_graph = Graph::load_str(content, format).map_err(|e| {
+        let new_graph = Graph::load_str_with_base(content, format, acl_iri).map_err(|e| {
             format!(
                 "put_acl denied: ACL content for <{}> did not parse as {}: {}",
                 acl_iri, format, e
             )
         })?;
+        let content = crate::loader::graph_triples(&new_graph);
+        crate::loader::ControlWrites::replacing(&self.graph, acp, acl_iri, content.clone())
+            .check(acl_iri, &content)
+            .map_err(|e| format!("put_acl denied: {e}"))?;
         let new_len = graph_len(&new_graph);
 
         // Capture the prior slot (for rollback) and swap the new content in.
         let term = Term::NamedNode(name.clone());
         let prior = self.take_named_slot(&term);
         let existed = prior.is_some();
+        if let (false, Some(governed)) = (existed, acl_iri.strip_suffix(crate::loader::ACR_SUFFIX)) {
+            // A new `.acr` keeps no facts of a resource that does not exist, whatever an
+            // earlier install saw (a rebuild after a failure resets this from the graph).
+            self.acr_controlled.remove(governed);
+        }
         self.graph.named.push((term.clone(), new_graph));
 
         // Re-materialize; roll back to the prior content on any error. sq-b7k7u
@@ -353,22 +363,15 @@ impl PodStore {
     /// diffs the old vs new `AuthIndex` per-origin and invalidates exactly the origins whose
     /// buckets changed — NOT merely the written ACL's own origin (a write at origin A can
     /// affect origin B's grants; the diff catches every such case). sq-vhhl0 doc
-    /// sweep. ACP re-materializes with no provenance, exactly as the non-scoped
-    /// `materialize_acp()` the write path used before — and, sq-ysv3u, with no
-    /// verified credentials either, so an `acp:vc` matcher stays fail-closed across an ACL
-    /// write exactly as it is on a plain `materialize_acp()`.
+    /// sweep. ACP re-materializes under the store's trusted context (the provenance and
+    /// credentials of the last ACP materialization), like [`PodStore::materialize_acp`].
     fn rematerialize_scoped(
         &mut self,
         acp: bool,
         scope: crate::ReindexScope,
     ) -> Result<(), String> {
         if acp {
-            self.materialize_acp_with_scoped(
-                &crate::AccessProvenance::new(),
-                &crate::VerifiedCredentials::new(),
-                scope,
-            )
-            .map(|_| ())
+            self.rematerialize_acp_scoped(scope).map(|_| ())
         } else {
             self.materialize_wac_scoped(scope).map(|_| ())
         }

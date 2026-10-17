@@ -166,7 +166,7 @@ pub enum EntityKind {
 }
 
 /// An axiom of the full OWL 2 structural model.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Axiom {
     /// `Declaration(kind(iri))`.
     Declaration(EntityKind, Id),
@@ -369,5 +369,190 @@ impl Ontology {
     /// The logical (non-declaration) axioms.
     pub fn logical_axioms(&self) -> impl Iterator<Item = &AxiomRecord> {
         self.axioms.iter().filter(|a| a.axiom.is_logical())
+    }
+
+    /// Whether axiom `ai` carries an annotation (an `owl:Axiom` reification of one of its
+    /// triples).
+    pub fn is_annotated(&self, ai: usize) -> bool {
+        let source = &self.axioms[ai].source;
+        self.annotations
+            .iter()
+            .any(|a| matches!(a.target, AnnotationTarget::Axiom(t) if source.contains(&t)))
+    }
+}
+
+/// Every entity, individual and datatype id of a model value, mapped by `f`: the same
+/// structure over another dictionary (to compare ontologies read into different ones).
+pub trait MapIds: Sized {
+    #[must_use]
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> Self;
+}
+
+impl MapIds for Id {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> Id {
+        f(*self)
+    }
+}
+
+impl<T: MapIds> MapIds for Vec<T> {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> Vec<T> {
+        self.iter().map(|x| x.map_ids(f)).collect()
+    }
+}
+
+impl<T: MapIds> MapIds for Box<T> {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> Box<T> {
+        Box::new((**self).map_ids(f))
+    }
+}
+
+impl MapIds for Literal {
+    fn map_ids(&self, _: &mut impl FnMut(Id) -> Id) -> Literal {
+        self.clone()
+    }
+}
+
+impl<A: MapIds, B: MapIds> MapIds for (A, B) {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> (A, B) {
+        (self.0.map_ids(f), self.1.map_ids(f))
+    }
+}
+
+impl MapIds for Individual {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> Individual {
+        match self {
+            Individual::Named(i) => Individual::Named(f(*i)),
+            Individual::Anonymous(i) => Individual::Anonymous(f(*i)),
+        }
+    }
+}
+
+impl MapIds for ObjectProperty {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> ObjectProperty {
+        match self {
+            ObjectProperty::Named(i) => ObjectProperty::Named(f(*i)),
+            ObjectProperty::Inverse(i) => ObjectProperty::Inverse(f(*i)),
+        }
+    }
+}
+
+impl MapIds for DataRange {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> DataRange {
+        use DataRange as D;
+        match self {
+            D::TopLiteral => D::TopLiteral,
+            D::Datatype(i) => D::Datatype(f(*i)),
+            D::IntersectionOf(rs) => D::IntersectionOf(rs.map_ids(f)),
+            D::UnionOf(rs) => D::UnionOf(rs.map_ids(f)),
+            D::ComplementOf(r) => D::ComplementOf(r.map_ids(f)),
+            D::OneOf(ls) => D::OneOf(ls.clone()),
+            D::Restriction(i, fs) => D::Restriction(f(*i), fs.map_ids(f)),
+        }
+    }
+}
+
+impl MapIds for ClassExpression {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> ClassExpression {
+        use ClassExpression as C;
+        match self {
+            C::Class(i) => C::Class(f(*i)),
+            C::Thing => C::Thing,
+            C::Nothing => C::Nothing,
+            C::IntersectionOf(cs) => C::IntersectionOf(cs.map_ids(f)),
+            C::UnionOf(cs) => C::UnionOf(cs.map_ids(f)),
+            C::ComplementOf(c) => C::ComplementOf(c.map_ids(f)),
+            C::OneOf(is) => C::OneOf(is.map_ids(f)),
+            C::SomeValuesFrom(p, c) => C::SomeValuesFrom(p.map_ids(f), c.map_ids(f)),
+            C::AllValuesFrom(p, c) => C::AllValuesFrom(p.map_ids(f), c.map_ids(f)),
+            C::HasValue(p, i) => C::HasValue(p.map_ids(f), i.map_ids(f)),
+            C::HasSelf(p) => C::HasSelf(p.map_ids(f)),
+            C::MinCardinality(n, p, c) => C::MinCardinality(*n, p.map_ids(f), c.map_ids(f)),
+            C::MaxCardinality(n, p, c) => C::MaxCardinality(*n, p.map_ids(f), c.map_ids(f)),
+            C::ExactCardinality(n, p, c) => C::ExactCardinality(*n, p.map_ids(f), c.map_ids(f)),
+            C::DataSomeValuesFrom(d, r) => C::DataSomeValuesFrom(f(*d), r.map_ids(f)),
+            C::DataAllValuesFrom(d, r) => C::DataAllValuesFrom(f(*d), r.map_ids(f)),
+            C::DataHasValue(d, l) => C::DataHasValue(f(*d), l.clone()),
+            C::DataMinCardinality(n, d, r) => C::DataMinCardinality(*n, f(*d), r.map_ids(f)),
+            C::DataMaxCardinality(n, d, r) => C::DataMaxCardinality(*n, f(*d), r.map_ids(f)),
+            C::DataExactCardinality(n, d, r) => C::DataExactCardinality(*n, f(*d), r.map_ids(f)),
+        }
+    }
+}
+
+impl MapIds for AnnotationSubject {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> AnnotationSubject {
+        match self {
+            AnnotationSubject::Iri(i) => AnnotationSubject::Iri(f(*i)),
+            AnnotationSubject::Anonymous(i) => AnnotationSubject::Anonymous(f(*i)),
+        }
+    }
+}
+
+impl MapIds for AnnotationValue {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> AnnotationValue {
+        match self {
+            AnnotationValue::Iri(i) => AnnotationValue::Iri(f(*i)),
+            AnnotationValue::Anonymous(i) => AnnotationValue::Anonymous(f(*i)),
+            AnnotationValue::Literal(l) => AnnotationValue::Literal(l.clone()),
+        }
+    }
+}
+
+impl MapIds for Axiom {
+    fn map_ids(&self, f: &mut impl FnMut(Id) -> Id) -> Axiom {
+        use Axiom as A;
+        match self {
+            A::Declaration(k, i) => A::Declaration(*k, f(*i)),
+            A::SubClassOf(a, b) => A::SubClassOf(a.map_ids(f), b.map_ids(f)),
+            A::EquivalentClasses(cs) => A::EquivalentClasses(cs.map_ids(f)),
+            A::DisjointClasses(cs) => A::DisjointClasses(cs.map_ids(f)),
+            A::DisjointUnion(i, cs) => A::DisjointUnion(f(*i), cs.map_ids(f)),
+            A::SubObjectPropertyOf(w, p) => A::SubObjectPropertyOf(w.map_ids(f), p.map_ids(f)),
+            A::EquivalentObjectProperties(ps) => A::EquivalentObjectProperties(ps.map_ids(f)),
+            A::DisjointObjectProperties(ps) => A::DisjointObjectProperties(ps.map_ids(f)),
+            A::InverseObjectProperties(p, q) => {
+                A::InverseObjectProperties(p.map_ids(f), q.map_ids(f))
+            }
+            A::ObjectPropertyDomain(p, c) => A::ObjectPropertyDomain(p.map_ids(f), c.map_ids(f)),
+            A::ObjectPropertyRange(p, c) => A::ObjectPropertyRange(p.map_ids(f), c.map_ids(f)),
+            A::FunctionalObjectProperty(p) => A::FunctionalObjectProperty(p.map_ids(f)),
+            A::InverseFunctionalObjectProperty(p) => {
+                A::InverseFunctionalObjectProperty(p.map_ids(f))
+            }
+            A::ReflexiveObjectProperty(p) => A::ReflexiveObjectProperty(p.map_ids(f)),
+            A::IrreflexiveObjectProperty(p) => A::IrreflexiveObjectProperty(p.map_ids(f)),
+            A::SymmetricObjectProperty(p) => A::SymmetricObjectProperty(p.map_ids(f)),
+            A::AsymmetricObjectProperty(p) => A::AsymmetricObjectProperty(p.map_ids(f)),
+            A::TransitiveObjectProperty(p) => A::TransitiveObjectProperty(p.map_ids(f)),
+            A::SubDataPropertyOf(d, e) => A::SubDataPropertyOf(f(*d), f(*e)),
+            A::EquivalentDataProperties(ds) => A::EquivalentDataProperties(ds.map_ids(f)),
+            A::DisjointDataProperties(ds) => A::DisjointDataProperties(ds.map_ids(f)),
+            A::DataPropertyDomain(d, c) => A::DataPropertyDomain(f(*d), c.map_ids(f)),
+            A::DataPropertyRange(d, r) => A::DataPropertyRange(f(*d), r.map_ids(f)),
+            A::FunctionalDataProperty(d) => A::FunctionalDataProperty(f(*d)),
+            A::DatatypeDefinition(i, r) => A::DatatypeDefinition(f(*i), r.map_ids(f)),
+            A::HasKey(c, ps, ds) => A::HasKey(c.map_ids(f), ps.map_ids(f), ds.map_ids(f)),
+            A::SameIndividual(is) => A::SameIndividual(is.map_ids(f)),
+            A::DifferentIndividuals(is) => A::DifferentIndividuals(is.map_ids(f)),
+            A::ClassAssertion(c, i) => A::ClassAssertion(c.map_ids(f), i.map_ids(f)),
+            A::ObjectPropertyAssertion(p, a, b) => {
+                A::ObjectPropertyAssertion(p.map_ids(f), a.map_ids(f), b.map_ids(f))
+            }
+            A::NegativeObjectPropertyAssertion(p, a, b) => {
+                A::NegativeObjectPropertyAssertion(p.map_ids(f), a.map_ids(f), b.map_ids(f))
+            }
+            A::DataPropertyAssertion(d, a, l) => {
+                A::DataPropertyAssertion(f(*d), a.map_ids(f), l.clone())
+            }
+            A::NegativeDataPropertyAssertion(d, a, l) => {
+                A::NegativeDataPropertyAssertion(f(*d), a.map_ids(f), l.clone())
+            }
+            A::AnnotationAssertion(p, s, v) => {
+                A::AnnotationAssertion(f(*p), s.map_ids(f), v.map_ids(f))
+            }
+            A::SubAnnotationPropertyOf(p, q) => A::SubAnnotationPropertyOf(f(*p), f(*q)),
+            A::AnnotationPropertyDomain(p, i) => A::AnnotationPropertyDomain(f(*p), f(*i)),
+            A::AnnotationPropertyRange(p, i) => A::AnnotationPropertyRange(f(*p), f(*i)),
+        }
     }
 }

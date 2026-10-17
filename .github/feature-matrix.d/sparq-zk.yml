@@ -19,6 +19,12 @@
 
 # Exercise the default-OFF dual-leaf identity/desynchronisation
 # regression guard in an explicit opt-in matrix leg.
+# It also carries `tests/dual_leaf_v2_noir_pin.rs` (same `dual-leaf` feature):
+# the host/circuit pin tying every `global` in zk/dual-leaf-v2/src/lib.nr to its
+# `dual_leaf_v2` host derivation. The Noir half of that mirror runs as `nargo test`
+# in `.github/workflows/zk-toolchain.yml`; this leg is where the HOST half runs, so
+# the two cannot drift apart unnoticed. The leg NAME is unchanged, so
+# scripts/tests/feature-matrix-legnames.golden.txt is untouched.
 - name: "sparq-zk (dual-leaf — identity/desync regression guard)"
   crate: "sparq-zk"
   features: "dual-leaf"

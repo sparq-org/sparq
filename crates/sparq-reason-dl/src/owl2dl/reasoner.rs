@@ -7,9 +7,10 @@
 //! [`Unknown`](Consistency::Unknown) with the reason, and the triples behind it when there are
 //! any.
 //!
-//! The fragment is currently SHOIQ(D) plus the OWL 2 role characteristics and ABox:
+//! The fragment is currently SROIQ(D) without the top and bottom properties, with the ABox:
 //! classes and all class constructors including nominals (`ObjectOneOf`,
-//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity,
+//! `ObjectHasValue`), object properties with inverses, hierarchies, transitivity and
+//! regular property chains (encoded by automata, see the clausifier),
 //! functionality, reflexivity, irreflexivity, symmetry, asymmetry and disjointness,
 //! `hasSelf`, qualified cardinality, class / object-property / negative-property / same /
 //! different assertions, and data properties: domain, range, sub- / equivalent / disjoint
@@ -18,9 +19,9 @@
 //! OWL 2 datatype map (datatypes, facet restrictions, `DataOneOf`, `DataIntersectionOf`,
 //! `DataUnionOf`, `DataComplementOf` and acyclic `DatatypeDefinition`s), decided by
 //! [`super::data_ranges`], and keys (`HasKey`, over named individuals; a key whose data
-//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on an
-//! object property with a transitive sub-property, property chains other than `R∘R ⊑ R`,
-//! the top and bottom
+//! values the tableau has not fixed to literals answers `Unknown(Unconfirmed)`). Keys on a
+//! non-simple object property, a property hierarchy the automata cannot encode, the top and
+//! bottom
 //! properties, datatypes outside the map, and number restrictions above
 //! [`MAX_CARDINALITY`] answer `Unknown(OutOfFragment)`; a datatype question the oracle cannot
 //! decide answers `Unknown(DatatypeUnknown)`. An ill-typed literal in an assertion,
@@ -37,7 +38,7 @@
 //! With nominals every class test includes the ABox.
 
 pub use super::clausify::MAX_CARDINALITY;
-use super::clausify::{clausify, AtomKind, Clauses};
+use super::clausify::{clausify, AtomKind, Clauses, Refusal};
 use super::datatypes::{self, ValueError};
 use super::dl_profile::{
     check_dl, for_each_class_in_axiom, for_each_range_in_axiom, DlProfileReport, Violation,
@@ -106,6 +107,13 @@ pub struct Classification {
     pub inferred: Vec<(Id, Id)>,
 }
 
+/// Entailments known before a classification (from a check of a subset of the axioms).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Known {
+    pub unsatisfiable: FxHashSet<Id>,
+    pub subsumptions: FxHashSet<(Id, Id)>,
+}
+
 /// Everything [`check`] found out about an ontology.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DlReport {
@@ -148,7 +156,7 @@ impl Reasoner {
         Self::with_profile(dict, onto, &check_dl(dict, onto), budget)
     }
 
-    fn with_profile(
+    pub(crate) fn with_profile(
         dict: &Dict,
         onto: &Ontology,
         profile: &DlProfileReport,
@@ -173,15 +181,15 @@ impl Reasoner {
                 model: OnceCell::from(Ok(false)),
             });
         }
-        let clauses = clausify(dict, onto).map_err(|u| {
+        let clauses = clausify(dict, onto, budget.max_steps).map_err(|u| {
             let source = onto.axioms[u.axiom].source.clone();
-            if u.datatype {
-                UnknownReason::DatatypeUnknown { source }
-            } else {
-                UnknownReason::OutOfFragment {
+            match u.kind {
+                Refusal::Datatype => UnknownReason::DatatypeUnknown { source },
+                Refusal::Budget => UnknownReason::ResourceBudget,
+                Refusal::Fragment => UnknownReason::OutOfFragment {
                     construct: u.construct,
                     source,
-                }
+                },
             }
         })?;
         let index = ClauseIndex::new(&clauses);
@@ -384,11 +392,15 @@ impl Reasoner {
         if !self.imports.is_empty() || !self.abox_model()? {
             return None;
         }
-        self.classify_consistent().ok()
+        self.classify_consistent(&Known::default()).ok()
     }
 
-    /// Classifies a consistent ontology, or says why it could not.
-    fn classify_consistent(&self) -> Result<Classification, UnknownReason> {
+    /// Classifies a consistent ontology, or says why it could not. What `known` holds is
+    /// taken as entailed without a test (it must be: entailments of a subset of the axioms).
+    pub(crate) fn classify_consistent(
+        &self,
+        known: &Known,
+    ) -> Result<Classification, UnknownReason> {
         let classes = &self.clauses.classes;
         let is_class = |a: u32| matches!(self.clauses.atoms[a as usize], AtomKind::Class(_));
         let mut out = Classification::default();
@@ -397,6 +409,10 @@ impl Reasoner {
         let left = Cell::new(self.budget.max_steps);
         let pool = Some(&left);
         for &(id, a) in classes {
+            if known.unsatisfiable.contains(&id) {
+                out.unsatisfiable.push(id);
+                continue;
+            }
             let mut t = self.tableau(pool);
             let root = t.add_root();
             t.assert_concept(root, a);
@@ -415,8 +431,9 @@ impl Reasoner {
                 let AtomKind::Class(bid) = self.clauses.atoms[b as usize] else {
                     unreachable!("checked")
                 };
-                let entailed =
-                    deterministic || self.below(Concept::Atom(a), Concept::Atom(b), false, pool)?;
+                let entailed = deterministic
+                    || known.subsumptions.contains(&(id, bid))
+                    || self.below(Concept::Atom(a), Concept::Atom(b), false, pool)?;
                 if entailed {
                     subs.insert((id, bid));
                 }
@@ -506,7 +523,7 @@ pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
     };
     let consistency = reasoner.consistency();
     let (classification, classification_unknown) = if consistency == Consistency::Consistent {
-        match reasoner.classify_consistent() {
+        match reasoner.classify_consistent(&Known::default()) {
             Ok(c) => (Some(c), None),
             Err(reason) => (None, Some(reason)),
         }
@@ -518,5 +535,45 @@ pub fn check(dict: &Dict, onto: &Ontology, budget: Budget) -> DlReport {
         consistency,
         classification,
         classification_unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::owl2dl::extract;
+    use sparq_core::Graph;
+
+    /// Every budget either stops the run or holds the whole of it: the work that confirms
+    /// a model (blocking, the unravelling check) is inside the budget too.
+    #[test]
+    fn a_verdict_never_exceeds_the_budget() {
+        let body = r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            :P a owl:Class . :hasParent a owl:ObjectProperty . :livesIn a owl:ObjectProperty .
+            :c a owl:NamedIndividual . :bob a owl:NamedIndividual , :P .
+            :P rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :hasParent ; owl:someValuesFrom :P ] ,
+                [ a owl:Restriction ; owl:onProperty :livesIn ; owl:hasValue :c ] .
+        "#;
+        let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+        let o = extract(&d, &triples).unwrap();
+        let full = Reasoner::new(&d, &o, Budget::default()).unwrap();
+        let mut t = Tableau::new(&full.clauses, &full.index, full.budget);
+        full.load_abox(&mut t);
+        assert_eq!(t.run(), Ok(true));
+        let needed = t.work();
+        for max_steps in 0..=needed + 2 {
+            let budget = Budget {
+                max_steps,
+                ..Budget::default()
+            };
+            let r = Reasoner::new(&d, &o, budget).unwrap();
+            let mut t = Tableau::new(&r.clauses, &r.index, r.budget);
+            r.load_abox(&mut t);
+            if t.run() == Ok(true) {
+                assert!(t.work() <= max_steps, "{} > {max_steps}", t.work());
+            }
+        }
     }
 }

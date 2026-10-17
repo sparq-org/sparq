@@ -166,7 +166,7 @@ use serde_json::{json, Value};
 use sparq_core::Graph;
 use sparq_engine::QueryBudget;
 use sparq_introspect::Introspection;
-use sparq_solid::{Mode, PodStore, Session};
+use sparq_solid::{Mode, PodStore, Session, StoredGraphs};
 
 use crate::jsonrpc::{Request, RpcError, INVALID_PARAMS, METHOD_NOT_FOUND, RESOURCE_NOT_FOUND};
 use crate::notifications::{classify, ActivityType, Subscriptions, TopicDigest};
@@ -669,14 +669,7 @@ fn is_control_doc(iri: &str) -> bool {
 /// the origin root: `https://h/a/b` → `https://h/a/`, `https://h/a/` → `https://h/`,
 /// `https://h/` → `None`.
 fn parent_iri(iri: &str) -> Option<String> {
-    let scheme_end = iri.find("://")? + 3;
-    let root_slash = iri[scheme_end..].find('/')? + scheme_end;
-    let cut = iri.strip_suffix('/').unwrap_or(iri);
-    let pos = cut.rfind('/')?;
-    if pos < root_slash {
-        return None; // already the origin root (or a scheme slash)
-    }
-    Some(iri[..=pos].to_string())
+    sparq_solid::parent_container(iri).map(str::to_owned)
 }
 
 /// Parse + validate a write-target IRI: syntactically an IRI and outside the reserved
@@ -751,6 +744,11 @@ impl SolidMcpServer {
         &self.store
     }
 
+    /// Consume the server, returning the pod store it served (for embedders / tests).
+    pub fn into_store(self) -> PodStore {
+        self.store
+    }
+
     /// Handle one raw JSON-RPC message — the pod twin of
     /// [`crate::McpServer::handle_message`], sharing the very same framing core
     /// (`Some(response)` for a request, `None` for a notification, and top-level
@@ -785,6 +783,16 @@ impl SolidMcpServer {
     /// Fail-closed point decision: may this session do `mode` on `url`?
     fn allowed(&self, url: &str, mode: Mode) -> bool {
         self.store.decide(&self.session(), url, mode).allow
+    }
+
+    /// Rebuild the authorization view after this call changed the store's graphs since
+    /// `before`: the store's provenance follows the change (see
+    /// [`PodStore::rematerialize_after_edit`]), recording no creator for what it creates. On
+    /// error nothing of the view or provenance changed, and the caller restores the graphs.
+    fn rematerialize_after(&mut self, before: &StoredGraphs) -> Result<(), String> {
+        self.store
+            .rematerialize_after_edit(before, None, self.config.acp)
+            .map(|_| ())
     }
 
     /// (Re-)materialize the authorization view under the configured model.
@@ -1482,12 +1490,13 @@ impl SolidMcpServer {
         self.gate_write(&url, Mode::Write)?;
 
         // PARSE FIRST — a malformed body is rejected before anything mutates.
-        let new_graph = Graph::load_str(&content, fmt)
+        let new_graph = Graph::load_str_with_base(&content, fmt, &url)
             .map_err(|e| format!("content for <{url}> did not parse as {fmt}: {e}"))?;
         let triples = new_graph.len();
 
         // Swap the document slot (capturing the prior content for rollback).
         let term = Term::NamedNode(name);
+        let before = self.store.stored_graphs();
         let prior = self.take_slot(&term);
         let existed = prior.is_some();
         self.store.graph.named.push((term.clone(), new_graph));
@@ -1508,7 +1517,7 @@ impl SolidMcpServer {
 
         // Re-materialize so the write is visible (a created doc enters the authorized
         // sets; a replaced group document takes effect) — rollback on error.
-        if let Err(e) = self.rematerialize() {
+        if let Err(e) = self.rematerialize_after(&before) {
             self.unlink_containment(&created_graphs, &added_links);
             self.restore_slot(&term, prior);
             let _ = self.rematerialize(); // restore the prior (already-valid) view
@@ -1552,10 +1561,19 @@ impl SolidMcpServer {
             return Err(write_denied_error(&url));
         }
         if url.ends_with('/') {
-            // A container: reject when its STORED containment listing is non-empty.
+            // A container: reject when any resource is stored below it (whatever its
+            // containment listing says), or when that listing still names a member.
+            let (acl, acr) = (format!("{url}.acl"), format!("{url}.acr"));
+            let has_member = self.store.graph.named.iter().any(|(n, _)| {
+                matches!(n, Term::NamedNode(n)
+                    if n.as_str().len() > url.len()
+                        && n.as_str().starts_with(url.as_str())
+                        && n.as_str() != acl
+                        && n.as_str() != acr)
+            });
             let doc = self.find_doc(&url).expect("slot checked above");
             let q = format!("ASK {{ <{url}> <{LDP_CONTAINS}> ?m }}");
-            if sparq_engine::ask(doc, &q)? {
+            if has_member || sparq_engine::ask(doc, &q)? {
                 return Err(format!(
                     "container <{url}> is not empty — delete its members first"
                 ));
@@ -1563,9 +1581,10 @@ impl SolidMcpServer {
         }
 
         // Remove the document and its parent's containment link (rollback-capable).
+        let before = self.store.stored_graphs();
         let prior = self.take_slot(&term).expect("slot checked above");
         let removed_link = self.unlink_parent(&url);
-        if let Err(e) = self.rematerialize() {
+        if let Err(e) = self.rematerialize_after(&before) {
             if let Some((pterm, t)) = &removed_link {
                 if let Some(i) = self.slot_index(pterm) {
                     let _ = self.store.graph.named[i].1.insert_triple(
@@ -1596,6 +1615,7 @@ impl SolidMcpServer {
             return Err(format!("container <{url}> already exists"));
         }
 
+        let before = self.store.stored_graphs();
         let container = container_graph(&url)?;
         self.store.graph.named.push((term.clone(), container));
         let (created_graphs, added_links) = match self.link_containment(&url) {
@@ -1605,7 +1625,7 @@ impl SolidMcpServer {
                 return Err(e);
             }
         };
-        if let Err(e) = self.rematerialize() {
+        if let Err(e) = self.rematerialize_after(&before) {
             self.unlink_containment(&created_graphs, &added_links);
             self.restore_slot(&term, None);
             let _ = self.rematerialize();

@@ -32,7 +32,8 @@ struct Harness {
 }
 
 impl Harness {
-    async fn new(with_secret: bool, with_broken_acl: bool) -> Self {
+    /// The root, its owner ACL and one readable resource.
+    async fn seeded() -> MemoryStore {
         let store = MemoryStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
         store
             .write(ROOT, Bytes::new(), "text/turtle")
@@ -58,6 +59,11 @@ impl Harness {
             )
             .await
             .expect("seed readable resource");
+        store
+    }
+
+    async fn new(with_secret: bool, with_broken_acl: bool) -> Self {
+        let store = Self::seeded().await;
 
         if with_secret {
             store
@@ -101,6 +107,10 @@ impl Harness {
                 .expect("store deliberately malformed ACL fixture");
         }
 
+        Self::over(store)
+    }
+
+    fn over(store: MemoryStore) -> Self {
         let issuer_key = KeyKit::generate();
         let client_key = KeyKit::generate();
         let config = VerifierConfig::new(vec![ISSUER.to_owned()], BASE_URL);
@@ -231,6 +241,41 @@ async fn direct_no_leak_matches_ldp_get_authorization() {
         broken_acl["boolean"], false,
         "malformed ACL must exclude data"
     );
+}
+
+/// Records of the LWS surface (a linkset record, a service record) that a legacy edge lists are
+/// no graphs of the dataset, even when they hold RDF the requester could otherwise read.
+#[tokio::test]
+async fn lws_records_are_no_graphs() {
+    let store = Harness::seeded().await;
+    let service = "https://pod.example/.lws/";
+    store
+        .create_in_container(ROOT, service, Bytes::new(), "text/turtle")
+        .await
+        .expect("seed the service container");
+    for (parent, key) in [
+        (ROOT, "https://pod.example/a.meta"),
+        (ROOT, "https://pod.example/.META"),
+        (service, "https://pod.example/.lws/g1"),
+    ] {
+        store
+            .create_in_container(
+                parent,
+                key,
+                Bytes::from(format!("<urn:r> <urn:p> \"{key}\" .")),
+                "text/turtle",
+            )
+            .await
+            .expect("seed a record listed by an edge");
+    }
+    let harness = Harness::over(store);
+    let rows = json(
+        harness
+            .direct_query("SELECT ?g WHERE { GRAPH ?g { ?s <urn:p> ?o } } ORDER BY ?g")
+            .await,
+    )
+    .await;
+    assert_eq!(binding_values(&rows, "g"), ["https://pod.example/a"]);
 }
 
 // Dataset assembly must not erase the request's VERSION contract.

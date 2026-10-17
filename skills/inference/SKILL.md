@@ -742,7 +742,17 @@ none, which happens when the shared classification budget runs out).
 `is_satisfiable(iri)` / `is_subclass_of(sub_iri, sup_iri)` queries by class IRI
 (`Option<bool>`; `owl:Thing`, `owl:Nothing` and
 classes no axiom mentions included; `None` when an unloaded import could change a negative
-answer). The decided fragment is SHOIQ(D) with `hasSelf` and `R∘R ⊑ R`: nominals
+answer). `owl2dl::IncrementalChecker::check(&dict, &onto, budget)` rechecks successive
+versions of an ontology and returns `(DlReport, Reuse)`: the same report as `check`, except
+that it reuses the last decided answer when the logical axioms are the same
+(`Reuse::Identical`, no reasoning) or a superset (`Reuse::Extension`: by monotonicity the
+old inconsistency carries over, and old unsatisfiable classes and subsumptions are taken
+without a test), so a reused answer may be decided where a fresh one ran out of budget.
+Axioms are compared by the terms they name (each check may use its own `Dict`; an anonymous
+individual by its blank-node label); the profile check and clausification always run, and a
+refused version keeps the kept answer. The decided fragment is SROIQ(D) without the top and bottom properties: regular
+property chains (`owl:propertyChainAxiom`, transitivity; each non-simple property gets an
+automaton over the property words that imply it, and `∀R.C` follows its states), nominals
 (`ObjectOneOf`, `ObjectHasValue`; a node labelled `{a}` is merged into `a`'s node, and with
 nominals every class test runs with the ABox), number restrictions up to
 `MAX_CARDINALITY`, and data properties: domain, range, sub- /
@@ -760,7 +770,11 @@ in an assertion, `DataHasValue` or `DataOneOf` (e.g. `"sixteen"^^xsd:nonNegative
 makes the ontology `Inconsistent`. Literal policies that decide verdicts: lexical forms
 are not whitespace-normalised, so `" 1"^^xsd:integer` is ill-typed; an `rdf:PlainLiteral`
 without `@` is ill-typed; `rdf:langString` is accepted as a datatype (it is RDF 1.1's, not
-in the OWL 2 map); `xsd:hexBinary` and `xsd:base64Binary` share no values (OWL 2 §4.5).
+in the OWL 2 map); `xsd:hexBinary` and `xsd:base64Binary` share no values (OWL 2 §4.5);
+the data domain has values outside every datatype of the map (the Direct Semantics allows
+them), so the complement of the whole map is not empty, while `rdfs:Literal` is the whole
+domain. A branch closed as undecided or unconfirmed never makes the alternatives after it
+look forced: no subsumption is read off them.
 Nominals are decided without SHOIQ's NI-rule: a complete branch is accepted only when its
 graph provably unravels into a model (no blocked node keeps an edge to an individual, no
 edge outside the tree joins two blockable nodes, and no number restriction at an
@@ -771,10 +785,12 @@ apply to named individuals only, as OWL 2 specifies: two named members of the ke
 sharing a named value on every object property and a value on every data property are
 merged. Data values are compared when the tableau fixed them to literals (ABox
 assertions, `DataHasValue`); a pair that might share a value not fixed yet closes the
-branch as unconfirmed. A key on an object property with a transitive sub-property
-(a non-simple one) is `OutOfFragment`: the values it compares would lie along paths.
+branch as unconfirmed. A key on a non-simple object property (transitive, or
+implied by a chain or a transitive sub-property) is `OutOfFragment`: the values it compares would lie along paths.
 Still out of the fragment, as
-`Unknown(OutOfFragment { construct, source })`: other chains, the top and bottom object and data properties
+`Unknown(OutOfFragment { construct, source })`: a hierarchy the automaton construction finds
+irregular or too large (`MAX_AUTOMATON_STATES`; the profile check reports irregular ones as
+`NotInDl` first), the top and bottom object and data properties
 in axioms (except `SubDataPropertyOf(D owl:topDataProperty)`), datatypes outside the map
 without exactly one definition, cyclic or repeated definitions, literals of datatypes
 outside the map, and a property used both as an object and as a data property. A data

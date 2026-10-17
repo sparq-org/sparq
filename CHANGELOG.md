@@ -115,8 +115,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left in the plain mode, and a `value_none()` re-derived until it falls outside the reachable
   value-handle band, which `is_in_handle_band` decides and a test asserts — the checkable invariant
   `research/zk-field-native-encoding.md` §14.1 asks for, discharging that reserved-tag requirement on
-  the HOST side. The in-circuit half stays open: no Noir global or assert names the sentinel, so a
-  member refuses it only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
+  the HOST side. The in-circuit half stays open: the `zk/dual-leaf-v2` Noir library mirrors the
+  sentinel and its band check, but no proving member imports it, so a member refuses the sentinel
+  only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
   unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
   §14.1 `LANG_NONE` separation is asserted on the host side only (see the hardening entry below). Both versions carry the same #769-accepted INV-VL
   downgrade; not externally audited (CR-G8 / sq-qhy4).
@@ -133,6 +134,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
+  recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that
+  commitment, instead of from whichever entry the prover listed first. All such entries must carry
+  a salt, every one must decode to a field element, and all must decode to the SAME one (the hex
+  spelling may differ, since agreement is compared on the decoded element). If any is absent or
+  malformed, or two disagree, the salt does not resolve and the commitment is refused as
+  unreferenced — the same fail-closed outcome a single missing salt already produced. The previous
+  first-entry-wins resolution made that verdict depend on entry order (`[no salt, salt]` refused
+  while `[salt, no salt]` proceeded, and a second, disagreeing salt was never read). Under
+  `verify_manifest` the new rule refuses strictly more: the clear-attestation-preferred path is
+  unchanged, and no manifest that verified before is newly refused unless it carried a salt-less,
+  malformed-salt or disagreeing hidden-issuer entry over the same commitment. The structural
+  prefilter alone is not a verifier: there, an unresolved salt now skips the salt-reuse check, and
+  the full verifier refuses the commitment as unreferenced instead.
+- **sparq-zk:** doc correction — `RegistryEntry::issued_with_status` documented its signed message
+  as the method-unbound `commitment_message_with_status` (`ZKSIG_C3`); it signs the method-bound
+  `commitment_message_with_status_and_scheme` (`ZKSIG_M3`), which is what the code already did and
+  what `verify_commitment_signature_with_status` recomputes. No behaviour change.
 - **sparq-zk:** hardening — the dual-leaf encoders now assert the §14.1 `LANG_NONE` separation
   on the host side instead of assuming it. `dual_leaf::degenerate_value_component` and
   `dual_leaf_v2::degenerate_value_component` return `Result<Fr, DualLeafError>` and refuse a language

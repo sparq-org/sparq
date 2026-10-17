@@ -67,7 +67,7 @@ export type OwlDlRefusalKind = 'Unparsed' | 'Malformed' | 'Ambiguous' | 'Unsuppo
 
 /** The reason attached to `consistent: "unknown"`. */
 export type OwlDlReason =
-  /** A construct outside the decided fragment (e.g. a key or a property chain). */
+  /** A construct outside the decided fragment (e.g. `owl:topObjectProperty`). */
   | { kind: 'OutOfFragment'; construct: string; triples: OwlDlTriple[] }
   /** A blocking OWL 2 DL violation (a non-simple property where a simple one is required, or an irregular property hierarchy). */
   | { kind: 'NotInDl'; violations: OwlDlViolation[] }
@@ -218,11 +218,11 @@ export function normaliseOwlDlOptions(
  * the graph as OWL 2, runs the OWL 2 DL profile check, consistency, and — for a consistent
  * ontology — classification.
  *
- * Decided fragment: SHOIQ(D) — classes and every class constructor including nominals,
- * object properties with inverses, hierarchies, transitivity, `R∘R ⊑ R` chains, the role
- * characteristics, `hasSelf`, qualified cardinality up to a fixed bound, data properties over
- * the OWL 2 datatype map, keys over named individuals, and the ABox. Keys on a non-simple
- * property, other property chains, the top and bottom
+ * Decided fragment: SROIQ(D) without the top and bottom properties — classes and every
+ * class constructor including nominals, object properties with inverses, hierarchies,
+ * transitivity and regular property chains, the role characteristics, `hasSelf`, qualified
+ * cardinality up to a fixed bound, data properties over the OWL 2 datatype map, keys over
+ * named individuals, and the ABox. Keys on a non-simple property, the top and bottom
  * properties, datatypes outside the map and object/data property punning answer
  * `consistent: "unknown"` with reason `OutOfFragment` and the triples; an undecided datatype
  * question answers `DatatypeUnknown`, and an unconfirmed model with nominals `Unconfirmed`.
@@ -239,4 +239,56 @@ export async function checkOwlDl(tbox: string, abox?: string, options?: OwlDlOpt
   const { format, optionsJson } = normaliseOwlDlOptions(options);
   const mod = await loadDl();
   return JSON.parse(mod.checkOwlDl(tbox, abox ?? undefined, format, optionsJson)) as OwlDlResult;
+}
+
+/** What {@link OwlDlSession.check} reused from the session's previous check. */
+export type OwlDlReuse = 'none' | 'identical' | 'extension';
+
+/** The result of {@link OwlDlSession.check}: a {@link OwlDlResult} plus what was reused. */
+export interface OwlDlSessionResult extends OwlDlResult {
+  /**
+   * `"identical"`: the same axioms as the last decided check, answered from it without
+   * reasoning. `"extension"`: those axioms and more, so the last inconsistency, unsatisfiable
+   * classes and subsumptions carry over (OWL 2 is monotone) and only the rest is tested.
+   * `"none"`: a full check (the first, an axiom removed or changed, or nothing decided kept).
+   */
+  reuse: OwlDlReuse;
+}
+
+/**
+ * Rechecks successive versions of an ontology (a working draft plus small edits), keeping the
+ * last decided answer to reuse. Results are exactly what {@link checkOwlDl} would answer,
+ * except that a reused answer may be decided where a fresh check ran out of budget. Axioms are
+ * compared by the terms they name; an anonymous individual by its blank-node label, so a
+ * relabelled blank node counts as a change. Call {@link OwlDlSession.free} when done.
+ */
+export interface OwlDlSession {
+  /** As {@link checkOwlDl}, synchronously (the bundle is already loaded). */
+  check(tbox: string, abox?: string, options?: OwlDlOptions): OwlDlSessionResult;
+  /** Releases the session's memory in the bundle; the session cannot be used afterwards. */
+  free(): void;
+}
+
+/**
+ * Opens an {@link OwlDlSession}, loading the DL bundle on first use as {@link checkOwlDl} does.
+ * Rejects if the bundle cannot be loaded.
+ */
+export async function openOwlDlSession(): Promise<OwlDlSession> {
+  const mod = await loadDl();
+  let inner: InstanceType<DlModule['OwlDlSession']> | undefined = new mod.OwlDlSession();
+  return {
+    check(tbox: string, abox?: string, options?: OwlDlOptions): OwlDlSessionResult {
+      if (!inner) throw new TypeError('OwlDlSession: used after free()');
+      if (typeof tbox !== 'string') throw new TypeError('checkOwlDl: tbox must be a string');
+      if (abox !== undefined && abox !== null && typeof abox !== 'string') {
+        throw new TypeError('checkOwlDl: abox must be a string when given');
+      }
+      const { format, optionsJson } = normaliseOwlDlOptions(options);
+      return JSON.parse(inner.check(tbox, abox ?? undefined, format, optionsJson)) as OwlDlSessionResult;
+    },
+    free(): void {
+      inner?.free();
+      inner = undefined;
+    },
+  };
 }

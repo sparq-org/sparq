@@ -124,9 +124,9 @@ at construction — the MCP-Solid proposal draft's local-trusted-agent deploymen
 | `shapes` | the same miner, one class | a class only unreadable documents use reports as absent |
 | `stats` | totals over the same projection | two sessions get different totals; no grants ⇒ zeros |
 | `update` *(gated)* | `PodStore::update_as_with_budget` / `update_as_acp_with_budget` | per-graph session write check, fail-closed; its SPARQL *evaluation* is bounded by the SAME per-call budget the read tools use (draft §9.4) — the one place an update evaluates SPARQL, its `DELETE`/`INSERT … WHERE`. The rest is NOT budgeted, and a request cap covers only the inline `INSERT`/`DELETE DATA`: `CLEAR`/`DROP` cost whatever the session may write, and `LOAD` is refused unless the embedder installs an allowlisted base |
-| `resource_put` *(gated)* | atomic named-graph swap (+ containment link on create) | `.acl`/`.acr` route through `put_acl`/`put_acl_acp` |
-| `resource_delete` *(gated)* | slot removal + containment unlink | non-empty containers rejected; `.acl` via `delete_acl` |
-| `container_create` *(gated)* | typed `ldp:BasicContainer` graph + containment | slash-terminated IRIs only |
+| `resource_put` *(gated)* | atomic named-graph swap (+ containment link on create) | `.acl`/`.acr` route through `put_acl`/`put_acl_acp`; what it creates records no creator for `acp:CreatorAgent` (as on main), and an existing resource or container keeps its creator and owner (`PodStore::rematerialize_after_edit`); a rolled-back write changes no provenance |
+| `resource_delete` *(gated)* | slot removal + containment unlink | containers with anything stored below them (or a non-empty listing) rejected; `.acl` via `delete_acl`; a resource that no longer exists afterwards (a deleted document, or an emptied container) loses its creator and owner unless its own `.acr` is still stored |
+| `container_create` *(gated)* | typed `ldp:BasicContainer` graph + containment | slash-terminated IRIs only; records no creator, like `resource_put` |
 
 Key contracts: a resource the session cannot read errors **byte-identically** to a
 nonexistent one (existence non-disclosure, draft §9.3); ACL writes are gated on

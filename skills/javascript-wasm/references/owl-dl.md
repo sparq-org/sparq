@@ -42,6 +42,28 @@ The load is memoised; a failed initialisation (for example the `.wasm` fetch) is
 fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*`
 (`checkOwlDl(tbox, abox, format, optionsJson) -> string`).
 
+## Rechecking a draft (`openOwlDlSession`)
+
+```js
+import { openOwlDlSession } from '@sparq-org/sparq';
+
+const session = await openOwlDlSession();   // loads the bundle like checkOwlDl
+let r = session.check(draftTurtle);         // synchronous; same arguments as checkOwlDl
+r = session.check(draftPlusEditTurtle);     // r.reuse: 'none' | 'identical' | 'extension'
+session.free();
+```
+
+A session keeps the last decided answer. `session.check` answers exactly what `checkOwlDl`
+would, plus `reuse`: `'identical'` when the logical axioms are the last decided version's (the
+answer is returned without reasoning), `'extension'` when they are a superset (OWL 2 is
+monotone, so the old inconsistency, unsatisfiable classes and subsumptions carry over and only
+the rest is tested; such an answer may be decided where a fresh check ran out of budget), and
+`'none'` otherwise (a removed or changed axiom, or nothing decided kept). Axioms are compared by
+the terms they name, an anonymous individual by its blank-node label, so `[]` nodes (which get
+fresh labels on every parse) make every version count as changed. A version that is refused or
+does not parse leaves the kept answer as it was. The raw glue class is `OwlDlSession`
+(`new OwlDlSession()`, `.check(tbox, abox, format, optionsJson) -> string`, `.free()`).
+
 ## Result shape (`OwlDlResult`)
 
 ```ts
@@ -93,7 +115,8 @@ fetches the bundle. The raw glue is also exported as `@sparq-org/sparq/wasm-dl/*
 
 ## Scope (honest)
 
-The decided fragment is SHOIQ(D) with `hasSelf` and `R∘R ⊑ R`: every class constructor
+The decided fragment is SROIQ(D) without the top and bottom properties: regular property
+chains (`owl:propertyChainAxiom`) and transitivity, every class constructor
 including nominals (`oneOf`, `hasValue` on object properties; with nominals the ABox takes
 part in classification, so `A ≡ {a}` and `a ∈ B` give `A ⊑ B`), object properties with inverses and hierarchies, the role
 characteristics (functional, inverse-functional, reflexive, irreflexive, symmetric,
@@ -106,8 +129,9 @@ data assertions) over the OWL 2 datatype map with facet restrictions, `DataOneOf
 booleans and acyclic `DatatypeDefinition`s. Literals are compared by value, and an ill-typed
 literal in an assertion makes the ontology inconsistent (`"sixteen"^^xsd:nonNegativeInteger`).
 Keys (`hasKey`) are decided over named individuals; a key whose data values are not
-fixed to literals answers `'Unconfirmed'`. **Keys on an object property with a transitive
-sub-property, property chains other than `R∘R ⊑ R`, the top/bottom properties in axioms,
+fixed to literals answers `'Unconfirmed'`. **Keys on a non-simple object property (transitive,
+or implied by a chain or a transitive sub-property), a property hierarchy whose automaton
+would exceed a fixed size, the top/bottom properties in axioms,
 datatypes and literals outside the OWL 2 datatype map, and a property used as both an
 object and a data property currently answer `consistent: 'unknown'` with
 `reason.kind: 'OutOfFragment'`** and the triples of the axiom that uses them; a datatype
