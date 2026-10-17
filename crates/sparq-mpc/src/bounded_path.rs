@@ -201,7 +201,7 @@ pub const MAX_UNROLL_CHAINS: u64 = 1 << 20; // 1_048_576
 /// it — yet chain `ℓ` is an `ℓ`-hop join fold, so the union evaluates `Σ_{ℓ=m..=k} ℓ`
 /// joins and allocates an `ℓ`-long predicate sequence per chain. A single-predicate
 /// `{0,k}` with a huge public `k` was therefore unbounded work that the chain cap
-/// waved through. It also reached [`projected_chain_count`], whose own `a^ℓ` loop
+/// waved through. It also reached `projected_chain_count`, whose own `a^ℓ` loop
 /// runs `ℓ` times per length, so even deciding to refuse grew with `k`.
 ///
 /// Bounding the hop count first fixes both: with `a >= 2` alternatives the chain cap
