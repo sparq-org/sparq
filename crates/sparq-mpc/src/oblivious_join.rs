@@ -298,40 +298,42 @@ pub(crate) fn check_output_bound_cap(bound: usize) -> Result<(), MpcError> {
     Ok(())
 }
 
-/// The bound contract settled from PUBLIC dimensions only: `B` within
-/// [`MAX_OUTPUT_BOUND`], and `B` covering `public_bound` — an upper bound on the
-/// candidate count derived from public sizes alone (an edge count, a hop count),
-/// never from a statistic over the caller's data.
+/// The bound contract, decided from the PUBLIC input sizes FIRST and from the
+/// exact candidate count only if it has to be.
 ///
-/// Use this wherever the exact candidate count is a function of HIDDEN or
-/// unmatched data, as it is for the hidden property-path builders: comparing `B`
-/// against such a count would make the accept/refuse decision — and so the fact
-/// of the refusal — depend on a quantity the operator does not disclose. An
-/// upper bound from public dimensions refuses in the fail-closed direction
-/// instead: `B` must be provisioned for the public worst case, and a `B` that
-/// clears it also clears the exact count, so nothing is ever truncated.
+/// `public_bound` is an upper bound on the candidate count derived from public
+/// sizes alone (an edge count, a hop count) — never a statistic over the caller's
+/// data. `exact_count` computes the real count, and is called ONLY on the branch
+/// where it is needed.
 ///
-/// The message carries `B` and the public bound, both already public, and no
-/// candidate count.
-pub(crate) fn check_public_output_bound(
+/// - `B >= public_bound`: accepted on public sizes alone. `exact_count` is not
+///   called, so nothing about the data is computed, let alone disclosed, and no
+///   `B` the data would have allowed is ever refused.
+/// - `B < public_bound`: the caller has chosen a tighter `B` than the public
+///   worst case, so coverage can only be settled against the real count. It is
+///   computed here, before any draw, and a `B` that cannot cover it is refused.
+///   Success or refusal therefore discloses ONE BIT — whether the candidate count
+///   is at most `B` — which is the caller's own trade for the tighter bound.
+///
+/// Either way the message names `B` and `public_bound`, both already public, and
+/// never the candidate count. A count above [`MAX_OUTPUT_BOUND`] needs no branch
+/// of its own: `B` is capped first, so a count that large cannot be covered and
+/// falls out of the same refusal.
+pub(crate) fn check_bound_public_first(
     what: &str,
     bound: usize,
     public_bound: usize,
+    exact_count: impl FnOnce() -> Result<usize, MpcError>,
 ) -> Result<(), MpcError> {
     check_output_bound_cap(bound)?;
-    if public_bound > MAX_OUTPUT_BOUND {
-        return Err(MpcError::Protocol(format!(
-            "{}: the public candidate bound {} exceeds the MAX_OUTPUT_BOUND cap of {} — \
-             refusing (every candidate becomes one materialised slot, so no legal B could \
-             cover the public worst case)",
-            what, public_bound, MAX_OUTPUT_BOUND
-        )));
+    if bound >= public_bound {
+        return Ok(());
     }
-    if bound < public_bound {
+    if bound < exact_count()? {
         return Err(MpcError::Protocol(format!(
-            "{}: padded bound B={} < the public candidate bound {} derived from the public \
-             input sizes — refusing before any draw (B must cover the public worst case, or a \
-             candidate could be truncated and a true match dropped)",
+            "{}: padded bound B={} is below the public candidate bound {} AND does not cover \
+             the candidate set — refusing before any draw (a B at or above the public bound is \
+             decided from the public input sizes alone)",
             what, bound, public_bound
         )));
     }
@@ -346,8 +348,10 @@ pub(crate) fn check_public_output_bound(
 /// Its messages name the candidate count, so call it only where that count is
 /// something the CALLER already holds — it owns the candidate slice, or the count
 /// is a product of public input lengths. Where the count is a statistic over
-/// hidden or unmatched data, use `check_public_output_bound` instead, so neither
-/// the message nor the fact of the refusal depends on undisclosed data.
+/// hidden or unmatched data, use `check_bound_public_first` instead: it decides
+/// from the public sizes whenever `B` allows, keeps the count out of the message
+/// either way, and leaves the one-bit disclosure to callers that ask for a
+/// tighter `B`.
 pub(crate) fn check_output_bound(bound: usize, candidates: usize) -> Result<(), MpcError> {
     check_output_bound_cap(bound)?;
     if candidates > MAX_OUTPUT_BOUND {
@@ -3917,5 +3921,71 @@ mod output_randomness_seam_tests {
             text
         );
         assert!(text.contains("not valid UTF-8"), "{}", text);
+    }
+
+    /// The bound contract tries the PUBLIC half first, and the data-dependent count
+    /// is not even computed when the public half settles it.
+    ///
+    /// The closure stands in for the caller's exact projection: it panics if
+    /// called, so "accepted without computing the count" is asserted by the test
+    /// completing rather than by inspecting anything after the fact.
+    #[test]
+    fn a_bound_at_or_above_the_public_bound_never_computes_the_exact_count() {
+        use std::cell::Cell;
+
+        let called = Cell::new(0usize);
+        let counting = |n: usize| {
+            let called = &called;
+            move || {
+                called.set(called.get() + 1);
+                Ok(n)
+            }
+        };
+
+        // B above, and B exactly at, the public bound: accepted, closure untouched.
+        for bound in [8usize, 7] {
+            check_bound_public_first("t", bound, 7, || {
+                panic!("the exact count must not be computed when B covers the public bound")
+            })
+            .expect("a B at or above the public bound is accepted");
+        }
+
+        // B below the public bound: the count decides, and is computed exactly once.
+        check_bound_public_first("t", 5, 7, counting(5))
+            .expect("a tighter B is still accepted when the count fits");
+        assert_eq!(
+            called.get(),
+            1,
+            "the count is computed once, on this branch only"
+        );
+
+        let err = check_bound_public_first("t", 5, 7, counting(6))
+            .expect_err("a tighter B that cannot cover the count is refused");
+        assert_eq!(called.get(), 2);
+        let text = format!("{} || {:?}", err, err);
+        assert!(
+            text.contains("B=5") && text.contains("public candidate bound 7"),
+            "{}",
+            text
+        );
+        // The count that decided it is NOT in the message.
+        assert!(
+            !text.contains("count 6") && !text.contains(" 6 "),
+            "{}",
+            text
+        );
+
+        // The cap is still checked first, before either branch.
+        assert!(check_bound_public_first("t", MAX_OUTPUT_BOUND + 1, 1, || Ok(0)).is_err());
+
+        // A count above the cap needs no branch of its own: B is capped, so it
+        // cannot cover such a count and falls out of the same refusal.
+        assert!(
+            check_bound_public_first("t", MAX_OUTPUT_BOUND, MAX_OUTPUT_BOUND + 1, || Ok(
+                MAX_OUTPUT_BOUND + 1
+            ))
+            .is_err(),
+            "a count above the cap is refused"
+        );
     }
 }

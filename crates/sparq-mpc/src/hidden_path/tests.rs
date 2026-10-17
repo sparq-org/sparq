@@ -798,10 +798,9 @@ fn an_over_cap_bound_is_refused_before_any_draw() {
 /// `k = 18` the builder drew one secure equality per hop of every one of the
 /// `2^18` tuples, about 2.1 billion draws over roughly seventeen minutes, and only
 /// THEN discovered that `B = 1` could not hold the answer. The count is decidable
-/// decidable from the PUBLIC input sizes — the edge count and `k` — so it is now
-/// decided first. A `k = 18` fixture is used deliberately: with the guard in place
-/// the test finishes instantly, and without it the enumeration is the cost being
-/// avoided.
+/// from the disclosed endpoint terms in `O(|E| log |E|)`, so it is now decided
+/// first. A `k = 18` fixture is used deliberately: with the guard in place the test
+/// finishes instantly, and without it the enumeration is the cost being avoided.
 #[test]
 fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
     use crate::randomness::test_sources::DrawCountingSource;
@@ -814,9 +813,9 @@ fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
         ("http://ex/b", "http://ex/c"),
     ]);
     assert_eq!(
-        public_candidate_pair_bound(edges.len(), 18).unwrap(),
+        projected_candidate_count(&edges, 18).unwrap(),
         4,
-        "the public bound for k >= 2 is |E|^2, from the edge count alone"
+        "the projection must agree with the builder's grouping"
     );
 
     for k in [2usize, 18] {
@@ -826,19 +825,29 @@ fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
             .expect_err("a bound below the candidate count must be refused");
         match &err {
             MpcError::Protocol(m) => {
-                assert!(m.contains("public candidate bound"), "k={}: {}", k, m);
-                // The refusal names B and the public bound, and no candidate count.
-                assert!(!m.contains("candidate count {"), "k={}: {}", k, m);
+                assert!(
+                    m.contains("does not cover the candidate set"),
+                    "k={}: {}",
+                    k,
+                    m
+                );
+                // The message names B and the PUBLIC bound, and no candidate count.
+                assert!(
+                    m.contains("B=1") && m.contains("public candidate bound 4"),
+                    "k={}: {}",
+                    k,
+                    m
+                );
+                assert!(!m.contains("count 4"), "k={}: {}", k, m);
             }
             other => panic!("k={}: expected a Protocol refusal, got {:?}", k, other),
         }
         assert_eq!(counted.draws(), 0, "k={}: refused before any draw", k);
     }
 
-    // k = 1 groups by the edges' own (subject, object) pairs, so at most one key per
-    // edge: the public bound is |E| = 2 and B = 1 is still short. The bound must
-    // track `k`, not assume the product.
-    assert_eq!(public_candidate_pair_bound(edges.len(), 1).unwrap(), 2);
+    // k = 1 groups by the edges' own (subject, object) pairs, so the count is 2 and
+    // B = 1 is still short — the projection must track `k`, not assume the product.
+    assert_eq!(projected_candidate_count(&edges, 1).unwrap(), 2);
     let mut dealer = backend.dealer();
     let mut counted = DrawCountingSource::new(&mut dealer);
     assert!(
@@ -847,13 +856,13 @@ fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
     );
     assert_eq!(counted.draws(), 0);
 
-    // And a bound equal to the PUBLIC bound runs, for both the k = 1 and the
-    // k >= 2 grouping — the guard refuses short bounds, not every bound.
-    eval_exact_k_chain_hidden(&backend, &edges, 1, 2).expect("B = the public bound runs at k=1");
-    eval_exact_k_chain_hidden(&backend, &edges, 2, 4).expect("B = the public bound runs at k=2");
+    // And the projection is EXACT, not merely an upper bound: a bound equal to it
+    // runs, for both the k = 1 and the k >= 2 grouping.
+    eval_exact_k_chain_hidden(&backend, &edges, 1, 2).expect("B = exact count runs at k=1");
+    eval_exact_k_chain_hidden(&backend, &edges, 2, 4).expect("B = exact count runs at k=2");
 
-    // The test-only instrumentation entry carries the SAME guard, so a short `B`
-    // cannot reach the builder through it either.
+    // The test-only instrumentation entry carries the SAME bound contract, so a
+    // short `B` cannot reach the builder through it either.
     let mut dealer = backend.dealer();
     let mut counted = DrawCountingSource::new(&mut dealer);
     assert!(
@@ -861,4 +870,109 @@ fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
         "the instrumentation entry must refuse a short B too"
     );
     assert_eq!(counted.draws(), 0);
+}
+
+/// `public_candidate_pair_bound` is the value a caller provisions `B` against: it
+/// is a function of the edge COUNT and `k`, and of nothing in the edges.
+#[test]
+fn the_public_candidate_pair_bound_is_a_function_of_the_public_sizes() {
+    // k = 1 keys at most one pair per edge.
+    assert_eq!(public_candidate_pair_bound(7, 1).unwrap(), 7);
+    // k >= 2 is the product of the two endpoint positions, capped by |E|^k.
+    assert_eq!(public_candidate_pair_bound(7, 2).unwrap(), 49);
+    assert_eq!(public_candidate_pair_bound(7, 9).unwrap(), 49);
+    // |E|^k is the tighter bound while it is below |E|^2 — it never is for k >= 2,
+    // but k = 2 over two edges shows the two agreeing.
+    assert_eq!(public_candidate_pair_bound(2, 2).unwrap(), 4);
+    // Degenerate inputs produce no candidates at all.
+    assert_eq!(public_candidate_pair_bound(0, 5).unwrap(), 0);
+    assert_eq!(public_candidate_pair_bound(5, 0).unwrap(), 0);
+    // `|E|^2` overflowing `usize` is a refusal, not a wrap.
+    assert!(public_candidate_pair_bound(usize::MAX, 2).is_err());
+
+    // Two edge sets of the SAME size but different contents give the same bound —
+    // that is the property that makes a decision taken on it data-independent.
+    let (a, _ia) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/c", "http://ex/d"),
+    ]);
+    let (b, _ib) = hidden_edges(&[
+        ("http://ex/x", "http://ex/x"),
+        ("http://ex/x", "http://ex/x"),
+    ]);
+    assert_eq!(
+        public_candidate_pair_bound(a.len(), 3).unwrap(),
+        public_candidate_pair_bound(b.len(), 3).unwrap()
+    );
+    // Their EXACT counts differ (4 pairs vs 1), which is exactly why the public
+    // bound is what the decision is taken on.
+    assert_ne!(
+        projected_candidate_count(&a, 3).unwrap(),
+        projected_candidate_count(&b, 3).unwrap()
+    );
+}
+
+/// The two branches of the exactly-`k` bound contract, at the entry point.
+///
+/// A `B` at or above the public bound is accepted whatever the edges are; a `B`
+/// below it is accepted when the real count fits and refused — before any draw —
+/// when it does not. The second branch is the one that discloses the single bit,
+/// and it exists so that a caller choosing a tight `B` is not refused work the
+/// data allows.
+#[test]
+fn both_branches_of_the_exact_k_bound_contract() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C09).unwrap();
+    // One edge pair, a self-loop and a chain: 2 distinct subjects x 2 distinct
+    // objects = 4 pairs at k >= 2, while the public bound is |E|^2 = 4 as well, so
+    // a second fixture is used below for the strictly-tighter case.
+    let (edges, _interner) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    let public = public_candidate_pair_bound(edges.len(), 2).unwrap();
+    assert_eq!(public, 4);
+
+    // Branch 1: B at the public bound, and above it — accepted.
+    eval_exact_k_chain_hidden(&backend, &edges, 2, public).expect("B = the public bound runs");
+    eval_exact_k_chain_hidden(&backend, &edges, 2, public + 3)
+        .expect("B above the public bound runs");
+
+    // Branch 2: a strictly tighter B than the public bound, with a count that
+    // FITS — must be accepted, not refused. Three parallel edges share one subject
+    // and one object, so k >= 2 yields a single pair while the public bound is 9.
+    let (narrow, _i2) = hidden_edges(&[
+        ("http://ex/s", "http://ex/o"),
+        ("http://ex/s", "http://ex/o"),
+        ("http://ex/s", "http://ex/o"),
+    ]);
+    let narrow_public = public_candidate_pair_bound(narrow.len(), 2).unwrap();
+    assert_eq!(narrow_public, 9);
+    assert_eq!(projected_candidate_count(&narrow, 2).unwrap(), 1);
+    eval_exact_k_chain_hidden(&backend, &narrow, 2, 1)
+        .expect("a B far below the public bound runs when the real count fits");
+
+    // Branch 2, the other way: the count does not fit, so it is refused before any
+    // draw, with a message carrying only B and the public bound.
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, 3)
+        .expect_err("B below both the public bound and the count must be refused");
+    assert_eq!(counted.draws(), 0, "refused before any draw");
+    match &err {
+        MpcError::Protocol(m) => {
+            assert!(
+                m.contains("B=3") && m.contains("public candidate bound 4"),
+                "{}",
+                m
+            );
+            assert!(
+                !m.contains("count 4"),
+                "the count itself is not rendered: {}",
+                m
+            );
+        }
+        other => panic!("expected a Protocol refusal, got {:?}", other),
+    }
 }
