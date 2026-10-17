@@ -1940,7 +1940,42 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   take the lock up front, re-checks what needs repairing under it, and fails if a writer holds it:
   a torn-looking tail can be a live writer mid-append. An `open` that takes NO lock never repairs
   anything — it loads only fully-committed records, leaves every log as it found it, and marks
-  itself unwritable if it meets work it was not allowed to do. The lock is released when the store is dropped and by the kernel on process exit
+  itself unwritable if it meets work it was not allowed to do.
+- **A reader sees a WHOLE transaction or none of it, or gets `503`-grade busy (`sq-ycle`).** An
+  UPDATE body is materialised graph by graph after its journal commit, so a store opened in the
+  middle of that could take one named graph from before the body and the default graph from after
+  it. The writer generation is therefore a **seqlock**: the writer sets it ODD before materialising
+  a committed frame (and across a multi-graph `apply_delta_nquads` batch) and EVEN after. An
+  `open` reads it, loads the whole dataset, re-reads it, and accepts the image only if the value
+  did not move and was not odd; after a bounded number of retries it fails with
+  `ErrorKind::WouldBlock` ("busy") rather than answering from a mixed state. The odd/even writes
+  are plain 8-byte in-place writes with **no fsync** — they only need to be visible to other
+  processes, not durable — so a committed transaction pays two page-cache writes and the hot
+  single-graph `apply_delta` path pays no seqlock cost at all (its one added cost is the identity
+  `stat` in the next bullet); only the per-acquisition bump is fsync'd. A crash can leave the
+  counter odd, and the next **locked** open resets it to even once it has finished repairing. A
+  store no writer has ever locked has no counter at all and reads as `0` (even), and an in-memory
+  graph has none of this.
+- **A durable restore runs under the store's writer lock (`sq-ycle`).** `Graph::restore_into_durable`
+  takes the exclusive lock itself and returns busy if another handle holds it — replacing the
+  directory under an idle lock holder left that holder appending to an unlinked WAL. The live
+  writer uses `Graph::restore_in_place`, which swaps under the lock **it already holds**, so
+  exclusion is continuous from before the staging directory is written until after the reopen
+  (`flock` is per open file description, so a writer cannot re-acquire its own lock). As a
+  backstop, every durable write costs one `stat`: the store directory's `(device, inode)` must
+  still be the one this handle locked, so a swapped-out handle is poisoned on its next write even
+  if some future path forgets the lock.
+- **One store, one lock, whatever you call it (`sq-ycle`).** The store directory is
+  `canonicalize`d once at open and every control path is derived from that, so a symlink, a bind
+  mount or a `./`-and-`..` detour cannot hand one store two locks and two generations — and two
+  writers.
+- **A named sub-graph directory is not a store (`sq-ycle`).** `Graph::open(DIR/named/<i>)` is a
+  clean `Err` (`ErrorKind::InvalidInput`), not a silent redirect to the root: a child opened
+  directly would get a second writer lock and a second redo journal over data the root's manifest,
+  journal and poison flag also cover. Each child directory carries a `.sparq-subgraph` ownership
+  marker naming its root relatively (so moving the store keeps it correct); a legacy store written
+  before the markers gets them stamped by the root on its first locked write, and in the meantime a
+  direct open is still refused because `<root>/named.bin` lists that position. The lock is released when the store is dropped and by the kernel on process exit
   however it exits, so a crash never leaves it stale. Unix only: on a non-unix target writes
   proceed unlocked and a second writer is not detected. An offline `sparq-cli compact` on a live
   server's dir still needs the server stopped, exactly as the compaction note above advises: it
@@ -2014,32 +2049,4 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   rationale: the `sparq_server::status_contract` crate doc, asserted by `tests/status_contract.rs`.
 - **The versioned HTTP wire contract (sq-fdurb / gh-1416, PSS ask).** The endpoints,
   params, media types, negotiation rules, status codes and error-body shape an **HTTP-only
-  consumer** may rely on are enumerated as the **v1 wire contract** in
-  [`docs/http-wire-contract.md`](../../docs/http-wire-contract.md) — frozen-vs-unstable
-  partition, plus the wire-semver policy (breaking vs additive). Pinned end-to-end by the
-  served-surface snapshot suite `tests/wire_contract.rs` (one direct test per documented
-  endpoint behaviour / error class), so an accidental wire break fails CI. Status: **PROPOSED**
-  — the freeze ratification is the maintainer's call, like the embedding freeze in
-  [`docs/api-stability.md`](../../docs/api-stability.md).
-- **Error bodies are sanitized — no information leak (sq-cz89 / sq-j9zs).** On the
-  no-auth-by-default path an error body carries only a **stable, generic CLASS message**
-  (e.g. `malformed query`, `malformed RDF body`, `malformed gzip body`,
-  `query execution error`, `update failed: invalid SPARQL update`). It deliberately does
-  **NOT** echo the caller's submitted query/UPDATE/RDF text, a fragment of the loaded RDF
-  (parsers like `oxttl`/`spargebra` quote the offending token — that would confirm loaded
-  triples), or any server-side filesystem path (e.g. a `--persist` mirror's path inside a
-  transient durable-write `503`). The full detailed cause is preserved for the **operator**
-  via the server-side `tracing` log (target `sparq_server`), surfaced only through the
-  opt-in `--verbose` / `RUST_LOG` subscriber — never the HTTP response. Status semantics
-  (the `400`/`413`/`415`/`503`/`500` classification) are unchanged; only the prose detail
-  is withheld. Regression tests assert a sentinel token never appears in any error body.
-- **mimalloc** is the binary's global allocator (matters under concurrent load).
-
-## See also
-
-- `serve` — the underlying `sparq-serve` generation-ring + sequenced group-commit writer
-  (the concurrency primitives `router`/`AppState` wire up).
-- `engine` — `sparq-engine` query/ask/construct/describe + `QueryBudget` the server drives.
-- `cli` — the `sparq` command-line surface over the same engine.
-- `geo` — the `geof:` GeoSPARQL extension functions enabled by `--features geo`.
-- `core` — `sparq_core::Graph` (`Graph::load_str`) the dataset is loaded into.
+  consumer** may rely on are enumerated as t

@@ -2255,16 +2255,19 @@ impl ApplyUpdates for ServerApplier {
             .graph
             .persist_dir()
             .ok_or_else(|| "durable graph is not directory-backed".to_string())?;
-        // Release the OLD durable graph's WAL handle before the directory swap (its `wal.log` is
-        // about to be renamed away with `dir`); the crash-safe swap re-opens a fresh handle.
-        durable.graph.close_wal();
-        let restored = Graph::restore_into_durable(&dir, fresh)
+        // (sq-ycle, codex I10) The swap runs through `restore_in_place` on the graph that
+        // OWNS the store, so it happens under THAT graph's exclusive writer lock — continuously,
+        // from before the staging directory is written until after the reopen. The standalone
+        // `Graph::restore_into_durable` takes the lock itself and would collide with the lock this
+        // very handle holds (`flock` is per open file description). It also closes the old WAL
+        // handle and adopts the re-opened store in place, so the caller does neither.
+        let _ = &dir;
+        durable
+            .graph
+            .restore_in_place(fresh)
             .map_err(|e| format!("restore-into-durable swap failed: {e}"))?;
-        // Adopt the re-opened, directory-backed restored store; subsequent updates WAL-append to it.
         // The published snapshot is an independent in-memory image of the restored content.
-        let published = restored.snapshot().into_graph();
-        durable.graph = restored;
-        Ok(published)
+        Ok(durable.graph.snapshot().into_graph())
     }
 }
 

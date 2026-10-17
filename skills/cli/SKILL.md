@@ -189,8 +189,17 @@ cargo run --release -p sparq-cli --features hdt-write -- \
   counter (`<parent>/.<dirname>.writer.gen`) that every writer bumps when it takes the lock, so a
   writer that appended, compacted and exited is still detected. Both control files live in the
   store directory's PARENT, which must be writable, and `rm -rf <dir>` leaves them behind
-  (harmless). The lock is advisory and unix-only, and it is released on process exit however the
+  (harmless), as does a symlink or `..` alias of the directory — the store is `canonicalize`d once
+  at open and both control files are keyed on that canonical path, so one store never gets two
+  locks. The lock is advisory and unix-only, and it is released on process exit however the
   process exits.
+- **A store directory is opened as a whole, never by sub-graph.** Pointing a command at
+  `DIR/named/<i>` is a clean error, not a redirect: a named sub-graph is part of its root's
+  dataset, and opening it directly would give it a second writer lock and a second redo journal
+  over the same tree. Open the store root and select the graph in the query.
+- **An open can report the store BUSY.** While a writer is materialising a committed multi-graph
+  transaction, no self-consistent view of the dataset exists; an open retries briefly and then
+  fails rather than answering from a half-applied one. Rerun the command.
 - **`query` and `query-mmap` print RESULTS** (a table by default for SELECT; a boolean for ASK; N-Triples for CONSTRUCT/DESCRIBE) on stdout — load stats and reasoning/inconsistency reports go to stderr. Use `--format <table|tsv|csv|xml|json|ntriples>` to pick the SELECT/ASK serialisation, or `--count` for the legacy count-only line (`<n> solutions/triples in <ms>ms`). The two are at output parity (they share one emission core; `query-mmap` only differs in opening the indexes memory-mapped instead of loading into RAM). `bench`/`bench-mmap` are unchanged and emit TSV.
 - **No `--help`.** Run a subcommand with too few args to see its one-line usage; an unknown subcommand prints the top-level usage and exits 2. Query errors exit 1.
 - **`--reason <profile>` is a flag on `query`** (scanned anywhere in argv); the standalone `reason` subcommand instead takes the profile as the 3rd positional. Profiles: `rdfs`, `owl`, `n3`, and — with the opt-in features — `el` and `datalog:<rules.dlog>`. `datalog:` is the only profile that carries an ARGUMENT (its rules file), split on the FIRST `:`; a bare `datalog` is a usage error (exit 2) naming the syntax, in both feature states.
