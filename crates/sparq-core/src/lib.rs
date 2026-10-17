@@ -4073,11 +4073,13 @@ impl Graph {
         // the manifest entry — the recovery commit point — is itself durable.
         let mut names: Vec<Term> = self.named.iter().map(|(n, _)| n.clone()).collect();
         names.push(name.clone());
-        write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
-        // (I9) Mark the new directory as a named sub-graph of this tree, so a direct
-        // `Graph::open` of it is refused instead of minting it a second lock and journal.
+        // (I9, round-4 review finding b) THE MARKER IS WRITTEN BEFORE THE MANIFEST
+        // NAMES THE CHILD. The manifest is what makes the position reachable, so stamping the
+        // ownership marker afterwards left a window — and, across a crash in it, a lasting state —
+        // where a reachable child directory carried no marker of its own.
         std::fs::write(sub_dir.join(SUBGRAPH_MARKER), root_relative_path(1))
             .map_err(|e| e.to_string())?;
+        write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
         // The caller holds this tree's writer lock (`ensure_named` -> `begin_durable_write`), so
         // the open may repair; a named sub-graph is reached only through its root directory.
         let mut g = Graph::open_inner(&sub_dir, None, &mut OpenCtx::repairing())
@@ -4256,10 +4258,21 @@ impl Graph {
         // and re-taking a lock inside the NEW directory did not even conflict with a holder of
         // the old one.
         let tree = std::sync::Arc::clone(&self.tree);
+        // (round-4 review finding a) As in `restore_in_place`: the WAL is already
+        // closed, so a swap that fails here must leave a handle that REFUSES writes rather than
+        // one that accepts them into memory with no log behind it.
         let mut reopened = swap_dir_to_new_base(dir, Some(&tree), |new_dir| self.save(new_dir))
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                tree.mark_stale();
+                e.to_string()
+            })?;
         reopened.tree = tree;
         reopened.share_tree();
+        // (I8) The published directory is a new inode: re-take the lock held inside it.
+        if let Err(e) = reopened.tree.relock_inner_after_swap(dir) {
+            reopened.tree.mark_stale();
+            return Err(e);
+        }
         // (I10) Re-record the identity ONLY when the ROOT directory was replaced.
         // This also runs for a NAMED sub-graph's own compaction, whose `dir` is a child: recording
         // the child's inode in the tree's SHARED identity made the next write to the root compare
@@ -4341,6 +4354,11 @@ impl Graph {
         write_generation(dir, generation)?;
         restored.tree = TreeState::rooted(dir, Some(lock), generation);
         restored.share_tree();
+        // (I8) The swap published a new inode at `dir`: re-take the inner lock.
+        restored
+            .tree
+            .relock_inner_after_swap(dir)
+            .map_err(std::io::Error::other)?;
         restored.tree.record_identity(dir);
         write_subgraph_markers(dir);
         Ok(restored)
@@ -4369,10 +4387,25 @@ impl Graph {
         // Close this graph's WAL before the swap renames its `wal.log` away with the directory.
         self.wal = None;
         let tree = std::sync::Arc::clone(&self.tree);
+        // (round-4 review finding a) A FAILED SWAP MUST NOT LEAVE A WRITABLE HANDLE
+        // WITH NO WAL. The WAL is closed above because the swap renames it away; if the swap then
+        // fails — the staging directory could not be written, say — this graph still holds the
+        // lock and is not poisoned, so its next `apply_delta` would be ACKNOWLEDGED into memory
+        // with nothing appended to any log. Mark the tree stale instead: every later durable
+        // write is refused with "reopen the graph", and the untouched store on disk is what a
+        // reopen gets.
         let mut reopened = swap_dir_to_new_base(&dir, Some(&tree), |new_dir| fresh.save(new_dir))
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| {
+                self.tree.mark_stale();
+                e.to_string()
+            })?;
         reopened.tree = tree;
         reopened.share_tree();
+        // (I8) The published directory is a new inode: re-take the lock held inside it.
+        if let Err(e) = reopened.tree.relock_inner_after_swap(&dir) {
+            reopened.tree.mark_stale();
+            return Err(e);
+        }
         // (I10) Root swaps only — see `persist_swap`: a child restore leaves the
         // root's inode alone, and recording the child's would make the next root write stale.
         if reopened.tree.dir.as_deref() == Some(dir.as_path()) {
@@ -5191,6 +5224,14 @@ struct TreeState {
     /// box, for a path that cannot change while this tree holds the lock. `None` for a tree with
     /// no directory.
     gen_path: Option<std::path::PathBuf>,
+    /// (round-4 cost work) The generation file, kept OPEN so the seqlock's enter and
+    /// leave are one `pwrite` each: re-opening (and closing) it per transaction cost four
+    /// syscalls plus two path lookups on the commit path, for a file whose path cannot change
+    /// while this tree holds the lock. Opened lazily on the first window, and dropped whenever a
+    /// path REPLACES the file (`write_generation` writes a temp and renames, so the old inode
+    /// would be unlinked under the handle). `None` until first use, and on a store that has no
+    /// counter file at all.
+    gen_fd: std::sync::Mutex<Option<std::fs::File>>,
     /// (I10) The store directory's `(device, inode)` as it was when this tree took
     /// the writer lock, re-recorded after a swap this tree performed. `None` before the lock is
     /// taken, and on a target with no inodes.
@@ -5215,6 +5256,7 @@ impl TreeState {
             stale: std::sync::atomic::AtomicBool::new(false),
             seq_depth: std::sync::Mutex::new(0),
             gen_path: None,
+            gen_fd: std::sync::Mutex::new(None),
             identity: std::sync::Mutex::new(None),
         })
     }
@@ -5235,6 +5277,7 @@ impl TreeState {
             stale: std::sync::atomic::AtomicBool::new(false),
             seq_depth: std::sync::Mutex::new(0),
             gen_path: Some(sibling_control_file(dir, "writer.gen")),
+            gen_fd: std::sync::Mutex::new(None),
             identity: std::sync::Mutex::new(None),
         })
     }
@@ -5311,6 +5354,9 @@ impl TreeState {
         })?;
         self.open_generation
             .store(claimed, std::sync::atomic::Ordering::Release);
+        // `write_generation` published the claim by RENAME, so any handle opened before it points
+        // at an unlinked inode: re-open on the next window.
+        self.forget_generation_handle();
         *self.identity.lock().unwrap_or_else(|e| e.into_inner()) = store_identity(dir);
         *held = Some(lock);
         // (I9) First moment this tree is known to be the single writer: stamp the
@@ -5359,7 +5405,7 @@ impl TreeState {
             // published — is authoritative and the read would only cost an open + a read per
             // transaction.
             let odd = self.open_generation.load(std::sync::atomic::Ordering::Acquire) | 1;
-            set_generation_at(self.gen_path.as_deref(), odd).map_err(|e| {
+            self.publish_generation(odd).map_err(|e| {
                 format!(
                     "durable write refused: cannot open the reader-consistency window for {}: {}",
                     dir.display(),
@@ -5385,7 +5431,7 @@ impl TreeState {
             return Ok(());
         }
         let even = (self.open_generation.load(std::sync::atomic::Ordering::Acquire) | 1) + 1;
-        set_generation_at(self.gen_path.as_deref(), even).map_err(|e| {
+        self.publish_generation(even).map_err(|e| {
             self.mark_stale();
             format!(
                 "cannot close the reader-consistency window for {}: {}",
@@ -5396,6 +5442,54 @@ impl TreeState {
         self.open_generation
             .store(even, std::sync::atomic::Ordering::Release);
         Ok(())
+    }
+
+    /// (I7, round-4 cost work) Publish `value` as this tree's generation through the
+    /// KEPT-OPEN counter file: eight bytes written at offset 0, no fsync, no open, no path
+    /// lookup. The value carries no durability obligation — nothing is recovered from it, and an
+    /// interrupted window is recovered by I11 — so it must never be made to cost a barrier.
+    ///
+    /// A store with no counter file (no writer ever locked it) is a no-op, exactly as the
+    /// path-based writer is.
+    fn publish_generation(&self, value: u64) -> std::io::Result<()> {
+        let Some(path) = self.gen_path.as_deref() else {
+            return Ok(());
+        };
+        let mut held = self.gen_fd.lock().unwrap_or_else(|e| e.into_inner());
+        if held.is_none() {
+            match std::fs::OpenOptions::new().write(true).open(path) {
+                Ok(f) => *held = Some(f),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(e) => return Err(e),
+            }
+        }
+        let file = held.as_mut().expect("opened just above");
+        write_eight_at_zero(file, value)
+    }
+
+    /// (I8, round-4 review finding d) Re-take the INNER (inode-keyed) lock inside the
+    /// directory a swap has just published: the new base is a different inode, so the lock taken
+    /// before the swap no longer excludes another path to what is now the canonical directory.
+    /// Fails closed — the caller marks the tree stale — if that lock cannot be had.
+    fn relock_inner_after_swap(&self, dir: &std::path::Path) -> Result<(), String> {
+        let mut held = self.lock.lock().unwrap_or_else(|e| e.into_inner());
+        match held.as_mut() {
+            Some(lock) => lock.relock_inner(dir).map_err(|e| {
+                format!(
+                    "durable write refused: cannot hold the writer lock inside {} after the \
+                     swap: {}",
+                    dir.display(),
+                    e
+                )
+            }),
+            None => Ok(()),
+        }
+    }
+
+    /// Drop the kept-open counter handle, for a path that REPLACES the file by rename: the old
+    /// inode is then unlinked, and a write through the stale handle would be invisible.
+    fn forget_generation_handle(&self) {
+        *self.gen_fd.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 
     /// (I7, I11) [`seq_enter`](Self::seq_enter) as an RAII guard: the window is
@@ -5436,19 +5530,27 @@ impl Drop for TreeState {
     /// dropped the graph, or an empty commit on an older path. The writer lock is still held
     /// here (fields drop after this body), so no other writer can be mid-transaction.
     ///
-    /// It settles the COUNTER only. A kept journal frame, a torn tail or an interrupted swap is
-    /// still on disk and is still found by `open_repair_pending`, so real recovery work is not
-    /// lost by closing the window.
+    /// (round-4 review finding c) IT DOES NOT SETTLE THE COUNTER WHILE RECOVERY
+    /// WORK IS RETAINED. A window open because a committed frame was materialised only PARTLY —
+    /// the materialisation failed, or the caller dropped the graph between the commit and
+    /// `clear_txn` — describes a tree that really is mid-transaction: publishing an even value
+    /// there would let the next reader load that partial state as if it were quiescent. The
+    /// read-only probe decides (a kept frame, a torn tail, an interrupted swap), and when it finds
+    /// work the window is LEFT OPEN for the locked repair to redo the frame and settle the counter
+    /// itself (I11). Only a window over a clean store is closed here.
     fn drop(&mut self) {
-        if self.dir.is_none() {
+        let Some(dir) = self.dir.clone() else {
             return;
-        }
+        };
         let depth = self.seq_depth.lock().unwrap_or_else(|e| e.into_inner());
         if *depth == 0 {
             return;
         }
+        if open_repair_pending(&dir).unwrap_or(true) {
+            return;
+        }
         let even = (self.open_generation.load(std::sync::atomic::Ordering::Acquire) | 1) + 1;
-        let _ = set_generation_at(self.gen_path.as_deref(), even);
+        let _ = self.publish_generation(even);
     }
 }
 
@@ -5736,16 +5838,33 @@ fn set_generation_in_place(dir: &std::path::Path, next: u64) -> std::io::Result<
 /// (a tree with no directory) is a no-op, as a missing file is.
 #[cfg(feature = "mmap")]
 fn set_generation_at(path: Option<&std::path::Path>, next: u64) -> std::io::Result<()> {
-    use std::io::Write;
     let Some(path) = path else { return Ok(()) };
     let mut f = match std::fs::OpenOptions::new().write(true).open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
-    // The file is exactly eight bytes, so writing eight bytes at offset 0 replaces the value
-    // whole — no truncation, no length change, nothing for a reader to see half of.
-    f.write_all(&next.to_le_bytes())
+    write_eight_at_zero(&mut f, next)
+}
+
+/// The eight-byte counter write itself: offset 0, no seek, no truncation, no length change — so
+/// a concurrent reader sees the old value or the new one, never a mix (the two writers above
+/// share this). `pwrite` on unix, where the handle is kept open across writes; elsewhere a seek
+/// and a write, which is why the handle is never assumed to sit at offset 0.
+#[cfg(feature = "mmap")]
+fn write_eight_at_zero(file: &mut std::fs::File, value: u64) -> std::io::Result<()> {
+    let bytes = value.to_le_bytes();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        file.write_all_at(&bytes, 0)
+    }
+    #[cfg(not(unix))]
+    {
+        use std::io::{Seek, Write};
+        file.seek(std::io::SeekFrom::Start(0))?;
+        file.write_all(&bytes)
+    }
 }
 
 /// (codex round-2 finding I10) The store directory's IDENTITY — its `(device, inode)` —
@@ -5782,17 +5901,27 @@ fn store_identity(_dir: &std::path::Path) -> Option<(u64, u64)> {
 #[cfg(all(feature = "mmap", unix))]
 fn writer_active(dir: &std::path::Path) -> std::io::Result<bool> {
     use std::os::unix::io::AsRawFd;
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(DirLock::lock_path(dir))?;
-    // SAFETY: `flock` is called with a valid, open file descriptor owned by `file` (which
-    // outlives the call) and a valid operation bitmask. It only takes a lock on that descriptor —
-    // it neither reads nor writes memory.
-    let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
-    // Closing the descriptor releases any lock the call took: this is a probe, not a reader lock.
-    drop(file);
-    Ok(rc != 0)
+    // (I8, round-4 review finding d) BOTH of the writer's locks are probed: a
+    // writer that reached this directory through another path to it (a bind-mount alias) holds a
+    // different sibling lock but the SAME lock inside the directory.
+    let mut paths = vec![DirLock::lock_path(dir)];
+    if dir.is_dir() {
+        paths.push(dir.join(DirLock::INNER_LOCK_FILE));
+    }
+    for path in paths {
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+        // SAFETY: `flock` is called with a valid, open file descriptor owned by `file` (which
+        // outlives the call) and a valid operation bitmask. It only takes a lock on that
+        // descriptor — it neither reads nor writes memory.
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_SH | libc::LOCK_NB) };
+        // Closing the descriptor releases any lock the call took: this is a probe, not a reader
+        // lock.
+        drop(file);
+        if rc != 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Non-unix fallback: there is no advisory lock to probe here, so no writer is ever reported
@@ -5919,6 +6048,11 @@ struct DirLock {
     /// Holding the file open IS the lock — closing it (on drop) releases the `flock`.
     #[cfg(unix)]
     _file: std::fs::File,
+    /// The second, INODE-keyed lock held inside the store directory; see
+    /// [`INNER_LOCK_FILE`](DirLock::INNER_LOCK_FILE). `None` only while the canonical directory is
+    /// missing (an interrupted swap).
+    #[cfg(unix)]
+    _inner: Option<std::fs::File>,
 }
 
 #[cfg(feature = "mmap")]
@@ -5929,6 +6063,50 @@ impl DirLock {
     /// sentinel: its bytes are never read or written, only locked.
     fn lock_path(dir: &std::path::Path) -> std::path::PathBuf {
         sibling_control_file(dir, "writer.lock")
+    }
+
+    /// (I8, round-4 review finding d) The SECOND lock file, INSIDE the store
+    /// directory. The sibling lock above is keyed on the store's PATH, and two paths can be the
+    /// same directory: a `mount --bind` alias canonicalises to its own path, under its own parent,
+    /// so each alias derived a different sibling lock and both could become writers. A file inside
+    /// the directory is the same INODE through every alias, so `flock` on it excludes them.
+    ///
+    /// Neither lock replaces the other: the sibling keeps its inode across the renames a swap
+    /// performs (so exclusion is continuous across the swap), and this one is alias-proof. The
+    /// writer holds BOTH.
+    const INNER_LOCK_FILE: &'static str = ".sparq-writer.lock";
+
+    /// Lock [`INNER_LOCK_FILE`](Self::INNER_LOCK_FILE) inside `dir`, if `dir` exists.
+    ///
+    /// `Ok(None)` when it does not: an interrupted swap can have renamed the canonical directory
+    /// away, and that open must still be able to repair it. The sibling lock covers that case, so
+    /// what is lost is only the alias check, for as long as the directory is missing.
+    #[cfg(unix)]
+    fn lock_inner(dir: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+        use std::os::unix::io::AsRawFd;
+        if !dir.is_dir() {
+            return Ok(None);
+        }
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(Self::INNER_LOCK_FILE))?;
+        // SAFETY: as in `acquire` — a valid open descriptor owned by `file`, a valid operation
+        // bitmask, no memory touched.
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if rc != 0 {
+            let cause = std::io::Error::last_os_error();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::WouldBlock,
+                format!(
+                    "{} is already being WRITTEN by another sparq graph or process, reached \
+                     through another path to the same directory ({})",
+                    dir.display(),
+                    cause
+                ),
+            ));
+        }
+        Ok(Some(file))
     }
 
     /// Takes the exclusive lock, or fails with a message naming the directory. Never blocks:
@@ -5956,7 +6134,26 @@ impl DirLock {
                 ),
             ));
         }
-        Ok(DirLock { _file: file })
+        Ok(DirLock {
+            _file: file,
+            _inner: Self::lock_inner(dir)?,
+        })
+    }
+
+    /// Re-take the inner lock inside `dir` after a swap published a NEW directory there: the new
+    /// base has a different inode, so the lock the holder took before the swap no longer excludes
+    /// an alias of the directory that is now canonical.
+    #[cfg(unix)]
+    fn relock_inner(&mut self, dir: &std::path::Path) -> std::io::Result<()> {
+        self._inner = None;
+        self._inner = Self::lock_inner(dir)?;
+        Ok(())
+    }
+
+    /// Non-unix fallback: there is no advisory lock here (see the type-level BOUNDARY note).
+    #[cfg(not(unix))]
+    fn relock_inner(&mut self, _dir: &std::path::Path) -> std::io::Result<()> {
+        Ok(())
     }
 
     /// Non-unix fallback: no advisory lock is available here, so the open proceeds unlocked (see
@@ -13766,7 +13963,10 @@ mod tests {
             "an empty commit left no window open"
         );
         Graph::open(&dir).expect("a reader is served beside an empty commit");
-        // A real commit that is never cleared: the window is open until the handle goes away.
+        // (round-4 review finding c) A commit that is never cleared is a tree
+        // mid-transaction: dropping the handle must NOT publish a quiescent counter, because the
+        // frame has been materialised only partly. The window stays open and the locked repair
+        // settles it after redoing the frame.
         g.commit_txn_ops(&[TxnOp::Insert {
             slot: None,
             triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
@@ -13776,9 +13976,309 @@ mod tests {
         drop(g);
         assert_eq!(
             read_generation(&dir) % 2,
-            0,
-            "dropping the tree's last handle closed the window"
+            1,
+            "a retained frame keeps the window open across the drop"
         );
+        let reopened = Graph::open(&dir).expect("the locked repair redoes the frame");
+        assert!(
+            format!("{:?}", dump_terms(&reopened)).contains("http://ex/s1"),
+            "the retained frame was redone, not discarded"
+        );
+        assert_eq!(
+            read_generation(&dir) % 2,
+            0,
+            "and the repair settled the counter"
+        );
+        drop(reopened);
+        // A window over a CLEAN store is still closed by the drop: nothing on disk would bring
+        // the counter back, which is what I11 is about.
+        let clean = Graph::open(&dir).unwrap();
+        clean.tree.ensure_writer().expect("takes the lock");
+        clean.tree.seq_enter().expect("opens a window by hand");
+        assert_eq!(read_generation(&dir) % 2, 1, "the hand-opened window is open");
+        drop(clean);
+        assert_eq!(
+            read_generation(&dir) % 2,
+            0,
+            "dropping the last handle closed a window over a clean store"
+        );
+        clean_store(&dir);
+    }
+
+    /// (round-4 review finding a) A SWAP THAT FAILS LEAVES A HANDLE THAT REFUSES
+    /// WRITES. Both swap entries close this graph's WAL before the staging directory is written,
+    /// because the swap renames `wal.log` away with the directory. If the staging then fails, the
+    /// handle still holds the lock and is not poisoned — so its next `apply_delta` used to be
+    /// acknowledged into memory with nothing appended to any log, and was lost at the reopen.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_failed_swap_leaves_a_handle_that_refuses_writes() {
+        for restore in [true, false] {
+            let dir = txn_tmp_dir(if restore { "failed-restore" } else { "failed-compact" });
+            clean_store(&dir);
+            Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+                .unwrap()
+                .save(&dir)
+                .unwrap();
+            let mut g = Graph::open(&dir).unwrap();
+            g.apply_delta_nquads("<http://ex/live> <http://ex/p> <http://ex/o> .", "")
+                .expect("the handle writes durably to start with");
+            // Make the staging path un-creatable: a FILE where the staging DIRECTORY must go.
+            let staging = dir.with_extension("compact-new");
+            std::fs::remove_dir_all(&staging).ok();
+            std::fs::write(&staging, b"not a directory").unwrap();
+            let failed = if restore {
+                g.restore_in_place(
+                    Graph::load_dataset("<http://ex/new> <http://ex/p> <http://ex/o> .", "nquads")
+                        .unwrap(),
+                )
+                .expect_err("the swap cannot stage its new base")
+            } else {
+                g.apply_delta_nquads("<http://ex/pending> <http://ex/p> <http://ex/o> .", "")
+                    .unwrap();
+                g.compact().expect_err("the swap cannot stage its new base")
+            };
+            assert!(!failed.is_empty(), "the failure is reported");
+            // The handle must now REFUSE, not silently accept into memory.
+            let refused = g
+                .apply_delta_nquads("<http://ex/afterwards> <http://ex/p> <http://ex/o> .", "")
+                .expect_err("a handle whose swap failed must not accept writes");
+            assert!(
+                refused.contains("reopen the graph"),
+                "fail-closed with a clear refusal: {}",
+                refused
+            );
+            drop(g);
+            // The store on disk is the one the failed swap never touched, and it still opens.
+            std::fs::remove_file(&staging).ok();
+            let reopened = Graph::open(&dir).expect("the untouched store reopens");
+            let terms = format!("{:?}", dump_terms(&reopened));
+            assert!(terms.contains("http://ex/live"), "durable writes survive: {}", terms);
+            assert!(
+                !terms.contains("http://ex/afterwards"),
+                "the refused write was not acknowledged: {}",
+                terms
+            );
+            drop(reopened);
+            clean_store(&dir);
+        }
+    }
+
+    /// (I9, round-4 review finding b) A CHILD CARRIES ITS OWNERSHIP MARKER BEFORE THE
+    /// MANIFEST MAKES IT REACHABLE. The manifest entry is what lets anything find the position, so
+    /// a marker written after it left a reachable child directory with no marker of its own —
+    /// permanently, if a crash landed in that window.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_new_childs_marker_precedes_its_manifest_entry() {
+        let dir = txn_tmp_dir("child-marker-order");
+        clean_store(&dir);
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        g.apply_delta_nquads(
+            "<http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .",
+            "",
+        )
+        .unwrap();
+        let child = dir.join(NAMED_SUBDIR).join("0");
+        assert!(child.is_dir(), "the child directory exists");
+        // Whatever the manifest says, the child on disk carries its marker.
+        let marker = child.join(SUBGRAPH_MARKER);
+        assert!(marker.is_file(), "the child carries its ownership marker");
+        assert_eq!(
+            std::fs::read(&marker).unwrap(),
+            root_relative_path(1).as_bytes(),
+            "and it names the root relatively"
+        );
+        // The marker is the thing that refuses a direct open, manifest or not.
+        let Err(err) = Graph::open(&child) else {
+            panic!("a child directory is not a store")
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{}", err);
+        drop(g);
+        clean_store(&dir);
+    }
+
+    /// (I8, round-4 review finding d) TWO PATHS TO ONE DIRECTORY ARE ONE STORE.
+    /// Canonicalisation makes a symlink or a `..` detour resolve to the store's own path, but a
+    /// `mount --bind` alias IS its own canonical path, under its own parent — so each alias
+    /// derived its own sibling lock and its own counter, and both could become writers of the one
+    /// directory, interleaving WAL appends. The writer now also holds a lock on a file INSIDE the
+    /// directory, which is the same inode through every alias.
+    ///
+    /// SKIPPED, not failed, where `mount --bind` is unavailable (no `CAP_SYS_ADMIN` in the test
+    /// environment): there is no portable second path to one directory to substitute — a hardlink
+    /// to a directory is not permitted, and `/proc/self/fd/<n>` resolves back to the real path.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_bind_mount_alias_of_a_store_cannot_become_a_second_writer() {
+        let root = txn_tmp_dir("bind-alias");
+        let store = root.join("store");
+        let alias = root.join("alias");
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::create_dir_all(&store).unwrap();
+        std::fs::create_dir_all(&alias).unwrap();
+        let bound = std::process::Command::new("mount")
+            .arg("--bind")
+            .arg(&store)
+            .arg(&alias)
+            .status()
+            .map(|st| st.success())
+            .unwrap_or(false);
+        if !bound {
+            eprintln!("skipped: mount --bind is unavailable in this environment");
+            std::fs::remove_dir_all(&root).ok();
+            return;
+        }
+        // The two paths really are one directory, with different canonical paths and parents.
+        assert_eq!(
+            store_identity(&store),
+            store_identity(&alias),
+            "the alias is the same directory"
+        );
+        assert_ne!(
+            canonical_store_dir(&store),
+            canonical_store_dir(&alias),
+            "and canonicalisation does NOT unify them, which is why the inner lock exists"
+        );
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&store)
+            .unwrap();
+        let mut writer = Graph::open(&store).unwrap();
+        writer
+            .apply_delta_nquads("<http://ex/first> <http://ex/p> <http://ex/o> .", "")
+            .expect("the first writer takes the lock");
+        // A READ-ONLY open through the alias must already know a writer is active, so it marks
+        // itself unwritable rather than discovering it at its first append.
+        let seen = Graph::open(&alias).expect("a reader through the alias still opens");
+        assert!(
+            seen.tree.stale.load(std::sync::atomic::Ordering::Acquire),
+            "the alias's open saw the live writer and will not become one"
+        );
+        drop(seen);
+        // A handle reached through the alias must not become a second writer of this directory.
+        let second = Graph::open(&alias);
+        let refused = match second {
+            Ok(mut g) => g
+                .apply_delta_nquads("<http://ex/second> <http://ex/p> <http://ex/o> .", "")
+                .expect_err("an alias of a locked store must not write to it"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            refused.contains("another sparq graph or process")
+                || refused.contains("busy")
+                || refused.contains("changed since open"),
+            "the alias is refused as a second writer: {}",
+            refused
+        );
+        // A SWAP publishes a new inode at the same path, so the writer must re-take the lock
+        // inside it: otherwise an alias can lock the new base's file and write beside the writer.
+        writer
+            .apply_delta_nquads("<http://ex/pending> <http://ex/p> <http://ex/o> .", "")
+            .unwrap();
+        writer.compact().expect("the compaction swap publishes a new base");
+        // The swap renamed the OLD directory away, so the existing bind mount now points at a
+        // deleted inode: re-bind the alias to what is canonical now, which is the case the
+        // re-taken inner lock exists for.
+        std::process::Command::new("umount").arg(&alias).status().ok();
+        assert!(
+            std::process::Command::new("mount")
+                .arg("--bind")
+                .arg(&store)
+                .arg(&alias)
+                .status()
+                .map(|st| st.success())
+                .unwrap_or(false),
+            "re-binding the alias to the swapped-in directory"
+        );
+        let after = Graph::open(&alias);
+        let refused_after = match after {
+            Ok(mut g) => g
+                .apply_delta_nquads("<http://ex/third> <http://ex/p> <http://ex/o> .", "")
+                .expect_err("an alias must still be refused after a swap"),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            refused_after.contains("another sparq graph or process")
+                || refused_after.contains("busy")
+                || refused_after.contains("changed since open"),
+            "the alias is still refused after the swap: {}",
+            refused_after
+        );
+        // And nothing of the refused writes reached the store.
+        drop(writer);
+        let reopened = Graph::open(&store).expect("the store reopens");
+        let terms = format!("{:?}", dump_terms(&reopened));
+        assert!(terms.contains("http://ex/first"), "the real writer's data is there");
+        assert!(
+            !terms.contains("http://ex/second") && !terms.contains("http://ex/third"),
+            "the alias wrote nothing: {}",
+            terms
+        );
+        drop(reopened);
+        std::process::Command::new("umount").arg(&alias).status().ok();
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::remove_file(DirLock::lock_path(&store)).ok();
+        std::fs::remove_file(sibling_control_file(&store, "writer.gen")).ok();
+        std::fs::remove_file(DirLock::lock_path(&alias)).ok();
+        std::fs::remove_file(sibling_control_file(&alias, "writer.gen")).ok();
+    }
+
+    /// (round-4 cost work) The generation file is kept OPEN across windows, so the
+    /// counter write is one `pwrite`. A path that REPLACES the file by rename unlinks the inode
+    /// the handle points at, so the handle must be dropped there — otherwise the window's value
+    /// would be written to a file nothing can read.
+    #[cfg(unix)]
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_replaced_generation_file_is_not_written_through_a_stale_handle() {
+        let dir = txn_tmp_dir("gen-handle");
+        clean_store(&dir);
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // A first writer creates the counter file and goes away, leaving the store unlocked.
+        let mut first = Graph::open(&dir).unwrap();
+        first
+            .apply_delta_nquads("<http://ex/w> <http://ex/p> <http://ex/o> .", "")
+            .unwrap();
+        drop(first);
+        assert!(
+            sibling_control_file(&dir, "writer.gen").is_file(),
+            "the counter file exists"
+        );
+        // A second handle opens the cached generation handle BEFORE it takes the lock. Taking the
+        // lock publishes the claim by temp-write + RENAME, which unlinks the inode that handle
+        // points at — so the window below must go through a re-opened handle.
+        let g = Graph::open(&dir).unwrap();
+        let before = read_generation(&dir);
+        g.tree
+            .publish_generation(before)
+            .expect("opens the cached handle");
+        g.tree.ensure_writer().expect("takes the lock, replacing the file");
+        g.tree.seq_enter().expect("opens a window");
+        let published = read_generation(&dir);
+        assert_eq!(
+            published % 2,
+            1,
+            "the window's odd value reached the file that is actually on disk (read {})",
+            published
+        );
+        assert!(
+            published > before,
+            "and it is the claim this writer published, not the stale one ({} -> {})",
+            before,
+            published
+        );
+        drop(g);
         clean_store(&dir);
     }
 

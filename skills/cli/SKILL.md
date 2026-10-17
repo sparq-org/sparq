@@ -197,6 +197,11 @@ cargo run --release -p sparq-cli --features hdt-write -- \
   `DIR/named/<i>` is a clean error, not a redirect: a named sub-graph is part of its root's
   dataset, and opening it directly would give it a second writer lock and a second redo journal
   over the same tree. Open the store root and select the graph in the query.
+- **The writer holds TWO lock files.** `<parent>/.<DIR>.writer.lock` beside the directory (it
+  survives the renames a `compact`/`vacuum`/restore performs) and `.sparq-writer.lock` inside it
+  (the same inode through a `mount --bind` alias, so an alias cannot become a second writer).
+  Both are advisory, unix-only, and released by the kernel on exit. A bind mount made before a
+  swap points at the base that swap renamed away: re-bind it afterwards.
 - **An open can report the store BUSY.** While a writer is materialising a committed multi-graph
   transaction, or replacing the base in a compaction/vacuum/restore swap, no self-consistent view
   of the dataset exists; an open retries briefly and then fails rather than answering from a

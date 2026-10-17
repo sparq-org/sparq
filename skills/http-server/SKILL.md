@@ -1964,8 +1964,19 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   writer holding the lock** therefore takes the lock itself, repairs whatever is there, and settles
   the counter to an even value. A writer that really is mid-transaction still holds the lock, and
   that case is still answered as retryable. An empty UPDATE body commits nothing and opens no
-  window, and the window is closed when the tree's last handle is dropped, so a caller that commits
-  and returns cannot strand the store either.
+  window. When the tree's last handle is dropped with a window open, the counter is settled only
+  if the store is otherwise CLEAN: a retained frame (a failed materialisation, or a commit the
+  caller never cleared) leaves the window open on purpose, because that tree really is
+  mid-transaction, and the locked repair redoes the frame and settles the counter itself.
+- **A swap that fails leaves a handle that REFUSES writes (`sq-ycle`).** Compaction, vacuum and
+  restore close the store's WAL before they stage a new base, because the swap renames `wal.log`
+  away with the directory. If the staging then fails, the old store on disk is untouched (the
+  renames never started) and the handle is marked unwritable rather than left accepting writes it
+  could only hold in memory. Recovery is a reopen on the same `DIR`.
+- **A named graph carries its ownership marker before it is reachable (`sq-ycle`).** The manifest
+  entry is what makes a new child position findable, so the `.sparq-subgraph` marker is written
+  into the child directory first; a crash between them can no longer leave a reachable child with
+  no marker.
 - **Recovery probing covers every swap crash point (`sq-ycle`).** The read-only probe that decides
   whether an open must repair (and so lock) enumerates **named-graph positions whose directory is
   absent but whose swap staging sibling survives** — the state a crash inside a NAMED graph's own
@@ -1983,9 +1994,16 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   on its next write even if some future path forgets the lock. A named sub-graph's own swap leaves
   that identity alone — it does not replace the root.
 - **One store, one lock, whatever you call it (`sq-ycle`).** The store directory is
-  `canonicalize`d once at open and every control path is derived from that, so a symlink, a bind
-  mount or a `./`-and-`..` detour cannot hand one store two locks and two generations — and two
-  writers.
+  `canonicalize`d once at open and every control path is derived from that, so a symlink or a
+  `./`-and-`..` detour cannot hand one store two locks and two generations — and two writers. A
+  `mount --bind` alias is NOT unified that way: it is its own canonical path, under its own parent.
+  The writer therefore holds **two** locks — the path-keyed sibling (`.<DIR>.writer.lock`, which
+  keeps its inode across a swap's renames, so exclusion is continuous) and an inode-keyed
+  `.sparq-writer.lock` **inside** the directory, which is the same file through every alias. A
+  second handle reached through an alias is refused, and a read-only open through one marks itself
+  unwritable because the live-writer probe tries both locks. One honest consequence of in-place
+  swaps: a bind mount made BEFORE a compaction/vacuum/restore points at the base that swap renamed
+  away, so it stops resolving to the live store — re-bind it after a swap.
 - **A named sub-graph directory is not a store (`sq-ycle`).** `Graph::open(DIR/named/<i>)` is a
   clean `Err` (`ErrorKind::InvalidInput`), not a silent redirect to the root: a child opened
   directly would get a second writer lock and a second redo journal over data the root's manifest,
