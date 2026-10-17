@@ -134,6 +134,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-reason (N3 backward chaining):** a variable substitution is cheaper to COPY, with no
+  change to any name or answer. The `name -> term` map a premise evaluation and a backward proof
+  carry now holds the variable's name as a reference-counted string rather than an owned one, so
+  copying a substitution — which the backward path does once per candidate rule site and once per
+  solution, the join path once per candidate fact, and a formula multiset match once per pairing
+  it tries — no longer allocates a fresh name for every entry it carries. That mattered most where
+  the substitution is largest: a backward step's renamed variables stay in the substitution its
+  whole subtree inherits, so the copies grew with the depth of the proof in allocation count, not
+  merely in bytes. Alongside it, the unification of a backward goal against a rule conclusion
+  decides the cases it can decide — the two sides already equal, or either one an unbound variable
+  — on BORROWED terms, where it used to resolve and deep-copy both sides every time; only the
+  member-wise unification of two compounds still owns its two sides, and only the term actually
+  bound is copied.
+
+  **The hasher is unchanged and the amount of hashing is unchanged.** A key is still hashed as the
+  variable name's bytes under SipHash, which is what keeps a crafted document from degrading the
+  map, and a lookup still computes one hash of the same bytes and lands in the same bucket — one
+  lookup per lookup, as before; the saving is in what a copy costs, not in what a lookup costs. The substitution's iteration order
+  is therefore unchanged too, which matters because the proof-mode tie-break encodes a whole
+  binding. Every `__bw<n>_` name, derived fact, proof, `why()` string and `sparq-prov` IRI is
+  byte-identical, pinned against output captured from the parent commit, and the W3C N3 inference
+  conformance report is unchanged. No run that previously answered is refused, and no refusal
+  changes. (#7080)
+
 - **sparq-reason (N3 backward chaining):** the per-goal cost of naming a backward renaming by
   its proof-tree fingerprint is reduced, with no change to any name or answer. A goal's
   canonical identity key is built into one pre-sized buffer with the length prefix written

@@ -110,6 +110,7 @@ pub use serialize::{RuleKind, RuleVars};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
 use std::collections::HashMap;
+use std::rc::Rc;
 
 /// One forward-chaining derivation step: `(derived ground fact, rule index, premise facts
 /// that justified it)`. Collected during closure so a proof can be reconstructed.
@@ -2764,7 +2765,115 @@ fn reachable_lists<'a>(t: &'a Term, out: &mut Vec<&'a Term>) {
     }
 }
 
-type Binding = HashMap<String, Term>;
+/// A variable substitution — the `name → term` map a premise evaluation or a backward proof
+/// carries — with its KEY made cheap to copy.
+///
+/// It is still one flat [`HashMap`] keyed by the variable's name under SipHash. What changed
+/// is that the name is held as an `Rc<str>` instead of a `String`, so copying a substitution
+/// copies the table and bumps one reference count per entry where it used to allocate a
+/// fresh name string for each. (The VALUE is still a plain [`Term`] and is still deep-cloned
+/// by a copy — reference-counting it as well was implemented and measured, and is recorded
+/// below as the reason it is not here.)
+///
+/// Copying is what the engine does most. The backward path copies the inherited
+/// substitution once per candidate site and once per solution ([`backward_prove`]), the
+/// join path once per candidate fact ([`unify`]), and a formula multiset match once per
+/// pairing it tries ([`formula_search`]) — while the number of entries a copy carries grows
+/// with the DEPTH of the proof, because a backward step's renamed variables
+/// ([`rename_vars`]) stay in the substitution its whole subtree inherits. So the copies were
+/// quadratic in the proof depth in ALLOCATION COUNT, not merely in bytes: an entry cost two
+/// allocations and two frees per copy, one pair for the name and one for the term, and that
+/// allocator traffic dominated a recursive backward proof. This removes the name's pair and
+/// leaves the term's (GH #7080, and the residual GH #7095 left behind, which made every
+/// renamed name longer and so every key larger).
+///
+/// Reference-counting the VALUE too removes the other pair, and on a recursive backward proof
+/// it is a much larger saving still. It is nevertheless NOT done here, because it costs a
+/// heap box on every `insert` and a forward closure inserts once per bound variable per join
+/// row while copying substitutions that hold almost nothing: measured, a closure with no
+/// backward rule at all came out slower for it, which is a regression this is not worth. The
+/// saving it would unlock is real but belongs in [`Term`]'s own leaf payloads, where a bound
+/// value would already be cheap to clone and an insert would have nothing to box.
+///
+/// **The hashing is unchanged, deliberately.** A key is hashed as the `str` it holds, since
+/// `Rc<str>` both [`Hash`](std::hash::Hash)es and [`Borrow`](std::borrow::Borrow)s as its
+/// `str`: a lookup computes the same SipHash over the same name bytes, and the table lands
+/// every key in the same bucket a `HashMap<String, Term>` would. These names come from
+/// untrusted N3 input and SipHash is what stops a crafted document degrading the map, so the
+/// hasher is NOT changed — the saving is in what a COPY costs, not in what a lookup costs,
+/// and the count of key hashes a workload performs is the same either way.
+///
+/// **Iteration order is unchanged too**, which matters because [`canonical_new_firings`]
+/// encodes a whole binding on its proof-mode tie-break path. A table's bucket count follows
+/// from how many entries it holds, not from how wide one is, so the same inserts give the
+/// same buckets; the hashes are the same; and a copy-then-mutate still copies before it
+/// mutates. (That encoding also sorts what it collects, and the one other place that reads a
+/// whole binding — [`independent_firing`] — asks a question of every entry, so neither
+/// output would depend on the order even if it had moved.)
+#[derive(Clone, Default, Debug, PartialEq)]
+pub(crate) struct Binding {
+    map: HashMap<Rc<str>, Term>,
+}
+
+impl Binding {
+    /// An empty substitution.
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// How many variables are bound. [`walk_ref`] reads this as its cycle bound, so it
+    /// counts entries exactly as the map it replaced did.
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    /// Whether nothing is bound.
+    fn is_empty(&self) -> bool {
+        self.map.is_empty()
+    }
+
+    /// What `v` is bound to, or `None` — the same term the map it replaced handed back,
+    /// found by the same hash of the same name bytes.
+    fn get(&self, v: &str) -> Option<&Term> {
+        self.map.get(v)
+    }
+
+    /// Bind `v` to `t`, replacing any binding it had.
+    ///
+    /// ONE probe of the table, as [`HashMap::insert`] is: a pre-probe to reuse the key of an
+    /// already-bound variable was measured and removed, because it hashed the name a second
+    /// time on every insert and inserts are overwhelmingly of names not yet bound — it cost
+    /// a forward closure more than the key allocation it occasionally saved.
+    ///
+    /// `v` is taken as anything a key can be made of, so a caller that had to own the name
+    /// before it could reach for `&mut self` — [`unify_walked`], whose name is borrowed out
+    /// of this very map until the walk's borrow ends — hands over the key it already made
+    /// instead of allocating a second one.
+    fn insert(&mut self, v: impl Into<Rc<str>>, t: Term) {
+        self.map.insert(v.into(), t);
+    }
+
+    /// Drop every binding whose variable `keep` rejects.
+    fn retain(&mut self, mut keep: impl FnMut(&str) -> bool) {
+        self.map.retain(|k, _| keep(k));
+    }
+
+    /// Every binding, as the name and the term. The order is the table's, as it was.
+    fn iter(&self) -> impl Iterator<Item = (&str, &Term)> {
+        self.map.iter().map(|(k, v)| (&**k, v))
+    }
+
+    /// Every bound value.
+    fn values(&self) -> impl Iterator<Item = &Term> {
+        self.map.values()
+    }
+}
+
+impl bounded::Subst for Binding {
+    fn bound(&self, v: &str) -> Option<&Term> {
+        self.get(v)
+    }
+}
 
 /// Which facts a premise evaluation's join atoms may match, and which atom (if any) is
 /// already bound into the seed. The atoms KEEP THEIR ORIGINAL premise indices under every
@@ -2973,7 +3082,7 @@ fn match_premise_admitted(
                 // blank nodes) stay inside it: each test gets fresh ones.
                 let mut matches = matches;
                 for nb in &mut matches {
-                    nb.retain(|k, _| !k.starts_with(PATTERN_WILDCARD));
+                    nb.retain(|k| !k.starts_with(PATTERN_WILDCARD));
                 }
                 // Every negation passes the gate, whatever it found.
                 if is_not {
@@ -3727,6 +3836,12 @@ impl BwPath {
 }
 
 /// Resolve `t` through any chain of variable bindings in `s` (bounded against cycles).
+///
+/// The OWNING form, kept as what this module's tests pin the walk through. No caller in the
+/// engine needs it any more: each one only READS the term the walk lands on — to compare it,
+/// or to build something else from it — so they all take [`walk_ref`] and none of them copies
+/// the resolved term to look at it (GH #7080).
+#[cfg(test)]
 fn walk(t: &Term, s: &Binding) -> Term {
     walk_ref(t, s).clone()
 }
@@ -3757,37 +3872,73 @@ fn walk_ref<'a>(t: &'a Term, s: &'a Binding) -> &'a Term {
 /// chain-resolving each side through `s` first. Unbound-vs-unbound binds left → right, so a
 /// free goal variable points AT the rule variable and is grounded by the premise proof.
 fn unify_walked(a: &Term, c: &Term, s: &mut Binding) -> bool {
-    let aw = walk(a, s);
-    let cw = walk(c, s);
-    if aw == cw {
-        return true;
+    // What the two resolved sides ask for, decided while `s` is only BORROWED. `walk_ref`
+    // leaves each side where the walk found it, so the cases that decide the unification on
+    // the spot — the two sides already equal, or either one an unbound variable — look at
+    // the resolved terms without copying them; only the term that is actually BOUND is
+    // copied, as it was before. The compound cases are the exception: the member-wise
+    // recursion needs `s` mutable while it reads both sides, so those two own their sides.
+    // That is the trade this split exists for — a goal unifying against a rule conclusion is
+    // overwhelmingly leaves and variables, and both sides used to be deep-cloned every time
+    // (GH #7080).
+    enum Next {
+        /// The two sides are already equal, or one was bound to the other.
+        Done(bool),
+        /// Bind this variable to this term.
+        Bind(Rc<str>, Term),
+        /// Recurse member-wise into these two compounds.
+        Deep(Term, Term),
     }
-    match (&aw, &cw) {
-        (Term::Var(v), _) if !unbindable_var(v) => {
-            if frees_quoted_universal(&cw) {
-                return false;
+    let next = {
+        let aw = walk_ref(a, s);
+        let cw = walk_ref(c, s);
+        if aw == cw {
+            Next::Done(true)
+        } else {
+            match (aw, cw) {
+                (Term::Var(v), _) if !unbindable_var(v) => {
+                    if frees_quoted_universal(cw) {
+                        Next::Done(false)
+                    } else {
+                        Next::Bind(Rc::from(v.as_str()), cw.clone())
+                    }
+                }
+                (_, Term::Var(v)) if !unbindable_var(v) => {
+                    if frees_quoted_universal(aw) {
+                        Next::Done(false)
+                    } else {
+                        Next::Bind(Rc::from(v.as_str()), aw.clone())
+                    }
+                }
+                // Structural list unification, member by member (either side may hold
+                // variables — backward goals over list arguments). Lengths that differ
+                // fail here, where the owning form failed on its own `xs.len() == ys.len()`.
+                (Term::List(xs), Term::List(ys)) if xs.len() == ys.len() => {
+                    Next::Deep(aw.clone(), cw.clone())
+                }
+                // Structural quoted-triple unification (backward goals over
+                // quoted-triple arguments). [FABLE-5]
+                (Term::Triple(_), Term::Triple(_)) => Next::Deep(aw.clone(), cw.clone()),
+                _ => Next::Done(false),
             }
-            s.insert(v.clone(), cw.clone());
+        }
+    };
+    match next {
+        Next::Done(ok) => ok,
+        Next::Bind(v, t) => {
+            s.insert(v, t);
             true
         }
-        (_, Term::Var(v)) if !unbindable_var(v) => {
-            if frees_quoted_universal(&aw) {
-                return false;
+        Next::Deep(aw, cw) => match (&aw, &cw) {
+            (Term::List(xs), Term::List(ys)) => {
+                xs.iter().zip(ys).all(|(x, y)| unify_walked(x, y, s))
             }
-            s.insert(v.clone(), aw.clone());
-            true
-        }
-        // Structural list unification, member by member (either side may hold
-        // variables — backward goals over list arguments).
-        (Term::List(xs), Term::List(ys)) => {
-            xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| unify_walked(x, y, s))
-        }
-        // Structural quoted-triple unification (backward goals over
-        // quoted-triple arguments). [FABLE-5]
-        (Term::Triple(xs), Term::Triple(ys)) => {
-            xs.iter().zip(ys.iter()).all(|(x, y)| unify_walked(x, y, s))
-        }
-        _ => false,
+            (Term::Triple(xs), Term::Triple(ys)) => {
+                xs.iter().zip(ys.iter()).all(|(x, y)| unify_walked(x, y, s))
+            }
+            // `Next::Deep` is produced by those two arms alone.
+            _ => unreachable!("Deep holds two compounds of the same kind"),
+        },
     }
 }
 
@@ -4166,7 +4317,11 @@ fn unify_term_in(
                 if !v.starts_with(PATTERN_WILDCARD) && frees_quoted_universal(val) {
                     return Some(false);
                 }
-                b.insert(v.clone(), val.clone());
+                // `v.as_str()`, not `v.clone()`: the key is made ONCE, straight from the
+                // name's bytes. Handing over an owned `String` made the allocation twice,
+                // because the key it becomes is a separate allocation it has to be copied
+                // into.
+                b.insert(v.as_str(), val.clone());
                 true
             }
         },
@@ -10616,15 +10771,15 @@ mod tests {
         let iri = |s: &str| Term::Iri(s.to_string());
         let var = |s: &str| Term::Var(s.to_string());
         let mut b = Binding::default();
-        b.insert("one".into(), iri("http://ex/v"));
-        b.insert("two".into(), var("one"));
-        b.insert("three".into(), var("two"));
-        b.insert("deep".into(), Term::List(vec![var("three"), iri("http://ex/w")]));
-        b.insert("toDeep".into(), var("deep"));
+        b.insert("one", iri("http://ex/v"));
+        b.insert("two", var("one"));
+        b.insert("three", var("two"));
+        b.insert("deep", Term::List(vec![var("three"), iri("http://ex/w")]));
+        b.insert("toDeep", var("deep"));
         // A two-variable cycle, and a self-cycle.
-        b.insert("loopA".into(), var("loopB"));
-        b.insert("loopB".into(), var("loopA"));
-        b.insert("self".into(), var("self"));
+        b.insert("loopA", var("loopB"));
+        b.insert("loopB", var("loopA"));
+        b.insert("self", var("self"));
         let probes = vec![
             var("one"),
             var("two"),
@@ -10659,6 +10814,363 @@ mod tests {
             assert_eq!(walk_ref(t, &b), &reference(t), "walk_ref disagreed on {t:?}");
             assert_eq!(walk(t, &b), reference(t), "walk disagreed on {t:?}");
         }
+    }
+
+
+    /// The substitution answers every question the `HashMap<String, Term>` it replaced
+    /// answered, over a randomized sequence of operations.
+    ///
+    /// The reference is a `HashMap<String, Term>` driven by the operations the REPLACED type
+    /// supported directly — `insert` / `get` / `len` / `retain` / `values` on a map keyed by
+    /// an owned `String` — not by the new type, which would pass whatever the new type did.
+    /// What is compared is every answer AND the whole contents after every step, so a
+    /// difference in `insert`'s replace semantics (an existing variable must take the new
+    /// value, not keep the old one) or in `retain`'s predicate shows up immediately.
+    #[test]
+    fn the_substitution_answers_what_the_string_keyed_map_answered() {
+        let mut r = rng(0x7080);
+        // Names that collide on prefixes, plus the long `__bw<fold>_` shape a backward
+        // renaming actually produces, so the keys under test are the keys the engine uses.
+        let names: Vec<String> = (0..12)
+            .map(|i| match i % 4 {
+                0 => format!("x{i}"),
+                1 => format!("x{i}x"),
+                2 => format!("__bw1844674407370955161{i}_y"),
+                _ => format!("__up.{i}"),
+            })
+            .collect();
+        let term = |i: u64| -> Term {
+            match i % 5 {
+                0 => Term::Iri(format!("http://example.org/shared/path/s{}", i / 5)),
+                1 => Term::Blank(format!("b{}", i / 5)),
+                2 => Term::Lit(format!("l{}", i / 5), "http://x/dt".into(), None),
+                3 => Term::List(vec![Term::Iri(format!("http://x/{}", i / 5))]),
+                _ => Term::Formula(vec![[
+                    Term::Var(format!("v{}", i / 5)),
+                    Term::Iri("http://x/p".into()),
+                    Term::Iri("http://x/o".into()),
+                ]]),
+            }
+        };
+        // The whole contents, as a sorted list so the comparison does not depend on either
+        // table's iteration order (which is what the engine's own encodings do too).
+        let sorted = |mut rows: Vec<String>| {
+            rows.sort();
+            rows
+        };
+        let mut subst = Binding::new();
+        let mut reference: HashMap<String, Term> = HashMap::new();
+        for step in 0..4000u64 {
+            let v = &names[(r(names.len() as u64)) as usize];
+            match r(10) {
+                // Bind, including re-binding a variable that is already bound.
+                0..=5 => {
+                    let t = term(r(20));
+                    subst.insert(v.as_str(), t.clone());
+                    reference.insert(v.clone(), t);
+                }
+                // Drop a class of bindings, as a negation's wildcard cleanup does.
+                6 => {
+                    let drop = names[(r(names.len() as u64)) as usize].clone();
+                    subst.retain(|k| k != drop.as_str());
+                    reference.retain(|k, _| k != &drop);
+                }
+                _ => {}
+            }
+            assert_eq!(subst.get(v), reference.get(v), "step {step}: get({v})");
+            assert_eq!(subst.len(), reference.len(), "step {step}: len");
+            assert_eq!(subst.is_empty(), reference.is_empty(), "step {step}: is_empty");
+            assert_eq!(
+                sorted(subst.iter().map(|(k, t)| format!("{k:?}={t:?}")).collect()),
+                sorted(reference.iter().map(|(k, t)| format!("{k:?}={t:?}")).collect()),
+                "step {step}: the whole contents, as `canonical_new_firings` encodes them"
+            );
+            assert_eq!(
+                sorted(subst.values().map(|t| format!("{t:?}")).collect()),
+                sorted(reference.values().map(|t| format!("{t:?}")).collect()),
+                "step {step}: the values, as `within_depth` reads them"
+            );
+        }
+        // A name that was never bound is unbound in both, and asking does not bind it.
+        assert_eq!(subst.get("never-bound"), reference.get("never-bound"));
+    }
+
+    /// `unify_walked` decides, and extends the substitution, exactly as the CLONING form it
+    /// replaced did.
+    ///
+    /// The reference below is that form spelled out — `walk`-and-clone both sides, then
+    /// match on the two owned terms — because the shipped version decides the common cases
+    /// on BORROWED terms and owns only the two compound arms, and comparing it against
+    /// itself would pass whatever it did. Both the verdict and the resulting substitution
+    /// are compared, over randomized pairs that reach every arm: equal terms, a variable
+    /// against a value, a value against a variable, two unbound variables (which bind left
+    /// to right), lists of equal and unequal length, triple terms, a quoted formula's own
+    /// universal (which no matcher may bind), a value that would free one, and chains and
+    /// cycles through the substitution.
+    #[test]
+    fn unify_walked_decides_what_the_cloning_form_decided() {
+        /// The implementation this replaced, verbatim apart from the key type `insert` now
+        /// takes: both sides walked to owned terms before anything is matched.
+        fn reference(a: &Term, c: &Term, s: &mut Binding) -> bool {
+            let aw = walk(a, s);
+            let cw = walk(c, s);
+            if aw == cw {
+                return true;
+            }
+            match (&aw, &cw) {
+                (Term::Var(v), _) if !unbindable_var(v) => {
+                    if frees_quoted_universal(&cw) {
+                        return false;
+                    }
+                    s.insert(v.as_str(), cw.clone());
+                    true
+                }
+                (_, Term::Var(v)) if !unbindable_var(v) => {
+                    if frees_quoted_universal(&aw) {
+                        return false;
+                    }
+                    s.insert(v.as_str(), aw.clone());
+                    true
+                }
+                (Term::List(xs), Term::List(ys)) => {
+                    xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| reference(x, y, s))
+                }
+                (Term::Triple(xs), Term::Triple(ys)) => {
+                    xs.iter().zip(ys.iter()).all(|(x, y)| reference(x, y, s))
+                }
+                _ => false,
+            }
+        }
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let var = |s: &str| Term::Var(s.to_string());
+        // One universal of a quoted formula at nesting depth 0, which `unbindable_var`
+        // refuses to bind and `frees_quoted_universal` refuses to let out of its formula.
+        let universal = Term::Var(format!("{}0.http://ex/u", serialize::FORMULA_UNIVERSAL));
+        let terms: Vec<Term> = vec![
+            iri("a"),
+            iri("b"),
+            var("x"),
+            var("y"),
+            var("chain"),
+            var("mid"),
+            var("loopA"),
+            var("loopB"),
+            var("selfy"),
+            universal.clone(),
+            Term::Lit("7".into(), "http://x/int".into(), None),
+            Term::Blank("bn".into()),
+            Term::List(vec![var("x"), iri("a")]),
+            Term::List(vec![iri("a"), iri("b")]),
+            // A different LENGTH, so the list arm's length check is exercised both ways.
+            Term::List(vec![iri("a")]),
+            Term::List(vec![Term::List(vec![var("y")]), iri("b")]),
+            Term::Triple(Box::new([var("x"), iri("p"), iri("b")])),
+            Term::Triple(Box::new([iri("a"), iri("p"), var("y")])),
+            Term::Formula(vec![[var("x"), iri("p"), iri("b")]]),
+            // A value that would take a quoted universal out of the formula binding it.
+            Term::Formula(vec![[universal.clone(), iri("p"), iri("b")]]),
+            universal,
+        ];
+        // The seed substitutions the pairs are unified under: empty, a chain, and a cycle
+        // (where the answer is whatever the shared `s.len() + 1` iteration bound lands on).
+        let seeds: Vec<Binding> = {
+            let mut empty = Binding::new();
+            let mut chain = Binding::new();
+            chain.insert("chain", var("mid"));
+            chain.insert("mid", iri("a"));
+            let mut cyclic = Binding::new();
+            cyclic.insert("loopA", var("loopB"));
+            cyclic.insert("loopB", var("loopA"));
+            cyclic.insert("selfy", var("selfy"));
+            let mut bound = Binding::new();
+            bound.insert("x", iri("a"));
+            bound.insert("y", Term::List(vec![iri("b")]));
+            empty.retain(|_| true); // keep `empty` mutable-used and genuinely empty
+            vec![empty, chain, cyclic, bound]
+        };
+        let mut r = rng(0x7080_7095);
+        let mut reached_bind = 0usize;
+        let mut reached_deep = 0usize;
+        let mut reached_false = 0usize;
+        for case in 0..6000u64 {
+            let a = &terms[r(terms.len() as u64) as usize];
+            let c = &terms[r(terms.len() as u64) as usize];
+            let seed = &seeds[r(seeds.len() as u64) as usize];
+            let mut mine = seed.clone();
+            let mut theirs = seed.clone();
+            let got = unify_walked(a, c, &mut mine);
+            let want = reference(a, c, &mut theirs);
+            assert_eq!(got, want, "case {case}: verdict on {a:?} vs {c:?} under {seed:?}");
+            assert_eq!(
+                mine, theirs,
+                "case {case}: the substitution after {a:?} vs {c:?} under {seed:?}"
+            );
+            // Count which arms the corpus actually reached, so a future edit that stops
+            // reaching one of them fails here instead of silently testing less.
+            if mine.len() > seed.len() {
+                reached_bind += 1;
+            }
+            if matches!((a, c), (Term::List(_), Term::List(_)) | (Term::Triple(_), Term::Triple(_)))
+            {
+                reached_deep += 1;
+            }
+            if !got {
+                reached_false += 1;
+            }
+        }
+        assert!(reached_bind > 100, "the binding arms are reached: {reached_bind}");
+        assert!(reached_deep > 100, "the compound arms are reached: {reached_deep}");
+        assert!(reached_false > 100, "the refusing arms are reached: {reached_false}");
+    }
+
+    /// Every fact a backward proof derives is BYTE IDENTICAL to what the
+    /// `HashMap<String, Term>`-keyed substitution derived, and so is every proof step.
+    ///
+    /// The expectations are not computed: they are the literal output of the engine as it
+    /// stood BEFORE this change, captured from the parent commit and pasted in. That is
+    /// what makes this a differential and not a tautology — the new representation cannot
+    /// talk its way into agreeing with itself.
+    ///
+    /// What they pin is exactly the part a representation change could move. A backward
+    /// renaming's `__bw<fold>_` name is a function of the goal with its variables resolved
+    /// to the END of their binding chains, so it reads the substitution's whole contents;
+    /// and a quoted formula is opaque to substitution, so that name survives into a derived
+    /// fact, where it becomes part of the fact's term identity, its `why()` string and its
+    /// `sparq-prov` IRI (GH #6844 item 2, GH #7095). The twenty-digit folds below are
+    /// therefore the sharpest available statement that the substitution holds the same
+    /// bindings in the same chains as before: one entry wrong, missing, or resolved one hop
+    /// instead of to the end, and these names move.
+    ///
+    /// The documents cover the arms a substitution is reachable through: a renamed variable
+    /// leaked into an answer, a recursive proof deep enough to accumulate a large
+    /// substitution, two sites concluding one shape, a goal over a LIST and one over a
+    /// TRIPLE TERM (the two compound arms of [`unify_walked`]), a goal whose variables
+    /// ALIAS one another, a formula multiset match (which copies the substitution once per
+    /// pairing it tries), builtins and a list generator over a backward-proved binding, and
+    /// a document that derives NOTHING at all.
+    #[test]
+    fn a_backward_proof_derives_the_bytes_the_string_keyed_substitution_derived() {
+        let recursive_chain = {
+            let mut s = String::from("@prefix : <http://ex/> .\n");
+            for i in 0..7 {
+                s.push_str(&format!(":n{i} :par :n{}.\n", i + 1));
+            }
+            s.push_str(
+                ":n7 :reaches :end .\n{ ?x :reaches ?y } <= { ?x :par ?m . ?m :reaches ?y } .\n",
+            );
+            s
+        };
+        let cases: Vec<(&str, &str, &str, &[&str])> = vec![
+            (
+                "a renamed variable leaked into the answer",
+                "@prefix : <http://ex/> .\n:s0 :p :v0 .\n:s1 :p :v1 .\n:s2 :p :v2 .\n\
+                 { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n",
+                "@prefix : <http://ex/> .\n{ ?x :p ?any . ?x :has ?f } => { ?x :vals ?f } .\n",
+                &[
+                    r#"Iri("http://ex/s0") Iri("http://ex/vals") Formula([[Var("__bw13293826320743913544_y"), Iri("http://ex/inner"), Var("__bw13293826320743913544_z")]])"#,
+                    r#"Iri("http://ex/s1") Iri("http://ex/vals") Formula([[Var("__bw14225706374877674727_y"), Iri("http://ex/inner"), Var("__bw14225706374877674727_z")]])"#,
+                    r#"Iri("http://ex/s2") Iri("http://ex/vals") Formula([[Var("__bw8776505594191193573_y"), Iri("http://ex/inner"), Var("__bw8776505594191193573_z")]])"#,
+                ],
+            ),
+            (
+                "a recursive proof over a chain",
+                &recursive_chain,
+                "@prefix : <http://ex/> .\n{ ?x :reaches ?y } => { ?x :out ?y } .\n",
+                &[
+                    r#"Iri("http://ex/n0") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n1") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n2") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n3") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n4") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n5") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n6") Iri("http://ex/out") Iri("http://ex/end")"#,
+                    r#"Iri("http://ex/n7") Iri("http://ex/out") Iri("http://ex/end")"#,
+                ],
+            ),
+            (
+                "two sites concluding one shape for one goal",
+                "@prefix : <http://ex/> .\n:a :p :v .\n:a :q :w .\n\
+                 { ?x :has { ?y :inner ?z } } <= { ?x :p ?y } .\n\
+                 { ?x :has { ?y :inner ?z } } <= { ?x :q ?y } .\n",
+                "@prefix : <http://ex/> .\n{ :a :has ?f } => { :all :vals ?f } .\n",
+                &[
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Var("__bw17784778144888223834_y"), Iri("http://ex/inner"), Var("__bw17784778144888223834_z")]])"#,
+                    r#"Iri("http://ex/all") Iri("http://ex/vals") Formula([[Var("__bw17784779244399852045_y"), Iri("http://ex/inner"), Var("__bw17784779244399852045_z")]])"#,
+                ],
+            ),
+            (
+                "a backward goal over a LIST argument",
+                "@prefix : <http://ex/> .\n:a :pair ( :l :r ) .\n\
+                 { ?x :swapped ( ?b ?a ) } <= { ?x :pair ( ?a ?b ) } .\n",
+                "@prefix : <http://ex/> .\n{ ?x :swapped ?s } => { ?x :out ?s } .\n",
+                &[
+                    r#"Iri("http://ex/a") Iri("http://ex/out") List([Iri("http://ex/r"), Iri("http://ex/l")])"#,
+                ],
+            ),
+            (
+                "a backward goal over a TRIPLE TERM argument",
+                "@prefix : <http://ex/> .\n:a :says << :s :p :o >> .\n\
+                 { ?x :echo << ?s ?p ?o >> } <= { ?x :says << ?s ?p ?o >> } .\n",
+                "@prefix : <http://ex/> .\n{ ?x :echo ?e } => { ?x :out ?e } .\n",
+                &[
+                    r#"Iri("http://ex/a") Iri("http://ex/out") Triple([Iri("http://ex/s"), Iri("http://ex/p"), Iri("http://ex/o")])"#,
+                ],
+            ),
+            (
+                "a goal whose variables alias one another, which derives nothing",
+                "@prefix : <http://ex/> .\n:t :p :t .\n\
+                 { ( ?a ?b ) :outer { ?a :held ?b } } <= { ?a :p ?b } .\n",
+                "@prefix : <http://ex/> .\n{ ( ?x ?y ) :outer ?f } => { ?x :got ?f } .\n",
+                &[],
+            ),
+            (
+                "a formula multiset match",
+                "@prefix : <http://ex/> .\n:d :says { :a :p :b . :c :q :d } .\n",
+                "@prefix : <http://ex/> .\n\
+                 { ?d :says { ?x :p ?y . ?u :q ?v } } => { ?d :saw ?x ; :saw ?v } .\n",
+                &[
+                    r#"Iri("http://ex/d") Iri("http://ex/saw") Iri("http://ex/a")"#,
+                    r#"Iri("http://ex/d") Iri("http://ex/saw") Iri("http://ex/d")"#,
+                ],
+            ),
+            (
+                "builtins and a list generator over a backward-proved binding",
+                "@prefix : <http://ex/> .\n:a :val 3 .\n:a :items ( 1 2 3 ) .\n\
+                 { ?x :double ?d } <= { ?x :val ?v . ( ?v 2 ) \
+                 <http://www.w3.org/2000/10/swap/math#product> ?d } .\n",
+                "@prefix : <http://ex/> .\n\
+                 @prefix list: <http://www.w3.org/2000/10/swap/list#> .\n\
+                 { ?x :double ?d . ?x :items ?l . ?l list:member ?m } => { ?x :out ( ?d ?m ) } .\n",
+                &[
+                    r#"Iri("http://ex/a") Iri("http://ex/out") List([Lit("6", "http://www.w3.org/2001/XMLSchema#integer", None), Lit("1", "http://www.w3.org/2001/XMLSchema#integer", None)])"#,
+                    r#"Iri("http://ex/a") Iri("http://ex/out") List([Lit("6", "http://www.w3.org/2001/XMLSchema#integer", None), Lit("2", "http://www.w3.org/2001/XMLSchema#integer", None)])"#,
+                    r#"Iri("http://ex/a") Iri("http://ex/out") List([Lit("6", "http://www.w3.org/2001/XMLSchema#integer", None), Lit("3", "http://www.w3.org/2001/XMLSchema#integer", None)])"#,
+                ],
+            ),
+        ];
+        for (what, data, query, want) in cases {
+            assert_eq!(derived_rows(data, query), want, "{what}");
+        }
+
+        // And the PROOF a backward derivation records: the rule it fired, the premise facts
+        // it rests on, and the term keys of both.
+        let proofed = "@prefix : <http://ex/> .\n:a :par :b .\n:b :par :c .\n:c :reaches :end .\n\
+                       { ?x :reaches ?y } <= { ?x :par ?m . ?m :reaches ?y } .\n\
+                       { ?x :reaches ?y } => { ?x :out ?y } .\n";
+        let mut dict = Dict::default();
+        let (facts, steps) = reason_n3_proof(&mut dict, proofed).expect("proof");
+        assert_eq!(facts.len(), 6, "the facts the proof run closes over");
+        let mut rendered: Vec<String> = steps.iter().map(|s| format!("{s:?}")).collect();
+        rendered.sort();
+        assert_eq!(
+            rendered,
+            vec![
+                r#"ProofStep { conclusion: [1, 2, 3], rule: 0, premises: [[1, 4, 3]], conclusion_key: ["I\"http://ex/c\"", "I\"http://ex/out\"", "I\"http://ex/end\""], premise_keys: [["I\"http://ex/c\"", "I\"http://ex/reaches\"", "I\"http://ex/end\""]] }"#,
+                r#"ProofStep { conclusion: [5, 2, 3], rule: 0, premises: [], conclusion_key: ["I\"http://ex/b\"", "I\"http://ex/out\"", "I\"http://ex/end\""], premise_keys: [] }"#,
+                r#"ProofStep { conclusion: [6, 2, 3], rule: 0, premises: [], conclusion_key: ["I\"http://ex/a\"", "I\"http://ex/out\"", "I\"http://ex/end\""], premise_keys: [] }"#,
+            ],
+            "the proof steps, byte for byte"
+        );
     }
 
     /// `BwPrefix::render` writes the bytes `format!("__bw{fold}_")` wrote. That rendering is
@@ -10765,7 +11277,7 @@ mod tests {
         for i in 0..1_000u32 {
             chain.insert(format!("x{}", i), Term::List(vec![var(&format!("x{}", i + 1))]));
         }
-        chain.insert("x1000".into(), iri("a"));
+        chain.insert("x1000", iri("a"));
         let goal = [var("x0"), iri("has"), var("z")];
         let bw = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
         let proved = backward_prove(
