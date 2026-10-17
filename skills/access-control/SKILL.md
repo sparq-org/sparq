@@ -155,8 +155,9 @@ Materialize the authorization view from the access-control documents, then enfor
   `store.rematerialize_after_edit(&before, creator, created, acp)` — `created` naming the
   resources `creator` created — which
   applies the same rule and installs the view and provenance together only on success. It
-  refuses when `acp` is not the model the view in force was built under, as the update entry
-  points do, rather than replacing that view (the MCP server passes its session agent and the
+  refuses when `acp` is not the model the view in force was built under, rather than replacing
+  that view — as an update that changes the access-control documents does, since that update
+  rebuilds too (one that leaves them alone rebuilds nothing and is unaffected) (the MCP server passes its session agent and the
   resource its call created). `store.holds_resource(iri)` asks whether `iri` is a resource of
   the view, the store's own enumeration.
   `store.acp_provenance()` reads the stored provenance. A resource removed by editing
