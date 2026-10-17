@@ -41,16 +41,16 @@ SHIPPING bounded `#[global_allocator]` (the only way to bound wasm32 linear memo
 `deny(unsafe_code)` plus a single `#[allow(unsafe_code)] pub mod memory;` — every other module in
 the crate still fails to compile on `unsafe`. sq-wubkf.
 
-## MS-2 — 106-site register (ceiling and live), count-verified
+## MS-2 — 107-site register (ceiling and live), count-verified
 
 ```sh
-python3 scripts/unsafe-gate.py --check    # → "live total = 106, snapshot total = 106"
+python3 scripts/unsafe-gate.py --check    # → "live total = 107, snapshot total = 107"
 ```
 Per-crate (from `--check`, matching `bench/unsafe-snapshot.json::crates`):
 
 | crate | snapshot | live |
 |---|---:|---:|
-| sparq-core | 53 | 53 |
+| sparq-core | 54 | 54 |
 | sparq-vectors | 12 | 12 |
 | sparq-lws-core | 12 | 12 |
 | sparq-engine | 8 | 8 |
@@ -60,10 +60,16 @@ Per-crate (from `--check`, matching `bench/unsafe-snapshot.json::crates`):
 | sparq-cli | 2 | 2 |
 | sparq-zk-compose | 3 | 3 |
 | sparq-bench | 1 | 1 |
-| **total** | **106** | **106** |
+| **total** | **107** | **107** |
 
 <!-- sq-gg0qq.2: sparq-lws-core imported with EXAMPLE- and TEST-only counting-allocator
 sites (register rows in unsafe-register.md). -->
+
+<!-- sq-ycle: sparq-core 53 -> 54. One `libc::flock(LOCK_EX)` FFI site, `DirLock::lock_inner`:
+the inode-keyed half of the durable store's single-writer lock, which excludes a second writer
+reaching the store through another mount of the same directory. Registered row + `// SAFETY:`
+comment in unsafe-register.md; `cfg(unix)` + `cfg(feature = "mmap")`, so neither the lean default
+build nor wasm compiles it. -->
 
 <!-- [OPUS-4.8] sq-i6gj6: table re-synced to bench/unsafe-snapshot.json (was a stale 59/5-crate
 snapshot: sparq-core rose 45→50, sparq-vectors 9→13, and sparq-engine/sparq-py picked up
