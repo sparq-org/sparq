@@ -946,6 +946,28 @@ pub fn run_cell_networked(
                 .to_string(),
         ));
     }
+    // `scale` sizes the canonical input column each class builds, so cap it HERE —
+    // before the listener is bound and before `n` party threads are spawned, let
+    // alone before `(0..scale)` is collected. An uncapped `scale` is not a slow run
+    // but a dead process: `usize::MAX` overflows the column build and `1 << 35`
+    // exhausts memory. Each class is capped against the bound its own work is
+    // proportional to; the two classes that do not read `scale` are capped by
+    // nothing, which is stated rather than left to inference.
+    match query_class {
+        // Both build a `scale`-row column and route it through a network of that
+        // width, so the network cap is the one that fits.
+        QueryClass::ObliviousShuffle | QueryClass::ObliviousSort => {
+            crate::oblivious::check_network_width("run_cell_networked", scale)?;
+        }
+        // All-pairs over `scale x scale` rows: the candidate cardinality is the
+        // bound, and it is checked here as well as inside `Coordinator::hidden_join`.
+        QueryClass::HiddenValueEquiJoin => {
+            crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
+        }
+        // `CumulativeSumAggregate` is sized by the caller's own `values` slice and
+        // ignores `scale`; `HiddenBoundedPath` has no wire driver and refuses below.
+        QueryClass::CumulativeSumAggregate | QueryClass::HiddenBoundedPath => {}
+    }
     let n = backend.parties();
     // Bind a loopback listener; parties connect to it. Port 0 ⇒ OS-assigned.
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -1401,6 +1423,100 @@ mod tests {
     /// `run_cell_networked` is public and drives the public-permutation shuffle, so
     /// it must not manufacture the acknowledgement for its caller. Without the token
     /// the shuffle class is refused, and the refusal lands before any wire work.
+    /// `scale` sizes the canonical column each class builds, so an uncapped one is
+    /// not a slow cell but a dead process: `usize::MAX` overflows the `(0..scale)`
+    /// build and a merely large value exhausts memory. The cap sits at the top of
+    /// the function, ahead of the listener and the party threads, so the refusal
+    /// costs no socket and no thread — which is also why this test can afford to
+    /// try `usize::MAX` at all.
+    #[test]
+    fn run_cell_networked_refuses_an_over_cap_scale_without_panicking() {
+        use crate::oblivious::MAX_NETWORK_WIDTH;
+        use crate::oblivious_join::MAX_OUTPUT_BOUND;
+
+        let backend = ShamirBackend::new_seeded(3, 0xE8).unwrap();
+
+        for scale in [MAX_NETWORK_WIDTH + 1, usize::MAX] {
+            // Both network classes cap on the width. The shuffle class is passed its
+            // opt-in token, so the refusal under test is the size one and not the
+            // acknowledgement one.
+            for (class, token) in [
+                (
+                    QueryClass::ObliviousShuffle,
+                    Some(PublicPermutation::acknowledged()),
+                ),
+                (QueryClass::ObliviousSort, None),
+            ] {
+                let mut dealer = backend.dealer();
+                let err = run_cell_networked(class, &backend, &mut dealer, &[], scale, token)
+                    .expect_err("an over-cap scale must be refused");
+                assert!(
+                    matches!(&err, MpcError::Protocol(m) if m.contains("MAX_NETWORK_WIDTH")),
+                    "{:?} scale={}: {:?}",
+                    class,
+                    scale,
+                    err
+                );
+            }
+
+            // The all-pairs class caps on the candidate cardinality instead.
+            let mut dealer = backend.dealer();
+            let err = run_cell_networked(
+                QueryClass::HiddenValueEquiJoin,
+                &backend,
+                &mut dealer,
+                &[],
+                scale,
+                None,
+            )
+            .expect_err("an over-cap scale must be refused");
+            // `usize::MAX` squared refuses on the overflow; a merely over-cap
+            // scale refuses on the cap. Both are the same guard, reached by its
+            // two arms, and both must be a typed refusal rather than a wrap.
+            assert!(
+                matches!(&err, MpcError::Protocol(m)
+                    if m.contains("MAX_OUTPUT_BOUND") || m.contains("overflows usize")),
+                "HiddenValueEquiJoin scale={}: {:?}",
+                scale,
+                err
+            );
+        }
+
+        // `scale` below the cap but whose SQUARE is above it: the join class must
+        // still refuse, which is what distinguishes its cap from the width one.
+        let square_over = 1usize << 10;
+        assert!(
+            square_over <= MAX_NETWORK_WIDTH && square_over * square_over > MAX_OUTPUT_BOUND,
+            "the fixture must be legal as a width but illegal as a pair count"
+        );
+        let mut dealer = backend.dealer();
+        assert!(
+            run_cell_networked(
+                QueryClass::HiddenValueEquiJoin,
+                &backend,
+                &mut dealer,
+                &[],
+                square_over,
+                None,
+            )
+            .is_err(),
+            "scale^2 above the cap must be refused even though scale is not"
+        );
+
+        // And a legal scale still runs the real wire cell, so the caps refuse a
+        // size rather than the class.
+        let mut dealer = backend.dealer();
+        run_cell_networked(
+            QueryClass::ObliviousSort,
+            &backend,
+            &mut dealer,
+            &[],
+            8,
+            None,
+        )
+        .expect("a legal scale still runs");
+    }
+
     #[test]
     fn run_cell_networked_refuses_the_shuffle_class_without_the_opt_in() {
         let backend = ShamirBackend::new_seeded(3, 0xE7).unwrap();
