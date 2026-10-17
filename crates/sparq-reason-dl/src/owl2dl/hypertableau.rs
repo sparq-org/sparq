@@ -27,13 +27,17 @@
 //! filler. A clause takes part when its head is one at-most restriction and disjuncts at
 //! `s` ([`NiShape`]): those disjuncts are further alternatives, since the restriction holds
 //! at `s` unless one of them does. Otherwise the branch is closed and, if no branch gives a
-//! model, the run returns [`Stop::Unconfirmed`], never a verdict.
+//! model, the run returns [`Stop::Unconfirmed`], never a verdict. When a plain attempt runs
+//! out or cannot confirm its model, [`Tableau::run`] starts over with the rule also applied
+//! as HermiT applies it, where the at-most restriction at `s` would merge `w` with another
+//! neighbour (`eager_ni`); the first choice among slots not introduced yet is the only one
+//! tried, since they are interchangeable.
 //!
 //! **Termination.** HermiT's NI-rule (Motik, Shearer and Horrocks, JAIR 36, 2009) fires on
 //! an annotated equality: an at-most restriction at a root forcing two nodes to merge. This
-//! one fires at completion, on an edge [`Tableau::unravels`] refuses. The roots it
-//! introduces can introduce further roots, so the JAIR termination argument does not carry
-//! over as it stands. Termination is backed by the [`Budget`]: every rule application and
+//! one fires there in the eager attempt and at completion, on an edge [`Tableau::unravels`]
+//! refuses. The roots it introduces can introduce further roots, so the JAIR termination
+//! argument does not carry over as it stands. Termination is backed by the [`Budget`]: every rule application and
 //! every new node counts against it, and running out is [`Stop::Exhausted`]
 //! (`Unknown(ResourceBudget)`), never a verdict.
 //!
@@ -329,7 +333,7 @@ struct Instance {
     deps: Dep,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Undo {
     Concept(Node, Atom),
     Role(u32, Node, Node),
@@ -358,7 +362,7 @@ enum Choice {
     },
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Branch {
     mark: usize,
     choice: Choice,
@@ -367,6 +371,7 @@ struct Branch {
 }
 
 /// One tableau run over a fixed clause set.
+#[derive(Clone)]
 pub(crate) struct Tableau<'c> {
     c: &'c Clauses,
     index: &'c ClauseIndex,
@@ -408,6 +413,9 @@ pub(crate) struct Tableau<'c> {
     named: Vec<Node>,
     /// The roots the NI-rule introduced, by (root, at-most clause, index).
     ni_nodes: FxHashMap<(Node, u32, u32), Node>,
+    /// Whether the NI-rule also applies when an at-most restriction merges (see
+    /// [`Tableau::run`]).
+    eager_ni: bool,
 }
 
 /// What the key rule did.
@@ -484,6 +492,7 @@ impl<'c> Tableau<'c> {
             unconfirmed: false,
             named: Vec::new(),
             ni_nodes: FxHashMap::default(),
+            eager_ni: false,
         }
     }
 
@@ -594,7 +603,32 @@ impl<'c> Tableau<'c> {
 
     /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
     /// built, `Ok(false)` when every branch closed on a clash.
+    /// Runs to a verdict. With nominals and at-most restrictions, a first attempt on a
+    /// third of the budget merges the neighbours an at-most restriction at a root counts as
+    /// usual; when it runs out or cannot confirm its model, the run starts over with the
+    /// NI-rule applied to those merges too (`eager_ni`, as HermiT does), on the rest of the
+    /// budget. The eager rule settles graphs whose merges at a root would otherwise keep
+    /// joining parts of the tree, but slows some that the plain attempt decides.
     pub(crate) fn run(&mut self) -> Result<bool, Stop> {
+        if self.index.ni.is_empty() || self.eager_ni {
+            return self.run_inner();
+        }
+        let start = self.clone();
+        let full = self.budget.max_steps;
+        self.budget.max_steps = start.work() + full.saturating_sub(start.work()) / 3;
+        let r = self.run_inner();
+        self.budget.max_steps = full;
+        if !matches!(r, Err(Stop::Exhausted | Stop::Unconfirmed)) {
+            return r;
+        }
+        let spent = self.work() - start.work();
+        *self = start;
+        self.eager_ni = true;
+        self.probes.set(self.probes.get() + spent);
+        self.run_inner()
+    }
+
+    fn run_inner(&mut self) -> Result<bool, Stop> {
         loop {
             if self.over_budget() || self.nodes.len() > self.budget.max_nodes {
                 return Err(Stop::Exhausted);
@@ -1232,25 +1266,25 @@ impl<'c> Tableau<'c> {
         self.mark_with_neighbours(s);
     }
 
+    /// Deactivates `t`'s descendants. A child is always adjacent to its parent (the edge
+    /// that created it), so the walk follows edges: work proportional to the subtree.
     fn prune_descendants(&mut self, t: Node) {
-        let len = self.nodes.len();
-        self.charge(len);
-        let mut desc = vec![false; len];
-        for n in (t as usize + 1)..len {
-            let node = &self.nodes[n];
-            if !node.active || node.root {
-                continue;
-            }
-            if let Some(p) = node.parent {
-                if p == t || desc[p as usize] {
-                    desc[n] = true;
-                }
-            }
-        }
-        for (n, &is_desc) in desc.iter().enumerate() {
-            if is_desc {
-                self.nodes[n].active = false;
-                self.trail.push(Undo::Deactivate(n as Node));
+        let mut stack = vec![t];
+        while let Some(u) = stack.pop() {
+            let adj = &self.nodes[u as usize].adj;
+            self.charge(adj.len());
+            let children: Vec<Node> = adj
+                .keys()
+                .copied()
+                .filter(|&n| {
+                    let node = &self.nodes[n as usize];
+                    node.active && !node.root && node.parent == Some(u)
+                })
+                .collect();
+            for n in children {
+                self.nodes[n as usize].active = false;
+                self.trail.push(Undo::Deactivate(n));
+                stack.push(n);
             }
         }
     }
@@ -1300,10 +1334,13 @@ impl<'c> Tableau<'c> {
             let head = &self.c.clauses[inst.clause as usize].head;
             match head.len() {
                 0 => self.set_clash(inst.deps.clone()),
-                1 => {
-                    let h = head[0].clone();
-                    self.apply(&inst, &h, &inst.deps.clone());
-                }
+                1 => match self.ni_trigger(&inst) {
+                    Some(choice) => self.open(choice),
+                    None => {
+                        let h = head[0].clone();
+                        self.apply(&inst, &h, &inst.deps.clone());
+                    }
+                },
                 _ => {
                     self.pending.push(inst);
                     self.trail.push(Undo::PendingPush);
@@ -1436,7 +1473,67 @@ impl<'c> Tableau<'c> {
     // ---- branching --------------------------------------------------------------------
 
     fn branch(&mut self, inst: Instance) {
-        self.open(Choice::Clause(inst));
+        let choice = self.ni_trigger(&inst).unwrap_or(Choice::Clause(inst));
+        self.open(choice);
+    }
+
+    /// The NI-rule where an at-most clause applies at root `s` to a blockable node `w` that
+    /// is not `s`'s child: instead of merging `w` with another neighbour, `w` becomes one
+    /// of the restriction's at most `n` named neighbours (or another disjunct holds at `s`).
+    fn ni_trigger(&self, inst: &Instance) -> Option<Choice> {
+        if !self.eager_ni {
+            return None;
+        }
+        let k = self
+            .index
+            .ni
+            .binary_search_by_key(&inst.clause, |(c, _)| *c)
+            .ok()?;
+        let s = inst.nodes[0];
+        if !self.nodes[s as usize].root {
+            return None;
+        }
+        let w = self.index.ni[k]
+            .1
+            .group
+            .iter()
+            .map(|&v| inst.nodes[1 + v as usize])
+            .find(|&w| {
+                let n = &self.nodes[w as usize];
+                !n.root && !n.concrete && n.parent != Some(s)
+            })?;
+        // The choice depends on the restriction holding at `s` and counting `w`, not on the
+        // other neighbours it counted.
+        let (ci, shape) = &self.index.ni[k];
+        let (cl, ys) = (&self.c.clauses[*ci as usize], &self.index.ys[*ci as usize]);
+        let sn = &self.nodes[s as usize];
+        let mut deps = Dep::default();
+        for a in &cl.body_x {
+            deps = deps.union(sn.label.get(a)?);
+        }
+        for &r in &cl.body_self {
+            deps = deps.union(&self.role_dep(r, s, s));
+        }
+        for &v in shape.context.iter().chain(&shape.group[..1]) {
+            let u = if shape.group[0] == v {
+                w
+            } else {
+                inst.nodes[1 + v as usize]
+            };
+            let (roles, atoms, _) = &ys[v as usize];
+            for &r in roles {
+                deps = deps.union(&self.role_dep(r, s, u));
+            }
+            for a in atoms {
+                deps = deps.union(self.nodes[u as usize].label.get(a)?);
+            }
+        }
+        Some(Choice::Ni {
+            s,
+            w,
+            ni: k as u32,
+            deps,
+        })
     }
 
     /// Opens a branch point over `choice` and takes its first alternative (a single
@@ -1824,6 +1921,13 @@ impl<'c> Tableau<'c> {
     fn ni_merge(&mut self, s: Node, w: Node, ni: u32, i: u32, d: &Dep) {
         let (clause, ref shape) = self.index.ni[ni as usize];
         let v = shape.group[0];
+        // Slots not introduced yet are interchangeable: only the first of them is tried, the
+        // others fail as the alternatives before them did.
+        let fresh = |k: u32| !self.ni_nodes.contains_key(&(s, clause, k));
+        if i > 0 && fresh(i) && fresh(i - 1) {
+            self.set_clash(d.clone());
+            return;
+        }
         let (z, dz) = match self.ni_nodes.get(&(s, clause, i)) {
             Some(&z) => self.canonical_dep(z),
             None => {

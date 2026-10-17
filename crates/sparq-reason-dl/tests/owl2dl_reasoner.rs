@@ -3634,3 +3634,26 @@ fn an_at_most_restriction_in_a_union_or_under_a_condition_counts_its_neighbours(
         assert_eq!(verdict(&format!("{decl} {chain} {extra}")), want, "{extra}");
     }
 }
+
+/// An at-most restriction at an individual whose neighbours are blockable nodes from all over
+/// the tree: merging them keeps joining parts of the tree, so they become the individual's
+/// named neighbours instead (the NI-rule on merges). Consistent, as HermiT agrees; decided
+/// under the default budget.
+#[test]
+fn merges_at_an_individual_of_nodes_across_the_tree_are_decided() {
+    let body = r#":C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :r2 a owl:ObjectProperty . :i0 a owl:NamedIndividual . :i1 a owl:NamedIndividual . :i2 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:someValuesFrom :C2 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:allValuesFrom :C2 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:allValuesFrom :C1 ] .
+        :C2 owl:disjointWith :C1 .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:hasValue :i2 ] .
+        :i2 a [ a owl:Class ; owl:unionOf ( [ a owl:Restriction ; owl:onProperty :r1 ; owl:maxQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass owl:Thing ] :C2 ) ] .
+        :r1 rdfs:subPropertyOf :r1 .
+        :i2 a [ a owl:Restriction ; owl:onProperty :r1 ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C0 ] :C2 ) ] ] .
+        :r2 a owl:SymmetricProperty .
+        :i1 owl:differentFrom :i0 .
+        :i2 :r1 :i2 .
+        :a a owl:NamedIndividual , :C0 ."#;
+    assert_eq!(verdict(body), Consistency::Consistent);
+}
