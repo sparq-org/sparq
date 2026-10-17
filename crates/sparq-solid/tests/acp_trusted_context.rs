@@ -316,9 +316,9 @@ fn a_fact_of_a_resource_that_does_not_exist_is_validated_too() {
 }
 
 #[test]
-fn a_rolled_back_write_keeps_the_context() {
+fn a_refused_write_keeps_the_context() {
     let mut store = store();
-    // An agent in the reserved pair encoding cannot be materialized, so the write rolls back.
+    // An agent in the reserved pair encoding is refused, so nothing is written.
     let bad = "<https://pod.ex/other.acr> <http://www.w3.org/ns/solid/acp#accessControl> \
         <https://pod.ex/other.acr#c> .\n\
         <https://pod.ex/other.acr#c> <http://www.w3.org/ns/solid/acp#apply> <https://pod.ex/other.acr#p> .\n\
@@ -328,7 +328,7 @@ fn a_rolled_back_write_keeps_the_context() {
     assert!(store
         .put_acl_acp("https://pod.ex/other.acr", bad, "ntriples")
         .is_err());
-    assert_context_in_force(&store, "a rolled-back put_acl_acp");
+    assert_context_in_force(&store, "a refused put_acl_acp");
 }
 
 fn alice() -> Session<'static> {
