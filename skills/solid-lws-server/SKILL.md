@@ -550,9 +550,13 @@ What the server exposes, all discoverable from the storage description
   `Last-Modified`) are as they were. A recursive delete too large to put back is refused with
   `409` before anything is removed. Nothing is copied to put a resource back: the store holds
   the bytes its record points at (a hold, itself stored, so a stop leaves nothing unaccounted
-  for) and the record is put back pointing at them, validators included; the holds go once the
-  change is kept or put back, and a start releases any a stop left that no change still needs
-  (their bytes are then the orphan sweep's). So no delete is refused for the size of what is
+  for) and the record is put back pointing at them, validators included. Each change's holds are
+  its own (two changes holding the same bytes each release only theirs), and bytes are reclaimed
+  only once the index shows no hold on them, whichever server instance took it. The holds go once
+  the change is kept or put back, and a start releases any of this storage's holds whose change's
+  intent is gone (their bytes are then the orphan sweep's). Residual: hold records and intents are
+  a few fixed fields per resource a change touches and are not counted against the storage's
+  quota. So no delete is refused for the size of what is
   stored, and none answers `507` for want of room to copy it. Residual: what bounds a recursive
   delete (`409`) is how many resources it removes and the size of their metadata (types, links
   and linkset, which it reads to decide who may act on them while the delete is in flight),

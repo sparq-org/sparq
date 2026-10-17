@@ -27,6 +27,10 @@
 //!   DELETE doc    (k=3)                          10 → 7           2 (target 4→2, parent 3→2)
 //!   PATCH insert  (existing doc, k=3)             5 → 3           1 (target: 4→2)
 //!
+//! Held blob references later added one query to PUT overwrite, DELETE and PATCH: before the
+//! replaced or removed bytes are reclaimed, the index is asked whether any hold record names them
+//! (authoritative, so a hold from another store instance is never missed).
+//!
 //! The win is DEPTH-INDEPENDENT: the sequential side grows with k (a deeper resource pays a longer
 //! walk), the planned side is flat 2 at any k. The creation paths' remaining per-ancestor
 //! EXISTENCE probes (`nearest_existing_container` / `ensure_ancestor_containers`) are a separate
@@ -200,8 +204,8 @@ async fn put_overwrite_k3_counts() {
         .await;
     assert_eq!(resp.status(), StatusCode::NO_CONTENT, "overwrite 204");
     assert_eq!(
-        d.sparql_queries, 5,
-        "PUT overwrite = existence meta + planned walk (plan + re-confirm) + slash probe + replace_meta's previous-record read, depth-independent: {d:?}"
+        d.sparql_queries, 6,
+        "PUT overwrite = existence meta + planned walk (plan + re-confirm) + slash probe + replace_meta's previous-record read + whether the replaced bytes are held, depth-independent: {d:?}"
     );
     assert_eq!(d.blob_puts, 1, "one body write: {d:?}");
     assert_eq!(
@@ -278,8 +282,8 @@ async fn delete_doc_k3_counts() {
         .await;
     assert_eq!(resp.status(), StatusCode::NO_CONTENT, "delete 204");
     assert_eq!(
-        d.sparql_queries, 7,
-        "DELETE = planned target walk (2) + planned parent walk (2) + existence/aux probes, depth-independent (was 10): {d:?}"
+        d.sparql_queries, 8,
+        "DELETE = planned target walk (2) + planned parent walk (2) + existence/aux probes + whether the removed bytes are held, depth-independent (was 10): {d:?}"
     );
     assert_eq!(d.blob_puts, 0, "no body write: {d:?}");
     assert_eq!(d.max_in_flight, 1, "strictly sequential");
@@ -302,8 +306,8 @@ _:patch a solid:InsertDeletePatch;\n\
         .await;
     assert_eq!(resp.status(), StatusCode::NO_CONTENT, "patch 204");
     assert_eq!(
-        d.sparql_queries, 4,
-        "PATCH = planned walk (2) + target read meta + replace_meta's previous-record read, depth-independent: {d:?}"
+        d.sparql_queries, 5,
+        "PATCH = planned walk (2) + target read meta + replace_meta's previous-record read + whether the replaced bytes are held, depth-independent: {d:?}"
     );
     assert_eq!(d.blob_puts, 1, "one rewritten body: {d:?}");
     assert_eq!(

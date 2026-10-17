@@ -206,8 +206,8 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.restore(iri, container, body, meta).await
     }
 
-    async fn hold(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
-        self.inner.hold(iri).await
+    async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
+        self.inner.hold(iri, holder).await
     }
 
     async fn reinstate(
@@ -221,11 +221,16 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.reinstate(iri, container, held).await
     }
 
-    async fn release(&self, held: &ResourceMeta, iri: Option<&str>) -> ServerResult<()> {
-        self.inner.release(held, iri).await
+    async fn release(
+        &self,
+        held: &ResourceMeta,
+        holder: &str,
+        iri: Option<&str>,
+    ) -> ServerResult<()> {
+        self.inner.release(held, holder, iri).await
     }
 
-    async fn holds(&self) -> ServerResult<Vec<ResourceMeta>> {
+    async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
         self.inner.holds().await
     }
 

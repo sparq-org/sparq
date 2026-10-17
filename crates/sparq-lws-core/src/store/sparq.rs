@@ -341,6 +341,8 @@ impl Default for InMemorySparqClient {
 struct Meta {
     map: HashMap<String, ResourceMeta>,
     pooled: usize,
+    /// Records of holds ([`super::is_hold_record`]), admitted apart from every ceiling.
+    holds: usize,
 }
 
 impl Meta {
@@ -361,15 +363,22 @@ impl Meta {
         self.pooled
     }
 
+    /// Records of holds.
+    fn holds(&self) -> usize {
+        self.holds
+    }
+
     fn values(&self) -> std::collections::hash_map::Values<'_, String, ResourceMeta> {
         self.map.values()
     }
 
     fn insert(&mut self, iri: String, meta: ResourceMeta) -> Option<ResourceMeta> {
         let pooled = super::in_service_pool(&iri);
+        let hold = super::is_hold_record(&iri);
         let replaced = self.map.insert(iri, meta);
-        if pooled && replaced.is_none() {
-            self.pooled += 1;
+        if replaced.is_none() {
+            self.pooled += usize::from(pooled);
+            self.holds += usize::from(hold);
         }
         replaced
     }
@@ -378,6 +387,9 @@ impl Meta {
         let gone = self.map.remove(iri)?;
         if super::in_service_pool(iri) {
             self.pooled -= 1;
+        }
+        if super::is_hold_record(iri) {
+            self.holds -= 1;
         }
         Some(gone)
     }
@@ -425,14 +437,17 @@ impl InMemorySparqClient {
     /// own ceiling and counts towards nothing else, so no number of them makes a write of
     /// content fail.
     fn admit_resource(&self, index: &Index, iri: &str) -> Result<(), SparqError> {
-        if index.meta.contains_key(iri) {
+        if index.meta.contains_key(iri) || super::is_hold_record(iri) {
             return Ok(());
         }
         let pooled = index.meta.pooled();
         let (held, ceiling) = if super::in_service_pool(iri) {
             (pooled, self.limits.max_pool_resource_count)
         } else {
-            (index.meta.len() - pooled, self.limits.max_resource_count)
+            (
+                index.meta.len() - pooled - index.meta.holds(),
+                self.limits.max_resource_count,
+            )
         };
         if held >= ceiling {
             return Err(SparqError::QuotaExceeded);

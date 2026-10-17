@@ -893,7 +893,7 @@ impl<S: Store + 'static> LwsState<S> {
                 }
             }
             // Released while its locks are held: nothing can stage what it put back meanwhile.
-            release_holds(&state.store, &left.2).await;
+            left.2.release(&state.store).await;
             drop(left);
             state.locks.show(&iris);
             state
@@ -1135,29 +1135,48 @@ pub(crate) struct Journal<'a, S: Store + 'static> {
     holds: Holds<S>,
 }
 
-/// The holds a [`Journal`] took, released when it is dropped before its intent was stored (a
-/// change that panicked part way): once it is stored, the intent keeps them, and the next start
-/// settles it and releases them ([`intents::recover`]).
+/// The holds a [`Journal`] took, all as one holder: the IRI its intent is (or would be) stored
+/// at, so no other journal's release can end them, and a start can tell whose they are. Released
+/// when it is dropped before its intent was stored (a change that panicked part way): once it is
+/// stored, the intent keeps them, and the next start settles it and releases them
+/// ([`intents::recover`]).
 struct Holds<S: Store + 'static> {
     state: LwsState<S>,
-    held: Vec<(String, StoredMeta)>,
+    holding: Holding,
     intended: bool,
 }
 
+/// Holds taken as one holder (see [`Store::hold`]): each held resource, with what was held.
+#[derive(Default)]
+pub(crate) struct Holding {
+    pub(crate) holder: String,
+    pub(crate) held: Vec<(String, StoredMeta)>,
+}
+
+impl Holding {
+    /// Release every hold, best effort (see [`release_holds`]).
+    pub(crate) async fn release<S: Store>(&self, store: &S) {
+        release_holds(store, &self.holder, &self.held).await
+    }
+}
+
 impl<S: Store + 'static> Holds<S> {
-    fn take(&mut self) -> Vec<(String, StoredMeta)> {
-        std::mem::take(&mut self.held)
+    fn take(&mut self) -> Holding {
+        Holding {
+            holder: self.holding.holder.clone(),
+            held: std::mem::take(&mut self.holding.held),
+        }
     }
 }
 
 impl<S: Store + 'static> Drop for Holds<S> {
     fn drop(&mut self) {
-        if self.held.is_empty() || self.intended {
+        if self.holding.held.is_empty() || self.intended {
             return;
         }
-        let (state, held) = (self.state.clone(), self.take());
+        let (state, holding) = (self.state.clone(), self.take());
         if let Ok(rt) = tokio::runtime::Handle::try_current() {
-            rt.spawn(async move { release_holds(&state.store, &held).await });
+            rt.spawn(async move { holding.release(&state.store).await });
         }
     }
 }
@@ -1239,11 +1258,15 @@ pub(crate) fn holds_of(undo: &[Undo]) -> Vec<(String, StoredMeta)> {
     out
 }
 
-/// Release `holds` (see [`holds_of`]), best effort: one whose release fails stays until the next
-/// start's sweep ([`intents::recover`]) releases it.
-pub(crate) async fn release_holds<S: Store>(store: &S, holds: &[(String, StoredMeta)]) {
+/// Release `holder`'s `holds` (see [`holds_of`]), best effort: one whose release fails stays
+/// until the next start's sweep ([`intents::recover`]) releases it.
+pub(crate) async fn release_holds<S: Store>(
+    store: &S,
+    holder: &str,
+    holds: &[(String, StoredMeta)],
+) {
     for (iri, meta) in holds {
-        let _ = store.release(meta, Some(iri)).await;
+        let _ = store.release(meta, holder, Some(iri)).await;
     }
 }
 
@@ -1351,7 +1374,7 @@ impl Undo {
 
 /// What is left to put back of a change that could not be put back after a few tries, the next
 /// to apply first, and the holds of its journal (see [`Journal`]), released once it is put back.
-pub(crate) struct Unsettled(Vec<Undo>, Option<InFlight>, Vec<(String, StoredMeta)>);
+pub(crate) struct Unsettled(Vec<Undo>, Option<InFlight>, Holding);
 
 /// A journaled change's resources published as in flight ([`IriLocks::changing`]), with what
 /// each was before the change began, until this is dropped: from before the change's first
@@ -1377,9 +1400,9 @@ impl Drop for InFlight {
 pub(crate) struct Hidden(Vec<(Unsettled, (Vec<String>, usize))>);
 
 impl Unsettled {
+    /// What is left of a change, holding nothing (its caller hands it the holds it carries).
     pub(crate) fn new(undo: Vec<Undo>) -> Self {
-        let holds = holds_of(&undo);
-        Self(undo, None, holds)
+        Self(undo, None, Holding::default())
     }
 
     /// About how many bytes it holds to put back: each body, and each record at its limit.
@@ -1595,7 +1618,10 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             in_flight: None,
             holds: Holds {
                 state: state.clone(),
-                held: Vec::new(),
+                holding: Holding {
+                    holder: intents::mint(&state.cfg.storage()),
+                    held: Vec::new(),
+                },
                 intended: false,
             },
         }
@@ -1611,10 +1637,18 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         if self.staged.contains_key(key) {
             return Ok(());
         }
-        let prior = match self.state.store.hold(key).await? {
+        let prior = match self
+            .state
+            .store
+            .hold(key, &self.holds.holding.holder)
+            .await?
+        {
             Some(meta) => {
                 // Held from here on: released with the journal's holds, whatever follows.
-                self.holds.held.push((key.to_string(), meta.clone()));
+                self.holds
+                    .holding
+                    .held
+                    .push((key.to_string(), meta.clone()));
                 let peek = match key.ends_with(META_SUFFIX) {
                     true => Some(self.state.store.read_at(key, &meta).await?),
                     false => None,
@@ -1681,7 +1715,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         let existing = self.intent.is_some();
         let record = self
             .intent
-            .get_or_insert_with(|| intents::mint(&self.state.cfg.storage()))
+            .get_or_insert_with(|| self.holds.holding.holder.clone())
             .clone();
         // Published first: a check without the lock from now on is made on what was staged,
         // whatever this change writes or puts back.
@@ -1814,7 +1848,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
         touch: Option<&str>,
     ) -> Result<(), (crate::error::ServerError, Option<Unsettled>)> {
         let Some(record) = self.intent.clone() else {
-            release_holds(&self.state.store, &self.holds.take()).await;
+            self.holds.take().release(&self.state.store).await;
             return Ok(());
         };
         let kept = match touch {
@@ -1835,7 +1869,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
             }
         };
         if kept {
-            release_holds(&self.state.store, &self.holds.take()).await;
+            self.holds.take().release(&self.state.store).await;
             return Ok(());
         }
         // Whether the store did it anyway is read back from the intent: still holding its plan,
@@ -1847,7 +1881,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                     if let Some(container) = touch {
                         self.state.owe_touch(container, record);
                     }
-                    release_holds(&self.state.store, &self.holds.take()).await;
+                    self.holds.take().release(&self.state.store).await;
                     return Ok(());
                 }
                 Ok(false) => {
@@ -1918,7 +1952,7 @@ impl<'a, S: Store + 'static> Journal<'a, S> {
                 Some(left)
             }
             None => {
-                release_holds(store, &holds).await;
+                holds.release(store).await;
                 None
             }
         }
@@ -2839,7 +2873,6 @@ pub(crate) mod test_store {
             }
         }
 
-        /// Count a store step against [`FlakyStore::fail_step`].
         /// Whether a read (or a hold) of `iri` is to fail.
         fn read_fails(&self, iri: &str) -> bool {
             self.fail_read_of
@@ -2857,6 +2890,7 @@ pub(crate) mod test_store {
                     .any(|of| of == iri)
         }
 
+        /// Count a store step against [`FlakyStore::fail_step`].
         fn step(&self) -> ServerResult<()> {
             let countdown = |slot: &mut Option<usize>| match slot.as_mut() {
                 Some(0) => {
@@ -3108,12 +3142,12 @@ pub(crate) mod test_store {
             }
             self.inner.restore(iri, container, body, meta).await
         }
-        async fn hold(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+        async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
             // What a journal stages is held, not read: the read hooks apply to it alike.
             if self.read_fails(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
-            self.inner.hold(iri).await
+            self.inner.hold(iri, holder).await
         }
         async fn reinstate(
             &self,
@@ -3129,10 +3163,15 @@ pub(crate) mod test_store {
             }
             self.inner.reinstate(iri, container, held).await
         }
-        async fn release(&self, held: &ResourceMeta, iri: Option<&str>) -> ServerResult<()> {
-            self.inner.release(held, iri).await
+        async fn release(
+            &self,
+            held: &ResourceMeta,
+            holder: &str,
+            iri: Option<&str>,
+        ) -> ServerResult<()> {
+            self.inner.release(held, holder, iri).await
         }
-        async fn holds(&self) -> ServerResult<Vec<ResourceMeta>> {
+        async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
             self.inner.holds().await
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {

@@ -266,7 +266,10 @@ pub(crate) async fn recover<S: Store + 'static>(
             continue;
         }
         let iris = super::iris_of(&undo);
-        let holds = super::holds_of(&undo);
+        let holds = super::Holding {
+            holder: record.clone(),
+            held: super::holds_of(&undo),
+        };
         let forget = Undo::Forget {
             record: record.clone(),
             iris,
@@ -284,26 +287,24 @@ pub(crate) async fn recover<S: Store + 'static>(
                 left.2 = holds;
                 set_aside.push(left);
             }
-            None => super::release_holds(store, &holds).await,
+            None => holds.release(store).await,
         }
     }
-    // Holds no change still needs: those of changes kept (their intents name none), of intents
-    // cleared before their holds were released, and of journals cut short before their intent
-    // was stored. Each is withdrawn alone: its bytes, once no record names them, are the
-    // reconciler's to collect.
-    let needed: std::collections::HashSet<&str> = set_aside
-        .iter()
-        .flat_map(|left| left.2.iter().map(|(_, meta)| meta.blob_key.as_str()))
-        .collect();
-    let held = store.holds().await.map_err(|e| format!("holds: {e}"))?;
-    for meta in held
-        .iter()
-        .filter(|m| !needed.contains(m.blob_key.as_str()))
-    {
-        store
-            .release(meta, None)
-            .await
-            .map_err(|e| format!("holds: {e}"))?;
+    // This storage's holds no change still needs: each holder is an intent's IRI, so a hold
+    // whose intent is gone is nobody's (a change kept, or put back, before its holds were
+    // released; a journal cut short before its intent was stored). Another storage's holds
+    // over the same backends are its own start's to sweep. Each is withdrawn alone: its bytes,
+    // once no record names them, are the reconciler's to collect. Best effort: a hold left
+    // behind only keeps bytes, so a failure here does not stop the start.
+    match store.holds().await {
+        Ok(held) => {
+            for (holder, meta) in held.iter().filter(|(h, _)| h.starts_with(&container)) {
+                if matches!(store.exists(holder).await, Ok(false)) {
+                    let _ = store.release(meta, holder, None).await;
+                }
+            }
+        }
+        Err(e) => eprintln!("lws: the holds a stop left could not be listed: {e}"),
     }
     // Kept changes: their containers are touched and the intents go once they are. While a
     // change is still being put back in the background it could restore a container's metadata
@@ -457,6 +458,26 @@ mod tests {
         assert!(st.store.holds().await.unwrap().is_empty());
         let after = snapshot(&st, &store, std::slice::from_ref(&d), &[]).await;
         assert_eq!(after, before);
+    }
+
+    /// A start sweeps only its own storage's holds: another storage over the same backends
+    /// keeps its own, live or left, for its own start.
+    #[tokio::test]
+    async fn a_start_leaves_another_storages_holds() {
+        let (st, store, d, _) = typed_doc().await;
+        let mut journal = st.journal();
+        journal.stage(&d).await.unwrap();
+        std::mem::forget(journal);
+        let mut cfg = LwsConfig::new("http://localhost:3001");
+        cfg.open = true;
+        let other = LwsState::new(store.clone(), cfg).await.expect("starts");
+        assert_eq!(
+            other.store.holds().await.unwrap().len(),
+            1,
+            "swept another's"
+        );
+        let st = restart(&store).await;
+        assert!(st.store.holds().await.unwrap().is_empty());
     }
 
     /// An intent stored before the store held bytes names the bytes themselves; it is still put

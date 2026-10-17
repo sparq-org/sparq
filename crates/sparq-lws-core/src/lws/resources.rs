@@ -3733,7 +3733,9 @@ async fn delete<S: Store + 'static>(
             // content: the store holds their bytes (see `Journal::stage`).
             let mut journal = state.journal();
             if let Err(e) = stage_removal(&mut journal, &doomed).await {
-                return ((Vec::new(), Err(e)), None);
+                // Its holds are released here, while the locks are held.
+                let left = journal.rollback().await;
+                return ((Vec::new(), Err(e)), left);
             }
             // Who hears of each removal is decided before the resources go, while who may read
             // each can still be decided; the notifications go out only once the whole removal
@@ -10098,6 +10100,11 @@ mod tests {
         let r = delete("/e/", &[("depth", "infinity")]).await;
         assert_eq!(r.status(), StatusCode::CONFLICT);
         assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), prepared);
+        // What it held while staging is released before its locks go.
+        assert!(
+            st.store.holds().await.unwrap().is_empty(),
+            "holds left behind"
+        );
         assert!(st.store.exists(&format!("{e}m0")).await.unwrap());
         // One member alone fits, and its delete is prepared.
         let r = delete("/e/m0", &[]).await;
