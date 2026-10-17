@@ -12,7 +12,7 @@
 //! hashing. The F=0 member eliminates hidden predicate circuitry; relative
 //! component costs depend on the admitted integer capacity.
 
-use crate::hashes::{commit_fold, h2, h3, h4, h5, TYPE_CODE_LITERAL};
+use crate::hashes::{commit_fold, h2, h3, h4, TYPE_CODE_LITERAL};
 use crate::issuer::{schnorr_verify, Point};
 use crate::revoke::revoke_unset_check;
 use crate::filter_int::filter_int_check;
@@ -26,28 +26,8 @@ pub global STATUS_DEPTH: u32 = 10;
 pub global POLICY_DEPTH: u32 = 4;
 // Exact existing sig.rs domain tags: clear-index status signature, kept private.
 global STATUS_REF: Field = 0x5a4b5349475f5352;
-/// `ZKSIG_M5` -- the METHOD-BOUND presentation attestation tag
-/// (`sig::presentation_message_with_status_and_scheme`). The relation
-/// authenticates credentials over this message, so a credential whose issuer
-/// attested no commitment method (the method-UNBOUND `ZKSIG_C3`) does not open
-/// here at all.
-global PRESENTATION_STATUS_SCHEME: Field = 0x5a4b5349475f4d35;
+global COMMITMENT_STATUS: Field = 0x5a4b5349475f4333;
 global ACCEPTED_STATUS: Field = 0x5a4b5349475f414c;
-/// The folded `sig::scheme_iri_to_field` digest of the STRING-CANONICAL
-/// commitment method's `zk:scheme` IRI (`CommitmentMethod::StringCanonicalV1`).
-///
-/// It is a compile-time CONSTANT rather than a public input because this
-/// relation proves string-canonical leaves ONLY: every leaf is
-/// `h3(Enc(s), Enc(p), Enc(o))` over the string-canonical term encoding, so no
-/// other commitment method can be the one a verifying proof is about. Baking it
-/// in is what makes the method part of the relation instead of a prover choice --
-/// a dual-leaf credential's attestation simply fails `schnorr_verify` here.
-///
-/// `crates/sparq-zk-compose/tests/result_scheme_pin.rs` pins this literal to
-/// `sig::scheme_iri_to_field(CommitmentMethod::StringCanonicalV1.scheme_iri())`,
-/// so the two sides cannot drift apart silently.
-pub global SCHEME_STRING_CANONICAL_V1: Field =
-    0x057ecc168a5cf8f59c4b3a3f3aaae1b630d6bb875a0fb3255d801e28db485042;
 
 /// Opens one bounded integer without disclosing its digit count.
 pub fn small_integer_check(operand: Field, op: u32, bound: u64, value: u8) {
@@ -145,13 +125,7 @@ pub fn result_check<T, let K: u32, let F: u32, let SD: u32, let INTEGER_BITS: u3
         let root = commit_fold(leaves, counts[g]);
         // Independently bind each credential's own list, version, and index.
         let reference = h4(STATUS_REF, status_lists[g], status_indices[g], status_versions[g] as Field);
-        let message = h5(
-            PRESENTATION_STATUS_SCHEME,
-            root,
-            salts[g],
-            reference,
-            SCHEME_STRING_CANONICAL_V1,
-        );
+        let message = h4(COMMITMENT_STATUS, root, salts[g], reference);
         let sig = signatures[g];
         schnorr_verify(
             Point { x: issuer_keys[g][0], y: issuer_keys[g][1] },
