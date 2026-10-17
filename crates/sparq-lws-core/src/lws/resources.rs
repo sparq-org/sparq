@@ -235,13 +235,32 @@ async fn authorize_unlocked<S: Store + 'static>(
                 .await
                 .err()
                 .or_else(|| full(state, method)),
-            Ok(false) if state.needs_auth(agent) => Some(state.challenge(None)),
-            Ok(false) => Some(problem(StatusCode::NOT_FOUND, None)),
+            Ok(false) => Some(absent(state, action, uri, agent).await),
             Err(e) => Some(store_error(e)),
         }
     })
     .await
     .unwrap_or_else(|| Some(state.deny(agent)))
+}
+
+/// The answer to a request for `uri` where nothing is: the challenge to a caller that is not
+/// authenticated, a `404` to one that would be allowed `action` there
+/// ([`allowed_absent`](super::access::allowed_absent)), and to anyone else the refusal it would
+/// get were something there, so a caller without access learns nothing of whether it is.
+async fn absent<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Response {
+    if state.needs_auth(agent) {
+        return state.challenge(None);
+    }
+    match super::access::allowed_absent(state, action, uri, agent).await {
+        Ok(true) => problem(StatusCode::NOT_FOUND, None),
+        Ok(false) => state.deny(agent),
+        Err(e) => store_error(e),
+    }
 }
 
 /// How many times a check without the lock is made again while changes to its resource itself
@@ -283,8 +302,7 @@ async fn in_flight<S: Store + 'static>(
 ) -> Option<Response> {
     match super::access::aside(state, action, uri, agent).await {
         Ok(super::access::Aside::Allowed) => full(state, method),
-        Ok(super::access::Aside::Missing) if state.needs_auth(agent) => Some(state.challenge(None)),
-        Ok(super::access::Aside::Missing) => Some(problem(StatusCode::NOT_FOUND, None)),
+        Ok(super::access::Aside::Missing) => Some(absent(state, action, uri, agent).await),
         Ok(super::access::Aside::Denied) | Err(_) => Some(state.deny(agent)),
     }
 }
@@ -309,8 +327,7 @@ async fn authorized_aside<S: Store + 'static>(
 ) -> Response {
     match super::access::aside(state, action, uri, agent).await {
         Ok(super::access::Aside::Allowed) => set_aside_meanwhile(),
-        Ok(super::access::Aside::Missing) if state.needs_auth(agent) => state.challenge(None),
-        Ok(super::access::Aside::Missing) => problem(StatusCode::NOT_FOUND, None),
+        Ok(super::access::Aside::Missing) => absent(state, action, uri, agent).await,
         Ok(super::access::Aside::Denied) | Err(_) => state.deny(agent),
     }
 }
@@ -536,8 +553,15 @@ async fn unread_precondition<S: Store + 'static>(
         req.method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     );
-    // A patch reads what it patches, whatever its preconditions (see [`patch`]).
-    if !writes || (req.method != Method::PATCH && !compares_state(&req.headers, dated)) {
+    // A patch reads what it patches, whatever its preconditions (see [`patch`]). So, in effect,
+    // does a replace, of data or of a whole linkset (what it keeps decides whether it is admitted;
+    // see [`update`] and [`linkset`]), and a container's delete (what it holds decides how it
+    // ends; see [`delete`]): each needs Read, decided here, before any lock is waited for or a
+    // change set aside answers.
+    let reads = req.method == Method::PATCH
+        || req.method == Method::PUT
+        || (req.method == Method::DELETE && uri.ends_with('/'));
+    if !writes || (!reads && !compares_state(&req.headers, dated)) {
         return None;
     }
     if req.method == Method::POST
@@ -1621,8 +1645,6 @@ async fn create<S: Store + 'static>(
             && l.param("rel")
                 .is_some_and(|r| r.split_whitespace().any(|r| r.eq_ignore_ascii_case("type")))
     });
-    let base_name = sanitize_slug(req.header("slug"))
-        .unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
     // The container's lock is held shared from the choice of a free name through the create and
     // the new member's creator metadata. Shared, because creates in one container do not need to
     // exclude each other: what keeps two POSTs with one Slug from both taking a name is the new
@@ -1689,6 +1711,16 @@ async fn create<S: Store + 'static>(
             return refused;
         }
     }
+    // A `Slug` is a hint the server may ignore, and does for a writer that may not list the
+    // container: the name it would get (the slug, or the slug numbered past one taken) would
+    // say which members the container has. Decided under the container's lock, on the state the
+    // name is chosen in.
+    let slug = match req.header("slug") {
+        Some(slug) if state.allowed(Action::Read, parent, agent).await => sanitize_slug(Some(slug)),
+        _ => None,
+    };
+    let base_name =
+        slug.unwrap_or_else(|| jose::random_id().to_ascii_lowercase().replace('_', "-"));
     let (name, child_guards) = match free_name(state, parent, &base_name).await {
         Ok(found) => found,
         Err(r) => return r,
@@ -2465,18 +2497,26 @@ async fn update<S: Store + 'static>(
         Ok(listing) => listing,
         Err(r) => return r,
     };
+    // Authorized, now that the lock is held, before the resource's existence answers anything.
+    if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
+        return r;
+    }
+    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
+        return r;
+    }
+    // A replace keeps what is stored beside the content (the declared types, the links, the
+    // content type when none is sent), and that decides whether it is admitted. So a writer that
+    // may not read the resource is refused before anything stored answers (and before its lock;
+    // see [`unread_precondition`]), and one that may is told why a write is refused.
+    if let Err(r) = recheck(state, Action::Read, uri, agent).await {
+        return r;
+    }
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
     };
-    if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
-        return r;
-    }
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
-    }
-    if let Err(r) = precondition_read_check(state, req, uri, agent, true).await {
-        return r;
     }
     if let Precondition::Failed | Precondition::NotModified = evaluate(
         &req.headers,
@@ -2486,10 +2526,10 @@ async fn update<S: Store + 'static>(
     ) {
         return problem(StatusCode::PRECONDITION_FAILED, None);
     }
-    let content_type = req
-        .header(header::CONTENT_TYPE)
-        .map(str::to_string)
-        .unwrap_or(meta.content_type.clone());
+    let content_type = match req.header(header::CONTENT_TYPE) {
+        Some(ty) => ty.to_string(),
+        None => meta.content_type.clone(),
+    };
     let set_linkset = prefers_set_linkset(req);
     let old_rmeta = match stored_meta(state, uri).await {
         Ok(m) => m,
@@ -2551,9 +2591,6 @@ async fn update<S: Store + 'static>(
     if let Err(refused) = admissible_meta(uri, &state.cfg.storage(), &rmeta, format) {
         return refused;
     }
-    // The new tag covers the stored content type, which a PUT without `Content-Type` keeps from
-    // before: only a writer that may read the resource is given it.
-    let reader = state.allowed(Action::Read, uri, agent).await;
     // The listing lock goes with the resource's into the writes' task (see [`hold_locks`]),
     // which touches the container once they are over.
     let (written, _guard, _) = write_with_meta(
@@ -2571,9 +2608,7 @@ async fn update<S: Store + 'static>(
         Err(e) => return store_error(e),
     };
     let mut resp = StatusCode::NO_CONTENT.into_response();
-    if reader {
-        set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
-    }
+    set(resp.headers_mut(), header::ETAG, &quoted(&written.etag));
     if set_linkset {
         set(
             resp.headers_mut(),
@@ -3496,10 +3531,6 @@ async fn patch<S: Store + 'static>(
         Ok(listing) => listing,
         Err(r) => return r,
     };
-    let meta = match current(state, uri).await {
-        Ok(m) => m,
-        Err(r) => return r,
-    };
     if let Err(r) = recheck(state, Action::Modify, uri, agent).await {
         return r;
     }
@@ -3509,6 +3540,10 @@ async fn patch<S: Store + 'static>(
     if let Err(r) = recheck(state, Action::Read, uri, agent).await {
         return r;
     }
+    let meta = match current(state, uri).await {
+        Ok(m) => m,
+        Err(r) => return r,
+    };
     if uri.ends_with('/') {
         return method_not_allowed(&allow_for(uri, uri == state.cfg.storage()));
     }
@@ -3602,7 +3637,9 @@ async fn delete<S: Store + 'static>(
     // Every resource the delete may remove is locked before anything is decided, so the
     // precondition, the permission check of each descendant and the removal see one state: no
     // member can be created in, written to, or deleted from the subtree in between.
-    let (guards, doomed) = match lock_subtree(state, uri, parent.clone()).await {
+    // Only what the agent may read is listed for it: a container it may not read is refused
+    // before what it holds is looked at.
+    let (guards, doomed) = match lock_subtree(state, uri, parent.clone(), Some(agent)).await {
         Ok(locked) => locked,
         Err(r) => return r,
     };
@@ -3612,6 +3649,16 @@ async fn delete<S: Store + 'static>(
         Ok(listing) => listing,
         Err(r) => return r,
     };
+    // The delete is authorized, now that its lock is held, before anything about the target (its
+    // validators, its members) answers it.
+    if let Err(r) = recheck(state, Action::Delete, uri, agent).await {
+        return r;
+    }
+    if uri.ends_with('/') {
+        if let Err(r) = recheck(state, Action::Read, uri, agent).await {
+            return r;
+        }
+    }
     let meta = match current(state, uri).await {
         Ok(m) => m,
         Err(r) => return r,
@@ -3666,6 +3713,11 @@ async fn delete<S: Store + 'static>(
         if let Err(r) = recheck(state, Action::Delete, node, agent).await {
             return r;
         }
+        if node.ends_with('/') {
+            if let Err(r) = recheck(state, Action::Read, node, agent).await {
+                return r;
+            }
+        }
     }
     // The removals, the notifications of those that happened and the touch of the container run
     // in a task that holds the subtree's locks, and the listing lock, until the removals are
@@ -3677,7 +3729,13 @@ async fn delete<S: Store + 'static>(
             // A subtree too large to remove atomically is refused before anything is removed,
             // and before anyone's notifications are prepared: an oversized delete does none of
             // that work.
-            let mut journal = state.journal();
+            // One resource's delete (a data resource, or an empty container) is staged whatever
+            // its size, so whether it may go never follows what is stored.
+            let mut journal = if doomed.len() == 1 {
+                state.journal_for_one()
+            } else {
+                state.journal()
+            };
             if let Err(e) = stage_removal(&mut journal, &doomed).await {
                 return ((Vec::new(), Err(e)), None);
             }
@@ -3729,11 +3787,14 @@ async fn delete<S: Store + 'static>(
 }
 
 /// `uri` and everything under it, each with the container it is in: descendants before the
-/// containers that hold them, `uri` last.
+/// containers that hold them, `uri` last. With `reader`, a container is listed only when that
+/// agent may read it (else [`ServerError::Forbidden`]), so what a container it may not read
+/// holds is never looked at for it.
 async fn subtree<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
     parent: Option<String>,
+    reader: Option<&Agent>,
 ) -> Result<Vec<(String, Option<String>)>, ServerError> {
     let mut out = Vec::new();
     let mut stack = vec![(uri.to_string(), parent, false)];
@@ -3741,6 +3802,13 @@ async fn subtree<S: Store + 'static>(
         if expanded || !node.ends_with('/') {
             out.push((node, origin));
             continue;
+        }
+        // Decided as every check without the lock is: on what the container was before a
+        // change in flight to it began (see [`reads_stably`]).
+        if let Some(agent) = reader {
+            if !reads_stably(state, &node, agent).await {
+                return Err(ServerError::Forbidden);
+            }
         }
         let children = state.store.list_children(&node).await?;
         stack.push((node.clone(), origin, true));
@@ -3766,7 +3834,12 @@ async fn lock_subtree<S: Store + 'static>(
     state: &LwsState<S>,
     uri: &str,
     parent: Option<String>,
+    reader: Option<&Agent>,
 ) -> Result<(Vec<IriGuard>, Vec<(String, Option<String>)>), Response> {
+    let listed_error = |e: ServerError| match (e, reader) {
+        (ServerError::Forbidden, Some(agent)) => state.deny(agent),
+        (e, _) => store_error(e),
+    };
     let sorted = |tree: &[(String, Option<String>)]| {
         let mut iris: Vec<String> = tree.iter().map(|(n, _)| n.clone()).collect();
         iris.sort_by(|a, b| lock_order(a, b));
@@ -3774,8 +3847,8 @@ async fn lock_subtree<S: Store + 'static>(
         iris
     };
     for _ in 0..8 {
-        let listed = subtree(state, uri, parent.clone()).await;
-        let before = sorted(&listed.map_err(store_error)?);
+        let listed = subtree(state, uri, parent.clone(), reader).await;
+        let before = sorted(&listed.map_err(listed_error)?);
         let mut guards = Vec::with_capacity(before.len());
         for iri in &before {
             guards.push(
@@ -3786,9 +3859,9 @@ async fn lock_subtree<S: Store + 'static>(
                     .ok_or_else(set_aside_meanwhile)?,
             );
         }
-        let after = subtree(state, uri, parent.clone())
+        let after = subtree(state, uri, parent.clone(), reader)
             .await
-            .map_err(store_error)?;
+            .map_err(listed_error)?;
         if sorted(&after) == before {
             return Ok((guards, after));
         }
@@ -4675,6 +4748,10 @@ async fn linkset<S: Store + 'static>(
     } else {
         None
     };
+    // Authorized, now that the lock is held, before the resource's existence answers anything.
+    if let Err(r) = recheck(state, action, uri, agent).await {
+        return r;
+    }
     let exists = match state.store.exists(uri).await {
         Ok(e) => e,
         Err(e) => return store_error(e),
@@ -4686,15 +4763,11 @@ async fn linkset<S: Store + 'static>(
             problem(StatusCode::NOT_FOUND, None)
         };
     }
-    if let Err(r) = recheck(state, action, uri, agent).await {
-        return r;
-    }
-    // A patch reads the linkset it patches (see [`patch`]), so it needs Read; a whole linkset
-    // replaces it, and needs Read only to compare it.
-    let read_check = if req.method == Method::PATCH {
+    // A patch reads the linkset it patches (see [`patch`]), so it needs Read; so does a whole
+    // linkset, which keeps the server-managed part of the stored one, and that decides whether
+    // it is admitted.
+    let read_check = if writes {
         recheck(state, Action::Read, uri, agent).await
-    } else if writes {
-        precondition_read_check(state, req, uri, agent, false).await
     } else {
         Ok(())
     };
@@ -4834,11 +4907,6 @@ async fn linkset<S: Store + 'static>(
                     Some("a linkset is replaced with application/linkset+json"),
                 );
             }
-            if let Err(r) = precondition_read_check(state, req, uri, agent, false).await {
-                return r;
-            }
-            // A writer need not be able to read the linkset, so a 412 carries no tag of it, as
-            // for a PATCH.
             if let Precondition::Failed = evaluate(&req.headers, Some(&etag), None, false) {
                 return problem(StatusCode::PRECONDITION_FAILED, None);
             }
@@ -6441,8 +6509,8 @@ mod tests {
     }
 
     /// Create a member of `parent` with `who` as its creator (only the creator matters here).
-    async fn create_as(
-        st: &LwsState<Mem>,
+    async fn create_as<S: Store + 'static>(
+        st: &LwsState<S>,
         who: &Agent,
         parent: &str,
         slug: &str,
@@ -6598,6 +6666,8 @@ mod tests {
             .await;
             assert_eq!(status, StatusCode::FORBIDDEN, "{method}");
         }
+        // Nor is a whole linkset replaced without Read, whatever it is sent with: it keeps the
+        // server-managed part of the stored one.
         let status = send(
             dave.clone(),
             "PUT",
@@ -6605,7 +6675,7 @@ mod tests {
             vec![("if-unmodified-since", date.clone())],
         )
         .await;
-        assert!(status.is_success(), "{status}");
+        assert_eq!(status, StatusCode::FORBIDDEN);
         // A conditional create is compared with the container's listing; at the storage root
         // without an Accept, with the storage description, which is public.
         let c = create(
@@ -6650,9 +6720,17 @@ mod tests {
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         // With an `If-Match`, a date is not evaluated (RFC 9110 section 13.2.2), so `*` alone
-        // decides: no comparison, and no Read asked.
+        // decides, with no comparison; a replace needs Read in any case, so a reader is asked.
         let status = send(
             dave.clone(),
+            "PUT",
+            p.clone(),
+            vec![("if-match", "*".into())],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = send(
+            bob.clone(),
             "PUT",
             p.clone(),
             vec![
@@ -6679,8 +6757,17 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+        // A container's delete needs Read in any case.
         let status = send(
             dave.clone(),
+            "DELETE",
+            format!("{g}?page=99"),
+            vec![("if-match", "*".into())],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = send(
+            bob.clone(),
             "DELETE",
             format!("{g}?page=99"),
             vec![("if-match", "*".into())],
@@ -6714,12 +6801,16 @@ mod tests {
         assert_eq!(status, StatusCode::CREATED);
         let status = send(erin, "POST", c.clone(), other()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
-        // A new tag describes content only a reader may learn: a PUT without `Content-Type` keeps
-        // the stored type, which the tag covers.
-        for (who, sent) in [(&dave, false), (&bob, true)] {
-            let r = handle(&st, &request("PUT", &p, &[], "{}"), who).await;
-            assert_eq!(r.status(), StatusCode::NO_CONTENT);
-            assert_eq!(r.headers().contains_key("etag"), sent, "PUT {who:?}");
+        // A replace needs Read in any case; a reader gets the new tag.
+        for (who, ok) in [(&dave, false), (&bob, true)] {
+            let r = handle(
+                &st,
+                &request("PUT", &p, &[("content-type", JSON)], "{}"),
+                who,
+            )
+            .await;
+            assert_eq!(r.status().is_success(), ok, "PUT {who:?}");
+            assert_eq!(r.headers().contains_key("etag"), ok, "PUT {who:?}");
         }
         // A patch needs Read in any case; a reader gets the new tag.
         for (who, ok) in [(&dave, false), (&bob, true)] {
@@ -6734,15 +6825,30 @@ mod tests {
                 assert_eq!(r.headers().contains_key("etag"), ok, "{path} {who:?}");
             }
         }
-        // `*` stays open to a writer that may not read.
-        for (method, path) in [
-            ("PUT", meta.clone()),
-            ("PUT", p.clone()),
-            ("DELETE", p.clone()),
-        ] {
-            let status = send(dave.clone(), method, path, vec![("if-match", "*".into())]).await;
-            assert!(status.is_success(), "{method} {status}");
-        }
+        // `*` stays open to a writer that may not read, where the method is.
+        let status = send(
+            dave.clone(),
+            "DELETE",
+            p.clone(),
+            vec![("if-match", "*".into())],
+        )
+        .await;
+        assert!(status.is_success(), "DELETE {status}");
+        // A `Slug` names the member only for a writer that may list the container: the name
+        // would otherwise say whether one by that name is there.
+        let named = |who: Agent| {
+            let (st, root) = (st.clone(), root.clone());
+            async move {
+                let h = [("slug", "taken"), ("content-type", "text/plain")];
+                let r = create(&st, &request("POST", "/", &h, "x"), &who, &root).await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+                path_of(&hdr(&r, "location")).to_string()
+            }
+        };
+        assert_eq!(named(bob.clone()).await, "/taken");
+        assert_eq!(named(bob).await, "/taken-2");
+        let name = named(dave).await;
+        assert!(!name.starts_with("/taken"), "{name}");
     }
 
     #[tokio::test]
@@ -6787,6 +6893,32 @@ mod tests {
         for uri in [&shared, &sub, &theirs] {
             assert!(!st.store.exists(uri).await.unwrap(), "{uri} is gone");
         }
+    }
+
+    /// A recursive delete lists a container's members only for an agent that may read it: Alice
+    /// is refused for Bob's container inside hers before what it holds is looked at (here, where
+    /// listing it would fail).
+    #[tokio::test]
+    async fn recursive_delete_lists_only_what_may_be_read() {
+        use super::super::test_store::FlakyStore;
+        let store = FlakyStore::new();
+        let mut cfg = super::super::LwsConfig::new(BASE);
+        cfg.owner = Some("https://owner.example/#me".into());
+        let st = LwsState::new(store.clone(), cfg).await.expect("state");
+        let (alice, bob) = (
+            agent("https://alice.example/#me"),
+            agent("https://bob.example/#me"),
+        );
+        let root = st.cfg.storage();
+        let shared = create_as(&st, &alice, &root, "shared", true).await;
+        let sub = create_as(&st, &bob, &shared, "sub", true).await;
+        create_as(&st, &bob, &sub, "bob.txt", false).await;
+        assert!(!st.allowed(Action::Read, &sub, &alice).await);
+        *store.fail_list_of.lock().unwrap() = Some(sub.clone());
+        let req = request("DELETE", path_of(&shared), &[("depth", "infinity")], "");
+        let r = handle(&st, &req, &alice).await;
+        assert_eq!(r.status(), StatusCode::FORBIDDEN);
+        assert!(st.store.exists(&sub).await.unwrap());
     }
 
     #[tokio::test]
@@ -6942,13 +7074,8 @@ mod tests {
                 &bob,
             )
             .await;
-            // A patch, which needs Read, is refused before its target is looked for.
-            let expected = if method == "PATCH" {
-                StatusCode::FORBIDDEN
-            } else {
-                StatusCode::NOT_FOUND
-            };
-            assert_eq!(r.status(), expected, "{method}");
+            // Bob may not act on it, so what he is told does not follow whether it is there.
+            assert_eq!(r.status(), StatusCode::FORBIDDEN, "{method}");
         }
         *store.hide.lock().unwrap() = None;
         let r = handle(&st, &get, &owner).await;
@@ -9479,7 +9606,7 @@ mod tests {
             (at("d/e/"), Some(at("d/"))),
             (at("d/"), Some(root.clone())),
         ];
-        let Ok((guards, _)) = lock_subtree(&st, &at("d/"), Some(root.clone())).await else {
+        let Ok((guards, _)) = lock_subtree(&st, &at("d/"), Some(root.clone()), None).await else {
             panic!("locked");
         };
         *store.fail_delete_of.lock().unwrap() = Some(at("d/e/z"));
@@ -9944,6 +10071,15 @@ mod tests {
         let r = delete("/d/a", &[]).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
         assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 1);
+        // One resource's delete goes whatever its size, even past the bound a journal holds.
+        let huge = Bytes::from(vec![b'x'; 66 << 20]);
+        st.store
+            .create_in_container(&d, &format!("{d}huge"), huge, "text/plain")
+            .await
+            .unwrap();
+        let r = delete("/d/huge", &[]).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert!(!st.store.exists(&format!("{d}huge")).await.unwrap());
     }
 
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
@@ -10973,9 +11109,30 @@ mod tests {
         let status = patch(dave.clone(), text.clone(), blind.clone()).await;
         assert_eq!(status, StatusCode::FORBIDDEN);
         assert_eq!(
-            patch(bob.clone(), text, blind).await,
+            patch(bob.clone(), text.clone(), blind).await,
             StatusCode::UNSUPPORTED_MEDIA_TYPE
         );
+        // A PUT is under the same rule for what it keeps from before: the stored content type
+        // when it sends none, and the stored links and types its linkset is held to with it.
+        let put = |who: Agent, headers: Vec<(&'static str, &'static str)>, body: String| {
+            let (st, text) = (st.clone(), text.clone());
+            async move {
+                let req = request("PUT", &text, &headers, &body);
+                handle(&st, &req, &who).await.status()
+            }
+        };
+        let status = put(dave.clone(), vec![], "plain".into()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = put(bob.clone(), vec![], "plain".into()).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let many: String = (0..MAX_LINKSET_TARGETS)
+            .map(|i| format!("<> a <https://ex.org/T{i}> .\n"))
+            .collect();
+        let turtle = vec![("content-type", "text/turtle")];
+        let status = put(dave.clone(), turtle.clone(), many.clone()).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let status = put(bob.clone(), turtle, many).await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
         // A linkset is patched under the same rule.
         let meta = format!("{doc}{META_SUFFIX}");
         for ops in [
@@ -11953,7 +12110,7 @@ mod tests {
     /// part way) is, to whoever may not act on it, the `404` (or challenge) of any missing
     /// resource.
     #[tokio::test]
-    async fn a_missing_set_aside_resource_is_missing_to_a_stranger() {
+    async fn a_missing_set_aside_resource_is_refused_to_a_stranger_alike() {
         use super::super::test_store::{agent, closed_state, stick, OWNER};
         let (st, store) = closed_state(100).await;
         let gone = st.cfg.absolute("/gone");
@@ -11964,8 +12121,9 @@ mod tests {
             async move { handle(&st, &r, &who).await.status() }
         };
         let stranger = agent("https://stranger.example/#me");
-        assert_eq!(get("/gone", &stranger).await, StatusCode::NOT_FOUND);
-        assert_eq!(get("/never", &stranger).await, StatusCode::NOT_FOUND);
+        // A caller without access is refused alike whether anything is there.
+        assert_eq!(get("/gone", &stranger).await, StatusCode::FORBIDDEN);
+        assert_eq!(get("/never", &stranger).await, StatusCode::FORBIDDEN);
         assert_eq!(
             get("/gone", &Agent::anonymous()).await,
             StatusCode::UNAUTHORIZED
@@ -12604,6 +12762,67 @@ mod tests {
         }
     }
 
+    /// Review finding: a DELETE was authorized again before its lock on the stored metadata,
+    /// not on the state before a change in flight, so a Delete grant that matched the resource
+    /// was refused while a write that would keep it matching was still under way.
+    #[tokio::test]
+    async fn a_delete_meanwhile_a_write_is_decided_under_its_lock() {
+        use super::super::test_store::{agent, closed_state, request as req, OWNER};
+        let (st, store) = closed_state(100).await;
+        let root = st.cfg.storage();
+        let dave = "https://dave.example/#me";
+        let grant = super::super::access::policies(
+            &json!([{"type": ["AccessPolicy"], "action": ["delete"], "assignee": dave}]),
+            &root,
+        )
+        .unwrap();
+        st.access.put_grant_for_test("dave", grant);
+        let h = [("slug", "doc.txt"), ("content-type", "text/plain")];
+        let r = handle(&st, &req(Method::POST, "/", &h, "x"), &agent(OWNER)).await;
+        assert_eq!(r.status(), StatusCode::CREATED);
+        let doc = st.cfg.absolute("/doc.txt");
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_write_of.lock().unwrap() = Some((doc.clone(), gate.clone()));
+        let put = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                let h = [
+                    ("content-type", "text/plain"),
+                    ("link", "<https://e.example/T>; rel=\"type\""),
+                ];
+                handle(&st, &req(Method::PUT, "/doc.txt", &h, "y"), &agent(OWNER))
+                    .await
+                    .status()
+            })
+        };
+        for _ in 0..200 {
+            if stored_meta(&st, &doc)
+                .await
+                .unwrap()
+                .is_some_and(|m| m.pending)
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert!(stored_meta(&st, &doc)
+            .await
+            .unwrap()
+            .is_some_and(|m| m.pending));
+        let delete = {
+            let st = st.clone();
+            tokio::spawn(async move {
+                handle(&st, &req(Method::DELETE, "/doc.txt", &[], ""), &agent(dave))
+                    .await
+                    .status()
+            })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        gate.add_permits(1);
+        assert!(put.await.unwrap().is_success());
+        assert_eq!(delete.await.unwrap(), StatusCode::NO_CONTENT);
+    }
+
     /// Review findings: what is stored under a linkset record's name, or a legacy edge that makes
     /// one a container's member, must not show anywhere. Every answer on such a name is the one
     /// on a name where nothing is stored, the container's listing does not name it, a recursive
@@ -12742,7 +12961,12 @@ mod tests {
         ];
         let r = handle(&st, &req(Method::POST, "/", &h, ""), &agent(eve)).await;
         assert_eq!(r.status(), StatusCode::CREATED);
-        let e = st.cfg.absolute("/e/");
+        // A writer that may not read the container gets a name of the server's, not its slug.
+        let e = r.headers()[header::LOCATION].to_str().unwrap().to_string();
+        let e_path = e
+            .strip_prefix(st.cfg.storage().trim_end_matches('/'))
+            .unwrap()
+            .to_string();
         st.store
             .create_in_container(
                 &e,
@@ -12752,7 +12976,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let r = handle(&st, &req(Method::DELETE, "/e/", &[], ""), &agent(eve)).await;
+        let r = handle(&st, &req(Method::DELETE, &e_path, &[], ""), &agent(eve)).await;
         assert!(r.status().is_success(), "{}", r.status());
         assert!(!st.store.exists(&format!("{e}x.meta")).await.unwrap());
         let r = handle(&st, &req(Method::DELETE, "/c/", &[], ""), &agent(OWNER)).await;

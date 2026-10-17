@@ -49,8 +49,10 @@ pub use embedded::EmbeddedSparqClient;
 #[cfg(all(feature = "http-sparq", not(target_arch = "wasm32")))]
 pub use http::{HttpSparqClient, SparqHttpError};
 pub use limits::{
-    InMemoryStoreLimits, StoreUsage, DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT,
-    DEFAULT_IN_MEMORY_MAX_TOTAL_BYTES,
+    in_service_pool, is_pooled_blob_key, InMemoryStoreLimits, StoreUsage,
+    DEFAULT_IN_MEMORY_MAX_POOL_BYTES, DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT,
+    DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT, DEFAULT_IN_MEMORY_MAX_TOTAL_BYTES, POOLED_BLOB_KEY_MARK,
+    SERVICE_POOL_PATH,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use reconcile::spawn_periodic;
@@ -491,6 +493,12 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
             let _ = write!(acc, "{b:02x}");
             acc
         });
+        // A record in the service pool ([`in_service_pool`]) is marked here, where the IRI says
+        // which it is: the blob store admits it against the pool's ceilings and never against
+        // stored content's, and it has only the key to go on.
+        if limits::in_service_pool(iri) {
+            return Ok(format!("{}{prefix}-{hex}", limits::POOLED_BLOB_KEY_MARK));
+        }
         Ok(format!("{prefix}-{hex}"))
     }
 
