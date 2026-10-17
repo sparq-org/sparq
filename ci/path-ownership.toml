@@ -224,6 +224,18 @@ crates = ["sparq-zk"]
 pattern = "zk/compose/compose_core/src/hashes.nr"
 crates = ["sparq-zk"]
 
+# sq-j506: the V2-member unreachability guard
+# (crates/sparq-zk-compose/tests/v2_dual_leaf_members_unreachable.rs) compiles in
+# each V2 member's own main.nr with include_str!, so a change to either must
+# re-run sparq-zk-compose.
+[[map]]
+pattern = "zk/compose/scan_v2dl_k1_n16_r4/src/main.nr"
+crates = ["sparq-zk-compose"]
+
+[[map]]
+pattern = "zk/compose/join_eq_v2dl_na16_nb16/src/main.nr"
+crates = ["sparq-zk-compose"]
+
 # [FABLE-5] sq-0iqzw: the ADJUDICATED cross-engine divergence allowlist, read at
 # runtime by the sparq-bench differential fuzzer (crates/sparq-bench/src/fuzz.rs
 # DivergenceAllowlist, via an env!("CARGO_MANIFEST_DIR")-relative path) AND by its

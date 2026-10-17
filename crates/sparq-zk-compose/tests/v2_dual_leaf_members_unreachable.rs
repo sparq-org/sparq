@@ -11,8 +11,9 @@
 //! lookup all name a member through. No `CircuitId` variant produces either
 //! package name, so no `ProofManifest` can name a V2 member and no sub-proof can
 //! be routed to one. This file asserts exactly that, over a sweep of the shipped
-//! id space, and asserts the two packages DO exist on disk so the claim is about
-//! real members rather than absent ones.
+//! id space, and compiles in each member's own `main.nr` so the claim is about
+//! real members rather than absent ones -- a moved or renamed member is a COMPILE
+//! error here, not a silently-passing test.
 //!
 //! When sq-j506 opens the V2 scan lane it will add a `CircuitId` variant for
 //! these members. This test is what turns red at that moment, so the gates are
@@ -23,12 +24,12 @@ use sparq_zk_compose::manifest::CircuitId;
 /// The two V2 members' on-disk package names.
 const V2_MEMBERS: [&str; 2] = ["scan_v2dl_k1_n16_r4", "join_eq_v2dl_na16_nb16"];
 
-/// The repository root, from this crate's manifest directory.
-fn repo_root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-}
+/// The two V2 members' own sources, compiled in. A moved or renamed member
+/// breaks the build rather than silently disabling this file's claim.
+const SCAN_V2DL_MAIN: &str =
+    include_str!("../../../zk/compose/scan_v2dl_k1_n16_r4/src/main.nr");
+const JOIN_V2DL_MAIN: &str =
+    include_str!("../../../zk/compose/join_eq_v2dl_na16_nb16/src/main.nr");
 
 /// Every `CircuitId` the shipped id space can form over a sweep that covers each
 /// variant's parameters well past the compiled members. A name no `CircuitId`
@@ -83,17 +84,20 @@ fn the_sweep_names_the_shipped_scan_and_join_members() {
     }
 }
 
-/// And the two V2 members are REAL packages on disk, so the unreachability above
-/// is a statement about members that exist.
+/// And the two V2 members are REAL members whose relations go through the
+/// component recompute, so the unreachability above is a statement about members
+/// that exist and do the work the gates are being kept closed over.
 #[test]
-fn both_v2_dual_leaf_members_are_shipped_packages() {
-    for member in V2_MEMBERS {
-        let main = repo_root().join("zk").join("compose").join(member).join("src").join("main.nr");
+fn both_v2_dual_leaf_members_call_the_component_recompute() {
+    for (member, source, relation) in [
+        (V2_MEMBERS[0], SCAN_V2DL_MAIN, "scan_v2_dual_leaf_check"),
+        (V2_MEMBERS[1], JOIN_V2DL_MAIN, "join_eq_v2_dual_leaf_check"),
+    ] {
         assert!(
-            main.is_file(),
-            "{} must be a shipped circuit package (missing {})",
+            source.contains(relation),
+            "{} must run the component-witnessed relation {}",
             member,
-            main.display()
+            relation
         );
     }
 }

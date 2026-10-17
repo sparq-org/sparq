@@ -150,7 +150,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   two encodings) and `CheckError::ScanPatternMethodNotEncodable`. `verifier::bind_fragment_scans`
   takes the authenticated-method map as a second argument. The value-lane and V2-scan verifier
   gates stay CLOSED: nothing becomes acceptable, and every change here only adds refusals.
-  Research-grade, not externally audited (sq-qhy4).
+  **BEHAVIOUR CHANGE in a DEFAULT build:** a scan whose authenticated method is `DualLeafV1` or
+  `DualLeafV2` is now refused when the `dual-leaf` feature is off, because the host dual-leaf
+  encoders are behind that feature and the verifier must not re-check such a scan's pattern
+  constants string-canonically. Such a manifest used to be accepted. Research-grade, not
+  externally audited (sq-qhy4).
 
 - **sparq-zk-compose (BREAKING for a relying party on default settings):** `MethodPolicy::current()`
   — the default policy on `verifier::KeySet` — now **REFUSES** a method-UNBOUND commitment
