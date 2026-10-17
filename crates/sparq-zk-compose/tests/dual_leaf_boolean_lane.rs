@@ -552,16 +552,10 @@ fn boolean_lane_inputs_round_trip_on_the_shared_wire_tag() {
 }
 
 // =========================================================================
-// 7. IN-CIRCUIT vectors — real witness solving. Skip cleanly with no toolchain.
+// 7. IN-CIRCUIT vectors — real witness solving. LIVE: they need `nargo`.
 // =========================================================================
 
-fn toolchain_available() -> bool {
-    std::process::Command::new("nargo")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+mod support;
 
 /// The value-lane `Prover.toml` layout, rendered LOCALLY.
 ///
@@ -632,8 +626,7 @@ fn member_accepts(
 ///       (the `dual-leaf operand encoding mismatch` assert) — the separation.
 #[test]
 fn in_circuit_boolean_lane_accepts_honest_and_rejects_lies() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping sq-5xdlk in-circuit boolean-lane vectors");
+    if !support::require_toolchain("in_circuit_boolean_lane_accepts_honest_and_rejects_lies", &["nargo"]) {
         return;
     }
     let built = build_filter_value_dl_boolean(&bool_lit(true), FilterOp::Gt, false).unwrap();
@@ -698,8 +691,7 @@ fn in_circuit_boolean_lane_accepts_honest_and_rejects_lies() {
 /// would hold if that hook were compared as an integer.
 #[test]
 fn in_circuit_string_lane_boolean_leaf_is_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping the string-lane boolean leaf vector");
+    if !support::require_toolchain("in_circuit_string_lane_boolean_leaf_is_rejected", &["nargo"]) {
         return;
     }
     let lit = bool_lit(true);
@@ -720,8 +712,7 @@ fn in_circuit_string_lane_boolean_leaf_is_rejected() {
 /// tag is unprovable on the boolean lane with the `VALUE_NONE` hook.
 #[test]
 fn in_circuit_opaque_datatype_leaf_is_rejected() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping the opaque-datatype leaf vector");
+    if !support::require_toolchain("in_circuit_opaque_datatype_leaf_is_rejected", &["nargo"]) {
         return;
     }
     let iri = format!("{XSD_BOOLEAN}@domain=bit");

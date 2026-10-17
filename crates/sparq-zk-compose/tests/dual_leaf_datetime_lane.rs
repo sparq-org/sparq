@@ -657,13 +657,7 @@ fn raw_datetime_toml(
     )
 }
 
-fn toolchain_available() -> bool {
-    std::process::Command::new("nargo")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
+mod support;
 
 /// Solve `filter_value_dl_datetime`'s witness for the given public/private
 /// assignment. `Ok` ⇔ the relation is SATISFIABLE ⇔ the member ACCEPTS.
@@ -723,8 +717,7 @@ fn accepts(tag: &str, built: &BuiltFilterValueDlDateTime) -> bool {
 ///       This is THE §13.3 lane-separation claim, in-circuit.
 #[test]
 fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
-    if !toolchain_available() {
-        eprintln!("nargo absent; skipping sq-wz99x in-circuit dateTime-lane vectors");
+    if !support::require_toolchain("in_circuit_datetime_lane_accepts_honest_and_rejects_lies", &["nargo"]) {
         return;
     }
 

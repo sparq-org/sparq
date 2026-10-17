@@ -283,6 +283,24 @@ jobs:
           echo "nargo: $(nargo --version | head -1)"
           echo "bb:    $(bb --version)"
 
+      # LOAD-BEARING for this lane's whole purpose: the live tests in
+      # crates/sparq-zk-compose/tests/ used to `return` early when nargo/bb were absent,
+      # so if the two install steps above ever broke (a moved release URL, a bad pin) the
+      # entire forge suite would self-skip and this lane would report PASS with nothing
+      # proven. They now PANIC instead, naming the missing tool — unless
+      # SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN is set, which the toolchain-free lanes (ci.yml,
+      # feature-matrix.yml) set at workflow level. This workflow must NEVER set it; this
+      # step asserts it is unset so a stray export cannot silently restore the false green.
+      - name: Assert the live-toolchain opt-out is NOT set in this lane
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          set -euo pipefail
+          if [ -n "${SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN:-}" ]; then
+            echo "::error::SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN is set in the toolchain lane — the live ZK tests would SKIP instead of proving anything. Unset it."
+            exit 1
+          fi
+          echo "opt-out unset: a missing nargo/bb will fail this lane loudly."
+
       # Build the ZK crates' test targets first so a compile failure is distinct from a
       # proving failure in the logs.
       - name: Build sparq-zk* test targets
@@ -354,7 +372,7 @@ jobs:
       # The sq-c5f gate-count regression test (`gate_count::gate_count_regression`) is
       # deliberately NOT `#[ignore]`d — gate counts are cheap (compile + `bb gates`, no
       # proving) — so it can run in the normal suite WHEN the toolchain is present. But the
-      # normal ci.yml lanes have no nargo/bb, so it self-skips there, and the ignored-suite
+      # normal ci.yml lanes have no nargo/bb, so it skips there (declared, see below), and the ignored-suite
       # step below runs `-- --ignored`, which SKIPS every non-ignored test. Net result before
       # this step: `gate_count_regression` ran in NO CI lane, so its baselines went silently
       # stale (the sq-25mgo deep-underflow fix grew filter_f64 and filter_value_dl_f64 well
@@ -372,8 +390,8 @@ jobs:
       # suites in crates/sparq-zk-compose/tests/ (`#![cfg(feature = "dual-leaf")]`)
       # compile to NOTHING in every other lane — a lane test could regress with no red
       # check anywhere. They are cheap (no proving; the in-circuit cases shell out to
-      # `nargo execute` only, and self-skip without the toolchain, which is on PATH
-      # here), so run them in this lane, which already builds these crates. They run
+      # `nargo execute` only, and the toolchain is on PATH here), so run them in this
+      # lane, which already builds these crates. They run
       # ONLY when this workflow runs at all — the pull_request / push `paths:` filter
       # above restricts that to crates/sparq-zk*/**, zk/compose/** (and this file), so
       # these steps add NO runner load to an unrelated PR.
@@ -424,6 +442,15 @@ jobs:
         if: steps.changes.outputs.zk == 'true'
         run: |
           cargo test -p sparq-zk-compose -p sparq-zk -- --ignored --test-threads=1
+
+      # The live tests that are NOT `#[ignore]`d (e2e forge-reject cases, the signed
+      # filter bindings, the family members, the differential fuzz, the car-hire capture)
+      # run in the default lanes only as declared skips, because those lanes have no
+      # toolchain. This is the lane that has it, so run them here too.
+      - name: Run the default-run live ZK tests (real nargo/bb)
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          cargo test -p sparq-zk-compose -- --test-threads=1
 
       # Rebuild the immutable foundation separately from the PR candidate.
       # This independently checks the provenance of all four legacy key goldens.
