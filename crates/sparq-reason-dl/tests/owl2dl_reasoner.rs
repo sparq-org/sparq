@@ -294,7 +294,7 @@ fn unsatisfiable_classes() {
 #[test]
 fn out_of_fragment_constructs_answer_unknown() {
     let (_, r) = run(&format!(
-        "{DECL} :A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :B ] ."
+        "{DECL} owl:topObjectProperty rdfs:subPropertyOf :r ."
     ));
     match r.consistency {
         Consistency::Unknown(UnknownReason::OutOfFragment { construct, source }) => {
@@ -2324,6 +2324,148 @@ fn oracle_differential_chains() {
     );
 }
 
+/// A corpus of the built-in properties: `owl:topObjectProperty` and
+/// `owl:bottomObjectProperty` in existential, universal and `hasValue` restrictions (also
+/// negated and nested), as super-properties of properties and chains, in domain and range
+/// axioms and in positive and negative assertions, mixed with ordinary restrictions over a
+/// small role hierarchy and an ABox.
+fn builtins_corpus(seed: u64) -> String {
+    let mut rng = Rng(seed.wrapping_mul(0x9FB2_1C65_1E98_DF25) | 1);
+    let n_classes = 3 + rng.below(3);
+    let n_roles = 2 + rng.below(2);
+    let n_ind = 1 + rng.below(4);
+    let mut out = String::new();
+    let _ = writeln!(out, "<http://ex/bi{seed}> a owl:Ontology .");
+    for i in 0..n_classes {
+        let _ = writeln!(out, ":C{i} a owl:Class .");
+    }
+    for i in 0..n_roles {
+        let _ = writeln!(out, ":r{i} a owl:ObjectProperty .");
+    }
+    for i in 0..n_ind {
+        let _ = writeln!(out, ":i{i} a owl:NamedIndividual .");
+    }
+    fn concept(
+        rng: &mut Rng,
+        n_classes: usize,
+        n_roles: usize,
+        n_ind: usize,
+        depth: u32,
+    ) -> String {
+        let leaf = |rng: &mut Rng| format!(":C{}", rng.below(n_classes));
+        if depth == 0 || rng.chance(30) {
+            return leaf(rng);
+        }
+        let sub = |rng: &mut Rng| concept(rng, n_classes, n_roles, n_ind, depth - 1);
+        let prop = |rng: &mut Rng| match rng.below(5) {
+            0 | 1 => "owl:topObjectProperty".to_string(),
+            2 => "owl:bottomObjectProperty".to_string(),
+            _ => format!(":r{}", rng.below(n_roles)),
+        };
+        match rng.below(7) {
+            0 => format!("[ owl:complementOf {} ]", sub(rng)),
+            1 => format!(
+                "[ a owl:Class ; owl:intersectionOf ( {} {} ) ]",
+                sub(rng),
+                sub(rng)
+            ),
+            2 => format!(
+                "[ a owl:Class ; owl:unionOf ( {} {} ) ]",
+                sub(rng),
+                sub(rng)
+            ),
+            3 | 4 => {
+                let p = prop(rng);
+                format!(
+                    "[ a owl:Restriction ; owl:onProperty {p} ; owl:someValuesFrom {} ]",
+                    sub(rng)
+                )
+            }
+            5 => {
+                let p = prop(rng);
+                format!(
+                    "[ a owl:Restriction ; owl:onProperty {p} ; owl:allValuesFrom {} ]",
+                    sub(rng)
+                )
+            }
+            _ => {
+                let p = prop(rng);
+                format!(
+                    "[ a owl:Restriction ; owl:onProperty {p} ; owl:hasValue :i{} ]",
+                    rng.below(n_ind)
+                )
+            }
+        }
+    }
+    for _ in 0..(1 + rng.below(2)) {
+        let line = match rng.below(6) {
+            0 => format!(
+                ":r{} rdfs:subPropertyOf :r{} .",
+                rng.below(n_roles),
+                rng.below(n_roles)
+            ),
+            1 => format!(
+                ":r{} rdfs:subPropertyOf owl:topObjectProperty .",
+                rng.below(n_roles)
+            ),
+            2 => format!(
+                ":r{} rdfs:subPropertyOf owl:bottomObjectProperty .",
+                rng.below(n_roles)
+            ),
+            3 => format!(
+                "owl:bottomObjectProperty owl:propertyChainAxiom ( :r{} :r{} ) .",
+                rng.below(n_roles),
+                rng.below(n_roles)
+            ),
+            4 => format!(
+                "owl:topObjectProperty rdfs:domain {} .",
+                concept(&mut rng, n_classes, n_roles, n_ind, 1)
+            ),
+            _ => format!(":r{} a owl:TransitiveProperty .", rng.below(n_roles)),
+        };
+        let _ = writeln!(out, "{line}");
+    }
+    for _ in 0..(2 + rng.below(4)) {
+        let (a, b) = (
+            concept(&mut rng, n_classes, n_roles, n_ind, 2),
+            concept(&mut rng, n_classes, n_roles, n_ind, 2),
+        );
+        let _ = writeln!(out, "{a} rdfs:subClassOf {b} .");
+    }
+    for _ in 0..rng.below(3) {
+        let a = rng.below(n_ind);
+        let c = concept(&mut rng, n_classes, n_roles, n_ind, 1);
+        let _ = writeln!(out, ":i{a} a {c} .");
+    }
+    for _ in 0..rng.below(3) {
+        let (a, b) = (rng.below(n_ind), rng.below(n_ind));
+        let p = match rng.below(8) {
+            0 => "owl:topObjectProperty".to_string(),
+            1 => "owl:bottomObjectProperty".to_string(),
+            _ => format!(":r{}", rng.below(n_roles)),
+        };
+        if rng.chance(25) {
+            let _ = writeln!(out, "[ a owl:NegativePropertyAssertion ; owl:sourceIndividual :i{a} ; owl:assertionProperty {p} ; owl:targetIndividual :i{b} ] .");
+        } else {
+            let _ = writeln!(out, ":i{a} {p} :i{b} .");
+        }
+    }
+    out
+}
+
+const BUILTIN_SEEDS: u64 = 400;
+
+#[test]
+fn oracle_differential_builtins() {
+    differential(
+        "builtins",
+        builtins_corpus,
+        BUILTIN_SEEDS,
+        include_str!("data/owl2dl_oracle_builtins_expected.txt"),
+        Some(5),
+    );
+}
+
 /// A corpus of data properties and datatypes: data property axioms, data restrictions
 /// over integer, decimal, string and boolean ranges (facet restrictions, `DataOneOf`, the
 /// data booleans, a `DatatypeDefinition`), and data assertions whose literals denote the
@@ -2971,4 +3113,240 @@ fn a_blocked_node_may_reach_a_nominal_its_blocker_reaches() {
         "C0",
         "C1"
     ));
+}
+
+// ---- built-in properties ---------------------------------------------------------------
+
+const U: &str = "owl:topObjectProperty";
+const NONE: &str = "owl:bottomObjectProperty";
+
+#[test]
+fn the_top_property_reaches_every_individual() {
+    let c = |body: &str| verdict(&format!("{DECL} {body}"));
+    // `a ∈ ∀U.C` makes every individual `C`, whatever relates them.
+    assert_eq!(
+        c(&format!(
+            ":a a {} . :b a [ owl:complementOf :C ] .",
+            all(U, ":C")
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":a a {} .", all(U, ":C"))),
+        Consistency::Consistent
+    );
+    // `∃U.C` holds everywhere once some individual is `C`.
+    assert_eq!(
+        c(&format!(
+            "{} rdfs:subClassOf :D . :a a :C . :b a [ owl:complementOf :D ] .",
+            some(U, ":C")
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(
+            "{} rdfs:subClassOf :D . :b a [ owl:complementOf :D ] .",
+            some(U, ":C")
+        )),
+        Consistency::Consistent
+    );
+    // In a superclass and under negation.
+    assert_eq!(
+        c(&format!(
+            ":A rdfs:subClassOf {} . :a a :A . :C rdfs:subClassOf owl:Nothing .",
+            some(U, ":C")
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(
+            ":a a [ owl:complementOf {} ] . :b a :C .",
+            all(U, "[ owl:complementOf :C ]")
+        )),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        c(&format!(
+            ":a a [ owl:complementOf {} ] .",
+            some(U, "owl:Thing")
+        )),
+        Consistency::Inconsistent
+    );
+    // Assertions: every pair is related by the top property, none by the bottom one.
+    assert_eq!(c(&format!(":a {U} :b .")), Consistency::Consistent);
+    assert_eq!(
+        c(&format!(
+            "[ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ; owl:assertionProperty {U} ; owl:targetIndividual :b ] ."
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(c(&format!(":a {NONE} :b .")), Consistency::Inconsistent);
+    assert_eq!(
+        c(&format!(
+            "[ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ; owl:assertionProperty {NONE} ; owl:targetIndividual :b ] ."
+        )),
+        Consistency::Consistent
+    );
+    // Domain and range of the top property: every element.
+    assert_eq!(
+        c(&format!(
+            "{U} rdfs:domain :C . :a a [ owl:complementOf :C ] ."
+        )),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!("{NONE} rdfs:range owl:Nothing . :a a :C .")),
+        Consistency::Consistent
+    );
+}
+
+#[test]
+fn classification_through_the_top_property() {
+    let body = format!(
+        "{DECL} {} rdfs:subClassOf :B . :D rdfs:subClassOf {} .",
+        some(U, ":A"),
+        all(U, ":C")
+    );
+    // `A ⊑ ∃U.A ⊑ B`; but `C ⊑ B` holds only where `A` is non-empty.
+    assert!(entails_sub(&body, "A", "B"));
+    assert!(!entails_sub(&body, "C", "B"));
+    // `D ⊑ ∀U.C` and `D ⊑ U.D`: `D ⊑ C`, and `A` is not below `C`.
+    assert!(entails_sub(&body, "D", "C"));
+    assert!(!entails_sub(&body, "A", "C"));
+    let body = format!(
+        "{DECL} :A rdfs:subClassOf {} . :B owl:equivalentClass {} .",
+        some(U, ":B"),
+        all(U, "owl:Nothing")
+    );
+    // `B` is empty (its member would make every element, itself included, nothing).
+    assert!(unsat(&body, "B"));
+    assert!(unsat(&body, "A"));
+    assert!(!unsat(&body, "C"));
+}
+
+#[test]
+fn the_bottom_property_relates_nothing() {
+    let c = |body: &str| verdict(&format!("{DECL} {body}"));
+    assert_eq!(
+        c(&format!(":a a {} .", some(NONE, "owl:Thing"))),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":a a {} .", has_value(NONE, ":b"))),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":a a {} .", all(NONE, "owl:Nothing"))),
+        Consistency::Consistent
+    );
+    // A sub-property of the bottom property is empty, through chains too.
+    assert_eq!(
+        c(&format!(":r rdfs:subPropertyOf {NONE} . :a :r :b .")),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":r owl:equivalentProperty {NONE} . :a :r :b .")),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":r owl:inverseOf {NONE} . :a :r :b .")),
+        Consistency::Inconsistent
+    );
+    let body = format!("{NONE} owl:propertyChainAxiom ( :r :s ) . :t rdfs:subPropertyOf :r .");
+    assert_eq!(
+        c(&format!("{body} :a :t :b . :b :s :c .")),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!("{body} :a :t :b . :c :s :b .")),
+        Consistency::Consistent
+    );
+    // A chain through the bottom property relates nothing either: no constraint.
+    assert_eq!(
+        c(&format!(
+            ":t owl:propertyChainAxiom ( :r {NONE} ) . :a :r :b . :a a {} .",
+            all(":t", "owl:Nothing")
+        )),
+        Consistency::Consistent
+    );
+}
+
+#[test]
+fn the_bottom_data_property_has_no_values() {
+    let c = |body: &str| verdict(&format!("{DECL} :d a owl:DatatypeProperty . {body}"));
+    let none = "owl:bottomDataProperty";
+    assert_eq!(c(&format!(":a {none} 1 .")), Consistency::Inconsistent);
+    assert_eq!(
+        c(&format!(":a a {} .", dsome(none, "rdfs:Literal"))),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":a a {} .", dall(none, "xsd:string"))),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        c(&format!(":d rdfs:subPropertyOf {none} . :a :d 1 .")),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":d owl:equivalentProperty {none} . :a :d 1 .")),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":d rdfs:subPropertyOf {none} . :a a :C .")),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        c(&format!(
+            "[ a owl:NegativePropertyAssertion ; owl:sourceIndividual :a ; owl:assertionProperty {none} ; owl:targetValue 1 ] ."
+        )),
+        Consistency::Consistent
+    );
+}
+
+/// Reflexivity and keys on the built-in properties (answers checked with HermiT): the
+/// top property is reflexive by definition, a reflexive bottom property has no model, and
+/// a key on a bottom property identifies nothing (the last case is the control).
+#[test]
+fn reflexive_and_key_axioms_on_the_built_in_properties() {
+    let c = |body: &str| {
+        verdict(&format!(
+            "{DECL} :d a owl:DatatypeProperty . :a a :C ; :d 1 . :b a :C ; :d 1 . :a owl:differentFrom :b . {body}"
+        ))
+    };
+    assert_eq!(
+        c(&format!("{U} a owl:ReflexiveProperty .")),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        c(&format!("{NONE} a owl:ReflexiveProperty .")),
+        Consistency::Inconsistent
+    );
+    assert_eq!(
+        c(&format!(":C owl:hasKey ( {NONE} ) .")),
+        Consistency::Consistent
+    );
+    assert_eq!(
+        c(":C owl:hasKey ( owl:bottomDataProperty :d ) ."),
+        Consistency::Consistent
+    );
+    assert_eq!(c(":C owl:hasKey ( :d ) ."), Consistency::Inconsistent);
+}
+
+/// A class named only inside an expression on a bottom property, which the translation
+/// drops, is still classified: with `⊤ ⊑ C1` (the top property's domain), `C0 ⊑ C1`.
+/// HermiT lists it for the first three; the OWL API does not read the undeclared `:C0` in
+/// a domain axiom as a class, so it leaves the last two out of its signature.
+#[test]
+fn classes_under_a_bottom_property_are_classified() {
+    for body in [
+        format!(":C1 rdfs:subClassOf {} .", all(NONE, ":C0")),
+        format!("{} rdfs:subClassOf :C2 .", some(NONE, ":C0")),
+        format!(":C0 owl:hasKey ( {NONE} ) ."),
+        format!("{NONE} rdfs:domain :C0 ."),
+        "owl:bottomDataProperty rdfs:domain :C0 .".to_string(),
+    ] {
+        let body = format!(":C1 a owl:Class . :C2 a owl:Class . {U} rdfs:domain :C1 . {body}");
+        assert!(entails_sub(&body, "C0", "C1"), "{body}");
+    }
 }

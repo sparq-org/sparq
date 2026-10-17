@@ -574,6 +574,10 @@ impl PrssRandomness {
                     items: m,
                     switches: 0,
                     depth_rounds: 0,
+                    // No resharing round runs, so the input share vectors come
+                    // straight back. With at most one entry there is no position
+                    // for them to be paired with.
+                    fresh_sharings: 0,
                 },
             ));
         }
@@ -591,6 +595,16 @@ impl PrssRandomness {
                 switches: 0,
                 // One resharing round per maximal unqualified set.
                 depth_rounds: rounds,
+                // Every element of every entry comes back as a fresh sharing: the
+                // last resharing round masks it with randomness from each group
+                // member's own private key. At `t = 0` a resharing draws no
+                // masking coefficient, so the share vectors are only reordered
+                // and nothing is counted, matching the dealer path.
+                fresh_sharings: if self.t == 0 {
+                    0
+                } else {
+                    m.saturating_mul(elements)
+                },
             },
         ))
     }
@@ -2069,13 +2083,20 @@ mod tests {
         );
     }
 
-    /// The dealer's switch-network shuffle only moves whole entries and never
-    /// reads a share, so it stays degree-AGNOSTIC: the same mixed-degree packed
-    /// column the PRSS source refuses must still go through it unchanged, as a
-    /// permutation of the input entries. (The output stage's seeded pins in
-    /// `oblivious_join` cover the same property end to end.)
+    /// The dealer's privacy shuffle refuses the SAME mixed-degree packed column the
+    /// PRSS source refuses, and refuses it before any draw.
+    ///
+    /// The dealer path used to accept it, because a switch only moves whole entries
+    /// and never interpolates one. It cannot accept it any more: the output is
+    /// re-randomised with a degree-`t` zero-sharing, which refreshes the
+    /// coefficients `x^1 .. x^t` and leaves anything above `x^t` as the input had
+    /// it, so a degree-`2t` element would come back carrying a value-independent
+    /// fingerprint of its input element. Refusing is the fail-closed answer; a
+    /// caller with a product sharing degree-reduces it first, which the oblivious
+    /// output stage does for every selected element. Both sources therefore now
+    /// agree on what they accept.
     #[test]
-    fn the_dealer_shuffle_still_accepts_the_mixed_degree_layout() {
+    fn the_dealer_shuffle_refuses_the_mixed_degree_layout() {
         let n = 5;
         let backend = ShamirBackend::new_seeded(n, 0x0DA).unwrap();
         let rows = vec![
@@ -2085,23 +2106,91 @@ mod tests {
             (0, vec![41, 42]),
         ];
         let col = mixed_degree_column(&backend, &rows);
-        let before: BTreeSet<Vec<u64>> = col
-            .iter()
-            .map(|e| e.iter().map(|sh| sh.y.value()).collect())
-            .collect();
         let mut dealer = backend.dealer();
-        let (shuffled, cost) = dealer.oblivious_shuffle(col).unwrap();
-        assert_eq!(cost.items, rows.len());
-        // A switch network really is routed here, unlike the PRSS construction.
-        assert!(cost.switches > 0);
-        let after: BTreeSet<Vec<u64>> = shuffled
-            .iter()
-            .map(|e| e.iter().map(|sh| sh.y.value()).collect())
-            .collect();
+        // A witness draw taken BEFORE and AFTER the refused call: a refusal must
+        // not consume a field element, or the keystream would depend on a rejected
+        // input.
+        let mut probe = backend.dealer();
+        let expected_next = probe.draw_fp();
+        match dealer.oblivious_shuffle(col) {
+            Err(MpcError::Protocol(m)) => assert!(
+                m.contains("not a consistent") && m.contains("degree"),
+                "wrong refusal: {m}"
+            ),
+            other => panic!("the dealer path must fail closed, got {other:?}"),
+        }
         assert_eq!(
-            before, after,
-            "the switch-network shuffle must carry mixed-degree entries through untouched"
+            dealer.draw_fp(),
+            expected_next,
+            "the refused call must have drawn nothing"
         );
+        // The same column goes through once every element is degree-`t`: a plain
+        // degree-`t` column of the same shape is accepted.
+        let mut ok_dealer = backend.dealer();
+        let plain: crate::oblivious::SecretColumn = rows
+            .iter()
+            .map(|(tag, limbs)| {
+                let mut e = ok_dealer.share(Fp::new(*tag));
+                for l in limbs {
+                    e.extend(ok_dealer.share(Fp::new(*l)));
+                }
+                e
+            })
+            .collect();
+        let (shuffled, cost) = ok_dealer.oblivious_shuffle(plain).unwrap();
+        assert_eq!(shuffled.len(), rows.len());
+        assert_eq!(cost.fresh_sharings, rows.len() * 3);
+    }
+
+    /// The PRSS construction's output is unlinkable to its input for the same
+    /// reason, by a different mechanism: it permutes by RESHARING, so every output
+    /// element is a fresh sharing already. A coalition of `t` parties looking for
+    /// its own share values again in the output finds none of them.
+    #[test]
+    fn a_t_coalition_cannot_pair_prss_output_elements_with_input_elements() {
+        let n = 5;
+        let backend = ShamirBackend::new_seeded(n, 0x0DB).unwrap();
+        let coalition = [1u64, 2];
+        assert_eq!(backend.threshold(), coalition.len());
+        let view = |col: &crate::oblivious::SecretColumn| -> BTreeSet<Vec<u64>> {
+            col.iter()
+                .map(|e| {
+                    e.iter()
+                        .filter(|sh| coalition.contains(&sh.x))
+                        .map(|sh| sh.y.value())
+                        .collect()
+                })
+                .collect()
+        };
+        for seed in 0..8u64 {
+            let mut dealer = backend.dealer();
+            let col: crate::oblivious::SecretColumn =
+                (0..4u64).map(|k| dealer.share(Fp::new(1000 + k))).collect();
+            let before = view(&col);
+            let mut source = PrssRandomness::with_seeded_setup(n, 0x0DC + seed).unwrap();
+            let (after, cost) = source.oblivious_shuffle(col).unwrap();
+            assert_eq!(cost.fresh_sharings, 4, "one fresh sharing per element");
+            assert!(
+                view(&after).is_disjoint(&before),
+                "seed {seed}: an output element carried an input element's coalition shares"
+            );
+        }
+    }
+
+    #[test]
+    fn at_threshold_zero_the_prss_shuffle_counts_no_fresh_sharings() {
+        // n = 2 gives t = 0: a resharing draws no masking coefficient, so the
+        // shuffle only reorders share vectors and must not report them as fresh.
+        let n = 2;
+        let backend = ShamirBackend::new_seeded(n, 0x0E1).unwrap();
+        assert_eq!(backend.threshold(), 0);
+        let mut dealer = backend.dealer();
+        let col: crate::oblivious::SecretColumn =
+            (0..4u64).map(|k| dealer.share(Fp::new(2000 + k))).collect();
+        let mut source = PrssRandomness::with_seeded_setup(n, 0x0E2).unwrap();
+        let (after, cost) = source.oblivious_shuffle(col).unwrap();
+        assert_eq!(after.len(), 4);
+        assert_eq!(cost.fresh_sharings, 0, "t = 0 refreshes nothing");
     }
 
     // ---- The shuffle's SECURITY properties, each pinned against a weakening

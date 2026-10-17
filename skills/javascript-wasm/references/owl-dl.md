@@ -117,7 +117,12 @@ kept version's terms. The raw glue class is `OwlDlSession`
 
 ## Scope (honest)
 
-The decided fragment is SROIQ(D) without the top and bottom properties: regular property
+The decided fragment is SROIQ(D), including the built-in properties (`owl:topObjectProperty`,
+whose restrictions reach every individual, so an ontology using it is classified with the ABox
+and more often answers `'Unconfirmed'`; `owl:bottomObjectProperty` and `owl:bottomDataProperty`,
+which relate nothing; a property above `owl:topObjectProperty`, the top property in a chain
+body, equivalent or inverse to an ordinary property, or in a key, and `owl:topDataProperty`
+anywhere but as a super-property, are `OutOfFragment`): regular property
 chains (`owl:propertyChainAxiom`) and transitivity, every class constructor
 including nominals (`oneOf`, `hasValue` on object properties; with nominals the ABox takes
 part in classification, so `A ≡ {a}` and `a ∈ B` give `A ⊑ B`), object properties with inverses and hierarchies, the role
@@ -133,7 +138,7 @@ literal in an assertion makes the ontology inconsistent (`"sixteen"^^xsd:nonNega
 Keys (`hasKey`) are decided over named individuals; a key whose data values are not
 fixed to literals answers `'Unconfirmed'`. **Keys on a non-simple object property (transitive,
 or implied by a chain or a transitive sub-property), a property hierarchy whose automaton
-would exceed a fixed size, the top/bottom properties in axioms,
+would exceed a fixed size,
 datatypes and literals outside the OWL 2 datatype map, and a property used as both an
 object and a data property currently answer `consistent: 'unknown'` with
 `reason.kind: 'OutOfFragment'`** and the triples of the axiom that uses them; a datatype

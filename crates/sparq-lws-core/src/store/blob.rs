@@ -183,11 +183,68 @@ struct StoredBlob {
     generation: u64,
 }
 
+/// The stored blobs, with how many of them and how many of their bytes are in the service pool
+/// ([`super::is_pooled_blob_key`]) kept as they change, so admission can hold the pool to its own
+/// ceilings without walking the map.
+#[derive(Default)]
+struct Entries {
+    map: HashMap<String, StoredBlob>,
+    pooled: usize,
+    pooled_bytes: usize,
+}
+
+impl Entries {
+    fn get(&self, key: &str) -> Option<&StoredBlob> {
+        self.map.get(key)
+    }
+
+    fn contains_key(&self, key: &str) -> bool {
+        self.map.contains_key(key)
+    }
+
+    fn len(&self) -> usize {
+        self.map.len()
+    }
+
+    fn iter(&self) -> std::collections::hash_map::Iter<'_, String, StoredBlob> {
+        self.map.iter()
+    }
+
+    /// Entries in the service pool, and the bytes they hold.
+    fn pooled(&self) -> (usize, usize) {
+        (self.pooled, self.pooled_bytes)
+    }
+
+    fn insert(&mut self, key: String, blob: StoredBlob) -> Option<StoredBlob> {
+        let pooled = super::is_pooled_blob_key(&key);
+        let bytes = blob.body.len();
+        let replaced = self.map.insert(key, blob);
+        if pooled {
+            if let Some(old) = &replaced {
+                self.pooled_bytes -= old.body.len();
+            } else {
+                self.pooled += 1;
+            }
+            self.pooled_bytes += bytes;
+        }
+        replaced
+    }
+
+    fn remove(&mut self, key: &str) -> Option<StoredBlob> {
+        let gone = self.map.remove(key)?;
+        if super::is_pooled_blob_key(key) {
+            self.pooled -= 1;
+            self.pooled_bytes -= gone.body.len();
+        }
+        Some(gone)
+    }
+}
+
 /// Blob entries and their exact aggregate body-byte usage, protected by one lock so admission and
 /// accounting are atomic under concurrent PUTs.
 #[derive(Default)]
 struct BlobState {
-    entries: HashMap<String, StoredBlob>,
+    entries: Entries,
     total_bytes: usize,
 }
 
@@ -264,7 +321,21 @@ impl InMemoryBlobStore {
             .map_err(|_| BlobError::Backend("poisoned".into()))?;
         let previous_bytes = guard.entries.get(key).map_or(0, |blob| blob.body.len());
         let is_new = !guard.entries.contains_key(key);
-        if is_new && guard.entries.len() >= self.limits.max_resource_count {
+        // A service-pool record is admitted against the pool's own ceilings and counts towards
+        // nothing else, so no number of them makes a write of content fail.
+        let pooled = super::is_pooled_blob_key(key);
+        let (pool_entries, pool_bytes) = guard.entries.pooled();
+        let held = if pooled {
+            pool_entries
+        } else {
+            guard.entries.len() - pool_entries
+        };
+        let ceiling = if pooled {
+            self.limits.max_pool_resource_count
+        } else {
+            self.limits.max_resource_count
+        };
+        if is_new && held >= ceiling {
             return Err(BlobError::QuotaExceeded);
         }
         let retained_bytes = guard
@@ -274,7 +345,21 @@ impl InMemoryBlobStore {
         let next_total = retained_bytes
             .checked_add(body.len())
             .ok_or(BlobError::QuotaExceeded)?;
-        if next_total > self.limits.max_total_bytes {
+        let next_pool_bytes = if pooled {
+            pool_bytes
+                .checked_sub(previous_bytes)
+                .ok_or_else(|| BlobError::Backend("blob byte accounting underflow".into()))?
+                .checked_add(body.len())
+                .ok_or(BlobError::QuotaExceeded)?
+        } else {
+            pool_bytes
+        };
+        let next_content_bytes = next_total
+            .checked_sub(next_pool_bytes)
+            .ok_or_else(|| BlobError::Backend("blob byte accounting underflow".into()))?;
+        if next_pool_bytes > self.limits.max_pool_bytes
+            || next_content_bytes > self.limits.max_total_bytes
+        {
             return Err(BlobError::QuotaExceeded);
         }
 
