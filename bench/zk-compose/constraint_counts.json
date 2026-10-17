@@ -25,12 +25,13 @@
   "layers": {
     "result": {
       "families": [
+        "result_v5",
         "result_v4",
         "result_v3",
         "result_v2",
         "result_v1"
       ],
-      "members": 32
+      "members": 34
     },
     "query": {
       "families": [
@@ -58,6 +59,67 @@
     }
   },
   "families": {
+    "result_v5": {
+      "layer": "result",
+      "role": "Version 5 support for released SELECT DISTINCT mappings, identical in capacity and public ABI to the version-1 f=0 profile but folding the METHOD-BOUND presentation message, so the issuer signature attests the string-canonical commitment METHOD and not merely the commitment. The scheme digest is a compile-time constant of the relation, not a public input. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.",
+      "parameters": [
+        "k",
+        "n",
+        "p",
+        "r",
+        "f",
+        "d"
+      ],
+      "members": [
+        {
+          "member": "result_v5_k1_n16_p3_r4_f0_d10",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "d": 10
+          },
+          "circuit_size": 32290
+        },
+        {
+          "member": "result_v5_k2_n16_p3_r4_f0_d10",
+          "params": {
+            "k": 2,
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "d": 10
+          },
+          "circuit_size": 59104
+        }
+      ],
+      "min_circuit_size": 32290,
+      "max_circuit_size": 59104,
+      "scaling": [
+        {
+          "parameter": "k",
+          "from_member": "result_v5_k1_n16_p3_r4_f0_d10",
+          "from_value": 1,
+          "from_circuit_size": 32290,
+          "to_member": "result_v5_k2_n16_p3_r4_f0_d10",
+          "to_value": 2,
+          "to_circuit_size": 59104,
+          "delta_gates": 26814,
+          "ratio": 1.8304,
+          "held_fixed": {
+            "n": 16,
+            "p": 3,
+            "r": 4,
+            "f": 0,
+            "d": 10
+          }
+        }
+      ],
+      "invariances": []
+    },
     "result_v4": {
       "layer": "result",
       "role": "Version 4 support for released SELECT DISTINCT mappings. The first BGP pattern whose slots are all constants or projected variables is moved to index zero and checked against a public triple table the verifier reconstructs from its query and the released rows, instead of private typed openings. Issuer authentication, credential status (tree depth d), leaf membership and the remaining patterns' private typed and shared-variable joins stay in-circuit. f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, d=10. Does not establish result completeness or holder identity.",
@@ -2426,10 +2488,10 @@
     ]
   },
   "summary": {
-    "families": 18,
-    "members": 70,
-    "snapshot_members": 70,
-    "scaling_pairs": 77,
+    "families": 19,
+    "members": 72,
+    "snapshot_members": 72,
+    "scaling_pairs": 78,
     "invariance_facts": 3
   }
 }

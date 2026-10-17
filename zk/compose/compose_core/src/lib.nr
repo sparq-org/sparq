@@ -86,6 +86,10 @@ mod tests;
 
 // [GPT-6] Additive selected-result relation; not externally audited.
 pub mod result;
+// sq-j506 (#7103): the METHOD-BOUND (ZKSIG_M5) successful-result relation. A NEW
+// relation beside `result`, which 30 shipped members compile and which must stay
+// byte-identical -- see result_m5.nr for why.
+pub mod result_m5;
 
 // [GPT-6] Additive private full-u64 result literal relation.
 pub mod result_integer;

@@ -121,11 +121,17 @@
     "result_v1_k2_n16_p3_r4_f0": {
       "circuit_size": 59101
     },
+    "result_v5_k2_n16_p3_r4_f0_d10": {
+      "circuit_size": 59104
+    },
     "result_v1_k2_n16_p3_r4_f2": {
       "circuit_size": 95775
     },
     "result_v1_k1_n16_p3_r4_f0": {
       "circuit_size": 32288
+    },
+    "result_v5_k1_n16_p3_r4_f0_d10": {
+      "circuit_size": 32290
     },
     "result_v1_k1_n16_p3_r4_f2": {
       "circuit_size": 68963

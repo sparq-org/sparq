@@ -414,10 +414,20 @@ for exact scope. Before proving or verifying, it requires the exact
 pinned version field (`nargo version = 1.0.0-beta.21` as the first line; trimmed
 `bb` output `5.0.0-nightly.20260324`); substrings, diagnostics and non-UTF-8
 output are rejected. This is a pin guard, not binary attestation (no hash check).
-Each credential's issuer signature must be over the METHOD-BOUND presentation
-message (`ZKSIG_M5`) binding the STRING-CANONICAL commitment method, so a
-method-unbound (`ZKSIG_C3`) credential is refused with no opt-in — the relation
-proves string-canonical leaves only and the circuit recomputes that one message.
+New issuance is METHOD-BOUND: `prepare_result` selects a `result_v5_*` member
+(contract version 5), whose relation recomputes the METHOD-BOUND presentation
+message (`ZKSIG_M5`) binding the STRING-CANONICAL commitment method, so the
+issuer attests that method and not merely the commitment. A method-unbound
+(`ZKSIG_C3`) credential is refused by default. The shipped version-1 to -4
+members are RETAINED unchanged and their proofs keep verifying;
+`ResultPolicy::admit_unbound_legacy` is the written-down opt-in that acts on
+method-unbound material and issues through them, the same shape as
+`MethodPolicy::admit_unbound`. Method-bound members exist at one or two
+credentials, no private predicate and status depth 10; any other capacity
+bucket, and the signed and public-pattern families, are refused by name unless
+that opt-in is written down. Each credential is witnessed under the message the
+selected member's relation folds, and an attestation that does not match that
+message is refused rather than witnessed.
 Research-stage, not externally
 audited: no complete-answer, absence, wallet-size or holder-identity guarantee.
 

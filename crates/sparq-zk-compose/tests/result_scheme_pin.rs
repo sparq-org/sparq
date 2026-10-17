@@ -32,8 +32,15 @@ use sparq_zk::field::{field_from_hex_str, field_to_hex};
 use sparq_zk::sig;
 use sparq_zk::Fr;
 
-/// The two Noir relations, compiled into this test binary. A path change breaks
-/// the build rather than silently disabling the pin.
+/// The Noir relations, compiled into this test binary. A path change breaks the
+/// build rather than silently disabling the pin.
+///
+/// `RESULT_M5_NR` is the METHOD-BOUND relation this file pins. `RESULT_NR` and
+/// `RESULT_PUBLIC_NR` are the RETAINED method-unbound (`ZKSIG_C3`) relations: 30
+/// shipped members compile them and the four `result_v1_*` members are pinned to
+/// an immutable verification-key baseline, so they must keep the C3 tag. This
+/// file pins BOTH facts.
+const RESULT_M5_NR: &str = include_str!("../../../zk/compose/compose_core/src/result_m5.nr");
 const RESULT_NR: &str = include_str!("../../../zk/compose/compose_core/src/result.nr");
 const RESULT_PUBLIC_NR: &str =
     include_str!("../../../zk/compose/compose_core/src/result_public.nr");
@@ -102,25 +109,34 @@ fn host_scheme_digest() -> Fr {
 #[test]
 fn the_noir_relations_declare_the_pinned_field_globals() {
     assert_eq!(
-        noir_globals(RESULT_NR)
+        noir_globals(RESULT_M5_NR)
             .into_iter()
             .map(|(n, _)| n)
             .collect::<Vec<_>>(),
         vec![
-            "STATUS_REF",
             "PRESENTATION_STATUS_SCHEME",
+            "STATUS_REF",
             "ACCEPTED_STATUS",
             "SCHEME_STRING_CANONICAL_V1",
         ],
-        "result.nr's Field-global inventory changed; pin the new constants here"
+        "result_m5.nr's Field-global inventory changed; pin the new constants here"
+    );
+    // The retained C3 relations keep their own inventory, unchanged.
+    assert_eq!(
+        noir_globals(RESULT_NR)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect::<Vec<_>>(),
+        vec!["STATUS_REF", "COMMITMENT_STATUS", "ACCEPTED_STATUS"],
+        "result.nr's Field-global inventory changed; it is a retained contract"
     );
     assert_eq!(
         noir_globals(RESULT_PUBLIC_NR)
             .into_iter()
             .map(|(n, _)| n)
             .collect::<Vec<_>>(),
-        vec!["STATUS_REF", "PRESENTATION_STATUS_SCHEME", "ACCEPTED_STATUS"],
-        "result_public.nr's Field-global inventory changed; pin the new constants here"
+        vec!["STATUS_REF", "COMMITMENT_STATUS", "ACCEPTED_STATUS"],
+        "result_public.nr's Field-global inventory changed; it is a retained contract"
     );
 }
 
@@ -128,7 +144,7 @@ fn the_noir_relations_declare_the_pinned_field_globals() {
 #[test]
 fn the_noir_scheme_constant_equals_the_host_string_canonical_digest() {
     assert_eq!(
-        field_to_hex(&noir_global(RESULT_NR, "SCHEME_STRING_CANONICAL_V1")),
+        field_to_hex(&noir_global(RESULT_M5_NR, "SCHEME_STRING_CANONICAL_V1")),
         field_to_hex(&host_scheme_digest()),
         "the Noir SCHEME_STRING_CANONICAL_V1 literal drifted from \
          scheme_iri_to_field(StringCanonicalV1.scheme_iri())"
@@ -140,7 +156,7 @@ fn the_noir_scheme_constant_equals_the_host_string_canonical_digest() {
 /// arbitrary element.
 #[test]
 fn the_noir_scheme_constant_matches_no_other_recognised_method() {
-    let pinned = noir_global(RESULT_NR, "SCHEME_STRING_CANONICAL_V1");
+    let pinned = noir_global(RESULT_M5_NR, "SCHEME_STRING_CANONICAL_V1");
     for method in CommitmentMethod::recognised() {
         let digest = sig::scheme_iri_to_field(method.scheme_iri());
         let same = field_to_hex(&digest) == field_to_hex(&pinned);
@@ -160,20 +176,17 @@ fn the_noir_scheme_constant_matches_no_other_recognised_method() {
 #[test]
 fn the_noir_domain_tag_is_the_presentation_method_bound_tag() {
     let expected = Fr::from(u64::from_be_bytes(*b"ZKSIG_M5"));
-    for (what, source) in [("result.nr", RESULT_NR), ("result_public.nr", RESULT_PUBLIC_NR)] {
-        assert_eq!(
-            field_to_hex(&noir_global(source, "PRESENTATION_STATUS_SCHEME")),
-            field_to_hex(&expected),
-            "{} folds a tag that is not ZKSIG_M5",
-            what
-        );
-    }
+    assert_eq!(
+        field_to_hex(&noir_global(RESULT_M5_NR, "PRESENTATION_STATUS_SCHEME")),
+        field_to_hex(&expected),
+        "result_m5.nr folds a tag that is not ZKSIG_M5"
+    );
 }
 
 /// THE PIN. The message the CIRCUIT recomputes from its own literals is the
 /// message the HOST signs and verifies.
 ///
-/// `result.nr` computes
+/// `result_m5.nr` computes
 /// `h5(PRESENTATION_STATUS_SCHEME, root, salt, reference, SCHEME_STRING_CANONICAL_V1)`
 /// with `h5 = Poseidon2::hash(.., 5)`, which is `sparq_zk::poseidon2::hash` over
 /// the same five elements. Recomputing it here from the PARSED literals and
@@ -195,26 +208,18 @@ fn the_circuit_recomputed_message_equals_the_host_signed_message() {
         &host_scheme_digest(),
     );
 
-    for (what, source, scheme_source) in [
-        ("result.nr", RESULT_NR, RESULT_NR),
-        // The v4 relation imports the constant from `result.nr` and declares
-        // only the tag, so its scheme digest comes from the same literal.
-        ("result_public.nr", RESULT_PUBLIC_NR, RESULT_NR),
-    ] {
-        let in_circuit = sparq_zk::poseidon2::hash(&[
-            noir_global(source, "PRESENTATION_STATUS_SCHEME"),
-            root,
-            salt,
-            reference,
-            noir_global(scheme_source, "SCHEME_STRING_CANONICAL_V1"),
-        ]);
-        assert_eq!(
-            field_to_hex(&in_circuit),
-            field_to_hex(&host),
-            "the message {} recomputes in circuit is not the one the host signs",
-            what
-        );
-    }
+    let in_circuit = sparq_zk::poseidon2::hash(&[
+        noir_global(RESULT_M5_NR, "PRESENTATION_STATUS_SCHEME"),
+        root,
+        salt,
+        reference,
+        noir_global(RESULT_M5_NR, "SCHEME_STRING_CANONICAL_V1"),
+    ]);
+    assert_eq!(
+        field_to_hex(&in_circuit),
+        field_to_hex(&host),
+        "the message result_m5.nr recomputes in circuit is not the one the host signs"
+    );
 }
 
 /// The in-circuit message is NOT the legacy method-unbound one, so the pin above
@@ -225,11 +230,11 @@ fn the_circuit_message_is_not_the_method_unbound_message() {
     let salt = Fr::from(0x9abc_def0_u64);
     let reference = Fr::from(0x0fed_cba9_u64);
     let bound = sparq_zk::poseidon2::hash(&[
-        noir_global(RESULT_NR, "PRESENTATION_STATUS_SCHEME"),
+        noir_global(RESULT_M5_NR, "PRESENTATION_STATUS_SCHEME"),
         root,
         salt,
         reference,
-        noir_global(RESULT_NR, "SCHEME_STRING_CANONICAL_V1"),
+        noir_global(RESULT_M5_NR, "SCHEME_STRING_CANONICAL_V1"),
     ]);
     let unbound = sig::commitment_message_with_status(&root, &salt, &reference);
     assert_ne!(field_to_hex(&bound), field_to_hex(&unbound));
@@ -247,18 +252,99 @@ fn the_circuit_message_is_not_the_method_unbound_message() {
     );
 }
 
-/// The method-UNBOUND `ZKSIG_C3` tag must be GONE from both relations: leaving
-/// the literal behind would let a later edit recompute the unbound message
-/// beside the bound one.
+/// The method-UNBOUND `ZKSIG_C3` tag must be GONE from the METHOD-BOUND relation
+/// -- leaving the literal behind would let a later edit recompute the unbound
+/// message beside the bound one -- and RETAINED in the two legacy relations,
+/// whose 30 shipped members authenticate over exactly that message and four of
+/// which are pinned to an immutable verification-key baseline.
 #[test]
-fn the_method_unbound_tag_is_absent_from_both_relations() {
+fn the_unbound_tag_is_gone_from_the_bound_relation_and_kept_in_the_legacy_ones() {
     let c3 = format!("{:#x}", u64::from_be_bytes(*b"ZKSIG_C3"));
+    assert!(
+        !RESULT_M5_NR.contains(&c3),
+        "result_m5.nr carries the method-unbound ZKSIG_C3 domain tag ({})",
+        c3
+    );
     for (what, source) in [("result.nr", RESULT_NR), ("result_public.nr", RESULT_PUBLIC_NR)] {
         assert!(
-            !source.contains(&c3),
-            "{} still carries the method-unbound ZKSIG_C3 domain tag ({})",
+            source.contains(&c3),
+            "{} lost the method-unbound ZKSIG_C3 domain tag ({}); its members are a retained contract",
             what,
             c3
         );
     }
+}
+
+/// THE DRIFT PIN. `result_m5::result_check_m5` is `result::result_check` with
+/// exactly one substitution: the credential message. This test performs that
+/// substitution on `result.nr`'s text and asserts the output is byte-equal to the
+/// function in `result_m5.nr`.
+///
+/// Why a text derivation and not a shared function: `result_check` is compiled by
+/// 30 shipped members, four of which are pinned to an immutable verification-key
+/// baseline, so it cannot be refactored to share code with the bound relation
+/// without risking their bytes. The duplication is deliberate; this pin is what
+/// stops the copies diverging. An edit to either relation that is not mirrored in
+/// the other turns it red, and the failure prints which side to update.
+#[test]
+fn the_bound_relation_is_the_unbound_one_with_only_the_message_substituted() {
+    /// The single line `result_check` folds the method-UNBOUND message on.
+    const UNBOUND_MESSAGE: &str =
+        "let message = h4(COMMITMENT_STATUS, root, salts[g], reference);";
+    /// What it becomes in the bound relation.
+    const BOUND_MESSAGE: &str = "let message = h5(
+            PRESENTATION_STATUS_SCHEME,
+            root,
+            salts[g],
+            reference,
+            SCHEME_STRING_CANONICAL_V1,
+        );";
+
+    /// The text of one `pub fn <name><...>` through the first line that is
+    /// exactly `}`, which is how both relations are terminated.
+    fn function(source: &str, signature: &str) -> String {
+        let start = source
+            .find(signature)
+            .unwrap_or_else(|| panic!("no function starting {} in the source", signature));
+        let rest = &source[start..];
+        let end = rest.find("\n}\n").expect("the function terminates at a bare closing brace");
+        rest[..end + 3].to_string()
+    }
+
+    let unbound = function(RESULT_NR, "pub fn result_check<");
+    let bound = function(RESULT_M5_NR, "pub fn result_check_m5<");
+
+    assert_eq!(
+        unbound.matches(UNBOUND_MESSAGE).count(),
+        1,
+        "result_check no longer folds the unbound message exactly once; re-derive this pin"
+    );
+    let derived = unbound
+        .replacen("pub fn result_check<", "pub fn result_check_m5<", 1)
+        .replacen(UNBOUND_MESSAGE, BOUND_MESSAGE, 1);
+
+    assert_eq!(
+        derived, bound,
+        "result_m5.nr's relation is no longer result.nr's with only the credential \
+         message substituted: the two have drifted, and whichever side changed must \
+         be mirrored in the other"
+    );
+}
+
+/// The CONTROL for the derivation pin: the substitution is not a no-op, so the
+/// equality above is a statement about two genuinely different relations.
+#[test]
+fn the_message_substitution_actually_changes_the_relation() {
+    assert!(
+        RESULT_NR.contains("h4(COMMITMENT_STATUS, root, salts[g], reference)"),
+        "result.nr must still fold the unbound message"
+    );
+    assert!(
+        !RESULT_M5_NR.contains("h4(COMMITMENT_STATUS, root, salts[g], reference)"),
+        "result_m5.nr must not fold the unbound message"
+    );
+    assert!(
+        RESULT_M5_NR.contains("PRESENTATION_STATUS_SCHEME,"),
+        "result_m5.nr must fold the bound message"
+    );
 }

@@ -236,6 +236,13 @@ crates = ["sparq-zk-compose"]
 pattern = "zk/compose/join_eq_v2dl_na16_nb16/src/main.nr"
 crates = ["sparq-zk-compose"]
 
+# sq-j506: result_scheme_pin.rs also reads the METHOD-BOUND relation with
+# include_str! (the scheme constants and the drift derivation), so a change to it
+# must re-run sparq-zk-compose.
+[[map]]
+pattern = "zk/compose/compose_core/src/result_m5.nr"
+crates = ["sparq-zk-compose"]
+
 # [FABLE-5] sq-0iqzw: the ADJUDICATED cross-engine divergence allowlist, read at
 # runtime by the sparq-bench differential fuzzer (crates/sparq-bench/src/fuzz.rs
 # DivergenceAllowlist, via an env!("CARGO_MANIFEST_DIR")-relative path) AND by its

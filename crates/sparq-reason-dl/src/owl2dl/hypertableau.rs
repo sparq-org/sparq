@@ -1439,12 +1439,13 @@ impl<'c> Tableau<'c> {
         self.blocking().0
     }
 
-    /// Per node: whether it is blocked (directly or through its parent), and whether it
-    /// blocks some node.
-    fn blocking(&self) -> (Vec<bool>, Vec<bool>) {
+    /// Per node: whether it is blocked (directly or through its parent), whether it blocks
+    /// some node, and the node blocking it directly.
+    fn blocking(&self) -> (Vec<bool>, Vec<bool>, Vec<Option<Node>>) {
         let len = self.nodes.len();
         let mut blocked = vec![false; len];
         let mut blocker = vec![false; len];
+        let mut blocked_by = vec![None; len];
         let mut seen: FxHashMap<Vec<u32>, Node> = FxHashMap::default();
         for n in 0..len {
             let node = &self.nodes[n];
@@ -1467,10 +1468,11 @@ impl<'c> Tableau<'c> {
                 std::collections::hash_map::Entry::Occupied(e) => {
                     blocked[n] = true;
                     blocker[*e.get() as usize] = true;
+                    blocked_by[n] = Some(*e.get());
                 }
             }
         }
-        (blocked, blocker)
+        (blocked, blocker, blocked_by)
     }
 
     /// Whether a complete, clash-free graph is known to unravel into a model.
@@ -1481,8 +1483,9 @@ impl<'c> Tableau<'c> {
     /// between a root and a blockable node that is not its child. Such an edge is copied with
     /// the subtree it hangs from, and the model is still one as long as
     ///
-    /// - no blocked node has one (it is dropped by the unravelling, together with what it
-    ///   gave the root),
+    /// - a blocked node has one only if its blocker has the same edge to the same root (the
+    ///   unravelling drops the blocked node, and the copy of its blocker that takes its
+    ///   place gives the root the same neighbour: the two have the same label),
     /// - no edge joins two blockable nodes outside the tree (an at-most restriction at a
     ///   root merged nodes of different subtrees), and
     /// - where the blockable end is copied, no number restriction at the root can match two
@@ -1491,7 +1494,7 @@ impl<'c> Tableau<'c> {
     /// Otherwise the answer is unconfirmed (SHOIQ needs the NI-rule here). A graph with no
     /// blocked node is a finite model as it stands.
     fn unravels(&self) -> bool {
-        let (blocked, blocker) = self.blocking();
+        let (blocked, blocker, blocked_by) = self.blocking();
         if !blocked.contains(&true) {
             return true;
         }
@@ -1528,12 +1531,34 @@ impl<'c> Tableau<'c> {
                     continue;
                 }
                 let w = v as usize;
-                if blocked[w] || (copied[w] && self.counts_copies(u as Node, v)) {
+                if blocked[w] && !self.replaced_alike(u as Node, v, blocked_by[w]) {
+                    return false;
+                }
+                if !blocked[w] && copied[w] && self.counts_copies(u as Node, v) {
                     return false;
                 }
             }
         }
         true
+    }
+
+    /// Whether blocked node `w`, with an edge to root `s`, is blocked directly by a node with
+    /// the same roles to `s` that no number restriction at `s` counts twice (one unit per
+    /// role compared).
+    fn replaced_alike(&self, s: Node, w: Node, by: Option<Node>) -> bool {
+        let Some(b) = by else {
+            return false;
+        };
+        let (rw, rb) = (
+            self.nodes[w as usize].adj.get(&s),
+            self.nodes[b as usize].adj.get(&s),
+        );
+        let (Some(rw), Some(rb)) = (rw, rb) else {
+            return false;
+        };
+        self.charge(rw.len() + rb.len());
+        // The copies of `b` all reach `s`, even where `b` itself is `s`'s child.
+        rw.len() == rb.len() && rw.iter().all(|r| rb.contains(r)) && !self.counts_copies(s, b)
     }
 
     /// Whether a clause with several neighbour variables (a number restriction) can apply

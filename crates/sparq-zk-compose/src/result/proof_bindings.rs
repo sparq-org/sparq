@@ -57,6 +57,9 @@ fn fixture(job: &Value) -> Fallible<(Vec<ResultCredential>, ResultPolicy)> {
         }],
         min_version: 7,
         max_version: 7,
+        // sq-j506: this corpus fixture exercises the capacity profiles and the v4
+        // statement, not method binding, so it takes the legacy downgrade.
+        admit_unbound_legacy: true,
     };
     if triples.is_empty() {
         return Ok((vec![], policy));
@@ -64,7 +67,9 @@ fn fixture(job: &Value) -> Fallible<(Vec<ResultCredential>, ResultPolicy)> {
     let graph = commit_triples(&triples, Fr::from(91u64))?;
     let reference =
         sig::status_ref_digest(&sig::status_list_id_to_field("urn:binding-status"), 0, 7);
-    let message = result_presentation_message(&graph.commitment, &graph.salt, &reference);
+    // sq-j506: the legacy downgrade above selects a retained member, whose
+    // relation folds the method-unbound message, so the fixture signs that one.
+    let message = sig::commitment_message_with_status(&graph.commitment, &graph.salt, &reference);
     Ok((
         vec![ResultCredential {
             graph,

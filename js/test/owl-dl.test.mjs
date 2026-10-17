@@ -113,15 +113,23 @@ test('property chains are decided', async () => {
   assert.equal((await checkOwlDl(chain, only)).consistent, false);
 });
 
-test('the top and bottom properties are out of fragment: unknown, with the offending triples', async () => {
-  const r = await checkOwlDl(`${TBOX} :Person rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :Company ] .`);
+test('a property above the top property is out of fragment: unknown, with the offending triples', async () => {
+  const r = await checkOwlDl(`${TBOX} :every a owl:ObjectProperty . owl:topObjectProperty rdfs:subPropertyOf :every .`);
   assert.equal(r.consistent, 'unknown');
   assert.equal(r.reason.kind, 'OutOfFragment');
   assert.equal(r.reason.construct, 'owl:topObjectProperty / owl:bottomObjectProperty');
-  assert.ok(r.reason.triples.some((t) => t.endsWith('<http://www.w3.org/2002/07/owl#topObjectProperty> .')));
+  assert.ok(r.reason.triples.some((t) => t.startsWith('<http://www.w3.org/2002/07/owl#topObjectProperty> ')));
   for (const t of r.reason.triples) assert.match(t, / \.$/);
   assert.equal(r.profile.dl, true);
   assert.equal(r.classification, null);
+});
+
+test('the top property reaches every individual and the bottom one relates none', async () => {
+  const every = '[ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:allValuesFrom :Company ]';
+  const r = await checkOwlDl(`${TBOX} :acme a ${every} . :bob a :Person . :Person owl:disjointWith :Company .`);
+  assert.equal(r.consistent, false);
+  const s = await checkOwlDl(`${TBOX} :acme owl:bottomObjectProperty :bob .`);
+  assert.equal(s.consistent, false);
 });
 
 test('an undecided datatype question answers DatatypeUnknown with its triples', async () => {

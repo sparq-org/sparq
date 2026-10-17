@@ -197,6 +197,7 @@ fn authenticate(inputs: Vec<Vec<Triple>>) -> Fallible<Fixture> {
             }],
             min_version: 7,
             max_version: 7,
+            admit_unbound_legacy: false,
         },
         rows: vec![BTreeMap::from([(
             "name".into(),

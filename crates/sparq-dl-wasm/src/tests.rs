@@ -218,8 +218,10 @@ fn chains_are_decided() {
 }
 
 #[test]
-fn top_properties_are_out_of_fragment_with_the_offending_triples() {
-    let r = run(&format!("{ALCHIQ} :Person rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :Company ] ."));
+fn a_property_above_the_top_property_is_out_of_fragment_with_the_offending_triples() {
+    let r = run(&format!(
+        "{ALCHIQ} :every a owl:ObjectProperty . owl:topObjectProperty rdfs:subPropertyOf :every ."
+    ));
     assert_eq!(s(get(&r, "consistent")), "unknown");
     let reason = get(&r, "reason");
     assert_eq!(s(get(reason, "kind")), "OutOfFragment");
@@ -231,7 +233,7 @@ fn top_properties_are_out_of_fragment_with_the_offending_triples() {
     assert!(
         triples
             .iter()
-            .any(|t| t.ends_with("<http://www.w3.org/2002/07/owl#topObjectProperty> .")),
+            .any(|t| t.starts_with("<http://www.w3.org/2002/07/owl#topObjectProperty> ")),
         "{triples:?}"
     );
     for t in &triples {
@@ -419,7 +421,9 @@ fn a_session_reuses_identical_and_extended_versions() {
     assert_eq!(s(get(&r, "reuse")), "none");
     assert_eq!(without_reuse(&r), without_reuse(&fresh));
     // A refused version answers "none" and keeps the kept answer.
-    let r = next(&format!("{base} :A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty owl:topObjectProperty ; owl:someValuesFrom :B ] ."));
+    let r = next(&format!(
+        "{base} :every a owl:ObjectProperty . owl:topObjectProperty rdfs:subPropertyOf :every ."
+    ));
     assert_eq!(s(get(&r, "consistent")), "unknown");
     assert_eq!(s(get(&r, "reuse")), "none");
     assert_eq!(s(get(&next(&base), "reuse")), "identical");
