@@ -187,9 +187,12 @@ class Admission(unittest.TestCase):
                 api = FakeAPI([run(status=status, conclusion=conclusion)])
                 self.blocked(api)
                 self.assertEqual(len(api.calls), 1)
-        # An active run beside an unreadable one still blocks.
-        api = FakeAPI([run(status="in_progress", conclusion=None), run(998, status="mystery", conclusion=None)])
-        self.blocked(api, "unreadable")
+        # An active run beside any unreadable one still blocks.
+        for status, conclusion in [("mystery", None), ("completed", None), ("queued", "success")]:
+            with self.subTest(beside_active=(status, conclusion)):
+                api = FakeAPI([run(status="in_progress", conclusion=None),
+                               run(998, status=status, conclusion=conclusion)])
+                self.blocked(api, "unreadable")
 
     def test_manual_force_and_other_events_never_read_history(self):
         for event in ["workflow_dispatch", "merge_group", "push", "pull_request", "unknown", ""]:

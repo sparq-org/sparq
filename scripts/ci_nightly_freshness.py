@@ -216,8 +216,14 @@ def decide(event, repo, head, current_id, get=gh_json):
     # The Saturday sweep has its own concurrency group and can outlive the next tick. A
     # readable active same-head run is doing this head's heavy work already, so this tick
     # stands down cleanly; an unreadable status still blocks.
-    if any(r.get("status") in ACTIVE_STATUSES and r.get("conclusion") is None for r in prior):
-        if any(r.get("status") not in ACTIVE_STATUSES + ("completed",) for r in prior):
+    def active(r):
+        return r.get("status") in ACTIVE_STATUSES and r.get("conclusion") is None
+
+    def finished(r):
+        return r.get("status") == "completed" and r.get("conclusion") in COMPLETED_CONCLUSIONS
+
+    if any(active(r) for r in prior):
+        if not all(active(r) or finished(r) for r in prior):
             raise EvidenceError("same-head schedule status unreadable")
         return False, "a same-head schedule is still active; it carries this head's heavy work"
     if any(r.get("status") != "completed" for r in prior):
