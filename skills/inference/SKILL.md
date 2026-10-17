@@ -264,7 +264,12 @@ pub struct ProofNode { pub conclusion: [String;3], pub key: [String;3], pub rule
 // ClosureLimits::max_join_rows x max_rounds (per-round rows times the rounds the run may take,
 // since the tables accumulate across rounds), and a site is registered only once its conclusion
 // unifies, so a run that SET that limit can be refused with a cut only for registrations it
-// actually used; the default max_join_rows is unbounded and never is. A side effect: the GH #6757 programs whose only growth was
+// actually used; the default max_join_rows is unbounded and never is, and an evaluation with no
+// <= rule registers nothing at all. Resolving a goal leaves a variable the resolution is already
+// inside the expansion of as it is (a formula bound to ?x may name ?x itself, which is the
+// formula's own name), so a self-naming formula resolves to a finite term; a goal the resolution
+// REFUSES for its depth or term size fails the run with that reason instead of coming back as an
+// empty proof. A side effect: the GH #6757 programs whose only growth was
 // that counter now SATURATE instead of being refused at the closure limit, because re-proving
 // one goal at one node mints one name. Labels are still NOT canonical across reordered isomorphic
 // documents (anonymous parser blanks are _b<n> in arrival order, formula rows keep source order,

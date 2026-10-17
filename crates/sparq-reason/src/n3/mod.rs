@@ -528,6 +528,14 @@ mod run_shared {
             Ok(fold)
         }
 
+        /// Whether `key`'s fold is held by a DIFFERENT key already: what [`RunShared::node`]
+        /// would refuse, asked without charging the allowance or inserting anything, so a
+        /// caller that uses a fold before it registers it can refuse the collision at the
+        /// point of USE ([`super::BwCtx::conflicts`]).
+        pub(super) fn conflicts(&self, key: &NodeKey) -> bool {
+            self.nodes.get(&key.fold()).is_some_and(|prev| prev != key)
+        }
+
         /// The id of the string identity `canon`, registered against it so it can never
         /// name a second, different string ([`RunShared::ids`]). The same refusals as
         /// [`RunShared::node`], and the same allowance: this is how a goal or a nested
@@ -856,7 +864,38 @@ impl<'a> BwCtx<'a> {
     /// one node alike.
     fn root_path(&self, ri: usize) -> Option<BwPath> {
         let key = NodeKey::Root { scope: self.scope, salt: self.scope_salt, rule: ri as u64 };
+        if self.unnamed() {
+            return Some(BwPath::at(key.fold()));
+        }
         self.node(key).map(BwPath::at)
+    }
+
+    /// Whether this evaluation can mint no proof-node NAME, because it has no `<=` rule for
+    /// [`backward_prove`] to apply: its paths are then handed out unregistered
+    /// ([`BwCtx::root_path`], [`BwPath::child`]) and the run's node accounting is untouched.
+    /// A path is registered so that two keys cannot share one fold and alias their
+    /// standardize-apart spaces; with no backward rule no variable is ever renamed after a
+    /// fold, so there is no space to alias — while charging those paths to the allowance made
+    /// a forward-only run refusable inside its own limits, one root per rule per round
+    /// (GH #6844 review round 5). The paths' folds are the same either way, so what a later
+    /// round or a sibling evaluation names is unchanged.
+    fn unnamed(&self) -> bool {
+        self.rules.is_empty()
+    }
+
+    /// Whether `key`'s fold is already registered to a DIFFERENT key, which fails the run
+    /// (the same refusal as [`BwCtx::node`], recorded here): the caller asks BEFORE it uses
+    /// the fold, because a fold used to rename variables and only registered afterwards
+    /// would, on a collision with an ancestor, be caught by neither — the renamed variables
+    /// would be the ancestor's, the caller's inherited bindings would capture them,
+    /// unification would fail and the site would be skipped with no error at all
+    /// (GH #6844 review round 5).
+    fn conflicts(&self, key: NodeKey) -> bool {
+        if self.unnamed() || !self.visited.borrow().conflicts(&key) {
+            return false;
+        }
+        self.registered(Err(run_shared::NodeFault::Collision));
+        true
     }
 }
 
@@ -3369,6 +3408,25 @@ fn backward_prove(
                     // the whole chain, so two goals this resolution tells apart can
                     // substitute alike and one identity over both would merge them.
                     let Some(resolved) = bounded::walked_atom(&goal, b, &bw.truncated) else {
+                        // The walker refused the goal for its depth or its size, so the
+                        // goal has NO identity and no name can be minted for its proof.
+                        // The run fails with that reason: an empty proof here reads as
+                        // "not provable" and would drop an answer silently
+                        // (GH #6844 review round 5). A size refusal already fails the run
+                        // with the limit it names; a depth cut is only a cut, so it is
+                        // turned into the failure here.
+                        if bw.truncated.refusal().is_none() {
+                            let why = bw.truncated.get().unwrap_or("the walk was cut short");
+                            bw.nested_error.borrow_mut().get_or_insert_with(|| {
+                                format!(
+                                    "n3: refused a backward proof: {}, so the goal it is \
+                                     resolving has no identity to standardize its \
+                                     variables apart by (raise ClosureLimits::\
+                                     max_term_bytes, or simplify the terms the rules build)",
+                                    why
+                                )
+                            });
+                        }
                         return Vec::new();
                     };
                     let Some(id) = bw.intern(&serialize::goal_key(&resolved)) else {
@@ -3382,7 +3440,15 @@ fn backward_prove(
             // unified. A site whose conclusion does not unify mints no name that survives
             // (`rc` and `subst` are dropped), so registering it would only charge the run's
             // tables for search it rejected — a document with many `<=` sites per predicate
-            // reached the allowance that way (GH #6844 review round 4).
+            // reached the allowance that way (GH #6844 review round 4). What CANNOT wait is
+            // the collision check: this fold is about to rename the conclusion's variables,
+            // and a fold already held by another key — an ancestor's, say — renames them to
+            // names the inherited bindings already hold, so unification fails on the capture
+            // and `continue` below would leave the collision unseen and the proof lost with
+            // no error (GH #6844 review round 5).
+            if bw.conflicts(key) {
+                return Vec::new();
+            }
             let fold = key.fold();
             let pfx = format!("__bw{fold}_");
             let n = pfx.as_str();
@@ -3574,7 +3640,11 @@ impl BwPath {
     /// [`BwCtx::node`] describes — a step is a node like any other, so a step whose fold
     /// is already another key's is a capture too.
     fn child(&self, bw: &BwCtx, step: u64) -> Option<BwPath> {
-        bw.node(NodeKey::Step { parent: self.fold, step }).map(BwPath::at)
+        let key = NodeKey::Step { parent: self.fold, step };
+        if bw.unnamed() {
+            return Some(BwPath::at(key.fold()));
+        }
+        bw.node(key).map(BwPath::at)
     }
 }
 
@@ -10059,8 +10129,9 @@ mod tests {
         use super::{run_shared::RunShared, BwCtx, NodeKey, Truncation};
         let shared = RunShared::for_sources(&[]);
         // Two contexts of ONE run, as a closure and the query over it are.
-        let closure = BwCtx::new(&[], Truncation::top_level(), shared.clone());
-        let mut query = BwCtx::new(&[], Truncation::top_level(), shared.clone());
+        let rules = one_backward_rule();
+        let closure = BwCtx::new(&rules, Truncation::top_level(), shared.clone());
+        let mut query = BwCtx::new(&rules, Truncation::top_level(), shared.clone());
         query.scope += 1;
         let root = closure.root_path(0).expect("a root");
         let mine = NodeKey::Site { parent: root.fold, goal: 7, site: 0 };
@@ -10093,8 +10164,11 @@ mod tests {
         // two-entry allowance is two rows in one round.
         let limits =
             ClosureLimits { max_join_rows: 2, max_rounds: 1, ..ClosureLimits::default() };
+        // A context with a `<=` rule in it: one with none registers nothing at all, since no
+        // name it could mint would ever rename a variable ([`BwCtx::unnamed`]).
+        let rules = one_backward_rule();
         let bw =
-            BwCtx::new(&[], Truncation::top_level_with(limits), RunShared::for_sources(&[]));
+            BwCtx::new(&rules, Truncation::top_level_with(limits), RunShared::for_sources(&[]));
         // The root is the first entry; one site key is the second.
         let root = bw.root_path(0).expect("a root");
         bw.node(NodeKey::Site { parent: root.fold, goal: 1, site: 0 }).expect("the second");
@@ -10110,12 +10184,12 @@ mod tests {
         );
         // An INTERNED identity is charged to the same allowance, not a second one.
         let tight =
-            BwCtx::new(&[], Truncation::top_level_with(limits), RunShared::for_sources(&[]));
+            BwCtx::new(&rules, Truncation::top_level_with(limits), RunShared::for_sources(&[]));
         tight.root_path(0).expect("a root");
         tight.intern("G1").expect("the second entry");
         assert_eq!(tight.intern("G2"), None, "interning is charged to the same allowance");
         // The DEFAULT allowance is the unbounded sentinel: nothing is refused.
-        let open = BwCtx::new(&[], Truncation::top_level(), RunShared::for_sources(&[]));
+        let open = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
         let open_root = open.root_path(0).expect("a root");
         for g in 0..64 {
             open.node(NodeKey::Site { parent: open_root.fold, goal: g, site: 0 })
@@ -10315,6 +10389,162 @@ mod tests {
             .count();
         assert_eq!(derived, 200, "one derivation per subject");
     }
+
+    /// One `<=` rule, enough to make a `BwCtx` over it do its node accounting: a context
+    /// with no backward rule hands its paths out unregistered (`BwCtx::unnamed`).
+    fn one_backward_rule() -> Vec<Rule> {
+        vec![Rule { premise: Vec::new(), conclusion: Vec::new() }]
+    }
+
+    /// GH #6844 review round 5 (loop finding 2): a forward rule's premise evaluation walks
+    /// paths — a root per rule, a step per premise atom — and registered every one of them
+    /// whether or not any backward resolution could ever use them, so a forward-only
+    /// evaluation spent the backward-proof allowance and grew the run's tables with the
+    /// search. An evaluation with no `<=` rule now hands those paths out UNREGISTERED: it
+    /// mints no name, so no fold of its can rename a variable and no two of them can alias
+    /// a standardize-apart space. The folds are unchanged either way, which is what keeps a
+    /// later round naming the same node.
+    #[test]
+    fn a_forward_only_evaluation_registers_no_proof_nodes() {
+        use super::{run_shared::RunShared, BwCtx, Truncation};
+        let shared = RunShared::for_sources(&[]);
+        let forward = BwCtx::new(&[], Truncation::top_level(), shared.clone());
+        let root = forward.root_path(0).expect("a root");
+        let step = root.child(&forward, 0).expect("a premise step");
+        assert_eq!(shared.borrow().node_count(), 0, "a forward-only evaluation names nothing");
+        assert!(forward.nested_error.borrow().is_none());
+        // And an evaluation that HAS a backward rule registers the same two paths, under the
+        // same folds: what changed is the accounting, not any name.
+        let rules = one_backward_rule();
+        let named = RunShared::for_sources(&[]);
+        let backward = BwCtx::new(&rules, Truncation::top_level(), named.clone());
+        let b_root = backward.root_path(0).expect("a root");
+        let b_step = b_root.child(&backward, 0).expect("a premise step");
+        assert_eq!((b_root.fold, b_step.fold), (root.fold, step.fold), "the same two nodes");
+        assert_eq!(named.borrow().node_count(), 2, "registered, because a name can be minted");
+    }
+
+    /// The other half of finding R4-1: a goal the walker REFUSES — it has no identity, so
+    /// no name can be minted for its proof — fails the run, rather than coming back as an
+    /// empty proof that reads as "not provable". The goal here is admitted by the
+    /// evaluation boundary, which substitutes ONE binding (`[ ?x1 ]`), and refused by the
+    /// walk, which follows the whole chain and so builds a term nested past the walker's
+    /// room. That refusal records a cut and nothing else, so the failure is made here.
+    #[test]
+    fn a_goal_the_walker_refuses_fails_the_run_instead_of_proving_nothing() {
+        use super::{run_shared::RunShared, BwCtx, BwPath, FactIndex, Rule, Truncation};
+        let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
+        let var = |s: &str| Term::Var(s.to_string());
+        let rules = vec![Rule {
+            premise: vec![[var("x"), iri("p"), var("y")]],
+            conclusion: vec![[var("x"), iri("has"), var("y")]],
+        }];
+        let facts = FactIndex::from_iter(vec![[iri("a"), iri("p"), iri("v")]]);
+        // A chain of 1000 bindings, each one list level deeper than the last.
+        let mut chain = Binding::default();
+        for i in 0..1_000u32 {
+            chain.insert(format!("x{}", i), Term::List(vec![var(&format!("x{}", i + 1))]));
+        }
+        chain.insert("x1000".into(), iri("a"));
+        let goal = [var("x0"), iri("has"), var("z")];
+        let bw = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
+        let proved = backward_prove(
+            &goal,
+            &chain,
+            &facts,
+            &bw,
+            bounded::backward_depth(),
+            BwPath::at(0),
+        );
+        assert!(proved.is_empty(), "nothing is proved from a goal with no identity");
+        assert!(
+            bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("no identity")),
+            "and the run fails rather than passing as unprovable: {:?}",
+            bw.nested_error.borrow()
+        );
+    }
+
+    /// GH #6844 review round 5 (loop finding 1): the site's fingerprint renames the
+    /// conclusion's variables BEFORE it is registered, so a fold already held by another key
+    /// has to be refused at the point of USE. It was not: the renamed variables were the
+    /// other key's, the inherited bindings captured them, unification failed and the site
+    /// was skipped — the proof lost with no error. Here the fold of the site this proof will
+    /// take is forced onto a different key, and the conclusion is one that cannot unify with
+    /// the goal (`:b`, not `:a`) — exactly the path that skipped the check.
+    #[test]
+    fn a_site_fold_collision_fails_the_run_even_when_the_conclusion_cannot_unify() {
+        use super::{run_shared::RunShared, BwCtx, BwPath, FactIndex, NodeKey, Rule, Truncation};
+        let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
+        let var = |s: &str| Term::Var(s.to_string());
+        let rules = vec![Rule {
+            premise: vec![[var("x"), iri("p"), var("y")]],
+            conclusion: vec![[iri("b"), iri("has"), var("y")]],
+        }];
+        let facts = FactIndex::from_iter(vec![[iri("a"), iri("p"), iri("v")]]);
+        let goal = [iri("a"), iri("has"), var("z")];
+        let bw = BwCtx::new(&rules, Truncation::top_level(), RunShared::for_sources(&[]));
+        // The key this proof's one site will take: the root path the call is given (0), the
+        // goal's interned identity, and site 0.
+        let key = NodeKey::Site {
+            parent: 0,
+            goal: serialize::fnv1a64(&serialize::goal_key(&goal)),
+            site: 0,
+        };
+        let other = NodeKey::Site { parent: 0, goal: 1, site: 1 };
+        assert_ne!(key.fold(), other.fold(), "the two keys are distinct nodes");
+        bw.visited.borrow_mut().force_node_fold(key.fold(), other);
+        let proved = backward_prove(
+            &goal,
+            &Binding::default(),
+            &facts,
+            &bw,
+            bounded::backward_depth(),
+            BwPath::at(0),
+        );
+        assert!(proved.is_empty(), "the conclusion cannot unify, so nothing is proved");
+        assert!(
+            bw.nested_error.borrow().as_deref().is_some_and(|e| e.contains("fingerprint")),
+            "and the collision fails the run rather than passing as unprovable: {:?}",
+            bw.nested_error.borrow()
+        );
+    }
+
+    /// GH #6844 review round 5 (finding R4-1, new in round 4): a caller variable bound to a
+    /// quoted formula that mentions a variable of the SAME NAME. Walking the goal's identity
+    /// into the formula resolved that name to the formula again, so the walk went round until
+    /// the term-depth room ran out, `walked_atom` refused the goal and the proof came back
+    /// EMPTY — the answer was dropped with no error. The occurs check on the walk stack
+    /// leaves such a name as the variable it is (it is the formula's own), so the goal walks
+    /// to a finite term and the row survives.
+    #[test]
+    fn a_formula_naming_the_variable_it_is_bound_to_still_answers() {
+        let data = "@prefix : <http://ex/> .\n\
+                    @prefix log: <http://www.w3.org/2000/10/swap/log#> .\n\
+                    :s :p { ?x :q :z } .\n\
+                    { ?f :val :ok } <= { ?f log:includes { ?a :q ?b } } .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { :s :p ?x . ?x :val ?g } => { :r :is ?g } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows, vec![SELF_NAMING_ROW.to_string()], "the base engine's one row");
+    }
+
+    /// The same cycle without a builtin in the premise, and with the name repeated across
+    /// two triples of the formula: the walk of `{ ?x :q ?x . ?x :r ?x }` under `?x` bound to
+    /// that very formula re-entered it at each of the four occurrences.
+    #[test]
+    fn a_formula_naming_itself_in_several_places_still_answers() {
+        let data = "@prefix : <http://ex/> .\n\
+                    :s :p { ?x :q ?x . ?x :r ?x } .\n\
+                    { ?f :val :ok } <= true .\n";
+        let query = "@prefix : <http://ex/> .\n\
+                     { :s :p ?x . ?x :val ?g } => { :r :is ?g } .\n";
+        let rows = derived_rows(data, query);
+        assert_eq!(rows, vec![SELF_NAMING_ROW.to_string()], "the base engine's one row");
+    }
+
+    /// The row both self-naming-formula tests expect, as [`derived_rows`] prints it: the
+    /// `:r :is :ok` the base engine derives.
+    const SELF_NAMING_ROW: &str = "Iri(\"http://ex/r\") Iri(\"http://ex/is\") Iri(\"http://ex/ok\")";
 
     /// Every `:derived` row of a query run, as `subject object` debug strings, sorted — so
     /// the comparison is of the derived facts as a SET, not of the projection's row order.

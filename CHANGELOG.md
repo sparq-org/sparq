@@ -484,7 +484,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry that would be one too many fails the run with a cut; a `(rule, conclusion)` site is
   registered only once its conclusion unifies with the goal, so the sites a search rejects
   cost nothing, and the DEFAULT `max_join_rows` is the unbounded sentinel, so a
-  default-limits run is never refused for it. Three
+  default-limits run is never refused for it, and an evaluation with no `<=` rule in it
+  registers nothing at all, since no name it could mint would ever rename a variable. The
+  resolution that identifies a goal leaves a variable it is already inside the expansion of
+  as it is — a formula bound to `?x` may name `?x` itself, and that occurrence is the
+  formula's own — so a self-naming formula resolves to a finite term instead of being
+  refused; a goal the resolution does refuse (its depth or its term size) now FAILS the run
+  with that reason, where it used to come back as an empty proof that read as "not
+  provable"; and a site's fingerprint is checked against the run's table before it renames
+  anything, since a fold already held by another key renames the conclusion into names the
+  inherited bindings hold, which fails unification and would otherwise skip the check
+  entirely. Three
   consequences: a fact carrying
   a renamed variable has a different identity than before, so regenerate stored `sparq-prov`
   IRIs for such facts; proofs of different goals keep the distinct values they had, including

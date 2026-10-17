@@ -811,12 +811,21 @@ pub(crate) fn substitute_deep(t: &Term, b: &super::Binding, run: &Truncation) ->
 /// binding. Naming both with one identity merges their answers and loses a row
 /// (GH #6844).
 ///
+/// A variable whose expansion this is already INSIDE is left as it is: a formula bound to
+/// `?x` may itself name `?x` (`:s :p { ?x :q ?x }`, where the query binds `?x` to that
+/// formula), and that occurrence is the formula's OWN name, not the caller's binding of
+/// it. Resolving it would walk back into the same formula at every occurrence, round and
+/// round until the depth room ran out, which refused the goal and dropped the answer
+/// (GH #6844 review round 5). An occurs check on the walk stack stops that at the first
+/// re-entry, and it terminates for every binding: there are finitely many names, so an
+/// endless walk would have to expand one of them twice.
+///
 /// `None`, with the cut recorded, past the run's term allowance: its depth limit bounds
 /// the levels this recurses (as [`generated`] bounds what evaluation keeps) and each TERM
 /// it builds is charged against its size limit ([`substituted_refused`]), which is a
 /// per-term limit, so the three terms of an atom are counted apart as [`substitute`]
-/// counts them. Those are also what stops a binding chain that walks back into itself: it
-/// is refused, not followed forever.
+/// counts them. A goal that has no identity cannot be named, so `backward_prove` fails
+/// the run on it rather than return an empty proof, which would read as "not provable".
 pub(crate) fn walked_atom(
     g: &[Term; 3],
     b: &super::Binding,
@@ -824,21 +833,27 @@ pub(crate) fn walked_atom(
 ) -> Option<[Term; 3]> {
     let room = run.term_depth.get();
     // One byte counter PER TERM: `max_term_bytes` bounds one term, so three terms that are
-    // each admissible on their own must not refuse the atom by their sum.
-    let walk_term = |t: &Term| walked(t, b, run, room, &mut 0usize);
+    // each admissible on their own must not refuse the atom by their sum. The occurs-check
+    // stack is per term too: it holds the variables THIS term's walk is inside.
+    let walk_term = |t: &Term| walked(t, b, run, room, &mut 0usize, &mut Vec::new());
     Some([walk_term(&g[0])?, walk_term(&g[1])?, walk_term(&g[2])?])
 }
 
 /// One term of [`walked_atom`], `room` levels of nesting and `spent` bytes of the atom's
-/// allowance in. Private: callers go through [`walked_atom`].
+/// allowance in, with `open` naming the variables whose expansion this walk is inside.
+/// Private: callers go through [`walked_atom`].
 fn walked(
     t: &Term,
     b: &super::Binding,
     run: &Truncation,
     room: usize,
     spent: &mut usize,
+    open: &mut Vec<String>,
 ) -> Option<Term> {
-    let resolved = super::walk(t, b);
+    // The occurs check: a variable this walk is already inside the expansion of is the
+    // formula's own name and stays as it is.
+    let own = matches!(t, Term::Var(v) if open.iter().any(|o| o == v));
+    let resolved = if own { t.clone() } else { super::walk(t, b) };
     let compound = matches!(resolved, Term::List(_) | Term::Triple(_) | Term::Formula(_));
     // A compound is charged for its own node here and for its members as they resolve; a
     // leaf is charged for all of itself at once.
@@ -856,27 +871,54 @@ fn walked(
     if room == 0 {
         return settle(run, Bounded::cut(None, TERM_DEPTH_CUT));
     }
-    let inner = room - 1;
+    // Descending into the value of a variable: that variable is OPEN for the walk below,
+    // so an occurrence of it inside its own value is left alone by the check above. Popped
+    // after, and a refusal below abandons the whole atom, so the stack is never read again.
+    let expanded = match t {
+        Term::Var(v) if !own => {
+            open.push(v.clone());
+            true
+        }
+        _ => false,
+    };
+    let out = walked_members(resolved, b, run, room - 1, spent, open);
+    if expanded {
+        open.pop();
+    }
+    out
+}
+
+/// The members of compound `resolved`, each walked with `inner` levels of room left: the
+/// descending half of [`walked`], split out so its caller can pop the occurs-check stack
+/// on every path out of it.
+fn walked_members(
+    resolved: Term,
+    b: &super::Binding,
+    run: &Truncation,
+    inner: usize,
+    spent: &mut usize,
+    open: &mut Vec<String>,
+) -> Option<Term> {
     Some(match resolved {
         Term::List(ms) => {
             let mut out = Vec::with_capacity(ms.len());
             for m in &ms {
-                out.push(walked(m, b, run, inner, spent)?);
+                out.push(walked(m, b, run, inner, spent, open)?);
             }
             Term::List(out)
         }
         Term::Triple(tr) => Term::Triple(Box::new([
-            walked(&tr[0], b, run, inner, spent)?,
-            walked(&tr[1], b, run, inner, spent)?,
-            walked(&tr[2], b, run, inner, spent)?,
+            walked(&tr[0], b, run, inner, spent, open)?,
+            walked(&tr[1], b, run, inner, spent, open)?,
+            walked(&tr[2], b, run, inner, spent, open)?,
         ])),
         Term::Formula(ts) => {
             let mut out = Vec::with_capacity(ts.len());
             for r in &ts {
                 out.push([
-                    walked(&r[0], b, run, inner, spent)?,
-                    walked(&r[1], b, run, inner, spent)?,
-                    walked(&r[2], b, run, inner, spent)?,
+                    walked(&r[0], b, run, inner, spent, open)?,
+                    walked(&r[1], b, run, inner, spent, open)?,
+                    walked(&r[2], b, run, inner, spent, open)?,
                 ]);
             }
             Term::Formula(out)
@@ -2165,9 +2207,9 @@ mod tests {
 
     /// #6844: `walked_atom` resolves every variable of a goal to the END of its chain,
     /// inside lists and quoted triples, keeps a quoted formula as the value it is, and
-    /// refuses a chain that walks back into itself instead of following it forever.
+    /// stops a chain that walks back into itself instead of following it forever.
     #[test]
-    fn walked_atom_resolves_chains_and_refuses_a_cyclic_one() {
+    fn walked_atom_resolves_chains_and_stops_a_cyclic_one() {
         use super::super::{Binding, Term};
         let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
         let var = |s: &str| Term::Var(s.to_string());
@@ -2205,13 +2247,18 @@ mod tests {
         assert_eq!(substitute(&goal[0], &b, &run), Some(apply(&goal[0], &b)));
         assert_ne!(apply(&goal[0], &b), walked[0], "one binding is not the whole chain");
 
+        // A chain that walks back into itself stops at the re-entry (GH #6844 round 5): the
+        // occurs check leaves the second `?x` as the variable it is, so the walk is finite
+        // and the goal still HAS an identity instead of being refused for its depth.
         let mut cyclic = Binding::default();
         cyclic.insert("x".into(), Term::List(vec![var("x")]));
+        let cyclic_run = Truncation::top_level();
         assert_eq!(
-            walked_atom(&[var("x"), iri("has"), iri("v")], &cyclic, &Truncation::top_level()),
-            None,
-            "a cycle is refused, not followed"
+            walked_atom(&[var("x"), iri("has"), iri("v")], &cyclic, &cyclic_run),
+            Some([Term::List(vec![var("x")]), iri("has"), iri("v")]),
+            "a cycle is stopped at its re-entry, not followed and not refused"
         );
+        assert_eq!(cyclic_run.get(), None, "and the run is not cut short by it");
     }
 
     /// #6844 round 4: only a compound takes a level off the walker's room, so a goal

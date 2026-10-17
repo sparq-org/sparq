@@ -217,7 +217,9 @@ prefix is the fingerprint of the derivation that standardized that rule applicat
 scope (a nested
 closure's own canonical key included, folded width-independently) — instead
 of counting applications in evaluation order, so a fact carrying one has a stable IRI too, and
-two proofs of different goals keep the distinct IRIs they had (GH #6844). It is not canonical across reordered isomorphic documents (anonymous `_b<n>`
+two proofs of different goals keep the distinct IRIs they had (GH #6844) — a variable the goal's
+resolution is already inside the expansion of stays as it is, so a formula that names itself
+resolves to a finite term rather than refusing the proof. It is not canonical across reordered isomorphic documents (anonymous `_b<n>`
 parser labels follow arrival order, formula rows keep source order, a label depends on its
 round's other firings), and it assumes stable
 binding values and firing sets: a `log:collectAllIn` list can still carry traversal
