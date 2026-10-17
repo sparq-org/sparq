@@ -3058,7 +3058,6 @@ fn prefilter_manifest_structure_impl(
         bind_joins(manifest, &methods)?;
     }
 
-
     Ok(Prefiltered { required, methods })
 }
 
