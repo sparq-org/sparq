@@ -349,6 +349,10 @@ fn wac_small_pod_differential() {
     for r in ["", "docs/", "docs/a", "docs/b"] {
         base.insert([res(r), solidx("isResource"), b_true()]);
     }
+    // the loader-synthesized immediate parents (sparq-solid `loader::parent_iri`)
+    for (r, p) in [("docs/", ""), ("docs/a", "docs/"), ("docs/b", "docs/")] {
+        base.insert([res(r), solidx("parent"), res(p)]);
+    }
     base.insert([res(""), solidx("ownAcl"), res(".acl")]);
     let auth = iri("https://pod.ex/.acl#owner");
     base.insert([auth, ty.clone(), acl("Authorization")]);
