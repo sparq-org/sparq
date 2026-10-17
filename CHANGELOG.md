@@ -168,8 +168,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `bind_scan_pattern_methods` adds two named refusals — `CheckError::ScanPatternMethodsMixed`
   (a `K > 1` scan whose commitments select different encoders: one pattern constant cannot match
   two encodings) and `CheckError::ScanPatternMethodNotEncodable`. `verifier::bind_fragment_scans`
-  takes the authenticated-method map as a second argument. The value-lane and V2-scan verifier
-  gates stay CLOSED: nothing becomes acceptable, and every change here only adds refusals.
+  takes the authenticated-method map as a second argument. **Gate order:** the attestation gate
+  that authenticates the methods runs AHEAD of the stage-1 query-binding gates, and
+  `bind_scan_pattern_methods` immediately after it, so every comparison site reads an
+  authenticated map rather than comparing string-canonically whatever the attested method was;
+  in the `extended-fragment` regime `verify_fragment_manifest` runs it before
+  `bind_fragment_scans`, which is that regime's only scan-slot binding. The gate SET is
+  unchanged and every gate still runs, so nothing that was refused becomes acceptable; what
+  changes is which refusal is reported first for a manifest that fails both an attestation check
+  and a structural check, and that the pattern gates now refuse strictly more. The value-lane and
+  V2-scan verifier gates stay CLOSED: nothing becomes acceptable, and every change here only
+  adds refusals.
   **BEHAVIOUR CHANGE in a DEFAULT build:** a scan whose authenticated method is `DualLeafV1` or
   `DualLeafV2` is now refused when the `dual-leaf` feature is off, because the host dual-leaf
   encoders are behind that feature and the verifier must not re-check such a scan's pattern
