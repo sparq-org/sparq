@@ -64,6 +64,30 @@ fn statically_large_unroll_is_rejected() {
     }
 }
 
+// Hop counts are capped before the projection: an upper bound past MAX_HOP_COUNT is
+// refused with a controlled Protocol error rather than running `project_bounded`,
+// whose own loop count grows with the bound. Finishing the test is the no-hang
+// witness; nothing here asserts a timing.
+#[test]
+fn upper_bound_past_the_hop_cap_is_rejected() {
+    for max in [MAX_HOP_COUNT + 1, 262_144, usize::MAX] {
+        let req = HiddenPathRequest::range("p", 1, max);
+        let err = plan_hidden_bounded_path(&req, 4).unwrap_err();
+        match err {
+            MpcError::Protocol(m) => assert!(
+                m.contains("MAX_HOP_COUNT"),
+                "max={}: rejection must cite the hop cap: {}",
+                max,
+                m
+            ),
+            other => panic!("max={}: expected Protocol refusal, got {:?}", max, other),
+        }
+    }
+    // At the cap the hop guard passes; |E| = 1 keeps the projection inside the
+    // tuple cap, so the plan is admitted.
+    assert!(plan_hidden_bounded_path(&HiddenPathRequest::range("p", 1, MAX_HOP_COUNT), 1).is_ok());
+}
+
 #[test]
 fn alternation_arity_blowup_is_rejected() {
     // A 6-way alternation at k = 8 over |E| = 6: Σ_ℓ (6·6)^ℓ overshoots the cap.
@@ -149,7 +173,7 @@ fn comm_counter_counts_equalities_reductions_and_output() {
     // (p){1,3} over |E| = 3, B = 4 slots.
     let req = HiddenPathRequest::range("p", 1, 3);
     let plan = plan_hidden_bounded_path(&req, 3).unwrap();
-    let c = plan.comm_counter(5, 4);
+    let c = plan.comm_counter(5, 4).unwrap();
     // The k×-join secure equalities (63) each contribute one mult + one open; the
     // reduction chain folds another `secure_equalities` mults; the B=4 output adds
     // 4 select mults + 4 opens + the shuffle's switch mults. So multiplications and
@@ -172,8 +196,8 @@ fn comm_counter_counts_equalities_reductions_and_output() {
 fn comm_counter_is_deterministic() {
     let req = HiddenPathRequest::range("p", 1, 3);
     let plan = plan_hidden_bounded_path(&req, 3).unwrap();
-    let a = plan.comm_counter(5, 4);
-    let b = plan.comm_counter(5, 4);
+    let a = plan.comm_counter(5, 4).unwrap();
+    let b = plan.comm_counter(5, 4).unwrap();
     assert_eq!(a.multiplications, b.multiplications);
     assert_eq!(a.total_bytes(), b.total_bytes());
 }
@@ -223,4 +247,32 @@ fn bounded_path_correctness_gate_passes() {
     let k = BOUNDED_PATH_K;
     let expected: usize = (0..=4usize).map(|i| (i + k).min(4) - i).sum();
     assert_eq!(pairs, expected);
+}
+
+/// The cost model's own output bound is capped. `comm_counter` iterates `B` times
+/// and builds a real Waksman network over `B` slots, so an unchecked `B` would do
+/// work and allocate in proportion to a caller-chosen number — and it would be
+/// modelling a run the output stage itself refuses.
+#[test]
+fn comm_counter_refuses_an_over_cap_bound() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+    let req = HiddenPathRequest::range("p", 1, 3);
+    let plan = plan_hidden_bounded_path(&req, 3).unwrap();
+    // `MAX_OUTPUT_BOUND + 1` first on purpose: with the cap removed, that case
+    // fails in a moment, whereas `usize::MAX` would instead build a `usize::MAX`
+    // wide modelled network and never finish. A mutant should go red, not hang.
+    for bound in [MAX_OUTPUT_BOUND + 1, usize::MAX] {
+        match plan.comm_counter(5, bound) {
+            Err(MpcError::Protocol(m)) => {
+                assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m)
+            }
+            other => panic!(
+                "B={}: an over-cap bound must be a Protocol refusal, got {:?}",
+                bound,
+                other.map(|c| c.multiplications)
+            ),
+        }
+    }
+    // A bound inside the cap is still modelled.
+    assert!(plan.comm_counter(5, 4).is_ok());
 }

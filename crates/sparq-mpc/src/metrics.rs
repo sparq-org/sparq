@@ -156,12 +156,19 @@ impl CommCounter {
         // Per equality: 3 deals (key_L, key_R, mask r) + 1 mult + 1 open. Each
         // deal sends `parties` shares; opens/mults are 1 logical op each. Fold the
         // whole batch in arithmetically (== `k` × the per-op increments above).
-        self.field_elements_shared += 3 * k * self.parties as u64;
-        self.multiplications += k;
-        self.mult_rounds += k;
-        self.batchable_ops += k;
-        self.field_elements_opened += k;
-        self.open_rounds += k;
+        //
+        // Saturating, not wrapping: `k` is a candidate count the caller supplies and
+        // `3 * k * parties` can exceed `u64` at an absurd `k`. A counter that wrapped
+        // would report a SMALLER cost than the real one, which is the one direction a
+        // cost model must never round. Saturation pins it at the maximum instead.
+        self.field_elements_shared = self
+            .field_elements_shared
+            .saturating_add(k.saturating_mul(3).saturating_mul(self.parties as u64));
+        self.multiplications = self.multiplications.saturating_add(k);
+        self.mult_rounds = self.mult_rounds.saturating_add(k);
+        self.batchable_ops = self.batchable_ops.saturating_add(k);
+        self.field_elements_opened = self.field_elements_opened.saturating_add(k);
+        self.open_rounds = self.open_rounds.saturating_add(k);
     }
 
     /// Fold in the modelled cost of one oblivious **shuffle** (from the crate's own
@@ -254,6 +261,32 @@ impl CommCounter {
 
 #[cfg(test)]
 mod tests {
+    /// The batch fold is saturating, not wrapping. `k` is a candidate count the
+    /// caller supplies, and `3 * k * parties` can exceed `u64`; a wrapped counter
+    /// would report a SMALLER cost than the real one, which is the one direction a
+    /// cost model must never round.
+    #[test]
+    fn an_enormous_equality_batch_saturates_instead_of_wrapping() {
+        use super::*;
+        let mut c = CommCounter::new(5);
+        c.record_independent_equalities(u64::MAX);
+        assert_eq!(c.field_elements_shared, u64::MAX, "must pin at the maximum");
+        assert_eq!(c.multiplications, u64::MAX);
+        assert_eq!(c.open_rounds, u64::MAX);
+        // A second fold cannot bring it back down.
+        c.record_independent_equalities(u64::MAX);
+        assert_eq!(c.field_elements_shared, u64::MAX);
+        assert_eq!(c.multiplications, u64::MAX);
+
+        // And an ordinary batch is still exact: 3 deals x parties shares, one
+        // mult/open each, so the closed form must equal the per-op increments.
+        let mut small = CommCounter::new(5);
+        small.record_independent_equalities(4);
+        assert_eq!(small.field_elements_shared, 3 * 4 * 5);
+        assert_eq!(small.multiplications, 4);
+        assert_eq!(small.open_rounds, 4);
+    }
+
     use super::*;
     use crate::field::Fp;
 
