@@ -597,8 +597,14 @@ impl PrssRandomness {
                 depth_rounds: rounds,
                 // Every element of every entry comes back as a fresh sharing: the
                 // last resharing round masks it with randomness from each group
-                // member's own private key.
-                fresh_sharings: m.saturating_mul(elements),
+                // member's own private key. At `t = 0` a resharing draws no
+                // masking coefficient, so the share vectors are only reordered
+                // and nothing is counted, matching the dealer path.
+                fresh_sharings: if self.t == 0 {
+                    0
+                } else {
+                    m.saturating_mul(elements)
+                },
             },
         ))
     }
@@ -2169,6 +2175,22 @@ mod tests {
                 "seed {seed}: an output element carried an input element's coalition shares"
             );
         }
+    }
+
+    #[test]
+    fn at_threshold_zero_the_prss_shuffle_counts_no_fresh_sharings() {
+        // n = 2 gives t = 0: a resharing draws no masking coefficient, so the
+        // shuffle only reorders share vectors and must not report them as fresh.
+        let n = 2;
+        let backend = ShamirBackend::new_seeded(n, 0x0E1).unwrap();
+        assert_eq!(backend.threshold(), 0);
+        let mut dealer = backend.dealer();
+        let col: crate::oblivious::SecretColumn =
+            (0..4u64).map(|k| dealer.share(Fp::new(2000 + k))).collect();
+        let mut source = PrssRandomness::with_seeded_setup(n, 0x0E2).unwrap();
+        let (after, cost) = source.oblivious_shuffle(col).unwrap();
+        assert_eq!(after.len(), 4);
+        assert_eq!(cost.fresh_sharings, 0, "t = 0 refreshes nothing");
     }
 
     // ---- The shuffle's SECURITY properties, each pinned against a weakening
