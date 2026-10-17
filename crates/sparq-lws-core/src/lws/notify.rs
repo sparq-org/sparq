@@ -1689,8 +1689,9 @@ const EXPIRY_SWEEP_EVERY: Duration = Duration::from_secs(2);
 const SCANNED_PER_SWEEP: usize = 256;
 
 /// How long one of the sweeper's removals may take before it is given up, to be tried again:
-/// longer than the few store calls a removal makes can take while the store is healthy (an
-/// HTTP index allows each call 30 seconds), so only a store that stalls cuts one short.
+/// longer than the store calls a removal makes take while the store is healthy (an HTTP index
+/// allows each call 30 seconds). A degraded store may still cut one short, above all one whose
+/// delete's outcome is unknown and must be settled; it is tried again after its wait.
 const SWEEP_REMOVAL_DEADLINE: Duration = Duration::from_secs(120);
 
 /// How long a subscription whose removal failed, was given up or panicked waits before it is

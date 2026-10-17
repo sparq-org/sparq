@@ -325,8 +325,8 @@ its own records'. Everyone else's are removed by an expiry sweeper that runs eve
 (and when a create goes through) for as long as the server does, whether any create is admitted
 or refused. Each sweep looks at most at 256 subscriptions, from where the last one stopped, and
 starts at most 16 removals at once, in places of their own that request load cannot take; each
-removal is given up after 2 minutes, longer than a healthy store's calls take (one that never
-completes in the store holds up no other), and one that fails, is given up or (in a build that
+removal is given up after 2 minutes, longer than a healthy store's calls take (a degraded
+store may still cut one short; one that never completes holds up no other), and one that fails, is given up or (in a build that
 unwinds) panics is tried again after a wait that doubles from 10
 seconds to 10 minutes; a removal whose delete the store leaves unknown is settled within that
 same deadline, never handed on, so its place comes back with it. The sweeper stops, aborting
