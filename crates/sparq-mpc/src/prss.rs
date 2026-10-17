@@ -2077,16 +2077,20 @@ mod tests {
         );
     }
 
-    /// The dealer's switch-network shuffle routes whole entries and never
-    /// interpolates one, so it stays degree-AGNOSTIC: the same mixed-degree packed
-    /// column the PRSS source refuses must still go through it, as a permutation
-    /// of the input entries' VALUES. The shares themselves come back fresh — the
-    /// dealer re-randomises every output element — so the property is asserted on
-    /// the reconstructed values, element by element, and the share vectors are
-    /// asserted to have CHANGED. (The output stage's seeded pins in
-    /// `oblivious_join` cover the same property end to end.)
+    /// The dealer's privacy shuffle refuses the SAME mixed-degree packed column the
+    /// PRSS source refuses, and refuses it before any draw.
+    ///
+    /// The dealer path used to accept it, because a switch only moves whole entries
+    /// and never interpolates one. It cannot accept it any more: the output is
+    /// re-randomised with a degree-`t` zero-sharing, which refreshes the
+    /// coefficients `x^1 .. x^t` and leaves anything above `x^t` as the input had
+    /// it, so a degree-`2t` element would come back carrying a value-independent
+    /// fingerprint of its input element. Refusing is the fail-closed answer; a
+    /// caller with a product sharing degree-reduces it first, which the oblivious
+    /// output stage does for every selected element. Both sources therefore now
+    /// agree on what they accept.
     #[test]
-    fn the_dealer_shuffle_still_accepts_the_mixed_degree_layout() {
+    fn the_dealer_shuffle_refuses_the_mixed_degree_layout() {
         let n = 5;
         let backend = ShamirBackend::new_seeded(n, 0x0DA).unwrap();
         let rows = vec![
@@ -2096,41 +2100,39 @@ mod tests {
             (0, vec![41, 42]),
         ];
         let col = mixed_degree_column(&backend, &rows);
-        let t = backend.threshold();
-        // Each entry's VALUES: the tag element opens at degree 2t, the limbs at t.
-        let values = |e: &[crate::shamir::Share]| -> Vec<u64> {
-            let mut v = vec![crate::shamir::reconstruct_degree(&e[..n], 2 * t)
-                .unwrap()
-                .value()];
-            for el in e[n..].chunks(n) {
-                v.push(crate::shamir::reconstruct_degree(el, t).unwrap().value());
-            }
-            v
-        };
-        let before_values: BTreeSet<Vec<u64>> = col.iter().map(|e| values(e)).collect();
-        let before_shares: BTreeSet<Vec<u64>> = col
-            .iter()
-            .map(|e| e.iter().map(|sh| sh.y.value()).collect())
-            .collect();
         let mut dealer = backend.dealer();
-        let (shuffled, cost) = dealer.oblivious_shuffle(col).unwrap();
-        assert_eq!(cost.items, rows.len());
-        // A switch network really is routed here, unlike the PRSS construction.
-        assert!(cost.switches > 0);
-        let after_values: BTreeSet<Vec<u64>> = shuffled.iter().map(|e| values(e)).collect();
+        // A witness draw taken BEFORE and AFTER the refused call: a refusal must
+        // not consume a field element, or the keystream would depend on a rejected
+        // input.
+        let mut probe = backend.dealer();
+        let expected_next = probe.draw_fp();
+        match dealer.oblivious_shuffle(col) {
+            Err(MpcError::Protocol(m)) => assert!(
+                m.contains("not a consistent") && m.contains("degree"),
+                "wrong refusal: {m}"
+            ),
+            other => panic!("the dealer path must fail closed, got {other:?}"),
+        }
         assert_eq!(
-            before_values, after_values,
-            "the switch-network shuffle must carry mixed-degree entries through as a \
-             permutation of their values"
+            dealer.draw_fp(),
+            expected_next,
+            "the refused call must have drawn nothing"
         );
-        let after_shares: BTreeSet<Vec<u64>> = shuffled
+        // The same column goes through once every element is degree-`t`: a plain
+        // degree-`t` column of the same shape is accepted.
+        let mut ok_dealer = backend.dealer();
+        let plain: crate::oblivious::SecretColumn = rows
             .iter()
-            .map(|e| e.iter().map(|sh| sh.y.value()).collect())
+            .map(|(tag, limbs)| {
+                let mut e = ok_dealer.share(Fp::new(*tag));
+                for l in limbs {
+                    e.extend(ok_dealer.share(Fp::new(*l)));
+                }
+                e
+            })
             .collect();
-        assert!(
-            after_shares.is_disjoint(&before_shares),
-            "every output entry must be a fresh sharing, not an input share vector"
-        );
+        let (shuffled, cost) = ok_dealer.oblivious_shuffle(plain).unwrap();
+        assert_eq!(shuffled.len(), rows.len());
         assert_eq!(cost.fresh_sharings, rows.len() * 3);
     }
 

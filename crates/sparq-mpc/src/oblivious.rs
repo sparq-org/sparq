@@ -723,12 +723,45 @@ fn ceil_log2(n: usize) -> usize {
 /// The random permutation is drawn from the `dealer`'s masking RNG (a CSPRNG in
 /// production — sq-1vt; the seedable PRNG only under the test feature). The
 /// cleartext permutation never leaves the routing layer.
+///
+/// ## Every output element is a FRESH sharing
+///
+/// A switch moves a share vector verbatim, so routing alone would hand back the
+/// input element's own share values at a new position and a party holding its own
+/// share of each input element could pair the two up by value — which is the
+/// permutation. So after routing, [`rerandomise_sharings`] adds an independent
+/// degree-`t` zero-sharing to EVERY element of EVERY entry (per element, not per
+/// entry): the reconstructed values and the degree are unchanged, the share
+/// vectors are independent of the input's. [`ShuffleCost::fresh_sharings`] reports
+/// how many elements were refreshed.
+///
+/// At `t = 0` there is nothing to refresh and nothing to hide — one party holds
+/// the secret in the clear — so `fresh_sharings` is `0` and this call offers no
+/// confidentiality at all.
+///
+/// ## Two refusals, both before any draw
+///
+/// Fail-closed: both run before the permutation is sampled, so a refused call
+/// consumes no randomness (see `require_shufflable_column`).
+///
+/// - An entry whose width is not a whole number of `n`-party sharings is refused:
+///   the elements could not be told apart to mask them separately.
+/// - An element that is not a consistent degree-`<= t` sharing is refused. The
+///   zero-sharing only refreshes the coefficients up to `x^t`, so a higher-degree
+///   element would come back only partly fresh; degree-reduce it first
+///   ([`crate::shamir::degree_reduce_through`]). This matches what
+///   [`crate::prss::PrssRandomness`] already required.
 pub fn shuffle(
     dealer: &mut ShamirDealer,
     mut col: SecretColumn,
 ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
-    let n = col.len();
-    let net = WaksmanNetwork::new(n);
+    let items = col.len();
+    let net = WaksmanNetwork::new(items);
+    // Fail closed BEFORE any draw: this construction can only hand back fresh
+    // sharings for a degree-`<= t` column (see `require_shufflable_column`), and a
+    // refused call must not consume a single field element of the keystream.
+    require_shufflable_column(&col, dealer.parties(), dealer.threshold())?;
+    let n = items;
     if n == 0 {
         return Ok((col, ShuffleCost::model(n, net.switch_count())));
     }
@@ -776,28 +809,40 @@ pub fn shuffle(
 /// non-canonical evaluation points is re-randomised correctly too (the caller's
 /// own shape checks decide whether such a column is acceptable at all).
 ///
+/// ## `t = 0` re-randomises nothing, and is counted as nothing
+///
+/// A degree-`0` zero-sharing IS zero: there are no coefficients to draw, so the
+/// shares cannot be changed. The return value is therefore `0`, not the element
+/// count — nothing was made fresh, and a cost report must not claim otherwise. A
+/// `t = 0` configuration gives no confidentiality in the first place (each party's
+/// share is the secret), so there is nothing for a shuffle to hide; it is accepted
+/// for shape-level testing only.
+///
 /// It is public because a caller that routes the network itself
 /// ([`sample_random_permutation`] + [`WaksmanNetwork::apply`]) must apply the same
-/// step before handing the routed column on. [`crate::transport`]'s shuffle routes
-/// its own network but RECONSTRUCTS the column in the same call and returns the
-/// opened values, so no output sharing leaves it and it does not call this today.
+/// step before handing the routed column on.
+///
+/// [`crate::transport`]'s shuffle routes its own network and does NOT call this,
+/// for a different reason: that tier sends each switch's endpoints and its control
+/// bit in the clear to every party and each party keeps the column it swapped, so
+/// the permutation is in every party's view however the sharings are handled
+/// afterwards. Re-randomising the result would not change that, so it is
+/// documented as a public-permutation measurement harness and its entry point
+/// requires an explicit acknowledgement
+/// ([`crate::transport::PublicPermutation`]).
 pub fn rerandomise_sharings(
     dealer: &mut ShamirDealer,
     col: &mut SecretColumn,
 ) -> Result<usize, MpcError> {
     let n = dealer.parties();
     let t = dealer.threshold();
+    require_shufflable_column(col, n, t)?;
+    if t == 0 {
+        // A degree-0 zero-sharing is zero: nothing is refreshed, so report nothing.
+        return Ok(0);
+    }
     let mut count = 0usize;
-    for (j, entry) in col.iter_mut().enumerate() {
-        if n == 0 || entry.len() % n != 0 {
-            return Err(MpcError::Protocol(format!(
-                "rerandomise_sharings: entry {} is {} shares wide, which is not a whole \
-                 number of {}-party sharings; cannot re-randomise element by element",
-                j,
-                entry.len(),
-                n
-            )));
-        }
+    for entry in col.iter_mut() {
         for element in entry.chunks_mut(n) {
             // A fresh degree-`t` polynomial with a ZERO constant term: `t` uniform
             // coefficients, independent of every other element's.
@@ -816,6 +861,75 @@ pub fn rerandomise_sharings(
         }
     }
     Ok(count)
+}
+
+/// Fail closed unless every element of every entry is a consistent degree-`<= t`
+/// sharing on a whole number of `n`-party sharings — the precondition
+/// [`rerandomise_sharings`] and therefore [`shuffle`] need.
+///
+/// ## Why the degree is required, not merely assumed
+///
+/// The re-randomisation adds a degree-`t` ZERO-sharing, which refreshes the
+/// coefficients `x^1 .. x^t` and nothing above them. Handed a degree-`2t` sharing
+/// it would leave the coefficients `x^(t+1) .. x^2t` exactly as the input had
+/// them, so the output element would still carry a value-independent fingerprint
+/// of its input element and a coalition could pair the two up by it. Rather than
+/// return a column that is only partly fresh, the dealer path refuses one above
+/// degree `t` — the same precondition [`crate::prss::PrssRandomness`] enforces for
+/// its own construction, so both sources now agree on what they accept. A caller
+/// with a product sharing must degree-reduce it first
+/// ([`crate::shamir::degree_reduce_through`]), which the oblivious output stage
+/// does for every selected element.
+///
+/// The check interpolates each element from its own first `t + 1` points and
+/// requires every remaining point to lie on that polynomial: exact on the given
+/// shares, and it works on non-canonical evaluation points too. With `n <= t + 1`
+/// there is no redundant point, so every point set lies on SOME degree-`t`
+/// polynomial and there is nothing to reject. Like the PRSS check it names the
+/// POSITION only: the two values compared are a share and a function of `t + 1`
+/// shares, so printing either would put secret-shared data in a log.
+fn require_shufflable_column(col: &SecretColumn, n: usize, t: usize) -> Result<(), MpcError> {
+    for (j, entry) in col.iter().enumerate() {
+        if n == 0 || entry.len() % n != 0 {
+            return Err(MpcError::Protocol(format!(
+                "oblivious shuffle: entry {} is {} shares wide, which is not a whole \
+                 number of {}-party sharings; cannot re-randomise element by element",
+                j,
+                entry.len(),
+                n
+            )));
+        }
+        if n <= t + 1 {
+            continue;
+        }
+        for (e, element) in entry.chunks(n).enumerate() {
+            let base: Vec<u64> = element[..t + 1].iter().map(|sh| sh.x).collect();
+            for sh in &element[t + 1..] {
+                let weights = crate::shamir::lagrange_weights_at(&base, Fp::new(sh.x));
+                let extrapolated = weights
+                    .iter()
+                    .zip(&element[..t + 1])
+                    .fold(Fp::zero(), |acc, (w, s)| acc.add(w.mul(s.y)));
+                if extrapolated != sh.y {
+                    return Err(MpcError::Protocol(format!(
+                        "oblivious shuffle: entry {} element {} is not a consistent \
+                         degree-<= t sharing (t = {}): its share at x = {} is off the \
+                         polynomial through the first {} points (share values withheld). \
+                         The output is re-randomised with a degree-t zero-sharing, which \
+                         cannot refresh the coefficients above x^t of a higher-degree \
+                         sharing, so such a column is refused rather than returned only \
+                         partly fresh - degree-reduce it first",
+                        j,
+                        e,
+                        t,
+                        sh.x,
+                        t + 1
+                    )));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Public wrapper over the private `random_permutation` sampler so the
@@ -1399,6 +1513,41 @@ mod tests {
         Some(out)
     }
 
+    /// At `t = 0` a degree-`0` zero-sharing is zero, so nothing can be refreshed:
+    /// the cost must report `0` fresh sharings rather than count elements it did
+    /// not change, and the share values come back exactly as they went in (merely
+    /// reordered). `n = 2` is the smallest configuration the public constructor
+    /// builds, and it fixes `t = ⌊(n-1)/2⌋ = 0`. Such a configuration offers no
+    /// confidentiality at all — each party's share IS the secret — which is why the
+    /// honest report matters: a non-zero count here would read as privacy work that
+    /// did not happen.
+    #[test]
+    fn at_threshold_zero_nothing_is_refreshed_and_nothing_is_counted() {
+        let b = ShamirBackend::new_seeded(2, 0x5300).unwrap();
+        assert_eq!(b.threshold(), 0);
+        let mut dealer = b.dealer();
+        let vals: Vec<u64> = (1..=4u64).map(|v| v * 10).collect();
+        let before = share_col(&mut dealer, &vals);
+        let (after, cost) = shuffle(&mut dealer, before.clone()).unwrap();
+        assert_eq!(
+            cost.fresh_sharings, 0,
+            "a degree-0 zero-sharing refreshes nothing, so nothing may be counted"
+        );
+        let sorted = |col: &SecretColumn| {
+            let mut v: Vec<Vec<u64>> = col
+                .iter()
+                .map(|e| e.iter().map(|s| s.y.value()).collect())
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(
+            sorted(&after),
+            sorted(&before),
+            "at t = 0 the share vectors can only have been reordered"
+        );
+    }
+
     /// Route and apply the network WITHOUT re-randomising — the verbatim
     /// share-vector move, as the POSITIVE CONTROL for the linkability test below.
     /// This is a test-local reimplementation on purpose: it is the behaviour the
@@ -1425,6 +1574,14 @@ mod tests {
     /// Against [`shuffle`] it recovers nothing in any trial — not one output
     /// position's coalition shares coincide with any input position's — so the
     /// coalition is left guessing among the `m` positions.
+    ///
+    /// Equality is not the only value-level move, so the second half closes the
+    /// obvious generalisation: the coalition takes the DIFFERENCE of every
+    /// `(output, input)` pair at its own points. A mask that is not drawn per
+    /// element — one constant mask for the column, or one per run — leaves the `m`
+    /// true pairs sharing a single difference vector, which hands the coalition the
+    /// permutation just as equality would. So no difference vector may repeat
+    /// across the `m · m` pairs.
     #[test]
     fn a_t_coalition_cannot_pair_output_elements_with_input_elements() {
         let (n, m) = (5usize, 6usize);
@@ -1476,6 +1633,26 @@ mod tests {
                     !bv.contains(a),
                     "seed {seed}: output {k}'s coalition shares are an input element's"
                 );
+            }
+            // And nothing pairs up by DIFFERENCE either: a mask that is not per
+            // element would make the m true pairs share one difference vector.
+            let mut seen: Vec<(Vec<u64>, usize, usize)> = Vec::new();
+            for (k, a) in av.iter().enumerate() {
+                for (i, b) in bv.iter().enumerate() {
+                    let diff: Vec<u64> = a
+                        .iter()
+                        .zip(b)
+                        .map(|(x, y)| Fp::new(*x).sub(Fp::new(*y)).value())
+                        .collect();
+                    if let Some((_, pk, pi)) = seen.iter().find(|(d, _, _)| *d == diff) {
+                        panic!(
+                            "seed {}: pairs (out {}, in {}) and (out {}, in {}) share a \
+                             coalition difference vector — the mask is not per element",
+                            seed, pk, pi, k, i
+                        );
+                    }
+                    seen.push((diff, k, i));
+                }
             }
         }
     }
@@ -1631,6 +1808,145 @@ mod tests {
         assert_eq!(
             (wide.items, wide.switches, wide.depth_rounds),
             (base.items, base.switches, base.depth_rounds)
+        );
+    }
+
+    /// Interpolate a sharing's polynomial coefficients, low order first.
+    fn coeffs_of(shares: &[Share]) -> Vec<Fp> {
+        let mut coeffs = vec![Fp::zero(); shares.len()];
+        for (i, si) in shares.iter().enumerate() {
+            // The Lagrange basis polynomial for point `i`, expanded.
+            let mut num = vec![Fp::one()];
+            let mut den = Fp::one();
+            for (j, sj) in shares.iter().enumerate() {
+                if i == j {
+                    continue;
+                }
+                let mut next = vec![Fp::zero(); num.len() + 1];
+                for (k, c) in num.iter().enumerate() {
+                    next[k + 1] = next[k + 1].add(*c);
+                    next[k] = next[k].sub(c.mul(Fp::new(sj.x)));
+                }
+                num = next;
+                den = den.mul(Fp::new(si.x).sub(Fp::new(sj.x)));
+            }
+            let scale = si.y.mul(den.inv());
+            for (k, c) in num.iter().enumerate() {
+                coeffs[k] = coeffs[k].add(c.mul(scale));
+            }
+        }
+        coeffs
+    }
+
+    /// **Coefficient-level freshness.** Every coefficient above `x^0` of every
+    /// output sharing is fresh: across trials with the SAME input column, no
+    /// output sharing's non-constant coefficients ever coincide with an input
+    /// sharing's, and the set of non-constant coefficient vectors is different in
+    /// every trial. The constant terms — the values — are of course preserved.
+    ///
+    /// The POSITIVE CONTROL is the verbatim route-and-apply: there, every output
+    /// sharing's coefficient vector IS one of the input's, in every trial, which is
+    /// what the re-randomisation has to break.
+    #[test]
+    fn every_output_coefficient_above_the_constant_term_is_fresh() {
+        let n = 5usize;
+        let vals = [31u64, 32, 33, 34];
+        let nonconst = |col: &SecretColumn| -> std::collections::BTreeSet<Vec<u64>> {
+            col.iter()
+                .map(|e| coeffs_of(e)[1..].iter().map(|c| c.value()).collect())
+                .collect()
+        };
+
+        // Positive control: the verbatim move preserves every coefficient vector.
+        for seed in 0..8u64 {
+            let b = ShamirBackend::new_seeded(n, 0x5800 + seed).unwrap();
+            let mut dealer = b.dealer();
+            let before = share_col(&mut dealer, &vals);
+            let (after, _) = verbatim_shuffle(&mut dealer, before.clone());
+            assert_eq!(
+                nonconst(&after),
+                nonconst(&before),
+                "seed {seed}: the control must carry the coefficients through"
+            );
+        }
+
+        // The shipped shuffle: no coefficient vector survives, and the set of them
+        // differs in every trial.
+        let mut seen: std::collections::BTreeSet<Vec<Vec<u64>>> = std::collections::BTreeSet::new();
+        for seed in 0..8u64 {
+            let b = ShamirBackend::new_seeded(n, 0x5900 + seed).unwrap();
+            let t = b.threshold();
+            let mut dealer = b.dealer();
+            let before = share_col(&mut dealer, &vals);
+            let (after, _) = shuffle(&mut dealer, before.clone()).unwrap();
+            let (bn, an) = (nonconst(&before), nonconst(&after));
+            assert!(
+                an.is_disjoint(&bn),
+                "seed {seed}: an output sharing kept an input sharing's coefficients"
+            );
+            // The values are untouched, and no coefficient above `x^t` appeared.
+            assert_eq!(
+                multiset(open_col(t, &after)),
+                multiset(vals.to_vec()),
+                "seed {seed}: values"
+            );
+            for (k, e) in after.iter().enumerate() {
+                for (d, c) in coeffs_of(e).iter().enumerate().skip(t + 1) {
+                    assert_eq!(
+                        *c,
+                        Fp::zero(),
+                        "seed {seed}, element {k}: coefficient of x^{d} must be zero"
+                    );
+                }
+            }
+            seen.insert(an.into_iter().collect());
+        }
+        assert_eq!(
+            seen.len(),
+            8,
+            "the output coefficients repeated across trials"
+        );
+    }
+
+    /// A column with an element above degree `t` is refused, and refused BEFORE any
+    /// draw — the re-randomisation cannot refresh the coefficients above `x^t`, so
+    /// returning such a column only partly fresh is not an option.
+    #[test]
+    fn a_higher_degree_element_is_refused_before_any_draw() {
+        let n = 5usize;
+        let b = ShamirBackend::new_seeded(n, 0x5A00).unwrap();
+        let t = b.threshold();
+        let mut dealer = b.dealer();
+        // A degree-`2t` product sharing, exactly what an un-reduced select yields.
+        let col: SecretColumn = (0..3u64)
+            .map(|k| {
+                let a = dealer.share(Fp::new(k + 1));
+                let c = dealer.share(Fp::new(k + 2));
+                crate::shamir::mul_shares_raw(&a, &c).unwrap()
+            })
+            .collect();
+        // The first element really is above degree `t`.
+        assert!(coeffs_of(&col[0])[t + 1..].iter().any(|c| *c != Fp::zero()));
+        let mut probe = b.dealer();
+        for _ in 0..3 {
+            // Advance the probe to the same point in the keystream the column
+            // construction above left `dealer` at: 3 x (2 sharings).
+            let _ = probe.share(Fp::zero());
+            let _ = probe.share(Fp::zero());
+        }
+        let expected_next = probe.draw_fp();
+        let err = shuffle(&mut dealer, col).unwrap_err();
+        match err {
+            MpcError::Protocol(m) => assert!(
+                m.contains("not a consistent") && m.contains("degree"),
+                "wrong refusal: {m}"
+            ),
+            other => panic!("must fail closed, got {other:?}"),
+        }
+        assert_eq!(
+            dealer.draw_fp(),
+            expected_next,
+            "the refused call must have drawn nothing"
         );
     }
 

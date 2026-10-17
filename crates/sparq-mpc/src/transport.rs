@@ -529,6 +529,35 @@ impl NetworkCell {
 /// The coordinator drives one cell over `n` already-connected party channels.
 /// Generic over the stream type so the same logic runs over TCP loopback or a
 /// Unix socket (and, under netem, over a shaped loopback — same code).
+/// Acknowledgement that a shuffle's PERMUTATION IS PUBLIC, required by
+/// [`Coordinator::shuffle_public_permutation`].
+///
+/// The transport tier drives the switch network by sending each switch's endpoints
+/// and its control bit in the clear to every party, so every party's view carries
+/// the composed permutation (see that method's docs). This marker exists so no
+/// caller can reach that behaviour without naming it: the plain
+/// `Coordinator::shuffle` is refused, and the only way through takes a value of
+/// this type, which can be built only by
+/// [`PublicPermutation::acknowledged`].
+///
+/// Pass it from a measurement or correctness harness. Do NOT pass it from a path
+/// whose output is meant to hide which row went where — that needs secret control
+/// bits, which this tier does not have.
+#[derive(Debug, Clone, Copy)]
+pub struct PublicPermutation {
+    /// Private, so the struct cannot be built by a literal elsewhere.
+    _acknowledged: (),
+}
+
+impl PublicPermutation {
+    /// Acknowledge that the permutation will be public to every party.
+    ///
+    /// Naming this function IS the opt-in; read [`PublicPermutation`] first.
+    pub fn acknowledged() -> Self {
+        PublicPermutation { _acknowledged: () }
+    }
+}
+
 pub struct Coordinator<S: Read + Write> {
     channels: Vec<Channel<S>>,
     backend: ShamirBackend,
@@ -650,27 +679,64 @@ impl<S: Read + Write> Coordinator<S> {
         Ok(matches)
     }
 
-    /// Run the **oblivious shuffle** over a `scale`-row secret-shared column
-    /// (sq-bdbv). The coordinator (playing the dealer, as the in-process
-    /// [`crate::oblivious::shuffle`] does) shares the `scale` row values, samples a
-    /// fresh uniformly-random secret permutation, routes it through the AS-Waksman
-    /// [`WaksmanNetwork`](crate::oblivious::WaksmanNetwork) to obtain the per-switch
-    /// control bits, then drives the network over the wire one switch at a time —
-    /// the multi-round per-switch exchange the bead asks for. Returns the opened
-    /// shuffled column (the reconstructed row values, in their permuted order) so
-    /// the caller can assert it is a permutation of the input multiset. The number
-    /// of switch rounds driven is reported via [`Coordinator`]'s caller (see
-    /// [`run_cell_networked`]).
+    /// Refused. Run the switch network over the wire with
+    /// [`Self::shuffle_public_permutation`] instead, which requires the caller to
+    /// acknowledge that **this shuffle's permutation is PUBLIC**.
     ///
-    /// `values` are the cleartext row values the dealer shares (the in-process
-    /// `check_shuffle` uses `i*7+1`; the network runner passes the same). The
-    /// permutation never leaves the coordinator's routing layer — only the
-    /// per-switch boolean (already part of a data-independent topology) crosses the
-    /// wire, exactly as the in-process simulation's local swap models.
+    /// ## Why it is refused rather than kept
+    ///
+    /// The coordinator (playing the dealer, as the in-process
+    /// [`crate::oblivious::shuffle`] does) shares the row values, samples a
+    /// permutation, routes it through the AS-Waksman
+    /// [`WaksmanNetwork`](crate::oblivious::WaksmanNetwork), and then drives the
+    /// network one switch at a time — sending each switch's endpoints AND its
+    /// control bit **in the clear** to EVERY party ([`Message::Swap`]), with each
+    /// party applying the swap to the column it holds. So every party sees the
+    /// whole control-bit sequence over a topology that is public by construction,
+    /// and keeps the intermediate column it swapped: the composed permutation is in
+    /// every party's view, and the output share vectors are the input ones
+    /// reordered. Opening the column at the end of the same call does not undo
+    /// that, because the views along the way are what carry it.
+    ///
+    /// That is fine for what this tier exists to do — MEASURE wall-clock, bytes on
+    /// the wire and the multiset-correctness of a multi-round network protocol —
+    /// and it is not a privacy shuffle. Hiding the permutation needs SECRET control
+    /// bits, i.e. the arithmetic conditional swap `x' = x + b·(y − x)` with `b`
+    /// secret-shared and one multiplication per switch. This tier does not have
+    /// that, and building it is not in scope here.
+    #[deprecated(
+        since = "0.1.7",
+        note = "the permutation is public; call shuffle_public_permutation with                 PublicPermutation::acknowledged()"
+    )]
     pub fn shuffle(
+        &mut self,
+        _dealer: &mut ShamirDealer,
+        _values: &[u64],
+    ) -> Result<(Vec<u64>, u64), MpcError> {
+        Err(MpcError::Protocol(
+            "Coordinator::shuffle: this transport shuffle's PERMUTATION IS PUBLIC - every \
+             party is sent each switch's endpoints and its control bit in the clear and \
+             keeps the column it swapped, so the composed permutation is in every party's \
+             view. It is a measurement harness for wall-clock and bytes-on-wire, not a \
+             privacy shuffle. A caller that accepts that calls \
+             `shuffle_public_permutation` and passes `PublicPermutation::acknowledged()`; \
+             a private-output path needs secret control bits, which this tier does not \
+             have"
+                .to_string(),
+        ))
+    }
+
+    /// [`Self::shuffle`] with the public-permutation property acknowledged — the
+    /// only way to run it.
+    ///
+    /// See [`PublicPermutation`] for what the caller is accepting. Use this for
+    /// measurement (wall-clock, bytes-on-wire, multiset correctness over the wire),
+    /// never to hide which row went where.
+    pub fn shuffle_public_permutation(
         &mut self,
         dealer: &mut ShamirDealer,
         values: &[u64],
+        _ack: PublicPermutation,
     ) -> Result<(Vec<u64>, u64), MpcError> {
         if values.is_empty() {
             return Err(MpcError::Protocol("shuffle: no rows (empty column)".into()));
@@ -916,7 +982,11 @@ pub fn run_cell_networked(
             // permuted column + permutation-of-input check lives in the in-crate
             // tests that call `Coordinator::shuffle` directly. sq-bdbv.
             let col_values: Vec<u64> = (0..scale as u64).map(|i| i * 7 + 1).collect();
-            let (opened, gates) = coord.shuffle(dealer, &col_values)?;
+            let (opened, gates) = coord.shuffle_public_permutation(
+                dealer,
+                &col_values,
+                PublicPermutation::acknowledged(),
+            )?;
             (opened.iter().copied().sum(), gates)
         }
         QueryClass::ObliviousSort => {
@@ -1110,6 +1180,46 @@ mod tests {
         assert_eq!(cell.result as usize, 3);
     }
 
+    /// The transport shuffle is refused without the explicit opt-in, and the
+    /// refusal says why: this tier's permutation is public to every party.
+    ///
+    /// No network is needed to assert it — the refusal lands before anything is
+    /// dealt — so the test builds a coordinator over a pair of in-memory streams.
+    #[test]
+    fn the_transport_shuffle_is_refused_without_the_public_permutation_opt_in() {
+        let backend = ShamirBackend::new_seeded(3, 0x7A11).unwrap();
+        let mut dealer = backend.dealer();
+        let (coord, handles) = loopback_coordinator(&backend);
+        let mut coord = coord;
+        #[allow(deprecated)]
+        let refused = coord.shuffle(&mut dealer, &[1u64, 2, 3]);
+        match refused {
+            Err(MpcError::Protocol(m)) => {
+                assert!(
+                    m.contains("PERMUTATION IS PUBLIC"),
+                    "the refusal must say why: {m}"
+                );
+                assert!(
+                    m.contains("shuffle_public_permutation"),
+                    "the refusal must name the opt-in: {m}"
+                );
+            }
+            other => panic!("must fail closed without the opt-in, got {other:?}"),
+        }
+        // With the acknowledgement the same call runs and permutes the multiset.
+        let values = vec![11u64, 22, 33];
+        let (opened, gates) = coord
+            .shuffle_public_permutation(&mut dealer, &values, PublicPermutation::acknowledged())
+            .unwrap();
+        assert!(gates > 0);
+        let mut got = opened;
+        got.sort_unstable();
+        assert_eq!(got, values);
+        for h in handles {
+            h.join().unwrap().unwrap();
+        }
+    }
+
     // sq-bdbv: the oblivious shuffle + sort now run over the SAME
     // Coordinator/Channel transport, multi-round (one `Swap` per network gate). The
     // load-bearing anchor is the networked result == in-process result, exactly as
@@ -1158,7 +1268,9 @@ mod tests {
             let values: Vec<u64> = (0..8u64).map(|i| i * 7 + 1).collect();
             let (mut coord, handles) = loopback_coordinator(&backend);
             let mut dealer = backend.dealer();
-            let (opened, gates) = coord.shuffle(&mut dealer, &values).unwrap();
+            let (opened, gates) = coord
+                .shuffle_public_permutation(&mut dealer, &values, PublicPermutation::acknowledged())
+                .unwrap();
             for h in handles {
                 h.join().unwrap().unwrap();
             }
