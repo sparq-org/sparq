@@ -281,10 +281,15 @@ pub trait DistributedRandomness {
     ///
     /// ## Every element must be a degree-`t` sharing — the caller's obligation
     ///
-    /// An implementor requires that every element of every entry be a degree-`<= t`
-    /// sharing on the canonical points, and refuses with [`MpcError::Protocol`]
-    /// otherwise — both [`crate::prss::PrssRandomness`] and [`ShamirDealer`] do.
-    /// The reason differs by implementation but the obligation does not. A shuffle
+    /// An implementor requires that every element of every entry be a consistent
+    /// degree-`<= t` sharing, and refuses with [`MpcError::Protocol`] otherwise —
+    /// both [`crate::prss::PrssRandomness`] and [`ShamirDealer`] do. Which POINTS
+    /// are acceptable is the implementor's own business:
+    /// [`crate::prss::PrssRandomness`] is tied to the canonical points `x = 1..n`,
+    /// while [`ShamirDealer`] accepts any one common point vector, canonical or not,
+    /// as long as the points are distinct and non-zero mod `p` and every element of
+    /// every entry uses the same vector in the same order. The reason for the degree
+    /// bound differs by implementation too, but the obligation does not. A shuffle
     /// that *recombines* — converting each element between sharings, as a
     /// dealer-less source must — interpolates from `t+1` points, which is only
     /// faithful at degree `<= t`; handed a degree-`2t` element it would return a
