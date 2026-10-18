@@ -531,6 +531,12 @@ impl PrssRandomness {
         &mut self,
         col: SecretColumn,
     ) -> Result<(SecretColumn, ShuffleCost), MpcError> {
+        // The same width cap the dealer path applies in `oblivious::shuffle`, so the
+        // two randomness sources agree on what they will route. Checked before the
+        // shape walk and so before anything is drawn: this source permutes by
+        // resharing, which is `m` sharings of work, and a `pi` over an uncapped `m`
+        // is caller-chosen work just as the dealer's network is.
+        crate::oblivious::check_network_width("PRSS resharing shuffle", col.len())?;
         let m = col.len();
         let width = col.first().map(|e| e.len()).unwrap_or(0);
         for (j, entry) in col.iter().enumerate() {
@@ -2053,6 +2059,39 @@ mod tests {
         let bad_rows: Vec<(u64, Vec<u64>)> = (0..6).map(|k| (k % 2, vec![9])).collect();
 
         let mut refused_then_valid = PrssRandomness::with_seeded_setup(n, 21).unwrap();
+        // An over-cap ROW COUNT is refused on the same terms, and must cost no
+        // counter either. The column is built for real — `MAX_NETWORK_WIDTH + 1`
+        // entries of `n` shares, about 21 MB at 16 bytes a share — and it is ALSO
+        // made ragged, which the shape walk below the cap would reject with its own
+        // words. That is what makes the ordering observable and the mutant fast:
+        // with the cap in place the refusal names the width; without it the shape
+        // walk refuses instead (also quickly, since it is one pass), and the
+        // resharing that would actually grind is never reached either way.
+        {
+            use crate::oblivious::MAX_NETWORK_WIDTH;
+            let mut over_cap: crate::oblivious::SecretColumn = (0..MAX_NETWORK_WIDTH + 1)
+                .map(|_| {
+                    (1..=n as u64)
+                        .map(|x| crate::shamir::Share {
+                            x,
+                            y: crate::field::Fp::new(1),
+                        })
+                        .collect()
+                })
+                .collect();
+            over_cap[1].pop();
+            match refused_then_valid.oblivious_shuffle(over_cap) {
+                Err(MpcError::Protocol(m)) => assert!(
+                    m.contains("MAX_NETWORK_WIDTH"),
+                    "the width cap must refuse BEFORE the shape walk, got: {}",
+                    m
+                ),
+                other => panic!(
+                    "an over-cap row count must be a Protocol refusal, got {:?}",
+                    other.map(|(c, _)| c.len())
+                ),
+            }
+        }
         for malformed in [
             mixed_degree_column(&backend, &bad_rows),
             // A shape refusal must be free too.

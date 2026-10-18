@@ -220,13 +220,19 @@ pub const RABBIT_VALUE_MAX_EXCLUSIVE: u64 = 1u64 << RABBIT_VALUE_BITS;
 /// Fail-closed range check: an operand must be a canonical field element strictly
 /// below `2^COMPARE_BITS`, else the bit-decomposition comparison could wrap the
 /// modulus and silently return a wrong verdict.
+///
+/// The operand is a PRIVATE value, so the range error reports the bound only: the
+/// public bit-width / exclusive bound and `label` — the operand POSITION, a fixed
+/// parameter name supplied by the call site (`"a"`, `"b"`, `"secret"`,
+/// `"threshold"`), never caller data. `v` itself is not formatted into the message.
+/// The caller already knows which position it passed, so the position plus the
+/// bound is everything it needs to correct the call.
 fn check_in_range(label: &str, v: Fp) -> Result<(), MpcError> {
     if v.value() >= COMPARE_MAX_EXCLUSIVE {
         return Err(MpcError::Protocol(format!(
-            "secure comparison: {label} = {} is out of range (must be < 2^{COMPARE_BITS} = {} so \
-             the bit-decomposition comparison cannot wrap the field modulus)",
-            v.value(),
-            COMPARE_MAX_EXCLUSIVE
+            "secure comparison: operand `{}` is out of range (must be < 2^{} = {} so the \
+             bit-decomposition comparison cannot wrap the field modulus)",
+            label, COMPARE_BITS, COMPARE_MAX_EXCLUSIVE
         )));
     }
     Ok(())
@@ -1807,6 +1813,52 @@ mod tests {
         assert!(
             secure_greater_than(&mut d2, Fp::new(COMPARE_MAX_EXCLUSIVE - 1), Fp::new(0)).is_ok()
         );
+    }
+
+    /// The range error reports the bound only. The operands are PRIVATE, so the
+    /// message carries the public bit-width / exclusive bound and the operand
+    /// POSITION and nothing else — in particular not the operand's own value, in
+    /// either decimal or hex form.
+    #[test]
+    fn range_error_message_carries_no_operand_value() {
+        // Distinctive: `>= 2^COMPARE_BITS` so the check fires, and `< p` so
+        // `Fp::new` is the identity on it (the value in the error, had it been
+        // formatted, would be exactly this one).
+        const DISTINCTIVE: u64 = 0x1DEA_DBEE_FCAF_E777;
+        const { assert!(DISTINCTIVE >= COMPARE_MAX_EXCLUSIVE && DISTINCTIVE < crate::field::P) };
+        let forbidden = [
+            format!("{}", DISTINCTIVE),
+            format!("{:x}", DISTINCTIVE),
+            format!("{:X}", DISTINCTIVE),
+        ];
+
+        let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+        let mut dealer = backend.dealer();
+        let refusals = [
+            secure_greater_than(&mut dealer, Fp::new(DISTINCTIVE), Fp::new(0)),
+            secure_greater_than(&mut dealer, Fp::new(0), Fp::new(DISTINCTIVE)),
+            secure_threshold(&mut dealer, Fp::new(DISTINCTIVE), Fp::new(0)),
+            secure_threshold(&mut dealer, Fp::new(0), Fp::new(DISTINCTIVE)),
+            secure_equal_to_bit(&mut dealer, Fp::new(DISTINCTIVE), Fp::new(0)),
+            secure_equal_to_bit(&mut dealer, Fp::new(0), Fp::new(DISTINCTIVE)),
+        ];
+        for refusal in refusals {
+            let msg = match refusal.unwrap_err() {
+                MpcError::Protocol(m) => m,
+                other => panic!("expected a Protocol range error, got {:?}", other),
+            };
+            assert!(msg.contains("out of range"), "not a range error: {}", msg);
+            // The bound IS public and must still be reported.
+            assert!(msg.contains("2^60"), "the bound is missing from: {}", msg);
+            for form in &forbidden {
+                assert!(
+                    !msg.contains(form.as_str()),
+                    "the range error carried the operand value {}: {}",
+                    form,
+                    msg
+                );
+            }
+        }
     }
 
     #[test]

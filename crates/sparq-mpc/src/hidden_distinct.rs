@@ -312,6 +312,12 @@ fn check_params(
             MAX_DISTINCT_ROWS
         )));
     }
+    // The guarantee is: BEFORE ANY DRAW OR ALLOCATION, not "first". The checks
+    // above it are parameter and shape refusals that draw nothing and allocate
+    // nothing, so they keep precedence deliberately; what matters is that no draw
+    // and no `B`-sized allocation can precede this. The sort-and-scan draws per
+    // comparison and the output stage materialises `B` slots.
+    crate::oblivious_join::check_output_bound_cap(bound)?;
     if bound < pairs.len() {
         return Err(MpcError::Protocol(format!(
             "hidden-key DISTINCT: padded bound B={bound} < row count {} — would truncate \
@@ -343,6 +349,12 @@ fn build_distinct_candidates(
     source: &mut dyn DistributedRandomness,
     pairs: &[SecretEndpointPair],
 ) -> Result<(Vec<Candidate>, usize, usize), MpcError> {
+    // The sort network's width BEFORE any key is shared: `MAX_DISTINCT_ROWS` is
+    // below `MAX_NETWORK_WIDTH`, so a caller that came through `check_params`
+    // cannot trip this — but this function takes `pairs` directly, and leaving the
+    // width check until after the per-row sharings would mean a refusal that had
+    // already drawn `2N` sharings. Checked here, it draws nothing.
+    crate::oblivious::check_network_width("hidden-key DISTINCT sort", pairs.len())?;
     // Share each pair's keys (a_key then b_key, row by row — the holder's own
     // inputs, shape-checked); carry the disclosed terms co-indexed.
     let n = backend.parties();
@@ -359,7 +371,9 @@ fn build_distinct_candidates(
     }
 
     // --- Oblivious sort by the secret composite key. ---
-    let net = SortingNetwork::new(rows.len());
+    // Width already refused above, before any sharing was drawn; `try_new` is kept
+    // as the only public constructor, and here it cannot fail.
+    let net = SortingNetwork::try_new(rows.len())?;
     let mut compare_exchanges = 0usize;
     for &(i, j) in net.compare_exchanges() {
         // Plaintext composite keys (held by the simulation as the dealer; the secure
