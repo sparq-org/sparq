@@ -7399,10 +7399,18 @@ fn a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate() {
         &nonce_for("0x2a"),
         &InMemorySeenNonces::new(),
     ) {
-        Err(CheckError::SubProofMethodUnresolved { ref proof, .. }) if proof == "sub_proofs[0]" => {}
+        // The REASON is asserted, not just the variant: the refusal must be the
+        // one the fixture is built to provoke — the two bound commitments of the
+        // k=2 scan authenticated DIFFERENT methods (the hidden-only one a method,
+        // the clear one none) — and not some other way of failing to derive a
+        // single method, which the same variant also reports.
+        Err(CheckError::SubProofMethodUnresolved { ref proof, ref reason })
+            if proof == "sub_proofs[0]"
+                && reason.contains("authenticated different commitment methods") => {}
         other => panic!(
             "the deferred member resolution must refuse this manifest after the \
-             hidden-issuer gate, got {other:?}"
+             hidden-issuer gate, because its bound commitments authenticated \
+             different methods, got {other:?}"
         ),
     }
 }

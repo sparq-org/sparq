@@ -166,7 +166,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `commit_a`/`commit_b`, and a `Filter*` member inherits the method of the source scan of every
   validated binding edge that binds it; all of them must agree. The declared id is resolved through the
   `(commitment-method x circuit)` dispatch matrix (`dispatch::resolve_circuit`, opt-in behind
-  `dual-leaf`) and only the resolved member is used. Three new fail-closed refusals:
+  `dual-leaf`) and only the resolved member is used. Five new fail-closed refusals:
   `CheckError::MemberNotLegalForMethod` (the member is not legal for that method),
   `CheckError::SubProofMethodUnresolved` (no single method could be derived — differing methods
   across bound commitments, a mixture of attested and unattested ones, an unparseable bound
@@ -199,7 +199,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusals compile only with the `dual-leaf` feature, which is OFF by default, because they are
   decided by the `dual-leaf` dispatch matrix; the stage 2g′ endpoint gate and
   `CheckError::JoinProofNotBoundToAnEdge` below are unconditional and apply in every feature
-  state. Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
+  state. Of the five refusals above, the first four compile only with `dual-leaf`;
+  `CheckError::MemberNotForFixedRole` is UNCONDITIONAL, as are `FixedMemberRole` and the
+  per-role `fixed_member` selection path that raises it, which run in every feature state.
+  Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
   achieved.
 
 - **sparq-zk-compose:** the hidden-join gate's ENDPOINT half now runs in BOTH stage-1 regimes.
@@ -214,11 +217,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   names commitments other than its endpoint scans' is now refused
   (`CheckError::JoinCommitmentMismatch`) instead of standing as a prover-declared linkage, and a
   hidden join one of whose endpoints is a bounded-path (`PathReach`) sub-proof rather than a
-  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's verdicts
-  are unchanged — it already ran the whole gate. In BOTH regimes and in EVERY feature state, a
+  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's ENDPOINT
+  verdicts are unchanged — it already ran that half of the gate — but see the coverage rule
+  below, which is new in both regimes. In BOTH regimes and in EVERY feature state, a
   `JoinEq` sub-proof that no `JoinEdge` names is now refused
   (`CheckError::JoinProofNotBoundToAnEdge`): its `commit_a`/`commit_b` were free of the manifest's
   declared linkage, and no later gate read them. Adds refusals and no acceptance.
+
+- **sparq-zk-compose (opt-in `extended-fragment`):** the extended-fragment verifier now REFUSES
+  the query/presentation shapes it does not discharge, instead of accepting them.
+  (1) A query one of whose re-derived branches carries a `FILTER` is refused by the routing gate
+  (`FragmentDispatchError::FilterNotDischarged { branch, filters }`): the flat FILTER obligation
+  lives in `bind_query_correctness`, which this regime skips, and nothing on this path reads
+  `FragmentBranch::filters`, so an accepted presentation would have answered the query as though
+  the FILTER were absent. Checked over EVERY branch, attributed or not; the branch-local typed
+  FILTER obligation that would lift it does not exist yet.
+  (2) A `VALUES` cell now constrains its variable whether or not that variable is PROJECTED:
+  `bind_fragment_join_coherence` merges every selected non-`UNDEF` cell — re-encoded by the
+  verifier from the query text, never a prover encoding — into the branch coherence map before
+  the atoms are read, so the scan slot or `PathReach` endpoint carrying the variable must equal
+  it. `bind_fragment_solution` still binds only the PROJECTED cells, having no disclosed term for
+  the rest; before the merge an unprojected `VALUES` variable entered no map at all. Two blocks
+  pinning one variable to disagreeing cells is `FragmentJoinError::ValuesCellIncoherent`, a cell
+  the verifier cannot re-encode is `ValuesCellUnencodable`, and an atom disagreeing with a seeded
+  cell is `Incoherent` against that atom.
+  (3) The branch coherence maps refuse a DISAGREEING duplicate rather than overwriting it, so a
+  variable occurring twice in ONE atom is compared: a path whose subject and object are the same
+  variable (`ASK { ?x <p>+ ?x }`) must carry `src_enc` equal to `dst_enc`, and the two slots of a
+  self-joining BGP atom must agree in the selected row.
+  (4) `verify_fragment_manifest` refuses a presentation carrying NO `BranchWitness`
+  (`CheckError::FragmentNoBranchWitness`): every branch-local layer iterates the witnesses, so an
+  empty vector left all four of them with nothing to check and the accept would have rested on the
+  crypto stage alone. `dispatch_fragment`'s per-branch ROUTING stays a deliberate no-op over such a
+  manifest, since it is also used over stage-1-style presentations; its query-hygiene, FILTER
+  and id checks still run.
+  (5) A disclosed binding must be BOUND BY THE ATTRIBUTED BRANCH, projected, and unique.
+  `bind_fragment_solution` and `bind_fragment_scans` build the re-encoded disclosed map through one
+  shared admissibility rule: a branch binds the variables of its pattern `SlotPattern::Var` slots,
+  its `path_reach` subject/object positions, and the `VALUES` columns whose SELECTED row carries a
+  non-`UNDEF` cell. A disclosed variable outside that set is refused
+  (`FragmentSolutionError::SolutionVariableNotBoundByBranch`) — previously a solution could carry a
+  variable the attributed branch binds nowhere (the other arm of a `UNION`, a branch with no atoms,
+  or a `VALUES` column selected at an `UNDEF` row) and every obligation over it was simply absent.
+  A variable the query does not project is refused (`SolutionVariableNotProjected`), and a second
+  binding of one variable is refused (`DuplicateSolutionVariable`) instead of silently replacing the
+  first, which went unchecked.
+  (6) A `VALUES` cell is encoded under the commitment method the branch's scans AUTHENTICATE:
+  `bind_fragment_join_coherence` now takes `&AuthenticatedMethods`, resolves one pattern-constant
+  encoder across the branch's scans and encodes each seeded cell with `encode_pattern_slot` under
+  it, so the cell is comparable to the slots and endpoints it constrains under the authenticated
+  method rather than under string-canonical always. A branch whose scans resolve no single method,
+  or disagree, is refused (`FragmentJoinError::ValuesMethodUnresolved`). This is a breaking change
+  to that function's signature; it is `pub` behind the opt-in feature and has no callers outside
+  the crate's own verifier path.
+  (7) The lane has ONE encoding policy. `verify_fragment_manifest` reads the authenticated-method
+  map BEFORE the first layer that re-encodes a disclosed term and refuses a presentation referring
+  to a commitment that authenticated any method other than
+  `sparq_zk::commit::CommitmentMethod::StringCanonicalV1`
+  (`CheckError::FragmentUnsupportedCommitmentMethod`; a method-UNATTESTED commitment is admitted,
+  its pattern encoder being the same one). The layers re-encode a disclosed term with `encode_term`
+  — string-canonical — and compare the result against disclosed scan-row slots and `PathReach`
+  endpoint encodings, which is coherent only under that method; under another, an HONEST
+  presentation would be refused for an encoding mismatch and nothing would be admitted, so the
+  combination is refused by name instead. This is a bound on the lane, not a property established
+  about any proof, and one coherent policy across all four surfaces is the deferred follow-up. Two
+  consequences of reading the map earlier: an unattested or revoked commitment is now reported
+  before the disclosed-solution layer rather than after it (both refusals, same accept set), and
+  `bind_fragment_join_coherence` stays method-aware for the `VALUES` seed even though the lane
+  admits only the one method.
+  All of these ADD refusals and open nothing. The feature is OFF by default, so no default-build
+  verdict changes with them, and no new dependency is added. Research grade, NOT externally audited
+  (`sq-qhy4`). No soundness or privacy claim.
+  <!-- privacy-claims-allow: describes added fail-closed refusals on an opt-in research lane, each with the obligation it does NOT yet discharge named; the external audit is restated as an OPEN obligation; asserts no soundness/privacy property as achieved; sq-qhy4 -->
+
+- **sparq-zk:** every query extractor refuses a solution SLICE (`LIMIT` and/or `OFFSET`) at any
+  depth, under one shared reason, instead of descending through it: `verify::fragment_query`'s
+  top-level modifier peel and its subquery arm, and the flat `verify::fragment_patterns`,
+  `verify::fragment_filters` and `verify::fragment_expr_trees` walkers. A proof of this design
+  states that a disclosed solution is a MEMBER of the query's answer, and a slice makes that
+  unprovable from the disclosed data in both directions: a positive `OFFSET` can empty a
+  non-empty answer (`SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1` has no solutions at all),
+  `LIMIT 0` always empties it, and a `LIMIT` smaller than the answer selects an
+  implementation-nondeterministic subset. Peeling the modifier off therefore proved membership in
+  the UNSLICED answer and accepted a solution the query text excludes. `DISTINCT` / `REDUCED` are
+  still peeled. `sparq_zk_compose::planner` already refused to PLAN a sliced query, so no honest
+  consumer in the estate asks for one. Adds refusals and opens nothing.
+
+- **sparq-zk-compose:** stage 2g′ (`bind_join_endpoints`) collects the covered join-proof indices
+  in the SAME pass that validates the declared edges, so the coverage rule is a set lookup per
+  sub-proof rather than a re-walk of `join_edges` for each one, and the `JoinEq` arm of the
+  per-sub-proof member resolution reads a per-manifest index of validated endpoints
+  (`JoinEndpointIndex`, built once) rather than re-validating the matching edges for every
+  sub-proof it is asked about. Both vectors are prover-controlled, so neither product is a cost a
+  presentation can choose any more. No verdict changes: the same edges are validated and the same
+  endpoints are read.
 
 - **sparq-lws-core (notifications):** subscription expiry is decided against a durable
   high-water time stored in the index, so a restart with the clock stepped back does not revive
