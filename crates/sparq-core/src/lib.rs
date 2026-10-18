@@ -1851,8 +1851,9 @@ impl Graph {
     /// holder has it. Saving into the directory this graph is open from (or a directory of one
     /// of its named graphs) is refused with `InvalidInput`, whatever the path's spelling: the
     /// graph still maps and logs into the files a save would truncate. Its directory already
-    /// holds its state (base plus log); fold the log into the base with
-    /// [`compact`](Self::compact), and see [`is_backed_by`](Self::is_backed_by). The
+    /// holds its state (base plus log): to replace that state with another image use
+    /// [`restore_in_place`](Self::restore_in_place), to fold the log into the base
+    /// [`compact`](Self::compact); [`is_backed_by`](Self::is_backed_by) tells the case apart. The
     /// directory of a named graph inside another graph (`<root>/named/<i>`) is refused too.
     #[cfg(feature = "mmap")]
     pub fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
@@ -1898,8 +1899,8 @@ impl Graph {
                 std::io::ErrorKind::InvalidInput,
                 format!(
                     "{} is the directory this graph is open from: a save would truncate files it \
-                     still maps; its directory already holds its state (`compact` folds the log \
-                     into the base), or save elsewhere",
+                     still maps; its directory already holds its state (`restore_in_place` replaces \
+                     it, `compact` folds the log into the base), or save elsewhere",
                     dir.display()
                 ),
             ));
@@ -3988,18 +3989,18 @@ impl Graph {
     #[cfg(feature = "mmap")]
     pub fn restore_in_place(&mut self, fresh: Graph) -> std::io::Result<()> {
         self.refuse_if_detached().map_err(std::io::Error::other)?;
-        self.swap_base_in_place(|_, new_dir| fresh.save_unlocked(new_dir))
+        self.publish_staged_base_or_freeze(|_, new_dir| fresh.save_unlocked(new_dir))
     }
 
-    /// Replace this directory-backed graph's base with the image `write_new_base` writes into
-    /// the staging directory it is handed (given this graph, to write its own image), through
-    /// the crash-safe swap, keeping this graph's lock. Its log is closed for the swap (on
+    /// Publish a staged base, or freeze: replace this directory-backed graph's base with the
+    /// image `write_new_base` writes into the staging directory it is handed (given this graph,
+    /// to write its own image), through the crash-safe swap, keeping this graph's lock. Its log is closed for the swap (on
     /// Windows a directory with an open file cannot be renamed). On failure, when the directory
     /// is still the old store, the log is re-opened, so the graph keeps writing durably as
     /// before; otherwise the graph and its named graphs are detached: every later write is
     /// refused, never applied in memory only.
     #[cfg(feature = "mmap")]
-    fn swap_base_in_place<F>(&mut self, write_new_base: F) -> std::io::Result<()>
+    fn publish_staged_base_or_freeze<F>(&mut self, write_new_base: F) -> std::io::Result<()>
     where
         F: FnOnce(&Graph, &std::path::Path) -> std::io::Result<()>,
     {
@@ -4047,7 +4048,8 @@ impl Graph {
         }
     }
 
-    /// `Err` when this graph refuses writes ([`swap_base_in_place`](Self::swap_base_in_place)).
+    /// `Err` when this graph refuses writes (read-only, or frozen by
+    /// [`publish_staged_base_or_freeze`](Self::publish_staged_base_or_freeze)).
     fn refuse_if_detached(&self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
         if let Some(why) = &self.detached {
@@ -12238,7 +12240,7 @@ mod tests {
             Term::NamedNode(NamedNode::new_unchecked("http://ex/o")),
         ];
         // An empty staging directory: the renames succeed, re-opening the new base does not.
-        let err = g.swap_base_in_place(|_, new_dir| std::fs::create_dir_all(new_dir));
+        let err = g.publish_staged_base_or_freeze(|_, new_dir| std::fs::create_dir_all(new_dir));
         assert!(err.is_err());
         assert!(g.apply_delta(std::slice::from_ref(&t), &[]).is_err(), "a write was accepted");
         assert!(g.named[0].1.apply_delta(std::slice::from_ref(&t), &[]).is_err(), "named too");

@@ -657,7 +657,8 @@ gets `WouldBlock` at once. Rules that follow:
 - **No save into the graph's own directory.** `g.save(dir)` into the directory `g` is open
   from (compared by file identity, so `dir/`, `x/../dir` or a link to it count) is refused
   with `InvalidInput`: `g` still maps and logs into the files a save would truncate. That
-  directory already holds `g`'s state; `g.compact()` folds the log into its base, and
+  directory already holds `g`'s state: `g.restore_in_place(other)` replaces it with another
+  image (the supported in-place rewrite), `g.compact()` folds the log into its base, and
   `g.is_backed_by(dir)` tells the case apart.
 - **A named graph's directory (`<root>/named/<i>`) belongs to its root:** opening, saving or
   building into it directly is refused (`InvalidInput`).
