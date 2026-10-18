@@ -64,7 +64,13 @@ SAVE_IF_VALUE = "${{ github.ref == 'refs/heads/main' }}"
 
 # Nightly/dispatch-only lanes whose documented way to run on a branch is
 # `gh workflow run <file> --ref <branch>`; a save from that run is branch-scoped.
-BRANCH_DISPATCH_LANES = ("ci.yml", "feature-matrix.yml", "formal-verification.yml", "fuzz.yml")
+BRANCH_DISPATCH_LANES = (
+    "ci.yml",
+    "feature-matrix.yml",
+    "formal-verification.yml",
+    "fuzz.yml",
+    "datalog-souffle.yml",
+)
 
 NEXTEST_ARCHIVE_ARTIFACT = "nextest-archive"
 UPLOAD_ARTIFACT = "actions/upload-artifact@"
