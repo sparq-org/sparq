@@ -626,6 +626,17 @@ impl<'c> Tableau<'c> {
         (n, d)
     }
 
+    /// Whether the run ended in (or started with) the eager attempt (see [`Tableau::run`]).
+    pub(crate) fn eager(&self) -> bool {
+        self.eager_ni
+    }
+
+    /// Skips the plain attempt: the run starts with the eager one.
+    pub(crate) fn start_eager(&mut self) {
+        self.eager_ni = true;
+        self.scoped = true;
+    }
+
     /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
     /// built, `Ok(false)` when every branch closed on a clash. With nominals and at-most
     /// restrictions, a first attempt on a third of the budget merges the neighbours an
@@ -1396,6 +1407,15 @@ impl<'c> Tableau<'c> {
                 return;
             }
             deps = deps.union(&self.role_dep(r, x, x));
+        }
+        // A head disjunct about `x` alone that holds satisfies every match of the clause.
+        let at_x = |h: &Head| match *h {
+            Head::Concept(a, Var::X) => node.label.contains_key(&a),
+            Head::SelfLoop(r) => self.has_role(r, x, x),
+            _ => false,
+        };
+        if cl.n_y > 0 && cl.head.iter().any(at_x) {
+            return;
         }
         let mut nodes = vec![x];
         self.match_ys(ci, 0, &mut nodes, deps, found);

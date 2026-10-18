@@ -150,6 +150,9 @@ pub struct Reasoner {
     /// The labels of the elements of that model, when it has one: each is the set of atoms
     /// some element is in, and it is in no other.
     witnesses: OnceCell<Vec<Vec<Atom>>>,
+    /// Whether deciding that model took the tableau's eager attempt: the tests, over the
+    /// same clauses (and the same ABox, with nominals), then start with it.
+    eager: Cell<bool>,
 }
 
 impl Reasoner {
@@ -185,6 +188,7 @@ impl Reasoner {
                 sources,
                 model: OnceCell::from(Ok(false)),
                 witnesses: OnceCell::new(),
+                eager: Cell::new(false),
             });
         }
         let clauses = clausify(dict, onto, budget.max_steps).map_err(|u| {
@@ -213,6 +217,7 @@ impl Reasoner {
             sources,
             model: OnceCell::new(),
             witnesses: OnceCell::new(),
+            eager: Cell::new(false),
         })
     }
 
@@ -263,6 +268,7 @@ impl Reasoner {
         }
         self.load_abox(&mut t);
         let r = t.run();
+        self.eager.set(r.is_ok() && t.eager());
         if matches!(r, Ok(true)) {
             let _ = self.witnesses.set(t.element_labels());
         }
@@ -339,6 +345,9 @@ impl Reasoner {
             budget.max_steps = shared.left.get();
         }
         let mut t = Tableau::new(&self.clauses, &self.index, budget);
+        if self.eager.get() {
+            t.start_eager();
+        }
         if !self.clauses.nominals.is_empty() {
             self.load_abox(&mut t);
         }
@@ -458,6 +467,11 @@ impl Reasoner {
                     let r = t.run();
                     settle(pool, &t, &r);
                     if !r.map_err(|s| self.reason(s))? {
+                        // A witness in `a` would contradict this: the tableau is wrong.
+                        debug_assert!(
+                            candidates.is_none(),
+                            "a witnessed class tested unsatisfiable"
+                        );
                         out.unsatisfiable.push(id);
                         continue;
                     }
