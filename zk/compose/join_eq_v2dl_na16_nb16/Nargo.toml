@@ -1,0 +1,8 @@
+[package]
+name = "join_eq_v2dl_na16_nb16"
+type = "bin"
+authors = ["sparq"]
+
+[dependencies]
+sparq_zk_compose_core = { path = "../compose_core" }
+sparq_dual_leaf_v2 = { path = "../../dual-leaf-v2" }

@@ -493,6 +493,27 @@
         }
       }
     },
+    "join_eq_v2dl_na16_nb16": {
+      "circuit_size": 45233,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
+          "legal": true
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
+    },
     "path_reach_d2_k1_n16": {
       "circuit_size": 5156,
       "lane": "string",
@@ -1472,6 +1493,27 @@
           "reason": "IllegalPair"
         }
       }
+    },
+    "scan_v2dl_k1_n16_r4": {
+      "circuit_size": 25095,
+      "lane": "string",
+      "configs": {
+        "string-canonical": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf": {
+          "legal": false,
+          "reason": "IllegalPair"
+        },
+        "dual-leaf-v2": {
+          "legal": true
+        },
+        "value-only": {
+          "legal": false,
+          "reason": "IllegalPair"
+        }
+      }
     }
   },
   "comparison": {
@@ -1510,10 +1552,10 @@
     }
   },
   "summary": {
-    "circuits": 72,
+    "circuits": 74,
     "methods": 4,
-    "configs": 288,
-    "legal_configs": 148,
-    "illegal_configs": 140
+    "configs": 296,
+    "legal_configs": 150,
+    "illegal_configs": 146
   }
 }
