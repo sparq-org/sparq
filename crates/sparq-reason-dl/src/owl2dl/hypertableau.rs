@@ -3162,6 +3162,11 @@ mod tests {
         assert!(t.same_label(v, w), "the undo");
         t.add_concept(v, cc, &Dep::default());
         assert!(!t.same_label(v, w), "v gained C");
+        let mark = t.trail.len();
+        t.add_concept(w, cc, &Dep::default());
+        assert!(t.same_label(v, w), "both have C");
+        t.undo_to(mark);
+        assert!(!t.same_label(v, w), "w lost C again");
     }
 
     /// Pruning deactivates a node's whole subtree, found through the children lists, and
