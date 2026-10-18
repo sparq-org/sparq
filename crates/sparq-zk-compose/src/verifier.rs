@@ -5629,11 +5629,17 @@ enum SubProofMethod {
 /// - `Scan` / `PathReach` — its OWN `commitments` vector. The member recomputes
 ///   every one of those commitments in-circuit, so its leaf-shape assumption
 ///   applies to each; all `k` are returned.
-/// - `JoinEq` — its public `commit_a` and `commit_b`, which `bind_joins` has
-///   already byte-bound to the two scans' `commitments[graph_*]` in the
-///   pre-filter, so resolving from them is resolving from the validated scan
-///   endpoints. The HIDING `join_commitment` is a per-presentation value
-///   commitment, not a committed graph, so it is NOT returned.
+/// - `JoinEq` — its public `commit_a` and `commit_b`. On the FLAT path
+///   `bind_joins` has already byte-bound those to the two scans'
+///   `commitments[graph_*]` in the pre-filter, so resolving from them is
+///   resolving from the validated scan endpoints. In the `extended-fragment`
+///   regime `bind_joins` is DEFERRED (sq-1zf94), so there they are still
+///   prover-declared; that does not open anything here, because a commitment no
+///   attestation covers is absent from `methods` and reads as
+///   `AuthenticatedMethod::Unbound`, and `fold_bound_methods` refuses a mixture
+///   of attested and unattested — so a substituted endpoint fails closed rather
+///   than selecting a method. The HIDING `join_commitment` is a per-presentation
+///   value commitment, not a committed graph, so it is NOT returned.
 /// - the `Filter*` members — NONE of their own. A FILTER binds to committed data
 ///   only through a [`crate::manifest::BindingEdge`], whose `from_proof` names
 ///   the scan sub-proof whose row/slot supplies its `operand_enc` and whose
