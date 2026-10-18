@@ -340,19 +340,27 @@ fn alice() -> Session<'static> {
     }
 }
 
-/// The creator and owner of a resource that no longer exists are not applied again.
+/// The creator and owner of a resource that no longer exists are not applied again: the
+/// resource has no recorded creator or owner, so a matcher that needs one is undecided
+/// there. The `#creator` ALLOW that needs it does not apply, and the `#denyCreator` /
+/// `#denyOwner` DENIES that need it do — to every agent, since no agent can be ruled out
+/// as the creator or owner.
 fn assert_context_forgotten(store: &PodStore, after: &str) {
     assert!(
         !holds(store, ALICE, Mode::Write),
         "{after}: the old creator does not write"
     );
     assert!(
-        holds(store, ALICE, Mode::Read),
-        "{after}: the creator deny no longer applies"
+        !holds(store, ALICE, Mode::Read),
+        "{after}: the creator deny has no recorded creator to clear, so it applies"
     );
     assert!(
-        holds(store, ERIN, Mode::Read),
-        "{after}: the owner deny no longer applies"
+        !holds(store, ERIN, Mode::Read),
+        "{after}: and so does the owner deny"
+    );
+    assert!(
+        !holds(store, DAVE, Mode::Read),
+        "{after}: for an agent with no context of its own too"
     );
     assert!(
         !holds(store, CAROL, Mode::Read),
@@ -494,7 +502,10 @@ fn decisions_follow_a_drop_with_no_rebuild_after_it() {
 fn a_move_onto_a_resource_keeps_its_creator_and_ends_the_source() {
     let mut store = store();
     let mut prov = store.acp_provenance().clone();
+    // d1 needs BOTH recorded, or `#denyOwner` is undecided on d1 and denies ADMIN the
+    // Read the move reads it with.
     prov.set_creator(D1, DAVE);
+    prov.set_owner(D1, DAVE);
     let mut creds = VerifiedCredentials::new();
     creds.hold(CAROL, FLAGGED);
     store
