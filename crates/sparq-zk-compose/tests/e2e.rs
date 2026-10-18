@@ -6649,6 +6649,9 @@ fn hidden_issuer_not_enabled_rejected() {
         &m, &prover, &scratch("hi_notenabled"),
         &k, &fresh_policy(), &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(), &EntailmentPolicy::simple_only(), &nonce_for("0x2a"), &InMemorySeenNonces::new(),
     );
+    // zk-toolchain-gate: allow deliberately broad (`SOME rejection`, per the comment above):
+    //   the empty sub-proofs are refused as MissingProof before the bb loop, and tracing this
+    //   test with a recording nargo/bb shim on PATH records no spawn
     assert!(res.is_err(), "a manifest with hidden-issuer attestation under a non-opted-in KeySet must be rejected");
 }
 

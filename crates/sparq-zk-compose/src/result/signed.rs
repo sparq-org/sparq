@@ -435,6 +435,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo and bb; proves a version-three member and verifies it through verify_signed_result"]
     fn signed_real_legacy_member_verifies_only_under_the_written_down_downgrade() {
+        if !crate::support::require_toolchain(
+            "signed_real_legacy_member_verifies_only_under_the_written_down_downgrade",
+            &["nargo", "bb"],
+        ) {
+            return;
+        }
         crate::result::pinned_toolchain().unwrap();
         let (c, policy, nonce, rows) = numeric_fixture(integer("42"), 3, 128);
         let q = query("?v >= 18");
@@ -518,8 +524,13 @@ mod tests {
         let mut wire = serde_json::to_value(presentation(&p)).unwrap();
         let unsigned: ResultPresentation = serde_json::from_value(wire.clone()).unwrap();
         assert_eq!(unsigned.integer_capacity, PrivateIntegerCapacity::TwoDigits);
+        // zk-toolchain-gate: allow an unsigned wire read under the signed statement rule is
+        //   refused by the statement check itself; traced with a recording nargo/bb shim on PATH,
+        //   this test spawns nothing
         assert!(crate::result::public_statement(&unsigned, &policy, &nonce).is_err());
         wire["integer_capacity"] = json!("full_u64");
+        // zk-toolchain-gate: allow a serde rejection of the mutated wire; no process is
+        //   involved
         assert!(serde_json::from_value::<SignedResultPresentation>(wire).is_err());
         let driver = CircuitProver::from_crate_root();
         for version in [0, 1, 2, 4] {
@@ -534,6 +545,9 @@ mod tests {
                 &driver,
                 Path::new("unused")
             )
+            // zk-toolchain-gate: allow the wrong-VERSION refusals are reached before any proof
+            //   verification; traced with a recording nargo/bb shim on PATH, this test spawns
+            //   nothing, so no missing tool can satisfy these arms
             .is_err());
         }
     }
@@ -566,6 +580,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo; executes every signed wrapper and boundary witness"]
     fn signed_relation_executes_capacity_matrix_and_rejects_bias_tampering() {
+        if !crate::support::require_toolchain(
+            "signed_relation_executes_capacity_matrix_and_rejects_bias_tampering",
+            &["nargo"],
+        ) {
+            return;
+        }
         crate::result::pinned_toolchain().unwrap();
         let driver = CircuitProver::from_crate_root();
         for depth in [10, 17, 20] {
@@ -637,6 +657,12 @@ mod tests {
     #[test]
     #[ignore = "requires pinned nargo and bb; genuine signed boundaries, predicate-free proof, and cross-contract rejection"]
     fn signed_real_proofs_bind_version_policy_and_signed_order() {
+        if !crate::support::require_toolchain(
+            "signed_real_proofs_bind_version_policy_and_signed_order",
+            &["nargo", "bb"],
+        ) {
+            return;
+        }
         crate::result::pinned_toolchain().unwrap();
         let driver = CircuitProver::from_crate_root();
         let directory =

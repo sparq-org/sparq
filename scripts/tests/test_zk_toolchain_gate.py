@@ -19,6 +19,18 @@ Which test reds when a checker function is deleted or inverted (the functions ar
 exercised through the CLI, so this maps them to their covering test):
 
   * `lint_file`        -> AcquisitionLint.test_each_evasion_class_turns_the_check_red
+  * `strip_noncode`    -> SourceReader.test_blanking_literals_never_moves_a_line
+  * `fn_spans`         -> SourceReader.test_every_test_function_is_found
+  * `_reaching`        -> DriverRouteSuites
+                          .test_an_unnamed_error_arm_in_it_turns_the_check_red (the
+                          prover is built in a local helper, so only the fixpoint
+                          reaches it)
+  * `_src_scope`       -> SrcTestRegions.test_a_planted_spawn_in_a_src_test_is_red and
+                          .test_the_same_spawn_in_production_code_is_not
+  * `check_src_gate_decl` -> SrcTestRegions
+                          .test_dropping_the_shared_gate_declaration_is_red
+  * `exempt`           -> AcquisitionLint
+                          .test_an_annotation_does_not_reach_past_its_own_line
   * `check_helpers`    -> GateSource.test_the_two_copies_of_the_gate_are_byte_identical
                           plus the helper-drift fixture in `--self-test`
   * `check_ratchet`    -> AcquisitionLint
@@ -33,6 +45,12 @@ exercised through the CLI, so this maps them to their covering test):
   * `report_check`     -> RealTree.test_the_real_tree_is_clean (exit code) and
                           .test_every_ledger_exclusion_states_a_reason (its output)
   * `static_findings`  -> all of the above; it is the aggregator they share
+
+Mutations of the gate that turn this file red, each verified by running it:
+dropping `#[track_caller]` from `gate` or from `require_toolchain` (the gate module's
+own `gate_identity_tests`, which run in every binary that declares the module);
+recording on the skip path (same); deleting CHECK A8, CHECK F, the `src` scan trees,
+the annotation's line scope, or the call-site key (`--self-test`).
 
 Mutations that turn this file red: dropping the ledger append from the gate
 (`GateSource`); removing the token parameter from `live_tool` (`GateSource`);
@@ -74,6 +92,19 @@ COPIED = (
     "crates/sparq-zk-compose/tests",
     "crates/sparq-zk-compose/Cargo.toml",
 )
+# The `src` trees are 2.6 MB of Rust and the checker reads every line of them, so a
+# test that is about `tests/` copies only each crate root (enough for the src scan
+# dirs to exist and for CHECK F to read its declaration) and passes full_src=True
+# only where a src region is the subject.
+SRC_TREES = ("crates/sparq-zk/src", "crates/sparq-zk-compose/src")
+LIB_ROOTS = ("crates/sparq-zk/src/lib.rs", "crates/sparq-zk-compose/src/lib.rs")
+# Gate call sites in `src` test regions, which the lib test target runs.
+SRC_GATED = (
+    "crates/sparq-zk-compose/src/driver.rs",
+    "crates/sparq-zk-compose/src/result.rs",
+    "crates/sparq-zk-compose/src/result/signed.rs",
+)
+COMPOSE_LIB = "crates/sparq-zk-compose/src/lib.rs"
 
 # One planted file per evasion class. Each must turn the real-tree check red.
 EVASIONS: dict[str, str] = {
@@ -158,11 +189,18 @@ EVASIONS: dict[str, str] = {
         'mod support;\nconst N: &str = "planted_dyn";\n#[test]\nfn case() {\n'
         '    if !support::require_toolchain(N, &["nargo"]) { return; }\n}\n'
     ),
-    "a duplicate inventory name": (
+    "two gate calls on one line": (
         "mod support;\n#[test]\nfn a() {\n"
-        '    if !support::require_toolchain("planted_dup", &["nargo"]) { return; }\n}\n'
-        "\n#[test]\nfn b() {\n"
-        '    if !support::require_toolchain("planted_dup", &["nargo"]) { return; }\n}\n'
+        '    if !support::require_toolchain("x", &["nargo"]) '
+        '|| !support::require_toolchain("y", &["nargo"]) { return; }\n}\n'
+    ),
+    "the gate renamed in a use": (
+        "mod support;\nuse support::gate as g;\n#[test]\nfn case() {\n"
+        '    let _ = g("case", &["nargo"]);\n}\n'
+    ),
+    "the gate taken as a function value": (
+        "mod support;\n#[test]\nfn case() {\n    let f = support::gate;\n"
+        '    let _ = f("case", &["nargo"]);\n}\n'
     ),
     "a quoted exemption marker": (
         "#[test]\nfn case() {\n"
@@ -179,7 +217,7 @@ def run_script(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def copy_tree(tmp: str) -> Path:
+def copy_tree(tmp: str, full_src: bool = False) -> Path:
     root = Path(tmp)
     (root / WORKFLOW).parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(REPO / WORKFLOW, root / WORKFLOW)
@@ -187,6 +225,13 @@ def copy_tree(tmp: str) -> Path:
         src, dst = REPO / rel, root / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(src, dst) if src.is_dir() else shutil.copy2(src, dst)
+    if full_src:
+        for rel in SRC_TREES:
+            shutil.copytree(REPO / rel, root / rel)
+    else:
+        for rel in LIB_ROOTS:
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(REPO / rel, root / rel)
     return root
 
 
@@ -254,6 +299,22 @@ class AcquisitionLint(unittest.TestCase):
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("[E]", proc.stderr)
 
+    def test_an_annotation_does_not_reach_past_its_own_line(self):
+        """One code line between the annotation and the finding ends its reach."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree(tmp)
+            (root / "crates/sparq-zk-compose/tests/planted_far.rs").write_text(
+                "#[test]\nfn case() {\n"
+                "    // zk-toolchain-gate: allow a stated reason\n"
+                "    let n = 1;\n"
+                '    let _ = std::process::Command::new("nargo")\n'
+                "        .arg(n.to_string())\n        .output();\n}\n",
+                encoding="utf-8",
+            )
+            proc = run_script("--check", "--root", str(root))
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("planted_far.rs", proc.stderr)
+
     def test_a_missing_scan_directory_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = copy_tree(tmp)
@@ -303,49 +364,49 @@ class LedgerVerification(unittest.TestCase):
 
     def test_a_partial_ledger_names_the_missing_call_sites(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = copy_tree(tmp)
-            p = self._ledger(root, ["sparq-zk/poseidon2_noir_cross::nargo_live_cross_check"])
+            root = copy_tree(tmp, full_src=True)
+            first = POSEIDON + ":15"
+            p = self._ledger(root, [first])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             self.assertEqual(proc.returncode, 1)
             self.assertIn("left no ledger entry", proc.stderr)
-            self.assertIn("sparq-zk-compose/e2e::", proc.stderr)
-            self.assertNotIn(
-                "sparq-zk/poseidon2_noir_cross::nargo_live_cross_check", proc.stderr
-            )
+            self.assertIn("crates/sparq-zk-compose/tests/e2e.rs:", proc.stderr)
+            self.assertIn("crates/sparq-zk-compose/src/result.rs:", proc.stderr)
+            self.assertNotIn(first + " ", proc.stderr)
 
     def test_a_complete_ledger_is_green_and_an_unknown_entry_is_only_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = copy_tree(tmp)
+            root = copy_tree(tmp, full_src=True)
             # Build a complete ledger from the checker's own missing-list.
             p = self._ledger(root, [])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             keys = [
                 line.strip().split("  ")[0]
                 for line in proc.stderr.splitlines()
-                if line.startswith("  sparq-")
+                if line.startswith("  crates/")
             ]
             self.assertFalse(keys, "an empty ledger short-circuits before the key list")
             # Instead, take the keys from a one-entry run, which does reach the list.
-            p = self._ledger(root, ["sparq-zk/plain::nothing"])
+            p = self._ledger(root, ["crates/sparq-zk/tests/plain.rs:1"])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             keys = [
                 line.strip().split("  ")[0]
                 for line in proc.stderr.splitlines()
-                if line.strip().startswith("sparq-")
+                if line.strip().startswith("crates/")
             ]
             self.assertGreater(len(keys), 50, proc.stderr)
-            p = self._ledger(root, keys + ["sparq-zk/plain::who_is_this"])
+            p = self._ledger(root, keys + ["crates/sparq-zk/tests/plain.rs:999"])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             self.assertEqual(proc.returncode, 0, f"{proc.stdout}\n{proc.stderr}")
             self.assertIn("no matching call site", proc.stdout)
 
-    def test_a_duplicate_inventory_name_blocks_verification(self):
+    def test_two_gate_calls_on_one_line_block_verification(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = copy_tree(tmp)
             (root / "crates/sparq-zk-compose/tests/planted_dup.rs").write_text(
-                EVASIONS["a duplicate inventory name"], encoding="utf-8"
+                EVASIONS["two gate calls on one line"], encoding="utf-8"
             )
-            p = self._ledger(root, ["sparq-zk/plain::nothing"])
+            p = self._ledger(root, ["crates/sparq-zk/tests/plain.rs:1"])
             proc = run_script("--verify-ledger", str(p), "--root", str(root))
             self.assertEqual(proc.returncode, 1)
             self.assertIn("does not parse", proc.stderr)
@@ -378,20 +439,39 @@ class GateSource(unittest.TestCase):
         )
 
     def test_the_gate_records_only_on_the_allowed_path(self):
-        self.assertIn('pub const LEDGER_ENV: &str = "SPARQ_ZK_LIVE_LEDGER";', self.text)
-        self.assertIn("fn record(test: &str)", self.text)
         self.assertIn(".append(true)", self.text, "the append must be O_APPEND")
         self.assertIn("write_all(line.as_bytes())", self.text, "one write per line")
         body = self.text.split("pub fn gate(", 1)[1]
-        allowed, rest = body.split("record(test);", 1)
+        allowed, rest = body.split("record(&path, std::panic::Location::caller());", 1)
         self.assertIn("missing.is_empty()", allowed, "recording happens on the run path")
         self.assertNotIn("record(", rest.split("pub fn require_toolchain", 1)[0],
                          "a skip or a panic must record nothing")
 
-    def test_the_ledger_key_is_package_binary_and_test(self):
-        self.assertIn('env!("CARGO_CRATE_NAME")', self.text)
-        self.assertIn('env!("CARGO_PKG_NAME")', self.text)
-        self.assertIn('format!("{}/{}::{}"', self.text)
+    def test_the_ledger_env_var_is_private_to_the_gate_module(self):
+        self.assertIn('const LEDGER_ENV: &str = "SPARQ_ZK_LIVE_LEDGER";', self.text)
+        self.assertNotIn("pub const LEDGER_ENV", self.text,
+                         "a test must not be able to name or redirect the ledger")
+
+    def test_the_ledger_key_is_the_call_site(self):
+        """The identity is file:line, and `#[track_caller]` is what makes it the
+        CALLER's line. The behaviour itself is pinned by the gate module's own
+        `gate_identity_tests`, which run in every binary that declares the module."""
+        self.assertIn('format!("{}:{}", loc.file().replace(\'\\\\\', "/"), loc.line())',
+                      self.text)
+        for fn in ("pub fn gate(", "pub fn require_toolchain("):
+            head = self.text.rsplit(fn, 1)[0]
+            self.assertTrue(
+                head.rstrip().endswith("#[track_caller]"),
+                f"{fn} must carry #[track_caller], or the key becomes the gate's own "
+                "line for every caller",
+            )
+        self.assertIn("mod gate_identity_tests", self.text)
+        for name in (
+            "fn the_recorded_key_is_the_call_site_of_the_gate_call",
+            "fn require_toolchain_records_its_own_caller_not_the_wrapper",
+            "fn a_missing_tool_records_nothing_on_either_path",
+        ):
+            self.assertIn(name, self.text)
 
 
 class GateIsTheOnlyPath(unittest.TestCase):
@@ -457,6 +537,130 @@ class DriverRouteSuites(unittest.TestCase):
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("[C1]", proc.stderr)
             self.assertIn("holder_pop_forge.rs", proc.stderr)
+
+
+class SourceReader(unittest.TestCase):
+    """The two readers the `src` region scan rests on."""
+
+    def setUp(self):
+        sys.path.insert(0, str(REPO / "scripts"))
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("zk_gate_checker", SCRIPT)
+        self.mod = importlib.util.module_from_spec(spec)
+        sys.modules["zk_gate_checker"] = self.mod
+        spec.loader.exec_module(self.mod)
+
+    def test_blanking_literals_never_moves_a_line(self):
+        """A multi-line string literal with a `\\` continuation carries unbalanced
+        braces; losing its newline shifts every later line number, and the brace
+        matcher then walks off the end of the file."""
+        for rel in ("crates/sparq-zk/src", "crates/sparq-zk-compose/src",
+                    "crates/sparq-zk/tests", "crates/sparq-zk-compose/tests"):
+            for path in (REPO / rel).rglob("*.rs"):
+                text = path.read_text(encoding="utf-8")
+                self.assertEqual(
+                    len(self.mod.strip_noncode(text).splitlines()),
+                    len(text.splitlines()),
+                    f"line count drifted on {path}",
+                )
+
+    def test_every_test_function_is_found(self):
+        """Each `#[test]` in a real file falls inside some span, or C1 and the
+        helper fixpoint silently skip it."""
+        for rel in (POSEIDON, "crates/sparq-zk-compose/tests/holder_pop_forge.rs",
+                    SRC_GATED[2]):
+            text = (REPO / rel).read_text(encoding="utf-8")
+            lines = text.splitlines()
+            spans = self.mod.fn_spans(text)
+            self.assertTrue(spans, rel)
+            marks = [i for i, line in enumerate(lines) if line.strip() == "#[test]"]
+            self.assertTrue(marks, rel)
+            for i in marks:
+                self.assertTrue(
+                    any(a <= i + 2 <= b for a, b, _ in spans),
+                    f"{rel}: the #[test] at line {i + 1} is in no fn span",
+                )
+
+
+class SrcTestRegions(unittest.TestCase):
+    """`src` `#[cfg(test)]` code is scanned; the production code above it is not."""
+
+    def test_the_src_live_tests_go_through_the_gate(self):
+        for rel in SRC_GATED:
+            text = (REPO / rel).read_text(encoding="utf-8")
+            self.assertIn("crate::support::", text, rel)
+        text = (REPO / COMPOSE_LIB).read_text(encoding="utf-8")
+        self.assertIn('#[path = "../tests/support/mod.rs"]', text)
+        self.assertIn("mod support;", text)
+
+    def test_a_planted_spawn_in_a_src_test_is_red(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree(tmp, full_src=True)
+            p = root / "crates/sparq-zk/src/field.rs"
+            text = p.read_text(encoding="utf-8")
+            marker = "mod tests {"
+            self.assertIn(marker, text)
+            p.write_text(
+                text.replace(
+                    marker,
+                    marker + "\n    #[test]\n    fn planted() {\n"
+                    '        let _ = std::process::Command::new("nargo").output();\n'
+                    "    }\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            proc = run_script("--check", "--root", str(root))
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("src/field.rs", proc.stderr)
+            self.assertIn("[A1]", proc.stderr)
+
+    def test_the_same_spawn_in_production_code_is_not(self):
+        """The driver spawns nargo/bb for real, above its test module. Linting that
+        would make the whole src scan unusable."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree(tmp, full_src=True)
+            p = root / "crates/sparq-zk/src/field.rs"
+            p.write_text(
+                'pub fn tool() -> std::process::Command {\n'
+                '    std::process::Command::new("nargo")\n}\n'
+                + p.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            proc = run_script("--check", "--root", str(root))
+            self.assertEqual(
+                proc.returncode, 0, f"{proc.stdout}\n{proc.stderr}"
+            )
+
+    def test_dropping_the_shared_gate_declaration_is_red(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree(tmp, full_src=True)
+            p = root / COMPOSE_LIB
+            p.write_text(
+                p.read_text(encoding="utf-8").replace(
+                    '#[path = "../tests/support/mod.rs"]', "#[path = \"support.rs\"]", 1
+                ),
+                encoding="utf-8",
+            )
+            proc = run_script("--check", "--root", str(root))
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("[F]", proc.stderr)
+
+    def test_a_src_gate_call_is_in_the_ledger_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree(tmp, full_src=True)
+            p = self._partial(root)
+            proc = run_script("--verify-ledger", str(p), "--root", str(root))
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("crates/sparq-zk-compose/src/driver.rs:", proc.stderr)
+            self.assertIn("crates/sparq-zk-compose/src/result/signed.rs:", proc.stderr)
+
+    @staticmethod
+    def _partial(root: Path) -> Path:
+        p = root / "ledger.txt"
+        p.write_text("crates/sparq-zk/tests/plain.rs:1\n", encoding="utf-8")
+        return p
 
 
 class LaneWiring(unittest.TestCase):
