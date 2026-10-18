@@ -270,18 +270,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or disagree, is refused (`FragmentJoinError::ValuesMethodUnresolved`). This is a breaking change
   to that function's signature; it is `pub` behind the opt-in feature and has no callers outside
   the crate's own verifier path.
+  (7) The lane has ONE encoding policy. `verify_fragment_manifest` reads the authenticated-method
+  map BEFORE the first layer that re-encodes a disclosed term and refuses a presentation referring
+  to a commitment that authenticated any method other than
+  `sparq_zk::commit::CommitmentMethod::StringCanonicalV1`
+  (`CheckError::FragmentUnsupportedCommitmentMethod`; a method-UNATTESTED commitment is admitted,
+  its pattern encoder being the same one). The layers re-encode a disclosed term with `encode_term`
+  — string-canonical — and compare the result against disclosed scan-row slots and `PathReach`
+  endpoint encodings, which is coherent only under that method; under another, an HONEST
+  presentation would be refused for an encoding mismatch and nothing would be admitted, so the
+  combination is refused by name instead. This is a bound on the lane, not a property established
+  about any proof, and one coherent policy across all four surfaces is the deferred follow-up. Two
+  consequences of reading the map earlier: an unattested or revoked commitment is now reported
+  before the disclosed-solution layer rather than after it (both refusals, same accept set), and
+  `bind_fragment_join_coherence` stays method-aware for the `VALUES` seed even though the lane
+  admits only the one method.
   All of these ADD refusals and open nothing. The feature is OFF by default, so no default-build
   verdict changes with them, and no new dependency is added. Research grade, NOT externally audited
   (`sq-qhy4`). No soundness or privacy claim.
   <!-- privacy-claims-allow: describes added fail-closed refusals on an opt-in research lane, each with the obligation it does NOT yet discharge named; the external audit is restated as an OPEN obligation; asserts no soundness/privacy property as achieved; sq-qhy4 -->
 
-- **sparq-zk:** `verify::fragment_query` refuses a query whose answer is the empty multiset
-  whatever the data: a `Slice` modifier with length `0` (`LIMIT 0`) is now
-  `VerifyError::UnsupportedFragment` instead of being peeled off like any other modifier, because no
-  disclosed solution is an answer to such a query and every downstream binding gate would then be
-  attesting a solution the query does not have. The other peels (`LIMIT n` for `n > 0`, `OFFSET`,
-  `DISTINCT`, `REDUCED`) are unchanged, and a `LIMIT 0` query reaching the flat verifier was already
-  refused there. Adds a refusal and opens nothing.
+- **sparq-zk:** every query extractor refuses a solution SLICE (`LIMIT` and/or `OFFSET`) at any
+  depth, under one shared reason, instead of descending through it: `verify::fragment_query`'s
+  top-level modifier peel and its subquery arm, and the flat `verify::fragment_patterns`,
+  `verify::fragment_filters` and `verify::fragment_expr_trees` walkers. A proof of this design
+  states that a disclosed solution is a MEMBER of the query's answer, and a slice makes that
+  unprovable from the disclosed data in both directions: a positive `OFFSET` can empty a
+  non-empty answer (`SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1` has no solutions at all),
+  `LIMIT 0` always empties it, and a `LIMIT` smaller than the answer selects an
+  implementation-nondeterministic subset. Peeling the modifier off therefore proved membership in
+  the UNSLICED answer and accepted a solution the query text excludes. `DISTINCT` / `REDUCED` are
+  still peeled. `sparq_zk_compose::planner` already refused to PLAN a sliced query, so no honest
+  consumer in the estate asks for one. Adds refusals and opens nothing.
 
 - **sparq-zk-compose:** stage 2g′ (`bind_join_endpoints`) collects the covered join-proof indices
   in the SAME pass that validates the declared edges, so the coverage rule is a set lookup per

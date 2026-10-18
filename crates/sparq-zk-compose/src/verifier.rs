@@ -2198,6 +2198,24 @@ pub enum CheckError {
     /// Opt-in (`extended-fragment`).
     #[cfg(feature = "extended-fragment")]
     FragmentNoBranchWitness,
+    /// A committed graph this extended-fragment presentation refers to
+    /// authenticated a commitment method the extended binding layers do not have
+    /// ONE encoding policy for, so the presentation is refused BY NAME instead of
+    /// being compared under an encoder parts of it were never derived under.
+    ///
+    /// The extended layers re-encode a disclosed solution term with
+    /// `encode_term` — the STRING-CANONICAL encoding — and compare the result
+    /// against disclosed scan-row slots and `PathReach` endpoint encodings. That
+    /// is coherent exactly while every commitment the presentation refers to
+    /// authenticated `CommitmentMethod::StringCanonicalV1`, or authenticated no
+    /// method at all (whose pattern encoder is the same one). Under any other
+    /// authenticated method the row slots carry a DIFFERENT encoding of the same
+    /// term, so the comparison would fail for an honest presentation and pass for
+    /// nothing: refusing the combination is the honest verdict, and it is the
+    /// bound on the lane rather than a property of the proofs.
+    /// Opt-in (`extended-fragment`).
+    #[cfg(feature = "extended-fragment")]
+    FragmentUnsupportedCommitmentMethod { commitment: String, method_iri: String },
 }
 
 impl std::fmt::Display for CheckError {
@@ -2693,6 +2711,17 @@ impl std::fmt::Display for CheckError {
                 "the extended-fragment presentation carries no branch witness, so it \
                  discloses no solution and every branch-local binding gate would have \
                  nothing to check (refused fail-closed)"
+            ),
+            #[cfg(feature = "extended-fragment")]
+            CheckError::FragmentUnsupportedCommitmentMethod { commitment, method_iri } => write!(
+                f,
+                "commitment {} authenticated commitment method {}, which the \
+                 extended-fragment binding layers have no single encoding policy for \
+                 (they re-encode a disclosed term string-canonically and compare it \
+                 against the disclosed row slots); the combination is refused \
+                 fail-closed rather than compared under an encoder part of the \
+                 presentation was never derived under",
+                commitment, method_iri
             ),
         }
     }
@@ -8874,6 +8903,44 @@ fn re_encode_solution(
     Ok(mu)
 }
 
+/// ONE encoding policy for the extended-fragment binding layers: refuse a
+/// presentation referring to a committed graph whose AUTHENTICATED commitment
+/// method is not the one those layers encode under.
+///
+/// The layers below re-encode a disclosed solution term with [`encode_term`] (the
+/// string-canonical encoding) and compare the result against disclosed scan-row
+/// slots, `PathReach` endpoint encodings and re-encoded `VALUES` cells. Those
+/// four are comparable to each other only while every commitment involved
+/// authenticated [`sparq_zk::commit::CommitmentMethod::StringCanonicalV1`] — or
+/// authenticated nothing ([`AuthenticatedMethod::Unbound`]), whose pattern
+/// encoder is the same one.
+///
+/// Under any other authenticated method the disclosed rows carry a different
+/// encoding of the same term, so comparing them against a string-canonical
+/// re-encoding would REFUSE an honest presentation and admit nothing. Rather than
+/// leave that as a silent false refusal, or encode each surface under its own
+/// method (which would mean one coherent policy across all four surfaces — the
+/// larger change this bound defers), the combination is refused BY NAME. This is
+/// a bound on the lane, not a property established about any proof.
+// sq-ygk6x / sq-j506 follow-up.
+#[cfg(feature = "extended-fragment")]
+fn bind_fragment_encoding_policy(methods: &AuthenticatedMethods) -> Result<(), CheckError> {
+    for (commitment, entry) in methods {
+        let Some(method) = entry.method() else {
+            // `Unbound`: no method was attested, and the pattern encoder for that
+            // case IS the string-canonical one, so the layers stay coherent.
+            continue;
+        };
+        if method != sparq_zk::commit::CommitmentMethod::StringCanonicalV1 {
+            return Err(CheckError::FragmentUnsupportedCommitmentMethod {
+                commitment: commitment.clone(),
+                method_iri: method.scheme_iri().to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// FAIL-CLOSED wave-1 extended-fragment DISCLOSED-SOLUTION term binding
 /// (sq-1zf94): the composition analogue of the flat query-text term binding
 /// (`bind_query_correctness`'s scan-const check + the `bind_joins` slot binding),
@@ -10091,6 +10158,13 @@ pub fn verify_fragment_manifest(
         return Err(CheckError::FragmentNoBranchWitness);
     }
 
+    // (1c) ONE ENCODING POLICY for every layer below. The authenticated-method
+    // map is read here rather than after layer (2) because layer (2) is the first
+    // gate that re-encodes a disclosed term, and all four layers must agree on the
+    // encoding they compare under. See `bind_fragment_encoding_policy`.
+    let fragment_methods = authenticated_methods_for(&fm.manifest, trusted_key_set)?;
+    bind_fragment_encoding_policy(&fragment_methods)?;
+
     // (2) FAIL-CLOSED DISCLOSED-SOLUTION term binding (sq-1zf94): bind each bound
     // path's pred_enc/src_enc/dst_enc and each disclosed VALUES cell to the encoding
     // the verifier re-derives from the query text + the disclosed solution (never a
@@ -10112,7 +10186,6 @@ pub fn verify_fragment_manifest(
     // stage below runs it again as part of the full pre-filter, so nothing is
     // skipped: a refusal here is a refusal that stage would also raise, reported
     // before the nonce is burnt.
-    let fragment_methods = authenticated_methods_for(&fm.manifest, trusted_key_set)?;
     bind_scan_pattern_methods(&fm.manifest, &fragment_methods)?;
     bind_fragment_scans(fm, &fragment_methods).map_err(CheckError::FragmentScan)?;
 
@@ -13211,6 +13284,37 @@ mod fragment_dispatch_tests {
         attest_routing_fixture(&mut m.manifest)
     }
 
+    /// As [`attest_fragment_fixture`], but the issuer attests a CHOSEN commitment
+    /// method rather than the string-canonical one the other fixtures use — so a
+    /// test can build an honestly attested presentation over a method the extended
+    /// lane does not encode under.
+    #[cfg(feature = "dual-leaf")]
+    fn attest_fragment_fixture_with_method(
+        m: &mut crate::manifest::FragmentManifest,
+        method: sparq_zk::commit::CommitmentMethod,
+    ) -> KeySet {
+        let ks = attest_routing_fixture(&mut m.manifest);
+        let sk = sparq_zk::sig::SecretKey::from_seed(1);
+        let list_id = sparq_zk::sig::status_list_id_to_field(TEST_STATUS_LIST);
+        let status_ref =
+            sparq_zk::sig::status_ref_digest(&list_id, TEST_STATUS_INDEX, TEST_STATUS_VERSION);
+        for att in &mut m.manifest.commitment_attestations {
+            let c = att.commitment.to_field().expect("a parseable fixture commitment");
+            let salt = att
+                .salt
+                .as_ref()
+                .and_then(|s| s.to_field())
+                .expect("the fixture attestation carries a salt");
+            att.signature = sk.sign_presentation_with_status_and_scheme(
+                &c,
+                &salt,
+                &status_ref,
+                &sparq_zk::sig::scheme_iri_to_field(method.scheme_iri()),
+            );
+        }
+        ks
+    }
+
     fn dummy_prover() -> CircuitProver {
         // Never invoked in these tests — every case rejects before the sub-proof
         // bb loop, so no nargo/bb toolchain is needed.
@@ -13914,12 +14018,19 @@ mod fragment_dispatch_tests {
         // End-to-end: a VALUES cell that disagrees with the disclosed solution is
         // refused as a structured CheckError::FragmentSolution — BEFORE the nonce is
         // burnt or any bb subprocess runs.
-        let m = fm(
+        //
+        // The fixture is ATTESTED because the encoding-policy gate (layer 1c) reads
+        // the authenticated-method map ahead of this layer, so an unattested
+        // commitment would be refused there first — a refusal about the fixture, not
+        // about the disclosed solution.
+        let mut m = fm(
             VALUES,
             vec![sub(scan_min())],
             vec![bw_sol(0, vec![0], vec![], vec![1], sol(&[("o", "http://ex/z")]))],
         );
-        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let ks = attest_fragment_fixture(&mut m);
+        let m = m;
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
         let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
             .unwrap_err();
         assert!(
@@ -15095,14 +15206,19 @@ mod fragment_dispatch_tests {
         assert_eq!(join_coherence(&values_fixture(Q, "http://ex/a", vec![0])), Ok(()));
     }
 
-    /// The `VALUES` cell really is encoded under the AUTHENTICATED method: the
-    /// SAME presentation is accepted when the branch's scan authenticates
-    /// `DualLeafV2` and its disclosed rows carry dual-leaf encodings, and refused
+    /// The `VALUES` cell really is encoded under the AUTHENTICATED method, as
+    /// `bind_fragment_join_coherence` is called DIRECTLY here: the same
+    /// presentation passes that gate when the branch's scan authenticates
+    /// `DualLeafV2` and its disclosed rows carry dual-leaf encodings, and fails it
     /// when the map says string-canonical instead.
     ///
-    /// This is what keeps an honest dual-leaf presentation with an UNPROJECTED
-    /// `VALUES` variable from being refused by the cell merge: the cell and the
-    /// row it is compared against are both folded by that method's encoder.
+    /// This gate is therefore method-aware, but the LANE is not: the end-to-end
+    /// entry point refuses a non-string-canonical commitment outright at layer 1c
+    /// (`bind_fragment_encoding_policy`), because the OTHER extended layers
+    /// re-encode a disclosed term string-canonically. That refusal is asserted in
+    /// `an_extended_presentation_over_a_non_string_canonical_commitment_is_refused`.
+    /// This test is about what this one gate compares under; it is NOT a claim
+    /// that a dual-leaf presentation verifies end to end.
     #[cfg(feature = "dual-leaf")]
     #[test]
     fn a_values_cell_is_encoded_under_the_scans_authenticated_method() {
@@ -15158,6 +15274,74 @@ mod fragment_dispatch_tests {
         assert!(
             matches!(err, FragmentJoinError::Incoherent { witness: 0, var: ref v, .. } if v == "o"),
             "under the wrong encoder the cell must not match the row, got {:?}",
+            err
+        );
+    }
+
+    /// The extended lane has ONE encoding policy, and a commitment that
+    /// authenticated any other commitment method is refused BY NAME at layer 1c
+    /// rather than compared under an encoder part of the presentation was never
+    /// derived under (which would be a false refusal of an honest prover).
+    #[cfg(feature = "dual-leaf")]
+    #[test]
+    fn an_extended_presentation_over_a_non_string_canonical_commitment_is_refused() {
+        let mut m = fm(
+            VALUES,
+            vec![sub(scan_min())],
+            vec![bw_sol(0, vec![0], vec![], vec![0], sol(&[("o", "http://ex/x")]))],
+        );
+        // Attest the fixture under DUAL-LEAF-V2 rather than string-canonical.
+        let ks = attest_fragment_fixture_with_method(
+            &mut m,
+            sparq_zk::commit::CommitmentMethod::DualLeafV2,
+        );
+        let (p, w, _ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        match err {
+            CheckError::FragmentUnsupportedCommitmentMethod { ref method_iri, .. } => {
+                assert_eq!(
+                    method_iri,
+                    sparq_zk::commit::CommitmentMethod::DualLeafV2.scheme_iri(),
+                    "the refusal must name the method it refused"
+                );
+            }
+            other => panic!(
+                "a non-string-canonical commitment must be refused by name, got {:?}",
+                other
+            ),
+        }
+    }
+
+    /// FULL-STACK positive control: an HONEST string-canonical presentation —
+    /// disclosed solution, a BGP scan with its selected row, and an UNPROJECTED
+    /// `VALUES` cell constraining that row's object — passes layers 1, 1b, 1c, 2,
+    /// 2b and 2c and is refused only by the CRYPTO stage, which has no proof bytes
+    /// to verify in a fixture.
+    ///
+    /// This is the control the per-layer tests cannot give: every layer runs over
+    /// ONE presentation, in order, with the attested method map the real entry
+    /// point builds — so none of the refusals added on this lane refuses an honest
+    /// shape.
+    #[test]
+    fn an_honest_extended_presentation_passes_every_binding_layer() {
+        const Q: &str =
+            "SELECT ?s WHERE { VALUES ?o { <http://ex/a> } ?s <http://ex/p> ?o }";
+        let mut m = fm(
+            Q,
+            vec![sub(p_scan_with_object("http://ex/a"))],
+            vec![bw_scan(0, vec![0], vec![0], vec![0], sol(&[("s", "http://ex/s1")]))],
+        );
+        let ks = attest_fragment_fixture(&mut m);
+        let (p, w, _ks, _rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        // The relying party's own authoritative snapshot, showing the attested
+        // status index UNSET — stage 2f reads this, never the prover's.
+        let rp = join_fixture_policy();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        assert!(
+            matches!(err, CheckError::MissingProof { .. }),
+            "an honest presentation must reach the crypto stage, got {:?}",
             err
         );
     }

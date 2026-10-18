@@ -555,6 +555,49 @@ jobs:
             fi
           done
 
+      # The OFF-by-default `extended-fragment` lane's regression cases live INLINE
+      # in `src/verifier.rs` (`verifier::fragment_dispatch_tests`), so
+      # `scripts/check-feature-test-execution.py` cannot see them (it scans
+      # `tests/` files and `required-features`, not inline `#[cfg(feature = ...)]`
+      # tests in `src/`), the workspace lane compiles them to nothing, and the
+      # step above passes no `--features`. The feature-matrix leg
+      # `opt-in sparq-zk-compose (extended-fragment + dual-leaf ...)` builds and
+      # runs the module; THIS step additionally asserts, by name, that the lane's
+      # load-bearing cases each ran as exactly one passing test — so a rename or a
+      # `cfg` change cannot silently retire one of them (a libtest filter that
+      # matches nothing exits 0).
+      #
+      # No toolchain is needed for these (they refuse before any bb subprocess);
+      # they are here because this is the workflow that owns the ZK lanes.
+      - name: Assert the extended-fragment regression cases ran (default-off feature)
+        if: steps.changes.outputs.zk == 'true'
+        run: |
+          set -euo pipefail
+          for t in \
+            verifier::fragment_dispatch_tests::a_disclosed_binding_the_attributed_branch_does_not_bind_is_refused \
+            verifier::fragment_dispatch_tests::a_duplicate_disclosed_binding_is_refused \
+            verifier::fragment_dispatch_tests::a_non_projected_disclosed_binding_is_refused \
+            verifier::fragment_dispatch_tests::a_sliced_query_is_refused_end_to_end \
+            verifier::fragment_dispatch_tests::an_extended_presentation_over_a_non_string_canonical_commitment_is_refused \
+            verifier::fragment_dispatch_tests::an_honest_extended_presentation_passes_every_binding_layer \
+            verifier::fragment_dispatch_tests::the_filter_sweep_runs_even_with_no_branch_witness \
+            verifier::fragment_dispatch_tests::a_values_only_branch_carrying_a_filter_is_refused \
+            verifier::fragment_dispatch_tests::a_path_only_branch_carrying_a_filter_is_refused \
+            verifier::fragment_dispatch_tests::two_values_blocks_pinning_one_variable_to_different_cells_are_refused \
+            verifier::fragment_dispatch_tests::the_selected_values_row_is_the_one_that_constrains \
+            verifier::fragment_dispatch_tests::every_values_block_is_read_not_only_the_first \
+            verifier::fragment_dispatch_tests::every_values_column_is_read_not_only_the_first \
+            verifier::fragment_dispatch_tests::a_values_cell_is_encoded_under_the_scans_authenticated_method; do
+            echo "::group::$t"
+            cargo test -p sparq-zk-compose --features extended-fragment,dual-leaf --lib \
+              -- --exact --test-threads=1 "$t" 2>&1 | tee "/tmp/ef-$t.log"
+            echo "::endgroup::"
+            if ! grep -qE '^test result: ok\. 1 passed' "/tmp/ef-$t.log"; then
+              echo "FAIL: $t did not run as exactly one passing test under --features extended-fragment,dual-leaf" >&2
+              exit 1
+            fi
+          done
+
       # The live tests that are NOT `#[ignore]`d (e2e forge-reject cases, the signed
       # filter bindings, the family members, the differential fuzz, the car-hire capture)
       # run in the default lanes only as declared skips, because those lanes have no
