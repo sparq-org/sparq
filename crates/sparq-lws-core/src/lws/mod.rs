@@ -1159,6 +1159,10 @@ const STAGED_ENTRY_BYTES: usize = 512;
 /// store step goes through one: a write or delete that fails leaves content, metadata and
 /// membership as they were, validators included (records are put back with
 /// [`Store::reinstate`], pointing at the bytes the store held for them, see [`Journal::stage`]).
+/// The one exception is the edge a container holds to a linkset record already gone, which
+/// [`Journal::remove_member`] detaches in a step of its own: that edge is not put back when the
+/// change is, since it names nothing and no LWS listing shows it, so a failed change can leave a
+/// container one dangling record edge lighter than it began.
 /// What a journal holds to put things back is bounded (`limit` bytes); a change that would need
 /// more is refused, and one that knows its whole extent up front ([`Journal::stage`]) is refused
 /// before it changes anything.
