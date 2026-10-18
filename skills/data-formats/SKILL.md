@@ -646,6 +646,16 @@ cargo build -p sparq-cli --features serialize-rdf
 
 ## Gotchas / feature flags / prerequisites
 
+**One holder per directory:** `Graph::open`, `open_or_create`, `save`, `save_compressed`,
+`restore_into_durable` and the `build_external*` builders take an exclusive advisory lock
+(`dir_lock`: `flock` on Unix, `LockFileEx` on Windows) before touching a directory; an open
+keeps it while the graph lives, and a graph may still save into its own directory. A second
+holder, in another process or this one, gets `WouldBlock` at once. Every open replays and
+truncates the logs, so there is no unlocked (read-only) open. The flat layout locks
+`<canonical dir>.lock` beside the directory, so symbolic links and trailing slashes share
+one lock, but two bind mounts of a directory do not; `Graph::open_locked_at` takes another
+location. Network file systems are not supported.
+
 - **Format strings are matched literally — an unknown format is REJECTED, not
   guessed.** Accepted aliases:
   `"turtle"`/`"ttl"`/`"text/turtle"`/`"application/turtle"`,
