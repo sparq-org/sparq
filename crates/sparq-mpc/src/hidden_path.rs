@@ -488,7 +488,7 @@ pub fn public_candidate_pair_bound(edge_count: usize, k: usize) -> Result<usize,
 /// The answer is their SUM, which over-counts the pairs the arms share. That is
 /// deliberate: the bound must not depend on the edge data, and over-counting only
 /// raises the `B` at which the decision becomes data-independent. For inputs
-/// [`check_bounded_params`] accepts, that sum can exceed
+/// `check_bounded_params` accepts, that sum can exceed
 /// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`, or
 /// `{0,2}` with `|E| = 511` — and then no admissible `B` reaches it, so the caller
 /// has only the data-dependent branch. Neither branch hides the distinct
@@ -595,7 +595,7 @@ fn projected_candidate_count(edges: &HiddenEdges, k: usize) -> Result<usize, Mpc
 /// The union is materialised rather than estimated, because a sum of the three
 /// arms double-counts the pairs they share and would refuse a `bound` the operator
 /// should accept. It costs at most the keys the builder's own accumulator will
-/// hold: the product arm is `|A| x |B| <= |E|^2`, and [`check_bounded_params`] —
+/// hold: the product arm is `|A| x |B| <= |E|^2`, and `check_bounded_params` —
 /// which runs first — has already capped `Σ_ℓ a^ℓ·|E|^ℓ` at
 /// [`MAX_CHAIN_TUPLES`], so for any form that reaches the product arm `|E|^2` is
 /// within that cap. What it avoids is the `Σ_ℓ |E|^ℓ` secure equalities the build
@@ -945,7 +945,7 @@ impl HiddenBoundedPath {
 /// the one `length`-long sequence. Grows the chain set amortised (no
 /// `len * alts`-sized `with_capacity`, which could overflow on a large public unroll).
 ///
-/// [`check_bounded_params`] runs first and caps the chain COUNT — `Σ_ℓ a^ℓ·|E|^ℓ`
+/// `check_bounded_params` runs first and caps the chain COUNT — `Σ_ℓ a^ℓ·|E|^ℓ`
 /// against [`MAX_CHAIN_TUPLES`] — so the number of sequences this returns is
 /// bounded. It does NOT bound their WIDTHS: a predicate IRI's length is unbounded,
 /// as are the payload arity and the endpoint terms' lengths downstream. Width caps
@@ -1077,7 +1077,7 @@ fn check_bounded_params(
     Ok(())
 }
 
-/// The controlled over-cap refusal shared by [`check_bounded_params`]'s overflow and
+/// The controlled over-cap refusal shared by `check_bounded_params`'s overflow and
 /// over-limit branches.
 fn oversized_bounded<T>(edges: &PredicatedEdges, form: &HiddenBoundedPath) -> Result<T, MpcError> {
     Err(MpcError::Protocol(format!(
@@ -1219,7 +1219,7 @@ fn build_bounded_candidates(
 ///
 /// **The public bound can be out of reach here.**
 /// [`public_bounded_candidate_pair_bound`] sums the arms the form admits, and for
-/// inputs [`check_bounded_params`] accepts that sum can exceed
+/// inputs `check_bounded_params` accepts that sum can exceed
 /// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`
 /// (`3·|E|`), or `{0,2}` with `|E| = 511` (`3·|E| + |E|^2`), for instance. No `B` is
 /// then both at or above the public bound and within `MAX_OUTPUT_BOUND`, so such a
