@@ -1589,7 +1589,9 @@ pub enum CheckError {
     /// the ONE selection site whose id comes from the manifest; the five auxiliary
     /// gates' members come from the relying party's own policy or registry (see
     /// `fixed_member`), and `crate::result`'s selected-answer verifier is a
-    /// separate surface outside this PR's scope.
+    /// separate surface this gate does not cover: it selects its key by PACKAGE
+    /// (`CircuitProver::canonical_package_vk`) from a statement it built itself,
+    /// not from a manifest-declared `CircuitId`.
     ///
     /// This variant only ADDS a refusal: `crate::dispatch::resolve_circuit` echoes
     /// the id it is given on success, so a legal pair selects exactly the member it
