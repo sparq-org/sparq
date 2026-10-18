@@ -996,7 +996,7 @@ impl<S: Store + 'static> LwsState<S> {
         let state = self.detached();
         tokio::spawn(async move {
             for undo in &left.0 {
-                until_done(|| undo.apply(&state.store)).await;
+                until_done(|| undo.apply(&state.store, None)).await;
                 if let Undo::Resolve {
                     record,
                     touch: Some(container),
@@ -1438,8 +1438,17 @@ pub(crate) enum Undo {
 }
 
 impl Undo {
-    /// Put this change back, with the mutation's locks still held.
-    async fn apply<S: Store>(&self, store: &S) -> Result<(), crate::error::ServerError> {
+    /// Put this change back, with the mutation's locks still held. `within` bounds how long a
+    /// step waits for a fence (an [`Undo::Fence`], or an unsettled removal's in
+    /// [`records::delete_record`]): [`records::LOCK_WAIT`] while a request waits on it
+    /// ([`settle`]), so a fence that stalls leaves the step to be set aside rather than holding
+    /// the request and its locks; `None` for as long as the store's own call takes (the
+    /// background put-back, and the settling of intents at start-up).
+    async fn apply<S: Store>(
+        &self,
+        store: &S,
+        within: Option<std::time::Duration>,
+    ) -> Result<(), crate::error::ServerError> {
         match self {
             Undo::Restore {
                 key,
@@ -1457,18 +1466,31 @@ impl Undo {
                 }
                 kept.put_back(store, iri, parent.as_deref()).await
             }
-            Undo::Remove { iri, parent } => records::delete_record(store, iri, parent).await,
-            Undo::Fence { fence } => store.fence(fence).await,
+            Undo::Remove { iri, parent } => {
+                records::delete_record(store, iri, parent, within).await
+            }
+            Undo::Fence { fence } => match within {
+                Some(within) => {
+                    let deadline = tokio::time::Instant::now() + within;
+                    match records::fenced_by(store, fence, Some(deadline)).await {
+                        true => Ok(()),
+                        false => Err(crate::error::ServerError::Storage(
+                            "the fence did not succeed in time".into(),
+                        )),
+                    }
+                }
+                None => store.fence(fence).await,
+            },
             Undo::Locked { .. } => Ok(()),
-            Undo::Forget { record, .. } => intents::clear(store, record).await,
+            Undo::Forget { record, .. } => intents::clear(store, record, within).await,
             Undo::Resolve { record, undo, .. } => {
                 if intents::kept(store, record).await? {
                     return Ok(());
                 }
                 for step in undo {
-                    Box::pin(step.apply(store)).await?;
+                    Box::pin(step.apply(store, within)).await?;
                 }
-                intents::clear(store, record).await
+                intents::clear(store, record, within).await
             }
         }
     }
@@ -1673,15 +1695,33 @@ fn iris_of(undo: &[Undo]) -> Vec<String> {
 /// change waits on it, before what is left is set aside ([`LwsState::set_aside`]).
 const UNDO_ATTEMPTS: u32 = 3;
 
-/// Apply `undo` in order, each tried a few times ([`UNDO_ATTEMPTS`], with short waits between):
-/// `None` once all are applied, else what is left, from the step that kept failing on.
+/// Apply `undo` in order while a request waits on it (with its locks held), each tried a few
+/// times ([`UNDO_ATTEMPTS`], with short waits between): `None` once all are applied, else what is
+/// left, from the step that kept failing on. Each attempt waits for a fence for
+/// [`records::LOCK_WAIT`] at most ([`Undo::apply`]): one that stalls leaves its step to be set
+/// aside and put back in the background, which waits as long as the store takes.
 pub(crate) async fn settle<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unsettled> {
+    settle_within(store, undo, Some(records::LOCK_WAIT)).await
+}
+
+/// [`settle`] with no request waiting: each fence is waited for as long as the store's own call
+/// takes. For the settling of intents at start-up (see [`intents`]), before anything is served.
+pub(crate) async fn settle_at_start<S: Store>(store: &S, undo: Vec<Undo>) -> Option<Unsettled> {
+    settle_within(store, undo, None).await
+}
+
+/// [`settle`], each fence waited for `within` at most (`None`: as long as the store takes).
+async fn settle_within<S: Store>(
+    store: &S,
+    undo: Vec<Undo>,
+    within: Option<std::time::Duration>,
+) -> Option<Unsettled> {
     let mut steps = undo.into_iter();
     while let Some(step) = steps.next() {
         let mut wait = std::time::Duration::from_millis(50);
         let mut done = false;
         for attempt in 1..=UNDO_ATTEMPTS {
-            if step.apply(store).await.is_ok() {
+            if step.apply(store, within).await.is_ok() {
                 done = true;
                 break;
             }
@@ -2884,6 +2924,9 @@ pub(crate) mod test_store {
         pub lose_nth_write_of: Arc<std::sync::Mutex<Option<(String, usize)>>>,
         /// `meta` fails, as in a backend outage.
         pub fail_meta: Arc<AtomicBool>,
+        /// The next `meta` (of any IRI) waits for a permit of this gate before it reads, as a
+        /// call to a slow store.
+        pub hold_next_meta: Arc<std::sync::Mutex<Option<Arc<tokio::sync::Semaphore>>>>,
         /// `meta` of this IRI reports no modification time, as a backend that keeps none does.
         pub timeless: Arc<std::sync::Mutex<Option<String>>>,
         /// While [`FlakyStore::fail_exists`] is set, this many existence checks still answer
@@ -2930,6 +2973,9 @@ pub(crate) mod test_store {
         /// Every `fence` takes this many milliseconds before answering (0: at once), as a call
         /// to a slow store.
         pub slow_fence_ms: Arc<std::sync::atomic::AtomicU64>,
+        /// The store's call timeout in milliseconds (`Store::call_timeout`; 0: the inner
+        /// store's).
+        pub call_timeout_ms: Arc<std::sync::atomic::AtomicU64>,
         /// What the last write reported unsettled changes (its fence's `touches`).
         pub last_unsettled: Arc<std::sync::Mutex<Vec<String>>>,
         /// Each unsettled write by its fence's nonce: whether it is fenced, locked while it
@@ -2992,6 +3038,7 @@ pub(crate) mod test_store {
                 lose_nth_write_of: Default::default(),
                 fail_list: Default::default(),
                 fail_meta: Default::default(),
+                hold_next_meta: Default::default(),
                 timeless: Default::default(),
                 exists_answers: Default::default(),
                 refuse_write_of: Default::default(),
@@ -3009,6 +3056,7 @@ pub(crate) mod test_store {
                 fences_tried: Default::default(),
                 hang_fence: Default::default(),
                 slow_fence_ms: Default::default(),
+                call_timeout_ms: Default::default(),
                 fail_release: Default::default(),
                 failing_holds: Default::default(),
                 last_unsettled: Default::default(),
@@ -3137,6 +3185,10 @@ pub(crate) mod test_store {
         }
         async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
             self.traced("meta", iri);
+            let held = self.hold_next_meta.lock().unwrap().take();
+            if let Some(gate) = held {
+                gate.acquire().await.expect("gate").forget();
+            }
             if self.fail_meta.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
@@ -3453,6 +3505,12 @@ pub(crate) mod test_store {
         }
         fn raises_markers(&self) -> bool {
             !self.no_atomic_markers.load(Ordering::SeqCst) && self.inner.raises_markers()
+        }
+        fn call_timeout(&self) -> std::time::Duration {
+            match self.call_timeout_ms.load(Ordering::SeqCst) {
+                0 => self.inner.call_timeout(),
+                ms => std::time::Duration::from_millis(ms),
+            }
         }
         async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
             self.marker_writes.fetch_add(1, Ordering::SeqCst);

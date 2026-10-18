@@ -44,11 +44,14 @@
 //! and then RE-RUNS the same WAC check for the WebID the token is bound to
 //! ([`NotificationHub::authorize_receive_token`]). Re-checking at connect time keeps the two gates in
 //! lock-step and means a grant REVOKED after subscribe cannot be replayed for the remainder of the
-//! token's TTL. The token gates connecting only: an open socket lives until the client closes it,
-//! its subscriber loses read access, or its backlog overflows. The same check runs again before
-//! every frame on an open socket (a frame the subscriber may not read is dropped), and on a timer
-//! of the socket's own ([`ws::ACCESS_RECHECK`]), which closes it (1008) once the subscriber has
-//! lost read access: up to one timer period after the loss, never on an event.
+//! token's TTL. The token gates connecting only, with at most one socket open per token at a time:
+//! an open socket lives until the client closes it, its subscriber loses read access (1008), or it
+//! is closed 1011 (its backlog overflows, its access cannot be checked on the timer, or a frame was
+//! dropped and the client is to reconnect and reconcile). The same check runs again before every
+//! frame on an open socket (a frame the subscriber may not read is dropped), and on a timer of the
+//! socket's own ([`ws::ACCESS_RECHECK`]), which closes it (1008) once the subscriber has lost read
+//! access: up to one timer period after the loss, plus the time a check already in progress
+//! takes, never on an event.
 //!
 //! **Existence non-disclosure** (`research/lws-design-records.md` §6): neither gate probes the topic
 //! resource itself — the decision comes ONLY from the ACL-resolution chain — so a denial is the same
@@ -68,12 +71,17 @@ pub use activity::{ActivityType, AS2_CONTEXT, NOTIFICATIONS_CONTEXT};
 
 /// How long a minted receive token stays valid after the authenticated subscribe (make-the-call
 /// decision, documented). 5 minutes: long enough to bridge subscribe-POST → WS-connect (which a
-/// client does immediately) AND to absorb a transient reconnect, short enough that a leaked
-/// `receiveFrom` URL stops working quickly. The token is REUSABLE until expiry (NOT single-use at
-/// connect) so a client that drops the socket can reconnect with the same `receiveFrom` URL within
-/// the window — the standard WebSocketChannel2023 reconnect behaviour; expiry bounds the exposure.
+/// client does immediately) AND to absorb a transient reconnect, short enough that a
+/// `receiveFrom` URL in someone else's hands stops connecting quickly. The token is REUSABLE until
+/// expiry (NOT single-use at connect) so a client that drops the socket can reconnect with the
+/// same `receiveFrom` URL within the window — the standard WebSocketChannel2023 reconnect
+/// behaviour — but it has at most ONE socket open at a time ([`NotificationHub::claim_receive_socket`]):
+/// a connect while a socket opened with it is still open is refused as an invalid token is (401),
+/// and a reconnect is accepted once that socket has closed.
 /// It is a window for CONNECTING: a socket opened within it is not closed when it ends (an open
-/// socket follows its subscriber's access instead, see [`ws::ACCESS_RECHECK`]).
+/// socket follows its subscriber's access instead, see [`ws::ACCESS_RECHECK`]), so expiry bounds
+/// when a socket can be opened, not how long one stays open: whoever holds the URL within its
+/// window can hold one socket open for as long as the subscriber may read the topic.
 const RECEIVE_TOKEN_TTL: Duration = Duration::from_secs(300);
 
 /// The number of random bytes in a receive token before base64url encoding. 32 bytes = 256 bits of
@@ -93,6 +101,19 @@ struct ReceiveTokenBinding {
     web_id: String,
     /// When the token stops connecting.
     expiry: TokenExpiry,
+    /// Whether a socket opened with this token is open: at most one is at a time (see
+    /// [`NotificationHub::claim_receive_socket`]).
+    open: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// The one socket a receive token may have open, held by that socket's task: released (so the
+/// token can connect again, within its window) when the task ends, however it ends.
+pub(crate) struct SocketClaim(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for SocketClaim {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// When a receive token stops connecting: its expiry instant, and a latch set once it is seen
@@ -183,6 +204,7 @@ impl NotificationHub {
             topic: topic.to_string(),
             web_id: web_id.to_string(),
             expiry: TokenExpiry::new(Instant::now() + RECEIVE_TOKEN_TTL),
+            open: Default::default(),
         };
         let mut tokens = self.receive_tokens.lock().await;
         // Opportunistic sweep: drop any expired token so a stream of subscribes-without-connect
@@ -206,6 +228,7 @@ impl NotificationHub {
             topic: topic.to_string(),
             web_id: web_id.to_string(),
             expiry: TokenExpiry::new(Instant::now() + ttl),
+            open: Default::default(),
         };
         self.receive_tokens
             .lock()
@@ -245,6 +268,27 @@ impl NotificationHub {
             // Present but bound to a DIFFERENT topic, or absent entirely.
             _ => None,
         }
+    }
+
+    /// Claim the one socket `token` may have open for `topic`: `None` when the token does not
+    /// validate (as for [`authorize_receive_token`](Self::authorize_receive_token)) or a socket
+    /// opened with it is still open. The claim is released when it is dropped (the socket's task
+    /// has ended), and the token may then connect again within its window.
+    pub(crate) async fn claim_receive_socket(
+        &self,
+        token: &str,
+        topic: &str,
+    ) -> Option<SocketClaim> {
+        use std::sync::atomic::Ordering;
+        let tokens = self.receive_tokens.lock().await;
+        let b = tokens.get(token)?;
+        if b.expiry.expired() || b.topic != topic {
+            return None;
+        }
+        b.open
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()?;
+        Some(SocketClaim(b.open.clone()))
     }
 
     /// The number of LIVE subscribers for a topic (0 if the topic has no channel). Test/observability

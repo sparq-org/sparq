@@ -382,6 +382,16 @@ pub trait Store: Send + Sync {
         false
     }
 
+    /// How long one call to this store may take before the store itself gives it up: what a
+    /// caller that retries a call in the background (a removal's [`fence`](Store::fence)) lets an
+    /// attempt run for at most. The default is [`STORE_CALL_TIMEOUT`]; a store whose calls are
+    /// bounded otherwise says so (a [`CompositeStore`] says its index's,
+    /// [`SparqClient::call_timeout`], which for the HTTP index is the per-request timeout it was
+    /// built with, `HttpSparqClient::with_timeout`).
+    fn call_timeout(&self) -> std::time::Duration {
+        STORE_CALL_TIMEOUT
+    }
+
     /// The lease every handle to this backend shares, when it keeps one: a service built over
     /// it takes the lease for as long as it runs. The default is none (each service built over
     /// such a store takes a lease of its own).
@@ -1275,6 +1285,11 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
 
     fn raises_markers(&self) -> bool {
         self.sparq.raises_markers()
+    }
+
+    /// The index's: a fence, the call retried in the background, is the index's.
+    fn call_timeout(&self) -> std::time::Duration {
+        self.sparq.call_timeout()
     }
 
     async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {

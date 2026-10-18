@@ -76,16 +76,21 @@ pub(crate) fn names_lws_service_record(key: &str, base: &str) -> bool {
 /// Whether `path` (a path from the storage root, without query or fragment) holds a dot segment
 /// (`.` or `..`) as a URL normaliser could see one: a segment between slashes or raw backslashes
 /// (a WHATWG URL parser takes `\` as `/` in an `http` path, so `/a/..\b` resolves to `/b`), as
-/// sent or %-decoded (`%2E`, `%2e%2E`, `.%2E`, `%2E%2E%5Cb`). A write never creates a name with
-/// one, since a client or intermediary normalising the URL would resolve it away; `parse_target`
-/// refuses only a raw `.` or `..` between slashes, so a name stored with an encoded one (before
-/// writes refused it) can still be read and deleted.
+/// sent or %-decoded (`%2E`, `%2e%2E`, `.%2E`, `%2E%2E%5Cb`, `..%2Fb`). A %-decoded segment is
+/// split on `/` as well as `\`, since a normaliser that decodes `%2F` sees a separator there;
+/// a name merely holding an encoded slash (`a%2Fb`) has no dot segment and stays writable. A
+/// doubly encoded dot (`%252E`) is decoded once only, as by every standard normaliser, which
+/// leaves `%2E` and so no dot segment. A write never creates a name with one, since a client or
+/// intermediary normalising the URL would resolve it away; `parse_target` refuses only a raw `.`
+/// or `..` between slashes, so a name stored with an encoded one (before writes refused it) can
+/// still be read and deleted.
 pub(crate) fn has_normalisable_dot_segment(path: &str) -> bool {
     let is_dots = |s: &str| s == "." || s == "..";
-    let any_dots = |s: &str| s.split('\\').any(is_dots);
+    let raw_dots = |s: &str| s.split('\\').any(is_dots);
+    let decoded_dots = |s: &str| s.split(['/', '\\']).any(is_dots);
     path.split('/').any(|seg| {
-        any_dots(seg)
-            || (seg.contains('%') && any_dots(&crate::identity::percent_decode_lossy(seg)))
+        raw_dots(seg)
+            || (seg.contains('%') && decoded_dots(&crate::identity::percent_decode_lossy(seg)))
     })
 }
 
@@ -193,6 +198,9 @@ mod tests {
             "/a/..\\b",
             "/a/x\\.\\b",
             "/a/%2E%2E%5Cb",
+            "/a/..%2Fx",
+            "/a/%2E%2E%2Fz",
+            "/a/x%2F.%2Fy",
             "/a/..",
             "/a/./b",
         ] {
@@ -204,6 +212,8 @@ mod tests {
             "/a/...",
             "/a/%2Ex",
             "/a/x\\y",
+            "/a/a%2Fb",
+            "/a/%252E%252E/b",
             "/a/b",
         ] {
             assert!(!super::has_normalisable_dot_segment(path), "{path}");

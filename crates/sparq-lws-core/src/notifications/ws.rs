@@ -10,7 +10,8 @@
 //! - `GET  /.notifications/WebSocketChannel2023/receive?topic=<iri>&token=<tok>` — upgrade to a
 //!   WebSocket and register the connection under `<iri>`. **Token-gated:** the `token` must be a
 //!   valid, unexpired receive token whose bound topic matches `<iri>`, else the upgrade is rejected
-//!   (401, no socket). **Then WAC-gated again** for the WebID that token names, so a revoked grant
+//!   (401, no socket), as is a second connect while a socket the token opened is still open.
+//!   **Then WAC-gated again** for the WebID that token names, so a revoked grant
 //!   cannot be replayed within the token's TTL (403, no socket). The server then pushes AS2.0
 //!   notifications on change.
 //! - `GET  /.well-known/solid`                     — a storage-description document advertising the
@@ -136,7 +137,8 @@ pub struct NotifyState<S: Store> {
 }
 
 /// How often an open receive socket checks, on a timer of its own, that its subscriber may still
-/// read the topic, closing it (1008) once it may not. Every event is checked as well, and one the
+/// read the topic, closing it (1008) once it may not: at most one period, plus the time a check
+/// already in progress takes, after the loss. Every event is checked as well, and one the
 /// subscriber may not read is dropped, but only this timer closes the socket for it, so when the
 /// socket closes, and why, follows the subscriber's access and the clock alone, never an event it
 /// may not read.
@@ -544,9 +546,21 @@ pub async fn receive_handler<S: Store + 'static>(
         Ok(ws) => ws,
         Err(rej) => return rej.into_response(),
     };
+    // A token has at most one socket open at a time: a connect while one opened with it is still
+    // open is refused as an invalid token is (the client subscribes again for a fresh token, as it
+    // does for an expired one). The claim is held by the socket's task, and released when it ends
+    // (or when the upgrade never completes and the task is dropped), so a reconnect after the
+    // previous socket has closed is accepted within the window.
+    let Some(claim) = state.hub.claim_receive_socket(&token, &topic).await else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "a valid receive token is required",
+        )
+            .into_response();
+    };
     // Only AFTER the token validates do we upgrade + register a subscriber.
     let origin = request_origin(&headers).map(str::to_string);
-    ws.on_upgrade(move |socket| stream_notifications(socket, state, topic, web_id, origin))
+    ws.on_upgrade(move |socket| stream_notifications(socket, state, topic, web_id, origin, claim))
 }
 
 /// Send a close frame (best effort: the client may be gone already).
@@ -563,23 +577,44 @@ async fn close(socket: &mut WebSocket, code: u16, reason: &'static str) {
 const REVOKED: &str = "access to the topic was revoked";
 /// The close reason once the subscriber's access to the topic could not be decided.
 const UNDECIDED: &str = "access to the topic could not be checked; reconnect";
-/// The close reason once notifications may have been missed: the backlog overflowed, or an
-/// event's access check could not be made.
+/// The close reason once notifications may have been missed: one was dropped (the subscriber
+/// could not read it then, or its access check could not be made) and the subscriber may now
+/// read the topic.
 const RECONCILE: &str = "notifications may have been missed; reconnect and reconcile";
 /// The close reason once the backlog overflowed.
 const OVERFLOW: &str = "notification backlog overflow; reconnect and reconcile";
 
+/// What a socket's access check was made for (see [`stream_notifications`]).
+enum Due {
+    /// The access timer.
+    Tick,
+    /// A notification to send.
+    Event(Arc<str>),
+    /// A backlog overflow, and how many notifications it skipped.
+    Lag(u64),
+}
+
+/// No access check in progress, typed as one `start` would start.
+fn no_check<F>(_start: &impl Fn() -> F) -> Option<(F, Due)> {
+    None
+}
+
 /// The per-connection task: register a subscriber, forward every notification to the socket, and
 /// clean up (drop the receiver ⇒ the hub prunes the topic on its next emit) when the socket closes.
+/// `_claim` is the receive token's one open socket, released when this task ends.
 ///
-/// Concurrency: a `tokio::select!` over the access timer, the next broadcast notification and the
-/// next inbound socket message. Inbound frames from the client are drained (a WebSocketChannel2023
-/// receive socket is server→client only; we read solely to observe a Close / a transport error so
-/// we can tear down promptly and not hold the subscription open).
+/// Concurrency: a `tokio::select!` over the access timer, the next broadcast notification, the
+/// access check in progress (at most one at a time, for the tick or the notification that is due)
+/// and the next inbound socket message. Inbound frames from the client are drained (a
+/// WebSocketChannel2023 receive socket is server→client only; we read solely to observe a Close /
+/// a transport error so we can tear down promptly and not hold the subscription open). The socket
+/// is read while an access check is in progress too, so a ping is answered (the pong goes out on
+/// the next read) whether or not a check is running: when it is answered says nothing of an event.
 ///
-/// The socket lives until the client closes it, its subscriber loses read access, or its backlog
-/// overflows: the receive token that opened it gates connecting only. What the subscriber learns
-/// follows its current access:
+/// The socket lives until the client closes it, its subscriber loses read access (1008), its
+/// backlog overflows, its access cannot be checked on the timer, or notifications may have been
+/// missed (each 1011): the receive token that opened it gates connecting only. What the
+/// subscriber learns follows its current access:
 /// - Every notification is checked (the WAC and ODRL gate) right before it is sent; one the
 ///   subscriber may not read is dropped. A backlog overflow is checked the same way before it
 ///   closes the socket (1011): while the subscriber may not read the topic, the overflow is
@@ -588,70 +623,88 @@ const OVERFLOW: &str = "notification backlog overflow; reconnect and reconcile";
 ///   the state's `access_recheck`), so neither the close nor its timing depends on an event the
 ///   subscriber may not read.
 /// - A check that cannot be made is neither a grant nor a denial. On the timer it closes the
-///   socket (1011). For an event, the event is held back and noted as missed; at the next tick
-///   where the subscriber may read the topic, the socket is closed (1011) for the client to
-///   reconcile. A subscriber that may not read it is never told.
+///   socket (1011).
+/// - A notification (or an overflow) that is dropped, because the subscriber may not read it or
+///   its check could not be made, is noted as missed. From then on, the next point where the
+///   subscriber may read the topic (a notification, or a tick) closes the socket (1011) for the
+///   client to reconcile, instead of delivering: nothing is sent after a gap without saying so,
+///   and a subscriber whose Read was restored before the next tick is still told it missed
+///   something. A subscriber that may not read the topic at that point gets the revocation close
+///   (1008) on the timer and is never told.
 async fn stream_notifications<S: Store + 'static>(
     mut socket: WebSocket,
     state: Arc<NotifyState<S>>,
     topic: String,
     web_id: String,
     origin: Option<String>,
+    _claim: crate::notifications::SocketClaim,
 ) {
     let mut rx = state.hub.subscribe(&topic).await;
     let every = state.access_recheck;
     let mut recheck = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
     recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let access = || state.read_access(&topic, &web_id, origin.as_deref());
-    // Whether an event (or an overflow) went undecided since the last tick.
+    let access = || Box::pin(state.read_access(&topic, &web_id, origin.as_deref()));
+    // The access check in progress, and what it is for. While one runs, neither the timer nor
+    // the next notification is taken, so they are decided in the order they came.
+    let mut check = no_check(&access);
+    // Whether a notification (or an overflow) was dropped since the socket opened.
     let mut missed = false;
 
     loop {
         tokio::select! {
             // The access timer: closed once the subscriber may no longer read the topic (or its
             // access cannot be decided), or, when it may, once it may have missed something.
-            () = state.next_tick(&mut recheck) => {
-                match access().await {
-                    ReadAccess::Allowed if missed => {
-                        close(&mut socket, 1011, RECONCILE).await;
-                        break;
-                    }
-                    ReadAccess::Allowed => {}
-                    ReadAccess::Denied => {
-                        close(&mut socket, 1008, REVOKED).await;
-                        break;
-                    }
-                    ReadAccess::Undecided => {
-                        close(&mut socket, 1011, UNDECIDED).await;
-                        break;
-                    }
-                }
+            () = state.next_tick(&mut recheck), if check.is_none() => {
+                check = Some((access(), Due::Tick));
             }
             // A notification for this topic: forwarded only while the subscriber may read the
             // topic; dropped otherwise.
-            received = rx.recv() => {
+            received = rx.recv(), if check.is_none() => {
                 match received {
-                    Ok(body) => match access().await {
-                        ReadAccess::Allowed => {
-                            if socket.send(Message::text(body.to_string())).await.is_err() {
-                                break; // the client went away mid-send
-                            }
-                        }
-                        ReadAccess::Denied => {}
-                        ReadAccess::Undecided => missed = true,
-                    },
+                    Ok(body) => check = Some((access(), Due::Event(body))),
                     // The buffer overran for this slow client: frames were dropped. Tell the client
                     // to reconcile by closing — it should re-subscribe + re-read (missed-update
                     // safety) — once it is known that it may read what it missed.
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                        match access().await {
-                            ReadAccess::Allowed => {}
-                            ReadAccess::Denied => continue,
-                            ReadAccess::Undecided => {
-                                missed = true;
-                                continue;
-                            }
+                        check = Some((access(), Due::Lag(skipped)));
+                    }
+                    // The sender was dropped (the topic channel went away) — nothing more will arrive.
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            decided = async {
+                match check.as_mut() {
+                    Some((decision, _)) => decision.as_mut().await,
+                    None => std::future::pending().await,
+                }
+            }, if check.is_some() => {
+                let Some((_, due)) = check.take() else {
+                    continue;
+                };
+                match (due, decided) {
+                    (Due::Tick, ReadAccess::Allowed) if missed => {
+                        close(&mut socket, 1011, RECONCILE).await;
+                        break;
+                    }
+                    (Due::Tick, ReadAccess::Allowed) => {}
+                    (Due::Tick, ReadAccess::Denied) => {
+                        close(&mut socket, 1008, REVOKED).await;
+                        break;
+                    }
+                    (Due::Tick, ReadAccess::Undecided) => {
+                        close(&mut socket, 1011, UNDECIDED).await;
+                        break;
+                    }
+                    (Due::Event(_), ReadAccess::Allowed) if missed => {
+                        close(&mut socket, 1011, RECONCILE).await;
+                        break;
+                    }
+                    (Due::Event(body), ReadAccess::Allowed) => {
+                        if socket.send(Message::text(body.to_string())).await.is_err() {
+                            break; // the client went away mid-send
                         }
+                    }
+                    (Due::Lag(skipped), ReadAccess::Allowed) => {
                         NOTIFICATION_METRICS
                             .dropped_subscribers_total
                             .fetch_add(1, Ordering::Relaxed);
@@ -662,11 +715,15 @@ async fn stream_notifications<S: Store + 'static>(
                         close(&mut socket, 1011, OVERFLOW).await;
                         break;
                     }
-                    // The sender was dropped (the topic channel went away) — nothing more will arrive.
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    // Dropped, and noted: the next point where the subscriber may read the
+                    // topic closes the socket for it to reconcile.
+                    (Due::Event(_) | Due::Lag(_), ReadAccess::Denied | ReadAccess::Undecided) => {
+                        missed = true;
+                    }
                 }
             }
-            // An inbound socket message — only meaningful as a Close / error signal.
+            // An inbound socket message — only meaningful as a Close / error signal. Read while
+            // a check is in progress too, so pings are answered meanwhile.
             inbound = socket.recv() => {
                 match inbound {
                     Some(Ok(Message::Close(_))) | None => break, // clean close or stream end
@@ -1594,7 +1651,7 @@ mod tests {
         );
     }
 
-    /// An event whose access check cannot be made is held back, not sent, and noted: at the
+    /// An event whose access check cannot be made is dropped, not sent, and noted: at the
     /// next tick where the subscriber may read the topic, the socket is closed `1011` for the
     /// client to reconcile.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1646,6 +1703,135 @@ mod tests {
             next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
             Some(Err((1008, REVOKED.to_string())))
         );
+    }
+
+    /// Review of #7174: after an event whose check could not be made was dropped and noted,
+    /// later events were still delivered until the next tick, so the client saw a stream with
+    /// a gap in it and no signal. The next event the subscriber may read closes the socket for
+    /// it to reconcile, instead of being delivered.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_event_after_a_missed_one_asks_to_reconcile_instead() {
+        let (s, store) = faulting_state().await;
+        let topic = format!("{BASE}/doc");
+        let mut ws = open_for_bob(&s, &topic).await;
+        store
+            .fail_meta
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        s.hub
+            .notify(&topic, crate::notifications::ActivityType::Update, None)
+            .await;
+        assert_eq!(next_frame(&mut ws, QUIET).await, None);
+        store
+            .fail_meta
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        s.hub
+            .notify(&topic, crate::notifications::ActivityType::Update, None)
+            .await;
+        assert_eq!(
+            next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
+            Some(Err((1011, RECONCILE.to_string()))),
+            "an event was delivered after one was missed"
+        );
+    }
+
+    /// Review of #7174: an event dropped while the subscriber's Read was revoked was never
+    /// signalled once Read was restored before the next tick: the socket carried on with a gap
+    /// in it. A dropped event is noted whatever dropped it, and the next tick where the
+    /// subscriber may read the topic closes the socket for it to reconcile.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_event_dropped_while_revoked_is_signalled_once_read_is_back() {
+        let s = state_with_reader(BY_HAND).await;
+        let topic = format!("{BASE}/doc");
+        let mut ws = open_for_bob(&s, &topic).await;
+        revoke_bob(&s).await;
+        s.hub
+            .notify(&topic, crate::notifications::ActivityType::Update, None)
+            .await;
+        assert_eq!(next_frame(&mut ws, QUIET).await, None);
+        // Read restored before the timer ticks.
+        s.ldp
+            .store
+            .write(
+                &format!("{BASE}/.acl"),
+                Bytes::from(acl_with_reader(ALICE, Some(BOB))),
+                "text/turtle",
+            )
+            .await
+            .expect("restore root acl");
+        s.tick_now();
+        assert_eq!(
+            next_frame(&mut ws, std::time::Duration::from_secs(2)).await,
+            Some(Err((1011, RECONCILE.to_string())))
+        );
+    }
+
+    /// Review of #7174: a receive token connected any number of sockets at once within its
+    /// window. It has one open at a time: a second connect while the first is open is refused
+    /// as an invalid token is (`401`), another token connects meanwhile, and the token
+    /// reconnects once its socket has closed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_receive_token_has_one_socket_open_at_a_time() {
+        let s = state_with_reader(BY_HAND).await;
+        let topic = format!("{BASE}/doc");
+        let token = s.hub.mint_receive_token(BOB, &topic).await;
+        let addr = serve_receive(s.clone()).await;
+        let mut first = connect(addr, &topic, &token).await.expect("connects");
+        registered(&s, &topic, 1).await;
+        assert_eq!(connect(addr, &topic, &token).await.err(), Some(401));
+        let other = s.hub.mint_receive_token(BOB, &topic).await;
+        let _other = connect(addr, &topic, &other).await.expect("connects");
+        registered(&s, &topic, 2).await;
+        first.close(None).await.expect("closed");
+        registered(&s, &topic, 1).await;
+        let mut again = None;
+        for _ in 0..100 {
+            match connect(addr, &topic, &token).await {
+                Ok(ws) => {
+                    again = Some(ws);
+                    break;
+                }
+                Err(401) => tokio::time::sleep(std::time::Duration::from_millis(20)).await,
+                Err(status) => panic!("reconnect: {status}"),
+            }
+        }
+        assert!(again.is_some(), "the token did not reconnect after its socket closed");
+        registered(&s, &topic, 2).await;
+    }
+
+    /// Review of #7174: the access check of an event ran on the socket's own task, so a ping
+    /// went unanswered while it ran, and when the pong came back said that an event was being
+    /// checked. Pings are answered while a check is in progress.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_ping_is_answered_while_an_access_check_runs() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message as M;
+        let (s, store) = faulting_state().await;
+        let topic = format!("{BASE}/doc");
+        let mut ws = open_for_bob(&s, &topic).await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.hold_next_meta.lock().unwrap() = Some(gate.clone());
+        s.hub
+            .notify(&topic, crate::notifications::ActivityType::Update, None)
+            .await;
+        // The event's check is held in the store.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while store.hold_next_meta.lock().unwrap().is_some() {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the check started");
+        ws.send(M::Ping(b"p".to_vec().into())).await.expect("ping");
+        let pong = tokio::time::timeout(std::time::Duration::from_secs(2), ws.next())
+            .await
+            .expect("the ping was answered while the check ran");
+        assert!(
+            matches!(pong, Some(Ok(M::Pong(ref p))) if p.as_ref() == b"p"),
+            "{pong:?}"
+        );
+        gate.add_permits(1);
+        let frame = next_frame(&mut ws, std::time::Duration::from_secs(2)).await;
+        assert!(matches!(frame, Some(Ok(_))), "{frame:?}");
     }
 
     /// Review of #7135: the canonical topic is the one the subscribe WAC check runs on, so a
