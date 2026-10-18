@@ -1041,6 +1041,7 @@ fn full_bb_join_accept_real_proof() {
         &InMemorySeenNonces::new(),
     )
     .expect("a real join_eq proof (canonical VK + pubinput + bb verify + bind_joins) must verify");
+    support::complete_required();
 }
 
 // === The per-sub-proof member resolution, through `verify_manifest` ==========

@@ -591,8 +591,17 @@ fn raw_value_lane_toml(
     )
 }
 
+/// What nargo prints when a witness violates a constraint: an `assert` with a
+/// message, one without, or an unsatisfiable range/bit constraint.
+const CONSTRAINT_REFUSALS: [&str; 3] = [
+    "Assertion failed",
+    "Failed constraint",
+    "Cannot satisfy constraint",
+];
+
 /// Solve `filter_value_dl_int`'s witness for the given public/private assignment.
 /// `Ok` ⇔ the relation is SATISFIABLE ⇔ the member ACCEPTS.
+/// A nargo constraint refusal is `false`; any other failure panics.
 #[allow(clippy::too_many_arguments)]
 fn member_accepts(
     tag: &str,
@@ -614,9 +623,23 @@ fn member_accepts(
         value_hook,
         lexical_component,
     );
-    sparq_zk_compose::driver::CircuitProver::from_crate_root()
-        .gen_witness_tagged(&CircuitId::FilterValueDl, &toml, tag)
-        .is_ok()
+    match sparq_zk_compose::driver::CircuitProver::from_crate_root().gen_witness_tagged(
+        &CircuitId::FilterValueDl,
+        &toml,
+        tag,
+    ) {
+        Ok(_) => true,
+        // A refusal counts only when nargo rejected the witness on a constraint; a
+        // spawn, I/O or compile failure leaves no witness either, and must not be
+        // read as the member refusing.
+        Err(sparq_zk_compose::driver::DriverError::Tool { tool, stderr })
+            if tool.starts_with("nargo")
+                && CONSTRAINT_REFUSALS.iter().any(|m| stderr.contains(m)) =>
+        {
+            false
+        }
+        Err(other) => panic!("{tag}: infrastructure failure, not a constraint refusal: {other}"),
+    }
 }
 
 /// The three in-circuit claims, in one toolchain-gated pass:
@@ -684,6 +707,7 @@ fn in_circuit_boolean_lane_accepts_honest_and_rejects_lies() {
         ),
         "an xsd:boolean leaf must be unprovable under the integer datatype_const"
     );
+    support::complete_required();
 }
 
 /// In-circuit: the string-lane leaf a whole-graph commitment gives `"true"^^xsd:boolean`
@@ -706,6 +730,7 @@ fn in_circuit_string_lane_boolean_leaf_is_rejected() {
         ),
         "a string-lane boolean leaf must be unprovable on the boolean lane"
     );
+    support::complete_required();
 }
 
 /// In-circuit: an opaque-datatype literal whose datatype IRI is shaped like a lane
@@ -727,4 +752,5 @@ fn in_circuit_opaque_datatype_leaf_is_rejected() {
         ),
         "an opaque-datatype leaf must be unprovable on the boolean lane"
     );
+    support::complete_required();
 }

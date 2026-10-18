@@ -189,6 +189,7 @@ fn scan_k1_n16_r8_witness_satisfiable() {
     prover
         .gen_witness_tagged(&id, &toml, "scan_k1_r8")
         .expect("honest scan_k1_n16_r8 witness is satisfiable");
+    support::complete_required();
 }
 
 /// Invalid witness (a disclosed row NOT present in the committed graph) => the
@@ -243,6 +244,7 @@ fn scan_k1_n16_r8_rejects_fabricated_row() {
         res.is_err(),
         "a disclosed row absent from the committed graph must yield NO satisfying witness"
     );
+    support::complete_required();
 }
 
 /// Full bb prove -> verify round trip on the new scan member; then a flipped proof
@@ -282,6 +284,7 @@ fn scan_k1_n16_r8_full_prove_verify_round_trip() {
         !prover.verify(&bad, &out.join("verify_bad")).expect("verify runs"),
         "tampered scan_k1_n16_r8 proof must be rejected"
     );
+    support::complete_required();
 }
 
 // ===========================================================================
@@ -357,6 +360,7 @@ fn join_eq_na64_nb64_witness_satisfiable() {
     prover
         .gen_witness_tagged(&id, &toml, "join_n64")
         .expect("honest join_eq_na64_nb64 witness is satisfiable");
+    support::complete_required();
 }
 
 /// Invalid witness (the two graphs share NO value at the chosen slots) => the
@@ -409,4 +413,5 @@ fn join_eq_na64_nb64_full_prove_verify_round_trip() {
             .expect("verify runs"),
         "tampered join_eq_na64_nb64 proof must be rejected"
     );
+    support::complete_required();
 }

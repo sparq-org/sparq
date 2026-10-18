@@ -941,6 +941,7 @@ fn finding_01_public_input_statement_substitution_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("#1: statement substitution must be PublicInputMismatch, got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// #2 (CRITICAL) — bb verify uses the verifier-recomputed CANONICAL vk, never the
@@ -970,6 +971,7 @@ fn finding_02_canonical_vk_used_not_prover_vk() {
         "#2: an honest composed manifest must verify through the verifier-recomputed canonical vk \
          (the prover-supplied vk is never trusted)",
     );
+    support::complete_required();
 }
 
 /// #7 (bb variant) — a GENUINE filter proof over a DIFFERENT operand than the
@@ -1001,6 +1003,7 @@ fn finding_07_operand_substitution_bb_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("#7 (bb): a substituted operand must be PublicInputMismatch, got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// #11 (bb variant) — the n-relabel forge: a proof made against the `n=64` scan
@@ -1104,4 +1107,5 @@ fn finding_11_n_relabel_bb_rejected() {
              (ProofRejected / PublicInputMismatch), got {other:?}"
         ),
     }
+    support::complete_required();
 }

@@ -693,9 +693,18 @@ fn raw_value_lane_toml(
 
 mod support;
 
+/// What nargo prints when a witness violates a constraint: an `assert` with a
+/// message, one without, or an unsatisfiable range/bit constraint.
+const CONSTRAINT_REFUSALS: [&str; 3] = [
+    "Assertion failed",
+    "Failed constraint",
+    "Cannot satisfy constraint",
+];
+
 /// Solve the given member's witness for the given public/private assignment,
 /// using the shared value-lane renderer (whose layout the dedicated member
 /// reuses). `Ok` ⇔ the relation is SATISFIABLE ⇔ the member ACCEPTS.
+/// A nargo constraint refusal is `false`; any other failure panics.
 #[allow(clippy::too_many_arguments)]
 fn member_accepts(
     id: &CircuitId,
@@ -718,9 +727,21 @@ fn member_accepts(
         value_hook,
         lexical_component,
     );
-    sparq_zk_compose::driver::CircuitProver::from_crate_root()
+    match sparq_zk_compose::driver::CircuitProver::from_crate_root()
         .gen_witness_tagged(id, &toml, tag)
-        .is_ok()
+    {
+        Ok(_) => true,
+        // A refusal counts only when nargo rejected the witness on a constraint; a
+        // spawn, I/O or compile failure leaves no witness either, and must not be
+        // read as the member refusing.
+        Err(sparq_zk_compose::driver::DriverError::Tool { tool, stderr })
+            if tool.starts_with("nargo")
+                && CONSTRAINT_REFUSALS.iter().any(|m| stderr.contains(m)) =>
+        {
+            false
+        }
+        Err(other) => panic!("{tag}: infrastructure failure, not a constraint refusal: {other}"),
+    }
 }
 
 /// The honest V2 boolean witness is provable on the dedicated member, and a LYING
@@ -785,6 +806,7 @@ fn in_circuit_the_v2_boolean_member_accepts_honest_and_rejects_a_lying_verdict()
             &built.lexical_component,
         ),
     );
+    support::complete_required();
 }
 
 /// THE BIT DOMAIN — the reason this member exists. A handle (and a bound) of `2`
@@ -860,6 +882,7 @@ fn in_circuit_the_dedicated_member_refuses_a_handle_outside_the_bit_domain() {
         ),
         "a public bound outside {{0, 1}} must be unprovable"
     );
+    support::complete_required();
 }
 
 /// IN-CIRCUIT lane separation, over several datatype byte strings built WITHOUT
@@ -919,6 +942,7 @@ fn in_circuit_the_v2_boolean_witness_does_not_open_under_an_opaque_datatype_cons
             datatype
         );
     }
+    support::complete_required();
 }
 
 /// ISOLATES `assert_bit(value_hook)`. The member rebinds its leaf from the
@@ -987,6 +1011,7 @@ fn in_circuit_the_hook_bit_constraint_is_what_refuses_an_otherwise_binding_witne
         "a witnessed handle of 2 must be refused even though the leaf binding and \
          the verdict both hold"
     );
+    support::complete_required();
 }
 
 /// What actually keeps a V2 STRING-LANE leaf off the value lanes: the handle, not
@@ -1065,6 +1090,7 @@ fn in_circuit_a_v2_string_lane_leaf_is_refused_on_the_value_lane_members() {
         ),
         "a string-lane leaf must be unprovable on the bit-domain boolean member"
     );
+    support::complete_required();
 }
 
 /// The decimal and dateTime members cannot even be ASKED the question above: their
@@ -1355,6 +1381,7 @@ fn full_prove_verify_filter_value_dl_bool() {
         ),
         "a handle of 2 must be refused on the bit-domain member"
     );
+    support::complete_required();
 }
 
 fn manifest_with(inputs: Vec<ProofInputs>) -> ProofManifest {
@@ -2610,6 +2637,7 @@ fn full_prove_verify_the_numeric_build_helpers() {
             tag
         );
     }
+    support::complete_required();
 }
 
 /// LIVE: a LYING disclosed verdict on the integer lane built by the helper does
@@ -2668,4 +2696,5 @@ fn in_circuit_a_lying_verdict_on_the_integer_build_helper_is_refused() {
         ),
         "a flipped disclosed verdict must not solve"
     );
+    support::complete_required();
 }

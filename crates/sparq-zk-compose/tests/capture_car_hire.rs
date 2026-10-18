@@ -70,4 +70,5 @@ fn native_filter_proof_captures_into_manifest() {
     assert!(json.contains("filter_int_d1"));
     // The honest caveat travels with the fixture.
     assert!(manifest.note.contains("sq-qhy4"));
+    support::complete_required();
 }

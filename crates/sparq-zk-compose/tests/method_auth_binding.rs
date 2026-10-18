@@ -840,6 +840,7 @@ fn live_verify_manifest_with_an_m5_attestation() {
         &InMemorySeenNonces::new(),
     )
     .expect("a manifest with an M5 attestation verifies end to end");
+    support::complete_required();
 }
 
 /// LIVE: a HIDDEN-ONLY commitment whose hidden-issuer proof is over the
@@ -970,6 +971,7 @@ fn live_hidden_issuer_proof_over_the_m5_message() {
         &InMemorySeenNonces::new(),
     )
     .expect("a hidden-issuer proof over the M5 message verifies end to end");
+    support::complete_required();
 }
 
 /// LIVE, ADDITIVE mode: a commitment carrying BOTH a clear `ZKSIG_M5`
@@ -1102,4 +1104,5 @@ fn live_additive_clear_m5_attestation_plus_a_hidden_proof_over_the_m5_message() 
         &InMemorySeenNonces::new(),
     )
     .expect("a clear M5 attestation alongside a hidden proof over that same M5 message verifies");
+    support::complete_required();
 }

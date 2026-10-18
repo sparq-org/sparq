@@ -2403,6 +2403,7 @@ mod tests {
         )
         .expect("the written-down downgrade verifies already-issued legacy material");
         assert_eq!(verified.rows, rows);
+        crate::support::complete_required();
     }
 
     /// `challenge` carries no arithmetic constraint of its own, so the host pins
@@ -2973,6 +2974,7 @@ mod tests {
             &serde_json::to_vec_pretty(&summary).unwrap(),
         );
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete_required();
     }
 
     /// beadzkp-15.1: version-four witness mutations reach their intended constraints.
@@ -3063,6 +3065,7 @@ mod tests {
                 Ok(_) => panic!("{name}: tampered witness satisfied the relation"),
             }
         }
+        crate::support::complete_required();
     }
 
     #[test]
@@ -3213,6 +3216,7 @@ mod tests {
         )
         .is_err());
         let _ = std::fs::remove_dir_all(dir);
+        crate::support::complete_required();
     }
 
     fn prepared() -> PreparedResult {
@@ -3710,30 +3714,37 @@ mod tests {
         let mutations = [
             (
                 "signature",
+                "schnorr verification equation failed",
                 alter_input(&p.toml, "signatures", |v| v[0][2] = json!("0x01")),
             ),
             (
                 "status",
+                "challenge reduction not bound to its preimage",
                 alter_input(&p.toml, "status_indices", |v| v[0] = json!("0x05")),
             ),
             (
                 "joined_value",
+                "joined variable mismatch",
                 alter_input(&p.toml, "values", |v| v[0][2] = json!("0x01")),
             ),
             (
                 "hidden_integer",
+                "operand encoding mismatch",
                 alter_input(&p.toml, "filter_values", |v| v[0][0] = json!(12)),
             ),
             (
                 "blank_type",
+                "selected blank or unsupported term",
                 alter_input(&p.toml, "selected_types", |v| v[0][0][0] = json!(3)),
             ),
             (
                 "padding_leaf",
+                "selected padding leaf",
                 alter_input(&p.toml, "selected_leaves", |v| v[0][0] = json!(15)),
             ),
             (
                 "issuer_identity",
+                "identity issuer key rejected",
                 alter_input(&p.toml, "issuer_keys", |v| {
                     v[0][0] = json!("0x00");
                     v[0][1] = json!("0x01");
@@ -3741,17 +3752,27 @@ mod tests {
             ),
             (
                 "status_policy",
+                "credential status outside verifier policy",
                 alter_input(&p.toml, "accepted_root", |v| *v = json!("0x01")),
             ),
         ];
-        for (name, inputs) in mutations {
+        // The honest witness of the same package proves first, so a refusal below
+        // is about the mutated input and not this package or toolchain.
+        driver
+            .private_package_witness(p.package, &p.toml, "result_tamper_honest")
+            .expect("the honest witness satisfies the relation");
+        for (name, expected, inputs) in mutations {
             let tag = format!("result_tamper_{name}");
-            let result = driver.private_package_witness(p.package, &inputs, &tag);
-            assert!(
-                result.is_err(),
-                "malicious witness {name} unexpectedly satisfied the circuit"
-            );
+            match driver.private_package_witness(p.package, &inputs, &tag) {
+                Err(DriverError::Tool { tool, stderr }) => assert!(
+                    tool.starts_with("nargo") && stderr.contains(expected),
+                    "{name}: expected `{expected}`, got `{tool}`:\n{stderr}"
+                ),
+                Err(other) => panic!("{name}: infrastructure failure, not a constraint: {other}"),
+                Ok(_) => panic!("malicious witness {name} unexpectedly satisfied the circuit"),
+            }
         }
+        crate::support::complete_required();
     }
 
     #[test]
@@ -3822,6 +3843,7 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete_required();
     }
 
     #[test]
@@ -3886,6 +3908,7 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete_required();
     }
 
     /// Every expanded wrapper executes; representative full proofs cover each new status depth.
@@ -4024,6 +4047,7 @@ mod tests {
         }
         assert_eq!(exercised.len(), 14);
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete_required();
     }
 
     #[test]
@@ -4056,6 +4080,7 @@ mod tests {
                 .private_package_witness(p.package, &p.toml, "private_u64_boundary")
                 .is_ok());
         }
+        crate::support::complete_required();
     }
 
     #[test]
@@ -4100,6 +4125,7 @@ mod tests {
                     .is_err());
             }
         }
+        crate::support::complete_required();
     }
 
     #[test]
@@ -4129,6 +4155,7 @@ mod tests {
         }
         assert_eq!(expected["members"].as_object().unwrap().len(), 4);
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete_required();
     }
 
     #[test]
@@ -4188,6 +4215,7 @@ mod tests {
             assert_eq!(&checked.rows, &rows);
         }
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete_required();
     }
 
     /// Full proofs anchor ABI reconstruction, proof mode, independent policy and request binding.
@@ -4419,5 +4447,6 @@ mod tests {
         )
         .is_err());
         std::fs::remove_dir_all(dir).unwrap();
+        crate::support::complete(gate);
     }
 }

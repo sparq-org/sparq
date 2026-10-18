@@ -579,6 +579,7 @@ fn holder_pok_valid_binding_verifies_end_to_end() {
     );
     verify_full(&m, &prover, &issuer, &registry, "pok_pos_verify")
         .expect("a valid issuer-bound holder PoK must verify end-to-end");
+    support::complete_required();
 }
 
 /// INVALID WITNESS (the binding edge rejection): a `holder_pok` proof for a
@@ -630,6 +631,7 @@ fn holder_pok_wrong_holder_rejected_digest_mismatch() {
              HolderPokDigestMismatch (the hidden-key A-presents-B closure), got {other:?}"
         ),
     }
+    support::complete_required();
 }
 
 /// TAMPER: a single flipped byte in the `holder_pok` proof blob is rejected. The
@@ -679,6 +681,7 @@ fn holder_pok_tampered_proof_rejected() {
         | Err(CheckError::HolderPokMalformedProof) => {}
         other => panic!("a tampered holder PoK proof must be rejected, got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// MISSING (mandated PoK): under `require_in_circuit_pok`, a holder-bound credential
@@ -707,4 +710,5 @@ fn holder_pok_required_but_absent_rejected() {
              must be HolderPokMissing, got {other:?}"
         ),
     }
+    support::complete_required();
 }

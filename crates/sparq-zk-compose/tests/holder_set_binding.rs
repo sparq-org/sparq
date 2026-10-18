@@ -45,7 +45,7 @@ use sparq_zk::encode::salt_from_bytes;
 use sparq_zk::field::{field_to_be_bytes_32, Fr};
 use sparq_zk::sig::{public_key_to_hex, PublicKey, SecretKey, SignatureScheme};
 use sparq_zk_compose::build::{build_scan, Pattern, Slot};
-use sparq_zk_compose::driver::{CircuitProver, ProofArtifacts};
+use sparq_zk_compose::driver::{CircuitProver, DriverError, ProofArtifacts};
 use sparq_zk_compose::holder::{
     holder_pok_witness, holder_set_membership_witness, holder_set_prover_toml, holder_set_root,
     HolderSetWitness,
@@ -625,6 +625,7 @@ fn hidden_holder_set_in_set_verifies_end_to_end() {
         &InMemorySeenNonces::new(),
     )
     .expect("an in-set holder's set-membership proof verifies end-to-end");
+    support::complete_required();
 }
 
 /// NEGATIVE end-to-end (the trust anchor): the SAME in-set holder's proof, but the
@@ -687,13 +688,16 @@ fn hidden_holder_set_forged_set_root_rejected_end_to_end() {
         Err(CheckError::HolderSetRootMismatch) => {}
         other => panic!("expected HolderSetRootMismatch (forged set), got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// NEGATIVE end-to-end (unprovable witness): an OUT-OF-SET holder cannot produce a
 /// satisfying `holder_set_d{depth}` witness against the relying party's
 /// authoritative root — the membership fold cannot recompute the root for a
-/// non-member digest, so `nargo execute` / `bb prove` FAILS (the proof never
-/// exists). Asserted by the prove call returning an error.
+/// non-member digest, so `nargo execute` FAILS (the proof never exists). The SAME
+/// prover first proves an IN-SET holder against the same root and depth, so the
+/// refusal below cannot be an infrastructure failure of this member, and the
+/// refusal must name the membership constraint.
 #[test]
 #[ignore = "requires nargo + bb on PATH"]
 fn hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end() {
@@ -705,6 +709,21 @@ fn hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end() {
     let holders = holder_set_keys();
     let root = holder_set_root(&holders, depth).unwrap();
 
+    // Positive control: an in-set holder proves against this root and depth.
+    let in_set_index = holders
+        .iter()
+        .position(|h| *h == SecretKey::from_seed(IN_SET_HOLDER_SEED).public_key())
+        .unwrap() as u64;
+    prove_holder_set(
+        &prover,
+        IN_SET_HOLDER_SEED,
+        &root,
+        &holders,
+        depth,
+        in_set_index,
+        "out_of_set_honest",
+    );
+
     // The out-of-set holder, trying to claim slot 0 (any slot) with that slot's path.
     let hsk = SecretKey::from_seed(OUT_OF_SET_HOLDER_SEED);
     let pok = holder_pok_witness(&hsk).expect("non-identity holder has a witness");
@@ -713,9 +732,16 @@ fn hidden_holder_set_out_of_set_holder_is_unprovable_end_to_end() {
     let challenge = FieldHex(CHALLENGE_HEX.into()).to_field().unwrap();
     let toml = holder_set_prover_toml(&challenge, &root, &witness);
     let out = scratch("out_of_set_unprovable");
-    let result = prover.prove_in(&CircuitId::HolderSet { depth }, &toml, &out, "out_of_set");
-    assert!(
-        result.is_err(),
-        "an out-of-set holder must NOT be able to produce a holder_set proof against the trusted root (membership fold fails)"
-    );
+    match prover.prove_in(&CircuitId::HolderSet { depth }, &toml, &out, "out_of_set") {
+        Err(DriverError::Tool { tool, stderr }) => assert!(
+            tool.starts_with("nargo")
+                && stderr.contains("holder is not a member of the committed holder set"),
+            "an out-of-set holder must be refused by the membership fold, got `{tool}`:\n{stderr}"
+        ),
+        Err(other) => panic!("infrastructure failure, not a constraint refusal: {other}"),
+        Ok(_) => panic!(
+            "an out-of-set holder must NOT be able to produce a holder_set proof against the trusted root"
+        ),
+    }
+    support::complete_required();
 }

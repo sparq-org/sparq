@@ -431,6 +431,7 @@ fn bb_forge_tampered_join_proof_rejected() {
         .verify_with(&bad, &art.public_inputs, &vk, &out.join("verify_bad"))
         .expect("verify runs");
     assert!(!rejected, "a tampered join proof must be rejected by bb");
+    support::complete_required();
 }
 
 /// FORGE — UNEQUAL HIDDEN VALUES: claim a join between two graphs whose join-slot
@@ -509,6 +510,7 @@ fn bb_forge_unequal_values_witness_unsatisfiable() {
         res.is_err(),
         "a join over genuinely-unequal hidden values must be UNSATISFIABLE (no witness)",
     );
+    support::complete_required();
 }
 
 /// FORGE — FORGED JOIN COMMITMENT: the public `join_commitment` does NOT bind the
@@ -557,6 +559,7 @@ fn bb_forge_join_commitment_not_binding_value_unsatisfiable() {
         res.is_err(),
         "a join_commitment that does not bind the proven value must be UNSATISFIABLE",
     );
+    support::complete_required();
 }
 
 /// FORGE — ATTACKER VK: verify a valid join proof against a NON-canonical
@@ -583,6 +586,7 @@ fn bb_forge_wrong_vk_rejected() {
         .verify_with(&art.proof, &art.public_inputs, &wrong_vk, &out.join("verify_wrongvk"))
         .expect("verify runs");
     assert!(!rejected, "a join proof verified against a non-canonical (attacker) vk must be rejected");
+    support::complete_required();
 }
 
 /// The smallest compiled scan member id (for the wrong-vk attacker case).
@@ -621,6 +625,7 @@ fn bb_join_value_absent_from_public_inputs() {
         !present,
         "PRIVACY REGRESSION: the join value's 32-byte field word appears in the bb public inputs",
     );
+    support::complete_required();
 }
 
 // ============================================================================
@@ -753,4 +758,5 @@ fn bb_uncovered_join_proof_over_unattested_graphs_rejected() {
         Err(CheckError::JoinCommitmentMismatch { edge: 0 }) => {}
         other => panic!("a declared edge over other commitments must be refused, got {other:?}"),
     }
+    support::complete_required();
 }

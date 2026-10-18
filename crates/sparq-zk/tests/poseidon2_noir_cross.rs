@@ -105,6 +105,7 @@ fn nargo_live_cross_check() {
     }
     let line = lines.next().expect("40-leaf output line");
     assert_eq!(line.trim(), NOIR_HASH_40_LEAVES, "40-leaf fold drifted");
+    support::complete(gate);
 }
 
 /// The encoding layer's hashes are plain sponge calls over field elements,

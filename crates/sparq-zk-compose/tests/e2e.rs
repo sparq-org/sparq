@@ -545,6 +545,7 @@ fn witness_gen_filter_int_satisfiable() {
     prover
         .gen_witness_tagged(&id, &toml, "wg_filter_d4")
         .expect("witness satisfiable");
+    support::complete_required();
 }
 
 #[test]
@@ -566,6 +567,7 @@ fn witness_gen_filter_int_rejects_false_verdict() {
         prover.gen_witness_tagged(&id, &toml, "wg_filter_d1_false").is_err(),
         "a lying verdict must be unsatisfiable"
     );
+    support::complete_required();
 }
 
 // roborev codex 2207: end-to-end `!=` (FilterCmp/FilterOp::Ne).
@@ -588,6 +590,7 @@ fn witness_gen_filter_int_ne_satisfiable() {
     prover
         .gen_witness_tagged(&id, &toml, "wg_filter_ne_d2")
         .expect("30 != 18 witness satisfiable");
+    support::complete_required();
 }
 
 #[test]
@@ -610,6 +613,7 @@ fn witness_gen_filter_int_ne_rejects_false_verdict() {
         prover.gen_witness_tagged(&id, &toml, "wg_filter_ne_d2_false").is_err(),
         "a lying `!=` verdict (18 != 18 claimed true) must be unsatisfiable"
     );
+    support::complete_required();
 }
 
 #[test]
@@ -638,6 +642,7 @@ fn witness_gen_scan_satisfiable() {
     prover
         .gen_witness_tagged(&id, &toml, "wg_scan")
         .expect("scan witness satisfiable");
+    support::complete_required();
 }
 
 // --- full bb prove -> verify ---------------------------------------------
@@ -671,6 +676,7 @@ fn full_prove_verify_filter_int_d1() {
         .verify(&bad, &out.join("verify_bad"))
         .expect("verify runs");
     assert!(!rejected, "tampered proof must be rejected");
+    support::complete_required();
 }
 
 /// roborev codex 2207: NON-ignored full prove+verify of a `Ne`
@@ -706,6 +712,7 @@ fn full_prove_verify_filter_int_ne_d1() {
         .verify(&bad, &out.join("verify_bad"))
         .expect("verify runs");
     assert!(!rejected, "tampered `!=` proof must be rejected");
+    support::complete_required();
 }
 
 /// Full manifest prove -> verify with the artifact-bundling path.
@@ -779,6 +786,7 @@ fn full_manifest_prove_verify_scan() {
         &InMemorySeenNonces::new(),
     )
     .expect("manifest verifies");
+    support::complete_required();
 }
 
 // --- forge-and-verify NEGATIVE tests (audit #1/#2) ------------------------
@@ -925,6 +933,7 @@ fn forge_positive_honest_filter_verifies() {
         &InMemorySeenNonces::new(),
     )
     .expect("honest manifest verifies");
+    support::complete_required();
 }
 
 /// Audit #1: a GENUINE proof over statement A (5 < 10 = true) presented under a
@@ -962,6 +971,7 @@ fn forge_reject_statement_substitution() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("expected PublicInputMismatch, got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// Audit #1: substituting the declared verdict (claim 5 >= 10 is true, while the
@@ -997,6 +1007,7 @@ fn forge_reject_verdict_substitution() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("expected PublicInputMismatch, got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// Audit #4 (challenge byte-binding): a proof committed under challenge 0x2a,
@@ -1034,6 +1045,7 @@ fn forge_reject_challenge_rebind() {
         Err(CheckError::PublicInputMismatch { proof: 0 }) => {}
         other => panic!("expected PublicInputMismatch, got {other:?}"),
     }
+    support::complete_required();
 }
 
 // --- audit #4: replay / freshness / single-use end-to-end tests -----------
@@ -1091,6 +1103,7 @@ fn nonce_happy_path_fresh_nonce_verifies() {
         &InMemorySeenNonces::new(),
     )
     .expect("fresh-nonce honest manifest verifies");
+    support::complete_required();
 }
 
 /// Audit #4 (a) REPLAY UNDER A NEW NONCE: a manifest+proof captured from an
@@ -1132,6 +1145,7 @@ fn nonce_replay_under_new_nonce_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 0 }) => {}
         other => panic!("expected PublicInputMismatch (replay under fresh nonce), got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// Audit #4 (b) SINGLE-USE: the SAME (nonce, manifest) presented twice to the
@@ -1181,6 +1195,7 @@ fn nonce_single_use_second_presentation_rejected() {
         Err(CheckError::NonceReplay) => {}
         other => panic!("expected NonceReplay on the second presentation, got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// Audit #4 (consistency + replay policy): a manifest whose declared binding
@@ -2017,6 +2032,7 @@ fn holder_pop_valid_verifies_end_to_end() {
         &InMemorySeenNonces::new(),
     )
     .expect("a valid HolderPop manifest must verify end-to-end");
+    support::complete_required();
 }
 
 /// sq-dua (audit hardening): a MALFORMED `proof_hex` blob is prover-controlled and
@@ -2142,6 +2158,7 @@ fn forge_reject_noncanonical_vk() {
         Err(CheckError::ProofRejected { proof: 1 }) => {}
         other => panic!("expected ProofRejected (canonical vk defeats attacker vk), got {other:?}"),
     }
+    support::complete(gate);
 }
 
 /// Audit #2 corollary: the prover-supplied `art.vk` is genuinely IGNORED — an
@@ -2176,6 +2193,7 @@ fn forge_artvk_is_ignored() {
         &InMemorySeenNonces::new(),
     )
     .expect("honest proof verifies despite a garbage bundled vk (canonical vk is used)");
+    support::complete_required();
 }
 
 /// Compile + prove a trivial ATTACKER circuit that has the same 5 public inputs
@@ -4281,6 +4299,41 @@ fn probe_scan_public_inputs_hex() {
     eprintln!("SCAN_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("SCAN_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("SCAN_INPUTS_JSON={}", serde_json::to_string(&scan.inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::Scan {
+        commitments,
+        pattern_is_const,
+        pattern_const_enc,
+        rows,
+        row_count,
+        attribution,
+        ..
+    } = &scan.inputs
+    else {
+        panic!("scan_k1: scan inputs");
+    };
+    // zk/compose/scan_k1_n16_r4/src/main.nr: challenge, commitments, pattern_is_const,
+    // pattern_const_enc, rows, row_count, attribution.
+    let mut want = vec![field(&challenge)];
+    want.extend(commitments.iter().map(field));
+    want.extend(pattern_is_const.iter().map(|b| small(u64::from(*b))));
+    want.extend(pattern_const_enc.iter().map(field));
+    want.extend(rows.iter().flatten().map(field));
+    want.push(small(u64::from(*row_count)));
+    want.extend(attribution.iter().map(|b| small(u64::from(*b))));
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "scan_k1: bb public_inputs differ from the scan_k1_n16_r4 ABI reconstruction"
+    );
+    support::complete_required();
 }
 
 /// sq-f9tl (NEW-1): PROBE (ignored) that dumps the real bb
@@ -4312,6 +4365,38 @@ fn probe_filter_f64_public_inputs_hex() {
     eprintln!("FILTER_F64_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("FILTER_F64_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("FILTER_F64_INPUTS_JSON={}", serde_json::to_string(&inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::FilterF64 {
+        operand_enc,
+        op,
+        b_bits,
+        expected,
+        ..
+    } = &inputs
+    else {
+        panic!("filter_f64 inputs");
+    };
+    // zk/compose/filter_f64_d2/src/main.nr: challenge, operand_enc, op, b_bits, expected.
+    let want = [
+        field(&challenge),
+        field(operand_enc),
+        small(u64::from(op.code())),
+        small(*b_bits),
+        small(u64::from(*expected)),
+    ];
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "filter_f64: bb public_inputs differ from the filter_f64_d2 ABI reconstruction"
+    );
+    support::complete_required();
 }
 
 /// sq-7lrq: PROBE (ignored) that dumps the real bb `public_inputs` for a
@@ -4341,6 +4426,42 @@ fn probe_filter_signed_int_public_inputs_hex() {
     eprintln!("FILTER_SIGNED_INT_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("FILTER_SIGNED_INT_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("FILTER_SIGNED_INT_INPUTS_JSON={}", serde_json::to_string(&inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::FilterSignedInt {
+        operand_enc,
+        op,
+        bound_neg,
+        bound,
+        expected,
+        ..
+    } = &inputs
+    else {
+        panic!("filter_signed_int inputs");
+    };
+    // zk/compose/filter_signed_int_d2/src/main.nr: challenge, operand_enc, op,
+    // bound_neg, bound, expected.
+    let want = [
+        field(&challenge),
+        field(operand_enc),
+        small(u64::from(op.code())),
+        small(u64::from(*bound_neg)),
+        small(*bound),
+        small(u64::from(*expected)),
+    ];
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "filter_signed_int: bb public_inputs differ from the filter_signed_int_d2 ABI \
+         reconstruction"
+    );
+    support::complete_required();
 }
 
 /// sq-7lrq: PROBE (ignored) that dumps the real bb `public_inputs` for a
@@ -4370,6 +4491,42 @@ fn probe_filter_decimal_public_inputs_hex() {
     eprintln!("FILTER_DECIMAL_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("FILTER_DECIMAL_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("FILTER_DECIMAL_INPUTS_JSON={}", serde_json::to_string(&inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::FilterDecimal {
+        operand_enc,
+        op,
+        bound_neg,
+        bound_scaled,
+        expected,
+        ..
+    } = &inputs
+    else {
+        panic!("filter_decimal inputs");
+    };
+    // zk/compose/filter_decimal_i3_f2/src/main.nr: challenge, operand_enc, op,
+    // bound_neg, bound_scaled, expected.
+    let want = [
+        field(&challenge),
+        field(operand_enc),
+        small(u64::from(op.code())),
+        small(u64::from(*bound_neg)),
+        small(*bound_scaled),
+        small(u64::from(*expected)),
+    ];
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "filter_decimal: bb public_inputs differ from the filter_decimal_i3_f2 ABI \
+         reconstruction"
+    );
+    support::complete_required();
 }
 
 /// sq-f9tl (NEW-1): PROBE (ignored) that dumps the real bb
@@ -4422,6 +4579,41 @@ fn probe_scan_k2_public_inputs_hex() {
     eprintln!("SCAN_K2_PUBLIC_INPUTS_LEN={}", art.public_inputs.len());
     eprintln!("SCAN_K2_PUBLIC_INPUTS_HEX={hex}");
     eprintln!("SCAN_K2_INPUTS_JSON={}", serde_json::to_string(&scan.inputs).unwrap());
+    // Independent reconstruction: the member's `pub` parameters in the declaration
+    // order of its `main.nr`, one 32-byte big-endian field each. It is built here
+    // from the statement, not by the verifier's reconstruction, so bb's emitted
+    // bytes are pinned against the circuit ABI on every toolchain run.
+    let field = |h: &FieldHex| {
+        sparq_zk::field::field_to_be_bytes_32(&h.to_field().expect("a canonical field"))
+    };
+    let small = |v: u64| sparq_zk::field::field_to_be_bytes_32(&Fr::from(v));
+    let ProofInputs::Scan {
+        commitments,
+        pattern_is_const,
+        pattern_const_enc,
+        rows,
+        row_count,
+        attribution,
+        ..
+    } = &scan.inputs
+    else {
+        panic!("scan_k2: scan inputs");
+    };
+    // zk/compose/scan_k2_n16_r8/src/main.nr: challenge, commitments, pattern_is_const,
+    // pattern_const_enc, rows, row_count, attribution.
+    let mut want = vec![field(&challenge)];
+    want.extend(commitments.iter().map(field));
+    want.extend(pattern_is_const.iter().map(|b| small(u64::from(*b))));
+    want.extend(pattern_const_enc.iter().map(field));
+    want.extend(rows.iter().flatten().map(field));
+    want.push(small(u64::from(*row_count)));
+    want.extend(attribution.iter().map(|b| small(u64::from(*b))));
+    assert_eq!(
+        art.public_inputs,
+        want.concat(),
+        "scan_k2: bb public_inputs differ from the scan_k2_n16_r8 ABI reconstruction"
+    );
+    support::complete_required();
 }
 
 // ===========================================================================
@@ -4859,6 +5051,7 @@ fn revocation_full_prove_verify_non_revoked_verifies() {
         &InMemorySeenNonces::new(),
     )
     .expect("non-revoked, fresh credential verifies through the full pipeline");
+    support::complete_required();
 }
 
 /// (6) FORGE (slow, real bb prove+verify): a REVOKED credential presented with a
@@ -4903,6 +5096,7 @@ fn revocation_full_prove_verify_revoked_rejected() {
         Err(CheckError::CredentialRevoked { .. }) => {}
         other => panic!("expected CredentialRevoked end-to-end (authoritative bit set), got {other:?}"),
     }
+    support::complete_required();
 }
 
 // ===========================================================================
@@ -5214,6 +5408,7 @@ fn hidden_revocation_unrevoked_verifies_and_index_is_private() {
         &InMemorySeenNonces::new(),
     )
     .expect("unrevoked hidden-index credential verifies end-to-end (clear index withheld)");
+    support::complete_required();
 }
 
 /// REVOKED index: the holder of a REVOKED credential CANNOT produce the proof.
@@ -5246,6 +5441,7 @@ fn hidden_revocation_revoked_index_is_unprovable() {
         res.is_err(),
         "a REVOKED credential's hidden-index bit-unset proof must be unprovable (the in-circuit bit==0 assertion fails)"
     );
+    support::complete_required();
 }
 
 /// FORGED ROOT: a prover proves bit-unset against its OWN all-zero tree (a forged
@@ -5296,6 +5492,7 @@ fn hidden_revocation_forged_root_rejected() {
         Err(CheckError::HiddenRevocationRootMismatch) => {}
         other => panic!("a forged-root hidden-revocation proof must be HiddenRevocationRootMismatch, got {other:?}"),
     }
+    support::complete_required();
 }
 
 // ===========================================================================
@@ -5567,6 +5764,7 @@ fn full_manifest_fully_hidden_revocation() {
         &InMemorySeenNonces::new(),
     )
     .expect("a well-formed fully-hidden revocation presentation verifies");
+    support::complete_required();
 }
 
 /// A REVOKED credential cannot even PRODUCE the proof: the in-circuit `bit == 0`
@@ -5598,6 +5796,7 @@ fn fully_hidden_revocation_revoked_credential_unprovable() {
         prover.prove_in(&id, &toml, &out, "fh_revoked").is_err(),
         "a REVOKED credential's fully-hidden proof must be unprovable (the in-circuit bit==0 assertion fails)"
     );
+    support::complete_required();
 }
 
 /// FORGED ANCHOR: a prover proves membership in its OWN accepted set (one whose
@@ -5654,6 +5853,7 @@ fn fully_hidden_revocation_forged_anchor_rejected() {
             "a forged-anchor fully-hidden proof must be FullyHiddenRevocationAnchorMismatch, got {other:?}"
         ),
     }
+    support::complete_required();
 }
 
 /// RE-BLINDING ENFORCEMENT (design sec 4, the single most important operational
@@ -5698,6 +5898,7 @@ fn fully_hidden_revocation_linkage_reuse_rejected() {
             "re-presenting the SAME (ref_commitment, index_commitment) pair under a fresh nonce must be FullyHiddenRevocationLinkageReplay (the holder must re-blind), got {other:?}"
         ),
     }
+    support::complete_required();
 }
 
 // --- structural (no bb) fully-hidden gates --------------------------------
@@ -6310,6 +6511,7 @@ fn hidden_issuer_in_set_verifies_and_key_is_private() {
         &keyset, &fresh_policy(), &HolderRegistry::empty(), &HolderBindingPolicy::allow_bearer(), &EntailmentPolicy::simple_only(), &nonce_for("0x2a"), &InMemorySeenNonces::new(),
     )
     .expect("in-set hidden-issuer attestation verifies end-to-end");
+    support::complete_required();
 }
 
 /// Build a scan manifest with NO clear `commitment_attestations` and NO declared
@@ -6412,6 +6614,7 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
         !json.to_ascii_lowercase().contains(&signer_hex_norm),
         "the clear issuer key must not appear anywhere in the hidden-only manifest"
     );
+    support::complete_required();
 }
 
 /// HIDDEN-ONLY, METHOD POLICY: the manifest's `hidden_issuer_attestations[i].message`
@@ -6482,6 +6685,7 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
             other => panic!("[{label}] expected HiddenIssuerMessageMismatch, got {other:?}"),
         }
     }
+    support::complete_required();
 }
 
 /// OUT-OF-SET KEY: a REAL signature by an issuer NOT in K. Its signature is valid
@@ -6524,6 +6728,7 @@ fn hidden_issuer_out_of_set_key_is_unprovable() {
         res.is_err(),
         "an out-of-set issuer's hidden-issuer proof must be unprovable (the in-circuit membership assertion fails)"
     );
+    support::complete_required();
 }
 
 /// FORGED SIGNATURE: a tampered signature scalar makes the in-circuit verification
@@ -6560,6 +6765,7 @@ fn hidden_issuer_forged_signature_is_unprovable() {
     let out = scratch("hi_forgesig");
     let res = prover.prove_in(&id, &toml, &out, "hi_forgesig");
     assert!(res.is_err(), "a forged signature must be unprovable (s*G != R + e*pk)");
+    support::complete_required();
 }
 
 /// FORGED KEY-SET ROOT: a prover proves membership in its OWN (forged) key set
@@ -6615,6 +6821,7 @@ fn hidden_issuer_forged_root_rejected() {
         Err(CheckError::HiddenIssuerRootMismatch) => {}
         other => panic!("a forged-root hidden-issuer proof must be HiddenIssuerRootMismatch, got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// FAIL-CLOSED: a hidden-issuer attestation present but the relying party did NOT
@@ -6715,6 +6922,7 @@ fn filter_f64_witness_honest_proves_lie_rejected() {
         lie.is_err(),
         "SOUNDNESS: a FALSE xsd:double FILTER verdict (25.0 >= 18.0 = false) must be UNprovable"
     );
+    support::complete_required();
 }
 
 /// sq-q7e/sq-tat (soundness): a prover cannot substitute a DIFFERENT operand than
@@ -6745,6 +6953,7 @@ fn filter_f64_operand_binding_rejects_substituted_value() {
         "SOUNDNESS: witnessing a value (99) different from the operand_enc the scan \
          committed (25) must fail the canonical-token binding (operand encoding mismatch)"
     );
+    support::complete_required();
 }
 
 /// sq-7lrq (soundness, composable path): the COMPOSABLE signed-int host
@@ -6782,6 +6991,7 @@ fn filter_signed_int_composable_witness_honest_proves_lie_rejected() {
         lie.is_err(),
         "SOUNDNESS: a FALSE signed-int FILTER verdict (-42 < 1 = false) must be UNprovable"
     );
+    support::complete_required();
 }
 
 /// sq-7lrq (soundness, composable path): the COMPOSABLE decimal host
@@ -6819,6 +7029,7 @@ fn filter_decimal_composable_witness_honest_proves_lie_rejected() {
         lie.is_err(),
         "SOUNDNESS: a FALSE decimal FILTER verdict (123.45 > 123.40 = false) must be UNprovable"
     );
+    support::complete_required();
 }
 
 /// sq-q7e/sq-tat (END-TO-END composition): a float-FILTER sub-proof participates in
@@ -6911,6 +7122,7 @@ fn filter_f64_composes_end_to_end() {
         &InMemorySeenNonces::new(),
     )
     .expect("a composed manifest with a float-FILTER sub-proof must verify end-to-end");
+    support::complete_required();
 }
 
 /// sq-q7e/sq-tat: a 5-digit (out-of-family) integer-valued double operand errors
@@ -7405,4 +7617,5 @@ fn a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate() {
              hidden-issuer gate, got {other:?}"
         ),
     }
+    support::complete_required();
 }

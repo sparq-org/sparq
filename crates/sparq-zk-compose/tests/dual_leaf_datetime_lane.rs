@@ -659,8 +659,17 @@ fn raw_datetime_toml(
 
 mod support;
 
+/// What nargo prints when a witness violates a constraint: an `assert` with a
+/// message, one without, or an unsatisfiable range/bit constraint.
+const CONSTRAINT_REFUSALS: [&str; 3] = [
+    "Assertion failed",
+    "Failed constraint",
+    "Cannot satisfy constraint",
+];
+
 /// Solve `filter_value_dl_datetime`'s witness for the given public/private
 /// assignment. `Ok` ⇔ the relation is SATISFIABLE ⇔ the member ACCEPTS.
+/// A nargo constraint refusal is `false`; any other failure panics.
 #[allow(clippy::too_many_arguments)]
 fn member_accepts(
     tag: &str,
@@ -686,9 +695,23 @@ fn member_accepts(
         value_hook_scaled,
         lexical_component,
     );
-    sparq_zk_compose::driver::CircuitProver::from_crate_root()
-        .gen_witness_tagged(&CircuitId::FilterValueDlDateTime, &toml, tag)
-        .is_ok()
+    match sparq_zk_compose::driver::CircuitProver::from_crate_root().gen_witness_tagged(
+        &CircuitId::FilterValueDlDateTime,
+        &toml,
+        tag,
+    ) {
+        Ok(_) => true,
+        // A refusal counts only when nargo rejected the witness on a constraint; a
+        // spawn, I/O or compile failure leaves no witness either, and must not be
+        // read as the member refusing.
+        Err(sparq_zk_compose::driver::DriverError::Tool { tool, stderr })
+            if tool.starts_with("nargo")
+                && CONSTRAINT_REFUSALS.iter().any(|m| stderr.contains(m)) =>
+        {
+            false
+        }
+        Err(other) => panic!("{tag}: infrastructure failure, not a constraint refusal: {other}"),
+    }
 }
 
 fn accepts(tag: &str, built: &BuiltFilterValueDlDateTime) -> bool {
@@ -832,6 +855,7 @@ fn in_circuit_datetime_lane_accepts_honest_and_rejects_lies() {
         ),
         "an xsd:dateTime leaf must be unprovable under the xsd:date datatype_const"
     );
+    support::complete_required();
 }
 
 /// A V1 temporal lane is reachable ONLY through the legacy names. The ordinary

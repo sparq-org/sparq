@@ -484,6 +484,7 @@ mod tests {
         )
         .expect("the written-down downgrade verifies already-issued version-three material");
         assert_eq!(checked.rows, rows);
+        crate::support::complete_required();
     }
 
     /// VERIFICATION side, version-three family: a `result_v3_*` member folds the
@@ -652,6 +653,7 @@ mod tests {
                 _ => panic!("wrong signed bias must fail the literal-binding constraint"),
             }
         }
+        crate::support::complete_required();
     }
 
     #[test]
@@ -781,5 +783,6 @@ mod tests {
             }
         }
         std::fs::remove_dir_all(directory).unwrap();
+        crate::support::complete_required();
     }
 }

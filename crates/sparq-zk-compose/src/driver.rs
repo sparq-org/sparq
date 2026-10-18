@@ -977,6 +977,7 @@ mod driver_glue_tests {
                 job.join().unwrap();
             }
         });
+        crate::support::complete_required();
     }
 
     /// A name no executable on a sane PATH resolves to — drives the `Spawn` arm

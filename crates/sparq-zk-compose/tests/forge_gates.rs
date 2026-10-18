@@ -595,6 +595,7 @@ fn forge_pubinput_positive_control_verifies() {
     let (filter, art) = honest_filter_d1(5, FilterOp::Lt, 10, true, &challenge, &prover, "fg_pub_pos");
     let m = composed_manifest(scan_inputs, scan_hex, filter, encode_artifacts(&art));
     verify_full(&m, "fg_pub_pos_verify").expect("honest composed manifest verifies");
+    support::complete_required();
 }
 
 /// BINDING 6 forge: a GENUINE proof of `5 < 10 = true` presented under a manifest
@@ -620,6 +621,7 @@ fn forge_pubinput_statement_substitution_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("statement substitution must be PublicInputMismatch, got {other:?}"),
     }
+    support::complete_required();
 }
 
 /// BINDING 6 forge (verdict): a genuine proof of the FALSE verdict
@@ -646,6 +648,7 @@ fn forge_pubinput_verdict_substitution_rejected() {
         Err(CheckError::PublicInputMismatch { proof: 1 }) => {}
         other => panic!("verdict substitution must be PublicInputMismatch, got {other:?}"),
     }
+    support::complete_required();
 }
 
 // === BINDING 7: distinct-graph strict ordering (duplicate-inclusion / COUNT) ===
@@ -878,6 +881,7 @@ fn forge_scan_duplicate_commitment_circuit_rejected() {
         res.is_err(),
         "a duplicate-commitment k=2 scan witness must be UNSATISFIABLE (strict-ordering gate), but nargo produced a witness"
     );
+    support::complete_required();
 }
 
 /// CIRCUIT-LEVEL positive control (FULL toolchain): an HONEST k=2 scan over two
@@ -919,4 +923,5 @@ fn honest_k2_distinct_scan_proves_and_verifies() {
     m.sub_proofs[0].proof_hex = encode_artifacts(&art);
     verify_full(&m, "honest_k2_distinct_verify")
         .expect("honest distinct k=2 scan VERIFIES through verify_manifest");
+    support::complete_required();
 }
