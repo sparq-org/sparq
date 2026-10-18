@@ -104,6 +104,25 @@ Materialize the authorization view from the access-control documents, then enfor
   size after each stratum, before RDF list expansion and interning. On `wasm32-unknown-unknown` the
   informational `MaterializeStats::millis` is reported as `0.0` (no `std::time::Instant`);
   the auth view is identical (sq-7agop).
+- `store.set_auth_limits(ClosureLimits)` / `store.auth_limits() -> ClosureLimits` /
+  `default_auth_limits() -> ClosureLimits` — the **reasoning allowance** every authorization
+  materialization of that store runs under (see
+  [Reasoning allowance](#reasoning-allowance)). `default_auth_limits()` is the default:
+  `max_rounds` 128, `max_facts` 256,000, `max_term_bytes` 64 KiB, `max_join_rows` 1,000,000
+  per round and `max_total_join_rows` 4,000,000 over all rounds of one stratum — the two
+  join-row fields being the ones the reasoner's own `ClosureLimits::default()` leaves
+  unbounded, and the cumulative one being what bounds a whole materialization (the per-round
+  allowance is refilled every round). `set_auth_limits` applies from the NEXT materialization (the view in force is
+  not rebuilt), to WAC and ACP alike and to every rebuild the store makes on its own after an
+  access-control write or an update. Raise it for a pod the default refuses; lower it to cap
+  the work one materialization may do. The free `materialize_*` functions always use
+  `default_auth_limits()`.
+- `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
+  -> bool` — whether a materialization error is a refusal by that allowance rather than any
+  other failure, and which allowance it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
+  RoundsOrFacts, TermBytes, Unspecified}`, `limit_name()` for a message). The refusal carries
+  that kind as a tag read from ANYWHERE in the message, so it still matches when a write path
+  wraps the failed rebuild's error in its own sentence.
 - `store.materialize_acp_with(&AccessProvenance) -> Result<MaterializeStats, _>` —
   (sq-3jtd.5) ACP materialization that ALSO resolves `acp:CreatorAgent` /
   `acp:OwnerAgent` matchers against per-resource creator/owner WebIDs supplied by the
@@ -114,7 +133,9 @@ Materialize the authorization view from the access-control documents, then enfor
   `urn:skolem:`/`urn:sparq:` IRI anywhere, name no reserved principal (`auth:`/`solidx:`, or
   an IRI containing `&client=`) as agent, member, origin, client or issuer, and use no
   `auth:`/`solidx:` predicate or class. Under ACP, an `.acr` that uses (as an access
-  control, policy or matcher) a node of a rejected `.acr` is rejected with it. `put_acl*` and
+  control, policy or matcher) a node of a rejected `.acr`, **or a node no loaded document
+  defines**, is withheld with it, to a fixpoint (see
+  [Unresolved references](#unresolved-references-and-cross-pod-policy-links)). `put_acl*` and
   `update_as*` refuse a write that would add such a triple to a control document the active
   view reads (`.acr` under ACP, `.acl` under WAC, neither reserved nor authority-less),
   judged in the state the write leaves (a statement an update adds and removes again is not
@@ -126,7 +147,19 @@ Materialize the authorization view from the access-control documents, then enfor
   attached, bridged or trust. So a writer who embeds `<r> solidx:creator <self>` in a
   content document OR in the `.acr` they control cannot self-grant (this also blocks forged
   `solidx:appliesToResource` policy redirection). Each grant is RESOURCE-SCOPED (the creator of `R1` is never
-  granted `R2`) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
+  granted `R2`), and so is every role a provenance matcher plays: in `allOf`, `anyOf` and
+  `noneOf` it is decided against the resource being accessed (an `allOf` of
+  `CreatorAgent` and `OwnerAgent` needs both on the same resource, and a `noneOf`
+  `CreatorAgent` excepts that resource's creator) and composes with `acp:client`/`acp:issuer`
+  constraints on the matcher itself AND on a sibling matcher of the same policy (the
+  resource's creator/owner is crossed with every client and issuer value the policy's
+  matchers name).
+  Provenance is THREE-VALUED: on a resource the caller supplied no creator (resp. owner)
+  for, a `CreatorAgent` (resp. `OwnerAgent`) matcher is UNDECIDED in all three roles — no
+  agent can be ruled out as that resource's creator — so an `acp:allow` whose conditions
+  include it does NOT apply, and an `acp:deny` whose conditions include it DOES, for every
+  agent. That holds for a resource that is absent from the view but has its own `.acr`, and
+  for one whose provenance was forgotten.
   The store keeps the provenance and credentials of its last successful ACP
   materialization: `materialize_acp()` and every rebuild after `put_acl_acp`,
   `delete_acl_acp` or an update use them. Before any is passed there is no provenance ⇒
@@ -606,10 +639,16 @@ discovery; neither is itself a conformance-tested HTTP layer.
   dimension. sq-3jtd.5: matchers may also use `acp:agent acp:CreatorAgent` /
   `acp:OwnerAgent` — the context agent must be the resource's creator / owner, resolved
   against the TRUSTED per-resource provenance supplied via `materialize_acp_with` (above),
-  resource-scoped and fail-closed. sq-ysv3u: matchers may also constrain on
+  resource-scoped, three-valued (undecided where the resource has no recorded creator /
+  owner: an allow needing it does not apply, a deny needing it does) and fail-closed. sq-ysv3u: matchers may also constrain on
   **`acp:vc`** — the context agent must hold a verified credential satisfying the named
   requirement, resolved against the TRUSTED holdings supplied via
   `materialize_acp_with_credentials` (above), and fail-closed with none supplied.
+  A matcher's attributes are FLAT — `acp:allOf`/`anyOf`/`noneOf` combine a policy's
+  matchers, and each matcher is a conjunction across its attributes and a disjunction
+  within one (so one matcher naming `acp:CreatorAgent`, `acp:OwnerAgent` and a concrete
+  WebID is satisfied by any of the three, and is undecided only when none of them accepts
+  and at least one is unrecorded). A matcher that nests another matcher is NOT supported.
   A matcher with no supported attribute (`acp:agent`, `acp:client`,
   `acp:issuer`, or `acp:vc`) is unsatisfied, as required by
   [ACP §6.5](https://solidproject.org/TR/acp#satisfied-matcher). Removing its final
@@ -625,6 +664,39 @@ discovery; neither is itself a conformance-tested HTTP layer.
   `AnyClient` as the client component when no client was supplied), for ≤12 grant lookups.
   Only an issuer-CONSTRAINED grant mints a triple principal; an issuer-unconstrained grant
   (`AnyIssuer`) reuses the agent / pair term, so issuer-blind pods are unaffected.
+
+### Unresolved references and cross-pod policy links
+
+An `.acr` may name an access control, a policy or a matcher that another document defines.
+What happens then turns on whether that document is in the **loaded set** — the `.acr`
+graphs the ACP loader reads (outside the reserved and skolem spaces, below an authority):
+
+- **Target loaded** (this pod or another) — the reference applies, and the resource is
+  decided by statements the target document's editor controls. This is **intended**: an
+  explicit cross-pod policy link **delegates trust to the linked document's editor**, the
+  same delegation WAC's `acl:agentGroup` makes. Pointing at a document is the referring
+  document's own choice; what the loader removes (via the admissibility check above) is a
+  document *describing* nodes it does not define.
+- **Target not loaded** — another pod's document, or one a partial load left out. Nothing
+  is known about what the named node says, and an unknown statement may be an `acp:deny`,
+  an `acp:noneOf` exception or a condition on an allow. So the **referring document
+  contributes nothing**, exactly like one the loader rejects: its resource and everything
+  below it get **no grant from any source** (static, attached, bridged or trust), and no
+  ancestor's member policy takes over. This propagates to a fixpoint, so a shared policy
+  document with one unresolved reference withholds every `.acr` that applies it.
+
+The two cases differ because a loaded document is known in full: a node it simply does not
+describe is a **known-empty** access control, policy or matcher and decides as ACP §6.5
+says (an attribute-free matcher never matches, so an empty `noneOf` blocks nothing). An
+absent document is not known-empty — it is unknown.
+
+Referencing another document delegates policy semantics to its editors. Keep mandatory
+denies and all their dependencies under owner control.
+
+`put_acl*`/`update_as*` refuse a write that would add such a reference to a control
+document the active view reads, because the written document would be withheld with it,
+Control included, leaving the writer unable to repair it. Order writes so a document is
+stored before one that uses its nodes.
 
 ## ACP conformance harness — sq-3jtd.9
 
@@ -768,6 +840,33 @@ reserved `urn:sparq:` encoding (or carries the `&client=`/`&issuer=` delimiter) 
 CLOSED — it cannot impersonate a minted pair/triple principal. (Again: this is the
 *authorization* boundary — authenticating the WebID **and verifying the issuer↔WebID
 binding** are the relying application's job.)
+
+### Reasoning allowance
+
+Each authorization closure — the WAC stratum, each of the three ACP strata, and the ODRL-bridge
+strata under `odrl-bridge` — runs under an explicit `ClosureLimits` whose join-row allowances
+are FINITE: `max_join_rows` bounds one round's premise joins and rule firings, and
+`max_total_join_rows` bounds them over ALL rounds of that closure, so the work one
+materialization can be made to do is capped however large a pod's policies are. (The
+reasoner's own `ClosureLimits::default()` leaves both unbounded; the authorization path does
+not inherit that. `max_total_join_rows` is a `sparq-reason` addition: it is charged once and
+never refilled, is unbounded by default, and so changes nothing for any other caller.) The
+default values are listed under [Public API](#public-api), each about ten times the largest
+value the fixtures this crate materializes need. An untrusted writer of a control document
+chooses how far its policies multiply, so these ceilings are what such a writer can spend on
+one materialization; raise them with `set_auth_limits` for a pod that genuinely needs more.
+
+A pod whose policies would need more is **refused**, and the refusal is a materialization
+error like any other: it happens before the dataset is touched, so no partial view is ever
+installed, and it takes the same fail-closed route — a direct `materialize_*` keeps the view
+in force (the dataset is unchanged, so that view still describes it), an update whose rebuild
+is refused is refused itself with nothing changed, and a rebuild that fails after a commit
+drops the view, denying every request until a materialization succeeds. The refusal reads
+`authorization reasoning allowance exceeded: …` and names the limit it reached and its value;
+`auth_allowance_refusal` tells it from any other materialization error and names which
+allowance was reached, so an operator can act on "raise the allowance" rather than reading it
+as a policy decision. Raise it with
+`PodStore::set_auth_limits`.
 
 ## Trust-graph authorisation PoC — sq-pfae (issue #940, opt-in `trust-graph`)
 

@@ -3805,6 +3805,42 @@ fn every_test_model_shows_non_subsumptions() {
     assert!(c.inferred.is_empty());
 }
 
+/// A fuzz ontology whose consistency check needs the tableau's eager attempt. Its class
+/// tests ran out of the shared budget while each first spent a third of its share on the
+/// plain attempt; started in the eager one they decide `C0 ⊑ C4`, the only inferred
+/// subsumption, as HermiT agrees.
+#[test]
+fn the_tests_start_in_the_attempt_the_model_needed() {
+    let body = r#"<http://ex/o5940> a owl:Ontology . :C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :C4 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :i0 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:someValuesFrom :C1 ] .
+        :C2 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C0 ] :C4 ) ] .
+        :C4 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C3 ] :C2 ) ] .
+        :C4 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:allValuesFrom :C2 ] .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:allValuesFrom :C4 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:hasValue :i0 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:hasValue :i0 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "3"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:intersectionOf ( [ owl:complementOf :C3 ] :C0 ) ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( :C2 [ owl:complementOf :C1 ] ) ] .
+        :i0 a [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass owl:Thing ] .
+        :r0 rdfs:subPropertyOf :r1 .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Class ; owl:intersectionOf ( [ owl:complementOf :C0 ] [ owl:complementOf :C2 ] ) ] ] .
+        :i0 a :C3 .
+        :i0 :r0 :i0 .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:minCardinality "2"^^xsd:nonNegativeInteger ] .
+        :i0 :r0 :i0 .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:minCardinality "3"^^xsd:nonNegativeInteger ] .
+        :a a owl:NamedIndividual , :C0 ."#;
+    let (d, r) = run(body);
+    let c = r
+        .classification
+        .unwrap_or_else(|| panic!("{:?}", r.classification_unknown));
+    assert!(c.unsatisfiable.is_empty());
+    assert_eq!(c.inferred.len(), 1);
+    assert!(c.subsumptions.contains(&(ex(&d, "C0"), ex(&d, "C4"))));
+}
+
 /// The scoped choice for `o : ≤1 T.∃S.¬C0` is the clause `T⁻(x, y₀) ∧ S(x, y₁) → C0(y₁) ∨
 /// Q(x)`, with two neighbour variables. The plain attempt does not apply it, so it must not
 /// count copies of a blocked node there either, or the plain attempt's model goes
@@ -3818,6 +3854,20 @@ fn a_clause_of_the_other_attempt_counts_no_copies() {
         :T rdfs:subPropertyOf [ owl:inverseOf :S ] .
         :o a [ owl:unionOf ( [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :Q ] ; owl:hasValue :o ] [ owl:intersectionOf ( :C1 [ owl:complementOf :C0 ] ) ] ) ] .
         :C3 rdfs:subClassOf [ owl:unionOf ( [ owl:intersectionOf ( :C1 :C2 ) ] [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :Q ] ; owl:minCardinality "2"^^xsd:nonNegativeInteger ] ) ] ."#;
+    assert_eq!(verdict(body), Consistency::Consistent);
+}
+
+/// A fuzz ontology whose model has `o` joined to every element of an infinite `S`-chain
+/// (each `C0` has `o` as an `R`-predecessor). `∃T.Self ⊑ ≤1 R` is an at-most at every
+/// node whose body needs a `T`-loop, and `o` has none: it counts no copies at `o`, so the
+/// unravelled chain is a model. HermiT agrees.
+#[test]
+fn an_at_most_behind_a_missing_self_loop_counts_no_copies() {
+    let body = r#":C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :R a owl:ObjectProperty . :S a owl:ObjectProperty . :T a owl:ObjectProperty . :Q a owl:ObjectProperty . :o a owl:NamedIndividual . :p a owl:NamedIndividual . :a a owl:NamedIndividual .
+        :a a :C0 . :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :S ; owl:someValuesFrom :C0 ] , [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:hasValue :o ] .
+        :p a [ a owl:Restriction ; owl:onProperty :R ; owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass :C2 ] .
+        :p a :C2 .
+        [ a owl:Restriction ; owl:onProperty :T ; owl:hasSelf true ] rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :R ; owl:maxCardinality "1"^^xsd:nonNegativeInteger ] ."#;
     assert_eq!(verdict(body), Consistency::Consistent);
 }
 
