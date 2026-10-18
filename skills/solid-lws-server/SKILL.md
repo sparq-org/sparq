@@ -596,10 +596,11 @@ What the server exposes, all discoverable from the storage description
   storage is served by one process at a time. The LWS service starts only over a store whose
   index is this process's alone (`Store::exclusive`): the in-memory index, or the embedded one,
   whose directory is locked to its graph from open to drop (sparq-core's directory lock, held
-  on the graph's own thread, so it is never lost while the process runs). Over any other index
-  (a remote SPARQL endpoint, or a store that does not say) the start fails before anything is
-  read or written. A running server cannot lose the lock, so no request (health probes and CORS
-  preflight included) is ever refused for want of it. When putting back fails too, it is tried a few more times with the
+  by the graph on its actor's thread). If that thread panics the graph, and with it the lock,
+  is dropped, and every later store call fails (`5xx`): the index is never used without the
+  lock. Over any other index (a remote SPARQL endpoint, or a store that does not say; the wasm
+  host's persistent store does not say) the start fails before anything is read or written.
+  The lock file sits beside the index directory, so that directory's parent must be writable. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees

@@ -465,7 +465,20 @@ fn cmd_recompress(args: &[String]) {
         }
     };
     check_emit_v2(v2);
-    let g = sparq_core::Graph::open(std::path::Path::new(src)).unwrap_or_else(|e| {
+    // The destination must be another directory. The text check above is only a shortcut: the
+    // directories are compared resolved, so `d/`, `./d` or a link to `d` is `d` too.
+    if let (Ok(a), Ok(b)) = (std::fs::canonicalize(src), std::fs::canonicalize(dst)) {
+        if a == b {
+            eprintln!(
+                "error: <dst-dir> is <src-dir>; recompress writes a new directory\nusage: {}",
+                RECOMPRESS_USAGE
+            );
+            std::process::exit(2);
+        }
+    }
+    // Read-only: the source is only read (several readers may share it; a live server's
+    // directory is refused).
+    let g = sparq_core::Graph::open_read_only(std::path::Path::new(src)).unwrap_or_else(|e| {
         eprintln!("open error: {e}");
         std::process::exit(1);
     });
@@ -1281,7 +1294,8 @@ fn cmd_query_mmap(args: &[String]) {
     let out_fmt = out_format_flag(args);
 
     let t = Instant::now();
-    let g = sparq_core::Graph::open(std::path::Path::new(dir)).unwrap_or_else(|e| {
+    // Read-only (a shared lock): several readers may query one index side by side.
+    let g = sparq_core::Graph::open_read_only(std::path::Path::new(dir)).unwrap_or_else(|e| {
         eprintln!("open error: {e}");
         std::process::exit(1);
     });
@@ -2218,7 +2232,8 @@ fn cmd_bench_mmap(args: &[String]) {
     let iters: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(5);
     let mode = args.get(5).map(String::as_str).unwrap_or("count");
     let t = Instant::now();
-    let mut g = sparq_core::Graph::open(std::path::Path::new(dir)).unwrap_or_else(|e| {
+    // Read-only (a shared lock): several readers may bench one index side by side.
+    let mut g = sparq_core::Graph::open_read_only(std::path::Path::new(dir)).unwrap_or_else(|e| {
         eprintln!("open error: {e}");
         std::process::exit(1);
     });

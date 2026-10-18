@@ -862,6 +862,33 @@ fn recompress_same_src_dst_exits_2() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The same directory spelled differently (a trailing slash, a `..` detour) is still the same
+/// directory: refused before anything is written, never recompressed over itself.
+#[test]
+fn recompress_same_dir_by_another_spelling_exits_2() {
+    let dir = scratch("err-recompress-alias");
+    let src = dir.join("src");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&src)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let before = std::fs::read(src.join("perm0.bin")).unwrap();
+    for alias in [
+        format!("{}/", src.display()),
+        dir.join("src").join("..").join("src").display().to_string(),
+    ] {
+        let (code, _stdout, stderr) = run3(&["recompress", s(&src), &alias]);
+        assert_eq!(code, 2, "{alias}: stderr: {stderr}");
+        assert!(stderr.contains("dirs must differ"), "stderr: {stderr}");
+    }
+    assert_eq!(
+        std::fs::read(src.join("perm0.bin")).unwrap(),
+        before,
+        "the source was rewritten"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---------------------------------------------------------------------------
 // Algebra-rewrite pass is LIT in this binary (sq-7d3dj.30.13)
 // ---------------------------------------------------------------------------

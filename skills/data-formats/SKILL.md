@@ -647,14 +647,36 @@ cargo build -p sparq-cli --features serialize-rdf
 ## Gotchas / feature flags / prerequisites
 
 **One holder per directory:** `Graph::open`, `open_or_create`, `save`, `save_compressed`,
-`restore_into_durable` and the `build_external*` builders take an exclusive advisory lock
-(`dir_lock`: `flock` on Unix, `LockFileEx` on Windows) before touching a directory; an open
-keeps it while the graph lives, and a graph may still save into its own directory. A second
-holder, in another process or this one, gets `WouldBlock` at once. Every open replays and
-truncates the logs, so there is no unlocked (read-only) open. The flat layout locks
-`<canonical dir>.lock` beside the directory, so symbolic links and trailing slashes share
-one lock, but two bind mounts of a directory do not; `Graph::open_locked_at` takes another
-location. Network file systems are not supported.
+`restore_into_durable`, `restore_in_place` and the `build_external*` builders take an
+exclusive advisory lock (`dir_lock`: `flock` on Unix, `LockFileEx` on Windows) before touching
+a directory. An open keeps it while the graph lives, and so does every named graph of it (a
+named graph taken out of `g.named` keeps its root locked), as do the graphs `compact`,
+`vacuum` and `restore_in_place` swap in. A second holder, in another process or this one,
+gets `WouldBlock` at once. Rules that follow:
+
+- **No save into the graph's own directory.** `g.save(dir)` into the directory `g` is open
+  from (compared by file identity, so `dir/`, `x/../dir` or a link to it count) is refused
+  with `InvalidInput`: `g` still maps and logs into the files a save would truncate. That
+  directory already holds `g`'s state; `g.compact()` folds the log into its base, and
+  `g.is_backed_by(dir)` tells the case apart.
+- **A named graph's directory (`<root>/named/<i>`) belongs to its root:** opening, saving or
+  building into it directly is refused (`InvalidInput`).
+- **One path per directory.** The directory is resolved once (symbolic links and `.`/`..`;
+  a dangling symbolic link is an error) and that path is used for the lock, the log, crash
+  recovery and compaction swaps, so compacting through a link rewrites the real directory and
+  leaves the link alone. `open_or_create` recovers an interrupted swap before deciding to
+  seed. Two bind mounts of one directory are two paths: not excluded.
+- **Read-only opens:** `Graph::open_read_only(dir)` takes the lock SHARED. Read-only opens
+  coexist with each other, never with a writable holder (`WouldBlock` either way), write
+  nothing into the directory, and refuse every write. One is refused while the directory has
+  updates still to fold in (a non-empty WAL or txn journal, or the residue of an interrupted
+  swap): open it writable and `compact` first. It can be saved to another directory.
+- **A failed `restore_in_place`** leaves the directory old-or-new, never lost. When it is still
+  the old store the graph keeps logging there; otherwise the graph refuses every later write
+  (re-open the directory).
+- **The lock file** is `<resolved dir>.lock` beside the directory, so the parent must be
+  writable. Never delete it as stale while the directory may be in use. Network file systems
+  are not supported.
 
 - **Format strings are matched literally — an unknown format is REJECTED, not
   guessed.** Accepted aliases:

@@ -4960,6 +4960,7 @@ dependencies = [
  "proptest",
  "rayon",
  "rustc-hash 2.1.3",
+ "same-file",
 ]
 
 [[package]]

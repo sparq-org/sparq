@@ -352,10 +352,31 @@ impl Graph {
         Ok(Graph { inner, text: None })
     }
 
-    /// Persist the graph (indexes + dictionary) into `dir` for later `Graph.open`.
-    fn save(&self, py: Python<'_>, dir: std::path::PathBuf) -> PyResult<()> {
-        py.detach(|| self.inner.save(&dir))
-            .map_err(|e| PyIOError::new_err(format!("cannot save to {}: {e}", dir.display())))
+    /// Open a persisted graph READ-ONLY: the directory is shared with other read-only opens
+    /// (in this or other processes) but not with a writable `Graph.open`, which is refused
+    /// while readers hold it (and they while it does). Updates on the result raise. Refused
+    /// while the directory holds updates still to fold in (open it writable and compact).
+    #[staticmethod]
+    fn open_read_only(py: Python<'_>, dir: std::path::PathBuf) -> PyResult<Graph> {
+        let inner = py
+            .detach(|| CoreGraph::open_read_only(&dir))
+            .map_err(|e| PyIOError::new_err(format!("cannot open {}: {e}", dir.display())))?;
+        Ok(Graph { inner, text: None })
+    }
+
+    /// Persist the graph (indexes + dictionary) into `dir` for later `Graph.open`. Into the
+    /// directory this graph was opened from, it compacts that directory instead (it already
+    /// holds the graph's state, and the graph still maps the files a plain save would rewrite).
+    fn save(&mut self, py: Python<'_>, dir: std::path::PathBuf) -> PyResult<()> {
+        let inner = &mut self.inner;
+        py.detach(|| {
+            if inner.is_backed_by(&dir) {
+                inner.compact()
+            } else {
+                inner.save(&dir).map_err(|e| e.to_string())
+            }
+        })
+        .map_err(|e| PyIOError::new_err(format!("cannot save to {}: {e}", dir.display())))
     }
 
     /// Run a SPARQL SELECT, materialising the solutions as a `QueryResult`

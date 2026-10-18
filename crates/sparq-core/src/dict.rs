@@ -1986,8 +1986,11 @@ impl Dict {
     /// Serialises the dictionary (prefixes, datatypes, compact terms) to `path` in a
     /// compact binary format. The hash table is NOT written — it is rebuilt on `open`.
     /// Arena-mode only (it serialises `terms`); the compacted/mmap'd modes persist via
-    /// `save_mmap`, which handles appended terms too.
-    pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
+    /// `save_mmap`, which handles appended terms too. Test-only: it writes the legacy format
+    /// that [`open`](Self::open) still reads; graphs persist through the locked
+    /// [`Graph::save`](crate::Graph::save).
+    #[cfg(test)]
+    pub(crate) fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         assert_eq!(self.base, 0, "Dict::save is arena-mode only; use save_mmap for blob/mmap'd (or grown) dicts");
         let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
@@ -2034,7 +2037,7 @@ impl Dict {
         w.flush()
     }
 
-    /// Loads a dictionary written by [`save`](Self::save), rebuilding the hash table.
+    /// Loads a dictionary written in the legacy single-file format, rebuilding the hash table.
     pub fn open(path: &std::path::Path) -> std::io::Result<Dict> {
         let file = std::fs::File::open(path)?;
         // sq-f5jh: the legacy single-file `dict.bin` is an UNTRUSTED on-disk file
@@ -2118,8 +2121,10 @@ impl Dict {
     /// meta file (prefixes + datatypes) plus four mmap-friendly blobs — the term records,
     /// their byte offsets, and a hash-sorted `(hash, id)` lookup index. Opened by
     /// [`open_mmap`](Self::open_mmap) with NOTHING large resident and no table rebuild.
+    /// Crate-internal: a directory is written only under its lock, through
+    /// [`Graph::save`](crate::Graph::save) and the builders.
     #[cfg(feature = "mmap")]
-    pub fn save_mmap(&self, dir: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn save_mmap(&self, dir: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         std::fs::create_dir_all(dir)?;
         // ALL ids — the blob/mmap'd base plus any APPENDED (delta-overlay) terms — so a
@@ -2169,7 +2174,7 @@ impl Dict {
         Ok(())
     }
 
-    /// Opens a dictionary written by [`save_mmap`](Self::save_mmap) with the term store +
+    /// Opens a dictionary written by `save_mmap` (through [`Graph::save`](crate::Graph::save)) with the term store +
     /// lookup index MEMORY-MAPPED: open is just `mmap` (no term parse, no table rebuild),
     /// and the large data stays off-heap. Only the small prefix/datatype tables are read
     /// into RAM. Read-only (no further interning).

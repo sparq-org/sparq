@@ -690,9 +690,10 @@ impl TripleStore {
 
     /// Persists the permutation indexes to `dir` (one raw little-endian `[u32;3]` file
     /// per permutation) so they can be memory-mapped later via [`open`](Self::open) —
-    /// the on-disk side of out-of-core querying.
+    /// the on-disk side of out-of-core querying. Crate-internal: a directory is written only
+    /// under its lock, through [`Graph::save`](crate::Graph::save) and the builders.
     #[cfg(feature = "mmap")]
-    pub fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
         self.save_with(dir, false)
     }
 
@@ -701,7 +702,7 @@ impl TripleStore {
     /// auto-detected by [`open`](Self::open) via [`crate::compress::FILE_MAGIC`], so old
     /// raw directories keep working and the two formats can be mixed.
     #[cfg(feature = "mmap")]
-    pub fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
         self.save_with(dir, true)
     }
 
@@ -750,7 +751,7 @@ impl TripleStore {
     /// # Errors
     /// Returns an error if creating, writing, or flushing the statistics file fails.
     #[cfg(feature = "mmap")]
-    pub fn save_pred_stats(&self, dir: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn save_pred_stats(&self, dir: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
         let mut w = std::io::BufWriter::new(std::fs::File::create(dir.join("predstats.bin"))?);
         w.write_all(&(self.pred_stats.len() as u64).to_le_bytes())?;
@@ -814,7 +815,7 @@ impl TripleStore {
     }
 
     /// Opens a store whose permutations are MEMORY-MAPPED from `dir` (written by
-    /// [`save`](Self::save)). The 6 (or 3, compact) index files stay on disk; the OS
+    /// [`Graph::save`](crate::Graph::save)). The 6 (or 3, compact) index files stay on disk; the OS
     /// pages in only the ranges a query touches, so datasets larger than RAM are
     /// queryable. Per-predicate stats are recomputed from the mapped POS/PSO indexes.
     #[cfg(feature = "mmap")]

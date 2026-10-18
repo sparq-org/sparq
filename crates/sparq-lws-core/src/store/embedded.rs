@@ -297,11 +297,20 @@ impl EmbeddedSparqClient {
     /// actor thread, so the snapshot cannot interleave with a write — but is deliberately NOT counted
     /// as an engine round-trip (it is an operator/persistence action, not a data-path query), keeping
     /// [`Self::engine_round_trips`] the same metric the counter tests pin.
+    ///
+    /// Into the directory the graph is open from (by file identity, whatever the spelling) the
+    /// snapshot is a compaction: that directory already holds the graph's state, and a plain
+    /// save there is refused (it would truncate files the graph still maps).
     pub async fn save(&self, dir: &Path) -> Result<(), SparqError> {
         let dir = dir.to_path_buf();
         self.actor
             .call(move |graph| {
-                graph.save(&dir).map_err(|e| {
+                let saved = if graph.is_backed_by(&dir) {
+                    graph.compact()
+                } else {
+                    graph.save(&dir).map_err(|e| e.to_string())
+                };
+                saved.map_err(|e| {
                     SparqError::Backend(format!("fatal: graph save({}) failed: {e}", dir.display()))
                 })
             })
@@ -1052,7 +1061,9 @@ mod tests {
                 .unwrap();
             let before = c.engine_round_trips();
 
-            let dir = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            // The store and its lock file (`store.lock`, beside it) share one scratch root.
+            let root = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            let dir = root.join("store");
             c.save(&dir).await.expect("snapshot written");
             assert_eq!(
                 c.engine_round_trips(),
@@ -1066,7 +1077,8 @@ mod tests {
                 meta("text/turtle", "blob-1", "\"e1\""),
                 "the snapshot round-trips the record"
             );
-            let _ = std::fs::remove_dir_all(&dir);
+            drop(reopened);
+            let _ = std::fs::remove_dir_all(&root);
         });
     }
 
@@ -1076,14 +1088,23 @@ mod tests {
     #[test]
     fn a_directory_is_opened_by_one_client_at_a_time() {
         block_on(async {
-            let dir = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            // The store and its lock file (`store.lock`, beside it) share one scratch root.
+            let root = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            let dir = root.join("store");
             client().save(&dir).await.expect("snapshot written");
             let first = EmbeddedSparqClient::open(&dir).expect("opened");
             assert!(first.exclusive().is_ok());
             assert!(EmbeddedSparqClient::open(&dir).is_err(), "opened twice");
             assert!(client().save(&dir).await.is_err(), "written while open");
-            // Its own directory it may save into.
-            first.save(&dir).await.expect("saved over its own directory");
+            // Its own directory it may save into: a compaction, under any spelling of it.
+            first
+                .save(&dir)
+                .await
+                .expect("saved over its own directory");
+            first
+                .save(&dir.join("..").join(dir.file_name().unwrap()))
+                .await
+                .expect("saved over its own directory, spelled differently");
             drop(first);
             // The actor drops the graph, and with it the lock, once its last handle goes.
             let mut reopened = None;
@@ -1096,7 +1117,7 @@ mod tests {
             }
             assert!(reopened.is_some(), "the lock outlived the graph");
             drop(reopened);
-            let _ = std::fs::remove_dir_all(&dir);
+            let _ = std::fs::remove_dir_all(&root);
         });
     }
 

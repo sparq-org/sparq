@@ -1921,6 +1921,14 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   published snapshot, and a recovered write is durable across a restart — covered for a transient
   burst, a permanent jam, AND (sq-bif.14) an INTERLEAVED recover→fail→recover sequence whose final
   durable set is exactly the successful writes (no refused write resurrects).
+- **One server per `--persist DIR`.** The server holds `DIR`'s exclusive lock (sparq-core
+  `dir_lock`; `Graph::open_or_create`) for its lifetime: a second server, `sparq-cli compact`, or a
+  read-only `sparq-cli query-mmap` on the same `DIR` fails at once (`WouldBlock`) while it runs.
+  The lock file is `DIR.lock` **beside** `DIR`, so `DIR`'s parent must be writable: on a read-only
+  root filesystem point `--persist` at a subdirectory of the writable volume (`/data/store`, not
+  `/data`, whose lock would go in `/` and fail with `EROFS`). Never delete `DIR.lock` as stale
+  while `DIR` may be in use. `/admin/restore?persist=true` and `/admin/compact` swap `DIR` under
+  that same lock (`Graph::restore_in_place`, `Graph::vacuum`).
 - **Online backup/restore — opt-in `backup` feature (default OFF).** Build with
   `--features backup` to mount the WRITE-gated, POST-only `/admin/backup` (stream a
   self-describing snapshot artifact of the live store WITHOUT stopping the world) and

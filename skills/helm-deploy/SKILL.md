@@ -100,6 +100,9 @@ raising `replicaCount`.
 
 - Set `persistence.enabled=true` to create a PVC mounted at `/data`, or also set
   `persistence.existingClaim` to use a pre-provisioned PVC.
+- With the read-only root filesystem, give `--persist` a subdirectory of the
+  volume (`/data/store`): the store's lock file goes beside its directory, so
+  `--persist /data` would need a writable `/` and fails at start (`EROFS`).
 - Leave `image.repository` empty for the selector-dependent canonical image.
   Set `image.repository`, `image.tag`, and `imagePullSecrets` for a fork, pinned
   release, or private registry. The default `latest` tag uses pull policy
