@@ -18,7 +18,7 @@
 # an allOf matcher that does not accept the triple's agent (resp. client, issuer) dimension
 { ?pol solidx:candTriple ?k . ?k solidx:pairAgent ?pa . ?pol acp:allOf ?m .
   ?UNSCOPED log:notIncludes { ?m solidx:isProvMatcher true . } .
-  ?UNSCOPED log:notIncludes { ?m solidx:acceptsAgentP ?pa . } . }
+  ?UNSCOPED2 log:notIncludes { ?m solidx:acceptsAgentP ?pa . } . }
 => { ?k solidx:allOfRejected true . } .
 # A provenance matcher is evaluated through its instance for the candidate's resource, and
 # its AGENT dimension is decided ONCE for the whole matcher, jointly over ALL of its
@@ -34,7 +34,7 @@
   ?m solidx:isProvMatcher true . ?k solidx:provForResource ?r .
   ?UNSCOPED log:notIncludes { ?mu solidx:instanceOf ?m . ?mu solidx:instanceRes ?r .
                               ?mu solidx:provUndecided ?ku . } .
-  ?UNSCOPED log:notIncludes { ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r .
+  ?UNSCOPED2 log:notIncludes { ?mi solidx:instanceOf ?m . ?mi solidx:instanceRes ?r .
                               ?mi solidx:acceptsAgentP ?pa . } . }
 => { ?k solidx:allOfRejected true . } .
 
