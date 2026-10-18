@@ -812,6 +812,36 @@ pub struct ServerConfig {
     /// `SPARQ_SOLID_AUTHZ_TRUST=1`.
     #[cfg(feature = "solid-authz-trust")]
     pub solid_authz_trust: bool,
+    /// How many authorization-view builds may run AT ONCE on the blocking pool, across
+    /// every `/authz/*` lane (the stateless per-request build, the stateful per-generation
+    /// view, the ODRL extension's re-parse + re-materialisation, and the trust lane's
+    /// augmented build).
+    ///
+    /// Materialising an authorization view is CPU-bound and its cost is set by the request
+    /// (the body dataset) or by the store, so it runs on `spawn_blocking` rather than an
+    /// async worker. That alone bounds nothing: without a cap, N concurrent requests put N
+    /// materialisations on the blocking pool at once and the pool's own queue grows without
+    /// limit. This is that cap; a request that finds every slot taken waits at most
+    /// [`ServerConfig::solid_authz_build_wait`] and is then refused with a retryable `503`
+    /// (fail-closed — no decision is produced from an un-built view).
+    ///
+    /// Default: the machine's available parallelism (CPU count), clamped to at least 1 —
+    /// the authorization build is CPU-bound, so more concurrent builds than cores buys
+    /// queueing rather than throughput. Set by `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY`. A
+    /// value of 0 is read as 1.
+    #[cfg(feature = "solid-authz")]
+    pub solid_authz_build_concurrency: usize,
+    /// How long an `/authz/*` request waits for a free
+    /// [`solid_authz_build_concurrency`](Self::solid_authz_build_concurrency) slot before it
+    /// is refused with a retryable `503`.
+    ///
+    /// The point of the bound is that saturation is SHED rather than queued: a client gets a
+    /// prompt, retryable refusal instead of a request that waits behind an unbounded queue
+    /// of other builds. Default: 2 seconds. Set by
+    /// `SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS` (milliseconds; 0 means "do not wait at all", so a
+    /// saturated pool refuses immediately).
+    #[cfg(feature = "solid-authz")]
+    pub solid_authz_build_wait: Duration,
 }
 
 impl Default for ServerConfig {
@@ -971,6 +1001,15 @@ impl Default for ServerConfig {
             // SPARQ_SOLID_AUTHZ_TRUST=1. Fail-closed: trust block is ignored until set.
             #[cfg(feature = "solid-authz-trust")]
             solid_authz_trust: false,
+            // The authorization build is CPU-bound, so the default cap is the CPU count:
+            // more concurrent builds than cores adds queueing, not throughput. Clamped to
+            // at least 1 on a box that reports no parallelism.
+            #[cfg(feature = "solid-authz")]
+            solid_authz_build_concurrency: std::thread::available_parallelism()
+                .map_or(1, std::num::NonZeroUsize::get),
+            // Shed rather than queue: a saturated pool refuses after this, retryably.
+            #[cfg(feature = "solid-authz")]
+            solid_authz_build_wait: Duration::from_secs(2),
         }
     }
 }
@@ -1293,6 +1332,23 @@ impl ServerConfig {
         #[cfg(feature = "solid-authz-trust")]
         if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ_TRUST") {
             cfg.solid_authz_trust = env_truthy(&v);
+        }
+        // SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY caps how many authorization-view builds run at
+        // once on the blocking pool (default: the CPU count); 0 is read as 1. An unparseable
+        // value leaves the default in place, as for the other numeric knobs here.
+        #[cfg(feature = "solid-authz")]
+        if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY") {
+            if let Ok(n) = v.trim().parse::<usize>() {
+                cfg.solid_authz_build_concurrency = n.max(1);
+            }
+        }
+        // SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS is how long a request waits for a free build slot
+        // before the fail-closed 503 (default 2000 ms; 0 refuses immediately).
+        #[cfg(feature = "solid-authz")]
+        if let Ok(v) = std::env::var("SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS") {
+            if let Ok(ms) = v.trim().parse::<u64>() {
+                cfg.solid_authz_build_wait = Duration::from_millis(ms);
+            }
         }
         Ok(cfg)
     }
@@ -2541,6 +2597,11 @@ pub struct AppState {
     /// request never decides from an auth view staler than the data it would read.
     #[cfg(feature = "solid-authz")]
     authz_view: Arc<std::sync::RwLock<Option<crate::solid_authz::CachedAuthView>>>,
+    /// The BOUNDED blocking pool every `/authz/*` authorization-view build runs on (see
+    /// [`ServerConfig::solid_authz_build_concurrency`]). Shared by all four build lanes, so
+    /// the cap is on authorization builds in flight rather than per lane.
+    #[cfg(feature = "solid-authz")]
+    authz_build_pool: Arc<crate::solid_authz::AuthBuildPool>,
     /// Admission control for streamed read bodies (SELECT JSON, CONSTRUCT / DESCRIBE). The
     /// `concurrency_limit` layer releases its slot as soon as the handler returns the
     /// `Response`, but a streamed body's worker keeps running on the blocking pool while the
@@ -2932,6 +2993,11 @@ impl AppState {
             config.templates_file.as_deref(),
         )?));
         let stream_worker_cap = config.max_concurrent.max(1);
+        // Read before `config` is moved into the state.
+        #[cfg(feature = "solid-authz")]
+        let authz_build_concurrency = config.solid_authz_build_concurrency.max(1);
+        #[cfg(feature = "solid-authz")]
+        let authz_build_wait = config.solid_authz_build_wait;
         Ok(Self {
             #[cfg(feature = "templates")]
             templates,
@@ -2963,6 +3029,11 @@ impl AppState {
             // the first `"source":"server"` request and re-built whenever the generation moves.
             #[cfg(feature = "solid-authz")]
             authz_view: Arc::new(std::sync::RwLock::new(None)),
+            #[cfg(feature = "solid-authz")]
+            authz_build_pool: Arc::new(crate::solid_authz::AuthBuildPool::new(
+                authz_build_concurrency,
+                authz_build_wait,
+            )),
             stream_workers: Arc::new(tokio::sync::Semaphore::new(stream_worker_cap)),
         })
     }
@@ -3488,6 +3559,13 @@ impl AppState {
         &self,
     ) -> &std::sync::RwLock<Option<crate::solid_authz::CachedAuthView>> {
         &self.authz_view
+    }
+
+    /// The bounded blocking pool every authorization-view build runs on (see the
+    /// `authz_build_pool` field).
+    #[cfg(feature = "solid-authz")]
+    pub(crate) fn authz_build_pool(&self) -> &Arc<crate::solid_authz::AuthBuildPool> {
+        &self.authz_build_pool
     }
 
     /// (sq-gos8) The installed structured access-audit sink, if any. `None` short-
