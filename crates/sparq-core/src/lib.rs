@@ -4353,10 +4353,17 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<()> {
 /// Mirrors [`recover_compaction`] but scoped to the `named/` sub-tree (`named.drop-old` /
 /// `named.drop-new` siblings):
 ///
-/// - `named/` present: the swap completed (or never started) — drop any stale siblings. The
-///   manifest is then reconciled by [`open_named`](Graph::open_named) (it trusts the manifest's
-///   count; extra leftover sub-dirs beyond it are ignored, a missing one surfaces as a clean
-///   error).
+/// - `named/` present AND `named.drop-old` present: the sub-tree was swapped but the manifest
+///   rewrite — the COMMIT POINT for the new set — may not have landed. The two are reconciled by
+///   COUNT: the manifest names one entry per slot, and the survivors are renumbered
+///   contiguously, so a manifest whose count matches the slots in `named/` is the new one (the
+///   drop committed: drop the old sub-tree) and a manifest whose count does NOT match is still
+///   the old one (the drop did not commit: ROLL BACK to `named.drop-old`). Without this the
+///   store did not open at all — the manifest named a slot the swapped-in sub-tree no longer
+///   had.
+/// - `named/` present, no sibling: the swap completed (or never started). The manifest is then
+///   reconciled by [`open_named`](Graph::open_named) (it trusts the manifest's count; extra
+///   leftover sub-dirs beyond it are ignored, a missing one surfaces as a clean error).
 /// - `named/` MISSING, `named.drop-new` present: a crash between the two renames — the new
 ///   (renumbered survivor) sub-tree was fully written + fsync'd, so COMPLETE the swap by
 ///   promoting it.
@@ -4370,6 +4377,23 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<()> {
     let new_dir = named_dir.with_extension("drop-new");
     let old_dir = named_dir.with_extension("drop-old");
     if named_dir.exists() {
+        // (sq-ycle) A retained `drop-old` beside a present `named/` is the window
+        // between the sub-tree swap and the manifest rewrite that commits it.
+        if old_dir.exists() {
+            if let Some(named_in_manifest) = manifest_entry_count(dir) {
+                let slots = contiguous_named_slots(&named_dir);
+                if named_in_manifest != slots {
+                    // The manifest still names the PRE-drop set, so the drop was never
+                    // committed: restore the sub-tree it names. Removing `named/` first is safe
+                    // because every survivor in it was persisted from `drop-old`'s content.
+                    std::fs::remove_dir_all(&named_dir)?;
+                    std::fs::rename(&old_dir, &named_dir)?;
+                    fsync_dir(dir)?;
+                    std::fs::remove_dir_all(&new_dir).ok();
+                    return Ok(());
+                }
+            }
+        }
         std::fs::remove_dir_all(&new_dir).ok();
         std::fs::remove_dir_all(&old_dir).ok();
         return Ok(());
@@ -4385,6 +4409,30 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<()> {
         fsync_dir(dir)?;
     }
     Ok(())
+}
+
+/// (sq-ycle) How many graph names `dir/named.bin` declares, or `None` when there is no
+/// readable manifest header. Only the COUNT is decoded: this runs during recovery, before the
+/// manifest's entries can be trusted to decode, and it is used to tell a pre-drop manifest from
+/// a post-drop one (see [`recover_named_drop`]).
+#[cfg(feature = "mmap")]
+fn manifest_entry_count(dir: &std::path::Path) -> Option<usize> {
+    let bytes = std::fs::read(dir.join(NAMED_MANIFEST)).ok()?;
+    if bytes.len() < 12 || u32::from_le_bytes(bytes[0..4].try_into().ok()?) != NAMED_MANIFEST_MAGIC {
+        return None;
+    }
+    Some(u32::from_le_bytes(bytes[8..12].try_into().ok()?) as usize)
+}
+
+/// (sq-ycle) How many `named/<i>` slots exist from 0 upwards without a gap — the number
+/// of named graphs a sub-tree actually holds, since the slots are renumbered contiguously.
+#[cfg(feature = "mmap")]
+fn contiguous_named_slots(named_dir: &std::path::Path) -> usize {
+    let mut n = 0usize;
+    while named_dir.join(n.to_string()).is_dir() {
+        n += 1;
+    }
+    n
 }
 
 /// (sq-3ui0, gh-45) The subdirectory holding the persisted named graphs (one
@@ -4569,7 +4617,16 @@ impl Wal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<Wal> {
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(Self::path(dir))?;
+        let path = Self::path(dir);
+        let existed = path.exists();
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        // (sq-ycle) A log this call CREATED exists only in the directory's page cache
+        // until the directory entry is synced. The first append fsyncs the file's DATA, which
+        // says nothing about the entry that names it, so a crash could leave an acknowledged
+        // batch in a file the directory no longer has. Synced once, on creation only.
+        if !existed {
+            fsync_dir(dir)?;
+        }
         Ok(Wal { file, dir: dir.to_path_buf() })
     }
 
@@ -4909,10 +4966,18 @@ impl TxnJournal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<TxnJournal> {
+        let path = Self::path(dir);
+        let existed = path.exists();
         let file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(Self::path(dir))?;
+            .open(&path)?;
+        // (sq-ycle) Sync the DIRECTORY ENTRY of a journal this call created, for the same
+        // reason as `Wal::open`: the commit fsync makes the frame's bytes durable, not the file
+        // that holds them. Once per creation, never per commit.
+        if !existed {
+            fsync_dir(dir)?;
+        }
         Ok(TxnJournal {
             file,
             dir: dir.to_path_buf(),
@@ -11407,6 +11472,111 @@ mod tests {
             );
             std::fs::remove_dir_all(&dir).ok();
         }
+    }
+
+    /// (sq-ycle) A named-graph DROP swaps the `named/` sub-tree BEFORE it rewrites the
+    /// manifest that commits the new set, so a crash in between leaves a manifest naming one more
+    /// slot than the sub-tree has — and the store did not open at all. Recovery now reconciles
+    /// the two by count: the manifest still names the PRE-drop set, so the drop never committed
+    /// and the retained `named.drop-old` sub-tree is restored.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_crash_between_the_drop_swap_and_its_manifest_rewrite_rolls_back() {
+        let dir = txn_tmp_dir("drop-window");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let old_dir = named_dir.with_extension("drop-old");
+        // Stage exactly the on-disk state a crash in that window leaves: the ORIGINAL two-slot
+        // sub-tree aside as `named.drop-old`, the renumbered single survivor as `named/`, and
+        // the PRE-drop manifest (two entries) still in place.
+        let survivor = {
+            // Copy slot 1 (the survivor of dropping g0) into a fresh single-slot sub-tree.
+            let staging = named_dir.with_extension("drop-new");
+            std::fs::remove_dir_all(&staging).ok();
+            std::fs::create_dir_all(&staging).unwrap();
+            Graph::open(&named_dir.join("1"))
+                .unwrap()
+                .save(&staging.join("0"))
+                .unwrap();
+            staging
+        };
+        std::fs::rename(&named_dir, &old_dir).unwrap();
+        std::fs::rename(&survivor, &named_dir).unwrap();
+        assert_eq!(manifest_entry_count(&dir), Some(2), "the pre-drop manifest is still in place");
+        assert_eq!(contiguous_named_slots(&named_dir), 1, "but the sub-tree holds one slot");
+
+        // The store must OPEN, and must open as the pre-drop dataset: the drop's commit point
+        // (the manifest rewrite) never ran, so the drop did not happen.
+        let g = Graph::open(&dir).expect("the store must open after a crash in the drop window");
+        let mut names: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec!["<http://ex/g0>".to_string(), "<http://ex/g1>".to_string()],
+            "an uncommitted drop rolls back to the set the manifest names"
+        );
+        assert!(!old_dir.exists(), "and the retained sub-tree is consumed");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) The other side of that reconciliation: when the manifest rewrite DID
+    /// land, the drop is committed and must stand — the retained sub-tree is dropped, not
+    /// restored. Rolling back here would resurrect a graph whose removal was acknowledged.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_committed_drop_is_not_rolled_back_by_a_retained_sub_tree() {
+        let dir = txn_tmp_dir("drop-committed");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let named_dir = dir.join(NAMED_SUBDIR);
+        let old_dir = named_dir.with_extension("drop-old");
+        {
+            // A real, completed drop: the manifest now names one graph.
+            let mut g = Graph::open(&dir).unwrap();
+            g.drop_named_durable(&named("g0")).unwrap();
+        }
+        assert_eq!(manifest_entry_count(&dir), Some(1), "the drop committed");
+        // Re-create the retained sub-tree a crash after the manifest rewrite would leave behind.
+        std::fs::create_dir_all(old_dir.join("0")).unwrap();
+        Graph::load_str("<http://ex/n0> <http://ex/p> <http://ex/o0> .", "ntriples")
+            .unwrap()
+            .save(&old_dir.join("0"))
+            .unwrap();
+        let g = Graph::open(&dir).expect("the store opens");
+        let names: Vec<String> = g.named.iter().map(|(n, _)| n.to_string()).collect();
+        assert_eq!(names, vec!["<http://ex/g1>".to_string()], "the committed drop stands");
+        // The CONTENT must be g1's, not the retained sub-tree's: a rollback here would leave the
+        // manifest naming g1 over the dropped graph's triples.
+        let survivor = dump_terms(&g.named[0].1);
+        assert!(
+            survivor.iter().any(|(s, _, _)| s.contains("n1")),
+            "the surviving graph keeps its own triples: {:?}",
+            survivor
+        );
+        assert!(
+            !survivor.iter().any(|(s, _, _)| s.contains("n0")),
+            "and not the dropped graph's: {:?}",
+            survivor
+        );
+        assert!(!old_dir.exists(), "and the leftover sub-tree is removed");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// (sq-ycle) A graph name that is neither an IRI nor a blank node cannot be written:

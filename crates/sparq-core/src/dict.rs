@@ -2158,6 +2158,9 @@ impl Dict {
         }
         meta.write_all(&(n as u64).to_le_bytes())?;
         meta.flush()?;
+        // (sq-ycle) Flushed is not durable: a staged dictionary is published by a
+        // rename, so its bytes must be on disk first.
+        meta.into_inner().map_err(std::io::Error::other)?.sync_all()?;
 
         // term blob + per-term byte offsets; collect (hash, id) for the lookup index.
         let mut blob = std::io::BufWriter::new(std::fs::File::create(dir.join("dict-terms.bin"))?);
@@ -2171,6 +2174,7 @@ impl Dict {
             pairs.push((hash_stored_ref(&r, &self.prefixes, &self.datatypes), id));
         }
         blob.flush()?;
+        blob.into_inner().map_err(std::io::Error::other)?.sync_all()?;
         write_pod_slice(&dir.join("dict-offs.bin"), &offsets)?;
 
         // hash-sorted parallel arrays (binary-searchable lookup). Sorted by (hash, id) —
@@ -2561,7 +2565,12 @@ fn write_pod_slice<T: Copy>(path: &std::path::Path, data: &[T]) -> std::io::Resu
     let () = DICT_ON_DISK_LE_GUARD;
     // SAFETY: T is u32/u64 (POD); we only read its bytes.
     let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(data)) };
-    std::fs::write(path, bytes)
+    // (sq-ycle) Written AND synced: these blobs are part of a base that a rename
+    // publishes, so `std::fs::write`'s page-cache-only guarantee is not enough.
+    use std::io::Write;
+    let mut f = std::fs::File::create(path)?;
+    f.write_all(bytes)?;
+    f.sync_all()
 }
 
 fn read_u32(r: &mut impl std::io::Read) -> std::io::Result<u32> {

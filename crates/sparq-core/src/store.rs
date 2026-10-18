@@ -707,6 +707,14 @@ impl TripleStore {
 
     #[cfg(feature = "mmap")]
     fn save_with(&self, dir: &std::path::Path, compressed: bool) -> std::io::Result<()> {
+        /// (sq-ycle) `std::fs::write` leaves the bytes in the page cache; a staged base
+        /// file must be on disk before a rename can publish it.
+        fn write_file_synced(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
+            use std::io::Write;
+            let mut f = std::fs::File::create(path)?;
+            f.write_all(bytes)?;
+            f.sync_all()
+        }
         std::fs::create_dir_all(dir)?;
         for (i, p) in self.perms.iter().enumerate() {
             // Raw modes borrow zero-copy; a compressed perm is decoded back to raw rows so
@@ -732,10 +740,15 @@ impl TripleStore {
                 let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
                 crate::compress::CompressedPerm::encode_emit(&rows).write_to(&mut w)?;
                 std::io::Write::flush(&mut w)?;
+                // (sq-ycle) FLUSH is not DURABILITY: it moves the bytes from this
+                // process into the page cache. A base that is about to be published by a
+                // rename must already be on disk, or a crash just after the rename leaves the
+                // canonical directory naming an index whose bytes were never written.
+                w.into_inner().map_err(std::io::Error::other)?.sync_all()?;
             } else {
                 // SAFETY: reinterpret the contiguous [u32;3] rows as bytes for writing.
                 let bytes = unsafe { std::slice::from_raw_parts(rows.as_ptr().cast::<u8>(), std::mem::size_of_val(rows.as_ref())) };
-                std::fs::write(path, bytes)?;
+                write_file_synced(&path, bytes)?;
             }
         }
         self.save_pred_stats(dir)
