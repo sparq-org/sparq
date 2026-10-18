@@ -905,7 +905,16 @@ fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
         let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 1)
             .expect_err("a bound below the candidate count must be refused");
         match &err {
-            MpcError::Protocol(m) => assert!(m.contains("candidate count"), "{}", m),
+            MpcError::Protocol(m) => {
+                assert!(m.contains("does not cover the candidate set"), "{}", m);
+                // B and the PUBLIC bound only — never the candidate count.
+                assert!(
+                    m.contains("B=1") && m.contains("public candidate bound"),
+                    "{}",
+                    m
+                );
+                assert!(!m.contains(&format!("count {}", count)), "{}", m);
+            }
             other => panic!("expected a Protocol refusal, got {:?}", other),
         }
         assert_eq!(counted.draws(), 0, "refused before any draw");
@@ -914,5 +923,105 @@ fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
         // than a bound that quietly refuses legal work.
         eval_bounded_path_hidden(&backend, &edges, &form, count)
             .expect("B = the exact candidate count must run");
+    }
+}
+/// `public_bounded_candidate_pair_bound` is a function of the edge COUNT and the
+/// form's public `min`/`max`, and of nothing in the edges.
+#[test]
+fn the_public_bounded_candidate_pair_bound_is_a_function_of_the_public_sizes() {
+    // {1,1}: the length-1 arm only.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(5, &HiddenBoundedPath::range(P, 1, 1)).unwrap(),
+        5
+    );
+    // {1,2}: length 1 plus any length >= 2.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(5, &HiddenBoundedPath::range(P, 1, 2)).unwrap(),
+        30
+    );
+    // {0,2}: the same plus the reflexive diagonal over at most 2*|E| nodes.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(5, &HiddenBoundedPath::range(P, 0, 2)).unwrap(),
+        40
+    );
+    // {2,3}: neither the diagonal nor the length-1 arm applies.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(5, &HiddenBoundedPath::range(P, 2, 3)).unwrap(),
+        25
+    );
+    // No edges, no candidates.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(0, &HiddenBoundedPath::range(P, 0, 2)).unwrap(),
+        0
+    );
+    // Overflow is a refusal, not a wrap.
+    assert!(
+        public_bounded_candidate_pair_bound(usize::MAX, &HiddenBoundedPath::range(P, 0, 2))
+            .is_err()
+    );
+
+    // Same size, different contents, same bound — the property that makes a
+    // decision taken on it independent of the edge data.
+    let wide = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/c", "http://ex/d"),
+    ]);
+    let narrow = predicated_edges(&[
+        (P, "http://ex/s", "http://ex/o"),
+        (P, "http://ex/s", "http://ex/o"),
+    ]);
+    let form = HiddenBoundedPath::range(P, 1, 2);
+    assert_eq!(
+        public_bounded_candidate_pair_bound(wide.len(), &form).unwrap(),
+        public_bounded_candidate_pair_bound(narrow.len(), &form).unwrap()
+    );
+    // Their exact unions differ, which is why the public bound is what decides.
+    assert_ne!(
+        projected_bounded_candidate_count(&wide, &form).unwrap(),
+        projected_bounded_candidate_count(&narrow, &form).unwrap()
+    );
+}
+
+/// The two branches of the bounded-form bound contract, at the entry point.
+#[test]
+fn both_branches_of_the_bounded_bound_contract() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7D09).unwrap();
+    let edges = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ]);
+    let form = HiddenBoundedPath::range(P, 0, 2);
+    let public = public_bounded_candidate_pair_bound(edges.len(), &form).unwrap();
+    assert_eq!(public, 10);
+    let exact = projected_bounded_candidate_count(&edges, &form).unwrap();
+    assert_eq!(exact, 6, "the arms overlap, so the union is below the sum");
+
+    // Branch 1: B at the public bound is accepted on the public sizes alone.
+    eval_bounded_path_hidden(&backend, &edges, &form, public).expect("B = the public bound runs");
+
+    // Branch 2: a B strictly below the public bound but covering the real union is
+    // still accepted — no legal work is refused.
+    eval_bounded_path_hidden(&backend, &edges, &form, exact)
+        .expect("B below the public bound runs when the exact union fits");
+
+    // Branch 2, refusing: below both, refused before any draw, public text only.
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    let err =
+        eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, exact - 1)
+            .expect_err("B below the exact union must be refused");
+    assert_eq!(counted.draws(), 0, "refused before any draw");
+    match &err {
+        MpcError::Protocol(m) => {
+            assert!(
+                m.contains("B=5") && m.contains("public candidate bound 10"),
+                "{}",
+                m
+            );
+            assert!(!m.contains("count 6"), "the union is not rendered: {}", m);
+        }
+        other => panic!("expected a Protocol refusal, got {:?}", other),
     }
 }

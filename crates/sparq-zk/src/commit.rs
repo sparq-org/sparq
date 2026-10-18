@@ -94,8 +94,10 @@ pub enum CommitmentMethod {
     /// key-derivation mode over length-framed `(datatype, params)`, a no-value
     /// sentinel asserted outside the reachable value-handle band (the
     /// `research/zk-field-native-encoding.md` §14.1 reserved-tag requirement, on
-    /// the HOST side — no Noir global or assert names that sentinel yet, so the
-    /// in-circuit half of the requirement stays open),
+    /// the HOST side; the in-circuit half has shipped as the `zk/dual-leaf-v2` Noir
+    /// library plus the band and `LANG_NONE` checks applied at the witnessed
+    /// component sites of the `scan_v2dl_*` / `join_eq_v2dl_*` members, which no
+    /// `CircuitId` names and so no verify path selects),
     /// and a bit-domain boolean member. The dual-leaf method a NEW issuance
     /// selects ([`Self::is_production_selectable`] is `true` only for this one,
     /// of the two dual-leaf versions). It carries exactly the same INV-VL
@@ -215,7 +217,10 @@ impl CommitmentMethod {
     /// recognised method.
     ///
     /// The point of the parameter is that legacy acceptance has to be WRITTEN
-    /// DOWN at the call site instead of being the silent default.
+    /// DOWN at the call site instead of being the silent default. The legacy
+    /// value is TRUSTED-CALLER INPUT and is not checked against issuance history
+    /// (see [`MethodUse::LegacyAlreadyIssued`]), so passing it is a recorded
+    /// caller assertion, not evidence that the commitment was already issued.
     pub const fn checked_for(self, use_: MethodUse) -> Result<Self, MethodNotSelectable> {
         match use_ {
             MethodUse::NewIssuance => self.checked_for_issuance(),
@@ -283,6 +288,10 @@ impl CommitmentMethod {
 /// re-deriving or re-verifying a commitment that was ALREADY ISSUED under a
 /// superseded method, which stays recognised and verifiable.
 ///
+/// Both values are TRUSTED-CALLER INPUT: this enum carries what the call site
+/// SAYS it is doing, and nothing in this module checks that claim against
+/// issuance history. See [`Self::LegacyAlreadyIssued`].
+///
 /// Neither value asserts a cryptographic property; see
 /// [`CommitmentMethod::is_production_selectable`] for the honest scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -294,6 +303,16 @@ pub enum MethodUse {
     /// Re-deriving or re-verifying an ALREADY-ISSUED commitment under the method
     /// it was issued with. Accepts every recognised method, including a
     /// superseded one.
+    ///
+    /// TRUSTED-CALLER INPUT. This value is the CALLER's assertion that the
+    /// commitment was already issued under that method. It is not authenticated
+    /// issuance history: nothing here reads a registry, a signature or an
+    /// attestation to confirm it, and a caller that passes it on a fresh
+    /// commitment gets the superseded method accepted. It therefore records a
+    /// written-down downgrade at the call site and nothing more — no verifier
+    /// gate may treat it as authenticated. The method a verifier acts on is the
+    /// ATTESTED one (`sparq_zk_compose::method_auth`), which is authenticated
+    /// separately and is not derived from this value.
     LegacyAlreadyIssued,
 }
 
