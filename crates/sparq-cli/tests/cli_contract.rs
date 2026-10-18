@@ -958,6 +958,26 @@ fn reason_output_through_a_link_never_writes_into_a_store() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An output that replaces an existing regular file keeps that file's permissions.
+#[cfg(unix)]
+#[test]
+fn reason_output_keeps_the_mode_of_the_file_it_replaces() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch("reason-out-mode");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let out = dir.join("out.nt");
+    std::fs::write(&out, b"old").unwrap();
+    std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o640)).unwrap();
+    let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&out)]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let written = std::fs::read_to_string(&out).unwrap();
+    assert!(written.contains("<http://ex/s>"), "{written}");
+    let mode = std::fs::metadata(&out).unwrap().permissions().mode() & 0o7777;
+    assert_eq!(mode, 0o640, "the replaced file's mode was {mode:o}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `probe-compress` maps a store's permutation file only under the store's lock: refused while
 /// the store is open for writing, fine once it is not.
 #[cfg(feature = "mmap")]

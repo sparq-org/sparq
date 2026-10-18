@@ -48,7 +48,9 @@ fn is_device_or_pipe(path: &std::path::Path) -> bool {
 /// fresh sibling (`.<name>.sparq-tmp-…`, created new, never an existing file or link), which
 /// [`finish`](Self::finish) syncs and renames over the path: what was at the path (a file, a hard
 /// link to someone else's file, a symbolic link) is replaced, never written through, and a
-/// failed command leaves it as it was. A device or pipe (`/dev/stdout`) is written directly.
+/// failed command leaves it as it was. A regular file replaced this way keeps its permissions
+/// (read from the path itself, never through a link). A device or pipe (`/dev/stdout`) is
+/// written directly.
 pub(crate) struct OutFile {
     file: Option<std::fs::File>,
     /// The fresh sibling and the path it replaces; `None` for a device or pipe.
@@ -82,10 +84,24 @@ impl OutFile {
             .write(true)
             .create_new(true)
             .open(&tmp)?;
-        Ok(OutFile {
+        let out = OutFile {
             file: Some(file),
             staged: Some((tmp, path.to_path_buf())),
-        })
+        };
+        // A regular file being replaced keeps its permissions. Read without following a link:
+        // a symbolic link (or nothing) at the path leaves the new file's default mode.
+        match std::fs::symlink_metadata(path) {
+            Ok(meta) if meta.file_type().is_file() => {
+                out.file
+                    .as_ref()
+                    .expect("just opened")
+                    .set_permissions(meta.permissions())?;
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        Ok(out)
     }
 
     /// Flushes the output and, for a file, syncs it and renames it over the path.
