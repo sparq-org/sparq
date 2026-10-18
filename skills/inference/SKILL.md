@@ -126,12 +126,21 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // store comes back as it went in. A variable no premise binds keeps its name (still the
 // one __bw<fold>_ fingerprint of the derivation), and a quoted formula's own @forAll
 // binder is never bound by a proof, so it is untouched. A log:collectAllIn / log:forAllIn
-// clause or a containment pattern given through a variable is NOT resolved into the
-// reading rule's variables: behind a <= the rule's own atoms are standardized apart, so a
-// ?y arriving from elsewhere is a different variable from the rule's own ?y and binds
-// nothing of it, whatever either spells. A formula a FORWARD rule passes to such a clause
-// is read through that rule's own substitution and does share its bindings. Whether a
-// backward rule should share the same way is open.
+// clause, template or scope given through a variable is NOT resolved into the reading
+// rule's variables: behind a <= the rule's own atoms are standardized apart, so a ?y
+// arriving from elsewhere is a different variable from the rule's own ?y and binds nothing
+// of it, whatever either spells. Where that would make the aggregation read a clause
+// nothing constrains, it is now REFUSED rather than answered: a bound clause, template or
+// scope naming a variable the applying rule itself writes fails the run with "a formula
+// bound through a variable cannot share variables with the backward rule that aggregates
+// over it". Unrefused, log:forAllIn held vacuously and FIRED a rule that must not fire and
+// log:collectAllIn collected nothing — wrong answers given silently. Narrow: a clause the
+// rule writes inline shares correctly and still answers; a bound clause sharing no name
+// with the rule aggregates as before; and a shared name the CALLER already bound is a value
+// the caller constrained, so a formula a caller passes in is never refused (which also
+// keeps a caller's choice of name from deciding a callee's behaviour). A forward rule is
+// unaffected — its atoms are never renamed, so the same premise shares and answers. Whether
+// a backward rule should share the same way is the open half of GH #6943.
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares

@@ -3175,6 +3175,43 @@ fn match_premise_admitted(
                     bw.nested_error.borrow_mut().get_or_insert_with(|| QUANTIFIED_ANTECEDENT.into());
                     continue;
                 }
+                // ANSWER SAFETY: a clause, template or scope that arrived through a variable
+                // and names one of the applying rule's own source variables was written to
+                // share that variable with the rule and cannot, because the rule's atoms were
+                // standardized apart around it. The aggregation would then read a clause
+                // nothing constrains — `forAllIn` holding vacuously and FIRING a rule that
+                // must not fire, `collectAllIn` collecting nothing — so the shape fails
+                // closed ([`BOUND_AGGREGATION_SHARES_RULE_VAR`]) rather than answer wrongly.
+                // Narrow by construction: a slot the rule wrote as a `{ … }` formula is
+                // renamed with the rule and shares correctly; a clause with no shared name
+                // aggregates as before; a value the application itself minted names no source
+                // variable; and `applying` is `None` outside a backward application, so a
+                // forward rule and a formula a caller passes in are untouched.
+                if let Some(rule) = path.applying.and_then(|i| bw.rules.get(i as usize)) {
+                    let written = aggregation_clauses(op, &pat[0]);
+                    let shares = aggregation_clauses(op, &subj)
+                        .iter()
+                        .enumerate()
+                        .any(|(i, c)| arrived_sharing_rule_var(written.get(i), c, rule, &b))
+                        // `collectAllIn`'s template: instantiated once per solution of the
+                        // clause, so a source name here is the same unshared variable.
+                        || matches!((op, &subj), (CollectOp::CollectAll, Term::List(ms)) if ms.len() == 3
+                            && arrived_sharing_rule_var(
+                                match &pat[0] { Term::List(w) => w.first(), _ => None },
+                                &ms[0],
+                                rule,
+                                &b,
+                            ))
+                        // The scope: read where the binding left it, so an unbound or ground
+                        // scope costs no substitution.
+                        || arrived_sharing_rule_var(Some(&pat[2]), walk_ref(&pat[2], &b), rule, &b);
+                    if shares {
+                        bw.nested_error
+                            .borrow_mut()
+                            .get_or_insert_with(|| BOUND_AGGREGATION_SHARES_RULE_VAR.into());
+                        continue;
+                    }
+                }
                 match op {
                     CollectOp::CollectAll => {
                         let [template, clause, list_pat] = &members[..] else { continue };
@@ -3528,7 +3565,7 @@ fn backward_prove(
     // over every site whether or not the gate below skips it, so a site's index does not
     // depend on the goal ([`BwPath`]).
     let mut site = 0u64;
-    for rule in bw.rules {
+    for (ri, rule) in bw.rules.iter().enumerate() {
         for concl in &rule.conclusion {
             let at = site;
             site += 1;
@@ -3619,7 +3656,15 @@ fn backward_prove(
                 .iter()
                 .map(|t| [rename_vars(&t[0], n), rename_vars(&t[1], n), rename_vars(&t[2], n)])
                 .collect();
-            for sol in match_premise_seeded(&prem, facts, &subst, JoinMode::All, bw, depth, BwPath::at(fold)) {
+            for sol in match_premise_seeded(
+                &prem,
+                facts,
+                &subst,
+                JoinMode::All,
+                bw,
+                depth,
+                BwPath::at(fold).applying(ri),
+            ) {
                 // Project the proof onto the goal's variables (walk chains like
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
@@ -3848,6 +3893,16 @@ impl bounded::Subst for Produced<'_> {
 struct BwPath {
     /// The fingerprint of the proof-tree node this path names.
     fold: u64,
+    /// The backward rule whose own premise is being matched under this path, as its index
+    /// into [`BwCtx::rules`] — set by [`BwPath::applying`] where `backward_prove` renames a
+    /// rule and evaluates its premise, and `None` everywhere else.
+    ///
+    /// It is what [`BOUND_AGGREGATION_SHARES_RULE_VAR`] measures an arriving formula
+    /// against, and it does not descend: [`BwPath::child`] builds its result through
+    /// [`BwPath::at`], so a step into a clause or a containment pattern — whose atoms are
+    /// that formula's, not the rule's — leaves it unset. An index, not a `&Rule`, so the
+    /// path stays `Copy` and free of a lifetime.
+    applying: Option<u32>,
 }
 
 /// What a proof-tree node's fingerprint is folded from ([`BwPath`]). Each shape carries the
@@ -3916,10 +3971,21 @@ impl BwPrefix {
     }
 }
 
+/// Two words. The path is copied down every step of every proof tree, so a third word here
+/// is paid on the whole proof-search path; `applying` is an index rather than a `&Rule` to
+/// keep it to this.
+const _: () = assert!(std::mem::size_of::<BwPath>() == 16);
+
 impl BwPath {
-    /// The path that is just the node `fold` names.
+    /// The path that is just the node `fold` names, inside no rule application.
     fn at(fold: u64) -> BwPath {
-        BwPath { fold }
+        BwPath { fold, applying: None }
+    }
+
+    /// `self` as the root of the premise evaluation of rule `ri`, whose atoms this path's
+    /// subtree therefore are ([`BwPath::applying`]).
+    fn applying(self, ri: usize) -> BwPath {
+        BwPath { applying: u32::try_from(ri).ok(), ..self }
     }
 
     /// The path one `step` further down, as its own registered node
@@ -4203,6 +4269,52 @@ fn frees_quoted_universal(t: &Term) -> bool {
 /// rule's own premise universals in stored-predicate atoms are supported (GH #6882,
 /// [`premise_universals_matchable`]); every other quantified antecedent is refused.
 const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are unsupported (@forAll in a rule premise or scoped body pattern)";
+
+/// The refusal for a bound aggregation subject that was written to share variables with
+/// the backward rule aggregating over it, but cannot (GH #6943).
+///
+/// Inside a backward application the rule's own atoms are standardized apart
+/// ([`rename_vars`]), while a formula arriving through a variable carries the names its
+/// document wrote. If the two name the same source variable they were written to share it
+/// and do not, and the aggregation reads a clause nothing constrains: `log:forAllIn` then
+/// holds VACUOUSLY and fires a rule that must not fire, and `log:collectAllIn` collects
+/// nothing. Both are wrong ANSWERS, so the shape fails closed here instead.
+const BOUND_AGGREGATION_SHARES_RULE_VAR: &str =
+    "N3: a formula bound through a variable cannot share variables with the backward rule \
+     that aggregates over it";
+
+/// Does `rule` write a variable named `v`, under the name its DOCUMENT spells — the name a
+/// formula stored elsewhere would have to use to share it?
+///
+/// Read from the rule's own source premise and conclusion, so the answer is a property of
+/// the rule rather than of any name's text: a variable the application MINTED is not in
+/// this set (it is `v` under a [`BwPath::prefix`], a different name), which is what keeps a
+/// clause the proof built from the rule's own terms out of the refusal below.
+fn rule_writes(rule: &Rule, v: &str) -> bool {
+    let hit = |n: &str| n == v;
+    rule.premise.iter().chain(&rule.conclusion).any(|t| t.iter().any(|m| mentions_var(m, &hit)))
+}
+
+/// Whether a term that ARRIVED through a variable names a source variable of the rule
+/// applying around it ([`rule_writes`]) — the shape
+/// [`BOUND_AGGREGATION_SHARES_RULE_VAR`] refuses.
+///
+/// `written` is the slot as the rule spells it. A slot written as a `{ … }` formula (or
+/// `{}`) is the rule's own text, renamed with the rest of it, so it shares correctly and is
+/// never refused; only a slot that came through a variable is checked, exactly as the
+/// quantifier check beside it decides what was invisible to `validate_rule_quantifiers`.
+///
+/// A shared name ALREADY BOUND in `b` is not the unsound shape and is not refused: its
+/// value came from the caller, which constrained it before passing the formula in, so the
+/// aggregation reads a real value rather than a variable nothing will bind. That is also
+/// what keeps the decision out of the caller's hands — were it left out, a caller whose own
+/// premise happens to spell its variable the way the callee spells one of its own would be
+/// refused where a caller spelling it anything else is answered, which is a caller's
+/// arbitrary choice of name deciding a callee's behaviour.
+fn arrived_sharing_rule_var(written: Option<&Term>, val: &Term, rule: &Rule, b: &Binding) -> bool {
+    !matches!(written, Some(Term::Formula(_) | Term::Lit(..)))
+        && mentions_var(val, &|n: &str| b.get(n).is_none() && rule_writes(rule, n))
+}
 
 /// The matching clauses of a `log:collectAllIn` / `log:forAllIn` subject list: the
 /// clause of `( template clause list )`, both clauses of `( clause-a clause-b )`. The

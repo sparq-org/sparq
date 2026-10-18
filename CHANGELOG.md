@@ -591,8 +591,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `__bw<fold>_` fingerprint of the derivation that makes the value its own. A quoted
   formula's own `@forAll` binder is never bound by a proof, so it is untouched. Three pinned
   expectations in the backward-naming tests move with this, all of the same shape and all
-  from a leaked name to the term the proof bound; forward rules, the aggregation and
-  containment operators, and every name the chainer mints are unchanged.
+  from a leaked name to the term the proof bound; forward rules, the containment operators
+  and every name the chainer mints are unchanged.
+
+- **sparq-reason (N3):** a `log:collectAllIn` / `log:forAllIn` clause, template or scope
+  that arrives through a VARIABLE inside a backward (`<=`) rule, and names a variable the
+  applying rule itself writes under its source name, is now REFUSED with "a formula bound
+  through a variable cannot share variables with the backward rule that aggregates over
+  it". The two were written to share that variable and cannot, because the rule's own atoms
+  were standardized apart around the arriving formula, so the aggregation read a clause
+  nothing constrains: `log:forAllIn` held VACUOUSLY and fired a rule that must not fire,
+  and `log:collectAllIn` collected nothing. Both were wrong answers given silently, and a
+  refusal is the only sound reading available. The refusal is narrow by construction. A
+  clause the rule writes inline is renamed with the rule and shares correctly; a bound
+  clause that shares no name with the rule aggregates as before; a shared name the caller
+  has ALREADY BOUND is a value the caller constrained, not an unbound variable, so a
+  formula a caller passes in is untouched — which is also what keeps a caller's arbitrary
+  choice of variable name from deciding a callee's behaviour. Forward rules are unaffected:
+  their atoms are never standardized apart, so the same premise still shares and still
+  answers. That forward/backward difference is the remaining half of the issue and stays
+  open.
 
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
   / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to

@@ -41,6 +41,19 @@ fn none() -> Vec<String> {
     Vec::new()
 }
 
+/// The run's refusal, for a shape that must fail closed rather than answer.
+fn err(body: &str) -> String {
+    let src = format!("{P}{body}");
+    match reason_n3_terms(&src, None) {
+        Ok(_) => panic!("{src}\nexpected a refusal, got an answer"),
+        Err(e) => e.to_string(),
+    }
+}
+
+/// The refusal a bound aggregation subject that would need to share the applying backward
+/// rule's variables fails with.
+const SHARES: &str = "cannot share variables with the backward rule";
+
 fn one(s: &str) -> Vec<String> {
     vec![s.to_string()]
 }
@@ -185,12 +198,60 @@ fn a_data_binding_inside_a_written_collect_clause_is_not_rewritten() {
     assert_eq!(got, list(&["hit"]));
 }
 
+// ------------------------------- answer safety: the shape that must fail closed
+
+/// THE answer-safety case. `:cfg :cl { :a :p ?y }` is read through `?cl`, and the rule
+/// writes `{ :a :q ?y }` beside it. The document means one `?y`: every `:a :p ?y` solution
+/// must extend to `:a :q ?y`, and over this scope `:a :p :c` has no `:a :q :c`, so
+/// `log:forAllIn` must NOT hold and `:mark :m :yes` must not be derived.
+///
+/// Behind a `<=` the rule's own `{ :a :q ?y }` was renamed and the stored clause's `?y` was
+/// not, so the first clause constrains nothing the second reads: every solution extends
+/// trivially, `forAllIn` holds VACUOUSLY and the rule fires. That is an unsound firing, so
+/// the shape is refused instead of answered.
+#[test]
+fn a_bound_forall_clause_that_would_share_a_rule_variable_is_refused() {
+    let e = err(":cfg :cl { :a :p ?y }.\n\
+                 { :mark :m :yes } <= { :cfg :cl ?cl. \
+                 ( ?cl { :a :q ?y } ) log:forAllIn { :a :p :b. :a :p :c. :a :q :b } }.\n\
+                 { :mark :m :yes } => { :out :fired :yes }.");
+    assert!(e.contains(SHARES), "{e}");
+    // The same document with the clause written INLINE is the rule's own text, renamed with
+    // the rest of it, so it shares correctly and is answered: it does not fire.
+    let inline = out(":cfg :cl { :a :p ?y }.\n\
+                      { :mark :m :yes } <= { \
+                      ( { :a :p ?y } { :a :q ?y } ) log:forAllIn { :a :p :b. :a :p :c. :a :q :b } }.\n\
+                      { :mark :m :yes } => { :out :fired :yes }.");
+    assert_eq!(inline, none(), "inline: one variable, shared, so the premise fails");
+}
+
+/// The `log:collectAllIn` twin: the stored clause's `?y` and the rule's template `?y` were
+/// written to share. Unrefused, the template is never bound by the clause's solutions and
+/// the aggregation collects nothing — silently, with no sign the question was not answered.
+#[test]
+fn a_bound_collect_clause_that_would_share_a_rule_variable_is_refused() {
+    let e = err(":cfg :cl { :a :p ?y }.\n\
+                 { :mark :m ?l } <= { :cfg :cl ?cl. \
+                 ( ?y ?cl ?l ) log:collectAllIn { :a :p :b. :a :p :c } }.\n\
+                 { :mark :m ?l } => { :out :list ?l }.");
+    assert!(e.contains(SHARES), "{e}");
+    // Inline, the same shape is the rule's own text and collects both.
+    let inline = out("{ :mark :m ?l } <= { \
+                      ( ?y { :a :p ?y } ?l ) log:collectAllIn { :a :p :b. :a :p :c } }.\n\
+                      { :mark :m ?l } => { :out :list ?l }.");
+    assert_eq!(inline, list(&["b", "c"]), "inline: the template is bound by the clause");
+}
+
 // ------------------------------------------------------- no spelling is special
 
 /// Nothing anywhere reads a variable's NAME to decide whose it is, so a document that
 /// spells a variable in the shape the chainer's own renaming uses (`?__bw<digits>_…`) is
 /// answered exactly as the same document with an ordinary name. A name test here would
 /// make the two differ, and a document is entitled to that spelling.
+///
+/// This document's shape is the one that now fails closed, so what must match across the
+/// spellings is the REFUSAL: were the decision made from a name's text, the `?__bw1_y`
+/// spelling would be taken for a generated name and answered differently.
 #[test]
 fn a_document_that_spells_a_generated_name_is_answered_the_same() {
     let doc = |y: &str| {
@@ -201,34 +262,36 @@ fn a_document_that_spells_a_generated_name_is_answered_the_same() {
              {{ :mark :m :yes }} => {{ :out :fired :yes }}."
         )
     };
-    assert_eq!(out(&doc("?y")), out(&doc("?__bw1_y")));
-    assert_eq!(out(&doc("?y")), out(&doc("?__bw99999999999999999999999_y")));
+    assert!(err(&doc("?y")).contains(SHARES), "{}", err(&doc("?y")));
+    assert_eq!(err(&doc("?y")), err(&doc("?__bw1_y")));
+    assert_eq!(err(&doc("?y")), err(&doc("?__bw99999999999999999999999_y")));
 }
 
-/// A stored formula that reaches the callee through the GOAL is a caller's value like any
-/// other: the callee's template is its own variable, so nothing is collected. Pinned at the
-/// answer the engine gave before this change.
+/// A stored formula reaching the callee through the GOAL, whose `?y` the caller never bound,
+/// meets a callee whose template is its own `?y`. The two were written to share and cannot,
+/// so the aggregation would collect nothing — and collecting nothing is a wrong ANSWER, not
+/// a safe one. It is refused.
 #[test]
-fn a_stored_formula_passed_through_the_goal_binds_nothing_of_the_callees() {
-    let got = out(":cfg :cl { :a :p ?y }.\n\
-                   { ?cl :coll ?l } <= { ( ?y ?cl ?l ) log:collectAllIn { :a :p :b. :a :p :c } }.\n\
-                   { :cfg :cl ?cl. ?cl :coll ?l } => { :out :list ?l }.");
-    assert_eq!(got, none());
+fn a_stored_formula_whose_name_the_callee_also_writes_is_refused() {
+    let e = err(":cfg :cl { :a :p ?y }.\n\
+                 { ?cl :coll ?l } <= { ( ?y ?cl ?l ) log:collectAllIn { :a :p :b. :a :p :c } }.\n\
+                 { :cfg :cl ?cl. ?cl :coll ?l } => { :out :list ?l }.");
+    assert!(e.contains(SHARES), "{e}");
 }
 
-/// And a stored formula an application's OWN atom reads is unchanged too: a clause given
-/// through a variable shares nothing with the rule's variables behind a `<=`, exactly as
-/// before this change. (It DOES share them in the forward rule below, because a forward
-/// rule's atoms are never standardized apart and the document's `?y` is then one variable
-/// — the forward/backward difference this PR no longer tries to close; see the PR body.)
+/// The SAME premise, forward and backward: the divergence that is now fail-closed. A
+/// forward rule's atoms are never standardized apart, so the document's `?y` is one
+/// variable there and the stored clause shares it — two items. Behind a `<=` the rule's
+/// atoms are renamed, the two `?y`s are different variables, and the aggregation would
+/// silently collect nothing; that half is refused rather than answered.
 #[test]
-fn a_stored_clause_read_by_the_applications_own_atom_is_unchanged() {
+fn the_forward_answer_stands_and_the_backward_one_is_refused() {
     let data = ":cfg :cl { :a :p ?y }.\n";
     let prem = ":cfg :cl ?cl. ( ?y ?cl ?l ) log:collectAllIn { :a :p :b. :a :p :c }";
-    let bwd = out(&format!(
+    let e = err(&format!(
         "{data}{{ :mark :m ?l }} <= {{ {prem} }}.\n{{ :mark :m ?l }} => {{ :out :list ?l }}."
     ));
-    assert_eq!(bwd, none(), "backward: the rule's own variables were standardized apart");
+    assert!(e.contains(SHARES), "{e}");
     let fwd = out(&format!("{data}{{ {prem} }} => {{ :out :list ?l }}."));
     assert_eq!(fwd, list(&["b", "c"]), "forward: one document variable, shared");
 }
