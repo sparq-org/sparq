@@ -117,11 +117,13 @@
 //! - **What a REFUSAL discloses.** The refusals on this module's open/decode path
 //!   carry no opened VALUE — not the opened tag, not a presence byte, a decoded
 //!   term, a length prefix, a limb value or a byte count. What they do carry is
-//!   WHERE decoding stopped: the failing column index, the failing data limb's
-//!   index, the two permitted tag constants, and the block's uniform byte width.
-//!   That position is itself a function of the opened block — it says the earlier
-//!   columns or limbs decoded and this one did not — so a refusal localises the
-//!   malformation without describing it. Where even the count of offending bytes
+//!   WHERE decoding stopped: the failing column index and the failing data limb's
+//!   index. Those two positions are themselves functions of the opened block — each
+//!   says the earlier columns or limbs decoded and this one did not — so a refusal
+//!   localises the malformation without describing it. The rest of what a refusal
+//!   carries is public by construction and independent of the block: the two
+//!   permitted tag constants, the payload's declared column arity, the block's
+//!   uniform byte width, and `BYTES_PER_LIMB`. Where even the count of offending bytes
 //!   is a function of the block, the refusal carries no number at all.
 //! - **L3 (input cardinalities `|L|`, `|R|`) and the candidate count** are public
 //!   (standard MPC assumption; research record §4.1). We do not claim to hide them.
@@ -343,11 +345,12 @@ pub(crate) fn check_output_bound_cap(bound: usize) -> Result<(), MpcError> {
 /// Either way the message names `B` and `public_bound`, both already public, and
 /// never the candidate count. **This is a check contract, not a hiding mechanism:**
 /// it keeps the candidate count out of the decision and the error text, and says
-/// nothing about what the producer's own schedule reveals. The hidden-path
-/// producers group on the disclosed endpoint pair of every enumerated tuple and
-/// multiply once more per repeat, so for them the fold POSITIONS — and hence that
-/// count — are visible on BOTH branches of this contract; see
-/// [`crate::hidden_path`]. A count above [`MAX_OUTPUT_BOUND`] needs no branch of
+/// nothing about what the producer itself discloses. The hidden-path producers
+/// group on every enumerated tuple's endpoint pair, read in the clear, and multiply
+/// once more per repeat, so for them the fold POSITIONS — and hence that count —
+/// are disclosed on BOTH branches of this contract, to the grouping evaluator here
+/// and to every evaluating party in a real run; see [`crate::hidden_path`] for who
+/// learns what, and for the limits of that account. A count above [`MAX_OUTPUT_BOUND`] needs no branch of
 /// its own: `B` is capped first, so a count that large cannot be covered and falls
 /// out of the same refusal.
 pub(crate) fn check_bound_public_first(
@@ -1335,8 +1338,11 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
                 pos = end + 1; // skip the NUL
             }
             _ => {
-                // The flag byte came out of an opened limb block, so it is an
-                // opened value: name the column and the error class, not the byte.
+                // The flag byte came out of an opened limb block, so it is not
+                // named. The column index is not public either: which column fails
+                // first is a function of the opened block, and reporting it says
+                // the earlier columns decoded. The error class plus that boundary
+                // is the whole diagnosis.
                 return Err(MpcError::Protocol(format!(
                     "decode_payload_row: column {} has an invalid presence flag (corrupt entry)",
                     col
@@ -1348,8 +1354,10 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
     // Trailing bytes mean the stream is not one `encode_payload_row` produced, so two
     // different streams could decode to the same row; refuse instead.
     if pos != bytes.len() {
-        // How MANY bytes trail is a function of the opened block; the fact that
-        // any do, after the PUBLIC column arity, is the whole diagnosis.
+        // How MANY bytes trail is a function of the opened block, so it is not
+        // named. The column arity IS public — it is the payload's declared width,
+        // the same for every slot — and the fact that anything trails it is the
+        // whole diagnosis.
         return Err(MpcError::Protocol(format!(
             "decode_payload_row: trailing byte(s) after {} column(s) (corrupt entry)",
             arity
@@ -1396,8 +1404,9 @@ fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
     let byte_len = len_limb.value() as usize;
     let available = (limbs.len() - 1) * BYTES_PER_LIMB;
     if byte_len > available {
-        // The prefix itself is an opened limb. The capacity it overran is the
-        // block's uniform width, which is public, so that is what the message
+        // The prefix itself is an opened limb, so it is not named. The capacity it
+        // overran is the block's uniform width — public, a function of the slot
+        // layout rather than of this block's contents — so that is what the message
         // names.
         return Err(MpcError::Protocol(format!(
             "limbs_to_bytes: the length prefix exceeds the block's {} available byte(s) \
@@ -1409,8 +1418,10 @@ fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
     for (index, limb) in limbs[1..].iter().enumerate() {
         let v = limb.value();
         if v >= (1u64 << (8 * BYTES_PER_LIMB)) {
-            // `v` is an opened limb: name its POSITION in the block, which is
-            // public, and the range it broke, which is a constant.
+            // `v` is an opened limb, so it is not named. The index is NOT public
+            // either: which limb fails first is a function of the opened block, and
+            // saying so reports that the earlier limbs were in range and this one
+            // was not. `BYTES_PER_LIMB` is a compile-time constant.
             return Err(MpcError::Protocol(format!(
                 "limbs_to_bytes: data limb at index {} exceeds the {}-byte range (corrupt \
                  shuffle entry)",

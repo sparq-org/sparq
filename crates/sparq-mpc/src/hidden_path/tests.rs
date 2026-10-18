@@ -915,11 +915,12 @@ fn the_public_candidate_pair_bound_is_a_function_of_the_public_sizes() {
 /// The two branches of the exactly-`k` bound contract, at the entry point.
 ///
 /// A `B` at or above the public bound is accepted whatever the edges are; a `B`
-/// below it is accepted when the real count fits and refused — before any draw —
-/// when it does not. The second branch is the one whose outcome discloses whether
-/// the distinct endpoint-pair count is at most `B`, and it exists so that a caller
-/// choosing a tight `B` is not refused work the data allows. Neither branch hides
-/// that count from an observer of the run's schedule; see the module docs.
+/// below it is accepted when the real count fits and refused when it does not —
+/// after the data-dependent projection, but before any build and before any draw.
+/// The second branch is the one whose outcome discloses whether the distinct
+/// endpoint-pair count is at most `B`, and it exists so that a caller choosing a
+/// tight `B` is not refused work the data allows. Neither branch hides that count
+/// from a successful run; see the module docs for who learns what.
 #[test]
 fn both_branches_of_the_exact_k_bound_contract() {
     use crate::randomness::test_sources::DrawCountingSource;
@@ -1040,34 +1041,37 @@ fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
     assert!(public_bounded_candidate_pair_bound(87_381, &one).unwrap() <= MAX_OUTPUT_BOUND);
 }
 
-/// The whole-call SCHEDULE — the sequence of randomness draws, with each draw's
-/// width — is what the randomness transcript of a run shows, and this pins how much
-/// of the edge data it carries, in both directions.
+/// A DRAW-COUNT regression on the fold count, and nothing wider.
 ///
-/// Two edge sets with the same public sizes, the same distinct endpoint-pair count
-/// `D`, the same payload width and the same (empty) result produce IDENTICAL
-/// transcripts, whatever their nodes are. An edge set with the same sizes, width
-/// and result but a different `D` produces a DIFFERENT transcript, because every
-/// repeated pair costs one extra secure OR: the transcript carries `T − D` and
-/// therefore `D`.
+/// What it inspects is one projection of a whole call: the sequence of
+/// `DistributedRandomness` calls, each reduced to its seam method and its width.
+/// That projection is coarse on purpose and is NOT an operation or communication
+/// schedule — sharing an input bit and resharing a multiplication both surface as
+/// `vss_own_input`, so two runs with equal draw sequences can still differ in which
+/// operation each draw served and in what a transport would carry.
 ///
-/// It does NOT separate the fold POSITIONS: the third fixture here repeats its
-/// pairs at other tuple positions with the same `D`, and its transcript is
-/// identical to the first's — every draw is the same seam method at the same width,
-/// so only their number is visible. The positions are visible elsewhere, to
-/// whoever performs the grouping: the key is the DISCLOSED endpoint pair of each
-/// enumerated tuple, matched or not, so that party sees the whole candidate pair
-/// multiset directly. The module docs state it that way; this test is the evidence
-/// for which instrument sees which part.
+/// Within that projection: fixtures agreeing on the public sizes, the distinct
+/// endpoint-pair count `D`, the payload width and the (empty) result are equal
+/// whatever their nodes are, while a fixture with a smaller `D` is longer, because
+/// every repeated pair costs one extra secure OR. So the projection tracks `T − D`,
+/// hence `D`.
+///
+/// It does not separate the fold POSITIONS, and the equality on `folds_late` below
+/// says so. That is a statement about this projection only: the positions are
+/// disclosed elsewhere — the grouping reads every tuple's endpoint pair in the
+/// clear, and every party in a real run evaluates the same wiring — as the module
+/// docs set out.
 #[test]
-fn the_draw_transcript_reveals_the_fold_count_but_not_its_positions() {
+fn the_draw_method_count_projection_tracks_the_fold_count() {
     use crate::randomness::test_sources::RecordingSource;
 
-    // The randomness transcript of one whole call: each draw's seam method and its
-    // width. The drawn VALUES are deliberately excluded — they are sharings of the
-    // secrets, so they differ between any two distinct inputs and would say nothing
-    // about what the operation sequence carries.
-    fn transcript(pairs: &[(&str, &str)]) -> Vec<(&'static str, usize)> {
+    // The method/count projection of one whole call's randomness calls: each
+    // draw's seam method and its width. The drawn VALUES are deliberately excluded
+    // — they are sharings of the secrets, so they differ between any two distinct
+    // inputs and would say nothing about the call sequence. The seam method does
+    // not identify the OPERATION either (see the doc comment), which is why this is
+    // a draw-count regression and not a schedule comparison.
+    fn projection(pairs: &[(&str, &str)]) -> Vec<(&'static str, usize)> {
         let backend = ShamirBackend::new_seeded(5, 0x5C4E).unwrap();
         let (edges, _interner) = hidden_edges(pairs);
         let mut recorder = RecordingSource::new(backend.dealer());
@@ -1083,7 +1087,7 @@ fn the_draw_transcript_reveals_the_fold_count_but_not_its_positions() {
                 .rows
                 .is_empty(),
             "fixture {:?} must have an empty result for the comparison to be about the \
-             transcript",
+             projection",
             pairs
         );
         recorder.log.iter().map(|(m, v)| (*m, v.len())).collect()
@@ -1118,24 +1122,25 @@ fn the_draw_transcript_reveals_the_fold_count_but_not_its_positions() {
         ("http://ex/d", "http://ex/b"),
     ];
 
-    let early = transcript(&folds_early);
-    let relabelled = transcript(&folds_early_relabelled);
-    let late = transcript(&folds_late);
-    let fewer = transcript(&fewer_pairs);
+    let early = projection(&folds_early);
+    let relabelled = projection(&folds_early_relabelled);
+    let late = projection(&folds_late);
+    let fewer = projection(&fewer_pairs);
 
     assert_eq!(
         early, relabelled,
         "fixtures agreeing on the public sizes, D, the width and the result must have the same \
-         transcript"
+         draw projection"
     );
     assert_eq!(
         early, late,
-        "the transcript does not separate the fold positions — if this ever differs, the \
-         module docs understate what it carries and must be widened"
+        "this projection does not separate the fold positions — if this ever differs, it \
+         carries more than the docs say and they must be widened"
     );
     assert_ne!(
         early, fewer,
-        "a different D must change the transcript: that is the disclosure the module docs state"
+        "a different D must change the draw projection: that is the count the module docs \
+         attribute to it"
     );
     assert!(
         fewer.len() > early.len(),
