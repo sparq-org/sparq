@@ -495,7 +495,7 @@ fn huge_upper_bound_is_refused_before_any_draw() {
         let form = HiddenBoundedPath::range(P, 1, max);
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 8)
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 8)
             .expect_err("an upper bound past the cap must be refused");
         assert!(
             matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
@@ -579,7 +579,7 @@ fn bounded_through_refuses_a_source_that_does_not_match_the_backend() {
     // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
     // whether anything was drawn before the refusal.
     let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0xB0C).unwrap().dealer());
-    match eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 8) {
+    match eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, PayloadWidths::derived(2), 8) {
         Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
         other => panic!("a wrong-n source must be refused, got {other:?}"),
     }
@@ -598,7 +598,7 @@ fn bounded_through_refuses_a_source_that_does_not_match_the_backend() {
             t,
         };
         let mut counted = DrawCountingSource::new(&mut lying);
-        match eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 8) {
+        match eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 8) {
             Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
             other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
         }
@@ -618,7 +618,7 @@ fn malformed_draws_in_the_or_fold_are_refused() {
     let form = HiddenBoundedPath::optional(P);
     for how in ALL_MALFORMATIONS {
         let mut src = MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, 0, how);
-        match eval_bounded_path_hidden_slots_through(&mut src, &backend, &edges, &form, 2) {
+        match eval_bounded_path_hidden_slots_through(&mut src, &backend, &edges, &form, PayloadWidths::derived(2), 2) {
             Err(MpcError::Protocol(m)) => {
                 assert!(
                     m.contains("re-sharing that is not the canonical"),
@@ -656,6 +656,7 @@ fn prss_fails_closed_on_every_bounded_shape() {
         &backend,
         &edges,
         &optional,
+        PayloadWidths::derived(2),
         6,
     )
     .unwrap();
@@ -667,7 +668,7 @@ fn prss_fails_closed_on_every_bounded_shape() {
 
     for (form, bound) in [(optional, 6), (HiddenBoundedPath::range(P, 1, 2), 8)] {
         let outcome =
-            eval_bounded_path_hidden_slots_through(&mut prss, &backend, &edges, &form, bound);
+            eval_bounded_path_hidden_slots_through(&mut prss, &backend, &edges, &form, PayloadWidths::derived(2), bound);
         assert!(
             matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
             "{form:?}: PRSS must fail closed, got {outcome:?}"
@@ -824,7 +825,7 @@ fn seeded_bounded_stage_transcript_is_pinned() {
     let edges = pin_edges();
     let form = HiddenBoundedPath::range("p", 0, 2);
     let mut rec = RecordingSource::new(backend.dealer());
-    eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 5).unwrap();
+    eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, PayloadWidths::derived(2), 5).unwrap();
     assert_eq!(rec.log.len(), 2074);
     // Prefix unchanged from the pre-routing pin; the whole move is in the output
     // suffix, which grew by the per-element degree reductions.
@@ -862,7 +863,7 @@ fn an_over_cap_output_bound_is_refused_before_any_draw() {
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
         let err =
-            eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, bound)
+            eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), bound)
                 .expect_err("an over-cap bound must be refused");
         match &err {
             MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
@@ -918,7 +919,7 @@ fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
 
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 1)
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 1)
             .expect_err("a bound below the candidate count must be refused");
         match &err {
             MpcError::Protocol(m) => {
@@ -1050,7 +1051,7 @@ fn both_branches_of_the_bounded_bound_contract() {
     let mut dealer = backend.dealer();
     let mut counted = DrawCountingSource::new(&mut dealer);
     let err =
-        eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, exact - 1)
+        eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), exact - 1)
             .expect_err("B below the exact union must be refused");
     assert_eq!(counted.draws(), 0, "refused before any draw");
     match &err {
@@ -1176,7 +1177,7 @@ fn hidden_zero_length_arm_without_a_declared_domain_is_refused_pre_crypto() {
     ] {
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 64)
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 64)
             .expect_err("a min == 0 form without a declared domain must be refused");
         assert_eq!(counted.draws(), 0, "refused before any draw");
         match &err {
@@ -1520,7 +1521,7 @@ fn an_over_cap_public_shape_refuses_the_operator_before_any_draw() {
     let backend = ShamirBackend::new_seeded(MAX_OUTPUT_PARTIES + 2, 0x91).unwrap();
     let mut dealer = backend.dealer();
     let mut counted = DrawCountingSource::new(&mut dealer);
-    let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 8)
+    let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 8)
         .expect_err("a party count past the output cap must be refused");
     assert!(
         matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
@@ -1537,6 +1538,6 @@ fn an_over_cap_public_shape_refuses_the_operator_before_any_draw() {
     // pinning the cap and not a broken fixture.
     let ok_backend = ShamirBackend::new_seeded(3, 0x92).unwrap();
     let mut ok_dealer = ok_backend.dealer();
-    eval_bounded_path_hidden_slots_through(&mut ok_dealer, &ok_backend, &edges, &form, 8)
+    eval_bounded_path_hidden_slots_through(&mut ok_dealer, &ok_backend, &edges, &form, PayloadWidths::derived(2), 8)
         .expect("an admissible party count still evaluates");
 }

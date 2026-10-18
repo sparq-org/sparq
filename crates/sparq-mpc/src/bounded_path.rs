@@ -58,11 +58,34 @@
 //! ## What the budgets in this module bound
 //!
 //! [`MAX_PATH_FORM_DEPTH`] and [`MAX_PATH_FORM_WORK`] bound a form's PUBLIC SHAPE
-//! before it is evaluated, and [`MAX_PATH_FORM_ROWS`] bounds the rows one whole
-//! form materialises, charged from a closed form before each join is built. That
-//! is the scope: WHOLE-OPERATOR resource planning — the `PartialResult` clones a
-//! caller makes around this call, a federation's own buffers, dealer batches,
-//! aggregate sharing, shuffle networks, party count, session traffic and
+//! before it is evaluated. [`MAX_PATH_FORM_ROWS`] bounds the rows the evaluation
+//! holds **LIVE at once** — a charge is RELEASED when the rows it paid for are
+//! dropped — and [`MAX_PATH_FORM_JOIN_WORK`] sums every charge over the whole
+//! operator and never releases any, which is the half a live bound cannot cover.
+//!
+//! **What is charged** is what the unroll MATERIALISES: every join's output
+//! (from its closed form, before the join is built), every projection of an
+//! accumulator, the reflexive diagonal, and the rows the repetition union keeps.
+//! **What is not charged** is a copy of the disclosed edge relation itself: those
+//! rows are already in the caller's memory before this module is entered, so
+//! charging a hop's edge list made the budget refuse forms whose own working set
+//! is small. A hop borrows the edge relation rather than copying it
+//! ([`DisclosedEdges::relation_ref`]).
+//!
+//! The charged figure is therefore not the peak ALLOCATION: a join's output, the
+//! projection taken from it and the dedup key set can be alive together, and the
+//! dedup keys are not charged at all, so the true peak is a small constant
+//! multiple (about three) of the charged row count. The budget is a bound on that
+//! multiple, not an accounting of it.
+//!
+//! The cumulative work counter is checked as work is charged, so a single charge
+//! is refused before its rows are built, but CPU already spent on earlier charges
+//! in the same operator is not refundable — the counter bounds the total, it does
+//! not pre-empt.
+//!
+//! That is the scope: WHOLE-OPERATOR resource planning — the `PartialResult`
+//! clones a caller makes around this call, a federation's own buffers, dealer
+//! batches, aggregate sharing, shuffle networks, party count, session traffic and
 //! deadlines — is follow-up work and is NOT bounded here.
 //!
 //! ## Supported path forms (the acceptance matrix)
@@ -103,7 +126,7 @@
 //! prohibition), so a pair reached by two different lengths appears once.
 
 use crate::chain_odometer::ChainOdometer;
-use crate::join::{DisclosedKeyJoin, GlobalJoin, JoinPlan};
+use crate::join::{DisclosedKeyJoin, JoinPlan};
 use crate::partial::{HolderId, MpcError, PartialResult};
 use oxrdf::{NamedNode, Term, Variable};
 use std::collections::{BTreeMap, BTreeSet};
@@ -282,28 +305,40 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 ///
 /// ## Where it is charged, exactly
 ///
-/// Every row the unroll materialises is charged BEFORE it is built:
+/// Every row the unroll MATERIALISES is charged before it is built:
 ///
-/// - a hop's own edge rows, from the disclosed edge set's row count, before
-///   `relation_for` clones them;
 /// - every [`DisclosedKeyJoin`] in this module — each hop of a fixed chain and
 ///   each composition step of a `Sequence` — from `projected_join_rows`, the
 ///   closed-form `Σ_k deg_L(k)·deg_R(k)` over the join keys, computed in
-///   `O(|L| + |R|)` from the inputs; and
-/// - the reflexive diagonal, from the declared domain's size.
+///   `O(|L| + |R|)` from the inputs;
+/// - every projection of an accumulator onto its endpoint columns, from the
+///   accumulator's own row count, which is exactly the projection's;
+/// - the reflexive diagonal, from the declared domain's size; and
+/// - the rows the repetition union KEEPS, as it keeps them.
 ///
 /// So the peak rows one join materialises is bounded by what was charged for it: a
 /// hub of `N` in-edges and `N` out-edges is refused on `N²` before the `N²` rows
-/// exist, not after. The projection and dedup that follow a join only shrink that
-/// row set.
+/// exist, not after.
+///
+/// A hop's own EDGE ROWS are deliberately NOT charged. A hop borrows the disclosed
+/// edge relation ([`DisclosedEdges::relation_ref`]) instead of copying it, and
+/// where a copy is still unavoidable — the first hop's accumulator seed — the rows
+/// it copies are already in the caller's memory before this module is entered.
+/// Charging them made the budget refuse single-predicate forms over edge sets that
+/// the operator evaluates in about a second.
 ///
 /// ## What it bounds, honestly
 ///
-/// It bounds the rows HELD AT ONCE, so it is a bound on this evaluation's peak row
-/// memory. A charge is RELEASED when the rows it paid for are dropped: a chain's
-/// hop relations, its join outputs and its accumulator go as soon as the next
+/// It bounds the rows HELD AT ONCE. A charge is RELEASED when the rows it paid for
+/// are dropped: a chain's join outputs and its accumulator go as soon as the next
 /// chain starts, and what stays charged for the rest of the evaluation is the
 /// deduped union, which holds the answer's rows and at most `|V|²` of them.
+///
+/// It is NOT an accounting of peak ALLOCATION. A join's output, the projection
+/// taken from it and the per-hop dedup's key set can be alive at the same moment,
+/// and the dedup keys are not charged at all, so the real peak is a small constant
+/// multiple — about three — of the charged figure. What this cap bounds is that
+/// multiple.
 ///
 /// Because charges are released, this budget says nothing about how much WORK a
 /// form may schedule — a million chains that each fit in it would each be
@@ -314,7 +349,7 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 /// here charges for the `PartialResult` clones a caller makes, a federation's own
 /// buffers, or anything downstream of the returned relation. Whole-operator
 /// resource planning is follow-up work and is named in the module docs.
-pub const MAX_PATH_FORM_ROWS: usize = 1 << 18; // 262_144
+pub const MAX_PATH_FORM_ROWS: usize = 1 << 24; // 16_777_216
 
 /// Largest CUMULATIVE number of endpoint row-steps one whole [`PathForm`]
 /// evaluation may charge before [`eval_bounded_path_disclosed`] refuses with an
@@ -760,6 +795,12 @@ const OBJECT_VAR: &str = "__pp_b";
 /// Prefix for the fresh intermediate join variables `?__pp_z{i}` between hops.
 const INTERMEDIATE_PREFIX: &str = "__pp_z";
 
+/// The canonical disclosed-edge schema's column names. Every holder's edge
+/// partial is re-keyed onto these at construction, so a hop can be joined against
+/// the stored relation by reference instead of re-keying a copy of it.
+const EDGE_S_VAR: &str = "__pp_edge_s";
+const EDGE_O_VAR: &str = "__pp_edge_o";
+
 /// The disclosed edge-relations the unroller joins over. ONE entry per
 /// **predicate IRI** that appears anywhere in the path: the set of `(subject,
 /// object)` global-IRI pairs each holder disclosed for that predicate, already
@@ -834,8 +875,8 @@ impl DisclosedEdges {
     pub fn from_holder_edges(
         holder_edges: impl IntoIterator<Item = (NamedNode, PartialResult)>,
     ) -> Result<Self, MpcError> {
-        let edge_s = Variable::new_unchecked("__pp_edge_s");
-        let edge_o = Variable::new_unchecked("__pp_edge_o");
+        let edge_s = Variable::new_unchecked(EDGE_S_VAR);
+        let edge_o = Variable::new_unchecked(EDGE_O_VAR);
         let mut by_predicate: Vec<(String, PartialResult)> = Vec::new();
         for (pred, part) in holder_edges {
             if part.vars.len() != 2 {
@@ -1043,20 +1084,16 @@ impl DisclosedEdges {
         Ok(self)
     }
 
-    /// The disclosed edge relation for one predicate, projected onto a chosen
-    /// `(subject_var, object_var)` schema (so a hop can be slotted into a chain
-    /// at any position). Returns an EMPTY relation (no rows) for a predicate with
-    /// no disclosed edges — an absent predicate simply contributes nothing, which
-    /// is exactly how the clear-text engine treats it.
-    /// The row count of a predicate's disclosed edge relation, WITHOUT building
-    /// (and cloning) it — so the rows a hop is about to materialise can be charged
-    /// to the budget before they exist.
-    fn row_count_for(&self, pred: &NamedNode) -> usize {
+    /// The stored `(?__pp_edge_s, ?__pp_edge_o)` relation for `pred`, BORROWED.
+    ///
+    /// This is how a hop reaches its edges: the canonical schema is the one the
+    /// unroll joins on, so no copy and no re-keying is needed. `None` means no
+    /// holder disclosed an edge under this predicate, which makes the chain empty.
+    fn relation_ref(&self, pred: &NamedNode) -> Option<&PartialResult> {
         self.by_predicate
             .iter()
             .find(|(k, _)| k == pred.as_str())
-            .map(|(_, p)| p.rows.len())
-            .unwrap_or(0)
+            .map(|(_, p)| p)
     }
 
     fn relation_for(
@@ -1431,16 +1468,32 @@ fn projected_join_rows(
 /// convention each call site has to remember.
 fn precharged_join(
     budget: &mut PathFormBudget,
-    left: PartialResult,
-    right: PartialResult,
+    left: &PartialResult,
+    right: &PartialResult,
     plan: &JoinPlan,
 ) -> Result<(PartialResult, usize), MpcError> {
-    let charged = projected_join_rows(&left, &right, &plan.join_var)?;
+    let charged = projected_join_rows(left, right, &plan.join_var)?;
     budget.charge(charged)?;
-    let joined = DisclosedKeyJoin::new().join(&[left, right], plan)?;
+    let joined = build_join(left, right, plan)?;
+    Ok((joined, charged))
+}
+
+/// Build one disclosed-key join, counting it the instant it RETURNS — ahead of the
+/// `?` — so a join that RAN is counted whether or not it then failed.
+///
+/// The counter is what the precharge tests read to show that a refused plan built
+/// NO join. Counting on the success path only, or counting at the call site after
+/// the `?`, would read zero for a join that ran and then errored, which is exactly
+/// the case those tests exist to rule out.
+fn build_join(
+    left: &PartialResult,
+    right: &PartialResult,
+    plan: &JoinPlan,
+) -> Result<PartialResult, MpcError> {
+    let built = DisclosedKeyJoin::new().join_pair(left, right, plan);
     #[cfg(test)]
     JOINS_BUILT.with(|c| c.set(c.get() + 1));
-    Ok((joined, charged))
+    built
 }
 
 #[cfg(test)]
@@ -1490,13 +1543,24 @@ fn eval_fixed_chain(
         }
     };
 
-    // First hop's edge relation: (?__pp_a, ?z1). Its rows are charged BEFORE
-    // `relation_for` clones them out of the disclosed edge set. `acc_charge` is
-    // what the accumulator currently holds charged, so each hop can release the
-    // accumulator it replaces instead of leaving it charged for the whole chain.
-    let mut acc_charge = edges.row_count_for(&chain[0]);
-    budget.charge(acc_charge)?;
-    let mut acc = edges.relation_for(&chain[0], &hop_var(0), &hop_var(1));
+    // The accumulator's FAR endpoint stays on the canonical edge-subject name for
+    // the whole fold, because that is the column every hop's BORROWED edge
+    // relation joins on. It is renamed to the caller's `object` once, at the exit.
+    let edge_s = Variable::new_unchecked(EDGE_S_VAR);
+    let edge_o = Variable::new_unchecked(EDGE_O_VAR);
+
+    // First hop's edge relation, re-keyed onto `(subject, ?__pp_edge_s)`. This is
+    // the one copy of an edge list the fold makes, and it is NOT charged: those
+    // rows are already in the caller's memory before this module is entered, and
+    // charging them refused single-predicate forms the operator evaluates quickly.
+    // `acc_charge` is what the accumulator currently holds CHARGED, so each hop can
+    // release the accumulator it replaces instead of leaving it charged for the
+    // whole chain.
+    if edges.relation_ref(&chain[0]).is_none() {
+        return Ok((empty_pair_relation(subject, object), 0));
+    }
+    let mut acc_charge = 0usize;
+    let mut acc = edges.relation_for(&chain[0], &hop_var(0), &edge_s);
 
     // Fold remaining hops via DisclosedKeyJoin on the shared intermediate var,
     // collapsing the accumulator to `(subject, reached)` after EVERY hop.
@@ -1510,50 +1574,79 @@ fn eval_fixed_chain(
     // endpoints are ever returned (this function's one caller unions endpoint
     // pairs), and endpoint reachability is a set — two walks reaching the same
     // `(subject, reached)` pair continue identically.
-    for (idx, pred) in chain.iter().enumerate().skip(1) {
-        // This hop's own edge rows, charged before they are cloned...
-        let next_charge = edges.row_count_for(pred);
-        budget.charge(next_charge)?;
-        let next = edges.relation_for(pred, &hop_var(idx), &hop_var(idx + 1));
-        let join_var = hop_var(idx); // the shared intermediate this hop joins on
+    for pred in chain.iter().skip(1) {
+        // This hop's edge relation is BORROWED on its canonical schema — no copy,
+        // and nothing charged for it.
+        let Some(next) = edges.relation_ref(pred) else {
+            // No holder disclosed an edge under this predicate, so the chain
+            // reaches nothing. Drop the accumulator and hand back an empty pair
+            // relation, with the accumulator's charge released.
+            drop(acc);
+            budget.release(acc_charge);
+            return Ok((empty_pair_relation(subject, object), 0));
+        };
         let plan = JoinPlan {
-            join_var,
+            // The accumulator's far endpoint and the edge relation's subject are
+            // the same canonical column, which is the only column the two share.
+            join_var: edge_s.clone(),
             key_disclosed: true,
         };
-        // ...and the hop's JOIN output charged from its closed form, before the
-        // join builds it. The per-hop projection and dedup that follow only ever
-        // shrink that row set, so the charge covers the whole hop.
-        let (joined, join_charge) = precharged_join(budget, acc, next, &plan)?;
-        let reached = hop_var(idx + 1);
-        let reduced = dedup_endpoint_pairs(
-            project_endpoints(&joined, subject, &reached)?,
-            subject,
-            &reached,
+        // The hop's JOIN output is charged from its closed form, before the join
+        // builds it. The per-hop projection and dedup that follow only ever shrink
+        // that row set, so the charge covers the whole hop.
+        let (joined, join_charge) = precharged_join(budget, &acc, next, &plan)?;
+        // Project onto `(subject, reached)` and put `reached` back on the canonical
+        // edge-subject name, ready for the next hop's borrowed relation.
+        let projected = rename_far_endpoint(
+            project_endpoints(&joined, subject, &edge_o)?,
+            &edge_s,
         );
+        let reduced = dedup_endpoint_pairs(projected, subject, &edge_s);
         // Everything this hop materialised is now dropped — the accumulator it
-        // replaced, this hop's edge relation and the join's own output — and what
-        // survives is `reduced`, which the projection and dedup shrank out of the
-        // join output. So release the three and charge the one. The charge cannot
-        // refuse: `reduced` holds at most `join_charge` rows, which was just
-        // released, and the work half was charged when the join was.
+        // replaced and the join's own output — and what survives is `reduced`,
+        // which the projection and dedup shrank out of the join output. So release
+        // the two and charge the one. The charge cannot refuse: `reduced` holds at
+        // most `join_charge` rows, which was just released, and the work half was
+        // charged when the join was.
         drop(joined);
-        budget.release(acc_charge + next_charge + join_charge);
+        budget.release(acc_charge + join_charge);
         acc_charge = reduced.rows.len();
         budget.charge_from_released(acc_charge);
         acc = reduced;
     }
 
-    // Project onto (subject, object), dropping any intermediate column. After the
-    // fold above the accumulator is already `(subject, object)`; this also covers
-    // the single-hop case, which never entered the loop. The projection is one row
-    // per accumulator row and the accumulator is then dropped, so the charge moves
-    // across rather than doubling, and the caller is handed what it now owes.
-    let out = project_endpoints(&acc, subject, object)?;
+    // Project onto `(subject, object)`, dropping any intermediate column. After the
+    // fold the accumulator is `(subject, ?__pp_edge_s)`; the single-hop case, which
+    // never entered the loop, is the same shape. The projection is one row per
+    // accumulator row, so its size is known from the accumulator and is charged
+    // BEFORE it is built. It is charged in its own right rather than from the
+    // accumulator's release, because a single-hop chain's accumulator is the
+    // uncharged edge-relation copy and this projection is the first thing that
+    // chain materialises.
+    let out_charge = acc.rows.len();
+    budget.charge(out_charge)?;
+    let out = rename_far_endpoint(project_endpoints(&acc, subject, &edge_s)?, object);
     drop(acc);
     budget.release(acc_charge);
-    let out_charge = out.rows.len();
-    budget.charge_from_released(out_charge);
     Ok((out, out_charge))
+}
+
+/// The empty `(subject, object)` pair relation, for a chain whose predicate no
+/// holder disclosed.
+fn empty_pair_relation(subject: &Variable, object: &Variable) -> PartialResult {
+    PartialResult {
+        holder: HolderId::new("federation"),
+        vars: vec![subject.clone(), object.clone()],
+        rows: Vec::new(),
+    }
+}
+
+/// Rename a two-column endpoint relation's SECOND column, which is a pure schema
+/// change: the rows are untouched and nothing is copied.
+fn rename_far_endpoint(mut part: PartialResult, to: &Variable) -> PartialResult {
+    debug_assert_eq!(part.vars.len(), 2, "endpoint relations are two-column");
+    part.vars[1] = to.clone();
+    part
 }
 
 /// `f1 / f2 / ... / fn` → relational composition of the sub-forms' pair
@@ -1629,7 +1722,7 @@ fn eval_sequence(
         // composing two in-budget parts multiplies out to, and it is charged from
         // the closed form BEFORE the join builds it. The projection that follows is
         // one output row per joined row, so the charge covers it.
-        let (joined, join_charge) = precharged_join(budget, acc_dedup, part_rel, &plan)?;
+        let (joined, join_charge) = precharged_join(budget, &acc_dedup, &part_rel, &plan)?;
         let projected = project_endpoints(&joined, subject, &this_end)?;
         // The join's inputs and its own output are dropped here; the projection is
         // what survives this step.
@@ -1641,11 +1734,13 @@ fn eval_sequence(
         prev_end = this_end;
     }
 
+    // One output row per accumulator row, so the projection's size is known before
+    // it is built and is charged then.
+    let out_charge = acc.rows.len();
+    budget.charge(out_charge)?;
     let out = project_endpoints(&acc, subject, object)?;
     drop(acc);
     budget.release(acc_charge);
-    let out_charge = out.rows.len();
-    budget.charge_from_released(out_charge);
     Ok((out, out_charge))
 }
 

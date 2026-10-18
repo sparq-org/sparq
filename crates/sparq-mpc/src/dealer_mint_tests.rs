@@ -200,7 +200,7 @@ fn every_through_entry_mints_no_dealer() {
     let edges = chain_edges();
     let mut src = b3.dealer();
     let got = mints_during(|| {
-        eval_exact_k_chain_hidden_slots_through(&mut src, &b3, &edges, 2, 4).unwrap();
+        eval_exact_k_chain_hidden_slots_through(&mut src, &b3, &edges, 2, crate::oblivious_join::PayloadWidths::derived(2), 4).unwrap();
     });
     if got != 0 {
         wrong.push(format!(
@@ -213,7 +213,7 @@ fn every_through_entry_mints_no_dealer() {
     let form = HiddenBoundedPath::range(P, 1, 2);
     let mut src = b3.dealer();
     let got = mints_during(|| {
-        eval_bounded_path_hidden_slots_through(&mut src, &b3, &pedges, &form, 8).unwrap();
+        eval_bounded_path_hidden_slots_through(&mut src, &b3, &pedges, &form, crate::oblivious_join::PayloadWidths::derived(2), 8).unwrap();
     });
     if got != 0 {
         wrong.push(format!(
@@ -225,7 +225,7 @@ fn every_through_entry_mints_no_dealer() {
     let pairs = distinct_pairs();
     let mut src = b3.dealer();
     let got = mints_during(|| {
-        distinct_hidden_pairs_slots_through(&mut src, &b3, &pairs, 4).unwrap();
+        distinct_hidden_pairs_slots_through(&mut src, &b3, &pairs, crate::oblivious_join::PayloadWidths::derived(2), 4).unwrap();
     });
     if got != 0 {
         wrong.push(format!(

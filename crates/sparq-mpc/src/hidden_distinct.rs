@@ -489,7 +489,13 @@ pub fn distinct_hidden_pairs_slots(
     pairs: &[SecretEndpointPair],
     bound: usize,
 ) -> Result<(Vec<OutputSlot>, DistinctCost), MpcError> {
-    distinct_hidden_pairs_slots_through(&mut backend.dealer(), backend, pairs, bound)
+    distinct_hidden_pairs_slots_through(
+        &mut backend.dealer(),
+        backend,
+        pairs,
+        PayloadWidths::derived(2),
+        bound,
+    )
 }
 
 /// [`distinct_hidden_pairs_slots`] with the sort-and-scan stage's randomness drawn
@@ -510,23 +516,20 @@ pub(crate) fn distinct_hidden_pairs_slots_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
     pairs: &[SecretEndpointPair],
+    widths: PayloadWidths,
     bound: usize,
 ) -> Result<(Vec<OutputSlot>, DistinctCost), MpcError> {
     require_source_matches(source, backend)?;
     check_params(backend, pairs, bound)?;
-    // The output stage's public-shape caps (declared widths, party count, aggregate
-    // slot work) at THIS operator's entry, before a candidate is built or a share
-    // drawn. They are closed forms on public numbers, so the answer is the same one
-    // the stage gives; running them here is what makes "before any draw" true of the
-    // operator and not only of the stage. The stage re-checks.
-    let widths = PayloadWidths::from(2);
-    // Resolve the widths over the INPUT pairs' terms — a superset of the terms the
-    // candidates will carry — in one streaming pass that retains nothing, so the
-    // width is fixed (derived mode) or the declaration is enforced (declared mode)
-    // before the first draw.
-    let resolved = widths.resolve(pairs.iter().flat_map(|p| [&p.a_term, &p.b_term]))?;
-    crate::oblivious_join::check_output_public_shape(
-        &resolved,
+    // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
+    // candidate is built or a share drawn: the padded bound, the payload arity (2 —
+    // the two endpoint terms), the compute-party count, and — only if the caller
+    // DECLARED the widths — the declared width, its limb count and the aggregate
+    // slot work. A DERIVED width is a function of the candidates' own rows, so it
+    // and its caps are decided at the stage, which is where this crate has always
+    // decided them.
+    crate::oblivious_join::check_output_entry_caps(
+        &widths,
         bound,
         backend.parties(),
         backend.threshold(),
@@ -553,14 +556,46 @@ pub fn distinct_hidden_pairs_oblivious(
     pairs: &[SecretEndpointPair],
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    distinct_oblivious_with(backend, pairs, PayloadWidths::derived(2), bound)
+}
+
+/// [`distinct_hidden_pairs_oblivious`] with the payload widths DECLARED rather
+/// than derived from the pairs' own endpoint terms.
+///
+/// A declaration makes the padded per-slot width a public number independent of
+/// the data, so the longest endpoint term's length is no longer observable in it or
+/// in any cost that scales with it, and the width's own caps are decided at this
+/// entry before anything is drawn. What a declaration exposes in its place is one
+/// bit per run — whether some term did not fit, which is a refusal naming the
+/// declared width and arity and nothing else. The payload arity of this operator is
+/// fixed at 2 (the two endpoint terms), so only the per-term width is the caller's
+/// to state.
+pub fn distinct_hidden_pairs_oblivious_with_widths(
+    backend: &ShamirBackend,
+    pairs: &[SecretEndpointPair],
+    term_bytes: usize,
+    bound: usize,
+) -> Result<ObliviousOutput, MpcError> {
+    distinct_oblivious_with(
+        backend,
+        pairs,
+        PayloadWidths::declare(2, term_bytes)?,
+        bound,
+    )
+}
+
+fn distinct_oblivious_with(
+    backend: &ShamirBackend,
+    pairs: &[SecretEndpointPair],
+    widths: PayloadWidths,
+    bound: usize,
+) -> Result<ObliviousOutput, MpcError> {
     check_params(backend, pairs, bound)?;
-    // The stage's public-shape caps before the build and before any draw; the stage
-    // re-checks.
-    let widths = PayloadWidths::from(2);
-    // The same width pass over the input pairs' terms, before the dealer is minted.
-    let resolved = widths.resolve(pairs.iter().flat_map(|p| [&p.a_term, &p.b_term]))?;
-    crate::oblivious_join::check_output_public_shape(
-        &resolved,
+    // The stage's PUBLIC-ONLY caps before the build and before the dealer is
+    // minted. A DERIVED width is itself resolved at the stage, over the candidates
+    // it packs.
+    crate::oblivious_join::check_output_entry_caps(
+        &widths,
         bound,
         backend.parties(),
         backend.threshold(),

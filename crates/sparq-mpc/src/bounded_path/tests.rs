@@ -632,7 +632,7 @@ fn naive_fixed_chain(
             join_var: hop_var(idx),
             key_disclosed: true,
         };
-        acc = join.join(&[acc, next], &plan).unwrap();
+        acc = join.join_pair(&acc, &next, &plan).unwrap();
     }
     dedup_endpoint_pairs(
         project_endpoints(&acc, subject, object).unwrap(),
@@ -1971,7 +1971,7 @@ fn disclosed_edges_debug_prints_sizes_not_terms() {
 /// and not quietly relaxing a guard.
 #[test]
 fn the_path_form_row_budget_is_pinned_by_value() {
-    assert_eq!(MAX_PATH_FORM_ROWS, 1 << 18);
+    assert_eq!(MAX_PATH_FORM_ROWS, 1 << 24);
 }
 
 /// The budget's own arithmetic: exactly at [`MAX_PATH_FORM_ROWS`] is accepted, one
@@ -2314,10 +2314,10 @@ fn a_hub_join_is_charged_from_its_closed_form_before_it_is_built() {
          matches on one side only"
     );
 
-    // With the budget spent to within one row of that, the join is refused and
+    // With the budget spent to one row short of that, the join is refused and
     // nothing is built.
     joins_built_reset();
-    let mut spent = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - projected);
+    let mut spent = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - projected + 1);
     let err = eval_with_budget(&edges, &form, &mut spent)
         .expect_err("the hub join must be refused on the closed form");
     assert!(
@@ -2396,7 +2396,7 @@ fn the_closed_form_join_size_matches_what_the_join_produces() {
         key_disclosed: true,
     };
     let built = DisclosedKeyJoin::new()
-        .join(&[left.clone(), right.clone()], &plan)
+        .join_pair(&left, &right, &plan)
         .unwrap();
     assert_eq!(predicted, 6);
     assert_eq!(predicted, built.rows.len(), "the closed form must be exact");
@@ -2409,7 +2409,7 @@ fn the_closed_form_join_size_matches_what_the_join_produces() {
     );
     let predicted = projected_join_rows(&left, &with_unbound, &m).unwrap();
     let built = DisclosedKeyJoin::new()
-        .join(&[left, with_unbound], &plan)
+        .join_pair(&left, &with_unbound, &plan)
         .unwrap();
     assert!(
         predicted >= built.rows.len(),
@@ -2590,15 +2590,16 @@ fn the_row_budget_is_live_so_a_form_may_do_more_work_than_it_can_hold() {
     let got = eval_with_budget(&edges, &form, &mut budget).expect("the form must RUN");
     assert_eq!(got.rows.len(), 100, "all 10x10 pairs are reachable");
 
-    // The work really does pass the row budget — so a cumulative row counter would
-    // have refused this form.
+    // The work this form charges in TOTAL is orders of magnitude past what it ever
+    // holds at once, which is the whole point of releasing a chain's charge: a
+    // cumulative row counter would be deciding this form on its total.
     assert!(
-        budget.work() > MAX_PATH_FORM_ROWS as u64,
-        "the fixture must charge more rows in total than the row budget holds: {} vs {}",
+        budget.work() > 100 * budget.peak() as u64,
+        "the fixture must charge far more rows in total than it ever holds: {} vs {}",
         budget.work(),
-        MAX_PATH_FORM_ROWS
+        budget.peak()
     );
-    // And the peak does not.
+    // And the peak fits the row budget.
     assert!(
         budget.peak() <= MAX_PATH_FORM_ROWS,
         "the peak must fit the row budget: {} vs {}",
@@ -2705,5 +2706,48 @@ fn the_shape_walk_never_gives_a_charge_back() {
         worklist_peak() <= 3,
         "the walk must not push parts the budget has not paid for: peak {}",
         worklist_peak()
+    );
+}
+
+/// A hop's own EDGE ROWS are not charged, and the hop does not copy them.
+///
+/// The fixture is a single-predicate `exact(p, 1)` over `N` edges, run on a budget
+/// with room for exactly `N` more rows. What that form materialises is ONE
+/// relation — the projection of the borrowed edge set onto the endpoint columns —
+/// so `N` rows of room is enough. Charging the hop's edge list as well would want
+/// `2N` and refuse, which is precisely the regression this removal fixes: a
+/// single-predicate path over a few hundred thousand edges is evaluated in about a
+/// second, and no budget that refuses it is bounding anything real.
+#[test]
+fn a_hops_edge_rows_are_neither_copied_nor_charged() {
+    const N: usize = 64;
+    let mut doc = String::new();
+    for i in 0..N {
+        doc.push_str(&format!("ex:n{i} ex:p ex:n{}. ", i + 1));
+    }
+    let edges = disclosed_edges_only(&[(doc.as_str(), &["http://ex/p"])]);
+    let form = PathForm::exact(nn("http://ex/p"), 1);
+
+    // Room for exactly the one relation the form materialises.
+    let mut tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - N);
+    let got = eval_with_budget(&edges, &form, &mut tight)
+        .expect("a single-predicate hop must not be charged for the edge set it borrows");
+    assert_eq!(got.rows.len(), N, "every edge is an endpoint pair");
+    // And the charge really is ONE relation's worth, not two.
+    assert_eq!(
+        tight.work(),
+        N as u64,
+        "only the projection may be charged, not the edge list as well"
+    );
+
+    // One row less of room and the projection itself is refused, so the budget is
+    // still deciding this form — it is deciding it on what the form materialises.
+    let mut too_tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - N + 1);
+    let err = eval_with_budget(&edges, &form, &mut too_tight)
+        .expect_err("the projection is charged and must be refused when it does not fit");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
     );
 }

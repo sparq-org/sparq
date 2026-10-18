@@ -351,17 +351,6 @@ impl HiddenEdges {
         HiddenEdges { edges }
     }
 
-    /// Every endpoint TERM this relation could put in a payload slot, for the
-    /// width pass at an operator's entry. A superset of the terms the candidates
-    /// carry (every candidate endpoint is an edge endpoint), and reachable before
-    /// anything is drawn, which is what lets the width be fixed before the first
-    /// sharing.
-    pub(crate) fn payload_terms(&self) -> impl Iterator<Item = &Term> {
-        self.edges
-            .iter()
-            .flat_map(|e| [&e.subject.term, &e.object.term])
-    }
-
     /// Number of edges in the relation (`|E|` — public).
     pub fn len(&self) -> usize {
         self.edges.len()
@@ -841,8 +830,42 @@ pub fn eval_exact_k_chain_hidden(
     k: usize,
     bound: usize,
 ) -> Result<PartialResult, MpcError> {
-    let (slots, _cost) =
-        eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), backend, edges, k, bound)?;
+    let (slots, _cost) = eval_exact_k_chain_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        k,
+        PayloadWidths::derived(2),
+        bound,
+    )?;
+    Ok(partial_result_from_slots(slots, chain_out_vars()))
+}
+
+/// [`eval_exact_k_chain_hidden`] with the payload widths DECLARED rather than
+/// derived from the edges' own endpoint terms.
+///
+/// A declaration makes the padded per-slot width a public number independent of the
+/// data, so the longest endpoint term's length is no longer observable in it or in
+/// any cost that scales with it, and the width's caps are decided at this entry
+/// before anything is drawn. What a declaration exposes in its place is one bit per
+/// run — whether some term did not fit, which is a refusal. The payload arity is
+/// fixed at 2 (the endpoint pair), so only the per-term width is the caller's to
+/// state.
+pub fn eval_exact_k_chain_hidden_with_widths(
+    backend: &ShamirBackend,
+    edges: &HiddenEdges,
+    k: usize,
+    term_bytes: usize,
+    bound: usize,
+) -> Result<PartialResult, MpcError> {
+    let (slots, _cost) = eval_exact_k_chain_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        k,
+        PayloadWidths::declare(2, term_bytes)?,
+        bound,
+    )?;
     Ok(partial_result_from_slots(slots, chain_out_vars()))
 }
 
@@ -857,7 +880,14 @@ pub fn eval_exact_k_chain_hidden_slots(
     k: usize,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), backend, edges, k, bound)
+    eval_exact_k_chain_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        k,
+        PayloadWidths::derived(2),
+        bound,
+    )
 }
 
 /// [`eval_exact_k_chain_hidden_slots`] with the chain stage's randomness drawn
@@ -880,6 +910,7 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
     backend: &ShamirBackend,
     edges: &HiddenEdges,
     k: usize,
+    widths: PayloadWidths,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
     require_source_matches(source, backend)?;
@@ -903,17 +934,15 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
         public_candidate_pair_bound(edges.len(), k)?,
         || projected_candidate_count(edges, k),
     )?;
-    // Payload arity is 2 (the endpoint pair). The stage's public-shape caps run
-    // HERE, before any candidate is built or any share drawn; they read only public
-    // numbers, and the stage re-checks them.
-    let widths = PayloadWidths::from(2);
-    // Resolve the widths over the EDGE endpoints — a superset of the terms the
-    // candidates will carry — in one streaming pass that retains nothing. In the
-    // default (derived) mode this is what fixes the width before any draw; in the
-    // declared mode it is what refuses an over-width term before any draw.
-    let resolved = widths.resolve(edges.payload_terms())?;
-    crate::oblivious_join::check_output_public_shape(
-        &resolved,
+    // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
+    // candidate is built or a share drawn: the padded bound, the payload arity (2 —
+    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
+    // the widths, the declared width, its limb count and the aggregate slot work.
+    // In the default derived mode the width is a function of the candidates' own
+    // rows, so it and its caps are decided at the stage, which is where this crate
+    // has always decided them.
+    crate::oblivious_join::check_output_entry_caps(
+        &widths,
         bound,
         backend.parties(),
         backend.threshold(),
@@ -1147,17 +1176,6 @@ impl PredicatedEdges {
         }
         self.node_domain = Some(declared.into_values().collect());
         Ok(self)
-    }
-
-    /// Every term this edge set could put in a payload slot: both endpoints of
-    /// every edge, and every node of the declared domain, which a zero-length arm
-    /// emits as a `(x, x)` diagonal row. A superset of what the candidates carry,
-    /// reachable before anything is drawn.
-    pub(crate) fn payload_terms(&self) -> impl Iterator<Item = &Term> {
-        self.edges
-            .iter()
-            .flat_map(|e| [&e.subject.term, &e.object.term])
-            .chain(self.node_domain.iter().flatten())
     }
 
     /// Size of the declared PUBLIC node domain, or `0` when none was declared.
@@ -1577,8 +1595,36 @@ pub fn eval_bounded_path_hidden(
     form: &HiddenBoundedPath,
     bound: usize,
 ) -> Result<PartialResult, MpcError> {
-    let (slots, _cost) =
-        eval_bounded_path_hidden_slots_through(&mut backend.dealer(), backend, edges, form, bound)?;
+    let (slots, _cost) = eval_bounded_path_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        form,
+        PayloadWidths::derived(2),
+        bound,
+    )?;
+    Ok(partial_result_from_slots(slots, chain_out_vars()))
+}
+
+/// [`eval_bounded_path_hidden`] with the payload widths DECLARED rather than
+/// derived from the edges' and the declared node domain's own terms. Same trade as
+/// [`eval_exact_k_chain_hidden_with_widths`]: the width stops being a function of
+/// the data, and an over-width term becomes a refusal raised at this entry.
+pub fn eval_bounded_path_hidden_with_widths(
+    backend: &ShamirBackend,
+    edges: &PredicatedEdges,
+    form: &HiddenBoundedPath,
+    term_bytes: usize,
+    bound: usize,
+) -> Result<PartialResult, MpcError> {
+    let (slots, _cost) = eval_bounded_path_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        form,
+        PayloadWidths::declare(2, term_bytes)?,
+        bound,
+    )?;
     Ok(partial_result_from_slots(slots, chain_out_vars()))
 }
 
@@ -1591,7 +1637,14 @@ pub fn eval_bounded_path_hidden_slots(
     form: &HiddenBoundedPath,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    eval_bounded_path_hidden_slots_through(&mut backend.dealer(), backend, edges, form, bound)
+    eval_bounded_path_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        form,
+        PayloadWidths::derived(2),
+        bound,
+    )
 }
 
 /// [`eval_bounded_path_hidden_slots`] with the union stage's randomness drawn
@@ -1605,6 +1658,7 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
     backend: &ShamirBackend,
     edges: &PredicatedEdges,
     form: &HiddenBoundedPath,
+    widths: PayloadWidths,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
     require_source_matches(source, backend)?;
@@ -1623,16 +1677,15 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
         public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), form)?,
         || projected_bounded_candidate_count(edges, form),
     )?;
-    // The output stage's public-shape caps (declared widths, party count, aggregate
-    // slot work) at THIS operator's entry, before a candidate is built or a share
-    // drawn. Closed forms on public numbers, so the answer is the stage's own; the
-    // stage re-checks.
-    let widths = PayloadWidths::from(2);
-    // The width pass over the edge endpoints AND the declared node domain — a
-    // superset of the terms the candidates will carry, read before any draw.
-    let resolved = widths.resolve(edges.payload_terms())?;
-    crate::oblivious_join::check_output_public_shape(
-        &resolved,
+    // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
+    // candidate is built or a share drawn: the padded bound, the payload arity (2 —
+    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
+    // the widths, the declared width, its limb count and the aggregate slot work.
+    // In the default derived mode the width is a function of the candidates' own
+    // rows, so it and its caps are decided at the stage, which is where this crate
+    // has always decided them.
+    crate::oblivious_join::check_output_entry_caps(
+        &widths,
         bound,
         backend.parties(),
         backend.threshold(),

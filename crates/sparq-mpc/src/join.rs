@@ -131,6 +131,43 @@ impl DisclosedKeyJoin {
     }
 }
 
+impl DisclosedKeyJoin {
+    /// [`GlobalJoin::join`] over exactly TWO relations, taking both by reference.
+    ///
+    /// The slice form has to clone its first input to seed the fold; a two-input
+    /// equi-join does not, and every join in `bounded_path` is a two-input join
+    /// whose left side is an accumulator the caller still owns and whose right side
+    /// is a BORROWED edge relation. Same preconditions, same result.
+    pub(crate) fn join_pair(
+        &self,
+        left: &PartialResult,
+        right: &PartialResult,
+        plan: &JoinPlan,
+    ) -> Result<PartialResult, MpcError> {
+        if !plan.key_disclosed {
+            return Err(MpcError::not_yet(
+                "hidden-value (private-key) cross-holder join — circuit-PSI / oblivious join",
+                "M3 MpcBackend + Q2 (trust model) + Q3 (BGP-join obliviousness cost, RQ2b)",
+            ));
+        }
+        for p in [left, right] {
+            if !p.vars.contains(&plan.join_var) {
+                return Err(MpcError::Protocol(format!(
+                    "holder {} did not disclose the join key ?{} (vars: {})",
+                    p.holder,
+                    plan.join_var.as_str(),
+                    p.vars
+                        .iter()
+                        .map(|v| format!("?{}", v.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )));
+            }
+        }
+        join_two(left, right)
+    }
+}
+
 impl GlobalJoin for DisclosedKeyJoin {
     fn join(&self, partials: &[PartialResult], plan: &JoinPlan) -> Result<PartialResult, MpcError> {
         // The hidden-value path is the deferred, fork-gated one: PRIVATE join
@@ -769,30 +806,22 @@ impl BatchedHiddenInput {
 pub type BatchedJoinOutput = (PartialResult, ObliviousOutputCost);
 
 impl HiddenValueJoin {
-    /// The output stage's public-shape checks and its term-width pass, run at THIS
-    /// operator's entry — before a candidate is built or a share drawn.
+    /// The output stage's PUBLIC-ONLY caps, run at THIS operator's entry — before a
+    /// key is dealt, an equality bit drawn or a candidate built.
     ///
-    /// The width pass streams over both batches' disclosed payload terms, which is
-    /// a superset of the terms the candidates will carry (a candidate's payload is
-    /// a left row's terms followed by a right row's), and it retains nothing. In
-    /// the default derived mode it is what fixes the uniform width before the first
-    /// draw; with a declared width it is what refuses an over-width term before the
-    /// first draw. The stage resolves again over its own candidates and re-checks.
+    /// What it checks is the padded bound, the output arity and the compute-party
+    /// count, all of them the caller's own numbers. The DEFAULT width is a function
+    /// of the candidates' own rows, so the width's caps and the aggregate slot work
+    /// are decided at the stage, over the rows it packs — which is this crate's
+    /// long-standing draw schedule. An entry check that guessed a width from the
+    /// batches' widest term refused runs the stage itself accepts.
     fn preflight_output_shape(
         &self,
-        left: &BatchedHiddenInput,
-        right: &BatchedHiddenInput,
         arity: usize,
         bound: usize,
     ) -> Result<(), MpcError> {
-        let terms = left
-            .rows
-            .iter()
-            .chain(right.rows.iter())
-            .flat_map(|(_, payload)| payload.iter().flatten());
-        let resolved = oblivious_join::PayloadWidths::from(arity).resolve(terms)?;
-        oblivious_join::check_output_public_shape(
-            &resolved,
+        oblivious_join::check_output_entry_caps(
+            &oblivious_join::PayloadWidths::derived(arity),
             bound,
             self.backend.parties(),
             self.backend.threshold(),
@@ -946,7 +975,7 @@ impl HiddenValueJoin {
         let payload_arity = out_vars.len();
         // The output stage's public-shape caps and its width pass, before the key
         // sharings below draw anything.
-        self.preflight_output_shape(left, right, payload_arity, bound)?;
+        self.preflight_output_shape(payload_arity, bound)?;
 
         // (1) Secret-share each holder's private key column as a BatchedShares (the
         // sq-dwb5 primitive): each row's key gets its OWN fresh degree-`t` masking
@@ -1110,7 +1139,7 @@ impl HiddenValueJoin {
         out_vars.extend(right.payload_vars.iter().cloned());
         // The output stage's public-shape caps and its width pass, before
         // `fully_oblivious_candidates` draws an equality bit per pair.
-        self.preflight_output_shape(left, right, out_vars.len(), bound)?;
+        self.preflight_output_shape(out_vars.len(), bound)?;
         let candidates = self.fully_oblivious_candidates(source, left, right)?;
 
         // (3) Route through the oblivious output transform with the SECRET-SHARED

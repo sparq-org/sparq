@@ -328,14 +328,15 @@ impl BoundedPathPlan {
         // stage would refuse is not costed here either — a cost model for a run
         // that cannot happen is not a cost model.
         //
-        // The aggregate slot-work budget is NOT applied, and deliberately: this
-        // counter models the TAG column only (`limbs = 0`, because the payload
-        // bytes are what this planner does not see), and at that width the bound
-        // and party caps already bound the product — `MAX_OUTPUT_BOUND` slots at
-        // `MAX_OUTPUT_PARTIES` parties and the largest `t` honest majority allows
-        // is below `MAX_SLOT_WORK`, so no `B` and `n` this function accepts can
-        // reach it. A check that cannot fire is a guard no test can pin.
         crate::oblivious_join::check_output_parties_cap(parties)?;
+        // And the same aggregate slot-work budget, at the width this counter models
+        // — the TAG column only (`limbs = 0`, because the payload bytes are what
+        // this planner does not see), at the largest threshold honest majority
+        // allows for `parties`. It is a LOWER bound on the stage's real work, so a
+        // plan refused here could not have run; a plan admitted here may still be
+        // refused at the stage, once the payload width is known.
+        let threshold = parties.saturating_sub(1) / 2;
+        crate::oblivious_join::check_slot_work_budget(bound, 0, parties, threshold)?;
         let mut c = CommCounter::new(parties);
         // (1) The k×-join secure equalities — the cost center. Independent ACROSS
         // tuples (the matrix's `record_independent_equalities` batch shape).

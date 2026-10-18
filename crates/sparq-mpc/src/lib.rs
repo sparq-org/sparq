@@ -361,16 +361,18 @@ pub use bounded_path::{
 // sq-py8h.2: the HIDDEN-intermediate exactly-`k` chain surface (the
 // cryptographic regime — intermediate node-sets never opened).
 pub use hidden_path::{
-    eval_bounded_path_hidden, eval_bounded_path_hidden_slots, eval_exact_k_chain_hidden,
-    eval_exact_k_chain_hidden_slots, HiddenBoundedPath, HiddenEdge, HiddenEdges, HiddenNode,
+    eval_bounded_path_hidden, eval_bounded_path_hidden_slots, eval_bounded_path_hidden_with_widths,
+    eval_exact_k_chain_hidden, eval_exact_k_chain_hidden_slots,
+    eval_exact_k_chain_hidden_with_widths, HiddenBoundedPath, HiddenEdge, HiddenEdges, HiddenNode,
     PredicatedEdge, PredicatedEdges, MAX_CHAIN_TUPLES, MAX_HOP_COUNT,
 };
 // sq-py8h.4: the hidden-key endpoint DISTINCT surface — collapse
 // duplicate SECRET endpoint pairs (oblivious sort by a never-opened secure
 // comparator + adjacent-equality keep-bit + oblivious compaction).
 pub use hidden_distinct::{
-    distinct_hidden_pairs, distinct_hidden_pairs_oblivious, distinct_hidden_pairs_slots,
-    DistinctCost, SecretEndpointPair, MAX_DISTINCT_ROWS,
+    distinct_hidden_pairs, distinct_hidden_pairs_oblivious,
+    distinct_hidden_pairs_oblivious_with_widths, distinct_hidden_pairs_slots, DistinctCost,
+    SecretEndpointPair, MAX_DISTINCT_ROWS,
 };
 // sq-py8h.5: the planner guard + cost-model surface for the hidden
 // bounded property-path operator (reject statically-large unrolls, refuse a hidden

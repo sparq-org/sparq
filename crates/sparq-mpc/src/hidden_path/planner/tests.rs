@@ -303,15 +303,24 @@ fn comm_counter_applies_the_output_party_cap() {
         "the cap itself is still modelled"
     );
 
-    // And the arithmetic the omitted work check rests on: at the tag-only width
-    // this counter models, the widest legal plan is inside `MAX_SLOT_WORK`, so
-    // applying that budget here could never refuse anything.
+    // And the aggregate slot-work budget, at the tag-only width this counter
+    // models: the WIDEST legal combination of `B` and `n` multiplies past
+    // `MAX_SLOT_WORK`, so the budget really does decide something here, and the
+    // counter refuses that combination instead of costing a run that cannot happen.
     let worst_t = (MAX_OUTPUT_PARTIES - 1) / 2;
     let widest = (MAX_OUTPUT_BOUND as u64) * (MAX_OUTPUT_PARTIES as u64) * (2 * worst_t as u64 + 1);
     assert!(
-        widest <= MAX_SLOT_WORK,
-        "{} must stay inside the slot-work budget of {}",
+        widest > MAX_SLOT_WORK,
+        "the fixture must really exceed the slot-work budget: {} vs {}",
         widest,
         MAX_SLOT_WORK
+    );
+    let err = plan
+        .comm_counter(MAX_OUTPUT_PARTIES, MAX_OUTPUT_BOUND)
+        .expect_err("the widest legal B and n must be refused on the product");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_WORK")),
+        "{:?}",
+        err
     );
 }
