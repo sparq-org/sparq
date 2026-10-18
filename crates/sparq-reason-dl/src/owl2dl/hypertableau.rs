@@ -783,6 +783,8 @@ impl<'c> Tableau<'c> {
                 }
                 continue;
             }
+            #[cfg(debug_assertions)]
+            self.assert_saturated();
             if self.expand() {
                 continue;
             }
@@ -1498,6 +1500,42 @@ impl<'c> Tableau<'c> {
                 }
             }
         }
+    }
+
+    /// Debug builds: with nothing queued, a full match at every node finds no match the
+    /// queued (delta) matching left unhandled, i.e. every match is satisfied or is the
+    /// NI-rule's. The check counts no work, so the budget sees the same run as a release
+    /// build.
+    #[cfg(debug_assertions)]
+    fn assert_saturated(&self) {
+        if self.clash.is_some() || !self.dirty.is_empty() || !self.pending.is_empty() {
+            return;
+        }
+        // The check's own work starts from zero, so it is cut off only by a spent step budget.
+        let probes = self.probes.replace(0);
+        for x in 0..self.nodes.len() as Node {
+            let node = &self.nodes[x as usize];
+            if !node.active || node.concrete {
+                continue;
+            }
+            let mut found = Vec::new();
+            for ci in self.candidates(x) {
+                self.match_clause(ci, x, &mut found);
+            }
+            if self.over_budget() {
+                // A cut-off match proves nothing.
+                break;
+            }
+            for inst in found {
+                assert!(
+                    !self.valid(&inst) || self.satisfied(&inst) || self.ni_trigger(&inst).is_some(),
+                    "delta matching missed clause {} at {:?}",
+                    inst.clause,
+                    inst.nodes
+                );
+            }
+        }
+        self.probes.set(probes);
     }
 
     fn match_clause(&self, ci: u32, x: Node, found: &mut Vec<Instance>) {
@@ -3015,5 +3053,48 @@ mod tests {
         t.set_clash(Dep::single(level));
         assert_eq!(t.run(), Ok(true));
         assert!(!t.nodes[y as usize].active, "y is merged into a");
+    }
+
+    /// A branch that opens in the middle of matching a node matches that node again in
+    /// full on backtracking: the rest of its matches were never queued anywhere.
+    #[test]
+    fn the_node_being_matched_when_a_branch_opens_is_matched_again() {
+        let (d, c) = setup(
+            r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            :X a owl:Class . :G a owl:Class . :H a owl:Class . :E a owl:Class . :F a owl:Class .
+            :X rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :G :H ) ] .
+            :E rdfs:subClassOf :F .
+        "#,
+        );
+        let (x_, e, f) = (class(&d, &c, "X"), class(&d, &c, "E"), class(&d, &c, "F"));
+        let disj = c
+            .clauses
+            .iter()
+            .position(|cl| cl.head.len() == 2 && cl.body_x == vec![x_])
+            .unwrap() as u32;
+        let index = ClauseIndex::new(&c);
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        let x = t.add_root();
+        t.add_concept(x, x_, &Dep::default());
+        assert_eq!(t.run(), Ok(true));
+        t.add_concept(x, e, &Dep::default());
+        // `x` is taken off the queue to be matched, as `run` does, and the branch opens
+        // before its match of `E ⊑ F` is applied.
+        assert_eq!(t.dirty.pop(), Some(x));
+        t.in_dirty[x as usize] = false;
+        t.only[x as usize] = None;
+        t.centre = Some(x);
+        let level = t.branches.len() as u32;
+        t.open(Choice::Clause(Instance {
+            clause: disj,
+            nodes: vec![x],
+            deps: Dep::default(),
+        }));
+        t.centre = None;
+        t.set_clash(Dep::single(level));
+        assert_eq!(t.run(), Ok(true));
+        assert!(t.nodes[x as usize].label.contains_key(&f), "E ⊑ F at x");
     }
 }
