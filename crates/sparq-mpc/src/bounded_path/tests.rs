@@ -1742,6 +1742,27 @@ fn an_absent_constant_over_answers_only_a_fully_nullable_sequence() {
         "and no row mentions the widened term at all: {mandatory:?}"
     );
 
+    // The same holds for a mandatory arm in the MIDDLE: a row through it needs an
+    // edge out of the midpoint, and no edge is incident to the widened term at
+    // either end, so the position of the mandatory arm does not matter.
+    let middle = PathForm::Sequence(vec![
+        PathForm::range(nn("http://ex/p"), 0, 1),
+        PathForm::exact(nn("http://ex/r"), 1),
+        PathForm::range(nn("http://ex/q"), 0, 1),
+    ]);
+    let middle_pairs = federated_pairs(&widen(), &middle);
+    assert_eq!(
+        middle_pairs,
+        clear_text_pairs(&[h1], "ex:p?/ex:r/ex:q?"),
+        "a mandatory arm in the middle does not over-answer either"
+    );
+    assert!(
+        !middle_pairs
+            .iter()
+            .any(|(a, b)| *a == absent || *b == absent),
+        "and no row mentions the widened term: {middle_pairs:?}"
+    );
+
     // (3) A `{0,k}` RANGE is ONE repetition, not `p?/p?`: the engine self-matches
     // the bound constant on the zero-length arm, so the operator and the engine
     // agree — this is the query the widening is declared for, not an over-answer.
