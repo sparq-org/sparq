@@ -156,7 +156,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **sparq-zk-compose / zk (sq-j506, #7103):** the `DualLeafV2` **component-witnessed** scan and
+- **sparq-zk-compose / zk (sq-j506, #7121; Noir library #7103):** the `DualLeafV2` **component-witnessed** scan and
   hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir
   members, `scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16`, recompute each graph's per-slot
   term encodings from witnessed V2 leaf components through
