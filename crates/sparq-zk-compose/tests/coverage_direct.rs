@@ -271,6 +271,7 @@ fn nonexistent_dir(tag: &str) -> std::path::PathBuf {
 /// Whether `nargo` can be spawned here. These tests run in lanes with and without
 /// the toolchain, and the typed error a missing workspace produces depends on it.
 fn nargo_on_path() -> bool {
+    // zk-toolchain-gate: allow presence probe that selects the expected typed error; asserts in both branches and never skips
     std::process::Command::new("nargo")
         .arg("--version")
         .output()

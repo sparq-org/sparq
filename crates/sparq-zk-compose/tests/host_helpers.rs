@@ -707,6 +707,7 @@ fn driver_error_display_is_informative_for_every_variant() {
     use sparq_zk_compose::driver::DriverError;
     let spawn = DriverError::Spawn {
         tool: "nargo".to_string(),
+        // zk-toolchain-gate: allow constructs an io error for a Display assertion; no spawn involved
         source: std::io::Error::new(std::io::ErrorKind::NotFound, "no such file"),
     };
     let s = format!("{spawn}");

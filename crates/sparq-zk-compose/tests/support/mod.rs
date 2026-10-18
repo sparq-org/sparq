@@ -61,6 +61,24 @@ fn allow_missing() -> bool {
     std::env::var_os(ALLOW_MISSING_ENV).is_some_and(|v| !v.is_empty() && v != "0")
 }
 
+/// A [`std::process::Command`] for a live tool, for use AFTER
+/// [`require_toolchain`] has confirmed the tool is on `PATH`.
+///
+/// Call sites spawn through this instead of naming the executable to
+/// `Command::new` themselves, so the acquisition of `nargo` / `bb` stays inside this
+/// module. `scripts/check-zk-toolchain-gate.py` lints the ZK test trees for any
+/// other acquisition path (an executable literal or a non-literal argument to
+/// `Command::new`, an `ErrorKind::NotFound` arm, a `which` probe), so a fresh
+/// private copy of the gate cannot be added without a declared, reasoned exemption.
+/// This helper does NOT gate: it is [`require_toolchain`] that turns a missing tool
+/// into a hard failure or a declared, printed skip.
+// Each test binary declaring `mod support;` uses a SUBSET of this module, so an
+// unused item here is expected rather than dead code.
+#[allow(dead_code)]
+pub fn live_tool(tool: &str) -> std::process::Command {
+    std::process::Command::new(tool)
+}
+
 /// Gate a LIVE test body on `tools` all being on `PATH`.
 ///
 /// * all present → `true`; the caller runs its live body.

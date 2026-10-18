@@ -146,9 +146,7 @@ jobs:
     name: zk forge + anchor suite (nargo/bb)
     runs-on: ubuntu-latest
     # Toolchain install + real bb proving is the long pole; generous headroom.
-    # Raised from 60 with the "remaining non-ignored live suites" step, which adds
-    # real prove/verify work that previously ran in no lane.
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -221,34 +219,31 @@ jobs:
 
       - name: Install PyYAML (hash-pinned)
         if: steps.changes.outputs.zk == 'true'
-        # Needed only to parse this workflow's own `run:` blocks in the enumeration
-        # step below. HASH-pinned (Scorecard PinnedDependenciesID) against the same
-        # requirements file the docs-quality / feature-matrix YAML jobs use — one pin
-        # to bump.
-        run: pip install --require-hashes -r .github/requirements/docs-quality.txt
+        # Needed only to read this workflow's own steps in the gate check below.
+        # HASH-pinned (Scorecard PinnedDependenciesID) against the same requirements
+        # file the docs-quality / feature-matrix YAML jobs use — one pin to bump.
+        run: python3 -m pip install --require-hashes -r .github/requirements/docs-quality.txt
 
-      # MECHANICAL enumeration of the toolchain-bound test binaries.
+      # Fail-closed checks on the live-toolchain gate, static and toolchain-free so a
+      # violation is a fast RED rather than a 60-minute one.
       #
       # The live suites in crates/sparq-zk*/tests/ do not fail when nargo/bb are
       # absent: tests/support/mod.rs::require_toolchain turns a missing tool into a
       # printed skip whenever the lane declares itself toolchain-free via
       # SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN, which ci.yml and feature-matrix.yml set at
-      # workflow level. So a NON-`#[ignore]`d live test reports `ok` in every lane but
-      # this one — and this lane's `-- --ignored` sweep below skips every non-ignored
-      # test. A non-ignored live binary that no explicit `cargo test --test <bin>`
-      # step here names therefore executes its live body in NO CI lane at all.
-      #
-      # That set was maintained by hand, one `--test` line at a time, so a new binary
-      # was missed BY DEFAULT. This step derives the set from the test SOURCES
-      # instead — a non-ignored `#[test]` that either calls `require_toolchain` with a
-      # nargo/bb tool list, or spawns `nargo`/`bb` directly behind a private early
-      # `return` — and FAILS when no step below names the binary (with the right
-      # `--features`, so a feature-gated binary cannot be counted while compiling to
-      # nothing). Static and toolchain-free, so it runs before the toolchain install:
-      # a missed binary is a fast RED rather than a 60-minute one.
-      - name: Enumerate the toolchain-bound test binaries (fail if the lane misses one)
+      # workflow level. For that gate to mean anything, no test may obtain nargo/bb by
+      # any other route, and the lane that HAS the toolchain must run the gated tests.
+      # The checker enforces both: it lints the ZK test trees for a private
+      # acquisition path (an executable literal or a non-literal argument to
+      # `Command::new`, an `ErrorKind::NotFound` arm, a `which` probe) outside the
+      # gate's module, keeps the two per-crate copies of that module byte-identical,
+      # and reads this workflow to verify the "default-run live ZK tests" step below
+      # runs every helper-using package PACKAGE-WIDE with no `--no-run`, no filter and
+      # no swallowed exit code. Coverage is by package, so a new live test binary is
+      # covered the moment it is added.
+      - name: Check the ZK live-toolchain gate (acquisition + lane coverage)
         if: steps.changes.outputs.zk == 'true'
-        run: python3 scripts/check-zk-toolchain-gate-coverage.py --check
+        run: python3 scripts/check-zk-toolchain-gate.py --check
 
       - name: Rust (preinstalled stable)
         if: steps.changes.outputs.zk == 'true'
@@ -421,34 +416,6 @@ jobs:
         run: |
           cargo test -p sparq-zk-compose --test gate_count --test sparql_catalog -- --test-threads=1
 
-      # The rest of the set the enumeration step above counts. Each of these binaries
-      # holds non-ignored LIVE tests (witness generation, real prove/verify, the
-      # native-capture and operand-binding cases, the poseidon2 nargo cross-check)
-      # that, before this step, ran their live body in no lane: the toolchain-free
-      # lanes declare SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN and skip them, and the
-      # `-- --ignored` sweep below only runs ignored tests. Default features: none of
-      # these files carries a crate-level `#![cfg(feature = ...)]`.
-      #
-      # `poseidon2_noir_cross` gates itself with a PRIVATE early `return` rather than
-      # the shared `require_toolchain` gate, so it skips QUIETLY off this lane; it is
-      # counted by the enumeration's second marker and runs here for the same reason.
-      #
-      # These do real `bb prove`/`verify`, so they are the slowest non-ignored work in
-      # the lane — hence the step timeout and the job headroom raised with it.
-      - name: Run the remaining non-ignored live suites (real nargo/bb)
-        if: steps.changes.outputs.zk == 'true'
-        timeout-minutes: 40
-        run: |
-          set -euo pipefail
-          cargo test -p sparq-zk-compose \
-            --test capture_car_hire \
-            --test differential_fuzz \
-            --test e2e \
-            --test family_members_pzet \
-            --test filter_signed_binding \
-            -- --test-threads=1
-          cargo test -p sparq-zk --test poseidon2_noir_cross -- --test-threads=1
-
       # sq-j506 follow-up: the `dual-leaf` feature is OFF by default, so the lane
       # suites in crates/sparq-zk-compose/tests/ and crates/sparq-zk/tests/
       # (`#![cfg(feature = "dual-leaf")]`)
@@ -531,10 +498,22 @@ jobs:
       # filter bindings, the family members, the differential fuzz, the car-hire capture)
       # run in the default lanes only as declared skips, because those lanes have no
       # toolchain. This is the lane that has it, so run them here too.
+      #
+      # PACKAGE-WIDE on purpose, and `-p sparq-zk` was added: coverage by package means
+      # a new live test binary is run the moment it is added, with no list to update.
+      # `crates/sparq-zk/tests/poseidon2_noir_cross.rs` was the one gap — it gated
+      # itself with a private `ErrorKind::NotFound` arm that returned, so it passed
+      # quietly off this lane, and no step ran sparq-zk's non-ignored tests here. It
+      # now goes through the shared gate, and this step runs its package.
+      #
+      # `scripts/check-zk-toolchain-gate.py` reads this step BY NAME and fails when a
+      # helper-using package is missing from it, or when it grows a target selector,
+      # a `--no-run`, a test-name filter, a `-- --ignored`, a swallowed exit code or a
+      # skippable `if:`. Renaming the step without updating that script is also a RED.
       - name: Run the default-run live ZK tests (real nargo/bb)
         if: steps.changes.outputs.zk == 'true'
         run: |
-          cargo test -p sparq-zk-compose -- --test-threads=1
+          cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1
 
       # Rebuild the immutable foundation separately from the PR candidate.
       # This independently checks the provenance of all four legacy key goldens.

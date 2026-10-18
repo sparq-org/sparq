@@ -2211,6 +2211,7 @@ fn attacker_filter_d1_artifacts(
     )
     .unwrap();
     let nargo = |args: &[&str]| {
+        // zk-toolchain-gate: allow already behind support::require_toolchain in the calling test
         let out = std::process::Command::new("nargo")
             .args(args)
             .current_dir(&dir)
@@ -2224,6 +2225,7 @@ fn attacker_filter_d1_artifacts(
     let wit = dir.join("target/attacker_w.gz");
     let out = dir.join("out");
     std::fs::create_dir_all(&out).unwrap();
+    // zk-toolchain-gate: allow already behind support::require_toolchain in the calling test
     let bb = std::process::Command::new("bb")
         .args(["prove", "-b"])
         .arg(&acir)

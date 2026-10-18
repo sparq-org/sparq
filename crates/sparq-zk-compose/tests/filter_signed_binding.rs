@@ -94,6 +94,7 @@ fn try_witness(pkg: &str, toml: &str, tag: &str) -> bool {
     let witness_path = dir.join("target").join(format!("{witness_name}.gz"));
     let _ = std::fs::remove_file(&witness_path);
     // Compile is idempotent; required so target/<pkg>.json exists.
+    // zk-toolchain-gate: allow already behind support::require_toolchain in the calling test
     let _ = Command::new("nargo")
         .arg("compile")
         .arg("--package")
@@ -101,6 +102,7 @@ fn try_witness(pkg: &str, toml: &str, tag: &str) -> bool {
         .current_dir(&dir)
         .output()
         .expect("nargo compile runs");
+    // zk-toolchain-gate: allow already behind support::require_toolchain in the calling test
     let _ = Command::new("nargo")
         .arg("execute")
         .arg(&witness_name)

@@ -172,6 +172,7 @@ fn top_level_bin_circuits(zk: &Path) -> Vec<(String, PathBuf)> {
 /// Compile the whole workspace once (idempotent), producing `target/<pkg>.json`
 /// ACIR for every member.
 fn compile_workspace(dir: &Path) {
+    // zk-toolchain-gate: allow already behind support::require_toolchain in the calling test
     let out = Command::new("nargo")
         .arg("compile")
         .arg("--workspace")
@@ -188,6 +189,7 @@ fn compile_workspace(dir: &Path) {
 /// `bb gates -s ultra_honk` → the member's `circuit_size`.
 fn gate_count(dir: &Path, member: &str) -> u64 {
     let acir = dir.join("target").join(format!("{member}.json"));
+    // zk-toolchain-gate: allow already behind support::require_toolchain in the calling test
     let out = Command::new("bb")
         .arg("gates")
         .arg("-s")
