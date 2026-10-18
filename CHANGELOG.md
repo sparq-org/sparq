@@ -115,9 +115,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left in the plain mode, and a `value_none()` re-derived until it falls outside the reachable
   value-handle band, which `is_in_handle_band` decides and a test asserts — the checkable invariant
   `research/zk-field-native-encoding.md` §14.1 asks for, discharging that reserved-tag requirement on
-  the HOST side. The in-circuit half stays open: the `zk/dual-leaf-v2` Noir library mirrors the
-  sentinel and its band check, but no proving member imports it, so a member refuses the sentinel
-  only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
+  the HOST side. The in-circuit half landed with the component-witnessed members in the entry below: the
+  `zk/dual-leaf-v2` Noir library mirrors the sentinel and its band check, and
+  `compose_core::dual_leaf_v2_leaf` applies it at the `scan_v2dl_*` / `join_eq_v2dl_*` witnessed
+  component sites, which no `CircuitId` names. On the value-lane FILTER members a sentinel is
+  still refused only because their `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
   unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
   §14.1 `LANG_NONE` separation is asserted on the host side only (see the hardening entry below). Both versions carry the same #769-accepted INV-VL
   downgrade; not externally audited (CR-G8 / sq-qhy4).
@@ -154,7 +156,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **sparq-zk-compose / zk (sq-j506, #7103):** the `DualLeafV2` **component-witnessed** scan and
+- **sparq-zk-compose / zk (sq-j506, #7121; Noir library #7103):** the `DualLeafV2` **component-witnessed** scan and
   hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir
   members, `scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16`, recompute each graph's per-slot
   term encodings from witnessed V2 leaf components through
@@ -283,8 +285,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole-graph encoders rather than being encoded; `checked_lang_const` (in both modules) is the gate.
   A language constant is a 248-bit truncated BLAKE3 digest and `LANG_NONE` is the field element `1`,
   so only a fixed-target preimage reaches the refusal. No committed value, vector or leaf changes. The
-  in-circuit half of the assert stays open (no Noir member checks it;
-  `research/zk-field-native-encoding.md` §14.1, §14.3).
+  in-circuit half of the assert landed with the component-witnessed `scan_v2dl_*` /
+  `join_eq_v2dl_*` members, which no `CircuitId` names and so no verify path selects
+  (`research/zk-field-native-encoding.md` §14.1, §14.3).
 
 - **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
   the same parsed input, and as long as the binding values and firing sets are themselves

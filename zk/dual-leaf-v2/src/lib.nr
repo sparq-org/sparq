@@ -29,14 +29,17 @@
 //!
 //! # Scope -- what this does and does NOT do (read this)
 //!
-//! This is a CONSTANTS + PREDICATE library. It is not wired into any proving
-//! member: no circuit in `zk/compose` imports it, and nothing here constrains
-//! any proof that is generated today. [`assert_handle_not_value_none`] is the
-//! assertion a dual-leaf leaf recompute would call, provided here with its own
-//! tests so the recompute can adopt it; the recompute itself does not exist in
-//! Noir yet, and wiring the assertion into the shipped members is deliberately
-//! NOT part of this library (those members' sources are hash-pinned by the
-//! `bench/zk-compose` measurement evidence).
+//! This is a CONSTANTS + PREDICATE library. `sparq_zk_compose_core` depends on it
+//! and `compose_core/src/dual_leaf_v2_leaf.nr` uses [`in_handle_band`],
+//! [`VALUE_NONE_V2`] and [`LANG_NONE`] to assert the band exclusion and the
+//! `LANG_NONE` separation at the witnessed component sites of the
+//! `scan_v2dl_k1_n16_r4` / `join_eq_v2dl_na16_nb16` members.
+//!
+//! Those two members are not reachable from any verifier path: no `CircuitId`
+//! names either package, so nothing here constrains a proof that is verified
+//! today. The shipped `scan_*` / `join_eq_*` members are untouched (their sources
+//! are hash-pinned by the `bench/zk-compose` measurement evidence), so adding this
+//! library changed no existing circuit.
 //!
 //! The DECIMAL lane constant is scale-parameterised
 //! (`decimal_lane_const(fd)`, `params = "scale=<fd>"`) and so is not a single
@@ -104,9 +107,11 @@ pub fn in_handle_band(f: Field) -> bool {
 /// Asserts a witnessed value-lane handle is not the reserved no-value sentinel.
 ///
 /// This is the assertion a dual-leaf leaf recompute would place on a value-lane
-/// hook. NOTHING calls it today (see the module scope note): no member in
-/// `zk/compose` imports this library, so adding it here changes no shipped
-/// circuit and no generated proof.
+/// hook. Nothing calls it today: the leaf recompute in
+/// `compose_core/src/dual_leaf_v2_leaf.nr` needs a PREDICATED assert -- its checks
+/// are gated on a slot being active and declaring a handle -- which this
+/// unconditional form cannot express, so it uses [`in_handle_band`] and
+/// [`VALUE_NONE_V2`] directly.
 pub fn assert_handle_not_value_none(handle: Field) {
     assert(handle != VALUE_NONE_V2, "value-lane hook is the no-value sentinel");
 }
