@@ -478,6 +478,56 @@ pub fn eval_with_limits(
     rules.bind(dict).eval_with_limits(dict, facts, limits)
 }
 
+/// What one closure charged against its [`ClosureLimits`], reported by
+/// [`eval_charged`] (and [`BoundRuleSet::eval_charged`]) for a caller that runs several
+/// closures and caps their TOTAL itself.
+///
+/// Each closure gets its [`ClosureLimits`] afresh — its rounds, its per-round join-row
+/// allowance and its `max_total_join_rows` — so a pipeline of n closures may spend n times
+/// each of them. A caller that needs the pipeline bounded has to add the charges up, which
+/// is what this type is for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ClosureCharge {
+    /// Binding rows and rule firings the closure charged over ALL its rounds (what
+    /// [`ClosureLimits::max_total_join_rows`] bounds), or `None` when that field was left
+    /// at its unbounded default — nothing is counted then.
+    pub join_rows: Option<usize>,
+    /// Distinct facts the closure's fixpoint held: the input, the rule document's own
+    /// facts and every derivation (what [`ClosureLimits::max_facts`] bounds).
+    pub facts: usize,
+}
+
+/// [`eval_with_limits`], also reporting what the closure charged ([`ClosureCharge`]).
+///
+/// # Errors
+///
+/// As [`BoundRuleSet::eval_with_limits`].
+///
+/// # Examples
+///
+/// ```
+/// use sparq_reason::n3::compiled::{compile, eval_charged, intern_facts};
+/// let mut limits = sparq_reason::ClosureLimits::default();
+/// limits.max_total_join_rows = 1_000;
+/// let rules = compile("@prefix : <http://ex/> . { ?x a :Man } => { ?x a :Mortal } .")?;
+/// let mut dict = sparq_core::dict::Dict::new();
+/// let facts = intern_facts(&mut dict, "@prefix : <http://ex/> . :Socrates a :Man .")?;
+/// let (closure, charge) = eval_charged(&mut dict, &facts, &rules, limits)?;
+/// assert_eq!(closure.len(), 2);
+/// assert_eq!(charge.facts, 2);
+/// assert!(charge.join_rows.is_some_and(|rows| rows > 0));
+/// # Ok::<(), String>(())
+/// ```
+pub fn eval_charged(
+    dict: &mut Dict,
+    facts: &[[Id; 3]],
+    rules: &CompiledRuleSet,
+    limits: ClosureLimits,
+) -> Result<(Vec<[Id; 3]>, ClosureCharge), String> {
+    rules.bind(dict).eval_charged(dict, facts, limits)
+}
+
 // ---------------------------------------------------------------------------
 // Compile front end
 // ---------------------------------------------------------------------------
@@ -1129,24 +1179,57 @@ impl BoundRuleSet<'_> {
     /// engine's error) when the closure runs past `limits.max_rounds` rounds, holds more
     /// than `limits.max_facts` facts at the start of a round, or a builtin would build a
     /// term past `limits.max_term_bytes`. No truncated closure is returned.
+    ///
+    /// The fact allowance covers the GIVEN facts too: each one is checked against
+    /// `limits.max_facts` as it is inserted, so an input set past the allowance is refused
+    /// while it is being read — before the whole set is held and before the round-0 delta
+    /// is copied from it.
     pub fn eval_with_limits(
         &self,
         dict: &mut Dict,
         facts: &[[Id; 3]],
         limits: ClosureLimits,
     ) -> Result<Vec<[Id; 3]>, String> {
+        self.eval_charged(dict, facts, limits)
+            .map(|(closure, _)| closure)
+    }
+
+    /// [`BoundRuleSet::eval_with_limits`], also reporting what the closure charged against
+    /// its allowance ([`ClosureCharge`]) — the seam a caller that runs SEVERAL closures
+    /// under one aggregate cap of its own needs, since each closure gets its
+    /// [`ClosureLimits`] afresh.
+    ///
+    /// # Errors
+    ///
+    /// As [`BoundRuleSet::eval_with_limits`].
+    pub fn eval_charged(
+        &self,
+        dict: &mut Dict,
+        facts: &[[Id; 3]],
+        limits: ClosureLimits,
+    ) -> Result<(Vec<[Id; 3]>, ClosureCharge), String> {
         let run = Truncation::top_level_with(limits);
         let strata = &self.compiled.strata;
+        // The closure's round and fact allowance (the text engine's `ClosureRounds`).
+        let mut allowance = bounded::ClosureRounds::forward(&run);
         let mut store = FactStore::default();
+        // The fact allowance is charged while the input is READ, not after: a caller can
+        // hand over any number of facts, and the store plus the round-0 delta copied from
+        // it below hold two of each. Checking each newly-held fact stops at the allowance
+        // (plus the one fact whose insertion crossed it) instead of holding the whole set.
         for f in facts {
-            store.insert(*f);
+            if store.insert(*f) {
+                allowance.hold(store.all.len(), &run)?;
+            }
         }
         for f in &self.compiled.facts {
-            store.insert([
+            if store.insert([
                 self.syms[f[0] as usize],
                 self.syms[f[1] as usize],
                 self.syms[f[2] as usize],
-            ]);
+            ]) {
+                allowance.hold(store.all.len(), &run)?;
+            }
         }
         // Round 0: every fact is "new". Rules with scoped negation re-evaluate fully
         // each round (needs_full); pure-constant rules fire in round 0 only — the text
@@ -1156,8 +1239,6 @@ impl BoundRuleSet<'_> {
         // GH #6201): a single-stratum set runs exactly one loop; at each later stratum
         // boundary the whole store is the delta and round-0 handling restarts.
         let cs = self.compiled;
-        // The closure's round and fact allowance (the text engine's `ClosureRounds`).
-        let mut allowance = bounded::ClosureRounds::forward(&run);
         // Each round's join rows and firings (the text engine's `JoinWork`).
         let work = bounded::JoinWork::forward(&run);
         for stratum in 0..strata.n_strata {
@@ -1218,7 +1299,11 @@ impl BoundRuleSet<'_> {
                 delta = new_delta;
             }
         }
-        Ok(store.list)
+        let charge = ClosureCharge {
+            join_rows: work.charged(),
+            facts: store.all.len(),
+        };
+        Ok((store.list, charge))
     }
 
     fn resolve(&self, t: CTerm, row: &Row) -> Id {

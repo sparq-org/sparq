@@ -828,6 +828,9 @@ mod driver_glue_tests {
         std::fs::write(&first, b"corrupted cache").unwrap();
         assert!(prover
             .snapshot_acir("member", b"first compiled circuit")
+            // zk-toolchain-gate: allow snapshot_acir rejects a corrupted cache entry by
+            //   comparing BYTES on disk; no tool is spawned on this path, so a missing tool
+            //   cannot produce this error
             .is_err());
         let metrics = prover.take_stage_metrics().unwrap();
         assert!(metrics.complete);
@@ -859,6 +862,9 @@ mod driver_glue_tests {
             measured.run_stage(
                 DriverStage::BbProveAndWriteVk,
                 "deliberately absent",
+                // zk-toolchain-gate: allow a deliberately ABSENT program path drives the Spawn
+                //   arm of the error classifier; this module's tests are toolchain-FREE by design
+                //   (see the module comment)
                 &mut Command::new(absent)
             ),
             Err(DriverError::Spawn { .. })
@@ -904,6 +910,9 @@ mod driver_glue_tests {
         std::fs::write(root.0.join("count"), "0").unwrap();
         let mut children: Vec<_> = (0..4)
             .map(|_| {
+                // zk-toolchain-gate: allow re-execs THIS test binary to serialize the nargo
+                //   cache lock across processes; the spawned program is the test binary, not a ZK
+                //   tool
                 Command::new(std::env::current_exe().unwrap())
                     .args([
                         "--exact",
@@ -935,6 +944,12 @@ mod driver_glue_tests {
     #[test]
     #[ignore = "requires pinned nargo; stresses shared compiler cache and immutable snapshots"]
     fn real_concurrent_compile_returns_immutable_complete_acir() {
+        if !crate::support::require_toolchain(
+            "real_concurrent_compile_returns_immutable_complete_acir",
+            &["nargo"],
+        ) {
+            return;
+        }
         let id = CircuitId::FilterInt { d: 1 };
         let prover = CircuitProver::from_crate_root();
         let expected = std::fs::read(prover.compile(&id).unwrap()).unwrap();
@@ -979,12 +994,20 @@ mod driver_glue_tests {
     /// public `compile`/`prove`/`canonical_vk` wrappers rely on.
     #[test]
     fn run_missing_tool_is_spawn_error_not_panic() {
+        // zk-toolchain-gate: allow ABSENT_TOOL drives the Spawn arm deliberately: the assertion
+        //   below is that an absent tool is CLASSIFIED as Spawn, which is the contract the
+        //   wrappers rely on
         let err = run(ABSENT_TOOL, &mut Command::new(ABSENT_TOOL))
             .expect_err("a non-existent tool must surface an error, never spawn");
         match err {
+            // zk-toolchain-gate: allow the subject under test IS the Spawn classification,
+            //   asserted positively with a named variant and a panicking wildcard; it is not an
+            //   accepted soft pass
             DriverError::Spawn { tool, source } => {
                 assert_eq!(tool, ABSENT_TOOL, "the Spawn error names the failing tool");
                 // The io source is NotFound (the binary is not on PATH).
+                // zk-toolchain-gate: allow asserts the io source of that deliberate Spawn error
+                //   is NotFound; the absence is the input, not an excuse
                 assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
             }
             other => panic!("expected Spawn classification, got {:?}", other),
@@ -997,6 +1020,8 @@ mod driver_glue_tests {
     /// exit status, not on stderr content.
     #[test]
     fn run_failing_tool_is_tool_error_distinct_from_spawn() {
+        // zk-toolchain-gate: allow FAILING_TOOL is /usr/bin/false: a real binary that always
+        //   exits non-zero, which drives the Tool arm distinctly from Spawn
         let err = run("false", &mut Command::new(FAILING_TOOL))
             .expect_err("a non-zero exit must be an error");
         match err {
@@ -1023,6 +1048,8 @@ mod driver_glue_tests {
     fn display_renders_each_variant_distinctly() {
         let spawn = DriverError::Spawn {
             tool: "nargo".into(),
+            // zk-toolchain-gate: allow constructs a DriverError value for a Display test;
+            //   nothing is spawned
             source: std::io::Error::new(std::io::ErrorKind::NotFound, "not found"),
         };
         let tool = DriverError::Tool {
@@ -1091,6 +1118,9 @@ mod driver_glue_tests {
         let r_a = prover.gen_witness_tagged(&id, "challenge = \"0x1\"\n", "taga");
         let r_b = prover.gen_witness_tagged(&id, "challenge = \"0x2\"\n", "tagb");
         assert!(
+            // zk-toolchain-gate: allow documented either-way assertion: with or without nargo
+            //   this call errs, and the real assertion below is that the per-tag
+            //   Prover_<tag>.toml files were written first
             r_a.is_err() && r_b.is_err(),
             "no real witness without the toolchain"
         );
