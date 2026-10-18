@@ -152,7 +152,15 @@ pub fn kway_merge(runs: &[PathBuf], out: &Path) -> io::Result<()> {
         }
         Ok(())
     })?;
-    w.flush()
+    w.flush()?;
+    // (sq-ycle) FSYNC the merged permutation. This file is part of the store image an
+    // external build publishes, and `flush` only hands the bytes to the page cache: the build
+    // reported success while the index it had just written could still be lost to a crash. The
+    // durability barrier a manifest publish goes through syncs the directories and the files it
+    // walks; this syncs the one file this writer owns, where it is written.
+    w.into_inner()
+        .map_err(|e| io::Error::other(e.to_string()))?
+        .sync_all()
 }
 
 /// sq-vkz7 — k-way merges sorted run files into a BLOCK-COMPRESSED `SPQCPRM1`

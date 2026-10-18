@@ -1971,14 +1971,31 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   `Graph::restore_in_place`, which the graph itself performs — it stages the complete new base
   beside the store and renames it in, giving its log up only once that base is on disk, so a
   staging failure leaves the store exactly as writable as it was.
-- **A handle whose directory was replaced refuses writes.** Each graph records its tree's layout
-  generation, bumped by every base swap (compaction, vacuum, restore) and every named-graph drop.
-  A handle whose generation no longer matches — a named graph taken out of its parent's `named`
-  vector before the parent swapped its base, for instance — is refused rather than left appending
-  to an unlinked log.
-- **One writer per `--persist DIR`.** The durable store assumes a single writing process and a
-  single writing handle per directory; two writers on one directory corrupt it and nothing
-  currently detects that. Writer exclusion is designed in
+- **A handle whose directory was replaced refuses writes.** Each graph records the layout
+  generation of the DIRECTORY its log lives in, and every base swap (compaction, vacuum, restore)
+  and every named-graph drop records which directory it replaced. A handle inside a replaced
+  directory — a named graph taken out of its parent's `named` vector before the parent swapped
+  its base, for instance — is refused rather than left appending to an unlinked log. A swap
+  elsewhere in the tree (a sibling graph, or a child beneath a root that is still there) does not
+  make a handle stale, so a sequential writer can compact a store with named graphs and carry on
+  writing. A compaction of a store that HAS named graphs stages the whole tree once and publishes
+  it once.
+- **A named graph's directory is handed out once.** `named.bin` (format 2; format 1 is still
+  read) records each named graph's `named/<slot>` id and the next id to hand out, so the id is
+  monotonic rather than the graph's position. A `DROP GRAPH` rewrites the manifest — the commit
+  point — and then removes that graph's own directory, leaving every other graph's slot and
+  handle alone; a drop of every named graph leaves a manifest naming none, which is what keeps
+  the counter. A graph created after a drop therefore cannot land in a dropped graph's directory,
+  even if the removal of that directory failed or a crash interrupted it.
+- **A drop that cannot remove its directories is an error.** The removals are reported, not
+  discarded, and the failure freezes the store until it is reopened: for a `DROP` performed to
+  ERASE data (the retention/erasure runbook), reporting success while the data is still on disk
+  is the one answer that must not be given. Over HTTP this is a refused update, not a 2xx.
+- **One writer per `--persist DIR`.** Within this process the store tree holds a writer permit,
+  so two handles on one tree — a root and a named graph detached from it, say — cannot write
+  concurrently, and a handle's staleness check cannot be overtaken by maintenance between the
+  check and the append it guards. Two writing PROCESSES on one directory still corrupt it and
+  nothing detects that; cross-process exclusion is designed in
   [`research/core-versioned-store-design.md`](../../research/core-versioned-store-design.md) and
   is not implemented yet.
 - **Online backup/restore — opt-in `backup` feature (default OFF).** Build with

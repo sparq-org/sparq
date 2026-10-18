@@ -328,6 +328,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unaffected. In the other direction, a journal frame whose format version is NEWER than this
   build knows is an error that changes nothing, instead of a torn tail that gets truncated.
 
+- **sparq-core (`sq-ycle`): a named graph's directory is a MONOTONIC slot id, not its
+  position.** `named.bin` is format version 2: it records the `named/<slot>` id of every named
+  graph and, in its header, the next id to hand out. A version-1 manifest is still read (its ids
+  are its positions). Three behaviours follow. A drop no longer renumbers the survivors into a
+  fresh sub-tree and swaps it in — it rewrites the manifest, which is the commit point, and
+  removes the dropped graph's own directory, so survivors keep their slots and their handles. A
+  drop of every named graph rewrites the manifest naming NOTHING instead of removing it, because
+  the header carries the counter: removing it reset the counter, and the next created graph then
+  landed in slot 0 on top of whatever the removal of the old slot 0 had left behind — base, WAL
+  and journal — whose replay brought the dropped graph's triples back under the new graph's
+  name. And the removals themselves are REPORTED rather than discarded: a drop whose directories
+  are still on disk afterwards is an error that freezes the store, which for a DROP performed to
+  erase data is the only honest answer. A whole-store write — `save`, or the base swap a
+  compaction publishes — writes a FRESH image whose slots are numbered from zero again and whose
+  counter starts past them, which is sound precisely because nothing of the old image survives
+  there for an id to collide with.
+
+- **sparq-core (`sq-ycle`): one bottom-up durability barrier for every named-graph
+  manifest publish.** Each level is made durable before the level that names it — the sub-trees'
+  files and their own directories, then the `named/` container, then the store root that holds
+  `named/` and the manifest — and every publish site goes through it, the external quad builder
+  included (it wrote the manifest directly, so it synced nothing at all). The root rung was the
+  one previously missing: when a create was what made `named/` exist, the root's directory entry
+  for it reached disk only in the fsync that followed the manifest rename. The external-sort
+  merge and the compressed-permutation writer now fsync the index they produce instead of
+  flushing it.
+
+- **sparq-core (`sq-ycle`): layout generations are PER SUB-TREE, and a root compaction
+  stages the whole tree once.** A handle is stale when the directory its log lives in — or one
+  containing it — was replaced, not when anything anywhere in the tree was. One tree-wide
+  counter made a child's base swap mark the root and every sibling stale, so a root compaction
+  that folded its children one at a time refused at the second child, and with a single child
+  the root's own next write refused. A directory-backed compaction now stages the whole tree's
+  new base once and publishes it once (the image `save` writes already contains every named
+  graph, folded), so a sequential writer can compact a root with named graphs and carry on
+  writing.
+
+- **sparq-core (`sq-ycle`): a tree-wide WRITER PERMIT.** One writer at a time across a
+  durable tree, held across a write's staleness check, log append and in-memory application, and
+  by maintenance from staging through publish; reentrant, because a write at the top of a tree
+  materialises through writes further down it. The check-then-append sequence was not atomic
+  against maintenance elsewhere: a handle on a named graph taken out of its parent's public
+  `named` vector could pass the check, and the parent could then stage a new base, record the
+  replacement and unlink the old directory, before the detached child appended to — and
+  acknowledged — the log inside it. Exclusion BETWEEN PROCESSES is a different problem and is
+  still not solved here.
+
+- **sparq-core (`sq-ycle`): an interrupted named-graph drop reconciles EVERY candidate
+  before removing any of them.** The manifest names a definite set of slots, and a candidate
+  sub-tree agrees only if it holds exactly that set; the first candidate that agrees is
+  published, the losers are removed only afterwards, and when NONE agrees the open is refused
+  with all of them left on disk. A present `named/` that disagreed used to be deleted so that
+  `named.drop-old` could be promoted, without checking that `drop-old` agreed either. Slot
+  inspection is also fallible now: it walked directory entries with `is_dir()`, which an I/O
+  error answers the same way a missing directory does, so an unreadable sub-tree read as a
+  shorter one.
+
+- **sparq-core (`sq-ycle`): one committed-frame decoder for the WAL and the redo
+  journal.** Both files are the same frame format and had two copies of the scan, which had
+  drifted: the journal treated a COMMITTED, checksum-valid body it could not decode as a torn
+  tail and truncated it — an acknowledged commit discarded on the strength of a byte the build
+  could not interpret — and sized its record vector with an infallible reservation from the
+  untrusted header count. Through the shared decoder the journal now reports such a body as an
+  error that rewrites nothing, bounds the declared count by the body length before reserving
+  fallibly, refuses an unknown opcode, and refuses bytes left after the last record.
+
 - **sparq-core (`sq-ycle`): a graph store directory now says what it is.** Every store
   carries a `sparq-store` marker file naming its role — a root (opened, saved or built on its
   own) or a named graph of one — written before anything else in the directory, and a store

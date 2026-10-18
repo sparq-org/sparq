@@ -1113,6 +1113,12 @@ impl CompressedPermWriter {
         }
         std::io::copy(&mut body_rd, &mut w)?;
         std::io::Write::flush(&mut w)?;
+        // (sq-ycle) FSYNC the assembled permutation, for the same reason the raw
+        // external-sort merge does: this file is part of a store image a build publishes, and a
+        // flush leaves it in the page cache only.
+        w.into_inner()
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+            .sync_all()?;
         drop(body_rd);
         std::fs::remove_file(&self.body_path).ok();
         Ok(())

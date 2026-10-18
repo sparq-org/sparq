@@ -44,7 +44,7 @@ preserving RDF terms and triples. Writers use `numerics-v3.bin`/`temporals-v4.bi
 wrong-sized current files also trigger rebuilds.
 
 Legacy opens cost a dictionary scan until migrated with `Graph::open(old)?.save(new)?`; a store written before the `sparq-store` marker existed gets one
-on its next writable open. Versions mark semantic compatibility, not integrity. A pre-`dict-meta.bin` store is refused an atomic UPDATE until migrated, and `save`/`save_compressed`/`build_external*` write to a FRESH destination only — replace a store by swapping a staged image in. Details: [data-formats](../../skills/data-formats/SKILL.md), [durability](../../skills/http-server/SKILL.md).
+on its next writable open. Versions mark semantic compatibility, not integrity. A pre-`dict-meta.bin` store is refused an atomic UPDATE until migrated, and `save`/`save_compressed`/`build_external*` write to a FRESH destination only — replace a store by swapping a staged image in. A named graph lives in the `named/<slot>` directory its manifest (`named.bin`, format 2; format 1 is still read) records, and a slot id is handed out once and never reused, so a graph dropped and a graph created afterwards can never share a directory. One writer at a time per open store tree, in this process; a drop that cannot remove its directories is an error, not a silent success. Details: [data-formats](../../skills/data-formats/SKILL.md), [durability](../../skills/http-server/SKILL.md).
 
 ## ✨ Features
 
