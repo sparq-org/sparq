@@ -215,6 +215,16 @@ pub fn triple_principal(agent: &str, client: &str, issuer: &str) -> String {
     format!("urn:sparq:triple?agent={a}&client={c}&issuer={i}")
 }
 
+/// Three-valued outcome of an ACP `noneOf` exception matcher against a session. A
+/// provenance (`acp:CreatorAgent`/`acp:OwnerAgent`) matcher on a resource with no
+/// recorded creator (resp. owner) is `Undecided` rather than `No`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Accepts {
+    Yes,
+    No,
+    Undecided,
+}
+
 #[derive(Debug, Default)]
 struct ConditionalGrant {
     allow: bool,
@@ -363,6 +373,12 @@ pub struct AuthIndex {
     matcher_clients: FxHashMap<String, FxHashSet<String>>,
     /// sq-3jtd.6 — the issuer-dimension twin of `matcher_clients`.
     matcher_issuers: FxHashMap<String, FxHashSet<String>>,
+    /// Provenance (`acp:CreatorAgent`/`acp:OwnerAgent`) matcher instances whose resource
+    /// has no recorded creator (resp. owner): the matcher is UNDECIDED there, neither
+    /// accepting nor rejecting, so a conditional ALLOW that needs the exception decided
+    /// does not apply and a conditional DENY that needs it does
+    /// ([`AuthIndex::cond_applies`]).
+    matcher_undecided: FxHashSet<String>,
     /// Resources whose access-control document the loader rejected: no grant applies to
     /// them, whichever source installed it.
     withheld: Withheld,
@@ -431,6 +447,11 @@ impl AuthIndex {
                             let set = ix.matcher_issuers.entry(subj).or_default();
                             set.insert(o.as_str().to_owned());
                         }
+                    }
+                    // The third truth value: this instance's resource has no recorded
+                    // creator/owner of the matcher's kind (the object names the kind).
+                    "https://sparq.dev/ns/solidx#provUndecided" => {
+                        ix.matcher_undecided.insert(subj);
                     }
                     _ => {}
                 }
@@ -522,8 +543,10 @@ impl AuthIndex {
     }
 
     /// Does `matcher` accept this session? (Used for ACP noneOf exceptions: an
-    /// accepting exception matcher suppresses the conditional grant.)
-    fn matcher_accepts(&self, matcher: &str, s: &Session) -> bool {
+    /// accepting exception matcher suppresses the conditional grant.) Three-valued: a
+    /// provenance matcher whose resource has no recorded creator/owner is `Undecided`
+    /// once the session clears its other dimensions — it neither accepts nor rejects.
+    fn matcher_accepts(&self, matcher: &str, s: &Session) -> Accepts {
         let agent_ok = match self.matcher_agents.get(matcher) {
             None => false, // no accept-set materialized -> cannot accept
             Some(set) => {
@@ -546,7 +569,16 @@ impl AuthIndex {
                 set.contains(ANY_ISSUER) || s.issuer.map(|i| set.contains(i)).unwrap_or(false)
             }
         };
-        agent_ok && client_ok && issuer_ok
+        if agent_ok && client_ok && issuer_ok {
+            Accepts::Yes
+        } else if client_ok && issuer_ok && self.matcher_undecided.contains(matcher) {
+            // The agent dimension is the undecided one: with no recorded creator/owner
+            // this matcher's accept-set names no agent at all, so `agent_ok` being false
+            // carries no information.
+            Accepts::Undecided
+        } else {
+            Accepts::No
+        }
     }
 
     /// Does a conditional grant's (agent, client, issuer) head apply to this session,
@@ -561,11 +593,20 @@ impl AuthIndex {
         let client_ok = g.client == ANY_CLIENT || s.client == Some(g.client.as_str());
         let issuer_ok = g.issuer == ANY_ISSUER || s.issuer == Some(g.issuer.as_str());
         let window_ok = window_admits(g.not_before.as_deref(), g.not_after.as_deref(), s.now);
-        agent_ok
-            && client_ok
-            && issuer_ok
-            && window_ok
-            && !g.except.iter().any(|m| self.matcher_accepts(m, s))
+        if !(agent_ok && client_ok && issuer_ok && window_ok) {
+            return false;
+        }
+        let mut undecided = false;
+        for m in &g.except {
+            match self.matcher_accepts(m, s) {
+                Accepts::Yes => return false,
+                Accepts::Undecided => undecided = true,
+                Accepts::No => {}
+            }
+        }
+        // An undecided exception leaves the grant itself undecided: an ALLOW that needs
+        // the exception decided does not apply, a DENY that needs it does.
+        !undecided || !g.allow
     }
 
     /// The sorted, deduplicated graph set this session may access in `mode`:

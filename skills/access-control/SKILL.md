@@ -129,7 +129,16 @@ Materialize the authorization view from the access-control documents, then enfor
   granted `R2`), and so is every role a provenance matcher plays: in `allOf`, `anyOf` and
   `noneOf` it is decided against the resource being accessed (an `allOf` of
   `CreatorAgent` and `OwnerAgent` needs both on the same resource, and a `noneOf`
-  `CreatorAgent` excepts that resource's creator) and composes with the matcher's own `acp:client`/`acp:issuer` constraints.
+  `CreatorAgent` excepts that resource's creator) and composes with `acp:client`/`acp:issuer`
+  constraints on the matcher itself AND on a sibling matcher of the same policy (the
+  resource's creator/owner is crossed with every client and issuer value the policy's
+  matchers name).
+  Provenance is THREE-VALUED: on a resource the caller supplied no creator (resp. owner)
+  for, a `CreatorAgent` (resp. `OwnerAgent`) matcher is UNDECIDED in all three roles — no
+  agent can be ruled out as that resource's creator — so an `acp:allow` whose conditions
+  include it does NOT apply, and an `acp:deny` whose conditions include it DOES, for every
+  agent. That holds for a resource that is absent from the view but has its own `.acr`, and
+  for one whose provenance was forgotten.
   The store keeps the provenance and credentials of its last successful ACP
   materialization: `materialize_acp()` and every rebuild after `put_acl_acp`,
   `delete_acl_acp` or an update use them. Before any is passed there is no provenance ⇒
@@ -609,7 +618,8 @@ discovery; neither is itself a conformance-tested HTTP layer.
   dimension. sq-3jtd.5: matchers may also use `acp:agent acp:CreatorAgent` /
   `acp:OwnerAgent` — the context agent must be the resource's creator / owner, resolved
   against the TRUSTED per-resource provenance supplied via `materialize_acp_with` (above),
-  resource-scoped and fail-closed. sq-ysv3u: matchers may also constrain on
+  resource-scoped, three-valued (undecided where the resource has no recorded creator /
+  owner: an allow needing it does not apply, a deny needing it does) and fail-closed. sq-ysv3u: matchers may also constrain on
   **`acp:vc`** — the context agent must hold a verified credential satisfying the named
   requirement, resolved against the TRUSTED holdings supplied via
   `materialize_acp_with_credentials` (above), and fail-closed with none supplied.

@@ -30,12 +30,28 @@ acl:Append  solidx:allowPred auth:append  ; solidx:denyPred auth:denyAppend .
 acl:Control solidx:allowPred auth:control ; solidx:denyPred auth:denyControl .
 
 # ── policy satisfaction for a candidate triple ─────────────────────────────────────────
+# THREE-VALUED in the provenance dimension. A provenance (CreatorAgent/OwnerAgent) matcher
+# on a resource the trusted caller supplied no creator (resp. owner) for is undecided, and
+# stratum B marked the candidate allOfUndecided / anyOfUndecided for it. The two readings
+# of such a candidate differ by effect: `solidx:satisfied` (ALLOW) needs every condition
+# decided-true, so an undecided one withholds the allow; `solidx:satisfiedForDeny` (DENY)
+# counts an undecided condition as met, so a deny that needs it still applies. The split
+# stays stratified: every NAF below reads a fact this stratum does not derive — an original
+# acp: triple, or a stratum-B output (allOfRejected / allOfUndecided / anyOfSat).
 { ?pol solidx:candTriple ?k . ?k solidx:anyOfSat true . } => { ?k solidx:anyOfOk true . } .
 { ?pol solidx:candTriple ?k . ?UNSCOPED log:notIncludes { ?pol acp:anyOf ?m . } . }
 => { ?k solidx:anyOfOk true . } .
+# an undecided disjunct meets the anyOf for a DENY only (a satisfied one already meets both)
+{ ?k solidx:anyOfOk true . } => { ?k solidx:anyOfOkForDeny true . } .
+{ ?pol solidx:candTriple ?k . ?k solidx:anyOfUndecided true . }
+=> { ?k solidx:anyOfOkForDeny true . } .
 { ?pol solidx:candTriple ?k . ?k solidx:anyOfOk true .
-  ?UNSCOPED log:notIncludes { ?k solidx:allOfRejected true . } . }
+  ?UNSCOPED log:notIncludes { ?k solidx:allOfRejected true . } .
+  ?UNSCOPED log:notIncludes { ?k solidx:allOfUndecided true . } . }
 => { ?k solidx:satisfied true . } .
+{ ?pol solidx:candTriple ?k . ?k solidx:anyOfOkForDeny true .
+  ?UNSCOPED log:notIncludes { ?k solidx:allOfRejected true . } . }
+=> { ?k solidx:satisfiedForDeny true . } .
 
 # ── the candidate's principal term ─────────────────────────────────────────────────────
 # issuer-unconstrained: fall back to the agent (client-unconstrained) / minted pair model.
@@ -65,7 +81,7 @@ acl:Control solidx:allowPred auth:control ; solidx:denyPred auth:denyControl .
   ?UNSCOPED log:notIncludes { ?pol acp:noneOf ?nm . } .
   ?UNSCOPED log:notIncludes { ?pol solidx:provTriple ?k . } . }
 => { ?p ?pred ?r . } .
-{ ?pol solidx:candTriple ?k . ?k solidx:satisfied true . ?k solidx:principal ?p .
+{ ?pol solidx:candTriple ?k . ?k solidx:satisfiedForDeny true . ?k solidx:principal ?p .
   ?pol solidx:appliesToResource ?r . ?pol acp:deny ?mode . ?mode solidx:denyPred ?pred .
   ?UNSCOPED log:notIncludes { ?pol acp:noneOf ?nm . } .
   ?UNSCOPED log:notIncludes { ?pol solidx:provTriple ?k . } . }
@@ -78,7 +94,7 @@ acl:Control solidx:allowPred auth:control ; solidx:denyPred auth:denyControl .
   ?k solidx:provForResource ?r . ?pol acp:allow ?mode . ?mode solidx:allowPred ?pred .
   ?UNSCOPED log:notIncludes { ?pol acp:noneOf ?nm . } . }
 => { ?p ?pred ?r . } .
-{ ?pol solidx:provTriple ?k . ?k solidx:satisfied true . ?k solidx:principal ?p .
+{ ?pol solidx:provTriple ?k . ?k solidx:satisfiedForDeny true . ?k solidx:principal ?p .
   ?k solidx:provForResource ?r . ?pol acp:deny ?mode . ?mode solidx:denyPred ?pred .
   ?UNSCOPED log:notIncludes { ?pol acp:noneOf ?nm . } . }
 => { ?p ?pred ?r . } .
@@ -102,7 +118,7 @@ acl:Control solidx:allowPred auth:control ; solidx:denyPred auth:denyControl .
 => { ?g a auth:ConditionalGrant . ?g auth:effect auth:Allow .
      ?g auth:agent ?pa . ?g auth:client ?pc . ?g auth:issuer ?pi .
      ?g auth:mode ?mode . ?g auth:graph ?r . ?g auth:exceptMatcher ?nm . } .
-{ ?pol solidx:candTriple ?k . ?k solidx:satisfied true .
+{ ?pol solidx:candTriple ?k . ?k solidx:satisfiedForDeny true .
   ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc . ?k solidx:pairIssuer ?pi .
   ?pol solidx:appliesToResource ?r . ?pol acp:deny ?mode . ?pol acp:noneOf ?nm .
   ?UNSCOPED log:notIncludes { ?pol solidx:provTriple ?k . } .
@@ -138,7 +154,7 @@ acl:Control solidx:allowPred auth:control ; solidx:denyPred auth:denyControl .
 => { ?g a auth:ConditionalGrant . ?g auth:effect auth:Allow .
      ?g auth:agent ?pa . ?g auth:client ?pc . ?g auth:issuer ?pi .
      ?g auth:mode ?mode . ?g auth:graph ?r . ?g auth:exceptMatcher ?mi . } .
-{ ?pol solidx:provTriple ?k . ?k solidx:satisfied true .
+{ ?pol solidx:provTriple ?k . ?k solidx:satisfiedForDeny true .
   ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc . ?k solidx:pairIssuer ?pi .
   ?k solidx:provForResource ?r . ?pol acp:deny ?mode . ?pol acp:noneOf ?nm .
   ?UNSCOPED log:notIncludes { ?nm solidx:provMatcher ?kind . } .
@@ -149,7 +165,7 @@ acl:Control solidx:allowPred auth:control ; solidx:denyPred auth:denyControl .
 => { ?g a auth:ConditionalGrant . ?g auth:effect auth:Deny .
      ?g auth:agent ?pa . ?g auth:client ?pc . ?g auth:issuer ?pi .
      ?g auth:mode ?mode . ?g auth:graph ?r . ?g auth:exceptMatcher ?nm . } .
-{ ?pol solidx:provTriple ?k . ?k solidx:satisfied true .
+{ ?pol solidx:provTriple ?k . ?k solidx:satisfiedForDeny true .
   ?k solidx:pairAgent ?pa . ?k solidx:pairClient ?pc . ?k solidx:pairIssuer ?pi .
   ?k solidx:provForResource ?r . ?pol acp:deny ?mode . ?pol acp:noneOf ?nm .
   ?nm solidx:provMatcher ?kind . ?mi solidx:instanceOf ?nm . ?mi solidx:instanceRes ?r .
