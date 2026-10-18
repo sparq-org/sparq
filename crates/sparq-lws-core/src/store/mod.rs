@@ -66,6 +66,9 @@ pub use sparql::{BodyObject, BuildError};
 
 use crate::error::{ServerError, ServerResult};
 
+/// The content type of an index record [`Store::write_marker`] keeps: a marker, with no bytes.
+const MARKER_TYPE: &str = "application/x-sparq-marker";
+
 /// A resource as the LDP handler sees it: bytes + the authoritative metadata.
 #[derive(Debug, Clone)]
 pub struct Resource {
@@ -257,6 +260,26 @@ pub trait Store: Send + Sync {
         Err(ServerError::Storage(
             "this store has no unsettled writes to fence".into(),
         ))
+    }
+
+    /// The small value [`write_marker`](Store::write_marker) last stored under `iri`, or `None`
+    /// when none is. A record under `iri` that is not a marker reads as an empty value.
+    ///
+    /// The default refuses, as [`write_marker`](Store::write_marker) does.
+    async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+        let _ = iri;
+        Err(ServerError::Storage("this store keeps no markers".into()))
+    }
+
+    /// Store a small value under `iri`, replacing what it held in one step: kept in the index
+    /// alone, with no bytes, so it takes no blob capacity, and once one is stored a replacement
+    /// needs no capacity at all. An `iri` no request can name (a fragment) keeps it out of every
+    /// listing and every request's reach. A write that fails may still have landed.
+    ///
+    /// The default refuses: a store that cannot keep one apart from its bytes says so.
+    async fn write_marker(&self, iri: &str, value: &str) -> ServerResult<()> {
+        let _ = (iri, value);
+        Err(ServerError::Storage("this store keeps no markers".into()))
     }
 
     /// [`list_children`](Store::list_children) while it fits (see
@@ -834,6 +857,38 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .fence(fence)
             .await
             .map_err(|e| ServerError::Storage(format!("{e}")))
+    }
+
+    async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+        match self.sparq.get_meta(iri).await {
+            Ok(m) if m.content_type == MARKER_TYPE && m.blob_key.is_empty() => Ok(Some(m.etag)),
+            Ok(_) => Ok(Some(String::new())),
+            Err(SparqError::NotFound) => Ok(None),
+            Err(e) => Err(ServerError::Storage(format!("{e}"))),
+        }
+    }
+
+    async fn write_marker(&self, iri: &str, value: &str) -> ServerResult<()> {
+        // The index record alone, pointing at no bytes: the value rides in its tag.
+        let meta = ResourceMeta {
+            content_type: MARKER_TYPE.to_string(),
+            blob_key: String::new(),
+            etag: value.to_string(),
+            last_modified: None,
+        };
+        let previous = self
+            .sparq
+            .replace_meta(iri, meta)
+            .await
+            .map_err(|e| match e {
+                SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+                SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
+                other => ServerError::Storage(format!("{other}")),
+            })?;
+        if let Some(old) = previous.filter(|old| !old.blob_key.is_empty()) {
+            self.reclaim_blob(&old.blob_key).await;
+        }
+        Ok(())
     }
 
     async fn read_plan(&self, target: &str, acl_candidates: &[String]) -> ServerResult<ReadPlan> {

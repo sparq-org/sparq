@@ -332,7 +332,29 @@ seconds to 10 minutes; a removal whose delete the store leaves unknown is settle
 same deadline, never handed on, so its place comes back with it. The sweeper stops, aborting
 the removals under way, as soon as the server's last handle is dropped. Removal is eventual, subject to the store making
 progress: removals contend with requests for the store and its index, and a store that never
-answers delays them indefinitely. A start removes every expired subscription it loads. A
+answers delays them indefinitely. A start removes every expired subscription it loads.
+**Expiry is decided by a stored time.** The notification service keeps a wall-clock high-water
+mark (seconds since the epoch), and a subscription is expired once its `expires` is at or before
+the later of the clock and that mark. Before anything outside sees a subscription expire (a read
+of it answered `404`, a listing that leaves it out, its removal, a delivery stopped), a time at
+or past its expiry is stored as the mark, so a start whose clock was stepped back still finds it
+expired. The mark is one small record, replaced in one step and only ever raised, kept in the
+store's index alone (`Store::write_marker`, under a fragment of the subscriptions container that
+no request can name), so storing it needs no blob capacity even with the subscription pool full;
+it is written at most once for each second in which a subscription is seen to expire. A request
+whose answer would show an expiry the store will not take answers `503`. While the mark cannot be
+stored, no subscription with an expiry has a delivery made (those without one go on), and the
+expiry sweeper tries the write again. A start that finds no mark, or one that is not a time,
+while subscriptions with an expiry are stored expires every one of them (their subscribers may
+subscribe again), and stores a mark only once they are all removed; a fresh storage simply has
+one stored. Removal of an expired subscription is plain, retryable cleanup with nothing written
+first: a removal that fails, is cut short or whose outcome is unknown leaves it expired, and it
+is tried again. Expiry is decided again under the removal's locks, so a subscriber's `DELETE` of
+a subscription that expires while it waits answers `404`, as one already expired does.
+**Residual:** a stop between the clock passing an expiry and the mark being stored, followed by
+a start with the clock stepped back before it, serves that subscription again; nothing outside
+saw it expire. WebSocket subscriptions have no expiry latch: their receive tokens are held in
+memory and expire by the process's monotonic clock, and none survives a restart. A
 subscriber's conditional subscription create compares its own listing, and holds only that
 listing (and the container, shared) while it is evaluated and until the new subscription is
 registered (when the store leaves the create's outcome unknown, it holds that listing shared
@@ -342,11 +364,9 @@ above, or the owner's conditional create (which holds the container alone, and o
 later shared holders waiting behind it, so then, for at most the lock wait, another
 subscriber's change too), never another subscriber's create or removal otherwise, and never
 the sweeper's removal of anyone else's expired subscription, which is listed nowhere (once seen
-expired, a subscription stays expired, even if the clock is stepped back; it is marked expired
-in the store before its removal begins, and none begins unless the mark is stored, so a start
-after a removal that failed or was cut short finds it expired whatever the clock says then; a
-delivery checks its subscription again once it has decided the subscriber may read the
-resource, with nothing waited on between that check and the send). An access document nested too deeply to store and read back gets 400. A
+expired, a subscription stays expired, even if the clock is stepped back; a delivery checks its
+subscription again once it has decided the subscriber may read the resource, with nothing waited
+on between that check and the send). An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.

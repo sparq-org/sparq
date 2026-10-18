@@ -375,9 +375,11 @@ pub(crate) enum Removed {
 /// - The steps then run in a task of their own, holding the locks and `admission` (the request's
 ///   share of its admission permit), so a client that goes away cannot cut them short:
 ///   `set_aside` takes the record out of force while its removal runs (`None` when it is not in
-///   force: [`Removed::Absent`]); the record is deleted ([`delete_record`]), and a failure is
-///   checked against the listing ([`still_listed`]); `settle` is told whether it is confirmed
-///   gone, and removes it from memory or puts it back, giving the author to announce it to.
+///   force: [`Removed::Absent`]), deciding under the locks, where it may wait (a decision that
+///   needs nothing stored is [`at_once`]); the record is deleted ([`delete_record`]), and a
+///   failure is checked against the listing ([`still_listed`]); `settle` is told whether it is
+///   confirmed gone, and removes it from memory or puts it back, giving the author to announce
+///   it to.
 /// - A delete that failed [unsettled](crate::error::ServerError::Unsettled) (an HTTP update that
 ///   timed out) can still remove the record after the listing showed it. Still listed (or the
 ///   listing unreadable), it is settled in the background: the record stays out of force, and
@@ -391,7 +393,7 @@ pub(crate) enum Removed {
 ///   are released. Otherwise the answer is `500`, saying whether it is still stored or that this
 ///   is not known (it is left as it was, and the request may be retried).
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn remove_record<S, H, A, Z>(
+pub(crate) async fn remove_record<S, H, A, F, Z>(
     state: &LwsState<S>,
     container: &str,
     iri: &str,
@@ -399,14 +401,14 @@ pub(crate) async fn remove_record<S, H, A, Z>(
     listed: Listed<'_>,
     by: Remover,
     admission: Option<crate::overload::AdmissionSlot>,
-    tombstone: Option<(Bytes, &'static str)>,
     set_aside: A,
     settle: Z,
 ) -> Result<Removed, Response>
 where
     S: Store + 'static,
     H: Send + 'static,
-    A: FnOnce() -> Option<H> + Send + 'static,
+    A: FnOnce() -> F + Send + 'static,
+    F: std::future::Future<Output = Option<H>> + Send + 'static,
     Z: FnOnce(&LwsState<S>, bool, H) -> Option<String> + Send + 'static,
 {
     let place = match by {
@@ -431,18 +433,9 @@ where
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
-        let Some(held) = set_aside() else {
+        let Some(held) = set_aside().await else {
             return Ok(Removed::Absent);
         };
-        // Stored over the record before anything is removed, the record's lock held: a removal
-        // that fails or is cut short leaves it, and none begins unless it is stored.
-        if let Some((body, content_type)) = tombstone {
-            if let Err(e) = state.store.write(&iri, body, content_type).await {
-                let author = settle(&state, false, held);
-                drop((own, listing, place, own_listing, author));
-                return Err(format!("the {what} could not be removed: {e}"));
-            }
-        }
         let gone = match delete_record(&state.store, &iri, &container).await {
             Ok(()) => Some(true),
             // A record not listed is gone for good (a delete only removes, and the record's
@@ -526,6 +519,13 @@ where
         Ok(Ok(removed)) => Ok(removed),
         Ok(Err(why)) | Err(why) => Err(problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&why))),
     }
+}
+
+/// A `set_aside` for [`remove_record`] that decides at once, waiting on nothing.
+pub(crate) fn at_once<H>(
+    set_aside: impl FnOnce() -> Option<H>,
+) -> impl FnOnce() -> std::future::Ready<Option<H>> {
+    move || std::future::ready(set_aside())
 }
 
 /// Who removes a record ([`remove_record`]), and so how its steps run.

@@ -2661,6 +2661,10 @@ pub(crate) mod test_store {
         /// Once [`FlakyStore::fail_step`] has failed a step, every later step fails too: the
         /// store is gone from then on, as for a process that stops there.
         pub dead_after: Arc<AtomicBool>,
+        /// `write_marker` fails with a backend error.
+        pub fail_marker_write: Arc<AtomicBool>,
+        /// How many `write_marker` calls went through.
+        pub marker_writes: Arc<std::sync::atomic::AtomicUsize>,
         fired: Arc<AtomicBool>,
     }
 
@@ -2716,6 +2720,8 @@ pub(crate) mod test_store {
                 fail_step: Default::default(),
                 fail_then: Default::default(),
                 dead_after: Default::default(),
+                fail_marker_write: Default::default(),
+                marker_writes: Default::default(),
                 fired: Default::default(),
             }
         }
@@ -3079,6 +3085,17 @@ pub(crate) mod test_store {
                 return Err(ServerError::Storage("no such write".into()));
             };
             *write.lock().await = true;
+            Ok(())
+        }
+        async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+            self.inner.read_marker(iri).await
+        }
+        async fn write_marker(&self, iri: &str, value: &str) -> ServerResult<()> {
+            if self.fail_marker_write.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.write_marker(iri, value).await?;
+            self.marker_writes.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {

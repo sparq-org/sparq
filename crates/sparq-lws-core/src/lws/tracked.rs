@@ -231,6 +231,15 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.fence(fence).await
     }
 
+    async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+        self.inner.read_marker(iri).await
+    }
+
+    /// A marker shows in no listing, so it moves no snapshot.
+    async fn write_marker(&self, iri: &str, value: &str) -> ServerResult<()> {
+        self.inner.write_marker(iri, value).await
+    }
+
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
         self.inner.list_children(container).await
     }
