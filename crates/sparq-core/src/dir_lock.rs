@@ -11,10 +11,14 @@
 //! wait. Advisory locks over network file systems (NFS and the like) are not relied on: such
 //! directories are not supported.
 //!
-//! The lock file lives beside the directory, so the parent directory must be writable (at least
-//! once, to create it). It is empty and harmless to keep: never delete it as "stale" while the
-//! directory may be in use, since a holder keeps the lock on the file it opened, and a new file
-//! at that path would let a second holder in.
+//! A store's lock is two lock files ([`DirLock`]): `<dir>.lock` beside the directory, taken
+//! when it exists or can be created, then `sparq.lock` inside it, always. A store whose parent
+//! directory is not writable (a mount root, say) is held by its inside lock alone: it opens,
+//! is written and read as any other, but a compaction or restore, which renames the directory,
+//! needs the outside lock and is refused, naming the parent. Both files are empty and harmless
+//! to keep: never delete either as "stale" while the directory may be in use, since a holder
+//! keeps the lock on the file it opened, and a new file at that path would let a second holder
+//! in. Anyone who can open a lock file can take a shared lock on it and so keep a writer out.
 //!
 //! The flat layout, whose directory compaction renames, locks a sibling file named for the
 //! directory's resolved path ([`LockLocation::sibling_of`]), so one directory
@@ -298,13 +302,13 @@ fn unnamed(dir: &Path) -> io::Error {
     )
 }
 
-/// The lock file a store keeps inside its own directory ([`DirLock::acquire_store`]), reserved
+/// The lock file a store keeps inside its own directory ([`DirLock`]), reserved
 /// like the store's other internal names.
 pub const INSIDE_LOCK: &str = "sparq.lock";
 
 /// The lock on a graph directory, held while this lives: exclusive or shared.
 ///
-/// A store's lock ([`acquire_store`](Self::acquire_store)) is two lock files, taken in this
+/// A store's lock is two lock files, taken in this
 /// order, outside then inside, by every holder:
 ///
 /// - the OUTSIDE lock, `<dir>.lock` beside the directory, when it exists or can be created (an
@@ -512,7 +516,8 @@ impl DirLock {
 
     /// Puts `file`, a lock already held on the new directory's inside lock file, in place of
     /// the inside lock held now, which is returned (for the caller to keep until the old
-    /// directory is gone).
+    /// directory is gone). Unix only: Windows takes the new lock after the renames.
+    #[cfg(not(windows))]
     pub(crate) fn replace_inside(&self, file: Option<File>) -> Option<File> {
         match &self.inside {
             Some((_, held)) => std::mem::replace(

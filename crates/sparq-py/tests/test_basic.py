@@ -541,11 +541,38 @@ def test_reason_keeps_the_directory_locked(tmp_path):
     # The reasoned graph still maps the store's dictionary, so it keeps the lock.
     with pytest.raises(OSError):
         sparq.Graph.open(d)
+    # It holds that lock itself: a save into its directory names the reason (the files it
+    # maps), it does not wait on its own lock.
+    with pytest.raises(OSError, match="open from"):
+        a.save(d)
     del a
     import gc
 
     gc.collect()
     sparq.Graph.open(d)
+
+
+def test_a_frozen_graph_raises_instead_of_serving(tmp_path):
+    d = tmp_path / "db"
+    g().save(d)
+    a = sparq.Graph.open(d)
+    assert not a.frozen
+    a._freeze_for_test("injected swap failure")
+    assert a.frozen
+    for call in (
+        lambda: a.query("SELECT * WHERE { ?s ?p ?o }"),
+        lambda: a.query_json("SELECT * WHERE { ?s ?p ?o }"),
+        lambda: a.ask("ASK { ?s ?p ?o }"),
+        lambda: a.construct("CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o }"),
+        lambda: a.describe("DESCRIBE <http://ex/alice>"),
+        lambda: a.save(d),
+        lambda: a.save(tmp_path / "elsewhere"),
+    ):
+        with pytest.raises(OSError, match="frozen"):
+            call()
+    assert not (tmp_path / "elsewhere").exists()
+    with pytest.raises(Exception, match="injected swap failure"):
+        a.update("INSERT DATA { <http://ex/x> <http://ex/p> <http://ex/o> }")
 
 
 def test_open_missing_dir(tmp_path):

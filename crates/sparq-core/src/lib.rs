@@ -2148,14 +2148,15 @@ impl Graph {
     /// lock ([`dir_lock`], at the same location as [`open`](Self::open)'s) is taken SHARED, so
     /// read-only opens coexist with each other but not with a writable holder (`WouldBlock`
     /// either way round: a directory in use by a server, which can compact it underneath, is
-    /// refused). Nothing in the directory is written (the lock file beside it is created if
-    /// missing).
+    /// refused). Both lock files (`<dir>.lock` beside the directory, `sparq.lock` inside it)
+    /// are taken shared, each created when missing and creatable; a reader that can neither
+    /// open nor create either holds no lock. Nothing else in the directory is written.
     ///
     /// Refused (`InvalidInput`) while the directory, or any named graph in it, has something a
     /// writable open would replay or recover: a non-empty write-ahead log or transaction
-    /// journal, or the residue of an interrupted compaction or named-graph drop. Fold that in
-    /// first: [`open`](Self::open) it and [`compact`](Self::compact) (`sparq-cli compact <dir>`
-    /// does both), then open it read-only.
+    /// journal, or the residue of an interrupted compaction or named-graph drop. A writable
+    /// open recovers or replays that: [`open`](Self::open) it once (`sparq-cli compact <dir>`
+    /// does, and folds the logs into the base), then open it read-only.
     ///
     /// The graph refuses every write ([`apply_delta`](Self::apply_delta), updates,
     /// [`compact`](Self::compact), [`vacuum`](Self::vacuum), restores) and is not
@@ -2187,8 +2188,8 @@ impl Graph {
     /// the logs replayed and kept open for appends, and a legacy store without a marker gets
     /// one. Read-only (the caller has checked that there is no residue and no log to replay):
     /// nothing in `dir` is written, and the graph and its named graphs refuse writes. Either
-    /// way the store's internals are checked first: no symbolic link, and no file with another
-    /// hard link (on Unix), among them.
+    /// way the store's internals are checked first: no symbolic link among them, and no other
+    /// hard link to a file written in place (its logs; on Unix).
     #[cfg(feature = "mmap")]
     fn open_dir(
         dir: &std::path::Path,
@@ -3991,11 +3992,12 @@ impl Graph {
         // frozen base (so the NEXT fork is O(1) again) and the forked caches flat.
         // No-ops on a never-forked graph.
         for i in 0..self.named.len() {
-            if let Err(e) = self.named[i].1.compact() {
-                // A named graph whose swap froze it has lost its log: the root must not go on
-                // writing (a named-graph drop would re-save the frozen graph's view and lose
-                // its data), so it is frozen too.
-                #[cfg(feature = "mmap")]
+            let compacted = self.named[i].1.compact();
+            // A named graph whose swap froze it has lost its log: the root must not go on
+            // writing (a named-graph drop would re-save the frozen graph's view and lose its
+            // data), so it is frozen too.
+            #[cfg(feature = "mmap")]
+            if let Err(e) = &compacted {
                 if self.named[i].1.is_frozen() {
                     self.detach(&format!(
                         "the swap of a named graph ({}) failed: {e}; drop this graph and re-open \
@@ -4003,8 +4005,8 @@ impl Graph {
                         self.named[i].0
                     ));
                 }
-                return Err(e);
             }
+            compacted?;
         }
         if self.dict.is_forked() {
             self.dict = self.dict.compacted();
@@ -4044,7 +4046,9 @@ impl Graph {
     /// renames); a crash there must NOT lose the dataset. We:
     ///
     ///   1. write the new base to `<dir>.compact-new` and fsync the DIRECTORY (so its existence +
-    ///      contents are durable before it can become canonical);
+    ///      contents are durable before it can become canonical); the staging directory is made
+    ///      under a scratch name and carries a staging record from before it has that name, so
+    ///      recovery only ever acts on a staging directory this store's swap made;
     ///   2. rename `dir` -> `<dir>.compact-old`, fsync the parent (the rename is durable);
     ///   3. rename `<dir>.compact-new` -> `dir`, fsync the parent.
     ///
@@ -4100,12 +4104,13 @@ impl Graph {
     /// [`restore_into_durable`](Self::restore_into_durable) for the directory this graph was
     /// opened from, under the lock it holds: this graph becomes the restored one.
     ///
-    /// On an error the directory is the old store or, if the swap got as far as its second
-    /// rename, the restored one; it is never lost. When it is still the old store (the swap
-    /// failed before its renames, or was rolled back) this graph keeps writing to it as before
-    /// (re-opened from it, when the swap had got as far as releasing its files). Otherwise this
-    /// graph refuses every later write (an error, never a silently dropped update): drop it and
-    /// re-open the directory.
+    /// A failure part-way through the swap is recovered at once, under the lock this graph
+    /// holds: when that completes the swap the restore succeeded (`Ok`, this graph is the
+    /// restored one); when it rolls the swap back the error is returned and this graph keeps
+    /// writing to the old store (re-opened from it, when the swap had got as far as releasing
+    /// its files). The directory is never lost. Only when neither works is this graph frozen
+    /// ([`is_frozen`](Self::is_frozen)): every later write refused (an error, never a silently
+    /// dropped update); drop it and re-open the directory.
     #[cfg(feature = "mmap")]
     pub fn restore_in_place(&mut self, fresh: Graph) -> std::io::Result<()> {
         self.refuse_if_detached().map_err(std::io::Error::other)?;
@@ -4290,6 +4295,15 @@ impl Graph {
         false
     }
 
+    /// TEST hook: freeze this graph as a failed directory swap that could not be recovered
+    /// does ([`is_frozen`](Self::is_frozen)), saying `why`, so a crate serving graphs can test
+    /// how it reports one (a real freeze needs a filesystem failure part-way through a swap).
+    #[cfg(feature = "mmap")]
+    #[doc(hidden)]
+    pub fn freeze_for_test(&mut self, why: &str) {
+        self.detach(why);
+    }
+
     /// `Err` when this graph refuses writes: it was opened read-only (`Graph::open_read_only`),
     /// or a failed directory swap froze it ([`is_frozen`](Self::is_frozen)). A caller that
     /// replaces a graph with a rebuilt copy (an update or reasoning pass that returns a new
@@ -4319,20 +4333,20 @@ impl Graph {
     }
 
     /// (sq-ft7u) The directory this graph is durably backed by (its `--persist` dir),
-    /// or `None` for an in-memory graph. The companion to [`restore_into_durable`](Self::restore_into_durable):
-    /// a caller doing an in-place durable restore reads the backing dir, then closes the WAL
-    /// (see [`close_wal`](Self::close_wal)) before swapping the directory over to the new base.
+    /// or `None` for an in-memory graph. To restore that directory while this graph is open
+    /// from it, use [`restore_in_place`](Self::restore_in_place), which swaps it under the lock
+    /// this graph holds and releases the graph's files itself.
     #[cfg(feature = "mmap")]
     pub fn persist_dir(&self) -> Option<std::path::PathBuf> {
         self.wal.as_ref().map(|w| w.dir.clone())
     }
 
-    /// (sq-ft7u) Close (drop) this graph's write-ahead-log handle, if any. Used right
-    /// before a directory swap that renames the backing dir away (the WAL's `wal.log` lives under
-    /// it), exactly as the internal compaction swap does — the swap then re-opens a fresh handle.
-    /// A no-op for an in-memory graph. Safe to call on a graph whose dir is about to be replaced
-    /// by [`restore_into_durable`](Self::restore_into_durable); the graph keeps serving reads from
-    /// its in-memory image, it simply stops appending to the (about-to-be-renamed) log.
+    /// (sq-ft7u) Close (drop) this graph's write-ahead-log handle, if any: the graph keeps
+    /// serving reads from its image, and later updates apply in memory only, unlogged. A no-op
+    /// for an in-memory graph. It does not release the directory's lock (the graph's mapped
+    /// files keep it), so it does not make the directory free for
+    /// [`restore_into_durable`](Self::restore_into_durable); to replace the directory of an open
+    /// graph use [`restore_in_place`](Self::restore_in_place).
     #[cfg(feature = "mmap")]
     pub fn close_wal(&mut self) {
         self.wal = None;

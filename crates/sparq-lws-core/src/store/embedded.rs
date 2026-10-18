@@ -290,7 +290,12 @@ impl EmbeddedSparqClient {
         T: Send + 'static,
     {
         self.round_trips.fetch_add(1, Ordering::Relaxed);
-        self.actor.call(f).await
+        self.actor
+            .call(move |graph| {
+                refuse_frozen(graph)?;
+                f(graph)
+            })
+            .await
     }
 
     /// Snapshot the current graph to `dir` (the durable seam for the in-memory path). Runs on the
@@ -305,6 +310,7 @@ impl EmbeddedSparqClient {
         let dir = dir.to_path_buf();
         self.actor
             .call(move |graph| {
+                refuse_frozen(graph)?;
                 let saved = if graph.is_backed_by(&dir) {
                     graph.compact()
                 } else {
@@ -316,6 +322,19 @@ impl EmbeddedSparqClient {
             })
             .await
     }
+}
+
+/// A graph a failed directory swap froze ([`Graph::is_frozen`]) is reported as failed, never
+/// served: what it still reads may be empty or older than its directory. The store has to be
+/// re-opened.
+fn refuse_frozen(graph: &Graph) -> Result<(), SparqError> {
+    if !graph.is_frozen() {
+        return Ok(());
+    }
+    let why = graph.check_writable().err().unwrap_or_default();
+    Err(SparqError::Backend(format!(
+        "fatal: the embedded graph is frozen and must be re-opened from its directory: {why}"
+    )))
 }
 
 /// Map an engine error string (the `Result<_, String>` the `sparq-engine` entry points return) into
@@ -840,6 +859,33 @@ mod tests {
 
     fn client() -> EmbeddedSparqClient {
         EmbeddedSparqClient::in_memory().expect("empty in-memory graph")
+    }
+
+    /// A graph a failed directory swap froze is reported as failed by every data-path call and
+    /// by `save`, never served (what it still reads may be empty or older than its directory).
+    #[test]
+    fn a_frozen_graph_is_reported_not_served() {
+        block_on(async {
+            let c = client();
+            c.put_meta("http://pod/alice/doc", meta("text/turtle", "b", "\"e\""))
+                .await
+                .unwrap();
+            c.actor
+                .call(|g| {
+                    g.freeze_for_test("injected swap failure");
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let read = c.get_meta("http://pod/alice/doc").await;
+            let Err(SparqError::Backend(msg)) = read else {
+                panic!("a frozen graph was served: {read:?}");
+            };
+            assert!(msg.contains("frozen") && msg.contains("injected swap failure"), "{msg}");
+            let dir = std::env::temp_dir().join(format!("sparq-lws-frozen-{}", std::process::id()));
+            assert!(c.save(&dir).await.is_err(), "a frozen graph was saved");
+            assert!(!dir.exists(), "a refused save wrote {}", dir.display());
+        });
     }
 
     fn meta(ct: &str, bk: &str, etag: &str) -> ResourceMeta {

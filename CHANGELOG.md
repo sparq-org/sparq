@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **sparq-core (`mmap`): one writer per store directory.** A store is locked while a graph is
+  open from it: `<dir>.lock` beside the directory, taken when it exists or can be created, then
+  `sparq.lock` inside it, always, in that order, by every opener. A second writable open, save,
+  build or compaction of the same store fails at once (`WouldBlock`) instead of corrupting it;
+  `Graph::open_read_only` opens share the lock with each other. A store whose parent directory
+  is not writable (a mount root, say) still opens, writable or read-only, held by its inside
+  lock alone; a compaction, vacuum or restore there (they rename the directory) is refused with
+  an error naming the parent. Compaction and restore swaps stage the new base under a recorded
+  staging name, recover an interrupted swap at once, and roll back on a failure; a swap that
+  can neither complete nor roll back freezes the graph: `Graph::is_frozen` reports it, every
+  write is refused, and the embedded LWS store and the Python `Graph` (`frozen` property) report
+  it as an error instead of serving it. New: `Graph::open_read_only`, `Graph::restore_in_place`,
+  `Graph::is_backed_by`, `Graph::check_writable`, `Graph::is_frozen`, `Graph::into_dict`, and
+  `dir_lock::{store_root, is_inside_store, is_reserved_store_path}`.
+- **sparq-cli:** output files (`--out`, `reason`, tabular conversions) are written under a fresh
+  name beside the target and renamed into place; an output path that names a store, a path
+  inside one or a reserved name (lock files, in any letter case) is refused (exit 2), and a
+  symbolic link is followed to the file it names, which is the file replaced.
+
 - **sparq-zk / sparq-zk-compose (opt-in `dual-leaf`):** `DualLeafV2` routes all six value lanes,
   and the host builds every lane's value-lane sub-proof inputs from typed operands.
   `dual_leaf_v2::is_hookable_datatype` and `encode_literal` now route `xsd:boolean`,
@@ -155,6 +174,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   <!-- privacy-claims-allow: describes an added method-bound relation and its retained legacy contract; the external audit is named as an OPEN obligation and the downgrade is written down; asserts no soundness/privacy property; sq-qhy4 -->
 
 ### Changed
+
+- **sparq-core (BREAKING API):** `Graph::dict` and `Graph::store` are no longer public fields;
+  read them with `Graph::dict()` / `Graph::store()`, and take the dictionary out with
+  `Graph::into_dict()` (rebuild with `Graph::from_parts`). These openers and writers of a
+  store's files became crate-internal, so a store's files are reachable only through the
+  locked `Graph`: `Dict::{save, save_mmap, open_mmap, fork}`, `TripleStore::{open, save,
+  save_compressed, save_pred_stats, fork}`, `compress::CompressedPermWriter::{create, create_with,
+  finish}`, and `extsort::{spill_run, kway_merge, kway_merge_compressed, external_sort,
+  external_sort_compressed, map_perm}`. Migration: open, save and build through `Graph`
+  (`Graph::open`, `Graph::save`, `Graph::build_external*`), fork through `Graph::fork`, and restore an
+  open store with `Graph::restore_in_place` (`Graph::restore_into_durable` refuses a directory a
+  graph is open from).
 
 - **sparq-lws-core (notifications):** subscription expiry is decided against a durable
   high-water time stored in the index, so a restart with the clock stepped back does not revive

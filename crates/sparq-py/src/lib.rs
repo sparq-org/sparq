@@ -303,6 +303,19 @@ impl Graph {
             self.text = Some(py.detach(|| TextIndex::build(inner)));
         }
     }
+
+    /// The graph, for reading — unless a failed directory swap froze it: what a frozen graph
+    /// reads may be empty or older than its directory, so it raises `OSError` instead (re-open
+    /// the directory with `Graph.open`).
+    fn live(&self) -> PyResult<&CoreGraph> {
+        if self.inner.is_frozen() {
+            let why = self.inner.check_writable().err().unwrap_or_default();
+            return Err(PyIOError::new_err(format!(
+                "the graph is frozen and must be re-opened from its directory: {why}"
+            )));
+        }
+        Ok(&self.inner)
+    }
 }
 
 #[pymethods]
@@ -364,10 +377,19 @@ impl Graph {
         Ok(Graph { inner, text: None })
     }
 
+    /// True when a failed directory swap (a `save` that compacted the directory the graph is
+    /// open from) froze the graph: it then refuses writes, and its queries and `save` raise
+    /// `OSError`. Drop it and re-open the directory with `Graph.open`.
+    #[getter]
+    fn frozen(&self) -> bool {
+        self.inner.is_frozen()
+    }
+
     /// Persist the graph (indexes + dictionary) into `dir` for later `Graph.open`. Into the
     /// directory this graph was opened from, it compacts that directory instead (it already
     /// holds the graph's state, and the graph still maps the files a plain save would rewrite).
     fn save(&mut self, py: Python<'_>, dir: std::path::PathBuf) -> PyResult<()> {
+        self.live()?;
         let inner = &mut self.inner;
         py.detach(|| {
             if inner.is_backed_by(&dir) {
@@ -382,8 +404,9 @@ impl Graph {
     /// Run a SPARQL SELECT, materialising the solutions as a `QueryResult`
     /// (`.vars` + `.rows`, where each row is a `{var: Term}` dict).
     fn query(&self, py: Python<'_>, sparql: &str) -> PyResult<QueryResult> {
+        let inner = self.live()?;
         let res = py
-            .detach(|| sparq_engine::query(&self.inner, sparql))
+            .detach(|| sparq_engine::query(inner, sparql))
             .map_err(engine_err)?;
         select_result(py, &res)
     }
@@ -392,7 +415,8 @@ impl Graph {
     /// `str` — the fast path: rows are serialised straight from the dictionary,
     /// skipping per-cell term materialisation.
     fn query_json(&self, py: Python<'_>, sparql: &str) -> PyResult<String> {
-        py.detach(|| sparq_engine::query_json(&self.inner, sparql))
+        let inner = self.live()?;
+        py.detach(|| sparq_engine::query_json(inner, sparql))
             .map_err(engine_err)
     }
 
@@ -415,8 +439,9 @@ impl Graph {
     /// if it is missing.
     #[cfg(feature = "arrow")]
     fn query_arrow<'py>(&self, py: Python<'py>, sparql: &str) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.live()?;
         let res = py
-            .detach(|| sparq_engine::query(&self.inner, sparql))
+            .detach(|| sparq_engine::query(inner, sparql))
             .map_err(engine_err)?;
         arrow_export::query_result_to_pyarrow_table(py, &res)
     }
@@ -431,13 +456,14 @@ impl Graph {
             .map_err(|error| engine_err(error.to_string()))?;
         let prepared = sparq_engine::PreparedQuery::from_query_with_versions(query, versions)
             .map_err(engine_err)?;
+        let inner = self.live()?;
         match prepared.query() {
             Query::Ask { .. } => {
-                py.detach(|| sparq_engine::ask_prepared(&self.inner, &prepared)).map_err(engine_err)
+                py.detach(|| sparq_engine::ask_prepared(inner, &prepared)).map_err(engine_err)
             }
             Query::Select { .. } => {
                 let n = py
-                    .detach(|| sparq_engine::count_prepared(&self.inner, &prepared))
+                    .detach(|| sparq_engine::count_prepared(inner, &prepared))
                     .map_err(engine_err)?;
                 Ok(n > 0)
             }
@@ -451,8 +477,9 @@ impl Graph {
     /// unbound variable or an illegal RDF position are silently dropped, and
     /// template blank nodes are fresh per solution).
     fn construct(&self, py: Python<'_>, sparql: &str) -> PyResult<Vec<(Term, Term, Term)>> {
+        let inner = self.live()?;
         let triples = py
-            .detach(|| sparq_engine::construct(&self.inner, sparql))
+            .detach(|| sparq_engine::construct(inner, sparql))
             .map_err(engine_err)?;
         Ok(triples.iter().map(triple_terms).collect())
     }
@@ -462,8 +489,9 @@ impl Graph {
     /// through blank-node objects) of each described resource, as a list of
     /// `(subject, predicate, object)` `Term` triples.
     fn describe(&self, py: Python<'_>, sparql: &str) -> PyResult<Vec<(Term, Term, Term)>> {
+        let inner = self.live()?;
         let triples = py
-            .detach(|| sparq_engine::describe(&self.inner, sparql))
+            .detach(|| sparq_engine::describe(inner, sparql))
             .map_err(engine_err)?;
         Ok(triples.iter().map(triple_terms).collect())
     }
@@ -645,7 +673,7 @@ impl Graph {
     fn query_text(&mut self, py: Python<'_>, sparql: &str) -> PyResult<QueryResult> {
         self.ensure_text_index(py);
         let index = self.text.as_ref().expect("ensure_text_index just built it");
-        let inner = &self.inner;
+        let inner = self.live()?;
         let res = py
             .detach(|| sparq_text::query_text(inner, sparql, index))
             .map_err(engine_err)?;
@@ -733,6 +761,13 @@ impl Graph {
     // it is intentionally undocumented in SKILL.md (not part of the public API).
     fn _panic_for_test(&self) {
         panic!("sparq-py panic-surface test: this must reach Python as a PanicException, not abort");
+    }
+
+    // Private test hook (not in SKILL.md): freeze the graph as a failed directory swap that
+    // could not be recovered does. A real freeze needs a filesystem failure part-way through a
+    // swap, which no Python test can arrange; this asserts the frozen state is surfaced.
+    fn _freeze_for_test(&mut self, why: &str) {
+        self.inner.freeze_for_test(why);
     }
 }
 
