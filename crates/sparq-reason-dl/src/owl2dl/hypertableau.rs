@@ -2034,10 +2034,11 @@ impl<'c> Tableau<'c> {
         for &ci in &self.index.multi_y {
             self.probe();
             let cl = &self.c.clauses[ci as usize];
-            // A clause inactive in this attempt counts nothing, nor does one whose body fails
-            // at `s` or whose head already holds there.
+            // A clause inactive in this attempt counts nothing, nor does one whose body
+            // (concepts or self-loops) fails at `s` or whose head already holds there.
             if cl.scoped.is_some_and(|scoped| scoped != self.scoped)
                 || !cl.body_x.iter().all(|a| sn.label.contains_key(a))
+                || !cl.body_self.iter().all(|&r| self.has_role(r, s, s))
                 || cl.head.iter().any(|h| match *h {
                     Head::Concept(a, Var::X) => sn.label.contains_key(&a),
                     Head::SelfLoop(r) => self.has_role(r, s, s),
