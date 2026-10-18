@@ -3713,6 +3713,37 @@ fn the_scoped_choice_reaches_every_counted_neighbour() {
     }
 }
 
+/// A fuzz ontology whose tests of `C0` against each other class ran out of the shared
+/// budget. The model the consistency check found has elements in `C0` that are outside
+/// every other class but `C1`, so only `C0 ⊑ C1` is tested. HermiT agrees.
+#[test]
+fn the_consistency_model_shows_non_subsumptions() {
+    let body = r#"<http://ex/o6854> a owl:Ontology . :C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :C4 a owl:Class . :C5 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :r2 a owl:ObjectProperty . :i0 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r2 ] ; owl:someValuesFrom :C0 ] .
+        :C5 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:someValuesFrom :C0 ] .
+        :C4 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :C0 :C3 ) ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:allValuesFrom :C1 ] .
+        :C5 owl:disjointWith :C1 .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:hasValue :i0 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:hasValue :i0 ] .
+        :C5 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:maxQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C4 ] ] .
+        :i0 a :C5 .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r1 ] ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C5 ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( :C0 [ owl:complementOf :C3 ] ) ] .
+        :C1 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r2 ; owl:minCardinality "2"^^xsd:nonNegativeInteger ] .
+        :i0 :r0 :i0 .
+        :r1 a owl:FunctionalProperty .
+        :C5 owl:hasKey ( :r1 ) .
+        :a a owl:NamedIndividual , :C0 ."#;
+    let (d, r) = run(body);
+    let c = r
+        .classification
+        .unwrap_or_else(|| panic!("{:?}", r.classification_unknown));
+    assert!(c.unsatisfiable.is_empty());
+    assert!(c.subsumptions.contains(&(ex(&d, "C0"), ex(&d, "C1"))));
+}
+
 /// The scoped choice for `o : ≤1 T.∃S.¬C0` is the clause `T⁻(x, y₀) ∧ S(x, y₁) → C0(y₁) ∨
 /// Q(x)`, with two neighbour variables. The plain attempt does not apply it, so it must not
 /// count copies of a blocked node there either, or the plain attempt's model goes
