@@ -348,9 +348,13 @@ pub(crate) fn check_output_bound_cap(bound: usize) -> Result<(), MpcError> {
 /// nothing about what the producer itself discloses. The hidden-path producers
 /// group on every enumerated tuple's endpoint pair, read in the clear, and multiply
 /// once more per repeat, so for them the fold POSITIONS — and hence that count —
-/// are disclosed on BOTH branches of this contract, to the grouping evaluator here
-/// and to every evaluating party in a real run; see [`crate::hidden_path`] for who
-/// learns what, and for the limits of that account. A count above [`MAX_OUTPUT_BOUND`] needs no branch of
+/// are disclosed on BOTH branches of this contract to the grouping evaluator here,
+/// and to every evaluating party in a distributed implementation that supplies them
+/// with the ordered plaintext endpoint terms or with that construction's
+/// data-dependent accumulator wiring. This crate implements a single-process
+/// simulation and does not establish a per-party input or wiring-distribution
+/// boundary. See [`crate::hidden_path`] for who learns what, and for the limits of
+/// that account. A count above [`MAX_OUTPUT_BOUND`] needs no branch of
 /// its own: `B` is capped first, so a count that large cannot be covered and falls
 /// out of the same refusal.
 pub(crate) fn check_bound_public_first(

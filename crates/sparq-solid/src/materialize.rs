@@ -75,10 +75,14 @@ const EXCEPT_MATCHER: &str = "https://sparq.dev/ns/auth#exceptMatcher";
 /// solidx facts copied into the auth view for matchers referenced by conditional
 /// grants (the session layer evaluates `exceptMatcher`s from these).
 /// sq-3jtd.6 adds `acceptsIssuerP` — the noneOf exception check is three-dimensional.
-const MATCHER_FACTS: [&str; 3] = [
+/// `provUndecided` marks a provenance matcher instance whose resource has no recorded
+/// creator/owner: the session layer reads it as the third truth value (an allow that needs
+/// the exception decided does not apply, a deny that needs it does).
+const MATCHER_FACTS: [&str; 4] = [
     "https://sparq.dev/ns/solidx#acceptsAgentP",
     "https://sparq.dev/ns/solidx#acceptsClientP",
     "https://sparq.dev/ns/solidx#acceptsIssuerP",
+    "https://sparq.dev/ns/solidx#provUndecided",
 ];
 
 /// What a `materialize_*` run produced: auth-view size, per-stratum closure sizes,

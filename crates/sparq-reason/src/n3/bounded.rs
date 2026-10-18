@@ -715,15 +715,35 @@ pub(crate) fn derived_term(
     Bounded::cut(true, CLOSURE_CUT)
 }
 
+/// What a substitution has to offer the term-building helpers below: the term a variable is
+/// bound to, if it is bound.
+///
+/// Two substitutions implement it, and the helpers size and build the same terms for either.
+/// The text engine's [`super::Binding`] keys itself by an `Rc<str>`, so copying a
+/// substitution — which its backward proof search does per candidate site and per solution —
+/// does not allocate a name per entry (GH #7080). The incremental counting engine carries a
+/// plain `FxHashMap<String, Term>` and is left as it is. Both answer this one question, and
+/// that is all these helpers ask of a substitution.
+pub(crate) trait Subst {
+    /// What `v` is bound to, or `None`.
+    fn bound(&self, v: &str) -> Option<&Term>;
+}
+
+impl<S: BuildHasher> Subst for HashMap<String, Term, S> {
+    fn bound(&self, v: &str) -> Option<&Term> {
+        self.get(v)
+    }
+}
+
 /// The [`term_bytes`] of `t` with `b`'s bindings substituted, as [`substitute`] (or, with
 /// `deep`, [`substitute_deep`], through quoted formulae) would build it, read from the
 /// borrowed terms without building anything.
-pub(crate) fn resolved_bytes<S: BuildHasher>(t: &Term, b: &HashMap<String, Term, S>, deep: bool) -> usize {
+pub(crate) fn resolved_bytes<B: Subst + ?Sized>(t: &Term, b: &B, deep: bool) -> usize {
     let all = |ts: &mut dyn Iterator<Item = &Term>| {
         ts.fold(TERM_NODE_BYTES, |n, m| n.saturating_add(resolved_bytes(m, b, deep)))
     };
     match t {
-        Term::Var(v) => term_bytes(b.get(v).unwrap_or(t)),
+        Term::Var(v) => term_bytes(b.bound(v).unwrap_or(t)),
         Term::List(ms) => all(&mut ms.iter()),
         Term::Triple(tr) => all(&mut tr.iter()),
         Term::Formula(ts) if deep => all(&mut ts.iter().flatten()),
@@ -771,9 +791,9 @@ impl std::fmt::Display for Substituted {
 /// atom is one copy of an existing term and is not sized. `tests/n3_bounded_discipline.rs`
 /// fails if an N3 evaluator substitutes any other way.
 #[inline]
-pub(crate) fn substitute<S: BuildHasher>(
+pub(crate) fn substitute<B: Subst + ?Sized>(
     t: &Term,
-    b: &HashMap<String, Term, S>,
+    b: &B,
     run: &Truncation,
 ) -> Option<Term> {
     match t {
@@ -960,9 +980,9 @@ fn walked_members<'a>(
 /// (sized from the borrowed terms; the cut and the run's refusal are recorded). Kept out
 /// of line: a variable or atom, the common case, never reaches it.
 #[inline(never)]
-fn compound_refused<S: BuildHasher>(
+fn compound_refused<B: Subst + ?Sized>(
     t: &Term,
-    b: &HashMap<String, Term, S>,
+    b: &B,
     run: &Truncation,
     deep: bool,
 ) -> bool {
@@ -1019,9 +1039,9 @@ pub(crate) fn dict_term_bytes(dict: &sparq_core::dict::Dict, id: sparq_core::dic
 /// Substitute bound variables in `t` (recursing into list members and quoted triples);
 /// returns the term (possibly still containing free vars). Private: callers go through
 /// [`substitute`].
-fn apply<S: BuildHasher>(t: &Term, b: &HashMap<String, Term, S>) -> Term {
+fn apply<B: Subst + ?Sized>(t: &Term, b: &B) -> Term {
     match t {
-        Term::Var(v) => b.get(v).cloned().unwrap_or_else(|| t.clone()),
+        Term::Var(v) => b.bound(v).cloned().unwrap_or_else(|| t.clone()),
         Term::List(ms) => Term::List(ms.iter().map(|m| apply(m, b)).collect()),
         Term::Triple(tr) => {
             Term::Triple(Box::new([apply(&tr[0], b), apply(&tr[1], b), apply(&tr[2], b)]))
@@ -2251,10 +2271,10 @@ mod tests {
         let var = |s: &str| Term::Var(s.to_string());
         let run = Truncation::top_level();
         let mut b = super::super::Binding::default();
-        b.insert("bound".into(), iri("http://ex/v"));
-        b.insert("chain".into(), var("bound"));
-        b.insert("list".into(), Term::List(vec![var("chain"), iri("http://ex/w")]));
-        b.insert("cyc".into(), Term::Formula(vec![[var("cyc"), iri("http://ex/q"), var("bound")]]));
+        b.insert("bound", iri("http://ex/v"));
+        b.insert("chain", var("bound"));
+        b.insert("list", Term::List(vec![var("chain"), iri("http://ex/w")]));
+        b.insert("cyc", Term::Formula(vec![[var("cyc"), iri("http://ex/q"), var("bound")]]));
         let goals = vec![
             // Every term a leaf: nothing is copied.
             [iri("http://ex/a"), iri("http://ex/p"), var("free")],
@@ -2299,10 +2319,10 @@ mod tests {
         let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
         let var = |s: &str| Term::Var(s.to_string());
         let mut b = Binding::default();
-        b.insert("x".into(), var("mid"));
-        b.insert("mid".into(), var("end"));
-        b.insert("end".into(), iri("v"));
-        b.insert("inner".into(), iri("leaked"));
+        b.insert("x", var("mid"));
+        b.insert("mid", var("end"));
+        b.insert("end", iri("v"));
+        b.insert("inner", iri("leaked"));
         let quoted = Term::Formula(vec![
             [iri("s"), iri("p"), var("inner")],
             [iri("s"), iri("q"), var("own")],
@@ -2336,7 +2356,7 @@ mod tests {
         // occurs check leaves the second `?x` as the variable it is, so the walk is finite
         // and the goal still HAS an identity instead of being refused for its depth.
         let mut cyclic = Binding::default();
-        cyclic.insert("x".into(), Term::List(vec![var("x")]));
+        cyclic.insert("x", Term::List(vec![var("x")]));
         let cyclic_run = Truncation::top_level();
         assert_eq!(
             walked_atom(&[var("x"), iri("has"), iri("v")], &cyclic, &cyclic_run),
