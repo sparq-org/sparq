@@ -1164,16 +1164,6 @@ where
         let _ = (issuer, jwks_cache_ttl, auth, identity);
         // The same overload stack the Solid router carries: the per-IP rate limiter, admission
         // control, the request timeout and the body ceiling, with /livez and /readyz outside it.
-        // The operator's recovery from a notification high water stored while the clock had
-        // jumped forward: run once, before anything is served, then unset.
-        if env_flag(sparq_lws_core::lws::notify::RESET_SUBSCRIPTION_CLOCK_VAR) {
-            let removed = sparq_lws_core::lws::notify::reset_subscription_clock(&store, &cfg).await?;
-            eprintln!(
-                "  NOTIFICATIONS: high water reset to the clock; {removed} subscriptions with an \
-                 expiry removed (unset {} before the next start)",
-                sparq_lws_core::lws::notify::RESET_SUBSCRIPTION_CLOCK_VAR
-            );
-        }
         let lws = sparq_lws_core::lws::router(store, cfg).await?;
         return Ok(with_overload_layers(lws, overload_config));
     }

@@ -20,11 +20,13 @@ pub const SERVICE_POOL_PATH: &str = "/.lws/subscriptions/";
 pub const SERVICE_MARKER_FRAGMENT: &str = "#high-water";
 
 /// Whether `iri` has the shape of the notification service's marker: an `http` or `https`
-/// origin (no user information) followed by exactly the service pool's container and
+/// origin (a non-empty host, no user information, and a port, if given, of digits alone)
+/// followed by exactly the service pool's container and
 /// [`SERVICE_MARKER_FRAGMENT`]. A storage has one marker, and its index entry has a slot of its
 /// own, admitted apart from every ceiling, so storing it never waits on room (no request can name
-/// it: it is a fragment). The in-memory index keeps that slot for one IRI alone, the first marker
-/// stored there; any other of this shape is admitted as an ordinary pool record.
+/// it: it is a fragment). The in-memory index keeps that slot for one IRI alone, the first new
+/// marker stored while it is free; any other of this shape is admitted as an ordinary pool
+/// record, and stays one.
 pub fn is_service_marker(iri: &str) -> bool {
     let Some(rest) = iri
         .strip_prefix("https://")
@@ -36,8 +38,25 @@ pub fn is_service_marker(iri: &str) -> bool {
         return false;
     };
     let (authority, path) = rest.split_at(at);
-    !authority.is_empty()
-        && !authority.contains(['@', '?', '#'])
+    // An IPv6 literal is bracketed, and its colons are not a port's.
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(inner) => match inner.split_once(']') {
+            Some((literal, "")) => (literal, None),
+            Some((literal, after)) => match after.strip_prefix(':') {
+                Some(port) => (literal, Some(port)),
+                None => return false,
+            },
+            None => return false,
+        },
+        None => match authority.split_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (authority, None),
+        },
+    };
+    let port_ok = port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    !host.is_empty()
+        && !host.contains(['@', '?', '#', '/', '[', ']'])
+        && port_ok
         && path.strip_prefix(SERVICE_POOL_PATH) == Some(SERVICE_MARKER_FRAGMENT)
 }
 

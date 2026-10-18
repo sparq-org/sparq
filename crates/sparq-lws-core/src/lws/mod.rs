@@ -109,6 +109,12 @@ pub struct LwsConfig {
     pub max_body: usize,
     /// Bounds on outgoing webhook deliveries (see [`notify::DeliveryLimits`]).
     pub delivery: notify::DeliveryLimits,
+    /// Start in the notification service's recovery mode: [`LwsState::new`] removes every stored
+    /// subscription with an expiry and then stores the clock as the notification high water,
+    /// before anything is served; it fails, the high water unchanged, while any of them is still
+    /// stored. For a high water stored while the clock had jumped forward, once the clock is
+    /// corrected; set for one start only (it removes those subscriptions at every start).
+    pub reset_subscription_clock: bool,
     /// The authentication suites the authorization server offers (see
     /// [`LwsConfig::register_suite`]).
     suites: sparq_lws_authn::Suites,
@@ -242,6 +248,7 @@ impl LwsConfig {
             allow_insecure_fetch: false,
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
             delivery: notify::DeliveryLimits::default(),
+            reset_subscription_clock: false,
             suites: default_suites(),
         }
     }
@@ -279,6 +286,8 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
+    /// - `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1`: start in the notification service's
+    ///   recovery mode ([`LwsConfig::reset_subscription_clock`]);
     /// - `SOLID_SERVER_LWS_AUTHN`: the authentication suites to offer, comma-separated, of
     ///   `ssi` (did:key and controlled identifiers, the default `authn-ssi` feature), `openid`
     ///   (OpenID Connect, the default `authn-openid` feature) and `saml` (SAML 2.0, the
@@ -307,6 +316,7 @@ impl LwsConfig {
         cfg.open = flag("SOLID_SERVER_LWS_OPEN") || flag("SOLID_SERVER_OPEN_MODE");
         // Open mode is for local test harnesses, whose inboxes and documents are on private hosts.
         cfg.allow_insecure_fetch = cfg.open || flag("SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH");
+        cfg.reset_subscription_clock = flag(notify::RESET_SUBSCRIPTION_CLOCK_VAR);
         if let Some(n) = var("SOLID_SERVER_LWS_PAGE_SIZE") {
             cfg.page_size = n
                 .parse()
@@ -736,6 +746,19 @@ impl<S: Store + 'static> LwsState<S> {
         // succeeded: a start that fails leaves nothing running to put an old state back over a
         // later start's writes, and grants are loaded while what is hidden stays hidden.
         let hidden = intents::recover(&state).await?;
+        // The notification recovery, when asked for, runs here: before any subscription is
+        // loaded and before the state is handed to anyone, so no request is in flight.
+        if state.cfg.reset_subscription_clock {
+            let removed = notify::reset_subscription_clock(&state.store, &state.cfg, |iri| {
+                state.visible(iri)
+            })
+            .await?;
+            eprintln!(
+                "lws: notification high water reset to the clock; {removed} subscriptions with an \
+                 expiry removed (unset {} before the next start)",
+                notify::RESET_SUBSCRIPTION_CLOCK_VAR
+            );
+        }
         let loaded =
             access::AccessStore::load_with(&state.store, &state.cfg, |iri| state.visible(iri))
                 .await?;

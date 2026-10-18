@@ -372,10 +372,15 @@ must subscribe again.** A mark ahead of the clock (one stored while the clock ha
 forward) stands, fail-closed: subscriptions expiring before it are expired, and a new
 subscription must expire after it. A start logs a warning when it is more than 24 hours ahead.
 **To recover**, correct the clock and start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1`
-(then unset it), or call `lws::notify::reset_subscription_clock(&store, &cfg)` before
-`LwsState::new`: it removes every stored subscription with an expiry (their subscribers
-resubscribe) and only then stores the clock as the mark, refusing, with the mark unchanged, while
-any of them is still stored (it may be run again). Removal of an expired subscription is plain, retryable cleanup with
+(then unset it), or, embedding the library, set `LwsConfig::reset_subscription_clock` for one
+`LwsState::new`. The recovery runs inside construction, before any subscription is loaded and
+before the state (or its store) is handed out, so no request is in flight: it removes every stored
+subscription with an expiry (their subscribers resubscribe) and only then stores the clock as
+the mark; construction fails, the mark unchanged, while any of them is still stored (start again
+once it can be removed). Running a second process over the same store directory is unsupported,
+and nothing at this release keeps one out. A create whose purge of its own expired subscriptions
+halts the service answers `503` and creates nothing, as does any create once the service is
+halted. Removal of an expired subscription is plain, retryable cleanup with
 nothing written first: a removal that fails, is cut short or whose outcome is unknown leaves it
 expired, and it is tried again. Expiry is decided again under the removal's locks, so a
 subscriber's `DELETE` of a subscription that expires while it waits answers `404`, as one

@@ -34,9 +34,9 @@
 //! `HighWater`). When that time cannot be stored, the service halts: no delivery, no request
 //! answered but `503`, no subscription removed, until a raise to the time owed goes through:
 //! the expiry sweeper alone retries it, waiting longer after each failure. A mark far ahead of
-//! the clock stands; only [`reset_subscription_clock`] lowers it. A halt shows no expiry, so a subscription
-//! that was never durably expired may be delivered to again after a restart whose clock was
-//! stepped back.
+//! the clock stands; only a start in the recovery mode lowers it
+//! ([`LwsConfig::reset_subscription_clock`]). A halt shows no expiry, so a subscription that was
+//! never durably expired may be delivered to again after a restart whose clock was stepped back.
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
@@ -636,26 +636,26 @@ struct HighWater {
 /// recovery ([`reset_subscription_clock`]); the mark stands either way ([`Notifier::load_with`]).
 const MAX_HIGH_WATER_AHEAD: i64 = 24 * 60 * 60;
 
-/// The environment variable that has the LWS server binary run [`reset_subscription_clock`]
-/// once, before it starts serving: `1` or `true`.
+/// The environment variable that starts the LWS server in the notification service's recovery
+/// mode ([`super::LwsConfig::reset_subscription_clock`]): `1` or `true`.
 pub const RESET_SUBSCRIPTION_CLOCK_VAR: &str = "SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK";
 
 /// Lower the notification service's stored high water to the clock, after removing every stored
 /// subscription with an expiry: the operator's recovery from a mark stored while the clock had
-/// jumped forward (a start warns of a mark more than a day ahead). Run it with the clock
-/// corrected and before the service is started over `store` ([`super::LwsState::new`]), never
-/// while one runs over it. Subscriptions without an expiry are kept; the subscribers of the
-/// others subscribe again.
+/// jumped forward (a start warns of a mark more than a day ahead), run only while the state is
+/// built, before any subscription is loaded or any request served
+/// (`LwsConfig::reset_subscription_clock`). Subscriptions without an expiry are kept; the
+/// subscribers of the others subscribe again.
 ///
 /// Returns how many subscriptions were removed. Refuses (an error, the mark unchanged, whatever
 /// it could remove gone; it may be run again) while any subscription with an expiry is still
-/// stored: one whose removal failed, or that a listing
-/// after the removals still shows. Stored records that are not subscriptions are left as they
-/// are (a start quarantines them, and nothing is delivered for them). Refuses, too, over a store
-/// whose index cannot hold the mark.
-pub async fn reset_subscription_clock<S: Store>(
+/// stored: one whose removal failed, one a change cut short holds hidden (not `visible`), or one
+/// a listing after the removals still shows. Stored records that are not subscriptions are left
+/// as they are (a start quarantines them, and nothing is delivered for them).
+pub(crate) async fn reset_subscription_clock<S: Store>(
     store: &S,
     cfg: &LwsConfig,
+    visible: impl Fn(&str) -> bool,
 ) -> Result<usize, String> {
     refuse_without_atomic_markers(store)?;
     let container = cfg.absolute(SUBSCRIPTIONS_PATH);
@@ -680,7 +680,7 @@ pub async fn reset_subscription_clock<S: Store>(
         Ok(found)
     };
     let mut removed = 0;
-    for iri in limited().await? {
+    for iri in limited().await?.into_iter().filter(|iri| visible(iri)) {
         if let Ok(crate::store::DeleteOutcome::Deleted) =
             super::remove_member(store, &iri, Some(&container)).await
         {
@@ -2203,11 +2203,14 @@ fn listing_lock(container: &str, subscriber: Option<&str>) -> String {
 /// subscriber index. This is the only purging the request waits for, so the work it does here
 /// is bounded by its own records; everyone else's are swept by the expiry sweeper
 /// ([`spawn_expiry_sweeper`]). Never while the request holds the listing alone.
+///
+/// `false` when the service is halted once it is done (a removal's decision may have halted it,
+/// [`Notifier::decide`]): the request then answers `503` and creates nothing.
 async fn purge_own_expired<S: Store + 'static>(
     state: &LwsState<S>,
     subscriber: Option<&str>,
     admission: Option<crate::overload::AdmissionSlot>,
-) {
+) -> bool {
     let (high_water, now) = (state.notify.high_water(), state.notify.clock());
     let expired = {
         let subs = state.notify.subs.read().expect("lock");
@@ -2225,6 +2228,7 @@ async fn purge_own_expired<S: Store + 'static>(
             )
             .await;
     }
+    !state.notify.halted()
 }
 
 /// Ask the expiry sweeper ([`spawn_expiry_sweeper`]) for a sweep now.
@@ -2664,7 +2668,9 @@ async fn subscribe<S: Store + 'static>(
     if let Some(refused) = super::resources::unavailable(state, req) {
         return refused;
     }
-    purge_own_expired(state, agent.subject.as_deref(), req.admission.clone()).await;
+    if !purge_own_expired(state, agent.subject.as_deref(), req.admission.clone()).await {
+        return halted();
+    }
     // A conditional create is evaluated against the listing it compares, held alone from here
     // until the subscription is registered (or, its outcome unknown, shared until it is
     // settled). Taken only once every topic has been checked (and its
@@ -2767,6 +2773,11 @@ async fn subscribe<S: Store + 'static>(
             drop(slot);
         }
     };
+    // Nothing is created while the service is halted, whatever halted it since the request
+    // began (its own purge, or anything else).
+    if state.notify.halted() {
+        return halted();
+    }
     let created = super::records::create_record(
         state,
         &container,
@@ -3254,7 +3265,10 @@ mod tests {
             is_container: false,
             relation: None,
         };
-        let count = |id: &str| posts.lock().unwrap().get(&format!("/{id}")).copied();
+        let count = |id: &str| {
+            let n = posts.lock().unwrap().get(&format!("/{id}")).copied();
+            n.unwrap_or(0)
+        };
         let settle = || async {
             for _ in 0..200 {
                 if state.notify.admitted.load(Ordering::SeqCst) == 0 {
@@ -3265,12 +3279,20 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(100)).await;
         };
         let owed = jose::now_secs();
+        // The delivery to the expired subscription halts the service. Those to the others run
+        // alongside it, and one decided before the halt may go out; none decided after it does.
         state.notify.announce(&state, event.clone()).await;
         settle().await;
         assert!(state.notify.halted(), "not halted");
-        for id in ["open", "limited", "due"] {
-            assert_eq!(count(id), None, "{id} delivered while halted");
-        }
+        assert_eq!(count("due"), 0, "delivered after it expired");
+        let before = (count("open"), count("limited"));
+        state.notify.announce(&state, event.clone()).await;
+        settle().await;
+        assert_eq!(
+            (count("open"), count("limited")),
+            before,
+            "delivered while halted"
+        );
         let body = json!({"type": WEBHOOK, "topic": [state.cfg.storage()], "inbox": "https://i/"});
         let requests = [
             (Method::GET, SUBSCRIPTIONS_PATH.to_string(), String::new()),
@@ -3322,7 +3344,7 @@ mod tests {
         assert!(store.exists(&due).await.unwrap(), "removed while halted");
         state.notify.announce(&state, event.clone()).await;
         settle().await;
-        assert_eq!(count("open"), None, "resumed in the process");
+        assert_eq!(count("open"), before.0, "resumed in the process");
         // The store takes it again, and the sweeper, having failed once, waits before it raises
         // again; a request makes no attempt of its own.
         store.fail_marker_write.store(false, Ordering::SeqCst);
@@ -3348,9 +3370,9 @@ mod tests {
         );
         state.notify.announce(&state, event).await;
         settle().await;
-        assert_eq!(count("open"), Some(1));
-        assert_eq!(count("limited"), Some(1));
-        assert_eq!(count("due"), None, "delivered after it expired");
+        assert_eq!(count("open"), before.0 + 1);
+        assert_eq!(count("limited"), before.1 + 1);
+        assert_eq!(count("due"), 0, "delivered after it expired");
     }
 
     /// Review finding: the store raised the high water as a read and a write, so a raise that
@@ -3628,6 +3650,47 @@ mod tests {
         assert_eq!(r.status(), StatusCode::CREATED);
     }
 
+    /// Review finding: a create whose purge of its subscriber's own expired subscriptions
+    /// halted the service (the raise of the high water failed) went on, and an unconditional or
+    /// existence-only create stored its subscription and answered `201` while halted. It answers
+    /// `503` and creates nothing.
+    #[tokio::test]
+    async fn a_create_whose_purge_halts_the_service_creates_nothing() {
+        for conditions in [vec![], vec![("if-match", "*")]] {
+            let (state, store) = test_store::state(100).await;
+            state.notify.sweeper_off.store(true, Ordering::SeqCst);
+            let due = stored_sub(&state, "due", sub_until(jose::now_secs() + 3600)).await;
+            due_by_the_clock(&state, "due").await;
+            store.fail_marker_write.store(true, Ordering::SeqCst);
+            let body =
+                json!({"type": WEBHOOK, "topic": [state.cfg.storage()], "inbox": "https://i/"});
+            let mut headers = vec![("content-type", LWS_JSON)];
+            headers.extend(conditions.iter().copied());
+            let req = test_store::request(
+                Method::POST,
+                SUBSCRIPTIONS_PATH,
+                &headers,
+                &body.to_string(),
+            );
+            let r = handle(&state, &req, &Agent::anonymous()).await;
+            assert_eq!(
+                r.status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "{conditions:?}"
+            );
+            assert!(state.notify.halted());
+            assert!(store.exists(&due).await.unwrap(), "{conditions:?}");
+            let ids: Vec<String> = state.notify.subs.read().unwrap().keys().cloned().collect();
+            assert_eq!(ids, ["due"], "{conditions:?}");
+            let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+            assert_eq!(
+                store.list_children(&container).await.unwrap().len(),
+                1,
+                "{conditions:?}"
+            );
+        }
+    }
+
     /// A conditional create that waits for the listing it compares, while a subscription
     /// registered meanwhile passes its expiry by the clock, decides what that listing leaves out
     /// once it holds it: the subscription is left out only with its expiry stored.
@@ -3713,9 +3776,9 @@ mod tests {
     /// Review finding: a stored high water far ahead of the clock was taken as unreadable, which
     /// expired every subscription with an expiry in memory only, so one whose removal failed came
     /// back at a start with the clock corrected. Such a mark stands: what expired by it stays
-    /// expired, across a restart with the clock moved up to it, until the operator's recovery
-    /// ([`reset_subscription_clock`]) removes every subscription with an expiry, refusing while
-    /// one is left, and only then stores the clock.
+    /// expired, across a restart with the clock moved up to it, until a start in the operator's
+    /// recovery mode (`LwsConfig::reset_subscription_clock`) removes every subscription with an
+    /// expiry, failing while one is left, and only then stores the clock.
     #[tokio::test]
     async fn a_high_water_far_ahead_of_the_clock_stands_until_the_operator_resets_it() {
         let cfg = LwsConfig::new("http://localhost:3000");
@@ -3766,15 +3829,20 @@ mod tests {
         assert!(store.exists(&stored[0]).await.unwrap());
         assert!(!restarted.is_live("before"));
         assert!(restarted.is_live("after"));
-        // The recovery refuses while one with an expiry is left, and lowers nothing (what it
-        // could remove is gone).
-        assert!(reset_subscription_clock(&store, &cfg).await.is_err());
+        // A start in the recovery mode fails while one with an expiry is left, and lowers
+        // nothing (what it could remove is gone).
+        let mut recovery = cfg.clone();
+        recovery.reset_subscription_clock = true;
+        assert!(LwsState::new(store.clone(), recovery.clone())
+            .await
+            .is_err());
         assert_eq!(stored_high_water(&store, &cfg).await, Some(mark));
         assert!(!store.exists(&stored[1]).await.unwrap());
         // Once it can be removed, every one with an expiry goes, and then the clock is stored.
         *store.fail_delete_of.lock().unwrap() = None;
-        let removed = reset_subscription_clock(&store, &cfg).await.unwrap();
-        assert_eq!(removed, 1);
+        let recovered = LwsState::new(store.clone(), recovery).await.unwrap();
+        recovered.notify.sweeper_off.store(true, Ordering::SeqCst);
+        assert!(recovered.notify.is_live("open"));
         assert!(!store.exists(&stored[0]).await.unwrap());
         assert!(store.exists(&stored[2]).await.unwrap());
         let reset: i64 = stored_high_water(&store, &cfg)

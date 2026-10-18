@@ -445,9 +445,14 @@ impl Meta {
         usize::from(self.marker.is_some())
     }
 
-    /// Whether `iri` is, or may become, the marker holding its slot.
+    /// Whether `iri` is the marker holding its slot, or would take it as a new record: the slot
+    /// is taken only by a first insert while no marker holds it, so a record admitted to the pool
+    /// stays in the pool, whatever is removed after.
     fn is_marker_slot(&self, iri: &str) -> bool {
-        super::is_service_marker(iri) && self.marker.as_deref().is_none_or(|m| m == iri)
+        match self.marker.as_deref() {
+            Some(m) => m == iri,
+            None => super::is_service_marker(iri) && !self.map.contains_key(iri),
+        }
     }
 
     fn values(&self) -> std::collections::hash_map::Values<'_, String, ResourceMeta> {
@@ -458,7 +463,7 @@ impl Meta {
         let marker = self.is_marker_slot(&iri);
         let pooled = super::in_service_pool(&iri) && !marker;
         let hold = super::is_hold_record(&iri);
-        if marker {
+        if marker && self.marker.is_none() {
             self.marker = Some(iri.clone());
         }
         let replaced = self.map.insert(iri, meta);
@@ -865,11 +870,50 @@ mod tests {
         }
         assert_eq!(index.raise_marker(marker, 9).await.unwrap(), 9);
         assert!(!crate::store::is_service_marker(
+            "http://:/.lws/subscriptions/#high-water"
+        ));
+        assert!(!crate::store::is_service_marker(
+            "http://a.example:x/.lws/subscriptions/#high-water"
+        ));
+        assert!(crate::store::is_service_marker(
+            "http://a.example:3000/.lws/subscriptions/#high-water"
+        ));
+        assert!(crate::store::is_service_marker(
+            "http://[::1]:3000/.lws/subscriptions/#high-water"
+        ));
+        assert!(!crate::store::is_service_marker(
             "http://u@a.example/.lws/subscriptions/#high-water"
         ));
         assert!(!crate::store::is_service_marker(
             "http://a.example/x/.lws/subscriptions/#high-water"
         ));
+    }
+
+    /// A marker admitted to the pool (the slot held by another) stays in it when the slot's
+    /// holder is removed and it is written again: the pool's count is exact throughout, so it
+    /// frees its room when removed and never wraps.
+    #[tokio::test]
+    async fn a_pooled_marker_is_never_moved_into_the_slot() {
+        let limits = InMemoryStoreLimits::default().with_pool(2, usize::MAX);
+        let index = InMemorySparqClient::with_limits(limits);
+        let a = "http://a.example/.lws/subscriptions/#high-water";
+        let b = "http://b.example/.lws/subscriptions/#high-water";
+        let pooled = |index: &InMemorySparqClient| index.inner.lock().unwrap().meta.pooled();
+        index.raise_marker(a, 1).await.unwrap();
+        index.raise_marker(b, 1).await.unwrap();
+        assert_eq!(pooled(&index), 1);
+        index.delete_meta(a).await.unwrap();
+        index.raise_marker(b, 2).await.unwrap();
+        assert_eq!(pooled(&index), 1, "moved into the slot");
+        index.delete_meta(b).await.unwrap();
+        assert_eq!(pooled(&index), 0);
+        // The pool's two places are both free again, and the slot takes a new marker apart.
+        for at in ["x", "y"] {
+            let iri = format!("http://a.example/.lws/subscriptions/{at}");
+            index.put_meta(&iri, meta("")).await.unwrap();
+        }
+        index.raise_marker(a, 3).await.unwrap();
+        assert_eq!(pooled(&index), 2);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
