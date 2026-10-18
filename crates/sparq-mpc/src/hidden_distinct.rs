@@ -127,7 +127,7 @@ use crate::compare::{
 use crate::field::Fp;
 use crate::oblivious::SortingNetwork;
 use crate::oblivious_join::{
-    oblivious_set_output_through, Candidate, MatchBit, ObliviousOutput, OutputSlot,
+    oblivious_set_output_through, Candidate, MatchBit, ObliviousOutput, OutputSlot, PayloadWidths,
 };
 use crate::partial::{HolderId, MpcError, PartialResult};
 use crate::randomness::{checked_vss_own_input, require_source_matches, DistributedRandomness};
@@ -514,8 +514,21 @@ pub(crate) fn distinct_hidden_pairs_slots_through(
 ) -> Result<(Vec<OutputSlot>, DistinctCost), MpcError> {
     require_source_matches(source, backend)?;
     check_params(backend, pairs, bound)?;
+    // The output stage's public-shape caps (declared widths, party count, aggregate
+    // slot work) at THIS operator's entry, before a candidate is built or a share
+    // drawn. They are closed forms on public numbers, so the answer is the same one
+    // the stage gives; running them here is what makes "before any draw" true of the
+    // operator and not only of the stage. The stage re-checks.
+    let widths = PayloadWidths::from(2);
+    crate::oblivious_join::check_output_public_shape(
+        &widths,
+        bound,
+        backend.parties(),
+        backend.threshold(),
+    )?;
     let (candidates, sort_ce, adj_eq) = build_distinct_candidates(backend, source, pairs)?;
-    let (slots, _out_cost) = oblivious_set_output_through(source, backend, &candidates, 2, bound)?;
+    let (slots, _out_cost) =
+        oblivious_set_output_through(source, backend, &candidates, widths, bound)?;
     let cost = DistinctCost {
         rows: pairs.len(),
         sort_compare_exchanges: sort_ce,
@@ -536,9 +549,18 @@ pub fn distinct_hidden_pairs_oblivious(
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
     check_params(backend, pairs, bound)?;
+    // The stage's public-shape caps before the build and before any draw; the stage
+    // re-checks.
+    let widths = PayloadWidths::from(2);
+    crate::oblivious_join::check_output_public_shape(
+        &widths,
+        bound,
+        backend.parties(),
+        backend.threshold(),
+    )?;
     let mut dealer = backend.dealer();
     let (candidates, _ce, _eq) = build_distinct_candidates(backend, &mut dealer, pairs)?;
-    oblivious_set_output_through(&mut dealer, backend, &candidates, 2, bound)
+    oblivious_set_output_through(&mut dealer, backend, &candidates, widths, bound)
 }
 
 #[cfg(test)]

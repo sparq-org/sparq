@@ -669,7 +669,7 @@ fn per_hop_projection_matches_the_naive_fold_at_small_lengths() {
         for len in 1..=8usize {
             let chain: Vec<NamedNode> = (0..len).map(|_| nn("http://ex/p")).collect();
             let shipped =
-                dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o).unwrap(), &s, &o);
+                dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new()).unwrap(), &s, &o);
             let naive = naive_fixed_chain(&edges, &chain, &s, &o);
             assert_eq!(
                 shipped.rows, naive.rows,
@@ -696,14 +696,14 @@ fn a_dense_graph_evaluates_at_the_hop_cap() {
         Variable::new_unchecked(OBJECT_VAR),
     );
     let short = dedup_endpoint_pairs(
-        eval_fixed_chain(&edges, &[nn("http://ex/p")], &s, &o).unwrap(),
+        eval_fixed_chain(&edges, &[nn("http://ex/p")], &s, &o, &mut PathFormBudget::new()).unwrap(),
         &s,
         &o,
     );
     assert_eq!(short.rows.len(), 4, "the dense 2-node graph has 4 pairs");
 
     let chain: Vec<NamedNode> = (0..MAX_UNROLL_HOPS).map(|_| nn("http://ex/p")).collect();
-    let long = dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o).unwrap(), &s, &o);
+    let long = dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new()).unwrap(), &s, &o);
     assert_eq!(
         long.rows, short.rows,
         "every length reaches the same four endpoint pairs on this graph"
@@ -1969,7 +1969,7 @@ fn disclosed_edges_debug_prints_sizes_not_terms() {
 /// and not quietly relaxing a guard.
 #[test]
 fn the_path_form_row_budget_is_pinned_by_value() {
-    assert_eq!(MAX_PATH_FORM_ROWS, 1 << 28);
+    assert_eq!(MAX_PATH_FORM_ROWS, 1 << 18);
 }
 
 /// The budget's own arithmetic: exactly at [`MAX_PATH_FORM_ROWS`] is accepted, one
@@ -2126,7 +2126,7 @@ fn the_repetition_union_is_deduped_as_it_grows() {
 #[test]
 fn the_form_shape_caps_are_pinned_by_value() {
     assert_eq!(MAX_PATH_FORM_DEPTH, 32);
-    assert_eq!(MAX_PATH_FORM_WORK, 1 << 28);
+    assert_eq!(MAX_PATH_FORM_WORK, 1 << 20);
 }
 
 /// Build a `Sequence`-in-`Sequence` form of exactly `depth` levels, with one
@@ -2220,20 +2220,19 @@ fn the_form_work_budget_refuses_just_over_and_runs_at_the_cap() {
 
     // A long sequence really does reach the budget by its part count alone, over
     // an edge set that yields NO rows — so the row budget cannot be what binds.
-    // Fourteen repetitions at both per-repetition shape caps are enough.
+    //
+    // The whole-form work budget is TIGHTER than the two per-repetition shape caps
+    // multiplied out (`MAX_UNROLL_CHAINS x MAX_UNROLL_HOPS` is far above it), so
+    // the heaviest part this fixture can use is one the work budget itself admits.
     let heavy = PathForm::repeat_step(
         PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
         1,
-        19,
+        15,
     );
-    let heavy_charge = check_form_shape(&heavy).expect("a near-cap repetition is in budget");
+    let heavy_charge = check_form_shape(&heavy).expect("a heavy-but-legal repetition");
     assert!(
-        heavy_charge <= MAX_PATH_FORM_WORK,
-        "the work budget must not make an expensive-but-legal single part illegal"
-    );
-    assert!(
-        heavy_charge > MAX_UNROLL_CHAINS,
-        "the heavy part must really be heavy"
+        heavy_charge > MAX_PATH_FORM_WORK / 4,
+        "the heavy part must really be heavy: {heavy_charge}"
     );
     let parts = (MAX_PATH_FORM_WORK / heavy_charge + 1) as usize;
     let long = PathForm::Sequence((0..parts).map(|_| heavy.clone()).collect::<Vec<_>>());
@@ -2244,6 +2243,188 @@ fn the_form_work_budget_refuses_just_over_and_runs_at_the_cap() {
         matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
         "{:?}",
         err
+    );
+
+    // And the per-repetition shape caps no longer bind first: a repetition the
+    // chain and hop caps each accept is refused by the whole-form budget, which is
+    // the tighter of the two now.
+    let past = PathForm::repeat_step(
+        PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
+        1,
+        19,
+    );
+    let err = check_form_shape(&past)
+        .expect_err("a repetition inside both shape caps can still pass the work budget");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+}
+
+/// A JOIN's output is charged from its closed form BEFORE the join is built.
+///
+/// The hub pattern is the case that matters: `N` edges into one node and `N` out
+/// of it join to `N²` rows from `2N` input rows, so charging the result after
+/// building it charges a number the budget was supposed to decide. With the budget
+/// already spent, `exact(p, 2)` over a hub must refuse having built NO join at
+/// all, which the thread-local join counter asserts — a memory figure could not.
+#[test]
+fn a_hub_join_is_charged_from_its_closed_form_before_it_is_built() {
+    const N: usize = 200;
+    // N edges into ex:hub and N out of it: one hop's join is N x N rows.
+    let mut doc = String::new();
+    for i in 0..N {
+        doc.push_str(&format!("ex:in{i} ex:p ex:hub . ex:hub ex:p ex:out{i} . "));
+    }
+    let edges = disclosed_edges_only(&[(doc.as_str(), &["http://ex/p"])]);
+    let form = PathForm::exact(nn("http://ex/p"), 2);
+
+    // The closed form says what the join will produce, from the inputs alone.
+    let s = Variable::new_unchecked(SUBJECT_VAR);
+    let o = Variable::new_unchecked(OBJECT_VAR);
+    let mid = Variable::new_unchecked(format!("{INTERMEDIATE_PREFIX}1"));
+    let left = edges.relation_for(&nn("http://ex/p"), &s, &mid);
+    let right = edges.relation_for(&nn("http://ex/p"), &mid, &o);
+    let projected = projected_join_rows(&left, &right, &mid).unwrap();
+    assert_eq!(
+        projected, N * N,
+        "the hub key carries N in-edges against N out-edges; every other key \
+         matches on one side only"
+    );
+
+    // With the budget spent to within one row of that, the join is refused and
+    // nothing is built.
+    joins_built_reset();
+    let mut spent = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - projected);
+    let err = eval_with_budget(&edges, &form, &mut spent)
+        .expect_err("the hub join must be refused on the closed form");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+    assert_eq!(
+        joins_built(),
+        0,
+        "the join must be refused BEFORE it is built"
+    );
+
+    // With room for it the same form runs and builds exactly its one hop's join.
+    joins_built_reset();
+    let mut room = PathFormBudget::new();
+    eval_with_budget(&edges, &form, &mut room).expect("a fresh budget has room for the hub");
+    assert_eq!(joins_built(), 1, "one hop, one join");
+    assert!(
+        room.charged() >= projected,
+        "the join's rows are charged: {} vs {}",
+        room.charged(),
+        projected
+    );
+}
+
+/// The closed form is exact on the shapes this module joins, and bounded above
+/// where a key is unbound.
+#[test]
+fn the_closed_form_join_size_matches_what_the_join_produces() {
+    let s = Variable::new_unchecked("a");
+    let m = Variable::new_unchecked("m");
+    let o = Variable::new_unchecked("b");
+    let rel = |vars: Vec<Variable>, rows: Vec<Vec<Option<Term>>>| PartialResult {
+        holder: HolderId::new("h"),
+        vars,
+        rows,
+    };
+    let t = |n: &str| Some(Term::from(nn(&format!("http://ex/{n}"))));
+
+    // Degrees 2 and 3 on one key, 1 and 0 on another: 2*3 + 1*0 = 6.
+    let left = rel(
+        vec![s.clone(), m.clone()],
+        vec![
+            vec![t("a1"), t("k1")],
+            vec![t("a2"), t("k1")],
+            vec![t("a3"), t("k2")],
+        ],
+    );
+    let right = rel(
+        vec![m.clone(), o.clone()],
+        vec![
+            vec![t("k1"), t("b1")],
+            vec![t("k1"), t("b2")],
+            vec![t("k1"), t("b3")],
+        ],
+    );
+    let predicted = projected_join_rows(&left, &right, &m).unwrap();
+    let plan = JoinPlan {
+        join_var: m.clone(),
+        key_disclosed: true,
+    };
+    let built = DisclosedKeyJoin::new()
+        .join(&[left.clone(), right.clone()], &plan)
+        .unwrap();
+    assert_eq!(predicted, 6);
+    assert_eq!(predicted, built.rows.len(), "the closed form must be exact");
+
+    // An UNBOUND key is compatible with the whole other side, so it is counted
+    // against it — an upper bound, never an under-count.
+    let with_unbound = rel(
+        vec![m.clone(), o.clone()],
+        vec![vec![t("k1"), t("b1")], vec![None, t("b2")]],
+    );
+    let predicted = projected_join_rows(&left, &with_unbound, &m).unwrap();
+    let built = DisclosedKeyJoin::new()
+        .join(&[left, with_unbound], &plan)
+        .unwrap();
+    assert!(
+        predicted >= built.rows.len(),
+        "{} must bound {}",
+        predicted,
+        built.rows.len()
+    );
+}
+
+/// The SEQUENCE join is charged the same way: a two-part sequence whose
+/// composition has more rows than the budget has left is refused before the join
+/// is built. (Removing the sequence's charge used to survive the whole suite.)
+#[test]
+fn the_sequence_join_is_charged_before_it_is_built() {
+    // ex:a -p-> ex:m -q-> {b1, b2, b3}: the composition has 3 rows.
+    let doc = "ex:a ex:p ex:m . ex:m ex:q ex:b1 . ex:m ex:q ex:b2 . ex:m ex:q ex:b3 .";
+    let edges = disclosed_edges_only(&[(doc, &["http://ex/p", "http://ex/q"])]);
+    let form = PathForm::Sequence(vec![
+        PathForm::exact(nn("http://ex/p"), 1),
+        PathForm::exact(nn("http://ex/q"), 1),
+    ]);
+
+    // What the two parts alone charge, and what the whole form charges.
+    let mut whole = PathFormBudget::new();
+    joins_built_reset();
+    let got = eval_with_budget(&edges, &form, &mut whole).expect("the form runs");
+    assert_eq!(got.rows.len(), 3);
+    assert_eq!(joins_built(), 1, "one sequence join");
+    let total = whole.charged();
+
+    // One row short of what the form needs: refused, with no join built.
+    joins_built_reset();
+    let mut tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - (total - 1));
+    let err = eval_with_budget(&edges, &form, &mut tight)
+        .expect_err("a sequence that would pass the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+    assert_eq!(
+        joins_built(),
+        0,
+        "the sequence join must be refused BEFORE it is built"
+    );
+
+    // And with exactly enough it runs and gives the same answer.
+    let mut exact = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - total);
+    assert_eq!(
+        eval_with_budget(&edges, &form, &mut exact).unwrap().rows,
+        got.rows
     );
 }
 
@@ -2275,5 +2456,53 @@ fn the_repetition_caps_still_decide_their_own_cases_in_order() {
         matches!(&err, MpcError::Protocol(m) if m.contains("MAX_UNROLL_CHAINS")),
         "{:?}",
         err
+    );
+}
+
+/// A `Sequence`'s declared part count is charged BEFORE its parts are pushed onto
+/// the shape walk's worklist.
+///
+/// Both orders end in the same refusal, so the order is only observable in how far
+/// the walk got: charging after pushing grows the worklist to hold every part of a
+/// form that was already over budget, which is the allocation the budget exists to
+/// decide. `worklist_peak` is the seam — the walk returns a work figure, not its
+/// own stack size.
+#[test]
+fn a_sequences_part_count_is_charged_before_its_parts_are_pushed() {
+    let unit = PathForm::Repetition(BoundedRepetition {
+        step: PathStep::predicate(nn("http://ex/p")),
+        min: 0,
+        max: 0,
+    });
+    // A sequence of many free parts. Each costs only its own `+ 1`, so the whole
+    // charge is the declared count plus the root.
+    let parts = 4096;
+    let seq = PathForm::Sequence((0..parts).map(|_| unit.clone()).collect::<Vec<_>>());
+
+    // Hand the walk a budget that the declared count alone exhausts.
+    worklist_peak_reset();
+    let err = check_form_shape_from(&seq, MAX_PATH_FORM_WORK - 1)
+        .expect_err("a part count past the budget must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+    assert!(
+        worklist_peak() < parts,
+        "the parts of an over-budget Sequence must not reach the worklist: peak {} of {} \
+         part(s)",
+        worklist_peak(),
+        parts
+    );
+
+    // With room, the same form walks every part, so the assertion above is about
+    // the ORDER and not about the walk refusing to descend at all.
+    worklist_peak_reset();
+    check_form_shape(&seq).expect("the same form is legal with room");
+    assert_eq!(
+        worklist_peak(),
+        parts,
+        "a form inside the budget must have every part walked"
     );
 }

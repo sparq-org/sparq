@@ -768,10 +768,10 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
     assert_eq!(
         slot_strings(&slots),
         [
-            "<http://ex/b> <http://ex/b>",
-            "dummy",
-            "<http://ex/a> <http://ex/a>",
             "<http://ex/a> <http://ex/b>",
+            "<http://ex/b> <http://ex/b>",
+            "<http://ex/a> <http://ex/a>",
+            "dummy",
             "<http://ex/b> <http://ex/a>"
         ]
     );
@@ -797,7 +797,10 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
             cost.shuffle.switches,
             cost.shuffle.depth_rounds
         ),
-        (5, 5, 5, 5, 56, 5)
+        // Width-scaled: the 8-switch network over five slots at the DECLARED
+        // entry width `1 + 39` (two columns at `DEFAULT_PAYLOAD_TERM_BYTES` is a
+        // 260-byte row, so 39 limbs whatever the endpoints are).
+        (5, 5, 5, 5, 8 * 40, 5)
     );
 }
 
@@ -805,7 +808,7 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
 /// order-sensitive fingerprint over every method and returned `y`).
 ///
 /// **This is the #6117-step-6 guard.** The transcript now ends in the output
-/// stage's 141 `vss_own_input` draws and its `oblivious_shuffle`: if
+/// stage's 801 `vss_own_input` draws and its `oblivious_shuffle`: if
 /// `eval_bounded_path_hidden_slots_through` went back to minting its own dealer for
 /// the output stage the log would stop at 1932 entries and both the length and the
 /// suffix assertion would fail.
@@ -814,7 +817,10 @@ fn seeded_bounded_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
 /// (`0x690e_cad1_cdf7_7eb0`, captured on the pre-routing code), asserted here
 /// unchanged: the routing appended an output-stage SUFFIX and moved nothing in the
 /// union part, and the output stage's per-element degree reduction only grew that
-/// suffix. The full-log fingerprint is the new pin.
+/// suffix. The suffix grew again when the padded width became the DECLARED width —
+/// 39 limbs per slot instead of the 6 the widest endpoint used to give — so the
+/// whole-log fingerprints below were re-captured. The union prefix is still pinned
+/// unchanged.
 #[test]
 fn seeded_bounded_stage_transcript_is_pinned() {
     use crate::randomness::test_sources::{
@@ -825,22 +831,20 @@ fn seeded_bounded_stage_transcript_is_pinned() {
     let form = HiddenBoundedPath::range("p", 0, 2);
     let mut rec = RecordingSource::new(backend.dealer());
     eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 5).unwrap();
-    assert_eq!(rec.log.len(), 2074);
+    assert_eq!(rec.log.len(), 1932 + 801 + 1);
     // Prefix unchanged from the pre-routing pin; the whole move is in the output
     // suffix, which grew by the per-element degree reductions.
     assert_eq!(fingerprint(&rec.log[..1932]), 0x690e_cad1_cdf7_7eb0);
-    // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
-    // fingerprint is the value the pre-re-randomisation code produced, so only
-    // the shuffle's own output and the draws after it moved.
+    // Re-captured with the declared width.
     assert_eq!(
         fingerprint(prefix_before_first_shuffle(&rec.log)),
-        0xa6c3_51d1_ad54_0fc2
+        0x9272_bef5_f2de_6a10
     );
-    assert_eq!(fingerprint(&rec.log), 0xd1f8_cf68_6b5c_ba26);
+    assert_eq!(fingerprint(&rec.log), 0x3284_5f2d_916a_ec15);
     let suffix: Vec<&str> = rec.log[1932..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,
-        [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
+        [["vss_own_input"; 801].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }
 
@@ -1492,4 +1496,51 @@ fn differential_hidden_blank_node_of_the_loaded_graph_yields_its_identity_pair()
     );
     // (a,a), (b,b), (c,c), the blank node's diagonal, and the (a,b) edge.
     assert_eq!(got.len(), 5, "{got:?}");
+}
+
+/// The output stage's PUBLIC-SHAPE caps are decided at the OPERATOR's entry, so
+/// nothing is drawn when one of them refuses.
+///
+/// The term and limb caps used to be charged inside the output stage, which the
+/// bounded operator reaches only after `build_bounded_candidates` has already dealt
+/// the per-hop match bits — so "refused before any draw" was true of the stage and
+/// not of the operator. `check_output_public_shape` runs the same closed forms at
+/// the operator's entry; the compute-party cap is the one a caller can trip with a
+/// legal form and a legal bound, so it is the one tested here. The counter is the
+/// witness: a refusal that still dealt would show a nonzero draw count.
+#[test]
+fn an_over_cap_public_shape_refuses_the_operator_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_PARTIES;
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let triples = [
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ];
+    let edges = predicated_edges(&triples);
+    let form = HiddenBoundedPath::range(P, 1, 2);
+
+    // More compute parties than the output stage's work model admits.
+    let backend = ShamirBackend::new_seeded(MAX_OUTPUT_PARTIES + 2, 0x91).unwrap();
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 8)
+        .expect_err("a party count past the output cap must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+        "the refusal must name the cap, got {:?}",
+        err
+    );
+    assert_eq!(
+        counted.draws(),
+        0,
+        "the operator must refuse on public numbers alone, having drawn nothing"
+    );
+
+    // And the same form at an admissible party count still runs, so the test is
+    // pinning the cap and not a broken fixture.
+    let ok_backend = ShamirBackend::new_seeded(3, 0x92).unwrap();
+    let mut ok_dealer = ok_backend.dealer();
+    eval_bounded_path_hidden_slots_through(&mut ok_dealer, &ok_backend, &edges, &form, 8)
+        .expect("an admissible party count still evaluates");
 }

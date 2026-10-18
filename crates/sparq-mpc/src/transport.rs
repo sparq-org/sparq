@@ -215,6 +215,18 @@ fn checked_item_count(
 /// The refusal names the FIELD (`value` or `point`) and the modulus, both public.
 /// It does not print the word: a share's value is secret-shared data, and a
 /// refusal is exactly where such a word would otherwise reach a log.
+fn require_canonical(field: &str, word: u64) -> Result<(), MpcError> {
+    if word >= P {
+        return Err(MpcError::Protocol(format!(
+            "non-canonical Share {} on the wire: the word is not below the field modulus \
+             {}, and Fp reduces it, so two different frames would decode to one Share — \
+             refusing",
+            field, P
+        )));
+    }
+    Ok(())
+}
+
 /// How much a receiver may reserve for a body of `len` declared bytes BEFORE any
 /// of them have arrived: one [`RECV_CHUNK_BYTES`] chunk at most.
 ///
@@ -228,16 +240,32 @@ fn initial_body_capacity(len: usize) -> usize {
     len.min(RECV_CHUNK_BYTES)
 }
 
-fn require_canonical(field: &str, word: u64) -> Result<(), MpcError> {
-    if word >= P {
-        return Err(MpcError::Protocol(format!(
-            "non-canonical Share {} on the wire: the word is not below the field modulus \
-             {}, and Fp reduces it, so two different frames would decode to one Share — \
-             refusing",
-            field, P
-        )));
-    }
-    Ok(())
+// The widest capacity the LAST body buffer held while filling, recorded by
+// `Channel::read_body_observed`. A finished body's own capacity says nothing about
+// how far ahead of the data the buffer ran while filling, and `recv` returns only
+// the message, so the chunk-step growth has no public observable. Tests read the
+// peak through here.
+#[cfg(test)]
+thread_local! {
+    static LAST_BODY_PEAK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Add `bytes` to a running byte counter with CHECKED arithmetic.
+///
+/// The counters are reported as session totals, so a wrapped counter would
+/// under-report traffic and go unnoticed; an overflow is a refusal instead. The
+/// refusal names the counter and the public byte count.
+fn add_bytes(total: u64, bytes: usize, what: &str) -> Result<u64, MpcError> {
+    u64::try_from(bytes)
+        .ok()
+        .and_then(|b| total.checked_add(b))
+        .ok_or_else(|| {
+            MpcError::Protocol(format!(
+                "transport {} counter overflows u64 at {} more byte(s) — refusing rather \
+                 than wrapping to a smaller total",
+                what, bytes
+            ))
+        })
 }
 
 fn read_share(bytes: &[u8], off: &mut usize) -> Result<Share, MpcError> {
@@ -272,10 +300,60 @@ impl Message {
         }
     }
 
+    /// The exact BODY length [`Self::encode`] will produce, in closed form from the
+    /// message's element count — no serialisation.
+    ///
+    /// `Shares` and `Open` carry `len` points of `8 + FIELD_BYTES` bytes each after
+    /// a tag byte and a `u32` count, so the size is known from the count alone.
+    /// Checked: a count whose byte size leaves `usize` is a refusal here rather
+    /// than a wrapped length later.
+    pub(crate) fn encoded_len(&self) -> Result<usize, MpcError> {
+        let points = |n: usize| -> Result<usize, MpcError> {
+            n.checked_mul(8 + FIELD_BYTES)
+                .and_then(|v| v.checked_add(5))
+                .ok_or_else(|| {
+                    MpcError::Protocol(format!(
+                        "outbound frame of {} share point(s) overflows a usize body length — \
+                         refusing before anything is serialised",
+                        n
+                    ))
+                })
+        };
+        match self {
+            Message::Shares(v) | Message::Open(v) => points(v.len()),
+            Message::Step(_) => Ok(2),
+            Message::Swap { .. } => Ok(1 + 4 + 4 + 1),
+            Message::Done => Ok(1),
+        }
+    }
+
     /// Serialise to a length-prefixed frame: `[u32 len][u8 tag][payload]`. `len`
     /// covers the tag + payload, so a reader frames on the prefix alone.
-    pub fn encode(&self) -> Vec<u8> {
-        let mut body = Vec::new();
+    ///
+    /// Refuses a body that does not fit the framing: the same
+    /// [`MAX_FRAME_BYTES`] cap the receiver applies, and the `u32` length prefix
+    /// itself. The cast used to be unchecked, so a body of `2^32 + k` bytes would
+    /// have been framed as `k` and the peer would have read a prefix of the body as
+    /// a whole message. Both are public byte counts, so the refusal is closed form
+    /// and names only sizes. At today's cap the `u32` conversion cannot fail once
+    /// the cap has passed — 64 MiB fits a `u32` — so it is the belt the cap is the
+    /// braces for, and only the cap's own refusal is reachable from a caller.
+    ///
+    /// The cap is charged from [`Self::encoded_len`], a closed form of the message's
+    /// element count, BEFORE anything is serialised, so an over-cap `Shares` or
+    /// `Open` refuses without building its body. It was charged on `body.len()`
+    /// after the loop, which is a refusal that has already done the work.
+    pub fn encode(&self) -> Result<Vec<u8>, MpcError> {
+        let declared = self.encoded_len()?;
+        if declared > MAX_FRAME_BYTES {
+            return Err(MpcError::Protocol(format!(
+                "outbound frame body of {} byte(s) exceeds the MAX_FRAME_BYTES cap of {} \
+                 — refusing to send it before it is serialised (the receiver applies the \
+                 same cap, so the frame could not be read either)",
+                declared, MAX_FRAME_BYTES
+            )));
+        }
+        let mut body = Vec::with_capacity(declared);
         match self {
             Message::Shares(v) => {
                 body.push(TAG_SHARES);
@@ -303,10 +381,19 @@ impl Message {
             }
             Message::Done => body.push(TAG_DONE),
         }
+        debug_assert_eq!(body.len(), declared, "encoded_len must be exact");
+        let len = u32::try_from(body.len()).map_err(|_| {
+            MpcError::Protocol(format!(
+                "outbound frame body of {} byte(s) does not fit the u32 length prefix — \
+                 refusing (a wrapped prefix would frame a prefix of the body as a whole \
+                 message)",
+                body.len()
+            ))
+        })?;
         let mut frame = Vec::with_capacity(4 + body.len());
-        frame.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&len.to_be_bytes());
         frame.extend_from_slice(&body);
-        frame
+        Ok(frame)
     }
 
     /// Decode one frame BODY (`[u8 tag][payload]`), exactly and only.
@@ -446,10 +533,12 @@ impl<S: Read + Write> Channel<S> {
     /// I/O errors surface as [`MpcError::Protocol`] (the crate's error type) so
     /// the coordinator / party loops can `?` uniformly.
     pub fn send(&mut self, msg: &Message) -> Result<(), MpcError> {
-        let frame = msg.encode();
+        let frame = msg.encode()?;
         self.write_all(&frame)?;
         self.flush()?;
-        self.bytes_sent += frame.len() as u64;
+        // Checked: the counters are reported as totals, and a wrapped total would
+        // under-report traffic rather than fail.
+        self.bytes_sent = add_bytes(self.bytes_sent, frame.len(), "bytes_sent")?;
         Ok(())
     }
 
@@ -472,11 +561,12 @@ impl<S: Read + Write> Channel<S> {
     /// The length prefix comes from the PEER. It is first refused above
     /// [`MAX_FRAME_BYTES`] — a closed-form check on the declared number, before
     /// anything is reserved — and then the body is read INCREMENTALLY, in
-    /// [`RECV_CHUNK_BYTES`] steps, with the buffer growing as bytes actually
-    /// arrive. So a four-byte header can commit the receiver to at most one chunk,
-    /// not to the whole declared frame: a header declaring the cap with nothing
-    /// behind it fails on the read, having reserved one chunk. Reserving `len`
-    /// up front, as this did, let the header alone decide the allocation.
+    /// [`RECV_CHUNK_BYTES`] steps, each chunk reserved exactly before it is read,
+    /// so the buffer stays within one chunk of the bytes that have arrived. So a
+    /// four-byte header can commit the receiver to at most one chunk, not to the
+    /// whole declared frame: a header declaring the cap with nothing behind it
+    /// fails on the read, having reserved one chunk. Reserving `len` up front, as
+    /// this did, let the header alone decide the allocation.
     pub fn recv(&mut self) -> Result<Message, MpcError> {
         let mut len_buf = [0u8; 4];
         self.read_exact(&mut len_buf)?;
@@ -491,27 +581,53 @@ impl<S: Read + Write> Channel<S> {
             )));
         }
         let body = self.read_body(len)?;
-        self.bytes_recv += (4 + len) as u64;
+        self.bytes_recv = add_bytes(self.bytes_recv, len, "bytes_recv")
+            .and_then(|v| add_bytes(v, 4, "bytes_recv"))?;
         Message::decode(&body)
     }
 
-    /// Read `len` body bytes, growing the buffer as they ARRIVE.
+    /// Read `len` body bytes, growing the buffer in CHUNK STEPS as they arrive.
     ///
-    /// Reserves at most [`RECV_CHUNK_BYTES`] ahead of the bytes that are actually
-    /// there (`initial_body_capacity`), so the peer's declared length bounds the
-    /// total but never the commitment: a short or absent body fails on the read
-    /// with one chunk reserved, whatever it declared.
+    /// The buffer starts at `initial_body_capacity(len)` and every further chunk is
+    /// reserved with `reserve_exact` just before it is read, so the allocation
+    /// stays within one chunk of the bytes that have actually arrived. Plain
+    /// `extend_from_slice` would grow geometrically instead — a `Vec` doubling from
+    /// 64 KiB runs tens of MiB ahead of the data on a large frame — which is the
+    /// commitment the header cap alone does not bound.
+    ///
+    /// Returns the body, and (in tests) the widest capacity the buffer ever held,
+    /// which `read_body` has no other way to show a caller.
     fn read_body(&mut self, len: usize) -> Result<Vec<u8>, MpcError> {
+        self.read_body_observed(len).map(|(body, _)| body)
+    }
+
+    /// [`Self::read_body`], also returning the buffer's PEAK capacity — the seam
+    /// the growth test observes, since a finished body's capacity says nothing
+    /// about how far ahead of the data the buffer ran while filling.
+    fn read_body_observed(&mut self, len: usize) -> Result<(Vec<u8>, usize), MpcError> {
         let mut body: Vec<u8> = Vec::with_capacity(initial_body_capacity(len));
+        let mut peak = body.capacity();
         let mut chunk = [0u8; RECV_CHUNK_BYTES];
         let mut remaining = len;
         while remaining > 0 {
             let take = remaining.min(RECV_CHUNK_BYTES);
+            // Reserve exactly this chunk, so the buffer never runs more than one
+            // chunk ahead of the bytes that have arrived.
+            let needed = body.len() + take;
+            if body.capacity() < needed {
+                body.reserve_exact(needed - body.len());
+            }
+            peak = peak.max(body.capacity());
+            #[cfg(test)]
+            LAST_BODY_PEAK.with(|c| c.set(peak));
             self.read_exact(&mut chunk[..take])?;
             body.extend_from_slice(&chunk[..take]);
+            peak = peak.max(body.capacity());
+            #[cfg(test)]
+            LAST_BODY_PEAK.with(|c| c.set(peak));
             remaining -= take;
         }
-        Ok(body)
+        Ok((body, peak))
     }
 
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), MpcError> {
@@ -706,8 +822,14 @@ pub struct NetworkCell {
 
 impl NetworkCell {
     /// Total measured on-wire bytes (sent + received), coordinator's view.
-    pub fn total_bytes(&self) -> u64 {
-        self.bytes_sent + self.bytes_recv
+    pub fn total_bytes(&self) -> Result<u64, MpcError> {
+        self.bytes_sent.checked_add(self.bytes_recv).ok_or_else(|| {
+            MpcError::Protocol(
+                "measured byte total overflows u64 — refusing rather than reporting a \
+                 wrapped total"
+                    .into(),
+            )
+        })
     }
 }
 
@@ -768,10 +890,21 @@ impl<S: Read + Write> Coordinator<S> {
     }
 
     /// Total bytes the coordinator sent / received across all channels.
-    pub fn byte_totals(&self) -> (u64, u64) {
-        let sent = self.channels.iter().map(|c| c.bytes_sent).sum();
-        let recv = self.channels.iter().map(|c| c.bytes_recv).sum();
-        (sent, recv)
+    pub fn byte_totals(&self) -> Result<(u64, u64), MpcError> {
+        let overflow = || {
+            MpcError::Protocol(
+                "measured byte total over the channels overflows u64 — refusing rather \
+                 than reporting a wrapped total"
+                    .into(),
+            )
+        };
+        let mut sent = 0u64;
+        let mut recv = 0u64;
+        for c in &self.channels {
+            sent = sent.checked_add(c.bytes_sent).ok_or_else(overflow)?;
+            recv = recv.checked_add(c.bytes_recv).ok_or_else(overflow)?;
+        }
+        Ok((sent, recv))
     }
 
     /// Run the **cumulative-sum aggregate** over the parties: deal each holder's
@@ -1256,7 +1389,7 @@ pub fn run_cell_networked(
     };
     let wall_clock = start.elapsed();
 
-    let (bytes_sent, bytes_recv) = coord.byte_totals();
+    let (bytes_sent, bytes_recv) = coord.byte_totals()?;
 
     // Join the party threads (they exit on `Done`).
     for h in party_handles {
@@ -1305,6 +1438,51 @@ mod tests {
         assert_eq!(initial_body_capacity(RECV_CHUNK_BYTES), RECV_CHUNK_BYTES);
     }
 
+    /// The body buffer stays within ONE chunk of the bytes that have arrived, at
+    /// the real `recv` call site.
+    ///
+    /// The declared-length cap and the one-chunk pre-arrival reservation bound
+    /// what the HEADER alone commits; neither bounds how far the buffer runs
+    /// ahead of the data once bytes are flowing. `extend_from_slice` on its own
+    /// grows geometrically, so a buffer doubling from one chunk ends several
+    /// chunks past the body it is holding. `read_body_observed` reserves exactly
+    /// the next chunk instead, and the peak capacity it records is the only place
+    /// that difference shows: `recv` returns the message, whose length is the
+    /// same either way.
+    #[test]
+    fn the_body_buffer_stays_within_one_chunk_of_the_bytes_that_arrived() {
+        // A body of several chunks, so geometric growth has room to overshoot.
+        let shares: Vec<Share> = (0..20_480u64)
+            .map(|i| Share {
+                x: i + 1,
+                y: Fp::new(i),
+            })
+            .collect();
+        let msg = Message::Shares(shares);
+        let frame = msg.encode().expect("a multi-chunk frame encodes");
+        let body_len = frame.len() - 4;
+        assert!(
+            body_len > 4 * RECV_CHUNK_BYTES,
+            "the fixture must span several chunks, got {} byte(s)",
+            body_len
+        );
+
+        LAST_BODY_PEAK.with(|c| c.set(0));
+        let mut chan = Channel::new(std::io::Cursor::new(frame));
+        assert_eq!(chan.recv().expect("the frame decodes"), msg);
+
+        let peak = LAST_BODY_PEAK.with(|c| c.get());
+        assert!(peak > 0, "the body read must have been attempted");
+        assert!(
+            peak <= body_len + RECV_CHUNK_BYTES,
+            "the buffer reached {} byte(s) of capacity for a {} byte body; chunk-step \
+             growth must stay within one RECV_CHUNK_BYTES ({}) of what arrived",
+            peak,
+            body_len,
+            RECV_CHUNK_BYTES
+        );
+    }
+
     // --- Codec round-trips every message variant. --------------------------
     #[test]
     fn codec_roundtrips_all_messages() {
@@ -1339,7 +1517,7 @@ mod tests {
             Message::Done,
         ];
         for m in &msgs {
-            let frame = m.encode();
+            let frame = m.encode().expect("a small message frames");
             // Strip the 4-byte length prefix the way Channel::recv does.
             let len = u32::from_be_bytes(frame[0..4].try_into().unwrap()) as usize;
             let body = &frame[4..4 + len];
@@ -1469,7 +1647,7 @@ mod tests {
             );
             assert_eq!(cell.result, expected_plain);
             // The transport actually moved bytes and drove rounds.
-            assert!(cell.total_bytes() > 0, "n={n}: bytes must cross the wire");
+            assert!(cell.total_bytes().unwrap() > 0, "n={n}: bytes must cross the wire");
             assert_eq!(cell.rounds, 2);
             assert_eq!(cell.parties, n);
         }
@@ -1501,7 +1679,7 @@ mod tests {
                 "n={n}: networked hidden-join match count must equal in-process"
             );
             assert_eq!(cell.result as usize, scale);
-            assert!(cell.total_bytes() > 0);
+            assert!(cell.total_bytes().unwrap() > 0);
         }
     }
 
@@ -1724,7 +1902,7 @@ mod tests {
             .unwrap();
             let want: u64 = (0..8u64).map(|i| i * 7 + 1).sum();
             assert_eq!(cell.result, want, "n={n}: networked shuffle multiset sum");
-            assert!(cell.total_bytes() > 0);
+            assert!(cell.total_bytes().unwrap() > 0);
             assert!(cell.rounds > 1, "shuffle is multi-round (per-switch)");
         }
     }
@@ -1748,7 +1926,7 @@ mod tests {
             .unwrap();
             let want: u64 = (1..=9u64).sum();
             assert_eq!(cell.result, want, "n={n}: networked sort multiset sum");
-            assert!(cell.total_bytes() > 0);
+            assert!(cell.total_bytes().unwrap() > 0);
             assert!(
                 cell.rounds > 1,
                 "sort is multi-round (per-compare-exchange)"

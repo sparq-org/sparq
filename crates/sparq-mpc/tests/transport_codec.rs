@@ -539,7 +539,7 @@ fn a_frame_with_trailing_bytes_is_refused() {
     ];
     for msg in &msgs {
         // The exact encoding still decodes.
-        let exact = msg.encode();
+        let exact = msg.encode().expect("a small message frames");
         let mut pipe = MemPipe::default();
         pipe.push_raw(&exact);
         let mut chan = Channel::new(pipe);
@@ -585,7 +585,7 @@ fn a_non_canonical_share_word_is_refused() {
         y: Fp::new(P - 1),
     }]);
     let mut pipe = MemPipe::default();
-    pipe.push_raw(&ok.encode());
+    pipe.push_raw(&ok.encode().expect("a small message frames"));
     let mut chan = Channel::new(pipe);
     assert_eq!(chan.recv().unwrap(), ok, "P - 1 is canonical");
 
@@ -618,4 +618,49 @@ fn a_non_canonical_share_word_is_refused() {
             "the word must not be echoed: {text}"
         );
     }
+}
+
+// =============================================================================
+// The OUTBOUND frame is capped too, in closed form
+// =============================================================================
+
+/// A message too large to frame is refused on the way OUT, from its element count,
+/// before the body is serialised.
+///
+/// The receiver's cap was the only one: `send` serialised whatever it was handed
+/// and wrote it, so the two ends disagreed about what a legal frame is — a body
+/// the peer must refuse was built and written in full. `Message::encode` now
+/// charges the same `MAX_FRAME_BYTES` cap on `encoded_len`, a closed form of the
+/// share count, so the refusal precedes the serialisation. The boundary is
+/// asserted from both sides, so the test pins the cap and not merely "large
+/// refuses".
+#[test]
+fn an_over_cap_outbound_frame_is_refused_before_it_is_serialised() {
+    // Body = 1 tag + 4 count + n·(8 + FIELD_BYTES). The largest n that fits:
+    let per_point = 8 + FIELD_BYTES;
+    let fits = (MAX_FRAME_BYTES - 5) / per_point;
+    let share = |i: u64| Share {
+        x: i + 1,
+        y: Fp::new(i),
+    };
+
+    let at_cap = Message::Shares((0..fits as u64).map(share).collect());
+    let frame = at_cap.encode().expect("the largest framable message encodes");
+    assert!(frame.len() - 4 <= MAX_FRAME_BYTES);
+
+    let over = Message::Shares((0..=fits as u64).map(share).collect());
+    let err = over
+        .encode()
+        .expect_err("one point past the cap must be refused");
+    let text = format!("{:?}", err);
+    assert!(
+        text.contains("MAX_FRAME_BYTES"),
+        "the refusal must name the cap, got {}",
+        text
+    );
+    assert!(
+        text.contains("before it is serialised"),
+        "the refusal must say it precedes serialisation, got {}",
+        text
+    );
 }

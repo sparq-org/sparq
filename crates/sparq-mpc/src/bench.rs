@@ -422,7 +422,7 @@ fn model_aggregate(n: usize) -> Result<CommCounter, MpcError> {
 fn model_hidden_join(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
     let pairs = crate::oblivious_join::checked_candidate_pairs(scale, scale)?;
     let mut c = CommCounter::new(n);
-    c.record_independent_equalities(pairs as u64);
+    c.record_independent_equalities(pairs as u64)?;
     Ok(c)
 }
 

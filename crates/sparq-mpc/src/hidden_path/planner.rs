@@ -325,7 +325,7 @@ impl BoundedPathPlan {
         let mut c = CommCounter::new(parties);
         // (1) The k×-join secure equalities — the cost center. Independent ACROSS
         // tuples (the matrix's `record_independent_equalities` batch shape).
-        c.record_independent_equalities(self.secure_equalities);
+        c.record_independent_equalities(self.secure_equalities)?;
         // (2) The AND/degree-reduce reductions that chain the per-tuple hop bits and
         // OR-fold the per-pair connected-bit: one secure multiplication (degree
         // reduce) per chained bit. Folded as `secure_equalities` reductions — the

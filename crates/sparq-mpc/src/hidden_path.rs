@@ -198,6 +198,7 @@ use crate::compare::secure_equal_to_bit_through;
 use crate::field::Fp;
 use crate::oblivious_join::{
     oblivious_set_output_through, partial_result_from_slots, Candidate, MatchBit, ObliviousOutput,
+    PayloadWidths,
 };
 use crate::partial::{MpcError, PartialResult};
 use crate::randomness::{require_source_matches, DistributedRandomness};
@@ -884,11 +885,21 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
         public_candidate_pair_bound(edges.len(), k)?,
         || projected_candidate_count(edges, k),
     )?;
+    // Payload arity is 2 (the endpoint pair). The stage's public-shape caps run
+    // HERE, before any candidate is built or any share drawn; they read only public
+    // numbers, and the stage re-checks them.
+    let widths = PayloadWidths::from(2);
+    crate::oblivious_join::check_output_public_shape(
+        &widths,
+        bound,
+        backend.parties(),
+        backend.threshold(),
+    )?;
     let candidates = build_candidates(backend, source, edges, k)?;
-    // Payload arity is 2 (the endpoint pair). Route through the slot-returning path.
-    // The stage re-checks the bound against the EXACT candidate count, which is what
-    // catches the degenerate case where the projection above could only bound it.
-    oblivious_set_output_through(source, backend, &candidates, 2, bound)
+    // Route through the slot-returning path. The stage re-checks the bound against
+    // the EXACT candidate count, which is what catches the degenerate case where the
+    // projection above could only bound it.
+    oblivious_set_output_through(source, backend, &candidates, widths, bound)
 }
 
 /// Test-only instrumentation: the candidates
@@ -1578,8 +1589,19 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
         public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), form)?,
         || projected_bounded_candidate_count(edges, form),
     )?;
+    // The output stage's public-shape caps (declared widths, party count, aggregate
+    // slot work) at THIS operator's entry, before a candidate is built or a share
+    // drawn. Closed forms on public numbers, so the answer is the stage's own; the
+    // stage re-checks.
+    let widths = PayloadWidths::from(2);
+    crate::oblivious_join::check_output_public_shape(
+        &widths,
+        bound,
+        backend.parties(),
+        backend.threshold(),
+    )?;
     let candidates = build_bounded_candidates(backend, source, edges, form)?;
-    oblivious_set_output_through(source, backend, &candidates, 2, bound)
+    oblivious_set_output_through(source, backend, &candidates, widths, bound)
 }
 
 /// Planner guard + cost-model wiring for the hidden bounded property-path operator

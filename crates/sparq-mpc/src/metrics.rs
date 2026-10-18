@@ -68,11 +68,23 @@
 //! [`CommCounter::bytes_per_party`], [`CommCounter::total_bytes`]) uses checked
 //! arithmetic and returns a `Result`.
 //!
-//! The one exception is [`CommCounter::record_independent_equalities`], whose
-//! SATURATION the existing API documents and whose test asserts: it pins at the
-//! maximum instead of refusing. Saturation errs in the safe direction there — it
-//! over-states, never under-states — so it is kept rather than changed under a
-//! name callers already rely on.
+//! [`CommCounter::record_independent_equalities`] is checked too. It used to
+//! saturate, pinning each counter it touches at the `u64` ceiling, which was
+//! argued to be safe because a ceiling is not a smaller number. It is not safe as
+//! a cost model: a pinned counter is indistinguishable from a real total at the
+//! ceiling, and every later checked recorder and derived total on the same
+//! `CommCounter` then refuses, so one absurd `k` turns the whole instrument into
+//! refusals with no record of which call did it. It returns a `Result` like the
+//! rest.
+//!
+//! ## Every recorder commits ALL its fields or NONE
+//!
+//! A recorder that touches several counters computes every new value first and
+//! assigns only once they all succeeded. Assigning as it went left the counter
+//! part-updated behind an `Err` — some fields advanced, some not — which is a
+//! state no sequence of successful calls can produce, so a caller that reported
+//! the error and carried on would read a total that never existed.
+//! `a_refused_recorder_leaves_every_counter_untouched` asserts this per recorder.
 //!
 //! ## Closed form, so the instrument does not cost what it measures
 //!
@@ -170,10 +182,11 @@ impl CommCounter {
         let dealt = k
             .checked_mul(self.parties as u64)
             .ok_or_else(|| overflowed("k deals x parties shares"))?;
-        self.field_elements_shared = self
+        let shared = self
             .field_elements_shared
             .checked_add(dealt)
             .ok_or_else(|| overflowed("the dealt-element total"))?;
+        self.field_elements_shared = shared;
         Ok(())
     }
 
@@ -190,18 +203,23 @@ impl CommCounter {
     /// Record `k` INDEPENDENT secure multiplications — [`Self::record_mult`] `k`
     /// times, in CLOSED FORM (every counter it touches is linear in `k`).
     pub fn record_mults(&mut self, k: u64) -> Result<(), MpcError> {
-        self.multiplications = self
+        // Compute all three, then commit: a mid-way `?` would leave the counter
+        // part-updated.
+        let mults = self
             .multiplications
             .checked_add(k)
             .ok_or_else(|| overflowed("the multiplication total"))?;
-        self.mult_rounds = self
+        let rounds = self
             .mult_rounds
             .checked_add(k)
             .ok_or_else(|| overflowed("the mult-round total"))?;
-        self.batchable_ops = self
+        let batchable = self
             .batchable_ops
             .checked_add(k)
             .ok_or_else(|| overflowed("the batchable-op total"))?;
+        self.multiplications = mults;
+        self.mult_rounds = rounds;
+        self.batchable_ops = batchable;
         Ok(())
     }
 
@@ -215,14 +233,16 @@ impl CommCounter {
     /// Record `k` opens — [`Self::record_open`] `k` times, in CLOSED FORM (every
     /// counter it touches is linear in `k`).
     pub fn record_opens(&mut self, k: u64) -> Result<(), MpcError> {
-        self.field_elements_opened = self
+        let opened = self
             .field_elements_opened
             .checked_add(k)
             .ok_or_else(|| overflowed("the opened-element total"))?;
-        self.open_rounds = self
+        let rounds = self
             .open_rounds
             .checked_add(k)
             .ok_or_else(|| overflowed("the open-round total"))?;
+        self.field_elements_opened = opened;
+        self.open_rounds = rounds;
         Ok(())
     }
 
@@ -239,31 +259,54 @@ impl CommCounter {
     /// not by looping `record_deal`/`record_mult`/`record_open` `k` times — the
     /// loop would make the *instrument* `O(k)` and let it dominate the harness at
     /// the larger `|L|·|R|` join scales. The totals are identical to `k`
-    /// applications of those primitives, EXCEPT at the `u64` ceiling: this is the
-    /// ONE recorder on the type whose documented behaviour is SATURATION rather
-    /// than a refusal, so it pins at the maximum where the checked recorders
-    /// return an error. That is deliberate and unchanged — the saturation is what
-    /// `an_enormous_equality_batch_saturates_instead_of_wrapping` asserts — and it
-    /// is safe in the same direction: it over-states, never under-states, the
-    /// cost. Every other recorder and every total on this type is checked and
-    /// fallible.
-    pub fn record_independent_equalities(&mut self, k: u64) {
+    /// applications of those primitives, including at the `u64` ceiling: this
+    /// recorder is CHECKED and fallible like every other one on the type, and
+    /// computes all six new values before committing any of them. It used to
+    /// saturate, pinning each counter at the ceiling, on the argument that a
+    /// ceiling over-states rather than under-states the cost. A pinned counter is
+    /// not distinguishable from a real total at the ceiling, and it makes every
+    /// later checked recorder and derived total on the same counter refuse, so the
+    /// refusal now names the batch instead.
+    pub fn record_independent_equalities(&mut self, k: u64) -> Result<(), MpcError> {
         // Per equality: 3 deals (key_L, key_R, mask r) + 1 mult + 1 open. Each
         // deal sends `parties` shares; opens/mults are 1 logical op each. Fold the
         // whole batch in arithmetically (== `k` × the per-op increments above).
-        //
-        // Saturating, not wrapping: `k` is a candidate count the caller supplies and
-        // `3 * k * parties` can exceed `u64` at an absurd `k`. A counter that wrapped
-        // would report a SMALLER cost than the real one, which is the one direction a
-        // cost model must never round. Saturation pins it at the maximum instead.
-        self.field_elements_shared = self
+        let dealt = k
+            .checked_mul(3)
+            .and_then(|v| v.checked_mul(self.parties as u64))
+            .ok_or_else(|| overflowed("k equalities x 3 deals x parties shares"))?;
+        let shared = self
             .field_elements_shared
-            .saturating_add(k.saturating_mul(3).saturating_mul(self.parties as u64));
-        self.multiplications = self.multiplications.saturating_add(k);
-        self.mult_rounds = self.mult_rounds.saturating_add(k);
-        self.batchable_ops = self.batchable_ops.saturating_add(k);
-        self.field_elements_opened = self.field_elements_opened.saturating_add(k);
-        self.open_rounds = self.open_rounds.saturating_add(k);
+            .checked_add(dealt)
+            .ok_or_else(|| overflowed("the dealt-element total"))?;
+        let mults = self
+            .multiplications
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the multiplication total"))?;
+        let mult_rounds = self
+            .mult_rounds
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the mult-round total"))?;
+        let batchable = self
+            .batchable_ops
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the batchable-op total"))?;
+        let opened = self
+            .field_elements_opened
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the opened-element total"))?;
+        let open_rounds = self
+            .open_rounds
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the open-round total"))?;
+        // Every value computed; commit them together.
+        self.field_elements_shared = shared;
+        self.multiplications = mults;
+        self.mult_rounds = mult_rounds;
+        self.batchable_ops = batchable;
+        self.field_elements_opened = opened;
+        self.open_rounds = open_rounds;
+        Ok(())
     }
 
     /// Fold in the modelled cost of one oblivious **shuffle** (from the crate's own
@@ -272,14 +315,16 @@ impl CommCounter {
     /// switches are NOT mutually independent (network depth), so the sequential
     /// rounds grow by `depth_rounds`, not by the switch count.
     pub fn record_shuffle(&mut self, cost: crate::oblivious::ShuffleCost) -> Result<(), MpcError> {
-        self.multiplications = self
+        let mults = self
             .multiplications
             .checked_add(cost.switches as u64)
             .ok_or_else(|| overflowed("the multiplication total"))?;
-        self.mult_rounds = self
+        let rounds = self
             .mult_rounds
             .checked_add(cost.depth_rounds as u64)
             .ok_or_else(|| overflowed("the mult-round total"))?;
+        self.multiplications = mults;
+        self.mult_rounds = rounds;
         // Each switch's conditional swap opens nothing on its own (it stays
         // secret-shared); the cost is the multiplications + the depth rounds.
         Ok(())
@@ -289,14 +334,16 @@ impl CommCounter {
     /// [`crate::oblivious::SortCost`]): each compare-exchange is a secure
     /// comparison + conditional swap, and the network has `depth_rounds` layers.
     pub fn record_sort(&mut self, cost: crate::oblivious::SortCost) -> Result<(), MpcError> {
-        self.multiplications = self
+        let mults = self
             .multiplications
             .checked_add(cost.compare_exchanges as u64)
             .ok_or_else(|| overflowed("the multiplication total"))?;
-        self.mult_rounds = self
+        let rounds = self
             .mult_rounds
             .checked_add(cost.depth_rounds as u64)
             .ok_or_else(|| overflowed("the mult-round total"))?;
+        self.multiplications = mults;
+        self.mult_rounds = rounds;
         Ok(())
     }
 
@@ -381,30 +428,91 @@ impl CommCounter {
 
 #[cfg(test)]
 mod tests {
-    /// The batch fold is saturating, not wrapping. `k` is a candidate count the
-    /// caller supplies, and `3 * k * parties` can exceed `u64`; a wrapped counter
-    /// would report a SMALLER cost than the real one, which is the one direction a
-    /// cost model must never round.
+    /// The batch fold is CHECKED, not saturating and not wrapping. `k` is a
+    /// candidate count the caller supplies, and `3 * k * parties` can exceed
+    /// `u64`. A wrapped counter would report a smaller cost than the real one;
+    /// a saturated one would report the ceiling as if it were a real total and
+    /// make every later checked recorder on the same counter refuse. The refusal
+    /// names the batch instead.
     #[test]
-    fn an_enormous_equality_batch_saturates_instead_of_wrapping() {
+    fn an_enormous_equality_batch_is_refused_instead_of_pinned() {
         use super::*;
         let mut c = CommCounter::new(5);
-        c.record_independent_equalities(u64::MAX);
-        assert_eq!(c.field_elements_shared, u64::MAX, "must pin at the maximum");
-        assert_eq!(c.multiplications, u64::MAX);
-        assert_eq!(c.open_rounds, u64::MAX);
-        // A second fold cannot bring it back down.
-        c.record_independent_equalities(u64::MAX);
-        assert_eq!(c.field_elements_shared, u64::MAX);
-        assert_eq!(c.multiplications, u64::MAX);
+        assert!(
+            c.record_independent_equalities(u64::MAX).is_err(),
+            "a batch whose dealt elements leave u64 must be refused"
+        );
 
         // And an ordinary batch is still exact: 3 deals x parties shares, one
         // mult/open each, so the closed form must equal the per-op increments.
         let mut small = CommCounter::new(5);
-        small.record_independent_equalities(4);
+        small
+            .record_independent_equalities(4)
+            .expect("an ordinary batch is recorded");
         assert_eq!(small.field_elements_shared, 3 * 4 * 5);
         assert_eq!(small.multiplications, 4);
         assert_eq!(small.open_rounds, 4);
+    }
+
+    /// A REFUSED recorder leaves every counter exactly as it was.
+    ///
+    /// Each of these touches several counters, and assigning as it went left the
+    /// counter part-updated behind the `Err` — a state no sequence of successful
+    /// calls can produce. The check is per recorder: drive each one to its own
+    /// overflow from a counter whose fields are at known values, and compare the
+    /// whole snapshot.
+    #[test]
+    fn a_refused_recorder_leaves_every_counter_untouched() {
+        use super::*;
+        // A counter whose round fields are already at the ceiling, so the SECOND
+        // field each recorder touches is the one that overflows — the case that
+        // used to commit the first.
+        let primed = || {
+            let mut c = CommCounter::new(5);
+            c.multiplications = 7;
+            c.field_elements_shared = 11;
+            c.field_elements_opened = 13;
+            c.mult_rounds = u64::MAX;
+            c.open_rounds = u64::MAX;
+            c
+        };
+        let before = primed();
+
+        let mut c = primed();
+        assert!(c.record_mults(1).is_err());
+        assert_eq!(c, before, "record_mults must commit all fields or none");
+
+        let mut c = primed();
+        assert!(c.record_opens(1).is_err());
+        assert_eq!(c, before, "record_opens must commit all fields or none");
+
+        let mut c = primed();
+        assert!(c.record_independent_equalities(1).is_err());
+        assert_eq!(
+            c, before,
+            "record_independent_equalities must commit all fields or none"
+        );
+
+        let mut c = primed();
+        assert!(c
+            .record_shuffle(crate::oblivious::ShuffleCost {
+                items: 2,
+                switches: 1,
+                depth_rounds: 1,
+                fresh_sharings: 2,
+            })
+            .is_err());
+        assert_eq!(c, before, "record_shuffle must commit all fields or none");
+
+        let mut c = primed();
+        assert!(c
+            .record_sort(crate::oblivious::SortCost {
+                items: 2,
+                compare_exchanges: 1,
+                depth_rounds: 1,
+            })
+            .is_err());
+        assert_eq!(c, before, "record_sort must commit all fields or none");
     }
 
     use super::*;
@@ -440,7 +548,7 @@ mod tests {
     #[test]
     fn one_equality_is_one_mult_one_open() {
         let mut c = CommCounter::new(3);
-        c.record_independent_equalities(1);
+        c.record_independent_equalities(1).unwrap();
         assert_eq!(c.multiplications, 1);
         assert_eq!(c.field_elements_opened, 1);
         // 3 deals (key_L, key_R, mask) × 3 parties = 9 field elements shared.
@@ -454,7 +562,7 @@ mod tests {
         // the literature flags) and s² multiplications.
         for s in [2u64, 4, 8] {
             let mut c = CommCounter::new(3);
-            c.record_independent_equalities(s * s);
+            c.record_independent_equalities(s * s).unwrap();
             assert_eq!(c.field_elements_opened, s * s);
             assert_eq!(c.multiplications, s * s);
         }
@@ -467,7 +575,7 @@ mod tests {
         // round) because the tests share no data dependency.
         let mut c = CommCounter::new(3);
         let k = 16;
-        c.record_independent_equalities(k);
+        c.record_independent_equalities(k).unwrap();
         assert_eq!(c.total_rounds().unwrap(), 2 * k); // sequential upper bound
         assert_eq!(c.batched_rounds().unwrap(), 2); // batched lower bound
         assert!(c.batched_rounds().unwrap() < c.total_rounds().unwrap());
@@ -514,7 +622,7 @@ mod tests {
                 c.record_deal().unwrap();
             }
             c.record_open().unwrap();
-            c.record_independent_equalities(9);
+            c.record_independent_equalities(9).unwrap();
             c
         };
         assert_eq!(

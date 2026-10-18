@@ -270,20 +270,38 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 /// across the sequence and through the joins that compose it. So the two shape
 /// caps are caps on factors; this is a cap on the product they multiply out to.
 ///
-/// Every row the unroll materialises is charged against it — each fixed chain's
-/// result rows, each reflexive identity pair, and each join accumulator in a
-/// sequence — and the charge is checked BEFORE the rows are retained, so an
-/// over-budget form refuses rather than filling memory first.
+/// ## Where it is charged, exactly
+///
+/// Every row the unroll materialises is charged BEFORE it is built:
+///
+/// - a hop's own edge rows, from the disclosed edge set's row count, before
+///   `relation_for` clones them;
+/// - every [`DisclosedKeyJoin`] in this module — each hop of a fixed chain and
+///   each composition step of a `Sequence` — from `projected_join_rows`, the
+///   closed-form `Σ_k deg_L(k)·deg_R(k)` over the join keys, computed in
+///   `O(|L| + |R|)` from the inputs; and
+/// - the reflexive diagonal, from the declared domain's size.
+///
+/// So the peak rows one join materialises is bounded by what was charged for it: a
+/// hub of `N` in-edges and `N` out-edges is refused on `N²` before the `N²` rows
+/// exist, not after. The projection and dedup that follow a join only shrink that
+/// row set.
 ///
 /// ## What it bounds, honestly
 ///
-/// It bounds the CUMULATIVE row count, not the peak memory: the deduped union
-/// holds far fewer rows than the budget counts, because a row charged by one chain
-/// and already seen is dropped. And it sits deliberately ABOVE the heaviest run
-/// the two shape caps already accept (a near-cap alternation is ~`2^20` chains of
-/// up to 19 hops), so it refuses the unbounded composition rather than making an
-/// expensive-but-legal path illegal.
-pub const MAX_PATH_FORM_ROWS: usize = 1 << 28; // 268_435_456
+/// It bounds the CUMULATIVE row count over one whole form, which is an upper
+/// bound on peak memory and not a measure of it: the deduped union holds far fewer
+/// rows than the budget counts, because a row charged by one chain and already
+/// seen is dropped. What it does NOT bound: the rest of the operator around this
+/// one call — nothing here charges for the `PartialResult` clones a caller makes,
+/// a federation's own buffers, or anything downstream of the returned relation.
+/// Whole-operator resource planning is follow-up work and is named in the module
+/// docs.
+///
+/// The value is below the heaviest run the two per-repetition shape caps would
+/// admit on their own, so for a dense edge set this budget, not those caps, is
+/// what binds.
+pub const MAX_PATH_FORM_ROWS: usize = 1 << 18; // 262_144
 
 /// Largest [`PathForm`] NESTING DEPTH the unroller accepts before
 /// [`eval_bounded_path_disclosed`] refuses with an [`MpcError::Protocol`] error.
@@ -297,6 +315,14 @@ pub const MAX_PATH_FORM_ROWS: usize = 1 << 28; // 268_435_456
 /// worklist: a recursive depth check would overflow on exactly the forms the cap
 /// exists to refuse. A plain SPARQL property path nests a handful of levels at
 /// most; a form deeper than this is malformed for this regime, not merely unusual.
+///
+/// What this cap does NOT cover: a [`PathForm`] is a recursive type with DERIVED
+/// `Clone`, `Debug` and `Drop`, and those walk it recursively whatever this cap
+/// says. A form nested deeply enough can therefore overflow the stack while being
+/// cloned, printed or dropped, before any evaluator sees it. Nothing in tree
+/// builds such a form — no parser constructs a `PathForm`, and the planner's own
+/// forms are shallow — so this is stated rather than guarded here; a guard would
+/// have to live in the type's own constructors.
 pub const MAX_PATH_FORM_DEPTH: usize = 32;
 
 /// Largest STATIC unroll work the whole [`PathForm`] may project to before
@@ -317,9 +343,16 @@ pub const MAX_PATH_FORM_DEPTH: usize = 32;
 /// zero-work parts finite, and it is computed from PUBLIC plan parameters alone,
 /// before any edge is touched.
 ///
-/// The value leaves room for a repetition at BOTH shape caps at once
-/// (`MAX_UNROLL_CHAINS × MAX_UNROLL_HOPS` is `2^26`), so it does not make an
-/// expensive-but-legal single repetition illegal.
+/// The unit is STATIC UNROLL STEPS of the plan — chains times hops, plus one per
+/// part — and nothing else. It is not comparable with
+/// [`crate::oblivious_join::MAX_SLOT_WORK`], which counts modelled field
+/// elements.
+///
+/// The value is BELOW `MAX_UNROLL_CHAINS × MAX_UNROLL_HOPS`, so it is this budget
+/// and not those two caps that decides a heavy single repetition: an alternation
+/// of width 2 over up to 19 hops, which both shape caps admit, is refused here.
+/// That is deliberate — the shape caps bound one part's shape, and this bounds the
+/// work a whole plan may schedule.
 ///
 /// ## What this projection does NOT cover
 ///
@@ -329,7 +362,7 @@ pub const MAX_PATH_FORM_DEPTH: usize = 32;
 /// edge set or the domain. Those rows are charged to [`MAX_PATH_FORM_ROWS`] as
 /// they are produced, which is what bounds a `{0,k}` over a large declared
 /// domain.
-pub const MAX_PATH_FORM_WORK: u64 = 1 << 28; // 268_435_456
+pub const MAX_PATH_FORM_WORK: u64 = 1 << 20; // 1_048_576 static unroll steps
 
 /// Validate a whole [`PathForm`]'s SHAPE before anything evaluates it: the nesting
 /// depth against [`MAX_PATH_FORM_DEPTH`] and the summed static unroll work against
@@ -344,6 +377,25 @@ pub const MAX_PATH_FORM_WORK: u64 = 1 << 28; // 268_435_456
 /// Both halves read PUBLIC plan parameters only — alternation width, `min`, `max`,
 /// part counts — so no edge is touched and the refusals name those numbers and the
 /// caps, nothing else.
+// The longest the shape walk's worklist ever got, and a reset for it. Charging a
+// `Sequence`'s declared part count BEFORE its parts are pushed is only observable
+// here: either order ends in the same refusal, and what differs is whether the
+// worklist grew to hold the parts of a form that was already over budget.
+#[cfg(test)]
+thread_local! {
+    static WORKLIST_PEAK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn worklist_peak_reset() {
+    WORKLIST_PEAK.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn worklist_peak() -> usize {
+    WORKLIST_PEAK.with(|c| c.get())
+}
+
 pub(crate) fn check_form_shape(form: &PathForm) -> Result<u64, MpcError> {
     check_form_shape_from(form, 0)
 }
@@ -357,6 +409,8 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
     let mut work: u64 = already;
     // (form, depth-of-that-form). The root is depth 1.
     let mut stack: Vec<(&PathForm, usize)> = vec![(form, 1)];
+    #[cfg(test)]
+    WORKLIST_PEAK.with(|c| c.set(c.get().max(stack.len())));
     while let Some((f, depth)) = stack.pop() {
         if depth > MAX_PATH_FORM_DEPTH {
             return Err(MpcError::Protocol(format!(
@@ -387,19 +441,31 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
                     .ok_or_else(|| form_work_overflow("the summed unroll work"))?;
             }
             PathForm::Sequence(parts) => {
+                // CHARGE BEFORE PUSHING: every part costs at least its own `+ 1`,
+                // so a Sequence of a billion parts must be refused on the count it
+                // declares, not after the worklist has grown to hold them all.
+                let declared = u64::try_from(parts.len())
+                    .map_err(|_| form_work_overflow("the part count"))?;
+                work = work
+                    .checked_add(declared)
+                    .ok_or_else(|| form_work_overflow("the part count"))?;
+                if work > MAX_PATH_FORM_WORK {
+                    return Err(form_work_over_budget(work));
+                }
                 for part in parts {
                     stack.push((part, depth + 1));
                 }
+                #[cfg(test)]
+                WORKLIST_PEAK.with(|c| c.set(c.get().max(stack.len())));
+                // The parts' own `+ 1` is charged above, so walking each one must
+                // not charge it twice.
+                work = work
+                    .checked_sub(declared)
+                    .ok_or_else(|| form_work_overflow("the part count"))?;
             }
         }
         if work > MAX_PATH_FORM_WORK {
-            return Err(MpcError::Protocol(format!(
-                "bounded path form: static unroll work {} exceeds the MAX_PATH_FORM_WORK \
-                 budget of {} — refusing before any edge is touched (the per-repetition \
-                 chain and hop caps bound one part's shape; a Sequence composes \
-                 arbitrarily many parts that each pass them)",
-                work, MAX_PATH_FORM_WORK
-            )));
+            return Err(form_work_over_budget(work));
         }
     }
     Ok(work)
@@ -407,6 +473,17 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
 
 /// The overflow refusal shape [`check_form_shape`] uses. Names the quantity and
 /// the budget, both public plan numbers.
+/// The one refusal for a form whose static unroll work passes the budget.
+fn form_work_over_budget(work: u64) -> MpcError {
+    MpcError::Protocol(format!(
+        "bounded path form: static unroll work {} exceeds the MAX_PATH_FORM_WORK \
+         budget of {} — refusing before any edge is touched (the per-repetition \
+         chain and hop caps bound one part's shape; a Sequence composes \
+         arbitrarily many parts that each pass them)",
+        work, MAX_PATH_FORM_WORK
+    ))
+}
+
 fn form_work_overflow(what: &str) -> MpcError {
     MpcError::Protocol(format!(
         "bounded path form: {} overflows u64, so it cannot be within the \
@@ -785,6 +862,17 @@ impl DisclosedEdges {
     /// at any position). Returns an EMPTY relation (no rows) for a predicate with
     /// no disclosed edges — an absent predicate simply contributes nothing, which
     /// is exactly how the clear-text engine treats it.
+    /// The row count of a predicate's disclosed edge relation, WITHOUT building
+    /// (and cloning) it — so the rows a hop is about to materialise can be charged
+    /// to the budget before they exist.
+    fn row_count_for(&self, pred: &NamedNode) -> usize {
+        self.by_predicate
+            .iter()
+            .find(|(k, _)| k == pred.as_str())
+            .map(|(_, p)| p.rows.len())
+            .unwrap_or(0)
+    }
+
     fn relation_for(
         &self,
         pred: &NamedNode,
@@ -993,20 +1081,17 @@ fn eval_repetition(
     // the answer, which has at most `|V|²` distinct rows.
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut union_rows: Vec<Vec<Option<Term>>> = Vec::new();
+    // Collect rows into the deduped union. The rows were CHARGED where they were
+    // produced — the diagonal below and every hop inside `eval_fixed_chain` charge
+    // their own closed-form size before building — so this only dedups.
     let keep = |rows: Vec<Vec<Option<Term>>>,
-                budget: &mut PathFormBudget,
                 seen: &mut BTreeSet<String>,
-                union_rows: &mut Vec<Vec<Option<Term>>>|
-     -> Result<(), MpcError> {
-        // Charge every row the chain produced, deduped or not: producing it is the
-        // work, and dropping a duplicate afterwards does not un-do it.
-        budget.charge(rows.len())?;
+                union_rows: &mut Vec<Vec<Option<Term>>>| {
         for row in rows {
             if seen.insert(format!("{row:?}")) {
                 union_rows.push(row);
             }
         }
-        Ok(())
     };
 
     for length in rep.min..=rep.max {
@@ -1017,12 +1102,14 @@ fn eval_repetition(
             // subset of it. Charged through the same budget as a chain's rows: a
             // declared domain is a public plan input, but the rows it contributes
             // are rows this form materialises.
-            let diagonal: Vec<Vec<Option<Term>>> = edges
-                .node_domain()?
+            let domain = edges.node_domain()?;
+            // Charged before the rows are built: one row per declared node.
+            budget.charge(domain.len())?;
+            let diagonal: Vec<Vec<Option<Term>>> = domain
                 .iter()
                 .map(|node| vec![Some(node.clone()), Some(node.clone())])
                 .collect();
-            keep(diagonal, budget, &mut seen, &mut union_rows)?;
+            keep(diagonal, &mut seen, &mut union_rows);
             continue;
         }
         // exactly-`length` chains: expand the alternation across the `length` hop
@@ -1031,8 +1118,8 @@ fn eval_repetition(
         // with a clone of every predicate IRI in each.
         let mut chains = ChainOdometer::new(&rep.step.alternatives, length);
         while let Some(chain) = chains.next_chain() {
-            let chain_rel = eval_fixed_chain(edges, chain, subject, object)?;
-            keep(chain_rel.rows, budget, &mut seen, &mut union_rows)?;
+            let chain_rel = eval_fixed_chain(edges, chain, subject, object, budget)?;
+            keep(chain_rel.rows, &mut seen, &mut union_rows);
         }
     }
 
@@ -1041,6 +1128,121 @@ fn eval_repetition(
         vars: vec![subject.clone(), object.clone()],
         rows: union_rows,
     })
+}
+
+/// The row count a [`DisclosedKeyJoin`] of `left` and `right` on `join_var` will
+/// produce, computed in CLOSED FORM before the join runs:
+/// `Σ_k deg_left(k) · deg_right(k)` over the join keys, in `O(|left| + |right|)`
+/// time and `O(distinct keys)` space, with checked arithmetic.
+///
+/// Why it exists: a join's OUTPUT is the row count that matters, and it is not
+/// bounded by its inputs — a hub of `N` edges in and `N` out joins to `N²` rows
+/// from `2N` input rows. Charging the result after building it is charging a
+/// number the budget was supposed to decide, so the budget is charged on this
+/// figure first and the join only runs if it fits.
+///
+/// Exactness: in this regime the join key is a bound term in every row (edge
+/// endpoints are IRIs, and a declared diagonal entry is a bound term), and the two
+/// relations joined share exactly the one connecting variable, so the figure is
+/// the join's row count exactly. A row whose key is UNBOUND is compatible with
+/// every row on the other side (SPARQL compatible-mapping semantics), and such a
+/// row is counted against the whole other side, which can OVER-state the product
+/// where both sides carry unbound keys. Over-stating refuses a plan that would
+/// have fitted; it never admits one that would not.
+fn projected_join_rows(
+    left: &PartialResult,
+    right: &PartialResult,
+    join_var: &Variable,
+) -> Result<usize, MpcError> {
+    let key_of = |part: &PartialResult| -> Result<usize, MpcError> {
+        part.vars
+            .iter()
+            .position(|v| v == join_var)
+            .ok_or_else(|| {
+                MpcError::Protocol(format!(
+                    "projected_join_rows: relation does not project the join key ?{} \
+                     (vars: {:?}) — internal unroll invariant violated",
+                    join_var.as_str(),
+                    part.vars
+                ))
+            })
+    };
+    let (li, ri) = (key_of(left)?, key_of(right)?);
+
+    // Left degrees per BOUND key, plus the count of left rows whose key is unbound.
+    let mut left_deg: BTreeMap<String, usize> = BTreeMap::new();
+    let mut left_unbound = 0usize;
+    for row in &left.rows {
+        match &row[li] {
+            Some(term) => *left_deg.entry(format!("{term:?}")).or_insert(0) += 1,
+            None => left_unbound += 1,
+        }
+    }
+
+    let overflow = || MpcError::Protocol(format!(
+        "bounded path form: the row count of a join on ?{} overflows a usize — refusing \
+         before the join is built",
+        join_var.as_str()
+    ));
+    let mut total = 0usize;
+    let mut right_unbound = 0usize;
+    for row in &right.rows {
+        match &row[ri] {
+            Some(term) => {
+                // This right row joins every left row of the same key, and also
+                // every left row whose key is unbound.
+                let deg = left_deg
+                    .get(&format!("{term:?}"))
+                    .copied()
+                    .unwrap_or(0)
+                    .checked_add(left_unbound)
+                    .ok_or_else(overflow)?;
+                total = total.checked_add(deg).ok_or_else(overflow)?;
+            }
+            None => right_unbound += 1,
+        }
+    }
+    // An unbound right key is compatible with the whole left side.
+    let from_unbound = right_unbound
+        .checked_mul(left.rows.len())
+        .ok_or_else(overflow)?;
+    total.checked_add(from_unbound).ok_or_else(overflow)
+}
+
+/// Charge a join's closed-form output size to the budget, then run it.
+///
+/// Every [`DisclosedKeyJoin`] in this module goes through here, so "the budget is
+/// charged before the rows exist" is a property of the one code path rather than a
+/// convention each call site has to remember.
+fn precharged_join(
+    budget: &mut PathFormBudget,
+    left: PartialResult,
+    right: PartialResult,
+    plan: &JoinPlan,
+) -> Result<PartialResult, MpcError> {
+    budget.charge(projected_join_rows(&left, &right, &plan.join_var)?)?;
+    let joined = DisclosedKeyJoin::new().join(&[left, right], plan)?;
+    #[cfg(test)]
+    JOINS_BUILT.with(|c| c.set(c.get() + 1));
+    Ok(joined)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many joins this thread has actually BUILT. The precharge tests read it
+    /// to show a refused plan built none, which no memory figure could assert
+    /// reproducibly.
+    static JOINS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn joins_built_reset() {
+    JOINS_BUILT.with(|c| c.set(0));
+}
+
+#[cfg(test)]
+fn joins_built() -> usize {
+    JOINS_BUILT.with(|c| c.get())
 }
 
 /// A fixed predicate chain `p_1 / p_2 / ... / p_n` (n = chain.len()) →
@@ -1053,6 +1255,7 @@ fn eval_fixed_chain(
     chain: &[NamedNode],
     subject: &Variable,
     object: &Variable,
+    budget: &mut PathFormBudget,
 ) -> Result<PartialResult, MpcError> {
     debug_assert!(
         !chain.is_empty(),
@@ -1071,7 +1274,9 @@ fn eval_fixed_chain(
         }
     };
 
-    // First hop's edge relation: (?__pp_a, ?z1).
+    // First hop's edge relation: (?__pp_a, ?z1). Its rows are charged BEFORE
+    // `relation_for` clones them out of the disclosed edge set.
+    budget.charge(edges.row_count_for(&chain[0]))?;
     let mut acc = edges.relation_for(&chain[0], &hop_var(0), &hop_var(1));
 
     // Fold remaining hops via DisclosedKeyJoin on the shared intermediate var,
@@ -1086,15 +1291,19 @@ fn eval_fixed_chain(
     // endpoints are ever returned (this function's one caller unions endpoint
     // pairs), and endpoint reachability is a set — two walks reaching the same
     // `(subject, reached)` pair continue identically.
-    let join = DisclosedKeyJoin::new();
     for (idx, pred) in chain.iter().enumerate().skip(1) {
+        // This hop's own edge rows, charged before they are cloned...
+        budget.charge(edges.row_count_for(pred))?;
         let next = edges.relation_for(pred, &hop_var(idx), &hop_var(idx + 1));
         let join_var = hop_var(idx); // the shared intermediate this hop joins on
         let plan = JoinPlan {
             join_var,
             key_disclosed: true,
         };
-        let joined = join.join(&[acc, next], &plan)?;
+        // ...and the hop's JOIN output charged from its closed form, before the
+        // join builds it. The per-hop projection and dedup that follow only ever
+        // shrink that row set, so the charge covers the whole hop.
+        let joined = precharged_join(budget, acc, next, &plan)?;
         let reached = hop_var(idx + 1);
         acc = dedup_endpoint_pairs(
             project_endpoints(&joined, subject, &reached)?,
@@ -1149,7 +1358,6 @@ fn eval_sequence(
     let mut acc = eval_form_relation(edges, &parts[0], subject, &first_end, scope, budget)?;
     let mut prev_end = first_end;
 
-    let join = DisclosedKeyJoin::new();
     for (idx, part) in parts.iter().enumerate().skip(1) {
         let last = idx == parts.len() - 1;
         let this_end = if last {
@@ -1167,11 +1375,12 @@ fn eval_sequence(
             join_var: prev_end.clone(),
             key_disclosed: true,
         };
-        acc = join.join(&[acc_dedup, part_rel], &plan)?;
-        acc = project_endpoints(&acc, subject, &this_end)?;
         // The join accumulator is the sequence's own product: its row count is what
-        // composing two in-budget parts multiplied out to, so it is charged too.
-        budget.charge(acc.rows.len())?;
+        // composing two in-budget parts multiplies out to, and it is charged from
+        // the closed form BEFORE the join builds it. The projection that follows is
+        // one output row per joined row, so the charge covers it.
+        acc = precharged_join(budget, acc_dedup, part_rel, &plan)?;
+        acc = project_endpoints(&acc, subject, &this_end)?;
         prev_end = this_end;
     }
 
