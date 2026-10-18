@@ -3416,22 +3416,22 @@ impl Graph {
     /// the same gate as an append.
     pub fn clear_txn(&mut self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
-        if self.txn.is_some() {
-            // Truncating the journal DESTROYS committed records, so it is a durable mutation
-            // like any other and passes the same gate BEFORE the journal is borrowed: it is
-            // refused on a poisoned tree, whose frame is kept for the reopen. Without this a
-            // clear could erase the remainder of a frame recovery still has to apply.
-            self.begin_durable_write()?;
-        }
-        #[cfg(feature = "mmap")]
         {
+            if self.txn.is_some() {
+                // Truncating the journal DESTROYS committed records, so it is a durable mutation
+                // like any other and passes the same gate BEFORE the journal is borrowed: it is
+                // refused on a poisoned tree, whose frame is kept for the reopen. Without this a
+                // clear could erase the remainder of a frame recovery still has to apply.
+                self.begin_durable_write()?;
+            }
             let cleared = match &mut self.txn {
                 Some(j) => j.truncate().map_err(|e| e.to_string()),
-                None => return Ok(()),
+                // No journal (an in-memory graph): nothing to clear, and nothing to freeze.
+                None => Ok(()),
             };
             // A clear that failed leaves the journal in a state this handle cannot describe: its
             // frame may be gone, kept, or shortened. The reopen decides, from the bytes.
-            return self.freeze_on_err(cleared, "a txn journal clear");
+            self.freeze_on_err(cleared, "a txn journal clear")
         }
         #[cfg(not(feature = "mmap"))]
         Ok(())
@@ -4366,10 +4366,13 @@ fn retained_journal_under(dir: &std::path::Path) -> Option<std::path::PathBuf> {
 }
 
 /// (sq-ycle) fsync every FILE under `dir`, deepest first, then the directories from the
-/// deepest up to `dir` itself. The staged base is written through buffered writers and
-/// `std::fs::write`, neither of which syncs: without this a crash just after the swap's renames
-/// could leave the canonical directory naming indexes, dictionary blobs or a manifest whose bytes
-/// never reached disk. Errors are propagated — a base that cannot be synced is not published.
+/// deepest up to `dir` itself. The indexes and the dictionary sync themselves as they are
+/// written (`TripleStore::save_with`, `Dict::save_mmap`); the numeric and temporal caches and the
+/// predicate statistics are written through buffered writers that only FLUSH, which leaves their
+/// bytes in the page cache. This is the backstop that covers all of them in one place: without
+/// it a crash just after the swap's renames could leave the canonical directory naming a cache or
+/// a statistics file whose bytes never reached disk. Errors are propagated — a base that cannot
+/// be synced is not published.
 #[cfg(feature = "mmap")]
 fn fsync_tree(dir: &std::path::Path) -> std::io::Result<()> {
     for entry in std::fs::read_dir(dir)? {
@@ -11409,7 +11412,7 @@ mod tests {
             .save(&dir)
             .unwrap();
         // "WTX9": this journal's own family, a version this build does not know.
-        let future = u32::from_le_bytes([b'W', b'T', b'X', b'9']);
+        let future = u32::from_le_bytes(*b"WTX9");
         let frame = txn_frame(
             future,
             1,
