@@ -124,9 +124,9 @@ at construction — the MCP-Solid proposal draft's local-trusted-agent deploymen
 | `shapes` | the same miner, one class | a class only unreadable documents use reports as absent |
 | `stats` | totals over the same projection | two sessions get different totals; no grants ⇒ zeros |
 | `update` *(gated)* | `PodStore::update_as_with_budget` / `update_as_acp_with_budget` | per-graph session write check, fail-closed; its SPARQL *evaluation* is bounded by the SAME per-call budget the read tools use (draft §9.4) — the one place an update evaluates SPARQL, its `DELETE`/`INSERT … WHERE`. The rest is NOT budgeted, and a request cap covers only the inline `INSERT`/`DELETE DATA`: `CLEAR`/`DROP` cost whatever the session may write, and `LOAD` is refused unless the embedder installs an allowlisted base |
-| `resource_put` *(gated)* | atomic named-graph swap (+ containment link on create) | `.acl`/`.acr` route through `put_acl`/`put_acl_acp`; what it creates records no creator for `acp:CreatorAgent` (as on main), and an existing resource or container keeps its creator and owner (`PodStore::rematerialize_after_edit`); a rolled-back write changes no provenance |
+| `resource_put` *(gated)* | atomic named-graph swap (+ containment link on create) | `.acl`/`.acr` route through `put_acl`/`put_acl_acp`; a document it creates records the SESSION AGENT as creator for `acp:CreatorAgent` rules, while an existing resource, and any container the write brings into being above it, keeps its creator and owner (`PodStore::rematerialize_after_edit`); a rolled-back write changes no provenance, and a containment chain that cannot be completed adds nothing |
 | `resource_delete` *(gated)* | slot removal + containment unlink | containers with anything stored below them (or a non-empty listing) rejected; `.acl` via `delete_acl`; a resource that no longer exists afterwards (a deleted document, or an emptied container) loses its creator and owner unless its own `.acr` is still stored |
-| `container_create` *(gated)* | typed `ldp:BasicContainer` graph + containment | slash-terminated IRIs only; records no creator, like `resource_put` |
+| `container_create` *(gated)* | typed `ldp:BasicContainer` graph + containment | slash-terminated IRIs only; records the session agent as the created container's creator, like `resource_put` does for a document |
 
 Key contracts: a resource the session cannot read errors **byte-identically** to a
 nonexistent one (existence non-disclosure, draft §9.3); ACL writes are gated on
@@ -196,6 +196,19 @@ no longer has a policy of its own) is authorized by the container that governs i
 and additionally requires that the topic itself was readable immediately BEFORE the
 deletion, so the ancestor fallback cannot re-grant read that a resource-specific ACL had
 revoked.
+
+The **authorization anchor** of a write is the target itself when the view can decide it —
+the store holds it as a resource (`PodStore::holds_resource`), or its own `.acl`/`.acr` is
+stored — else the nearest ancestor container that is one, which is the Solid creation rule:
+a create is authorized by the closest EXISTING container's policy. When no ancestor is one
+the decision fails closed.
+
+An ACP pod's trusted context (creator/owner facts and verified credentials) is the
+embedder's to assert. After a change that failed part way the store refuses to rebuild from
+facts that may no longer describe it, and the pod denies until the context is supplied again:
+`SolidMcpServer::supply_acp_context(&AccessProvenance, &VerifiedCredentials)` does that, and
+passing empty ones rebuilds with no such facts at all — the conservative choice when the
+embedder cannot restate them. It is an ACP-only call; a WAC server holds no such context.
 
 Emission is **pull-based**, matching the transport-agnostic dispatch core: a mutating
 tool call queues what it changed and the embedder drains it with
