@@ -41,14 +41,28 @@
 //!
 //! # Integration status (honest scope)
 //!
-//! This is the matrix + resolver as a self-contained, tested unit. WIRING it
-//! into the giant `verify_manifest` flow — so the verifier reads the recorded
-//! `zk:scheme` of the graph each `operand_enc` anchors to and calls
-//! [`resolve_circuit`] before accepting a sub-proof — is design bead 6, which
-//! depends on the host dual-leaf encoding (sq-j506) plumbing the method onto the
-//! verifier's view of a graph. Until then the verifier has NO commitment-method
-//! input (it operates on `CircuitId` + `ProofInputs` only — verified), so this
-//! resolver is the component bead 6 consumes, not yet a wired gate.
+//! [`resolve_circuit`] IS now consulted verifier-side. The per-sub-proof
+//! verification-key selection in `crate::verifier` resolves each sub-proof's
+//! member through it, against the AUTHENTICATED commitment method of the
+//! commitments that sub-proof is bound to (its own `commitments` for a scan or
+//! path, the VALIDATED endpoint commitments of the join edges that cover a join,
+//! the source edge's scan for a FILTER), so the key is selected from the resolved
+//! member rather than from the declared `CircuitId` alone. The five AUXILIARY bb gates — hidden and fully-hidden
+//! revocation, hidden issuer, holder PoK, holder set — are deliberately NOT
+//! routed through it: their member is fixed by the relying party's own policy or
+//! registry, the manifest declares no id for them, and they read revocation and
+//! key/holder-set roots rather than a committed graph's leaf shape.
+//!
+//! What that wiring does NOT do is open anything. The resolver echoes a legal
+//! pair, so no accepted manifest's key selection changes; and in this build every
+//! `(admissible method × member)` pair that can REACH the selection site is
+//! already legal, because a value-lane sub-proof is refused at stage 0 of
+//! `prefilter_manifest_structure` and the `value-only` method is admitted by no
+//! `MethodPolicy`. So the matrix refusal is a standing gate that becomes
+//! load-bearing when either of those is relaxed (the value-lane query binding is
+//! sq-j506), not a verdict change today. The per-sub-proof METHOD derivation
+//! around it does add reachable refusals — a sub-proof whose bound commitments
+//! authenticated different methods, or a mixture of attested and unattested ones.
 //!
 //! The LANE↔MEMBER check is different in exactly this respect: it needs no method
 //! input, because it decides from the `ProofInputs` alone. It therefore DOES run

@@ -622,3 +622,135 @@ fn bb_join_value_absent_from_public_inputs() {
         "PRIVACY REGRESSION: the join value's 32-byte field word appears in the bb public inputs",
     );
 }
+
+// ============================================================================
+// TIER 2 — the UNCOVERED join_eq construction (real bb, end-to-end)
+// ============================================================================
+
+/// An UNCOVERED `join_eq` sub-proof — one that no `JoinEdge` names — must be
+/// REFUSED, with real proofs, all the way through `verify_manifest`.
+///
+/// This is the hardening the stage 2g′ endpoint gate adds. `bind_joins` only
+/// ever walked the DECLARED edges, so a join proof outside that set carried two
+/// prover-chosen `commit_a`/`commit_b` that no gate read: not the endpoint
+/// commitment match (there is no edge to match against), and not the member
+/// resolution (which reads the VALIDATED endpoints of the covering edges). Two
+/// genuinely proved but UNATTESTED graphs are enough to build one, so this drives
+/// exactly that manifest — two real, attested, proved scans plus a real join
+/// proof over two unattested graphs — and asserts the refusal.
+///
+/// Both halves are asserted so neither is vacuous: the manifest with the edge
+/// DECLARED over the same two unattested commitments is refused differently (the
+/// endpoint match, `JoinCommitmentMismatch`), which is what makes the uncovered
+/// case a distinct hole rather than a restatement of an existing gate.
+#[test]
+#[ignore = "nightly: full bb prove of two scans + a join_eq member (nargo + bb)"]
+fn bb_uncovered_join_proof_over_unattested_graphs_rejected() {
+    use sparq_zk_compose::verifier::{
+        encode_artifacts, verify_manifest, EntailmentPolicy, HolderBindingPolicy, HolderRegistry,
+        InMemorySeenNonces, VerifierNonce,
+    };
+    if !support::require_toolchain(
+        "bb_uncovered_join_proof_over_unattested_graphs_rejected",
+        &["nargo", "bb"],
+    ) {
+        return;
+    }
+    let prover = CircuitProver::from_crate_root();
+    let sk = test_issuer_sk(1);
+    // DEFAULT policy — no downgrade is written down for this manifest.
+    let key_set = trusted_k(&sk);
+    assert!(!key_set.method_policy().accepts_unbound());
+
+    // The two ATTESTED credentials, proved for real.
+    let (ga, gb) = (graph_a(), graph_b());
+    let prove_scan = |g: &GraphCommitment, pattern: Pattern, tag: &str| {
+        let built = scan_artifact(g, pattern);
+        let (id, toml) = prover_toml_for(
+            &built.inputs,
+            &challenge(),
+            &built.witness.counts,
+            &built.witness.enc,
+            &[],
+            None,
+            None,
+        )
+        .expect("scan toml");
+        let art = prover.prove_in(&id, &toml, &scratch(tag), tag).expect("the scan proves");
+        SubProof { inputs: built.inputs, proof_hex: encode_artifacts(&art) }
+    };
+    let scan_a = prove_scan(&ga, pattern_a(), "stray_scan_a");
+    let scan_b = prove_scan(&gb, pattern_b(), "stray_scan_b");
+
+    // Two UNATTESTED graphs sharing `<ex/q>`, so the join relation is genuinely
+    // satisfiable. Their CONTENT differs from the attested pair (a commitment is
+    // content-addressed, so a fresh salt alone would not change it).
+    let stray_a = commit_triples(
+        &[Triple::new(
+            NamedOrBlankNode::NamedNode(iri("http://ex/x")),
+            iri("http://ex/knows"),
+            Term::NamedNode(iri("http://ex/q")),
+        )],
+        salt_from_bytes(&[41u8; 32]),
+    )
+    .unwrap();
+    let stray_b = commit_triples(
+        &[Triple::new(
+            NamedOrBlankNode::NamedNode(iri("http://ex/q")),
+            iri("http://ex/age"),
+            int_lit(99),
+        )],
+        salt_from_bytes(&[42u8; 32]),
+    )
+    .unwrap();
+    for g in [&stray_a, &stray_b] {
+        assert!(g.commitment != ga.commitment && g.commitment != gb.commitment);
+    }
+    let built_join =
+        build_join(&stray_a, SLOT_A, &stray_b, SLOT_B, blinding()).expect("the stray join builds");
+    let (join_id, join_toml) = prover_toml_for(
+        &built_join.inputs,
+        &challenge(),
+        &[],
+        &[],
+        &[],
+        Some(&built_join.witness),
+        None,
+    )
+    .expect("join toml");
+    let join_art = prover
+        .prove_in(&join_id, &join_toml, &scratch("stray_join"), "stray_join")
+        .expect("the stray join proves");
+    let join = SubProof { inputs: built_join.inputs, proof_hex: encode_artifacts(&join_art) };
+
+    let mut manifest = join_manifest();
+    manifest.sub_proofs = vec![scan_a, scan_b, join];
+    manifest.join_edges.clear();
+
+    let verify = |m: &ProofManifest, tag: &str| {
+        verify_manifest(
+            m,
+            &prover,
+            &scratch(tag),
+            &key_set,
+            &fresh_policy(),
+            &HolderRegistry::empty(),
+            &HolderBindingPolicy::allow_bearer(),
+            &EntailmentPolicy::simple_only(),
+            &VerifierNonce::from_hex(CHALLENGE_HEX).unwrap(),
+            &InMemorySeenNonces::new(),
+        )
+    };
+    match verify(&manifest, "stray_verify") {
+        Err(CheckError::JoinProofNotBoundToAnEdge { proof: 2 }) => {}
+        other => panic!("an uncovered join proof must be refused, got {other:?}"),
+    }
+    // CONTROL: declare the edge, and the SAME join proof is refused by the
+    // endpoint match instead — the two refusals cover different manifests.
+    manifest.join_edges =
+        vec![JoinEdge { scan_a: 0, graph_a: 0, scan_b: 1, graph_b: 0, join_proof: 2 }];
+    match verify(&manifest, "stray_verify_edge") {
+        Err(CheckError::JoinCommitmentMismatch { edge: 0 }) => {}
+        other => panic!("a declared edge over other commitments must be refused, got {other:?}"),
+    }
+}

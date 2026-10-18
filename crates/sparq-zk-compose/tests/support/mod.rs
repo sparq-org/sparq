@@ -61,22 +61,138 @@ fn allow_missing() -> bool {
     std::env::var_os(ALLOW_MISSING_ENV).is_some_and(|v| !v.is_empty() && v != "0")
 }
 
-/// Gate a LIVE test body on `tools` all being on `PATH`.
+/// Names the file the gate appends to when a live body is allowed to run.
 ///
-/// * all present → `true`; the caller runs its live body.
-/// * absent, [`ALLOW_MISSING_ENV`] set → prints a skip line naming `test`, the
-///   missing tool(s) and the variable, then `false`; the caller returns.
-/// * absent otherwise → PANICS, naming the missing tool, how to put the toolchain
-///   on `PATH`, and the opt-out variable.
+/// Private to this module so no test NAMES it by accident, but it is not a security
+/// boundary: the variable is in the job environment and the path is in the workflow,
+/// so test code that set out to forge an entry could. What the ledger is evidence
+/// for is the accident — a live test that no step runs, or that returns before the
+/// gate. `zk-toolchain.yml` sets it at JOB level and its final step verifies that
+/// every gate call site in the ZK test sources left an entry. A skip appends nothing
+/// and a panic appends nothing, so a lane that skipped past the gate cannot produce
+/// a complete ledger. The ledger records at GATE ENTRY: it proves the gate was
+/// entered with the tools present, NOT that the body ran to completion or asserted
+/// anything.
+const LEDGER_ENV: &str = "SPARQ_ZK_LIVE_LEDGER";
+
+/// Evidence that [`require_toolchain`]/[`gate`] found every requested tool on
+/// `PATH` and let the live body run.
 ///
-/// `test` is the calling test's own name. It is passed explicitly rather than read
-/// from the thread name because libtest runs tests on the main thread (named
+/// Only [`gate`] mints one — the field is private to this module — and
+/// [`live_tool`] takes one, so a live tool cannot be spawned without having passed
+/// the gate first. `#[allow(dead_code)]` because each test binary declaring
+/// `mod support;` uses a subset of this module.
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+pub struct LiveToolchain {
+    _seal: (),
+}
+
+/// The ledger key for a gate call: the CALL SITE, `<file>:<line>`.
+///
+/// The identity is the location, never the `test` argument. A caller-supplied name
+/// could be any string — including another test's — so keying on the name would let
+/// one call site record an entry that satisfies a different one. `Location::file()`
+/// is the path rustc was given, which for this workspace is relative to the
+/// workspace root; backslashes are normalised so a key does not depend on the host.
+fn ledger_key(loc: &std::panic::Location<'static>) -> String {
+    format!("{}:{}", loc.file().replace('\\', "/"), loc.line())
+}
+
+/// Append the CALL SITE's key to the ledger, if the lane asked for one.
+///
+/// Opened with `O_APPEND` (`append(true)`) and written as ONE line in ONE
+/// `write_all`, so entries from tests running in parallel, or from a re-exec'd child
+/// process, cannot interleave. Best-effort by design: a write failure must not turn
+/// a passing live test red, and a missing entry is what the verifier reports.
+fn record(path: &std::path::Path, loc: &std::panic::Location<'static>) {
+    use std::io::Write;
+    let line = format!("{}\n", ledger_key(loc));
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(line.as_bytes()));
+}
+
+/// Where this process records, or `None` when the lane asked for no ledger.
+///
+/// Under `cfg(test)` the module's own tests can redirect it — that is how the
+/// call-site identity below is tested without naming [`LEDGER_ENV`] anywhere a test
+/// could reach. Nothing outside this file can set it.
+fn ledger_path() -> Option<std::path::PathBuf> {
+    #[cfg(test)]
+    {
+        if let Some(path) = TEST_LEDGER.with(|cell| cell.borrow().clone()) {
+            return Some(path);
+        }
+    }
+    match std::env::var_os(LEDGER_ENV) {
+        Some(p) if !p.is_empty() => Some(std::path::PathBuf::from(p)),
+        _ => None,
+    }
+}
+
+// A ledger path for this module's own tests only. Private, `cfg(test)`-only, and
+// THREAD-LOCAL.
+//
+// libtest runs tests on worker threads (or, under `--test-threads=1`, one after
+// another on the main thread), so a thread-local redirect reaches only the test
+// that set it: a live test running in parallel keeps writing to the real ledger.
+// A process-wide override could divert that live test's entry into a temporary
+// file and turn the lane's ledger check red for the wrong reason — the compose lib
+// step `cargo test --lib driver::` runs without `--test-threads=1`, so this is a
+// real ordering, not a hypothetical one.
+#[cfg(test)]
+thread_local! {
+    static TEST_LEDGER: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// A [`std::process::Command`] for a live tool.
+///
+/// Takes a [`LiveToolchain`], which only [`gate`] mints, so the gate cannot be
+/// bypassed. It ALSO re-checks `PATH` itself and panics when the tool is absent, so
+/// neither a stale token nor an `is_err()` test on the spawn result can be turned
+/// into a soft pass. `scripts/check-zk-toolchain-gate.py` lints the ZK test trees
+/// for every other acquisition path.
+#[allow(dead_code)]
+pub fn live_tool(_gate: &LiveToolchain, tool: &str) -> std::process::Command {
+    assert!(
+        on_path(tool),
+        "{} is not on PATH at spawn time; the live toolchain gate must be passed \
+         first and the tool must stay available",
+        tool
+    );
+    std::process::Command::new(tool)
+}
+
+/// Gate a LIVE test body on `tools` all being on `PATH`, returning the token
+/// [`live_tool`] needs.
+///
+/// * all present -> `Some(token)`, and the CALL SITE's key (`<file>:<line>`) is
+///   appended to the ledger.
+/// * absent, [`ALLOW_MISSING_ENV`] set -> prints a skip line naming `test`, the
+///   missing tool(s) and the variable, then `None`; NOTHING is recorded.
+/// * absent otherwise -> PANICS, naming the missing tool, how to put the toolchain
+///   on `PATH`, and the opt-out variable; nothing is recorded.
+///
+/// `test` names the calling test, for the skip and panic messages ONLY — it is not
+/// the ledger identity (see [`ledger_key`]). It is passed explicitly rather than
+/// read from the thread name because libtest runs tests on the main thread (named
 /// `main`) under `--test-threads=1`, which is exactly how the toolchain lane runs
-/// them.
-pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
+/// them. `scripts/check-zk-toolchain-gate.py` still requires it to be a string
+/// literal, so a skip or panic line names something a reader can find in the
+/// source, but a wrong name can no longer satisfy another call site's entry.
+#[allow(dead_code)]
+#[track_caller]
+pub fn gate(test: &str, tools: &[&str]) -> Option<LiveToolchain> {
     let missing: Vec<&str> = tools.iter().copied().filter(|t| !on_path(t)).collect();
     if missing.is_empty() {
-        return true;
+        if let Some(path) = ledger_path() {
+            record(&path, std::panic::Location::caller());
+        }
+        return Some(LiveToolchain { _seal: () });
     }
     let missing = missing.join(", ");
     if allow_missing() {
@@ -85,7 +201,7 @@ pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
              this lane toolchain-free — the live body did NOT run.",
             test, missing, ALLOW_MISSING_ENV
         ));
-        return false;
+        return None;
     }
     panic!(
         "{} is a LIVE test, so its body would not have run — not on PATH: {}. \
@@ -96,4 +212,122 @@ pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
          toolchain-free and turn this failure into a visible, named skip.",
         test, missing, ALLOW_MISSING_ENV
     );
+}
+
+/// [`gate`] as a boolean, for the call sites that do not spawn a tool themselves.
+/// `#[track_caller]` so the ledger key is the TEST's line, not this forwarding
+/// call's line inside the gate module.
+#[allow(dead_code)]
+#[track_caller]
+pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
+    gate(test, tools).is_some()
+}
+
+// --------------------------------------------------------------------------- #
+// The gate's own identity tests.
+//
+// Compiled into every binary that declares `mod support;` and into the crate's lib
+// target (which includes this same file with `#[path]`), so they run wherever the
+// gate does. They are about the LEDGER KEY: that it is the caller's own line, that
+// `#[track_caller]` carries that line through the `require_toolchain` wrapper, and
+// that nothing is recorded on the skip or panic paths.
+// --------------------------------------------------------------------------- #
+
+#[cfg(test)]
+mod gate_identity_tests {
+    use super::{ALLOW_MISSING_ENV, TEST_LEDGER, gate, require_toolchain};
+
+    /// A name no executable resolves to, so the gate takes a non-recording path.
+    const ABSENT: &str = "sparq-zk-gate-identity-no-such-tool-xyzzy";
+
+    fn scratch(label: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "sparq_gate_identity_{}_{}_{}.txt",
+            label,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    /// Run `body` with this THREAD's ledger pointed at `path`.
+    ///
+    /// The override is thread-local, so these tests cannot overwrite each other's
+    /// path and cannot divert a live test running in parallel. The one test that
+    /// provokes a panic catches it INSIDE `body`, so `body()` returns normally and
+    /// the redirect is always cleared; a panic escaping `body` would leave it set
+    /// for this thread, which reaches nothing but these tests.
+    fn redirected<T>(path: &std::path::Path, body: impl FnOnce() -> T) -> T {
+        TEST_LEDGER.with(|cell| *cell.borrow_mut() = Some(path.to_path_buf()));
+        let out = body();
+        TEST_LEDGER.with(|cell| *cell.borrow_mut() = None);
+        out
+    }
+
+    fn ledger(path: &std::path::Path) -> String {
+        std::fs::read_to_string(path).unwrap_or_default()
+    }
+
+    /// The recorded key is the line of the GATE CALL in the calling test, not a line
+    /// inside the gate module. This is what makes the key unforgeable: the `test`
+    /// argument is a message, and the inventory recomputes these keys from source.
+    #[test]
+    fn the_recorded_key_is_the_call_site_of_the_gate_call() {
+        let path = scratch("call_site");
+        let line = line!() + 2;
+        let token = redirected(&path, || {
+            gate("a name that is deliberately not this test's name", &["cargo"])
+        });
+        assert!(token.is_some(), "cargo must be on PATH for this test to mean anything");
+        let want = format!("{}:{}\n", file!().replace('\\', "/"), line);
+        assert!(
+            ledger(&path).contains(&want),
+            "the ledger must hold {want:?}, got {:?}",
+            ledger(&path)
+        );
+    }
+
+    /// `require_toolchain` forwards the caller's location, so a test that uses the
+    /// boolean wrapper is recorded at ITS line and not at the wrapper's.
+    #[test]
+    fn require_toolchain_records_its_own_caller_not_the_wrapper() {
+        let path = scratch("wrapper");
+        let line = line!() + 1;
+        let ok = redirected(&path, || require_toolchain("wrapper probe", &["cargo"]));
+        assert!(ok, "cargo must be on PATH for this test to mean anything");
+        let want = format!("{}:{}\n", file!().replace('\\', "/"), line);
+        assert!(
+            ledger(&path).contains(&want),
+            "the ledger must hold {want:?}, got {:?}",
+            ledger(&path)
+        );
+    }
+
+    /// A missing tool records NOTHING — on the declared-skip path and on the panic
+    /// path alike. A ledger entry therefore means the body was allowed to run.
+    #[test]
+    fn a_missing_tool_records_nothing_on_either_path() {
+        let skipped = scratch("skip");
+        let declared = std::env::var_os(ALLOW_MISSING_ENV).is_some();
+        let out = redirected(&skipped, || {
+            std::panic::catch_unwind(|| require_toolchain("absent probe", &[ABSENT]))
+        });
+        match out {
+            Ok(allowed) => assert!(
+                !allowed && declared,
+                "an absent tool must not pass the gate"
+            ),
+            Err(_) => assert!(!declared, "the panic path is the undeclared one"),
+        }
+        let want = format!("{}:", file!().replace('\\', "/"));
+        assert!(
+            !ledger(&skipped).contains(&want),
+            "the skip and panic paths must record nothing from this file, got {:?}",
+            ledger(&skipped)
+        );
+    }
 }

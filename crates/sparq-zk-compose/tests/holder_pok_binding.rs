@@ -416,6 +416,9 @@ fn holder_pok_absent_and_not_required_is_noop() {
         }
         // Any non-B2 outcome (e.g. an unrelated clear-path Ok/Err) is fine: we only
         // assert the B2 gate did not fire.
+        // zk-toolchain-gate: allow the test asserts a NEGATIVE — that no HolderPok* error fires
+        //   — so every other outcome is deliberately accepted; tracing it with a recording
+        //   nargo/bb shim on PATH records no spawn, so a missing tool cannot reach this arm
         _ => {}
     }
 }

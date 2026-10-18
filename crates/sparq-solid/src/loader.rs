@@ -22,6 +22,7 @@
 //! (see [`assemble_facts`]). Principal values in the view's reserved spaces are refused
 //! ([`validate_principal_iri`]).
 
+use crate::budget::{AuthBudget, InputMeter};
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_NS, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -433,6 +434,33 @@ pub(crate) enum System {
     Acp,
 }
 
+/// [`graph_triples`] under the input budget `meter`, charging each term's bytes as it is
+/// materialized.
+///
+/// This is the seam the per-document and aggregate byte budgets act at: the terms of a
+/// control or group document are charged WHILE the owned triples are built, so a document
+/// set past the budget stops being read at the limit instead of being materialized whole
+/// and checked afterwards. `iri` names the document in a refusal.
+pub(crate) fn graph_triples_metered(
+    g: &Graph,
+    iri: &str,
+    meter: &mut InputMeter,
+) -> Result<Vec<[Term; 3]>, String> {
+    let pat: sparq_core::store::Pattern = [None, None, None];
+    let scan = g.store.scan(&pat);
+    meter.open();
+    let mut out = Vec::with_capacity(scan.rows.len());
+    for r in scan.rows.iter() {
+        let t = scan.to_spo(r);
+        let triple = [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])];
+        for term in &triple {
+            meter.term(iri, term)?;
+        }
+        out.push(triple);
+    }
+    Ok(out)
+}
+
 /// The triples of one named graph as ground term triples.
 pub(crate) fn graph_triples(g: &Graph) -> Vec<[Term; 3]> {
     let pat: sparq_core::store::Pattern = [None, None, None];
@@ -502,7 +530,9 @@ pub(crate) fn assemble_facts(
     system: System,
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
+    budget: AuthBudget,
 ) -> Result<Vec<[Term; 3]>, String> {
+    let mut meter = InputMeter::new(budget);
     let mut out: Vec<[Term; 3]> = Vec::new();
     let suffix = if system == System::Wac { ACL_SUFFIX } else { ACR_SUFFIX };
     let own_pred = if system == System::Wac { "ownAcl" } else { "ownAcr" };
@@ -512,11 +542,17 @@ pub(crate) fn assemble_facts(
     let is_webid = named(&format!("{SOLIDX_NS}isWebId"));
 
     // 1) resources (see [`enumerate`]).
-    let (resources, control_graphs) = enumerate(graph, suffix);
+    // The resources are enumerated under the SAME input meter as the documents, and
+    // charged before their container chains are built: the enumeration's cost grows with
+    // the pod's resource IRIs rather than with its documents' bytes or its fact count, so
+    // neither of the budgets checked after this one bounds it.
+    let (resources, control_graphs) = enumerate(graph, suffix, Some(&mut meter))?;
+    // Under the input budget: each document's terms are charged as they are read, so the
+    // whole set is never materialized past it (sq-7159 follow-up, `crate::AuthBudget`).
     let control_graphs: Vec<(&str, Vec<[Term; 3]>)> = control_graphs
         .into_iter()
-        .map(|(iri, sub)| (iri, graph_triples(sub)))
-        .collect();
+        .map(|(iri, sub)| graph_triples_metered(sub, iri, &mut meter).map(|ts| (iri, ts)))
+        .collect::<Result<_, String>>()?;
     // A control document with a triple it may not state contributes nothing. For ACP,
     // whose policies also deny, so does every ACR that references a node of a rejected
     // document or a node no loaded document defines (transitively — see [`document_view`]),
@@ -612,7 +648,10 @@ pub(crate) fn assemble_facts(
             }
             // A group document only grants (it lists members), so a triple it may not
             // state is dropped on its own; the rest of the document still counts.
-            for t in graph_triples(sub).into_iter().filter(|t| admits(t, iri)) {
+            for t in graph_triples_metered(sub, iri, &mut meter)?
+                .into_iter()
+                .filter(|t| admits(t, iri))
+            {
                 out.push([
                     skolemize(&t[0], iri),
                     skolemize(&t[1], iri),
@@ -675,7 +714,28 @@ pub(crate) fn assemble_facts(
     for a in &webids {
         out.push([named(a), is_webid.clone(), xsd_true()]);
     }
+    // The assembled total — document content plus the structural, provenance and
+    // credential facts — before any caller interns it.
+    meter.facts(out.len())?;
     Ok(out)
+}
+
+/// [`assemble_facts`] under [`crate::default_auth_budget`] — the shorthand the in-crate
+/// tests that are not about the budget itself use.
+#[cfg(test)]
+pub(crate) fn assemble_facts_default(
+    graph: &Graph,
+    system: System,
+    provenance: &AccessProvenance,
+    credentials: &VerifiedCredentials,
+) -> Result<Vec<[Term; 3]>, String> {
+    assemble_facts(
+        graph,
+        system,
+        provenance,
+        credentials,
+        crate::default_auth_budget(),
+    )
 }
 
 /// The reasoning input as `[Id; 3]` facts interned DIRECTLY into `dict` — the id-level
@@ -690,8 +750,13 @@ pub(crate) fn assemble_input_ids(
     system: System,
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
+    budget: AuthBudget,
 ) -> Result<Vec<[Id; 3]>, String> {
-    let facts = assemble_facts(graph, system, provenance, credentials)?;
+    let facts = assemble_facts(graph, system, provenance, credentials, budget)?;
+    // The fact count is re-checked HERE, immediately before interning: this is the point
+    // the input is copied into the closure's dictionary, and `assemble_facts` is also
+    // reached by the text differential path, so the guard sits on both sides of the seam.
+    InputMeter::new(budget).facts(facts.len())?;
     Ok(facts
         .iter()
         .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
@@ -712,9 +777,10 @@ pub(crate) fn assemble_input(
     system: System,
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
+    budget: AuthBudget,
 ) -> Result<String, String> {
     use std::fmt::Write;
-    let facts = assemble_facts(graph, system, provenance, credentials)?;
+    let facts = assemble_facts(graph, system, provenance, credentials, budget)?;
     let mut out = String::new();
     for t in &facts {
         let _ = writeln!(out, "{} {} {} .", t[0], t[1], t[2]);
@@ -825,13 +891,27 @@ pub(crate) fn iri_origin(iri: &str) -> &str {
     }
 }
 
+/// What [`enumerate`] yields: the view's resources, and its control documents with the
+/// stored graph of each.
+type Enumerated<'g> = (FxHashSet<String>, Vec<(&'g str, &'g Graph)>);
+
 /// The auth view's resources in `graph`, and its control documents ending in `suffix`.
 /// The resources are every graph outside the reserved and skolem spaces that is not an
 /// `.acl`/`.acr` and has an authority, plus every structural container above one (a container is an inheritance
 /// anchor even without a graph of its own, but not when only control documents sit below
 /// it). The materializer and the store's provenance pruning both use this, so trusted
 /// creator/owner facts are stated for exactly the resources the view holds.
-fn enumerate<'g>(graph: &'g Graph, suffix: &str) -> (FxHashSet<String>, Vec<(&'g str, &'g Graph)>) {
+///
+/// `meter`, when given, is the input budget of the materialization this enumeration feeds:
+/// the resources it walks are charged against it ([`crate::AuthBudget`]) BEFORE their
+/// container chains are built, so a pod cannot be made to spend unbounded memory here on
+/// the way to a budget that only bounds what comes after. A caller with no budget to charge
+/// (the store's own provenance pruning, over names it already holds) passes `None`.
+fn enumerate<'g>(
+    graph: &'g Graph,
+    suffix: &str,
+    mut meter: Option<&mut InputMeter>,
+) -> Result<Enumerated<'g>, String> {
     let mut resources: FxHashSet<String> = FxHashSet::default();
     let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
     for (name, sub) in &graph.named {
@@ -852,10 +932,10 @@ fn enumerate<'g>(graph: &'g Graph, suffix: &str) -> (FxHashSet<String>, Vec<(&'g
             continue;
         }
         if is_resource_graph(iri) {
-            insert_with_containers(&mut resources, iri);
+            insert_with_containers(&mut resources, iri, meter.as_deref_mut())?;
         }
     }
-    (resources, control_graphs)
+    Ok((resources, control_graphs))
 }
 
 /// Whether the stored graph `iri` is an access-control document.
@@ -902,15 +982,44 @@ fn is_container_name(iri: &str) -> bool {
 }
 
 /// Add `iri` and its structural container chain (https://host/a/b/doc -> /a/b/ -> /a/ -> /).
-fn insert_with_containers(resources: &mut FxHashSet<String>, iri: &str) {
+///
+/// The chain is the whole cost of this: one owned prefix string per container, so an IRI of
+/// length L under D containers owns up to L x D bytes here. `meter`, when given, is charged
+/// for each of those strings BEFORE it is made, and refuses the IRI's length and depth
+/// before the walk starts at all ([`InputMeter::resource`]) — the one point where a single
+/// name can cost more than its own length, and the reason the length and depth are bounded
+/// rather than only the facts the names become.
+///
+/// A container already in `resources` ends the walk, as its own chain is there already;
+/// nothing is allocated for it (nor charged), so the enumeration of a whole pod costs the
+/// bytes of its DISTINCT resources, not of every chain.
+fn insert_with_containers(
+    resources: &mut FxHashSet<String>,
+    iri: &str,
+    mut meter: Option<&mut InputMeter>,
+) -> Result<(), String> {
+    if let Some(m) = meter.as_deref_mut() {
+        m.resource(iri)?;
+    }
+    if resources.contains(iri) {
+        return Ok(());
+    }
+    if let Some(m) = meter.as_deref_mut() {
+        m.resource_bytes(iri.len())?;
+    }
     resources.insert(iri.to_owned());
     let mut cur = iri;
     while let Some(parent) = parent_iri(cur) {
-        if !resources.insert(parent.to_owned()) {
+        if resources.contains(parent) {
             break;
         }
+        if let Some(m) = meter.as_deref_mut() {
+            m.resource_bytes(parent.len())?;
+        }
+        resources.insert(parent.to_owned());
         cur = parent;
     }
+    Ok(())
 }
 
 /// The stored graphs that are resources by themselves (see [`is_resource_graph`]), kept in
@@ -978,7 +1087,9 @@ impl ResourceGraphs {
     pub(crate) fn all(&self) -> FxHashSet<String> {
         let mut out = FxHashSet::default();
         for name in &self.0 {
-            insert_with_containers(&mut out, name);
+            // Over names this store already holds, with no materialization budget to charge
+            // them against: unmetered, and infallible as a result.
+            let _ = insert_with_containers(&mut out, name, None);
         }
         out
     }
@@ -1038,8 +1149,13 @@ pub(crate) fn control_documents_name_provenance(graph: &Graph) -> bool {
 }
 
 /// The auth view's resources in `graph` (see [`enumerate`]).
+///
+/// Unmetered: this is the store's own provenance pruning over names it already holds, not
+/// the reasoning input of a materialization, so there is no input budget to charge. The
+/// materialization path passes its [`InputMeter`] instead.
 pub(crate) fn resources(graph: &Graph) -> FxHashSet<String> {
-    enumerate(graph, ACR_SUFFIX).0
+    // With no meter there is nothing to charge and so no refusal to propagate.
+    enumerate(graph, ACR_SUFFIX, None).unwrap_or_default().0
 }
 
 /// Whether `iri` is exactly a bare `scheme://` with no authority — above every authority
@@ -1072,7 +1188,7 @@ pub fn parent_iri(iri: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{assemble_facts, graph_triples, named, skolemize, System};
+    use super::{assemble_facts_default, graph_triples, named, skolemize, System};
     use super::{iri_origin, parent_iri};
     use crate::{
         AccessProvenance, Mode, PodStore, Session, VerifiedCredentials, AUTH_GRAPH, AUTH_NS,
@@ -1141,7 +1257,7 @@ mod tests {
             graph.named.push((named(iri), sub));
         }
         let facts = |g: &Graph| -> FxHashSet<_> {
-            assemble_facts(
+            assemble_facts_default(
                 g,
                 System::Wac,
                 &AccessProvenance::new(),
@@ -1216,7 +1332,7 @@ mod tests {
     }
 
     fn skolem_iris(store: &PodStore) -> FxHashSet<Term> {
-        assemble_facts(
+        assemble_facts_default(
             store.graph(),
             System::Acp,
             &AccessProvenance::new(),
@@ -1346,7 +1462,7 @@ mod tests {
                 );
                 let graph = Graph::load_dataset(&nq, "nquads").unwrap();
                 let (prov, creds) = (AccessProvenance::new(), VerifiedCredentials::new());
-                let facts = assemble_facts(&graph, system, &prov, &creds).unwrap();
+                let facts = assemble_facts_default(&graph, system, &prov, &creds).unwrap();
                 let own = |x: &Term| matches!(x, Term::NamedNode(n) if n.as_str().starts_with(doc));
                 let leaked: Vec<_> = facts.iter().filter(|t| own(&t[0])).collect();
                 assert!(leaked.is_empty(), "{statement}: {leaked:?}");

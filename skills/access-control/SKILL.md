@@ -117,12 +117,27 @@ Materialize the authorization view from the access-control documents, then enfor
   access-control write or an update. Raise it for a pod the default refuses; lower it to cap
   the work one materialization may do. The free `materialize_*` functions always use
   `default_auth_limits()`.
+- `store.set_auth_budget(AuthBudget)` / `store.auth_budget() -> AuthBudget` /
+  `default_auth_budget() -> AuthBudget` — the **input and whole-decision budget** every
+  authorization materialization of that store runs under (see
+  [Input and whole-decision budget](#input-and-whole-decision-budget)). It covers what the
+  per-closure `ClosureLimits` cannot: the reasoning INPUT the pod's control documents become
+  (`max_document_bytes` 64 KiB per document, `max_input_bytes` 1 MiB over all of them AND
+  over the resource enumeration, `max_input_facts` 32,000, `max_input_term_bytes` 4 KiB for
+  one term, `max_resource_iri_bytes` 2 KiB and `max_resource_path_depth` 64 for one resource
+  IRI the enumeration walks) and the AGGREGATE of
+  all the closures one materialization runs (`max_decision_join_rows` 4,000,000,
+  `max_decision_facts` 512,000). Same application rules as `set_auth_limits`: from the NEXT
+  materialization, WAC and ACP alike, every self-made rebuild included; the free
+  `materialize_*` functions always use `default_auth_budget()`.
 - `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
-  -> bool` — whether a materialization error is a refusal by that allowance rather than any
-  other failure, and which allowance it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
-  RoundsOrFacts, TermBytes, Unspecified}`, `limit_name()` for a message). The refusal carries
-  that kind as a tag read from ANYWHERE in the message, so it still matches when a write path
-  wraps the failed rebuild's error in its own sentence.
+  -> bool` — whether a materialization error is a refusal by that allowance or budget rather
+  than any other failure, and which one it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
+  RoundsOrFacts, TermBytes, InputBytes, InputFacts, InputTermBytes, ResourceIri,
+  DecisionWork, Unspecified}`, `limit_name()` for a message). The refusal carries that kind
+  as a tag directly after the refusal wording, and the pair is read from ANYWHERE in the
+  message, so it still matches when a write path wraps the failed rebuild's error in its own
+  sentence — while an error that merely quotes the tag literal is not read as a refusal.
 - `store.materialize_acp_with(&AccessProvenance) -> Result<MaterializeStats, _>` —
   (sq-3jtd.5) ACP materialization that ALSO resolves `acp:CreatorAgent` /
   `acp:OwnerAgent` matchers against per-resource creator/owner WebIDs supplied by the
@@ -503,6 +518,10 @@ Materialize the authorization view from the access-control documents, then enfor
   clock-bounded permission stores nothing (per-request evaluation: #6743). See the
   `usage-control-policy` skill.
 - `odrl_bridge::materialize_odrl_n3(&mut Graph, policy_ttl: &str, &Request) -> Result<BridgeOutcome, String>`
+  (and `materialize_odrl_n3_with_budget(…, AuthBudget)`, the twin that takes the
+  whole-decision budget its five closures are charged against instead of
+  `default_auth_budget()` — pass the store's own `auth_budget()` so a lowered budget is
+  honoured on this lane as it is on the WAC and ACP ones)
   — **opt-in** (`odrl-bridge`; sq-zgbso.2, sq-zgbso.2): an alternative
   materialization path that runs the stateless ODRL core as **five stratified `reason_n3` calls**
   (`rules/odrl-{a0,a,b,c,d}.n3`), mirroring the WAC/ACP N3-stratification pattern instead of the
@@ -846,8 +865,14 @@ binding** are the relying application's job.)
 Each authorization closure — the WAC stratum, each of the three ACP strata, and the ODRL-bridge
 strata under `odrl-bridge` — runs under an explicit `ClosureLimits` whose join-row allowances
 are FINITE: `max_join_rows` bounds one round's premise joins and rule firings, and
-`max_total_join_rows` bounds them over ALL rounds of that closure, so the work one
-materialization can be made to do is capped however large a pod's policies are. (The
+`max_total_join_rows` bounds them over ALL rounds of that closure. **Every field of
+`ClosureLimits` is PER CLOSURE, and each closure gets it afresh** — its rounds, its per-round
+join rows, its `max_total_join_rows` and its `max_facts` — so a materialization that runs n
+closures may spend n times each of them: a WAC view runs ONE closure, an ACP view runs THREE
+(accepts → rejections → grants, `materialize.rs`), and a bridged ODRL policy runs FIVE
+(`odrl_bridge.rs`). What bounds the n of them together is the separate
+`AuthBudget::max_decision_join_rows` / `max_decision_facts` — see
+[Input and whole-decision budget](#input-and-whole-decision-budget). (The
 reasoner's own `ClosureLimits::default()` leaves both unbounded; the authorization path does
 not inherit that. `max_total_join_rows` is a `sparq-reason` addition: it is charged once and
 never refilled, is unbounded by default, and so changes nothing for any other caller.) The
@@ -867,6 +892,68 @@ drops the view, denying every request until a materialization succeeds. The refu
 allowance was reached, so an operator can act on "raise the allowance" rather than reading it
 as a policy decision. Raise it with
 `PodStore::set_auth_limits`.
+
+### Input and whole-decision budget
+
+`ClosureLimits` bounds what the RULES may do inside one closure. Two things sit outside it,
+and `AuthBudget` (`PodStore::set_auth_budget`, `default_auth_budget()`) bounds those.
+
+**The reasoning input.** A pod's access-control and group documents become owned term triples
+and are interned into the closure's dictionary before any rule runs, and
+`ClosureLimits::max_term_bytes` bounds only the terms the rules DERIVE — not a term an
+untrusted writer put in a document. So the input has its own budget: `max_document_bytes` for
+what ONE document may contribute, `max_input_bytes` for all of them together,
+`max_input_term_bytes` for one term, and `max_input_facts` for the assembled fact set
+(document content plus the structural, provenance and credential facts). The per-document and
+per-term dimensions are charged **while each document is read**, so a document set past the
+budget stops being read at the limit rather than being materialized whole and checked
+afterwards; the fact count is checked on the assembled set, before it is interned.
+
+`ClosureLimits::max_facts` is now charged over the GIVEN facts too, so a refused closure does
+not first hold and copy an input of the caller's choosing.
+
+The input also carries the pod's **resource enumeration**, which neither of those dimensions
+bounds: a resource of the view brings every container on its chain, each an owned prefix
+string, so one name of length L under D containers costs up to L x D bytes — set by the
+pod's NAMES rather than by its documents' bytes, and built before there is a fact to count.
+`max_resource_iri_bytes` bounds the L and `max_resource_path_depth` the D of ONE name, both
+charged before that name's chain is walked, and every string the enumeration owns is charged
+against the aggregate `max_input_bytes` before it is made — so the enumeration of a whole
+pod costs at most the input budget, whatever shape its names have. Past any of the three the
+whole materialization is refused (`AuthAllowance::ResourceIri` for the two per-name caps,
+`InputBytes` for the aggregate), fail-closed, with nothing installed.
+
+**The whole decision.** Because `ClosureLimits` is per closure, an ACP view's three strata and
+a bridged ODRL policy's five strata could each spend the full allowance. Each closure now
+reports what it charged (`sparq_reason::n3::compiled::ClosureCharge`), the charges of one
+materialization go into one ledger, and `max_decision_join_rows` / `max_decision_facts` bound
+their sum. `max_decision_join_rows` is deliberately the same value as one closure's
+`max_total_join_rows`, so the ACCEPTED aggregate of an ACP view's three strata is no looser
+than what a single-stratum WAC view may spend. The ledger is charged when a closure
+RETURNS, so the stratum that pushes the aggregate over the cap has already run to completion
+under its own per-closure allowance: the PEAK work one refused decision does is the
+aggregate plus that one closure's cap (up to ~8,000,000 binding rows, ~768,000 facts at the
+defaults), and what the cap bounds exactly is the work of a decision that is ACCEPTED. Every
+closure is independently bounded either way, so the peak is finite in both dimensions, and
+the ledger counts conservatively (each stratum's fixpoint re-counts the facts it was given).
+
+Every default is ten times or more the largest value the fixtures this crate materializes
+need — by bisection for the dimensions a run either fits in or does not, and from the
+fixtures' longest and deepest resource name for the two enumeration caps; the per-field
+minima and the resulting margins (10x to 56x) are
+recorded in `default_auth_budget`'s rustdoc, not here — they are specific to those fixtures
+and that box. A refusal is the same kind of event as a reasoning-allowance
+refusal, with the same fail-closed routes and the same typed `AuthAllowance` kinds
+(`InputBytes`, `InputFacts`, `InputTermBytes`, `ResourceIri`, `DecisionWork`), so a caller
+that already tells an allowance refusal from a deny needs no second check.
+
+> The ODRL **parse** has its own, non-configurable budget on the other side of this seam:
+> `sparq_policy`'s constraint assembly bounds the nesting depth and the total operand
+> expansion of one rule's `odrl:LogicalConstraint`, because a compact acyclic combinator graph
+> with shared operands describes exponentially many operand nodes. Past either, the WHOLE
+> policy is refused (`sparq_policy::constraint_budget_refusal` names which), and every caller
+> here is fail-closed on that: the bridge materializes nothing and the server's ODRL lane
+> answers 400.
 
 ## Trust-graph authorisation PoC — sq-pfae (issue #940, opt-in `trust-graph`)
 

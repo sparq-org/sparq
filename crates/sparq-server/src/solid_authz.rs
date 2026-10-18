@@ -105,7 +105,7 @@ use axum::{
     response::Response,
 };
 
-use sparq_solid::{AclStatus, Mode, PodStore, Session, WacDecision};
+use sparq_solid::{AclStatus, AuthAllowance, Mode, PodStore, Session, WacDecision};
 
 use crate::http::{auth_gate, json_error, AppState, Operation};
 
@@ -156,7 +156,15 @@ pub(crate) struct CachedAuthView {
 enum ServerViewError {
     /// The N3 materialisation failed — an operational, retryable condition (503). Fail-closed:
     /// no store is cached and no request is answered from a partial view.
-    Materialize,
+    ///
+    /// Carries the materialisation's allowance/budget kind when it had one
+    /// ([`sparq_solid::auth_allowance_refusal`]) so the server can LOG which limit the store's
+    /// control documents reached — "raise the allowance" and "the reasoner failed" are different
+    /// operational conditions. `None` for any other materialisation failure. The kind is a
+    /// closed enum carrying no pod or request data, which is why it is what crosses into the
+    /// log; the message itself (which quotes document IRIs) is not logged and never reaches the
+    /// client.
+    Materialize(Option<AuthAllowance>),
     /// `odrl-authz` only: the server's own store carries ODRL policy rules. The stateful lane
     /// cannot yet evaluate them, and SILENTLY DROPPING a prohibition would be fail-OPEN — so the
     /// whole request is refused (400) instead.
@@ -440,22 +448,36 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
 // other handler helpers.
 #[allow(clippy::result_large_err)]
 fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
-    let graph = sparq_core::Graph::load_dataset(&req.dataset, "nquads").map_err(|_| {
+    build_store_from(&req.dataset, req.view)
+}
+
+/// [`build_store`] over the two fields it reads, so the blocking-pool lane
+/// ([`resolve_store`]) can own them for the task rather than borrow the request.
+// `Response` is large; same `result_large_err` allow as the rest of this module.
+#[allow(clippy::result_large_err)]
+fn build_store_from(dataset: &str, requested_view: Option<AuthView>) -> Result<PodStore, Response> {
+    let graph = sparq_core::Graph::load_dataset(dataset, "nquads").map_err(|_| {
         // The parser's detail is withheld from the client (info-leak posture); the class is enough.
         json_error(
             StatusCode::BAD_REQUEST,
             "'dataset' is not valid N-Quads",
         )
     })?;
-    let view = req.view.unwrap_or_else(|| infer_view(&req.dataset));
+    let view = requested_view.unwrap_or_else(|| infer_view(dataset));
     let mut store = PodStore::new(graph);
     let materialized = match view {
         AuthView::Wac => store.materialize_wac(),
         AuthView::Acp => store.materialize_acp(),
     };
-    materialized.map_err(|_| {
-        // Materialisation failed (e.g. a reserved-encoding collision / reasoner error): a
+    materialized.map_err(|e| {
+        // Materialisation failed (e.g. a reserved-encoding collision / reasoner error, or the
+        // request's own documents past the authorization allowance or input budget): a
         // transient/operational condition — 503 (retryable), fail-closed (no grant).
+        //
+        // The refusal KIND is logged so an operator can tell "this request's dataset is too big
+        // for the allowance in force" from "the reasoner failed"; the message is not logged and
+        // never reaches the client (info-leak posture), and the status is unchanged either way.
+        log_materialize_refusal("body", materialize_refusal_kind(&e));
         json_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "could not materialise the authorization view",
@@ -537,14 +559,49 @@ pub(crate) fn graph_carries_odrl(graph: &sparq_core::Graph) -> bool {
     holds(graph) || graph.named.iter().any(|(_, g)| holds(g))
 }
 
+/// Log which authorization allowance or input budget a refused materialisation reached, on
+/// the `lane` it was refused on (`"body"` for the stateless per-request build, `"server"` for
+/// the stateful per-generation view).
+///
+/// SANITISED BY CONSTRUCTION: [`AuthAllowance`] is an enum of limit kinds whose
+/// [`AuthAllowance::limit_name`] returns a `&'static str` — a tag this build does not know
+/// maps to `Unspecified`, not to the tag's own text — so nothing derived from the pod's
+/// data, the request, or the refusal's own message (which quotes document IRIs and sizes)
+/// can reach the log through here. A failure with no allowance kind is logged as such rather
+/// than with its text.
+fn log_materialize_refusal(lane: &'static str, kind: Option<AuthAllowance>) {
+    tracing::warn!(
+        target: "sparq_server::solid_authz",
+        lane = lane,
+        limit = refusal_limit_field(kind),
+        "authorization view materialisation refused"
+    );
+}
+
+/// Which allowance or budget the materialisation error `e` reached, if any — the ONE place
+/// this module reads a refusal kind off a materialisation error, so neither lane can go back
+/// to discarding it.
+fn materialize_refusal_kind(e: &str) -> Option<AuthAllowance> {
+    sparq_solid::auth_allowance_refusal(e)
+}
+
+/// The static name [`log_materialize_refusal`] logs for `kind`. Everything this can return is
+/// a compile-time string, which is what makes the log line sanitised.
+fn refusal_limit_field(kind: Option<AuthAllowance>) -> &'static str {
+    kind.map_or("none", AuthAllowance::limit_name)
+}
+
 /// The fail-closed [`Response`] for a [`ServerViewError`]. A materialisation failure mirrors the
 /// stateless lane's 503 (operational, retryable); an ODRL-carrying store is a definitive 400.
 fn server_view_error_response(err: ServerViewError) -> Response {
     match err {
-        ServerViewError::Materialize => json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "could not materialise the authorization view",
-        ),
+        ServerViewError::Materialize(kind) => {
+            log_materialize_refusal("server", kind);
+            json_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "could not materialise the authorization view",
+            )
+        }
         #[cfg(feature = "odrl-authz")]
         ServerViewError::Odrl => json_error(
             StatusCode::BAD_REQUEST,
@@ -595,7 +652,9 @@ fn build_server_view(
         AuthView::Wac => store.materialize_wac(),
         AuthView::Acp => store.materialize_acp(),
     };
-    materialized.map_err(|_| ServerViewError::Materialize)?;
+    // The refusal KIND is carried out of the blocking task (the message is not: it quotes
+    // document IRIs). `server_view_error_response` logs it.
+    materialized.map_err(|e| ServerViewError::Materialize(materialize_refusal_kind(&e)))?;
     let store = Arc::new(store);
     if let Ok(mut cache) = state.authz_view_cache().write() {
         // Never let a slow build overwrite a NEWER generation's view with an older one.
@@ -635,8 +694,33 @@ async fn server_store(
     }
 }
 
+/// [`build_store`] on the blocking pool — the STATELESS lane's counterpart of
+/// [`server_store`].
+///
+/// This lane parses and materialises the REQUEST's own dataset, so its cost is set by the
+/// body: the N-Quads parse, the resource enumeration and the N3 materialisation are all
+/// CPU-bound, bounded by the body-size limit and `sparq_solid::AuthBudget` rather than
+/// instant, and so must no more occupy an async worker than the stateful lane's whole-store
+/// run does. A join failure is the same fail-closed 503 a materialisation failure is: no
+/// decision is produced.
+// `Response` is large; same `result_large_err` allow as the rest of this module.
+#[allow(clippy::result_large_err)]
+async fn body_store(req: &AuthzRequest) -> Result<PodStore, Response> {
+    // The task outlives the borrow of `req`, so it owns the two fields `build_store` reads.
+    let dataset = req.dataset.clone();
+    let view = req.view;
+    let task = tokio::task::spawn_blocking(move || build_store_from(&dataset, view));
+    match task.await {
+        Ok(built) => built,
+        Err(_) => Err(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "could not materialise the authorization view",
+        )),
+    }
+}
+
 /// The store an endpoint decides over, per the request's [`AuthzSource`]: the stateless
-/// per-request build ([`build_store`]) or the stateful per-generation view ([`server_store`]).
+/// per-request build ([`body_store`]) or the stateful per-generation view ([`server_store`]).
 /// Both lanes are fail-closed; neither can yield a store that silently grants.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
@@ -645,7 +729,7 @@ async fn resolve_store(
     req: &AuthzRequest,
 ) -> Result<ResolvedStore, Response> {
     match req.source {
-        AuthzSource::Body => build_store(req).map(|s| ResolvedStore::Owned(Box::new(s))),
+        AuthzSource::Body => body_store(req).await.map(|s| ResolvedStore::Owned(Box::new(s))),
         AuthzSource::Server => server_store(state, req.view).await.map(ResolvedStore::Shared),
     }
 }
@@ -2429,11 +2513,98 @@ mod tests {
         );
     }
 
+    /// The refusal KIND survives the materialisation error instead of being discarded by a
+    /// `map_err(|_| …)`: a refusal by the authorization allowance or the input budget is
+    /// carried out as its typed kind, while any other failure carries none.
+    #[test]
+    fn a_materialisation_refusal_carries_its_limit_kind() {
+        // A real refusal, as `sparq-solid` produces it (allowance text + kind tag + a detail
+        // quoting the document it refused).
+        let mut budget = sparq_solid::default_auth_budget();
+        budget.max_input_facts = 0;
+        let acl = "https://pod.ex/.acl";
+        let nq = format!(
+            "<{acl}#a> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>              <http://www.w3.org/ns/auth/acl#Authorization> <{acl}> .\n"
+        );
+        let mut store = PodStore::new(sparq_core::Graph::load_dataset(&nq, "nquads").unwrap());
+        store.set_auth_budget(budget);
+        let err = store
+            .materialize_wac()
+            .expect_err("a zero-fact input budget refuses");
+
+        let kind = materialize_refusal_kind(&err);
+        assert_eq!(
+            kind,
+            Some(AuthAllowance::InputFacts),
+            "the kind must survive the error: {}",
+            err
+        );
+        assert_eq!(refusal_limit_field(kind), "max_input_facts");
+        // The response is unchanged: still the fail-closed, retryable 503.
+        assert_eq!(
+            server_view_error_response(ServerViewError::Materialize(kind)).status(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+
+        // Any other materialisation failure carries no kind, and is logged as such rather
+        // than with its own text.
+        assert_eq!(materialize_refusal_kind("the reasoner failed"), None);
+        assert_eq!(refusal_limit_field(None), "none");
+    }
+
+    /// What the log line can say is a CLOSED set of compile-time strings, so no pod IRI,
+    /// request field or refusal detail can reach the log through it — even though the
+    /// refusal's own message quotes the document it refused.
+    #[test]
+    fn the_logged_limit_field_cannot_carry_request_data() {
+        let detail = "https://private.pod.example/secret-container/.acl";
+        let err = format!(
+            "authorization reasoning allowance exceeded [allowance=input-bytes]: the \
+             access-control document <{detail}> contributes more than max_document_bytes"
+        );
+        let field = refusal_limit_field(materialize_refusal_kind(&err));
+        assert_eq!(field, "max_document_bytes/max_input_bytes");
+        assert!(
+            !field.contains("private") && !field.contains("secret") && !field.contains("://"),
+            "the logged field leaked the refusal's detail: {}",
+            field
+        );
+        // For ANY tag — including one this build does not know — the field is one of a
+        // closed set of compile-time strings, never anything taken from the message.
+        let allowed = [
+            "max_total_join_rows",
+            "max_join_rows",
+            "max_rounds/max_facts",
+            "max_term_bytes",
+            "max_document_bytes/max_input_bytes",
+            "max_input_facts",
+            "max_input_term_bytes",
+            "max_decision_join_rows/max_decision_facts",
+            "an unnamed limit",
+            "none",
+        ];
+        for e in [
+            "x [allowance=join-rows] y",
+            "x [allowance=decision-work] y",
+            "x [allowance=a-tag-from-a-newer-build] y",
+            "x [allowance=https://private.pod.example/leak] y",
+            "no tag at all",
+        ] {
+            let f = refusal_limit_field(materialize_refusal_kind(e));
+            assert!(
+                allowed.contains(&f),
+                "unexpected logged field {:?} for {:?}",
+                f,
+                e
+            );
+        }
+    }
+
     /// A materialisation failure is the retryable 503; the stateless lane's mapping, kept.
     #[test]
     fn server_view_error_maps_materialize_to_retryable_503() {
         assert_eq!(
-            server_view_error_response(ServerViewError::Materialize).status(),
+            server_view_error_response(ServerViewError::Materialize(None)).status(),
             StatusCode::SERVICE_UNAVAILABLE
         );
     }
