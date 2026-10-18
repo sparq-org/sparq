@@ -389,9 +389,17 @@ jobs:
           cargo test -p sparq-zk-compose --test gate_count --test sparql_catalog -- --test-threads=1
 
       # sq-j506 follow-up: the `dual-leaf` feature is OFF by default, so the lane
-      # suites in crates/sparq-zk-compose/tests/ (`#![cfg(feature = "dual-leaf")]`)
+      # suites in crates/sparq-zk-compose/tests/ and crates/sparq-zk/tests/
+      # (`#![cfg(feature = "dual-leaf")]`)
       # compile to NOTHING in every other lane — a lane test could regress with no red
-      # check anywhere. They are cheap (no proving; the in-circuit cases shell out to
+      # check anywhere. Two further binaries (`method_auth_binding`,
+      # `bb_gates_matrix`) are only PARTIALLY gated: they compile without the feature,
+      # but their `#[cfg(feature = "dual-leaf")]` cases (the resolver cross-check of the
+      # committed legality matrix among them) drop out, so they are listed here too.
+      # `--features sparq-zk-compose/dual-leaf` is what turns on `sparq-zk/dual-leaf`
+      # (the compose feature forwards it), which is what makes the two sparq-zk
+      # binaries non-empty.
+      # They are cheap (no proving; the in-circuit cases shell out to
       # `nargo execute` only, and the toolchain is on PATH here), so run them in this
       # lane, which already builds these crates. They run
       # ONLY when this workflow runs at all — the pull_request / push `paths:` filter
@@ -400,10 +408,15 @@ jobs:
       - name: Run the dual-leaf lane suites (default-off feature, toolchain on PATH)
         if: steps.changes.outputs.zk == 'true'
         run: |
-          cargo test -p sparq-zk-compose --features dual-leaf \
+          cargo test -p sparq-zk -p sparq-zk-compose --features sparq-zk-compose/dual-leaf \
             --test dual_leaf_v2_lanes \
             --test dual_leaf_boolean_lane \
             --test dual_leaf_datetime_lane \
+            --test value_lane_pin \
+            --test method_auth_binding \
+            --test bb_gates_matrix \
+            --test dual_leaf_v2_noir_pin \
+            --test dual_leaf_identity_guard \
             -- --test-threads=1
 
       # The Noir unit tests of the compose member crate. The step below runs the
@@ -411,10 +424,18 @@ jobs:
       # the WHOLE `sparq_zk_compose_core` package, so a member's own `#[test]`s (the
       # bit-domain boolean member's among them) cannot sit unrun. Compile + execute
       # only — no `bb prove`.
+      #
+      # The two V2 dual-leaf member packages carry their own `#[test]`s (honest-component
+      # accept + a refusal case each) and are NOT part of `sparq_zk_compose_core`, so
+      # they are run here as well — `nargo test` takes one `--package` per invocation.
       - name: Run the Noir unit tests of the compose member crate (nargo test)
         if: steps.changes.outputs.zk == 'true'
         working-directory: zk/compose
-        run: nargo test --package sparq_zk_compose_core
+        run: |
+          set -euo pipefail
+          nargo test --package sparq_zk_compose_core
+          nargo test --package scan_v2dl_k1_n16_r4
+          nargo test --package join_eq_v2dl_na16_nb16
 
       # The DualLeafV2 sentinel/constants mirror (zk/dual-leaf-v2). A separate Nargo
       # package on purpose: every *.nr under zk/compose is sha256-pinned by the

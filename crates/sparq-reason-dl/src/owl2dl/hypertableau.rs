@@ -626,6 +626,17 @@ impl<'c> Tableau<'c> {
         (n, d)
     }
 
+    /// Whether the run ended in (or started with) the eager attempt (see [`Tableau::run`]).
+    pub(crate) fn eager(&self) -> bool {
+        self.eager_ni
+    }
+
+    /// Skips the plain attempt: the run starts with the eager one.
+    pub(crate) fn start_eager(&mut self) {
+        self.eager_ni = true;
+        self.scoped = true;
+    }
+
     /// Runs the calculus to completion: `Ok(true)` when a clash-free complete graph was
     /// built, `Ok(false)` when every branch closed on a clash. With nominals and at-most
     /// restrictions, a first attempt on a third of the budget merges the neighbours an
@@ -1397,6 +1408,15 @@ impl<'c> Tableau<'c> {
             }
             deps = deps.union(&self.role_dep(r, x, x));
         }
+        // A head disjunct about `x` alone that holds satisfies every match of the clause.
+        let at_x = |h: &Head| match *h {
+            Head::Concept(a, Var::X) => node.label.contains_key(&a),
+            Head::SelfLoop(r) => self.has_role(r, x, x),
+            _ => false,
+        };
+        if cl.n_y > 0 && cl.head.iter().any(at_x) {
+            return;
+        }
         let mut nodes = vec![x];
         self.match_ys(ci, 0, &mut nodes, deps, found);
     }
@@ -1758,7 +1778,9 @@ impl<'c> Tableau<'c> {
     /// pairwise blocking unravels the graph: each blocked node is replaced by a copy of its
     /// blocker's subtree. A nominal merges a blockable node into a root, which leaves an edge
     /// between a root and a blockable node that is not its child. Such an edge is copied with
-    /// the subtree it hangs from, and the model is still one as long as
+    /// the subtree it hangs from. A child of a root is blocked only by a child of the same
+    /// root ([`signature`](Self::signature)), so the copy hung from the root in its place
+    /// has the blocker's edges to roots and no more. The model is still one as long as
     ///
     /// - a blocked node's edge is kept when its direct blocker has the same edge to the same
     ///   root (the copy of the blocker that takes its place gives the root the same
@@ -1883,6 +1905,10 @@ impl<'c> Tableau<'c> {
                 return None;
             }
             let cl = &self.c.clauses[*ci as usize];
+            // A clause of the other attempt is sound to apply but costs branches here.
+            if cl.scoped.is_some_and(|scoped| scoped != self.scoped) {
+                continue;
+            }
             let ys = &self.index.ys[*ci as usize];
             let (roles, atoms, _) = &ys[shape.group[0] as usize];
             if !roles.iter().all(|r| rs.contains(r))
@@ -2008,10 +2034,11 @@ impl<'c> Tableau<'c> {
         for &ci in &self.index.multi_y {
             self.probe();
             let cl = &self.c.clauses[ci as usize];
-            // A clause inactive in this attempt counts nothing, nor does one whose body fails
-            // at `s` or whose head already holds there.
+            // A clause inactive in this attempt counts nothing, nor does one whose body
+            // (concepts or self-loops) fails at `s` or whose head already holds there.
             if cl.scoped.is_some_and(|scoped| scoped != self.scoped)
                 || !cl.body_x.iter().all(|a| sn.label.contains_key(a))
+                || !cl.body_self.iter().all(|&r| self.has_role(r, s, s))
                 || cl.head.iter().any(|h| match *h {
                     Head::Concept(a, Var::X) => sn.label.contains_key(&a),
                     Head::SelfLoop(r) => self.has_role(r, s, s),
@@ -2055,6 +2082,13 @@ impl<'c> Tableau<'c> {
             .unwrap_or_default();
         rs.sort_unstable();
         sig.extend(rs);
+        // A root parent itself: the copy of a blocker hangs from the blocked node's parent,
+        // so a blocker under another root, or joined to this one off the tree, would gain or
+        // merge an edge to a root.
+        if self.nodes[p as usize].root {
+            sig.push(u32::MAX);
+            sig.push(p);
+        }
         sig
     }
 
@@ -2565,5 +2599,105 @@ fn remove_role(adj: &mut FxHashMap<Node, Vec<Role>>, n: Node, r: Role) {
         if rs.is_empty() {
             adj.remove(&n);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::clausify::clausify;
+    use super::super::model::Individual;
+    use super::*;
+    use crate::owl2dl::extract;
+    use oxrdf::{NamedNode, Term};
+    use sparq_core::Graph;
+
+    /// The NI-rule names a root's neighbours only for an at-most clause of the running
+    /// attempt. `≤1 r.(≥2 s.D)` at `o` defines a superset atom of its filler twice: for
+    /// the eager attempt where the restriction counts (`∃r⁻.⊤ ⊓ ≥2 s.D`), for the plain one
+    /// at every node. Both definitions are at-most clauses `≤1 s.D`, the eager one first.
+    /// With an `r`-predecessor of `o` both match an `s`-neighbour of `o`; the plain attempt
+    /// must take its own.
+    #[test]
+    fn the_ni_rule_skips_an_at_most_of_the_other_attempt() {
+        let body = r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+            :D a owl:Class . :r a owl:ObjectProperty . :s a owl:ObjectProperty .
+            :q a owl:NamedIndividual ; :r :o .
+            :o a owl:NamedIndividual , [ a owl:Restriction ; owl:onProperty :r ;
+                owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass
+                [ a owl:Restriction ; owl:onProperty :s ;
+                  owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass :D ] ] .
+        "#;
+        let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+        let onto = extract(&d, &triples).unwrap();
+        let c = clausify(&d, &onto, Budget::default().max_steps).unwrap();
+        let index = ClauseIndex::new(&c);
+        let id = |frag: &str| {
+            d.lookup(&Term::NamedNode(NamedNode::new_unchecked(format!(
+                "http://ex/{frag}"
+            ))))
+        };
+        let class = c.classes.iter().find(|&&(i, _)| i == id("D")).unwrap().1;
+        let s = Role {
+            idx: c.roles.iter().position(|&i| i == id("s")).unwrap() as u32,
+            inv: false,
+        };
+        let scope = |k: usize| c.clauses[index.ni[k].0 as usize].scoped;
+        let eager = (0..index.ni.len()).position(|k| scope(k) == Some(true));
+        let plain = (0..index.ni.len()).position(|k| scope(k) == Some(false));
+        assert!(eager < plain, "{eager:?} {plain:?}");
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        for _ in &c.abox.individuals {
+            t.add_root();
+        }
+        for &(a, n, _) in &c.abox.concepts {
+            t.assert_concept(n, a);
+        }
+        for &(r, a, b, _) in &c.abox.roles {
+            t.assert_role(r, a, b);
+        }
+        // `w` hangs from another root and joins `o` off the tree.
+        let o = c
+            .abox
+            .individuals
+            .iter()
+            .position(|i| matches!(i, Individual::Named(n) if *n == id("o")))
+            .unwrap() as Node;
+        let p = t.add_root();
+        let w = t.new_node(Some(p));
+        t.add_role(s, o, w, &Dep::default());
+        t.add_concept(w, class, &Dep::default());
+        let (k, _) = t.ni_clause(o, w).expect("an at-most at o counts w");
+        assert_eq!(Some(k as usize), plain);
+    }
+
+    /// A blocked child of a root is replaced by a copy of its blocker hung from that root.
+    /// A blocker under another root that also joins this one off the tree would give its
+    /// copy two edges to the same root collapsed into one, so only children of the same
+    /// root block each other.
+    #[test]
+    fn children_of_different_roots_do_not_block_each_other() {
+        let body = r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :D a owl:Class . :s a owl:ObjectProperty .
+            :D owl:equivalentClass [ a owl:Restriction ; owl:onProperty :s ; owl:someValuesFrom :D ] .
+        "#;
+        let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+        let onto = extract(&d, &triples).unwrap();
+        let c = clausify(&d, &onto, Budget::default().max_steps).unwrap();
+        let index = ClauseIndex::new(&c);
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        let s = Role { idx: 0, inv: false };
+        let (p, q) = (t.add_root(), t.add_root());
+        let b = t.new_node(Some(q));
+        t.add_role(s, q, b, &Dep::default());
+        t.add_role(s, p, b, &Dep::default());
+        let w = t.new_node(Some(p));
+        t.add_role(s, p, w, &Dep::default());
+        assert!(!t.blocked()[w as usize]);
+        let v = t.new_node(Some(p));
+        t.add_role(s, p, v, &Dep::default());
+        assert!(t.blocked()[v as usize], "a sibling still blocks");
     }
 }

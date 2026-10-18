@@ -187,6 +187,18 @@ fn a_private_join_key_is_redacted_directly_and_in_every_container() {
             object: secret_node(),
         }]),
     );
+    // A DECLARED node domain holds endpoint terms directly, in a field of its own
+    // — including the terms of intermediate nodes, which `HiddenNode`'s `Debug`
+    // redacts. A derived `Debug` on `PredicatedEdges` would print exactly what
+    // that redaction withholds, so the declared domain has to be redacted too.
+    let declared = PredicatedEdges::new(vec![PredicatedEdge {
+        predicate: "http://ex/p".to_string(),
+        subject: secret_node(),
+        object: secret_node(),
+    }])
+    .with_node_domain(vec![secret_term(), secret_iri()])
+    .expect("the declared domain covers the one edge's endpoints");
+    assert_redacted("PredicatedEdges (declared node domain)", &declared);
     assert_redacted(
         "SecretEndpointPair",
         &SecretEndpointPair {
@@ -211,6 +223,30 @@ fn a_private_join_key_is_redacted_directly_and_in_every_container() {
         rendered.contains("http://ex/p"),
         "the public predicate must still print: {}",
         rendered
+    );
+
+    // `PredicatedEdges`' redaction keeps the two PUBLIC sizes — the edge count and
+    // the declared domain's size, which already enters the public candidate bound —
+    // and says which of "declared" / "none declared" applies. Without that the
+    // rendering would be useless for the thing a `Debug` is for.
+    let shown = format!("{:?}", declared);
+    assert!(
+        shown.contains("edges: 1") && shown.contains("2 term(s)"),
+        "the public sizes must still print: {}",
+        shown
+    );
+    let bare = format!(
+        "{:?}",
+        PredicatedEdges::new(vec![PredicatedEdge {
+            predicate: "http://ex/p".to_string(),
+            subject: secret_node(),
+            object: secret_node(),
+        }])
+    );
+    assert!(
+        bare.contains("none declared"),
+        "an undeclared domain must say so rather than print a size: {}",
+        bare
     );
 }
 

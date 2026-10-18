@@ -115,9 +115,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left in the plain mode, and a `value_none()` re-derived until it falls outside the reachable
   value-handle band, which `is_in_handle_band` decides and a test asserts — the checkable invariant
   `research/zk-field-native-encoding.md` §14.1 asks for, discharging that reserved-tag requirement on
-  the HOST side. The in-circuit half stays open: the `zk/dual-leaf-v2` Noir library mirrors the
-  sentinel and its band check, but no proving member imports it, so a member refuses the sentinel
-  only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
+  the HOST side. The in-circuit half landed with the component-witnessed members in the entry below: the
+  `zk/dual-leaf-v2` Noir library mirrors the sentinel and its band check, and
+  `compose_core::dual_leaf_v2_leaf` applies it at the `scan_v2dl_*` / `join_eq_v2dl_*` witnessed
+  component sites, which no `CircuitId` names. On the value-lane FILTER members a sentinel is
+  still refused only because their `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
   unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
   §14.1 `LANG_NONE` separation is asserted on the host side only (see the hardening entry below). Both versions carry the same #769-accepted INV-VL
   downgrade; not externally audited (CR-G8 / sq-qhy4).
@@ -154,7 +156,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **sparq-zk-compose / zk (sq-j506, #7103):** the `DualLeafV2` **component-witnessed** scan and
+- **sparq-reason (N3 backward chaining):** a variable substitution is cheaper to COPY, with no
+  change to any name or answer. The `name -> term` map a premise evaluation and a backward proof
+  carry now holds the variable's name as a reference-counted string rather than an owned one, so
+  copying a substitution — which the backward path does once per candidate rule site and once per
+  solution, the join path once per candidate fact, and a formula multiset match once per pairing
+  it tries — no longer allocates a fresh name for every entry it carries. That mattered most where
+  the substitution is largest: a backward step's renamed variables stay in the substitution its
+  whole subtree inherits, so the copies grew with the depth of the proof in allocation count, not
+  merely in bytes. Alongside it, the unification of a backward goal against a rule conclusion
+  decides the cases it can decide — the two sides already equal, or either one an unbound variable
+  — on BORROWED terms, where it used to resolve and deep-copy both sides every time; only the
+  member-wise unification of two compounds still owns its two sides, and only the term actually
+  bound is copied. On the FORWARD side, a premise atom's variable names are now minted at most once
+  for the whole atom rather than once per candidate fact, so matching a join atom against its
+  candidates no longer allocates and frees a name per bound variable per row; a name is minted on
+  the first row that actually binds its position, so a position no candidate ever binds costs
+  nothing at all.
+
+  **The hasher is unchanged and the amount of hashing is unchanged.** A key is still hashed as the
+  variable name's bytes under SipHash, which is what keeps a crafted document from degrading the
+  map, and a lookup still computes one hash of the same bytes and lands in the same bucket — one
+  lookup per lookup, as before; the saving is in what a copy costs, not in what a lookup costs. No output depends on the
+  substitution's iteration order: every reader of a whole binding, including the proof-mode
+  tie-break, sorts it or asks a question of every entry. Every `__bw<n>_` name, derived fact, proof, `why()` string and `sparq-prov` IRI is
+  byte-identical, pinned against output captured from the parent commit, and the W3C N3 inference
+  conformance report is unchanged. No run that previously answered is refused, and no refusal
+  changes. (#7080)
+
+- **sparq-zk-compose / zk (sq-j506, #7121; Noir library #7103):** the `DualLeafV2` **component-witnessed** scan and
   hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir
   members, `scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16`, recompute each graph's per-slot
   term encodings from witnessed V2 leaf components through
@@ -283,8 +313,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole-graph encoders rather than being encoded; `checked_lang_const` (in both modules) is the gate.
   A language constant is a 248-bit truncated BLAKE3 digest and `LANG_NONE` is the field element `1`,
   so only a fixed-target preimage reaches the refusal. No committed value, vector or leaf changes. The
-  in-circuit half of the assert stays open (no Noir member checks it;
-  `research/zk-field-native-encoding.md` §14.1, §14.3).
+  in-circuit half of the assert landed with the component-witnessed `scan_v2dl_*` /
+  `join_eq_v2dl_*` members, which no `CircuitId` names and so no verify path selects
+  (`research/zk-field-native-encoding.md` §14.1, §14.3).
 
 - **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
   the same parsed input, and as long as the binding values and firing sets are themselves

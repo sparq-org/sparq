@@ -13,7 +13,7 @@
 //! existing [`crate::join::DisclosedKeyJoin`], then UNION-ing and DEDUP-ing the
 //! endpoint pairs.
 //!
-//! Because the join key on every hop is a disclosed global IRI, the whole
+//! Because the EDGE join key on every hop is a disclosed global IRI, the whole
 //! computation runs **OUTSIDE the cryptographic core** (architecture convention
 //! #4; design §2.1 DISCLOSED regime): it is a plaintext fold of equi-joins, the
 //! *exact* construction the `differential_three_holder_chain_equals_union` test
@@ -24,8 +24,15 @@
 //!
 //! ### Regime boundary (stated, not hidden) — disclosed-key ONLY
 //!
-//! This is the **DISCLOSED-KEY** regime: every endpoint and every intermediate
-//! node `?z_i` on the chain is a disclosed global IRI, so nothing enters an MPC.
+//! This is the **DISCLOSED-KEY** regime: every key the unroller joins EDGES on is
+//! a disclosed global IRI, so nothing enters an MPC. That is a statement about the
+//! edge relations ([`DisclosedEdges::from_holder_edges`] enforces it): a chain
+//! hop's intermediate `?z_i` is an edge endpoint, hence an IRI. It is NOT a claim
+//! about the terms that can REACH a result endpoint or a Sequence midpoint — a
+//! zero-length arm contributes `(x, x)` for every term of the DECLARED node
+//! domain, which may be a literal or a blank node, and those rows then compose
+//! through a Sequence like any other (see
+//! [`DisclosedEdges::with_node_domain`]).
 //! It does **NOT** support the HIDDEN-intermediate regime (where the `?z_i` are
 //! secret and the per-hop match must stay secret-shared via `secure_equal` /
 //! `degree_reduce` / `oblivious_set_output`). That is the separate, cryptographic
@@ -48,8 +55,14 @@
 //! - **exact** `(p){k}` — one fixed `k`-hop chain ([`BoundedRepetition`] `m==k`).
 //! - **range** `(p){m,k}` — UNION of the exactly-`ℓ` chains for `ℓ in m..=k`.
 //! - **reflexive** `(p){0,k}` — the `{1,k}` union PLUS the length-0 identity pairs
-//!   `(x,x)` over the node set in scope (design §2.3); the identity pairs appear
-//!   exactly once after dedup.
+//!   `(x,x)` over the **declared public node domain** (design §2.3); the identity
+//!   pairs appear exactly once after dedup. SPARQL 1.1 §18.4 `ZeroLengthPath` binds
+//!   the zero-length match to every distinct subject/object term of the active
+//!   graph — literals and object-only nodes included, predicate-only terms
+//!   excluded — which is strictly wider than the endpoints of the path's own
+//!   disclosed predicates, so the domain is a declared plan input of `Term`s
+//!   ([`DisclosedEdges::with_node_domain`]) and a `min == 0` form without it is
+//!   REFUSED rather than answered from a narrower domain.
 //! - **alternation** `(p1|p2|...)` per hop — each hop position expands over its
 //!   alternatives; a length-`ℓ` chain of an `a`-way alternation unrolls to `a^ℓ`
 //!   fixed chains (design §2.4), all unioned and deduped. Because that count is
@@ -77,7 +90,7 @@ use crate::chain_odometer::ChainOdometer;
 use crate::join::{DisclosedKeyJoin, GlobalJoin, JoinPlan};
 use crate::partial::{HolderId, MpcError, PartialResult};
 use oxrdf::{NamedNode, Term, Variable};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// One hop of a bounded path: a single predicate, or an ALTERNATION of
 /// predicates (`p1 | p2 | ...`). Each alternative is a disclosed global-IRI
@@ -472,10 +485,49 @@ const INTERMEDIATE_PREFIX: &str = "__pp_z";
 /// raw holder graphs, only these per-predicate disclosed edge relations
 /// (minimise data sharing, architecture §4.2). The `(a,b)` pairs are the headline
 /// federation case: endpoints are disclosed global IRIs.
-#[derive(Debug, Clone)]
+///
+/// A zero-length arm (`{0,k}` / `p?` / a bounded `p*`) additionally needs the
+/// PUBLIC node domain, which these per-predicate edge sets do NOT carry — see
+/// [`DisclosedEdges::with_node_domain`]. That domain is a set of `Term`s and may
+/// contain literals; only the EDGE endpoints are restricted to global IRIs.
+#[derive(Clone)]
 pub struct DisclosedEdges {
     /// `(predicate IRI string, disclosed (?__pp_edge_s, ?__pp_edge_o) edge partial)`.
     by_predicate: Vec<(String, PartialResult)>,
+    /// The caller-declared PUBLIC node domain of the federation's active graph,
+    /// if any. Deduped and canonically ordered; any `Term`, literals included.
+    /// `None` = not declared, and a form with `min == 0` is then refused.
+    node_domain: Option<Vec<Term>>,
+}
+
+/// `Debug` prints SIZES only — the per-predicate row counts and the declared
+/// domain's size — not the terms.
+///
+/// Nothing here is secret: this is the disclosed-key regime, every edge endpoint
+/// and every declared node is a term the federation published, and the sibling
+/// [`crate::hidden_path::PredicatedEdges`] redacts for a reason this type does
+/// not share. It is hygiene: a derived `Debug` on an edge set spills the whole
+/// federated relation into any log line, panic message or `assert_eq!` failure
+/// that happens to render one, which is noise at best. The sizes are what a
+/// `Debug` is actually wanted for here.
+impl std::fmt::Debug for DisclosedEdges {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let by_predicate: Vec<String> = self
+            .by_predicate
+            .iter()
+            .map(|(pred, part)| format!("{}: {} edge(s)", pred, part.rows.len()))
+            .collect();
+        f.debug_struct("DisclosedEdges")
+            .field("by_predicate", &by_predicate)
+            .field(
+                "declared_node_domain",
+                &match &self.node_domain {
+                    Some(d) => format!("{} term(s)", d.len()),
+                    None => "<none declared>".to_string(),
+                },
+            )
+            .finish()
+    }
 }
 
 impl DisclosedEdges {
@@ -553,7 +605,138 @@ impl DisclosedEdges {
                 None => by_predicate.push((key, rekeyed)),
             }
         }
-        Ok(DisclosedEdges { by_predicate })
+        Ok(DisclosedEdges {
+            by_predicate,
+            node_domain: None,
+        })
+    }
+
+    /// Declare the federation's PUBLIC node domain — every term that occurs as a
+    /// subject or an object of any triple in the active graph — so a zero-length
+    /// arm can be evaluated.
+    ///
+    /// ## Why this has to come from the caller
+    ///
+    /// SPARQL 1.1 §18.4 `ZeroLengthPath` binds the zero-length match to **every
+    /// distinct subject or object term of the active graph** — not just the terms
+    /// of the predicates the path traverses. That domain includes object-only
+    /// nodes and **literals**, and excludes predicate-only terms, exactly as the
+    /// clear-text engine's `graph_nodes` computes it. The per-predicate relations
+    /// built by
+    /// [`DisclosedEdges::from_holder_edges`] carry only the edges holders
+    /// disclosed for the path's own predicates, so their endpoint terms are a
+    /// SUBSET of that domain: a node occurring only in a triple of some other
+    /// predicate (or of a predicate no holder disclosed) is absent. Drawing the
+    /// identity pairs from the disclosed edges alone therefore dropped those
+    /// `(x, x)` pairs and answered a `{0,k}` / `p?` form with fewer rows than the
+    /// clear-text engine's `eval_path` — a wrong answer, silently.
+    ///
+    /// Widening the disclosure to recover the domain is not this module's call to
+    /// make: the holders decide what they publish (minimise data sharing,
+    /// architecture §4.2). So the domain is a declared, PUBLIC plan input, and
+    /// without it a `min == 0` form is REFUSED ([`MpcError::Protocol`]) rather
+    /// than answered from a narrower domain. A form with `min >= 1` never reads
+    /// the domain and needs no declaration.
+    ///
+    /// ## The term type: `Term`, not `NamedNode`
+    ///
+    /// The domain is a set of [`Term`]s, **independent of the IRI-only EDGE
+    /// regime**. The disclosed-key *edge* join requires global-IRI endpoints —
+    /// blank node labels are document-scoped, so joining EDGES on them across
+    /// holders would be unsound, and that check stays on
+    /// [`DisclosedEdges::from_holder_edges`]. The engine's domain contains
+    /// literals (every object of a triple whose object is a literal), so
+    /// restricting the declaration to `NamedNode` made the true domain
+    /// inexpressible and silently lost those `(x, x)` rows. A [`PartialResult`]
+    /// row is `Vec<Option<Term>>`, so a literal endpoint needs nothing special to
+    /// carry.
+    ///
+    /// A diagonal row is not join-free, though: inside a [`PathForm::Sequence`]
+    /// the `(x, x)` rows ARE joined, by [`DisclosedKeyJoin`] on the term itself.
+    /// That is sound for a non-IRI term precisely BECAUSE the edges are IRI-only:
+    /// a literal or blank-node `(x, x)` row can only ever meet another diagonal
+    /// row built from the same declared term, never an edge endpoint, so no
+    /// cross-holder identification is made on a document-scoped or
+    /// non-global key. The declared term is the caller's own, single,
+    /// federation-wide name for that node.
+    ///
+    /// ## The precondition — what the caller is trusted for
+    ///
+    /// The caller is trusted to supply **exactly** the selected active graph's
+    /// subject/object domain. The only thing this method checks is that the
+    /// declaration COVERS the endpoints of the disclosed edges (those are terms of
+    /// the active graph by construction, so a declaration missing one is
+    /// inconsistent with the edges it accompanies, and is refused with
+    /// [`MpcError::Protocol`]). **Neither completeness nor the absence of extra
+    /// nodes is verified:** an omission loses `(x, x)` answers the engine returns,
+    /// and an extra node invents an `(x, x)` answer the engine does not. Both are
+    /// wrong answers this method cannot detect.
+    ///
+    /// ### Reproducing the engine's self-match for an ABSENT bound endpoint
+    ///
+    /// The engine matches a **bound** endpoint against itself even when that
+    /// constant occurs in no triple (`sparq-engine`'s `exec/bgp.rs` skips the
+    /// node-membership check for a concrete term). A caller can reproduce that by
+    /// including the constant in the declared domain — no API change is needed.
+    ///
+    /// **This is correct only for a SINGLE repetition whose bound endpoint is that
+    /// constant, declared per query.** It is a deliberate per-query WIDENING of the
+    /// domain, taken with its consequence stated, not an exception to the
+    /// "exactly the domain" precondition above — the widened set is no longer the
+    /// active graph's domain, and every arm of the form sees it.
+    ///
+    /// So it OVER-answers as soon as two or more NULLABLE arms are chained in a
+    /// [`PathForm::Sequence`], because the Sequence's midpoint ranges over the
+    /// declared domain. Concretely, on `ex:a ex:p ex:b . ex:b ex:q ex:c` with the
+    /// active nodes plus `ex:absent` declared, `Sequence[p{0,1}, q{0,1}]` yields
+    /// `(absent, absent)` — it composes the two diagonals through the midpoint
+    /// `absent` — while the engine's `ex:absent ex:p?/ex:q? ?b` returns NOTHING:
+    /// its inner `q?` arm sees a VARIABLE midpoint, so that arm ranges over the
+    /// graph's own nodes, which do not include `ex:absent`. Pinned by
+    /// `an_absent_constant_over_answers_a_nested_nullable_sequence`.
+    ///
+    /// The whole HIDDEN regime is unaffected: [`crate::hidden_path`] evaluates a
+    /// single repetition and has no Sequence form at all.
+    ///
+    /// Duplicates are collapsed, and the stored order is canonical, so the
+    /// identity pairs do not depend on the order the caller listed its nodes in.
+    pub fn with_node_domain(
+        mut self,
+        nodes: impl IntoIterator<Item = Term>,
+    ) -> Result<Self, MpcError> {
+        let mut declared: BTreeMap<String, Term> = BTreeMap::new();
+        for n in nodes {
+            declared.entry(format!("{:?}", n)).or_insert(n);
+        }
+        // Report only HOW MANY endpoints are uncovered: the count is enough to act
+        // on, and the message stays free of term values.
+        let mut missing: BTreeSet<String> = BTreeSet::new();
+        for (_, part) in &self.by_predicate {
+            for row in &part.rows {
+                for slot in row.iter().flatten() {
+                    let key = format!("{:?}", slot);
+                    if !declared.contains_key(&key) {
+                        missing.insert(key);
+                    }
+                }
+            }
+        }
+        if !missing.is_empty() {
+            // VALUE- AND COUNT-FREE. An earlier version named how many endpoints
+            // were uncovered and how many terms were declared; both are statistics
+            // over the disclosed edges, and a caller could probe one candidate term
+            // at a time and read the count as a membership answer. The text now
+            // carries neither.
+            return Err(MpcError::Protocol(
+                "the declared node domain does not cover the edge endpoints — every disclosed \
+                 endpoint is a term of the active graph, so a zero-length arm over this \
+                 domain would under-answer; declare the full subject/object domain of the \
+                 active graph"
+                    .into(),
+            ));
+        }
+        self.node_domain = Some(declared.into_values().collect());
+        Ok(self)
     }
 
     /// The disclosed edge relation for one predicate, projected onto a chosen
@@ -580,24 +763,30 @@ impl DisclosedEdges {
         }
     }
 
-    /// The set of all distinct node IRIs occurring as a subject or object in ANY
-    /// disclosed edge — the term domain over which the reflexive (length-0)
-    /// identity pairs `(x,x)` are added for `{0,k}` (design §2.3, mirroring the
-    /// clear-text engine's `graph_nodes`).
-    fn node_domain(&self) -> Vec<Term> {
-        let mut set: BTreeSet<String> = BTreeSet::new();
-        let mut nodes: Vec<Term> = Vec::new();
-        for (_, part) in &self.by_predicate {
-            for row in &part.rows {
-                for slot in row.iter().flatten() {
-                    let key = format!("{slot:?}");
-                    if set.insert(key) {
-                        nodes.push(slot.clone());
-                    }
-                }
-            }
-        }
-        nodes
+    /// The declared PUBLIC node domain over which the reflexive (length-0)
+    /// identity pairs `(x,x)` are added for `{0,k}` (design §2.3; the analogue of
+    /// the clear-text engine's `graph_nodes`, which ranges over the WHOLE active
+    /// graph).
+    ///
+    /// Fail-closed when the caller declared no domain: the disclosed per-predicate
+    /// edge sets do not carry it, and the endpoint terms they do carry are only a
+    /// subset of it, so there is nothing sound to fall back on. See
+    /// [`DisclosedEdges::with_node_domain`].
+    fn node_domain(&self) -> Result<&[Term], MpcError> {
+        self.node_domain.as_deref().ok_or_else(|| {
+            MpcError::Protocol(
+                "bounded path with min == 0 (the zero-length arm of {0,k} / p? / a bounded p*) \
+                 needs the federation's PUBLIC node domain, which the disclosed per-predicate \
+                 edge sets do not carry: SPARQL 1.1 §18.4 binds the zero-length match to \
+                 every distinct SUBJECT or OBJECT term of the active graph, including terms \
+                 occurring only in triples of \
+                 predicates this path does not traverse or that no holder disclosed. Refusing \
+                 rather than drawing the identity pairs from the disclosed endpoints alone, \
+                 which would silently under-answer. Declare the domain with \
+                 DisclosedEdges::with_node_domain, or use a form with min >= 1."
+                    .into(),
+            )
+        })
     }
 }
 
@@ -607,12 +796,16 @@ impl DisclosedEdges {
 ///
 /// This is the increment-#1 deliverable: a CRYPTO-FREE unroll-and-fold. No MPC
 /// primitive runs (no secret sharing, no `secure_equal`, no `CommCounter` is
-/// touched) — every hop is a [`DisclosedKeyJoin`] over disclosed global IRIs,
+/// touched) — every EDGE hop is a [`DisclosedKeyJoin`] over disclosed global IRIs,
 /// exactly as the `differential_three_holder_chain_equals_union` test does for a
-/// single chain. The realized hop length is never disclosed (design §1.2).
+/// single chain. The realized hop length is not separately opened or encoded in
+/// the result (design §1.2).
 ///
-/// Regime: DISCLOSED-KEY ONLY (endpoints + intermediates are disclosed global
-/// IRIs). The HIDDEN-intermediate regime is sq-py8h.2 and is NOT handled here.
+/// Regime: DISCLOSED-KEY ONLY — every key EDGES are joined on, and so every
+/// chain intermediate, is a disclosed global IRI. A result endpoint or a Sequence
+/// midpoint may additionally be a literal or blank node contributed by a
+/// zero-length arm over the declared node domain. The HIDDEN-intermediate regime
+/// is sq-py8h.2 and is NOT handled here.
 pub fn eval_bounded_path_disclosed(
     edges: &DisclosedEdges,
     form: &PathForm,
@@ -777,12 +970,16 @@ fn eval_repetition(
 
     for length in rep.min..=rep.max {
         if length == 0 {
-            // Length-0: the reflexive identity pairs (x,x) over the node domain
-            // (design §2.3). Data-independent given the node set.
+            // Length-0: the reflexive identity pairs (x,x) over the DECLARED
+            // public node domain (design §2.3; SPARQL 1.1 §18.4). Refused when no
+            // domain was declared — the disclosed edges' endpoints are only a
+            // subset of it. Charged through the same budget as a chain's rows: a
+            // declared domain is a public plan input, but the rows it contributes
+            // are rows this form materialises.
             let diagonal: Vec<Vec<Option<Term>>> = edges
-                .node_domain()
-                .into_iter()
-                .map(|node| vec![Some(node.clone()), Some(node)])
+                .node_domain()?
+                .iter()
+                .map(|node| vec![Some(node.clone()), Some(node.clone())])
                 .collect();
             keep(diagonal, budget, &mut seen, &mut union_rows)?;
             continue;
@@ -983,7 +1180,8 @@ fn project_endpoints(
 /// DEDUP the endpoint pairs to a SET (design §2.2/§2.5): each distinct `(a,b)`
 /// term pair appears exactly once, regardless of how many chain lengths or
 /// alternation branches reached it. The realized length is not part of the row,
-/// so length is never disclosed (design §1.2). Output is sorted canonically so
+/// so length is not separately opened or encoded in the result (design §1.2).
+/// Output is sorted canonically so
 /// the disclosed multiset is order-independent.
 fn dedup_endpoint_pairs(
     part: PartialResult,

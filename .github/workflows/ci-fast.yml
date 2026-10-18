@@ -69,6 +69,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: clippy (deny warnings, core crates)
         run: cargo clippy $CORE_CRATES --all-targets -- -D warnings
+      # sparq-reason is not a core crate (its tests do not run here), but its test targets
+      # must still compile: a signature change elsewhere once broke them on main with this
+      # check green (#6914). Type-checks and lints them; runs nothing.
+      - name: clippy (deny warnings, sparq-reason incl. test targets)
+        run: cargo clippy -p sparq-reason --all-targets -- -D warnings
       # The LWS server's opt-in SAML suite: its integration code is behind `authn-saml`.
       - name: clippy (deny warnings, LWS server with the SAML suite)
         run: cargo clippy -p sparq-lws-core --features authn-saml --all-targets -- -D warnings
