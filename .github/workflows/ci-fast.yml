@@ -15,7 +15,8 @@ name: ci-fast
 # conformance, fuzz, …) run nightly and on dispatch in their own workflows (ci.yml,
 # feature-matrix.yml, fuzz.yml, …); they do not block merges.
 #
-# CORE CRATES: kept in ONE env var below so the three jobs cannot drift apart.
+# CORE CRATES: kept in ONE env var below so the core-crate steps cannot drift apart.
+# sparq-reason is named on its own (lint and `test-reason`): it is not a core crate.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -70,9 +71,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: clippy (deny warnings, core crates)
         run: cargo clippy $CORE_CRATES --all-targets -- -D warnings
-      # sparq-reason is not a core crate (its tests do not run here), but its test targets
-      # must still compile: a signature change elsewhere once broke them on main with this
-      # check green (#6914). Type-checks and lints them; runs nothing.
+      # sparq-reason is not a core crate; its tests run in `test-reason`. Lint them here
+      # too, with -D warnings, as the core crates' are (#6914).
       - name: clippy (deny warnings, sparq-reason incl. test targets)
         run: cargo clippy -p sparq-reason --all-targets -- -D warnings
       # The LWS server's opt-in SAML suite: its integration code is behind `authn-saml`.
@@ -120,7 +120,7 @@ jobs:
   test-reason:
     name: test (sparq-reason, default features)
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Free runner disk
