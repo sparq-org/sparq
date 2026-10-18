@@ -310,8 +310,10 @@ impl BoundedPathPlan {
     /// `B` slots, so an unchecked `B` would allocate a network proportional to a
     /// number the caller chose. (That one cap is enough on its own:
     /// [`crate::oblivious::MAX_NETWORK_WIDTH`] IS `MAX_OUTPUT_BOUND`, so a `B`
-    /// inside the bound cap is inside the width cap by definition.) Counting the
-    /// cost of a run the stage itself would refuse is not a cost model either way.
+    /// inside the bound cap is inside the width cap by definition.) The party cap
+    /// [`crate::oblivious_join::MAX_OUTPUT_PARTIES`] is applied here too, for the
+    /// same reason. Counting the cost of a run the stage itself would refuse is not
+    /// a cost model either way.
     ///
     /// The counting itself is CLOSED FORM: every counter the per-equality and
     /// per-slot records touch is linear in its multiplicity, so the batches fold in
@@ -322,6 +324,18 @@ impl BoundedPathPlan {
     /// understate the cost.
     pub fn comm_counter(&self, parties: usize, bound: usize) -> Result<CommCounter, MpcError> {
         crate::oblivious_join::check_output_bound_cap(bound)?;
+        // The same PARTY cap the stage applies, so a plan whose party count the
+        // stage would refuse is not costed here either — a cost model for a run
+        // that cannot happen is not a cost model.
+        //
+        // The aggregate slot-work budget is NOT applied, and deliberately: this
+        // counter models the TAG column only (`limbs = 0`, because the payload
+        // bytes are what this planner does not see), and at that width the bound
+        // and party caps already bound the product — `MAX_OUTPUT_BOUND` slots at
+        // `MAX_OUTPUT_PARTIES` parties and the largest `t` honest majority allows
+        // is below `MAX_SLOT_WORK`, so no `B` and `n` this function accepts can
+        // reach it. A check that cannot fire is a guard no test can pin.
+        crate::oblivious_join::check_output_parties_cap(parties)?;
         let mut c = CommCounter::new(parties);
         // (1) The k×-join secure equalities — the cost center. Independent ACROSS
         // tuples (the matrix's `record_independent_equalities` batch shape).

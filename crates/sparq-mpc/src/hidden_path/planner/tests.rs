@@ -276,3 +276,42 @@ fn comm_counter_refuses_an_over_cap_bound() {
     // A bound inside the cap is still modelled.
     assert!(plan.comm_counter(5, 4).is_ok());
 }
+
+/// The cost model applies the output stage's PARTY cap, so it does not cost a
+/// plan the stage would refuse.
+///
+/// A cost model for a run that cannot happen is not a cost model: the bound cap
+/// alone let `comm_counter` report a figure for a party count the stage refuses
+/// outright. The aggregate slot-work budget is deliberately not applied here —
+/// see `comm_counter`'s own docs for why it cannot fire at the tag-only width.
+#[test]
+fn comm_counter_applies_the_output_party_cap() {
+    use crate::oblivious_join::{MAX_OUTPUT_BOUND, MAX_OUTPUT_PARTIES, MAX_SLOT_WORK};
+    let req = HiddenPathRequest::range("p", 1, 3);
+    let plan = plan_hidden_bounded_path(&req, 3).unwrap();
+
+    let err = plan
+        .comm_counter(MAX_OUTPUT_PARTIES + 1, 4)
+        .expect_err("a party count past the cap must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+        "{:?}",
+        err
+    );
+    assert!(
+        plan.comm_counter(MAX_OUTPUT_PARTIES, 4).is_ok(),
+        "the cap itself is still modelled"
+    );
+
+    // And the arithmetic the omitted work check rests on: at the tag-only width
+    // this counter models, the widest legal plan is inside `MAX_SLOT_WORK`, so
+    // applying that budget here could never refuse anything.
+    let worst_t = (MAX_OUTPUT_PARTIES - 1) / 2;
+    let widest = (MAX_OUTPUT_BOUND as u64) * (MAX_OUTPUT_PARTIES as u64) * (2 * worst_t as u64 + 1);
+    assert!(
+        widest <= MAX_SLOT_WORK,
+        "{} must stay inside the slot-work budget of {}",
+        widest,
+        MAX_SLOT_WORK
+    );
+}

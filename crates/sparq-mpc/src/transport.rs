@@ -250,6 +250,17 @@ thread_local! {
     static LAST_BODY_PEAK: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
+// How far the LAST body buffer's capacity ever ran past twice the bytes that had
+// arrived at the time, recorded by `Channel::read_body_observed` at each
+// reservation. Zero means every reservation kept to the growth rule; a positive
+// value is the worst overshoot in bytes. This is the step-by-step observable the
+// finished buffer's capacity cannot show, because a fully-delivered body ends with
+// its capacity and its length equal whatever the growth rule did on the way.
+#[cfg(test)]
+thread_local! {
+    static LAST_BODY_OVERSHOOT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Add `bytes` to a running byte counter with CHECKED arithmetic.
 ///
 /// The counters are reported as session totals, so a wrapped counter would
@@ -561,12 +572,12 @@ impl<S: Read + Write> Channel<S> {
     /// The length prefix comes from the PEER. It is first refused above
     /// [`MAX_FRAME_BYTES`] — a closed-form check on the declared number, before
     /// anything is reserved — and then the body is read INCREMENTALLY, in
-    /// [`RECV_CHUNK_BYTES`] steps, each chunk reserved exactly before it is read,
-    /// so the buffer stays within one chunk of the bytes that have arrived. So a
-    /// four-byte header can commit the receiver to at most one chunk, not to the
-    /// whole declared frame: a header declaring the cap with nothing behind it
-    /// fails on the read, having reserved one chunk. Reserving `len` up front, as
-    /// this did, let the header alone decide the allocation.
+    /// [`RECV_CHUNK_BYTES`] steps, each growth reserved to at most twice the bytes
+    /// that have arrived (and never past the declared length). So a four-byte
+    /// header can commit the receiver to one chunk, not to the whole declared
+    /// frame: a header declaring the cap with nothing behind it fails on the read,
+    /// having reserved one chunk. Reserving `len` up front, as this did, let the
+    /// header alone decide the allocation.
     pub fn recv(&mut self) -> Result<Message, MpcError> {
         let mut len_buf = [0u8; 4];
         self.read_exact(&mut len_buf)?;
@@ -586,14 +597,18 @@ impl<S: Read + Write> Channel<S> {
         Message::decode(&body)
     }
 
-    /// Read `len` body bytes, growing the buffer in CHUNK STEPS as they arrive.
+    /// Read `len` body bytes, growing the buffer AS THEY ARRIVE rather than
+    /// reserving the declared length up front.
     ///
-    /// The buffer starts at `initial_body_capacity(len)` and every further chunk is
-    /// reserved with `reserve_exact` just before it is read, so the allocation
-    /// stays within one chunk of the bytes that have actually arrived. Plain
-    /// `extend_from_slice` would grow geometrically instead — a `Vec` doubling from
-    /// 64 KiB runs tens of MiB ahead of the data on a large frame — which is the
-    /// commitment the header cap alone does not bound.
+    /// The buffer starts at `initial_body_capacity(len)` and each further growth
+    /// goes to `min(len, max(needed, 2 × bytes_so_far))` with `reserve_exact`, so
+    /// the allocation never exceeds twice the bytes that have actually arrived (nor
+    /// the declared length), while still growing geometrically — reserving exactly
+    /// one chunk at a time instead would reallocate and copy once per chunk, which
+    /// on a large frame costs more copying than the frame itself. Plain
+    /// `extend_from_slice` runs the other way: a `Vec` doubling from 64 KiB can sit
+    /// tens of MiB ahead of the data, which is the commitment the header cap alone
+    /// does not bound.
     ///
     /// Returns the body, and (in tests) the widest capacity the buffer ever held,
     /// which `read_body` has no other way to show a caller.
@@ -611,11 +626,21 @@ impl<S: Read + Write> Channel<S> {
         let mut remaining = len;
         while remaining > 0 {
             let take = remaining.min(RECV_CHUNK_BYTES);
-            // Reserve exactly this chunk, so the buffer never runs more than one
-            // chunk ahead of the bytes that have arrived.
+            // Grow to at most twice what has arrived, and never past the declared
+            // length: geometric growth that is still bounded by the data.
             let needed = body.len() + take;
             if body.capacity() < needed {
-                body.reserve_exact(needed - body.len());
+                let target = needed.max(body.len().saturating_mul(2)).min(len);
+                body.reserve_exact(target - body.len());
+                // The step-by-step bound, observed at the moment it is decided:
+                // capacity is at most twice what has arrived (or one chunk, while
+                // less than a chunk has).
+                #[cfg(test)]
+                {
+                    let allowed = body.len().saturating_mul(2).max(RECV_CHUNK_BYTES);
+                    let over = body.capacity().saturating_sub(allowed);
+                    LAST_BODY_OVERSHOOT.with(|c| c.set(c.get().max(over)));
+                }
             }
             peak = peak.max(body.capacity());
             #[cfg(test)]
@@ -1438,19 +1463,20 @@ mod tests {
         assert_eq!(initial_body_capacity(RECV_CHUNK_BYTES), RECV_CHUNK_BYTES);
     }
 
-    /// The body buffer stays within ONE chunk of the bytes that have arrived, at
-    /// the real `recv` call site.
+    /// The body buffer never exceeds TWICE the bytes that have arrived (nor the
+    /// declared length), at the real `recv` call site.
     ///
     /// The declared-length cap and the one-chunk pre-arrival reservation bound
-    /// what the HEADER alone commits; neither bounds how far the buffer runs
-    /// ahead of the data once bytes are flowing. `extend_from_slice` on its own
-    /// grows geometrically, so a buffer doubling from one chunk ends several
-    /// chunks past the body it is holding. `read_body_observed` reserves exactly
-    /// the next chunk instead, and the peak capacity it records is the only place
-    /// that difference shows: `recv` returns the message, whose length is the
-    /// same either way.
+    /// what the HEADER alone commits; neither bounds how far the buffer runs ahead
+    /// of the data once bytes are flowing. `extend_from_slice` on its own grows
+    /// geometrically with no ceiling, so a buffer doubling from one chunk ends
+    /// well past the body it is holding. `read_body_observed` reserves
+    /// `min(len, max(needed, 2 x arrived))` instead — still geometric, so a large
+    /// frame is not recopied once per chunk, but bounded by the data. The peak
+    /// capacity it records is the only place that difference shows: `recv` returns
+    /// the message, whose length is the same either way.
     #[test]
-    fn the_body_buffer_stays_within_one_chunk_of_the_bytes_that_arrived() {
+    fn the_body_buffer_never_exceeds_twice_the_bytes_that_arrived() {
         // A body of several chunks, so geometric growth has room to overshoot.
         let shares: Vec<Share> = (0..20_480u64)
             .map(|i| Share {
@@ -1468,18 +1494,28 @@ mod tests {
         );
 
         LAST_BODY_PEAK.with(|c| c.set(0));
+        LAST_BODY_OVERSHOOT.with(|c| c.set(0));
         let mut chan = Channel::new(std::io::Cursor::new(frame));
         assert_eq!(chan.recv().expect("the frame decodes"), msg);
 
         let peak = LAST_BODY_PEAK.with(|c| c.get());
         assert!(peak > 0, "the body read must have been attempted");
         assert!(
-            peak <= body_len + RECV_CHUNK_BYTES,
-            "the buffer reached {} byte(s) of capacity for a {} byte body; chunk-step \
-             growth must stay within one RECV_CHUNK_BYTES ({}) of what arrived",
+            peak <= body_len,
+            "the buffer reached {} byte(s) of capacity for a {} byte body; growth is \
+             capped at the declared length",
             peak,
-            body_len,
-            RECV_CHUNK_BYTES
+            body_len
+        );
+        // And the ceiling that matters while the bytes are still arriving,
+        // observed at every reservation the read actually made: capacity is at most
+        // twice what had arrived at the time. A fully-delivered body ends with its
+        // capacity equal to its length whatever the growth rule did on the way, so
+        // this is the only place the step-by-step bound is visible.
+        assert_eq!(
+            LAST_BODY_OVERSHOOT.with(|c| c.get()),
+            0,
+            "a reservation ran past twice the bytes that had arrived"
         );
     }
 

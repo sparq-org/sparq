@@ -669,7 +669,7 @@ fn per_hop_projection_matches_the_naive_fold_at_small_lengths() {
         for len in 1..=8usize {
             let chain: Vec<NamedNode> = (0..len).map(|_| nn("http://ex/p")).collect();
             let shipped =
-                dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new()).unwrap(), &s, &o);
+                dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new()).unwrap().0, &s, &o);
             let naive = naive_fixed_chain(&edges, &chain, &s, &o);
             assert_eq!(
                 shipped.rows, naive.rows,
@@ -696,14 +696,16 @@ fn a_dense_graph_evaluates_at_the_hop_cap() {
         Variable::new_unchecked(OBJECT_VAR),
     );
     let short = dedup_endpoint_pairs(
-        eval_fixed_chain(&edges, &[nn("http://ex/p")], &s, &o, &mut PathFormBudget::new()).unwrap(),
+        eval_fixed_chain(&edges, &[nn("http://ex/p")], &s, &o, &mut PathFormBudget::new())
+            .unwrap()
+            .0,
         &s,
         &o,
     );
     assert_eq!(short.rows.len(), 4, "the dense 2-node graph has 4 pairs");
 
     let chain: Vec<NamedNode> = (0..MAX_UNROLL_HOPS).map(|_| nn("http://ex/p")).collect();
-    let long = dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new()).unwrap(), &s, &o);
+    let long = dedup_endpoint_pairs(eval_fixed_chain(&edges, &chain, &s, &o, &mut PathFormBudget::new()).unwrap().0, &s, &o);
     assert_eq!(
         long.rows, short.rows,
         "every length reaches the same four endpoint pairs on this graph"
@@ -2007,10 +2009,12 @@ fn the_row_budget_binds_on_a_real_form_at_the_cap() {
     let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
     let form = PathForm::range(nn("http://ex/p"), 1, 3);
 
-    // What this form actually charges, measured on the real path.
+    // What this form actually holds at its PEAK, measured on the real path. The
+    // row budget is live, so the peak is what has to fit in it — not the sum over
+    // the chains, which are evaluated and released one at a time.
     let mut measured = PathFormBudget::new();
     let baseline = eval_with_budget(&edges, &form, &mut measured).unwrap();
-    let spend = measured.charged();
+    let spend = measured.peak();
     assert!(spend > 0, "the unroll must charge the budget it is given");
 
     // A budget with one row less than it needs: refused, naming the budget.
@@ -2047,13 +2051,13 @@ fn the_row_budget_charges_the_zero_length_diagonal_too() {
     let mut without_diagonal = PathFormBudget::new();
     eval_with_budget(&edges, &mandatory, &mut without_diagonal).unwrap();
     assert_eq!(
-        with_diagonal.charged(),
-        without_diagonal.charged() + domain,
+        with_diagonal.work(),
+        without_diagonal.work() + domain as u64,
         "the zero-length arm must charge exactly one row per declared node"
     );
 
-    // And the charge BINDS: one row less than the form needs is refused.
-    let spend = with_diagonal.charged();
+    // And the charge BINDS: one row less than the form's PEAK is refused.
+    let spend = with_diagonal.peak();
     let mut tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - (spend - 1));
     let err = eval_with_budget(&edges, &nullable, &mut tight)
         .expect_err("a nullable form that would pass the budget is refused");
@@ -2088,7 +2092,7 @@ fn the_repetition_union_is_deduped_as_it_grows() {
 
     let mut budget = PathFormBudget::new();
     let mut scope = 0usize;
-    let raw =
+    let (raw, _charge) =
         eval_form_relation(&edges, &form, &subject, &object, &mut scope, &mut budget).unwrap();
 
     // The relation the repetition hands back carries NO duplicate row.
@@ -2101,11 +2105,14 @@ fn the_repetition_union_is_deduped_as_it_grows() {
         distinct.len()
     );
     // And duplicates really were produced: four chain lengths re-reach the same
-    // pairs, so the rows charged exceed the rows retained.
+    // pairs, so the WORK the form did exceeds the rows it kept. The row budget is
+    // live, so it cannot show this — the rows a collapsed duplicate occupied were
+    // released when its chain was dropped, which is the point.
     assert!(
-        budget.charged() > raw.rows.len(),
-        "charged {} must exceed the {} retained rows — otherwise nothing was collapsed",
-        budget.charged(),
+        budget.work() > raw.rows.len() as u64,
+        "the work charged ({}) must exceed the {} retained rows — otherwise nothing \
+         was collapsed",
+        budget.work(),
         raw.rows.len()
     );
 
@@ -2126,7 +2133,12 @@ fn the_repetition_union_is_deduped_as_it_grows() {
 #[test]
 fn the_form_shape_caps_are_pinned_by_value() {
     assert_eq!(MAX_PATH_FORM_DEPTH, 32);
-    assert_eq!(MAX_PATH_FORM_WORK, 1 << 20);
+    // The static work budget is exactly what the two per-repetition shape caps
+    // admit for ONE part, so no single repetition those caps accept is refused
+    // here; only composition can pass it.
+    assert_eq!(MAX_PATH_FORM_WORK, 1 << 26);
+    assert_eq!(MAX_PATH_FORM_WORK, MAX_UNROLL_CHAINS * MAX_UNROLL_HOPS as u64);
+    assert_eq!(MAX_PATH_FORM_JOIN_WORK, 1 << 31);
 }
 
 /// Build a `Sequence`-in-`Sequence` form of exactly `depth` levels, with one
@@ -2224,10 +2236,13 @@ fn the_form_work_budget_refuses_just_over_and_runs_at_the_cap() {
     // The whole-form work budget is TIGHTER than the two per-repetition shape caps
     // multiplied out (`MAX_UNROLL_CHAINS x MAX_UNROLL_HOPS` is far above it), so
     // the heaviest part this fixture can use is one the work budget itself admits.
+    // The heaviest part the per-repetition caps admit, which is also exactly what
+    // the whole-form budget admits for one part: a 2-way alternation of up to 19
+    // hops projects `2^20 - 2` chains, which is inside `MAX_UNROLL_CHAINS`.
     let heavy = PathForm::repeat_step(
         PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
         1,
-        15,
+        19,
     );
     let heavy_charge = check_form_shape(&heavy).expect("a heavy-but-legal repetition");
     assert!(
@@ -2245,18 +2260,24 @@ fn the_form_work_budget_refuses_just_over_and_runs_at_the_cap() {
         err
     );
 
-    // And the per-repetition shape caps no longer bind first: a repetition the
-    // chain and hop caps each accept is refused by the whole-form budget, which is
-    // the tighter of the two now.
+    // And NO single repetition the two per-repetition shape caps accept is refused
+    // here: the budget is exactly `MAX_UNROLL_CHAINS x MAX_UNROLL_HOPS`, which is
+    // what one part at both ceilings charges. `(p|q){1,19}` is the heaviest
+    // alternation the chain cap admits — `2^20 - 2` chains of up to 19 hops, so
+    // `1 + (2^20 - 2) x 19` static steps — and it passes.
+    let admitted = check_form_shape(&heavy).expect("the heaviest legal part is admitted");
+    assert_eq!(admitted, 1 + ((1u64 << 20) - 2) * 19);
+    assert!(admitted <= MAX_PATH_FORM_WORK);
+    // One hop more is refused by the CHAIN cap, exactly as it was before this
+    // budget existed.
     let past = PathForm::repeat_step(
         PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
         1,
-        19,
+        20,
     );
-    let err = check_form_shape(&past)
-        .expect_err("a repetition inside both shape caps can still pass the work budget");
+    let err = check_form_shape(&past).expect_err("one hop more passes the chain cap");
     assert!(
-        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_UNROLL_CHAINS")),
         "{:?}",
         err
     );
@@ -2315,9 +2336,24 @@ fn a_hub_join_is_charged_from_its_closed_form_before_it_is_built() {
     let mut room = PathFormBudget::new();
     eval_with_budget(&edges, &form, &mut room).expect("a fresh budget has room for the hub");
     assert_eq!(joins_built(), 1, "one hop, one join");
+    // The row charge is LIVE, so by the time the form has returned the join's own
+    // rows have been released — what proves they were charged is the cumulative
+    // work counter, and the PEAK the live budget reached.
     assert!(
-        room.charged() >= projected,
+        room.work() >= projected as u64,
         "the join's rows are charged: {} vs {}",
+        room.work(),
+        projected
+    );
+    assert!(
+        room.peak() >= projected,
+        "the join's rows were held live while it ran: {} vs {}",
+        room.peak(),
+        projected
+    );
+    assert!(
+        room.charged() < projected,
+        "and released once the hop was projected down: {} still held of {}",
         room.charged(),
         projected
     );
@@ -2402,7 +2438,10 @@ fn the_sequence_join_is_charged_before_it_is_built() {
     let got = eval_with_budget(&edges, &form, &mut whole).expect("the form runs");
     assert_eq!(got.rows.len(), 3);
     assert_eq!(joins_built(), 1, "one sequence join");
-    let total = whole.charged();
+    // The PEAK is what the live row budget has to fit; the final `charged()` is
+    // only what the form still holds once its working set has been released.
+    let total = whole.peak();
+    assert!(total > 0, "the sequence must charge the budget it is given");
 
     // One row short of what the form needs: refused, with no join built.
     joins_built_reset();
@@ -2504,5 +2543,167 @@ fn a_sequences_part_count_is_charged_before_its_parts_are_pushed() {
         worklist_peak(),
         parts,
         "a form inside the budget must have every part walked"
+    );
+}
+
+// =====================================================================
+// LIVE row charging vs the CUMULATIVE work budget
+// =====================================================================
+
+/// The row budget charges rows LIVE: a chain's working set is released when the
+/// chain is dropped, so a form whose chains charge far more rows IN TOTAL than
+/// [`MAX_PATH_FORM_ROWS`] still runs as long as its PEAK fits.
+///
+/// This is the property a cumulative row counter did not have. A repetition
+/// evaluates its chains one at a time — `ChainOdometer` yields one chain, the
+/// chain's hops are joined, projected and deduped, and everything but the
+/// endpoint rows the union keeps is dropped before the next chain starts — so
+/// summing every chain's charge against one row budget refused forms whose peak
+/// memory was a few thousand rows. The assertions are the two halves of that: the
+/// WORK the form did passes the row budget, and the PEAK it held does not.
+///
+/// Deleting the release (or the `retain` that moves a chain's kept rows into the
+/// retained total without leaving its working set charged) makes the run refuse,
+/// which is what makes this test not vacuous.
+#[test]
+fn the_row_budget_is_live_so_a_form_may_do_more_work_than_it_can_hold() {
+    // A 10-node double cycle: |E_p| = |E_q| = 10, and every pair is reachable, so
+    // an alternation's chains all produce rows rather than dying out.
+    let mut doc = String::new();
+    for i in 0..10usize {
+        doc.push_str(&format!(
+            "ex:v{} ex:p ex:v{} . ex:v{} ex:q ex:v{} . ",
+            i,
+            (i + 1) % 10,
+            i,
+            (i + 2) % 10
+        ));
+    }
+    let edges = disclosed_edges(&[(doc.as_str(), &["http://ex/p", "http://ex/q"])]);
+    let form = PathForm::repeat_step(
+        PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
+        1,
+        11,
+    );
+
+    let mut budget = PathFormBudget::new();
+    let got = eval_with_budget(&edges, &form, &mut budget).expect("the form must RUN");
+    assert_eq!(got.rows.len(), 100, "all 10x10 pairs are reachable");
+
+    // The work really does pass the row budget — so a cumulative row counter would
+    // have refused this form.
+    assert!(
+        budget.work() > MAX_PATH_FORM_ROWS as u64,
+        "the fixture must charge more rows in total than the row budget holds: {} vs {}",
+        budget.work(),
+        MAX_PATH_FORM_ROWS
+    );
+    // And the peak does not.
+    assert!(
+        budget.peak() <= MAX_PATH_FORM_ROWS,
+        "the peak must fit the row budget: {} vs {}",
+        budget.peak(),
+        MAX_PATH_FORM_ROWS
+    );
+    // The cumulative work budget is what bounds the work instead, and this form is
+    // inside it.
+    assert!(budget.work() <= MAX_PATH_FORM_JOIN_WORK);
+
+    // And once the result has left the budget's scope, NOTHING stays charged.
+    // Retaining each chain's whole working set instead — rather than only the rows
+    // the union took from it — leaves the budget holding a charge per chain that
+    // the final release cannot cover, which is the cumulative behaviour in another
+    // guise; the count below is what detects it.
+    assert_eq!(
+        budget.charged(),
+        0,
+        "every charge this form made must be released once its result has left scope"
+    );
+}
+
+/// The CUMULATIVE work budget binds on the real unroll: the same form that runs on
+/// a fresh budget is refused when the work budget has already been spent, and runs
+/// again when just enough is left.
+///
+/// This is the half the live row budget cannot cover: releasing a chain's rows is
+/// what lets a million small chains run, so without this counter the only bound on
+/// the work would be the static one, which never sees the edge set.
+#[test]
+fn the_cumulative_work_budget_binds_on_a_real_form() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c . ex:c ex:p ex:d .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 1, 3);
+
+    let mut measured = PathFormBudget::new();
+    let baseline = eval_with_budget(&edges, &form, &mut measured).unwrap();
+    let spend = measured.work();
+    assert!(spend > 0, "the unroll must charge work for what it does");
+
+    // One row-step short of what the form needs: refused, naming the work budget.
+    let mut tight = PathFormBudget::with_work(MAX_PATH_FORM_JOIN_WORK - (spend - 1));
+    let err = eval_with_budget(&edges, &form, &mut tight)
+        .expect_err("a form that would pass the work budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_JOIN_WORK")),
+        "{:?}",
+        err
+    );
+    // With exactly enough it runs, and the answer is unchanged.
+    let mut exact = PathFormBudget::with_work(MAX_PATH_FORM_JOIN_WORK - spend);
+    let got = eval_with_budget(&edges, &form, &mut exact).expect("exactly enough work runs");
+    assert_eq!(got.rows, baseline.rows);
+    // And an overflowing total refuses rather than wrapping under the budget.
+    let mut huge = PathFormBudget::with_work(u64::MAX);
+    assert!(eval_with_budget(&edges, &form, &mut huge).is_err());
+}
+
+/// The shape walk's charge is MONOTONIC: a `Sequence` charges its declared part
+/// count and pushes its parts PREPAID, rather than charging the count and then
+/// giving it back after the push.
+///
+/// Giving it back let the worklist hold parts the budget had not paid for, since
+/// `work` dropped again the moment the parts were on it. Monotonicity is the
+/// observable difference: with the count still charged, the walk's running total
+/// never decreases, and the total a nested form ends on is the same whichever
+/// order the walk pops its parts in.
+#[test]
+fn the_shape_walk_never_gives_a_charge_back() {
+    // A nested form: a Sequence of Sequences, so the inner levels' part counts are
+    // charged while the outer level's parts are still on the worklist.
+    let leaf = PathForm::exact(nn("http://ex/p"), 1);
+    let inner = PathForm::Sequence(vec![leaf.clone(), leaf.clone(), leaf.clone()]);
+    let outer = PathForm::Sequence(vec![inner.clone(), inner.clone(), inner.clone()]);
+
+    // The total is the part count of every level plus each leaf's own chain work:
+    // 1 root + 3 inner + 9 leaves = 13 parts, and each leaf charges `1 x 1` chain
+    // step on top of its part.
+    let charged = check_form_shape(&outer).expect("a small nested form is legal");
+    assert_eq!(charged, 13 + 9);
+
+    // Charging the count and then giving it back would still END here, so the
+    // property to pin is that no prefix of the walk is cheaper than its budget
+    // says: starting one step below the budget must refuse.
+    let err = check_form_shape_from(&outer, MAX_PATH_FORM_WORK - charged + 1)
+        .expect_err("one step past the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+    // And the worklist never holds more parts than the budget has paid for: with
+    // room for the root and the three inner parts but not their nine leaves, the
+    // walk refuses with the leaves never pushed.
+    worklist_peak_reset();
+    let err = check_form_shape_from(&outer, MAX_PATH_FORM_WORK - 5)
+        .expect_err("room for the root and its parts but not their leaves");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+    assert!(
+        worklist_peak() <= 3,
+        "the walk must not push parts the budget has not paid for: peak {}",
+        worklist_peak()
     );
 }

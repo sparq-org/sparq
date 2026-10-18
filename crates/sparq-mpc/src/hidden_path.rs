@@ -229,13 +229,20 @@ fn chain_out_vars() -> Vec<Variable> {
 ///
 /// ## What this module's caps do and do not bound
 ///
-/// Every cap here bounds a COUNT: the hop count, the enumerated tuple count, the
-/// candidate count and the output bound `B`. None of them bounds a WIDTH. The
-/// payload arity, the byte length of an endpoint term's IRI or literal, and the
-/// per-slot limb count the output stage derives from the longest candidate
-/// encoding are all unbounded, as is the cost of building a network of a given
-/// width. So a caller can still present a small count of very large things. Width
-/// caps are follow-up work; no claim is made here that they exist.
+/// Every cap HERE bounds a COUNT: the hop count, the enumerated tuple count, the
+/// candidate count and the output bound `B`. The WIDTHS are bounded by the output
+/// stage's own caps, which this operator applies at its ENTRY: the payload arity
+/// ([`crate::oblivious_join::MAX_PAYLOAD_ARITY`]), the per-term serialized byte
+/// width ([`crate::oblivious_join::MAX_PAYLOAD_TERM_BYTES`]), the uniform per-slot
+/// limb count ([`crate::oblivious_join::MAX_SLOT_LIMBS`]), the compute-party count
+/// ([`crate::oblivious_join::MAX_OUTPUT_PARTIES`]) and their aggregate product
+/// ([`crate::oblivious_join::MAX_SLOT_WORK`]) — see
+/// `crate::oblivious_join::check_output_public_shape`, called before this
+/// operator builds a candidate or draws a share.
+///
+/// What is NOT bounded: whole-operator resource planning — dealer batches,
+/// aggregate sharing, session traffic and deadlines — is follow-up work, and no
+/// claim is made here that it exists.
 pub const MAX_CHAIN_TUPLES: u64 = 1 << 18; // 262_144
 
 /// Maximum hop count the operator will consider — the exactly-`k` chain's `k`, and
@@ -342,6 +349,17 @@ impl HiddenEdges {
     /// Build the edge relation from a list of edges (the federated union).
     pub fn new(edges: Vec<HiddenEdge>) -> Self {
         HiddenEdges { edges }
+    }
+
+    /// Every endpoint TERM this relation could put in a payload slot, for the
+    /// width pass at an operator's entry. A superset of the terms the candidates
+    /// carry (every candidate endpoint is an edge endpoint), and reachable before
+    /// anything is drawn, which is what lets the width be fixed before the first
+    /// sharing.
+    pub(crate) fn payload_terms(&self) -> impl Iterator<Item = &Term> {
+        self.edges
+            .iter()
+            .flat_map(|e| [&e.subject.term, &e.object.term])
     }
 
     /// Number of edges in the relation (`|E|` — public).
@@ -889,8 +907,13 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
     // HERE, before any candidate is built or any share drawn; they read only public
     // numbers, and the stage re-checks them.
     let widths = PayloadWidths::from(2);
+    // Resolve the widths over the EDGE endpoints — a superset of the terms the
+    // candidates will carry — in one streaming pass that retains nothing. In the
+    // default (derived) mode this is what fixes the width before any draw; in the
+    // declared mode it is what refuses an over-width term before any draw.
+    let resolved = widths.resolve(edges.payload_terms())?;
     crate::oblivious_join::check_output_public_shape(
-        &widths,
+        &resolved,
         bound,
         backend.parties(),
         backend.threshold(),
@@ -1124,6 +1147,17 @@ impl PredicatedEdges {
         }
         self.node_domain = Some(declared.into_values().collect());
         Ok(self)
+    }
+
+    /// Every term this edge set could put in a payload slot: both endpoints of
+    /// every edge, and every node of the declared domain, which a zero-length arm
+    /// emits as a `(x, x)` diagonal row. A superset of what the candidates carry,
+    /// reachable before anything is drawn.
+    pub(crate) fn payload_terms(&self) -> impl Iterator<Item = &Term> {
+        self.edges
+            .iter()
+            .flat_map(|e| [&e.subject.term, &e.object.term])
+            .chain(self.node_domain.iter().flatten())
     }
 
     /// Size of the declared PUBLIC node domain, or `0` when none was declared.
@@ -1594,8 +1628,11 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
     // drawn. Closed forms on public numbers, so the answer is the stage's own; the
     // stage re-checks.
     let widths = PayloadWidths::from(2);
+    // The width pass over the edge endpoints AND the declared node domain — a
+    // superset of the terms the candidates will carry, read before any draw.
+    let resolved = widths.resolve(edges.payload_terms())?;
     crate::oblivious_join::check_output_public_shape(
-        &widths,
+        &resolved,
         bound,
         backend.parties(),
         backend.threshold(),

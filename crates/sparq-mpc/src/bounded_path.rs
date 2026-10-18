@@ -266,8 +266,8 @@ pub const MAX_UNROLL_CHAINS: u64 = 1 << 20; // 1_048_576
 /// case, not an expensive one.
 pub const MAX_UNROLL_HOPS: usize = 64;
 
-/// Largest CUMULATIVE number of endpoint rows one whole [`PathForm`] evaluation
-/// may materialise before [`eval_bounded_path_disclosed`] refuses with an
+/// Largest number of endpoint rows one whole [`PathForm`] evaluation may hold
+/// LIVE AT ONCE before [`eval_bounded_path_disclosed`] refuses with an
 /// [`MpcError::Protocol`] error.
 ///
 /// ## Why a budget over the form and not over each part
@@ -299,19 +299,48 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 ///
 /// ## What it bounds, honestly
 ///
-/// It bounds the CUMULATIVE row count over one whole form, which is an upper
-/// bound on peak memory and not a measure of it: the deduped union holds far fewer
-/// rows than the budget counts, because a row charged by one chain and already
-/// seen is dropped. What it does NOT bound: the rest of the operator around this
-/// one call — nothing here charges for the `PartialResult` clones a caller makes,
-/// a federation's own buffers, or anything downstream of the returned relation.
-/// Whole-operator resource planning is follow-up work and is named in the module
-/// docs.
+/// It bounds the rows HELD AT ONCE, so it is a bound on this evaluation's peak row
+/// memory. A charge is RELEASED when the rows it paid for are dropped: a chain's
+/// hop relations, its join outputs and its accumulator go as soon as the next
+/// chain starts, and what stays charged for the rest of the evaluation is the
+/// deduped union, which holds the answer's rows and at most `|V|²` of them.
 ///
-/// The value is below the heaviest run the two per-repetition shape caps would
-/// admit on their own, so for a dense edge set this budget, not those caps, is
-/// what binds.
+/// Because charges are released, this budget says nothing about how much WORK a
+/// form may schedule — a million chains that each fit in it would each be
+/// evaluated. [`MAX_PATH_FORM_JOIN_WORK`] is the cumulative counter that bounds
+/// that, and the two are charged together from the same call sites.
+///
+/// What NEITHER bounds: the rest of the operator around this one call — nothing
+/// here charges for the `PartialResult` clones a caller makes, a federation's own
+/// buffers, or anything downstream of the returned relation. Whole-operator
+/// resource planning is follow-up work and is named in the module docs.
 pub const MAX_PATH_FORM_ROWS: usize = 1 << 18; // 262_144
+
+/// Largest CUMULATIVE number of endpoint row-steps one whole [`PathForm`]
+/// evaluation may charge before [`eval_bounded_path_disclosed`] refuses with an
+/// [`MpcError::Protocol`] error.
+///
+/// [`MAX_PATH_FORM_ROWS`] bounds the rows that are LIVE at once, which is a bound
+/// on peak memory and deliberately NOT a bound on how much work a form may do: a
+/// repetition's chains are evaluated one at a time and each chain's working set is
+/// dropped before the next starts, so a form with a tiny peak can still schedule
+/// an unbounded amount of CPU: this module's unroll is crypto-free, so what the
+/// counter bounds is join and projection work, not protocol rounds.
+/// This budget is the one that bounds that. It sums every row charge the
+/// evaluation makes — hop edge relations, join outputs and the reflexive diagonal
+/// — and never releases any of them.
+///
+/// The unit is CHARGED ROW-STEPS, the same unit [`MAX_PATH_FORM_ROWS`] counts,
+/// summed over time rather than held at once. It is not comparable with
+/// [`MAX_PATH_FORM_WORK`], which counts STATIC unroll steps of the plan before any
+/// edge is read.
+///
+/// The value is chosen so that it admits every form-and-edge-set combination the
+/// crate's own tests, benches and probes evaluate to completion, and refuses the
+/// combinations that run unboundedly: `chains × hops × |V| × |E|` passes it long
+/// before a caller could be served. Raising it is a cost decision, not a
+/// correctness one.
+pub const MAX_PATH_FORM_JOIN_WORK: u64 = 1 << 31; // 2_147_483_648 row-steps
 
 /// Largest [`PathForm`] NESTING DEPTH the unroller accepts before
 /// [`eval_bounded_path_disclosed`] refuses with an [`MpcError::Protocol`] error.
@@ -358,11 +387,20 @@ pub const MAX_PATH_FORM_DEPTH: usize = 32;
 /// [`crate::oblivious_join::MAX_SLOT_WORK`], which counts modelled field
 /// elements.
 ///
-/// The value is BELOW `MAX_UNROLL_CHAINS × MAX_UNROLL_HOPS`, so it is this budget
-/// and not those two caps that decides a heavy single repetition: an alternation
-/// of width 2 over up to 19 hops, which both shape caps admit, is refused here.
-/// That is deliberate — the shape caps bound one part's shape, and this bounds the
-/// work a whole plan may schedule.
+/// ## Why the value is exactly `MAX_UNROLL_CHAINS × MAX_UNROLL_HOPS`
+///
+/// The budget is set to the most static unroll work the two per-repetition shape
+/// caps admit for ONE part. That is deliberate and load-bearing: every single
+/// repetition those two caps accept is accepted here too, so this budget refuses
+/// no form that a single-part path could run before it existed. What it binds is
+/// COMPOSITION — a `Sequence` of two parts that each sit at the per-part ceiling,
+/// or of many smaller ones, sums past it.
+///
+/// A near-cap alternation such as `(p|q){1,19}` therefore stays admitted: it
+/// projects `Σ_{ℓ=1..19} 2^ℓ = 2^20 − 2` chains of up to 19 hops, which charges
+/// `1 + (2^20 − 2) × 19` steps — inside this budget, and inside both shape caps as
+/// it was before. `(p|q){1,20}` is refused by [`MAX_UNROLL_CHAINS`], as it was
+/// before.
 ///
 /// ## What this projection does NOT cover
 ///
@@ -372,7 +410,7 @@ pub const MAX_PATH_FORM_DEPTH: usize = 32;
 /// edge set or the domain. Those rows are charged to [`MAX_PATH_FORM_ROWS`] as
 /// they are produced, which is what bounds a `{0,k}` over a large declared
 /// domain.
-pub const MAX_PATH_FORM_WORK: u64 = 1 << 20; // 1_048_576 static unroll steps
+pub const MAX_PATH_FORM_WORK: u64 = MAX_UNROLL_CHAINS * (MAX_UNROLL_HOPS as u64); // 2^26 steps
 
 // The longest the shape walk's worklist ever got, and a reset for it. Charging a
 // `Sequence`'s declared part count BEFORE its parts are pushed is only observable
@@ -417,11 +455,13 @@ pub(crate) fn check_form_shape(form: &PathForm) -> Result<u64, MpcError> {
 /// constant.
 pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64, MpcError> {
     let mut work: u64 = already;
-    // (form, depth-of-that-form). The root is depth 1.
-    let mut stack: Vec<(&PathForm, usize)> = vec![(form, 1)];
+    // (form, depth-of-that-form, whether its own `+ 1` is already charged). The
+    // root is depth 1 and charges its own; a Sequence's parts are pushed PREPAID,
+    // because the Sequence charged its declared part count before pushing them.
+    let mut stack: Vec<(&PathForm, usize, bool)> = vec![(form, 1, false)];
     #[cfg(test)]
     WORKLIST_PEAK.with(|c| c.set(c.get().max(stack.len())));
-    while let Some((f, depth)) = stack.pop() {
+    while let Some((f, depth, prepaid)) = stack.pop() {
         if depth > MAX_PATH_FORM_DEPTH {
             return Err(MpcError::Protocol(format!(
                 "bounded path form: nesting depth {} exceeds the MAX_PATH_FORM_DEPTH cap of \
@@ -432,10 +472,13 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
             )));
         }
         // Every part costs at least 1, so a long Sequence of zero-work parts is
-        // still bounded.
-        work = work
-            .checked_add(1)
-            .ok_or_else(|| form_work_overflow("the part count"))?;
+        // still bounded. A prepaid part's 1 was charged by the Sequence that
+        // declared it, so charging it again here would double-count it.
+        if !prepaid {
+            work = work
+                .checked_add(1)
+                .ok_or_else(|| form_work_overflow("the part count"))?;
+        }
         match f {
             PathForm::Repetition(rep) => {
                 // The repetition's OWN caps first, in their own order — the hop cap
@@ -462,16 +505,16 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
                 if work > MAX_PATH_FORM_WORK {
                     return Err(form_work_over_budget(work));
                 }
+                // Pushed PREPAID, so the charge above is not given back: `work`
+                // only ever grows, and a worklist that holds `n` parts has already
+                // charged for `n` parts. Subtracting the count again after the
+                // push — the other way to avoid double-charging each part — let
+                // the worklist hold parts the budget had not paid for.
                 for part in parts {
-                    stack.push((part, depth + 1));
+                    stack.push((part, depth + 1, true));
                 }
                 #[cfg(test)]
                 WORKLIST_PEAK.with(|c| c.set(c.get().max(stack.len())));
-                // The parts' own `+ 1` is charged above, so walking each one must
-                // not charge it twice.
-                work = work
-                    .checked_sub(declared)
-                    .ok_or_else(|| form_work_overflow("the part count"))?;
             }
         }
         if work > MAX_PATH_FORM_WORK {
@@ -481,9 +524,8 @@ pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64
     Ok(work)
 }
 
-/// The overflow refusal shape [`check_form_shape`] uses. Names the quantity and
-/// the budget, both public plan numbers.
-/// The one refusal for a form whose static unroll work passes the budget.
+/// The one refusal for a form whose static unroll work passes the budget. Names
+/// the quantity and the budget, both public plan numbers.
 fn form_work_over_budget(work: u64) -> MpcError {
     MpcError::Protocol(format!(
         "bounded path form: static unroll work {} exceeds the MAX_PATH_FORM_WORK \
@@ -494,6 +536,8 @@ fn form_work_over_budget(work: u64) -> MpcError {
     ))
 }
 
+/// The overflow refusal shape the shape walk uses when a projection does not fit
+/// in `u64` at all. Names the quantity and the budget, both public plan numbers.
 fn form_work_overflow(what: &str) -> MpcError {
     MpcError::Protocol(format!(
         "bounded path form: {} overflows u64, so it cannot be within the \
@@ -502,54 +546,186 @@ fn form_work_overflow(what: &str) -> MpcError {
     ))
 }
 
-/// The [`MAX_PATH_FORM_ROWS`] budget for ONE whole-form evaluation, threaded
-/// through the unroll alongside the intermediate-variable scope counter.
+/// The two evaluation-time budgets for ONE whole-form evaluation, threaded
+/// through the unroll alongside the intermediate-variable scope counter:
+/// [`MAX_PATH_FORM_ROWS`] over the rows that are LIVE at once, and
+/// [`MAX_PATH_FORM_JOIN_WORK`] over the row-steps the whole form does.
+///
+/// The split is what makes the row budget a bound on PEAK memory rather than on
+/// the amount of work a form may do. A repetition's chains are evaluated one at a
+/// time and each chain's working set — its hop edge relations, its join outputs
+/// and its accumulator — is dropped before the next chain starts, so charging
+/// every chain cumulatively against one row counter refused forms whose peak
+/// memory was a few thousand rows. Only what the evaluation KEEPS is charged
+/// cumulatively: the deduped union, which holds the answer's rows.
+///
+/// Dropping the cumulative row charge on its own would leave CPU unbounded (a
+/// million chains that each fit in the live budget), so the row-steps the form
+/// charges are ALSO summed, never released, against their own budget.
 struct PathFormBudget {
-    /// Rows charged so far across the whole form.
-    charged: usize,
+    /// Rows materialised and still held: a chain's hop relations, join outputs
+    /// and accumulator. Released as the evaluation drops them.
+    live: usize,
+    /// Rows the evaluation KEEPS to the end — the deduped union. Never released.
+    retained: usize,
+    /// Cumulative row-steps charged over the whole form, never released.
+    work: u64,
+    /// The highest `live + retained` this budget ever held.
+    peak: usize,
 }
 
 impl PathFormBudget {
     fn new() -> Self {
-        PathFormBudget { charged: 0 }
+        PathFormBudget {
+            live: 0,
+            retained: 0,
+            work: 0,
+            peak: 0,
+        }
     }
 
-    /// A budget that has already had `charged` rows charged against it — the way
-    /// the tests reach the cap without materialising `MAX_PATH_FORM_ROWS` rows.
+    /// A budget that already holds `charged` RETAINED rows — the way the tests
+    /// reach the cap without materialising `MAX_PATH_FORM_ROWS` rows. It bypasses
+    /// nothing: [`Self::charge`] is still the only thing that decides, against the
+    /// same constant, from the same call sites.
+    #[cfg(test)]
+    fn with_charged(charged: usize) -> Self {
+        PathFormBudget {
+            live: 0,
+            retained: charged,
+            work: 0,
+            peak: charged,
+        }
+    }
+
+    /// A budget that has already done `work` row-steps — the way the tests reach
+    /// the cumulative work budget without doing `MAX_PATH_FORM_JOIN_WORK` of it.
     /// It bypasses nothing: [`Self::charge`] is still the only thing that decides,
     /// against the same constant, from the same call sites.
     #[cfg(test)]
-    fn with_charged(charged: usize) -> Self {
-        PathFormBudget { charged }
+    fn with_work(work: u64) -> Self {
+        PathFormBudget {
+            live: 0,
+            retained: 0,
+            work,
+            peak: 0,
+        }
     }
 
-    /// Rows charged so far.
+    /// Rows held right now, live plus retained.
     #[cfg(test)]
     fn charged(&self) -> usize {
-        self.charged
+        self.live + self.retained
     }
 
-    /// Charge `rows` against the budget, refusing if the running total would pass
-    /// [`MAX_PATH_FORM_ROWS`]. Checked arithmetic: an overflowing total is a
-    /// refusal, never a wrapped count that would slip under the budget.
+    /// The highest `live + retained` this budget ever reached.
+    #[cfg(test)]
+    fn peak(&self) -> usize {
+        self.peak
+    }
+
+    /// Cumulative row-steps charged so far.
+    #[cfg(test)]
+    fn work(&self) -> u64 {
+        self.work
+    }
+
+    /// Charge `rows` about to be materialised: against the LIVE row budget, and
+    /// against the cumulative work budget. Checked arithmetic throughout — an
+    /// overflowing total is a refusal, never a wrapped count that would slip under
+    /// a budget.
+    ///
+    /// Both halves are decided before either is committed, so a refusal leaves the
+    /// budget exactly as it was.
     fn charge(&mut self, rows: usize) -> Result<(), MpcError> {
-        let total = self
-            .charged
+        let held = self
+            .live
             .checked_add(rows)
-            .filter(|t| *t <= MAX_PATH_FORM_ROWS);
-        match total {
-            Some(t) => {
-                self.charged = t;
-                Ok(())
-            }
-            None => Err(MpcError::Protocol(format!(
-                "bounded path form: materialising {} more endpoint row(s) on top of {} \
-                 already materialised would pass the MAX_PATH_FORM_ROWS budget of {} — \
-                 refusing (the per-repetition chain and hop caps bound the shape of one \
-                 part, not what a whole form's parts produce between them)",
-                rows, self.charged, MAX_PATH_FORM_ROWS
-            ))),
-        }
+            .and_then(|l| l.checked_add(self.retained))
+            .filter(|t| *t <= MAX_PATH_FORM_ROWS)
+            .ok_or_else(|| {
+                MpcError::Protocol(format!(
+                    "bounded path form: materialising {} more endpoint row(s) on top of \
+                     the {} held would pass the MAX_PATH_FORM_ROWS budget of {} — \
+                     refusing (the per-repetition chain and hop caps bound the shape of \
+                     one part, not what a whole form's parts hold at once)",
+                    rows,
+                    self.live + self.retained,
+                    MAX_PATH_FORM_ROWS
+                ))
+            })?;
+        let work = (rows as u64)
+            .checked_add(self.work)
+            .filter(|w| *w <= MAX_PATH_FORM_JOIN_WORK)
+            .ok_or_else(|| {
+                MpcError::Protocol(format!(
+                    "bounded path form: {} more endpoint row-step(s) on top of the {} \
+                     already done would pass the MAX_PATH_FORM_JOIN_WORK budget of {} — \
+                     refusing (the live row budget bounds what one chain holds; this \
+                     bounds how much work the whole form may schedule)",
+                    rows, self.work, MAX_PATH_FORM_JOIN_WORK
+                ))
+            })?;
+        self.live += rows;
+        self.work = work;
+        self.peak = self.peak.max(held);
+        Ok(())
+    }
+
+    /// Re-charge `rows` that were just RELEASED, for a relation that is a subset
+    /// of the one released. It cannot refuse — the budget was inside both caps
+    /// with the larger charge held, and the work half was charged when the larger
+    /// relation was — so it takes no decision and returns nothing.
+    fn charge_from_released(&mut self, rows: usize) {
+        self.live = self.live.saturating_add(rows);
+        self.peak = self.peak.max(self.live + self.retained);
+    }
+
+    /// Hand a finished sub-form's RETAINED rows back as LIVE rows, so the caller
+    /// that now owns the relation can release them when it drops it. A sub-form's
+    /// union is retained while the sub-form builds it, because it must stay
+    /// charged across the chains that feed it; once it is returned it is an
+    /// ordinary working-set relation of the caller's.
+    fn hand_back(&mut self, rows: usize) {
+        debug_assert!(
+            rows <= self.retained,
+            "handed back {} retained row(s) of {}",
+            rows,
+            self.retained
+        );
+        self.retained = self.retained.saturating_sub(rows);
+        self.live = self.live.saturating_add(rows);
+    }
+
+    /// Release `rows` of LIVE charge: the rows have been dropped. Work already
+    /// charged for them is NOT released — the work was done.
+    ///
+    /// `debug_assert`ed rather than checked: every release in this module pairs
+    /// with a charge on the same path, so an under-run is an internal accounting
+    /// bug and not a caller-reachable condition. In release builds it saturates,
+    /// which can only make the budget stricter.
+    fn release(&mut self, rows: usize) {
+        debug_assert!(
+            rows <= self.live,
+            "released {} live row(s) of {}",
+            rows,
+            self.live
+        );
+        self.live = self.live.saturating_sub(rows);
+    }
+
+    /// Move `kept` of a dropped working set's `held` live rows into the RETAINED
+    /// total: the deduped union keeps `kept` of them and the rest are gone.
+    ///
+    /// One call, so the budget is never momentarily over-charged for rows that no
+    /// longer exist nor under-charged for rows that do. `kept <= held` always
+    /// holds here (the union keeps a subset of what it was offered), so the
+    /// retained total cannot pass a cap the live total was already inside.
+    fn retain(&mut self, held: usize, kept: usize) {
+        debug_assert!(kept <= held, "kept {} of {} offered", kept, held);
+        self.release(held);
+        self.retained = self.retained.saturating_add(kept);
+        self.peak = self.peak.max(self.live + self.retained);
     }
 }
 
@@ -975,8 +1151,12 @@ fn eval_with_budget(
     // counter for the whole evaluation, so every nested sequence gets its own
     // intermediate-variable namespace (see `eval_sequence`).
     let mut scope = 0usize;
-    let relation = eval_form_relation(edges, form, &subject, &object, &mut scope, budget)?;
-    Ok(dedup_endpoint_pairs(relation, &subject, &object))
+    let (relation, charge) = eval_form_relation(edges, form, &subject, &object, &mut scope, budget)?;
+    let out = dedup_endpoint_pairs(relation, &subject, &object);
+    // The relation the dedup shrank is dropped, and the result leaves this budget's
+    // scope, so the whole-form charge is released here.
+    budget.release(charge);
+    Ok(out)
 }
 
 /// Evaluate one [`PathForm`] into its `(subject, object)` pair relation
@@ -989,7 +1169,7 @@ fn eval_form_relation(
     object: &Variable,
     scope: &mut usize,
     budget: &mut PathFormBudget,
-) -> Result<PartialResult, MpcError> {
+) -> Result<(PartialResult, usize), MpcError> {
     match form {
         // A repetition's own hop variables are `__pp_z{i}`, a different namespace
         // from a sequence's `__pp_zs{scope}_{i}`, and repetitions do not nest (a
@@ -1078,7 +1258,7 @@ fn eval_repetition(
     subject: &Variable,
     object: &Variable,
     budget: &mut PathFormBudget,
-) -> Result<PartialResult, MpcError> {
+) -> Result<(PartialResult, usize), MpcError> {
     // This repetition's own shape caps (also applied up front by `check_form_shape`;
     // re-applied here so the one code path holds them whichever entry reached it).
     check_repetition_shape(rep)?;
@@ -1093,15 +1273,20 @@ fn eval_repetition(
     let mut union_rows: Vec<Vec<Option<Term>>> = Vec::new();
     // Collect rows into the deduped union. The rows were CHARGED where they were
     // produced — the diagonal below and every hop inside `eval_fixed_chain` charge
-    // their own closed-form size before building — so this only dedups.
+    // their own closed-form size before building — so this only dedups, and
+    // reports how many rows the union KEPT so the caller can move that many from
+    // the live total to the retained one.
     let keep = |rows: Vec<Vec<Option<Term>>>,
                 seen: &mut BTreeSet<String>,
-                union_rows: &mut Vec<Vec<Option<Term>>>| {
+                union_rows: &mut Vec<Vec<Option<Term>>>|
+     -> usize {
+        let before = union_rows.len();
         for row in rows {
             if seen.insert(format!("{row:?}")) {
                 union_rows.push(row);
             }
         }
+        union_rows.len() - before
     };
 
     for length in rep.min..=rep.max {
@@ -1114,12 +1299,15 @@ fn eval_repetition(
             // are rows this form materialises.
             let domain = edges.node_domain()?;
             // Charged before the rows are built: one row per declared node.
-            budget.charge(domain.len())?;
+            let held = domain.len();
+            budget.charge(held)?;
             let diagonal: Vec<Vec<Option<Term>>> = domain
                 .iter()
                 .map(|node| vec![Some(node.clone()), Some(node.clone())])
                 .collect();
-            keep(diagonal, &mut seen, &mut union_rows);
+            let kept = keep(diagonal, &mut seen, &mut union_rows);
+            // The diagonal is gone; the union keeps `kept` of its rows.
+            budget.retain(held, kept);
             continue;
         }
         // exactly-`length` chains: expand the alternation across the `length` hop
@@ -1128,16 +1316,31 @@ fn eval_repetition(
         // with a clone of every predicate IRI in each.
         let mut chains = ChainOdometer::new(&rep.step.alternatives, length);
         while let Some(chain) = chains.next_chain() {
-            let chain_rel = eval_fixed_chain(edges, chain, subject, object, budget)?;
-            keep(chain_rel.rows, &mut seen, &mut union_rows);
+            let (chain_rel, held) = eval_fixed_chain(edges, chain, subject, object, budget)?;
+            let kept = keep(chain_rel.rows, &mut seen, &mut union_rows);
+            // This chain's whole working set is dropped here and the union keeps
+            // `kept` of its endpoint rows, so the live charge for the chain is
+            // released and only what the union holds stays charged. That is what
+            // makes the row budget a bound on this repetition's PEAK rows rather
+            // than on the number of chains it is allowed to evaluate; the work
+            // those chains did stays charged to the cumulative work budget.
+            budget.retain(held, kept);
         }
     }
 
-    Ok(PartialResult {
-        holder: HolderId::new("federation"),
-        vars: vec![subject.clone(), object.clone()],
-        rows: union_rows,
-    })
+    // The union is this repetition's result and the caller owns it from here, so
+    // its charge moves from retained to live: the caller releases it when it drops
+    // or shrinks the relation.
+    let charge = union_rows.len();
+    budget.hand_back(charge);
+    Ok((
+        PartialResult {
+            holder: HolderId::new("federation"),
+            vars: vec![subject.clone(), object.clone()],
+            rows: union_rows,
+        },
+        charge,
+    ))
 }
 
 /// The row count a [`DisclosedKeyJoin`] of `left` and `right` on `join_var` will
@@ -1219,7 +1422,9 @@ fn projected_join_rows(
     total.checked_add(from_unbound).ok_or_else(overflow)
 }
 
-/// Charge a join's closed-form output size to the budget, then run it.
+/// Charge a join's closed-form output size to the budget, then run it. Returns the
+/// joined relation and the rows charged for it, so the caller can RELEASE that
+/// charge once the join's output has been projected down and dropped.
 ///
 /// Every [`DisclosedKeyJoin`] in this module goes through here, so "the budget is
 /// charged before the rows exist" is a property of the one code path rather than a
@@ -1229,12 +1434,13 @@ fn precharged_join(
     left: PartialResult,
     right: PartialResult,
     plan: &JoinPlan,
-) -> Result<PartialResult, MpcError> {
-    budget.charge(projected_join_rows(&left, &right, &plan.join_var)?)?;
+) -> Result<(PartialResult, usize), MpcError> {
+    let charged = projected_join_rows(&left, &right, &plan.join_var)?;
+    budget.charge(charged)?;
     let joined = DisclosedKeyJoin::new().join(&[left, right], plan)?;
     #[cfg(test)]
     JOINS_BUILT.with(|c| c.set(c.get() + 1));
-    Ok(joined)
+    Ok((joined, charged))
 }
 
 #[cfg(test)]
@@ -1266,7 +1472,7 @@ fn eval_fixed_chain(
     subject: &Variable,
     object: &Variable,
     budget: &mut PathFormBudget,
-) -> Result<PartialResult, MpcError> {
+) -> Result<(PartialResult, usize), MpcError> {
     debug_assert!(
         !chain.is_empty(),
         "exactly-0 chains handled by reflexive arm"
@@ -1285,8 +1491,11 @@ fn eval_fixed_chain(
     };
 
     // First hop's edge relation: (?__pp_a, ?z1). Its rows are charged BEFORE
-    // `relation_for` clones them out of the disclosed edge set.
-    budget.charge(edges.row_count_for(&chain[0]))?;
+    // `relation_for` clones them out of the disclosed edge set. `acc_charge` is
+    // what the accumulator currently holds charged, so each hop can release the
+    // accumulator it replaces instead of leaving it charged for the whole chain.
+    let mut acc_charge = edges.row_count_for(&chain[0]);
+    budget.charge(acc_charge)?;
     let mut acc = edges.relation_for(&chain[0], &hop_var(0), &hop_var(1));
 
     // Fold remaining hops via DisclosedKeyJoin on the shared intermediate var,
@@ -1303,7 +1512,8 @@ fn eval_fixed_chain(
     // `(subject, reached)` pair continue identically.
     for (idx, pred) in chain.iter().enumerate().skip(1) {
         // This hop's own edge rows, charged before they are cloned...
-        budget.charge(edges.row_count_for(pred))?;
+        let next_charge = edges.row_count_for(pred);
+        budget.charge(next_charge)?;
         let next = edges.relation_for(pred, &hop_var(idx), &hop_var(idx + 1));
         let join_var = hop_var(idx); // the shared intermediate this hop joins on
         let plan = JoinPlan {
@@ -1313,19 +1523,37 @@ fn eval_fixed_chain(
         // ...and the hop's JOIN output charged from its closed form, before the
         // join builds it. The per-hop projection and dedup that follow only ever
         // shrink that row set, so the charge covers the whole hop.
-        let joined = precharged_join(budget, acc, next, &plan)?;
+        let (joined, join_charge) = precharged_join(budget, acc, next, &plan)?;
         let reached = hop_var(idx + 1);
-        acc = dedup_endpoint_pairs(
+        let reduced = dedup_endpoint_pairs(
             project_endpoints(&joined, subject, &reached)?,
             subject,
             &reached,
         );
+        // Everything this hop materialised is now dropped — the accumulator it
+        // replaced, this hop's edge relation and the join's own output — and what
+        // survives is `reduced`, which the projection and dedup shrank out of the
+        // join output. So release the three and charge the one. The charge cannot
+        // refuse: `reduced` holds at most `join_charge` rows, which was just
+        // released, and the work half was charged when the join was.
+        drop(joined);
+        budget.release(acc_charge + next_charge + join_charge);
+        acc_charge = reduced.rows.len();
+        budget.charge_from_released(acc_charge);
+        acc = reduced;
     }
 
     // Project onto (subject, object), dropping any intermediate column. After the
     // fold above the accumulator is already `(subject, object)`; this also covers
-    // the single-hop case, which never entered the loop.
-    project_endpoints(&acc, subject, object)
+    // the single-hop case, which never entered the loop. The projection is one row
+    // per accumulator row and the accumulator is then dropped, so the charge moves
+    // across rather than doubling, and the caller is handed what it now owes.
+    let out = project_endpoints(&acc, subject, object)?;
+    drop(acc);
+    budget.release(acc_charge);
+    let out_charge = out.rows.len();
+    budget.charge_from_released(out_charge);
+    Ok((out, out_charge))
 }
 
 /// `f1 / f2 / ... / fn` → relational composition of the sub-forms' pair
@@ -1340,7 +1568,7 @@ fn eval_sequence(
     object: &Variable,
     scope: &mut usize,
     budget: &mut PathFormBudget,
-) -> Result<PartialResult, MpcError> {
+) -> Result<(PartialResult, usize), MpcError> {
     if parts.is_empty() {
         return Err(MpcError::Protocol("empty path sequence".into()));
     }
@@ -1363,9 +1591,12 @@ fn eval_sequence(
         Variable::new_unchecked(format!("{}s{}_{}", INTERMEDIATE_PREFIX, my_scope, i))
     };
 
-    // First sub-form onto (?__pp_a, mid1).
+    // First sub-form onto (?__pp_a, mid1). `acc_charge` is what the accumulator
+    // holds charged, so each composition step releases the accumulator it replaces
+    // instead of leaving every step's rows charged to the end of the sequence.
     let first_end = mid_var(1);
-    let mut acc = eval_form_relation(edges, &parts[0], subject, &first_end, scope, budget)?;
+    let (mut acc, mut acc_charge) =
+        eval_form_relation(edges, &parts[0], subject, &first_end, scope, budget)?;
     let mut prev_end = first_end;
 
     for (idx, part) in parts.iter().enumerate().skip(1) {
@@ -1375,12 +1606,21 @@ fn eval_sequence(
         } else {
             mid_var(idx + 1)
         };
-        let part_rel = eval_form_relation(edges, part, &prev_end, &this_end, scope, budget)?;
+        let (part_rel, part_held) =
+            eval_form_relation(edges, part, &prev_end, &this_end, scope, budget)?;
         // Dedup each sub-form's relation before joining so a sub-form's internal
         // multiplicity (e.g. two lengths reaching the same mid pair) does not
-        // inflate the composition — endpoint relations are sets.
+        // inflate the composition — endpoint relations are sets. Each dedup drops
+        // the relation it shrank, so each releases what that relation held and
+        // charges what the shrunk one does.
         let part_rel = dedup_endpoint_pairs(part_rel, &prev_end, &this_end);
+        budget.release(part_held);
+        let part_charge = part_rel.rows.len();
+        budget.charge_from_released(part_charge);
         let acc_dedup = dedup_endpoint_pairs(acc, subject, &prev_end);
+        budget.release(acc_charge);
+        let acc_dedup_charge = acc_dedup.rows.len();
+        budget.charge_from_released(acc_dedup_charge);
         let plan = JoinPlan {
             join_var: prev_end.clone(),
             key_disclosed: true,
@@ -1389,12 +1629,24 @@ fn eval_sequence(
         // composing two in-budget parts multiplies out to, and it is charged from
         // the closed form BEFORE the join builds it. The projection that follows is
         // one output row per joined row, so the charge covers it.
-        acc = precharged_join(budget, acc_dedup, part_rel, &plan)?;
-        acc = project_endpoints(&acc, subject, &this_end)?;
+        let (joined, join_charge) = precharged_join(budget, acc_dedup, part_rel, &plan)?;
+        let projected = project_endpoints(&joined, subject, &this_end)?;
+        // The join's inputs and its own output are dropped here; the projection is
+        // what survives this step.
+        drop(joined);
+        budget.release(acc_dedup_charge + part_charge + join_charge);
+        acc_charge = projected.rows.len();
+        budget.charge_from_released(acc_charge);
+        acc = projected;
         prev_end = this_end;
     }
 
-    project_endpoints(&acc, subject, object)
+    let out = project_endpoints(&acc, subject, object)?;
+    drop(acc);
+    budget.release(acc_charge);
+    let out_charge = out.rows.len();
+    budget.charge_from_released(out_charge);
+    Ok((out, out_charge))
 }
 
 /// Project a partial onto exactly `[subject, object]`, dropping every other

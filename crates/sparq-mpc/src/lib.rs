@@ -441,7 +441,7 @@ pub use federated_binding::{
 pub use oblivious_join::{
     oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys,
     oblivious_set_output_to_recipient, Candidate, MatchBit, ObliviousOutput, ObliviousOutputCost,
-    OutputSlot, PayloadWidths, RecipientOutputShares, DEFAULT_PAYLOAD_TERM_BYTES,
+    OutputSlot, PayloadWidths, RecipientOutputShares,
     MAX_OUTPUT_BOUND, MAX_OUTPUT_PARTIES, MAX_PAYLOAD_ARITY, MAX_PAYLOAD_TERM_BYTES,
     MAX_SLOT_LIMBS, MAX_SLOT_WORK,
 };

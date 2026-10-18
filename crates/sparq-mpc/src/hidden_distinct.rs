@@ -520,8 +520,13 @@ pub(crate) fn distinct_hidden_pairs_slots_through(
     // the stage gives; running them here is what makes "before any draw" true of the
     // operator and not only of the stage. The stage re-checks.
     let widths = PayloadWidths::from(2);
+    // Resolve the widths over the INPUT pairs' terms — a superset of the terms the
+    // candidates will carry — in one streaming pass that retains nothing, so the
+    // width is fixed (derived mode) or the declaration is enforced (declared mode)
+    // before the first draw.
+    let resolved = widths.resolve(pairs.iter().flat_map(|p| [&p.a_term, &p.b_term]))?;
     crate::oblivious_join::check_output_public_shape(
-        &widths,
+        &resolved,
         bound,
         backend.parties(),
         backend.threshold(),
@@ -552,8 +557,10 @@ pub fn distinct_hidden_pairs_oblivious(
     // The stage's public-shape caps before the build and before any draw; the stage
     // re-checks.
     let widths = PayloadWidths::from(2);
+    // The same width pass over the input pairs' terms, before the dealer is minted.
+    let resolved = widths.resolve(pairs.iter().flat_map(|p| [&p.a_term, &p.b_term]))?;
     crate::oblivious_join::check_output_public_shape(
-        &widths,
+        &resolved,
         bound,
         backend.parties(),
         backend.threshold(),

@@ -743,6 +743,7 @@ impl BatchedHiddenInput {
         self.shared_keys_through(dealer, n)
     }
 
+
     /// [`Self::shared_keys`] over any randomness source: one
     /// [`DistributedRandomness::vss_own_input`] per row, in row order, each refused
     /// unless it is the canonical sharing for the caller's (already validated)
@@ -768,6 +769,36 @@ impl BatchedHiddenInput {
 pub type BatchedJoinOutput = (PartialResult, ObliviousOutputCost);
 
 impl HiddenValueJoin {
+    /// The output stage's public-shape checks and its term-width pass, run at THIS
+    /// operator's entry — before a candidate is built or a share drawn.
+    ///
+    /// The width pass streams over both batches' disclosed payload terms, which is
+    /// a superset of the terms the candidates will carry (a candidate's payload is
+    /// a left row's terms followed by a right row's), and it retains nothing. In
+    /// the default derived mode it is what fixes the uniform width before the first
+    /// draw; with a declared width it is what refuses an over-width term before the
+    /// first draw. The stage resolves again over its own candidates and re-checks.
+    fn preflight_output_shape(
+        &self,
+        left: &BatchedHiddenInput,
+        right: &BatchedHiddenInput,
+        arity: usize,
+        bound: usize,
+    ) -> Result<(), MpcError> {
+        let terms = left
+            .rows
+            .iter()
+            .chain(right.rows.iter())
+            .flat_map(|(_, payload)| payload.iter().flatten());
+        let resolved = oblivious_join::PayloadWidths::from(arity).resolve(terms)?;
+        oblivious_join::check_output_public_shape(
+            &resolved,
+            bound,
+            self.backend.parties(),
+            self.backend.threshold(),
+        )
+    }
+
     /// The bound contract every candidate-materialising entry runs FIRST: refuse an
     /// over-cap `B`, then count the candidates the binding permits without
     /// enumerating them, then require `B` to cover that count.
@@ -913,6 +944,9 @@ impl HiddenValueJoin {
         let mut out_vars = left.payload_vars.clone();
         out_vars.extend(right.payload_vars.iter().cloned());
         let payload_arity = out_vars.len();
+        // The output stage's public-shape caps and its width pass, before the key
+        // sharings below draw anything.
+        self.preflight_output_shape(left, right, payload_arity, bound)?;
 
         // (1) Secret-share each holder's private key column as a BatchedShares (the
         // sq-dwb5 primitive): each row's key gets its OWN fresh degree-`t` masking
@@ -1074,6 +1108,9 @@ impl HiddenValueJoin {
         // Output schema: left payload vars then right payload vars (key NOT projected).
         let mut out_vars = left.payload_vars.clone();
         out_vars.extend(right.payload_vars.iter().cloned());
+        // The output stage's public-shape caps and its width pass, before
+        // `fully_oblivious_candidates` draws an equality bit per pair.
+        self.preflight_output_shape(left, right, out_vars.len(), bound)?;
         let candidates = self.fully_oblivious_candidates(source, left, right)?;
 
         // (3) Route through the oblivious output transform with the SECRET-SHARED
@@ -3259,11 +3296,7 @@ mod randomness_seam_tests {
             vec![vec![lit("l0"), lit("r0")], vec![lit("l2"), lit("r2")]]
         );
         assert_eq!(rows_of(&public), rows_of(&through));
-        // Every modelled cost but the width-scaled switch count is identical to the
-        // pre-routing capture. The padded payload width is the DECLARED one — two
-        // columns at `DEFAULT_PAYLOAD_TERM_BYTES` is a 260-byte row, so 39 limbs —
-        // and the shuffle's switch count is the 3-switch network at an entry width
-        // of `1 + 39`.
+        // Every modelled cost is identical to the pre-routing capture.
         assert_eq!(
             (
                 cost.bound,
@@ -3273,9 +3306,9 @@ mod randomness_seam_tests {
                 cost.shuffle.switches,
                 cost.shuffle.depth_rounds
             ),
-            (3, 3, 3, 3, 3 * 40, 3)
+            (3, 3, 3, 3, 12, 3)
         );
-        assert_eq!(dealer.draw_fp().value(), 1_593_689_019_815_215_682);
+        assert_eq!(dealer.draw_fp().value(), 1985712154807401802);
 
         let b = ShamirBackend::new_seeded(3, 0xBA7C2).unwrap();
         let join = HiddenValueJoin::new(b.clone());
@@ -3285,11 +3318,9 @@ mod randomness_seam_tests {
         assert_eq!(rows_of(&through), vec![vec![lit("la"), lit("ra")]]);
         assert_eq!(
             (cost.bound, cost.shuffle.items, cost.shuffle.switches),
-            // The 1-switch network over two items at the declared entry width
-            // `1 + 39`.
-            (2, 2, 40)
+            (2, 2, 4)
         );
-        assert_eq!(dealer.draw_fp().value(), 1072836754348890829);
+        assert_eq!(dealer.draw_fp().value(), 2292455923086310036);
     }
 
     /// The COMPLETE seam transcript of a batched join — both key columns (left
@@ -3334,24 +3365,23 @@ mod randomness_seam_tests {
                 // The output stage: per slot a selector (a PUBLIC bit, lifted
                 // with its own sharing) + a real-tag sharing + `2t + 1 = 5`
                 // tag-reduction re-sharings, then per payload limb the limb
-                // sharing + 5 re-sharings. The limb count is the DECLARED width's
-                // — two columns at `DEFAULT_PAYLOAD_TERM_BYTES` is a 260-byte row,
-                // so 39 limbs whatever the terms in it are — giving 241 per slot
-                // over three slots, and finally the shuffle over the three packed
-                // entries.
-                &["vss_own_input"; 723],
+                // sharing + 5 re-sharings — 25 per slot over three slots — and
+                // finally the shuffle over the three packed entries.
+                &["vss_own_input"; 75],
                 &["oblivious_shuffle"],
             ]
             .concat()
         );
         // Prefix unchanged from the pre-routing pin; suffix is the new output stage.
         assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
-        // The whole-transcript fingerprints were re-captured when the padded width
-        // became the DECLARED width: the key/mask prefix above is unchanged, and
-        // the output suffix is longer because each slot packs 39 limbs instead of
-        // the 3 the widest term present used to give.
-        assert_eq!(fingerprint(prefix_before_first_shuffle(&rec.log)), 0x0813_8bb1_8c68_1cfa);
-        assert_eq!(fingerprint(&rec.log), 0x95cf_dd04_464e_80ab);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x35e4_8905_57b6_816d
+        );
+        assert_eq!(fingerprint(&rec.log), 0xf563_03af_2cc8_0641);
 
         let b = ShamirBackend::new_seeded(3, 0xBA7C2).unwrap();
         let join = HiddenValueJoin::new(b.clone());
@@ -3365,17 +3395,22 @@ mod randomness_seam_tests {
                 ["vss_own_input"; 4].as_slice(),
                 &["shared_nonzero_mask"; 2],
                 // At `n = 3`, `t = 1` each reduction re-shares through 3 parties:
-                // per slot the tag costs 2 + 3 = 5 and each of the 39 declared
-                // limbs 1 + 3 = 4, so 161 per slot over two slots.
-                &["vss_own_input"; 322],
+                // per slot the tag costs 2 + 3 = 5 and each of the three limbs
+                // 1 + 3 = 4, so 17 per slot over two slots.
+                &["vss_own_input"; 34],
                 &["oblivious_shuffle"],
             ]
             .concat()
         );
         assert_eq!(fingerprint(&rec.log[..6]), 0xbd36_3090_bbad_ff3c);
-        // Re-captured with the declared width, as above.
-        assert_eq!(fingerprint(prefix_before_first_shuffle(&rec.log)), 0x0318_cd98_e64c_6dbf);
-        assert_eq!(fingerprint(&rec.log), 0x8e7a_8a52_7fb1_19f0);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x1ac1_763a_ba2c_84a9
+        );
+        assert_eq!(fingerprint(&rec.log), 0x4d93_31c7_2de2_08e0);
 
         // `B = 5` over the SAME three candidates: the output stage pads with two
         // PURE-DUMMY slots on top of the three real ones. That padding branch is
@@ -3395,18 +3430,23 @@ mod randomness_seam_tests {
             [
                 ["vss_own_input"; 6].as_slice(),
                 &["shared_nonzero_mask"; 3],
-                // Five slots now, at the same 241 sharings per slot as the
-                // `B = 3` case (723 for three), then one shuffle over all five.
-                &["vss_own_input"; 1205],
+                // Five slots now, at the same 25 sharings per slot as the
+                // `B = 3` case (75 for three), then one shuffle over all five.
+                &["vss_own_input"; 125],
                 &["oblivious_shuffle"],
             ]
             .concat()
         );
         // Same prefix pin as `B = 3`: `B` changes only the output suffix.
         assert_eq!(fingerprint(&rec.log[..9]), 0x3928_3c3c_85e4_183f);
-        // Re-captured with the declared width, as above.
-        assert_eq!(fingerprint(prefix_before_first_shuffle(&rec.log)), 0xab77_6810_567a_0e68);
-        assert_eq!(fingerprint(&rec.log), 0x192c_6220_cc18_51f8);
+        // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+        // fingerprint is the value the pre-re-randomisation code produced, so only
+        // the shuffle's own output and the draws after it moved.
+        assert_eq!(
+            fingerprint(prefix_before_first_shuffle(&rec.log)),
+            0x33be_42c1_760b_6dbe
+        );
+        assert_eq!(fingerprint(&rec.log), 0xebc2_32c7_b6b7_cb63);
     }
 
     /// Every key sharing (any row of either column), every equality mask AND every
@@ -3449,6 +3489,49 @@ mod randomness_seam_tests {
                 );
             }
         }
+    }
+
+    /// BOTH batched entries run the output stage's public-shape checks and its
+    /// term-width pass at their OWN entry, before a key is dealt or an equality bit
+    /// drawn — so a run the output stage would refuse costs no draws here.
+    ///
+    /// The shape that refuses is a party count past
+    /// [`crate::oblivious_join::MAX_OUTPUT_PARTIES`], a public number, so neither
+    /// entry needs a candidate to decide it. Without the entry check, both paths
+    /// deal every key and draw every equality bit and only then let the output
+    /// stage refuse; `RecordingSource`'s empty log is what distinguishes the two.
+    #[test]
+    fn both_batched_entries_refuse_the_output_party_cap_before_any_draw() {
+        use crate::randomness::test_sources::RecordingSource;
+        let parties = crate::oblivious_join::MAX_OUTPUT_PARTIES + 2;
+        let b = ShamirBackend::new_seeded(parties, 0xBA7D1).unwrap();
+        let join = HiddenValueJoin::new(b.clone());
+        let (l, r) = positional_pair();
+
+        let mut rec = RecordingSource::new(b.dealer());
+        let err = join
+            .batched_join_through(&mut rec, &l, &r, 3)
+            .expect_err("a party count past the output cap must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            "{:?}",
+            err
+        );
+        assert!(rec.log.is_empty(), "batched_join drew before refusing");
+
+        let mut rec = RecordingSource::new(b.dealer());
+        let err = join
+            .fully_oblivious_batched_join_through(&mut rec, &l, &r, 3)
+            .expect_err("a party count past the output cap must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            "{:?}",
+            err
+        );
+        assert!(
+            rec.log.is_empty(),
+            "fully_oblivious_batched_join drew before refusing"
+        );
     }
 
     /// A source whose `(n, t)` differs from the backend's is refused before any
@@ -3511,15 +3594,12 @@ mod randomness_seam_tests {
     /// The fully-oblivious fixture: the positional pair at `bound = 4`, so the
     /// three candidates get one pure-dummy padding slot. At `n = 5`, `t = 2` each
     /// degree reduction re-shares through `2t + 1 = 5` parties, so the output stage
-    /// draws 961 sharings — per candidate a real-tag sharing + 5 reduction
+    /// draws 97 sharings — per candidate a real-tag sharing + 5 reduction
     /// re-sharings (the selector is the SHARED equality bit, which costs no draw),
     /// for the padding slot a zero-selector + a real-tag sharing + 5 re-sharings,
-    /// then for each payload limb per slot the limb sharing + 5 re-sharings — and
-    /// then one shuffle. The limb count is the DECLARED width's: two columns at
-    /// `DEFAULT_PAYLOAD_TERM_BYTES` is a 260-byte row, so 39 limbs per slot
-    /// whatever the terms in it are. It was 3 limbs while the width came from the
-    /// widest term present.
-    const OUTPUT_STAGE_DRAWS: usize = 962;
+    /// then for each of the three payload limbs per slot the limb sharing + 5
+    /// re-sharings — and then one shuffle.
+    const OUTPUT_STAGE_DRAWS: usize = 98;
 
     /// The rows are the canonicalised result — unchanged — and the WITNESS draw
     /// after the run pins the total draw count of the whole join. The witness and
@@ -3541,14 +3621,11 @@ mod randomness_seam_tests {
         );
         assert_eq!(cost.bound, 4);
         assert_eq!(cost.shuffle.items, 4);
-        // The 5-switch network over four items at the declared entry width
-        // `1 + 39`: two columns at `DEFAULT_PAYLOAD_TERM_BYTES` is a 260-byte row,
-        // so 39 limbs whatever the terms in it are.
-        assert_eq!(cost.shuffle.switches, 5 * 40);
-        // One degree reduction per selected element: the tag plus its 39 limbs,
+        assert_eq!(cost.shuffle.switches, 20);
+        // One degree reduction per selected element: the tag plus its three limbs,
         // over four slots.
-        assert_eq!(cost.degree_reductions, 4 * 40);
-        assert_eq!(dealer.draw_fp().value(), 1574542423692268145);
+        assert_eq!(cost.degree_reductions, 16);
+        assert_eq!(dealer.draw_fp().value(), 982498321419405726);
 
         // The public entry point mints its own dealer from the same seeded
         // backend, so it reproduces the same run.
@@ -3585,7 +3662,7 @@ mod randomness_seam_tests {
             ]
             .concat()
         );
-        assert_eq!(fingerprint(suffix), 0x7df4_1965_b820_33da);
+        assert_eq!(fingerprint(suffix), 0xefb1_95a0_08bb_d36e);
     }
 
     /// A source whose `(n, t)` differs from the backend's is refused before the

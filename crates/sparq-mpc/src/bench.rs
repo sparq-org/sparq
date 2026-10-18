@@ -840,7 +840,7 @@ mod tests {
         let a = run_matrix(DEFAULT_PARTIES, 4, 8).unwrap();
         let b = run_matrix(DEFAULT_PARTIES, 4, 8).unwrap();
         assert_eq!(a.cells, b.cells, "same matrix inputs → identical cells");
-        assert_eq!(a.to_json().unwrap(), b.to_json().unwrap());
+        assert_eq!(a.to_json(), b.to_json());
     }
 
     // --- AXIS-1 honesty: the security guarantee is the ACTUAL per-operator one. ---

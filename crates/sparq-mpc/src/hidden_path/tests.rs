@@ -627,10 +627,7 @@ fn seeded_exact_k_stage_draws_exactly_what_the_dealer_drew_before_the_seam() {
             cost.shuffle.switches,
             cost.shuffle.depth_rounds
         ),
-        // The switch count is width-scaled: the 8-switch network over five slots
-        // at the DECLARED entry width `1 + 39` (two columns at
-        // `DEFAULT_PAYLOAD_TERM_BYTES` is a 260-byte row).
-        (5, 5, 5, 5, 8 * 40, 5)
+        (5, 5, 5, 5, 56, 5)
     );
 }
 
@@ -694,7 +691,7 @@ fn rejected_two_hop_pairs_payloads_open_to_the_dummy_encoding() {
 /// order-sensitive fingerprint over every method and returned `y`).
 ///
 /// **This is the #6117-step-6 guard.** The transcript now ends in the output
-/// stage's 801 `vss_own_input` draws and its `oblivious_shuffle`: if
+/// stage's 141 `vss_own_input` draws and its `oblivious_shuffle`: if
 /// `eval_exact_k_chain_hidden_slots_through` went back to minting its own dealer
 /// for the output stage the log would stop at 1920 entries and both the length and
 /// the suffix assertion would fail.
@@ -703,10 +700,7 @@ fn rejected_two_hop_pairs_payloads_open_to_the_dummy_encoding() {
 /// (`0x1013_9382_581b_a7e3`, captured on the pre-routing code), asserted here
 /// unchanged: the routing appended an output-stage SUFFIX and moved nothing in the
 /// chain part, and the output stage's per-element degree reduction only grew that
-/// suffix. The suffix grew again when the padded width became the DECLARED width —
-/// 39 limbs per slot instead of the 6 the widest endpoint used to give — so the
-/// whole-log fingerprints below were re-captured. The chain prefix is still pinned
-/// unchanged.
+/// suffix. The full-log fingerprint is the new pin.
 #[test]
 fn seeded_exact_k_stage_transcript_is_pinned() {
     use crate::randomness::test_sources::{
@@ -716,20 +710,22 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
     let (edges, _) = hidden_edges(&PIN_EDGES);
     let mut rec = RecordingSource::new(backend.dealer());
     eval_exact_k_chain_hidden_slots_through(&mut rec, &backend, &edges, 2, 5).unwrap();
-    assert_eq!(rec.log.len(), 1920 + 801 + 1);
+    assert_eq!(rec.log.len(), 2062);
     // Prefix unchanged from the pre-routing pin; the whole move is in the output
     // suffix, which grew by the per-element degree reductions.
     assert_eq!(fingerprint(&rec.log[..1920]), 0x1013_9382_581b_a7e3);
-    // Re-captured with the declared width.
+    // The draws BEFORE the shuffle are byte-for-byte unchanged: this prefix
+    // fingerprint is the value the pre-re-randomisation code produced, so only
+    // the shuffle's own output and the draws after it moved.
     assert_eq!(
         fingerprint(prefix_before_first_shuffle(&rec.log)),
-        0xf4bf_a94d_0793_6a48
+        0x57c8_25d3_c07f_3fe9
     );
-    assert_eq!(fingerprint(&rec.log), 0xa618_8a03_26b0_b4f7);
+    assert_eq!(fingerprint(&rec.log), 0x33fc_792d_1e0b_566a);
     let suffix: Vec<&str> = rec.log[1920..].iter().map(|(m, _)| *m).collect();
     assert_eq!(
         suffix,
-        [["vss_own_input"; 801].as_slice(), &["oblivious_shuffle"]].concat()
+        [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
     );
 }
 
@@ -1052,7 +1048,7 @@ fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
     check_bounded_params(&backend, &wide, &one).expect("{0,1} over the fixture is accepted");
     let public_one =
         public_bounded_candidate_pair_bound(wide.len(), wide.declared_domain_len(), &one).unwrap();
-    assert_eq!(public_one, 3 * over);
+    assert_eq!(public_one, 3 * 87_382);
     assert!(
         public_one > MAX_OUTPUT_BOUND,
         "the public bound {} must be out of B's range {}",
