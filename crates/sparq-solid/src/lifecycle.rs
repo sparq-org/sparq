@@ -28,8 +28,9 @@
 //! which is what the whole-store rebuild after an update needs; the update path records no
 //! creator, so only a direct edit reaches the recording at all.
 
+use crate::budget::InputMeter;
 use crate::loader::{validate_principal_iri, ResourceGraphs, ACR_SUFFIX};
-use crate::AccessProvenance;
+use crate::{AccessProvenance, AuthBudget};
 use oxrdf::Term;
 use rustc_hash::{FxHashMap, FxHashSet};
 use spargebra::algebra::GraphTarget;
@@ -123,17 +124,25 @@ pub(crate) fn edit_events<'a>(
 /// `provenance` after `events` change `before` (the store's graphs before them), with
 /// `creator` (the acting agent, when the view would take it as a principal) recorded as the
 /// creator of every resource that exists after them and did not before, unless its own
-/// access-control document was stored before them (see the module docs); `None` when the
+/// access-control document was stored before them (see the module docs); `Ok(None)` when the
 /// events change no resource's life (most updates), so nothing is copied.
+///
+/// The replay walks the container chain of every name the events touch and OWNS each
+/// container it finds, so it is charged against `budget` exactly as a materialization's own
+/// resource enumeration is ([`crate::loader::ResourceGraphs::add`]): a name past the per-name
+/// caps, or a replay past the aggregate byte budget, is `Err` and the caller refuses the
+/// change rather than walking it. The replay gets its own aggregate allowance, since it is a
+/// pass of its own rather than part of one materialization's input.
 pub(crate) fn provenance_after(
     before: &Graph,
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
     installed_acrs: &FxHashSet<String>,
-) -> Option<AccessProvenance> {
+    budget: AuthBudget,
+) -> Result<Option<AccessProvenance>, String> {
     if events.is_empty() {
-        return None;
+        return Ok(None);
     }
     let stored = |name: &str| {
         before
@@ -149,6 +158,7 @@ pub(crate) fn provenance_after(
         None,
         stored,
         installed_acrs,
+        &mut InputMeter::new(budget),
     )
 }
 
@@ -162,9 +172,10 @@ pub(crate) fn provenance_after_names(
     creator: Option<&str>,
     created: Option<&[&str]>,
     installed_acrs: &FxHashSet<String>,
-) -> Option<AccessProvenance> {
+    budget: AuthBudget,
+) -> Result<Option<AccessProvenance>, String> {
     if events.is_empty() {
-        return None;
+        return Ok(None);
     }
     let stored = |name: &str| before.contains(name);
     replay(
@@ -175,9 +186,11 @@ pub(crate) fn provenance_after_names(
         created,
         stored,
         installed_acrs,
+        &mut InputMeter::new(budget),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn replay(
     mut graphs: ResourceGraphs,
     events: &[GraphEvent<'_>],
@@ -186,7 +199,8 @@ fn replay(
     created: Option<&[&str]>,
     stored_before: impl Fn(&str) -> bool,
     installed_acrs: &FxHashSet<String>,
-) -> Option<AccessProvenance> {
+    meter: &mut InputMeter,
+) -> Result<Option<AccessProvenance>, String> {
     // Each resource the change touches, with whether it was one before the change (the first
     // time the change touches it says which). Only the net effect counts: a resource that
     // exists before and after keeps its creator and owner, whatever happens in between.
@@ -198,23 +212,23 @@ fn replay(
     for event in events {
         match *event {
             GraphEvent::Added(name) => {
-                graphs.add(name, |r| {
+                graphs.add(name, meter, |r| {
                     touched.entry(r.to_owned()).or_insert(false);
-                });
+                })?;
             }
             GraphEvent::Removed(name) => {
                 if name.ends_with(ACR_SUFFIX) {
                     acr_removed.insert(name);
                 }
-                graphs.remove(name, |r| {
+                graphs.remove(name, meter, |r| {
                     touched.entry(r.to_owned()).or_insert(true);
-                });
+                })?;
             }
             GraphEvent::RemovedAll => {
                 cleared = true;
-                graphs.clear(|r| {
+                graphs.clear(meter, |r| {
                     touched.entry(r.to_owned()).or_insert(true);
-                });
+                })?;
             }
         }
     }
@@ -263,7 +277,7 @@ fn replay(
         None => Vec::new(),
     };
     if gone.is_empty() && began.is_empty() {
-        return known_moved.then(|| provenance.clone());
+        return Ok(known_moved.then(|| provenance.clone()));
     }
     let mut kept = provenance.clone();
     for r in gone {
@@ -274,7 +288,7 @@ fn replay(
             kept.set_creator(r, creator);
         }
     }
-    Some(kept)
+    Ok(Some(kept))
 }
 
 #[cfg(test)]
@@ -284,6 +298,12 @@ mod tests {
     use sparq_core::Graph;
 
     const ALICE: &str = "https://alice.ex/card#me";
+
+    /// A fresh input meter over `budget`, for the enumeration helpers that charge one.
+    fn meter(budget: crate::AuthBudget) -> crate::budget::InputMeter {
+        crate::budget::InputMeter::new(budget)
+    }
+
     const BOB: &str = "https://bob.ex/card#me";
 
     /// [`super::provenance_after`] with every `.acr` stored before the change stored when the
@@ -298,7 +318,15 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect();
-        super::provenance_after(before, events, provenance, creator, &installed)
+        super::provenance_after(
+            before,
+            events,
+            provenance,
+            creator,
+            &installed,
+            crate::default_auth_budget(),
+        )
+        .expect("the fixture names are inside the enumeration caps")
     }
 
     fn store(names: &[&str]) -> Graph {
@@ -604,9 +632,13 @@ mod tests {
             "urn:c/d",
         ];
         let graph = store(&names);
-        let enumerated = crate::loader::resources(&graph);
+        let budget = crate::default_auth_budget();
+        let enumerated = crate::loader::resources(&graph, &mut meter(budget)).expect("inside caps");
         let graphs = crate::loader::ResourceGraphs::of(&graph);
-        assert_eq!(graphs.all(), enumerated);
+        assert_eq!(
+            graphs.all(&mut meter(budget)).expect("inside caps"),
+            enumerated
+        );
         let mut probes: Vec<String> = enumerated.iter().cloned().collect();
         probes.push("urn:c/".to_owned());
         probes.extend(

@@ -1450,6 +1450,20 @@ deny, never a grant. **Double opt-in**, OFF by default: compiled only with the `
 feature **and** served only when `--solid-authz` / `SPARQ_SOLID_AUTHZ=1` is set (mirrors `shacl` /
 `terse`); with the feature but not the flag, `/authz/*` is `404`. Read-gated by `--auth-token-read`.
 
+**Bounded authorization-build pool.** Materialising an authorization view is CPU-bound and its
+size is chosen by untrusted input — the request's own `"dataset"` on the stateless lane, the
+store's control documents on the stateful one. Every lane that builds a view therefore runs on
+ONE bounded blocking pool rather than on an async worker: the stateless per-request build, the
+stateful per-generation view, the `odrl-authz` extension's re-parse + policy evaluation + index
+rebuild (a second build over the same request, so it takes a slot of its own), and the
+`solid-authz-trust` lane's augmented build. `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` caps the
+builds in flight (default: the CPU count — the work is CPU-bound, so more concurrency than cores
+buys queueing, not throughput) and `SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS` caps the WAIT: a request
+that finds every slot taken waits at most that long and is then **shed** with the same retryable
+`503` a materialisation failure gives, never queued without limit. The existing mappings are
+unchanged — an unparseable dataset is still `400`, a materialisation refusal still `503` — and a
+shed request produces no decision (fail-closed).
+
 **Which pod: `"source"` (`sq-snopa.8`).** Every endpoint takes an optional `"source"` field:
 
 - `"body"` (**default**, and the only mode before sq-snopa.8) — **stateless**: the pod dataset
@@ -1523,6 +1537,8 @@ env overrides the default.
 | `--shacl-shapes FILE` | `SPARQ_SHACL_SHAPES` | unset | (feature `shacl`) load the guard shapes graph once at startup; required when the guard is on |
 | `--solid-authz` | `SPARQ_SOLID_AUTHZ` | off | (feature `solid-authz`) serve the Solid WAC/ACP authorization endpoints `POST /authz/decide`+`/wac-allow`+`/query` — a fail-closed HTTP shell over `sparq-solid`; POST the pod dataset (or `"source":"server"` for the server's own loaded store, sq-snopa.8) + an already-resolved session, get the decision / `WAC-Allow` value / access-controlled query result; read-only — see "Solid WAC/ACP authorization endpoints" |
 | *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_TRUST` | off | (feature `solid-authz-trust`, implies `solid-authz`) opt-in stateless trust-graph extension to `POST /authz/decide` — a request may carry an additional `"trust"` JSON block containing credentials, a trust policy, and signed certification edges; the server runs the cert-graph closure (`derive_effective_rules`) and the `sparq_trust::admit` gate over them, injects any admitted facts into the pod dataset, then runs the unchanged WAC/ACP decision; double-opt-in: the feature must be compiled AND this flag set AND the request must carry a `"trust"` block — see "Stateless trust-graph decision extension (sq-pfae.17)"; honest scope: anchored-not-proven clear-path only (no ZK/unlinkability claim; sq-qhy4 external audit PENDING) |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_BUILD_CONCURRENCY` | CPU count | (feature `solid-authz`) how many authorization-view BUILDS may run at once on the bounded blocking pool, across every `/authz/*` lane; `0` is read as `1` — see "Bounded authorization-build pool" |
+| *(env only — no flag)* | `SPARQ_SOLID_AUTHZ_BUILD_WAIT_MS` | `2000` | (feature `solid-authz`) how long an `/authz/*` request waits for a free build slot before the fail-closed, retryable `503`; `0` refuses immediately — see "Bounded authorization-build pool" |
 | `--brtpf-max-bindings N` | `SPARQ_BRTPF_MAX_BINDINGS` | `1024` (`0`=off) | (feature `brtpf`) **DoS cap on the brTPF binding-set mapping COUNT** — one index scan per mapping, so cost is super-linear in the count, not the bytes → `413` (`sq-r74h`) |
 | `--brtpf-max-values-bytes N` | `SPARQ_BRTPF_MAX_VALUES_BYTES` | `1048576` (`0`=off) | (feature `brtpf`) **DoS cap on the raw brTPF `values` payload BYTES** — bounds the GET query-string carrier that `--max-body-bytes` never sees → `413` (`sq-r74h`) |
 | `--audit-log` | `SPARQ_AUDIT_LOG` | off | (feature `audit-log`) per-query **access audit log** — see "Access audit log" |

@@ -1083,23 +1083,40 @@ impl ResourceGraphs {
                     .is_some_and(|n| n.starts_with(iri)))
     }
 
-    /// Every resource, with its containers.
-    pub(crate) fn all(&self) -> FxHashSet<String> {
+    /// Every resource, with its containers, charged against `meter`.
+    ///
+    /// The names are the store's own, but their container chains are built HERE, so this
+    /// walk costs what the names say and not what the store already holds — the same
+    /// product [`insert_with_containers`] describes. It is therefore metered on the same
+    /// terms as a materialization's own enumeration: a name past
+    /// [`crate::AuthBudget::max_resource_iri_bytes`] /
+    /// [`crate::AuthBudget::max_resource_path_depth`], or an enumeration past the aggregate
+    /// [`crate::AuthBudget::max_input_bytes`], refuses rather than being walked.
+    pub(crate) fn all(&self, meter: &mut InputMeter) -> Result<FxHashSet<String>, String> {
         let mut out = FxHashSet::default();
         for name in &self.0 {
-            // Over names this store already holds, with no materialization budget to charge
-            // them against: unmetered, and infallible as a result.
-            let _ = insert_with_containers(&mut out, name, None);
+            insert_with_containers(&mut out, name, Some(meter))?;
         }
-        out
+        Ok(out)
     }
 
     /// Store a graph named `name`, calling `appears` for each resource it makes that was
     /// not one just before (the graph itself and the containers it brings).
-    pub(crate) fn add(&mut self, name: &str, mut appears: impl FnMut(&str)) {
+    ///
+    /// `appears` is what OWNS the container chain downstream (the lifecycle replay keys its
+    /// touched map by it), so every fresh resource is charged against `meter` BEFORE it is
+    /// handed over, and the name's own length and depth before the chain is walked at all.
+    /// A refusal leaves the set unchanged and nothing announced.
+    pub(crate) fn add(
+        &mut self,
+        name: &str,
+        meter: &mut InputMeter,
+        mut appears: impl FnMut(&str),
+    ) -> Result<(), String> {
         if !is_resource_graph(name) || self.0.contains(name) {
-            return;
+            return Ok(());
         }
+        meter.resource(name)?;
         let mut chain = vec![name];
         let mut cur = name;
         while let Some(parent) = parent_iri(cur) {
@@ -1107,33 +1124,60 @@ impl ResourceGraphs {
             cur = parent;
         }
         let fresh: Vec<&str> = chain.into_iter().filter(|r| !self.holds(r)).collect();
+        for r in &fresh {
+            meter.resource_bytes(r.len())?;
+        }
         self.0.insert(name.to_owned());
         fresh.into_iter().for_each(&mut appears);
+        Ok(())
     }
 
     /// Remove the graph named `name`, calling `gone` for each resource that is not one any
     /// more (the graph itself, and each container left with no graph below it).
-    pub(crate) fn remove(&mut self, name: &str, mut gone: impl FnMut(&str)) {
-        if !self.0.remove(name) {
-            return;
+    ///
+    /// Metered as [`ResourceGraphs::add`] is, and for the same reason: `gone` owns each
+    /// container it is given. A refusal leaves the set unchanged.
+    pub(crate) fn remove(
+        &mut self,
+        name: &str,
+        meter: &mut InputMeter,
+        mut gone: impl FnMut(&str),
+    ) -> Result<(), String> {
+        if !self.0.contains(name) {
+            return Ok(());
         }
+        meter.resource(name)?;
+        self.0.remove(name);
         let mut cur = name;
         if !self.holds(cur) {
+            meter.resource_bytes(cur.len())?;
             gone(cur);
         }
         while let Some(parent) = parent_iri(cur) {
             if self.holds(parent) {
                 break;
             }
+            meter.resource_bytes(parent.len())?;
             gone(parent);
             cur = parent;
         }
+        Ok(())
     }
 
     /// Remove every graph, calling `gone` for every resource.
-    pub(crate) fn clear(&mut self, mut gone: impl FnMut(&str)) {
-        self.all().iter().for_each(|r| gone(r));
+    ///
+    /// The enumeration [`ResourceGraphs::all`] charges is the one `gone` is then given, so
+    /// the charge is the set's bytes once rather than twice; the copies `gone` makes are
+    /// bounded by that same charged set.
+    pub(crate) fn clear(
+        &mut self,
+        meter: &mut InputMeter,
+        mut gone: impl FnMut(&str),
+    ) -> Result<(), String> {
+        let all = self.all(meter)?;
+        all.iter().for_each(|r| gone(r));
         self.0.clear();
+        Ok(())
     }
 }
 
@@ -1148,14 +1192,19 @@ pub(crate) fn control_documents_name_provenance(graph: &Graph) -> bool {
     })
 }
 
-/// The auth view's resources in `graph` (see [`enumerate`]).
+/// The auth view's resources in `graph` (see [`enumerate`]), charged against `meter`.
 ///
-/// Unmetered: this is the store's own provenance pruning over names it already holds, not
-/// the reasoning input of a materialization, so there is no input budget to charge. The
-/// materialization path passes its [`InputMeter`] instead.
-pub(crate) fn resources(graph: &Graph) -> FxHashSet<String> {
-    // With no meter there is nothing to charge and so no refusal to propagate.
-    enumerate(graph, ACR_SUFFIX, None).unwrap_or_default().0
+/// This is the store's own provenance pruning, over names it already holds — but it BUILDS
+/// their container chains, so it costs what those names say rather than what is already
+/// held, and it is metered on exactly the terms a materialization's own enumeration is. A
+/// name past the per-name caps, or an enumeration past the aggregate, refuses: the
+/// authorization view is not rebuilt (the caller propagates the refusal before anything is
+/// installed), rather than the walk being done unbounded.
+pub(crate) fn resources(
+    graph: &Graph,
+    meter: &mut InputMeter,
+) -> Result<FxHashSet<String>, String> {
+    Ok(enumerate(graph, ACR_SUFFIX, Some(meter))?.0)
 }
 
 /// Whether `iri` is exactly a bare `scheme://` with no authority — above every authority
@@ -1199,6 +1248,91 @@ mod tests {
 
     const ACR: &str = "https://pod.ex/doc.acr";
     const OTHER_ACR: &str = "https://other.ex/doc.acr";
+
+    /// A fresh input meter over the default budget, for the enumeration helpers.
+    fn meter() -> crate::budget::InputMeter {
+        crate::budget::InputMeter::new(crate::default_auth_budget())
+    }
+
+    /// A resource IRI under `depth` containers, inside the LENGTH cap so the depth cap is
+    /// the one that refuses it.
+    fn deep(depth: usize) -> String {
+        format!("https://pod.ex/{}doc", "a/".repeat(depth))
+    }
+
+    /// [`ResourceGraphs::add`] charges the name it is given: past the depth cap it refuses
+    /// before the chain is walked, and announces nothing — the caller's `appears` is what
+    /// would own each container.
+    #[test]
+    fn resource_graphs_add_refuses_a_name_past_the_caps_announcing_nothing() {
+        let mut graphs = super::ResourceGraphs::default();
+        let mut announced: Vec<String> = Vec::new();
+        let name = deep(crate::default_auth_budget().max_resource_path_depth + 4);
+        let err = graphs
+            .add(&name, &mut meter(), |r| announced.push(r.to_owned()))
+            .expect_err("a name past the depth cap is refused");
+        assert_eq!(
+            crate::auth_allowance_refusal(&err),
+            Some(crate::AuthAllowance::ResourceIri),
+            "the typed enumeration refusal: {}",
+            err
+        );
+        assert!(
+            announced.is_empty(),
+            "nothing is announced, so nothing owns the chain: {:?}",
+            announced
+        );
+        // A name inside the caps still goes in, with its containers announced.
+        let ok = "https://pod.ex/a/b/doc";
+        graphs
+            .add(ok, &mut meter(), |r| announced.push(r.to_owned()))
+            .expect("an ordinary name is admitted");
+        assert!(graphs.holds(ok));
+        assert!(announced.iter().any(|r| r == "https://pod.ex/a/"));
+    }
+
+    /// [`ResourceGraphs::all`] and [`resources`] walk the SAME chains and are charged the
+    /// same way: a held name past the caps refuses the enumeration rather than being walked.
+    #[test]
+    fn the_store_side_enumerations_refuse_a_held_name_past_the_caps() {
+        let name = deep(crate::default_auth_budget().max_resource_path_depth + 4);
+        let graphs = super::ResourceGraphs::from_names([name.as_str()]);
+        let err = graphs
+            .all(&mut meter())
+            .expect_err("a held name past the caps is refused");
+        assert_eq!(
+            crate::auth_allowance_refusal(&err),
+            Some(crate::AuthAllowance::ResourceIri),
+            "the typed enumeration refusal: {}",
+            err
+        );
+
+        let nq = format!("<{name}#it> <https://ex.dev/ns#k> \"v\" <{name}> .\n");
+        let graph = Graph::load_dataset(&nq, "nquads").expect("parses");
+        let err = super::resources(&graph, &mut meter())
+            .expect_err("the provenance pruning is refused on the same terms");
+        assert_eq!(
+            crate::auth_allowance_refusal(&err),
+            Some(crate::AuthAllowance::ResourceIri),
+            "the typed enumeration refusal: {}",
+            err
+        );
+    }
+
+    /// [`ResourceGraphs::remove`] is charged the same way, and a refusal leaves the set as
+    /// it was (so a refused walk cannot silently drop a resource).
+    #[test]
+    fn resource_graphs_remove_refuses_a_name_past_the_caps_keeping_the_set() {
+        let name = deep(crate::default_auth_budget().max_resource_path_depth + 4);
+        let mut graphs = super::ResourceGraphs::from_names([name.as_str()]);
+        let mut ended: Vec<String> = Vec::new();
+        let err = graphs
+            .remove(&name, &mut meter(), |r| ended.push(r.to_owned()))
+            .expect_err("a name past the caps is refused");
+        assert!(crate::is_auth_allowance_refusal(&err), "{}", err);
+        assert!(ended.is_empty(), "nothing is announced: {:?}", ended);
+        assert!(graphs.holds(&name), "the set is unchanged by a refusal");
+    }
 
     #[test]
     fn skolem_components_are_valid_and_unambiguous() {
