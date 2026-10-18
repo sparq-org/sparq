@@ -15,6 +15,82 @@ pub const DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT: usize = 4_096;
 /// both are built.
 pub const SERVICE_POOL_PATH: &str = "/.lws/subscriptions/";
 
+/// The fragment, on the service pool's container ([`SERVICE_POOL_PATH`]), of the one marker the
+/// notification service keeps there ([`is_service_marker`]).
+pub const SERVICE_MARKER_FRAGMENT: &str = "#high-water";
+
+/// Whether `iri` has the shape of the notification service's marker: an `http` or `https`
+/// origin (a host that is a registered name or a bracketed IPv6 address, no user information,
+/// and a port, if given, of digits alone) followed by exactly the service pool's container and
+/// [`SERVICE_MARKER_FRAGMENT`]. A storage has one marker, and its index entry has a slot of its
+/// own, admitted apart from every ceiling, so storing it never waits on room (no request can name
+/// it: it is a fragment). The in-memory index keeps that slot for one IRI alone, the first new
+/// marker stored while it is free; any other of this shape is admitted as an ordinary pool
+/// record, and stays one.
+pub fn is_service_marker(iri: &str) -> bool {
+    let Some(rest) = iri
+        .strip_prefix("https://")
+        .or_else(|| iri.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let Some(at) = rest.find('/') else {
+        return false;
+    };
+    let (authority, path) = rest.split_at(at);
+    // An IPv6 literal is bracketed, and its colons are not a port's; any other host is a
+    // registered name (RFC 3986 `reg-name`, which an IPv4 address also is).
+    let (host_ok, port) = match authority.strip_prefix('[') {
+        Some(inner) => {
+            let Some((literal, after)) = inner.split_once(']') else {
+                return false;
+            };
+            let port = match after {
+                "" => None,
+                after => match after.strip_prefix(':') {
+                    Some(port) => Some(port),
+                    None => return false,
+                },
+            };
+            (literal.parse::<std::net::Ipv6Addr>().is_ok(), port)
+        }
+        None => {
+            let (host, port) = match authority.split_once(':') {
+                Some((host, port)) => (host, Some(port)),
+                None => (authority, None),
+            };
+            (is_reg_name(host), port)
+        }
+    };
+    let port_ok = port.is_none_or(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+    host_ok && port_ok && path.strip_prefix(SERVICE_POOL_PATH) == Some(SERVICE_MARKER_FRAGMENT)
+}
+
+/// Whether `host` is a non-empty RFC 3986 `reg-name`: unreserved characters, percent-encoded
+/// octets and sub-delimiters only.
+fn is_reg_name(host: &str) -> bool {
+    let bytes = host.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        match bytes[at] {
+            b'%' => {
+                let hex = bytes.get(at + 1..at + 3);
+                if !hex.is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit)) {
+                    return false;
+                }
+                at += 3;
+                continue;
+            }
+            b if b.is_ascii_alphanumeric() => {}
+            b'-' | b'.' | b'_' | b'~' => {}
+            b'!' | b'$' | b'&' | b'\'' | b'(' | b')' | b'*' | b'+' | b',' | b';' | b'=' => {}
+            _ => return false,
+        }
+        at += 1;
+    }
+    !host.is_empty()
+}
+
 /// Default stored-entry ceiling for the service pool ([`in_service_pool`]).
 ///
 /// The pool is capacity of its own, apart from the content ceilings: records in it are admitted
