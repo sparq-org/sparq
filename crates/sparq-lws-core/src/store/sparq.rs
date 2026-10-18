@@ -869,8 +869,18 @@ mod tests {
             );
         }
         assert_eq!(index.raise_marker(marker, 9).await.unwrap(), 9);
-        assert!(!crate::store::is_service_marker(
-            "http://:/.lws/subscriptions/#high-water"
+        for not in [
+            "http://:/.lws/subscriptions/#high-water",
+            "http://a b/.lws/subscriptions/#high-water",
+            "http:// /.lws/subscriptions/#high-water",
+            "http://[garbage]/.lws/subscriptions/#high-water",
+            "http://[::1]x/.lws/subscriptions/#high-water",
+            "http://a%zz/.lws/subscriptions/#high-water",
+        ] {
+            assert!(!crate::store::is_service_marker(not), "{not}");
+        }
+        assert!(crate::store::is_service_marker(
+            "https://127.0.0.1:8443/.lws/subscriptions/#high-water"
         ));
         assert!(!crate::store::is_service_marker(
             "http://a.example:x/.lws/subscriptions/#high-water"

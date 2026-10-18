@@ -575,6 +575,10 @@ pub struct Notifier {
     /// Added to the clock expiry is decided by ([`Notifier::clock`]).
     #[cfg(test)]
     clock_offset: std::sync::atomic::AtomicI64,
+    /// The backend's lease the state holds for as long as it runs (see
+    /// `crate::store::Lifecycle`): the authority to store a first mark over a missing or
+    /// unusable one ([`Store::reset_marker`]). Without it, no mark is ever lowered.
+    lease: std::sync::OnceLock<crate::store::LifecycleGuard>,
 }
 
 /// Refuse a store whose marker raise is not atomic ([`Store::raises_markers`]): over one, a
@@ -624,8 +628,10 @@ struct HighWater {
     halted: AtomicBool,
     /// How many raises have failed since the process started.
     failures: AtomicU64,
-    /// Raises one at a time within the process (the store keeps them in order across it).
-    writing: tokio::sync::Mutex<()>,
+    /// Raises one at a time within the process (the store keeps them in order across it); a
+    /// subscription create holds it, too, from its last check of the halt and its expiry until
+    /// it is registered (or known not stored), so no raise fails between them.
+    writing: Arc<tokio::sync::Mutex<()>>,
     /// The subscriptions expired at the start because no mark was stored (or it could not be
     /// read as one) while subscriptions with an expiry were: until each is removed, none is
     /// stored, so a start after a stop finds them expired again.
@@ -656,6 +662,7 @@ pub(crate) async fn reset_subscription_clock<S: Store>(
     store: &S,
     cfg: &LwsConfig,
     visible: impl Fn(&str) -> bool,
+    lease: &crate::store::LifecycleGuard,
 ) -> Result<usize, String> {
     refuse_without_atomic_markers(store)?;
     let container = cfg.absolute(SUBSCRIPTIONS_PATH);
@@ -695,10 +702,16 @@ pub(crate) async fn reset_subscription_clock<S: Store>(
         ));
     }
     store
-        .reset_marker(&marker, jose::now_secs())
+        .reset_marker(&marker, jose::now_secs(), lease)
         .await
         .map_err(|e| format!("store: {marker}: {e}"))?;
     Ok(removed)
+}
+
+/// The refusal of a write that may lower the mark, made without the backend's lease
+/// ([`Notifier::lease`]).
+fn no_lease() -> crate::error::ServerError {
+    crate::error::ServerError::Storage("no lease is held".into())
 }
 
 /// The fragment the high water is stored under, in the subscriptions container ([`HighWater`]).
@@ -739,6 +752,8 @@ impl Notifier {
     #[cfg(test)]
     pub async fn load<S: Store>(store: &S, cfg: &LwsConfig) -> Result<Self, String> {
         let me = Self::new(cfg)?;
+        let lease = store.lifecycle().unwrap_or_default();
+        me.hold(lease.acquire().ok_or("the store's lease is held")?);
         me.load_with(store, cfg, |_| true).await?;
         Ok(me)
     }
@@ -784,7 +799,19 @@ impl Notifier {
             },
             #[cfg(test)]
             clock_offset: Default::default(),
+            lease: Default::default(),
         })
+    }
+
+    /// Hold the backend's `lease` for as long as this lives (see [`Notifier::lease`]).
+    pub(crate) fn hold(&self, lease: crate::store::LifecycleGuard) {
+        let _ = self.lease.set(lease);
+    }
+
+    /// The backend's lease this holds, when it holds it: what a write that may lower the mark
+    /// needs.
+    pub(crate) fn lease(&self) -> Option<&crate::store::LifecycleGuard> {
+        self.lease.get()
     }
 
     /// Ensure the service container exists and load the subscriptions it holds, skipping those
@@ -928,7 +955,11 @@ impl Notifier {
         let mut present = stored.is_some();
         if !present && unrecorded.is_empty() {
             pending = now;
-            match store.reset_marker(iri, now).await {
+            let reset = match self.lease() {
+                Some(lease) => store.reset_marker(iri, now, lease).await,
+                None => Err(no_lease()),
+            };
+            match reset {
                 Ok(()) => (high_water, present) = (now, true),
                 Err(_) => halted = true,
             }
@@ -1083,7 +1114,13 @@ impl Notifier {
         // With none stored (or none usable), the first is written over whatever is there.
         let raised = match hw.present.load(Ordering::Acquire) {
             true => store.raise_marker(&hw.iri, owed).await,
-            false => store.reset_marker(&hw.iri, owed).await.map(|()| owed),
+            false => match self.lease() {
+                Some(lease) => store
+                    .reset_marker(&hw.iri, owed, lease)
+                    .await
+                    .map(|()| owed),
+                None => Err(no_lease()),
+            },
         };
         match raised {
             Ok(raised) if raised >= owed => {
@@ -2231,6 +2268,31 @@ async fn purge_own_expired<S: Store + 'static>(
     !state.notify.halted()
 }
 
+/// The gate a subscription create passes once its listing locks are held, before anything is
+/// stored ([`super::records::create_record`]): the high water's raise lock
+/// ([`HighWater::writing`], so the lock order is listing, then raise), held until the create is
+/// settled. Under it the create is refused, `503`, while the service is halted, and `400` when
+/// its expiry (`expires_at`) is no longer after the clock and the stored high water: no raise
+/// can fail, nor the high water pass the expiry, between that check and the registration.
+async fn commit_gate<S: Store + 'static>(
+    state: &LwsState<S>,
+    expires_at: Option<i64>,
+) -> Result<Option<tokio::sync::OwnedMutexGuard<()>>, Response> {
+    let writing = state.notify.high_water.writing.clone();
+    let guard = super::records::within_wait(async { Some(writing.lock_owned().await) }).await?;
+    if state.notify.halted() {
+        return Err(halted());
+    }
+    let after = state.notify.clock().max(state.notify.high_water());
+    if expires_at.is_some_and(|t| t <= after) {
+        return Err(problem(
+            StatusCode::BAD_REQUEST,
+            Some("expires is in the past"),
+        ));
+    }
+    Ok(Some(guard))
+}
+
 /// Ask the expiry sweeper ([`spawn_expiry_sweeper`]) for a sweep now.
 ///
 /// Asked by a create that goes through, once its locks are released, so the sweep neither waits
@@ -2788,6 +2850,7 @@ async fn subscribe<S: Store + 'static>(
         held,
         author,
         register,
+        commit_gate(state, expires_at),
     );
     if let Err(refused) = created.await {
         return refused;
@@ -3689,6 +3752,75 @@ mod tests {
                 "{conditions:?}"
             );
         }
+    }
+
+    /// Review finding: a create checked the halt and its expiry before waiting for its listing
+    /// locks and storing, and shared no lock with a raise, so a raise that failed meanwhile
+    /// (halting the service, the stored high water unchanged) let it store and register its
+    /// subscription and answer `201`. The checks are made again under the raise lock, once the
+    /// listing locks are held, and that lock is held until the create is settled.
+    #[tokio::test]
+    async fn a_create_waiting_while_a_raise_fails_creates_nothing() {
+        let (state, store) = test_store::state(100).await;
+        state.notify.sweeper_off.store(true, Ordering::SeqCst);
+        let container = state.cfg.absolute(SUBSCRIPTIONS_PATH);
+        let held = state.locks.lock(&container).await.expect("held");
+        let create = tokio::spawn({
+            let state = state.clone();
+            async move {
+                let body = json!({
+                    "type": WEBHOOK,
+                    "topic": [state.cfg.storage()],
+                    "inbox": "https://i/",
+                    "expires": format_rfc3339(jose::now_secs() + 3600),
+                });
+                let headers = [("content-type", LWS_JSON)];
+                let req = test_store::request(
+                    Method::POST,
+                    SUBSCRIPTIONS_PATH,
+                    &headers,
+                    &body.to_string(),
+                );
+                handle(&state, &req, &Agent::anonymous()).await.status()
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!create.is_finished());
+        // Meanwhile a raise fails: a read of a subscription past its expiry by the clock.
+        let due = stored_sub(&state, "due", sub_until(jose::now_secs() + 3600)).await;
+        due_by_the_clock(&state, "due").await;
+        store.fail_marker_write.store(true, Ordering::SeqCst);
+        let get = test_store::request(Method::GET, &format!("{SUBSCRIPTIONS_PATH}due"), &[], "");
+        let r = handle(&state, &get, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert!(state.notify.halted());
+        drop(held);
+        assert_eq!(create.await.unwrap(), StatusCode::SERVICE_UNAVAILABLE);
+        let ids: Vec<String> = state.notify.subs.read().unwrap().keys().cloned().collect();
+        assert_eq!(ids, ["due"]);
+        let stored = store.list_children(&container).await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].as_str(), due);
+    }
+
+    /// Review finding: a second state could be built over a running one's store (a clone of
+    /// it), with a registry of its own, and in the recovery mode lower the high water under the
+    /// running service. The backend's lease is held for as long as a state lives: a second is
+    /// refused, and one built once the first is dropped is not.
+    #[tokio::test]
+    async fn a_second_state_over_a_running_ones_store_is_refused() {
+        let (state, _store) = test_store::state(100).await;
+        let mut cfg = state.cfg.clone();
+        cfg.reset_subscription_clock = true;
+        let backend = state.store.clone();
+        let refused = LwsState::new(backend.clone(), cfg.clone()).await;
+        let Err(why) = refused else {
+            panic!("a second state was built");
+        };
+        assert!(why.contains("another LWS service"), "{why}");
+        drop(state);
+        let state = LwsState::new(backend, cfg).await.unwrap();
+        assert!(state.notify.lease().is_some());
     }
 
     /// A conditional create that waits for the listing it compares, while a subscription

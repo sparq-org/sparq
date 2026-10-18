@@ -707,6 +707,14 @@ impl<S: Store + 'static> LwsState<S> {
         // Refused before anything is read or written: notifications keep a time the store must
         // raise atomically.
         notify::refuse_without_atomic_markers(&store)?;
+        // The backend's lease, held for as long as the state lives: a second state over the same
+        // backend (a clone of this one's store, say) is refused before it reads or writes
+        // anything, so no two registries diverge over one store, and only this one may lower the
+        // notification high water.
+        let lifecycle = store.lifecycle().unwrap_or_default();
+        let lease = lifecycle
+            .acquire()
+            .ok_or("another LWS service is running over this store")?;
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
         if !store
@@ -723,11 +731,12 @@ impl<S: Store + 'static> LwsState<S> {
         // record's create or removal among them).
         let access = access::AccessStore::empty();
         let notify = notify::Notifier::new(&cfg)?;
+        notify.hold(lease);
         let (owner, closed) = tokio::sync::watch::channel(());
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
-                store: tracked::Tracked::new(store, cfg.storage()),
+                store: tracked::Tracked::new(store, cfg.storage(), lifecycle),
                 cfg,
                 access,
                 notify,
@@ -749,10 +758,10 @@ impl<S: Store + 'static> LwsState<S> {
         // The notification recovery, when asked for, runs here: before any subscription is
         // loaded and before the state is handed to anyone, so no request is in flight.
         if state.cfg.reset_subscription_clock {
-            let removed = notify::reset_subscription_clock(&state.store, &state.cfg, |iri| {
-                state.visible(iri)
-            })
-            .await?;
+            let lease = state.notify.lease().ok_or("no lease is held")?;
+            let visible = |iri: &str| state.visible(iri);
+            let removed =
+                notify::reset_subscription_clock(&state.store, &state.cfg, visible, lease).await?;
             eprintln!(
                 "lws: notification high water reset to the clock; {removed} subscriptions with an \
                  expiry removed (unset {} before the next start)",
@@ -3417,13 +3426,18 @@ pub(crate) mod test_store {
             }
             self.inner.raise_marker(iri, value).await
         }
-        async fn reset_marker(&self, iri: &str, value: i64) -> ServerResult<()> {
+        async fn reset_marker(
+            &self,
+            iri: &str,
+            value: i64,
+            lease: &crate::store::LifecycleGuard,
+        ) -> ServerResult<()> {
             self.marker_writes.fetch_add(1, Ordering::SeqCst);
             self.step()?;
             if self.fail_marker_write.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
-            self.inner.reset_marker(iri, value).await
+            self.inner.reset_marker(iri, value, lease).await
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
             if self.fail_list.load(Ordering::SeqCst)
@@ -4133,9 +4147,8 @@ mod tests {
             .write(&at, serde_json::to_vec(&stored).unwrap().into(), LWS_JSON)
             .await
             .unwrap();
-        notify::Notifier::load(&state.store, &state.cfg)
-            .await
-            .unwrap();
+        // Loaded over the backend itself: the running state holds the lease of its own handle.
+        notify::Notifier::load(&store, &state.cfg).await.unwrap();
         assert!(!state.store.exists(&at).await.unwrap());
         assert_eq!(store.two_step_deletes.load(Ordering::SeqCst), 0);
     }

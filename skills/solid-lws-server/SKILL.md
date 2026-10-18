@@ -377,10 +377,18 @@ subscription must expire after it. A start logs a warning when it is more than 2
 before the state (or its store) is handed out, so no request is in flight: it removes every stored
 subscription with an expiry (their subscribers resubscribe) and only then stores the clock as
 the mark; construction fails, the mark unchanged, while any of them is still stored (start again
-once it can be removed). Running a second process over the same store directory is unsupported,
-and nothing at this release keeps one out. A create whose purge of its own expired subscriptions
-halts the service answers `503` and creates nothing, as does any create once the service is
-halted. Removal of an expired subscription is plain, retryable cleanup with
+once it can be removed). An `LwsState` holds its backend's lease (`store::Lifecycle`, shared
+by every clone of `LwsState::store`) for as long as it lives: a second `LwsState` built in the
+same process over a clone of a running one's store is refused, and only the holder may lower the
+mark (`Store::reset_marker` takes the lease's guard, which only this crate makes). A state that
+replaces another must be built after the old one is dropped. Running a second process over the
+same store directory is unsupported, and nothing at this release keeps one out. A create whose
+purge of its own expired subscriptions halts the service answers `503` and creates nothing. Once
+its listing locks are held, a subscription create takes the mark's raise lock and checks again
+that the service is not halted and that its expiry is after both the clock and the stored mark
+(`503`, `400`), holding that lock through its write and registration, so no raise fails between
+the check and the `201`. A create whose outcome the store leaves unknown gives the lock up as it
+answers so (`500`), before it is settled. Removal of an expired subscription is plain, retryable cleanup with
 nothing written first: a removal that fails, is cut short or whose outcome is unknown leaves it
 expired, and it is tried again. Expiry is decided again under the removal's locks, so a
 subscriber's `DELETE` of a subscription that expires while it waits answers `404`, as one

@@ -1415,6 +1415,7 @@ async fn create<S: Store + 'static>(
         held,
         agent.subject.clone(),
         register,
+        std::future::ready(Ok(None::<()>)),
     );
     if let Err(refused) = created.await {
         return refused;

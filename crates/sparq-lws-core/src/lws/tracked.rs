@@ -122,6 +122,9 @@ impl Drop for Mutating<'_> {
 pub struct Tracked<S> {
     inner: std::sync::Arc<S>,
     gens: std::sync::Arc<Generations>,
+    /// The backend's lease ([`Store::lifecycle`]): `inner`'s own when it keeps one, shared by
+    /// every clone, so a service built over a clone is refused while this one runs.
+    lifecycle: std::sync::Arc<crate::store::Lifecycle>,
 }
 
 impl<S> Clone for Tracked<S> {
@@ -129,14 +132,17 @@ impl<S> Clone for Tracked<S> {
         Self {
             inner: self.inner.clone(),
             gens: self.gens.clone(),
+            lifecycle: self.lifecycle.clone(),
         }
     }
 }
 
 impl<S: Store> Tracked<S> {
-    /// Track `inner`, whose storage root is `root`.
-    pub fn new(inner: S, root: String) -> Self {
+    /// Track `inner`, whose storage root is `root`, and whose backend's lease is `lifecycle`
+    /// (`inner`'s own, when it keeps one: see [`Store::lifecycle`]).
+    pub fn new(inner: S, root: String, lifecycle: std::sync::Arc<crate::store::Lifecycle>) -> Self {
         Self {
+            lifecycle,
             inner: std::sync::Arc::new(inner),
             gens: std::sync::Arc::new(Generations::new(root)),
         }
@@ -271,8 +277,17 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.raise_marker(iri, value).await
     }
 
-    async fn reset_marker(&self, iri: &str, value: i64) -> ServerResult<()> {
-        self.inner.reset_marker(iri, value).await
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &crate::store::LifecycleGuard,
+    ) -> ServerResult<()> {
+        self.inner.reset_marker(iri, value, lease).await
+    }
+
+    fn lifecycle(&self) -> Option<std::sync::Arc<crate::store::Lifecycle>> {
+        Some(self.lifecycle.clone())
     }
 
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {

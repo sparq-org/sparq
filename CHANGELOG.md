@@ -168,6 +168,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1` (`LwsConfig::reset_subscription_clock`),
   which, while the state is built, removes every subscription with an `expires` and then stores
   the clock.
+  An `LwsState` now holds its backend's lease (shared by every clone of its store) while it
+  lives: a second `LwsState` built over a running one's store is refused, so a state that
+  replaces another must be built after the old one is dropped. `Store::reset_marker` takes that
+  lease's guard.
 
 - **sparq-zk-compose / zk (sq-j506, #7121; Noir library #7103):** the `DualLeafV2` **component-witnessed** scan and
   hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir

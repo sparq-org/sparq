@@ -113,8 +113,16 @@ pub(crate) async fn within_wait<T>(
 /// - The change holds a place among those being made or settled ([`Settlements`]) from the
 ///   request until it is settled: `503` when there is none. The task that settles one is the
 ///   state's, and ends when the state is dropped.
+/// - `gate` runs once the listing locks and the record's own lock are held, and before anything
+///   is stored: it may refuse the create (its answer is the create's), and what it yields (a
+///   subscription's: the notification service's raise lock, see `notify::HighWater`) is held
+///   until the create's answer is decided: through the write, the listing read after a failed
+///   one, and the registration. A create whose outcome is not known gives it up as it answers
+///   so, before it is settled: that settling waits on the store for as long as the store does
+///   not answer, and holds no other change to the record's listings back but a conditional
+///   create's.
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn create_record<S, F>(
+pub(crate) async fn create_record<S, F, G, C>(
     state: &LwsState<S>,
     container: &str,
     iri: &str,
@@ -124,10 +132,13 @@ pub(crate) async fn create_record<S, F>(
     held: Option<ListingLocks>,
     author: Option<String>,
     register: F,
+    gate: G,
 ) -> Result<(), Response>
 where
     S: Store + 'static,
     F: FnOnce(&LwsState<S>) + Send + 'static,
+    G: std::future::Future<Output = Result<Option<C>, Response>>,
+    C: Send + 'static,
 {
     // Announced as it is put in force, wherever that happens (in the request's task, or in the
     // task that settles a write whose outcome was not known), so no record in force goes
@@ -160,6 +171,7 @@ where
             "the record's name is taken".into(),
         )));
     };
+    let gate = gate.await?;
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
@@ -180,6 +192,7 @@ where
             .await;
         let Err(e) = written else {
             register(&state);
+            drop(gate);
             return Ok(());
         };
         // A record listed is stored for good (its lock keeps a revocation of it out). One not
@@ -215,6 +228,7 @@ where
                     }
                     None => (None, container_lock.map(ListingGuard::shared)),
                 };
+                drop(gate);
                 let (weak, store, locks) =
                     (state.downgrade(), state.store.clone(), state.locks.clone());
                 state.settlements.spawn(async move {

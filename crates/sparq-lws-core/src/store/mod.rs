@@ -39,6 +39,43 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use oxrdf::NamedNode;
 
+/// The lease one running service holds over a backend for as long as it runs: shared by every
+/// handle to that backend (see [`Store::lifecycle`]), and held by at most one service at a time,
+/// so a second one built over the same backend is refused rather than run with a registry of
+/// its own beside the first. Within one process only.
+#[derive(Debug, Default)]
+pub struct Lifecycle {
+    held: std::sync::atomic::AtomicBool,
+}
+
+impl Lifecycle {
+    /// Take the lease, unless it is held: the guard gives it back when dropped.
+    pub(crate) fn acquire(self: &std::sync::Arc<Self>) -> Option<LifecycleGuard> {
+        use std::sync::atomic::Ordering;
+        self.held
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| LifecycleGuard {
+                lease: self.clone(),
+            })
+    }
+}
+
+/// A held [`Lifecycle`] lease: the authority of the one service running over a backend, which
+/// alone may lower a marker ([`Store::reset_marker`]). Only this crate makes one.
+#[derive(Debug)]
+pub struct LifecycleGuard {
+    lease: std::sync::Arc<Lifecycle>,
+}
+
+impl Drop for LifecycleGuard {
+    fn drop(&mut self) {
+        self.lease
+            .held
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 pub use blob::{BlobEntry, BlobError, BlobStore, InMemoryBlobStore};
 pub use body_cache::{BodyCache, DEFAULT_BODY_CACHE_BYTES};
 pub use counting::{
@@ -345,6 +382,13 @@ pub trait Store: Send + Sync {
         false
     }
 
+    /// The lease every handle to this backend shares, when it keeps one: a service built over
+    /// it takes the lease for as long as it runs. The default is none (each service built over
+    /// such a store takes a lease of its own).
+    fn lifecycle(&self) -> Option<std::sync::Arc<Lifecycle>> {
+        None
+    }
+
     /// Raise the time stored under `iri` to `value`, unless a later one is stored, in one
     /// indivisible step under the index's own write lock, and return the time stored once it is
     /// done. A raise never lowers what is stored, whatever order raises land in: one that fails
@@ -363,11 +407,18 @@ pub trait Store: Send + Sync {
     /// Store `value` under `iri` as a marker in one step, whatever is stored there, earlier or
     /// later: the one write that may lower a marker, for a start that finds the stored one
     /// unusable and has removed what it decided ([`raise_marker`](Store::raise_marker) keeps
-    /// every other write from lowering it).
+    /// every other write from lowering it). Only the service holding the backend's
+    /// [`Lifecycle`] lease may make it: `lease` is its guard, which no caller outside this crate
+    /// can make.
     ///
     /// The default refuses, as [`raise_marker`](Store::raise_marker) does.
-    async fn reset_marker(&self, iri: &str, value: i64) -> ServerResult<()> {
-        let _ = (iri, value);
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &LifecycleGuard,
+    ) -> ServerResult<()> {
+        let _ = (iri, value, lease);
         Err(ServerError::Storage(
             "this store cannot raise a marker atomically".into(),
         ))
@@ -1211,7 +1262,7 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .map_err(marker_error)
     }
 
-    async fn reset_marker(&self, iri: &str, value: i64) -> ServerResult<()> {
+    async fn reset_marker(&self, iri: &str, value: i64, _: &LifecycleGuard) -> ServerResult<()> {
         if !self.sparq.raises_markers() {
             return Err(ServerError::Storage(
                 "this store cannot raise a marker atomically".into(),
