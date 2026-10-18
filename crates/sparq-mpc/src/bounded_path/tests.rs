@@ -43,14 +43,20 @@
 
 use super::*;
 use crate::holder::Holder;
-use oxrdf::Term;
+use oxrdf::{Literal, Term};
 use sparq_core::Graph;
 use sparq_engine::query;
+use std::collections::BTreeMap;
 
 const PFX: &str = "@prefix ex: <http://ex/> .\n";
 
 fn nn(iri: &str) -> NamedNode {
     NamedNode::new(iri).unwrap()
+}
+
+/// An IRI as a [`Term`], for the `Term`-typed declared node domain.
+fn t(n: NamedNode) -> Term {
+    Term::NamedNode(n)
 }
 
 /// Build the per-predicate disclosed edge set WITHOUT declaring a node domain —
@@ -71,23 +77,29 @@ fn disclosed_edges_only(holder_docs: &[(&str, &[&str])]) -> DisclosedEdges {
     DisclosedEdges::from_holder_edges(entries).unwrap()
 }
 
-/// Every subject/object IRI of the WHOLE union of the holder documents — the
-/// active graph's node domain in the sense of SPARQL 1.1 §18.4, read out of the
-/// union store through the real engine so it is literally the term set the
+/// Every distinct subject/object TERM of the WHOLE union of the holder documents —
+/// the active graph's node domain in the sense of SPARQL 1.1 §18.4, read out of
+/// the union store through the real engine so it is literally the term set the
 /// clear-text oracle's zero-length match ranges over. Strictly wider than the
 /// endpoint set of any single predicate.
-fn active_graph_nodes(docs: &[&str]) -> Vec<NamedNode> {
+///
+/// NO term-kind filter: the engine's `graph_nodes` takes the subject and object of
+/// every triple whatever their kind, so a LITERAL object is in the domain. Keeping
+/// an IRI-only filter here would have hidden exactly the bug the literal case
+/// exercises, and would have been unimplementable anyway now the declared domain
+/// is a `Term` set. Predicate-only terms are excluded for free, since `?p` is not
+/// projected.
+fn active_graph_nodes(docs: &[&str]) -> Vec<Term> {
     let u = union_graph(docs);
     let res = query(&u, "SELECT ?s ?o WHERE { ?s ?p ?o }").unwrap();
-    let mut out: BTreeSet<String> = BTreeSet::new();
+    let mut out: BTreeMap<String, Term> = BTreeMap::new();
     for row in &res.rows {
         for slot in row.iter().flatten() {
-            if let Term::NamedNode(n) = slot {
-                out.insert(n.as_str().to_string());
-            }
+            out.entry(format!("{:?}", slot))
+                .or_insert_with(|| slot.clone());
         }
     }
-    out.into_iter().map(|s| nn(&s)).collect()
+    out.into_values().collect()
 }
 
 /// [`disclosed_edges_only`] plus the DECLARED public node domain of the union of
@@ -1408,16 +1420,24 @@ fn a_declared_domain_that_omits_a_disclosed_endpoint_is_refused() {
     let err = edges
         .clone()
         // ex:c is an object of a disclosed edge but is left out.
-        .with_node_domain([nn("http://ex/a"), nn("http://ex/b")])
+        .with_node_domain([t(nn("http://ex/a")), t(nn("http://ex/b"))])
         .unwrap_err();
     match &err {
         MpcError::Protocol(m) => {
             assert!(
-                m.contains("omits 1 endpoint term(s)") && m.contains("domain of 2 term(s)"),
+                m.contains("the declared node domain does not cover the edge endpoints"),
                 "{}",
                 m
             );
             assert!(!m.contains("ex/c"), "the message names a term: {}", m);
+            // COUNT-free as well as value-free: the message must not carry how many
+            // endpoints were uncovered, nor how many terms were declared — both are
+            // statistics over the edges, probeable one term at a time.
+            assert!(
+                !m.chars().any(|c| c.is_ascii_digit()),
+                "the message carries a count: {}",
+                m
+            );
         }
         other => panic!("expected a Protocol refusal, got {:?}", other),
     }
@@ -1426,10 +1446,10 @@ fn a_declared_domain_that_omits_a_disclosed_endpoint_is_refused() {
     // point: the active graph has terms the path's predicates never touch.
     edges
         .with_node_domain([
-            nn("http://ex/a"),
-            nn("http://ex/b"),
-            nn("http://ex/c"),
-            nn("http://ex/elsewhere"),
+            t(nn("http://ex/a")),
+            t(nn("http://ex/b")),
+            t(nn("http://ex/c")),
+            t(nn("http://ex/elsewhere")),
         ])
         .expect("a superset domain is accepted");
 }
@@ -1443,14 +1463,18 @@ fn a_declared_domain_is_order_and_duplicate_insensitive() {
     let form = PathForm::range(nn("http://ex/p"), 0, 1);
     let forward = base
         .clone()
-        .with_node_domain([nn("http://ex/a"), nn("http://ex/b"), nn("http://ex/z")])
+        .with_node_domain([
+            t(nn("http://ex/a")),
+            t(nn("http://ex/b")),
+            t(nn("http://ex/z")),
+        ])
         .unwrap();
     let shuffled = base
         .with_node_domain([
-            nn("http://ex/z"),
-            nn("http://ex/b"),
-            nn("http://ex/a"),
-            nn("http://ex/b"),
+            t(nn("http://ex/z")),
+            t(nn("http://ex/b")),
+            t(nn("http://ex/a")),
+            t(nn("http://ex/b")),
         ])
         .unwrap();
     let a = eval_bounded_path_disclosed(&forward, &form).unwrap();
@@ -1460,4 +1484,142 @@ fn a_declared_domain_is_order_and_duplicate_insensitive() {
         "the row ORDER must match too, not just the set"
     );
     assert_eq!(pair_set(&a.vars, &a.rows).len(), 4, "aa,bb,zz,ab");
+}
+
+// =====================================================================
+// 11. THE DOMAIN'S TERM KINDS — literals are in it, predicate-only
+//     terms are not; an empty graph has an empty diagonal
+// =====================================================================
+
+/// The engine's zero-length domain is every distinct SUBJECT or OBJECT term,
+/// whatever its kind — so a LITERAL object is in it. Graph `ex:a ex:p ex:b .
+/// ex:c ex:q "L"`, with only `ex:p` disclosed: the engine's `ex:p?` returns
+/// `("L","L")` along with the four IRI identity pairs.
+///
+/// While the declared domain was `NamedNode`-only the true domain could not be
+/// expressed: declaring `{a, b, c}` was accepted — it covers the one disclosed
+/// `ex:p` edge — yet `p?` then omitted `("L","L")`, which no `NamedNode` list can
+/// supply.
+#[test]
+fn differential_zero_length_domain_includes_a_literal_object() {
+    let h1 = "ex:a ex:p ex:b .";
+    let h2 = "ex:c ex:q \"L\" .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"]), (h2, &[])]);
+
+    let form = PathForm::range(nn("http://ex/p"), 0, 1);
+    let got = federated_pairs(&edges, &form);
+    let want = clear_text_pairs(&[h1, h2], "ex:p?");
+    assert_eq!(
+        got, want,
+        "the zero-length domain must contain the literal object too"
+    );
+
+    let lit = format!("{:?}", Term::from(Literal::new_simple_literal("L")));
+    assert!(
+        got.contains(&(lit.clone(), lit)),
+        "the literal identity pair must be present: {got:?}"
+    );
+    // 4 identity pairs (a, b, c, "L") + the one ex:p edge = 5.
+    assert_eq!(got.len(), 5, "{got:?}");
+}
+
+/// A `{0,2}` arm over a graph whose literals sit under BOTH a disclosed and an
+/// undisclosed predicate, and whose typed/language literals are distinct terms.
+#[test]
+fn differential_zero_length_domain_distinguishes_literal_kinds() {
+    // The path traverses ex:r, whose one edge has IRI endpoints (the edge regime
+    // is IRI-only). The literals reach the DOMAIN from ex:q, which no holder
+    // discloses — so they can only arrive through the declaration.
+    let h1 = "ex:a ex:r ex:b .";
+    let h2 = "ex:c ex:q \"L\" . ex:d ex:q \"L\"@en . ex:e ex:q 7 .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/r"]), (h2, &[])]);
+
+    let form = PathForm::range(nn("http://ex/r"), 0, 2);
+    let got = federated_pairs(&edges, &form);
+    let want = clear_text_pairs(&[h1, h2], "(ex:r)? | ex:r/ex:r");
+    assert_eq!(got, want);
+    // 5 IRIs (a,b,c,d,e) + 3 distinct literals ("L", "L"@en, 7) = 8 identity
+    // pairs, plus the (a,b) edge = 9. The three literals are distinct TERMS, so
+    // the plain and the language-tagged "L" do not collapse.
+    assert_eq!(got.len(), 9, "{got:?}");
+}
+
+/// A PREDICATE-only term is NOT in the domain: `ex:p` occurs only as a predicate,
+/// so the engine binds no `(ex:p, ex:p)` and neither does the unroll.
+#[test]
+fn differential_zero_length_domain_excludes_a_predicate_only_term() {
+    let h1 = "ex:a ex:p ex:b .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
+
+    let form = PathForm::range(nn("http://ex/p"), 0, 1);
+    let got = federated_pairs(&edges, &form);
+    assert_eq!(got, clear_text_pairs(&[h1], "ex:p?"));
+    let pred = format!("{:?}", Term::from(nn("http://ex/p")));
+    assert!(
+        !got.contains(&(pred.clone(), pred)),
+        "a predicate-only term must not be in the zero-length domain: {got:?}"
+    );
+    // Only (a,a), (b,b) and (a,b).
+    assert_eq!(got.len(), 3, "{got:?}");
+}
+
+/// An EMPTY active graph with variable endpoints gives an EMPTY diagonal — the
+/// declared domain is empty, which is a declaration, not an absent one, so the
+/// form runs and returns nothing rather than being refused.
+#[test]
+fn differential_zero_length_over_an_empty_graph_is_empty() {
+    let edges = disclosed_edges(&[("", &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 0, 2);
+    let got = federated_pairs(&edges, &form);
+    assert_eq!(got, clear_text_pairs(&[""], "(ex:p)? | ex:p/ex:p"));
+    assert!(got.is_empty(), "{got:?}");
+
+    // The distinction that matters: an EMPTY declared domain runs, an UNDECLARED
+    // one is refused. Both would print as "no identity pairs" otherwise.
+    let undeclared = disclosed_edges_only(&[("", &["http://ex/p"])]);
+    assert!(eval_bounded_path_disclosed(&undeclared, &form).is_err());
+    assert!(eval_bounded_path_disclosed(&edges, &form).is_ok());
+}
+
+/// The engine matches a BOUND endpoint against itself even when the constant does
+/// not occur in the graph, and the declared domain is how a caller reproduces
+/// that: including the absent constant yields its `(x,x)` pair, leaving it out
+/// does not. No API change is involved — it is just a wider declaration.
+#[test]
+fn an_absent_bound_endpoint_self_matches_when_declared() {
+    let h1 = "ex:a ex:p ex:b .";
+    let base = disclosed_edges_only(&[(h1, &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 0, 1);
+    let absent = format!("{:?}", Term::from(nn("http://ex/absent")));
+
+    // The engine's own answer for the bound-endpoint case: `<ex:absent> ex:p? ?b`
+    // binds (absent, absent) although ex:absent is in no triple.
+    let u = union_graph(&[h1]);
+    let q = "PREFIX ex: <http://ex/> SELECT ?b WHERE { ex:absent ex:p? ?b }";
+    let res = query(&u, q).unwrap();
+    assert_eq!(
+        res.rows.len(),
+        1,
+        "the engine self-matches the bound endpoint"
+    );
+
+    let with_absent = base
+        .clone()
+        .with_node_domain(
+            active_graph_nodes(&[h1])
+                .into_iter()
+                .chain([t(nn("http://ex/absent"))]),
+        )
+        .unwrap();
+    let got = federated_pairs(&with_absent, &form);
+    assert!(
+        got.contains(&(absent.clone(), absent.clone())),
+        "declaring the absent constant reproduces its self-match: {got:?}"
+    );
+
+    let without = base.with_node_domain(active_graph_nodes(&[h1])).unwrap();
+    assert!(
+        !federated_pairs(&without, &form).contains(&(absent.clone(), absent)),
+        "and leaving it out does not invent it"
+    );
 }

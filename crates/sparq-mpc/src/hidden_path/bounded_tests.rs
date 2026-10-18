@@ -5,7 +5,8 @@
 //! THE acceptance criterion (bead sq-py8h.3): the secure HIDDEN bounded path
 //! (`{1,k}`, `{0,k}`, `p?`, alternation) must equal the **plaintext** bounded-path
 //! evaluation over the same edge set; each connected endpoint pair returned exactly
-//! once; the realized length is never opened; the reflexive diagonal is correct for
+//! once; the realized length is not separately opened or encoded in the result; the
+//! reflexive diagonal is correct for
 //! `{0,k}` / `p?`.
 //!
 //! The differential ORACLE is a pure plaintext bounded-path reachability (the union
@@ -141,7 +142,15 @@ fn plaintext_bounded(
     out
 }
 
-/// Run the SECURE hidden bounded path and return its disclosed `(a,b)` IRI pair set.
+/// Run the SECURE hidden bounded path and return its disclosed `(a,b)` pair set.
+///
+/// An endpoint must be BOUND — an unbound one would mean a real defect in the
+/// output stage, not "no result" — but NOT necessarily an IRI. The EDGE regime is
+/// IRI-endpointed; the zero-length domain is not, so a `{0,k}` form over a graph
+/// with a literal object returns that literal as an endpoint, which a
+/// `PartialResult` row (`Vec<Option<Term>>`) carries directly. An IRI renders as
+/// its bare string, matching `plaintext_bounded`'s keys; any other term renders
+/// through `Display`.
 fn secure_bounded(
     backend: &ShamirBackend,
     edges: &PredicatedEdges,
@@ -159,15 +168,12 @@ fn secure_bounded(
         .rows
         .iter()
         .map(|r| {
-            let a = match &r[0] {
+            let render = |slot: &Option<Term>, which: &str| match slot {
                 Some(Term::NamedNode(n)) => n.as_str().to_string(),
-                other => panic!("endpoint a must be a bound IRI, got {other:?}"),
+                Some(other) => other.to_string(),
+                None => panic!("endpoint {which} must be BOUND, got an unbound slot"),
             };
-            let b = match &r[1] {
-                Some(Term::NamedNode(n)) => n.as_str().to_string(),
-                other => panic!("endpoint b must be a bound IRI, got {other:?}"),
-            };
-            (a, b)
+            (render(&r[0], "a"), render(&r[1], "b"))
         })
         .collect()
 }
@@ -1214,11 +1220,20 @@ fn hidden_declared_domain_omitting_an_edge_endpoint_is_refused() {
     match &err {
         MpcError::Protocol(m) => {
             assert!(
-                m.contains("omits 1 endpoint term(s)") && m.contains("domain of 2 term(s)"),
+                m.contains("the declared node domain does not cover the edge endpoints"),
                 "{}",
                 m
             );
             assert!(!m.contains("ex/c"), "the message names a term: {}", m);
+            // COUNT-free as well as value-free: a message naming how many endpoints
+            // were uncovered is a statistic over the edge relation, and a caller
+            // could probe one candidate term at a time and read it as a membership
+            // answer.
+            assert!(
+                !m.chars().any(|c| c.is_ascii_digit()),
+                "the message carries a count: {}",
+                m
+            );
         }
         other => panic!("expected a Protocol refusal, got {:?}", other),
     }
@@ -1239,4 +1254,66 @@ fn hidden_declared_domain_omitting_an_edge_endpoint_is_refused() {
         "http://ex/elsewhere".to_string()
     )));
     assert_eq!(got.len(), 6, "4 diagonal + (a,b),(b,c): {got:?}");
+}
+
+/// The declared domain is a set of `Term`s, not IRIs: a LITERAL in the active
+/// graph's object position is in the zero-length domain (SPARQL 1.1 §18.4), and
+/// the diagonal must carry it. The edges stay IRI-endpointed — only the DOMAIN
+/// widens — and a `PartialResult` row is `Vec<Option<Term>>`, so the literal
+/// endpoint comes back out of the oblivious output unchanged.
+#[test]
+fn hidden_zero_length_diagonal_carries_a_literal_domain_term() {
+    let mut interner = Interner::new();
+    let edges = vec![PredicatedEdge {
+        predicate: P.to_string(),
+        subject: interner.node("http://ex/a"),
+        object: interner.node("http://ex/b"),
+    }];
+    let lit = Term::Literal(oxrdf::Literal::new_simple_literal("L"));
+    let typed = Term::Literal(oxrdf::Literal::new_language_tagged_literal("L", "en").unwrap());
+    let edges = PredicatedEdges::new(edges)
+        .with_node_domain(vec![
+            iri_term("http://ex/a"),
+            iri_term("http://ex/b"),
+            iri_term("http://ex/c"),
+            lit.clone(),
+            typed.clone(),
+        ])
+        .expect("a Term domain covering the edge endpoints is accepted");
+
+    let backend = ShamirBackend::new_seeded(5, 0x2D05).unwrap();
+    let got = secure_bounded(&backend, &edges, &HiddenBoundedPath::optional(P), 16);
+
+    for term in [&lit, &typed] {
+        let rendered = term.to_string();
+        assert!(
+            got.contains(&(rendered.clone(), rendered.clone())),
+            "the literal identity pair for {rendered} must be present: {got:?}"
+        );
+    }
+    // 3 IRIs + 2 distinct literals = 5 diagonal pairs, + the (a,b) edge = 6. The
+    // plain and the language-tagged "L" are distinct TERMS and do not collapse.
+    assert_eq!(got.len(), 6, "{got:?}");
+}
+
+/// An explicitly EMPTY declared domain is a declaration, so a `min == 0` form
+/// RUNS and returns an empty diagonal — the right answer for an empty active
+/// graph. An UNDECLARED domain is refused. Both would otherwise look alike.
+#[test]
+fn hidden_an_empty_declared_domain_runs_while_an_undeclared_one_is_refused() {
+    let backend = ShamirBackend::new_seeded(5, 0x2D06).unwrap();
+    let form = HiddenBoundedPath::range(P, 0, 2);
+
+    let empty = PredicatedEdges::new(Vec::new())
+        .with_node_domain(Vec::new())
+        .expect("an empty domain over an empty edge relation is consistent");
+    assert_eq!(empty.declared_domain_len(), 0);
+    assert!(secure_bounded(&backend, &empty, &form, 8).is_empty());
+
+    let undeclared = PredicatedEdges::new(Vec::new());
+    assert_eq!(undeclared.declared_domain_len(), 0);
+    assert!(
+        eval_bounded_path_hidden(&backend, &undeclared, &form, 8).is_err(),
+        "an undeclared domain must be refused, not answered as empty"
+    );
 }
