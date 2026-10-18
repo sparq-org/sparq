@@ -514,13 +514,18 @@ jobs:
       #   * `hidden_issuer_in_set_*` / `hidden_issuer_only_*` — the POSITIVE
       #     controls for the deferred post-pass: an honest hidden-issuer
       #     presentation must still VERIFY with `dual-leaf` on, so the post-pass is
-      #     not refusing everything it defers. Without `--features dual-leaf` these
-      #     two run in the step above with the whole resolution compiled out, which
-      #     says nothing about it.
+      #     not refusing everything it defers. Without `--features dual-leaf` the
+      #     positive controls run in the step above with the whole resolution
+      #     compiled out, which says nothing about it.
       #
       # `--exact` with one invocation per name, and the per-test result line is
       # CHECKED: a libtest name filter that matches nothing exits 0, so a renamed
       # or `cfg`-ed-out case would otherwise report PASS having run nothing.
+      #
+      # The log is ALSO checked for a `SKIP ` line: the shared toolchain gate
+      # (`tests/support/mod.rs`) prints `SKIP <test>: ...` and RETURNS when a tool
+      # is missing and skipping is allowed, so the case still reports `1 passed`
+      # having proved nothing. In THIS lane a skip is a failure.
       - name: Run the ignored dual-leaf e2e cases (real bb, default-off feature)
         if: steps.changes.outputs.zk == 'true'
         run: |
@@ -536,6 +541,10 @@ jobs:
             echo "::endgroup::"
             if ! grep -qE '^test result: ok\. 1 passed' "/tmp/dl-e2e-$t.log"; then
               echo "FAIL: $t did not run as exactly one passing test under --features dual-leaf" >&2
+              exit 1
+            fi
+            if grep -qE '^SKIP ' "/tmp/dl-e2e-$t.log"; then
+              echo "FAIL: $t declared a SKIP in the toolchain lane — it reported a pass without proving anything" >&2
               exit 1
             fi
           done

@@ -225,7 +225,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared linkage, and no later gate read them. Adds refusals and no acceptance.
 
 - **sparq-zk-compose (opt-in `extended-fragment`):** the extended-fragment verifier now REFUSES
-  four query/presentation shapes it does not discharge, instead of accepting them.
+  the query/presentation shapes it does not discharge, instead of accepting them.
   (1) A query one of whose re-derived branches carries a `FILTER` is refused by the routing gate
   (`FragmentDispatchError::FilterNotDischarged { branch, filters }`): the flat FILTER obligation
   lives in `bind_query_correctness`, which this regime skips, and nothing on this path reads
@@ -251,10 +251,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crypto stage alone. `dispatch_fragment`'s per-branch ROUTING stays a deliberate no-op over such a
   manifest, since it is also used over stage-1-style presentations; its query-hygiene, FILTER
   and id checks still run.
-  All four ADD refusals and open nothing; default builds are byte-identical (the feature is OFF by
-  default) and no new dependency is added. Research grade, NOT externally audited (`sq-qhy4`). No
-  soundness or privacy claim.
+  (5) A disclosed binding must be BOUND BY THE ATTRIBUTED BRANCH, projected, and unique.
+  `bind_fragment_solution` and `bind_fragment_scans` build the re-encoded disclosed map through one
+  shared admissibility rule: a branch binds the variables of its pattern `SlotPattern::Var` slots,
+  its `path_reach` subject/object positions, and the `VALUES` columns whose SELECTED row carries a
+  non-`UNDEF` cell. A disclosed variable outside that set is refused
+  (`FragmentSolutionError::SolutionVariableNotBoundByBranch`) — previously a solution could carry a
+  variable the attributed branch binds nowhere (the other arm of a `UNION`, a branch with no atoms,
+  or a `VALUES` column selected at an `UNDEF` row) and every obligation over it was simply absent.
+  A variable the query does not project is refused (`SolutionVariableNotProjected`), and a second
+  binding of one variable is refused (`DuplicateSolutionVariable`) instead of silently replacing the
+  first, which went unchecked.
+  (6) A `VALUES` cell is encoded under the commitment method the branch's scans AUTHENTICATE:
+  `bind_fragment_join_coherence` now takes `&AuthenticatedMethods`, resolves one pattern-constant
+  encoder across the branch's scans and encodes each seeded cell with `encode_pattern_slot` under
+  it, so the cell is comparable to the slots and endpoints it constrains under the authenticated
+  method rather than under string-canonical always. A branch whose scans resolve no single method,
+  or disagree, is refused (`FragmentJoinError::ValuesMethodUnresolved`). This is a breaking change
+  to that function's signature; it is `pub` behind the opt-in feature and has no callers outside
+  the crate's own verifier path.
+  All of these ADD refusals and open nothing. The feature is OFF by default, so no default-build
+  verdict changes with them, and no new dependency is added. Research grade, NOT externally audited
+  (`sq-qhy4`). No soundness or privacy claim.
   <!-- privacy-claims-allow: describes added fail-closed refusals on an opt-in research lane, each with the obligation it does NOT yet discharge named; the external audit is restated as an OPEN obligation; asserts no soundness/privacy property as achieved; sq-qhy4 -->
+
+- **sparq-zk:** `verify::fragment_query` refuses a query whose answer is the empty multiset
+  whatever the data: a `Slice` modifier with length `0` (`LIMIT 0`) is now
+  `VerifyError::UnsupportedFragment` instead of being peeled off like any other modifier, because no
+  disclosed solution is an answer to such a query and every downstream binding gate would then be
+  attesting a solution the query does not have. The other peels (`LIMIT n` for `n > 0`, `OFFSET`,
+  `DISTINCT`, `REDUCED`) are unchanged, and a `LIMIT 0` query reaching the flat verifier was already
+  refused there. Adds a refusal and opens nothing.
 
 - **sparq-zk-compose:** stage 2g′ (`bind_join_endpoints`) collects the covered join-proof indices
   in the SAME pass that validates the declared edges, so the coverage rule is a set lookup per

@@ -1437,12 +1437,28 @@ pub fn fragment_query(sparql: &str) -> Result<FragmentQuery, VerifyError> {
     // Peel the OUTER solution-modifier stack (membership-indifferent:
     // LIMIT/OFFSET, DISTINCT/REDUCED) down to the query's own projection.
     // Any Project encountered DEEPER in the tree is a subquery.
+    //
+    // A slice is membership-indifferent only while it can keep a solution. One
+    // with `LIMIT 0` cannot: the query's answer is the EMPTY multiset whatever
+    // the data, so no disclosed solution is an answer to it and peeling the
+    // modifier away would admit a presentation whose claim the query text itself
+    // denies. Refused fail-closed instead.
     let mut node = pattern;
-    while let GraphPattern::Slice { inner, .. }
-    | GraphPattern::Distinct { inner }
-    | GraphPattern::Reduced { inner } = node
-    {
-        node = inner.as_ref();
+    loop {
+        match node {
+            GraphPattern::Slice { inner, length, .. } => {
+                if *length == Some(0) {
+                    return Err(VerifyError::UnsupportedFragment(
+                        "LIMIT 0 (the answer is the empty multiset whatever the data, so no disclosed solution is an answer to this query)".into(),
+                    ));
+                }
+                node = inner.as_ref();
+            }
+            GraphPattern::Distinct { inner } | GraphPattern::Reduced { inner } => {
+                node = inner.as_ref();
+            }
+            _ => break,
+        }
     }
     let (projected, body): (Vec<String>, &GraphPattern) =
         if let GraphPattern::Project { inner, variables } = node {
@@ -2702,6 +2718,41 @@ mod tests {
             }
         }
         assert!(matches!(fragment_query("SELECT WHERE"), Err(VerifyError::Parse(_))));
+    }
+
+    /// A slice that empties the answer is refused rather than peeled away.
+    ///
+    /// `LIMIT 0` makes the query's answer the empty multiset whatever the data,
+    /// so no disclosed solution can be an answer to it. Peeling the modifier off
+    /// left the rest of the query to be re-derived as though the limit were
+    /// absent, and a presentation could then claim a binding the query text
+    /// itself denies. The membership-indifferent modifiers are still peeled.
+    #[test]
+    fn a_slice_that_empties_the_answer_is_refused() {
+        for q in [
+            "SELECT ?s WHERE { VALUES ?s { <http://ex/a> } } LIMIT 0",
+            "SELECT * WHERE { ?s <http://ex/p> ?o } LIMIT 0",
+            "SELECT * WHERE { ?s <http://ex/p> ?o } LIMIT 0 OFFSET 3",
+            "ASK { ?s <http://ex/p> ?o } LIMIT 0",
+        ] {
+            match fragment_query(q) {
+                Err(VerifyError::UnsupportedFragment(msg)) => {
+                    assert!(msg.contains("LIMIT 0"), "{q}: got `{msg}`")
+                }
+                other => panic!("{q}: a slice that empties the answer must be refused, got {other:?}"),
+            }
+        }
+        // CONTROL: the modifiers that can still keep a solution are peeled as
+        // before, and the branch structure under them is unchanged.
+        let base = fragment_query("SELECT * WHERE { ?s <http://ex/p> ?o }").unwrap();
+        for q in [
+            "SELECT * WHERE { ?s <http://ex/p> ?o } LIMIT 1",
+            "SELECT * WHERE { ?s <http://ex/p> ?o } LIMIT 10 OFFSET 2",
+            "SELECT * WHERE { ?s <http://ex/p> ?o } OFFSET 5",
+            "SELECT DISTINCT * WHERE { ?s <http://ex/p> ?o }",
+        ] {
+            assert_eq!(fragment_query(q).as_ref(), Ok(&base), "{q} must still be peeled");
+        }
     }
 
     #[test]
