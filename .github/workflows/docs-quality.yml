@@ -397,6 +397,21 @@ jobs:
       - name: preflight — checker tests + worker-brief block consistency — GATING
         run: python3 scripts/tests/test_preflight.py
 
+      # ---- zk-toolchain gate enumeration ----
+      # scripts/check-zk-toolchain-gate-coverage.py derives the TOOLCHAIN-BOUND test
+      # binaries of crates/sparq-zk*/tests/ from the sources and fails when
+      # zk-toolchain.yml does not run one. That gate is invoked in the zk-toolchain
+      # lane, which only triggers on zk paths — so an edit to the CHECKER itself would
+      # not revalidate it. These two legs run here, where a scripts/ edit does trigger:
+      # `--self-test` pins the detector against its synthetic fixtures, and the
+      # unittest suite plants an unlisted toolchain-bound test into a COPY of the real
+      # tree and asserts the check goes red. Both must stay BARE COMMANDS on their own
+      # line — appending `|| true` leaves the step green while the gate cannot fail.
+      - name: Self-test the zk-toolchain gate enumeration (pure logic)
+        run: python3 scripts/check-zk-toolchain-gate-coverage.py --self-test
+      - name: zk-toolchain gate enumeration — checker tests — GATING
+        run: python3 scripts/tests/test_zk_toolchain_gate_coverage.py
+
       # ---- inference-conformance report drift (sq-t099c + sq-1d528 / issue #3171) ----
       # Two beads landed this gate independently; the script unifies them and
       # is wired in ONCE here. The inference ratchet number lives in four places and
