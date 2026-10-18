@@ -3686,6 +3686,33 @@ fn complement_fillers_are_chosen_only_where_counted() {
     assert!(c.unsatisfiable.is_empty());
 }
 
+/// `B ⊑ ≥2 r.¬D ⊓ ≤1 r.¬D` makes `B`, and so `A`, empty. On small budgets the plain attempt
+/// runs out and the eager attempt decides with the scoped choice of `¬D`'s superset, which
+/// must still reach every counted neighbour: no budget answers `Consistent`.
+#[test]
+fn the_scoped_choice_reaches_every_counted_neighbour() {
+    let body = format!(
+        r#"{PRE}:A a owl:Class . :B a owl:Class . :D a owl:Class . :r a owl:ObjectProperty . :s a owl:ObjectProperty . :a a owl:NamedIndividual .
+        :a a :A .
+        :A rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :s ; owl:someValuesFrom :B ] .
+        :B rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r ; owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :D ] ] .
+        :B rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r ; owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :D ] ] ."#
+    );
+    let (d, t) = Graph::parse_to_triples(&body, "turtle").expect("parse");
+    let o = extract(&d, &t).expect("extract");
+    for max_steps in (100..=400).step_by(10) {
+        let budget = Budget {
+            max_steps,
+            max_nodes: 100_000,
+        };
+        let r = check(&d, &o, budget);
+        assert_ne!(r.consistency, Consistency::Consistent, "{max_steps}");
+        if max_steps == 200 {
+            assert_eq!(r.consistency, Consistency::Inconsistent);
+        }
+    }
+}
+
 /// The scoped choice for `o : ≤1 T.∃S.¬C0` is the clause `T⁻(x, y₀) ∧ S(x, y₁) → C0(y₁) ∨
 /// Q(x)`, with two neighbour variables. The plain attempt does not apply it, so it must not
 /// count copies of a blocked node there either, or the plain attempt's model goes
