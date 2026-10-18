@@ -555,8 +555,9 @@ pub(crate) fn graph_carries_odrl(graph: &sparq_core::Graph) -> bool {
 /// the `lane` it was refused on (`"body"` for the stateless per-request build, `"server"` for
 /// the stateful per-generation view).
 ///
-/// SANITISED BY CONSTRUCTION: [`AuthAllowance`] is a closed enum of limit kinds and
-/// [`AuthAllowance::limit_name`] returns a `&'static str`, so nothing derived from the pod's
+/// SANITISED BY CONSTRUCTION: [`AuthAllowance`] is an enum of limit kinds whose
+/// [`AuthAllowance::limit_name`] returns a `&'static str` — a tag this build does not know
+/// maps to `Unspecified`, not to the tag's own text — so nothing derived from the pod's
 /// data, the request, or the refusal's own message (which quotes document IRIs and sizes)
 /// can reach the log through here. A failure with no allowance kind is logged as such rather
 /// than with its text.

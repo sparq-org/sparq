@@ -912,9 +912,10 @@ their sum. `max_decision_join_rows` is deliberately the same value as one closur
 `max_total_join_rows`, so an ACP view's three strata TOGETHER may not do more join work than a
 single-stratum WAC view may — the aggregate is never looser than the per-closure cap.
 
-Every default is about ten times the largest value the fixtures this crate materializes need,
-measured by bisection (recorded in `default_auth_budget`'s rustdoc, not here — it is specific
-to those fixtures and that box). A refusal is the same kind of event as a reasoning-allowance
+Every default is ten times or more the largest value the fixtures this crate materializes
+need, measured by bisection; the per-field minima and the resulting margins (11x to 36x) are
+recorded in `default_auth_budget`'s rustdoc, not here — they are specific to those fixtures
+and that box. A refusal is the same kind of event as a reasoning-allowance
 refusal, with the same fail-closed routes and the same typed `AuthAllowance` kinds
 (`InputBytes`, `InputFacts`, `InputTermBytes`, `DecisionWork`), so a caller that already tells
 an allowance refusal from a deny needs no second check.
