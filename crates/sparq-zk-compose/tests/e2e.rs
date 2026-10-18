@@ -2107,9 +2107,10 @@ fn malformed_proof_hex_rejected_not_panicked() {
 /// (trusting art.vk) this returned Ok(()).
 #[test]
 fn forge_reject_noncanonical_vk() {
-    if !support::require_toolchain("forge_reject_noncanonical_vk", &["nargo", "bb"]) {
-        return;
-    }
+    let gate = match support::gate("forge_reject_noncanonical_vk", &["nargo", "bb"]) {
+        Some(g) => g,
+        None => return,
+    };
     let challenge = FieldHex("0x2a".into());
     // The attacker's fabricated statement: operand_enc = Enc(17), op=Ge,
     // bound=18, expected=true (i.e. "17 >= 18 is true" — a lie). We declare
@@ -2122,7 +2123,7 @@ fn forge_reject_noncanonical_vk() {
         bound: 18,
         expected: true,
     };
-    let art = attacker_filter_d1_artifacts(&challenge, &operand_enc, 3 /*Ge*/, 18, true);
+    let art = attacker_filter_d1_artifacts(&gate, &challenge, &operand_enc, 3 /*Ge*/, 18, true);
     let prover = CircuitProver::from_crate_root();
     let (scan_inputs, scan_hex) = honest_age_scan(&challenge, &prover, "forge_vk_scan");
     let m = filter_manifest(scan_inputs, scan_hex, inputs, encode_artifacts(&art), challenge);
@@ -2182,6 +2183,7 @@ fn forge_artvk_is_ignored() {
 /// soundness constraints, over the fabricated public values. Returns the
 /// (attacker proof, its public_inputs, its attacker vk).
 fn attacker_filter_d1_artifacts(
+    gate: &support::LiveToolchain,
     challenge: &FieldHex,
     operand_enc: &FieldHex,
     op: u32,
@@ -2211,8 +2213,7 @@ fn attacker_filter_d1_artifacts(
     )
     .unwrap();
     let nargo = |args: &[&str]| {
-        // zk-toolchain-gate: allow already behind support::require_toolchain in the calling test
-        let out = std::process::Command::new("nargo")
+        let out = support::live_tool(gate, "nargo")
             .args(args)
             .current_dir(&dir)
             .output()
@@ -2225,8 +2226,7 @@ fn attacker_filter_d1_artifacts(
     let wit = dir.join("target/attacker_w.gz");
     let out = dir.join("out");
     std::fs::create_dir_all(&out).unwrap();
-    // zk-toolchain-gate: allow already behind support::require_toolchain in the calling test
-    let bb = std::process::Command::new("bb")
+    let bb = support::live_tool(gate, "bb")
         .args(["prove", "-b"])
         .arg(&acir)
         .arg("-w")

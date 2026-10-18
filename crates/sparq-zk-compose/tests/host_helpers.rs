@@ -704,6 +704,7 @@ fn fully_hidden_status_ref_serde_omits_iri_index_and_version() {
 
 #[test]
 fn driver_error_display_is_informative_for_every_variant() {
+    // zk-toolchain-gate: allow constructs DriverError values to assert their Display; it never spawns or verifies
     use sparq_zk_compose::driver::DriverError;
     let spawn = DriverError::Spawn {
         tool: "nargo".to_string(),

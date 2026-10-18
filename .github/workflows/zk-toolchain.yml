@@ -147,6 +147,15 @@ jobs:
     runs-on: ubuntu-latest
     # Toolchain install + real bb proving is the long pole; generous headroom.
     timeout-minutes: 60
+    env:
+      # The RUNTIME LEDGER. The shared gate in crates/sparq-zk*/tests/support/mod.rs
+      # appends one line, `<package>/<binary>::<test>`, each time it lets a live body
+      # run; a skip or a panic appends nothing. The job's final step compares the file
+      # against every gate call site in the ZK test trees, so a live test that no step
+      # runs — or that returned before reaching the gate — is a RED check rather than a
+      # silent pass. Set here, at JOB level, and read by that step as a literal path:
+      # a test must not be able to redirect it.
+      SPARQ_ZK_LIVE_LEDGER: ${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -225,22 +234,19 @@ jobs:
         run: python3 -m pip install --require-hashes -r .github/requirements/docs-quality.txt
 
       # Fail-closed checks on the live-toolchain gate, static and toolchain-free so a
-      # violation is a fast RED rather than a 60-minute one.
+      # violation is a fast RED rather than a 60-minute one. The gate in
+      # crates/sparq-zk*/tests/support/mod.rs is the only way a ZK test may obtain
+      # nargo/bb: `gate()` mints the token `live_tool()` needs, and the checker lints
+      # the test trees for every other acquisition path (a Command::new on a tool
+      # literal, a path or alias spelling of one, a shell, a non-literal executable, a
+      # not-found arm, a `which` probe, a `cmd!`, a branch on a driver spawn error, a
+      # prover route that never calls the gate). It also keeps the two per-crate copies
+      # of the gate byte-identical, ratchets the reviewed allow annotations, and checks
+      # that the ledger verify step at the end of this job cannot be skipped.
       #
-      # The live suites in crates/sparq-zk*/tests/ do not fail when nargo/bb are
-      # absent: tests/support/mod.rs::require_toolchain turns a missing tool into a
-      # printed skip whenever the lane declares itself toolchain-free via
-      # SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN, which ci.yml and feature-matrix.yml set at
-      # workflow level. For that gate to mean anything, no test may obtain nargo/bb by
-      # any other route, and the lane that HAS the toolchain must run the gated tests.
-      # The checker enforces both: it lints the ZK test trees for a private
-      # acquisition path (an executable literal or a non-literal argument to
-      # `Command::new`, an `ErrorKind::NotFound` arm, a `which` probe) outside the
-      # gate's module, keeps the two per-crate copies of that module byte-identical,
-      # and reads this workflow to verify the "default-run live ZK tests" step below
-      # runs every helper-using package PACKAGE-WIDE with no `--no-run`, no filter and
-      # no swallowed exit code. Coverage is by package, so a new live test binary is
-      # covered the moment it is added.
+      # Coverage is NOT checked statically: a step's command grammar cannot prove the
+      # tests ran. That is the ledger's job — see the job-level env above and the final
+      # step of this job.
       - name: Check the ZK live-toolchain gate (acquisition + lane coverage)
         if: steps.changes.outputs.zk == 'true'
         run: python3 scripts/check-zk-toolchain-gate.py --check
@@ -499,19 +505,18 @@ jobs:
       # run in the default lanes only as declared skips, because those lanes have no
       # toolchain. This is the lane that has it, so run them here too.
       #
-      # PACKAGE-WIDE on purpose, and `-p sparq-zk` was added: coverage by package means
-      # a new live test binary is run the moment it is added, with no list to update.
-      # `crates/sparq-zk/tests/poseidon2_noir_cross.rs` was the one gap — it gated
-      # itself with a private `ErrorKind::NotFound` arm that returned, so it passed
-      # quietly off this lane, and no step ran sparq-zk's non-ignored tests here. It
-      # now goes through the shared gate, and this step runs its package.
+      # PACKAGE-WIDE, and `-p sparq-zk` was added:
+      # `crates/sparq-zk/tests/poseidon2_noir_cross.rs` was the ONE gap this change
+      # found — it gated itself with a private not-found arm that returned, so it passed
+      # quietly, and no step ran sparq-zk's non-ignored tests here. It now goes through
+      # the shared gate, and this step runs its package. The other live compose binaries
+      # were already covered by this step before the change.
       #
-      # `scripts/check-zk-toolchain-gate.py` reads this step BY NAME and fails when a
-      # helper-using package is missing from it, or when it grows a target selector,
-      # a `--no-run`, a test-name filter, a `-- --ignored`, a swallowed exit code or a
-      # skippable `if:`. Renaming the step without updating that script is also a RED.
+      # DELIBERATELY no `if:`. The toolchain installs above share the `changes`
+      # condition, so if it were ever false this step would fail for want of nargo/bb
+      # rather than skip — which is the fail-closed direction. The ledger verify step at
+      # the end of the job is what proves these tests ran.
       - name: Run the default-run live ZK tests (real nargo/bb)
-        if: steps.changes.outputs.zk == 'true'
         run: |
           cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1
 
@@ -559,3 +564,19 @@ jobs:
           path: ${{ runner.temp }}/public-pattern-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: ${{ steps.selected-result.outcome == 'success' && 'error' || 'warn' }}
           retention-days: 30
+
+      # The ledger check: the proof that the live tests above RAN.
+      #
+      # Every `gate()`/`require_toolchain()` call site in crates/sparq-zk*/tests/ is
+      # expected to have appended its key to SPARQ_ZK_LIVE_LEDGER. A missing entry means
+      # the live body did not run — no step covers it, or it returned before the gate —
+      # and this step fails naming each one. A missing or empty ledger fails too. The
+      # path is a LITERAL here, not `$SPARQ_ZK_LIVE_LEDGER`, so a test that rewrote the
+      # variable could not point this step at a file it had prepared.
+      #
+      # It carries no `if:`, no `continue-on-error`, no `env:` and no
+      # `working-directory`, and must stay the LAST step of this job; the checker's own
+      # CHECK D reds on any of those changing. The ledger proves the gate was REACHED
+      # for each call site; it does not prove what the bodies asserted.
+      - name: Verify every live ZK test ran
+        run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt"

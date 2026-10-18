@@ -64,20 +64,21 @@ fn sponge_hash_matches_noir_poseidon_library() {
 /// its println output still equals the vectors above (and therefore the Rust
 /// implementation). Fails on any drift.
 ///
-/// The live body is gated by [`support::require_toolchain`], the single gate the ZK
-/// suites share. It used to catch the spawn's not-found error and `return`,
+/// The live body is gated by [`support::gate`], the single gate the ZK suites share,
+/// whose token is what `support::live_tool` requires in order to spawn. It used to catch the spawn's not-found error and `return`,
 /// so on a box without `nargo` this test reported `ok` for a body that never ran —
 /// the one remaining private soft-pass in the ZK test trees. The gate now decides:
 /// present → run; absent with `SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN` declared → a named,
 /// printed skip; absent and undeclared → a hard failure.
 #[test]
 fn nargo_live_cross_check() {
-    if !support::require_toolchain("nargo_live_cross_check", &["nargo"]) {
-        return;
-    }
+    let gate = match support::gate("nargo_live_cross_check", &["nargo"]) {
+        Some(g) => g,
+        None => return,
+    };
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/noir_poseidon2");
-    let out = support::live_tool("nargo")
+    let out = support::live_tool(&gate, "nargo")
         .arg("execute")
         .current_dir(&fixture)
         .output()

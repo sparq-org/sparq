@@ -72,29 +72,103 @@ fn allow_missing() -> bool {
 /// private copy of the gate cannot be added without a declared, reasoned exemption.
 /// This helper does NOT gate: it is [`require_toolchain`] that turns a missing tool
 /// into a hard failure or a declared, printed skip.
-// Each test binary declaring `mod support;` uses a SUBSET of this module, so an
-// unused item here is expected rather than dead code.
+
+/// Names the file the gate appends to when a live body is allowed to run.
+///
+/// `zk-toolchain.yml` sets it at JOB level and its final step verifies that every
+/// `require_toolchain` call site in the ZK test trees left an entry. A skip appends
+/// nothing and a panic appends nothing, so a lane that skipped past the gate cannot
+/// produce a complete ledger. The ledger proves the gate was REACHED; it says
+/// nothing about what the body went on to assert.
+pub const LEDGER_ENV: &str = "SPARQ_ZK_LIVE_LEDGER";
+
+/// Evidence that [`require_toolchain`]/[`gate`] found every requested tool on
+/// `PATH` and let the live body run.
+///
+/// Only [`gate`] mints one — the field is private to this module — and
+/// [`live_tool`] takes one, so a live tool cannot be spawned without having passed
+/// the gate first. `#[allow(dead_code)]` because each test binary declaring
+/// `mod support;` uses a subset of this module.
 #[allow(dead_code)]
-pub fn live_tool(tool: &str) -> std::process::Command {
+#[derive(Clone, Copy)]
+pub struct LiveToolchain {
+    _seal: (),
+}
+
+/// This test binary's cargo target name, the first half of a ledger key.
+fn binary_name() -> &'static str {
+    env!("CARGO_CRATE_NAME")
+}
+
+/// This package's name, so two crates' identically named test binaries (the
+/// per-crate copies of `toolchain_gate`) get distinct ledger keys.
+fn package_name() -> &'static str {
+    env!("CARGO_PKG_NAME")
+}
+
+/// The ledger key for `test`: `<package>/<binary>::<test>`.
+fn ledger_key(test: &str) -> String {
+    format!("{}/{}::{}", package_name(), binary_name(), test)
+}
+
+/// Append `test`'s key to the ledger, if the lane asked for one.
+///
+/// Opened with `O_APPEND` (`append(true)`) and written as ONE line in ONE
+/// `write_all`, so entries from tests running in parallel, or from a re-exec'd child
+/// process, cannot interleave. Best-effort by design: a write failure must not turn
+/// a passing live test red, and a missing entry is what the verifier reports.
+fn record(test: &str) {
+    use std::io::Write;
+    let path = match std::env::var_os(LEDGER_ENV) {
+        Some(p) if !p.is_empty() => p,
+        _ => return,
+    };
+    let line = format!("{}\n", ledger_key(test));
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(line.as_bytes()));
+}
+
+/// A [`std::process::Command`] for a live tool.
+///
+/// Takes a [`LiveToolchain`], which only [`gate`] mints, so the gate cannot be
+/// bypassed. It ALSO re-checks `PATH` itself and panics when the tool is absent, so
+/// neither a stale token nor an `is_err()` test on the spawn result can be turned
+/// into a soft pass. `scripts/check-zk-toolchain-gate.py` lints the ZK test trees
+/// for every other acquisition path.
+#[allow(dead_code)]
+pub fn live_tool(_gate: &LiveToolchain, tool: &str) -> std::process::Command {
+    assert!(
+        on_path(tool),
+        "{} is not on PATH at spawn time; the live toolchain gate must be passed \
+         first and the tool must stay available",
+        tool
+    );
     std::process::Command::new(tool)
 }
 
-/// Gate a LIVE test body on `tools` all being on `PATH`.
+/// Gate a LIVE test body on `tools` all being on `PATH`, returning the token
+/// [`live_tool`] needs.
 ///
-/// * all present → `true`; the caller runs its live body.
-/// * absent, [`ALLOW_MISSING_ENV`] set → prints a skip line naming `test`, the
-///   missing tool(s) and the variable, then `false`; the caller returns.
-/// * absent otherwise → PANICS, naming the missing tool, how to put the toolchain
-///   on `PATH`, and the opt-out variable.
+/// * all present -> `Some(token)`, and `test`'s key is appended to the ledger.
+/// * absent, [`ALLOW_MISSING_ENV`] set -> prints a skip line naming `test`, the
+///   missing tool(s) and the variable, then `None`; NOTHING is recorded.
+/// * absent otherwise -> PANICS, naming the missing tool, how to put the toolchain
+///   on `PATH`, and the opt-out variable; nothing is recorded.
 ///
 /// `test` is the calling test's own name. It is passed explicitly rather than read
 /// from the thread name because libtest runs tests on the main thread (named
 /// `main`) under `--test-threads=1`, which is exactly how the toolchain lane runs
-/// them.
-pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
+/// them. It must be a STRING LITERAL: the checker builds the expected ledger from
+/// those literals and rejects a call site whose name it cannot read.
+#[allow(dead_code)]
+pub fn gate(test: &str, tools: &[&str]) -> Option<LiveToolchain> {
     let missing: Vec<&str> = tools.iter().copied().filter(|t| !on_path(t)).collect();
     if missing.is_empty() {
-        return true;
+        record(test);
+        return Some(LiveToolchain { _seal: () });
     }
     let missing = missing.join(", ");
     if allow_missing() {
@@ -103,7 +177,7 @@ pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
              this lane toolchain-free — the live body did NOT run.",
             test, missing, ALLOW_MISSING_ENV
         ));
-        return false;
+        return None;
     }
     panic!(
         "{} is a LIVE test, so its body would not have run — not on PATH: {}. \
@@ -114,4 +188,10 @@ pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
          toolchain-free and turn this failure into a visible, named skip.",
         test, missing, ALLOW_MISSING_ENV
     );
+}
+
+/// [`gate`] as a boolean, for the call sites that do not spawn a tool themselves.
+#[allow(dead_code)]
+pub fn require_toolchain(test: &str, tools: &[&str]) -> bool {
+    gate(test, tools).is_some()
 }
