@@ -3,8 +3,8 @@ name: ci-fast
 # ci-fast — the ONE required check (docs/branch-protection.md). Fast and self-contained.
 #
 # WHAT: one workflow whose jobs are ordinary `needs:` edges — no cross-workflow polling.
-# Four parallel work jobs cover the core crates and sparq-reason, and one aggregating job named `ci-fast`
-# is the check the ruleset requires:
+# Four parallel work jobs cover the core crates and sparq-reason, and one aggregating job
+# named `ci-fast` is the check the ruleset requires:
 #   * lint        — clippy -D warnings on the core crates (fmt is informational: see below)
 #   * test        — nextest + doctests on the core crates, default features
 #   * test-reason — nextest + doctests on sparq-reason, default features
