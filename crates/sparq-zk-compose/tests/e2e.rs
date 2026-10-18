@@ -7238,3 +7238,166 @@ fn completeness_demand_leaves_simple_regime_verifiable() {
         ),
     }
 }
+
+/// INTEGRATION (hidden-only DEFERRAL, sq-xxg + the member resolution): a scan
+/// bound to BOTH a hidden-only commitment and a clear-attested one defers its
+/// member resolution out of the per-sub-proof loop — a hidden-only commitment's
+/// map entry is the method its declared hidden-issuer message SELECTS, and only
+/// `bind_hidden_issuer_attestations` byte-binds a proof to it — and is then
+/// resolved after that gate has run.
+///
+/// Here the two bound commitments authenticate DIFFERENT things: the hidden-only
+/// one attests the string-canonical method, the clear one attests NO method (the
+/// legacy unbound shape, admitted only under the written-down
+/// `MethodPolicy::admit_unbound` downgrade). So there is no single authenticated
+/// method to select a member against, and the manifest is REFUSED — by the
+/// DEFERRED pass, after the hidden-issuer gate has verified the hidden proof.
+///
+/// Why this reaches the deferred pass and not the loop: the loop sees the
+/// hidden-only commitment as a candidate and defers; everything between (the
+/// canonical vk + `bb verify` of the real `scan_k2` proof, the hidden revocation
+/// gates, and the hidden-issuer gate's own `bb verify`) must PASS for the
+/// deferred pass to run at all. Removing that pass leaves the deferral
+/// unresolved and the manifest ACCEPTED, so this case goes red.
+#[cfg(feature = "dual-leaf")]
+#[test]
+#[ignore = "slow: full bb prove of a k=2 scan + the hidden-issuer member \
+            (the deferred member resolution)"]
+fn a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate() {
+    use sparq_zk_compose::MethodPolicy;
+    if !support::require_toolchain(
+        "a_deferred_member_resolution_is_refused_after_the_hidden_issuer_gate",
+        &["nargo", "bb"],
+    ) {
+        return;
+    }
+    let prover = CircuitProver::from_crate_root();
+    let signer = test_issuer_sk(1);
+    let challenge_hex = FieldHex("0x2a".into());
+    let challenge = Fr::from(0x2au64);
+
+    // Two committed graphs over the same triples under DISTINCT salts, so the
+    // commitments differ (and the audit-#9 salt-uniqueness gate is satisfied).
+    // The `scan_k2` member asserts its per-graph commitments are STRICTLY
+    // INCREASING (the duplicate-inclusion / COUNT forge guard), so the pair is
+    // ordered by commitment value and the HIDDEN-ONLY role goes to whichever ends
+    // up first. Which of the two is hidden is immaterial to what is under test:
+    // either way one bound commitment is hidden-only and the other clear.
+    // DISTINCT triples (the commitment is over the canonical triples, so two
+    // graphs with the same content commit to the same value whatever their
+    // salts), under DISTINCT salts (the audit-#9 salt-uniqueness gate).
+    let second_graph = vec![Triple::new(
+        NamedOrBlankNode::NamedNode(iri("http://ex/bob")),
+        iri("http://ex/age"),
+        int_lit(26),
+    )];
+    let salt_a = salt_from_bytes(&[7u8; 32]);
+    let salt_b = salt_from_bytes(&[9u8; 32]);
+    let ca = commit_triples(&credential_graph(), salt_a).unwrap();
+    let cb = commit_triples(&second_graph, salt_b).unwrap();
+    use sparq_zk::field::field_to_be_bytes_32 as be32;
+    let ((c_hidden, salt_hidden), (c_clear, salt_clear)) =
+        if be32(&ca.commitment) < be32(&cb.commitment) {
+            ((ca, salt_a), (cb, salt_b))
+        } else {
+            ((cb, salt_b), (ca, salt_a))
+        };
+    let pattern = Pattern {
+        s: Slot::Var,
+        p: Slot::Const(Term::NamedNode(iri("http://ex/age"))),
+        o: Slot::Var,
+    };
+    // ONE k=2 scan bound to both graphs: its member's leaf-shape assumption
+    // applies to each, so both are resolved.
+    let scan = build_scan(&[c_hidden.clone(), c_clear.clone()], &pattern).unwrap();
+    let (id, toml) = prover_toml_for(
+        &scan.inputs,
+        &challenge_hex,
+        &scan.witness.counts,
+        &scan.witness.enc,
+        &[],
+        None,
+        None,
+    )
+    .unwrap();
+    let art = prover
+        .prove_in(&id, &toml, &scratch("defer_scan"), "defer_scan")
+        .expect("the k=2 scan proves");
+
+    // The CLEAR attestation over the second graph attests NO method (the legacy
+    // `ZKSIG_C3` shape).
+    let status_ref = sparq_zk::sig::status_ref_digest(
+        &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
+        FIXTURE_STATUS_INDEX,
+        FIXTURE_STATUS_VERSION,
+    );
+    let mut clear = attest_with_salt(c_clear.commitment, salt_clear, &signer);
+    clear.signature =
+        signer.sign_commitment_with_status(&c_clear.commitment, &salt_clear, &status_ref);
+
+    let mut manifest = ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o }".into(),
+        issuers: vec![],
+        key_set: vec![],
+        commitment_attestations: vec![clear],
+        attributions: vec![vec![0, 1]],
+        pattern_scans: vec![],
+        join_obligations: vec![],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge: challenge_hex },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot(false)],
+        sub_proofs: vec![SubProof { inputs: scan.inputs, proof_hex: encode_artifacts(&art) }],
+        binding_edges: vec![],
+        join_edges: vec![],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+        holder_pok_proofs: vec![],
+        holder_set_proofs: vec![],
+    };
+
+    // The FIRST graph is covered ONLY by a hidden-issuer proof, whose declared
+    // message attests the string-canonical METHOD.
+    let keyset = hi_keyset();
+    let signers = hi_canonical_signers();
+    let signer_index = keyset
+        .member_index(&public_key_to_hex(&signer.public_key()))
+        .expect("signer in K") as u64;
+    manifest.hidden_issuer_attestations = vec![prove_hidden_issuer(
+        &prover,
+        &keyset,
+        &signers,
+        &signer,
+        signer_index,
+        &c_hidden.commitment,
+        &salt_hidden,
+        &challenge,
+        true,
+        "defer_hi",
+    )];
+
+    // The downgrade is what lets the unattested clear entry past stage 2d, which
+    // is what makes the disagreement reachable at all.
+    let k = hi_keyset().with_method_policy(MethodPolicy::current().admit_unbound());
+    match verify_manifest(
+        &manifest,
+        &prover,
+        &scratch("defer_verify"),
+        &k,
+        &fresh_policy(),
+        &HolderRegistry::empty(),
+        &HolderBindingPolicy::allow_bearer(),
+        &EntailmentPolicy::simple_only(),
+        &nonce_for("0x2a"),
+        &InMemorySeenNonces::new(),
+    ) {
+        Err(CheckError::SubProofMethodUnresolved { ref proof, .. }) if proof == "sub_proofs[0]" => {}
+        other => panic!(
+            "the deferred member resolution must refuse this manifest after the \
+             hidden-issuer gate, got {other:?}"
+        ),
+    }
+}

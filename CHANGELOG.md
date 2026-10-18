@@ -160,9 +160,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its canonical verification key — from the AUTHENTICATED commitment method of the commitments
   that sub-proof is bound to, instead of from the manifest's declared `CircuitId` alone. The
   method is derived per sub-proof: a `Scan` (and an `extended-fragment` `PathReach`) resolves
-  every commitment in its own `commitments` vector, a `JoinEq` resolves both `commit_a` and
-  `commit_b`, and a `Filter*` member inherits the method of the source scan of every validated
-  binding edge that binds it; all of them must agree. The declared id is resolved through the
+  every commitment in its own `commitments` vector, a `JoinEq` resolves the ENDPOINT commitments
+  of every declared `JoinEdge` that covers it (`sub_proofs[edge.scan_a].commitments[edge.graph_a]`
+  and `sub_proofs[edge.scan_b].commitments[edge.graph_b]`) rather than its own prover-declared
+  `commit_a`/`commit_b`, and a `Filter*` member inherits the method of the source scan of every
+  validated binding edge that binds it; all of them must agree. The declared id is resolved through the
   `(commitment-method x circuit)` dispatch matrix (`dispatch::resolve_circuit`, opt-in behind
   `dual-leaf`) and only the resolved member is used. Three new fail-closed refusals:
   `CheckError::MemberNotLegalForMethod` (the member is not legal for that method),
@@ -183,6 +185,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attested and unattested ones, used to be accepted and is now refused; an edge-less FILTER over
   a member legal under every admissible method still verifies. Not externally audited (sq-qhy4);
   no soundness or privacy property is claimed as achieved.
+
+- **sparq-zk-compose:** the hidden-join gate's ENDPOINT half now runs in BOTH stage-1 regimes.
+  `bind_joins` enforces two separable things — the endpoint resolution plus commitment-matching
+  (each declared `JoinEdge`'s join proof must carry public `commit_a`/`commit_b` byte-equal to the
+  two referenced scans' `commitments[graph_*]`), which reads only the manifest, and the slot
+  binding, which re-derives the query's patterns. The first is now its own gate
+  (`bind_join_endpoints`, stage 2g′) and is no longer deferred with the second in the
+  `extended-fragment` regime; only the slot binding and the N-way chain check remain deferred
+  there (sq-1zf94). It is also what the `JoinEq` member resolution above reads its endpoints from.
+  **Behaviour change (`extended-fragment` only):** a declared hidden `JoinEdge` whose join proof
+  names commitments other than its endpoint scans' is now refused
+  (`CheckError::JoinCommitmentMismatch`) instead of standing as a prover-declared linkage, and a
+  hidden join one of whose endpoints is a bounded-path (`PathReach`) sub-proof rather than a
+  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's verdicts
+  are unchanged — it already ran the whole gate. Adds refusals and no acceptance.
 
 - **sparq-zk-compose / zk (sq-j506, #7121; Noir library #7103):** the `DualLeafV2` **component-witnessed** scan and
   hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir

@@ -2829,12 +2829,14 @@ struct Prefiltered {
 ///   query-fragment ACCEPTANCE is routed through `fragment_query` (accepts the
 ///   wave-1 `UNION` / `VALUES` / property-path extensions, fail-closed on anything
 ///   outside), and the FLAT cross-graph obligation binding plus the per-branch
-///   term binding (`bind_query_correctness` / `bind_attributions` / `bind_joins`)
-///   are DEFERRED to the structural routing gate + bead sq-1zf94.
+///   term binding (`bind_query_correctness` / `bind_attributions` / the SLOT half
+///   of `bind_joins`) are DEFERRED to the structural routing gate + bead
+///   sq-1zf94.
 ///
 /// The query-INDEPENDENT gates — id hygiene (stage 1b), binding edges (stage 2),
-/// issuer attestation (stage 2d), revocation (stage 2f) — are UNCHANGED in both
-/// regimes. This is the honest scope of the extended-fragment routing: it lets an
+/// issuer attestation (stage 2d), revocation (stage 2f), and the ENDPOINT half of
+/// the hidden-join gate (stage 2g′, [`bind_join_endpoints`]) — are UNCHANGED in
+/// both regimes. This is the honest scope of the extended-fragment routing: it lets an
 /// accepted extended query's sub-proofs verify end-to-end WITHOUT claiming the
 /// disclosed path/`VALUES` terms are bound to the proofs (that binding is
 /// sq-1zf94). NOT externally audited (sq-qhy4).
@@ -3120,8 +3122,17 @@ fn prefilter_manifest_structure_impl(
     //
     // sq-h732x: `bind_joins` re-derives the query-shared join slots via
     // the flat `fragment_patterns`, so the extended-fragment regime
-    // (`skip_query_binding`) defers it — the hidden-join slot binding over a
-    // multi-branch query is part of the per-branch term binding (sq-1zf94).
+    // (`skip_query_binding`) defers THAT half — the hidden-join slot binding over
+    // a multi-branch query is part of the per-branch term binding (sq-1zf94).
+    //
+    // Hardening: the ENDPOINT half reads no query text, so it runs
+    // UNCONDITIONALLY (stage 2g′, `bind_join_endpoints`) rather than being
+    // deferred with the slot binding. In the extended regime a declared hidden
+    // `JoinEdge`'s join proof therefore has its public `commit_a`/`commit_b`
+    // equated to the endpoint scans' `commitments[graph_*]` here, instead of
+    // standing as a prover-declared linkage; and the join arm of
+    // `bound_commitments` reads those validated endpoints.
+    bind_join_endpoints(manifest)?;
     if !skip_query_binding {
         bind_joins(manifest, &methods)?;
     }
@@ -5629,17 +5640,20 @@ enum SubProofMethod {
 /// - `Scan` / `PathReach` — its OWN `commitments` vector. The member recomputes
 ///   every one of those commitments in-circuit, so its leaf-shape assumption
 ///   applies to each; all `k` are returned.
-/// - `JoinEq` — its public `commit_a` and `commit_b`. On the FLAT path
-///   `bind_joins` has already byte-bound those to the two scans'
-///   `commitments[graph_*]` in the pre-filter, so resolving from them is
-///   resolving from the validated scan endpoints. In the `extended-fragment`
-///   regime `bind_joins` is DEFERRED (sq-1zf94), so there they are still
-///   prover-declared; that does not open anything here, because a commitment no
-///   attestation covers is absent from `methods` and reads as
-///   `AuthenticatedMethod::Unbound`, and `fold_bound_methods` refuses a mixture
-///   of attested and unattested — so a substituted endpoint fails closed rather
-///   than selecting a method. The HIDING `join_commitment` is a per-presentation
-///   value commitment, not a committed graph, so it is NOT returned.
+/// - `JoinEq` — the ENDPOINT commitments of every declared
+///   [`crate::manifest::JoinEdge`] whose `join_proof` is that sub-proof, i.e.
+///   `sub_proofs[edge.scan_a].commitments[edge.graph_a]` and
+///   `sub_proofs[edge.scan_b].commitments[edge.graph_b]`, taken from
+///   [`validate_join_edge`]. NOT the join's own public `commit_a`/`commit_b`:
+///   those are prover-declared, and [`bind_join_endpoints`] — which runs in BOTH
+///   stage-1 regimes — is what requires them to byte-equal these endpoints. An
+///   edge whose endpoints do not validate contributes nothing (that manifest was
+///   already refused by stage 2g′; if it had not been, the sub-proof falls to the
+///   ORPHAN rule below, which admits only a method-independent member). A join
+///   proof NO edge covers is likewise an orphan: it has no validated endpoint, so
+///   its method is not derived from a prover-declared commitment. The HIDING
+///   `join_commitment` is a per-presentation value commitment, not a committed
+///   graph, so it is never returned.
 /// - the `Filter*` members — NONE of their own. A FILTER binds to committed data
 ///   only through a [`crate::manifest::BindingEdge`], whose `from_proof` names
 ///   the scan sub-proof whose row/slot supplies its `operand_enc` and whose
@@ -5665,8 +5679,20 @@ fn bound_commitments(manifest: &ProofManifest, proof: usize) -> Vec<FieldHex> {
         ProofInputs::Scan { commitments, .. } => commitments.clone(),
         #[cfg(feature = "extended-fragment")]
         ProofInputs::PathReach { commitments, .. } => commitments.clone(),
-        ProofInputs::JoinEq { commit_a, commit_b, .. } => {
-            vec![commit_a.clone(), commit_b.clone()]
+        ProofInputs::JoinEq { .. } => {
+            // The VALIDATED endpoints of every edge that covers this join proof —
+            // never its own prover-declared `commit_a`/`commit_b`.
+            let mut out: Vec<FieldHex> = Vec::new();
+            for (e, edge) in manifest.join_edges.iter().enumerate() {
+                if edge.join_proof != proof {
+                    continue;
+                }
+                if let Ok(v) = validate_join_edge(manifest, e, edge) {
+                    out.push(v.endpoints.0);
+                    out.push(v.endpoints.1);
+                }
+            }
+            out
         }
         // Every remaining variant is a FILTER member, which binds to committed
         // data only through a binding edge.
@@ -6299,6 +6325,129 @@ fn bind_repeated_pattern_slots(
     Ok(())
 }
 
+/// What a declared [`crate::manifest::JoinEdge`] resolves to once its endpoints have been
+/// validated — the output of [`validate_join_edge`].
+struct ValidatedJoinEdge {
+    /// The ENDPOINT scans' committed-graph commitments:
+    /// `sub_proofs[edge.scan_a].commitments[edge.graph_a]` and
+    /// `sub_proofs[edge.scan_b].commitments[edge.graph_b]`.
+    ///
+    /// The join proof's PUBLIC `commit_a`/`commit_b` were required to byte-equal
+    /// these, so a consumer that resolves anything from the join's endpoints reads
+    /// these rather than the prover-declared public inputs.
+    ///
+    /// `bound_commitments` — the only reader — is `dual-leaf`-gated, so with that
+    /// feature OFF the endpoints are validated and then discarded.
+    #[cfg_attr(not(feature = "dual-leaf"), allow(dead_code))]
+    endpoints: (FieldHex, FieldHex),
+    /// The join proof's hiding `join_commitment` (a per-presentation value
+    /// commitment, NOT a committed graph).
+    join_commitment: FieldHex,
+    /// The join proof's public slots, for the query-dependent slot binding.
+    slot_a: u32,
+    slot_b: u32,
+}
+
+/// Resolve and validate ONE declared [`crate::manifest::JoinEdge`] endpoint pair — the
+/// QUERY-INDEPENDENT half of [`bind_joins`], factored out so it has a single
+/// implementation and can run in BOTH stage-1 regimes (see
+/// [`bind_join_endpoints`]).
+///
+/// It enforces, for edge index `e`:
+/// - the three referenced sub-proofs exist ([`CheckError::JoinDanglingEdge`]);
+/// - `scan_a`/`scan_b` are `Scan` sub-proofs and `join_proof` is a `JoinEq` one
+///   ([`CheckError::JoinEdgeKindMismatch`]);
+/// - `graph_a`/`graph_b` index inside those scans' `commitments`
+///   ([`CheckError::JoinDanglingEdge`]);
+/// - **commitment-matching (anti-A2, design §2.3/§4.2):** the join proof's public
+///   `commit_a`/`commit_b` byte-equal those two scan commitments
+///   ([`CheckError::JoinCommitmentMismatch`]). The comparison is over canonical
+///   big-endian field bytes, so `0x`-padding/case spellings do not spuriously
+///   diverge, and a malformed hex on either side fails closed (the audit-#1
+///   reconstruction also rejects it as `MalformedField` in the bb stage).
+///
+/// It reads NOTHING from the query text, which is why it is mode-independent.
+/// The slot binding (§4.4) and the N-way chain check DO re-derive the query's
+/// patterns and stay in [`bind_joins`].
+fn validate_join_edge(
+    manifest: &ProofManifest,
+    e: usize,
+    edge: &crate::manifest::JoinEdge,
+) -> Result<ValidatedJoinEdge, CheckError> {
+    // Resolve the three referenced sub-proofs (dangling => reject).
+    let scan_a = manifest
+        .sub_proofs
+        .get(edge.scan_a)
+        .ok_or(CheckError::JoinDanglingEdge { edge: e })?;
+    let scan_b = manifest
+        .sub_proofs
+        .get(edge.scan_b)
+        .ok_or(CheckError::JoinDanglingEdge { edge: e })?;
+    let join = manifest
+        .sub_proofs
+        .get(edge.join_proof)
+        .ok_or(CheckError::JoinDanglingEdge { edge: e })?;
+
+    // Kinds: scan_a/scan_b must be scans; join_proof must be a join_eq.
+    let commit_a_scan = match &scan_a.inputs {
+        ProofInputs::Scan { commitments, .. } => commitments
+            .get(edge.graph_a)
+            .ok_or(CheckError::JoinDanglingEdge { edge: e })?,
+        _ => return Err(CheckError::JoinEdgeKindMismatch { edge: e }),
+    };
+    let commit_b_scan = match &scan_b.inputs {
+        ProofInputs::Scan { commitments, .. } => commitments
+            .get(edge.graph_b)
+            .ok_or(CheckError::JoinDanglingEdge { edge: e })?,
+        _ => return Err(CheckError::JoinEdgeKindMismatch { edge: e }),
+    };
+    let (commit_a_join, commit_b_join, join_commitment, slot_a, slot_b) = match &join.inputs {
+        ProofInputs::JoinEq { commit_a, commit_b, join_commitment, slot_a, slot_b, .. } => {
+            (commit_a, commit_b, join_commitment, *slot_a, *slot_b)
+        }
+        _ => return Err(CheckError::JoinEdgeKindMismatch { edge: e }),
+    };
+
+    if !field_hex_eq(commit_a_join, commit_a_scan) || !field_hex_eq(commit_b_join, commit_b_scan) {
+        return Err(CheckError::JoinCommitmentMismatch { edge: e });
+    }
+
+    Ok(ValidatedJoinEdge {
+        endpoints: (commit_a_scan.clone(), commit_b_scan.clone()),
+        join_commitment: join_commitment.clone(),
+        slot_a,
+        slot_b,
+    })
+}
+
+/// Stage 2g′: run [`validate_join_edge`] over every declared [`crate::manifest::JoinEdge`], in
+/// BOTH stage-1 regimes.
+///
+/// [`bind_joins`] as a whole re-derives the query's patterns for its slot binding,
+/// so the extended-fragment regime defers it (sq-1zf94). Its endpoint half needs
+/// no query text, and deferring it too left a declared hidden `JoinEdge` in that
+/// regime with its join proof's public `commit_a`/`commit_b` never equated to the
+/// endpoint scans' commitments — a prover-declared linkage. Running the endpoint
+/// half unconditionally closes that: in either regime a `JoinEdge` whose join
+/// proof names commitments other than its endpoint scans' is refused by name
+/// before any key is selected.
+///
+/// It is also what makes the join arm of [`bound_commitments`] read VALIDATED
+/// endpoints: that arm returns the endpoint scans' commitments, which this gate
+/// has already required the join's public inputs to byte-equal.
+///
+/// In the extended regime this additionally refuses — fail-closed, by the
+/// pre-existing [`CheckError::JoinEdgeKindMismatch`] — a hidden join whose
+/// endpoint is a bounded-path (`PathReach`) sub-proof rather than a `Scan`. A
+/// scan↔path hidden join has no endpoint commitment this rule can resolve, so it
+/// is refused rather than admitted unvalidated.
+fn bind_join_endpoints(manifest: &ProofManifest) -> Result<(), CheckError> {
+    for (e, edge) in manifest.join_edges.iter().enumerate() {
+        validate_join_edge(manifest, e, edge)?;
+    }
+    Ok(())
+}
+
 /// sq-sfsi (hidden cross-credential JOIN, step 4 of sq-bwwl): the
 /// `bind_joins` verifier gate — the hidden-key analogue of `bind_query_correctness`
 /// + the `binding_edges` consistency stage, for `ProofManifest::join_edges`.
@@ -6352,6 +6501,15 @@ fn bind_repeated_pattern_slots(
 ///    pattern satisfied by two credentials) is handled correctly: the join binds
 ///    against whichever scan the edge names, neither spuriously rejected nor bound
 ///    to the wrong scan via `sub_proofs` ordering. sq-sfsi multi-scan.
+///
+/// # Which half runs in which stage-1 regime
+/// Properties 1 (endpoint resolution + commitment-matching) and 3 (the slot
+/// binding) have different inputs: 1 reads only the manifest, 3 re-derives the
+/// query's patterns. So 1 is factored into [`validate_join_edge`] and run by
+/// [`bind_join_endpoints`] in BOTH regimes, while this function — 3 plus the
+/// N-way chain check — stays FLAT-only (the extended regime's per-branch term
+/// binding is sq-1zf94). This function re-runs 1 through the same helper, so the
+/// rule has one implementation.
 ///
 /// # Scope / honesty boundary (the disclosed-vs-hidden distinction — load-bearing)
 /// `bind_joins` rigorously validates every DECLARED hidden `JoinEdge`. It does NOT
@@ -6452,49 +6610,12 @@ fn bind_joins(
 
     // --- (1)+(3a): per-edge commitment-matching + slot binding. ---
     for (e, edge) in manifest.join_edges.iter().enumerate() {
-        // Resolve the three referenced sub-proofs (dangling => reject).
-        let scan_a = manifest
-            .sub_proofs
-            .get(edge.scan_a)
-            .ok_or(CheckError::JoinDanglingEdge { edge: e })?;
-        let scan_b = manifest
-            .sub_proofs
-            .get(edge.scan_b)
-            .ok_or(CheckError::JoinDanglingEdge { edge: e })?;
-        let join = manifest
-            .sub_proofs
-            .get(edge.join_proof)
-            .ok_or(CheckError::JoinDanglingEdge { edge: e })?;
-
-        // Kinds: scan_a/scan_b must be scans; join_proof must be a join_eq.
-        let commit_a_scan = match &scan_a.inputs {
-            ProofInputs::Scan { commitments, .. } => commitments
-                .get(edge.graph_a)
-                .ok_or(CheckError::JoinDanglingEdge { edge: e })?,
-            _ => return Err(CheckError::JoinEdgeKindMismatch { edge: e }),
-        };
-        let commit_b_scan = match &scan_b.inputs {
-            ProofInputs::Scan { commitments, .. } => commitments
-                .get(edge.graph_b)
-                .ok_or(CheckError::JoinDanglingEdge { edge: e })?,
-            _ => return Err(CheckError::JoinEdgeKindMismatch { edge: e }),
-        };
-        let (commit_a_join, commit_b_join, join_commitment, slot_a, slot_b) = match &join.inputs {
-            ProofInputs::JoinEq { commit_a, commit_b, join_commitment, slot_a, slot_b, .. } => {
-                (commit_a, commit_b, join_commitment, *slot_a, *slot_b)
-            }
-            _ => return Err(CheckError::JoinEdgeKindMismatch { edge: e }),
-        };
-
-        // (1) Commitment-matching (anti-A2). Compare on the canonical big-endian
-        // field bytes (so spelling/padding differences do not spuriously diverge);
-        // a malformed commitment hex on EITHER side fails closed (the audit-#1
-        // reconstruction also rejects it as MalformedField in the bb stage).
-        if !field_hex_eq(commit_a_join, commit_a_scan)
-            || !field_hex_eq(commit_b_join, commit_b_scan)
-        {
-            return Err(CheckError::JoinCommitmentMismatch { edge: e });
-        }
+        // (1) Endpoint resolution + commitment-matching (anti-A2). Shared with
+        // `bind_join_endpoints`, which runs this half in BOTH stage-1 regimes, so
+        // the rule has one implementation and re-running it here is idempotent.
+        let validated = validate_join_edge(manifest, e, edge)?;
+        let ValidatedJoinEdge { join_commitment, slot_a, slot_b, .. } = validated;
+        let join_commitment = &join_commitment;
 
         // (3a) Slot binding (§4.4). The edge's two scans answer two query
         // patterns; the shared join variable must occupy slot_a in pattern A and
@@ -9124,8 +9245,10 @@ fn intern_attribution(
 ///    attestation, revocation, and the hidden gates), EXCEPT that stage-1a's
 ///    query-fragment acceptance is routed through `fragment_query` (so the
 ///    extended query is not rejected) and the FLAT per-branch term-binding gates
-///    (`bind_query_correctness`/`bind_attributions`/`bind_joins`) are replaced by
-///    layers 2–4's extended analogue.
+///    (`bind_query_correctness`/`bind_attributions`/the SLOT half of `bind_joins`)
+///    are replaced by layers 2–4's extended analogue. The ENDPOINT half of the
+///    hidden-join gate (`bind_join_endpoints`) is query-independent and runs here
+///    exactly as it does on the flat path.
 ///
 /// # Honest scope (LOAD-BEARING — read before relying on this)
 /// Layers 2–4 bind the disclosed path predicate/endpoints, `VALUES` cells, and a
@@ -12273,6 +12396,166 @@ mod fragment_dispatch_tests {
         );
     }
 
+    // --- Stage 2g′: a hidden join's ENDPOINTS are bound in BOTH regimes --------
+    //
+    // `bind_joins` as a whole re-derives the query's patterns for its slot
+    // binding, so the extended regime defers it (sq-1zf94). Its ENDPOINT half
+    // needs no query text and so runs in both regimes (`bind_join_endpoints`).
+    // These cases go through the PUBLIC `verify_fragment_manifest` — the only
+    // entry point into the extended regime — and refuse inside the pre-filter, so
+    // no nargo/bb toolchain is involved.
+
+    /// The UNION fixture (two routed BGP scans), plus an unrouted third scan whose
+    /// commitment is a DIFFERENT, equally attested committed graph, plus a
+    /// `JoinEq` sub-proof and a `JoinEdge` naming the two routed scans as its
+    /// endpoints. `declared` is what the join proof declares as its public
+    /// `(commit_a, commit_b)`.
+    ///
+    /// Returns the fragment manifest and the key set that attests every scan
+    /// commitment in it (so the decoy below is attested, not merely present).
+    fn union_with_hidden_join(declared: (FieldHex, FieldHex)) -> (FragmentManifest, KeySet) {
+        let sc0 = scan_real(
+            [None, Some("http://ex/p"), None],
+            vec![[iri("http://ex/s0"), iri("http://ex/p"), iri("http://ex/o0")]],
+        );
+        let sc1 = scan_real(
+            [None, Some("http://ex/q"), None],
+            vec![[iri("http://ex/o1"), iri("http://ex/q"), iri("http://ex/s1")]],
+        );
+        // A third committed graph, attested exactly like the endpoints, so a decoy
+        // drawn from it authenticates the SAME method as the real endpoints.
+        let mut decoy_scan = sc0.clone();
+        if let ProofInputs::Scan { commitments, .. } = &mut decoy_scan {
+            commitments[0] = decoy_commitment();
+        }
+        let join = ProofInputs::JoinEq {
+            id: CircuitId::JoinEq { n_a: 16, n_b: 16 },
+            commit_a: declared.0,
+            commit_b: declared.1,
+            join_commitment: fh("0x12c"),
+            slot_a: 2,
+            slot_b: 2,
+        };
+        let mut m = fm(
+            UNION,
+            vec![sub(sc0), sub(sc1), sub(decoy_scan), sub(join)],
+            vec![
+                bw_scan(0, vec![0], vec![0], vec![], sol(&[("s", "http://ex/s0"), ("o", "http://ex/o0")])),
+                bw_scan(1, vec![1], vec![0], vec![], sol(&[("o", "http://ex/o1"), ("s", "http://ex/s1")])),
+            ],
+        );
+        m.manifest.join_edges = vec![crate::manifest::JoinEdge {
+            scan_a: 0,
+            graph_a: 0,
+            scan_b: 1,
+            graph_b: 0,
+            join_proof: 3,
+        }];
+        let k = attest_fragment_fixture(&mut m);
+        (m, k)
+    }
+
+    /// Stage 2f (`bind_revocation`) runs ahead of 2g′ and reads the RELYING
+    /// PARTY's authoritative snapshot, so the fixtures' policy carries one showing
+    /// the attested status index UNSET.
+    fn join_fixture_policy() -> RevocationPolicy {
+        RevocationPolicy::accept_version(TEST_STATUS_VERSION).with_snapshots([
+            crate::manifest::StatusListSnapshot {
+                status_list: TEST_STATUS_LIST.to_string(),
+                version: TEST_STATUS_VERSION,
+                bits: vec![0u8, 0u8],
+            },
+        ])
+    }
+
+    /// The third committed graph's commitment (see `union_with_hidden_join`).
+    fn decoy_commitment() -> FieldHex {
+        fh("0x7")
+    }
+
+    /// The routed scans' own commitment, as `scan_real` builds it.
+    fn endpoint_commitment() -> FieldHex {
+        fh("0x1")
+    }
+
+    fn run_fragment(m: &FragmentManifest, k: &KeySet) -> Result<(), CheckError> {
+        let (p, w, _ks, _rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let rp = join_fixture_policy();
+        verify_fragment_manifest(m, &p, &w, k, &rp, &hr, &hbp, &ep, &n, &seen)
+    }
+
+    /// A hidden `JoinEdge` whose join proof declares commitments the edge's two
+    /// endpoint scans do not carry is REFUSED in the extended regime, for both
+    /// constructions that used to pass it:
+    ///
+    /// - **two ABSENT endpoints** — commitments no attestation covers, which the
+    ///   authenticated-method map has no entry for;
+    /// - **two same-method DECOYS** — a different committed graph, attested by the
+    ///   same issuer under the same method, so every method-agreement rule is
+    ///   satisfied and only the endpoint equality separates it from the honest
+    ///   edge.
+    ///
+    /// The honest edge is the control: it passes this gate and the refusal that
+    /// does arrive comes from a LATER stage, so the two refusals above are about
+    /// the endpoint binding and not about the fixture.
+    #[test]
+    fn an_extended_hidden_joins_endpoints_must_equal_its_edges_scans() {
+        let absent = (fh("0xdead"), fh("0xbeef"));
+        let decoy = (decoy_commitment(), decoy_commitment());
+        for (what, declared) in [("two absent endpoints", absent), ("two same-method decoys", decoy)]
+        {
+            let (m, k) = union_with_hidden_join(declared);
+            let err = run_fragment(&m, &k).unwrap_err();
+            assert!(
+                matches!(err, CheckError::JoinCommitmentMismatch { edge: 0 }),
+                "{}: the extended regime must bind the hidden join's endpoints, got {:?}",
+                what,
+                err
+            );
+        }
+
+        // CONTROL: the honest edge passes stage 2g′ and is refused later (its
+        // `join_eq` sub-proof carries no proof bytes), so the two refusals above
+        // are not an artefact of the fixture.
+        let (m, k) = union_with_hidden_join((endpoint_commitment(), endpoint_commitment()));
+        let err = run_fragment(&m, &k).unwrap_err();
+        assert!(
+            !matches!(err, CheckError::JoinCommitmentMismatch { .. }),
+            "the honest edge must pass the endpoint gate, got {:?}",
+            err
+        );
+    }
+
+    /// The ENDPOINT half runs ahead of the regime switch, so the extended regime
+    /// reaches it on a query the FLAT regime refuses at stage 1a. Pinned from the
+    /// other side too: with the hidden join removed, that same fixture gets past
+    /// stage 2g′ and the extended regime's own stage-1a routing accepts the UNION.
+    ///
+    /// The flat counterpart of the two refusals above lives in
+    /// `tests/join_gates.rs`, where the fixture is a flat-fragment join query.
+    #[test]
+    fn the_endpoint_gate_is_reached_on_a_query_only_the_extended_regime_accepts() {
+        let (m, k) = union_with_hidden_join((fh("0xdead"), fh("0xbeef")));
+        // Flat: refused at stage 1a, before stage 2g′ — so this fixture's
+        // endpoint refusal above is the EXTENDED regime's doing.
+        let flat =
+            prefilter_manifest_structure(&m.manifest, &k, &join_fixture_policy()).unwrap_err();
+        assert!(
+            matches!(flat, CheckError::Sparqzk(VerifyError::UnsupportedFragment(_))),
+            "the flat regime refuses this UNION query at stage 1a, got {flat:?}"
+        );
+        // Extended, same fixture with NO hidden join: stage 2g′ has nothing to
+        // validate and the refusal comes from a later stage.
+        let (mut ok, k2) = union_with_hidden_join((fh("0xdead"), fh("0xbeef")));
+        ok.manifest.join_edges.clear();
+        let err = run_fragment(&ok, &k2).unwrap_err();
+        assert!(
+            !matches!(err, CheckError::JoinCommitmentMismatch { .. }),
+            "with no declared edge the endpoint gate must be silent, got {:?}",
+            err
+        );
+    }
+
     // --- sq-1zf94: DISCLOSED-SOLUTION term binding (bind_fragment_solution) ----
     //
     // Non-vacuous, no nargo/bb: the disclosed path pred/endpoints + VALUES cells
@@ -13770,27 +14053,48 @@ mod member_from_authenticated_method_tests {
         assert!(resolve(&m, 0, &map_of(&[(&c1, Some(V2)), (&c2, Some(V2))])).is_ok());
     }
 
-    /// A join resolves BOTH endpoint commitments, in either order.
-    #[test]
-    fn a_join_resolves_both_endpoints_in_either_order() {
-        let c1 = fhx("0x64");
-        let c2 = fhx("0xc8");
-        let join = |a: &FieldHex, b: &FieldHex| ProofInputs::JoinEq {
+    fn join_over(a: &FieldHex, b: &FieldHex) -> ProofInputs {
+        ProofInputs::JoinEq {
             id: CircuitId::JoinEq { n_a: 16, n_b: 16 },
             commit_a: a.clone(),
             commit_b: b.clone(),
             join_commitment: fhx("0x12c"),
             slot_a: 2,
             slot_b: 2,
-        };
+        }
+    }
+
+    /// `sub_proofs = [scan over `a`, scan over `b`, join]`, with a `JoinEdge`
+    /// naming scan 0 / scan 1 as the join's endpoints.
+    fn join_manifest_of(a: &FieldHex, b: &FieldHex, declared: (&FieldHex, &FieldHex)) -> ProofManifest {
+        let mut m = manifest_of(vec![
+            scan_over(vec![a.clone()]),
+            scan_over(vec![b.clone()]),
+            join_over(declared.0, declared.1),
+        ]);
+        m.join_edges = vec![crate::manifest::JoinEdge {
+            scan_a: 0,
+            graph_a: 0,
+            scan_b: 1,
+            graph_b: 0,
+            join_proof: 2,
+        }];
+        m
+    }
+
+    /// A join resolves BOTH of its edge's endpoint commitments, in either order.
+    #[test]
+    fn a_join_resolves_both_endpoints_in_either_order() {
+        let c1 = fhx("0x64");
+        let c2 = fhx("0xc8");
         let mixed = map_of(&[(&c1, Some(V2)), (&c2, Some(CANON))]);
         // BOTH endpoint orders: a disagreement between the two graph commitments is
         // refused whichever side carries which method.
-        for inputs in [join(&c1, &c2), join(&c2, &c1)] {
-            let m = manifest_of(vec![inputs]);
+        for (a, b) in [(&c1, &c2), (&c2, &c1)] {
+            let m = join_manifest_of(a, b, (a, b));
             assert!(
                 matches!(
-                    resolve(&m, 0, &mixed),
+                    resolve(&m, 2, &mixed),
                     Err(CheckError::SubProofMethodUnresolved { .. })
                 ),
                 "a join over two differently-attested graphs must be refused in \
@@ -13799,10 +14103,53 @@ mod member_from_authenticated_method_tests {
         }
         // And both orders resolve when the endpoints agree.
         let agreed = map_of(&[(&c1, Some(V2)), (&c2, Some(V2))]);
-        for inputs in [join(&c1, &c2), join(&c2, &c1)] {
-            let m = manifest_of(vec![inputs]);
-            assert!(resolve(&m, 0, &agreed).is_ok());
+        for (a, b) in [(&c1, &c2), (&c2, &c1)] {
+            let m = join_manifest_of(a, b, (a, b));
+            assert!(resolve(&m, 2, &agreed).is_ok());
         }
+    }
+
+    /// Hardening: a join's bound commitments are its EDGE's validated endpoints,
+    /// never the `commit_a`/`commit_b` the prover declared on the join proof.
+    ///
+    /// The three cases are exactly the ones that separate the two readings:
+    ///
+    /// - the honest edge — the endpoints are returned;
+    /// - a join whose declared commitments are same-method DECOYS drawn from a
+    ///   third attested graph — the edge does not validate, so NOTHING is
+    ///   returned, and in particular not the decoys, whose method a declared-input
+    ///   reading would have resolved against;
+    /// - a join NO edge covers — nothing is returned, so it falls to the orphan
+    ///   rule rather than being resolved against a prover-declared commitment.
+    #[test]
+    fn a_joins_bound_commitments_are_its_edges_endpoints_not_its_declared_inputs() {
+        let c1 = fhx("0x64");
+        let c2 = fhx("0xc8");
+        let decoy = fhx("0x12c8");
+
+        let honest = join_manifest_of(&c1, &c2, (&c1, &c2));
+        assert_eq!(
+            bound_commitments(&honest, 2),
+            vec![c1.clone(), c2.clone()],
+            "an honest edge binds its two endpoint scans' commitments"
+        );
+
+        let decoys = join_manifest_of(&c1, &c2, (&decoy, &decoy));
+        let bound = bound_commitments(&decoys, 2);
+        assert!(
+            !bound.contains(&decoy),
+            "a declared commitment that is not an endpoint must never be bound, \
+             got {:?}",
+            bound
+        );
+        assert!(bound.is_empty(), "an edge that does not validate binds nothing");
+
+        let mut uncovered = honest.clone();
+        uncovered.join_edges.clear();
+        assert!(
+            bound_commitments(&uncovered, 2).is_empty(),
+            "a join proof no edge covers has no validated endpoint"
+        );
     }
 
     /// A BOUND neighbour must not mask an UNBOUND one, and the reverse. Both
@@ -13999,7 +14346,16 @@ mod member_from_authenticated_method_tests {
                 slot_b: 2,
             },
         ]);
+        m.join_edges = vec![crate::manifest::JoinEdge {
+            scan_a: 0,
+            graph_a: 0,
+            scan_b: 0,
+            graph_b: 1,
+            join_proof: 2,
+        }];
         assert_eq!(bound_commitments(&m, 0), vec![c1.clone(), c2.clone()]);
+        // The join's two bound commitments are its edge's endpoints — here the
+        // two graphs of scan 0, which its declared inputs also name.
         let join_bound = bound_commitments(&m, 2);
         assert_eq!(join_bound, vec![c1.clone(), c2.clone()]);
         assert!(

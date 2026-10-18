@@ -45,9 +45,9 @@
 //! verification-key selection in `crate::verifier` resolves each sub-proof's
 //! member through it, against the AUTHENTICATED commitment method of the
 //! commitments that sub-proof is bound to (its own `commitments` for a scan or
-//! path, both endpoints for a join, the source edge's scan for a FILTER), so the
-//! key is selected from the resolved member rather than from the declared
-//! `CircuitId` alone. The five AUXILIARY bb gates — hidden and fully-hidden
+//! path, the VALIDATED endpoint commitments of the join edges that cover a join,
+//! the source edge's scan for a FILTER), so the key is selected from the resolved
+//! member rather than from the declared `CircuitId` alone. The five AUXILIARY bb gates — hidden and fully-hidden
 //! revocation, hidden issuer, holder PoK, holder set — are deliberately NOT
 //! routed through it: their member is fixed by the relying party's own policy or
 //! registry, the manifest declares no id for them, and they read revocation and

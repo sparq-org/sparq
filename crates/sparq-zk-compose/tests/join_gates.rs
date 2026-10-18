@@ -479,6 +479,54 @@ fn forge_join_edge_points_at_wrong_scan_rejected() {
     }
 }
 
+/// Hardening: BOTH declared commitments ABSENT from the presentation — two
+/// well-formed field values no attestation in the manifest covers, so the
+/// authenticated-method map has no entry for either. Neither equals its endpoint
+/// scan's commitment, so the edge is REJECTED; the pair's absence from the map is
+/// not a licence to let the declared linkage stand.
+#[test]
+fn forge_join_both_declared_commitments_absent_rejected() {
+    let mut m = join_manifest();
+    if let ProofInputs::JoinEq { commit_a, commit_b, .. } = &mut m.sub_proofs[2].inputs {
+        *commit_a = FieldHex("0x0dead".to_string());
+        *commit_b = FieldHex("0x0beef".to_string());
+    } else {
+        unreachable!("join_eq inputs");
+    }
+    match prefilter(&m) {
+        Err(CheckError::JoinCommitmentMismatch { edge: 0 }) => {}
+        other => panic!(
+            "a join declaring two commitments the presentation does not attest \
+             must be JoinCommitmentMismatch, got {other:?}"
+        ),
+    }
+}
+
+/// Hardening: both declared commitments replaced by an attested commitment of
+/// ANOTHER committed graph in the SAME presentation — same issuer, same
+/// authenticated commitment method, both present in the authenticated-method map.
+/// Every method-agreement rule a verifier could apply to the declared inputs is
+/// satisfied, so only equality with the edge's ENDPOINT scans separates this from
+/// the honest edge. REJECT.
+#[test]
+fn forge_join_same_method_decoy_commitment_pair_rejected() {
+    let mut m = join_manifest();
+    let scan_b_commitment = commitment_hex(&m.sub_proofs[1].inputs);
+    if let ProofInputs::JoinEq { commit_a, commit_b, .. } = &mut m.sub_proofs[2].inputs {
+        *commit_a = scan_b_commitment.clone();
+        *commit_b = scan_b_commitment;
+    } else {
+        unreachable!("join_eq inputs");
+    }
+    match prefilter(&m) {
+        Err(CheckError::JoinCommitmentMismatch { edge: 0 }) => {}
+        other => panic!(
+            "a same-method attested decoy pair must still be \
+             JoinCommitmentMismatch, got {other:?}"
+        ),
+    }
+}
+
 // === REJECT 2: slot binding (wrong column, §4.4 / audit-#6 analogue) ========
 
 /// Forge: the join_eq's public `slot_a` is NOT the slot `?p` occupies in pattern A
@@ -979,4 +1027,176 @@ fn full_bb_join_accept_real_proof() {
         &InMemorySeenNonces::new(),
     )
     .expect("a real join_eq proof (canonical VK + pubinput + bb verify + bind_joins) must verify");
+}
+
+// === The per-sub-proof member resolution, through `verify_manifest` ==========
+//
+// `verify_manifest`'s per-sub-proof loop resolves each sub-proof's member from
+// the AUTHENTICATED commitment method of the commitments that sub-proof is bound
+// to, and selects its verification key from the RESOLVED member. The resolution
+// sits between the audit-#1 public-input byte-compare and the canonical-vk
+// recomputation, so a refusal there is reached with NO nargo/bb involved — the
+// cases below hand-assemble a `join_eq` artifact blob whose public inputs
+// byte-match the verifier's own reconstruction and never get as far as a prover
+// invocation.
+//
+// The feature gate matches the resolution's own: it is `dual-leaf`-only, and the
+// feature-matrix `sparq-zk-compose (dual-leaf …)` leg runs this crate's whole
+// test suite with the feature on, so these cases execute in CI.
+
+/// The `join_eq` member's bb public inputs, in its `main` declaration order:
+/// `[challenge, commit_a, commit_b, join_commitment, slot_a, slot_b]`, each a
+/// 32-byte big-endian word. Cross-reference `verifier::reconstruct_public_inputs`'s
+/// `JoinEq` arm — a divergence makes the byte-compare fail and the case stops
+/// BEFORE the resolution, which the control below detects.
+#[cfg(feature = "dual-leaf")]
+fn join_eq_public_inputs(inputs: &ProofInputs, challenge: &FieldHex) -> Vec<u8> {
+    let ProofInputs::JoinEq { commit_a, commit_b, join_commitment, slot_a, slot_b, .. } = inputs
+    else {
+        unreachable!("join_eq inputs");
+    };
+    let mut out = Vec::new();
+    for f in [challenge, commit_a, commit_b, join_commitment] {
+        let v = f.to_field().expect("parseable field");
+        out.extend_from_slice(&sparq_zk::field::field_to_be_bytes_32(&v));
+    }
+    for n in [*slot_a, *slot_b] {
+        let mut word = [0u8; 32];
+        word[24..].copy_from_slice(&u64::from(n).to_be_bytes());
+        out.extend_from_slice(&word);
+    }
+    out
+}
+
+/// The honest join manifest with the `join_eq` sub-proof FIRST, so
+/// `verify_manifest`'s loop reaches it before either scan, carrying a
+/// hand-assembled artifact blob whose public inputs byte-match the verifier's
+/// reconstruction. `graph_a_unbound` selects whether graph A's attestation attests
+/// the string-canonical METHOD (`ZKSIG_M5`) or attests NO method (the legacy
+/// `ZKSIG_C3` shape) — the latter makes the join's two ENDPOINTS a mixture of
+/// attested and unattested.
+#[cfg(feature = "dual-leaf")]
+fn join_first_manifest(graph_a_unbound: bool) -> ProofManifest {
+    let ga = graph_a();
+    let gb = graph_b();
+    let scan_a = scan_a_inputs(&ga);
+    let scan_b = scan_b_inputs(&gb);
+    let join = join_eq_inputs(commitment_hex(&scan_a), commitment_hex(&scan_b), SLOT_A, SLOT_B);
+    let challenge = FieldHex(CHALLENGE_HEX.to_string());
+    let art = sparq_zk_compose::driver::ProofArtifacts {
+        proof: vec![0u8; 8],
+        public_inputs: join_eq_public_inputs(&join, &challenge),
+        vk: vec![0u8; 8],
+    };
+    let sk = test_issuer_sk(1);
+    let att_a = if graph_a_unbound {
+        attest_method_unbound(ga.commitment, ga.salt, &sk)
+    } else {
+        attest_full(ga.commitment, ga.salt, &sk)
+    };
+    ProofManifest {
+        fully_hidden_revocation: None,
+        r#type: "urn:sparq:zk:ProofManifest".into(),
+        query: JOIN_QUERY.into(),
+        issuers: vec![],
+        key_set: vec![public_key_to_hex(&sk.public_key())],
+        commitment_attestations: vec![att_a, attest_full(gb.commitment, gb.salt, &sk)],
+        attributions: vec![vec![0], vec![0]],
+        pattern_scans: vec![],
+        join_obligations: vec![("p".to_string(), 0, 1)],
+        entailment_regime: EntailmentRegime::Simple,
+        derivation_steps: vec![],
+        binding: BindingMode::Challenge { challenge },
+        revocation: Some(fixture_revocation()),
+        status_snapshots: vec![fixture_snapshot()],
+        // The JOIN first: the loop resolves its member before any scan is read.
+        sub_proofs: vec![
+            SubProof { inputs: join, proof_hex: encode_artifacts(&art) },
+            SubProof { inputs: scan_a, proof_hex: String::new() },
+            SubProof { inputs: scan_b, proof_hex: String::new() },
+        ],
+        binding_edges: vec![],
+        join_edges: vec![JoinEdge { scan_a: 1, graph_a: 0, scan_b: 2, graph_b: 0, join_proof: 0 }],
+        hidden_revocation: None,
+        hidden_issuer_attestations: vec![],
+        holder_pok_proofs: vec![],
+        holder_set_proofs: vec![],
+    }
+}
+
+/// A salt + status-bound attestation that attests NO commitment method — the
+/// legacy `ZKSIG_C3` message shape. Accepted only under the written-down
+/// [`sparq_zk_compose::MethodPolicy::admit_unbound`] downgrade.
+#[cfg(feature = "dual-leaf")]
+fn attest_method_unbound(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestation {
+    let list_id = sparq_zk::sig::status_list_id_to_field(STATUS_LIST);
+    let status_ref = sparq_zk::sig::status_ref_digest(&list_id, STATUS_INDEX, STATUS_VERSION);
+    let mut att = attest_full(commitment, salt, sk);
+    att.signature = sk.sign_commitment_with_status(&commitment, &salt, &status_ref);
+    att
+}
+
+/// `verify_manifest` with a prover that is never invoked: every case below is
+/// refused inside the loop, before the canonical vk is recomputed.
+#[cfg(feature = "dual-leaf")]
+fn run_verify(m: &ProofManifest, k: &KeySet) -> Result<(), CheckError> {
+    verify_manifest(
+        m,
+        &CircuitProver::new(std::env::temp_dir()),
+        &scratch("method_resolution"),
+        k,
+        &fresh_policy(),
+        &HolderRegistry::empty(),
+        &HolderBindingPolicy::allow_bearer(),
+        &EntailmentPolicy::simple_only(),
+        &nonce_for(CHALLENGE_HEX),
+        &InMemorySeenNonces::new(),
+    )
+}
+
+/// INTEGRATION: through the public `verify_manifest`, a `join_eq` sub-proof whose
+/// two ENDPOINT commitments are a mixture of attested and unattested methods has
+/// no single authenticated method to select a member against, and the manifest is
+/// REFUSED by name inside the per-sub-proof loop.
+///
+/// This is the loop's own resolution, not a structural pre-filter gate: the
+/// control below shows the SAME manifest with both endpoints attested to one
+/// method gets past it, and the `proof` field names the join sub-proof the loop
+/// was on. Removing the loop's resolver (selecting the key from the declared id
+/// instead) makes this case fall through to the canonical-vk recomputation, so
+/// the named refusal never arrives.
+#[cfg(feature = "dual-leaf")]
+#[test]
+fn a_joins_member_is_resolved_in_the_verify_loop_from_its_endpoints_methods() {
+    use sparq_zk_compose::MethodPolicy;
+    let sk = test_issuer_sk(1);
+    // The downgrade is REQUIRED for the unattested endpoint to get past stage 2d
+    // at all; it is what makes the mixture reachable here.
+    let k = trusted_k(&sk).with_method_policy(MethodPolicy::current().admit_unbound());
+
+    match run_verify(&join_first_manifest(true), &k) {
+        Err(CheckError::SubProofMethodUnresolved { proof, reason }) => {
+            assert_eq!(proof, "sub_proofs[0]", "the join sub-proof the loop was on");
+            assert!(
+                reason.contains("different"),
+                "the reason must name the disagreement, got {reason:?}"
+            );
+        }
+        other => panic!(
+            "a join over a mixture of attested and unattested endpoints must be \
+             refused in the verify loop, got {other:?}"
+        ),
+    }
+
+    // CONTROL: both endpoints attested to the SAME method — the resolution
+    // succeeds and the manifest proceeds past the loop's resolver into the
+    // canonical-vk recomputation, which this toolchain-free prover cannot do. So
+    // the refusal above is the resolution's, and the fixture reaches it.
+    match run_verify(&join_first_manifest(false), &k) {
+        Err(CheckError::Driver(_)) => {}
+        other => panic!(
+            "with both endpoints attested to one method the resolution must \
+             succeed and the loop must proceed to the canonical vk, got {other:?}"
+        ),
+    }
 }
