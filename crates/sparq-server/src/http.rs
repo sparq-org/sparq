@@ -1906,24 +1906,13 @@ impl TouchedPods {
 /// only an unrelated file) is treated as fresh — we create the store from `seed`. A directory
 /// that holds a store but fails to open (corruption) surfaces the open error rather than
 /// silently clobbering it.
+///
+/// The check, the seed's save and the open happen under one hold of the directory's lock
+/// ([`Graph::open_or_create`]), kept while the returned graph lives: a second server (or any
+/// other writer) over the same directory is refused.
 fn open_or_create_durable(dir: &std::path::Path, seed: Graph) -> Result<Graph, String> {
-    let has_store = dir.join("dict-meta.bin").exists() || dir.join("dict.bin").exists();
-    if has_store {
-        // Existing durable store IS the source of truth: open + WAL-replay, no rebuild.
-        return Graph::open(dir).map_err(|e| format!("opening persist dir {}: {e}", dir.display()));
-    }
-    // Fresh: persist the seed, then open it so the returned graph is directory-backed
-    // (carries its own WAL) and ready for WAL-durable updates.
-    std::fs::create_dir_all(dir)
-        .map_err(|e| format!("creating persist dir {}: {e}", dir.display()))?;
-    seed.save(dir)
-        .map_err(|e| format!("initialising persist dir {}: {e}", dir.display()))?;
-    Graph::open(dir).map_err(|e| {
-        format!(
-            "opening freshly-initialised persist dir {}: {e}",
-            dir.display()
-        )
-    })
+    Graph::open_or_create(dir, &seed)
+        .map_err(|e| format!("opening persist dir {}: {e}", dir.display()))
 }
 
 /// (sq-vpx4) Internal marker prefixed onto the error string of a
@@ -2250,21 +2239,15 @@ impl ApplyUpdates for ServerApplier {
         let durable = self.durable.as_mut().ok_or_else(|| {
             "restore-into-durable requested on an applier with no --persist store".to_string()
         })?;
-        // The directory the OLD durable graph is backed by; the swap targets it.
-        let dir = durable
+        // The swap targets the directory the durable graph is backed by, under the lock it holds:
+        // its WAL handle is released first (its `wal.log` is renamed away with the directory),
+        // and the graph becomes the restored one, so subsequent updates WAL-append to it.
+        durable
             .graph
-            .persist_dir()
-            .ok_or_else(|| "durable graph is not directory-backed".to_string())?;
-        // Release the OLD durable graph's WAL handle before the directory swap (its `wal.log` is
-        // about to be renamed away with `dir`); the crash-safe swap re-opens a fresh handle.
-        durable.graph.close_wal();
-        let restored = Graph::restore_into_durable(&dir, fresh)
+            .restore_in_place(fresh)
             .map_err(|e| format!("restore-into-durable swap failed: {e}"))?;
-        // Adopt the re-opened, directory-backed restored store; subsequent updates WAL-append to it.
         // The published snapshot is an independent in-memory image of the restored content.
-        let published = restored.snapshot().into_graph();
-        durable.graph = restored;
-        Ok(published)
+        Ok(durable.graph.snapshot().into_graph())
     }
 }
 

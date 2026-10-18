@@ -62,6 +62,10 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.begin_reclaim(blob_key).await
     }
 
+    fn exclusive(&self) -> Result<(), SparqError> {
+        self.0.exclusive()
+    }
+
     async fn end_reclaim(&self, blob_key: &str) -> Result<(), SparqError> {
         self.0.end_reclaim(blob_key).await
     }

@@ -914,6 +914,24 @@ mod tests {
         store(st, &record, false, &[], touch).await.unwrap();
     }
 
+    /// A start over a store whose index other processes may write changes nothing: no root, no
+    /// recovery, and the start fails.
+    #[tokio::test]
+    async fn a_start_over_a_shared_index_changes_nothing() {
+        let store = FlakyStore::new();
+        store.shared.store(true, Ordering::SeqCst);
+        let mut cfg = LwsConfig::new("http://localhost:3000");
+        cfg.open = true;
+        let refused = LwsState::new(store.clone(), cfg.clone())
+            .await
+            .err()
+            .expect("refused");
+        assert!(refused.contains("cannot be served"), "{refused}");
+        assert!(!store.exists(&cfg.storage()).await.unwrap(), "the root was written");
+        store.shared.store(false, Ordering::SeqCst);
+        LwsState::new(store, cfg).await.expect("starts");
+    }
+
     /// Review finding: recovery set aside what it could not yet put back, in tasks that outlived
     /// a start that then failed on a later intent, and could put an old state back over writes
     /// made after a later start. Every intent is read before anything is settled or started.

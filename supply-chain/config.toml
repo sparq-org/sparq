@@ -896,6 +896,11 @@ notes = "Exact-version review backlog zkp-10.8.1, independently accepted by GPT-
 version = "3.3.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.fs4]]
+version = "1.1.0"
+criteria = "safe-to-deploy"
+notes = "Advisory file locks (flock / LockFileEx through rustix and windows-sys) for sparq-core's exclusive lock on a persisted graph directory; no build script, no unsafe beyond its platform bindings. Exempted pending a source audit."
+
 [[exemptions.fs_extra]]
 version = "1.3.0"
 criteria = "safe-to-deploy"
