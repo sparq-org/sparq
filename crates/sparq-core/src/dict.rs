@@ -1208,6 +1208,13 @@ mod kani_proofs {
 }
 
 impl Dict {
+    /// The lock of the store directory a memory-mapped dictionary's files are in, `None` for
+    /// one in memory.
+    #[cfg(feature = "mmap")]
+    pub(crate) fn lock_pin(&self) -> crate::dir_lock::Pin {
+        self.mapped.as_ref().and_then(|m| m._pin.clone())
+    }
+
     pub fn new() -> Self {
         Dict::default()
     }

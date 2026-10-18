@@ -122,13 +122,15 @@ jobs:
         shell: bash
         run: bash "$RUNNER_TEMP/annotate.sh" cargo test --locked -p sparq-core --features mmap --test dir_lock
 
-      # The library's own tests of saving, building, compacting, restoring and dropping named
-      # graphs (libtest runs every test whose name contains any of these words), and of the
-      # fresh-file publish step. Runs even when the step above failed, so one run reports both.
+      # The library's own tests of saving, building, compacting, vacuuming, restoring and
+      # dropping named graphs, of the logs, of a frozen (detached) graph, of the fault-injected
+      # swap failures and crashes (`swap_tests`), and of the fresh-file publish step (libtest
+      # runs every test whose name contains any of these words). Runs even when the step above
+      # failed, so one run reports both.
       - name: library save / build / swap tests
         if: always()
         shell: bash
         run: >-
           bash "$RUNNER_TEMP/annotate.sh"
           cargo test --locked -p sparq-core --features mmap --lib --
-          save build compact restore named fresh lock
+          save build compact restore named fresh lock swap vacuum detach frozen log wal

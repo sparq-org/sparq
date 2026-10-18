@@ -462,11 +462,12 @@ fn linked_internals_are_refused() {
         let err = err.expect("opened over a linked named graph");
         assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
     }
-    // c shares a's permutation file through a hard link.
+    // c shares a's write-ahead log through a hard link (a file written in place).
     let c = root.join("c");
     save_dataset(&c);
-    std::fs::remove_file(c.join("perm0.bin")).unwrap();
-    std::fs::hard_link(a.join("perm0.bin"), c.join("perm0.bin")).unwrap();
+    drop(Graph::open(&a).unwrap());
+    std::fs::remove_file(c.join("wal.log")).ok();
+    std::fs::hard_link(a.join("wal.log"), c.join("wal.log")).unwrap();
     for d in [&a, &c] {
         let err = Graph::open(d)
             .err()
@@ -478,6 +479,19 @@ fn linked_internals_are_refused() {
             d.display()
         );
     }
+    // A file a save replaces by a rename may be hard-linked (a `cp -al` snapshot of a store):
+    // it opens, and a save replaces it without writing through the link.
+    let d = root.join("d");
+    save_dataset(&d);
+    let snapshot = root.join("snapshot-perm0.bin");
+    std::fs::hard_link(d.join("perm0.bin"), &snapshot).unwrap();
+    let before = std::fs::read(&snapshot).unwrap();
+    drop(Graph::open(&d).expect("a hard-linked base file is not refused"));
+    Graph::load_str("<http://ex/n> <http://ex/p> <http://ex/o> .", "ntriples")
+        .unwrap()
+        .save(&d)
+        .unwrap();
+    assert_eq!(std::fs::read(&snapshot).unwrap(), before, "written through the snapshot");
     std::fs::remove_dir_all(&root).ok();
 }
 
@@ -521,6 +535,12 @@ fn a_rebuilt_graph_keeps_its_dictionarys_lock() {
             "the lock went with the graph the dictionary came from"
         );
         assert!(has(&rebuilt, "a"));
+        let err = rebuilt.save(&dir).expect_err("saved over the files it maps");
+        assert_eq!(
+            err.kind(),
+            std::io::ErrorKind::InvalidInput,
+            "a save into its own directory names the reason, it does not wait on its own lock: {err}"
+        );
         drop(rebuilt);
         drop(Graph::open(&dir).expect("released with the dictionary"));
     }
@@ -640,14 +660,23 @@ fn a_save_replaces_files_and_never_writes_through_them() {
     assert!(has(&g, "n") && !has(&g, "a"));
     drop(g);
 
-    // A file of the store hard-linked to one outside it: saves and builds are refused.
+    // A file of the store hard-linked to one outside it: a save or build replaces the store's
+    // file, never writing through the link.
     let outside = root.join("outside.bin");
     std::fs::write(&outside, b"not a store file").unwrap();
     std::fs::remove_file(&perm).unwrap();
     std::fs::hard_link(&outside, &perm).unwrap();
+    Graph::new().save(&dir).unwrap();
+    assert_eq!(std::fs::read(&outside).unwrap(), b"not a store file");
+    std::fs::remove_file(&perm).unwrap();
+    std::fs::hard_link(&outside, &perm).unwrap();
+    Graph::build_external("".as_bytes(), "ntriples", &dir, 1024).unwrap();
+    assert_eq!(std::fs::read(&outside).unwrap(), b"not a store file");
+    // The write-ahead log is written in place: a hard link to it is refused.
+    std::fs::remove_file(dir.join("wal.log")).ok();
+    std::fs::hard_link(&outside, dir.join("wal.log")).unwrap();
     let err = Graph::new().save(&dir).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
-    assert!(Graph::build_external("".as_bytes(), "ntriples", &dir, 1024).is_err());
     assert_eq!(std::fs::read(&outside).unwrap(), b"not a store file");
     std::fs::remove_dir_all(&root).ok();
 }
@@ -811,7 +840,13 @@ fn a_build_never_writes_through_a_link_in_its_directory() {
 /// new half of a swap caught between a rename and its staging record.
 fn half(at: &Path, id: &str, tag: &str) {
     let nt = format!("<http://ex/{tag}> <http://ex/p> <http://ex/o> .");
-    Graph::load_str(&nt, "ntriples").unwrap().save(at).unwrap();
+    // Saved under another name and renamed: a save at a staging name beside an unrecorded half
+    // is refused (it may be an earlier release's staging).
+    let mut name = at.file_name().unwrap().to_os_string();
+    name.push(".saving");
+    let saving = at.with_file_name(name);
+    Graph::load_str(&nt, "ntriples").unwrap().save(&saving).unwrap();
+    std::fs::rename(&saving, at).unwrap();
     std::fs::write(at.join("sparq-store"), format!("root {id}\n")).unwrap();
 }
 
@@ -849,14 +884,15 @@ fn staging_is_per_store_and_never_claimed_on_its_own() {
     assert!(has(&Graph::open(&a).unwrap(), "z"));
     assert!(has(&Graph::open(&b).unwrap(), "a"), "g.b was touched");
 
-    // Legacy shared names: this store's staging goes, another store's stays.
+    // The names an earlier release shared (`g.compact-*`) are never touched by a swap or a
+    // recovery of a store that is there, recorded or not.
     let (mine, theirs) = (root.join("g.compact-old"), root.join("g.compact-new"));
     save_dataset(&mine);
     stage(&mine, "compact-old", &store_id(&a));
     save_dataset(&theirs);
     stage(&theirs, "compact-new", &store_id(&b));
     drop(Graph::open(&a).unwrap());
-    assert!(!mine.exists(), "this store's legacy staging was kept");
+    assert!(mine.join("sparq-staging").exists(), "staging at a legacy name was touched");
     assert!(
         theirs.join("sparq-staging").exists(),
         "another store's staging was touched"
@@ -977,5 +1013,229 @@ fn recovery_never_follows_a_link_out_of_the_store() {
             "{what} removed staging past a linked named/"
         );
     }
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A store whose parent directory is not writable (a volume mounted at the store's own path, a
+/// service's state directory under a read-only parent): it has no lock file beside it, and
+/// cannot get one, so its holders take the lock file inside it alone. It opens writable and
+/// read-only as before, one writer at a time (and readers exclude a writer); what renames the
+/// directory (a compaction swap) is refused with an error naming the parent, and the graph
+/// goes on writing. Skipped where permissions are not enforced (run as root).
+#[cfg(unix)]
+#[test]
+fn a_store_in_a_read_only_parent_opens_and_keeps_one_writer() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = scratch("ro-parent");
+    let parent = root.join("mnt");
+    let dir = parent.join("store");
+    save_dataset(&dir);
+    // As left by a version without locks: nothing beside the store.
+    std::fs::remove_file(parent.join("store.lock")).unwrap();
+    let set_mode = |mode| {
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    set_mode(0o555);
+    if std::fs::write(parent.join("probe"), b"").is_ok() {
+        std::fs::remove_file(parent.join("probe")).ok();
+        set_mode(0o755);
+        eprintln!("skipped: permissions are not enforced here");
+        std::fs::remove_dir_all(&root).ok();
+        return;
+    }
+    let outcome = std::panic::catch_unwind(|| {
+        // Read-only opens share it, and exclude a writer.
+        let r1 = Graph::open_read_only(&dir).unwrap();
+        let r2 = Graph::open_read_only(&dir).unwrap();
+        assert!(would_block(Graph::open(&dir)), "a writer got in beside readers");
+        drop((r1, r2));
+        // One writer, which excludes a second writer and readers.
+        let mut g = Graph::open(&dir).unwrap();
+        assert!(would_block(Graph::open(&dir)), "a second writer got in");
+        assert!(would_block(Graph::open_read_only(&dir)), "a reader got in beside the writer");
+        g.apply_delta(&[triple("x")], &[]).unwrap();
+        let err = g.compact().unwrap_err();
+        assert!(err.contains(&parent.display().to_string()), "{err}");
+        g.apply_delta(&[triple("y")], &[]).unwrap();
+        drop(g);
+        let g = Graph::open(&dir).unwrap();
+        assert!(has(&g, "x") && has(&g, "y") && has(&g, "a"));
+        drop(g);
+        assert!(!parent.join("store.lock").exists());
+    });
+    set_mode(0o755);
+    std::fs::remove_dir_all(&root).ok();
+    if let Err(panic) = outcome {
+        std::panic::resume_unwind(panic);
+    }
+}
+
+/// Opening or compacting a store that is not there fails without creating anything: no
+/// parent directories, no lock file.
+#[test]
+fn opening_a_missing_store_creates_nothing() {
+    let root = scratch("missing");
+    let typo = root.join("typo").join("deeper").join("store");
+    for r in [Graph::open(&typo), Graph::open_read_only(&typo)] {
+        let err = r.err().expect("opened a missing store");
+        assert_eq!(err.kind(), ErrorKind::NotFound, "{err}");
+    }
+    assert!(!root.join("typo").exists(), "made the missing parents");
+    let missing = root.join("store");
+    assert!(Graph::open(&missing).is_err());
+    let left: Vec<_> = std::fs::read_dir(&root).unwrap().collect();
+    assert!(left.is_empty(), "left {left:?}");
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// Staging an earlier release left mid-swap (named with `with_extension`, so `g.a` staged at
+/// `g.compact-old`, with no staging record) is refused when the store it may belong to is
+/// about to be created or seeded empty: it may be that store's only copy.
+#[test]
+fn an_earlier_releases_staging_is_refused_before_a_store_is_created() {
+    let root = scratch("legacy-staging");
+    let store = root.join("g.a");
+    let residue = root.join("g.compact-old");
+    let saving = root.join("saving");
+    save_dataset(&saving);
+    std::fs::remove_file(saving.join("sparq-store")).unwrap();
+    std::fs::rename(&saving, &residue).unwrap();
+    let check = |what: &str, err: Option<String>| {
+        let err = err.unwrap_or_else(|| panic!("{what} went ahead"));
+        assert!(err.contains("g.compact-old"), "{what}: {err}");
+    };
+    check("open", Graph::open(&store).err().map(|e| e.to_string()));
+    check(
+        "open_or_create",
+        Graph::open_or_create(&store, &Graph::new()).err().map(|e| e.to_string()),
+    );
+    check("save", Graph::new().save(&store).err().map(|e| e.to_string()));
+    check(
+        "build",
+        Graph::build_external("".as_bytes(), "ntriples", &store, 1024).err(),
+    );
+    assert!(!store.join("dict-meta.bin").exists(), "seeded over the residue");
+    assert!(residue.join("perm0.bin").exists(), "the residue was touched");
+    // Renamed back, it is the store.
+    std::fs::remove_dir_all(&store).ok();
+    std::fs::rename(&residue, &store).unwrap();
+    assert!(has(&Graph::open(&store).unwrap(), "a"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A compaction never removes what a save would refuse to replace: another store moved inside.
+#[test]
+fn a_compaction_refuses_a_store_moved_inside() {
+    let root = scratch("compact-foreign");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    let other = root.join("other");
+    save_dataset(&other);
+    let mut g = Graph::open(&dir).unwrap();
+    std::fs::rename(&other, dir.join("other")).unwrap();
+    g.apply_delta(&[triple("z")], &[]).unwrap();
+    let err = g.compact().unwrap_err();
+    assert!(err.contains("another graph store"), "{err}");
+    assert!(dir.join("other").join("perm0.bin").exists(), "the other store was removed");
+    g.apply_delta(&[triple("w")], &[]).unwrap();
+    drop(g);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A build first removes the scratch a killed build left in the store.
+#[test]
+fn a_build_removes_scratch_a_killed_build_left() {
+    let root = scratch("stale-scratch");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    for tag in ["build", "quads-spill"] {
+        let stale = dir.join(format!(".sparq-{tag}-00112233445566778899aabbccddeeff"));
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::write(stale.join("run-0.bin"), b"left by a killed build").unwrap();
+    }
+    Graph::build_external(
+        "<http://ex/n> <http://ex/p> <http://ex/o> .\n".as_bytes(),
+        "ntriples",
+        &dir,
+        1024,
+    )
+    .unwrap();
+    let left: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(".sparq-"))
+        .collect();
+    assert!(left.is_empty(), "left {left:?}");
+    assert!(has(&Graph::open(&dir).unwrap(), "n"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A save keeps the permissions of the files it replaces.
+#[cfg(unix)]
+#[test]
+fn a_save_keeps_the_permissions_of_the_files_it_replaces() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = scratch("modes");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    let perm = dir.join("perm0.bin");
+    std::fs::set_permissions(&perm, std::fs::Permissions::from_mode(0o640)).unwrap();
+    save_dataset(&dir);
+    assert_eq!(
+        std::fs::metadata(&perm).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A read-only open of a store with a named graph caught mid-swap (its directory renamed
+/// aside) says so, rather than that the named graph is not found.
+#[test]
+fn a_read_only_open_names_a_named_graph_caught_mid_swap() {
+    let root = scratch("ro-named-swap");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    let named = dir.join("named").join("0");
+    let aside = dir.join("named").join("0.compact-old");
+    std::fs::rename(&named, &aside).unwrap();
+    let id = store_id(&aside);
+    std::fs::write(aside.join("sparq-staging"), format!("compact-old {id}\n")).unwrap();
+    let err = Graph::open_read_only(&dir).err().expect("opened mid-swap");
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    assert!(err.to_string().contains("interrupted swap of a named graph"), "{err}");
+    // A writable open recovers it.
+    assert!(has(sub_graph(&Graph::open(&dir).unwrap(), "g0"), "b"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+fn sub_graph<'a>(g: &'a Graph, name: &str) -> &'a Graph {
+    g.named_graph(&iri(name)).unwrap()
+}
+
+/// What a tool's output may not replace is matched as the filesystem compares names: in any
+/// case (`data.LOCK` for the lock of `data`), and any regular file some holder has locked now.
+#[test]
+fn reserved_names_match_in_any_case_and_held_files_are_reserved() {
+    use sparq_core::dir_lock::is_reserved_store_path;
+    let root = scratch("reserved-case");
+    std::fs::create_dir_all(root.join("data")).unwrap();
+    for name in ["data.LOCK", "data.Lock", "SPARQ-STORE", "x.Compact-New", "Sparq.Lock"] {
+        assert!(is_reserved_store_path(&root.join(name)).unwrap(), "{name}");
+    }
+    // Windows drops trailing dots and spaces from a name: `data.lock.` is `data.lock` there.
+    #[cfg(windows)]
+    for name in ["data.lock.", "data.LOCK .", "sparq-store."] {
+        assert!(is_reserved_store_path(&root.join(name)).unwrap(), "{name}");
+    }
+    assert!(!is_reserved_store_path(&root.join("out.nt")).unwrap());
+    // A store's lock file, under any name, while its store is open.
+    let dir = root.join("g");
+    save_dataset(&dir);
+    let renamed_lock = root.join("held-file");
+    let g = Graph::open(&dir).unwrap();
+    std::fs::hard_link(root.join("g.lock"), &renamed_lock).unwrap();
+    assert!(is_reserved_store_path(&renamed_lock).unwrap(), "a held lock file is not reserved");
+    drop(g);
+    assert!(!is_reserved_store_path(&renamed_lock).unwrap());
     std::fs::remove_dir_all(&root).ok();
 }

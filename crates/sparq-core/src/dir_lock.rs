@@ -129,21 +129,39 @@ pub fn store_root(path: &Path) -> io::Result<Option<PathBuf>> {
         .map(Path::to_path_buf))
 }
 
-/// The names a store reserves beside or inside itself: its marker and staging record, its
-/// scratch (`.sparq-*`), and the staging siblings of a swap (`<dir>.compact-new`, `.compact-old`,
-/// `.drop-new`, `.drop-old`).
+/// A file name as the filesystem compares it, for checking it against the names a store
+/// reserves: ASCII case folded (macOS and Windows filesystems ignore case by default), and on
+/// Windows without trailing dots and spaces (which Windows drops from a name).
+fn comparable_name(name: &str) -> String {
+    #[cfg(windows)]
+    let name = name.trim_end_matches(['.', ' ']);
+    name.to_ascii_lowercase()
+}
+
+/// The names a store reserves beside or inside itself: its marker, staging record and inside
+/// lock, its scratch (`.sparq-*`), the staging siblings of a swap (`<dir>.compact-new`,
+/// `.compact-old`, `.drop-new`, `.drop-old`) and the scratch a staging directory is made under
+/// (`*.sparq-part`). `name` is a [`comparable_name`].
 fn is_reserved_name(name: &str) -> bool {
     name == crate::STORE_MARKER
         || name == crate::STAGING_MARKER
+        || name == INSIDE_LOCK
         || name.starts_with(".sparq-")
-        || [".compact-new", ".compact-old", ".drop-new", ".drop-old"]
-            .iter()
-            .any(|suffix| name.ends_with(suffix))
+        || [
+            ".compact-new",
+            ".compact-old",
+            ".drop-new",
+            ".drop-old",
+            crate::STAGING_SCRATCH_SUFFIX,
+        ]
+        .iter()
+        .any(|suffix| name.ends_with(suffix))
 }
 
 /// Whether the entry at `entry` (resolved parent, then its own name) is a store's, inside one,
-/// or a name a store reserves: a store, or anything in one; a reserved name; or a lock file
-/// (`<name>.lock`) of something at `<name>`, of a reserved name, or held now.
+/// or a name a store reserves: a store, or anything in one; a reserved name; a lock file
+/// (`<name>.lock`, in any case) of something at `<name>` or of a reserved name; or a regular
+/// file some holder has locked now.
 fn is_reserved_entry(entry: &Path) -> io::Result<bool> {
     if entry.ancestors().any(crate::is_store) {
         return Ok(true);
@@ -151,18 +169,24 @@ fn is_reserved_entry(entry: &Path) -> io::Result<bool> {
     let Some(name) = entry.file_name() else {
         return Ok(false);
     };
-    let name = name.to_string_lossy();
+    let name = comparable_name(&name.to_string_lossy());
     if is_reserved_name(&name) {
         return Ok(true);
     }
     if let Some(stem) = name.strip_suffix(".lock").filter(|s| !s.is_empty()) {
+        // The stem as given (before case folding), so the check of what exists at it uses the
+        // spelling the filesystem compares.
+        let given = entry.file_name().map(|n| n.to_string_lossy().into_owned());
+        let stem = given
+            .as_deref()
+            .map_or(stem, |g| g.get(..stem.len()).unwrap_or(stem));
         let locked = entry.with_file_name(stem);
-        if locked.symlink_metadata().is_ok()
-            || is_reserved_entry(&locked)?
-            || (entry.is_file() && DirLock::is_held(entry)?)
-        {
+        if locked.symlink_metadata().is_ok() || is_reserved_entry(&locked)? {
             return Ok(true);
         }
+    }
+    if entry.symlink_metadata().is_ok_and(|m| m.is_file()) && DirLock::is_held(entry)? {
+        return Ok(true);
     }
     Ok(false)
 }
@@ -249,6 +273,18 @@ impl LockLocation {
         Self::at(&resolved, resolved.with_file_name(name))
     }
 
+    /// The lock beside the entry `path` (`<path>.lock`), named for its resolved parent and its
+    /// own name as given: a symbolic link at `path` itself is not followed (a staging path's
+    /// lock, taken before anything at that path is checked).
+    pub(crate) fn beside_entry(path: &Path) -> io::Result<Self> {
+        let name = path.file_name().ok_or_else(|| unnamed(path))?;
+        let parent = match path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p,
+            _ => Path::new("."),
+        };
+        Self::beside(&resolve_dir(parent)?.join(name))
+    }
+
     /// The lock file's path.
     pub fn path(&self) -> &Path {
         &self.0
@@ -262,18 +298,134 @@ fn unnamed(dir: &Path) -> io::Error {
     )
 }
 
-/// An exclusive lock on a graph directory, held while this lives.
+/// The lock file a store keeps inside its own directory ([`DirLock::acquire_store`]), reserved
+/// like the store's other internal names.
+pub const INSIDE_LOCK: &str = "sparq.lock";
+
+/// The lock on a graph directory, held while this lives: exclusive or shared.
+///
+/// A store's lock ([`acquire_store`](Self::acquire_store)) is two lock files, taken in this
+/// order, outside then inside, by every holder:
+///
+/// - the OUTSIDE lock, `<dir>.lock` beside the directory, when it exists or can be created (an
+///   existing one is opened read-only when it cannot be opened for writing: a lock needs no
+///   write access). It stays put when the directory is renamed, so it is what excludes holders
+///   across a swap's renames, and what a missing directory's recovery or creation needs;
+/// - the INSIDE lock, [`INSIDE_LOCK`] in the directory, always (a holder that cannot open or
+///   create it is refused, except a shared holder that cannot create either lock file, which
+///   holds none). A holder whose parent directory is not writable (a store at a mount root, say)
+///   holds the inside lock alone; it can open, write and read the store, but not rename it.
+///
+/// A holder renaming the directory (a compaction or restore swap) must hold the outside lock.
+/// It keeps the old directory's inside lock until the old directory is gone, and takes the new
+/// directory's inside lock before the new directory is put in place (on Windows, where a file
+/// held open inside a directory blocks its rename, it lets go of the inside lock for the
+/// renames and takes the new one after them, refusing writes if someone took it in between).
+/// After locking the inside file, a holder checks it is still the file at `<dir>/sparq.lock`,
+/// so a file a swap renamed away is never taken for the directory's lock.
 #[derive(Debug)]
 pub struct DirLock {
-    _file: File,
+    outside: Option<File>,
     location: LockLocation,
     shared: bool,
+    /// The store directory and the lock held on its inside lock file (`None` for a staging
+    /// path's lock, which has no inside lock; the file `None` while a swap has let go of it,
+    /// or for a shared holder that could open neither lock file).
+    inside: Option<(PathBuf, std::sync::Mutex<Option<File>>)>,
+}
+
+/// Whether `e` says a file cannot be created or written here (as opposed to some other error).
+fn unwritable(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
+    )
+}
+
+/// Opens the lock file at `path` to lock it: read-write, created when `create` and missing;
+/// else, or when it cannot be created or written, an existing file read-only. `None` when it
+/// neither exists nor can be created.
+fn open_lock_file(path: &Path, create: bool) -> io::Result<Option<File>> {
+    if create {
+        match OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)
+        {
+            Ok(f) => return Ok(Some(f)),
+            Err(e) if unwritable(&e) => {}
+            Err(e) => return Err(e),
+        }
+    }
+    match File::open(path) {
+        Ok(f) => Ok(Some(f)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound || unwritable(&e) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Locks `file` (the lock file at `path`), exclusively or shared, without waiting.
+fn try_lock(file: &File, path: &Path, shared: bool) -> io::Result<()> {
+    let locked = if shared {
+        fs4::FileExt::try_lock_shared(file)
+    } else {
+        fs4::FileExt::try_lock(file)
+    };
+    match locked {
+        Ok(()) => Ok(()),
+        Err(fs4::TryLockError::WouldBlock) => Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            format!(
+                "{} is locked: the directory is in use by another holder",
+                path.display()
+            ),
+        )),
+        Err(fs4::TryLockError::Error(e)) => Err(e),
+    }
+}
+
+/// Takes the inside lock of the store directory `dir`: `None` when it can be neither opened nor
+/// created and `shared` (a shared holder then holds none); an error when it is held, or when the
+/// file locked is no longer the one at `<dir>/sparq.lock` (a swap renamed it away meanwhile:
+/// `WouldBlock`, retry).
+pub(crate) fn lock_inside(dir: &Path, shared: bool) -> io::Result<Option<File>> {
+    let path = dir.join(INSIDE_LOCK);
+    let Some(file) = open_lock_file(&path, true)? else {
+        if shared {
+            return Ok(None);
+        }
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "the lock file {} cannot be created: the store directory {} must be writable \
+                 to open it writable",
+                path.display(),
+                dir.display()
+            ),
+        ));
+    };
+    try_lock(&file, &path, shared)?;
+    let same = same_file::Handle::from_file(file.try_clone()?)
+        .and_then(|held| Ok(held == same_file::Handle::from_path(&path)?))
+        .unwrap_or(false);
+    if !same {
+        return Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            format!(
+                "{} was replaced while it was being locked (the store is being swapped): retry",
+                path.display()
+            ),
+        ));
+    }
+    Ok(Some(file))
 }
 
 impl DirLock {
     /// Take the lock at `location` exclusively, creating its file if need be: `WouldBlock` when
     /// another holder (another process, or another open in this one, shared or exclusive) has
-    /// it.
+    /// it. A lock of this kind has no inside lock (a staging path's lock).
     pub fn acquire(location: LockLocation) -> io::Result<Self> {
         let file = OpenOptions::new()
             .read(true)
@@ -281,48 +433,100 @@ impl DirLock {
             .create(true)
             .truncate(false)
             .open(location.path())?;
-        Self::lock(file, location, false)
+        try_lock(&file, location.path(), false)?;
+        Ok(Self {
+            outside: Some(file),
+            location,
+            shared: false,
+            inside: None,
+        })
     }
 
-    /// Take the lock at `location` shared, for a read-only open: several shared holders
-    /// coexist, but none while an exclusive holder has it (`WouldBlock`), and an exclusive
-    /// holder cannot take it while any shared one does. An existing lock file is opened for
-    /// reading only; a missing one is created, which needs the parent directory writable.
-    pub fn acquire_shared(location: LockLocation) -> io::Result<Self> {
-        let file = match File::open(location.path()) {
-            Ok(f) => f,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .open(location.path())?,
-            Err(e) => return Err(e),
+    /// Take a store's outside lock at `location` (the lock file beside the directory), shared
+    /// or exclusive, when it exists or can be created; with `create` false, an existing lock
+    /// file only. Its inside lock is taken next ([`lock_inside`](Self::lock_inside)), once the
+    /// directory `dir` exists. `WouldBlock` when another holder has the outside lock.
+    pub(crate) fn acquire_outside(
+        location: LockLocation,
+        dir: &Path,
+        shared: bool,
+        create: bool,
+    ) -> io::Result<Self> {
+        let outside = match open_lock_file(location.path(), create)? {
+            Some(file) => {
+                try_lock(&file, location.path(), shared)?;
+                Some(file)
+            }
+            None => None,
         };
-        Self::lock(file, location, true)
+        Ok(Self {
+            outside,
+            location,
+            shared,
+            inside: Some((dir.to_path_buf(), std::sync::Mutex::new(None))),
+        })
     }
 
-    fn lock(file: File, location: LockLocation, shared: bool) -> io::Result<Self> {
-        let locked = if shared {
-            fs4::FileExt::try_lock_shared(&file)
-        } else {
-            fs4::FileExt::try_lock(&file)
+    /// Takes the inside lock of this store's directory, which must exist now (see
+    /// [`acquire_outside`](Self::acquire_outside)). A shared holder that can open or create
+    /// neither lock file holds none; any other holder that cannot lock it is refused.
+    pub(crate) fn lock_inside(&self) -> io::Result<()> {
+        let Some((dir, held)) = &self.inside else {
+            return Ok(());
         };
-        match locked {
-            Ok(()) => Ok(Self {
-                _file: file,
-                location,
-                shared,
-            }),
-            Err(fs4::TryLockError::WouldBlock) => Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                format!(
-                    "{} is locked: the directory is in use by another holder",
-                    location.path().display()
-                ),
-            )),
-            Err(fs4::TryLockError::Error(e)) => Err(e),
+        let file = lock_inside(dir, self.shared)?;
+        *held.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = file;
+        Ok(())
+    }
+
+    /// Makes sure the inside lock held is the one at `<dir>/sparq.lock` now (after a failed swap
+    /// was recovered, which may have put another directory in place): kept when it is, taken
+    /// afresh when not.
+    pub(crate) fn ensure_inside(&self) -> io::Result<()> {
+        let Some((dir, held)) = &self.inside else {
+            return Ok(());
+        };
+        let mut held = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(file) = held.as_ref() {
+            let current = same_file::Handle::from_file(file.try_clone()?)
+                .and_then(|h| Ok(h == same_file::Handle::from_path(dir.join(INSIDE_LOCK))?))
+                .unwrap_or(false);
+            if current {
+                return Ok(());
+            }
         }
+        *held = None;
+        *held = lock_inside(dir, self.shared)?;
+        Ok(())
+    }
+
+    /// Lets go of the inside lock (a swap about to rename the directory, on Windows).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn release_inside(&self) {
+        if let Some((_, held)) = &self.inside {
+            held.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+        }
+    }
+
+    /// Puts `file`, a lock already held on the new directory's inside lock file, in place of
+    /// the inside lock held now, which is returned (for the caller to keep until the old
+    /// directory is gone).
+    pub(crate) fn replace_inside(&self, file: Option<File>) -> Option<File> {
+        match &self.inside {
+            Some((_, held)) => std::mem::replace(
+                &mut *held.lock().unwrap_or_else(std::sync::PoisonError::into_inner),
+                file,
+            ),
+            None => file,
+        }
+    }
+
+    /// Whether this holder has the outside lock (beside the directory): what renaming the
+    /// directory needs.
+    pub fn holds_outside(&self) -> bool {
+        self.outside.is_some()
     }
 
     /// Whether some holder (exclusive or shared) has the lock file at `path` now: tried
@@ -341,9 +545,17 @@ impl DirLock {
         self.shared
     }
 
-    /// Where this lock is.
+    /// Where this lock's outside lock file is (held or not).
     pub fn location(&self) -> &LockLocation {
         &self.location
+    }
+
+    /// Whether this is the lock of the store directory `dir` (by identity, not by spelling).
+    pub(crate) fn guards(&self, dir: &Path) -> bool {
+        match &self.inside {
+            Some((own, _)) => same_file(own, dir),
+            None => false,
+        }
     }
 
     /// Whether this is the lock at `location`: the same lock file by identity, not by spelling

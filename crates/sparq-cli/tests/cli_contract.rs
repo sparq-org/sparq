@@ -1047,6 +1047,72 @@ fn an_output_never_replaces_a_stores_lock_or_reserved_names() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `reason … /dev/stdout > out.nt` (the documented way to stream the closure into a file):
+/// `/dev/stdout` is a link to the process's standard output, which is written through, never
+/// replaced; the closure ends up in the file the shell redirected stdout to.
+#[cfg(unix)]
+#[test]
+fn reason_to_dev_stdout_redirected_to_a_file_writes_the_file() {
+    let dir = scratch("reason-stdout-file");
+    let data = write(&dir, "data.nt", NT);
+    let out = dir.join("out.nt");
+    let file = std::fs::File::create(&out).unwrap();
+    let status = Command::new(env!("CARGO_BIN_EXE_sparq-cli"))
+        .args(["reason", s(&data), "ntriples", "rdfs", "/dev/stdout"])
+        .stdout(file)
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let written = std::fs::read_to_string(&out).unwrap();
+    assert!(!written.is_empty() && written.lines().all(|l| l.ends_with(" .")), "{written:?}");
+    #[cfg(target_os = "linux")]
+    assert!(
+        std::path::Path::new("/dev/stdout").symlink_metadata().unwrap().file_type().is_symlink(),
+        "/dev/stdout was replaced"
+    );
+    let left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left.len(), 2, "left {left:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An output to a symbolic link replaces the file the link leads to; the link stays a link.
+#[cfg(unix)]
+#[test]
+fn an_output_to_a_symbolic_link_replaces_its_target() {
+    let dir = scratch("reason-out-link");
+    let data = write(&dir, "data.nt", NT);
+    std::fs::create_dir_all(dir.join("real")).unwrap();
+    let target = dir.join("real").join("closure.nt");
+    std::fs::write(&target, b"old").unwrap();
+    let link = dir.join("closure.nt");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let (code, _stdout, stderr) = run3(&["reason", s(&data), "ntriples", "rdfs", s(&link)]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert!(link.symlink_metadata().unwrap().file_type().is_symlink(), "the link was replaced");
+    let written = std::fs::read_to_string(&target).unwrap();
+    assert!(written.contains(" ."), "{written}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A store's lock file is refused as an output in any case (`g.LOCK` on a case-insensitive
+/// filesystem is `g.lock`).
+#[cfg(feature = "mmap")]
+#[test]
+fn an_output_never_replaces_a_lock_file_named_in_another_case() {
+    let dir = scratch("reason-out-case");
+    let data = write(&dir, "data.nt", NT);
+    let store = dir.join("g");
+    let (rc, _o, e) = run3(&["save", s(&data), "ntriples", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    for name in ["g.LOCK", "g.Lock", "SPARQ-STORE"] {
+        let out = dir.join(name);
+        let (code, _stdout, stderr) = run3(&["reason", s(&data), "ntriples", "rdfs", s(&out)]);
+        assert_eq!(code, 2, "{name}: stderr: {stderr}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An output that replaces an existing regular file keeps that file's permissions.
 #[cfg(unix)]
 #[test]

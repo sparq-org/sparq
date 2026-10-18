@@ -20,6 +20,10 @@ pub mod dictspill;
 pub mod eliasfano;
 #[cfg(feature = "mmap")]
 pub mod dir_lock;
+#[cfg(all(test, feature = "mmap"))]
+mod fault;
+#[cfg(all(test, feature = "mmap"))]
+mod swap_tests;
 #[cfg(feature = "mmap")]
 pub mod extsort;
 // (sq-7d3dj.18) Prefix-memoized IRI-validation fast path in FRONT of the full
@@ -157,7 +161,16 @@ pub struct Graph {
     /// ([`open_read_only`](Self::open_read_only)), or a failed directory swap left it without
     /// a log it can trust (see [`restore_in_place`](Self::restore_in_place)). `None` normally.
     #[cfg(feature = "mmap")]
-    detached: Option<String>,
+    detached: Option<Detached>,
+}
+
+/// Why a graph refuses every write ([`Graph::check_writable`]).
+#[cfg(feature = "mmap")]
+#[derive(Clone, Debug)]
+struct Detached {
+    why: String,
+    /// A failed directory swap froze it ([`Graph::is_frozen`]), as opposed to a read-only open.
+    frozen: bool,
 }
 
 /// (sq-5lf) An IMMUTABLE, logically-independent point-in-time view of a
@@ -1492,9 +1505,19 @@ impl Graph {
 
     /// Builds a graph from an already-interned dictionary + triple set (e.g. after opt-in
     /// reasoning materialized additional triples). Public counterpart of the internal
-    /// `build`.
+    /// `build`. A memory-mapped dictionary brings its store's lock: the graph holds it as its
+    /// own, so a [`save`](Self::save) into that directory is refused with the reason (it would
+    /// rewrite the files the dictionary maps) instead of waiting on a lock it already holds.
     pub fn from_parts(dict: Dict, triples: Vec<[Id; 3]>) -> Graph {
-        Self::build(dict, triples)
+        #[cfg(feature = "mmap")]
+        let lock = dict.lock_pin();
+        #[allow(unused_mut)]
+        let mut g = Self::build(dict, triples);
+        #[cfg(feature = "mmap")]
+        {
+            g.lock = lock;
+        }
+        g
     }
 
     /// The term dictionary: id <-> term, for reading. A memory-mapped dictionary keeps its
@@ -1916,7 +1939,11 @@ impl Graph {
     #[cfg(feature = "mmap")]
     fn lock_to_write(&self, dir: &std::path::Path) -> std::io::Result<Owned> {
         claim_store(dir, Claim::Write, |dir, location| {
-            if self.is_backed_by(dir) || self.lock.as_ref().is_some_and(|held| held.is_at(location))
+            if self.is_backed_by(dir)
+                || self
+                    .lock
+                    .as_ref()
+                    .is_some_and(|held| held.is_at(location) || held.guards(dir))
             {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -2102,7 +2129,7 @@ impl Graph {
     /// recovered before the check, so a store mid-swap is opened, never re-seeded.
     #[cfg(feature = "mmap")]
     pub fn open_or_create(dir: &std::path::Path, seed: &Graph) -> std::io::Result<Graph> {
-        let owned = claim_store(dir, Claim::Open, |_, _| Ok(()))?;
+        let owned = claim_store(dir, Claim::OpenOrCreate, |_, _| Ok(()))?;
         let dir = owned.dir;
         let lock = owned.lock;
         // Checked before recovery touches anything; `open_dir` checks again after it.
@@ -2144,7 +2171,10 @@ impl Graph {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!(
-                    "{} cannot be opened read-only: {why}; open it writable and `compact` it first",
+                    "{} cannot be opened read-only: {why}. A writable open recovers or replays \
+                     that: open it writable once (`sparq-cli compact <dir>` does, and folds the \
+                     logs into the base), then open it read-only; if the writable open refuses, \
+                     its error says why and what to do",
                     dir.display()
                 ),
             ));
@@ -2172,7 +2202,7 @@ impl Graph {
         if writable {
             // (review 1593) Finish or roll back any compaction directory swap that a
             // crash interrupted, so `dir` is always present (never lost in the rename window).
-            let recovered = recover_compaction(dir)?;
+            let recovered = recover_compaction(dir)? != Recovered::Nothing;
             // (sq-glw2) Finish or roll back any named-graph DROP sub-tree swap a crash
             // interrupted, so `named/` is always consistent with the manifest before `open_named`.
             let recovered = recover_named_drop(dir)? || recovered;
@@ -2250,7 +2280,10 @@ impl Graph {
             detached: None,
         };
         if !writable {
-            g.detached = Some("it was opened read-only".to_owned());
+            g.detached = Some(Detached {
+                why: "it was opened read-only".to_owned(),
+                frozen: false,
+            });
             return Ok(g);
         }
         // Replay any write-ahead log into the delta-overlay (recovery after a crash or a
@@ -3539,6 +3572,7 @@ impl Graph {
     pub fn clear_named_durable(&mut self, name: &Term) -> Result<bool, String> {
         match self.named.iter().position(|(n, _)| n == name) {
             Some(i) => {
+                self.refuse_while_txn_poisoned()?;
                 self.named[i].1.clear_default_durable()?;
                 Ok(true)
             }
@@ -3571,7 +3605,9 @@ impl Graph {
         let Some(idx) = self.named.iter().position(|(n, _)| n == name) else {
             return Ok(false);
         };
-        self.refuse_if_detached()?;
+        // Refused while this graph, or any named graph under it, refuses writes (a frozen named
+        // graph would be re-saved from its view) or keeps a journal frame for the reopen.
+        self.refuse_while_txn_poisoned()?;
         // Directory-backed parent: durably remove the sub-dir + manifest entry. For an in-memory
         // parent (or a non-mmap build) fall through to the plain in-memory entry removal below.
         #[cfg(feature = "mmap")]
@@ -3615,7 +3651,7 @@ impl Graph {
         if self.named.is_empty() {
             return Ok(());
         }
-        self.refuse_if_detached()?;
+        self.refuse_while_txn_poisoned()?;
         // Release every sub-graph's mmap/WAL handles before any directory is touched (Issue 1/2:
         // no live map may point into `named/<i>/` across the removal — correct on every platform,
         // required on Windows where a mapped file blocks `remove_dir_all`/`rename`).
@@ -3625,6 +3661,24 @@ impl Graph {
             return self.persist_named_after_drop(&dir);
         }
         Ok(())
+    }
+
+    /// After a named-graph drop failed with `self.named` already cleared (part of it released
+    /// for the swap): recover the `named/` sub-tree under the lock this graph holds and re-open
+    /// the named graphs from what the directory now holds (the drop happened, or did not); when
+    /// that fails too, freeze this graph, which would otherwise go on with no named graphs and
+    /// lose them all at its next compaction.
+    #[cfg(feature = "mmap")]
+    fn reload_named_after_failed_drop(&mut self, dir: &std::path::Path, error: String) -> String {
+        let reloaded = recover_named_drop(dir).and_then(|_| Graph::open_named(dir, &self.lock, true));
+        match reloaded {
+            Ok(named) => self.named = named,
+            Err(e) => self.detach(&format!(
+                "a named-graph drop failed ({error}) and its named graphs could not be re-opened \
+                 ({e}): drop this graph and re-open the directory"
+            )),
+        }
+        error
     }
 
     /// (sq-glw2, Copilot #123) Crash-safe persistence of `self.named` AFTER a drop has
@@ -3645,6 +3699,12 @@ impl Graph {
     ///   map never points into the directory being renamed (Issue 2; Windows-safe).
     #[cfg(feature = "mmap")]
     fn persist_named_after_drop(&mut self, dir: &std::path::Path) -> Result<(), String> {
+        let result = self.persist_named_after_drop_inner(dir);
+        result.map_err(|e| self.reload_named_after_failed_drop(dir, e))
+    }
+
+    #[cfg(feature = "mmap")]
+    fn persist_named_after_drop_inner(&mut self, dir: &std::path::Path) -> Result<(), String> {
         let named_dir = dir.join(NAMED_SUBDIR);
         let new_dir = staging_path(&named_dir, "drop-new");
         let old_dir = staging_path(&named_dir, "drop-old");
@@ -3652,8 +3712,8 @@ impl Graph {
         // This store's identity: the provenance its staging directories record.
         let id = store_id(dir, Role::Root).map_err(|e| e.to_string())?;
         let clear_staging = || -> Result<(), String> {
-            remove_staging(&new_dir, "drop-new", Some(&id)).map_err(|e| e.to_string())?;
-            remove_staging(&old_dir, "drop-old", Some(&id)).map_err(|e| e.to_string())
+            remove_staging(&new_dir, "drop-new", Some(&id), &named_dir).map_err(|e| e.to_string())?;
+            remove_staging(&old_dir, "drop-old", Some(&id), &named_dir).map_err(|e| e.to_string())
         };
 
         if self.named.is_empty() {
@@ -3663,10 +3723,10 @@ impl Graph {
             return Ok(());
         }
 
-        // Build the renumbered survivor sub-tree in a fresh staging dir, fsync it, then swap.
+        // Build the renumbered survivor sub-tree in a fresh staging dir (carrying its record
+        // from the start), fsync it, then swap.
         clear_staging()?;
-        std::fs::create_dir(&new_dir).map_err(|e| e.to_string())?;
-        mark_staging(&new_dir, "drop-new", &id).map_err(|e| e.to_string())?;
+        create_staging(&new_dir, "drop-new", &id).map_err(|e| e.to_string())?;
         // Close every survivor's WAL before copying its directory so no open append handle is
         // mid-flight across the swap. Then persist each survivor — folding any overlay — into its
         // NEW positional slot, capturing its name for the rebuilt manifest.
@@ -3692,12 +3752,23 @@ impl Graph {
         fsync_dir(dir).map_err(|e| e.to_string())?;
         mark_staging(&old_dir, "drop-old", &id).map_err(|e| e.to_string())?;
         clear_staging_mark(&new_dir).map_err(|e| e.to_string())?;
-        publish_rename(&new_dir, &named_dir).map_err(|e| e.to_string())?;
+        if let Err(e) = publish_rename(&new_dir, &named_dir) {
+            // Put the old sub-tree back, as a compaction swap's rollback does: the new half gets
+            // its record back first, the old one loses its record once it is back in place.
+            let rolled_back = mark_staging(&new_dir, "drop-new", &id).is_ok()
+                && publish_rename(&old_dir, &named_dir).is_ok()
+                && fsync_dir(dir).is_ok()
+                && clear_staging_mark(&named_dir).is_ok();
+            if rolled_back {
+                remove_staging_dir(&new_dir).ok();
+            }
+            return Err(e.to_string());
+        }
         fsync_dir(dir).map_err(|e| e.to_string())?;
         // The sub-tree is now the renumbered survivors. Commit the new set by rewriting the
         // manifest (atomic temp+rename, fsyncs the parent dir) — the commit point for the set.
         write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
-        std::fs::remove_dir_all(&old_dir).ok();
+        remove_staging_dir(&old_dir).ok();
         // Re-open survivors from their NEW directories so each carries a correctly-indexed WAL
         // (and a fresh, correctly-targeted mmap into the swapped-in `named/`).
         for (i, name) in names.into_iter().enumerate() {
@@ -3919,8 +3990,21 @@ impl Graph {
         // graphs recursively, then this graph's dictionary extension into a fresh
         // frozen base (so the NEXT fork is O(1) again) and the forked caches flat.
         // No-ops on a never-forked graph.
-        for (_, g) in &mut self.named {
-            g.compact()?;
+        for i in 0..self.named.len() {
+            if let Err(e) = self.named[i].1.compact() {
+                // A named graph whose swap froze it has lost its log: the root must not go on
+                // writing (a named-graph drop would re-save the frozen graph's view and lose
+                // its data), so it is frozen too.
+                #[cfg(feature = "mmap")]
+                if self.named[i].1.is_frozen() {
+                    self.detach(&format!(
+                        "the swap of a named graph ({}) failed: {e}; drop this graph and re-open \
+                         the directory",
+                        self.named[i].0
+                    ));
+                }
+                return Err(e);
+            }
         }
         if self.dict.is_forked() {
             self.dict = self.dict.compacted();
@@ -4034,11 +4118,17 @@ impl Graph {
     /// swap, keeping this graph's lock. Once the new base is staged, the graph releases every
     /// file it has in the directory (its maps, its logs, its named graphs), since Windows refuses
     /// to rename a directory with a file in it open or mapped; any other holder of those files
-    /// (a fork, a snapshot, a named graph taken out of `named`) makes the rename fail there. On
-    /// failure, when the directory is still the old store, the graph is re-opened from it and
-    /// keeps writing durably as before; otherwise it is detached (every later write refused,
-    /// never applied in memory only), re-opened read-only from what the directory holds if that
-    /// opens, and empty if not.
+    /// (a fork, a snapshot, a named graph taken out of `named`) makes the rename fail there.
+    /// Until the swap ends the graph is an empty placeholder that holds the lock and refuses
+    /// writes (so a panic in between leaves nothing writable behind).
+    ///
+    /// On failure, the interrupted swap is recovered at once, under the lock this graph holds
+    /// ([`recover_compaction`]), and the graph re-opened writable from what that leaves: the
+    /// old store (rolled back; the error is returned) or the new one (the swap completed; `Ok`).
+    /// Only when that fails too is the graph frozen: every later write refused, never applied
+    /// in memory only ([`is_frozen`](Self::is_frozen)), and re-opened read-only from what the
+    /// directory holds, its logs replayed in memory so it reads as a re-open would, or empty if
+    /// nothing opens.
     #[cfg(feature = "mmap")]
     fn publish_staged_base_or_freeze<F>(&mut self, write_new_base: F) -> std::io::Result<()>
     where
@@ -4050,7 +4140,7 @@ impl Graph {
         let lock = self.lock.clone();
         let staged = {
             let this: &Graph = self;
-            stage_new_base(&dir, |new_dir, role| write_new_base(this, new_dir, role))
+            stage_new_base(&dir, lock.as_deref(), |new_dir, role| write_new_base(this, new_dir, role))
         };
         let staged = match staged {
             Ok(staged) => staged,
@@ -4058,28 +4148,37 @@ impl Graph {
             Err(failure) => return Err(failure.error),
         };
         let role = staged.role;
-        // Release every file this graph has in the directory; `lock` keeps the directory locked.
-        *self = Graph::new();
-        match staged.publish(lock.clone()) {
+        // Release every file this graph has in the directory; the placeholder keeps the lock.
+        *self = Graph::frozen_placeholder(
+            lock.clone(),
+            format!(
+                "a swap of {} did not finish: drop this graph and re-open the directory",
+                dir.display()
+            ),
+        );
+        let failure = match staged.publish(lock.clone()) {
             Ok(reopened) => {
                 *self = reopened;
-                Ok(())
+                return Ok(());
             }
-            Err(failure) => {
-                if failure.dir_unchanged {
-                    if let Ok(reopened) = Graph::open_dir(&dir, lock.clone(), true, role) {
-                        *self = reopened;
-                        return Err(failure.error);
-                    }
+            Err(failure) => failure,
+        };
+        match Graph::reopen_after_failed_swap(&dir, &lock, role) {
+            Ok((reopened, recovered)) => {
+                *self = reopened;
+                if recovered == Recovered::Completed {
+                    Ok(())
+                } else {
+                    Err(failure.error)
                 }
-                let mut frozen =
-                    Graph::open_dir(&dir, lock.clone(), false, role).unwrap_or_else(|_| {
-                        let mut empty = Graph::new();
-                        empty.lock = lock;
-                        empty
-                    });
+            }
+            Err(reopen) => {
+                let mut frozen = Graph::open_dir(&dir, lock.clone(), false, role)
+                    .and_then(|mut g| g.replay_logs_in_memory(&dir).map(|()| g))
+                    .unwrap_or_else(|_| Graph::frozen_placeholder(lock.clone(), String::new()));
                 frozen.detach(&format!(
-                    "a swap of {} failed ({}): drop this graph and re-open the directory",
+                    "a swap of {} failed ({}), and re-opening it after recovering the swap failed \
+                     too ({reopen}): drop this graph and re-open the directory",
                     dir.display(),
                     failure.error
                 ));
@@ -4089,27 +4188,121 @@ impl Graph {
         }
     }
 
-    /// Refuse every later write to this graph and its named graphs, saying `why`.
+    /// After a failed swap of `dir`: recover it under `lock` ([`recover_compaction`], which
+    /// completes the swap or rolls it back), make sure the lock holds the inside lock of what is
+    /// now at `dir` (a root store's), and open it writable. Returns what recovery did.
+    #[cfg(feature = "mmap")]
+    fn reopen_after_failed_swap(
+        dir: &std::path::Path,
+        lock: &Option<std::sync::Arc<dir_lock::DirLock>>,
+        role: Role,
+    ) -> std::io::Result<(Graph, Recovered)> {
+        let recovered = recover_compaction(dir)?;
+        if role == Role::Root {
+            if let Some(lock) = lock {
+                lock.ensure_inside()?;
+            }
+        }
+        let reopened = Graph::open_dir(dir, lock.clone(), true, role)?;
+        Ok((reopened, recovered))
+    }
+
+    /// An empty graph that holds `lock` and refuses every write, saying `why`: what a graph is
+    /// while a swap of its directory runs, and what is left when nothing can be re-opened.
+    #[cfg(feature = "mmap")]
+    fn frozen_placeholder(lock: Option<std::sync::Arc<dir_lock::DirLock>>, why: String) -> Graph {
+        let mut g = Graph::new();
+        g.lock = lock;
+        g.detached = Some(Detached { why, frozen: true });
+        g
+    }
+
+    /// Applies what the logs of the store in `dir` (opened read-only into this graph, and its
+    /// named graphs, each from `named/<i>`) hold, in memory only, without changing a byte on
+    /// disk: so a frozen graph reads what a re-open would.
+    #[cfg(feature = "mmap")]
+    fn replay_logs_in_memory(&mut self, dir: &std::path::Path) -> std::io::Result<()> {
+        self.replay_wal_in_memory(dir)?;
+        for (insert, slot, t) in TxnJournal::read(dir, false)? {
+            let target = match slot {
+                None => &mut *self,
+                Some(name) => match self.named.iter().position(|(n, _)| *n == name) {
+                    Some(i) => &mut self.named[i].1,
+                    None if insert => {
+                        self.named.push((name, Graph::new()));
+                        &mut self.named.last_mut().expect("just pushed").1
+                    }
+                    None => continue,
+                },
+            };
+            if insert {
+                target.apply_delta_mem(&[t], &[]);
+            } else {
+                target.apply_delta_mem(&[], &[t]);
+            }
+        }
+        Ok(())
+    }
+
+    /// The per-graph half of [`replay_logs_in_memory`](Self::replay_logs_in_memory).
+    #[cfg(feature = "mmap")]
+    fn replay_wal_in_memory(&mut self, dir: &std::path::Path) -> std::io::Result<()> {
+        for (insert, t) in Wal::read(dir, false)? {
+            if insert {
+                self.apply_delta_mem(&[t], &[]);
+            } else {
+                self.apply_delta_mem(&[], &[t]);
+            }
+        }
+        let named_dir = dir.join(NAMED_SUBDIR);
+        for (i, (_, sub)) in self.named.iter_mut().enumerate() {
+            sub.replay_wal_in_memory(&named_dir.join(i.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Refuse every later write to this graph and its named graphs, saying `why`: it is frozen
+    /// ([`is_frozen`](Self::is_frozen)).
     #[cfg(feature = "mmap")]
     fn detach(&mut self, why: &str) {
-        self.detached = Some(why.to_owned());
+        self.detached = Some(Detached {
+            why: why.to_owned(),
+            frozen: true,
+        });
         for (_, sub) in &mut self.named {
             sub.detach(why);
         }
     }
 
+    /// Whether a failed directory swap froze this graph (a compaction, vacuum or restore whose
+    /// swap failed and could not be recovered at once; see
+    /// [`restore_in_place`](Self::restore_in_place)): it refuses every write, and what it reads
+    /// is what the directory held when it froze (its logs applied in memory), or nothing when
+    /// that could not be opened. A caller serving it should report it as failed rather than go
+    /// on serving it: drop it and re-open the directory. `false` for a graph opened read-only
+    /// (which refuses writes too, [`check_writable`](Self::check_writable)), and always `false`
+    /// without the `mmap` feature.
+    pub fn is_frozen(&self) -> bool {
+        #[cfg(feature = "mmap")]
+        if let Some(d) = &self.detached {
+            return d.frozen;
+        }
+        false
+    }
+
     /// `Err` when this graph refuses writes: it was opened read-only (`Graph::open_read_only`),
-    /// or a failed directory swap froze it (see `Graph::restore_in_place`). A caller that replaces a graph with a
-    /// rebuilt copy (an update or reasoning pass that returns a new graph) checks this first,
-    /// so a read-only graph is never silently swapped for a writable in-memory one.
+    /// or a failed directory swap froze it ([`is_frozen`](Self::is_frozen)). A caller that
+    /// replaces a graph with a rebuilt copy (an update or reasoning pass that returns a new
+    /// graph) checks this first, so a read-only graph is never silently swapped for a writable
+    /// in-memory one.
     pub fn check_writable(&self) -> Result<(), String> {
         self.refuse_if_detached()
     }
 
     fn refuse_if_detached(&self) -> Result<(), String> {
         #[cfg(feature = "mmap")]
-        if let Some(why) = &self.detached {
-            return Err(format!("the graph refuses writes: {why}"));
+        if let Some(d) = &self.detached {
+            return Err(format!("the graph refuses writes: {}", d.why));
         }
         Ok(())
     }
@@ -4232,7 +4425,8 @@ impl Default for Graph {
 }
 
 /// A file a save or build writes into a store: the bytes go to a fresh sibling (`<name>.tmp`,
-/// any old one unlinked first, so nothing is ever written through an existing file or link),
+/// any old one unlinked first, so nothing is ever written through an existing file or link;
+/// on Unix it gets the permissions of the regular file it replaces, if any),
 /// and [`commit`](Self::commit) makes them durable and publishes them at `path` (see
 /// [`publish_rename`] for what that means on each platform). Until then `path` keeps its old
 /// file whole, and a graph that maps the old file keeps reading it; dropped without a commit,
@@ -4285,6 +4479,20 @@ impl FreshFile {
     /// file after a failure is best effort.
     pub(crate) fn commit(mut self) -> std::io::Result<()> {
         let file = self.file.take().expect("a fresh file is committed once");
+        // The file it replaces keeps its permissions (on Unix: a store whose files an operator
+        // made group-readable stays so); a new file gets the default under the umask.
+        #[cfg(unix)]
+        let file = match std::fs::symlink_metadata(&self.path) {
+            Ok(meta) if meta.is_file() => match file.set_permissions(meta.permissions()) {
+                Ok(()) => file,
+                Err(e) => {
+                    drop(file);
+                    std::fs::remove_file(&self.tmp).ok();
+                    return Err(e);
+                }
+            },
+            _ => file,
+        };
         if let Err(e) = file.sync_all() {
             drop(file);
             std::fs::remove_file(&self.tmp).ok();
@@ -4391,6 +4599,20 @@ fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
     }
 }
 
+/// A storage step about to run (`step` on `path`): in a test build, where a fault-injection
+/// plan ([`fault`]) can make it fail; nothing at all otherwise.
+#[cfg(feature = "mmap")]
+#[inline]
+fn fault_point(step: &str, path: &std::path::Path) -> std::io::Result<()> {
+    #[cfg(test)]
+    return fault::point(step, path);
+    #[cfg(not(test))]
+    {
+        let _ = (step, path);
+        Ok(())
+    }
+}
+
 /// Renames `from` over `to` (a file, replacing any file there; or a directory, onto a path that
 /// does not exist): the publishing step of every durable write and swap in a store.
 ///
@@ -4404,6 +4626,7 @@ fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// A failed rename is always returned, never treated as done.
 #[cfg(all(feature = "mmap", not(windows)))]
 fn publish_rename(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    fault_point("rename", from)?;
     std::fs::rename(from, to)
 }
 
@@ -4415,6 +4638,7 @@ fn publish_rename(from: &std::path::Path, to: &std::path::Path) -> std::io::Resu
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
+    fault_point("rename", from)?;
     let wide = |p: &std::path::Path| -> std::io::Result<Vec<u16>> {
         let mut w: Vec<u16> = p.as_os_str().encode_wide().collect();
         if w.contains(&0) {
@@ -4537,9 +4761,12 @@ struct Owned {
 #[cfg(feature = "mmap")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Claim {
-    /// A writable open (recovers, replays, appends): the lock exclusively.
+    /// A writable open (recovers, replays, appends) of a store that exists (or that an
+    /// interrupted swap left as staging): the lock exclusively.
     Open,
-    /// A read-only open: the lock shared; nothing is created.
+    /// A writable open that creates the store when there is none ([`Graph::open_or_create`]).
+    OpenOrCreate,
+    /// A read-only open of a store that exists: the lock shared.
     ReadOnly,
     /// A save, build or restore that writes the whole store: the lock exclusively, nothing of
     /// anyone else's inside the directory, and the root marker written first.
@@ -4686,16 +4913,71 @@ fn staging_path(dir: &std::path::Path, kind: &str) -> std::path::PathBuf {
     dir.with_file_name(name)
 }
 
-/// The lock beside a staging path (its sibling lock, as for any store directory), taken before
-/// the staging directory is made or recovered: no one else claims it meanwhile.
+/// The lock beside a staging path (`<staging>.lock`, named for its resolved parent and its own
+/// name, so a symbolic link planted at the staging path is never followed), taken before the
+/// staging directory is made or recovered: no one else claims it meanwhile.
 #[cfg(feature = "mmap")]
 fn lock_staging(staging: &std::path::Path) -> std::io::Result<dir_lock::DirLock> {
-    dir_lock::DirLock::acquire(dir_lock::LockLocation::sibling_of(staging)?)
+    dir_lock::DirLock::acquire(dir_lock::LockLocation::beside_entry(staging)?)
+}
+
+/// The suffix of the scratch name a staging directory is made under (`<staging>.sparq-part`):
+/// made there, given its staging record, then renamed to its staging name, so a staging
+/// directory never exists without its record.
+#[cfg(feature = "mmap")]
+pub(crate) const STAGING_SCRATCH_SUFFIX: &str = ".sparq-part";
+
+/// The scratch name `staging` is made under ([`STAGING_SCRATCH_SUFFIX`]).
+#[cfg(feature = "mmap")]
+fn staging_scratch(staging: &std::path::Path) -> std::path::PathBuf {
+    let mut name = staging.as_os_str().to_os_string();
+    name.push(STAGING_SCRATCH_SUFFIX);
+    std::path::PathBuf::from(name)
+}
+
+/// Makes the `kind` staging directory `staging` of the store `id`, carrying its record from the
+/// moment it has its name: made under its scratch name, given its record, synced, then renamed.
+/// A scratch directory a crash left there holds nothing but (part of) a record, and is removed
+/// first; anything else there is refused.
+#[cfg(feature = "mmap")]
+fn create_staging(staging: &std::path::Path, kind: &str, id: &str) -> std::io::Result<()> {
+    let scratch = staging_scratch(staging);
+    remove_staging_scratch(staging, kind)?;
+    fault_point("create", staging)?;
+    std::fs::create_dir(&scratch)?;
+    mark_staging(&scratch, kind, id)?;
+    publish_rename(&scratch, staging)?;
+    fsync_dir(staging.parent().unwrap_or_else(|| std::path::Path::new(".")))
+}
+
+/// Removes the scratch directory a crash left while `staging` was being made
+/// ([`create_staging`]): it holds nothing but (part of) a staging record, so no data. Anything
+/// else at the scratch name is refused.
+#[cfg(feature = "mmap")]
+fn remove_staging_scratch(staging: &std::path::Path, kind: &str) -> std::io::Result<()> {
+    let scratch = staging_scratch(staging);
+    if !something_at(&scratch)? {
+        return Ok(());
+    }
+    let partial = format!("{STAGING_MARKER}.tmp");
+    let only_a_record = std::fs::symlink_metadata(&scratch)?.is_dir()
+        && std::fs::read_dir(&scratch)?.all(|e| {
+            e.is_ok_and(|e| {
+                let name = e.file_name();
+                e.file_type().is_ok_and(|t| t.is_file())
+                    && (name == STAGING_MARKER || name == std::ffi::OsStr::new(&partial))
+            })
+        });
+    if !only_a_record {
+        return Err(not_own_staging(&scratch, kind, "holds more than a staging record", None));
+    }
+    std::fs::remove_dir_all(&scratch)
 }
 
 /// Records in `dir` that it is staging of the store whose identity is `id`, for `kind`.
 #[cfg(feature = "mmap")]
 fn mark_staging(dir: &std::path::Path, kind: &str, id: &str) -> std::io::Result<()> {
+    fault_point("mark", dir)?;
     write_fresh(
         &dir.join(STAGING_MARKER),
         format!("{kind} {id}\n").as_bytes(),
@@ -4712,11 +4994,40 @@ fn clear_staging_mark(dir: &std::path::Path) -> std::io::Result<()> {
             format!("{} is not a directory", dir.display()),
         ));
     }
+    fault_point("clear", dir)?;
     match std::fs::remove_file(dir.join(STAGING_MARKER)) {
         Ok(()) => fsync_dir(dir),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e),
     }
+}
+
+/// Removes the staging directory `staging` (checked by the caller) so that it keeps its record
+/// to the end: every other entry first (directories whole, links as links), then the record,
+/// then the directory. A crash part-way leaves a directory that still says whose staging it is.
+#[cfg(feature = "mmap")]
+fn remove_staging_dir(staging: &std::path::Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(staging)? {
+        let entry = entry?;
+        if entry.file_name() == STAGING_MARKER {
+            continue;
+        }
+        let path = entry.path();
+        fault_point("remove-entry", &path)?;
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(&path)?;
+        } else {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    fault_point("remove-record", staging)?;
+    match std::fs::remove_file(staging.join(STAGING_MARKER)) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    fault_point("remove-dir", staging)?;
+    std::fs::remove_dir(staging)
 }
 
 /// Whether anything (a directory, a file, a symbolic link, dangling or not) is at `path`.
@@ -4730,14 +5041,32 @@ fn something_at(path: &std::path::Path) -> std::io::Result<bool> {
 }
 
 /// `Err` (`InvalidInput`) naming `staging`, left alone: it is not this store's `kind` staging.
+/// With `live` (the store directory it is a sibling of) missing, the message says so: `staging`
+/// may then hold the only copy of that store, to be renamed back, never removed.
 #[cfg(feature = "mmap")]
-fn not_own_staging(staging: &std::path::Path, kind: &str, why: &str) -> std::io::Error {
+fn not_own_staging(
+    staging: &std::path::Path,
+    kind: &str,
+    why: &str,
+    live: Option<&std::path::Path>,
+) -> std::io::Error {
+    let advice = match live {
+        Some(live) if !live.exists() => format!(
+            "{} is missing, so {} may hold the only copy of its data: do not remove it; check it, \
+             and if it is that store, rename it back to {} (or recover it with the version that \
+             made it), then retry",
+            live.display(),
+            staging.display(),
+            live.display()
+        ),
+        _ => "check it and move it out of the way by hand (it may be another store's data), \
+              then retry"
+            .to_owned(),
+    };
     std::io::Error::new(
         std::io::ErrorKind::InvalidInput,
         format!(
-            "{} {why}, so it is not this store's {kind} staging and is left alone: check it and \
-             move or remove it by hand, then retry (staging left by an older version records no \
-             provenance and is refused the same way)",
+            "{} {why}, so it is not this store's {kind} staging and is left alone: {advice}",
             staging.display()
         ),
     )
@@ -4746,95 +5075,136 @@ fn not_own_staging(staging: &std::path::Path, kind: &str, why: &str) -> std::io:
 /// The staging record of the `kind` staging at `staging`: the owner's identity, or `None` when
 /// it is a real directory without one. An error when it is not a real directory (a link
 /// included), its record is for another kind or unreadable, or it holds another store or a
-/// lock in use ([`refuse_foreign_descendants`]).
+/// lock in use ([`refuse_foreign_descendants`]). `live` is the store it is beside (for the
+/// messages, [`not_own_staging`]).
 #[cfg(feature = "mmap")]
-fn staging_mark(staging: &std::path::Path, kind: &str) -> std::io::Result<Option<String>> {
+fn staging_mark(
+    staging: &std::path::Path,
+    kind: &str,
+    live: &std::path::Path,
+) -> std::io::Result<Option<String>> {
     if !std::fs::symlink_metadata(staging)?.is_dir() {
-        return Err(not_own_staging(staging, kind, "is not a directory"));
+        return Err(not_own_staging(staging, kind, "is not a directory", Some(live)));
     }
-    let owner = match std::fs::read(staging.join(STAGING_MARKER)) {
-        Ok(text) => std::str::from_utf8(&text)
-            .ok()
-            .and_then(|t| t.strip_suffix('\n'))
-            .and_then(|t| t.split_once(' '))
-            .filter(|(k, id)| *k == kind && is_store_id(id))
-            .map(|(_, id)| Some(id.to_string()))
-            .ok_or_else(|| not_own_staging(staging, kind, "records some other provenance"))?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-        Err(e) => return Err(e),
-    };
+    let owner = read_staging_record(staging)?
+        .map(|(k, id)| {
+            if k == kind {
+                Ok(id)
+            } else {
+                Err(not_own_staging(
+                    staging,
+                    kind,
+                    "records some other provenance",
+                    Some(live),
+                ))
+            }
+        })
+        .transpose()?;
     refuse_foreign_descendants(staging)?;
     Ok(owner)
 }
 
-/// Removes the `kind` staging at `staging` when its record names the store `id`; nothing there
-/// is fine; anything else (no record, another store's) is refused and left in place.
+/// The staging record in `dir`: `(kind, store id)`, or `None` without one; an error when it
+/// cannot be read or is not a record.
 #[cfg(feature = "mmap")]
-fn remove_staging(staging: &std::path::Path, kind: &str, id: Option<&str>) -> std::io::Result<()> {
+fn read_staging_record(dir: &std::path::Path) -> std::io::Result<Option<(String, String)>> {
+    let path = dir.join(STAGING_MARKER);
+    match std::fs::read(&path) {
+        Ok(text) => std::str::from_utf8(&text)
+            .ok()
+            .and_then(|t| t.strip_suffix('\n'))
+            .and_then(|t| t.split_once(' '))
+            .filter(|(_, id)| is_store_id(id))
+            .map(|(k, id)| Some((k.to_owned(), id.to_owned())))
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{} is not a staging record", path.display()),
+                )
+            }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether `dir`, a store directory, carries a staging record left over from putting it back:
+/// a swap's or recovery's rollback renames the old half back first and removes its record
+/// after, so a crash in between leaves the store with a `compact-old` (or, for a `named/`
+/// sub-tree, `drop-old`) record naming its own identity. Such a record is removed by the next
+/// writable open. A directory named as that kind of staging (`*.compact-old`, `*.drop-old`) is
+/// never taken for one: it is staging.
+#[cfg(feature = "mmap")]
+fn leftover_record(dir: &std::path::Path, kind: &str, id: Option<&str>) -> std::io::Result<bool> {
+    let Some((k, owner)) = read_staging_record(dir)? else {
+        return Ok(false);
+    };
+    let named_as_staging = dir
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().ends_with(&format!(".{kind}")));
+    Ok(k == kind && id == Some(owner.as_str()) && !named_as_staging)
+}
+
+/// Removes the `kind` staging at `staging` when its record names the store `id`; nothing there
+/// is fine; anything else (no record, another store's) is refused and left in place. `live` is
+/// the store it is beside.
+#[cfg(feature = "mmap")]
+fn remove_staging(
+    staging: &std::path::Path,
+    kind: &str,
+    id: Option<&str>,
+    live: &std::path::Path,
+) -> std::io::Result<()> {
     if !something_at(staging)? {
         return Ok(());
     }
-    match staging_mark(staging, kind)? {
-        Some(owner) if id == Some(owner.as_str()) => std::fs::remove_dir_all(staging),
+    match staging_mark(staging, kind, live)? {
+        Some(owner) if id == Some(owner.as_str()) => remove_staging_dir(staging),
         Some(_) => Err(not_own_staging(
             staging,
             kind,
             "is staging recorded by another store",
+            Some(live),
         )),
         None => Err(not_own_staging(
             staging,
             kind,
             "records no staging provenance",
+            Some(live),
         )),
     }
 }
 
-/// Removes this store's `kind` staging at a name an earlier version of this code used
-/// (`with_extension`, shared by `g.a` and `g.b`): only when its record names `id`, and never
-/// the store itself; anything else there is left alone, since it may be another store's.
+/// `Err` when staging an earlier release left mid-swap may be `dir`'s, about to be created or
+/// seeded empty: that release named a store's staging with `with_extension` (`g.a` staged at
+/// `g.compact-new` / `g.compact-old`, a name `g.b` shares) and wrote no record, so a directory
+/// there that holds a store and carries no record may be the only copy of `dir`'s data.
 #[cfg(feature = "mmap")]
-fn remove_legacy_staging(
-    dir: &std::path::Path,
-    kind: &str,
-    id: Option<&str>,
-) -> std::io::Result<()> {
-    let legacy = dir.with_extension(kind);
-    if legacy == dir || legacy == staging_path(dir, kind) || !something_at(&legacy)? {
-        return Ok(());
-    }
-    match (staging_mark(&legacy, kind), id) {
-        (Ok(Some(owner)), Some(id)) if owner == id => std::fs::remove_dir_all(&legacy),
-        _ => Ok(()),
-    }
-}
-
-/// Whether the store `owner` names is another store beside `dir` whose staging an earlier
-/// version put at `dir`'s staging names (`with_extension`: `g.a` staged at `g.compact-*`): a
-/// store there, named `<dir's name>.<extension>`, whose marker carries `owner`.
-#[cfg(feature = "mmap")]
-fn legacy_staging_of_a_sibling(dir: &std::path::Path, owner: &str) -> std::io::Result<bool> {
-    let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) else {
-        return Ok(false);
-    };
-    let entries = match std::fs::read_dir(parent) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(e),
-    };
-    for entry in entries {
-        let path = entry?.path();
-        let ext = path.extension().and_then(std::ffi::OsStr::to_str);
-        if path.file_stem() != Some(name)
-            || matches!(ext, None | Some("compact-new" | "compact-old"))
-            || !std::fs::symlink_metadata(&path)?.is_dir()
-        {
+fn refuse_legacy_staging(dir: &std::path::Path) -> std::io::Result<()> {
+    for kind in ["compact-new", "compact-old"] {
+        let legacy = dir.with_extension(kind);
+        if legacy == dir || legacy == staging_path(dir, kind) {
             continue;
         }
-        if matches!(read_marker(&path), Ok(Some(Marker { id: Some(id), .. })) if id == owner) {
-            return Ok(true);
+        if std::fs::symlink_metadata(&legacy).is_ok_and(|m| m.is_dir())
+            && is_store(&legacy)
+            && !something_at(&legacy.join(STAGING_MARKER))?
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "{} holds a graph store and no staging record: it may be staging an earlier \
+                     release left when a swap of {} (or of another store named like it) was \
+                     interrupted, and the only copy of that data. Recover it with the release \
+                     that made it, or, if it is this store, rename it back to {}; otherwise move \
+                     it out of the way. Then retry",
+                    legacy.display(),
+                    dir.display(),
+                    dir.display()
+                ),
+            ));
         }
     }
-    Ok(false)
+    Ok(())
 }
 
 /// Whether `dir` holds a store's files without a marker: a legacy store (saved before markers),
@@ -4862,18 +5232,26 @@ pub(crate) fn is_store(dir: &std::path::Path) -> bool {
 ///    ([`is_store`]): a named graph's directory, or anything else inside a store, belongs to
 ///    that store. This is marker-based, not name-based. It is refused too when it carries a
 ///    staging record ([`STAGING_MARKER`]): half of an interrupted swap, recovered through the
-///    store it belongs to.
+///    store it belongs to (a record left over from putting the store back, [`leftover_record`],
+///    is not refused: the claim's recovery removes it).
 /// 3. `refuse` (the caller's own check, e.g. "not my own directory") runs on the resolved path
 ///    and its lock location, before anything is created or locked.
-/// 4. Then missing parent directories are created (not for a read-only claim: the lock file
-///    goes beside the directory) and the lock taken: exclusively, or shared for
-///    [`Claim::ReadOnly`]. The ancestor check is repeated under the lock. The checks of step 5
-///    come after this, so a whole-store write they refuse may leave parents it created.
-/// 5. For [`Claim::Write`]: its internals are checked ([`check_store_internals`]) and it may hold
+/// 4. A claim that does not create a store ([`Claim::Open`], [`Claim::ReadOnly`]) of a path that
+///    holds none, and no staging of an interrupted swap either, fails (`NotFound`) here,
+///    having created nothing. A claim that creates one makes the missing parent directories.
+/// 5. The lock is taken ([`dir_lock::DirLock`]): the outside lock beside the directory when it
+///    exists or can be created, then the inside lock in it; exclusively, or shared for
+///    [`Claim::ReadOnly`]. A missing directory is recovered from staging, or created, under the
+///    outside lock only, before the inside lock is taken: without the outside lock (its parent
+///    is not writable) a missing directory is refused. Then the ancestor check is repeated, and
+///    staging an earlier release may have left is refused for a directory that holds no store
+///    yet ([`refuse_legacy_staging`]).
+/// 6. For [`Claim::Write`]: its internals are checked ([`check_store_internals`]) and it may hold
 ///    nothing of anyone else's ([`refuse_foreign_descendants`]); only then is an interrupted
 ///    swap of it recovered (so it is never mistaken for an empty one), from staging that records
 ///    this store as its owner and nothing else ([`recover_compaction`]), the checks repeated on
-///    what that put back; and the root marker is written before anything else.
+///    what that put back; scratch a killed build left is removed; and the root marker is
+///    written before anything else.
 ///
 /// Ownership is per root and decided here, at claim time, by what is on disk: the ancestor and
 /// descendant checks are a best effort against mistakes, not a reservation. Two processes
@@ -4890,27 +5268,67 @@ fn claim_store(
     refuse_staging(&resolved)?;
     let location = dir_lock::LockLocation::beside(&resolved)?;
     refuse(&resolved, &location)?;
-    if claim != Claim::ReadOnly {
+    let creates = matches!(claim, Claim::Write | Claim::OpenOrCreate);
+    let shared = claim == Claim::ReadOnly;
+    let staged = ["compact-new", "compact-old"]
+        .iter()
+        .try_fold(false, |any, kind| {
+            Ok::<_, std::io::Error>(any || something_at(&staging_path(&resolved, kind))?)
+        })?;
+    if !creates && !staged && !is_store(&resolved) {
+        refuse_legacy_staging(&resolved)?;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("{} holds no graph store", resolved.display()),
+        ));
+    }
+    if creates {
         if let Some(parent) = resolved.parent() {
             std::fs::create_dir_all(parent)?;
         }
     }
-    let lock = if claim == Claim::ReadOnly {
-        dir_lock::DirLock::acquire_shared(location)?
-    } else {
-        dir_lock::DirLock::acquire(location)?
-    };
+    let lock = dir_lock::DirLock::acquire_outside(location, &resolved, shared, true)?;
     refuse_inside_store(&resolved)?;
+    if !something_at(&resolved)? {
+        if !lock.holds_outside() {
+            return Err(needs_outside_lock(&resolved, &lock, "recovered or created"));
+        }
+        if shared {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "{} cannot be opened read-only: it is missing, and an interrupted swap left \
+                     its staging beside it; open it writable once (which recovers the swap), \
+                     then open it read-only",
+                    resolved.display()
+                ),
+            ));
+        }
+        refuse_legacy_staging(&resolved)?;
+        recover_compaction(&resolved)?;
+        if !something_at(&resolved)? {
+            if !creates {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("{} holds no graph store", resolved.display()),
+                ));
+            }
+            std::fs::create_dir_all(&resolved)?;
+        }
+    } else if !is_store(&resolved) {
+        refuse_legacy_staging(&resolved)?;
+    }
+    lock.lock_inside()?;
     if claim == Claim::Write {
         check_store_internals(&resolved)?;
         refuse_foreign_descendants(&resolved)?;
-        let recovered = recover_compaction(&resolved)?;
+        let recovered = recover_compaction(&resolved)? != Recovered::Nothing;
         let recovered = recover_named_drop(&resolved)? || recovered;
         if recovered {
             check_store_internals(&resolved)?;
             refuse_foreign_descendants(&resolved)?;
         }
-        std::fs::create_dir_all(&resolved)?;
+        remove_stale_scratch(&resolved)?;
         write_store_marker(&resolved, Role::Root)?;
     }
     Ok(Owned {
@@ -4919,11 +5337,82 @@ fn claim_store(
     })
 }
 
+/// The error for a step that needs the outside lock of the store `dir` (renaming it in a swap,
+/// or recovering or creating it when it is missing) when `lock` holds only its inside lock: the
+/// lock file beside it could be neither opened nor created, because its parent directory is not
+/// writable by this process.
+#[cfg(feature = "mmap")]
+fn needs_outside_lock(dir: &std::path::Path, lock: &dir_lock::DirLock, what: &str) -> std::io::Error {
+    let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
+    std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        format!(
+            "{} cannot be {what} here: that needs the lock file {} beside it, which cannot be \
+             opened or created because the parent directory {} is not writable by this process \
+             (the store itself opens, writes and reads without it). Move the store into a \
+             subdirectory of a writable directory (for a volume mounted at {}, keep the store \
+             in a directory under it, such as {}), or make {} writable",
+            dir.display(),
+            lock.location().path().display(),
+            parent.display(),
+            dir.display(),
+            dir.join("store").display(),
+            parent.display()
+        ),
+    )
+}
+
+/// `Err` unless the directory-backed graph's `lock` may rename its root directory `dir` (a
+/// compaction, vacuum or restore swap): it must hold the outside lock ([`needs_outside_lock`]).
+#[cfg(feature = "mmap")]
+fn refuse_swap_without_outside_lock(
+    dir: &std::path::Path,
+    lock: Option<&dir_lock::DirLock>,
+) -> std::io::Result<()> {
+    match lock {
+        Some(lock) if !lock.holds_outside() => Err(needs_outside_lock(
+            dir,
+            lock,
+            "swapped (compacted, vacuumed or restored, which renames the directory)",
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Removes the scratch directories a killed build left directly in the store `dir`
+/// (`.sparq-build-*`, `.sparq-quads-spill-*`: [`ScratchDir`]), under its exclusive lock, so no
+/// build of it is running. A build removes its own scratch when it ends, unless the process is
+/// killed (or aborts on a panic) first.
+#[cfg(feature = "mmap")]
+fn remove_stale_scratch(dir: &std::path::Path) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if (name.starts_with(".sparq-build-") || name.starts_with(".sparq-quads-spill-"))
+            && entry.file_type()?.is_dir()
+        {
+            std::fs::remove_dir_all(entry.path())?;
+        }
+    }
+    Ok(())
+}
+
 /// `Err` when the resolved `dir` carries a staging record ([`STAGING_MARKER`]): it is half of an
-/// interrupted swap of some store, recovered through that store, never claimed on its own.
+/// interrupted swap of some store, recovered through that store, never claimed on its own. A
+/// record left over from putting the store back ([`leftover_record`]) is not refused.
 #[cfg(feature = "mmap")]
 fn refuse_staging(dir: &std::path::Path) -> std::io::Result<()> {
     if something_at(&dir.join(STAGING_MARKER))? {
+        let id = read_marker(dir).ok().flatten().and_then(|m| m.id);
+        if leftover_record(dir, "compact-old", id.as_deref()).unwrap_or(false) {
+            return Ok(());
+        }
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!(
@@ -4956,11 +5445,16 @@ fn refuse_inside_store(dir: &std::path::Path) -> std::io::Result<()> {
 /// `Err` when the resolved `dir`, about to be written as a whole store, holds something of
 /// someone else's, or something it cannot tell is its own: another root store anywhere inside
 /// it, a store without a marker (a legacy store, which may be another root), a marker that
-/// cannot be read or parsed, or a lock file inside it that is held (a store under it is in use).
-/// Its own named graphs (child markers) are its to replace. Symbolic links inside are not
-/// followed.
+/// cannot be read or parsed, or a lock file inside it that is held (a store under it is in use;
+/// `dir`'s own inside lock excepted). Its own named graphs (child markers) are its to replace.
+/// Symbolic links inside are not followed.
 #[cfg(feature = "mmap")]
 fn refuse_foreign_descendants(dir: &std::path::Path) -> std::io::Result<()> {
+    refuse_foreign_below(dir, true)
+}
+
+#[cfg(feature = "mmap")]
+fn refuse_foreign_below(dir: &std::path::Path, top: bool) -> std::io::Result<()> {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -4994,9 +5488,10 @@ fn refuse_foreign_descendants(dir: &std::path::Path) -> std::io::Result<()> {
                     return refused(format!("{} holds {}: {e}", dir.display(), path.display()));
                 }
             }
-            refuse_foreign_descendants(&path)?;
+            refuse_foreign_below(&path, false)?;
         } else if kind.is_file()
             && path.extension() == Some(std::ffi::OsStr::new("lock"))
+            && !(top && entry.file_name() == dir_lock::INSIDE_LOCK)
             && dir_lock::DirLock::is_held(&path)?
         {
             return refused(format!(
@@ -5009,9 +5504,16 @@ fn refuse_foreign_descendants(dir: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The files of a store that are written in place (appended to, and emptied), not replaced by
+/// a rename: its logs.
+#[cfg(feature = "mmap")]
+const IN_PLACE_FILES: [&str; 2] = ["wal.log", "txn.log"];
+
 /// `Err` when the internals of the store in `dir` (its files, its `named/` directory and the
-/// entries in it) include a symbolic link, or a file with another hard link: either
-/// would let this store's lock guard files that another store, under another lock, also uses.
+/// entries in it) include a symbolic link, or a file written in place ([`IN_PLACE_FILES`]) with
+/// another hard link: either would let this store's lock guard files that another store, under
+/// another lock, also uses. Files a save replaces by a rename may have other hard links (a
+/// `cp -al` or `rsync --link-dest` snapshot): a save never writes through them.
 #[cfg(feature = "mmap")]
 fn check_store_internals(dir: &std::path::Path) -> std::io::Result<()> {
     let refused = |path: &std::path::Path, why: &str| {
@@ -5027,13 +5529,17 @@ fn check_store_internals(dir: &std::path::Path) -> std::io::Result<()> {
             Err(e) => return Err(e),
         };
         for entry in entries {
-            let path = entry?.path();
+            let entry = entry?;
+            let path = entry.path();
             let meta = std::fs::symlink_metadata(&path)?;
             if meta.file_type().is_symlink() {
                 return refused(&path, "is a symbolic link");
             }
-            if meta.is_file() && hard_links(&path, &meta)? > 1 {
-                return refused(&path, "has another hard link");
+            if meta.is_file()
+                && IN_PLACE_FILES.iter().any(|f| entry.file_name() == *f)
+                && hard_links(&path, &meta)? > 1
+            {
+                return refused(&path, "is written in place and has another hard link");
             }
         }
         Ok(())
@@ -5069,6 +5575,12 @@ fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>>
     // Links first: past this, nothing in `dir` or its `named/` is a symbolic link, so the walk
     // below never follows one (and cannot loop).
     check_store_internals(dir)?;
+    if something_at(&dir.join(STAGING_MARKER))? {
+        return Ok(Some(format!(
+            "an interrupted swap left its staging record {} in it",
+            dir.join(STAGING_MARKER).display()
+        )));
+    }
     for staging in ["compact-new", "compact-old"] {
         let sibling = staging_path(dir, staging);
         if something_at(&sibling)? {
@@ -5081,7 +5593,7 @@ fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>>
     let named = dir.join(NAMED_SUBDIR);
     for staging in ["drop-new", "drop-old"] {
         let sibling = staging_path(&named, staging);
-        if something_at(&sibling)? {
+        if something_at(&sibling)? || something_at(&staging_scratch(&sibling))? {
             return Ok(Some(format!(
                 "an interrupted drop left {}",
                 sibling.display()
@@ -5101,6 +5613,19 @@ fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>>
     if named.is_dir() {
         for entry in std::fs::read_dir(&named)? {
             let entry = entry?;
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if [".compact-new", ".compact-old", STAGING_SCRATCH_SUFFIX]
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+            {
+                // A named graph's directory is missing, or has leftover staging beside it: an
+                // interrupted swap of that named graph.
+                return Ok(Some(format!(
+                    "an interrupted swap of a named graph left {}",
+                    entry.path().display()
+                )));
+            }
             if entry.file_type()?.is_dir() {
                 if let Some(why) = needs_writable_open(&entry.path())? {
                     return Ok(Some(why));
@@ -5119,12 +5644,20 @@ fn needs_writable_open(dir: &std::path::Path) -> std::io::Result<Option<String>>
 /// re-opened memory-mapped from it (fresh, empty WAL) is returned.
 ///
 /// The protocol (matching the design recorded on `persist_swap`):
-///   1. clear any stale siblings, then write the new base to `<dir>.compact-new` and fsync that
-///      DIRECTORY (so it is durable before it can become canonical);
-///   2. rename `dir` -> `<dir>.compact-old`, fsync the parent (the rename is durable);
-///   3. rename `<dir>.compact-new` -> `dir`, fsync the parent;
-///   4. re-open from the new base, THEN drop `<dir>.compact-old` (open mmaps keep unlinked files
-///      alive on unix, so the re-open must precede the cleanup).
+///   1. clear this store's stale staging, then make `<dir>.compact-new` (with its staging record
+///      from the start), write the new base there and fsync that DIRECTORY (so it is durable
+///      before it can become canonical);
+///   2. rename `dir` -> `<dir>.compact-old`, fsync the parent (the rename is durable), and give
+///      the old half its record;
+///   3. remove the new half's record and rename `<dir>.compact-new` -> `dir`, fsync the parent;
+///   4. re-open from the new base, THEN remove `<dir>.compact-old`, its record last (open mmaps
+///      keep unlinked files alive on unix, so the re-open must precede the cleanup).
+///
+/// At every step one half carries a staging record naming the store, which is what recovery
+/// goes by. A root store's swap needs the outside lock ([`dir_lock::DirLock`]): it renames the
+/// directory. It takes the new base's inside lock before putting it in place, and keeps the old
+/// base's until that is gone (on Windows it holds neither across the renames, and takes the new
+/// one after them).
 ///
 /// FAIL-CLOSED: if `write_new_base` (or its fsync) fails — i.e. anything BEFORE the first rename —
 /// `dir` is never touched, so the old durable store survives intact. A crash DURING the two
@@ -5139,14 +5672,14 @@ fn swap_dir_to_new_base<F>(
 where
     F: FnOnce(&std::path::Path, Role) -> std::io::Result<()>,
 {
-    stage_new_base(dir, write_new_base)?.publish(lock)
+    stage_new_base(dir, lock.as_deref(), write_new_base)?.publish(lock)
 }
 
 /// A new base written and synced beside the directory it is to replace (the first half of
-/// [`swap_dir_to_new_base`]), holding its staging paths' locks. Nothing in the directory has
-/// changed yet. Whoever holds files inside the directory releases them before
-/// [`publish`](Self::publish): Windows refuses to rename a directory with a file in it open or
-/// mapped.
+/// [`swap_dir_to_new_base`]), holding its staging paths' locks (and, for a root store on Unix,
+/// the new base's inside lock). Nothing in the directory has changed yet. Whoever holds files
+/// inside the directory releases them before [`publish`](Self::publish): Windows refuses to
+/// rename a directory with a file in it open or mapped.
 #[cfg(feature = "mmap")]
 struct StagedBase {
     dir: std::path::PathBuf,
@@ -5154,24 +5687,33 @@ struct StagedBase {
     old_dir: std::path::PathBuf,
     id: String,
     role: Role,
+    new_inside: Option<std::fs::File>,
     _locks: (dir_lock::DirLock, dir_lock::DirLock),
 }
 
-/// Writes the new base for `dir` into its `compact-new` staging ([`StagedBase`]).
+/// Writes the new base for `dir` into its `compact-new` staging ([`StagedBase`]). `lock` is the
+/// lock held on `dir` (a root store's must hold the outside lock to rename it).
 #[cfg(feature = "mmap")]
-fn stage_new_base<F>(dir: &std::path::Path, write_new_base: F) -> Result<StagedBase, SwapFailure>
+fn stage_new_base<F>(
+    dir: &std::path::Path,
+    lock: Option<&dir_lock::DirLock>,
+    write_new_base: F,
+) -> Result<StagedBase, SwapFailure>
 where
     F: FnOnce(&std::path::Path, Role) -> std::io::Result<()>,
 {
-    let unchanged = |error| SwapFailure {
-        error,
-        dir_unchanged: true,
-    };
+    let unchanged = |error| SwapFailure { error };
     // A named graph's directory is swapped as a named graph's: its marker says so. Its identity
     // goes on the new base and on both staging directories (their recorded provenance).
     let role = read_store_marker(dir)
         .map_err(unchanged)?
         .unwrap_or(Role::Root);
+    if role == Role::Root {
+        refuse_swap_without_outside_lock(dir, lock).map_err(unchanged)?;
+    }
+    // The old base is removed once the new one is in place: nothing in it may be anyone
+    // else's (another store, a store in use), as for a save.
+    refuse_foreign_descendants(dir).map_err(unchanged)?;
     let id = store_id(dir, role).map_err(unchanged)?;
     let new_dir = staging_path(dir, "compact-new");
     let old_dir = staging_path(dir, "compact-old");
@@ -5181,14 +5723,20 @@ where
         lock_staging(&old_dir).map_err(unchanged)?,
     );
     // Only this store's own leftover staging is cleared; anything else there refuses the swap.
-    remove_staging(&new_dir, "compact-new", Some(&id)).map_err(unchanged)?;
-    remove_staging(&old_dir, "compact-old", Some(&id)).map_err(unchanged)?;
+    remove_staging(&new_dir, "compact-new", Some(&id), dir).map_err(unchanged)?;
+    remove_staging(&old_dir, "compact-old", Some(&id), dir).map_err(unchanged)?;
     // Build + sync the new base FIRST. A failure here leaves `dir` untouched (fail-closed) —
     // the two renames below have not started, so the old durable store is intact.
-    std::fs::create_dir(&new_dir).map_err(unchanged)?;
-    mark_staging(&new_dir, "compact-new", &id).map_err(unchanged)?;
+    create_staging(&new_dir, "compact-new", &id).map_err(unchanged)?;
     write_marker(&new_dir, role, &id).map_err(unchanged)?;
     write_new_base(&new_dir, role).map_err(unchanged)?;
+    // A root store's new base gets its inside lock file now; on Unix it is locked now too, so
+    // whoever opens the directory once the new base is in place finds it held.
+    let new_inside = if role == Role::Root && lock.is_some() {
+        new_inside_lock(&new_dir).map_err(unchanged)?
+    } else {
+        None
+    };
     fsync_dir(&new_dir).map_err(unchanged)?;
     Ok(StagedBase {
         dir: dir.to_path_buf(),
@@ -5196,8 +5744,37 @@ where
         old_dir,
         id,
         role,
+        new_inside,
         _locks: staging_locks,
     })
+}
+
+/// The inside lock of the new base in `new_dir`: created there, and on Unix locked (held by the
+/// swap until the new base is in place, then by the graph); on Windows only created (a file held
+/// open inside the directory would block its rename), and locked after the renames.
+#[cfg(feature = "mmap")]
+fn new_inside_lock(new_dir: &std::path::Path) -> std::io::Result<Option<std::fs::File>> {
+    #[cfg(not(windows))]
+    {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(new_dir.join(dir_lock::INSIDE_LOCK))?;
+        fs4::FileExt::try_lock(&file).map_err(|e| match e {
+            fs4::TryLockError::WouldBlock => std::io::Error::from(std::io::ErrorKind::WouldBlock),
+            fs4::TryLockError::Error(e) => e,
+        })?;
+        Ok(Some(file))
+    }
+    #[cfg(windows)]
+    {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(new_dir.join(dir_lock::INSIDE_LOCK))?;
+        Ok(None)
+    }
 }
 
 #[cfg(feature = "mmap")]
@@ -5214,53 +5791,84 @@ impl StagedBase {
             old_dir,
             id,
             role,
+            new_inside,
             _locks: locks,
         } = self;
         let dir = dir.as_path();
-        let changed = |error| SwapFailure {
-            error,
-            dir_unchanged: false,
-        };
-        let unchanged = |error| SwapFailure {
-            error,
-            dir_unchanged: true,
-        };
+        let changed = |error| SwapFailure { error };
+        let unchanged = changed;
+        let root_lock = lock.as_deref().filter(|_| role == Role::Root);
         let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
+        // On Windows a file held open inside the directory blocks its rename: let go of the
+        // inside lock for the renames (the outside lock still excludes every holder that can
+        // take it; one that cannot is blocked from renaming by the open files it holds, and a
+        // holder that takes the inside lock in between makes this swap refuse writes after).
+        #[cfg(windows)]
+        if let Some(lock) = root_lock {
+            lock.release_inside();
+        }
         // The live directory never carries a staging record: the old base is marked once it is
-        // aside, and the new one loses its record before it is renamed into place (recovery takes
-        // an unmarked half whose own marker carries the store's identity).
-        publish_rename(dir, &old_dir).map_err(unchanged)?;
+        // aside, and the new one loses its record just before it is renamed into place
+        // (recovery takes an unmarked half whose own marker carries the store's identity, and
+        // the other half carries a record throughout).
+        if let Err(e) = publish_rename(dir, &old_dir) {
+            #[cfg(windows)]
+            if let Some(lock) = root_lock {
+                if let Err(relock) = lock.lock_inside() {
+                    return Err(changed(relock));
+                }
+            }
+            return Err(unchanged(e));
+        }
         fsync_dir(parent).map_err(changed)?;
         mark_staging(&old_dir, "compact-old", &id).map_err(changed)?;
         clear_staging_mark(&new_dir).map_err(changed)?;
         if let Err(e) = publish_rename(&new_dir, dir) {
-            // Put the old base back: when that works the directory is as it was.
-            let rolled_back = clear_staging_mark(&old_dir).is_ok()
+            // Put the old base back: when that works the directory is as it was. The new half
+            // gets its record back first, and the old one loses its record only once it is
+            // back in place, so a half always says whose it is (a crash in between leaves a
+            // record in the store, which the next open removes: `leftover_record`).
+            let rolled_back = mark_staging(&new_dir, "compact-new", &id).is_ok()
                 && publish_rename(&old_dir, dir).is_ok()
-                && fsync_dir(parent).is_ok();
-            return Err(SwapFailure {
-                error: e,
-                dir_unchanged: rolled_back,
-            });
+                && fsync_dir(parent).is_ok()
+                && clear_staging_mark(dir).is_ok();
+            #[cfg(windows)]
+            let rolled_back = rolled_back && root_lock.is_none_or(|lock| lock.lock_inside().is_ok());
+            if rolled_back {
+                drop(new_inside);
+                remove_staging_dir(&new_dir).ok();
+            }
+            return Err(SwapFailure { error: e });
         }
         fsync_dir(parent).map_err(changed)?;
+        // The new base is in place: its inside lock becomes this store's (on Windows it is
+        // taken now); the old base's is kept until the old base is gone.
+        #[cfg(not(windows))]
+        let old_inside = root_lock.map(|lock| lock.replace_inside(new_inside));
+        #[cfg(windows)]
+        let old_inside: Option<Option<std::fs::File>> = {
+            let _ = new_inside;
+            if let Some(lock) = root_lock {
+                lock.lock_inside().map_err(changed)?;
+            }
+            None
+        };
         drop(locks);
         // Re-open memory-mapped from the new base (fresh, empty WAL); only then drop the old files.
         // The lock the caller holds goes with the re-opened graph (and its named graphs).
         let reopened = Graph::open_dir(dir, lock, true, role).map_err(changed)?;
-        std::fs::remove_dir_all(&old_dir).ok();
+        remove_staging_dir(&old_dir).ok();
+        drop(old_inside);
         Ok(reopened)
     }
 }
 
-/// A failed [`swap_dir_to_new_base`]: the error, and whether the directory is still the old
-/// store (the swap failed before its renames, or was rolled back), so a caller can keep using
-/// its log there; when not, the directory holds the new base (or is healed into old-or-new by
-/// [`recover_compaction`] on the next open).
+/// A failed [`swap_dir_to_new_base`]: the error. The directory is the old store (the swap failed
+/// before its renames, or was rolled back), the new one, or missing with its staging beside it,
+/// which [`recover_compaction`] heals into old-or-new.
 #[cfg(feature = "mmap")]
 struct SwapFailure {
     error: std::io::Error,
-    dir_unchanged: bool,
 }
 
 #[cfg(feature = "mmap")]
@@ -5270,50 +5878,66 @@ impl From<SwapFailure> for std::io::Error {
     }
 }
 
+/// What [`recover_compaction`] did.
+#[cfg(feature = "mmap")]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Recovered {
+    /// `dir` was there (leftover staging, or a leftover record in it, removed).
+    Nothing,
+    /// `dir` was missing; the new base was put in place (the swap completed).
+    Completed,
+    /// `dir` was missing; the old base was put back (the swap rolled back).
+    RolledBack,
+}
+
 /// (review 1593) Recover an INTERRUPTED [`compact`](Graph::compact) directory swap
 /// so the canonical `dir` always ends up present after any crash. Deterministic from the
 /// surviving siblings ([`staging_path`]: `<dir>.compact-old` / `<dir>.compact-new`):
 ///
-/// - `dir` present: the swap completed (or never started) — just remove any stale siblings.
+/// - `dir` present: the swap completed (or never started) — just remove any stale siblings, and
+///   a staging record left over in `dir` from putting it back ([`leftover_record`]).
 /// - `dir` MISSING, `compact-new` present: a crash between the two renames — the new base was
 ///   already fully written + dir-fsynced, so COMPLETE the swap by promoting `compact-new`.
 /// - `dir` MISSING, only `compact-old` present: a crash before the new base was ready — ROLL
-///   BACK by restoring `compact-old`.
+///   BACK by restoring `compact-old` (renamed first, its record removed after).
 ///
 /// What is removed or promoted is decided by staging records ([`STAGING_MARKER`]), never by the
 /// path's shape. With `dir` present, a sibling goes only when its record names the identity in
 /// `dir`'s marker. With `dir` missing, at least one sibling must carry a record, every record
 /// must name one store, and a sibling without one (the swap was between renaming it and
 /// marking it) must carry that store's identity in its own marker; the siblings' locks are
-/// taken first. Anything else is refused with an error and left alone. Returns whether `dir`
-/// was put back from a sibling.
+/// taken first. Anything else is refused with an error and left alone (with `dir` missing, the
+/// message says a sibling may be the only copy). A missing `dir` is recovered only under its
+/// outside lock (`claim_store`).
 #[cfg(feature = "mmap")]
-fn recover_compaction(dir: &std::path::Path) -> std::io::Result<bool> {
+fn recover_compaction(dir: &std::path::Path) -> std::io::Result<Recovered> {
     let new_dir = staging_path(dir, "compact-new");
     let old_dir = staging_path(dir, "compact-old");
     let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
     if dir.exists() {
         // Canonical dir is intact: drop this store's leftover staging from a crash after (or
-        // before) the swap.
+        // before) the swap, and a record left in it by an interrupted rollback.
         let id = read_marker(dir)?.and_then(|m| m.id);
-        for kind in ["compact-new", "compact-old"] {
-            remove_staging(&staging_path(dir, kind), kind, id.as_deref())?;
-            remove_legacy_staging(dir, kind, id.as_deref())?;
+        if leftover_record(dir, "compact-old", id.as_deref())? {
+            clear_staging_mark(dir)?;
         }
-        return Ok(false);
+        for kind in ["compact-new", "compact-old"] {
+            remove_staging(&staging_path(dir, kind), kind, id.as_deref(), dir)?;
+        }
+        return Ok(Recovered::Nothing);
     }
     let (has_new, has_old) = (something_at(&new_dir)?, something_at(&old_dir)?);
     if !has_new && !has_old {
-        return Ok(false);
+        return Ok(Recovered::Nothing);
     }
     let _locks = (lock_staging(&new_dir)?, lock_staging(&old_dir)?);
     let new_mark = if has_new {
-        staging_mark(&new_dir, "compact-new")?
+        staging_mark(&new_dir, "compact-new", dir)?
     } else {
         None
     };
     let old_mark = if has_old {
-        staging_mark(&old_dir, "compact-old")?
+        staging_mark(&old_dir, "compact-old", dir)?
     } else {
         None
     };
@@ -5323,6 +5947,7 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<bool> {
                 &old_dir,
                 "compact-old",
                 "is staging of another store",
+                Some(dir),
             ));
         }
         (Some(owner), _) | (None, Some(owner)) => owner.clone(),
@@ -5332,17 +5957,10 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<bool> {
                 staging,
                 "compact",
                 "records no staging provenance",
+                Some(dir),
             ));
         }
     };
-    if legacy_staging_of_a_sibling(dir, &owner)? {
-        let staging = if has_new { &new_dir } else { &old_dir };
-        return Err(not_own_staging(
-            staging,
-            "compact",
-            "is staging an earlier version made for another store beside it",
-        ));
-    }
     for (staging, kind, present, mark) in [
         (&new_dir, "compact-new", has_new, &new_mark),
         (&old_dir, "compact-old", has_old, &old_mark),
@@ -5353,6 +5971,7 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<bool> {
                 staging,
                 kind,
                 "is not this swap's other half",
+                Some(dir),
             ));
         }
     }
@@ -5367,15 +5986,17 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<bool> {
         publish_rename(&new_dir, dir)?;
         fsync_dir(parent)?;
         if has_old {
-            std::fs::remove_dir_all(&old_dir)?;
+            remove_staging_dir(&old_dir)?;
         }
+        Ok(Recovered::Completed)
     } else {
-        // Roll back: restore the previous base (the new one never reached durability).
-        clear_staging_mark(&old_dir)?;
+        // Roll back: restore the previous base (the new one never reached durability). It is
+        // renamed back first and loses its record after, so it says whose it is throughout.
         publish_rename(&old_dir, dir)?;
         fsync_dir(parent)?;
+        clear_staging_mark(dir)?;
+        Ok(Recovered::RolledBack)
     }
-    Ok(true)
 }
 
 /// (sq-glw2) Recover an INTERRUPTED [`drop_named_durable`](Graph::drop_named_durable)
@@ -5383,10 +6004,10 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<bool> {
 /// Mirrors [`recover_compaction`] but scoped to the `named/` sub-tree (`named.drop-old` /
 /// `named.drop-new` siblings):
 ///
-/// - `named/` present: the swap completed (or never started) — drop any stale siblings. The
-///   manifest is then reconciled by [`open_named`](Graph::open_named) (it trusts the manifest's
-///   count; extra leftover sub-dirs beyond it are ignored, a missing one surfaces as a clean
-///   error).
+/// - `named/` present: the swap completed (or never started) — drop any stale siblings (and a
+///   record left over in `named/` from putting it back). The manifest is then reconciled by
+///   [`open_named`](Graph::open_named) (it trusts the manifest's count; extra leftover sub-dirs
+///   beyond it are ignored, a missing one surfaces as a clean error).
 /// - `named/` MISSING, `named.drop-new` present: a crash between the two renames — the new
 ///   (renumbered survivor) sub-tree was fully written + fsync'd, so COMPLETE the swap by
 ///   promoting it.
@@ -5405,23 +6026,27 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
     let named_dir = dir.join(NAMED_SUBDIR);
     let new_dir = staging_path(&named_dir, "drop-new");
     let old_dir = staging_path(&named_dir, "drop-old");
+    let id = read_marker(dir)?.and_then(|m| m.id);
+    if something_at(&named_dir)? && leftover_record(&named_dir, "drop-old", id.as_deref())? {
+        clear_staging_mark(&named_dir)?;
+    }
+    remove_staging_scratch(&new_dir, "drop-new")?;
     let (has_new, has_old) = (something_at(&new_dir)?, something_at(&old_dir)?);
     if !has_new && !has_old {
         return Ok(false);
     }
-    let id = read_marker(dir)?.and_then(|m| m.id);
     if something_at(&named_dir)? {
-        remove_staging(&new_dir, "drop-new", id.as_deref())?;
-        remove_staging(&old_dir, "drop-old", id.as_deref())?;
+        remove_staging(&new_dir, "drop-new", id.as_deref(), &named_dir)?;
+        remove_staging(&old_dir, "drop-old", id.as_deref(), &named_dir)?;
         return Ok(false);
     }
     let new_mark = if has_new {
-        staging_mark(&new_dir, "drop-new")?
+        staging_mark(&new_dir, "drop-new", &named_dir)?
     } else {
         None
     };
     let old_mark = if has_old {
-        staging_mark(&old_dir, "drop-old")?
+        staging_mark(&old_dir, "drop-old", &named_dir)?
     } else {
         None
     };
@@ -5434,6 +6059,7 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
                 staging,
                 kind,
                 "is staging of another store",
+                Some(&named_dir),
             ));
         }
     }
@@ -5443,6 +6069,7 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
             staging,
             "drop",
             "records no staging provenance",
+            Some(&named_dir),
         ));
     }
     let id = id.expect("a record matched it");
@@ -5455,13 +6082,14 @@ fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<bool> {
         publish_rename(&new_dir, &named_dir)?;
         fsync_dir(dir)?;
         if has_old {
-            std::fs::remove_dir_all(&old_dir)?;
+            remove_staging_dir(&old_dir)?;
         }
     } else {
-        // The new sub-tree never reached durability: restore the previous one.
-        clear_staging_mark(&old_dir)?;
+        // The new sub-tree never reached durability: restore the previous one, renamed back
+        // first, its record removed after.
         publish_rename(&old_dir, &named_dir)?;
         fsync_dir(dir)?;
+        clear_staging_mark(&named_dir)?;
     }
     Ok(true)
 }
@@ -5681,6 +6309,9 @@ impl Wal {
         let crc = Self::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Self::COMMIT_MARKER.to_le_bytes());
+        // Another handle on this log (in this process) may have appended since this one did:
+        // write at the end, never over it.
+        std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))?;
         self.file.write_all(&buf)?;
         self.file.sync_data()
     }
@@ -5704,6 +6335,12 @@ impl Wal {
     /// corrupt batch — the torn tail of an interrupted append — so the partial batch is
     /// NEVER partially applied and subsequent appends start at a clean batch boundary.
     fn replay(dir: &std::path::Path) -> std::io::Result<Vec<(bool, [Term; 3])>> {
+        Self::read(dir, true)
+    }
+
+    /// [`replay`](Self::replay), truncating the torn tail only when `truncate` (with it false
+    /// the log is only read: a frozen graph's in-memory view).
+    fn read(dir: &std::path::Path, truncate: bool) -> std::io::Result<Vec<(bool, [Term; 3])>> {
         let path = Self::path(dir);
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
@@ -5763,7 +6400,7 @@ impl Wal {
             ops.extend(batch_ops);
             good = trailer_end;
         }
-        if good < bytes.len() {
+        if truncate && good < bytes.len() {
             let f = std::fs::OpenOptions::new().write(true).open(&path)?;
             f.set_len(good as u64)?;
             f.sync_data()?;
@@ -5912,9 +6549,8 @@ impl TxnJournal {
         let crc = Wal::checksum(&buf);
         buf.extend_from_slice(&crc.to_le_bytes());
         buf.extend_from_slice(&Wal::COMMIT_MARKER.to_le_bytes());
-        let written = self
-            .file
-            .write_all(&buf)
+        let written = std::io::Seek::seek(&mut self.file, std::io::SeekFrom::End(0))
+            .and_then(|_| self.file.write_all(&buf))
             .and_then(|()| self.file.sync_data());
         if written.is_err() {
             self.poisoned = true;
@@ -5944,6 +6580,11 @@ impl TxnJournal {
     /// frame — the torn tail of an interrupted append — so a partial frame is NEVER partially
     /// applied. EXACT clone of [`Wal::replay`]'s torn-tail logic, extended with the per-record slot.
     fn replay(dir: &std::path::Path) -> std::io::Result<Vec<TxnRecord>> {
+        Self::read(dir, true)
+    }
+
+    /// [`replay`](Self::replay), truncating the torn tail only when `truncate`.
+    fn read(dir: &std::path::Path, truncate: bool) -> std::io::Result<Vec<TxnRecord>> {
         let path = Self::path(dir);
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
@@ -6011,7 +6652,7 @@ impl TxnJournal {
             ops.extend(frame_ops);
             good = trailer_end;
         }
-        if good < bytes.len() {
+        if truncate && good < bytes.len() {
             let f = std::fs::OpenOptions::new().write(true).open(&path)?;
             f.set_len(good as u64)?;
             f.sync_data()?;
@@ -13328,11 +13969,12 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 
-    /// A swap that fails after the directory changed (here: the new base cannot be opened)
-    /// leaves the graph detached: every later write is refused, never applied in memory only.
+    /// A swap that fails after the directory changed (here: the new base cannot be opened, nor
+    /// can it after recovery) leaves the graph frozen: every later write is refused, never
+    /// applied in memory only.
     #[cfg(feature = "mmap")]
     #[test]
-    fn a_swap_failing_after_its_renames_detaches_the_graph() {
+    fn a_swap_whose_new_base_does_not_open_freezes_the_graph() {
         let base = std::env::temp_dir().join(format!("sparq_swap_detach_{}", std::process::id()));
         std::fs::remove_dir_all(&base).ok();
         let dir = base.join("g");
@@ -13354,13 +13996,8 @@ mod tests {
         assert!(err.is_err());
         assert!(g.apply_delta(std::slice::from_ref(&t), &[]).is_err(), "a write was accepted");
         // The graph released its files for the renames and could not re-open the directory
-        // (empty here): it holds whatever opened read-only, nothing at all here, and its lock.
-        for (_, sub) in &mut g.named {
-            assert!(
-                sub.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
-                "named too"
-            );
-        }
+        // (its new base is empty here): it is frozen, empty, and holds its lock.
+        assert!(g.is_frozen() && g.named.is_empty());
         assert!(
             matches!(Graph::open(&dir), Err(e) if e.kind() == std::io::ErrorKind::WouldBlock),
             "the frozen graph lost the directory's lock"

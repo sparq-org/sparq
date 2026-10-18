@@ -18,99 +18,210 @@ mod tabular;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-/// `Err` when the output file `out` would replace a graph store's file or a name a store
-/// reserves ([`sparq_core::dir_lock::is_reserved_store_path`]): the path or where it leads is
-/// in a store (a live store's `perm0.bin`, a symbolic link inside a store), or is a store's
-/// `<dir>.lock` lock file, a swap's staging sibling, a marker or `.sparq-*` scratch. Replacing
-/// one would corrupt the store or take its lock away. Also `Err` when the path cannot be
-/// resolved (a dangling symbolic link, say): it is never checked as spelled. A device or pipe
-/// (`/dev/stdout`) is fine: it is written as it is ([`OutFile`]), and no store's file is one.
-fn check_output_path(out: &str) -> std::io::Result<()> {
-    #[cfg(feature = "mmap")]
-    if !is_device_or_pipe(std::path::Path::new(out))
-        && sparq_core::dir_lock::is_reserved_store_path(std::path::Path::new(out))?
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!(
-                "{out} is inside a graph store or a name a store reserves (its lock file, \
-                 staging or scratch): write the output somewhere else"
-            ),
-        ));
-    }
-    #[cfg(not(feature = "mmap"))]
-    let _ = out;
-    Ok(())
+/// Where an output goes ([`output_target`]).
+#[derive(Debug, PartialEq, Eq)]
+enum Target {
+    /// Written through as it is: a device, a pipe, a socket, or a symbolic link into
+    /// `/proc/<pid>/fd`, `/dev/fd` or `/dev` (`/dev/stdout`, whatever stdout is).
+    Direct(std::path::PathBuf),
+    /// A regular file (or nothing yet) at this path, symbolic links resolved: replaced by
+    /// renaming a fresh file onto it.
+    Staged(std::path::PathBuf),
 }
 
-/// Whether `path` leads to something that is neither a regular file nor a directory (a device, a
-/// pipe, a socket: `/dev/stdout`, say), which an output is written to as it is.
-fn is_device_or_pipe(path: &std::path::Path) -> bool {
-    std::fs::metadata(path).is_ok_and(|m| !m.is_file() && !m.is_dir())
+/// Whether `path` (a symbolic link's target) is a process's file-descriptor link or a device
+/// path: `/proc/<pid>/fd/…` (`/proc/self/fd/…` included), `/dev/fd/…`, or anything under `/dev`.
+fn is_descriptor_or_device_path(path: &std::path::Path) -> bool {
+    let parts: Vec<_> = path.components().map(|c| c.as_os_str().to_owned()).collect();
+    let is = |i: usize, s: &str| parts.get(i).is_some_and(|p| p == s);
+    path.is_absolute() && (is(1, "dev") || (is(1, "proc") && is(3, "fd")))
+}
+
+/// Where an output to `path` goes. A symbolic link is never renamed over: it is followed, link
+/// by link; one leading into `/proc/<pid>/fd`, `/dev/fd` or `/dev` (`/dev/stdout`), or to
+/// something that is not a regular file (a device, a pipe), is written through as it is; one
+/// leading to a regular file, or to nothing under an existing directory, has that resolved
+/// path replaced. A dangling link (its target's directory missing) or a loop is an error.
+fn output_target(path: &std::path::Path) -> std::io::Result<Target> {
+    let mut current = path.to_path_buf();
+    for _ in 0..40 {
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                let link = std::fs::read_link(&current)?;
+                let next = match current.parent() {
+                    Some(parent) if link.is_relative() => parent.join(link),
+                    _ => link,
+                };
+                if is_descriptor_or_device_path(&next) {
+                    return Ok(Target::Direct(path.to_path_buf()));
+                }
+                current = next;
+            }
+            Ok(meta) if !meta.is_file() && !meta.is_dir() => {
+                return Ok(Target::Direct(path.to_path_buf()));
+            }
+            Ok(_) => return Ok(Target::Staged(current)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let parent = match current.parent() {
+                    Some(p) if !p.as_os_str().is_empty() => p,
+                    _ => std::path::Path::new("."),
+                };
+                if current != path && !parent.is_dir() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        format!(
+                            "{} is a dangling symbolic link (to {}): write the output somewhere \
+                             else",
+                            path.display(),
+                            current.display()
+                        ),
+                    ));
+                }
+                return Ok(Target::Staged(current));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("{} is a loop of symbolic links", path.display()),
+    ))
+}
+
+/// `Err` when the output file `out` would replace a graph store's file or a name a store
+/// reserves ([`sparq_core::dir_lock::is_reserved_store_path`]): the path, or the file its
+/// symbolic links lead to ([`output_target`]), is in a store (a live store's `perm0.bin`, a
+/// symbolic link inside a store), or is a store's lock file (in any case), a swap's staging
+/// sibling, a marker or `.sparq-*` scratch, or a file some holder has locked. Replacing one
+/// would corrupt the store or take its lock away. Also `Err` when the path cannot be resolved
+/// (a dangling symbolic link, say): it is never checked as spelled. What is written through as
+/// it is (a device, a pipe, `/dev/stdout`) is fine: no store's file is one. Returns where the
+/// output goes.
+fn check_output_path(out: &str) -> std::io::Result<Target> {
+    let path = std::path::Path::new(out);
+    let target = output_target(path)?;
+    #[cfg(feature = "mmap")]
+    if let Target::Staged(resolved) = &target {
+        let reserved = sparq_core::dir_lock::is_reserved_store_path(path)?
+            || (resolved != path && sparq_core::dir_lock::is_reserved_store_path(resolved)?);
+        if reserved {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "{out} is inside a graph store or a name a store reserves (its lock file, \
+                     staging or scratch): write the output somewhere else"
+                ),
+            ));
+        }
+    }
+    Ok(target)
+}
+
+/// A name for a new file beside `path`: `.<name>.<tag>-<random>`, unique enough that a name a
+/// killed run left behind (whatever its process id) is not tried again.
+fn fresh_sibling(path: &std::path::Path, tag: &str) -> std::path::PathBuf {
+    use std::hash::{BuildHasher, Hasher};
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u64(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    h.write_u32(std::process::id());
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos()),
+    );
+    let mut name = std::ffi::OsString::from(".");
+    name.push(path.file_name().unwrap_or_default());
+    name.push(format!(".{tag}-{:016x}", h.finish()));
+    path.with_file_name(name)
+}
+
+/// A new file beside `path` ([`fresh_sibling`]), created new with `mode` on Unix; a name already
+/// taken is retried under another.
+fn new_sibling(
+    path: &std::path::Path,
+    tag: &str,
+    mode: u32,
+) -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    let mut last = None;
+    for _ in 0..16 {
+        let candidate = fresh_sibling(path, tag);
+        match new_file(&candidate, mode) {
+            Ok(file) => return Ok((candidate, file)),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::from(std::io::ErrorKind::AlreadyExists)))
 }
 
 /// An output file a command writes. Checked first ([`check_output_path`]). The bytes go to a
-/// fresh sibling (`.<name>.sparq-tmp-…`, created new, never an existing file or link), which
-/// [`finish`](Self::finish) syncs and renames over the path: what was at the path (a file, a hard
-/// link to someone else's file, a symbolic link) is replaced, never written through, and a
-/// failed command leaves it as it was. The fresh file is created owner-only (`0600` on Unix)
-/// and gets its final permissions just before the rename: those of the regular file it
-/// replaces (read from the path itself, never through a link), or else a new file's default
-/// under the umask. A device or pipe (`/dev/stdout`) is written directly.
+/// fresh sibling of where the output goes (`.<name>.sparq-tmp-<random>`, created new, never an
+/// existing file or link), which [`finish`](Self::finish) syncs and renames onto it: what was
+/// there (a file, a hard link to someone else's file) is replaced, never written through, and
+/// a failed command leaves it as it was. A symbolic link is never replaced: an output to one
+/// replaces the file it leads to ([`output_target`]). The fresh file is created owner-only
+/// (`0600` on Unix) and gets its final permissions once written: those of the regular file it
+/// replaces, or else a new file's default under the umask. A device, a pipe or `/dev/stdout`
+/// is written directly (appending, so `>>` redirections keep what was there).
 pub(crate) struct OutFile {
     file: Option<std::fs::File>,
-    /// The fresh sibling and the path it replaces; `None` for a device or pipe.
+    /// The fresh sibling and the path it replaces; `None` for what is written directly.
     staged: Option<(std::path::PathBuf, std::path::PathBuf)>,
 }
 
 impl OutFile {
     pub(crate) fn create(out: &str) -> std::io::Result<OutFile> {
-        check_output_path(out)?;
-        let path = std::path::Path::new(out);
-        if is_device_or_pipe(path) {
-            let file = std::fs::OpenOptions::new().write(true).open(path)?;
-            return Ok(OutFile {
-                file: Some(file),
-                staged: None,
-            });
-        }
-        let name = path.file_name().ok_or_else(|| {
-            std::io::Error::new(
+        let path = match check_output_path(out)? {
+            Target::Direct(path) => {
+                let file = std::fs::OpenOptions::new().append(true).open(path)?;
+                return Ok(OutFile {
+                    file: Some(file),
+                    staged: None,
+                });
+            }
+            Target::Staged(path) => path,
+        };
+        if path.file_name().is_none() {
+            return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("{out} names no file"),
-            )
-        })?;
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let mut tmp_name = std::ffi::OsString::from(".");
-        tmp_name.push(name);
-        tmp_name.push(format!(".sparq-tmp-{}-{n}", std::process::id()));
-        let tmp = path.with_file_name(tmp_name);
-        let file = new_file(&tmp, 0o600)?;
+            ));
+        }
+        let (tmp, file) = new_sibling(&path, "sparq-tmp", 0o600)?;
         Ok(OutFile {
             file: Some(file),
-            staged: Some((tmp, path.to_path_buf())),
+            staged: Some((tmp, path)),
         })
     }
 
-    /// Flushes the output and, for a file, syncs it and renames it over the path.
+    /// Flushes the output and, for a file, syncs it, gives it its final permissions and renames
+    /// it over the path. On failure the fresh file is removed (made writable first, so a
+    /// read-only one goes too).
     pub(crate) fn finish(mut self) -> std::io::Result<()> {
         let mut file = self.file.take().expect("an output is finished once");
         std::io::Write::flush(&mut file)?;
         let Some((tmp, path)) = self.staged.take() else {
             return Ok(());
         };
-        let published = final_permissions(&path)
+        let published = file
+            .sync_all()
+            .and_then(|()| final_permissions(&path))
             .and_then(|perms| match perms {
                 Some(perms) => file.set_permissions(perms),
                 None => Ok(()),
             })
-            .and_then(|()| file.sync_all())
             .and_then(|()| {
                 drop(file);
                 std::fs::rename(&tmp, &path)
             });
         if published.is_err() {
+            if let Ok(meta) = std::fs::symlink_metadata(&tmp) {
+                let mut perms = meta.permissions();
+                #[allow(clippy::permissions_set_readonly_false)]
+                perms.set_readonly(false);
+                std::fs::set_permissions(&tmp, perms).ok();
+            }
             std::fs::remove_file(&tmp).ok();
         }
         published
@@ -161,14 +272,10 @@ fn final_permissions(path: &std::path::Path) -> std::io::Result<Option<std::fs::
     }
     #[cfg(unix)]
     {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let mut name = std::ffi::OsString::from(".");
-        name.push(path.file_name().unwrap_or_default());
-        name.push(format!(".sparq-mode-{}-{n}", std::process::id()));
-        let probe = path.with_file_name(name);
         // Created new, so what is removed below is only ever this probe.
-        let meta = new_file(&probe, 0o666)?.metadata();
+        let (probe, file) = new_sibling(path, "sparq-mode", 0o666)?;
+        let meta = file.metadata();
+        drop(file);
         std::fs::remove_file(&probe).ok();
         Ok(Some(meta?.permissions()))
     }
@@ -191,7 +298,7 @@ fn write_out(out: &str, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// [`check_output_path`], exiting 2 (a usage error) when it refuses.
-fn refuse_output_in_store(out: &str) {
+pub(crate) fn refuse_output_in_store(out: &str) {
     if let Err(e) = check_output_path(out) {
         eprintln!("error: {e}");
         std::process::exit(2);
@@ -1400,10 +1507,11 @@ fn cmd_classify(args: &[String]) {
             eprintln!("create {out}: {e}");
             std::process::exit(1);
         }));
-        for t in &triples {
-            writeln!(w, "{} {} {} .", dict.term(t[0]), dict.term(t[1]), dict.term(t[2])).unwrap();
-        }
-        finish_out(w).unwrap_or_else(|e| {
+        let written = triples
+            .iter()
+            .try_for_each(|t| writeln!(w, "{} {} {} .", dict.term(t[0]), dict.term(t[1]), dict.term(t[2])));
+        // On a write error the output is dropped (its fresh file removed) before exiting.
+        written.and_then(|()| finish_out(w)).unwrap_or_else(|e| {
             eprintln!("write {out}: {e}");
             std::process::exit(1);
         });
@@ -1446,11 +1554,13 @@ fn cmd_reason(args: &[String]) {
         }
         return;
     }
-    let g = load_with_reasoning(path, format, profile);
+    // The output path is checked before the closure is computed, so a refused path costs
+    // nothing.
     let out = args.get(5);
     if let Some(out) = out {
         refuse_output_in_store(out);
     }
+    let g = load_with_reasoning(path, format, profile);
     // With an output path the closure is the data product (and may itself be stdout, e.g.
     // `/dev/stdout`), so the summary is a diagnostic on stderr; without one the count is
     // the command's only result and stays on stdout (#6466).
@@ -1466,11 +1576,12 @@ fn cmd_reason(args: &[String]) {
             std::process::exit(1);
         }));
         let scan = g.store().scan(&[None, None, None]);
-        for r in scan.rows.iter() {
+        let written = scan.rows.iter().try_for_each(|r| {
             let spo = scan.to_spo(r);
-            writeln!(w, "{} {} {} .", g.dict().term(spo[0]), g.dict().term(spo[1]), g.dict().term(spo[2])).unwrap();
-        }
-        finish_out(w).unwrap_or_else(|e| {
+            writeln!(w, "{} {} {} .", g.dict().term(spo[0]), g.dict().term(spo[1]), g.dict().term(spo[2]))
+        });
+        // On a write error the output is dropped (its fresh file removed) before exiting.
+        written.and_then(|()| finish_out(w)).unwrap_or_else(|e| {
             eprintln!("write {out}: {e}");
             std::process::exit(1);
         });
