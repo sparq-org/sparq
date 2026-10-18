@@ -7927,7 +7927,8 @@ mod tests {
     /// A subscriber that may not read a topic causes the same store work, and gets the same
     /// answer, whether the topic exists or not: its access is decided before anything is asked
     /// of whether the topic is there, both when the topic's lock is free and when a change to it
-    /// holds it.
+    /// holds it (one that kept nothing of what it was, or, as a change does, an update of a topic
+    /// that is there, kept as it was, against a create of one that is not).
     #[tokio::test]
     async fn a_topic_the_subscriber_may_not_read_is_decided_the_same_whether_it_exists() {
         use test_store::{agent, closed_state, data};
@@ -7937,7 +7938,16 @@ mod tests {
         let gone = format!("{}gone", state.cfg.storage());
         assert!(!state.store.exists(&gone).await.unwrap());
         let stranger = agent("https://stranger.example/#me");
-        let attempt = |topic: String, changing: bool| {
+        let as_stored = super::super::Prior {
+            existed: Some(true),
+            meta: Some(state.resource_meta(&there).await.unwrap()),
+            format: Some(Some("text/plain".to_string())),
+        };
+        let creating = super::super::Prior {
+            existed: Some(false),
+            ..super::super::Prior::default()
+        };
+        let attempt = |topic: String, changing: Option<super::super::Prior>| {
             let (state, store, who) = (state.clone(), store.clone(), stranger.clone());
             async move {
                 let body = json!({
@@ -7954,21 +7964,20 @@ mod tests {
                 );
                 // A change in flight to it: its lock held, and what it was before not kept, so
                 // that is read as stored.
-                let held = match changing {
-                    true => {
+                let held = match changing.clone() {
+                    Some(before) => {
                         let held = state.locks.lock(&topic).await.unwrap();
-                        let before = super::super::Prior::default();
                         state
                             .locks
                             .changing_from([(topic.clone(), before)].into_iter().collect());
                         Some(held)
                     }
-                    false => None,
+                    None => None,
                 };
                 *store.trace.lock().unwrap() = Some(Vec::new());
                 let r = test_store::route_as(&state, req, &who).await;
                 let trace = store.trace.lock().unwrap().take().unwrap();
-                if changing {
+                if changing.is_some() {
                     state.locks.landed(std::slice::from_ref(&topic));
                 }
                 drop(held);
@@ -7983,12 +7992,18 @@ mod tests {
                 (status, body, trace)
             }
         };
-        for changing in [false, true] {
-            let a = attempt(there.clone(), changing).await;
-            let b = attempt(gone.clone(), changing).await;
+        for changing in [None, Some(super::super::Prior::default())] {
+            let a = attempt(there.clone(), changing.clone()).await;
+            let b = attempt(gone.clone(), changing.clone()).await;
             assert_eq!(a.0, StatusCode::FORBIDDEN);
-            assert_eq!(a, b, "changing: {changing}");
+            assert_eq!(a, b, "changing: {changing:?}");
         }
+        // An update in flight on the topic that is there, against a create in flight of the
+        // one that is not.
+        let updating = attempt(there.clone(), Some(as_stored)).await;
+        let created = attempt(gone.clone(), Some(creating)).await;
+        assert_eq!(updating.0, StatusCode::FORBIDDEN);
+        assert_eq!(updating, created);
     }
 
     /// Issue #6814 (review): a subscription POST said the subscriptions container was set

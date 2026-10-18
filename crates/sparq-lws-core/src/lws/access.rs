@@ -717,6 +717,14 @@ pub async fn aside_read_first<S: Store + 'static>(
         return Ok(Aside::Allowed);
     }
     let prior = state.locks.prior(uri);
+    // A change that is creating it: nothing was there, so it is decided as a URI where nothing
+    // is ([`allowed_absent`]), with nothing read of what the change is writing.
+    if prior.existed == Some(false) && prior.meta.is_none() {
+        return Ok(match allowed_absent(state, action, uri, agent).await? {
+            true => Aside::Missing,
+            false => Aside::Denied,
+        });
+    }
     // Read as it is stored when the change kept none (a default when absent).
     let meta = match prior.meta {
         Some(meta) => meta,
