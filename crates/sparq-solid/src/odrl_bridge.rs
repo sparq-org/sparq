@@ -144,7 +144,7 @@ use sparq_policy::{
     prohibition_status, Permit, ProhibitionStatus, Request, Rule, ValidatedPolicy,
 };
 use sparq_reason::n3::compiled::{
-    compile, compile_with_cycles, eval, intern_facts, CompiledRuleSet,
+    compile, compile_with_cycles, intern_facts, CompiledRuleSet,
 };
 use sparq_reason::NegationCycles;
 use std::fmt::Write as _;
@@ -1874,8 +1874,16 @@ pub fn materialize_odrl_n3(
     let rules = odrl_rules()?;
     let mut dict = Dict::new();
     let mut closure = intern_facts(&mut dict, &format!("{}\n{}", policy_facts, req_n3))?;
+    // Under the authorization reasoning allowance, as the WAC/ACP strata are: these strata
+    // derive `auth:*` grants and denies too, and nothing is written to `graph` until every
+    // one of them has returned, so a refusal leaves the view in force untouched.
     for stratum in rules {
-        closure = eval(&mut dict, &closure, stratum)?;
+        closure = crate::materialize::auth_eval(
+            &mut dict,
+            &closure,
+            stratum,
+            crate::materialize::default_auth_limits(),
+        )?;
     }
 
     // Extract auth:* triples from the final closure. A derived deny is kept (fail-closed);
