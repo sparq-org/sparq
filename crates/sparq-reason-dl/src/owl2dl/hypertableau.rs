@@ -427,6 +427,10 @@ struct Branch {
     choice: Choice,
     alt: usize,
     acc: Dep,
+    /// The nodes queued for matching when the branch opened (with what they gained), and
+    /// the node being matched then (in full): backtracking empties the queue but keeps
+    /// the facts from before the branch, so their matches are queued again.
+    queued: Vec<(Node, Option<Vec<Gain>>)>,
 }
 
 /// One tableau run over a fixed clause set.
@@ -446,6 +450,8 @@ pub(crate) struct Tableau<'c> {
     branches: Vec<Branch>,
     dirty: Vec<Node>,
     in_dirty: Vec<bool>,
+    /// The node `match_node` is matching, if any (a branch can open in the middle).
+    centre: Option<Node>,
     /// Per queued node: `None` to match every clause again, or what it gained since it was
     /// last matched (only clauses that use one of the gains can have new matches).
     only: Vec<Option<Vec<Gain>>>,
@@ -545,6 +551,7 @@ impl<'c> Tableau<'c> {
             branches: Vec::new(),
             dirty: Vec::new(),
             in_dirty: Vec::new(),
+            centre: None,
             only: Vec::new(),
             clash: None,
             forbidden: None,
@@ -757,7 +764,9 @@ impl<'c> Tableau<'c> {
                 self.in_dirty[x as usize] = false;
                 let only = self.only[x as usize].take();
                 if self.nodes[x as usize].active {
+                    self.centre = Some(x);
                     self.match_node(x, only.as_deref());
+                    self.centre = None;
                 }
                 continue;
             }
@@ -1699,11 +1708,19 @@ impl<'c> Tableau<'c> {
             return;
         }
         let d = Self::choice_deps(&choice).union(&Dep::single(level));
+        let mut queued: Vec<(Node, Option<Vec<Gain>>)> = self
+            .dirty
+            .iter()
+            .map(|&n| (n, self.only[n as usize].clone()))
+            .collect();
+        queued.extend(self.centre.map(|x| (x, None)));
+        self.charge(queued.len());
         self.branches.push(Branch {
             mark: self.trail.len(),
             choice: choice.clone(),
             alt: 0,
             acc: Dep::default(),
+            queued,
         });
         self.choose(&choice, 0, &d);
     }
@@ -1762,6 +1779,13 @@ impl<'c> Tableau<'c> {
             b.alt += 1;
             let choice = b.choice.clone();
             let alt = b.alt;
+            let queued = b.queued.clone();
+            for (n, only) in queued {
+                match only {
+                    None => self.mark(n),
+                    Some(gains) => gains.into_iter().for_each(|g| self.mark_for(n, g)),
+                }
+            }
             let n_alts = self.alternatives(&choice);
             let d = if alt + 1 < n_alts {
                 Self::choice_deps(&choice).union(&Dep::single(level))
@@ -2902,5 +2926,43 @@ mod tests {
             t.nodes[p as usize].label.contains_key(&b),
             "p has an s-neighbour in A"
         );
+    }
+
+    /// A branch can open while nodes are queued for matching (the NI-rule's choice opens in
+    /// the middle of a match). Backtracking empties the queue but keeps the facts from
+    /// before the branch: what they match must be queued again. Here `E(x)` is queued when
+    /// the branch on `X ⊑ G ⊔ H` opens, and its first alternative clashes.
+    #[test]
+    fn a_match_queued_when_a_branch_opens_survives_backtracking() {
+        let (d, c) = setup(
+            r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            :X a owl:Class . :G a owl:Class . :H a owl:Class . :E a owl:Class . :F a owl:Class .
+            :X rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :G :H ) ] .
+            :E rdfs:subClassOf :F .
+        "#,
+        );
+        let (x_, e, f) = (class(&d, &c, "X"), class(&d, &c, "E"), class(&d, &c, "F"));
+        let disj = c
+            .clauses
+            .iter()
+            .position(|cl| cl.head.len() == 2 && cl.body_x == vec![x_])
+            .unwrap() as u32;
+        let index = ClauseIndex::new(&c);
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        let x = t.add_root();
+        t.add_concept(x, x_, &Dep::default());
+        assert_eq!(t.run(), Ok(true));
+        t.add_concept(x, e, &Dep::default());
+        let level = t.branches.len() as u32;
+        t.open(Choice::Clause(Instance {
+            clause: disj,
+            nodes: vec![x],
+            deps: Dep::default(),
+        }));
+        t.set_clash(Dep::single(level));
+        assert_eq!(t.run(), Ok(true));
+        assert!(t.nodes[x as usize].label.contains_key(&f), "E ⊑ F at x");
     }
 }
