@@ -318,6 +318,7 @@ pub(crate) async fn recover<S: Store + 'static>(
     // back, before its holds were released; a journal cut short before its intent was stored).
     // Another storage's holds over the same backends are its own start's to sweep. Each is
     // withdrawn alone: its bytes, once no record names them, are the reconciler's to collect.
+<<<<<<< HEAD
     // This sweep is the only one that finds holds a stop left (the maintenance sweeper only
     // retries releases it is given), so the start fails unless the holds can be listed and
     // each holder's intent looked up. A release that fails is tried again by the sweeper,
@@ -340,6 +341,22 @@ pub(crate) async fn recover<S: Store + 'static>(
             "more than {} holds a stop left cannot be released",
             super::UNRELEASED_LIMIT
         ));
+=======
+    // Best effort: a release that fails is tried again by the maintenance sweeper, and a hold
+    // left behind only keeps bytes, so a failure here does not stop the start.
+    match store.holds().await {
+        Ok(held) => {
+            for (holder, meta) in held.iter().filter(|(h, _)| h.starts_with(&container)) {
+                let kept = touches.iter().any(|(record, _)| record == holder);
+                if (kept || matches!(store.exists(holder).await, Ok(false)))
+                    && store.release(meta, holder).await.is_err()
+                {
+                    state.release_later(holder, meta);
+                }
+            }
+        }
+        Err(e) => eprintln!("lws: the holds a stop left could not be listed: {e}"),
+>>>>>>> origin/main
     }
     // Reclaims a stop cut short, finished (best effort too: their bytes are named by no record).
     if let Err(e) = store.finish_reclaims().await {
@@ -529,6 +546,7 @@ mod tests {
         }
     }
 
+<<<<<<< HEAD
     /// A journal cut short, leaving its hold: the store's holds then.
     async fn a_left_hold() -> (FlakyStore, String, String) {
         let (st, store, d, _) = typed_doc().await;
@@ -627,6 +645,8 @@ mod tests {
         assert!(refused.contains("cannot be released"), "{refused}");
     }
 
+=======
+>>>>>>> origin/main
     /// A start sweeps only its own storage's holds: another storage over the same backends
     /// keeps its own, live or left, for its own start.
     #[tokio::test]

@@ -165,11 +165,21 @@ pub fn reconstruct_robust_attributed(
     degree: usize,
 ) -> Result<RobustReconstruction, MpcError> {
     let n = shares.len();
-    if n < degree + 1 {
+    // `degree + 1` is the share count a degree-`degree` codeword needs. `degree` is
+    // caller-supplied, so at `usize::MAX` the addition would wrap to 0 and the
+    // comparison would ACCEPT a share set that cannot determine the polynomial.
+    // Refuse instead of wrapping.
+    let needed = degree.checked_add(1).ok_or_else(|| {
+        MpcError::Protocol(format!(
+            "robust reconstruction: degree {} + 1 overflows usize; no share count \
+             could satisfy it",
+            degree
+        ))
+    })?;
+    if n < needed {
         return Err(MpcError::Protocol(format!(
             "robust reconstruction needs >= {} shares, got {}",
-            degree + 1,
-            n
+            needed, n
         )));
     }
     // Distinct evaluation points are required for RS decoding (a repeated x is a
@@ -567,6 +577,45 @@ fn poly_mul_linear(poly: &[Fp], c: Fp) -> Vec<Fp> {
 
 #[cfg(test)]
 mod tests {
+    /// `degree + 1` is the share count a degree-`degree` codeword needs, and
+    /// `degree` is caller-supplied. At `usize::MAX` the addition used to wrap to 0,
+    /// which made `n < 0` false and ACCEPTED a share set that cannot determine the
+    /// polynomial. It is now a typed refusal.
+    #[test]
+    fn an_overflowing_degree_is_refused_rather_than_wrapped() {
+        use super::*;
+        let shares = vec![
+            Share {
+                x: 1,
+                y: crate::field::Fp::new(1),
+            },
+            Share {
+                x: 2,
+                y: crate::field::Fp::new(2),
+            },
+        ];
+        for degree in [usize::MAX, usize::MAX - 1] {
+            let err = reconstruct_robust_attributed(&shares, degree)
+                .expect_err("an overflowing degree must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("overflows usize")
+                    || m.contains("needs >=")),
+                "degree={}: {:?}",
+                degree,
+                err
+            );
+        }
+        // And a degree one above the share count is still the ordinary refusal, so
+        // the overflow arm has not swallowed the normal one.
+        let err =
+            reconstruct_robust_attributed(&shares, 2).expect_err("too few shares must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("needs >=")),
+            "{:?}",
+            err
+        );
+    }
+
     use super::*;
     use crate::shamir::ShamirBackend;
 

@@ -11,17 +11,27 @@ name: CI
 #   gh workflow run ci.yml --ref <branch>
 # The per-commit coverage tier (coverage floors + per-crate measurement) runs on dispatch;
 # the nightly schedule runs the heavier coverage-nightly tier instead.
-# The cargo-mutants sweep runs only on the Saturday tick (and on dispatch).
+# The cargo-mutants sweep runs only on the Saturday tick, or on a dispatch that sets
+# `mutation_sweep`; a plain dispatch skips it.
 #
 # Heavy benchmarks live in bench.yml / bench-ec2.yml, NOT here.
 on:
-  workflow_dispatch: # also forces the nightly coverage + mutation tier past the freshness gate
+  workflow_dispatch: # also forces the nightly coverage tier past the freshness gate
+    inputs:
+      mutation_sweep:
+        # A full sweep is the largest single runner claim in the repository, so a dispatch
+        # that only wants the full suite on a branch must not start one as a side effect.
+        description: Also run the cargo-mutants sweep (many runner-hours)
+        type: boolean
+        default: false
   # Nightly; also drives the heavy coverage tier (coverage-nightly runs the sparq-vectors 50k
   # recall/diskann accuracy tests under llvm-cov instrumentation).
   schedule:
     # Sunday to Friday: the nightly tier. Saturday: the same tier plus the mutation sweep
     # (mutants-nightly-advisory keys on this exact cron string). Keep the two disjoint: a
     # same-day second tick would cancel the first through the concurrency group below.
+    # The Saturday tick has a concurrency group of its own, so Sunday's tick does not
+    # cancel a sweep that is still running.
     - cron: "17 3 * * 0-5"
     - cron: "17 3 * * 6"
 
@@ -29,7 +39,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # One group per cron string (and one for dispatch): a newer nightly tick cancels the
+  # previous nightly, but neither the nightly nor a dispatch cancels the weekly sweep.
+  group: ci-${{ github.ref }}-${{ github.event.schedule || github.event_name }}
   cancel-in-progress: true
 
 env:
@@ -3063,12 +3075,13 @@ jobs:
     needs: nightly-gate
     # WEEKLY, not nightly: a full sweep is ~140 runner-hours (the 2026-10-12 run held ~7
     # runners for ~20h), which starved PR checks of runners every day. It runs on the
-    # Saturday cron (and manual dispatch) only, inside one day's wall clock before Sunday's
-    # tick. A skipped weekday sweep is not completion evidence for nightly-gate, so the
-    # Saturday run is always admitted at a head no Saturday run has measured.
+    # Saturday cron, or on a dispatch that sets `mutation_sweep`. A skipped weekday sweep is
+    # not completion evidence for nightly-gate, so the Saturday run is always admitted at a
+    # head no Saturday run has measured.
     if: >-
       needs.nightly-gate.outputs.fresh == 'true'
-      && (github.event_name == 'workflow_dispatch' || github.event.schedule == '17 3 * * 6')
+      && ((github.event_name == 'workflow_dispatch' && inputs.mutation_sweep)
+      || github.event.schedule == '17 3 * * 6')
     runs-on: ubuntu-latest
     # sq-qcnn.11: ONE crate PER MATRIX SHARD so the FULL eligible crate set is
     # measured every nightly. The old single serial job walked all crates on ONE runner and
@@ -3089,10 +3102,12 @@ jobs:
     strategy:
       # fail-fast MUST be false: one crate's failure/timeout must NOT cancel the sibling
       # shards (that would re-create the "only the first few crates measured" bug). max-parallel
-      # bounds concurrent runners so the nightly does not inflate CI cost unboundedly — 51 jobs
-      # (24 whole-crate + 3 sparq-reason shards + 24 sparq-engine shards) once a day, at most 8
-      # runners at a time; wall-clock is non-critical for a nightly and the staggered waves warm
-      # the shared rust-cache for later waves.
+      # bounds concurrent runners so the sweep does not crowd out PR checks — 51 jobs
+      # (24 whole-crate + 3 sparq-reason shards + 24 sparq-engine shards) once a week, at most 3
+      # runners at a time. At 8 the 2026-10-17 sweep held 8 of the 20 standard runners all day
+      # and PR-head ci-fast queued for over an hour. At 3 the sweep spans the weekend, which is
+      # why the Saturday tick has its own concurrency group; wall-clock is non-critical for a
+      # weekly sweep and the staggered waves warm the shared rust-cache for later waves.
       # sq-has2g COST NOTE, stated plainly: sub-sharding sparq-engine 1->24 is a
       # real increase in nightly runner cost — a whole-crate engine sweep is many runner-hours of
       # SERIAL work, and that work has to happen SOMEWHERE to measure the crate at all. Today's
@@ -3106,7 +3121,7 @@ jobs:
       # If that cost is judged too high, the honest response is to make the sweep cheaper or to
       # run it less often than nightly — not to keep a job that cannot finish.
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 3
       matrix:
         crate:
           - sparq-canon

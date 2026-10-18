@@ -39,7 +39,9 @@
 #     graphs only. Their complete-root authentication does not use the legacy
 #     lexical-handle dispatch rule or admit dual-leaf/value-only commitments.
 #     [OPUS-5.5] zkp-15.1: the version-4 public-pattern members (result_v4_*)
-#     follow the same rule; any other `result_` member fails generation.
+#     follow the same rule, and so do the method-bound version-5 members
+#     (result_v5_*, sq-j506), which prove string-canonical leaves; any other
+#     `result_` member fails generation.
 #   * STRING-LANE members (all remaining members — scan, join, path, revoke, issuer,
 #     holder, and the blake3-token `filter_*` FILTER lanes) read the
 #     string-canonical / lexical leaf, so they are LEGAL against `string-canonical`
@@ -171,7 +173,7 @@ REASON_ILLEGAL_PAIR = "IllegalPair"
 # [OPUS-5.5] zkp-15.1: successful-result versions admitted against string-canonical
 # only. Another `result_` member must not fall through to the string-lane rule,
 # which would silently admit it for dual-leaf.
-RESULT_PREFIXES = ("result_v1_", "result_v2_", "result_v3_", "result_v4_")
+RESULT_PREFIXES = ("result_v1_", "result_v2_", "result_v3_", "result_v4_", "result_v5_")
 
 
 def lane_of(member: str) -> str:
