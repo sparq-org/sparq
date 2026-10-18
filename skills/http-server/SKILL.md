@@ -1954,7 +1954,28 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   does not know rather than silently truncating a journal frame it cannot read (which would
   destroy an acknowledged commit). A `DIR` written by an older build is marked the first time
   this version commits a body to it, so this is a one-way upgrade per store: keep a backup before
-  rolling a server forward if a rollback matters.
+  rolling a server forward if a rollback matters. A `DIR` still on the pre-`dict-meta.bin`
+  dictionary layout carries no such field: an atomic UPDATE on it is REFUSED — like any other
+  refused durable write, so a `503` over HTTP — with an error saying to re-save the store with
+  this build first (`Graph::open(old)?.save(new)?`).
+  Queries and single-operation updates of such a store are unaffected.
+- **A `--persist DIR` is a claimed store directory.** Every store carries a `sparq-store` marker
+  naming its role (a root, or a named graph of one), and every open, create, save, external build
+  and restore goes through one constructor: the path is resolved once, refused when any ancestor
+  is a store (so `DIR/named/<i>` is not a store you can point `--persist` at), and refused when
+  its name ends in a suffix a compaction or a named-graph drop derives for its own staging
+  directories. A store written before markers existed gets one on its next writable open.
+- **A whole-store write goes to a FRESH directory.** `Graph::save`, `save_compressed` and the
+  `build_external*` builders refuse a destination that exists and is not empty. The online
+  restore (`POST /admin/restore` with the durable store) is unaffected: it goes through
+  `Graph::restore_in_place`, which the graph itself performs — it stages the complete new base
+  beside the store and renames it in, giving its log up only once that base is on disk, so a
+  staging failure leaves the store exactly as writable as it was.
+- **A handle whose directory was replaced refuses writes.** Each graph records its tree's layout
+  generation, bumped by every base swap (compaction, vacuum, restore) and every named-graph drop.
+  A handle whose generation no longer matches — a named graph taken out of its parent's `named`
+  vector before the parent swapped its base, for instance — is refused rather than left appending
+  to an unlinked log.
 - **One writer per `--persist DIR`.** The durable store assumes a single writing process and a
   single writing handle per directory; two writers on one directory corrupt it and nothing
   currently detects that. Writer exclusion is designed in

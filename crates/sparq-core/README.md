@@ -34,8 +34,8 @@ subtype facets on the raw RDF lexical form, independently of finite arithmetic
 capacity. `numeric_cache_value` omits invalid lexicals/facets, values outside its
 representation and the existing NaN sentinel; larger literals can remain valid.
 
-`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional
-keys with checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
+`temporal::ExactTimeline` / `Graph::exact_temporal_value` borrow exact fractional keys with
+checked calendar/timezone parsing; initialized keys survive dictionary appends, which parse only new temporal IDs. Legacy epoch caches remain approximate.
 Raw lexicals preserve whitespace; dateTimeStamp requires a timezone. Malformed input returns `None`; [API details](../../skills/data-formats/SKILL.md) cover range and cost.
 
 **Legacy mmap archives:** `Graph::open` ignores the old unversioned
@@ -43,10 +43,8 @@ Raw lexicals preserve whitespace; dateTimeStamp requires a timezone. Malformed i
 preserving RDF terms and triples. Writers use `numerics-v3.bin`/`temporals-v4.bin`; missing or
 wrong-sized current files also trigger rebuilds.
 
-Legacy opens cost a dictionary scan and cache allocation until migrated with
-`Graph::open(old)?.save(new)?`. Current compatible caches remain memory-mapped.
-Versions mark semantic compatibility, not integrity; the trusted-storage contract
-still applies. Details: [data-formats guide](../../skills/data-formats/SKILL.md).
+Legacy opens cost a dictionary scan until migrated with `Graph::open(old)?.save(new)?`; a store written before the `sparq-store` marker existed gets one
+on its next writable open. Versions mark semantic compatibility, not integrity. A pre-`dict-meta.bin` store is refused an atomic UPDATE until migrated, and `save`/`save_compressed`/`build_external*` write to a FRESH destination only — replace a store by swapping a staged image in. Details: [data-formats](../../skills/data-formats/SKILL.md), [durability](../../skills/http-server/SKILL.md).
 
 ## ✨ Features
 

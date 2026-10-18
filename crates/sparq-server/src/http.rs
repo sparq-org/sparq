@@ -2234,37 +2234,30 @@ impl ApplyUpdates for ServerApplier {
     /// snapshot the ring should publish so reads serve the restored data. Runs on the WRITER THREAD
     /// (the only thread that mutates the durable store), so the on-disk swap never races a commit.
     ///
-    /// Sequence: release the OLD durable graph's WAL handle (close its log), then
-    /// [`Graph::restore_into_durable`] writes `fresh`'s image to a sibling, two-rename-swaps it over
-    /// `dir` (parent fsync'd between the renames), re-opens the new base memory-mapped with a fresh
-    /// WAL, and drops the old base — the EXACT crash-safe protocol the in-process compaction uses,
-    /// healed by `recover_compaction` on the next open if a crash interrupts it. We adopt the
-    /// re-opened directory-backed graph as the new durable store (so subsequent updates WAL-append
-    /// to it), and return an independent in-memory snapshot of it for the ring to publish.
+    /// Sequence: the durable graph itself performs the swap (`Graph::restore_in_place`) — it
+    /// writes `fresh`'s image to a sibling, two-rename-swaps it over its own directory (parent
+    /// fsync'd between the renames), re-opens the new base memory-mapped with a fresh WAL, and
+    /// drops the old base — the EXACT crash-safe protocol the in-process compaction uses, healed
+    /// by `recover_compaction` on the next open if a crash interrupts it. The graph becomes the
+    /// restored store (so subsequent updates WAL-append to it), and we return an independent
+    /// in-memory snapshot of it for the ring to publish.
     ///
-    /// FAIL-CLOSED: `fresh` is fully built before this runs; if the swap fails before the first
-    /// rename the OLD durable store is untouched, and a crash mid-swap heals to old-or-new. An
-    /// in-memory applier (no durable store) is a clean `Err` — there is no durable dir to write
-    /// through, so the in-memory restore path (the ring/writer swap) is used instead.
+    /// FAIL-CLOSED: `fresh` is fully built before this runs. The graph gives up its log only
+    /// once the new base is staged, so a staging failure leaves the OLD durable store untouched
+    /// AND still writable; a failure past that point freezes it until the reopen. This is why
+    /// the swap is the graph's own and not performed around it. An in-memory applier (no durable
+    /// store) is a clean `Err` — there is no durable dir to write through, so the in-memory
+    /// restore path (the ring/writer swap) is used instead.
     fn restore_durable(&mut self, fresh: Graph) -> Result<Graph, String> {
         let durable = self.durable.as_mut().ok_or_else(|| {
             "restore-into-durable requested on an applier with no --persist store".to_string()
         })?;
-        // The directory the OLD durable graph is backed by; the swap targets it.
-        let dir = durable
+        durable
             .graph
-            .persist_dir()
-            .ok_or_else(|| "durable graph is not directory-backed".to_string())?;
-        // Release the OLD durable graph's WAL handle before the directory swap (its `wal.log` is
-        // about to be renamed away with `dir`); the crash-safe swap re-opens a fresh handle.
-        durable.graph.close_wal();
-        let restored = Graph::restore_into_durable(&dir, fresh)
-            .map_err(|e| format!("restore-into-durable swap failed: {e}"))?;
-        // Adopt the re-opened, directory-backed restored store; subsequent updates WAL-append to it.
+            .restore_in_place(fresh)
+            .map_err(|e| format!("restore-into-durable swap failed: {}", e))?;
         // The published snapshot is an independent in-memory image of the restored content.
-        let published = restored.snapshot().into_graph();
-        durable.graph = restored;
-        Ok(published)
+        Ok(durable.graph.snapshot().into_graph())
     }
 }
 
