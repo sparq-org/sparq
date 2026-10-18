@@ -226,10 +226,15 @@ pub(crate) async fn kept<S: Store>(store: &S, record: &str) -> Result<bool, Serv
     }
 }
 
-/// Remove the intent `record`; absent is fine. Its membership goes in the same step.
-pub(crate) async fn clear<S: Store>(store: &S, record: &str) -> Result<(), ServerError> {
+/// Remove the intent `record`; absent is fine. Its membership goes in the same step. `within`
+/// bounds the wait for an unsettled removal's fence, as for [`super::records::delete_record`].
+pub(crate) async fn clear<S: Store>(
+    store: &S,
+    record: &str,
+    within: Option<std::time::Duration>,
+) -> Result<(), ServerError> {
     let container = record.rfind('/').map_or(record, |i| &record[..=i]);
-    super::records::delete_record(store, record, container).await
+    super::records::delete_record(store, record, container, within).await
 }
 
 /// Settle every intent a process stop left, when the server starts and before it serves
@@ -309,8 +314,8 @@ pub(crate) async fn recover<S: Store + 'static>(
             record: record.clone(),
             iris,
         };
-        let left = match super::settle(store, undo).await {
-            None => super::settle(store, vec![forget]).await,
+        let left = match super::settle_at_start(store, undo).await {
+            None => super::settle_at_start(store, vec![forget]).await,
             Some(mut left) => {
                 left.0.push(forget);
                 Some(left)
@@ -1048,7 +1053,7 @@ mod tests {
             let mut meta = st.resource_meta(&c).await.unwrap();
             meta.pending = true;
             journal.write_meta(&c, &meta).await.unwrap();
-            clear(&st.store, journal.intent.as_ref().unwrap())
+            clear(&st.store, journal.intent.as_ref().unwrap(), None)
                 .await
                 .unwrap();
             let restores = super::super::Unsettled::new(std::mem::take(&mut journal.undo));
@@ -1122,7 +1127,7 @@ mod tests {
         assert!(LwsState::new(store.clone(), cfg).await.is_err());
         // The unreadable intent is repaired; the store is well; the next start puts `/d` back,
         // and a write after it stands, however long a task of the failed start might wait.
-        clear(&store, &bad).await.unwrap();
+        clear(&store, &bad, None).await.unwrap();
         *store.fail_restore_of.lock().unwrap() = None;
         let st = restart(&store).await;
         let status = call(&st, Method::PUT, "/d", &h, "<> a <urn:C> .").await;

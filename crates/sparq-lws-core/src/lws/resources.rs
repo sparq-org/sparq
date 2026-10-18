@@ -767,7 +767,7 @@ pub(crate) async fn touch_container<S: Store + 'static>(state: &LwsState<S>, con
     }
     for record in owed {
         // A failure leaves the intent, and the next start touches the container again.
-        let _ = super::intents::clear(&state.store, &record).await;
+        let _ = super::intents::clear(&state.store, &record, None).await;
     }
 }
 

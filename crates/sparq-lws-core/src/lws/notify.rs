@@ -8000,10 +8000,36 @@ mod tests {
         }
         // An update in flight on the topic that is there, against a create in flight of the
         // one that is not.
-        let updating = attempt(there.clone(), Some(as_stored)).await;
-        let created = attempt(gone.clone(), Some(creating)).await;
+        let updating = attempt(there.clone(), Some(as_stored.clone())).await;
+        let created = attempt(gone.clone(), Some(creating.clone())).await;
         assert_eq!(updating.0, StatusCode::FORBIDDEN);
         assert_eq!(updating, created);
+        // Review of #7174: a create that failed and was set aside keeps the default metadata
+        // it wrote over nothing (and no format). It is still a URI where nothing was: with a
+        // grant to the subscriber whose format constraint the topic does not meet, nothing is
+        // read of it either (its format is not looked up), as for the update in flight.
+        state.access.put_grant_for_test(
+            "format",
+            access::policies(
+                &json!([{"type": ["AccessPolicy"], "action": ["read"],
+                    "assignee": "https://stranger.example/#me",
+                    "constraint": [{"leftOperand": "format", "operator": "isAnyOf",
+                        "rightOperand": ["text/turtle"]}]}]),
+                &state.cfg.storage(),
+            )
+            .unwrap(),
+        );
+        let failed_create = super::super::Prior {
+            existed: Some(false),
+            meta: Some(super::super::ResourceMeta::default()),
+            format: None,
+        };
+        let updating = attempt(there.clone(), Some(as_stored)).await;
+        let created = attempt(gone.clone(), Some(creating)).await;
+        let failed = attempt(gone.clone(), Some(failed_create)).await;
+        assert_eq!(updating.0, StatusCode::FORBIDDEN);
+        assert_eq!(updating, created);
+        assert_eq!(created, failed);
     }
 
     /// Issue #6814 (review): a subscription POST said the subscriptions container was set
