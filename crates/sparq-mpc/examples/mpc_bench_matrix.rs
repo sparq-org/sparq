@@ -34,14 +34,18 @@ fn main() {
     if json_only {
         print!(
             "{}",
-            results.to_json().expect("the modelled counts fit u64 at these scales")
+            results
+                .to_json()
+                .expect("the modelled counts fit u64 at these scales")
         );
         return;
     }
 
     print!(
         "{}",
-        results.to_table().expect("the modelled counts fit u64 at these scales")
+        results
+            .to_table()
+            .expect("the modelled counts fit u64 at these scales")
     );
     println!();
 
@@ -59,7 +63,9 @@ fn main() {
     println!("--- JSON schema (structured results; consume this, not the table) ---");
     print!(
         "{}",
-        results.to_json().expect("the modelled counts fit u64 at these scales")
+        results
+            .to_json()
+            .expect("the modelled counts fit u64 at these scales")
     );
 }
 

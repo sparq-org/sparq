@@ -1205,7 +1205,8 @@ fn the_repetition_union_is_deduped_as_it_grows() {
 
     let mut budget = PathFormBudget::new();
     let mut scope = 0usize;
-    let raw = eval_form_relation(&edges, &form, &subject, &object, &mut scope, &mut budget).unwrap();
+    let raw =
+        eval_form_relation(&edges, &form, &subject, &object, &mut scope, &mut budget).unwrap();
 
     // The relation the repetition hands back carries NO duplicate row.
     let distinct: BTreeSet<String> = raw.rows.iter().map(|r| format!("{r:?}")).collect();
@@ -1227,6 +1228,169 @@ fn the_repetition_union_is_deduped_as_it_grows() {
 
     // And the answer is still right once the top-level dedup has run too.
     let got = eval_bounded_path_disclosed(&edges, &form).unwrap();
-    let want = clear_text_pairs(&[h1], "ex:p | ex:p/ex:p | ex:p/ex:p/ex:p | ex:p/ex:p/ex:p/ex:p");
+    let want = clear_text_pairs(
+        &[h1],
+        "ex:p | ex:p/ex:p | ex:p/ex:p/ex:p | ex:p/ex:p/ex:p/ex:p",
+    );
     assert_eq!(pair_set(&got.vars, &got.rows), want);
+}
+
+// =====================================================================
+// PathForm nesting DEPTH and the static whole-form WORK budget
+// =====================================================================
+
+/// Both form-shape caps are pinned BY VALUE.
+#[test]
+fn the_form_shape_caps_are_pinned_by_value() {
+    assert_eq!(MAX_PATH_FORM_DEPTH, 32);
+    assert_eq!(MAX_PATH_FORM_WORK, 1 << 28);
+}
+
+/// Build a `Sequence`-in-`Sequence` form of exactly `depth` levels, with one
+/// trivial repetition at the bottom. Built ITERATIVELY so the fixture itself
+/// cannot be what overflows.
+fn nested_form(depth: usize) -> PathForm {
+    let mut form = PathForm::exact(nn("http://ex/p"), 1);
+    for _ in 1..depth {
+        form = PathForm::Sequence(vec![form]);
+    }
+    form
+}
+
+/// A form nested one level past [`MAX_PATH_FORM_DEPTH`] is refused; a form exactly
+/// AT the cap evaluates. The refusal comes from the ITERATIVE shape check, before
+/// `eval_sequence` recurses into anything — which is the whole point, since nesting
+/// depth is stack depth on the evaluator.
+///
+/// There is no "zero draws" half: the disclosed unroll is crypto-free, so there is
+/// no randomness source to draw from (see `crypto_free_no_mpc_round_artifacts`).
+#[test]
+fn the_form_depth_cap_refuses_just_over_and_runs_at_the_cap() {
+    let edges = disclosed_edges(&[("ex:a ex:p ex:b .", &["http://ex/p"])]);
+
+    // One past the cap: refused, naming the cap.
+    let err = eval_bounded_path_disclosed(&edges, &nested_form(MAX_PATH_FORM_DEPTH + 1))
+        .expect_err("one level past the depth cap must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_DEPTH")),
+        "{:?}",
+        err
+    );
+    // Still refused well past the cap, and the ITERATIVE walk is what refuses it:
+    // the check descends no further than the first over-deep level, so its own
+    // stack use does not grow with the form.
+    assert!(eval_bounded_path_disclosed(&edges, &nested_form(MAX_PATH_FORM_DEPTH * 8)).is_err());
+
+    // Exactly AT the cap: evaluates, and to the same answer the un-nested form
+    // gives — a nested Sequence of one part denotes exactly that part.
+    let got = eval_bounded_path_disclosed(&edges, &nested_form(MAX_PATH_FORM_DEPTH))
+        .expect("the deepest legal form evaluates");
+    let flat = eval_bounded_path_disclosed(&edges, &nested_form(1)).unwrap();
+    assert_eq!(got.rows, flat.rows);
+    assert_eq!(got.rows.len(), 1);
+}
+
+/// The static whole-form work budget bounds a LONG Sequence, which neither
+/// per-repetition shape cap nor the row budget catches: every part passes both
+/// shape caps, and over an edge set that yields no rows the row budget is never
+/// charged either.
+///
+/// Exercised exactly at and one unit past [`MAX_PATH_FORM_WORK`] on the real shape
+/// check, reaching the budget by handing the walk work already charged rather than
+/// by building a form of a quarter of a billion parts.
+#[test]
+fn the_form_work_budget_refuses_just_over_and_runs_at_the_cap() {
+    // A part that charges exactly `1 + chains*hops = 1 + 0*0 = 1`: `{0,0}` unrolls
+    // to no chain at all (the reflexive arm is not a chain), so each part's whole
+    // charge is the `+ 1` that makes a long sequence of free parts finite.
+    let unit = PathForm::Repetition(BoundedRepetition {
+        step: PathStep::predicate(nn("http://ex/p")),
+        min: 0,
+        max: 0,
+    });
+    assert_eq!(
+        check_form_shape(&unit).unwrap(),
+        1,
+        "a zero-length repetition part costs 1"
+    );
+
+    // A ten-part sequence: the root plus ten unit parts.
+    let seq = PathForm::Sequence((0..10).map(|_| unit.clone()).collect::<Vec<_>>());
+    let charge = check_form_shape(&seq).unwrap();
+    assert_eq!(charge, 11, "root + 10 parts");
+
+    // Exactly AT the budget: accepted.
+    assert_eq!(
+        check_form_shape_from(&seq, MAX_PATH_FORM_WORK - charge).unwrap(),
+        MAX_PATH_FORM_WORK
+    );
+    // One unit past it: refused, naming the budget.
+    let err = check_form_shape_from(&seq, MAX_PATH_FORM_WORK - charge + 1)
+        .expect_err("one unit past the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+    // An overflowing charge refuses rather than wrapping under the budget.
+    assert!(check_form_shape_from(&seq, u64::MAX).is_err());
+
+    // A long sequence really does reach the budget by its part count alone, over
+    // an edge set that yields NO rows — so the row budget cannot be what binds.
+    // Fourteen repetitions at both per-repetition shape caps are enough.
+    let heavy = PathForm::repeat_step(
+        PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
+        1,
+        19,
+    );
+    let heavy_charge = check_form_shape(&heavy).expect("a near-cap repetition is in budget");
+    assert!(
+        heavy_charge <= MAX_PATH_FORM_WORK,
+        "the work budget must not make an expensive-but-legal single part illegal"
+    );
+    assert!(
+        heavy_charge > MAX_UNROLL_CHAINS,
+        "the heavy part must really be heavy"
+    );
+    let parts = (MAX_PATH_FORM_WORK / heavy_charge + 1) as usize;
+    let long = PathForm::Sequence((0..parts).map(|_| heavy.clone()).collect::<Vec<_>>());
+    let edges = disclosed_edges(&[("ex:a ex:q ex:b .", &["http://ex/q"])]);
+    let err = eval_bounded_path_disclosed(&edges, &long)
+        .expect_err("a long sequence must be refused on the work budget");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_WORK")),
+        "{:?}",
+        err
+    );
+}
+
+/// The per-repetition caps keep their own refusals and their own ORDER inside the
+/// shape check: the hop cap before the chain projection, whose per-length loop
+/// grows with `max`. Checking the work budget first would have had to project a
+/// `max` of a million to charge for it.
+#[test]
+fn the_repetition_caps_still_decide_their_own_cases_in_order() {
+    let edges = disclosed_edges(&[("ex:a ex:p ex:b .", &["http://ex/p"])]);
+
+    // Over the hop cap: the hop cap's message, not the work budget's.
+    let form = PathForm::repeat_step(PathStep::predicate(nn("http://ex/p")), 1, 1_000_000);
+    let err = eval_bounded_path_disclosed(&edges, &form).unwrap_err();
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_UNROLL_HOPS")),
+        "{:?}",
+        err
+    );
+
+    // Over the chain cap but inside the hop cap: the chain cap's message.
+    let form = PathForm::repeat_step(
+        PathStep::alternation([nn("http://ex/p"), nn("http://ex/q")]),
+        1,
+        40,
+    );
+    let err = eval_bounded_path_disclosed(&edges, &form).unwrap_err();
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_UNROLL_CHAINS")),
+        "{:?}",
+        err
+    );
 }

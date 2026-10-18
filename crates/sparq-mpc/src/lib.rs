@@ -356,7 +356,7 @@ pub use bench::{
 // sq-py8h.1: the disclosed-key bounded property-path surface.
 pub use bounded_path::{
     eval_bounded_path_disclosed, BoundedRepetition, DisclosedEdges, PathForm, PathStep,
-    MAX_PATH_FORM_ROWS,
+    MAX_PATH_FORM_DEPTH, MAX_PATH_FORM_ROWS, MAX_PATH_FORM_WORK,
 };
 // sq-py8h.2: the HIDDEN-intermediate exactly-`k` chain surface (the
 // cryptographic regime — intermediate node-sets never opened).

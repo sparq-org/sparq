@@ -266,6 +266,121 @@ pub const MAX_UNROLL_HOPS: usize = 64;
 /// expensive-but-legal path illegal.
 pub const MAX_PATH_FORM_ROWS: usize = 1 << 28; // 268_435_456
 
+/// Largest [`PathForm`] NESTING DEPTH the unroller accepts before
+/// [`eval_bounded_path_disclosed`] refuses with an [`MpcError::Protocol`] error.
+///
+/// A [`PathForm::Sequence`] may hold further `Sequence`s, and `eval_sequence`
+/// evaluates a sub-form by RECURSING into it. Nesting depth is therefore stack
+/// depth, and an unbounded depth is an unbounded stack — which no row budget
+/// catches, because the form overflows the stack before it produces a row.
+///
+/// The cap is checked ITERATIVELY, by `check_form_shape`, over an explicit
+/// worklist: a recursive depth check would overflow on exactly the forms the cap
+/// exists to refuse. A plain SPARQL property path nests a handful of levels at
+/// most; a form deeper than this is malformed for this regime, not merely unusual.
+pub const MAX_PATH_FORM_DEPTH: usize = 32;
+
+/// Largest STATIC unroll work the whole [`PathForm`] may project to before
+/// [`eval_bounded_path_disclosed`] refuses with an [`MpcError::Protocol`] error.
+///
+/// Work is charged per part as `1 + chains × hops`: the `Σ_ℓ a^ℓ` fixed chains the
+/// repetition unrolls to, each an up-to-`max`-hop join fold, plus one for the part
+/// itself. Summed over every part of the form, with checked `u64` arithmetic.
+///
+/// ## Why this exists on top of the other three caps
+///
+/// [`MAX_UNROLL_CHAINS`] and [`MAX_UNROLL_HOPS`] bound ONE repetition's shape, and
+/// [`MAX_PATH_FORM_ROWS`] bounds what the form MATERIALISES. Neither bounds a long
+/// `Sequence`: a sequence of a million individually-legal repetitions passes both
+/// shape caps part by part, and over an empty or sparse edge set it produces no
+/// rows at all, so the row budget never charges for it either. This budget is the
+/// one that binds there — the `+ 1` per part is what makes a long sequence of
+/// zero-work parts finite, and it is computed from PUBLIC plan parameters alone,
+/// before any edge is touched.
+///
+/// The value leaves room for a repetition at BOTH shape caps at once
+/// (`MAX_UNROLL_CHAINS × MAX_UNROLL_HOPS` is `2^26`), so it does not make an
+/// expensive-but-legal single repetition illegal.
+pub const MAX_PATH_FORM_WORK: u64 = 1 << 28; // 268_435_456
+
+/// Validate a whole [`PathForm`]'s SHAPE before anything evaluates it: the nesting
+/// depth against [`MAX_PATH_FORM_DEPTH`] and the summed static unroll work against
+/// [`MAX_PATH_FORM_WORK`]. Returns the charged work.
+///
+/// Walks the form with an explicit worklist — never recursively. That is the whole
+/// point of the depth half: a recursive walk would overflow the stack on exactly
+/// the deeply-nested forms this is here to refuse, so the check cannot share the
+/// evaluator's shape. Depth is checked as each level is pushed, so an over-deep
+/// form refuses at depth `MAX_PATH_FORM_DEPTH + 1` without descending further.
+///
+/// Both halves read PUBLIC plan parameters only — alternation width, `min`, `max`,
+/// part counts — so no edge is touched and the refusals name those numbers and the
+/// caps, nothing else.
+pub(crate) fn check_form_shape(form: &PathForm) -> Result<u64, MpcError> {
+    check_form_shape_from(form, 0)
+}
+
+/// [`check_form_shape`] with work already charged against the budget — the way the
+/// tests reach [`MAX_PATH_FORM_WORK`] exactly without building a form of a quarter
+/// of a billion parts. It bypasses nothing: the same walk, the same per-repetition
+/// caps and the same `work > MAX_PATH_FORM_WORK` decision against the same
+/// constant.
+pub(crate) fn check_form_shape_from(form: &PathForm, already: u64) -> Result<u64, MpcError> {
+    let mut work: u64 = already;
+    // (form, depth-of-that-form). The root is depth 1.
+    let mut stack: Vec<(&PathForm, usize)> = vec![(form, 1)];
+    while let Some((f, depth)) = stack.pop() {
+        if depth > MAX_PATH_FORM_DEPTH {
+            return Err(MpcError::Protocol(format!(
+                "bounded path form: nesting depth {} exceeds the MAX_PATH_FORM_DEPTH cap of                  {} — refusing (a nested Sequence is evaluated by recursion, so nesting                  depth is stack depth, and this check is itself iterative so it cannot                  overflow on the forms it refuses)",
+                depth, MAX_PATH_FORM_DEPTH
+            )));
+        }
+        // Every part costs at least 1, so a long Sequence of zero-work parts is
+        // still bounded.
+        work = work
+            .checked_add(1)
+            .ok_or_else(|| form_work_overflow("the part count"))?;
+        match f {
+            PathForm::Repetition(rep) => {
+                // The repetition's OWN caps first, in their own order — the hop cap
+                // before the chain projection, whose per-length loop grows with
+                // `max`. So an over-cap part still refuses with its own message and
+                // this budget only binds where those caps do not.
+                let chains = check_repetition_shape(rep)?;
+                let part = chains
+                    .checked_mul(rep.max as u64)
+                    .ok_or_else(|| form_work_overflow("chains x hops"))?;
+                work = work
+                    .checked_add(part)
+                    .ok_or_else(|| form_work_overflow("the summed unroll work"))?;
+            }
+            PathForm::Sequence(parts) => {
+                for part in parts {
+                    stack.push((part, depth + 1));
+                }
+            }
+        }
+        if work > MAX_PATH_FORM_WORK {
+            return Err(MpcError::Protocol(format!(
+                "bounded path form: static unroll work {} exceeds the MAX_PATH_FORM_WORK                  budget of {} — refusing before any edge is touched (the per-repetition                  chain and hop caps bound one part's shape; a Sequence composes                  arbitrarily many parts that each pass them)",
+                work, MAX_PATH_FORM_WORK
+            )));
+        }
+    }
+    Ok(work)
+}
+
+/// The overflow refusal shape [`check_form_shape`] uses. Names the quantity and
+/// the budget, both public plan numbers.
+fn form_work_overflow(what: &str) -> MpcError {
+    MpcError::Protocol(format!(
+        "bounded path form: {} overflows u64, so it cannot be within the \
+         MAX_PATH_FORM_WORK budget of {} — refusing before any edge is touched",
+        what, MAX_PATH_FORM_WORK
+    ))
+}
+
 /// The [`MAX_PATH_FORM_ROWS`] budget for ONE whole-form evaluation, threaded
 /// through the unroll alongside the intermediate-variable scope counter.
 struct PathFormBudget {
@@ -516,6 +631,11 @@ fn eval_with_budget(
     form: &PathForm,
     budget: &mut PathFormBudget,
 ) -> Result<PartialResult, MpcError> {
+    // The whole form's SHAPE first: nesting depth and static unroll work, both
+    // iterative and both over public plan parameters, so an over-deep or
+    // over-budget form refuses before a single sub-form is evaluated — and before
+    // `eval_sequence` recurses into anything.
+    check_form_shape(form)?;
     let subject = Variable::new_unchecked(SUBJECT_VAR);
     let object = Variable::new_unchecked(OBJECT_VAR);
     // The pair RELATION over the canonical endpoint vars (?__pp_a, ?__pp_b),
@@ -548,18 +668,16 @@ fn eval_form_relation(
     }
 }
 
-/// `(step){m,k}` → UNION over `ℓ in m..=k` of the exactly-`ℓ` chains, plus the
-/// reflexive identity pairs when `m == 0` (design §2.2/§2.3). Each exactly-`ℓ`
-/// chain is a fold of [`DisclosedKeyJoin`] over `ℓ` copies of the step's edge
-/// relation through fresh intermediate vars; alternation expands each hop over
-/// its alternatives (design §2.4).
-fn eval_repetition(
-    edges: &DisclosedEdges,
-    rep: &BoundedRepetition,
-    subject: &Variable,
-    object: &Variable,
-    budget: &mut PathFormBudget,
-) -> Result<PartialResult, MpcError> {
+/// One repetition's own SHAPE checks, in the order they must run: `min <= max`, a
+/// non-empty alternation, the per-chain [`MAX_UNROLL_HOPS`] cap, and then the
+/// [`MAX_UNROLL_CHAINS`] cap on the projected chain count. Returns that count.
+///
+/// Extracted so [`check_form_shape`] applies them in exactly this order, part by
+/// part, BEFORE it charges anything against [`MAX_PATH_FORM_WORK`] — the hop cap in
+/// particular has to precede the projection, whose own per-length loop grows with
+/// `max`. `eval_repetition` calls it too, so the checks hold on the one code path
+/// as well as the other and the refusal texts are the same wherever they come from.
+fn check_repetition_shape(rep: &BoundedRepetition) -> Result<u64, MpcError> {
     if rep.min > rep.max {
         return Err(MpcError::Protocol(format!(
             "bounded path {{{},{}}} has min > max",
@@ -612,6 +730,26 @@ fn eval_repetition(
             )));
         }
     }
+
+    // Within both caps: hand back the count the work budget charges from.
+    Ok(projected.unwrap_or(0))
+}
+
+/// `(step){m,k}` → UNION over `ℓ in m..=k` of the exactly-`ℓ` chains, plus the
+/// reflexive identity pairs when `m == 0` (design §2.2/§2.3). Each exactly-`ℓ`
+/// chain is a fold of [`DisclosedKeyJoin`] over `ℓ` copies of the step's edge
+/// relation through fresh intermediate vars; alternation expands each hop over
+/// its alternatives (design §2.4).
+fn eval_repetition(
+    edges: &DisclosedEdges,
+    rep: &BoundedRepetition,
+    subject: &Variable,
+    object: &Variable,
+    budget: &mut PathFormBudget,
+) -> Result<PartialResult, MpcError> {
+    // This repetition's own shape caps (also applied up front by `check_form_shape`;
+    // re-applied here so the one code path holds them whichever entry reached it).
+    check_repetition_shape(rep)?;
 
     // Accumulate the union of all chain lengths, DEDUPED AS IT GROWS. The top-level
     // `dedup_endpoint_pairs` dedups too, so this does not change the answer — but it

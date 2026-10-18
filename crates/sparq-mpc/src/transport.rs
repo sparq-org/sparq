@@ -60,7 +60,7 @@ use std::net::{TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
 use crate::bench::QueryClass;
-use crate::field::Fp;
+use crate::field::{Fp, P};
 use crate::metrics::FIELD_BYTES;
 use crate::partial::MpcError;
 use crate::shamir::{self, ShamirBackend, ShamirDealer, Share};
@@ -203,6 +203,30 @@ fn checked_item_count(
     Ok(declared)
 }
 
+/// Refuse a wire `u64` that is not a CANONICAL `Fp` representative (`>= `[`P`]).
+///
+/// Both halves of a wire `Share` are interpreted in `F_p`: the value through
+/// `Fp::new`, and the evaluation point wherever a column is interpolated over it
+/// (`Fp::new(share.x)`). `Fp::new` REDUCES, so a `>= P` word is a second encoding
+/// of a value that already has one — two different frames would decode to the same
+/// `Share`, which makes the encoding non-injective and a frame digest meaningless.
+/// Refuse it instead.
+///
+/// The refusal names the FIELD (`value` or `point`) and the modulus, both public.
+/// It does not print the word: a share's value is secret-shared data, and a
+/// refusal is exactly where such a word would otherwise reach a log.
+fn require_canonical(field: &str, word: u64) -> Result<(), MpcError> {
+    if word >= P {
+        return Err(MpcError::Protocol(format!(
+            "non-canonical Share {} on the wire: the word is not below the field modulus \
+             {}, and Fp reduces it, so two different frames would decode to one Share — \
+             refusing",
+            field, P
+        )));
+    }
+    Ok(())
+}
+
 fn read_share(bytes: &[u8], off: &mut usize) -> Result<Share, MpcError> {
     let need = 8 + FIELD_BYTES;
     if *off + need > bytes.len() {
@@ -212,6 +236,8 @@ fn read_share(bytes: &[u8], off: &mut usize) -> Result<Share, MpcError> {
     *off += 8;
     let y = u64::from_be_bytes(bytes[*off..*off + FIELD_BYTES].try_into().unwrap());
     *off += FIELD_BYTES;
+    require_canonical("point", x)?;
+    require_canonical("value", y)?;
     Ok(Share { x, y: Fp::new(y) })
 }
 
@@ -270,7 +296,34 @@ impl Message {
         frame
     }
 
+    /// Decode one frame BODY (`[u8 tag][payload]`), exactly and only.
+    ///
+    /// STRICT: the body must be exactly one message's encoding. A body with
+    /// TRAILING bytes past the decoded message is refused, not ignored — accepting
+    /// it would make the encoding non-injective (two different frames decoding to
+    /// one `Message`), so a frame digest or a replay check over the bytes would not
+    /// mean what it says. Every `Share` word must also be a canonical `Fp`
+    /// representative (see `require_canonical`), for the same reason.
+    ///
+    /// The refusals name the tag, the byte COUNTS and the modulus — all public
+    /// framing facts. No share value and no decoded payload appears in any of them.
     fn decode(body: &[u8]) -> Result<Message, MpcError> {
+        let (msg, consumed) = Self::decode_prefix(body)?;
+        if consumed != body.len() {
+            return Err(MpcError::Protocol(format!(
+                "frame has {} trailing byte(s) after a complete {} message — refusing \
+                 (a frame must be exactly one message's encoding, or two different \
+                 frames would decode to the same one)",
+                body.len() - consumed,
+                msg.kind()
+            )));
+        }
+        Ok(msg)
+    }
+
+    /// [`Self::decode`] without the trailing-byte check: the message and how many
+    /// bytes it consumed. Separate so the strictness lives in ONE place.
+    fn decode_prefix(body: &[u8]) -> Result<(Message, usize), MpcError> {
         if body.is_empty() {
             return Err(MpcError::Protocol("empty frame".into()));
         }
@@ -295,17 +348,19 @@ impl Message {
                 for _ in 0..count {
                     v.push(read_share(body, &mut off)?);
                 }
-                Ok(if tag == TAG_SHARES {
+                let msg = if tag == TAG_SHARES {
                     Message::Shares(v)
                 } else {
                     Message::Open(v)
-                })
+                };
+                Ok((msg, off))
             }
             TAG_STEP => {
                 if off >= body.len() {
                     return Err(MpcError::Protocol("short Step frame".into()));
                 }
-                Ok(Message::Step(StepCode::from_byte(body[off])?))
+                let code = StepCode::from_byte(body[off])?;
+                Ok((Message::Step(code), off + 1))
             }
             TAG_SWAP => {
                 // 4 (a) + 4 (b) + 1 (swap flag).
@@ -325,13 +380,34 @@ impl Message {
                         )))
                     }
                 };
-                Ok(Message::Swap { a, b, swap })
+                Ok((Message::Swap { a, b, swap }, off + 1))
             }
-            TAG_DONE => Ok(Message::Done),
+            TAG_DONE => Ok((Message::Done, off)),
             other => Err(MpcError::Protocol(format!("unknown frame tag {other}"))),
         }
     }
 }
+
+/// Largest single frame body [`Channel::recv`] accepts before refusing with an
+/// [`MpcError::Protocol`] error.
+///
+/// The length prefix is the peer's number, so it is capped on its own, in closed
+/// form, before anything is reserved. A single frame over this harness carries a
+/// batch of 8-byte shares and never approaches this; the cap is there so a garbled
+/// or hostile header is a controlled refusal rather than an allocation request.
+///
+/// Capping the declared length is NOT on its own enough: see
+/// [`RECV_CHUNK_BYTES`] for the other half.
+pub const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+
+/// How many body bytes [`Channel::recv`] reserves ahead of the bytes that have
+/// actually arrived.
+///
+/// [`MAX_FRAME_BYTES`] bounds what a frame may declare, but a four-byte header
+/// declaring the cap used to reserve the whole thing before a single body byte was
+/// read. The body is now read in chunks of this size with the buffer growing as
+/// bytes arrive, so the header bounds the TOTAL and this bounds the COMMITMENT.
+pub const RECV_CHUNK_BYTES: usize = 64 * 1024;
 
 /// A framed, byte-counting message channel over any `Read + Write` stream
 /// (TcpStream on `127.0.0.1`, or a Unix-domain stream). Tracks bytes sent /
@@ -377,23 +453,52 @@ impl<S: Read + Write> Channel<S> {
     }
 
     /// Block until one full frame is read and decoded.
+    ///
+    /// ## The declared length never commits the allocation
+    ///
+    /// The length prefix comes from the PEER. It is first refused above
+    /// [`MAX_FRAME_BYTES`] — a closed-form check on the declared number, before
+    /// anything is reserved — and then the body is read INCREMENTALLY, in
+    /// [`RECV_CHUNK_BYTES`] steps, with the buffer growing as bytes actually
+    /// arrive. So a four-byte header can commit the receiver to at most one chunk,
+    /// not to the whole declared frame: a header declaring the cap with nothing
+    /// behind it fails on the read, having reserved one chunk. Reserving `len`
+    /// up front, as this did, let the header alone decide the allocation.
     pub fn recv(&mut self) -> Result<Message, MpcError> {
         let mut len_buf = [0u8; 4];
         self.read_exact(&mut len_buf)?;
         let len = u32::from_be_bytes(len_buf) as usize;
-        // Frame-length sanity cap: a single frame over this harness never exceeds
-        // a few hundred KiB (it carries a batch of 8-byte shares); reject an
-        // absurd length rather than allocating gigabytes on a garbled header.
-        const MAX_FRAME: usize = 64 * 1024 * 1024;
-        if len > MAX_FRAME {
+        // The declared length's cap FIRST: closed form on a public number, before
+        // a single byte is reserved.
+        if len > MAX_FRAME_BYTES {
             return Err(MpcError::Protocol(format!(
-                "frame length {len} exceeds cap"
+                "frame length {} exceeds the MAX_FRAME_BYTES cap of {} — refusing \
+                 before anything is reserved",
+                len, MAX_FRAME_BYTES
             )));
         }
-        let mut body = vec![0u8; len];
-        self.read_exact(&mut body)?;
+        let body = self.read_body(len)?;
         self.bytes_recv += (4 + len) as u64;
         Message::decode(&body)
+    }
+
+    /// Read `len` body bytes, growing the buffer as they ARRIVE.
+    ///
+    /// Reserves at most [`RECV_CHUNK_BYTES`] ahead of the bytes that are actually
+    /// there, so the peer's declared length bounds the total but never the
+    /// commitment: a short or absent body fails on the read with one chunk
+    /// reserved, whatever it declared.
+    fn read_body(&mut self, len: usize) -> Result<Vec<u8>, MpcError> {
+        let mut body: Vec<u8> = Vec::with_capacity(len.min(RECV_CHUNK_BYTES));
+        let mut chunk = [0u8; RECV_CHUNK_BYTES];
+        let mut remaining = len;
+        while remaining > 0 {
+            let take = remaining.min(RECV_CHUNK_BYTES);
+            self.read_exact(&mut chunk[..take])?;
+            body.extend_from_slice(&chunk[..take]);
+            remaining -= take;
+        }
+        Ok(body)
     }
 
     fn read_exact(&mut self, buf: &mut [u8]) -> Result<(), MpcError> {

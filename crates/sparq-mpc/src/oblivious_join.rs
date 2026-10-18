@@ -3885,6 +3885,16 @@ mod tests {
         use crate::randomness::test_sources::DrawCountingSource;
         let backend = ShamirBackend::new_seeded(5, 0x7A11).unwrap();
 
+        // The closed-form guard itself, exactly at and past the cap.
+        assert!(check_payload_arity_cap(MAX_PAYLOAD_ARITY).is_ok());
+        let err = check_payload_arity_cap(MAX_PAYLOAD_ARITY + 1)
+            .expect_err("one column past the cap is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PAYLOAD_ARITY")),
+            "{:?}",
+            err
+        );
+
         for arity in [MAX_PAYLOAD_ARITY + 1, usize::MAX] {
             let mut dealer = backend.dealer();
             let mut counted = DrawCountingSource::new(&mut dealer);
@@ -3950,8 +3960,8 @@ mod tests {
 
         // AT the cap it runs, and the row survives the round-trip intact.
         let cands = public_candidates(&[(true, vec![at_cap.clone()])]);
-        let (slots, _cost) = oblivious_set_output(&backend, &cands, 1, 2)
-            .expect("the longest legal term runs");
+        let (slots, _cost) =
+            oblivious_set_output(&backend, &cands, 1, 2).expect("the longest legal term runs");
         let rows: Vec<&Vec<Option<Term>>> = slots
             .iter()
             .filter_map(|s| match s {
@@ -3973,8 +3983,8 @@ mod tests {
         let backend = ShamirBackend::new_seeded(5, 0x7A13).unwrap();
 
         assert!(check_slot_limbs_cap(MAX_SLOT_LIMBS).is_ok());
-        let err = check_slot_limbs_cap(MAX_SLOT_LIMBS + 1)
-            .expect_err("one limb past the cap is refused");
+        let err =
+            check_slot_limbs_cap(MAX_SLOT_LIMBS + 1).expect_err("one limb past the cap is refused");
         assert!(
             matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_LIMBS")),
             "{:?}",
@@ -4035,9 +4045,14 @@ mod tests {
         let cands = public_candidates(&[(true, vec![None; MAX_PAYLOAD_ARITY])]);
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err =
-            oblivious_set_output_through(&mut counted, &backend, &cands, MAX_PAYLOAD_ARITY, MAX_OUTPUT_BOUND)
-                .expect_err("the product of three legal factors must be refused");
+        let err = oblivious_set_output_through(
+            &mut counted,
+            &backend,
+            &cands,
+            MAX_PAYLOAD_ARITY,
+            MAX_OUTPUT_BOUND,
+        )
+        .expect_err("the product of three legal factors must be refused");
         assert!(
             matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_WORK")),
             "{:?}",
@@ -4574,5 +4589,4 @@ mod output_randomness_seam_tests {
             "a count above the cap is refused"
         );
     }
-
 }
