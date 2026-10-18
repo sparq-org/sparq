@@ -127,14 +127,15 @@ Materialize the authorization view from the access-control documents, then enfor
   one term, `max_resource_iri_bytes` 2 KiB and `max_resource_path_depth` 64 for one resource
   IRI the enumeration walks) and the AGGREGATE of
   all the closures one materialization runs (`max_decision_join_rows` 4,000,000,
-  `max_decision_facts` 512,000). Same application rules as `set_auth_limits`: from the NEXT
+  `max_decision_facts` 512,000), plus the WALL-CLOCK time the whole materialization may take
+  (`max_materialize_time`, 5 s). Same application rules as `set_auth_limits`: from the NEXT
   materialization, WAC and ACP alike, every self-made rebuild included; the free
   `materialize_*` functions always use `default_auth_budget()`.
 - `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
   -> bool` — whether a materialization error is a refusal by that allowance or budget rather
   than any other failure, and which one it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
   RoundsOrFacts, TermBytes, InputBytes, InputFacts, InputTermBytes, ResourceIri,
-  DecisionWork, Unspecified}`, `limit_name()` for a message). The refusal carries that kind
+  DecisionWork, Deadline, Unspecified}`, `limit_name()` for a message). The refusal carries that kind
   as a tag directly after the refusal wording, and the pair is read from ANYWHERE in the
   message, so it still matches when a write path wraps the failed rebuild's error in its own
   sentence — while an error that merely quotes the tag literal is not read as a refusal.
@@ -938,23 +939,59 @@ in force stays in force; it is the REBUILD that refuses. Raising `max_resource_i
 lets a caller remove the offending name, since the removal's own replay is charged the same
 way.
 
+**The wall clock.** Every dimension above bounds a COUNT, which is what makes a refusal a
+property of the pod and so reproducible — but counts do not bound the TIME they take, and a
+caller answering a request has a wall-clock budget whatever the counts say.
+`max_materialize_time` is that backstop: ONE deadline is taken when a materialization starts
+and shared by every stage of it — the input assembly and the resource enumeration check it at
+their own loop boundaries (once per document, once per resource), each stratum boundary checks
+it, and inside the reasoner every closure ROUND checks it
+(`sparq_reason::ClosureLimits::deadline`, which the materializer sets from the same deadline).
+Past it the materialization is refused with `AuthAllowance::Deadline`, fail-closed, with
+nothing installed and the view in force left in place. The store-side passes that are not part
+of one materialization — the lifecycle REPLAY a direct edit's rebuild runs, and the provenance
+an update stages — each take a deadline of their OWN, exactly as each has its own aggregate
+byte allowance, so each is bounded without one pass's time being charged to another's.
+
+The sampling is deliberately coarse — one `Instant::now` per document, resource, stratum and
+round, never per fact or per row — so the check costs nothing on the hot path. It is therefore
+an upper bound on when a materialization STOPS, not a promise about any instant inside a
+round. And unlike the count limits, a `Deadline` refusal depends on how fast the machine is
+and what else is running on it: it is the one refusal in this family that is not a property of
+the pod alone, which is why the default is a generous backstop (orders of magnitude above what
+this crate's fixtures take) rather than a tight multiple of any measured time. An embedder that
+knows its own hardware and request deadline should set its own. On
+`wasm32-unknown-unknown` there is no monotonic clock, so no deadline is ever taken or checked
+there and the count limits are the whole bound, as before.
+
 **The whole decision.** Because `ClosureLimits` is per closure, an ACP view's three strata and
 a bridged ODRL policy's five strata could each spend the full allowance. Each closure now
 reports what it charged (`sparq_reason::n3::compiled::ClosureCharge`), the charges of one
 materialization go into one ledger, and `max_decision_join_rows` / `max_decision_facts` bound
 their sum. `max_decision_join_rows` is deliberately the same value as one closure's
 `max_total_join_rows`, so the ACCEPTED aggregate of an ACP view's three strata is no looser
-than what a single-stratum WAC view may spend. The ledger is charged when a closure
-RETURNS, so the stratum that pushes the aggregate over the cap has already run to completion
-under its own per-closure allowance: the PEAK work one refused decision does is the
-aggregate plus that one closure's cap (up to ~8,000,000 binding rows, ~768,000 facts at the
-defaults), and what the cap bounds exactly is the work of a decision that is ACCEPTED. Every
-closure is independently bounded either way, so the peak is finite in both dimensions, and
-the ledger counts conservatively (each stratum's fixpoint re-counts the facts it was given).
+than what a single-stratum WAC view may spend.
 
-Every default is ten times or more the largest value the fixtures this crate materializes
-need — by bisection for the dimensions a run either fits in or does not, and from the
-fixtures' longest and deepest resource name for the two enumeration caps; the per-field
+The ledger alone would bound only an ACCEPTED decision: it is charged when a closure RETURNS,
+so the stratum that pushes the aggregate over the cap would first run to completion under its
+own per-closure allowance, and the PEAK work of a refused decision would be the aggregate plus
+that one closure's cap. So each closure is handed **what the decision has LEFT** as its own
+`max_facts` / `max_join_rows` / `max_total_join_rows` — the smaller of the configured cap and
+the remainder — and the round that would cross the aggregate is the round that stops. A
+closure stopped by that narrowed cap is reported as `AuthAllowance::DecisionWork` (carrying
+the closure's own message), not as a per-closure cut, so "this decision as a whole is too big"
+stays distinguishable from "this one closure is too big"; because the kind `RoundsOrFacts`
+covers rounds and facts together, a closure that exhausts its ROUNDS while its facts cap was
+the narrowed one is reported that way too. A closure that reports no join-row count at all
+(its `max_total_join_rows` left unbounded) is REFUSED rather than charged zero — the narrowing
+means a closure of a decision always has a bound below the decision's own. The ledger counts
+conservatively (each stratum's fixpoint re-counts the facts it was given).
+
+Every COUNT default is ten times or more the largest value the fixtures this crate
+materializes need — by bisection for the dimensions a run either fits in or does not, and from
+the fixtures' longest and deepest resource name for the two enumeration caps
+(`max_materialize_time` is the exception: a time is not a property of the pod, so it is sized
+as a backstop rather than bisected); the per-field
 minima and the resulting margins (10x to 56x) are
 recorded in `default_auth_budget`'s rustdoc, not here — they are specific to those fixtures
 and that box. A refusal is the same kind of event as a reasoning-allowance

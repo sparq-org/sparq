@@ -16,7 +16,7 @@
 //! reference, and the tests below assert the two produce the SAME `<urn:sparq:auth>`
 //! triple set on the WAC/ACP fixtures.
 
-use crate::budget::{default_auth_budget, AuthBudget, DecisionWork};
+use crate::budget::{default_auth_budget, AuthBudget, Deadline, DecisionWork};
 use crate::loader::{assemble_input_ids, strip_reserved_graphs, System};
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_GRAPH, AUTH_NS};
 use oxrdf::{NamedNode, Term};
@@ -73,6 +73,11 @@ pub enum AuthAllowance {
     /// one authorization materialization added up, which the per-closure [`ClosureLimits`]
     /// cannot bound.
     DecisionWork,
+    /// `max_materialize_time`: the whole materialization was still running at its
+    /// WALL-CLOCK deadline ([`crate::AuthBudget`]). Unlike every other kind, this one is a
+    /// property of the machine as well as of the pod: the same pod on a faster box, or under
+    /// less load, may well materialize.
+    Deadline,
     /// An allowance this crate does not name individually (a newer reasoner cut).
     Unspecified,
 }
@@ -91,6 +96,7 @@ impl AuthAllowance {
             AuthAllowance::InputTermBytes => "max_input_term_bytes",
             AuthAllowance::ResourceIri => "max_resource_iri_bytes/max_resource_path_depth",
             AuthAllowance::DecisionWork => "max_decision_join_rows/max_decision_facts",
+            AuthAllowance::Deadline => "max_materialize_time",
             AuthAllowance::Unspecified => "an unnamed limit",
         }
     }
@@ -107,6 +113,7 @@ impl AuthAllowance {
             AuthAllowance::InputTermBytes => "input-term-bytes",
             AuthAllowance::ResourceIri => "resource-iri",
             AuthAllowance::DecisionWork => "decision-work",
+            AuthAllowance::Deadline => "deadline",
             AuthAllowance::Unspecified => "unspecified",
         }
     }
@@ -124,6 +131,7 @@ impl AuthAllowance {
             AuthAllowance::InputTermBytes,
             AuthAllowance::ResourceIri,
             AuthAllowance::DecisionWork,
+            AuthAllowance::Deadline,
         ] {
             if kind.tag() == tag {
                 return kind;
@@ -284,11 +292,55 @@ pub(crate) fn auth_eval(
     rules: &CompiledRuleSet,
     limits: ClosureLimits,
     work: &mut DecisionWork,
+    deadline: Deadline,
 ) -> Result<Vec<[sparq_core::dict::Id; 3]>, String> {
-    let (closure, charge) =
-        eval_charged(dict, facts, rules, limits).map_err(tag_allowance_refusal)?;
+    // The STRATUM boundary: refuse here rather than start another closure past the
+    // deadline. Inside the closure the same deadline is checked at each round boundary,
+    // which `limits` carries (see [`materialize_wac_limited`]).
+    deadline.check("running the authorization rules")?;
+    // The per-closure caps are NARROWED to what the whole decision has left, so this closure
+    // cannot spend the decision's allowance before the ledger below sees it
+    // ([`crate::budget::DecisionWork::remaining`]).
+    let narrowed = work.remaining(limits);
+    let (closure, charge) = eval_charged(dict, facts, rules, narrowed)
+        .map_err(|e| decision_bounded(tag_allowance_refusal(e), limits, narrowed))?;
     work.charge(charge)?;
     Ok(closure)
+}
+
+/// A closure refusal RE-TAGGED as [`AuthAllowance::DecisionWork`] when the bound that
+/// stopped the closure came from the whole-decision ledger
+/// ([`crate::budget::DecisionWork::remaining`]) rather than from the caller's per-closure
+/// `configured` allowance — the closure's own message kept, so nothing is lost.
+///
+/// The ledger used to be what refused such a decision, AFTER the closure that crossed it had
+/// run; now the narrowed cap stops that closure mid-run, which is the point. Without this
+/// re-tagging the refusal would change kind (reading as a per-closure cut), so a caller that
+/// tells "this decision as a whole is too big" from "this one closure is too big" would stop
+/// being able to.
+///
+/// `RoundsOrFacts` covers rounds AND facts, and only the facts cap is narrowed, so a closure
+/// that exhausted its ROUNDS while its facts cap was the narrowed one is reported as
+/// `DecisionWork` too. The kind already conflates the two; the message says which.
+fn decision_bounded(tagged: String, configured: ClosureLimits, narrowed: ClosureLimits) -> String {
+    let from_ledger = match auth_allowance_refusal(&tagged) {
+        Some(AuthAllowance::RoundsOrFacts) => narrowed.max_facts < configured.max_facts,
+        Some(AuthAllowance::TotalJoinRows) => {
+            narrowed.max_total_join_rows < configured.max_total_join_rows
+        }
+        Some(AuthAllowance::JoinRows) => narrowed.max_join_rows < configured.max_join_rows,
+        _ => false,
+    };
+    if !from_ledger {
+        return tagged;
+    }
+    allowance_refusal(
+        AuthAllowance::DecisionWork,
+        &format!(
+            "a closure of this authorization materialization was stopped by what the              whole-decision budget (max_decision_join_rows / max_decision_facts) had LEFT              rather than by its own allowance; no view is installed (fail-closed). The              closure reported: {}",
+            tagged
+        ),
+    )
 }
 
 /// An authorization refusal of kind `kind` carrying `detail`: the same
@@ -313,9 +365,13 @@ pub(crate) fn tag_allowance_refusal(e: String) -> String {
     if !e.contains(CLOSURE_CUT) {
         return e;
     }
-    // Which limit the cut names. `max_total_join_rows` contains `max_join_rows`, so it is
-    // tested first.
-    let kind = if e.contains("max_total_join_rows") {
+    // Which limit the cut names. The wall-clock deadline is tested FIRST: its cut carries
+    // the same `CLOSURE_CUT` text (so an enclosing negation gate and any text-matching
+    // caller keep working) and no limit name, which would otherwise read as `Unspecified`.
+    // `max_total_join_rows` contains `max_join_rows`, so it precedes it.
+    let kind = if e.contains(CLOSURE_DEADLINE) {
+        AuthAllowance::Deadline
+    } else if e.contains("max_total_join_rows") {
         AuthAllowance::TotalJoinRows
     } else if e.contains("max_join_rows") {
         AuthAllowance::JoinRows
@@ -338,6 +394,11 @@ pub(crate) fn tag_allowance_refusal(e: String) -> String {
 /// The reasoner's own text for a forward closure stopped by its [`ClosureLimits`] (every
 /// cut message contains it, and each names the limit it reached).
 const CLOSURE_CUT: &str = "forward closure limit exceeded";
+
+/// The part of that text a closure stopped by its [`ClosureLimits::deadline`] adds
+/// (`sparq_reason`'s `ClosureRounds::past_deadline`), which is how the deadline is told from
+/// a count limit.
+const CLOSURE_DEADLINE: &str = "wall-clock deadline";
 
 /// The WAC rule set (`common.n3` + `wac.n3`) compiled to the id-level IR, once per
 /// process. Compilation is deterministic over a `const` input, so the result is cached
@@ -455,7 +516,12 @@ pub struct MaterializeStats {
 /// # Ok::<(), String>(())
 /// ```
 pub fn materialize_wac(graph: &mut Graph) -> Result<MaterializeStats, String> {
-    materialize_wac_limited(graph, default_auth_limits(), default_auth_budget())
+    materialize_wac_limited(
+        graph,
+        default_auth_limits(),
+        default_auth_budget(),
+        Deadline::starting_now(default_auth_budget()),
+    )
 }
 
 /// [`materialize_wac`] under `limits` and `budget` instead of [`default_auth_limits`] and
@@ -465,6 +531,7 @@ pub(crate) fn materialize_wac_limited(
     graph: &mut Graph,
     limits: ClosureLimits,
     budget: AuthBudget,
+    deadline: Deadline,
 ) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
@@ -474,6 +541,13 @@ pub(crate) fn materialize_wac_limited(
     // reserved graph space itself, so it does not depend on the strip having run.
     let rules = wac_rules()?;
     let mut dict = Dict::new();
+    // `deadline` is the WHOLE materialization's, taken by the caller before its resource
+    // enumeration so that pass and this one share one bound. The input assembly checks it at
+    // its own loop boundaries (through the input meter), the stratum boundary checks it in
+    // [`auth_eval`], and the reasoner checks it at every closure round
+    // ([`sparq_reason::ClosureLimits::deadline`]). Past it the materialization is refused
+    // like any other budget refusal — before `graph` is touched.
+    let limits = with_deadline(limits, deadline);
     // WAC has no creator/owner vocabulary; provenance is ignored (the loader skips it).
     let facts = assemble_input_ids(
         &mut dict,
@@ -482,9 +556,10 @@ pub(crate) fn materialize_wac_limited(
         &AccessProvenance::new(),
         &VerifiedCredentials::new(),
         budget,
+        deadline,
     )?;
     let mut work = DecisionWork::new(budget);
-    let closure = auth_eval(&mut dict, &facts, rules, limits, &mut work)?;
+    let closure = auth_eval(&mut dict, &facts, rules, limits, &mut work, deadline)?;
     strip_reserved_graphs(graph);
     let mut stats = install_auth_view(graph, &dict, &closure);
     stats.strata_facts = vec![closure.len()];
@@ -591,6 +666,7 @@ pub fn materialize_acp_with_credentials(
         credentials,
         default_auth_limits(),
         default_auth_budget(),
+        Deadline::starting_now(default_auth_budget()),
     )
 }
 
@@ -609,12 +685,16 @@ pub(crate) fn materialize_acp_limited(
     credentials: &VerifiedCredentials,
     limits: ClosureLimits,
     budget: AuthBudget,
+    deadline: Deadline,
 ) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Fallible work first, mutation last — see [`materialize_wac`].
     let rules = acp_rules()?;
     let mut dict = Dict::new();
+    // The caller's one deadline bounds all three strata TOGETHER, as it bounds the
+    // enumeration pass before them — see [`materialize_wac_limited`].
+    let limits = with_deadline(limits, deadline);
     let facts = assemble_input_ids(
         &mut dict,
         graph,
@@ -622,6 +702,7 @@ pub(crate) fn materialize_acp_limited(
         provenance,
         credentials,
         budget,
+        deadline,
     )?;
     let mut work = DecisionWork::new(budget);
     // Chain the three strata entirely at the id level, in ONE dictionary: each stratum's
@@ -630,7 +711,7 @@ pub(crate) fn materialize_acp_limited(
     let mut closure = facts;
     let mut strata_facts = Vec::with_capacity(rules.len());
     for stratum in rules {
-        closure = auth_eval(&mut dict, &closure, stratum, limits, &mut work)?;
+        closure = auth_eval(&mut dict, &closure, stratum, limits, &mut work, deadline)?;
         strata_facts.push(closure.len());
     }
 
@@ -642,6 +723,15 @@ pub(crate) fn materialize_acp_limited(
         t0,
     );
     Ok(stats)
+}
+
+/// `limits` with the materialization's wall-clock `deadline` installed, so every closure
+/// of the run checks the SAME deadline at its own round boundaries
+/// ([`sparq_reason::ClosureLimits::deadline`]) as the stages around it check between them.
+fn with_deadline(limits: ClosureLimits, deadline: Deadline) -> ClosureLimits {
+    let mut limits = limits;
+    limits.deadline = deadline.at();
+    limits
 }
 
 /// Wall-clock milliseconds since `t0`, or `0.0` on `wasm32-unknown-unknown` where
@@ -847,6 +937,7 @@ mod tests {
                 &prov,
                 &VerifiedCredentials::new(),
                 default_auth_budget(),
+                Deadline::none(),
             )
             .expect("id facts");
             let direct: BTreeSet<String> = ids

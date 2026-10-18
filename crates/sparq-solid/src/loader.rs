@@ -22,7 +22,7 @@
 //! (see [`assemble_facts`]). Principal values in the view's reserved spaces are refused
 //! ([`validate_principal_iri`]).
 
-use crate::budget::{AuthBudget, InputMeter};
+use crate::budget::{AuthBudget, Deadline, InputMeter};
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_NS, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -448,7 +448,7 @@ pub(crate) fn graph_triples_metered(
 ) -> Result<Vec<[Term; 3]>, String> {
     let pat: sparq_core::store::Pattern = [None, None, None];
     let scan = g.store.scan(&pat);
-    meter.open();
+    meter.open()?;
     let mut out = Vec::with_capacity(scan.rows.len());
     for r in scan.rows.iter() {
         let t = scan.to_spo(r);
@@ -531,8 +531,9 @@ pub(crate) fn assemble_facts(
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
     budget: AuthBudget,
+    deadline: Deadline,
 ) -> Result<Vec<[Term; 3]>, String> {
-    let mut meter = InputMeter::new(budget);
+    let mut meter = InputMeter::with_deadline(budget, deadline);
     let mut out: Vec<[Term; 3]> = Vec::new();
     let suffix = if system == System::Wac { ACL_SUFFIX } else { ACR_SUFFIX };
     let own_pred = if system == System::Wac { "ownAcl" } else { "ownAcr" };
@@ -735,6 +736,7 @@ pub(crate) fn assemble_facts_default(
         provenance,
         credentials,
         crate::default_auth_budget(),
+        Deadline::starting_now(crate::default_auth_budget()),
     )
 }
 
@@ -751,12 +753,13 @@ pub(crate) fn assemble_input_ids(
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
     budget: AuthBudget,
+    deadline: Deadline,
 ) -> Result<Vec<[Id; 3]>, String> {
-    let facts = assemble_facts(graph, system, provenance, credentials, budget)?;
+    let facts = assemble_facts(graph, system, provenance, credentials, budget, deadline)?;
     // The fact count is re-checked HERE, immediately before interning: this is the point
     // the input is copied into the closure's dictionary, and `assemble_facts` is also
     // reached by the text differential path, so the guard sits on both sides of the seam.
-    InputMeter::new(budget).facts(facts.len())?;
+    InputMeter::with_deadline(budget, deadline).facts(facts.len())?;
     Ok(facts
         .iter()
         .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
@@ -780,7 +783,14 @@ pub(crate) fn assemble_input(
     budget: AuthBudget,
 ) -> Result<String, String> {
     use std::fmt::Write;
-    let facts = assemble_facts(graph, system, provenance, credentials, budget)?;
+    let facts = assemble_facts(
+        graph,
+        system,
+        provenance,
+        credentials,
+        budget,
+        Deadline::starting_now(budget),
+    )?;
     let mut out = String::new();
     for t in &facts {
         let _ = writeln!(out, "{} {} {} .", t[0], t[1], t[2]);

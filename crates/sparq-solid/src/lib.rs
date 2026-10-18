@@ -629,11 +629,13 @@ impl PodStore {
         // container chains — so it is charged against the store's budget, and before the
         // materialization installs anything: a stored name past the enumeration caps refuses
         // the whole rebuild, fail-closed, with the view in force untouched.
-        let resources = self.enumerate_resources()?;
+        let deadline = budget::Deadline::starting_now(self.auth_budget);
+        let resources = self.enumerate_resources(deadline)?;
         let stats = materialize::materialize_wac_limited(
             &mut self.graph,
             self.auth_limits,
             self.auth_budget,
+            deadline,
         )?;
         // Stored creator and owner facts of resources gone with their access control resource
         // go at any rebuild, so an ACP view built later never revives them.
@@ -929,8 +931,11 @@ impl PodStore {
     /// materialization path gives for the same name — and the caller refuses the rebuild
     /// before anything is installed, so an already-stored name past the caps makes the
     /// authorization view refuse rather than letting the walk run unbounded.
-    fn enumerate_resources(&self) -> Result<FxHashSet<String>, String> {
-        loader::resources(&self.graph, &mut budget::InputMeter::new(self.auth_budget))
+    fn enumerate_resources(&self, deadline: budget::Deadline) -> Result<FxHashSet<String>, String> {
+        loader::resources(
+            &self.graph,
+            &mut budget::InputMeter::with_deadline(self.auth_budget, deadline),
+        )
     }
 
     fn existing_provenance(
@@ -1092,13 +1097,15 @@ impl PodStore {
         supplied: bool,
     ) -> Result<MaterializeStats, String> {
         // Metered, and before anything is installed — see [`PodStore::materialize_wac_scoped`].
-        let resources = self.enumerate_resources()?;
+        let deadline = budget::Deadline::starting_now(self.auth_budget);
+        let resources = self.enumerate_resources(deadline)?;
         let stats = materialize::materialize_acp_limited(
             &mut self.graph,
             provenance,
             credentials,
             self.auth_limits,
             self.auth_budget,
+            deadline,
         )?;
         // Kept for exactly the resources the view was built over (see [`loader::resources`]).
         self.acp_context = (
@@ -2309,6 +2316,7 @@ impl PodStore {
                         &self.acp_context.1,
                         self.auth_limits,
                         self.auth_budget,
+                        budget::Deadline::starting_now(self.auth_budget),
                     )
                 })
             } else {
@@ -2316,6 +2324,7 @@ impl PodStore {
                     &mut candidate,
                     self.auth_limits,
                     self.auth_budget,
+                    budget::Deadline::starting_now(self.auth_budget),
                 )
             };
             if let Err(e) = rebuilt {

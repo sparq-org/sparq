@@ -1912,13 +1912,15 @@ pub fn materialize_odrl_n3_with_budget(
     // (`crate::AuthBudget`); otherwise this lane could spend five times the allowance a
     // single-stratum WAC view can.
     let mut work = crate::budget::DecisionWork::new(budget);
+    // ONE wall-clock deadline across all five strata, checked at each stratum boundary and
+    // at every closure round inside them, so this lane cannot spend five times the
+    // whole-materialization time budget either.
+    let deadline = crate::budget::Deadline::starting_now(budget);
+    let mut limits = crate::materialize::default_auth_limits();
+    limits.deadline = deadline.at();
     for stratum in rules {
         closure = crate::materialize::auth_eval(
-            &mut dict,
-            &closure,
-            stratum,
-            crate::materialize::default_auth_limits(),
-            &mut work,
+            &mut dict, &closure, stratum, limits, &mut work, deadline,
         )?;
     }
 

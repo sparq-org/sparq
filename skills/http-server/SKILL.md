@@ -1464,6 +1464,20 @@ that finds every slot taken waits at most that long and is then **shed** with th
 unchanged — an unparseable dataset is still `400`, a materialisation refusal still `503` — and a
 shed request produces no decision (fail-closed).
 
+**Single-flight and refusal caching on the stateful lane.** The pool bounds how many builds run
+at once; it does not stop N requests for the SAME generation each wanting a build of their own.
+So the stateful lane's cached view is a single-flight SLOT keyed by `(generation, requested
+view)`: the first request through installs the slot and runs the build on the pool, and every
+other request for that same key **awaits that one outcome** instead of taking a pool slot to
+run an identical materialisation. A generation whose view **refuses** has that refusal cached
+too, so a pod the budget refuses is not re-materialised once per request — it is rebuilt when
+the generation MOVES, which an `.acl`/`.acr` write does by construction. A failure of the pool
+itself (shed or join) is NOT cached: it is a property of the moment, not of the generation, so
+the next request tries again. Two requests that name different `"view"` values for one
+generation do not share a build even where they would resolve to the same view — a missed
+sharing opportunity, never a wrong answer, and deliberate: resolving the view needs a store
+scan that would then run on the async worker.
+
 **Which pod: `"source"` (`sq-snopa.8`).** Every endpoint takes an optional `"source"` field:
 
 - `"body"` (**default**, and the only mode before sq-snopa.8) — **stateless**: the pod dataset
@@ -1471,8 +1485,9 @@ shed request produces no decision (fail-closed).
 - `"server"` — **stateful**: authorise over the **server's own loaded store**. The body must NOT
   carry a `"dataset"` (a body naming both pods is ambiguous → `400`). A pod resource IS a named
   graph of the loaded store, so `"resource"` must be that graph's absolute IRI; relative paths are
-  not resolved. The pinned current generation is forked, materialised once, and cached in
-  `AppState` keyed by the **generation number** — so the N3 materialisation is paid once per
+  not resolved. The pinned current generation is forked, materialised once (concurrent requests
+  for one generation share that single build — see "Single-flight and refusal caching"), and
+  cached in `AppState` keyed by the **generation number** — so the N3 materialisation is paid once per
   generation, not once per request, and **an `.acl`/`.acr` write re-materialises automatically**
   (every commit publishes a new generation, which makes the cached view stale by construction;
   there is no window in which a revoked grant is still served).

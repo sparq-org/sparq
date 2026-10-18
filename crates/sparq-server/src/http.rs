@@ -2595,6 +2595,13 @@ pub struct AppState {
     /// request. That is the "re-materialise on ACL change" contract, obtained without any writer
     /// coupling: the cached view can never be older than the generation the request pins, so a
     /// request never decides from an auth view staler than the data it would read.
+    ///
+    /// The entry is a SINGLE-FLIGHT slot, not a finished view: concurrent requests for the
+    /// same generation share the one build instead of each running an identical
+    /// materialisation, and a generation whose materialisation REFUSES has that refusal
+    /// cached beside a success would be — a refusal is a property of the generation, so
+    /// re-deriving it per request would pay a whole materialisation to learn the same thing.
+    /// See [`CachedAuthView`](crate::solid_authz::CachedAuthView).
     #[cfg(feature = "solid-authz")]
     authz_view: Arc<std::sync::RwLock<Option<crate::solid_authz::CachedAuthView>>>,
     /// The BOUNDED blocking pool every `/authz/*` authorization-view build runs on (see

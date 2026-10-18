@@ -257,22 +257,65 @@ where
     })
 }
 
-/// (sq-snopa.8) The cached STATEFUL authorization view: one materialised
-/// [`PodStore`] plus the generation number and auth model it was built for. Lives in
+/// The OUTCOME of one stateful authorization-view build, shared by every request that
+/// needs it: the materialised store, or the typed refusal it failed with.
+///
+/// The refusal is in here deliberately. A view is a pure function of its generation, so a
+/// generation whose control documents the materialisation REFUSES will refuse again, exactly
+/// the same way, however many times it is asked — and the refusal costs a whole
+/// materialisation to discover. Caching it beside the success case is what stops a client
+/// that retries (or a fleet of them) from re-running the refused build per request until the
+/// generation moves.
+type ViewOutcome = Result<Arc<PodStore>, ServerViewError>;
+
+/// (sq-snopa.8) The cached STATEFUL authorization view: the SINGLE-FLIGHT slot
+/// for one `(generation, requested view)` — a [`tokio::sync::OnceCell`] resolved by whichever
+/// request gets there first and awaited by every other. Lives in
 /// [`AppState`](crate::http::AppState) behind an `RwLock`; see that field's doc for why a
 /// generation-keyed cache beside the ring is the whole "re-materialise on ACL change" contract.
 ///
-/// The `Arc` is what makes concurrent serving cheap: every request of a generation clones the
-/// same materialised store handle, so the N3 materialisation is paid ONCE per generation rather
-/// than once per request.
+/// Two things make concurrent serving cheap, and they are different. The `Arc<PodStore>` is
+/// what lets every request of a generation share one materialised store. The `OnceCell` is
+/// what makes the materialisation happen ONCE even when the requests arrive TOGETHER: before
+/// it, a cache miss hit by N concurrent requests ran N identical materialisations (each
+/// correct, N-1 wasted), which is the load shape a cold generation under traffic actually has.
+/// Now the first request builds and the others await its result.
+///
+/// The key is the generation plus the view the request ASKED for (`None` = "infer it"), not
+/// the view the build resolved: the resolution reads the store, which is the work this slot
+/// exists to do once, so it cannot be part of the key. Two requests that name the model
+/// differently therefore do not share a build even when they resolve to the same one — a
+/// missed sharing opportunity, never a wrong answer.
+///
+/// One generation holds a slot PER VIEW KIND rather than one slot in all. With a single slot,
+/// requests that name different models — a `"view":"wac"` request and a `"view":"acp"` request
+/// against the same generation — evict each other's slot in turn, so neither coalesces and
+/// each alternation pays a whole materialisation: the pathological shape is cheap to send and
+/// is exactly the traffic the cache exists to absorb. The kinds are bounded by the
+/// vocabulary ([`VIEW_KEYS`]), so the per-generation set cannot grow with traffic.
 pub(crate) struct CachedAuthView {
-    /// The ring generation number this view is a pure function of.
+    /// The ring generation number these slots' views are a pure function of.
     generation: u64,
-    /// Which auth model was materialised (a request that asks for the other one rebuilds).
-    view: AuthView,
-    /// The materialised store, shared by every request pinned to `generation`.
-    store: Arc<PodStore>,
+    /// One single-flight slot per view the request may ASK for (`None` is "infer from the
+    /// store"), at most [`VIEW_KEYS`] of them.
+    ///
+    /// Each slot's cell is `None` until its build finishes, then holds that outcome for
+    /// everyone. A build that failed for a reason that is NOT a property of the generation (a
+    /// saturated build pool, a cancelled task) leaves the cell UNSET, so it is retried
+    /// rather than cached.
+    slots: Vec<(Option<AuthView>, Arc<tokio::sync::OnceCell<ViewOutcome>>)>,
 }
+
+/// How many single-flight slots ONE generation can hold: the views a request may name
+/// (`"wac"`, `"acp"`) plus "infer it". The vocabulary is closed, so this is a bound on the
+/// cache, not a policy — a generation's slot set cannot grow with traffic.
+///
+/// A bridged ODRL policy is NOT one of them: the stateful lane refuses a server store
+/// carrying ODRL rules outright (`ServerViewError::Odrl`, under `odrl-authz`), so there is no
+/// ODRL view of a
+/// server generation to cache. That refusal is cached like any other outcome of the key the
+/// request asked under.
+const VIEW_KEYS: usize = 3;
 
 /// (sq-snopa.8) Why the stateful view refused to build. A small `Send` enum rather
 /// than a [`Response`] so it crosses the `spawn_blocking` boundary cleanly; mapped to the
@@ -740,41 +783,29 @@ fn server_view_error_response(err: ServerViewError) -> Response {
     }
 }
 
-/// Build (or reuse) the STATEFUL authorization view over the server's own loaded store.
-/// Synchronous and CPU-bound (the N3 materialisation) — call it on the blocking pool, which is
-/// what [`server_store`] does.
+/// Build the STATEFUL authorization view over ONE PINNED generation of the server's own
+/// loaded store. Synchronous and CPU-bound (the N3 materialisation) — call it on the bounded
+/// blocking pool, which is what [`server_store`] does.
 ///
-/// A cache HIT (same generation, same auth model) is one `RwLock` read plus an `Arc` clone. A
-/// MISS forks the pinned snapshot, materialises, and installs the result. Two concurrent misses
-/// may both materialise; both results are correct for their generation and the newer one wins
-/// the cache slot, so the duplicated work is the only cost of not holding the lock across the
-/// (potentially long) materialisation.
+/// It takes the generation the REQUEST pinned rather than re-reading the current one, so the
+/// view it returns is a pure function of the key its single-flight slot is stored under: a
+/// build that started before a commit cannot end up cached as the newer generation's view.
 ///
-/// A POISONED cache lock degrades to "no cache" (rebuild every request) rather than failing the
-/// request or, worse, serving a stale view.
+/// Caching, reuse and coalescing are [`server_store`]'s job ([`CachedAuthView`]); this
+/// function is the pure build.
 fn build_server_view(
-    state: &AppState,
+    pinned: &crate::http::PinnedGen,
     requested_view: Option<AuthView>,
 ) -> Result<Arc<PodStore>, ServerViewError> {
-    let pinned = state.current();
-    let generation = pinned.number();
     let graph = pinned.snapshot();
     let view = requested_view.unwrap_or(if graph_view_is_acp(graph) {
         AuthView::Acp
     } else {
         AuthView::Wac
     });
-    // Refuse BEFORE consulting the cache so the refusal cannot be skipped by a warm entry.
     #[cfg(feature = "odrl-authz")]
     if graph_carries_odrl(graph) {
         return Err(ServerViewError::Odrl);
-    }
-    if let Ok(cache) = state.authz_view_cache().read() {
-        if let Some(cached) = cache.as_ref() {
-            if cached.generation == generation && cached.view == view {
-                return Ok(cached.store.clone());
-            }
-        }
     }
     let mut store = PodStore::new(graph.fork());
     let materialized = match view {
@@ -784,22 +815,54 @@ fn build_server_view(
     // The refusal KIND is carried out of the blocking task (the message is not: it quotes
     // document IRIs). `server_view_error_response` logs it.
     materialized.map_err(|e| ServerViewError::Materialize(materialize_refusal_kind(&e)))?;
-    let store = Arc::new(store);
-    if let Ok(mut cache) = state.authz_view_cache().write() {
-        // Never let a slow build overwrite a NEWER generation's view with an older one.
-        let install = match cache.as_ref() {
-            None => true,
-            Some(cached) => cached.generation <= generation,
-        };
-        if install {
+    Ok(Arc::new(store))
+}
+
+/// The single-flight slot for `(generation, requested_view)`: the one already in the cache
+/// for that exact key, or a fresh one installed beside the generation's other view kinds.
+///
+/// The lock is held only for this lookup-or-install — never across the build — so a slow
+/// materialisation blocks nothing but the requests that want its own result. A cache for a
+/// NEWER generation is left in place (an older build must not displace it); the older
+/// request then gets an uncached slot of its own and still returns the view its own pinned
+/// generation calls for. A newer generation REPLACES the whole set, which is what makes an
+/// `.acl`/`.acr` write re-materialise.
+///
+/// A POISONED cache lock degrades to "no cache, no coalescing" — every request builds its
+/// own, as it did before this cache existed — rather than failing the request or, worse,
+/// serving a view from a generation it cannot check.
+fn view_slot(
+    state: &AppState,
+    generation: u64,
+    requested_view: Option<AuthView>,
+) -> Arc<tokio::sync::OnceCell<ViewOutcome>> {
+    let Ok(mut cache) = state.authz_view_cache().write() else {
+        return Arc::new(tokio::sync::OnceCell::new());
+    };
+    match cache.as_mut() {
+        // This generation: reuse this view kind's slot, or add one beside the others.
+        Some(cached) if cached.generation == generation => {
+            if let Some((_, slot)) = cached.slots.iter().find(|(key, _)| *key == requested_view) {
+                return Arc::clone(slot);
+            }
+            let slot = Arc::new(tokio::sync::OnceCell::new());
+            if cached.slots.len() < VIEW_KEYS {
+                cached.slots.push((requested_view, Arc::clone(&slot)));
+            }
+            slot
+        }
+        // A NEWER generation's cache stays; this older request builds uncached.
+        Some(cached) if cached.generation > generation => Arc::new(tokio::sync::OnceCell::new()),
+        // No cache, or an older generation's: this generation's set replaces it.
+        _ => {
+            let slot = Arc::new(tokio::sync::OnceCell::new());
             *cache = Some(CachedAuthView {
                 generation,
-                view,
-                store: store.clone(),
+                slots: vec![(requested_view, Arc::clone(&slot))],
             });
+            slot
         }
     }
-    Ok(store)
 }
 
 /// [`build_server_view`] on the BOUNDED blocking pool — the materialisation is a whole-store
@@ -812,10 +875,24 @@ async fn server_store(
     state: &AppState,
     requested_view: Option<AuthView>,
 ) -> Result<Arc<PodStore>, Response> {
-    let st = state.clone();
-    on_build_pool(state, move || build_server_view(&st, requested_view))
-        .await?
-        .map_err(server_view_error_response)
+    let pinned = state.current();
+    let generation = pinned.number();
+    let slot = view_slot(state, generation, requested_view);
+    // SINGLE-FLIGHT: the first request through here runs the build; every other request for
+    // the same generation and requested view awaits this one outcome instead of running its
+    // own identical materialisation. `get_or_try_init` caches an `Ok` (the materialised view
+    // OR the generation's typed refusal, both properties of the generation) and leaves the
+    // cell UNSET on an `Err` — a saturated pool or a cancelled task, neither of which says
+    // anything about this generation — so those are retried rather than remembered.
+    let outcome = slot
+        .get_or_try_init(|| async {
+            on_build_pool(state, move || build_server_view(&pinned, requested_view)).await
+        })
+        .await?;
+    match outcome {
+        Ok(store) => Ok(Arc::clone(store)),
+        Err(err) => Err(server_view_error_response(*err)),
+    }
 }
 
 /// [`build_store`] on the blocking pool — the STATELESS lane's counterpart of
@@ -3344,6 +3421,199 @@ mod build_pool_tests {
             st.authz_build_pool().admitted(),
             2,
             "the store build AND the ODRL extension each took a pool slot"
+        );
+    }
+
+    /// A server-lane `decide` body (no dataset: the server's own store).
+    fn server_lane_request() -> Bytes {
+        decide_bytes(serde_json::json!({
+            "source": "server",
+            "session": { "agent": "https://alice.ex/card#me" },
+            "resource": "https://pod.ex/n1",
+            "mode": "read",
+        }))
+    }
+
+    /// CONCURRENT requests for one generation share ONE build.
+    ///
+    /// The race is made deterministic rather than hoped for: the test holds the pool's only
+    /// slot, so the first request's build is parked inside the pool with its single-flight
+    /// slot already installed; the other requests then arrive, find that slot and await it.
+    /// Releasing the permit lets the one build run. Without the single-flight slot each of
+    /// those requests would want a pool slot of its own and, with the only one held, would be
+    /// shed with a 503 instead of being served.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_requests_for_one_generation_share_one_build() {
+        let st = state(1, 10_000);
+        let held = st
+            .authz_build_pool()
+            .claim()
+            .await
+            .expect("the only build slot");
+
+        // The first request installs the single-flight slot and parks on the pool.
+        let first = tokio::spawn({
+            let st = st.clone();
+            async move {
+                decide_endpoint(State(st), HeaderMap::new(), server_lane_request())
+                    .await
+                    .status()
+            }
+        });
+        // Wait for its slot to exist, so the followers are genuinely sharing a build in
+        // flight rather than reading a finished one.
+        while st
+            .authz_view_cache()
+            .read()
+            .is_ok_and(|c| c.as_ref().is_none())
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+
+        let mut followers = tokio::task::JoinSet::new();
+        for _ in 0..7 {
+            let st = st.clone();
+            followers.spawn(async move {
+                decide_endpoint(State(st), HeaderMap::new(), server_lane_request())
+                    .await
+                    .status()
+            });
+        }
+        // Let the one build run.
+        drop(held);
+
+        assert_eq!(
+            first.await.expect("the first request finishes"),
+            StatusCode::FORBIDDEN,
+            "an empty server store is the fail-closed noAcl deny"
+        );
+        while let Some(status) = followers.join_next().await {
+            assert_eq!(
+                status.expect("a follower finishes"),
+                StatusCode::FORBIDDEN,
+                "every follower is served from the shared build, not shed"
+            );
+        }
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            2,
+            "one build for all eight requests (plus this test's own hold)"
+        );
+        assert_eq!(
+            st.authz_build_pool().refused(),
+            0,
+            "no request was shed: they shared the build instead of queueing for slots"
+        );
+    }
+
+    /// A `decide` body on the stateful lane naming `view` explicitly.
+    fn server_lane_request_viewing(view: &str) -> Bytes {
+        decide_bytes(serde_json::json!({
+            "source": "server",
+            "view": view,
+            "session": { "agent": "https://alice.ex/card#me" },
+            "resource": "https://pod.ex/n1",
+            "mode": "read",
+        }))
+    }
+
+    /// One generation holds a slot PER VIEW KIND, so requests that name DIFFERENT models do
+    /// not evict each other: alternating `view:"wac"` and `view:"acp"` over one generation
+    /// pays two builds in all, not one per request.
+    ///
+    /// With a single slot per generation each alternation displaced the other's slot, so
+    /// neither coalesced and every request re-materialised — a pathological shape that costs
+    /// the sender nothing to produce.
+    #[tokio::test]
+    async fn alternating_view_kinds_do_not_evict_each_others_slot() {
+        let st = state(4, 1_000);
+
+        for _ in 0..4 {
+            for view in ["wac", "acp"] {
+                let resp = decide_endpoint(
+                    State(st.clone()),
+                    HeaderMap::new(),
+                    server_lane_request_viewing(view),
+                )
+                .await;
+                assert_eq!(
+                    resp.status(),
+                    StatusCode::FORBIDDEN,
+                    "an empty server store is the fail-closed noAcl deny ({})",
+                    view
+                );
+            }
+        }
+
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            2,
+            "one build per view kind for the whole generation, not one per request"
+        );
+    }
+
+    /// A generation whose materialisation REFUSES has that refusal cached: the refused build
+    /// is not re-run per request, and it IS re-run once the generation moves.
+    ///
+    /// The store holds a resource name past the enumeration caps, so its view refuses — the
+    /// refusal is a property of the generation, which is exactly what makes caching it sound.
+    #[tokio::test]
+    async fn a_refused_generation_is_not_rebuilt_until_the_generation_moves() {
+        let deep = format!("https://pod.ex/{}doc", "a/".repeat(200));
+        let nq = format!("<{deep}#it> <https://ex.dev/ns#k> \"v\" <{deep}> .\n");
+        let st = AppState::with_config(
+            sparq_core::Graph::load_dataset(&nq, "nquads").expect("parses"),
+            ServerConfig {
+                solid_authz: true,
+                solid_authz_build_concurrency: 4,
+                solid_authz_build_wait: Duration::from_millis(1_000),
+                ..ServerConfig::default()
+            },
+        );
+
+        let resp =
+            decide_endpoint(State(st.clone()), HeaderMap::new(), server_lane_request()).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the view over a name past the enumeration caps is refused"
+        );
+        assert_eq!(st.authz_build_pool().admitted(), 1, "one build so far");
+
+        for _ in 0..4 {
+            let resp =
+                decide_endpoint(State(st.clone()), HeaderMap::new(), server_lane_request()).await;
+            assert_eq!(
+                resp.status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "the cached refusal is still the fail-closed 503"
+            );
+        }
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            1,
+            "the refusal was cached: no request rebuilt the refused view"
+        );
+
+        // A commit publishes a new generation, which the cache is keyed by — so the next
+        // request builds again (and refuses again, the store being no better).
+        let writer = st.clone();
+        tokio::task::spawn_blocking(move || {
+            writer.apply_update(
+                "INSERT DATA { <https://ex.dev/s> <https://ex.dev/p> <https://ex.dev/o> }",
+            )
+        })
+        .await
+        .expect("the update task joins")
+        .expect("the update commits");
+
+        let resp =
+            decide_endpoint(State(st.clone()), HeaderMap::new(), server_lane_request()).await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            st.authz_build_pool().admitted(),
+            2,
+            "the new generation is built afresh rather than answered from the old refusal"
         );
     }
 

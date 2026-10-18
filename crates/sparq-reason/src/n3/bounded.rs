@@ -547,6 +547,23 @@ pub struct ClosureLimits {
     /// A nested closure gets its own total afresh, as it does its rounds and its per-round
     /// allowance.
     pub max_total_join_rows: usize,
+    /// A WALL-CLOCK instant the closure may not run past: checked at every ROUND boundary
+    /// (and so at every stratum boundary, each of which begins a round), and past it the
+    /// closure is refused exactly as it is past `max_rounds` — the cut is recorded, no
+    /// truncated closure is returned, and the error names the deadline.
+    ///
+    /// The work limits above bound COUNTS, which is what makes them reproducible; they do
+    /// not bound the TIME those counts take, and a caller serving requests has a wall-clock
+    /// budget of its own. This is that bound, and it is deliberately coarse: `Instant::now`
+    /// is sampled once per round, never per row, so a round whose own work is large can run
+    /// past the deadline before it is noticed. It is an upper bound on when the closure
+    /// STOPS, not a guarantee about any instant inside a round.
+    ///
+    /// `None`, the default, is no deadline at all: nothing is sampled and a closure accepted
+    /// before this field existed is still accepted. A deadline already in the past refuses at
+    /// the first round. Unlike the count limits, a deadline makes a run's verdict depend on
+    /// how fast the machine is, so a reproducible refusal wants the counts, not this.
+    pub deadline: Option<std::time::Instant>,
 }
 
 impl Default for ClosureLimits {
@@ -559,6 +576,7 @@ impl Default for ClosureLimits {
             max_term_bytes: CLOSURE_TERM_BYTES,
             max_join_rows: CLOSURE_JOIN_ROWS,
             max_total_join_rows: CLOSURE_TOTAL_JOIN_ROWS,
+            deadline: None,
         }
     }
 }
@@ -1173,6 +1191,13 @@ impl ClosureRounds {
     /// negation gate refuses to read it) and the closure fails with an error, so no
     /// caller takes the truncated fact set for a fixpoint.
     pub(crate) fn round(&mut self, facts: usize, cuts: &impl Sink) -> Result<(), String> {
+        // The wall-clock deadline, sampled ONCE here — at the round boundary, never per row
+        // (see [`ClosureLimits::deadline`]). `None` samples nothing at all.
+        if let Some(at) = self.limits.deadline {
+            if std::time::Instant::now() >= at {
+                return Err(self.past_deadline(cuts));
+            }
+        }
         match self.left.checked_sub(1) {
             Some(left) if facts <= self.limits.max_facts => {
                 self.left = left;
@@ -1191,6 +1216,21 @@ impl ClosureRounds {
             return Ok(());
         }
         Err(self.exceeded(cuts))
+    }
+
+    /// The error of a closure still running at its [`ClosureLimits::deadline`], the cut
+    /// recorded on `cuts` — the same cut a count limit records, so every enclosing run's
+    /// negation gate refuses to read the incomplete closure exactly as it does for a round
+    /// or fact cut. The message carries [`CLOSURE_CUT`] for the same reason: a caller that
+    /// classifies a closure refusal by its text keeps working, and names the deadline.
+    fn past_deadline(&self, cuts: &impl Sink) -> String {
+        cuts.record(CLOSURE_CUT);
+        format!(
+            "n3: {} (wall-clock deadline) before reaching a fixpoint: the rules were still \
+             deriving facts when the closure's wall-clock deadline passed (raise the \
+             deadline, or the time budget the caller derives it from, to allow more)",
+            CLOSURE_CUT
+        )
     }
 
     /// The error of a closure past its allowance, the cut recorded on `cuts`.
@@ -1966,10 +2006,47 @@ mod tests {
                 max_term_bytes: 16 << 20,
                 max_join_rows: usize::MAX,
                 max_total_join_rows: usize::MAX,
+                deadline: None,
             }
         );
         let sink = Cell::new(false);
         assert!(allowance.round(closure.facts.len(), &sink).is_ok());
+        assert!(!sink.get());
+    }
+
+    /// A closure whose [`ClosureLimits::deadline`] has passed is refused at its next ROUND
+    /// boundary, with the cut recorded — the same shape a round or fact cut has, so an
+    /// enclosing negation gate refuses to read the incomplete closure. A deadline still in
+    /// the future costs the round nothing.
+    #[test]
+    fn a_passed_deadline_refuses_the_next_round() {
+        let limits = ClosureLimits {
+            deadline: Some(std::time::Instant::now() - std::time::Duration::from_millis(1)),
+            ..ClosureLimits::default()
+        };
+        let mut allowance = ClosureRounds::forward(&Truncation::top_level_with(limits));
+        let sink = Cell::new(false);
+        let err = allowance
+            .round(0, &sink)
+            .expect_err("a passed deadline refuses the round");
+        assert!(err.contains(CLOSURE_CUT), "{}", err);
+        assert!(
+            err.contains("deadline"),
+            "the error names the deadline: {}",
+            err
+        );
+        assert!(sink.get(), "the cut is recorded, as for a count limit");
+
+        let future = ClosureLimits {
+            deadline: Some(std::time::Instant::now() + std::time::Duration::from_secs(600)),
+            ..ClosureLimits::default()
+        };
+        let mut allowance = ClosureRounds::forward(&Truncation::top_level_with(future));
+        let sink = Cell::new(false);
+        assert!(
+            allowance.round(0, &sink).is_ok(),
+            "a future deadline allows the round"
+        );
         assert!(!sink.get());
     }
 
