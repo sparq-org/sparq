@@ -19,15 +19,26 @@ pub const SERVICE_POOL_PATH: &str = "/.lws/subscriptions/";
 /// notification service keeps there ([`is_service_marker`]).
 pub const SERVICE_MARKER_FRAGMENT: &str = "#high-water";
 
-/// Whether `iri` names the notification service's marker: the service pool's container with
-/// [`SERVICE_MARKER_FRAGMENT`]. A storage has one, and its index entry has a slot of its own,
-/// admitted apart from every ceiling, so storing it never waits on room (no request can name it:
-/// it is a fragment).
+/// Whether `iri` has the shape of the notification service's marker: an `http` or `https`
+/// origin (no user information) followed by exactly the service pool's container and
+/// [`SERVICE_MARKER_FRAGMENT`]. A storage has one marker, and its index entry has a slot of its
+/// own, admitted apart from every ceiling, so storing it never waits on room (no request can name
+/// it: it is a fragment). The in-memory index keeps that slot for one IRI alone, the first marker
+/// stored there; any other of this shape is admitted as an ordinary pool record.
 pub fn is_service_marker(iri: &str) -> bool {
-    iri.split_once("://")
-        .and_then(|(_, rest)| rest.find('/').map(|at| &rest[at..]))
-        .and_then(|path| path.strip_prefix(SERVICE_POOL_PATH))
-        .is_some_and(|rest| rest == SERVICE_MARKER_FRAGMENT)
+    let Some(rest) = iri
+        .strip_prefix("https://")
+        .or_else(|| iri.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let Some(at) = rest.find('/') else {
+        return false;
+    };
+    let (authority, path) = rest.split_at(at);
+    !authority.is_empty()
+        && !authority.contains(['@', '?', '#'])
+        && path.strip_prefix(SERVICE_POOL_PATH) == Some(SERVICE_MARKER_FRAGMENT)
 }
 
 /// Default stored-entry ceiling for the service pool ([`in_service_pool`]).

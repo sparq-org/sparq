@@ -1135,7 +1135,7 @@ pub async fn handle<S: Store + 'static>(
                     req,
                     &container,
                     None,
-                    |get| listing(state, get, grants),
+                    |get| std::future::ready(listing(state, &get, grants)),
                 )
                 .await
                 {

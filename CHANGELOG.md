@@ -163,7 +163,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subscribe again; subscriptions without one are kept. Notifications now start only over a store
   that can raise that time atomically (the in-memory and embedded indexes); `LwsState::new`
   fails over any other. While the time cannot be stored, notification endpoints answer `503`
-  and nothing is delivered.
+  and nothing is delivered. A stored time ahead of the clock stands (subscriptions expiring
+  before it stay expired); to recover from a clock that jumped forward, correct the clock and
+  start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1` (or call
+  `lws::notify::reset_subscription_clock`), which removes every subscription with an `expires`
+  and then stores the clock.
 
 - **sparq-zk-compose / zk (sq-j506, #7121; Noir library #7103):** the `DualLeafV2` **component-witnessed** scan and
   hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir

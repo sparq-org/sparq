@@ -335,13 +335,16 @@ impl ListingLocks {
 /// otherwise. A listing that cannot be produced (a representation the client does not accept, a
 /// page that does not exist) is that response: its absent `ETag` is not the absence of the
 /// container.
-pub(crate) async fn service_preconditions<S: Store + 'static>(
+pub(crate) async fn service_preconditions<S: Store + 'static, L>(
     state: &LwsState<S>,
     req: &LwsRequest,
     container: &str,
     own: Option<&str>,
-    listing: impl FnOnce(&LwsRequest) -> axum::response::Response,
-) -> Result<Option<ListingLocks>, axum::response::Response> {
+    listing: impl FnOnce(LwsRequest) -> L,
+) -> Result<Option<ListingLocks>, axum::response::Response>
+where
+    L: std::future::Future<Output = axum::response::Response>,
+{
     if !resources::is_conditional(req) {
         return Ok(None);
     }
@@ -370,7 +373,9 @@ pub(crate) async fn service_preconditions<S: Store + 'static>(
             None => Ok(Some(locks)),
         };
     }
-    let current = listing(&resources::plain_get(req));
+    // Read only now, with the locks held: what it shows (and leaves out) is decided after every
+    // change it waited on.
+    let current = listing(resources::plain_get(req)).await;
     if !current.status().is_success() {
         return Err(current);
     }
