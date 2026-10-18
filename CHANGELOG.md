@@ -169,6 +169,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-lws-core (notifications):** subscription expiry is decided against a durable
+  high-water time stored in the index, so a restart with the clock stepped back does not revive
+  an expired subscription. On the first start after upgrading, and after a restore that drops
+  index-only records, every subscription with an `expires` is removed and its subscriber must
+  subscribe again; subscriptions without one are kept. Notifications now start only over a store
+  that can raise that time atomically (the in-memory and embedded indexes); `LwsState::new`
+  fails over any other. While the time cannot be stored, notification endpoints answer `503`
+  and nothing is delivered. A stored time ahead of the clock stands (subscriptions expiring
+  before it stay expired); to recover from a clock that jumped forward, correct the clock and
+  start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1` (`LwsConfig::reset_subscription_clock`),
+  which, while the state is built, removes every subscription with an `expires` and then stores
+  the clock.
+  An `LwsState` now holds its backend's lease (shared by every clone of its store) while it
+  lives: a second `LwsState` built over a running one's store is refused, so a state that
+  replaces another must be built after the old one is dropped. `Store::reset_marker` takes that
+  lease's guard.
+
 - **sparq-reason (N3 backward chaining):** a variable substitution is cheaper to COPY, with no
   change to any name or answer. The `name -> term` map a premise evaluation and a backward proof
   carry now holds the variable's name as a reference-counted string rather than an owned one, so
