@@ -137,7 +137,11 @@ an already-issued `receiveFrom` URL, and an open socket is closed (code 1008) on
 its subscriber loses read access. With the `odrl-authz` gate attached, its deny
 applies here exactly as it does to `GET`.
 Lacking the mode returns `403`, whether or not the topic exists. A topic outside this
-server's storage root is refused with `400` before the WAC gate runs.
+server's storage root is refused with `400` before the WAC gate runs. A topic on it is taken
+in one canonical form, the IRI `parse_target` gives its path (query and fragment dropped), for
+the WAC check, the receive token and the notifications alike; a topic with none — a linkset
+record (`X.meta`, in any case), anything under `/.lws/`, a dot segment — gets the same `403`
+as a topic the caller may not read.
 
 ## Serve provider WebIDs off the pod (optional)
 
@@ -592,7 +596,10 @@ What the server exposes, all discoverable from the storage description
   metadata records it would put back), so in a storage at its ceiling a change that needs one is
   refused with `507`; a store that fails may fail the change (`5xx`, below) whatever was asked;
   and a hold whose release fails keeps its bytes until the maintenance sweeper releases it again
-  (or, the process stopping first, the next start); and a response's status, timing and quota
+  (or, the process stopping first, the sweeper's bounded wait list being full, which is counted
+  and reported, or the hold being one whose taking failed part way, the next start); a start fails, rather than leave a hold to nobody, when the
+  holds cannot be listed, a holder's intent cannot be looked up, or a release that fails cannot
+  wait for the sweeper (each asked a few times first); and a response's status, timing and quota
   outcome are independent of the content of the resources a change touches, not of their
   metadata, of the room others leave in the shared quota, or of the backends' and the index's
   own work. A start

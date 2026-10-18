@@ -3713,6 +3713,38 @@ fn the_scoped_choice_reaches_every_counted_neighbour() {
     }
 }
 
+/// The complement of the filler `≥2 s.D` is an at-most restriction, so each attempt's
+/// definition of the filler's superset carries an NI-shaped clause of its own. Only the
+/// attempt's own clauses may name `o`'s neighbours: no budget answers `Consistent`.
+#[test]
+fn an_at_most_inside_a_filler_complement_stays_sound_at_every_budget() {
+    let body = format!(
+        r#"{PRE}:D a owl:Class . :r a owl:ObjectProperty . :s a owl:ObjectProperty . :o a owl:NamedIndividual . :a a owl:NamedIndividual . :b a owl:NamedIndividual .
+        :o a [ a owl:Restriction ; owl:onProperty :r ; owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass [ a owl:Restriction ; owl:onProperty :s ; owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass :D ] ] .
+        :o :r :a , :b .
+        :a owl:differentFrom :b .
+        :a a [ a owl:Restriction ; owl:onProperty :s ; owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass :D ] .
+        :b a [ a owl:Restriction ; owl:onProperty :s ; owl:minQualifiedCardinality "2"^^xsd:nonNegativeInteger ; owl:onClass :D ] ."#
+    );
+    let (d, t) = Graph::parse_to_triples(&body, "turtle").expect("parse");
+    let o = extract(&d, &t).expect("extract");
+    assert_eq!(
+        check(&d, &o, Budget::default()).consistency,
+        Consistency::Inconsistent
+    );
+    for max_steps in (20..=2_000).step_by(20) {
+        let budget = Budget {
+            max_steps,
+            max_nodes: 100_000,
+        };
+        assert_ne!(
+            check(&d, &o, budget).consistency,
+            Consistency::Consistent,
+            "{max_steps}"
+        );
+    }
+}
+
 /// A fuzz ontology whose tests of `C0` against each other class ran out of the shared
 /// budget. The model the consistency check found has elements in `C0` that are outside
 /// every other class but `C1`, so only `C0 ⊑ C1` is tested. HermiT agrees.
@@ -3742,6 +3774,35 @@ fn the_consistency_model_shows_non_subsumptions() {
         .unwrap_or_else(|| panic!("{:?}", r.classification_unknown));
     assert!(c.unsatisfiable.is_empty());
     assert!(c.subsumptions.contains(&(ex(&d, "C0"), ex(&d, "C1"))));
+}
+
+/// A fuzz ontology that runs out of the shared budget unless the models of earlier tests
+/// also count as witnesses: each class's test model rules out candidates for the classes
+/// tested after it. No class is unsatisfiable and none has an inferred subsumer, as HermiT
+/// agrees.
+#[test]
+fn every_test_model_shows_non_subsumptions() {
+    let body = r#"<http://ex/o5658> a owl:Ontology . :C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :C4 a owl:Class . :C5 a owl:Class . :r0 a owl:ObjectProperty . :r1 a owl:ObjectProperty . :i0 a owl:NamedIndividual . :i1 a owl:NamedIndividual .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:someValuesFrom :C0 ] .
+        :C5 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:someValuesFrom :C3 ] .
+        :C4 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( [ owl:complementOf :C5 ] [ owl:complementOf :C2 ] ) ] .
+        :C5 rdfs:subClassOf [ a owl:Class ; owl:unionOf ( :C0 :C2 ) ] .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:allValuesFrom :C4 ] .
+        :C2 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r1 ; owl:allValuesFrom :C5 ] .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :r0 ] ; owl:hasValue :i0 ] .
+        :C5 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:maxQualifiedCardinality "4"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C5 ] ] .
+        :i0 a :C5 .
+        :C3 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:maxQualifiedCardinality "3"^^xsd:nonNegativeInteger ; owl:onClass [ owl:complementOf :C3 ] ] .
+        :i0 a [ a owl:Class ; owl:unionOf ( :C3 :C3 ) ] .
+        :r1 a owl:IrreflexiveProperty .
+        :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :r0 ; owl:minCardinality "3"^^xsd:nonNegativeInteger ] .
+        :a a owl:NamedIndividual , :C0 ."#;
+    let (_, r) = run(body);
+    let c = r
+        .classification
+        .unwrap_or_else(|| panic!("{:?}", r.classification_unknown));
+    assert!(c.unsatisfiable.is_empty());
+    assert!(c.inferred.is_empty());
 }
 
 /// The scoped choice for `o : ≤1 T.∃S.¬C0` is the clause `T⁻(x, y₀) ∧ S(x, y₁) → C0(y₁) ∨
