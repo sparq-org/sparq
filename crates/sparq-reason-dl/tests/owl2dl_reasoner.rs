@@ -3857,6 +3857,20 @@ fn a_clause_of_the_other_attempt_counts_no_copies() {
     assert_eq!(verdict(body), Consistency::Consistent);
 }
 
+/// A fuzz ontology whose model has `o` joined to every element of an infinite `S`-chain
+/// (each `C0` has `o` as an `R`-predecessor). `∃T.Self ⊑ ≤1 R` is an at-most at every
+/// node whose body needs a `T`-loop, and `o` has none: it counts no copies at `o`, so the
+/// unravelled chain is a model. HermiT agrees.
+#[test]
+fn an_at_most_behind_a_missing_self_loop_counts_no_copies() {
+    let body = r#":C0 a owl:Class . :C1 a owl:Class . :C2 a owl:Class . :C3 a owl:Class . :R a owl:ObjectProperty . :S a owl:ObjectProperty . :T a owl:ObjectProperty . :Q a owl:ObjectProperty . :o a owl:NamedIndividual . :p a owl:NamedIndividual . :a a owl:NamedIndividual .
+        :a a :C0 . :C0 rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :S ; owl:someValuesFrom :C0 ] , [ a owl:Restriction ; owl:onProperty [ owl:inverseOf :R ] ; owl:hasValue :o ] .
+        :p a [ a owl:Restriction ; owl:onProperty :R ; owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ; owl:onClass :C2 ] .
+        :p a :C2 .
+        [ a owl:Restriction ; owl:onProperty :T ; owl:hasSelf true ] rdfs:subClassOf [ a owl:Restriction ; owl:onProperty :R ; owl:maxCardinality "1"^^xsd:nonNegativeInteger ] ."#;
+    assert_eq!(verdict(body), Consistency::Consistent);
+}
+
 /// A fuzz ontology where HermiT reports `C2` unsatisfiable, wrongly: `C2` has the model below
 /// (domain `{a, x, i0}`), which satisfies every axiom, and HermiT itself answers consistent
 /// once the model is added as assertions with `x : C2`.
