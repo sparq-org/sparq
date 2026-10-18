@@ -4801,6 +4801,35 @@ fn remove_legacy_staging(
     }
 }
 
+/// Whether the store `owner` names is another store beside `dir` whose staging an earlier
+/// version put at `dir`'s staging names (`with_extension`: `g.a` staged at `g.compact-*`): a
+/// store there, named `<dir's name>.<extension>`, whose marker carries `owner`.
+#[cfg(feature = "mmap")]
+fn legacy_staging_of_a_sibling(dir: &std::path::Path, owner: &str) -> std::io::Result<bool> {
+    let (Some(parent), Some(name)) = (dir.parent(), dir.file_name()) else {
+        return Ok(false);
+    };
+    let entries = match std::fs::read_dir(parent) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    for entry in entries {
+        let path = entry?.path();
+        let ext = path.extension().and_then(std::ffi::OsStr::to_str);
+        if path.file_stem() != Some(name)
+            || matches!(ext, None | Some("compact-new" | "compact-old"))
+            || !std::fs::symlink_metadata(&path)?.is_dir()
+        {
+            continue;
+        }
+        if matches!(read_marker(&path), Ok(Some(Marker { id: Some(id), .. })) if id == owner) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Whether `dir` holds a store's files without a marker: a legacy store (saved before markers),
 /// taken for a store all the same.
 #[cfg(feature = "mmap")]
@@ -4824,7 +4853,9 @@ pub(crate) fn is_store(dir: &std::path::Path) -> bool {
 ///    is an error), through its nearest existing ancestor, creating nothing.
 /// 2. It is refused (`InvalidInput`) when any ancestor, up to the filesystem root, is a store
 ///    ([`is_store`]): a named graph's directory, or anything else inside a store, belongs to
-///    that store. This is marker-based, not name-based.
+///    that store. This is marker-based, not name-based. It is refused too when it carries a
+///    staging record ([`STAGING_MARKER`]): half of an interrupted swap, recovered through the
+///    store it belongs to.
 /// 3. `refuse` (the caller's own check, e.g. "not my own directory") runs on the resolved path
 ///    and its lock location, before anything is created or locked.
 /// 4. Then missing parent directories are created (not for a read-only claim: the lock file
@@ -5241,6 +5272,14 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<bool> {
             ));
         }
     };
+    if legacy_staging_of_a_sibling(dir, &owner)? {
+        let staging = if has_new { &new_dir } else { &old_dir };
+        return Err(not_own_staging(
+            staging,
+            "compact",
+            "is staging an earlier version made for another store beside it",
+        ));
+    }
     for (staging, kind, present, mark) in [
         (&new_dir, "compact-new", has_new, &new_mark),
         (&old_dir, "compact-old", has_old, &old_mark),
@@ -5477,6 +5516,31 @@ fn decode_graph_name(bytes: &[u8], pos: usize) -> Result<(Term, usize), String> 
     Ok((term, val_end))
 }
 
+/// Opens the log file at `path` (a WAL or the transaction journal), creating it if missing, for
+/// appending and emptying: writable but not in append mode, since an append-mode handle on
+/// Windows lacks the right to truncate (`set_len` fails with access denied), with the cursor
+/// at the end. Only the directory's lock holder writes it, so a write at the cursor appends.
+#[cfg(feature = "mmap")]
+fn open_log(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    use std::io::Seek;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    file.seek(std::io::SeekFrom::End(0))?;
+    Ok(file)
+}
+
+/// Empties a log opened by [`open_log`] and puts the cursor back at its start, then syncs.
+#[cfg(feature = "mmap")]
+fn truncate_log(file: &mut std::fs::File) -> std::io::Result<()> {
+    use std::io::Seek;
+    file.set_len(0)?;
+    file.seek(std::io::SeekFrom::Start(0))?;
+    file.sync_data()
+}
+
 /// The append-only write-ahead log of update operations for a directory-backed graph.
 ///
 /// (review 1593) Entries are framed as ATOMIC BATCHES, not independent per-triple
@@ -5514,7 +5578,7 @@ impl Wal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<Wal> {
-        let file = std::fs::OpenOptions::new().create(true).append(true).open(Self::path(dir))?;
+        let file = open_log(&Self::path(dir))?;
         Ok(Wal { file, dir: dir.to_path_buf() })
     }
 
@@ -5568,8 +5632,7 @@ impl Wal {
 
     /// Empties the log (after a compaction persisted the folded base).
     fn truncate(&mut self) -> std::io::Result<()> {
-        self.file.set_len(0)?;
-        self.file.sync_data()
+        truncate_log(&mut self.file)
     }
 
     /// Reads `dir`'s log into `(is_insert, triple)` ops in append order, batch by batch.
@@ -5740,10 +5803,7 @@ impl TxnJournal {
     }
 
     fn open(dir: &std::path::Path) -> std::io::Result<TxnJournal> {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(Self::path(dir))?;
+        let file = open_log(&Self::path(dir))?;
         Ok(TxnJournal {
             file,
             poisoned: false,
@@ -5812,8 +5872,7 @@ impl TxnJournal {
                 "txn journal kept: an earlier commit failed; reopen the graph",
             ));
         }
-        self.file.set_len(0)?;
-        self.file.sync_data()
+        truncate_log(&mut self.file)
     }
 
     /// Reads `dir`'s journal into `(is_insert, slot, triple)` records in append order, frame by
@@ -12284,6 +12343,56 @@ mod tests {
         });
         assert_eq!(nsub.map(|v| v.len()), Some(1), "the named record is present exactly once");
         assert_eq!(std::fs::read(TxnJournal::path(&dir)).unwrap().len(), 0, "journal truncated after idempotent redo");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The logs append at their end when reopened and start again at the beginning once
+    /// emptied, opened writable rather than in append mode (an append-mode handle cannot be
+    /// truncated on Windows).
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn logs_append_after_reopen_and_restart_after_truncate() {
+        let dir = std::env::temp_dir().join(format!("sparq_log_cursor_{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        let t = |s: &str| {
+            let iri = |x: &str| {
+                Term::NamedNode(oxrdf::NamedNode::new_unchecked(format!("http://ex/{x}")))
+            };
+            [iri(s), iri("p"), iri("o")]
+        };
+        // WAL: two sessions append; a truncate restarts at the beginning.
+        Wal::open(&dir)
+            .unwrap()
+            .append_batch(&[t("a")], &[])
+            .unwrap();
+        let mut wal = Wal::open(&dir).unwrap();
+        wal.append_batch(&[t("b")], &[]).unwrap();
+        let subjects = |ops: Vec<(bool, [Term; 3])>| {
+            ops.into_iter()
+                .map(|(_, t)| t[0].to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            subjects(Wal::replay(&dir).unwrap()),
+            ["<http://ex/a>", "<http://ex/b>"]
+        );
+        wal.truncate().unwrap();
+        wal.append_batch(&[t("c")], &[]).unwrap();
+        assert_eq!(subjects(Wal::replay(&dir).unwrap()), ["<http://ex/c>"]);
+        // Journal: the same.
+        TxnJournal::open(&dir)
+            .unwrap()
+            .append(&[(true, None, t("a"))])
+            .unwrap();
+        let mut j = TxnJournal::open(&dir).unwrap();
+        j.append(&[(true, None, t("b"))]).unwrap();
+        assert_eq!(TxnJournal::replay(&dir).unwrap().len(), 2);
+        j.truncate().unwrap();
+        j.append(&[(true, None, t("c"))]).unwrap();
+        let left = TxnJournal::replay(&dir).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].2[0].to_string(), "<http://ex/c>");
         std::fs::remove_dir_all(&dir).ok();
     }
 

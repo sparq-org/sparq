@@ -677,11 +677,19 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
   checks see what is on disk when they run; they reserve nothing. Separate processes creating
   nested stores (one inside the other's directory) at the same time are not supported.
 - **Recovery touches only its own staging.** A swap (`compact`, `vacuum`, the restores, a
-  named-graph drop) first writes `sparq-staging` (`<kind> <store id>`) into each staging
-  directory (`<dir>.compact-new`/`-old`, `named.drop-new`/`-old`). Recovery, and the next swap,
-  promote or remove a staging directory only when that file names this store; anything else at
-  those names (another store, or staging an older version left, which records nothing) is
-  refused with an error and left in place: move or remove it by hand, then retry.
+  named-graph drop) stages beside the directory under names appended to its whole name
+  (`<dir>.compact-new`/`-old`, so `g.a` and `g.b` never share one; `named.drop-new`/`-old`),
+  taking those paths' locks first. Each staging directory carries `sparq-staging`
+  (`<kind> <store id>`); the live directory never does (the old base is marked once renamed
+  aside, the new one unmarked just before it is renamed in). Recovery, and the next swap,
+  promote or remove a staging directory only when that file names this store, and take a half
+  caught between a rename and its record only when its own marker carries that store's
+  identity; anything else at those names (another store, or staging an older version left,
+  which records nothing) is refused with an error and left in place: move or remove it by
+  hand, then retry. Staging an earlier version left at the names it shared (`g.compact-*` for
+  both `g.a` and `g.b`) is removed only when it names this store. No open, save or build claims a
+  directory carrying `sparq-staging` on its own: open the store it belongs to. A writable open
+  checks the store's internals (no links, no extra hard links) before recovering anything.
 - **Advisory, over a namespace you trust.** All of this guards against mistakes and other
   well-behaved processes, not against someone racing the filesystem: paths are checked and
   then opened by name (no `O_NOFOLLOW`/`openat`), so a change between the check and the open
@@ -698,9 +706,14 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
 - **Tool outputs stay out of stores.** `sparq_core::dir_lock::is_inside_store(path)` says
   whether a path is a store directory or inside one (`store_root(path)` names the store), and
   fails closed: a path that cannot be resolved, such as a dangling link, is an error.
-  `sparq-cli` refuses such a path for `reason`, `classify`, tabular and benchmark `--json`
-  outputs (exit 2), and writes every output to a fresh sibling it renames over the path, so a
-  hard link to a store's file is replaced, never written through. A device or pipe
+  `dir_lock::is_reserved_store_path(path)` also covers what a store reserves beside itself (its
+  `<dir>.lock`, a `<name>.lock` of anything at `<name>` or held now, swap staging names,
+  `sparq-store`, `sparq-staging`, `.sparq-*` scratch), checking the entry itself (so a symbolic
+  link inside a store counts even when it points out) and where it leads. `sparq-cli` refuses
+  such a path for `reason`, `classify`, tabular and benchmark `--json` outputs (exit 2), and
+  writes every output to a fresh owner-only (`0600`) sibling it renames over the path, so a
+  hard link to a store's file is replaced, never written through; just before the rename it
+  takes the replaced file's mode, or a new file's default under the umask. A device or pipe
   (`/dev/stdout`) is written as it is. `probe-compress` maps a store's file only under the
   store's shared lock.
 - **One path per directory.** The directory is resolved once (symbolic links and `.`/`..`;
@@ -718,8 +731,9 @@ around its dictionary (`Graph::into_dict` + `from_parts`) lives, and by the grap
   the old store the graph keeps logging there; otherwise the graph refuses every later write
   (re-open the directory).
 - **The lock file** is `<resolved dir>.lock` beside the directory, so the parent must be
-  writable. Never delete it as stale while the directory may be in use. Network file systems
-  are not supported.
+  writable. A swap also leaves the lock files of its staging paths (`<dir>.compact-new.lock`,
+  `<dir>.compact-old.lock`). Never delete one as stale while the directory may be in use.
+  Network file systems are not supported.
 
 - **Format strings are matched literally — an unknown format is REJECTED, not
   guessed.** Accepted aliases:

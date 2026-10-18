@@ -826,16 +826,27 @@ fn staging_is_per_store_and_never_claimed_on_its_own() {
     save_dataset(&a);
     save_dataset(&b);
     let mut g = Graph::open(&a).unwrap();
+    g.apply_delta(&[triple("z")], &[]).unwrap();
     g.compact().unwrap();
+    assert!(has(&g, "z"));
     drop(g);
     let names: Vec<String> = std::fs::read_dir(&root)
         .unwrap()
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
+    // The swap staged at `g.a.compact-*` (whose locks stay, like any lock file), never at the
+    // `g.compact-*` that `g.b` would share, and left no staging directory.
     assert!(
-        names.iter().all(|n| !n.contains("compact")),
+        names.iter().any(|n| n == "g.a.compact-new.lock"),
+        "the swap took no lock on its staging path: {names:?}"
+    );
+    assert!(
+        names.iter().all(
+            |n| !n.starts_with("g.compact") && (!n.contains("compact") || n.ends_with(".lock"))
+        ),
         "staging left after a swap: {names:?}"
     );
+    assert!(has(&Graph::open(&a).unwrap(), "z"));
     assert!(has(&Graph::open(&b).unwrap(), "a"), "g.b was touched");
 
     // Legacy shared names: this store's staging goes, another store's stays.
@@ -867,6 +878,10 @@ fn staging_is_per_store_and_never_claimed_on_its_own() {
             .save(&theirs),
     );
     assert!(theirs.join("sparq-staging").exists());
+    // Nor is it taken for the staging of a missing `g` (the store whose staging the name
+    // would be now): it records `g.b`, which is there.
+    refused("open g", Graph::open(&root.join("g")).map(drop));
+    assert!(!root.join("g").exists() && theirs.join("sparq-staging").exists());
     assert!(has(&Graph::open(&a).unwrap(), "a") && has(&Graph::open(&b).unwrap(), "a"));
     std::fs::remove_dir_all(&root).ok();
 }

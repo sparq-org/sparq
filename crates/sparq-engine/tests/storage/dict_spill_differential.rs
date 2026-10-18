@@ -46,8 +46,10 @@ fn synthetic_nt(n: u32) -> String {
 }
 
 /// The data files of the store at `dir`: every file but its marker (`sparq-store`), which
-/// records the store's own random identity and so differs between any two stores.
+/// records the store's own random identity and so differs between any two stores. The marker is
+/// checked on its own instead ([`assert_root_marker`]).
 fn dir_files(dir: &std::path::Path) -> Vec<String> {
+    assert_root_marker(dir);
     let mut v: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .filter_map(|e| e.ok())
@@ -57,6 +59,22 @@ fn dir_files(dir: &std::path::Path) -> Vec<String> {
         .collect();
     v.sort();
     v
+}
+
+/// The store at `dir` carries its marker, naming it a root store with an identity
+/// (`root <32 lowercase hex digits>`).
+fn assert_root_marker(dir: &std::path::Path) {
+    let marker = std::fs::read_to_string(dir.join("sparq-store"))
+        .unwrap_or_else(|e| panic!("{} has no store marker: {e}", dir.display()));
+    let id = marker
+        .strip_suffix('\n')
+        .and_then(|m| m.strip_prefix("root "))
+        .unwrap_or_else(|| panic!("{}: not a root marker: {marker:?}", dir.display()));
+    assert!(
+        id.len() == 32 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')),
+        "{}: not a store identity: {id:?}",
+        dir.display()
+    );
 }
 
 #[test]

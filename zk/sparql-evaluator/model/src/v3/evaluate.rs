@@ -75,7 +75,7 @@ fn evaluate_inner<E: From<Rejected>>(
         .chain(graph.named.iter().map(|(_, graph)| graph))
         .any(|graph| {
             graph
-                .dict
+                .dict()
                 .iter()
                 .any(|(_, term)| matches!(term, sparq_core::dict::TermParts::Blank(_)))
         })
