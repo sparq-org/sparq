@@ -3155,7 +3155,7 @@ fn match_premise_admitted(
                         match b.get(*v) {
                             Some(val) if holds_document_var(val) => {
                                 let into = into_application(val, prefix);
-                                over.get_or_insert_with(|| b.clone()).insert((*v).to_string(), into);
+                                over.get_or_insert_with(|| b.clone()).insert(*v, into);
                             }
                             _ => {}
                         }
@@ -4170,6 +4170,21 @@ fn unify(
     b: &Binding,
     run: &Truncation,
 ) -> Option<Binding> {
+    // `keys` is a cache of `pat`'s own names, and a slot's name is what a row BINDS under:
+    // a cache built for a different atom would bind a row's value to the wrong variable,
+    // silently. Nothing in the signature ties the two together, so the correspondence is
+    // checked in debug builds — slot for slot, against what [`atom_keys`] makes of `pat`
+    // (GH #7147 review).
+    debug_assert!(
+        (0..3).all(|i| match (&pat[i], &keys[i]) {
+            (Term::Var(v), Some((name, _))) => *name == v.as_str(),
+            (Term::Var(v), None) => unbindable_var(v),
+            (_, None) => true,
+            (_, Some(_)) => false,
+        }),
+        "n3 unify: `keys` is not `atom_keys` of `pat` ({:?})",
+        pat
+    );
     let mut nb = b.clone();
     let mut steps = bounded::StepBudget::unification();
     for i in 0..3 {
@@ -11536,6 +11551,24 @@ mod tests {
                 "position {i} minted a key although no candidate ever bound it",
             );
         }
+    }
+
+    /// GH #7147 review: `unify` binds a row under the name its [`AtomKeys`] slot holds, and
+    /// nothing in its signature ties those slots to the atom it is matching. Keys made for
+    /// ANOTHER atom would bind the row's values to that atom's variables — the wrong answer,
+    /// with nothing to show it — so the correspondence is a debug assertion, and this is the
+    /// mutation that must trip it. (Debug only: the assertion is compiled out of a release
+    /// build, where the contract is the caller's.)
+    #[test]
+    #[should_panic(expected = "`keys` is not `atom_keys` of `pat`")]
+    #[cfg(debug_assertions)]
+    fn unify_refuses_keys_made_for_another_atom() {
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let pat = [Term::Var("a".into()), iri("p"), Term::Var("b".into())];
+        let other = [Term::Var("x".into()), iri("p"), Term::Var("y".into())];
+        let keys = atom_keys(&other);
+        let fact = [iri("s"), iri("p"), iri("o")];
+        let _ = unify(&pat, &keys, &fact, &Binding::new(), &Truncation::top_level());
     }
 
     /// `BwPrefix::render` writes the bytes `format!("__bw{fold}_")` wrote. That rendering is

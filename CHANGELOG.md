@@ -576,6 +576,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-reason (N3):** a `log:collectAllIn` / `log:forAllIn` subject, subject member
+  (template, clause, result pattern) or scope given through a VARIABLE inside a backward
+  (`<=`) rule is resolved into that rule application's variable namespace, so it shares the
+  rule's bindings exactly as the same formula written in the rule does — and exactly as
+  either form does in a forward rule, whose atoms are never standardized apart. It used to
+  arrive with the names the document wrote, which share nothing with the renamed atoms
+  around it: a `collectAllIn` template was never bound by its clause's solutions so the
+  aggregation collected nothing, and a `forAllIn` first clause was independent of the
+  second so the premise held vacuously and fired a rule that must not fire. A variable the
+  document wrote is renamed into the application; a quoted formula's own `@forAll`
+  universal keeps its scope, and a name the chainer itself minted keeps its bindings, so a
+  clause the proof built from the rule's own terms still shares them. A bound clause
+  carrying a formula-level `@forAll` is still refused, as the inline one is. Forward rules,
+  containment patterns (`log:includes` / `log:notIncludes` / `log:supports`) and every name
+  the chainer mints are unchanged.
+
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
   / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to
   a stored formula that holds no variable at any depth is matched as that formula, as

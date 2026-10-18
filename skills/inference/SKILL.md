@@ -116,6 +116,16 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // holds, notIncludes fails), as before; full matching is
 // https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. Each
 // containment matches its blanks afresh (no witness carries over to the next one).
+// A log:collectAllIn / log:forAllIn SUBJECT, subject member (template, clause, result
+// pattern) or SCOPE given through a variable is resolved into the backward (<=) rule
+// application that reads it, so it shares that rule's bindings exactly as the same formula
+// written in the rule does, and exactly as either form does in a forward rule (GH #6943):
+// a variable the document wrote is renamed into the application, while a quoted formula's
+// own universal keeps its scope and a name the chainer itself minted keeps its bindings, so
+// a clause the proof built from the rule's own terms still shares them. Before this a bound
+// clause behind a <= shared nothing: a collectAllIn template was never bound (it collected
+// nothing) and a forAllIn first clause was independent of the second (it held vacuously).
+// A bound clause carrying a formula-level @forAll is still refused, as the inline one is.
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares
