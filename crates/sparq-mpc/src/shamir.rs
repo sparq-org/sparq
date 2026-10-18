@@ -95,13 +95,34 @@ use crate::rng::{MpcRng, SecureRng};
 /// itself implement `Drop`; the zeroize-on-drop lives on the owning secret type
 /// (e.g. `MacKey`). Hygiene only — `Zeroize` adds a scrub method, it changes no
 /// sharing/reconstruction arithmetic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, zeroize::Zeroize)]
+/// `Debug` is hand-written, not derived: `y` is the share value, and a derived
+/// `Debug` would print it from EVERY container that holds a `Share` — a message
+/// frame, a candidate's match bit, an authenticated sharing, a keyed-row set — so
+/// one stray `{:?}` in a log line or a panic message would carry share values with
+/// it. The rendering keeps the evaluation point `x`, which is the party index and
+/// public by construction, and redacts `y`.
+///
+/// Note for anyone changing this: `Debug` here must stay independent of `y`, and
+/// must NOT become the basis of a map key. The places in this crate that do build
+/// keys from a `Debug` rendering — `bounded_path::dedup_endpoint_pairs`,
+/// `hidden_path::endpoint_key` and `PredicatedEdges::node_domain` — format `Term`
+/// values, never a `Share`, so they are unaffected by this impl.
+#[derive(Clone, Copy, PartialEq, Eq, zeroize::Zeroize)]
 pub struct Share {
     /// The evaluation point (party index, always `>= 1`). `x = 0` is reserved
     /// for the secret and is never handed to a party.
     pub x: u64,
     /// The share value `f(x)` in `F_p`.
     pub y: Fp,
+}
+
+impl std::fmt::Debug for Share {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Share")
+            .field("x", &self.x)
+            .field("y", &"<redacted>")
+            .finish()
+    }
 }
 
 /// How a [`ShamirBackend`] seeds the masking RNG for each dealing session.
@@ -1114,12 +1135,14 @@ impl MacSession<'_> {
         let sigma = self.dealer.reconstruct(&sigma_shares)?;
         if sigma != Fp::zero() {
             return Err(MpcError::MacCheckFailed {
+                // The opened σ is a function of the batch's values and the secret
+                // α; "non-zero" is the whole verdict, so the message carries the
+                // batch SIZE and the parameters and no opened quantity.
                 detail: format!(
-                    "batched IT-MAC check over {} value(s) opened σ = {} != 0 — a value, share, \
+                    "batched IT-MAC check over {} value(s) opened a non-zero σ — a value, share, \
                      or degree-reduce re-sharing on the authenticated path was tampered (caught at \
                      n = {n}, t = {t}; soundness ≈ 1 − 2^-61 from the secret α, not RS redundancy)",
-                    values.len(),
-                    sigma.value()
+                    values.len()
                 ),
             });
         }
@@ -1760,7 +1783,10 @@ fn extract_single_integer(p: &PartialResult) -> Result<u64, MpcError> {
             .parse::<u64>()
             .map_err(|e| MpcError::Protocol(format!("private input not a u64 integer: {e}"))),
         other => Err(MpcError::Protocol(format!(
-            "private input must be an integer literal, got {other:?}"
+            // The rejected binding is a holder's PRIVATE input. Name its kind so
+            // the holder can fix its projection; never echo the value.
+            "private input must be an integer literal, got {}",
+            crate::partial::term_slot_kind(other.as_ref())
         ))),
     }
 }
@@ -1799,7 +1825,9 @@ fn extract_integer_vector(p: &PartialResult) -> Result<Vec<u64>, MpcError> {
                     MpcError::Protocol(format!("batched private input not a u64 integer: {e}"))
                 }),
                 other => Err(MpcError::Protocol(format!(
-                    "batched private input must be an integer literal in each row, got {other:?}"
+                    // Same rule as the single-row path: kind only, no value.
+                    "batched private input must be an integer literal in each row, got {}",
+                    crate::partial::term_slot_kind(other.and_then(|slot| slot.as_ref()))
                 ))),
             }
         })
@@ -2997,6 +3025,68 @@ mod tests {
         assert!(session.mac_check_and_open(&[]).unwrap().is_empty());
         assert_eq!(session.sigma_opens_for_test(), 0);
     }
+
+    /// The batched IT-MAC refusal carries the batch SIZE and the parameters, and
+    /// no opened quantity.
+    ///
+    /// The opened `σ` is a function of the batch's values and the secret
+    /// `α`, so it cannot appear in the refusal. `σ` is unpredictable, so instead
+    /// of naming one value this test enumerates every number the detail does
+    /// render and requires each to be one of the PUBLIC parameters — which a
+    /// rendered field element would not be.
+    #[test]
+    fn the_batched_mac_check_refusal_renders_no_opened_sigma() {
+        let left = [7u64, 8, 9];
+        let right = [9u64, 11, 12];
+        let backend = ShamirBackend::new_seeded(5, 0x51_6A).unwrap();
+        let mut dealer = backend.dealer();
+        let mut session = dealer.new_mac_session();
+        let (mut products, _) = all_pairs_equality_batch(&mut session, &left, &right);
+        let batch = products.len();
+        products[1] = tamper_value(&products[1], 12_345);
+
+        let err = session.mac_check_and_open(&products).unwrap_err();
+        let detail = match &err {
+            MpcError::MacCheckFailed { detail } => detail.clone(),
+            other => panic!("expected MacCheckFailed, got {:?}", other),
+        };
+        let text = format!("{} || {:?}", err, err);
+
+        // The tampering delta itself must not survive into the message either.
+        assert!(!text.contains("12345"), "{}", text);
+
+        // Every number the detail renders is a public parameter: the batch size,
+        // the party count, the threshold, and the digits of the `1 - 2^-61`
+        // soundness bound. An opened field element is ~61 bits wide and would not
+        // be among them.
+        let permitted: Vec<String> = [batch, backend.parties(), backend.threshold(), 61, 2, 1]
+            .iter()
+            .map(|v| v.to_string())
+            .collect();
+        let mut run = String::new();
+        for ch in detail.chars().chain(std::iter::once(' ')) {
+            if ch.is_ascii_digit() {
+                run.push(ch);
+                continue;
+            }
+            if !run.is_empty() {
+                assert!(
+                    permitted.contains(&run),
+                    "the refusal renders {}, which is not one of the public parameters {:?}; \
+                     an opened quantity must not appear: {}",
+                    run,
+                    permitted,
+                    detail
+                );
+                run.clear();
+            }
+        }
+        assert!(
+            detail.contains("non-zero σ"),
+            "the verdict is still named: {}",
+            detail
+        );
+    }
 }
 
 #[cfg(test)]
@@ -3246,5 +3336,87 @@ mod input_randomness_seam_tests {
                 .unwrap(),
             Vec::<ShareVec>::new()
         );
+    }
+
+    /// Refusals on the private-input extraction path name the KIND of the
+    /// offending binding, never its value.
+    ///
+    /// The rejected binding IS the holder's private input, and an error string
+    /// travels further than the value it describes. Each case below uses a
+    /// distinctive, searchable value and asserts it appears in neither the
+    /// `Display` nor the `Debug` rendering of the error.
+    #[test]
+    fn private_input_refusals_name_the_kind_and_not_the_value() {
+        use crate::partial::{HolderId, PartialResult};
+        use oxrdf::{Literal, NamedNode, Term, Variable};
+
+        let one_row = |slot: Option<Term>| PartialResult {
+            holder: HolderId::new("h"),
+            vars: vec![Variable::new("salary").unwrap()],
+            rows: vec![vec![slot]],
+        };
+        let shown = |e: &MpcError| format!("{} || {:?}", e, e);
+
+        // (a) A literal that is not a u64. This path reports the integer-parse
+        // failure, whose rendering never includes the input; the assertion keeps
+        // it that way, so the lexical form cannot be added back.
+        let err = extract_single_integer(&one_row(Some(Term::Literal(
+            Literal::new_simple_literal("SALARY-987654321"),
+        ))))
+        .unwrap_err();
+        let text = shown(&err);
+        assert!(
+            !text.contains("987654321") && !text.contains("SALARY"),
+            "the rejected lexical form must not be rendered: {}",
+            text
+        );
+        assert!(text.contains("not a u64 integer"), "{}", text);
+
+        // (b) A non-literal term: the IRI is the private value.
+        let err = extract_single_integer(&one_row(Some(Term::NamedNode(
+            NamedNode::new("http://ex/secret-patient-77777").unwrap(),
+        ))))
+        .unwrap_err();
+        let text = shown(&err);
+        assert!(
+            !text.contains("77777") && !text.contains("secret-patient"),
+            "the rejected term must not be rendered: {}",
+            text
+        );
+        assert!(
+            text.contains("got an IRI"),
+            "the kind is named instead: {}",
+            text
+        );
+
+        // (c) An unbound binding is named as such.
+        let err = extract_single_integer(&one_row(None)).unwrap_err();
+        assert!(shown(&err).contains("unbound binding"), "{:?}", err);
+
+        // (d) The batched path follows the same rule, on both its branches.
+        let batch = |slots: Vec<Option<Term>>| PartialResult {
+            holder: HolderId::new("h"),
+            vars: vec![Variable::new("salary").unwrap()],
+            rows: slots.into_iter().map(|s| vec![s]).collect(),
+        };
+        let err = extract_integer_vector(&batch(vec![
+            Some(Term::Literal(Literal::from(7i64))),
+            Some(Term::Literal(Literal::new_simple_literal("ROW-123454321"))),
+        ]))
+        .unwrap_err();
+        let text = shown(&err);
+        // Same as (a): the parse-failure branch names no value.
+        assert!(
+            !text.contains("123454321") && !text.contains("ROW-"),
+            "{}",
+            text
+        );
+        let err = extract_integer_vector(&batch(vec![Some(Term::NamedNode(
+            NamedNode::new("http://ex/row-888888").unwrap(),
+        ))]))
+        .unwrap_err();
+        let text = shown(&err);
+        assert!(!text.contains("888888"), "{}", text);
+        assert!(text.contains("got an IRI"), "{}", text);
     }
 }

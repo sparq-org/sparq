@@ -977,10 +977,14 @@ literal, term, triple and whole-graph encoder above it) routes each language con
 through `checked_lang_const`'s gate and refuses a tag whose constant equals `LANG_NONE`
 with `DualLeafError::ReservedLanguageConstant`, so such a tag is rejected at ingest
 rather than encoded. The gate changes no committed value: it only adds a refusal for an
-input no known tag produces. The **circuit half is still open** — no Noir member asserts
-`LANG_CONST != LANG_NONE` — so for a witnessed `LANG_CONST`, "no committed language tag
-hashes to `LANG_NONE`" remains a **retained assumption**, registered as an OPEN audit
-obligation in §14.3.
+input no known tag produces. The **circuit half has shipped, unreached**:
+`compose_core::dual_leaf_v2_leaf::recompute_term` asserts that a slot declaring a
+language tag carries `LANG_CONST != LANG_NONE`, and that a language-free slot carries
+exactly `LANG_NONE`, at each witnessed component site of the `scan_v2dl_k1_n16_r4` /
+`join_eq_v2dl_na16_nb16` members. No `CircuitId` names either member, so no verify path
+selects one. For a witnessed `LANG_CONST` on any member a verifier can actually select,
+"no committed language tag hashes to `LANG_NONE`" therefore remains a **retained
+assumption**, registered as an OPEN audit obligation in §14.3.
 
 The value slot is worse than probabilistic, which is why it gets an assert and not a
 caveat: its real occupants ARE small field elements, so a `0`/`1` tag collides with

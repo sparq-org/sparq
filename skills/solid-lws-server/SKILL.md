@@ -137,7 +137,11 @@ an already-issued `receiveFrom` URL, and an open socket is closed (code 1008) on
 its subscriber loses read access. With the `odrl-authz` gate attached, its deny
 applies here exactly as it does to `GET`.
 Lacking the mode returns `403`, whether or not the topic exists. A topic outside this
-server's storage root is refused with `400` before the WAC gate runs.
+server's storage root is refused with `400` before the WAC gate runs. A topic on it is taken
+in one canonical form, the IRI `parse_target` gives its path (query and fragment dropped), for
+the WAC check, the receive token and the notifications alike; a topic with none — a linkset
+record (`X.meta`, in any case), anything under `/.lws/`, a dot segment — gets the same `403`
+as a topic the caller may not read.
 
 ## Serve provider WebIDs off the pod (optional)
 
@@ -332,7 +336,69 @@ seconds to 10 minutes; a removal whose delete the store leaves unknown is settle
 same deadline, never handed on, so its place comes back with it. The sweeper stops, aborting
 the removals under way, as soon as the server's last handle is dropped. Removal is eventual, subject to the store making
 progress: removals contend with requests for the store and its index, and a store that never
-answers delays them indefinitely. A start removes every expired subscription it loads. A
+answers delays them indefinitely. A start removes every expired subscription it loads.
+**Expiry is decided by a stored time.** The notification service keeps a wall-clock high-water
+mark (seconds since the epoch), and a subscription is expired once its `expires` is at or before
+the later of the clock and that mark. Every expiry decision goes through one function that reads
+the clock once: before anything outside sees a subscription expire (a read of it answered `404`,
+a listing that leaves it out, its removal, a delivery stopped), a time at or past its expiry is
+stored as the mark, so a start whose clock was stepped back still finds it expired. The mark is
+one small record in the store's index alone (`Store::raise_marker`, under a fragment of the
+subscriptions container that no request can name), raised in one step under the index's own
+write lock, so a raise that lands late never lowers it; it needs no blob capacity, and its index
+entry has a slot of its own, admitted however full the subscription pool is (the slot is kept for
+one IRI, the first marker stored; any other IRI of that shape takes room in the pool). A listing,
+and the listing a conditional create compares, is read as one snapshot once its lock is held: the
+subscriptions it weighs are read, the clock is read once, and the mark is raised before any is
+left out. It is written only
+when a delivery, a request or the expiry sweeper finds a subscription past its expiry by the clock
+and not yet by the mark (at most once for each such second, as concurrent raises wait on one
+another); the choice of which subscriptions an event goes to reads only the stored mark and
+writes nothing. Notifications start only
+over a store whose raise is atomic (the in-memory and embedded indexes); over any other,
+`LwsState::new` fails before reading or writing anything. **When a raise fails, the service
+halts:** no delivery to any subscription, every request to `/.lws/subscriptions/` answers `503`,
+and no subscription is removed, until the expiry sweeper's retry stores the latest time any
+decision needed (never an earlier clock). While halted, requests attempt no write of their own:
+the sweeper alone retries, waiting longer after each failure (up to ten minutes), and logs at
+the first failure and at each doubling of their count (`Notifier::high_water_failures` and
+`Notifier::paused` report it). A start that finds no mark, or one that is not a time, while
+subscriptions with an expiry are stored expires every one of them (their subscribers may
+subscribe again), and stores a mark only once they are all removed (what the start could not
+remove, the sweeper removes first); no subscription is created until a mark is stored. **On the
+first start after upgrading to a release with this mark, and after a restore that drops
+index-only records, every subscription with an expiry is removed this way and its subscriber
+must subscribe again.** A mark ahead of the clock (one stored while the clock had jumped
+forward) stands, fail-closed: subscriptions expiring before it are expired, and a new
+subscription must expire after it. A start logs a warning when it is more than 24 hours ahead.
+**To recover**, correct the clock and start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1`
+(then unset it), or, embedding the library, set `LwsConfig::reset_subscription_clock` for one
+`LwsState::new`. The recovery runs inside construction, before any subscription is loaded and
+before the state (or its store) is handed out, so no request is in flight: it removes every stored
+subscription with an expiry (their subscribers resubscribe) and only then stores the clock as
+the mark; construction fails, the mark unchanged, while any of them is still stored (start again
+once it can be removed). An `LwsState` holds its backend's lease (`store::Lifecycle`, shared
+by every clone of `LwsState::store`) for as long as it lives: a second `LwsState` built in the
+same process over a clone of a running one's store is refused, and only the holder may lower the
+mark (`Store::reset_marker` takes the lease's guard, which only this crate makes). A state that
+replaces another must be built after the old one is dropped. Running a second process over the
+same store directory is unsupported, and nothing at this release keeps one out. A create whose
+purge of its own expired subscriptions halts the service answers `503` and creates nothing. Once
+its listing locks are held, a subscription create takes the mark's raise lock and checks again
+that the service is not halted and that its expiry is after both the clock and the stored mark
+(`503`, `400`), holding that lock through its write and registration, so no raise fails between
+the check and the `201`. A create whose outcome the store leaves unknown gives the lock up as it
+answers so (`500`), before it is settled. Removal of an expired subscription is plain, retryable cleanup with
+nothing written first: a removal that fails, is cut short or whose outcome is unknown leaves it
+expired, and it is tried again. Expiry is decided again under the removal's locks, so a
+subscriber's `DELETE` of a subscription that expires while it waits answers `404`, as one
+already expired does. **Residual (accepted):** the halt and the time it owes are held in the
+process alone, and a halt shows no expiry, so a subscription never durably expired (a stop
+between the clock passing its expiry and the mark being stored, or a stop while halted after a
+failed raise, or a create whose store outcome was unknown, answered `500`, and committed late)
+may be delivered to again after a restart whose clock was stepped back before its expiry; nothing
+outside saw it expire. WebSocket subscriptions have no expiry latch: their receive tokens are held in
+memory and expire by the process's monotonic clock, and none survives a restart. A
 subscriber's conditional subscription create compares its own listing, and holds only that
 listing (and the container, shared) while it is evaluated and until the new subscription is
 registered (when the store leaves the create's outcome unknown, it holds that listing shared
@@ -342,7 +408,9 @@ above, or the owner's conditional create (which holds the container alone, and o
 later shared holders waiting behind it, so then, for at most the lock wait, another
 subscriber's change too), never another subscriber's create or removal otherwise, and never
 the sweeper's removal of anyone else's expired subscription, which is listed nowhere (once seen
-expired, a subscription stays expired, even if the clock is stepped back). An access document nested too deeply to store and read back gets 400. A
+expired, a subscription stays expired, even if the clock is stepped back; a delivery checks its
+subscription again once it has decided the subscriber may read the resource, with nothing waited
+on between that check and the send). An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
@@ -366,6 +434,7 @@ cargo run -p sparq-lws-core
 | `SOLID_SERVER_LWS_AS_PREVIOUS_KEY_FILE` | Key rotation: the P-256 JWK (public or private; only the public part is used) the access-token key replaced. It must exist and be a different key from the current one. Keys generated by older builds all carry `kid` `lws-as-1`; when both keys do, the current key goes by its thumbprint instead and the previous key keeps `lws-as-1`, so its tokens still verify. Startup still fails when both files hold the same key, or when the kids collide even after that. It is published in the JWKS, and tokens whose `kid` names it still validate until they expire. To rotate, move the old key file here and point `SOLID_SERVER_LWS_AS_KEY_FILE` at a new path; drop this variable once the token lifetime has passed. |
 | `SOLID_SERVER_LWS_TOKEN_TTL_SECS` | Access-token lifetime (default 300). |
 | `SOLID_SERVER_LWS_DELIVERY_QUEUE`, `SOLID_SERVER_LWS_DELIVERY_WORKERS`, `SOLID_SERVER_LWS_DELIVERY_PER_INBOX` | Webhook delivery bounds: deliveries waiting or in flight (default 1024; past it a notification is dropped and logged), deliveries in flight (default 16), and in flight to one inbox origin (default 2). |
+| `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK` | `1` runs the notification recovery once at start, before anything is served: every stored subscription with an expiry is removed, then the clock is stored as the notification high water (the start fails, the mark unchanged, while one is left). For a mark stored while the clock had jumped forward; correct the clock first and unset it afterwards. |
 | `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH` | `1` lets the server fetch and deliver to `http:`, loopback and private addresses (CID documents, OIDC issuers, webhook inboxes). Test-suite use only. |
 | `SOLID_SERVER_LWS_AUTHN` | Comma-separated authentication suites to offer, of `ssi` (did:key and controlled identifiers), `openid` (OpenID Connect) and `saml` (SAML 2.0). Unset, every suite built in is offered (SAML when `SOLID_SERVER_LWS_SAML_IDPS_FILE` is set). A name that is no suite or that the build does not hold, `saml` without its identity providers, and a suite's own variable set while that suite is left out each stop the start. |
 | `SOLID_SERVER_LWS_SAML_IDPS_FILE` | A JSON object of trusted SAML identity provider entity ids to their signing keys (PEM certificate, PEM public key, or public JWK); offers the SAML 2.0 suite. Needs a build with `--features authn-saml`; set without it, or with `SOLID_SERVER_LWS_AUTHN` leaving `saml` out, the server refuses to start. A key that cannot be read also stops the start. |
@@ -493,7 +562,11 @@ What the server exposes, all discoverable from the storage description
   may still apply) is fenced first: the client writes a fence that the update, if it has not
   been applied yet, finds and then does nothing. Only a listing read after the fence counts
   as "not listed"; until the fence lands, the create answers `500` "not known" and keeps the
-  record's lock and quota place, and the record is put in force if it landed. A fence is
+  record's lock and quota place, and the record is put in force if it landed. Until it is
+  settled, the record's narrowest listing stays held, shared: a subscriber's own listing for
+  a subscription, the container's for a grant, a request or an owner's subscription. So a
+  conditional create evaluated on that listing waits for the outcome (`503` past the lock
+  wait), and two with one entity tag cannot both register. A fence is
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
   way. At most 256 record changes are in progress or being settled at once; past that, a new
@@ -588,7 +661,10 @@ What the server exposes, all discoverable from the storage description
   metadata records it would put back), so in a storage at its ceiling a change that needs one is
   refused with `507`; a store that fails may fail the change (`5xx`, below) whatever was asked;
   and a hold whose release fails keeps its bytes until the maintenance sweeper releases it again
-  (or, the process stopping first, the next start); and a response's status, timing and quota
+  (or, the process stopping first, the sweeper's bounded wait list being full, which is counted
+  and reported, or the hold being one whose taking failed part way, the next start); a start fails, rather than leave a hold to nobody, when the
+  holds cannot be listed, a holder's intent cannot be looked up, or a release that fails cannot
+  wait for the sweeper (each asked a few times first); and a response's status, timing and quota
   outcome are independent of the content of the resources a change touches, not of their
   metadata, of the room others leave in the shared quota, or of the backends' and the index's
   own work. A start

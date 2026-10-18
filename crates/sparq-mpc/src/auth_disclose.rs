@@ -882,14 +882,14 @@ fn auth_square_protocol_random_bit(
         // 4. Public square root d of c, re-checked fail-closed.
         let d = c.sqrt_residue();
         if d.mul(d) != c {
-            return Err(MpcError::Protocol(format!(
-                "authenticated square-protocol random bit: c = {} is not a quadratic residue \
-                 (sqrt d = {}, d² = {} ≠ c) — the MAC-checked open of a² is inconsistent; \
-                 refusing to emit a bit",
-                c.value(),
-                d.value(),
-                d.mul(d).value()
-            )));
+            // As on the unauthenticated path: `c` is opened and `d` is derived
+            // from it, so the refusal names the check, not the quantities.
+            return Err(MpcError::Protocol(
+                "authenticated square-protocol random bit: the opened c = a² is not a quadratic \
+                 residue (its sqrt d has d² ≠ c) — the MAC-checked open of a² is inconsistent; \
+                 refusing to emit a bit"
+                    .to_string(),
+            ));
         }
         // 5. [[s]] = d⁻¹·[[a]] ∈ {+1,−1}; [[b]] = (s+1)·2⁻¹ (free authenticated affine).
         let d_inv = d.inv();
@@ -952,12 +952,11 @@ fn open_auth_verdict(
     } else if bit == Fp::one() {
         Ok(true)
     } else {
-        Err(MpcError::Protocol(format!(
-            "experimental_tamper_evident_disclose_threshold_verdict: verdict reconstructed \
-             to a non-boolean field \
-             element {} (expected 0 or 1) — refusing to coerce",
-            bit.value()
-        )))
+        Err(MpcError::Protocol(
+            "experimental_tamper_evident_disclose_threshold_verdict: verdict reconstructed to a \
+             non-boolean field element (expected 0 or 1) — refusing to coerce"
+                .to_string(),
+        ))
     }
 }
 
@@ -1906,5 +1905,23 @@ mod tests {
         session.mac_check(std::slice::from_ref(&auth_m))?;
         let m = backend.reconstruct(auth_m.value_shares())?;
         Ok(m == Fp::zero())
+    }
+
+    /// The authenticated verdict open refuses a non-boolean reconstruction
+    /// without rendering it.
+    #[test]
+    fn authenticated_verdict_refusal_renders_no_field_element() {
+        let backend = ShamirBackend::new_seeded(3, 0x7E57).unwrap();
+        let mut dealer = backend.dealer();
+        let mut session = dealer.new_mac_session();
+        let bogus = session.authenticated_share(Fp::new(494_949));
+        let err = open_auth_verdict(&backend, &bogus).unwrap_err();
+        let text = format!("{} || {:?}", err, err);
+        assert!(
+            !text.contains("494949"),
+            "the reconstructed non-boolean must not be rendered: {}",
+            text
+        );
+        assert!(text.contains("non-boolean"), "{}", text);
     }
 }

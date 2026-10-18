@@ -550,3 +550,110 @@ mod compiled {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// The CUMULATIVE allowance: `max_total_join_rows` over all rounds of a closure
+// ---------------------------------------------------------------------------
+
+/// A transitive chain of `n` `:next` edges plus a rule that walks it: each round extends
+/// every reach by one step, so the closure takes a round per step and no single round does
+/// much work — the shape `max_join_rows` alone cannot bound, since it is refilled each
+/// round.
+fn chain_closure(n: usize) -> String {
+    let mut facts = String::new();
+    for i in 0..n {
+        facts.push_str(&format!(":n{} :next :n{} .\n", i, i + 1));
+    }
+    format!(
+        "{PREFIXES}{{ ?x :next ?y }} => {{ ?x :reach ?y }} .\n\
+         {{ ?x :next ?y . ?y :reach ?z }} => {{ ?x :reach ?z }} .\n{facts}"
+    )
+}
+
+fn total(max_total_join_rows: usize) -> ClosureLimits {
+    let mut l = ClosureLimits::default();
+    l.max_total_join_rows = max_total_join_rows;
+    l
+}
+
+/// The smallest `field` the chain closure runs under, by bisection (it is accepted at the
+/// returned value and refused below it).
+fn smallest(src: &str, set: fn(usize) -> ClosureLimits) -> usize {
+    let mut hi = 1usize;
+    while text(src, set(hi)).is_err() {
+        hi *= 2;
+        assert!(hi < 1 << 32, "the closure is refused at every allowance");
+    }
+    let mut lo = hi / 2;
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        if text(src, set(mid)).is_ok() {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    hi
+}
+
+/// The cumulative allowance refuses a closure whose every SINGLE round stays well inside
+/// the per-round allowance: the rounds add up, and `max_join_rows` cannot see that because
+/// each round gets it afresh. The same closure runs when only the per-round allowance is
+/// set to the same number, which is what makes this the total's doing.
+#[test]
+fn the_cumulative_allowance_refuses_work_spread_over_rounds() {
+    let src = chain_closure(40);
+    let per_round = smallest(&src, rows);
+    let cumulative = smallest(&src, total);
+    assert!(
+        cumulative > per_round * 2,
+        "the chain spends far more over its rounds ({cumulative}) than in its largest one \
+         ({per_round}) — otherwise this fixture proves nothing"
+    );
+
+    // Set the TOTAL to the largest single round's work: every round stays inside the
+    // per-round allowance (which is the default, unbounded), and the closure is still
+    // refused — naming the total.
+    match text(&src, total(per_round)) {
+        Err(e) => {
+            assert!(e.contains("forward closure limit exceeded"), "{e}");
+            assert!(e.contains("max_total_join_rows"), "{e}");
+            assert!(!e.contains("one round's"), "the refusal names the total, not a round: {e}");
+        }
+        Ok(c) => panic!("accepted past the cumulative allowance: {} facts", c.len()),
+    }
+    // The per-round allowance alone, at that same number, accepts it.
+    text(&src, rows(per_round)).expect("every single round fits in that allowance");
+    // And the total, given what the closure actually spends, accepts it too.
+    text(&src, total(cumulative)).expect("the closure fits in its measured total");
+
+    // The default leaves it unbounded, so nothing that was accepted before is refused now.
+    text(&src, ClosureLimits::default()).expect("the default allowance refuses nothing");
+}
+
+/// Both allowances compose: whichever is reached first refuses the run, and each names
+/// itself.
+#[test]
+fn the_per_round_and_cumulative_allowances_compose() {
+    let src = chain_closure(40);
+    let per_round = smallest(&src, rows);
+    let cumulative = smallest(&src, total);
+
+    let mut tight_round = ClosureLimits::default();
+    tight_round.max_join_rows = per_round - 1;
+    tight_round.max_total_join_rows = cumulative;
+    let e = text(&src, tight_round).expect_err("the round's allowance is one short");
+    assert!(e.contains("max_join_rows") && e.contains("one round's"), "{e}");
+
+    let mut tight_total = ClosureLimits::default();
+    tight_total.max_join_rows = per_round;
+    tight_total.max_total_join_rows = cumulative - 1;
+    let e = text(&src, tight_total).expect_err("the total is one short");
+    assert!(e.contains("max_total_join_rows"), "{e}");
+
+    // Both exactly as measured: accepted.
+    let mut exact = ClosureLimits::default();
+    exact.max_join_rows = per_round;
+    exact.max_total_join_rows = cumulative;
+    text(&src, exact).expect("accepted at exactly the measured allowances");
+}

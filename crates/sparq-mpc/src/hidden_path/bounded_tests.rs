@@ -5,7 +5,8 @@
 //! THE acceptance criterion (bead sq-py8h.3): the secure HIDDEN bounded path
 //! (`{1,k}`, `{0,k}`, `p?`, alternation) must equal the **plaintext** bounded-path
 //! evaluation over the same edge set; each connected endpoint pair returned exactly
-//! once; the realized length is never opened; the reflexive diagonal is correct for
+//! once; the realized length is not separately opened or encoded in the result; the
+//! reflexive diagonal is correct for
 //! `{0,k}` / `p?`.
 //!
 //! The differential ORACLE is a pure plaintext bounded-path reachability (the union
@@ -20,7 +21,7 @@ use crate::field::Fp;
 use crate::partial::HolderId;
 use crate::shamir::ShamirBackend;
 use oxrdf::{NamedNode, Term};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 fn iri_term(iri: &str) -> Term {
     Term::NamedNode(NamedNode::new(iri).unwrap())
@@ -59,7 +60,10 @@ impl Interner {
 }
 
 /// Build a [`PredicatedEdges`] from `(predicate, subject, object)` triples, interning
-/// node IRIs to nonzero `Fp` keys (shared node namespace across predicates).
+/// node IRIs to nonzero `Fp` keys (shared node namespace across predicates), and
+/// DECLARE the public node domain as every subject/object term of those triples —
+/// which is exactly the active graph's node domain here, so the zero-length arm of a
+/// `{0,k}` form matches the oracle's diagonal (SPARQL 1.1 §18.4).
 fn predicated_edges(triples: &[(&str, &str, &str)]) -> PredicatedEdges {
     let mut interner = Interner::new();
     let mut edges: Vec<PredicatedEdge> = Vec::new();
@@ -70,7 +74,13 @@ fn predicated_edges(triples: &[(&str, &str, &str)]) -> PredicatedEdges {
             object: interner.node(o),
         });
     }
+    let domain: Vec<Term> = triples
+        .iter()
+        .flat_map(|(_, s, o)| [iri_term(s), iri_term(o)])
+        .collect();
     PredicatedEdges::new(edges)
+        .with_node_domain(domain)
+        .expect("the declared domain covers every edge endpoint by construction")
 }
 
 /// PLAINTEXT differential oracle: the SET of `(a,b)` IRI pairs connected by the
@@ -132,7 +142,15 @@ fn plaintext_bounded(
     out
 }
 
-/// Run the SECURE hidden bounded path and return its disclosed `(a,b)` IRI pair set.
+/// Run the SECURE hidden bounded path and return its disclosed `(a,b)` pair set.
+///
+/// An endpoint must be BOUND — an unbound one would mean a real defect in the
+/// output stage, not "no result" — but NOT necessarily an IRI. The EDGE regime is
+/// IRI-endpointed; the zero-length domain is not, so a `{0,k}` form over a graph
+/// with a literal object returns that literal as an endpoint, which a
+/// `PartialResult` row (`Vec<Option<Term>>`) carries directly. An IRI renders as
+/// its bare string, matching `plaintext_bounded`'s keys; any other term renders
+/// through `Display`.
 fn secure_bounded(
     backend: &ShamirBackend,
     edges: &PredicatedEdges,
@@ -150,15 +168,12 @@ fn secure_bounded(
         .rows
         .iter()
         .map(|r| {
-            let a = match &r[0] {
+            let render = |slot: &Option<Term>, which: &str| match slot {
                 Some(Term::NamedNode(n)) => n.as_str().to_string(),
-                other => panic!("endpoint a must be a bound IRI, got {other:?}"),
+                Some(other) => other.to_string(),
+                None => panic!("endpoint {which} must be BOUND, got an unbound slot"),
             };
-            let b = match &r[1] {
-                Some(Term::NamedNode(n)) => n.as_str().to_string(),
-                other => panic!("endpoint b must be a bound IRI, got {other:?}"),
-            };
-            (a, b)
+            (render(&r[0], "a"), render(&r[1], "b"))
         })
         .collect()
 }
@@ -507,11 +522,12 @@ fn bounded_bound_below_candidate_count_fails_closed() {
     assert!(matches!(err, MpcError::Protocol(_)));
 }
 
-/// An empty edge set with `min >= 1` yields nothing; with `min == 0` and no edges the
-/// node domain is empty too, so the result is empty (no panic, fail-soft).
+/// An empty edge set with `min >= 1` yields nothing; with `min == 0` and an empty
+/// DECLARED node domain the diagonal is empty too, so the result is empty (no panic,
+/// fail-soft).
 #[test]
 fn bounded_empty_edges_is_empty() {
-    let edges = PredicatedEdges::new(Vec::new());
+    let edges = predicated_edges(&[]);
     let backend = ShamirBackend::new_seeded(3, 1).unwrap();
     let got1 = secure_bounded(&backend, &edges, &HiddenBoundedPath::range(P, 1, 3), 8);
     assert!(got1.is_empty());
@@ -905,7 +921,16 @@ fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
         let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 1)
             .expect_err("a bound below the candidate count must be refused");
         match &err {
-            MpcError::Protocol(m) => assert!(m.contains("candidate count"), "{}", m),
+            MpcError::Protocol(m) => {
+                assert!(m.contains("does not cover the candidate set"), "{}", m);
+                // B and the PUBLIC bound only — never the candidate count.
+                assert!(
+                    m.contains("B=1") && m.contains("public candidate bound"),
+                    "{}",
+                    m
+                );
+                assert!(!m.contains(&format!("count {}", count)), "{}", m);
+            }
             other => panic!("expected a Protocol refusal, got {:?}", other),
         }
         assert_eq!(counted.draws(), 0, "refused before any draw");
@@ -915,4 +940,539 @@ fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
         eval_bounded_path_hidden(&backend, &edges, &form, count)
             .expect("B = the exact candidate count must run");
     }
+}
+/// `public_bounded_candidate_pair_bound` is a function of the edge COUNT, the
+/// DECLARED node-domain size and the form's public `min`/`max`, and of nothing in
+/// the edges.
+#[test]
+fn the_public_bounded_candidate_pair_bound_is_a_function_of_the_public_sizes() {
+    // {1,1}: the length-1 arm only; the domain size is irrelevant for min >= 1.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(5, 9, &HiddenBoundedPath::range(P, 1, 1)).unwrap(),
+        5
+    );
+    // {1,2}: length 1 plus any length >= 2.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(5, 9, &HiddenBoundedPath::range(P, 1, 2)).unwrap(),
+        30
+    );
+    // {0,2}: the same plus one diagonal pair per DECLARED node. The domain is an
+    // independent public input, not a function of |E| — a graph whose other
+    // predicates name more nodes has a larger domain for the same edge count.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(5, 9, &HiddenBoundedPath::range(P, 0, 2)).unwrap(),
+        39
+    );
+    assert_eq!(
+        public_bounded_candidate_pair_bound(5, 40, &HiddenBoundedPath::range(P, 0, 2)).unwrap(),
+        70
+    );
+    // {2,3}: neither the diagonal nor the length-1 arm applies.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(5, 9, &HiddenBoundedPath::range(P, 2, 3)).unwrap(),
+        25
+    );
+    // No edges and no declared domain: no candidates.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(0, 0, &HiddenBoundedPath::range(P, 0, 2)).unwrap(),
+        0
+    );
+    // No edges but a declared domain: the diagonal is still emitted for every
+    // declared node, so the bound has to cover it.
+    assert_eq!(
+        public_bounded_candidate_pair_bound(0, 4, &HiddenBoundedPath::range(P, 0, 2)).unwrap(),
+        4
+    );
+    // Overflow is a refusal, not a wrap.
+    assert!(
+        public_bounded_candidate_pair_bound(usize::MAX, 0, &HiddenBoundedPath::range(P, 0, 2))
+            .is_err()
+    );
+    assert!(public_bounded_candidate_pair_bound(
+        usize::MAX,
+        usize::MAX,
+        &HiddenBoundedPath::range(P, 0, 1)
+    )
+    .is_err());
+
+    // Same size, different contents, same bound — the property that makes a
+    // decision taken on it independent of the edge data.
+    let wide = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/c", "http://ex/d"),
+    ]);
+    let narrow = predicated_edges(&[
+        (P, "http://ex/s", "http://ex/o"),
+        (P, "http://ex/s", "http://ex/o"),
+    ]);
+    let form = HiddenBoundedPath::range(P, 1, 2);
+    assert_eq!(
+        public_bounded_candidate_pair_bound(wide.len(), wide.declared_domain_len(), &form).unwrap(),
+        public_bounded_candidate_pair_bound(narrow.len(), narrow.declared_domain_len(), &form)
+            .unwrap()
+    );
+    // Their exact unions differ, which is why the public bound is what decides.
+    assert_ne!(
+        projected_bounded_candidate_count(&wide, &form).unwrap(),
+        projected_bounded_candidate_count(&narrow, &form).unwrap()
+    );
+}
+
+/// The two branches of the bounded-form bound contract, at the entry point.
+#[test]
+fn both_branches_of_the_bounded_bound_contract() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7D09).unwrap();
+    let edges = predicated_edges(&[
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ]);
+    let form = HiddenBoundedPath::range(P, 0, 2);
+    let public =
+        public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), &form)
+            .unwrap();
+    // |E| = 2 edges, a declared domain of 3 nodes: 3 diagonal + 2 at length 1 + 4
+    // at length 2.
+    assert_eq!(public, 9);
+    let exact = projected_bounded_candidate_count(&edges, &form).unwrap();
+    assert_eq!(exact, 6, "the arms overlap, so the union is below the sum");
+
+    // Branch 1: B at the public bound is accepted on the public sizes alone.
+    eval_bounded_path_hidden(&backend, &edges, &form, public).expect("B = the public bound runs");
+
+    // Branch 2: a B strictly below the public bound but covering the real union is
+    // still accepted — no legal work is refused.
+    eval_bounded_path_hidden(&backend, &edges, &form, exact)
+        .expect("B below the public bound runs when the exact union fits");
+
+    // Branch 2, refusing: below both, refused before any draw, public text only.
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    let err =
+        eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, exact - 1)
+            .expect_err("B below the exact union must be refused");
+    assert_eq!(counted.draws(), 0, "refused before any draw");
+    match &err {
+        MpcError::Protocol(m) => {
+            assert!(
+                m.contains("B=5") && m.contains("public candidate bound 9"),
+                "{}",
+                m
+            );
+            assert!(!m.contains("count 6"), "the union is not rendered: {}", m);
+        }
+        other => panic!("expected a Protocol refusal, got {:?}", other),
+    }
+}
+
+// =====================================================================
+// ZERO-LENGTH NODE DOMAIN — the whole active graph, not the edge
+// relation's own endpoints (SPARQL 1.1 §18.4 ZeroLengthPath)
+// =====================================================================
+
+/// Build a [`PredicatedEdges`] whose EDGES come from `edge_triples` only, while the
+/// DECLARED public node domain spans `all_triples` — the shape where the active
+/// graph has terms the path's own edges never name.
+fn predicated_edges_with_wider_domain(
+    edge_triples: &[(&str, &str, &str)],
+    all_triples: &[(&str, &str, &str)],
+) -> PredicatedEdges {
+    let mut interner = Interner::new();
+    let mut edges: Vec<PredicatedEdge> = Vec::new();
+    for (p, s, o) in edge_triples {
+        edges.push(PredicatedEdge {
+            predicate: (*p).to_string(),
+            subject: interner.node(s),
+            object: interner.node(o),
+        });
+    }
+    let domain: Vec<Term> = all_triples
+        .iter()
+        .flat_map(|(_, s, o)| [iri_term(s), iri_term(o)])
+        .collect();
+    PredicatedEdges::new(edges)
+        .with_node_domain(domain)
+        .expect("the active graph's domain covers every edge endpoint")
+}
+
+/// THE reproducer, hidden regime. The federation's active graph holds `a p b` and
+/// `c q d`; only the `p` edge enters the path's edge relation. `p?` is a
+/// zero-length arm, so §18.4 binds `(x,x)` for every term of the active graph —
+/// `c` and `d` included, although no edge in the relation names them.
+///
+/// Drawing the reflexive diagonal from the edge relation's own endpoints yielded
+/// {aa, ab, bb} and missed (c,c) and (d,d).
+#[test]
+fn differential_zero_length_diagonal_spans_the_whole_active_graph() {
+    let all = [
+        (P, "http://ex/a", "http://ex/b"),
+        (Q, "http://ex/c", "http://ex/d"),
+    ];
+    let edges = predicated_edges_with_wider_domain(&all[..1], &all);
+    let backend = ShamirBackend::new_seeded(5, 0x2D01).unwrap();
+    let form = HiddenBoundedPath::optional(P);
+
+    let got = secure_bounded(&backend, &edges, &form, 8);
+    let want = plaintext_bounded(&all, &[P], 0, 1);
+    assert_eq!(
+        got, want,
+        "p? must bind (x,x) for every term of the active graph, not just the \
+         endpoints of the path's own edges"
+    );
+    for n in ["http://ex/a", "http://ex/b", "http://ex/c", "http://ex/d"] {
+        assert!(
+            got.contains(&(n.to_string(), n.to_string())),
+            "reflexive ({n},{n}) missing: {got:?}"
+        );
+    }
+    assert_eq!(got.len(), 5, "4 diagonal pairs + the one p edge: {got:?}");
+}
+
+/// The same with a `{0,2}` arm, and the bound sized from the public inputs.
+#[test]
+fn differential_zero_to_k_diagonal_spans_the_whole_active_graph() {
+    let all = [
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+        (Q, "http://ex/x", "http://ex/y"),
+    ];
+    let edges = predicated_edges_with_wider_domain(&all[..2], &all);
+    let backend = ShamirBackend::new_seeded(5, 0x2D02).unwrap();
+    let form = HiddenBoundedPath::range(P, 0, 2);
+
+    let public =
+        public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), &form)
+            .unwrap();
+    let got = secure_bounded(&backend, &edges, &form, public);
+    assert_eq!(got, plaintext_bounded(&all, &[P], 0, 2));
+    // 5 diagonal (a,b,c,x,y) + (a,b),(b,c) + (a,c) = 8.
+    assert_eq!(got.len(), 8, "{got:?}");
+}
+
+/// A zero-length arm on an edge relation with NO declared node domain is refused
+/// BEFORE any sharing is drawn, not answered from the edge endpoints. The refusal
+/// is value-free: no term, no count.
+#[test]
+fn hidden_zero_length_arm_without_a_declared_domain_is_refused_pre_crypto() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let edges = PredicatedEdges::new(vec![PredicatedEdge {
+        predicate: P.to_string(),
+        subject: HiddenNode {
+            key: Fp::new(1),
+            term: iri_term("http://ex/a"),
+        },
+        object: HiddenNode {
+            key: Fp::new(2),
+            term: iri_term("http://ex/b"),
+        },
+    }]);
+    let backend = ShamirBackend::new_seeded(5, 0x2D03).unwrap();
+
+    for form in [
+        HiddenBoundedPath::optional(P),
+        HiddenBoundedPath::range(P, 0, 3),
+    ] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 64)
+            .expect_err("a min == 0 form without a declared domain must be refused");
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+        match &err {
+            MpcError::Protocol(m) => {
+                assert!(
+                    m.contains("PUBLIC node domain") && m.contains("with_node_domain"),
+                    "{}",
+                    m
+                );
+                for value in ["ex/a", "ex/b"] {
+                    assert!(!m.contains(value), "the message names a term: {}", m);
+                }
+            }
+            other => panic!("expected a Protocol refusal, got {:?}", other),
+        }
+    }
+
+    // min >= 1 never reads the domain, so it runs on the same relation.
+    let plus = HiddenBoundedPath::range(P, 1, 1);
+    let got = secure_bounded(&backend, &edges, &plus, 8);
+    assert_eq!(
+        got,
+        BTreeSet::from([("http://ex/a".to_string(), "http://ex/b".to_string())])
+    );
+}
+
+/// A declared domain that omits an endpoint of an edge in the relation is refused
+/// at declaration time — a zero-length arm over it would under-answer exactly as
+/// the old edge-derived diagonal did. The message names counts only.
+#[test]
+fn hidden_declared_domain_omitting_an_edge_endpoint_is_refused() {
+    let triples = [
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ];
+    let base = predicated_edges(&triples);
+    let err = base
+        .clone()
+        .with_node_domain(vec![iri_term("http://ex/a"), iri_term("http://ex/b")])
+        .unwrap_err();
+    match &err {
+        MpcError::Protocol(m) => {
+            assert!(
+                m.contains("the declared node domain does not cover the edge endpoints"),
+                "{}",
+                m
+            );
+            assert!(!m.contains("ex/c"), "the message names a term: {}", m);
+            // COUNT-free as well as value-free: a message naming how many endpoints
+            // were uncovered is a statistic over the edge relation, and a caller
+            // could probe one candidate term at a time and read it as a membership
+            // answer.
+            assert!(
+                !m.chars().any(|c| c.is_ascii_digit()),
+                "the message carries a count: {}",
+                m
+            );
+        }
+        other => panic!("expected a Protocol refusal, got {:?}", other),
+    }
+
+    // A WIDER domain is accepted, and it is what widens the diagonal.
+    let wider = base
+        .with_node_domain(vec![
+            iri_term("http://ex/a"),
+            iri_term("http://ex/b"),
+            iri_term("http://ex/c"),
+            iri_term("http://ex/elsewhere"),
+        ])
+        .expect("a superset domain is accepted");
+    let backend = ShamirBackend::new_seeded(5, 0x2D04).unwrap();
+    let got = secure_bounded(&backend, &wider, &HiddenBoundedPath::optional(P), 16);
+    assert!(got.contains(&(
+        "http://ex/elsewhere".to_string(),
+        "http://ex/elsewhere".to_string()
+    )));
+    assert_eq!(got.len(), 6, "4 diagonal + (a,b),(b,c): {got:?}");
+}
+
+/// The declared domain is a set of `Term`s, not IRIs: a LITERAL in the active
+/// graph's object position is in the zero-length domain (SPARQL 1.1 §18.4), and
+/// the diagonal must carry it. The edges stay IRI-endpointed — only the DOMAIN
+/// widens — and a `PartialResult` row is `Vec<Option<Term>>`, so the literal
+/// endpoint comes back out of the oblivious output unchanged.
+#[test]
+fn hidden_zero_length_diagonal_carries_a_literal_domain_term() {
+    let mut interner = Interner::new();
+    let edges = vec![PredicatedEdge {
+        predicate: P.to_string(),
+        subject: interner.node("http://ex/a"),
+        object: interner.node("http://ex/b"),
+    }];
+    let lit = Term::Literal(oxrdf::Literal::new_simple_literal("L"));
+    let typed = Term::Literal(oxrdf::Literal::new_language_tagged_literal("L", "en").unwrap());
+    let edges = PredicatedEdges::new(edges)
+        .with_node_domain(vec![
+            iri_term("http://ex/a"),
+            iri_term("http://ex/b"),
+            iri_term("http://ex/c"),
+            lit.clone(),
+            typed.clone(),
+        ])
+        .expect("a Term domain covering the edge endpoints is accepted");
+
+    let backend = ShamirBackend::new_seeded(5, 0x2D05).unwrap();
+    let got = secure_bounded(&backend, &edges, &HiddenBoundedPath::optional(P), 16);
+
+    for term in [&lit, &typed] {
+        let rendered = term.to_string();
+        assert!(
+            got.contains(&(rendered.clone(), rendered.clone())),
+            "the literal identity pair for {rendered} must be present: {got:?}"
+        );
+    }
+    // 3 IRIs + 2 distinct literals = 5 diagonal pairs, + the (a,b) edge = 6. The
+    // plain and the language-tagged "L" are distinct TERMS and do not collapse.
+    assert_eq!(got.len(), 6, "{got:?}");
+}
+
+/// An explicitly EMPTY declared domain is a declaration, so a `min == 0` form
+/// RUNS and returns an empty diagonal — the right answer for an empty active
+/// graph. An UNDECLARED domain is refused. Both would otherwise look alike.
+#[test]
+fn hidden_an_empty_declared_domain_runs_while_an_undeclared_one_is_refused() {
+    let backend = ShamirBackend::new_seeded(5, 0x2D06).unwrap();
+    let form = HiddenBoundedPath::range(P, 0, 2);
+
+    let empty = PredicatedEdges::new(Vec::new())
+        .with_node_domain(Vec::new())
+        .expect("an empty domain over an empty edge relation is consistent");
+    assert_eq!(empty.declared_domain_len(), 0);
+    assert!(secure_bounded(&backend, &empty, &form, 8).is_empty());
+
+    let undeclared = PredicatedEdges::new(Vec::new());
+    assert_eq!(undeclared.declared_domain_len(), 0);
+    assert!(
+        eval_bounded_path_hidden(&backend, &undeclared, &form, 8).is_err(),
+        "an undeclared domain must be refused, not answered as empty"
+    );
+}
+
+// =====================================================================
+// ENGINE-BACKED differential for the declared node domain
+// =====================================================================
+
+/// Build the hidden relation and its DECLARED domain from one turtle document,
+/// the way a federation member would: the edges are the document's triples for
+/// `edge_preds` only, and the domain is every distinct subject/object term of the
+/// WHOLE document — read back out of the real engine, so it is literally the term
+/// set the clear-text oracle's zero-length match ranges over.
+///
+/// This gives the hidden regime the same engine-backed oracle the disclosed-key
+/// suite uses, instead of only the in-file plaintext one: the declared domain is
+/// not this test's guess at `graph_nodes`, it IS `graph_nodes`.
+fn hidden_edges_and_engine_domain(doc: &str, edge_preds: &[&str]) -> PredicatedEdges {
+    use sparq_core::Graph;
+    use sparq_engine::query;
+
+    let full = format!("@prefix ex: <http://ex/> .\n{doc}");
+    let graph = Graph::load_str(&full, "turtle").expect("the fixture parses");
+
+    let mut interner = Interner::new();
+    let mut edges: Vec<PredicatedEdge> = Vec::new();
+    for p in edge_preds {
+        let rows = query(&graph, &format!("SELECT ?s ?o WHERE {{ ?s <{p}> ?o }}"))
+            .unwrap()
+            .rows;
+        for row in rows {
+            // The EDGE regime is IRI-only, so a fixture must not hand a literal
+            // edge endpoint to `edge_preds`.
+            let iri = |slot: &Option<Term>| match slot {
+                Some(Term::NamedNode(n)) => n.as_str().to_string(),
+                other => panic!("edge endpoints must be IRIs, got {other:?}"),
+            };
+            edges.push(PredicatedEdge {
+                predicate: (*p).to_string(),
+                subject: interner.node(&iri(&row[0])),
+                object: interner.node(&iri(&row[1])),
+            });
+        }
+    }
+
+    let mut domain: BTreeMap<String, Term> = BTreeMap::new();
+    for row in query(&graph, "SELECT ?s ?o WHERE { ?s ?p ?o }")
+        .unwrap()
+        .rows
+    {
+        for slot in row.iter().flatten() {
+            domain
+                .entry(format!("{:?}", slot))
+                .or_insert_with(|| slot.clone());
+        }
+    }
+    PredicatedEdges::new(edges)
+        .with_node_domain(domain.into_values())
+        .expect("graph_nodes covers every edge endpoint")
+}
+
+/// The engine's answer for `?a <path> ?b` over the same document, keyed exactly as
+/// [`secure_bounded`] keys its rows (an IRI as its bare string, anything else
+/// through `Display`).
+fn engine_pairs(doc: &str, path: &str) -> BTreeSet<(String, String)> {
+    use sparq_core::Graph;
+    use sparq_engine::query;
+
+    let full = format!("@prefix ex: <http://ex/> .\n{doc}");
+    let graph = Graph::load_str(&full, "turtle").expect("the fixture parses");
+    let q = format!("PREFIX ex: <http://ex/> SELECT ?a ?b WHERE {{ ?a {path} ?b }}");
+    let render = |slot: &Option<Term>| match slot {
+        Some(Term::NamedNode(n)) => n.as_str().to_string(),
+        Some(other) => other.to_string(),
+        None => panic!("an endpoint column must be BOUND"),
+    };
+    query(&graph, &q)
+        .unwrap()
+        .rows
+        .iter()
+        .map(|r| (render(&r[0]), render(&r[1])))
+        .collect()
+}
+
+/// The hidden `p?` against the REAL ENGINE, on a graph whose domain carries two
+/// literals under a predicate the path does not traverse. Same shape as the
+/// disclosed-key reproducer, now through the secure operator.
+#[test]
+fn differential_hidden_optional_equals_the_engine_with_a_literal_domain() {
+    let doc = "ex:a ex:p ex:b . ex:c ex:q \"L\" . ex:d ex:q \"L\"@en .";
+    let edges = hidden_edges_and_engine_domain(doc, &[P]);
+    let backend = ShamirBackend::new_seeded(5, 0x2D07).unwrap();
+
+    let got = secure_bounded(&backend, &edges, &HiddenBoundedPath::optional(P), 16);
+    assert_eq!(
+        got,
+        engine_pairs(doc, "ex:p?"),
+        "the hidden p? must equal the engine's over the same active graph"
+    );
+    for lit in [
+        Term::Literal(oxrdf::Literal::new_simple_literal("L")),
+        Term::Literal(oxrdf::Literal::new_language_tagged_literal("L", "en").unwrap()),
+    ] {
+        let key = lit.to_string();
+        assert!(
+            got.contains(&(key.clone(), key.clone())),
+            "the literal identity pair {key} must be present: {got:?}"
+        );
+    }
+    // 4 IRIs (a,b,c,d) + 2 distinct literals = 6 diagonal pairs, + (a,b) = 7.
+    assert_eq!(got.len(), 7, "{got:?}");
+}
+
+/// The hidden `{0,2}` against the REAL ENGINE, over a two-hop chain plus an
+/// undisclosed predicate contributing further domain terms.
+#[test]
+fn differential_hidden_zero_to_two_equals_the_engine() {
+    let doc = "ex:a ex:p ex:b . ex:b ex:p ex:c . ex:x ex:q ex:y . ex:z ex:q 7 .";
+    let edges = hidden_edges_and_engine_domain(doc, &[P]);
+    let backend = ShamirBackend::new_seeded(5, 0x2D08).unwrap();
+
+    let form = HiddenBoundedPath::range(P, 0, 2);
+    let public =
+        public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), &form)
+            .unwrap();
+    let got = secure_bounded(&backend, &edges, &form, public);
+    assert_eq!(got, engine_pairs(doc, "(ex:p)? | ex:p/ex:p"));
+    // 7 domain terms (a,b,c,x,y,z,7) diagonal + (a,b),(b,c) + (a,c) = 10.
+    assert_eq!(got.len(), 10, "{got:?}");
+}
+
+/// A BLANK NODE in the declared domain yields its identity pair in the hidden
+/// regime too. The blank node is a DOMAIN term only — the edges keep their own
+/// `HiddenNode` keys — and its diagonal entry gets the same constant shared `1`
+/// chain bit as any other, so nothing is compared on a document-scoped label.
+#[test]
+fn hidden_a_blank_node_in_the_declared_domain_yields_its_identity_pair() {
+    let mut interner = Interner::new();
+    let edges = vec![PredicatedEdge {
+        predicate: P.to_string(),
+        subject: interner.node("http://ex/a"),
+        object: interner.node("http://ex/b"),
+    }];
+    let blank = Term::BlankNode(oxrdf::BlankNode::new("b0").unwrap());
+    let edges = PredicatedEdges::new(edges)
+        .with_node_domain(vec![
+            iri_term("http://ex/a"),
+            iri_term("http://ex/b"),
+            blank.clone(),
+        ])
+        .expect("a blank node is a legal DOMAIN term");
+
+    let backend = ShamirBackend::new_seeded(5, 0x2D09).unwrap();
+    let got = secure_bounded(&backend, &edges, &HiddenBoundedPath::optional(P), 16);
+    let key = blank.to_string();
+    assert!(
+        got.contains(&(key.clone(), key)),
+        "the blank node's identity pair must be present: {got:?}"
+    );
+    // (a,a), (b,b), (_:b0,_:b0) and the (a,b) edge.
+    assert_eq!(got.len(), 4, "{got:?}");
 }

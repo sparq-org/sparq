@@ -60,6 +60,8 @@ concurrency:
 
 jobs:
   site-e2e:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: lint + unit + zk-prewarm smoke
     runs-on: ubuntu-latest
     timeout-minutes: 20

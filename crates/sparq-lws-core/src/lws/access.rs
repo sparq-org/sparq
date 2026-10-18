@@ -1135,7 +1135,7 @@ pub async fn handle<S: Store + 'static>(
                     req,
                     &container,
                     None,
-                    |get| listing(state, get, grants),
+                    |get| std::future::ready(listing(state, &get, grants)),
                 )
                 .await
                 {
@@ -1243,7 +1243,7 @@ pub async fn handle<S: Store + 'static>(
                 super::records::Listed::InContainer,
                 super::records::Remover::Request,
                 req.admission.clone(),
-                set_aside,
+                super::records::at_once(set_aside),
                 settle,
             );
             match removed.await {
@@ -1415,6 +1415,7 @@ async fn create<S: Store + 'static>(
         held,
         agent.subject.clone(),
         register,
+        std::future::ready(Ok(None::<()>)),
     );
     if let Err(refused) = created.await {
         return refused;
@@ -3098,9 +3099,11 @@ mod tests {
         assert_eq!(state.access.grant_policies().len(), 2);
     }
 
-    /// Review finding: a create whose outcome was settled later registered it without the
+    /// Review findings: a create whose outcome was settled later registered it without the
     /// container's lock, so the listing could change under a conditional create holding the
-    /// container. It is registered only once it holds the container's lock, shared.
+    /// container; and, the lock given up while the outcome was unknown, a second conditional
+    /// create with the same entity tag could pass and register too. The container's lock is
+    /// held, shared, from the create until it is settled.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_settled_create_registers_under_the_container_lock() {
         use std::sync::atomic::Ordering;
@@ -3116,16 +3119,22 @@ mod tests {
         store.fail_list.store(true, Ordering::SeqCst);
         let r = handle(&state, &post, &Agent::anonymous()).await;
         assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        let held = state.locks.lock(&container).await.expect("held");
+        let wait = std::time::Duration::from_millis(500);
+        assert!(
+            tokio::time::timeout(wait, state.locks.lock(&container))
+                .await
+                .is_err(),
+            "the listing was free while the outcome was unknown"
+        );
+        assert!(state.access.grant_policies().is_empty());
         store.fail_after_create.store(false, Ordering::SeqCst);
         store.fail_list.store(false, Ordering::SeqCst);
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        assert!(state.access.grant_policies().is_empty());
-        drop(held);
         eventually("the stored grant is put in force", || {
             state.access.grant_policies().len() == 1
         })
         .await;
+        let held = tokio::time::timeout(wait * 10, state.locks.lock(&container)).await;
+        assert!(held.is_ok_and(|g| g.is_some()), "the listing stayed held");
     }
 
     /// Review finding: a request whose create was not known to be stored gave its place back,

@@ -103,6 +103,22 @@ TOOL = "bb gates -s ultra_honk"
 #   result     — integrated support for released mappings, without result completeness
 # ---------------------------------------------------------------------------------------
 FAMILIES: list[dict] = [
+    # sq-j506: the method-BOUND successful-result members. The regex pins the exact
+    # measured profile (K1/K2, N16, P3, R4, F0, D10), so an unmeasured version-5
+    # bucket fails classify() instead of joining this family unreviewed.
+    {
+        "key": "result_v5",
+        "pattern": r"result_v5_k(?P<k>[12])_n(?P<n>16)_p(?P<p>3)_r(?P<r>4)_f(?P<f>0)_d(?P<d>10)",
+        "params": ["k", "n", "p", "r", "f", "d"],
+        "layer": "result",
+        "role": "Version 5 support for released SELECT DISTINCT mappings, identical in "
+        "capacity and public ABI to the version-1 f=0 profile but folding the "
+        "METHOD-BOUND presentation message, so the issuer signature attests the "
+        "string-canonical commitment METHOD and not merely the commitment. The scheme "
+        "digest is a compile-time constant of the relation, not a public input. "
+        "f=0 only: no private FILTER. Compiled only for k in {1, 2}, n=16, p=3, r=4, "
+        "d=10. Does not establish result completeness or holder identity.",
+    },
     # [OPUS-5.5] zkp-15.1: the regex pins the exact measured profile (K1/K2, N16, P3, R4,
     # F0, D10) rather than a parameter shape, so an unmeasured version-4 bucket fails
     # classify() instead of joining this family unreviewed.
@@ -153,6 +169,31 @@ FAMILIES: list[dict] = [
         "integer FILTERs. Capacity parameters: k credentials, n triples per credential, "
         "p patterns, r released rows, f private FILTERs per row. Does not establish "
         "result completeness or holder identity.",
+    },
+    # sq-j506: the V2 DUAL-LEAF component-witnessed members. Separate families from
+    # the shipped scan / join_eq ones, because they prove the same body over leaf
+    # components recomputed IN-CIRCUIT and so are not comparable as a parameter
+    # point of those families. The regexes pin the exact measured profiles.
+    {
+        "key": "scan_v2dl",
+        "pattern": r"scan_v2dl_k(?P<k>1)_n(?P<n>16)_r(?P<r>4)",
+        "params": ["k", "n", "r"],
+        "layer": "query",
+        "role": "BGP row membership over V2 dual-leaf graphs whose per-slot term "
+        "encodings are RECOMPUTED in-circuit from witnessed leaf components, with the "
+        "reserved-sentinel band check and the reserved language-tag check applied at "
+        "those component sites, before the unchanged scan body runs. Compiled only for "
+        "k=1, n=16, r=4.",
+    },
+    {
+        "key": "join_eq_v2dl",
+        "pattern": r"join_eq_v2dl_na(?P<na>16)_nb(?P<nb>16)",
+        "params": ["na", "nb"],
+        "layer": "query",
+        "role": "Hidden equality join between two V2 dual-leaf committed sides whose "
+        "per-slot term encodings are RECOMPUTED in-circuit from witnessed leaf "
+        "components, under the same component-site checks as the V2 scan member, "
+        "before the unchanged join body runs. Compiled only for na=nb=16.",
     },
     {
         "key": "scan",

@@ -115,9 +115,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left in the plain mode, and a `value_none()` re-derived until it falls outside the reachable
   value-handle band, which `is_in_handle_band` decides and a test asserts — the checkable invariant
   `research/zk-field-native-encoding.md` §14.1 asks for, discharging that reserved-tag requirement on
-  the HOST side. The in-circuit half stays open: the `zk/dual-leaf-v2` Noir library mirrors the
-  sentinel and its band check, but no proving member imports it, so a member refuses the sentinel
-  only because its `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
+  the HOST side. The in-circuit half landed with the component-witnessed members in the entry below: the
+  `zk/dual-leaf-v2` Noir library mirrors the sentinel and its band check, and
+  `compose_core::dual_leaf_v2_leaf` applies it at the `scan_v2dl_*` / `join_eq_v2dl_*` witnessed
+  component sites, which no `CircuitId` names. On the value-lane FILTER members a sentinel is
+  still refused only because their `u64` range decomposition cannot represent it. V1's constants, vectors and public API are
   unchanged and V1 stays recognised and verifiable, but it is no longer production-selectable. The
   §14.1 `LANG_NONE` separation is asserted on the host side only (see the hardening entry below). Both versions carry the same #769-accepted INV-VL
   downgrade; not externally audited (CR-G8 / sq-qhy4).
@@ -132,8 +134,152 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decimal and double lanes have V2 host encoders and V2 renderers but no V2 `build` helper yet. No
   soundness or privacy claim.
 
+- **sparq-zk-compose (opt-in `successful-results`):** METHOD-BOUND successful-result issuance,
+  added beside the retained contract rather than replacing it. Two new members,
+  `result_v5_k1_n16_p3_r4_f0_d10` and `result_v5_k2_n16_p3_r4_f0_d10`, compile a new
+  `compose_core::result_m5::result_check_m5` relation that folds the METHOD-BOUND presentation
+  message `sig::presentation_message_with_status_and_scheme(root, salt, status_ref,
+  scheme_iri_to_field(CommitmentMethod::StringCanonicalV1.scheme_iri()))` (`ZKSIG_M5`), so the
+  issuer attests the string-canonical commitment METHOD and not merely the commitment. The scheme
+  digest is a compile-time constant of the relation, so the public ABI is the version-1 f=0 one
+  unchanged and the verifier's public-input reconstruction does not move. `prepare_result` selects
+  these members by default at one or two credentials with no private predicate and status depth 10,
+  and refuses any other bucket by name instead of silently issuing a method-unbound proof.
+  `compose_core::result` and `compose_core::result_public` are byte-for-byte as they were, so every
+  shipped version-1 to version-4 member keeps its compiled circuit, ABI and verification-key bytes
+  and the fixed-foundation rebuild check passes unchanged.
+  `crates/sparq-zk-compose/tests/result_scheme_pin.rs` pins the new relation as the legacy one with
+  only the signed message substituted, with a control test that the substitution does change it.
+  Gate-count baselines and the constraint-count pack cover the two members. Research grade, NOT
+  externally audited (`sq-qhy4`). No soundness or privacy claim.
+  <!-- privacy-claims-allow: describes an added method-bound relation and its retained legacy contract; the external audit is named as an OPEN obligation and the downgrade is written down; asserts no soundness/privacy property; sq-qhy4 -->
+
 ### Changed
 
+- **sparq-lws-core (notifications):** subscription expiry is decided against a durable
+  high-water time stored in the index, so a restart with the clock stepped back does not revive
+  an expired subscription. On the first start after upgrading, and after a restore that drops
+  index-only records, every subscription with an `expires` is removed and its subscriber must
+  subscribe again; subscriptions without one are kept. Notifications now start only over a store
+  that can raise that time atomically (the in-memory and embedded indexes); `LwsState::new`
+  fails over any other. While the time cannot be stored, notification endpoints answer `503`
+  and nothing is delivered. A stored time ahead of the clock stands (subscriptions expiring
+  before it stay expired); to recover from a clock that jumped forward, correct the clock and
+  start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1` (`LwsConfig::reset_subscription_clock`),
+  which, while the state is built, removes every subscription with an `expires` and then stores
+  the clock.
+  An `LwsState` now holds its backend's lease (shared by every clone of its store) while it
+  lives: a second `LwsState` built over a running one's store is refused, so a state that
+  replaces another must be built after the old one is dropped. `Store::reset_marker` takes that
+  lease's guard.
+
+- **sparq-reason (N3 backward chaining):** a variable substitution is cheaper to COPY, with no
+  change to any name or answer. The `name -> term` map a premise evaluation and a backward proof
+  carry now holds the variable's name as a reference-counted string rather than an owned one, so
+  copying a substitution — which the backward path does once per candidate rule site and once per
+  solution, the join path once per candidate fact, and a formula multiset match once per pairing
+  it tries — no longer allocates a fresh name for every entry it carries. That mattered most where
+  the substitution is largest: a backward step's renamed variables stay in the substitution its
+  whole subtree inherits, so the copies grew with the depth of the proof in allocation count, not
+  merely in bytes. Alongside it, the unification of a backward goal against a rule conclusion
+  decides the cases it can decide — the two sides already equal, or either one an unbound variable
+  — on BORROWED terms, where it used to resolve and deep-copy both sides every time; only the
+  member-wise unification of two compounds still owns its two sides, and only the term actually
+  bound is copied. On the FORWARD side, a premise atom's variable names are now minted at most once
+  for the whole atom rather than once per candidate fact, so matching a join atom against its
+  candidates no longer allocates and frees a name per bound variable per row; a name is minted on
+  the first row that actually binds its position, so a position no candidate ever binds costs
+  nothing at all.
+
+  **The hasher is unchanged and the amount of hashing is unchanged.** A key is still hashed as the
+  variable name's bytes under SipHash, which is what keeps a crafted document from degrading the
+  map, and a lookup still computes one hash of the same bytes and lands in the same bucket — one
+  lookup per lookup, as before; the saving is in what a copy costs, not in what a lookup costs. No output depends on the
+  substitution's iteration order: every reader of a whole binding, including the proof-mode
+  tie-break, sorts it or asks a question of every entry. Every `__bw<n>_` name, derived fact, proof, `why()` string and `sparq-prov` IRI is
+  byte-identical, pinned against output captured from the parent commit, and the W3C N3 inference
+  conformance report is unchanged. No run that previously answered is refused, and no refusal
+  changes. (#7080)
+
+- **sparq-zk-compose / zk (sq-j506, #7121; Noir library #7103):** the `DualLeafV2` **component-witnessed** scan and
+  hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir
+  members, `scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16`, recompute each graph's per-slot
+  term encodings from witnessed V2 leaf components through
+  `compose_core::dual_leaf_v2_leaf::recompute_term` — applying the reserved-sentinel band check
+  and the reserved language-tag check at the witnessed component sites — and then run the
+  UNCHANGED `scan_check` / `join_eq_check` bodies. The shipped `scan_*` / `join_eq_*` members and
+  the relation sources are byte-unchanged, so existing verification keys and all issued material
+  stay valid; each new member's public-input vector is its shipped counterpart's, and the two are
+  told apart by their verification keys. `verifier::encode_pattern_slot` now folds a query pattern
+  constant with the encoder the scan's AUTHENTICATED commitment method selects, with no fallback,
+  and `bind_scan_pattern_methods` adds two named refusals — `CheckError::ScanPatternMethodsMixed`
+  (a `K > 1` scan whose commitments select different encoders: one pattern constant cannot match
+  two encodings) and `CheckError::ScanPatternMethodNotEncodable`. `verifier::bind_fragment_scans`
+  takes the authenticated-method map as a second argument. **Gate order:** the attestation gate
+  that authenticates the methods runs AHEAD of the stage-1 query-binding gates, and
+  `bind_scan_pattern_methods` immediately after it, so every comparison site reads an
+  authenticated map rather than comparing string-canonically whatever the attested method was;
+  in the `extended-fragment` regime `verify_fragment_manifest` runs it before
+  `bind_fragment_scans`, which is that regime's only scan-slot binding. The gate SET is
+  unchanged and every gate still runs, so nothing that was refused becomes acceptable; what
+  changes is which refusal is reported first for a manifest that fails both an attestation check
+  and a structural check, and that the pattern gates now refuse strictly more. The value-lane and
+  V2-scan verifier gates stay CLOSED: nothing becomes acceptable, and every change here only
+  adds refusals.
+  **BEHAVIOUR CHANGE in a DEFAULT build:** a scan whose authenticated method is `DualLeafV1` or
+  `DualLeafV2` is now refused when the `dual-leaf` feature is off, because the host dual-leaf
+  encoders are behind that feature and the verifier must not re-check such a scan's pattern
+  constants string-canonically. Such a manifest used to be accepted. Research-grade, not
+  externally audited (sq-qhy4).
+
+- **sparq-zk-compose (BREAKING for `successful-results` users):** successful-result issuance and
+  verification are METHOD-BOUND by default. A method-UNBOUND (`ZKSIG_C3`) credential, which attests
+  no commitment method at all, is refused with a named error, and the new
+  `ResultPolicy::admit_unbound_legacy` field (a public struct field, so constructing `ResultPolicy`
+  requires it) is the written-down opt-in that acts on already-issued unbound material and issues
+  through the retained legacy members. It has the same shape and meaning as
+  `MethodPolicy::admit_unbound`: under it the commitment method rests on trusted-issuer honesty
+  rather than an attestation the circuit recomputes. The signed (`result_v3_*`) and public-pattern
+  (`result_v4_*`) families have no method-bound member yet, so they need that opt-in. The
+  requirement is ONE boundness check on the SELECTED member, not one arm per contract family, so a
+  family added later cannot inherit the legacy behaviour by omission. Each selected
+  credential is now witnessed under the message the SELECTED member's relation folds, and an
+  incoherent pairing — a method-bound attestation through a legacy member, or the reverse — is
+  refused by name rather than witnessed into a proof that could not succeed. Legacy proofs stay
+  verifiable; nothing previously refused is admitted.
+- **sparq-zk-compose (BREAKING for a relying party on default settings):** `MethodPolicy::current()`
+  — the default policy on `verifier::KeySet` — now **REFUSES** a method-UNBOUND commitment
+  attestation (`CheckError::MethodNotAuthenticated`) instead of accepting one. A commitment whose
+  method is not issuer-attested has no authenticated leaf shape, so there is nothing for a later
+  gate to pin a lane constant or a pattern-slot encoding against; refusing it by default is the
+  prerequisite that makes an authenticated method something a gate could rely on (sq-j506). A
+  manifest whose attestation signs only the `ZKSIG_C3`/`ZKSIG_C4` message verified before and is
+  now refused: re-issue over the method-bound `ZKSIG_M5`/`ZKSIG_M4` shapes, or state the downgrade
+  with `KeySet::with_method_policy(MethodPolicy::current().admit_unbound())`. The new
+  `MethodPolicy::admit_unbound()` is that written-down opt-in, and `require_method_bound()` takes
+  the requirement back again; the unbound dial and `admit_legacy_dual_leaf_v1()` are independent,
+  so neither widens the other. **It opens no gate:** the Stage-0 `ValueLaneSubProofNotAccepted`
+  value-lane refusals are untouched and stay closed. Research-grade, NOT externally audited
+  (sq-qhy4) — no soundness or privacy property is claimed as achieved.
+
+- **sparq-zk-compose (opt-in `successful-results`):** the successful-result relations now
+  authenticate every credential slot over the METHOD-BOUND presentation message
+  `sig::presentation_message_with_status_and_scheme` (`ZKSIG_M5`) instead of the method-UNBOUND
+  `commitment_message_with_status` (`ZKSIG_C3`), with the folded scheme digest fixed to the
+  STRING-CANONICAL method. The relations prove `h3(Enc(s), Enc(p), Enc(o))` leaves over the
+  string-canonical term encoding and nothing else, so the digest is a compile-time constant in the
+  circuit (`compose_core::result::SCHEME_STRING_CANONICAL_V1`, with `hashes::h5` for the arity the
+  message needs) rather than a public input — which makes the commitment method part of the
+  relation instead of a prover choice. The host refuses per cause: an attested method that is not
+  string-canonical, and a method-unbound attestation, which attests no method at all. There is no
+  opt-in for the unbound case here, because the circuit side has no unbound message to recompute.
+  A `ResultCredential` must therefore carry a `ZKSIG_M5` signature; an already-issued `ZKSIG_C3`
+  one is refused. `crates/sparq-zk-compose/tests/result_scheme_pin.rs` pins the message the circuit
+  recomputes from its own Noir literals to the one the host signs, so the two sides cannot drift
+  apart silently. Every `result_v1_*`/`result_v2_*`/`result_v3_*`/`result_v4_*` member routes
+  through the two shared library functions, so no member source changes; the `zk/compose` source
+  hashes and verification-key/gate evidence are regenerated by the dedicated-hardware measurement
+  run. NOT externally audited (sq-qhy4).
 - **sparq-reason (N3 backward chaining):** the per-goal cost of naming a backward renaming by
   its proof-tree fingerprint is reduced, with no change to any name or answer. A goal's
   canonical identity key is built into one pre-sized buffer with the length prefix written
@@ -184,8 +330,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole-graph encoders rather than being encoded; `checked_lang_const` (in both modules) is the gate.
   A language constant is a 248-bit truncated BLAKE3 digest and `LANG_NONE` is the field element `1`,
   so only a fixed-target preimage reaches the refusal. No committed value, vector or leaf changes. The
-  in-circuit half of the assert stays open (no Noir member checks it;
-  `research/zk-field-native-encoding.md` §14.1, §14.3).
+  in-circuit half of the assert landed with the component-witnessed `scan_v2dl_*` /
+  `join_eq_v2dl_*` members, which no `CircuitId` names and so no verify path selects
+  (`research/zk-field-native-encoding.md` §14.1, §14.3).
 
 - **sparq-reason (N3):** rule existentials are now skolemized in a deterministic order, so for
   the same parsed input, and as long as the binding values and firing sets are themselves

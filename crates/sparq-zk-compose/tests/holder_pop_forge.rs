@@ -83,6 +83,20 @@ const SALT_BYTE: u8 = 9;
 const IDENTITY_HOLDER_HEX: &str =
     "0100000000000000000000000000000000000000000000000000000000000000";
 
+/// The STRING-CANONICAL commitment method's `zk:scheme` digest — the method the
+/// fixtures below commit under, and the one their issuer now ATTESTS.
+///
+/// The fixtures sign the METHOD-BOUND presentation message (`ZKSIG_M5`) rather
+/// than the method-unbound `ZKSIG_C3`, because `MethodPolicy::current` now
+/// refuses an unbound attestation. A test whose SUBJECT is legacy unbound
+/// material keeps an unbound fixture and states `MethodPolicy::admit_unbound`
+/// explicitly instead.
+fn string_canonical_scheme() -> Fr {
+    sparq_zk::sig::scheme_iri_to_field(
+        sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+    )
+}
+
 fn iri(s: &str) -> NamedNode {
     NamedNode::new(s).unwrap()
 }
@@ -182,7 +196,12 @@ fn attest_bearer(commitment: Fr, salt: Fr, sk: &SecretKey) -> CommitmentAttestat
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1
             .cryptosuite_iri()
             .to_string(),
@@ -214,7 +233,13 @@ fn attest_holder(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_holder(&commitment, &salt, &status_ref, &holder_digest),
+        signature: sk.sign_commitment_with_holder_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &holder_digest,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1
             .cryptosuite_iri()
             .to_string(),

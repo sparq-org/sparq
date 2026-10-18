@@ -109,6 +109,12 @@ pub struct LwsConfig {
     pub max_body: usize,
     /// Bounds on outgoing webhook deliveries (see [`notify::DeliveryLimits`]).
     pub delivery: notify::DeliveryLimits,
+    /// Start in the notification service's recovery mode: [`LwsState::new`] removes every stored
+    /// subscription with an expiry and then stores the clock as the notification high water,
+    /// before anything is served; it fails, the high water unchanged, while any of them is still
+    /// stored. For a high water stored while the clock had jumped forward, once the clock is
+    /// corrected; set for one start only (it removes those subscriptions at every start).
+    pub reset_subscription_clock: bool,
     /// The authentication suites the authorization server offers (see
     /// [`LwsConfig::register_suite`]).
     suites: sparq_lws_authn::Suites,
@@ -242,6 +248,7 @@ impl LwsConfig {
             allow_insecure_fetch: false,
             max_body: crate::body_limit::DEFAULT_MAX_BODY_BYTES,
             delivery: notify::DeliveryLimits::default(),
+            reset_subscription_clock: false,
             suites: default_suites(),
         }
     }
@@ -279,6 +286,8 @@ impl LwsConfig {
     /// - `SOLID_SERVER_LWS_TOKEN_TTL_SECS`: access token lifetime (default 300);
     /// - `SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH=1`: allow `http:` and private-address fetches
     ///   (development and conformance only);
+    /// - `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1`: start in the notification service's
+    ///   recovery mode ([`LwsConfig::reset_subscription_clock`]);
     /// - `SOLID_SERVER_LWS_AUTHN`: the authentication suites to offer, comma-separated, of
     ///   `ssi` (did:key and controlled identifiers, the default `authn-ssi` feature), `openid`
     ///   (OpenID Connect, the default `authn-openid` feature) and `saml` (SAML 2.0, the
@@ -307,6 +316,7 @@ impl LwsConfig {
         cfg.open = flag("SOLID_SERVER_LWS_OPEN") || flag("SOLID_SERVER_OPEN_MODE");
         // Open mode is for local test harnesses, whose inboxes and documents are on private hosts.
         cfg.allow_insecure_fetch = cfg.open || flag("SOLID_SERVER_LWS_ALLOW_INSECURE_FETCH");
+        cfg.reset_subscription_clock = flag(notify::RESET_SUBSCRIPTION_CLOCK_VAR);
         if let Some(n) = var("SOLID_SERVER_LWS_PAGE_SIZE") {
             cfg.page_size = n
                 .parse()
@@ -639,6 +649,9 @@ pub struct Inner<S: Store> {
     /// Holds whose release failed, each with its holder: tried again by the maintenance
     /// sweeper (see [`LwsState::unreleased`]).
     unreleased: std::sync::Mutex<Vec<(String, StoredMeta)>>,
+    /// How many failed releases were not kept for the sweeper, the wait list being full (see
+    /// [`LwsState::release_later`]).
+    dropped_releases: std::sync::atomic::AtomicU64,
 }
 
 /// An [`LwsState`] that does not keep it alive: what a task the state owns holds (see
@@ -699,6 +712,17 @@ impl<S: Store + 'static> LwsState<S> {
         store
             .exclusive()
             .map_err(|e| format!("the storage cannot be served over this store: {e}"))?;
+        // Refused before anything is read or written: notifications keep a time the store must
+        // raise atomically.
+        notify::refuse_without_atomic_markers(&store)?;
+        // The backend's lease, held for as long as the state lives: a second state over the same
+        // backend (a clone of this one's store, say) is refused before it reads or writes
+        // anything, so no two registries diverge over one store, and only this one may lower the
+        // notification high water.
+        let lifecycle = store.lifecycle().unwrap_or_default();
+        let lease = lifecycle
+            .acquire()
+            .ok_or("another LWS service is running over this store")?;
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
         if !store
@@ -715,11 +739,12 @@ impl<S: Store + 'static> LwsState<S> {
         // record's create or removal among them).
         let access = access::AccessStore::empty();
         let notify = notify::Notifier::new(&cfg)?;
+        notify.hold(lease);
         let (owner, closed) = tokio::sync::watch::channel(());
         let state = Self {
             owner: Some(Arc::new(owner)),
             inner: Arc::new(Inner {
-                store: tracked::Tracked::new(store, cfg.storage()),
+                store: tracked::Tracked::new(store, cfg.storage(), lifecycle),
                 cfg,
                 access,
                 notify,
@@ -730,6 +755,7 @@ impl<S: Store + 'static> LwsState<S> {
                 owed_touches: Default::default(),
                 settlements: Default::default(),
                 unreleased: Default::default(),
+                dropped_releases: Default::default(),
             }),
         };
         // Changes a process stop cut short are put back before anything is served.
@@ -737,6 +763,19 @@ impl<S: Store + 'static> LwsState<S> {
         // succeeded: a start that fails leaves nothing running to put an old state back over a
         // later start's writes, and grants are loaded while what is hidden stays hidden.
         let hidden = intents::recover(&state).await?;
+        // The notification recovery, when asked for, runs here: before any subscription is
+        // loaded and before the state is handed to anyone, so no request is in flight.
+        if state.cfg.reset_subscription_clock {
+            let lease = state.notify.lease().ok_or("no lease is held")?;
+            let visible = |iri: &str| state.visible(iri);
+            let removed =
+                notify::reset_subscription_clock(&state.store, &state.cfg, visible, lease).await?;
+            eprintln!(
+                "lws: notification high water reset to the clock; {removed} subscriptions with an \
+                 expiry removed (unset {} before the next start)",
+                notify::RESET_SUBSCRIPTION_CLOCK_VAR
+            );
+        }
         let loaded =
             access::AccessStore::load_with(&state.store, &state.cfg, |iri| state.visible(iri))
                 .await?;
@@ -763,12 +802,33 @@ impl<S: Store + 'static> LwsState<S> {
     /// `uri` is next touched: a stop before then leaves it, and the next start touches the
     /// container (see the `intents` module).
     /// Keep `holder`'s hold on `meta`'s bytes, whose release failed, for the maintenance
-    /// sweeper to release ([`LwsState::release_unreleased`]).
+    /// sweeper to release ([`LwsState::release_unreleased`]). Past [`UNRELEASED_LIMIT`] the hold
+    /// is not kept: it is counted ([`LwsState::dropped_releases`]) and reported, and left to the
+    /// next start's sweep ([`intents::recover`]), which fails the start rather than drop one.
     pub(crate) fn release_later(&self, holder: &str, meta: &StoredMeta) {
         let mut unreleased = self.unreleased.lock().unwrap_or_else(|e| e.into_inner());
         if unreleased.len() < UNRELEASED_LIMIT {
             unreleased.push((holder.to_string(), meta.clone()));
+            return;
         }
+        drop(unreleased);
+        let dropped = 1 + self
+            .dropped_releases
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        // Reported at the first and at each doubling, so an outage does not flood the log.
+        if dropped.is_power_of_two() {
+            eprintln!(
+                "lws: {dropped} failed releases could not be kept to be tried again; \
+                 their holds wait for the next start"
+            );
+        }
+    }
+
+    /// How many failed releases were not kept to be tried again (see
+    /// [`LwsState::release_later`]).
+    pub(crate) fn dropped_releases(&self) -> u64 {
+        self.dropped_releases
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Whether a hold waits to be released again.
@@ -1167,6 +1227,10 @@ const STAGED_ENTRY_BYTES: usize = 512;
 /// store step goes through one: a write or delete that fails leaves content, metadata and
 /// membership as they were, validators included (records are put back with
 /// [`Store::reinstate`], pointing at the bytes the store held for them, see [`Journal::stage`]).
+/// The one exception is the edge a container holds to a linkset record already gone, which
+/// [`Journal::remove_member`] detaches in a step of its own: that edge is not put back when the
+/// change is, since it names nothing and no LWS listing shows it, so a failed change can leave a
+/// container one dangling record edge lighter than it began.
 /// What a journal holds to put things back is bounded (`limit` bytes); a change that would need
 /// more is refused, and one that knows its whole extent up front ([`Journal::stage`]) is refused
 /// before it changes anything.
@@ -1226,9 +1290,10 @@ impl Holding {
     }
 }
 
-/// How many failed releases wait to be tried again at most: past it, one is left to the next
-/// start's sweep ([`intents::recover`]), as a hold that outlives its change only keeps bytes.
-const UNRELEASED_LIMIT: usize = 4096;
+/// How many failed releases wait to be tried again at most: past it, one is counted and left to
+/// the next start's sweep ([`intents::recover`]), as a hold that outlives its change only keeps
+/// bytes.
+pub(crate) const UNRELEASED_LIMIT: usize = 4096;
 
 impl<S: Store + 'static> Holds<S> {
     fn take(&mut self) -> Holding {
@@ -2779,6 +2844,8 @@ pub(crate) mod test_store {
         pub fail_release: Arc<AtomicBool>,
         /// The index is not this process's alone ([`Store::exclusive`]).
         pub shared: Arc<AtomicBool>,
+        /// How many more `holds` listings fail with a backend error.
+        pub failing_holds: Arc<std::sync::atomic::AtomicUsize>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `read` of this IRI alone (or, one ending in `/`, of the members of that container)
@@ -2876,10 +2943,21 @@ pub(crate) mod test_store {
         /// Once [`FlakyStore::fail_step`] has failed a step, every later step fails too: the
         /// store is gone from then on, as for a process that stops there.
         pub dead_after: Arc<AtomicBool>,
+        /// `raise_marker` and `reset_marker` fail with a backend error.
+        pub fail_marker_write: Arc<AtomicBool>,
+        /// How many `raise_marker` and `reset_marker` calls were made, failed ones too.
+        pub marker_writes: Arc<std::sync::atomic::AtomicUsize>,
+        /// The store says it cannot raise a marker atomically.
+        pub no_atomic_markers: Arc<AtomicBool>,
         fired: Arc<AtomicBool>,
     }
 
     impl FlakyStore {
+        /// See `CompositeStore::plant_marker`.
+        pub async fn plant_marker(&self, iri: &str, value: &str) {
+            self.inner.plant_marker(iri, value).await
+        }
+
         pub fn new() -> Self {
             Self::with_limits(crate::store::InMemoryStoreLimits::default())
         }
@@ -2928,11 +3006,15 @@ pub(crate) mod test_store {
                 hang_fence: Default::default(),
                 fail_release: Default::default(),
                 shared: Default::default(),
+                failing_holds: Default::default(),
                 last_unsettled: Default::default(),
                 unsettled: Default::default(),
                 fail_step: Default::default(),
                 fail_then: Default::default(),
                 dead_after: Default::default(),
+                fail_marker_write: Default::default(),
+                marker_writes: Default::default(),
+                no_atomic_markers: Default::default(),
                 fired: Default::default(),
             }
         }
@@ -3234,6 +3316,13 @@ pub(crate) mod test_store {
             self.inner.release(held, holder).await
         }
         async fn holds(&self) -> ServerResult<Vec<(String, ResourceMeta)>> {
+            if self
+                .failing_holds
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
             self.inner.holds().await
         }
         async fn finish_reclaims(&self) -> ServerResult<()> {
@@ -3339,6 +3428,33 @@ pub(crate) mod test_store {
             };
             *write.lock().await = true;
             Ok(())
+        }
+        async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+            self.inner.read_marker(iri).await
+        }
+        fn raises_markers(&self) -> bool {
+            !self.no_atomic_markers.load(Ordering::SeqCst) && self.inner.raises_markers()
+        }
+        async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+            self.marker_writes.fetch_add(1, Ordering::SeqCst);
+            self.step()?;
+            if self.fail_marker_write.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.raise_marker(iri, value).await
+        }
+        async fn reset_marker(
+            &self,
+            iri: &str,
+            value: i64,
+            lease: &crate::store::LifecycleGuard,
+        ) -> ServerResult<()> {
+            self.marker_writes.fetch_add(1, Ordering::SeqCst);
+            self.step()?;
+            if self.fail_marker_write.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.reset_marker(iri, value, lease).await
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
             if self.fail_list.load(Ordering::SeqCst)
@@ -4048,9 +4164,8 @@ mod tests {
             .write(&at, serde_json::to_vec(&stored).unwrap().into(), LWS_JSON)
             .await
             .unwrap();
-        notify::Notifier::load(&state.store, &state.cfg)
-            .await
-            .unwrap();
+        // Loaded over the backend itself: the running state holds the lease of its own handle.
+        notify::Notifier::load(&store, &state.cfg).await.unwrap();
         assert!(!state.store.exists(&at).await.unwrap());
         assert_eq!(store.two_step_deletes.load(Ordering::SeqCst), 0);
     }

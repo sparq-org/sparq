@@ -70,7 +70,7 @@ fn out(s: &PodStore) -> String {
 
 fn wonly_len(s: &PodStore) -> usize {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("https://pod.ex/wonly"));
-    s.graph
+    s.graph()
         .named
         .iter()
         .find(|(n, _)| *n == term)
@@ -227,7 +227,7 @@ fn unreadable_graphs_are_never_evaluated() {
 
 /// Every named graph's contents, for comparing a store before and after an update.
 fn snapshot(s: &PodStore) -> std::collections::BTreeMap<String, String> {
-    s.graph
+    s.graph()
         .named
         .iter()
         .filter(|(n, _)| !n.to_string().contains("urn:sparq:"))

@@ -368,6 +368,9 @@ const CLOSURE_TERM_BYTES: usize = 16 << 20;
 /// Default [`ClosureLimits::max_join_rows`] (GH #6938): unbounded, so a closure accepted
 /// before the allowance existed is still accepted. A caller opts in by setting a limit.
 const CLOSURE_JOIN_ROWS: usize = usize::MAX;
+/// Default [`ClosureLimits::max_total_join_rows`]: unbounded, for the same reason the
+/// per-round default is. A caller opts in by setting a limit.
+const CLOSURE_TOTAL_JOIN_ROWS: usize = usize::MAX;
 
 /// Why a forward closure was stopped by its [`ClosureLimits`].
 const CLOSURE_CUT: &str = "forward closure limit exceeded";
@@ -405,6 +408,13 @@ const CLOSURE_CUT: &str = "forward closure limit exceeded";
 /// Substitution is sized because the raw substitution functions are private to this
 /// module; the guard test `substitution_goes_through_the_bounded_module` is a lexical
 /// tripwire for a crate-internal copy, not the guarantee.
+///
+/// `max_total_join_rows` bounds the SAME rows and firings over all rounds of one closure,
+/// charged once and never refilled. Because the per-round allowance is refilled each round,
+/// `max_join_rows` alone bounds a closure's work only as `max_join_rows × max_rounds`; a
+/// caller that needs the whole closure's work bounded sets this one as well. The two
+/// compose — whichever is reached first refuses the run, each naming itself — and it is
+/// unbounded by default, so it changes nothing for a caller that does not set it.
 ///
 /// `max_join_rows` (GH #6938) bounds the transient work of one round: the binding rows its
 /// premise joins produce and the times its rules fire. Without it their number grows with
@@ -523,17 +533,32 @@ pub struct ClosureLimits {
     /// conclusion triple a rule instantiates (see the type's docs for exactly what is
     /// charged and when). Default unbounded (`usize::MAX`): set a limit to opt in.
     pub max_join_rows: usize,
+    /// The same rows and firings `max_join_rows` counts, but summed over ALL rounds of one
+    /// forward closure instead of one round: the total transient work the closure may do.
+    ///
+    /// `max_join_rows` alone bounds a closure's work only as the product of itself and
+    /// `max_rounds`, because each round gets its per-round allowance afresh; a closure that
+    /// stays just under the per-round limit for many rounds can therefore do far more work
+    /// than either number suggests. This one is charged once and never refilled, so it is
+    /// the whole closure's budget. The two compose: whichever is reached first refuses the
+    /// run, each naming itself. Default unbounded (`usize::MAX`): set a limit to opt in, and
+    /// a closure accepted before this field existed is still accepted.
+    ///
+    /// A nested closure gets its own total afresh, as it does its rounds and its per-round
+    /// allowance.
+    pub max_total_join_rows: usize,
 }
 
 impl Default for ClosureLimits {
-    /// 1,000,000 rounds, 50,000,000 facts, 16 MiB per derived term and unbounded join rows
-    /// per round.
+    /// 1,000,000 rounds, 50,000,000 facts, 16 MiB per derived term, and unbounded join rows
+    /// both per round and in total.
     fn default() -> Self {
         ClosureLimits {
             max_rounds: CLOSURE_ROUNDS,
             max_facts: CLOSURE_FACTS,
             max_term_bytes: CLOSURE_TERM_BYTES,
             max_join_rows: CLOSURE_JOIN_ROWS,
+            max_total_join_rows: CLOSURE_TOTAL_JOIN_ROWS,
         }
     }
 }
@@ -553,8 +578,12 @@ impl Default for ClosureLimits {
 pub(crate) struct JoinWork {
     left: Cell<usize>,
     limit: usize,
+    /// What is left of the whole closure's total ([`ClosureLimits::max_total_join_rows`]) —
+    /// charged alongside `left` and NEVER refilled by [`JoinWork::round`].
+    total_left: Cell<usize>,
+    total_limit: usize,
     spent: Cell<bool>,
-    /// The limit is the unbounded sentinel: charges are not counted.
+    /// Both limits are the unbounded sentinel: charges are not counted.
     unbounded: bool,
 }
 
@@ -562,26 +591,35 @@ impl JoinWork {
     /// The allowance of one round of a closure of the run `run`.
     pub(crate) fn forward(run: &Truncation) -> JoinWork {
         let limit = run.limits.max_join_rows;
+        let total_limit = run.limits.max_total_join_rows;
         JoinWork {
             left: Cell::new(limit),
             limit,
+            total_left: Cell::new(total_limit),
+            total_limit,
             spent: Cell::new(false),
-            unbounded: limit == usize::MAX,
+            unbounded: limit == usize::MAX && total_limit == usize::MAX,
         }
     }
 
-    /// A new round: the full allowance again, unless it was spent.
+    /// A new round: the full PER-ROUND allowance again, unless it was spent. The closure's
+    /// total is not refilled — that is what makes it a total.
     pub(crate) fn round(&self) {
         if !self.spent.get() {
             self.left.set(self.limit);
         }
     }
 
-    /// The join kernel's view of the rows the round may still produce.
+    /// The join kernel's view of the rows the round may still produce: whichever of the
+    /// round's allowance and the closure's remaining total is smaller.
     #[cfg(feature = "compiled-rules")]
     pub(crate) fn kernel_view(&self) -> RowsLeft {
         // Unbounded: `rows > usize::MAX` never holds, so the kernel never stops.
-        RowsLeft(if self.unbounded { usize::MAX } else { self.left.get() })
+        RowsLeft(if self.unbounded {
+            usize::MAX
+        } else {
+            self.left.get().min(self.total_left.get())
+        })
     }
 
     /// Charge `n` rows or firings about to be stored: `true` when the round's allowance
@@ -592,30 +630,46 @@ impl JoinWork {
         if self.unbounded {
             return true;
         }
-        match self.left.get().checked_sub(n) {
-            Some(left) => {
+        // Both allowances are charged, and neither is debited unless both cover `n`.
+        match (self.left.get().checked_sub(n), self.total_left.get().checked_sub(n)) {
+            (Some(left), Some(total_left)) => {
                 self.left.set(left);
+                self.total_left.set(total_left);
                 true
             }
-            None => {
-                self.exceeded(run);
+            (round_left, _) => {
+                self.exceeded(run, round_left.is_some());
                 false
             }
         }
     }
 
+    /// Refuse the run: `total` says the CLOSURE's total was what it reached (the round's
+    /// allowance still covered the charge), so the error names the limit that was actually
+    /// spent.
     #[cold]
-    fn exceeded(&self, run: &Truncation) {
+    fn exceeded(&self, run: &Truncation, total: bool) {
         self.left.set(0);
+        self.total_left.set(0);
         self.spent.set(true);
         let limit = self.limit;
-        run.refuse(|| {
-            format!(
-                "n3: {CLOSURE_CUT}: one round's premise joins and rule firings would \
-                 produce more than max_join_rows ({limit}) binding rows: the rules join \
-                 patterns whose matches multiply (raise ClosureLimits::max_join_rows to \
-                 allow more)"
-            )
+        let total_limit = self.total_limit;
+        run.refuse(move || {
+            if total {
+                format!(
+                    "n3: {CLOSURE_CUT}: the closure's premise joins and rule firings would \
+                     produce more than max_total_join_rows ({total_limit}) binding rows over \
+                     all its rounds: the rules keep joining patterns whose matches multiply \
+                     (raise ClosureLimits::max_total_join_rows to allow more)"
+                )
+            } else {
+                format!(
+                    "n3: {CLOSURE_CUT}: one round's premise joins and rule firings would \
+                     produce more than max_join_rows ({limit}) binding rows: the rules join \
+                     patterns whose matches multiply (raise ClosureLimits::max_join_rows to \
+                     allow more)"
+                )
+            }
         });
     }
 }
@@ -715,15 +769,35 @@ pub(crate) fn derived_term(
     Bounded::cut(true, CLOSURE_CUT)
 }
 
+/// What a substitution has to offer the term-building helpers below: the term a variable is
+/// bound to, if it is bound.
+///
+/// Two substitutions implement it, and the helpers size and build the same terms for either.
+/// The text engine's [`super::Binding`] keys itself by an `Rc<str>`, so copying a
+/// substitution — which its backward proof search does per candidate site and per solution —
+/// does not allocate a name per entry (GH #7080). The incremental counting engine carries a
+/// plain `FxHashMap<String, Term>` and is left as it is. Both answer this one question, and
+/// that is all these helpers ask of a substitution.
+pub(crate) trait Subst {
+    /// What `v` is bound to, or `None`.
+    fn bound(&self, v: &str) -> Option<&Term>;
+}
+
+impl<S: BuildHasher> Subst for HashMap<String, Term, S> {
+    fn bound(&self, v: &str) -> Option<&Term> {
+        self.get(v)
+    }
+}
+
 /// The [`term_bytes`] of `t` with `b`'s bindings substituted, as [`substitute`] (or, with
 /// `deep`, [`substitute_deep`], through quoted formulae) would build it, read from the
 /// borrowed terms without building anything.
-pub(crate) fn resolved_bytes<S: BuildHasher>(t: &Term, b: &HashMap<String, Term, S>, deep: bool) -> usize {
+pub(crate) fn resolved_bytes<B: Subst + ?Sized>(t: &Term, b: &B, deep: bool) -> usize {
     let all = |ts: &mut dyn Iterator<Item = &Term>| {
         ts.fold(TERM_NODE_BYTES, |n, m| n.saturating_add(resolved_bytes(m, b, deep)))
     };
     match t {
-        Term::Var(v) => term_bytes(b.get(v).unwrap_or(t)),
+        Term::Var(v) => term_bytes(b.bound(v).unwrap_or(t)),
         Term::List(ms) => all(&mut ms.iter()),
         Term::Triple(tr) => all(&mut tr.iter()),
         Term::Formula(ts) if deep => all(&mut ts.iter().flatten()),
@@ -771,9 +845,9 @@ impl std::fmt::Display for Substituted {
 /// atom is one copy of an existing term and is not sized. `tests/n3_bounded_discipline.rs`
 /// fails if an N3 evaluator substitutes any other way.
 #[inline]
-pub(crate) fn substitute<S: BuildHasher>(
+pub(crate) fn substitute<B: Subst + ?Sized>(
     t: &Term,
-    b: &HashMap<String, Term, S>,
+    b: &B,
     run: &Truncation,
 ) -> Option<Term> {
     match t {
@@ -960,9 +1034,9 @@ fn walked_members<'a>(
 /// (sized from the borrowed terms; the cut and the run's refusal are recorded). Kept out
 /// of line: a variable or atom, the common case, never reaches it.
 #[inline(never)]
-fn compound_refused<S: BuildHasher>(
+fn compound_refused<B: Subst + ?Sized>(
     t: &Term,
-    b: &HashMap<String, Term, S>,
+    b: &B,
     run: &Truncation,
     deep: bool,
 ) -> bool {
@@ -1019,9 +1093,9 @@ pub(crate) fn dict_term_bytes(dict: &sparq_core::dict::Dict, id: sparq_core::dic
 /// Substitute bound variables in `t` (recursing into list members and quoted triples);
 /// returns the term (possibly still containing free vars). Private: callers go through
 /// [`substitute`].
-fn apply<S: BuildHasher>(t: &Term, b: &HashMap<String, Term, S>) -> Term {
+fn apply<B: Subst + ?Sized>(t: &Term, b: &B) -> Term {
     match t {
-        Term::Var(v) => b.get(v).cloned().unwrap_or_else(|| t.clone()),
+        Term::Var(v) => b.bound(v).cloned().unwrap_or_else(|| t.clone()),
         Term::List(ms) => Term::List(ms.iter().map(|m| apply(m, b)).collect()),
         Term::Triple(tr) => {
             Term::Triple(Box::new([apply(&tr[0], b), apply(&tr[1], b), apply(&tr[2], b)]))
@@ -1878,6 +1952,7 @@ mod tests {
                 max_facts: 50_000_000,
                 max_term_bytes: 16 << 20,
                 max_join_rows: usize::MAX,
+                max_total_join_rows: usize::MAX,
             }
         );
         let sink = Cell::new(false);
@@ -2251,10 +2326,10 @@ mod tests {
         let var = |s: &str| Term::Var(s.to_string());
         let run = Truncation::top_level();
         let mut b = super::super::Binding::default();
-        b.insert("bound".into(), iri("http://ex/v"));
-        b.insert("chain".into(), var("bound"));
-        b.insert("list".into(), Term::List(vec![var("chain"), iri("http://ex/w")]));
-        b.insert("cyc".into(), Term::Formula(vec![[var("cyc"), iri("http://ex/q"), var("bound")]]));
+        b.insert("bound", iri("http://ex/v"));
+        b.insert("chain", var("bound"));
+        b.insert("list", Term::List(vec![var("chain"), iri("http://ex/w")]));
+        b.insert("cyc", Term::Formula(vec![[var("cyc"), iri("http://ex/q"), var("bound")]]));
         let goals = vec![
             // Every term a leaf: nothing is copied.
             [iri("http://ex/a"), iri("http://ex/p"), var("free")],
@@ -2299,10 +2374,10 @@ mod tests {
         let iri = |s: &str| Term::Iri(format!("http://ex/{}", s));
         let var = |s: &str| Term::Var(s.to_string());
         let mut b = Binding::default();
-        b.insert("x".into(), var("mid"));
-        b.insert("mid".into(), var("end"));
-        b.insert("end".into(), iri("v"));
-        b.insert("inner".into(), iri("leaked"));
+        b.insert("x", var("mid"));
+        b.insert("mid", var("end"));
+        b.insert("end", iri("v"));
+        b.insert("inner", iri("leaked"));
         let quoted = Term::Formula(vec![
             [iri("s"), iri("p"), var("inner")],
             [iri("s"), iri("q"), var("own")],
@@ -2336,7 +2411,7 @@ mod tests {
         // occurs check leaves the second `?x` as the variable it is, so the walk is finite
         // and the goal still HAS an identity instead of being refused for its depth.
         let mut cyclic = Binding::default();
-        cyclic.insert("x".into(), Term::List(vec![var("x")]));
+        cyclic.insert("x", Term::List(vec![var("x")]));
         let cyclic_run = Truncation::top_level();
         assert_eq!(
             walked_atom(&[var("x"), iri("has"), iri("v")], &cyclic, &cyclic_run),

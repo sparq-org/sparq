@@ -39,6 +39,43 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use oxrdf::NamedNode;
 
+/// The lease one running service holds over a backend for as long as it runs: shared by every
+/// handle to that backend (see [`Store::lifecycle`]), and held by at most one service at a time,
+/// so a second one built over the same backend is refused rather than run with a registry of
+/// its own beside the first. Within one process only.
+#[derive(Debug, Default)]
+pub struct Lifecycle {
+    held: std::sync::atomic::AtomicBool,
+}
+
+impl Lifecycle {
+    /// Take the lease, unless it is held: the guard gives it back when dropped.
+    pub(crate) fn acquire(self: &std::sync::Arc<Self>) -> Option<LifecycleGuard> {
+        use std::sync::atomic::Ordering;
+        self.held
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| LifecycleGuard {
+                lease: self.clone(),
+            })
+    }
+}
+
+/// A held [`Lifecycle`] lease: the authority of the one service running over a backend, which
+/// alone may lower a marker ([`Store::reset_marker`]). Only this crate makes one.
+#[derive(Debug)]
+pub struct LifecycleGuard {
+    lease: std::sync::Arc<Lifecycle>,
+}
+
+impl Drop for LifecycleGuard {
+    fn drop(&mut self) {
+        self.lease
+            .held
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 pub use blob::{BlobEntry, BlobError, BlobStore, InMemoryBlobStore};
 pub use body_cache::{BodyCache, DEFAULT_BODY_CACHE_BYTES};
 pub use counting::{
@@ -49,10 +86,10 @@ pub use embedded::EmbeddedSparqClient;
 #[cfg(all(feature = "http-sparq", not(target_arch = "wasm32")))]
 pub use http::{HttpSparqClient, SparqHttpError};
 pub use limits::{
-    in_service_pool, is_hold_record, is_pooled_blob_key, InMemoryStoreLimits, StoreUsage,
-    DEFAULT_IN_MEMORY_MAX_POOL_BYTES, DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT,
+    in_service_pool, is_hold_record, is_pooled_blob_key, is_service_marker, InMemoryStoreLimits,
+    StoreUsage, DEFAULT_IN_MEMORY_MAX_POOL_BYTES, DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT,
     DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT, DEFAULT_IN_MEMORY_MAX_TOTAL_BYTES, POOLED_BLOB_KEY_MARK,
-    SERVICE_POOL_PATH,
+    SERVICE_MARKER_FRAGMENT, SERVICE_POOL_PATH,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use reconcile::spawn_periodic;
@@ -65,6 +102,15 @@ pub use sparq::{
 pub use sparql::{BodyObject, BuildError};
 
 use crate::error::{ServerError, ServerResult};
+
+/// A failed marker write, as the store reports it.
+fn marker_error(e: SparqError) -> ServerError {
+    match e {
+        SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+        SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
+        other => ServerError::Storage(format!("{other}")),
+    }
+}
 
 /// A resource as the LDP handler sees it: bytes + the authoritative metadata.
 #[derive(Debug, Clone)]
@@ -330,6 +376,62 @@ pub trait Store: Send + Sync {
         ))
     }
 
+    /// The value last stored under `iri` by [`raise_marker`](Store::raise_marker), as written,
+    /// or `None` when none is. A record under `iri` that is not a marker reads as an empty value.
+    ///
+    /// The default refuses, as [`raise_marker`](Store::raise_marker) does.
+    async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+        let _ = iri;
+        Err(ServerError::Storage("this store keeps no markers".into()))
+    }
+
+    /// Whether [`raise_marker`](Store::raise_marker) is atomic here. The default is `false`.
+    fn raises_markers(&self) -> bool {
+        false
+    }
+
+    /// The lease every handle to this backend shares, when it keeps one: a service built over
+    /// it takes the lease for as long as it runs. The default is none (each service built over
+    /// such a store takes a lease of its own).
+    fn lifecycle(&self) -> Option<std::sync::Arc<Lifecycle>> {
+        None
+    }
+
+    /// Raise the time stored under `iri` to `value`, unless a later one is stored, in one
+    /// indivisible step under the index's own write lock, and return the time stored once it is
+    /// done. A raise never lowers what is stored, whatever order raises land in: one that fails
+    /// and lands late is a no-op once a later time is stored. With nothing stored under `iri`,
+    /// or nothing that reads as a time, `value` is stored. The value is kept in the index alone,
+    /// with no bytes, so it takes no blob capacity.
+    ///
+    /// The default refuses: a store that cannot raise atomically says so.
+    async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+        let _ = (iri, value);
+        Err(ServerError::Storage(
+            "this store cannot raise a marker atomically".into(),
+        ))
+    }
+
+    /// Store `value` under `iri` as a marker in one step, whatever is stored there, earlier or
+    /// later: the one write that may lower a marker, for a start that finds the stored one
+    /// unusable and has removed what it decided ([`raise_marker`](Store::raise_marker) keeps
+    /// every other write from lowering it). Only the service holding the backend's
+    /// [`Lifecycle`] lease may make it: `lease` is its guard, which no caller outside this crate
+    /// can make.
+    ///
+    /// The default refuses, as [`raise_marker`](Store::raise_marker) does.
+    async fn reset_marker(
+        &self,
+        iri: &str,
+        value: i64,
+        lease: &LifecycleGuard,
+    ) -> ServerResult<()> {
+        let _ = (iri, value, lease);
+        Err(ServerError::Storage(
+            "this store cannot raise a marker atomically".into(),
+        ))
+    }
+
     /// [`list_children`](Store::list_children) while it fits (see
     /// [`SparqClient::list_children_within`]): `None` when it does not, without the whole
     /// listing having been held. A store that cannot bound its read refuses the call.
@@ -516,12 +618,7 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
 
     /// [`SparqClient::get_meta`] with the read path's error mapping (absent ⇒ [`ServerError::NotFound`]).
     async fn get_meta_mapped(&self, iri: &str) -> ServerResult<ResourceMeta> {
-        self.sparq.get_meta(iri).await.map_err(|e| match e {
-            SparqError::NotFound => ServerError::NotFound,
-            SparqError::QuotaExceeded => ServerError::InsufficientStorage,
-            SparqError::Backend(e) => ServerError::Storage(e),
-            SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
-        })
+        self.sparq.get_meta(iri).await.map_err(map_sparq)
     }
 
     /// Reclaim a blob no record names any longer, best effort.
@@ -723,6 +820,16 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
 // The concrete wasm/dev-store pair exposes one combined limits and usage view without
 // widening the production backend traits, whose remote stores have backend-specific quota models.
 impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
+    /// Store `value` under `iri` as a marker as it is, whatever is stored there: what a test
+    /// plants to stand for an earlier, or a damaged, one.
+    #[cfg(test)]
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) {
+        self.sparq
+            .put_meta(iri, sparq::marker_meta(value))
+            .await
+            .expect("planted");
+    }
+
     /// Build a bounded in-memory store with the same limits enforced at both storage seams.
     pub fn in_memory_with_limits(limits: InMemoryStoreLimits) -> Self {
         Self::new(
@@ -963,10 +1070,11 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // misses it.
             self.count_hold(&meta.blob_key, true);
             if let Err(e) = self.publish_hold(&meta.blob_key, holder).await {
-                // It may have landed (a lost reply): withdrawn, best effort, as the holder is
-                // told nothing is held (else the next start's sweep withdraws it).
-                let _ = self.withdraw_hold(&meta.blob_key, holder).await;
-                self.count_hold(&meta.blob_key, false);
+                // It may have landed (a lost reply): released, best effort, as the holder is
+                // told nothing is held (else the next start's sweep releases it). Released, not
+                // only withdrawn: a reclaim through this instance meanwhile skipped these bytes
+                // for the count, and they are reclaimed here unless a record names them.
+                let _ = self.release(&meta, holder).await;
                 return Err(e);
             }
             match self.sparq.get_meta(iri).await {
@@ -1081,16 +1189,13 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
         // the index delete leaves orphaned bytes (the reconciler GCs them), never an index row
         // pointing at missing bytes. The byte delete is best effort: the resource is already gone
         // from the index, so a failed blob delete must not fail the request; it stays an orphan.
+        // Either step's failure is reported as what it was (`map_sparq`), as the metadata
+        // read above is: a refused admission and a write that failed unsettled (which the caller
+        // settles through the fence it carries) are not flattened into a backend fault.
         if let Some(p) = parent {
-            self.sparq
-                .remove_child(p, iri)
-                .await
-                .map_err(|e| ServerError::Storage(format!("{e}")))?;
+            self.sparq.remove_child(p, iri).await.map_err(map_sparq)?;
         }
-        self.sparq
-            .delete_meta(iri)
-            .await
-            .map_err(|e| ServerError::Storage(format!("{e}")))?;
+        self.sparq.delete_meta(iri).await.map_err(map_sparq)?;
         if let Some(key) = blob_key {
             self.reclaim_blob(&key).await;
         }
@@ -1124,15 +1229,14 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
                 return Err(ServerError::Unsettled { detail, fence })
             }
         };
+        // A failure is reported as what it was (`map_sparq`): a refused admission stays
+        // `InsufficientStorage`, and one not known yet keeps its fence, so the caller can
+        // settle it.
         let outcome = self
             .sparq
             .delete_meta_if_empty(iri, parent)
             .await
-            .map_err(|e| match e {
-                // Not known yet: kept apart, so the caller can settle it (`fence`).
-                SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
-                e => ServerError::Storage(format!("{e}")),
-            })?;
+            .map_err(map_sparq)?;
         // NotEmpty / NotFound: nothing was deleted, so the bytes stay. Deleted: the record AND the parent
         // edge are gone atomically (above), so the bytes are unreferenced — reclaim them now.
         if outcome == DeleteOutcome::Deleted {
@@ -1148,6 +1252,39 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             .fence(fence)
             .await
             .map_err(|e| ServerError::Storage(format!("{e}")))
+    }
+
+    async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
+        match self.sparq.get_meta(iri).await {
+            Ok(m) if sparq::is_marker(&m) => Ok(Some(m.etag)),
+            Ok(_) => Ok(Some(String::new())),
+            Err(SparqError::NotFound) => Ok(None),
+            Err(e) => Err(ServerError::Storage(format!("{e}"))),
+        }
+    }
+
+    fn raises_markers(&self) -> bool {
+        self.sparq.raises_markers()
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+        self.sparq
+            .raise_marker(iri, value)
+            .await
+            .map_err(marker_error)
+    }
+
+    async fn reset_marker(&self, iri: &str, value: i64, _: &LifecycleGuard) -> ServerResult<()> {
+        if !self.sparq.raises_markers() {
+            return Err(ServerError::Storage(
+                "this store cannot raise a marker atomically".into(),
+            ));
+        }
+        // One record put: the index admits a marker's record apart from every ceiling.
+        self.sparq
+            .put_meta(iri, sparq::marker_meta(&value.to_string()))
+            .await
+            .map_err(marker_error)
     }
 
     async fn read_plan(&self, target: &str, acl_candidates: &[String]) -> ServerResult<ReadPlan> {
@@ -1206,7 +1343,10 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
     }
 }
 
-/// A [`SparqError`] as the server reports it.
+/// An index error as the server reports it: an absent record is [`ServerError::NotFound`], a
+/// refused admission [`ServerError::InsufficientStorage`], and a write that failed unsettled
+/// keeps its detail and its fence, so the caller can settle it ([`Store::fence`]) rather than
+/// read the failure as a plain backend fault.
 fn map_sparq(e: SparqError) -> ServerError {
     match e {
         SparqError::NotFound => ServerError::NotFound,
@@ -1675,6 +1815,156 @@ mod tests {
         );
         one.release(&held, "urn:a").await.unwrap();
         assert!(!blob.exists(&held.blob_key).await.unwrap());
+    }
+
+    /// An index whose detaching steps fail with the error set for each (taken when it is used),
+    /// every other call answered by a working in-memory index.
+    struct FailsDetaching {
+        inner: InMemorySparqClient,
+        on_remove_child: std::sync::Mutex<Option<SparqError>>,
+        on_delete_meta: std::sync::Mutex<Option<SparqError>>,
+        on_delete_meta_if_empty: std::sync::Mutex<Option<SparqError>>,
+    }
+
+    impl FailsDetaching {
+        fn new() -> Self {
+            Self {
+                inner: InMemorySparqClient::new(),
+                on_remove_child: std::sync::Mutex::new(None),
+                on_delete_meta: std::sync::Mutex::new(None),
+                on_delete_meta_if_empty: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SparqClient for FailsDetaching {
+        async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
+            self.inner.get_meta(iri).await
+        }
+        async fn put_meta(&self, iri: &str, meta: ResourceMeta) -> Result<(), SparqError> {
+            self.inner.put_meta(iri, meta).await
+        }
+        async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
+            self.inner.exists(iri).await
+        }
+        async fn delete_meta(&self, iri: &str) -> Result<(), SparqError> {
+            let set = self.on_delete_meta.lock().unwrap().take();
+            match set {
+                Some(e) => Err(e),
+                None => self.inner.delete_meta(iri).await,
+            }
+        }
+        async fn delete_meta_if_empty(
+            &self,
+            iri: &str,
+            parent: Option<&str>,
+        ) -> Result<crate::store::sparq::DeleteOutcome, SparqError> {
+            let set = self.on_delete_meta_if_empty.lock().unwrap().take();
+            match set {
+                Some(e) => Err(e),
+                None => self.inner.delete_meta_if_empty(iri, parent).await,
+            }
+        }
+        async fn create_child(
+            &self,
+            container: &str,
+            child: &str,
+            meta: ResourceMeta,
+        ) -> Result<(), SparqError> {
+            self.inner.create_child(container, child, meta).await
+        }
+        async fn remove_child(&self, container: &str, child: &str) -> Result<(), SparqError> {
+            let set = self.on_remove_child.lock().unwrap().take();
+            match set {
+                Some(e) => Err(e),
+                None => self.inner.remove_child(container, child).await,
+            }
+        }
+        async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
+            self.inner.list_children(container).await
+        }
+        async fn referenced_blob_keys(
+            &self,
+        ) -> Result<std::collections::HashSet<String>, SparqError> {
+            self.inner.referenced_blob_keys().await
+        }
+    }
+
+    /// A delete whose detach or record step fails reports the failure as what it was, as the
+    /// metadata read that precedes them does: a refused admission stays `InsufficientStorage`,
+    /// and a write that failed unsettled keeps its fence, so the caller can settle it.
+    #[tokio::test]
+    async fn a_delete_reports_each_failure_as_what_it_was() {
+        let container = "https://pod.example/c/";
+        let child = "https://pod.example/c/note";
+        let build = || async {
+            let store = CompositeStore::new(FailsDetaching::new(), InMemoryBlobStore::new());
+            store
+                .write(container, Bytes::from_static(b""), "text/turtle")
+                .await
+                .expect("mint container");
+            store
+                .create_in_container(container, child, Bytes::from_static(b"x"), "text/turtle")
+                .await
+                .expect("add child");
+            store
+        };
+        // A refused admission stays one.
+        let store = build().await;
+        *store.sparq.on_remove_child.lock().unwrap() = Some(SparqError::QuotaExceeded);
+        let r = store.delete(child, Some(container)).await;
+        assert!(matches!(r, Err(ServerError::InsufficientStorage)), "{r:?}");
+        // A write that failed unsettled keeps its fence, so the caller can settle it.
+        let store = build().await;
+        *store.sparq.on_delete_meta.lock().unwrap() = Some(SparqError::Unsettled {
+            detail: "the update timed out".into(),
+            fence: Fence::new("n1".to_string(), vec![child.to_string()]),
+        });
+        let r = store.delete(child, Some(container)).await;
+        match r {
+            Err(ServerError::Unsettled { fence, .. }) => assert_eq!(fence.nonce(), "n1"),
+            other => panic!("{:?}", other),
+        }
+    }
+
+    /// The atomic removal (`delete_container_if_empty`) reports its index step's failure as
+    /// what it was, as `delete` does: a refused admission stays `InsufficientStorage`, a write
+    /// that failed unsettled keeps its fence, and the resource is left in place either way.
+    #[tokio::test]
+    async fn an_atomic_removal_reports_each_failure_as_what_it_was() {
+        let container = "https://pod.example/c/";
+        let child = "https://pod.example/c/note";
+        let store = CompositeStore::new(FailsDetaching::new(), InMemoryBlobStore::new());
+        store
+            .write(container, Bytes::from_static(b""), "text/turtle")
+            .await
+            .expect("mint container");
+        store
+            .create_in_container(container, child, Bytes::from_static(b"x"), "text/turtle")
+            .await
+            .expect("add child");
+        *store.sparq.on_delete_meta_if_empty.lock().unwrap() = Some(SparqError::QuotaExceeded);
+        let r = store
+            .delete_container_if_empty(child, Some(container))
+            .await;
+        assert!(matches!(r, Err(ServerError::InsufficientStorage)), "{r:?}");
+        *store.sparq.on_delete_meta_if_empty.lock().unwrap() = Some(SparqError::Unsettled {
+            detail: "the update timed out".into(),
+            fence: Fence::new("n2".to_string(), vec![child.to_string()]),
+        });
+        let r = store
+            .delete_container_if_empty(child, Some(container))
+            .await;
+        match r {
+            Err(ServerError::Unsettled { fence, .. }) => assert_eq!(fence.nonce(), "n2"),
+            other => panic!("{:?}", other),
+        }
+        assert!(store.exists(child).await.unwrap());
+        let r = store
+            .delete_container_if_empty(child, Some(container))
+            .await;
+        assert!(matches!(r, Ok(DeleteOutcome::Deleted)), "{r:?}");
     }
 
     #[test]
