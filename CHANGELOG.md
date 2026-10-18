@@ -155,7 +155,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   direct write could be acknowledged and then undone or reordered by the recovery redo. The
   refusal propagates in both directions: a frame retained by a named graph refuses the root's
   writes too. `clear_txn` is gated like an append because truncating the journal destroys
-  committed records.
+  committed records. A durable path that fails PART-WAY — a WAL append, a graph create, a graph
+  drop, a journal clear, or a base swap after its new base is staged — freezes the tree the same
+  way, because each has already changed part of the store or the in-memory image by the time it
+  can fail; the store is writable again after it is reopened, which replays what is on disk.
+
+- **sparq-core (`sq-ycle`): a durable store written by this version cannot be opened by an
+  earlier one.** The dictionary's on-disk format version (`dict-meta.bin`) moves to 2, and an
+  older build refuses a version it does not know with a rebuild-required error. This is
+  deliberate: an older build meeting a `WTX2` journal frame treats the unknown frame magic as a
+  torn tail and TRUNCATES it, destroying a commit it had already acknowledged, and the format
+  version is the only field such a build hard-errors on instead of truncating. A store written by
+  an older build is marked the first time this version appends a journal frame to it, so opening
+  a store read-only does not mark it, and a store this version has committed to is a one-way
+  upgrade. In the other direction, a journal frame whose format version is NEWER than this build
+  knows is an error that changes nothing, instead of a torn tail that gets truncated.
+
+- **sparq-core (`sq-ycle`):** `Graph::save`, `Graph::save_compressed` and
+  `Graph::restore_into_durable` refuse a destination that would destroy durable state: the live
+  backing directory of the graph being saved (saving over its own mapped base, which also removed
+  the `named/` sub-tree it was walking), or a store whose `txn.log` keeps a committed frame that
+  has not been replayed. Saving to a fresh directory, and re-saving over a store with an empty
+  journal, are unchanged. A graph name that is neither an IRI nor a blank node is also refused
+  rather than coerced into the manifest as a lexical form the manifest's own decoder rejects.
+
+- **sparq-core:** a staged base is now fsynced file by file and then directory by directory before
+  the rename that publishes it, and a WAL or journal file this process creates gets its directory
+  entry synced once. Flushing a buffered writer moves bytes into the page cache only, so a crash
+  just after the swap could leave the canonical directory naming an index, dictionary or manifest
+  whose bytes were never written.
+
+- **sparq-core:** the staging directories a compaction, a vacuum and a named-graph drop use are
+  now derived by appending the suffix to the store's WHOLE name (`data.a.compact-new`), not by
+  replacing its file extension (`data.compact-new`). Two stores in one directory whose names
+  differ only after a dot shared staging paths, so opening or swapping one could remove or
+  overwrite the other's — including the retained staging directory that is a store's only copy
+  after a crash mid-swap. A store whose own name ends in `.compact-new`, `.compact-old`,
+  `.drop-new` or `.drop-old` is refused on open and as a save destination: such a store derives
+  its own path as its staging sibling, so a swap removed the store it was swapping.
+
+- **sparq-core:** a crash between a named-graph DROP's sub-tree swap and the manifest rewrite that
+  commits it left a manifest naming a slot the swapped-in sub-tree no longer had, and the store
+  did not open at all. Recovery now reconciles the two by count: a manifest that matches the
+  slots present is the post-drop one and the drop stands, and a manifest that does not is the
+  pre-drop one, so the drop never committed and the retained sub-tree is restored.
 
 - **sparq-zk-compose:** hardening — the salt a HIDDEN-ONLY commitment's issuer-signed message is
   recomputed from is now resolved by AGREEMENT over every hidden-issuer entry declared over that

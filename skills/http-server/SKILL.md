@@ -1937,6 +1937,19 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   (`503` over HTTP). Accepting a write in that window would let the recovery redo silently undo
   or reorder something already acknowledged. The refusal is tree-wide in both directions: a frame
   retained by a named graph freezes the root too.
+- **A durable path that fails part-way freezes the store the same way.** Not only a failed
+  materialisation: a WAL append, a graph create, a graph drop, a journal clear, or a compaction
+  or vacuum whose swap fails after its new base is staged all freeze the store until it is
+  reopened, because each has already changed part of it or part of the in-memory image by the
+  time it can fail. Over HTTP that is a `503` until the process is restarted against the same
+  `DIR`; the restart replays what is on disk, so nothing acknowledged is lost and nothing refused
+  appears.
+- **`--persist DIR` written by this version cannot be opened by an earlier one.** The store's
+  on-disk format version moves with the journal format, and an older build refuses a version it
+  does not know rather than silently truncating a journal frame it cannot read (which would
+  destroy an acknowledged commit). A `DIR` written by an older build is marked the first time
+  this version commits a body to it, so this is a one-way upgrade per store: keep a backup before
+  rolling a server forward if a rollback matters.
 - **One writer per `--persist DIR`.** The durable store assumes a single writing process and a
   single writing handle per directory; two writers on one directory corrupt it and nothing
   currently detects that. Writer exclusion is designed in

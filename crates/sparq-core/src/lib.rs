@@ -1848,7 +1848,22 @@ impl Graph {
     /// and NO `named.bin`, so its on-disk layout is byte-identical to before this change.
     #[cfg(feature = "mmap")]
     pub fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
-        self.refuse_unsafe_save_destination(dir)?;
+        self.save_to(dir, false)
+    }
+
+    /// (sq-ycle) [`save`](Self::save) into a STAGING directory of a base swap — a
+    /// `<store>.compact-new` the swap is about to rename into place. The only difference is that
+    /// the reserved-staging-name refusal does not apply: that refusal exists to stop a STORE
+    /// being created or opened under a name a swap derives for itself, and this is the swap
+    /// deriving it. Every other destination check still runs.
+    #[cfg(feature = "mmap")]
+    fn save_staged(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        self.save_to(dir, true)
+    }
+
+    #[cfg(feature = "mmap")]
+    fn save_to(&self, dir: &std::path::Path, staging: bool) -> std::io::Result<()> {
+        self.refuse_unsafe_save_destination(dir, staging)?;
         std::fs::create_dir_all(dir)?;
         self.store.save(dir)?; // folds any delta-overlay into the persisted permutations
         self.dict.save_mmap(dir)?; // includes appended (delta-overlay) terms
@@ -1869,7 +1884,7 @@ impl Graph {
     /// after open to trade RAM for exactly-raw query speed instead.
     #[cfg(feature = "mmap")]
     pub fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
-        self.refuse_unsafe_save_destination(dir)?;
+        self.refuse_unsafe_save_destination(dir, false)?;
         std::fs::create_dir_all(dir)?;
         self.store.save_compressed(dir)?; // folds any delta-overlay, like `save`
         self.dict.save_mmap(dir)?;
@@ -1909,7 +1924,12 @@ impl Graph {
     /// question of which destinations a durable writer may route a save to belongs with the
     /// writer lock (PR #7136) and the versioned layout.
     #[cfg(feature = "mmap")]
-    fn refuse_unsafe_save_destination(&self, dir: &std::path::Path) -> std::io::Result<()> {
+    fn refuse_unsafe_save_destination(&self, dir: &std::path::Path, staging: bool) -> std::io::Result<()> {
+        // A store cannot be CREATED under a reserved staging name either (see `Graph::open`),
+        // unless this IS a swap writing its own staging directory (`save_staged`).
+        if !staging && is_reserved_staging_name(dir) {
+            return Err(reserved_staging_name_error(dir));
+        }
         let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
         let target = canon(dir);
         let mut mine = Vec::new();
@@ -2045,6 +2065,12 @@ impl Graph {
     /// Saving to a new directory persists current cache files without changing RDF.
     #[cfg(feature = "mmap")]
     pub fn open(dir: &std::path::Path) -> std::io::Result<Graph> {
+        // (sq-ycle) A directory whose own name ends in a staging suffix cannot be a
+        // store: its staging siblings would collide with a real store's, and the recovery below
+        // treats such a name as scratch space it may REMOVE. Refused before anything is read.
+        if is_reserved_staging_name(dir) {
+            return Err(reserved_staging_name_error(dir));
+        }
         // (review 1593) Finish or roll back any compaction directory swap that a
         // crash interrupted, so `dir` is always present (never lost in the rename window).
         recover_compaction(dir)?;
@@ -3668,8 +3694,8 @@ impl Graph {
     #[cfg(feature = "mmap")]
     fn persist_named_after_drop(&mut self, dir: &std::path::Path) -> Result<(), String> {
         let named_dir = dir.join(NAMED_SUBDIR);
-        let new_dir = named_dir.with_extension("drop-new");
-        let old_dir = named_dir.with_extension("drop-old");
+        let new_dir = staging_sibling(&named_dir, "drop-new");
+        let old_dir = staging_sibling(&named_dir, "drop-old");
 
         if self.named.is_empty() {
             remove_named_manifest(dir).map_err(|e| e.to_string())?;
@@ -3980,24 +4006,34 @@ impl Graph {
         // fallible one (it writes the whole image), and closing the WAL before it meant a
         // failure left a graph with `wal == None` that still accepted — and acknowledged —
         // updates that reached no log, so they were lost on the next open.
-        stage_new_base(dir, |new_dir| self.save(new_dir)).map_err(|e| e.to_string())?;
-        // Only now: `dir` (and the `wal.log` inside it) is about to be renamed away.
+        stage_new_base(dir, |new_dir| self.save_staged(new_dir)).map_err(|e| e.to_string())?;
+        let reopened = self.publish_staged_base_or_freeze(dir)?;
+        *self = reopened;
+        Ok(())
+    }
+
+    /// (sq-ycle) The SECOND half of every base swap, in ONE place: release this graph's
+    /// WAL (its `wal.log` is inside the directory about to be renamed), promote the base that
+    /// `stage_new_base` has already staged, and hand the re-opened graph this tree's shared
+    /// poison flag — or, if anything from the first rename onward fails, FREEZE the tree and say
+    /// so.
+    ///
+    /// Freezing is the point: past the release there is no log to append to and the directory may
+    /// be mid-swap, so a further acknowledged write would describe a state no reopen reproduces.
+    /// The reopen heals the swap (`recover_compaction`) and replays what is actually on disk.
+    /// Compaction, vacuum and any later swap caller share this, so there is one failure
+    /// behaviour rather than one per call site.
+    #[cfg(feature = "mmap")]
+    fn publish_staged_base_or_freeze(&mut self, dir: &std::path::Path) -> Result<Graph, String> {
         self.wal = None;
-        // Carry the ONE shared tree state across the re-open, so every handle in this tree keeps
-        // reading the same poison flag after a compaction (a freshly-opened graph starts with a
-        // detached flag of its own, which would split the tree in half).
         let tree = std::sync::Arc::clone(&self.tree);
         match promote_staged_base(dir) {
             Ok(mut reopened) => {
                 reopened.tree = tree;
                 reopened.share_tree();
-                *self = reopened;
-                Ok(())
+                Ok(reopened)
             }
             Err(e) => {
-                // Past this point the WAL is closed and the directory may be mid-swap, so no
-                // further durable write may be acknowledged: freeze the tree until the reopen,
-                // which heals the swap (`recover_compaction`) and replays what is on disk.
                 self.tree.poison();
                 Err(format!(
                     "durable base swap failed after the new base was staged; the store is frozen until it is reopened: {}",
@@ -4051,7 +4087,7 @@ impl Graph {
                 held.display()
             )));
         }
-        swap_dir_to_new_base(dir, |new_dir| fresh.save(new_dir))
+        swap_dir_to_new_base(dir, |new_dir| fresh.save_staged(new_dir))
     }
 
     /// Whether this graph, or any named graph under it, is backed by a directory (opened with
@@ -4120,24 +4156,9 @@ impl Graph {
             // Stage `fresh`'s image while THIS graph still holds its WAL, exactly as
             // `persist_swap` does: a staging failure must leave a writable store behind, not a
             // handle that acknowledges writes into a closed log.
-            stage_new_base(&dir, |new_dir| fresh.save(new_dir)).map_err(|e| e.to_string())?;
-            // Only now close this graph's WAL: `dir` (and its `wal.log`) is about to be renamed.
-            self.wal = None;
-            let tree = std::sync::Arc::clone(&self.tree);
-            match promote_staged_base(&dir) {
-                Ok(reopened) => {
-                    fresh = reopened;
-                    fresh.tree = tree;
-                    fresh.share_tree();
-                }
-                Err(e) => {
-                    self.tree.poison();
-                    return Err(format!(
-                        "durable vacuum swap failed after the new base was staged; the store is frozen until it is reopened: {}",
-                        e
-                    ));
-                }
-            }
+            stage_new_base(&dir, |new_dir| fresh.save_staged(new_dir)).map_err(|e| e.to_string())?;
+            // The same publish-or-freeze half the compaction uses.
+            fresh = self.publish_staged_base_or_freeze(&dir)?;
         }
         // Adopt the freshly re-interned (and, when persisted, re-opened) image in place.
         std::mem::swap(self, &mut fresh);
@@ -4241,8 +4262,8 @@ fn stage_new_base<F>(dir: &std::path::Path, write_new_base: F) -> std::io::Resul
 where
     F: FnOnce(&std::path::Path) -> std::io::Result<()>,
 {
-    let new_dir = dir.with_extension("compact-new");
-    let old_dir = dir.with_extension("compact-old");
+    let new_dir = staging_sibling(dir, "compact-new");
+    let old_dir = staging_sibling(dir, "compact-old");
     std::fs::remove_dir_all(&new_dir).ok();
     std::fs::remove_dir_all(&old_dir).ok();
     write_new_base(&new_dir)?;
@@ -4257,8 +4278,8 @@ where
 /// open — the caller must refuse further durable writes rather than carry on.
 #[cfg(feature = "mmap")]
 fn promote_staged_base(dir: &std::path::Path) -> std::io::Result<Graph> {
-    let new_dir = dir.with_extension("compact-new");
-    let old_dir = dir.with_extension("compact-old");
+    let new_dir = staging_sibling(dir, "compact-new");
+    let old_dir = staging_sibling(dir, "compact-old");
     let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
     std::fs::rename(dir, &old_dir)?;
     fsync_dir(parent)?;
@@ -4268,6 +4289,54 @@ fn promote_staged_base(dir: &std::path::Path) -> std::io::Result<Graph> {
     let reopened = Graph::open(dir)?;
     std::fs::remove_dir_all(&old_dir).ok();
     Ok(reopened)
+}
+
+/// (sq-ycle) The staging siblings a base swap and a named-graph drop use, as SUFFIXES
+/// appended to a store directory's WHOLE name — never as a file *extension*.
+///
+/// `Path::with_extension` REPLACES the part after the last dot, so `data.a` and `data.b` both
+/// staged through `data.compact-new`: two stores in one directory shared staging paths and a
+/// concurrent or interleaved swap could publish one store's base over the other's. It also made
+/// a store literally named `data.compact-old` derive its own path as its staging sibling, so the
+/// swap removed the store it was swapping.
+#[cfg(feature = "mmap")]
+const STAGING_SUFFIXES: [&str; 4] = ["compact-new", "compact-old", "drop-new", "drop-old"];
+
+/// (sq-ycle) `dir` plus `.<suffix>` appended to its full file name: the staging sibling
+/// of `data.a` is `data.a.compact-new`, not `data.compact-new`. See [`STAGING_SUFFIXES`].
+#[cfg(feature = "mmap")]
+fn staging_sibling(dir: &std::path::Path, suffix: &str) -> std::path::PathBuf {
+    let name = dir.file_name().map(|n| n.to_owned()).unwrap_or_default();
+    let mut name = name;
+    name.push(".");
+    name.push(suffix);
+    dir.with_file_name(name)
+}
+
+/// (sq-ycle) Whether `dir`'s own name ends in a reserved staging suffix, so it cannot be
+/// opened or created as a store: its staging siblings and a real store's would be the same paths,
+/// and recovery treats such a name as scratch space it may remove.
+#[cfg(feature = "mmap")]
+fn is_reserved_staging_name(dir: &std::path::Path) -> bool {
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    STAGING_SUFFIXES
+        .iter()
+        .any(|suffix| name.len() > suffix.len() + 1 && name.ends_with(suffix) && name.as_bytes()[name.len() - suffix.len() - 1] == b'.')
+}
+
+/// (sq-ycle) The error a reserved staging name is refused with, naming the directory.
+#[cfg(feature = "mmap")]
+fn reserved_staging_name_error(dir: &std::path::Path) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!(
+            "{} ends in a reserved staging suffix ({}), which a compaction or a named-graph drop uses for its own staging directories; rename the store",
+            dir.display(),
+            STAGING_SUFFIXES.join(", ")
+        ),
+    )
 }
 
 /// (sq-ycle) The path of a store directory at or under `dir` whose `txn.log` holds a
@@ -4326,8 +4395,8 @@ fn fsync_tree(dir: &std::path::Path) -> std::io::Result<()> {
 ///   BACK by restoring `compact-old`.
 #[cfg(feature = "mmap")]
 fn recover_compaction(dir: &std::path::Path) -> std::io::Result<()> {
-    let new_dir = dir.with_extension("compact-new");
-    let old_dir = dir.with_extension("compact-old");
+    let new_dir = staging_sibling(dir, "compact-new");
+    let old_dir = staging_sibling(dir, "compact-old");
     let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
     if dir.exists() {
         // Canonical dir is intact; drop any leftover siblings from a crash after the swap.
@@ -4374,8 +4443,8 @@ fn recover_compaction(dir: &std::path::Path) -> std::io::Result<()> {
 #[cfg(feature = "mmap")]
 fn recover_named_drop(dir: &std::path::Path) -> std::io::Result<()> {
     let named_dir = dir.join(NAMED_SUBDIR);
-    let new_dir = named_dir.with_extension("drop-new");
-    let old_dir = named_dir.with_extension("drop-old");
+    let new_dir = staging_sibling(&named_dir, "drop-new");
+    let old_dir = staging_sibling(&named_dir, "drop-old");
     if named_dir.exists() {
         // (sq-ycle) A retained `drop-old` beside a present `named/` is the window
         // between the sub-tree swap and the manifest rewrite that commits it.
@@ -11474,6 +11543,88 @@ mod tests {
         }
     }
 
+    /// (sq-ycle) Staging siblings are derived from a store's WHOLE name, so two stores
+    /// whose names differ only after a dot do not share them. `Path::with_extension` replaced the
+    /// part after the last dot, so `data.a` and `data.b` both staged through `data.compact-*`:
+    /// opening one store then removed the other's retained staging directory — its only copy
+    /// after a crash mid-swap — and a swap could publish one store's base over the other's.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn two_stores_whose_names_differ_after_a_dot_do_not_share_staging_directories() {
+        let root = txn_tmp_dir("staging-collide");
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        let a = root.join("data.a");
+        let b = root.join("data.b");
+        Graph::load_str("<http://ex/sa> <http://ex/p> <http://ex/oa> .", "ntriples")
+            .unwrap()
+            .save(&a)
+            .unwrap();
+        Graph::load_str("<http://ex/sb> <http://ex/p> <http://ex/ob> .", "ntriples")
+            .unwrap()
+            .save(&b)
+            .unwrap();
+        // Stage the state a crash between `data.a`'s two renames leaves: `data.a` is gone and its
+        // base is held in ITS OWN retained sibling.
+        let a_old = staging_sibling(&a, "compact-old");
+        std::fs::rename(&a, &a_old).unwrap();
+        assert!(!a.exists(), "data.a is mid-swap");
+
+        // Opening the OTHER store must not touch it. (Sharing `data.compact-old` meant this
+        // open removed data.a's only copy.)
+        let gb = Graph::open(&b).expect("the other store opens");
+        assert!(dump_terms(&gb).iter().any(|(s, _, _)| s.contains("sb")));
+        assert!(a_old.exists(), "the neighbour's retained staging directory survived");
+        drop(gb);
+
+        // And `data.a` recovers from its own sibling.
+        let ga = Graph::open(&a).expect("data.a is recovered from its own retained sibling");
+        assert!(
+            dump_terms(&ga).iter().any(|(s, _, _)| s.contains("sa")),
+            "the rolled-back store is data.a's, not data.b's"
+        );
+        assert!(!a_old.exists(), "and the sibling is consumed");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// (sq-ycle) A store whose own name ends in a reserved staging suffix is refused, on
+    /// open and on save. Such a store derives its own path as its staging sibling, so a swap
+    /// removed the store it was swapping, and recovery treats the name as scratch space.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_store_named_like_a_staging_directory_is_refused() {
+        let root = txn_tmp_dir("staging-name");
+        std::fs::remove_dir_all(&root).ok();
+        std::fs::create_dir_all(&root).unwrap();
+        let g = Graph::load_str("<http://ex/s> <http://ex/p> <http://ex/o> .", "ntriples").unwrap();
+        for suffix in STAGING_SUFFIXES {
+            let reserved = root.join(format!("data.{}", suffix));
+            let e = g
+                .save(&reserved)
+                .unwrap_err();
+            assert!(
+                e.to_string().contains("reserved staging suffix"),
+                "save to {}: unexpected error: {}",
+                reserved.display(),
+                e
+            );
+            // Even if such a directory exists already (made by an older build), it is not opened.
+            std::fs::create_dir_all(&reserved).unwrap();
+            match Graph::open(&reserved) {
+                Ok(_) => panic!("{} must not open as a store", reserved.display()),
+                Err(e) => assert!(
+                    e.to_string().contains("reserved staging suffix"),
+                    "open {}: unexpected error: {}",
+                    reserved.display(),
+                    e
+                ),
+            }
+        }
+        // A name that merely CONTAINS the word is fine: only the dotted suffix is reserved.
+        g.save(&root.join("compact-old-data")).expect("a name that is not the suffix still saves");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
     /// (sq-ycle) A named-graph DROP swaps the `named/` sub-tree BEFORE it rewrites the
     /// manifest that commits the new set, so a crash in between leaves a manifest naming one more
     /// slot than the sub-tree has — and the store did not open at all. Recovery now reconciles
@@ -12587,12 +12738,21 @@ mod tests {
         let base = std::env::temp_dir().join(format!("sparq_compact_recover_{}", std::process::id()));
         let dir = base.join("g");
         // Helper: build a graph dir with one triple naming `tag`.
+        // A staging sibling is built by saving to a scratch name and renaming it into place:
+        // `save` refuses a reserved staging name as a STORE destination (sq-ycle), which is
+        // exactly the protection this fixture is working around to stage a crash state.
         let build = |d: &std::path::Path, tag: &str| {
             std::fs::remove_dir_all(d).ok();
+            let scratch = d.with_file_name(format!(
+                "{}-scratch",
+                d.file_name().and_then(|n| n.to_str()).unwrap_or("x")
+            ));
+            std::fs::remove_dir_all(&scratch).ok();
             Graph::load_str(&format!("<http://ex/{tag}> <http://ex/p> <http://ex/o> ."), "ntriples")
                 .unwrap()
-                .save(d)
+                .save(&scratch)
                 .unwrap();
+            std::fs::rename(&scratch, d).unwrap();
         };
 
         // (a) Crash BETWEEN the two renames: dir missing, both siblings present. Recovery must
@@ -13438,12 +13598,21 @@ mod tests {
     fn vacuum_swap_crash_recovery() {
         let base = std::env::temp_dir().join(format!("sparq_vacuum_recover_{}", std::process::id()));
         let dir = base.join("g");
+        // A staging sibling is built by saving to a scratch name and renaming it into place:
+        // `save` refuses a reserved staging name as a STORE destination (sq-ycle), which is
+        // exactly the protection this fixture is working around to stage a crash state.
         let build = |d: &std::path::Path, tag: &str| {
             std::fs::remove_dir_all(d).ok();
+            let scratch = d.with_file_name(format!(
+                "{}-scratch",
+                d.file_name().and_then(|n| n.to_str()).unwrap_or("x")
+            ));
+            std::fs::remove_dir_all(&scratch).ok();
             Graph::load_str(&format!("<http://ex/{tag}> <http://ex/p> <http://ex/o> ."), "ntriples")
                 .unwrap()
-                .save(d)
+                .save(&scratch)
                 .unwrap();
+            std::fs::rename(&scratch, d).unwrap();
         };
         // (a) Crash BETWEEN the two renames (dir missing, both siblings present): the open must
         //     COMPLETE the swap by promoting the fully-synced new base.
