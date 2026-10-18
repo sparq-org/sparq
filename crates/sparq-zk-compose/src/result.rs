@@ -2216,10 +2216,14 @@ mod tests {
     /// downgrade can reach must be refused by name without it.
     #[test]
     fn no_contract_selects_a_method_unbound_member_under_the_default_policy() {
+        // `+ 1` past the deepest published status tree, so the sweep covers a
+        // depth no member exists at, exactly as it covers a credential slot and
+        // a hidden-filter slot past their bounds.
+        let past_bound = STATUS_DEPTHS.iter().copied().max().unwrap() + 1;
         let depths: Vec<u32> = STATUS_DEPTHS
             .iter()
             .copied()
-            .chain([0, POLICY_DEPTH, PUBLIC_PATTERN_STATUS_DEPTH])
+            .chain([0, POLICY_DEPTH, PUBLIC_PATTERN_STATUS_DEPTH, past_bound])
             .collect();
         let (mut bound, mut refused) = (0usize, 0usize);
         for contract in NumericContract::every() {
@@ -2274,6 +2278,121 @@ mod tests {
             bound,
             refused
         );
+    }
+
+    /// The default-policy refusal reaches the PUBLIC entry point, not only
+    /// `NumericContract::package`: [`verify_result`] itself refuses a
+    /// presentation over a retained legacy member, and it does so before any
+    /// proof work, so the refusal needs no toolchain. Under
+    /// `ResultPolicy::admit_unbound_legacy` the same call gets past member
+    /// selection and fails only later, on the absent proof — which is what makes
+    /// the refusal above attributable to the policy and nothing else.
+    #[test]
+    fn verify_result_refuses_a_legacy_member_under_the_default_policy() {
+        let (credentials, policy, nonce, rows) = fixture();
+        let prepared = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        let member = prepared.package;
+        assert_ne!(
+            prepared.presentation.version, BOUND_VERSION,
+            "{} is method-bound; this control needs a retained legacy member",
+            member
+        );
+        let driver = CircuitProver::from_crate_root();
+        let dir = std::env::temp_dir().join(format!(
+            "sparq_result_legacy_entry_{}",
+            std::process::id()
+        ));
+        let bound = ResultPolicy {
+            admit_unbound_legacy: false,
+            ..policy.clone()
+        };
+        let Err(ResultError::Rejected(refusal)) = verify_result(
+            QUERY,
+            &prepared.presentation,
+            &bound,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("refused"),
+        ) else {
+            panic!("the default policy must refuse a legacy member at verify_result");
+        };
+        assert!(
+            refusal.contains("no method-bound successful-result member"),
+            "unexpected refusal for {}: {}",
+            member,
+            refusal
+        );
+        let Err(ResultError::Rejected(later)) = verify_result(
+            QUERY,
+            &prepared.presentation,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("admitted"),
+        ) else {
+            panic!("the downgrade must carry an unproved presentation past member selection");
+        };
+        assert_eq!(
+            later, "missing proof",
+            "the downgrade must fail only on the absent proof, not on member selection"
+        );
+    }
+
+    /// The admitted direction end to end at the public entry point: a GENUINE
+    /// proof over a retained legacy member verifies under the written-down
+    /// downgrade and is refused by name without it. Same presentation, same
+    /// proof, same nonce — only the policy differs.
+    #[test]
+    #[ignore = "requires pinned nargo and bb; proves a retained legacy member and verifies it through verify_result"]
+    fn result_real_legacy_member_verifies_only_under_the_written_down_downgrade() {
+        pinned_toolchain().unwrap();
+        let (credentials, policy, nonce, rows) = fixture();
+        let prepared = prepare_result(QUERY, &credentials, &rows, &policy, &nonce).unwrap();
+        let member = prepared.package;
+        assert_ne!(prepared.presentation.version, BOUND_VERSION);
+        let dir = std::env::temp_dir().join(format!(
+            "sparq_result_legacy_live_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let driver = CircuitProver::from_crate_root();
+        let p = prepared
+            .prove(&driver, &dir.join("proof"), "--result_legacy_downgrade-v1")
+            .unwrap();
+        let bound = ResultPolicy {
+            admit_unbound_legacy: false,
+            ..policy.clone()
+        };
+        let Err(ResultError::Rejected(refusal)) = verify_result(
+            QUERY,
+            &p,
+            &bound,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("refused"),
+        ) else {
+            panic!("a proved legacy member must still be refused by the default policy");
+        };
+        assert!(
+            refusal.contains("no method-bound successful-result member"),
+            "unexpected refusal for {}: {}",
+            member,
+            refusal
+        );
+        let verified = verify_result(
+            QUERY,
+            &p,
+            &policy,
+            &nonce,
+            &InMemorySeenNonces::default(),
+            &driver,
+            &dir.join("admitted"),
+        )
+        .expect("the written-down downgrade verifies already-issued legacy material");
+        assert_eq!(verified.rows, rows);
     }
 
     /// `challenge` carries no arithmetic constraint of its own, so the host pins
@@ -2783,6 +2902,18 @@ mod tests {
                 ) else {
                     panic!("{name}: {kind} substitution was not a typed verifier rejection");
                 };
+                // The swapped-challenge control satisfies every host-side pin —
+                // the envelope and the verifier's own nonce agree — so it is
+                // meaningful only if the CRYPTOGRAPHIC check is what refused it.
+                // A bare "some typed rejection" would also pass on a host
+                // refusal and leave the proof's challenge binding unexercised.
+                if kind == "nonce" {
+                    assert_eq!(
+                        reason, "cryptographic proof rejected",
+                        "{}: a swapped challenge must be refused by the proof check",
+                        name
+                    );
+                }
                 controls.push(json!({"kind": kind, "error": reason}));
             }
             let expected_rows: Vec<BTreeMap<_, _>> = rows
@@ -4118,21 +4249,31 @@ mod tests {
             &dir.join("substitution")
         )
         .is_err());
-        // Changing both the envelope and verifier nonce passes host equality;
-        // the old cryptographic proof must still reject the different challenge.
+        // Changing both the envelope and verifier nonce passes host equality, so
+        // every host-side pin is satisfied and only the CRYPTOGRAPHIC check can
+        // refuse the different challenge. Pin that specific refusal: an
+        // `is_err()` here would also be satisfied by a host rejection, which
+        // would leave the proof's challenge binding unexercised.
         let fresh_nonce = VerifierNonce::from_field(Fr::from(999_999u64));
         let mut rechallenged = p.clone();
         rechallenged.challenge = fresh_nonce.as_field_hex();
-        assert!(verify_result(
+        let rechallenged_refusal = verify_result(
             QUERY,
             &rechallenged,
             &policy,
             &fresh_nonce,
             &InMemorySeenNonces::default(),
             &driver,
-            &dir.join("challenge_binding")
-        )
-        .is_err());
+            &dir.join("challenge_binding"),
+        );
+        assert!(
+            matches!(
+                rechallenged_refusal,
+                Err(ResultError::Rejected(ref s)) if s == "cryptographic proof rejected"
+            ),
+            "a swapped challenge must be refused by the proof check, got {:?}",
+            rechallenged_refusal.map(|v| v.rows)
+        );
 
         // VKs can be shared between backend modes. Test an actual non-ZK proof,
         // rather than incorrectly assuming the VK itself records masking mode.
