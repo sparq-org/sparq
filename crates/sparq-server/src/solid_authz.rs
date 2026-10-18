@@ -448,14 +448,22 @@ fn parse_request(body: &Bytes) -> Result<AuthzRequest, Response> {
 // other handler helpers.
 #[allow(clippy::result_large_err)]
 fn build_store(req: &AuthzRequest) -> Result<PodStore, Response> {
-    let graph = sparq_core::Graph::load_dataset(&req.dataset, "nquads").map_err(|_| {
+    build_store_from(&req.dataset, req.view)
+}
+
+/// [`build_store`] over the two fields it reads, so the blocking-pool lane
+/// ([`resolve_store`]) can own them for the task rather than borrow the request.
+// `Response` is large; same `result_large_err` allow as the rest of this module.
+#[allow(clippy::result_large_err)]
+fn build_store_from(dataset: &str, requested_view: Option<AuthView>) -> Result<PodStore, Response> {
+    let graph = sparq_core::Graph::load_dataset(dataset, "nquads").map_err(|_| {
         // The parser's detail is withheld from the client (info-leak posture); the class is enough.
         json_error(
             StatusCode::BAD_REQUEST,
             "'dataset' is not valid N-Quads",
         )
     })?;
-    let view = req.view.unwrap_or_else(|| infer_view(&req.dataset));
+    let view = requested_view.unwrap_or_else(|| infer_view(dataset));
     let mut store = PodStore::new(graph);
     let materialized = match view {
         AuthView::Wac => store.materialize_wac(),
@@ -686,8 +694,32 @@ async fn server_store(
     }
 }
 
+/// [`build_store`] on the blocking pool — the STATELESS lane's counterpart of
+/// [`server_store`].
+///
+/// This lane parses and materialises the REQUEST's own dataset, so its cost is set by the
+/// body: the N-Quads parse, the resource enumeration and the N3 materialisation are all
+/// CPU-bound, all bounded by `sparq_solid::AuthBudget` rather than instant, and so must no
+/// more occupy an async worker than the stateful lane's whole-store run does. A join failure
+/// is the same fail-closed 503 a materialisation failure is: no decision is produced.
+// `Response` is large; same `result_large_err` allow as the rest of this module.
+#[allow(clippy::result_large_err)]
+async fn body_store(req: &AuthzRequest) -> Result<PodStore, Response> {
+    // The task outlives the borrow of `req`, so it owns the two fields `build_store` reads.
+    let dataset = req.dataset.clone();
+    let view = req.view;
+    let task = tokio::task::spawn_blocking(move || build_store_from(&dataset, view));
+    match task.await {
+        Ok(built) => built,
+        Err(_) => Err(json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "could not materialise the authorization view",
+        )),
+    }
+}
+
 /// The store an endpoint decides over, per the request's [`AuthzSource`]: the stateless
-/// per-request build ([`build_store`]) or the stateful per-generation view ([`server_store`]).
+/// per-request build ([`body_store`]) or the stateful per-generation view ([`server_store`]).
 /// Both lanes are fail-closed; neither can yield a store that silently grants.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
@@ -696,7 +728,7 @@ async fn resolve_store(
     req: &AuthzRequest,
 ) -> Result<ResolvedStore, Response> {
     match req.source {
-        AuthzSource::Body => build_store(req).map(|s| ResolvedStore::Owned(Box::new(s))),
+        AuthzSource::Body => body_store(req).await.map(|s| ResolvedStore::Owned(Box::new(s))),
         AuthzSource::Server => server_store(state, req.view).await.map(ResolvedStore::Shared),
     }
 }

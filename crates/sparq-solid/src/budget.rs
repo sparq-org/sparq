@@ -8,7 +8,10 @@
 //!   ([`crate::loader`]), and the reasoner's `max_term_bytes` bounds only the terms its
 //!   builtins DERIVE — not a term an untrusted writer put in a document. So the input
 //!   itself needs a budget: per-document and aggregate bytes, the length of one term, and
-//!   the number of facts.
+//!   the number of facts. The input also carries the pod's RESOURCE ENUMERATION, which
+//!   owns a prefix string per container on every resource's chain and so grows with the
+//!   resource IRIs rather than with the documents' bytes or the fact count — bounded here
+//!   by a length and a depth cap per IRI and by the aggregate byte budget over all of them.
 //! * **The whole decision.** [`sparq_reason::ClosureLimits`] applies per CLOSURE, and one
 //!   authorization decision runs several: ACP runs three strata (accepts → rejections →
 //!   grants) and the ODRL bridge runs five, each its own closure getting the allowance
@@ -37,7 +40,9 @@ pub struct AuthBudget {
     /// Approximate bytes ONE control or group document may contribute to the reasoning
     /// input: its terms' lexical bytes plus a fixed cost per term.
     pub max_document_bytes: usize,
-    /// The same bytes summed over EVERY document the input is assembled from.
+    /// The same bytes summed over EVERY document the input is assembled from, plus the
+    /// bytes of the resource enumeration (see [`AuthBudget::max_resource_iri_bytes`]):
+    /// everything the input assembly owns that grows with what the pod holds.
     pub max_input_bytes: usize,
     /// Facts the assembled reasoning input may carry, document content and the
     /// structural/provenance/credential facts together.
@@ -45,6 +50,19 @@ pub struct AuthBudget {
     /// Approximate bytes of ONE term of the input — the counterpart of
     /// [`sparq_reason::ClosureLimits::max_term_bytes`], which bounds only derived terms.
     pub max_input_term_bytes: usize,
+    /// Bytes of ONE resource IRI the input's resource enumeration may walk. A resource of
+    /// the view brings every container on its chain, so an IRI of length L with D
+    /// containers makes D owned prefix strings totalling up to L x D bytes — a cost that
+    /// grows with the IRI itself, is paid before any fact exists to count, and that
+    /// neither [`AuthBudget::max_document_bytes`] nor [`AuthBudget::max_input_facts`]
+    /// bounds. This caps the L of that product, [`AuthBudget::max_resource_path_depth`]
+    /// caps the D, and the strings are charged against
+    /// [`AuthBudget::max_input_bytes`] as they are made.
+    pub max_resource_iri_bytes: usize,
+    /// Containers one resource IRI's chain may have — the D of the product
+    /// [`AuthBudget::max_resource_iri_bytes`] caps the L of. Charged before the chain is
+    /// walked, so a deeper IRI is refused instead of walked.
+    pub max_resource_path_depth: usize,
     /// Binding rows and rule firings summed over ALL closures of one authorization
     /// materialization (`ClosureLimits::max_total_join_rows` bounds one closure, and a
     /// materialization runs several).
@@ -67,6 +85,11 @@ pub struct AuthBudget {
 /// of those, rounded up. Those minima are recorded in the per-constant docs below rather
 /// than in any markdown, since they are specific to these fixtures and this box.
 ///
+/// The two resource-enumeration fields are sized the same way against the same fixtures,
+/// but from their MAXIMA rather than by bisection: a resource IRI's length and its
+/// container depth are properties of the pod's names, so what the fixtures need is the
+/// longest and the deepest name they hold, not a value a run either fits in or does not.
+///
 /// (A cross-check on the whole-decision figure: WAC runs ONE closure, and its measured
 /// `max_decision_join_rows` minimum is exactly the `max_total_join_rows` minimum
 /// [`crate::default_auth_limits`] records for the same fixture — the aggregate ledger and
@@ -81,6 +104,8 @@ pub fn default_auth_budget() -> AuthBudget {
         max_input_bytes: AUTH_MAX_INPUT_BYTES,
         max_input_facts: AUTH_MAX_INPUT_FACTS,
         max_input_term_bytes: AUTH_MAX_INPUT_TERM_BYTES,
+        max_resource_iri_bytes: AUTH_MAX_RESOURCE_IRI_BYTES,
+        max_resource_path_depth: AUTH_MAX_RESOURCE_PATH_DEPTH,
         max_decision_join_rows: AUTH_MAX_DECISION_JOIN_ROWS,
         max_decision_facts: AUTH_MAX_DECISION_FACTS,
     }
@@ -89,21 +114,39 @@ pub fn default_auth_budget() -> AuthBudget {
 /// Bytes one control or group document may contribute to the reasoning input. Smallest
 /// value the fixtures still materialize under: 3,568; this is ~18x it.
 const AUTH_MAX_DOCUMENT_BYTES: usize = 64 << 10;
-/// Bytes all documents together may contribute. Fixture minimum 61,722; ~17x it.
+/// Bytes all documents AND the resource enumeration together may contribute. Fixture
+/// minimum 98,054; ~10x it.
 const AUTH_MAX_INPUT_BYTES: usize = 1 << 20;
 /// Facts the assembled input may carry. Fixture minimum 2,520; ~13x it.
 const AUTH_MAX_INPUT_FACTS: usize = 32_000;
 /// Bytes of one input term. Fixture minimum 114; ~36x it — a legitimate ACL can carry a
 /// long IRI or a long literal, and this dimension costs nothing to leave roomy.
 const AUTH_MAX_INPUT_TERM_BYTES: usize = 4 << 10;
+/// Bytes of one resource IRI the enumeration may walk. Longest resource IRI over the
+/// fixtures: 36 bytes; this is ~56x it — the dimension a legitimate pod is likeliest to
+/// want room in (a long percent-encoded name), and the enumeration's real bound is the
+/// aggregate [`AUTH_MAX_INPUT_BYTES`] rather than this.
+const AUTH_MAX_RESOURCE_IRI_BYTES: usize = 2 << 10;
+/// Containers one resource IRI's chain may have. Deepest over the fixtures: 4; this is 16x
+/// it. The product with [`AUTH_MAX_RESOURCE_IRI_BYTES`] is what one resource's chain may
+/// own (128 KiB), and the aggregate caps the sum of those at [`AUTH_MAX_INPUT_BYTES`].
+const AUTH_MAX_RESOURCE_PATH_DEPTH: usize = 64;
 /// Binding rows and firings over ALL closures of one materialization. Fixture minimum
 /// 357,200; ~11x it. Deliberately the same value as one closure's `max_total_join_rows`,
-/// so an ACP view's three strata TOGETHER may not do more work than a single-stratum WAC
-/// view may — the aggregate is never looser than the per-closure cap.
+/// so the ACCEPTED aggregate of an ACP view's three strata is no looser than what a
+/// single-stratum WAC view may spend.
+///
+/// The ledger is charged when a closure RETURNS ([`DecisionWork::charge`]), so the closure
+/// that pushes the aggregate past this has already run to completion under its own
+/// per-closure cap: the PEAK a refused decision reaches is this value plus one closure's
+/// `max_total_join_rows`, and this bounds exactly the work of a decision that is accepted.
+/// Both are finite, since every closure is independently capped.
 const AUTH_MAX_DECISION_JOIN_ROWS: usize = 4_000_000;
 /// Facts over all closures' fixpoints of one materialization. Fixture minimum 34,603;
 /// ~15x it, and 2x one closure's `max_facts`, so the strata of an ACP view may not each
-/// hold a full closure's worth.
+/// hold a full closure's worth. As with [`AUTH_MAX_DECISION_JOIN_ROWS`], this is the
+/// accepted aggregate: a refused decision's peak is this plus the one closure's `max_facts`
+/// that crossed it.
 const AUTH_MAX_DECISION_FACTS: usize = 512_000;
 
 /// The fixed cost [`term_bytes`] charges per term node, on top of its lexical bytes — the
@@ -212,6 +255,67 @@ impl InputMeter {
                      max_input_bytes ({}) to the reasoning input (reached while reading <{}>); \
                      the authorization view is not built (fail-closed)",
                     self.budget.max_input_bytes, iri
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Admit `iri` into the resource enumeration: its length against
+    /// [`AuthBudget::max_resource_iri_bytes`] and its container depth against
+    /// [`AuthBudget::max_resource_path_depth`], BEFORE anything that grows with that depth
+    /// is allocated.
+    ///
+    /// The length is checked first, so the depth walk that follows it is itself bounded
+    /// (it stops one step past the depth cap, over an IRI already known to be short).
+    pub(crate) fn resource(&mut self, iri: &str) -> Result<(), String> {
+        if iri.len() > self.budget.max_resource_iri_bytes {
+            return Err(allowance_refusal(
+                AuthAllowance::ResourceIri,
+                &format!(
+                    "a resource of this pod is named by an IRI of {} bytes, past the \
+                     max_resource_iri_bytes budget ({}); the authorization view is not \
+                     built (fail-closed)",
+                    iri.len(),
+                    self.budget.max_resource_iri_bytes
+                ),
+            ));
+        }
+        let mut depth = 0usize;
+        let mut cur = iri;
+        while let Some(parent) = crate::loader::parent_iri(cur) {
+            depth += 1;
+            if depth > self.budget.max_resource_path_depth {
+                return Err(allowance_refusal(
+                    AuthAllowance::ResourceIri,
+                    &format!(
+                        "a resource of this pod is under more than max_resource_path_depth \
+                         ({}) containers; the authorization view is not built (fail-closed)",
+                        self.budget.max_resource_path_depth
+                    ),
+                ));
+            }
+            cur = parent;
+        }
+        Ok(())
+    }
+
+    /// Charge `n` bytes of the resource enumeration — one resource or container string —
+    /// against the AGGREGATE [`AuthBudget::max_input_bytes`], before that string is owned.
+    ///
+    /// Per-resource caps bound one chain; this is what bounds the sum of them, so the
+    /// enumeration of a whole pod cannot cost more than the input budget whatever shape
+    /// its names have.
+    pub(crate) fn resource_bytes(&mut self, n: usize) -> Result<(), String> {
+        self.bytes = self.bytes.saturating_add(n);
+        if self.bytes > self.budget.max_input_bytes {
+            return Err(allowance_refusal(
+                AuthAllowance::InputBytes,
+                &format!(
+                    "this pod's resources and their containers contribute more than \
+                     max_input_bytes ({}) to the reasoning input; the authorization view is \
+                     not built (fail-closed)",
+                    self.budget.max_input_bytes
                 ),
             ));
         }
