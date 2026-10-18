@@ -446,7 +446,10 @@ impl PathFormBudget {
     /// [`MAX_PATH_FORM_ROWS`]. Checked arithmetic: an overflowing total is a
     /// refusal, never a wrapped count that would slip under the budget.
     fn charge(&mut self, rows: usize) -> Result<(), MpcError> {
-        let total = self.charged.checked_add(rows).filter(|t| *t <= MAX_PATH_FORM_ROWS);
+        let total = self
+            .charged
+            .checked_add(rows)
+            .filter(|t| *t <= MAX_PATH_FORM_ROWS);
         match total {
             Some(t) => {
                 self.charged = t;
@@ -991,9 +994,9 @@ fn eval_repetition(
     let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut union_rows: Vec<Vec<Option<Term>>> = Vec::new();
     let keep = |rows: Vec<Vec<Option<Term>>>,
-                    budget: &mut PathFormBudget,
-                    seen: &mut BTreeSet<String>,
-                    union_rows: &mut Vec<Vec<Option<Term>>>|
+                budget: &mut PathFormBudget,
+                seen: &mut BTreeSet<String>,
+                union_rows: &mut Vec<Vec<Option<Term>>>|
      -> Result<(), MpcError> {
         // Charge every row the chain produced, deduped or not: producing it is the
         // work, and dropping a duplicate afterwards does not un-do it.

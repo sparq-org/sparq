@@ -215,6 +215,19 @@ fn checked_item_count(
 /// The refusal names the FIELD (`value` or `point`) and the modulus, both public.
 /// It does not print the word: a share's value is secret-shared data, and a
 /// refusal is exactly where such a word would otherwise reach a log.
+/// How much a receiver may reserve for a body of `len` declared bytes BEFORE any
+/// of them have arrived: one [`RECV_CHUNK_BYTES`] chunk at most.
+///
+/// The declared length is the peer's own number, checked only against
+/// [`MAX_FRAME_BYTES`], so reserving `len` would let a 9-byte header commit the
+/// receiver to the whole cap. The body then grows as bytes actually arrive. This
+/// is the decision itself rather than a hint, so it is a named function with its
+/// own test: the reservation is not observable through the public API, and
+/// `a_declared_length_commits_at_most_one_chunk` can only pin the READ sizes.
+fn initial_body_capacity(len: usize) -> usize {
+    len.min(RECV_CHUNK_BYTES)
+}
+
 fn require_canonical(field: &str, word: u64) -> Result<(), MpcError> {
     if word >= P {
         return Err(MpcError::Protocol(format!(
@@ -485,11 +498,11 @@ impl<S: Read + Write> Channel<S> {
     /// Read `len` body bytes, growing the buffer as they ARRIVE.
     ///
     /// Reserves at most [`RECV_CHUNK_BYTES`] ahead of the bytes that are actually
-    /// there, so the peer's declared length bounds the total but never the
-    /// commitment: a short or absent body fails on the read with one chunk
-    /// reserved, whatever it declared.
+    /// there (`initial_body_capacity`), so the peer's declared length bounds the
+    /// total but never the commitment: a short or absent body fails on the read
+    /// with one chunk reserved, whatever it declared.
     fn read_body(&mut self, len: usize) -> Result<Vec<u8>, MpcError> {
-        let mut body: Vec<u8> = Vec::with_capacity(len.min(RECV_CHUNK_BYTES));
+        let mut body: Vec<u8> = Vec::with_capacity(initial_body_capacity(len));
         let mut chunk = [0u8; RECV_CHUNK_BYTES];
         let mut remaining = len;
         while remaining > 0 {
@@ -1271,6 +1284,26 @@ pub fn run_cell_networked(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The receiver's PRE-ARRIVAL reservation is one chunk at most, whatever the
+    /// peer declared. `a_declared_length_commits_at_most_one_chunk` pins the read
+    /// sizes; this pins the reservation, which no public call reveals — a body
+    /// that is fully delivered ends up `len` bytes long either way, and one that
+    /// is not delivered returns an error instead of a buffer.
+    #[test]
+    fn the_pre_arrival_reservation_is_one_chunk_at_most() {
+        // A declared length at the frame cap reserves one chunk, not the cap.
+        assert_eq!(initial_body_capacity(MAX_FRAME_BYTES), RECV_CHUNK_BYTES);
+        assert_eq!(
+            initial_body_capacity(RECV_CHUNK_BYTES + 1),
+            RECV_CHUNK_BYTES
+        );
+        // A body that fits in one chunk is reserved exactly, so the common small
+        // frame still takes one allocation.
+        assert_eq!(initial_body_capacity(0), 0);
+        assert_eq!(initial_body_capacity(9), 9);
+        assert_eq!(initial_body_capacity(RECV_CHUNK_BYTES), RECV_CHUNK_BYTES);
+    }
 
     // --- Codec round-trips every message variant. --------------------------
     #[test]

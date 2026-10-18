@@ -1482,7 +1482,10 @@ fn differential_hidden_blank_node_of_the_loaded_graph_yields_its_identity_pair()
         engine_pairs_from(&graph, "ex:p?"),
         "the hidden p? must equal the engine's over the same loaded graph"
     );
-    let blanks = got.iter().filter(|(a, b)| a.starts_with("_:") && a == b).count();
+    let blanks = got
+        .iter()
+        .filter(|(a, b)| a.starts_with("_:") && a == b)
+        .count();
     assert_eq!(
         blanks, 1,
         "the loaded graph's blank node must contribute its identity pair: {got:?}"

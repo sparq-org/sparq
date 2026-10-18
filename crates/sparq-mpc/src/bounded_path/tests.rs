@@ -2042,8 +2042,7 @@ fn the_row_budget_charges_the_zero_length_diagonal_too() {
         err
     );
     let mut exact = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - spend);
-    let got =
-        eval_with_budget(&edges, &nullable, &mut exact).expect("exactly enough budget runs");
+    let got = eval_with_budget(&edges, &nullable, &mut exact).expect("exactly enough budget runs");
     assert_eq!(got.rows, baseline.rows);
 }
 
