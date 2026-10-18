@@ -18,23 +18,25 @@ use super::*;
 /// what the store says of the record is not yet final: its fence ([`Store::fence`]) is made to
 /// succeed first, and only then is the record read. A fence that does not succeed leaves the
 /// removal where it was, and the original error is returned rather than the record being
-/// reported gone.
+/// reported gone. The fence is waited for as long as the store's own call takes (bounded by the
+/// store, as every call is): this runs outside any request (putting a change back, clearing an
+/// intent), which a short cap would leave unable to finish over a slow store.
 pub(crate) async fn delete_record<S: Store>(
     store: &S,
     iri: &str,
     container: &str,
 ) -> Result<(), crate::error::ServerError> {
-    let deadline = tokio::time::Instant::now() + LOCK_WAIT;
-    delete_record_by(store, iri, container, deadline).await
+    delete_record_by(store, iri, container, None).await
 }
 
-/// [`delete_record`], waiting for an unsettled removal's fence until `deadline` at most: one
-/// that has not succeeded by then leaves the removal unsettled, as one that fails does.
+/// [`delete_record`], waiting for an unsettled removal's fence until `deadline` at most, when
+/// one is given (a request's): one that has not succeeded by then leaves the removal unsettled,
+/// as one that fails does.
 async fn delete_record_by<S: Store>(
     store: &S,
     iri: &str,
     container: &str,
-    deadline: tokio::time::Instant,
+    deadline: Option<tokio::time::Instant>,
 ) -> Result<(), crate::error::ServerError> {
     match remove_member(store, iri, Some(container)).await {
         Ok(_) | Err(crate::error::ServerError::NotFound) => Ok(()),
@@ -85,28 +87,41 @@ pub(crate) async fn still_listed<S: Store>(
 /// long at most ([`fenced_by`]).
 const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 
-/// Whether `fence` succeeded by `deadline`: one that fails, or does not answer by then, leaves
-/// the write it fences unsettled, to be fenced again (by the background settlement, for a
-/// removal a request made), so no request waits on a store that stalls.
+/// Whether `fence` succeeded by `deadline` (when one is given): one that fails, or does not
+/// answer by then, leaves the write it fences unsettled, to be fenced again (by the background
+/// settlement, for a removal a request made), so no request waits on a store that stalls.
 async fn fenced_by<S: Store>(
     store: &S,
     fence: &crate::store::Fence,
-    deadline: tokio::time::Instant,
+    deadline: Option<tokio::time::Instant>,
 ) -> bool {
-    matches!(
-        tokio::time::timeout_at(deadline, store.fence(fence)).await,
-        Ok(Ok(()))
-    )
+    match deadline {
+        Some(deadline) => matches!(
+            tokio::time::timeout_at(deadline, store.fence(fence)).await,
+            Ok(Ok(()))
+        ),
+        None => store.fence(fence).await.is_ok(),
+    }
 }
 
-/// One attempt at `fence` by a settlement in the background, given up after [`LOCK_WAIT`] (to
-/// be tried again, see `until_done`) rather than left waiting on a call that never answers.
-async fn fence_attempt<S: Store>(store: &S, fence: &crate::store::Fence) -> Result<(), ()> {
-    let deadline = tokio::time::Instant::now() + LOCK_WAIT;
-    fenced_by(store, fence, deadline)
-        .await
-        .then_some(())
-        .ok_or(())
+/// Fence `fence` in the background until it succeeds: each attempt is given up after a time
+/// that starts at [`LOCK_WAIT`] and doubles up to the store's own call timeout
+/// ([`crate::store::STORE_CALL_TIMEOUT`]), then tried again (`until_done`), so a fence that
+/// never answers does not hold the settlement on one call, and one that answers slowly (within
+/// the store's timeout) is still waited for long enough to succeed.
+async fn fence_in_background<S: Store>(store: &S, fence: &crate::store::Fence) {
+    let mut within = LOCK_WAIT;
+    until_done(|| {
+        let deadline = tokio::time::Instant::now() + within;
+        within = (within * 2).min(crate::store::STORE_CALL_TIMEOUT);
+        async move {
+            fenced_by(store, fence, Some(deadline))
+                .await
+                .then_some(())
+                .ok_or(())
+        }
+    })
+    .await
 }
 
 /// Take a lock (`lock`, from [`resources::IriLocks`]) in the request path, waiting at most
@@ -528,7 +543,7 @@ where
         let mut refused = false;
         // The request waits for the delete's fence (in `delete_record_by` and again below) for
         // LOCK_WAIT in all.
-        let deadline = tokio::time::Instant::now() + LOCK_WAIT;
+        let deadline = Some(tokio::time::Instant::now() + LOCK_WAIT);
         let gone = match delete_record_by(&state.store, &iri, &container, deadline).await {
             Ok(()) => Some(true),
             // A delete that failed unsettled can still commit until its fence succeeds, so no
@@ -563,7 +578,7 @@ where
                         let (iri, container) = (iri.clone(), container.clone());
                         state.settlements.spawn(async move {
                             let _held = (place, own_listing);
-                            until_done(|| fence_attempt(&store, &fence)).await;
+                            fence_in_background(&store, &fence).await;
                             let listed =
                                 until_done(|| still_listed(&store, &iri, &container)).await;
                             let Some(state) = weak.upgrade() else {
@@ -983,6 +998,53 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
         assert_eq!(*settled.lock().unwrap(), Some(false));
+    }
+
+    /// A fence slower than `LOCK_WAIT` but within the store's own call timeout: the request
+    /// answers that the outcome is not known, and the background settlement, whose attempts
+    /// are allowed longer each time, settles the removal and releases its locks.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_fence_slower_than_the_lock_wait_still_settles() {
+        let (state, store) = super::super::test_store::state(100).await;
+        let (container, iri) = listed_record(&state, "r1").await;
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        let slow = LOCK_WAIT + std::time::Duration::from_millis(500);
+        store
+            .slow_fence_ms
+            .store(slow.as_millis() as u64, Ordering::SeqCst);
+        let settled = Arc::new(std::sync::Mutex::new(None));
+        let r = remove_as_request(&state, &container, &iri, settled.clone()).await;
+        assert_eq!(r.err().unwrap().status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let began = tokio::time::Instant::now();
+        while began.elapsed() < LOCK_WAIT * 6 {
+            if settled.lock().unwrap().is_some()
+                && state.locks.try_lock(&container).is_some()
+                && state.locks.try_lock(&iri).is_some()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(settled.lock().unwrap().is_some(), "never settled");
+        assert!(state.locks.try_lock(&container).is_some());
+        assert!(state.locks.try_lock(&iri).is_some());
+    }
+
+    /// Removing a record outside a request (putting a change back, clearing an intent) waits
+    /// for an unsettled removal's fence as long as the store takes, not `LOCK_WAIT`.
+    #[tokio::test]
+    async fn a_removal_outside_a_request_waits_for_a_slow_fence() {
+        let store = super::super::test_store::FlakyStore::new();
+        let container = "http://localhost:3000/.lws/grants/";
+        let iri = format!("{container}g1");
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        let slow = LOCK_WAIT + std::time::Duration::from_millis(500);
+        store
+            .slow_fence_ms
+            .store(slow.as_millis() as u64, Ordering::SeqCst);
+        delete_record(&store, &iri, container)
+            .await
+            .expect("settled once the slow fence answered");
     }
 
     /// Review of #7135: a removal the store refused for want of room was answered `500`, the

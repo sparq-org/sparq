@@ -2927,6 +2927,9 @@ pub(crate) mod test_store {
         pub fences_tried: Arc<std::sync::atomic::AtomicUsize>,
         /// `fence` never answers, as a call to a store that stalls.
         pub hang_fence: Arc<AtomicBool>,
+        /// Every `fence` takes this many milliseconds before answering (0: at once), as a call
+        /// to a slow store.
+        pub slow_fence_ms: Arc<std::sync::atomic::AtomicU64>,
         /// What the last write reported unsettled changes (its fence's `touches`).
         pub last_unsettled: Arc<std::sync::Mutex<Vec<String>>>,
         /// Each unsettled write by its fence's nonce: whether it is fenced, locked while it
@@ -3005,6 +3008,7 @@ pub(crate) mod test_store {
                 fail_fence: Default::default(),
                 fences_tried: Default::default(),
                 hang_fence: Default::default(),
+                slow_fence_ms: Default::default(),
                 fail_release: Default::default(),
                 failing_holds: Default::default(),
                 last_unsettled: Default::default(),
@@ -3429,6 +3433,10 @@ pub(crate) mod test_store {
             self.fences_tried.fetch_add(1, Ordering::SeqCst);
             if self.hang_fence.load(Ordering::SeqCst) {
                 std::future::pending::<()>().await;
+            }
+            let slow = self.slow_fence_ms.load(Ordering::SeqCst);
+            if slow > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(slow)).await;
             }
             if self.fail_fence.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("the store cannot be reached".into()));

@@ -89,7 +89,7 @@ pub use limits::{
     in_service_pool, is_hold_record, is_pooled_blob_key, is_service_marker, InMemoryStoreLimits,
     StoreUsage, DEFAULT_IN_MEMORY_MAX_POOL_BYTES, DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT,
     DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT, DEFAULT_IN_MEMORY_MAX_TOTAL_BYTES, POOLED_BLOB_KEY_MARK,
-    SERVICE_MARKER_FRAGMENT, SERVICE_POOL_PATH,
+    SERVICE_MARKER_FRAGMENT, SERVICE_POOL_PATH, STORE_CALL_TIMEOUT,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use reconcile::spawn_periodic;
