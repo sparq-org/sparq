@@ -345,7 +345,8 @@ what it waits on is a change to its own subscriptions, the inline purge of its o
 above, or the owner's conditional create (which holds the container alone, and once queued keeps
 later shared holders waiting behind it, so then, for at most the lock wait, another
 subscriber's change too), never another subscriber's create or removal otherwise, and never
-the sweeper's removal of anyone else's expired subscription, which is listed nowhere. An access document nested too deeply to store and read back gets 400. A
+the sweeper's removal of anyone else's expired subscription, which is listed nowhere (once seen
+expired, a subscription stays expired, even if the clock is stepped back). An access document nested too deeply to store and read back gets 400. A
 request's Link headers may declare at most 128 relations holding
 64 KiB of targets between them, and `Accept`, `Prefer`, `If-Match` and `If-None-Match` at most
 64 members each (431 past either); the targets are weighed as resolved against the resource.
@@ -496,11 +497,17 @@ What the server exposes, all discoverable from the storage description
   may still apply) is fenced first: the client writes a fence that the update, if it has not
   been applied yet, finds and then does nothing. Only a listing read after the fence counts
   as "not listed"; until the fence lands, the create answers `500` "not known" and keeps the
-  record's lock and quota place, and the record is put in force if it landed. A fence is
+  record's lock and quota place, and the record is put in force if it landed. Until it is
+  settled, the record's narrowest listing stays held, shared: a subscriber's own listing for
+  a subscription, the container's for a grant, a request or an owner's subscription. So a
+  conditional create evaluated on that listing waits for the outcome (`503` past the lock
+  wait), and two with one entity tag cannot both register. A fence is
   one triple, kept for good in the index's reserved `urn:pss:index#fences` graph (the update it
   fences may still arrive at any time): the graph grows by one triple per write that failed this
   way. At most 256 record changes are in progress or being settled at once; past that, a new
-  create or removal answers `503` with `Retry-After`. The tasks that settle them belong to the
+  create or removal answers `503` with `Retry-After`. Residual: requests and the settling of
+  outcomes the store left unknown share those 256 places, so while many outcomes wait to be
+  settled (a store that keeps failing), any caller's create or removal can get that `503`. The tasks that settle them belong to the
   server's state and end when it is dropped, leaving the record as the store has it for the next
   start to load. A record is announced (`Create`) as it is
   put in force, so one confirmed only after its create answered is announced then. A revocation (or a request's withdrawal)
@@ -570,11 +577,31 @@ What the server exposes, all discoverable from the storage description
   (a whole `Depth: infinity` subtree included) record what each store step replaced and put it
   all back when a later step fails, so content, metadata, listings and validators (`ETag`,
   `Last-Modified`) are as they were. A recursive delete too large to put back is refused with
-  `409` before anything is removed; one resource's delete is never refused for its size by that
-  bound. Residual: what a delete would put back is copied into the store first, so a store with
-  too little room for that copy refuses the delete (`507`), and whether it does follows the size
-  of what is stored, which the deleting writer may not be able to read; a recursive delete's
-  `409` follows the subtree's size the same way. When putting back fails too, it is tried a few more times with the
+  `409` before anything is removed. Nothing is copied to put a resource back: the store holds
+  the bytes its record points at (a hold, itself stored, so a stop leaves nothing unaccounted
+  for) and the record is put back pointing at them, validators included. Each change's holds are
+  its own (two changes holding the same bytes each release only theirs). Bytes a record leaves are
+  reclaimed in two steps through the index, whichever server instance acts: they are first named
+  as being reclaimed, in one step that also finds no record naming them (a resource's, or a
+  hold's), so none can come to name them again; only then are they deleted (a reclaim a stop cut
+  short is finished at the next start). That step relies on the index applying updates one at a
+  time: the embedded store or sparq-server; another SPARQL endpoint is not supported behind a
+  storage that holds bytes. The holds go once the change is kept or put back, and a start
+  releases any of this storage's holds whose change's intent is gone or says it was kept. So no delete is
+  refused for the size of what is stored, and none answers `507` for want of room to copy it.
+  Residuals: what bounds a recursive delete (`409`) is how many resources it removes and the size
+  of their metadata (types, links and linkset, which it reads to decide who may act on them while
+  the delete is in flight), never their content; hold records (a few fixed fields per resource a
+  change touches) are not counted against the storage's quota, but intents are (each carries the
+  metadata records it would put back), so in a storage at its ceiling a change that needs one is
+  refused with `507`; a store that fails may fail the change (`5xx`, below) whatever was asked;
+  and a hold whose release fails keeps its bytes until the maintenance sweeper releases it again
+  (or, the process stopping first, the next start); and a response's status, timing and quota
+  outcome are independent of the content of the resources a change touches, not of their
+  metadata, of the room others leave in the shared quota, or of the backends' and the index's
+  own work. A start
+  settles every intent of its storage and releases holds as if no other process served it: one
+  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees

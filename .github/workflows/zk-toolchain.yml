@@ -141,6 +141,8 @@ env:
 
 jobs:
   forge-suite:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: zk forge + anchor suite (nargo/bb)
     runs-on: ubuntu-latest
     # Toolchain install + real bb proving is the long pole; generous headroom.

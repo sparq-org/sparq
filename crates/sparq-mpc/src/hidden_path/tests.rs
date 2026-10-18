@@ -305,6 +305,44 @@ fn oversized_k_is_rejected() {
     assert!(matches!(err, MpcError::Protocol(m) if m.contains("chain")));
 }
 
+/// Hop counts are capped before evaluation: a `k` past [`MAX_HOP_COUNT`] — up to
+/// `usize::MAX`, where the per-hop counting loop and the `k`-wide odometer would
+/// otherwise run — is refused by the hop guard with NO draw made, so the refusal
+/// does not wait on the enumeration being sized. Finishing the test at all is the
+/// no-hang witness; nothing here asserts a timing.
+#[test]
+fn huge_hop_count_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+    let (edges, _i) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    // A single self-loop edge too: with |E| = 1 the projected tuple count stays 1
+    // for ANY k, so MAX_CHAIN_TUPLES never fires and only the hop cap refuses.
+    let (one_edge, _j) = hidden_edges(&[("http://ex/a", "http://ex/a")]);
+    let backend = ShamirBackend::new_seeded(3, 1).unwrap();
+
+    for edge_set in [&edges, &one_edge] {
+        for k in [MAX_HOP_COUNT + 1, 262_144, usize::MAX] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            let err =
+                eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, edge_set, k, 8)
+                    .expect_err("a hop count past the cap must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
+                "k={}: expected the hop-count refusal, got {:?}",
+                k,
+                err
+            );
+            assert_eq!(counted.draws(), 0, "k={}: refused before any draw", k);
+        }
+    }
+    // The cap itself is still a legal `k` as far as the hop guard goes (|E| = 1
+    // keeps the tuple count at 1, so nothing else refuses it).
+    assert!(eval_exact_k_chain_hidden(&backend, &one_edge, MAX_HOP_COUNT, 8).is_ok());
+}
+
 // =====================================================================
 // Determinism of the disclosed result across shuffle seeds
 // =====================================================================
@@ -689,4 +727,122 @@ fn seeded_exact_k_stage_transcript_is_pinned() {
         suffix,
         [["vss_own_input"; 141].as_slice(), &["oblivious_shuffle"]].concat()
     );
+}
+
+/// The two caps are pinned by VALUE, not only by their relation.
+///
+/// `MAX_HOP_COUNT` is DEFINED as `MAX_CHAIN_TUPLES.ilog2()`, so asserting that
+/// relation would be a tautology that passes however either moves. What is
+/// load-bearing is the numbers themselves: a reviewer reading a cost argument
+/// about "18 hops" and "2^18 tuples" should find that claim pinned somewhere, and
+/// changing either constant should make a test say so rather than quietly
+/// rescaling every bound in the module.
+#[test]
+fn the_hop_and_tuple_caps_are_pinned_by_value() {
+    use crate::hidden_path::{MAX_CHAIN_TUPLES, MAX_HOP_COUNT};
+    assert_eq!(MAX_HOP_COUNT, 18, "the documented hop cap");
+    assert_eq!(MAX_CHAIN_TUPLES, 1u64 << 18, "the documented tuple cap");
+    // And the relation the definition expresses, so a future hand-written value
+    // cannot drift from it.
+    assert_eq!(MAX_HOP_COUNT, MAX_CHAIN_TUPLES.ilog2() as usize);
+}
+
+/// Both exactly-`k` entries — the public slot path and the test-only instrumented
+/// one — refuse an over-cap output bound before ANY draw, on a NON-EMPTY edge set.
+/// `build_candidates` draws per hop equality and the output stage materialises `B`
+/// slots, so the refusal has to precede both.
+#[test]
+fn an_over_cap_bound_is_refused_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C01).unwrap();
+    let (edges, _interner) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+        ("http://ex/c", "http://ex/d"),
+    ]);
+
+    for bound in [usize::MAX, MAX_OUTPUT_BOUND + 1] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 2, bound)
+            .expect_err("an over-cap bound must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
+        }
+        assert_eq!(counted.draws(), 0, "slots_through B={bound}");
+
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err =
+            exact_k_chain_candidates_and_opened_rows(&mut counted, &backend, &edges, 2, bound)
+                .expect_err("the instrumented entry must refuse it too");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
+            other => panic!("B={}: expected a Protocol refusal, got {:?}", bound, other),
+        }
+        assert_eq!(counted.draws(), 0, "candidates_and_opened_rows B={bound}");
+    }
+
+    // A legal bound over the same edges still runs.
+    let legal = eval_exact_k_chain_hidden(&backend, &edges, 2, 16);
+    assert!(legal.is_ok(), "a legal bound must still run: {:?}", legal);
+}
+
+/// The OTHER half of the bound contract — `B` covering the candidate count — is
+/// also settled before any draw.
+///
+/// This is the half that used to be left to the output stage: with `|E| = 2` and
+/// `k = 18` the builder drew one secure equality per hop of every one of the
+/// `2^18` tuples, about 2.1 billion draws over roughly seventeen minutes, and only
+/// THEN discovered that `B = 1` could not hold the answer. The count is decidable
+/// from the disclosed endpoint terms in `O(|E| log |E|)`, so it is now decided
+/// first. A `k = 18` fixture is used deliberately: with the guard in place the test
+/// finishes instantly, and without it the enumeration is the cost being avoided.
+#[test]
+fn a_bound_below_the_candidate_count_is_refused_before_any_draw() {
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let backend = ShamirBackend::new_seeded(5, 0x7C07).unwrap();
+    // Two edges over three nodes: 2 distinct subjects x 2 distinct objects = 4
+    // endpoint pairs for any k >= 2, so B = 1 cannot cover it.
+    let (edges, _interner) = hidden_edges(&[
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/b", "http://ex/c"),
+    ]);
+    assert_eq!(
+        projected_candidate_count(&edges, 18).unwrap(),
+        4,
+        "the projection must agree with the builder's grouping"
+    );
+
+    for k in [2usize, 18] {
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, k, 1)
+            .expect_err("a bound below the candidate count must be refused");
+        match &err {
+            MpcError::Protocol(m) => assert!(m.contains("candidate count"), "k={}: {}", k, m),
+            other => panic!("k={}: expected a Protocol refusal, got {:?}", k, other),
+        }
+        assert_eq!(counted.draws(), 0, "k={}: refused before any draw", k);
+    }
+
+    // k = 1 groups by the edges' own (subject, object) pairs, so the count is 2 and
+    // B = 1 is still short — the projection must track `k`, not assume the product.
+    assert_eq!(projected_candidate_count(&edges, 1).unwrap(), 2);
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    assert!(
+        eval_exact_k_chain_hidden_slots_through(&mut counted, &backend, &edges, 1, 1).is_err(),
+        "B=1 below the k=1 count must be refused"
+    );
+    assert_eq!(counted.draws(), 0);
+
+    // And the projection is EXACT, not merely an upper bound: a bound equal to it
+    // runs, for both the k = 1 and the k >= 2 grouping.
+    eval_exact_k_chain_hidden(&backend, &edges, 1, 2).expect("B = exact count runs at k=1");
+    eval_exact_k_chain_hidden(&backend, &edges, 2, 4).expect("B = exact count runs at k=2");
 }

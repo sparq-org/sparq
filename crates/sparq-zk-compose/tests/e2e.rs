@@ -75,6 +75,22 @@ const FIXTURE_STATUS_INDEX: u64 = 3;
 /// The status-list version the fixtures bind + the relying party accepts.
 const FIXTURE_STATUS_VERSION: u64 = 1;
 
+/// The STRING-CANONICAL commitment method's `zk:scheme` digest -- the method
+/// every fixture here commits under, and the one its issuer now ATTESTS.
+///
+/// The fixtures sign the METHOD-BOUND shapes (`ZKSIG_M5` for a bearer
+/// attestation, `ZKSIG_M4` for a holder-bound one) rather than the
+/// method-unbound `ZKSIG_C3` / `ZKSIG_C4`, because `MethodPolicy::current` now
+/// refuses an unbound attestation. A test whose SUBJECT is legacy unbound
+/// material keeps an unbound fixture and states `MethodPolicy::admit_unbound`
+/// explicitly instead.
+fn string_canonical_scheme() -> Fr {
+    sparq_zk::sig::scheme_iri_to_field(
+        sparq_zk::commit::CommitmentMethod::StringCanonicalV1.scheme_iri(),
+    )
+}
+
+
 /// The relying party's revocation policy accepting the fixture version (window 0)
 /// AND carrying a fresh, NON-revoked AUTHORITATIVE snapshot. This is the external
 /// authoritative bitstring the verifier reads the liveness bit from (re-audit
@@ -207,7 +223,12 @@ fn attest_with_status(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef {
@@ -279,7 +300,12 @@ fn attest_with_status_commit(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef {
@@ -1499,7 +1525,13 @@ fn attest_with_holder(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_holder(&commitment, &salt, &status_ref, &holder_digest),
+        signature: sk.sign_commitment_with_holder_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &holder_digest,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1
             .cryptosuite_iri()
             .to_string(),
@@ -2255,6 +2287,26 @@ fn filter_inputs(value: u64, op: FilterOp, bound: u64, expected: bool) -> ProofI
         .0
 }
 
+/// sq-j506: honestly attest every scan commitment of a FILTER-forge fixture and
+/// return the key set that trusts the issuer.
+///
+/// Stage 2d — the issuer-attestation and method-authentication gate — now runs
+/// AHEAD of the stage-1 query-binding gates, because the authenticated method is
+/// what selects the encoder those gates compare pattern constants under. An
+/// unattested fixture is therefore refused at stage 2d and never reaches the gate
+/// under test, so these fixtures attest their scan commitment honestly: the forge
+/// under test is the only thing wrong with each of them. Every `scan_inputs_for`
+/// scan is committed under the same fixture salt.
+fn attested_forge_key_set(m: &mut ProofManifest) -> KeySet {
+    let sk = test_issuer_sk(1);
+    // audit #12: a scan-covering attestation is status-bound, so the fixture
+    // carries the same non-revoked fresh status the happy-path fixture carries.
+    m.revocation = Some(fixture_revocation());
+    m.status_snapshots = vec![fixture_snapshot(false)];
+    attest_all(m, &sk, salt_from_bytes(&[9u8; 32]));
+    trusted_k(&sk)
+}
+
 /// Audit #5 (comparison-substitution): a `filter_int` over (op=Ge, bound=17,
 /// expected=true) — a genuinely-true `17 >= 17` instance — must NOT satisfy a
 /// query `FILTER(?o >= 18)`. The bound (17) differs from the query constant
@@ -2273,7 +2325,7 @@ fn filter_reject_comparison_substitution_17_vs_18() {
     if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
         *operand_enc = scan_operand;
     }
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2299,7 +2351,8 @@ fn filter_reject_comparison_substitution_17_vs_18() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "o" => {}
         other => panic!("expected UnboundFilter(o), got {other:?}"),
     }
@@ -2311,7 +2364,7 @@ fn filter_reject_comparison_substitution_17_vs_18() {
 #[test]
 fn filter_reject_filter_add_on_scan_only() {
     let scan = scan_inputs_for(&credential_graph(), "http://ex/age");
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2334,7 +2387,8 @@ fn filter_reject_filter_add_on_scan_only() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "o" => {}
         other => panic!("expected UnboundFilter(o), got {other:?}"),
     }
@@ -2346,7 +2400,7 @@ fn filter_reject_filter_add_on_scan_only() {
 #[test]
 fn filter_reject_constant_swap_age_as_salary() {
     let scan = scan_inputs_for(&credential_graph(), "http://ex/age");
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/salary> ?o }".into(),
@@ -2369,7 +2423,8 @@ fn filter_reject_constant_swap_age_as_salary() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundPattern { pattern: 0 }) => {}
         other => panic!("expected UnboundPattern(0), got {other:?}"),
     }
@@ -2396,7 +2451,7 @@ fn filter_reject_operand_slot_substitution() {
     if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
         *operand_enc = salary_operand;
     }
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?p WHERE { ?p <http://ex/hasSalary> ?sal . ?p <http://ex/hasAge> ?age FILTER(?age >= \"65\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2424,7 +2479,8 @@ fn filter_reject_operand_slot_substitution() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "age" => {}
         other => panic!("expected UnboundFilter(age), got {other:?}"),
     }
@@ -2447,7 +2503,7 @@ fn filter_reject_false_verdict_row() {
     if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
         *operand_enc = scan_operand;
     }
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2473,7 +2529,8 @@ fn filter_reject_false_verdict_row() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "o" => {}
         other => panic!("expected UnboundFilter(o), got {other:?}"),
     }
@@ -2485,7 +2542,7 @@ fn filter_reject_false_verdict_row() {
 #[test]
 fn filter_reject_unbindable_filter_fragment() {
     let scan = scan_inputs_for(&credential_graph(), "http://ex/age");
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\") }".into(),
@@ -2508,7 +2565,8 @@ fn filter_reject_unbindable_filter_fragment() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::Sparqzk(_)) => {}
         other => panic!("expected Sparqzk(UnsupportedFragment), got {other:?}"),
     }
@@ -2599,7 +2657,7 @@ fn filter_reject_unproven_failing_row() {
     if let ProofInputs::FilterInt { operand_enc, .. } = &mut filt {
         *operand_enc = rows[0][2].clone();
     }
-    let m = ProofManifest {
+    let mut m = ProofManifest {
         fully_hidden_revocation: None,
         r#type: "urn:sparq:zk:ProofManifest".into(),
         query: "SELECT ?s ?o WHERE { ?s <http://ex/age> ?o FILTER(?o >= \"18\"^^<http://www.w3.org/2001/XMLSchema#integer>) }".into(),
@@ -2626,7 +2684,8 @@ fn filter_reject_unproven_failing_row() {
             holder_pok_proofs: vec![],
             holder_set_proofs: vec![],
     };
-    match prefilter_manifest_structure(&m, &empty_k(), &fresh_policy()) {
+    let k = attested_forge_key_set(&mut m);
+    match prefilter_manifest_structure(&m, &k, &fresh_policy()) {
         Err(CheckError::UnboundFilter { variable }) if variable == "o" => {}
         other => panic!("expected UnboundFilter(o) for the unproven failing row, got {other:?}"),
     }
@@ -3274,7 +3333,22 @@ fn pattern_scans_reject_a_declaration_contradicting_the_bound_constants() {
 
     // …and a scan whose bound predicate constant answers a DIFFERENT pattern:
     // an `<ex/role>` scan cannot be declared as answering an `<ex/age>` pattern.
-    let role_scan = scan_inputs_for(&credential_graph(), "http://ex/role");
+    // sq-j506: stage 2d — and with it the audit-#9 salt-uniqueness check — now
+    // runs ahead of the declaration gate, so this extra scan is committed under
+    // its OWN salt. Reusing another graph's salt would be refused as a reused
+    // salt before the declaration is read, which is not what this case is about.
+    let role_salt = salt_from_bytes(&[13u8; 32]);
+    let role_commit = commit_triples(&credential_graph(), role_salt).unwrap();
+    let role_scan = build_scan(
+        &[role_commit],
+        &Pattern {
+            s: Slot::Var,
+            p: Slot::Const(Term::NamedNode(iri("http://ex/role"))),
+            o: Slot::Var,
+        },
+    )
+    .expect("scan builds")
+    .inputs;
     let mut m = same_layout_manifest();
     m.sub_proofs.push(SubProof { inputs: role_scan, proof_hex: String::new() });
     let sk = test_issuer_sk(1);
@@ -3285,7 +3359,7 @@ fn pattern_scans_reject_a_declaration_contradicting_the_bound_constants() {
             .any(|a| a.commitment == FieldHex::from_field(&c))
         {
             m.commitment_attestations
-                .push(attest_with_salt(c, salt_from_bytes(&[9u8; 32]), &sk));
+                .push(attest_with_salt(c, role_salt, &sk));
         }
     }
     m.pattern_scans = vec![vec![3], vec![1]];
@@ -5287,7 +5361,12 @@ fn attest_with_status_fully_hidden(
     CommitmentAttestation {
         commitment: FieldHex::from_field(&commitment),
         issuer_public_key: public_key_to_hex(&sk.public_key()),
-        signature: sk.sign_commitment_with_status(&commitment, &salt, &status_ref),
+        signature: sk.sign_presentation_with_status_and_scheme(
+            &commitment,
+            &salt,
+            &status_ref,
+            &string_canonical_scheme(),
+        ),
         cryptosuite: SignatureScheme::Poseidon2SchnorrV1.cryptosuite_iri().to_string(),
         salt: Some(FieldHex::from_field(&salt)),
         status: Some(AttestedStatusRef::fully_hidden(ref_commitment, index_commitment)),
@@ -6075,11 +6154,27 @@ fn hi_scan_manifest(prover: &CircuitProver, signer_sk: &SecretKey, tag: &str) ->
 fn hi_message(commitment: &Fr, salt: &Fr) -> Fr {
     let list_id = sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST);
     let status_ref = sparq_zk::sig::status_ref_digest(&list_id, FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION);
+    sparq_zk::sig::presentation_message_with_status_and_scheme(
+        commitment,
+        salt,
+        &status_ref,
+        &string_canonical_scheme(),
+    )
+}
+
+/// The LEGACY method-UNBOUND (`ZKSIG_C3`) counterpart of [`hi_message`] -- the
+/// message a credential issued before the method-bound shapes existed carries.
+/// Used only by the test whose SUBJECT is the method policy's treatment of such
+/// a credential.
+fn hi_message_unbound(commitment: &Fr, salt: &Fr) -> Fr {
+    let list_id = sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST);
+    let status_ref = sparq_zk::sig::status_ref_digest(&list_id, FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION);
     sparq_zk::sig::commitment_message_with_status(commitment, salt, &status_ref)
 }
 
 /// Prove the hidden_issuer_d4 circuit: `signer_sk` signed `m` (the status-bound
-/// message over `commitment`/`salt`); membership is proved against the tree of
+/// message over `commitment`/`salt`; METHOD-BOUND unless `method_bound` is
+/// false, which selects the legacy unbound message); membership is proved against the tree of
 /// `keyset`. `keyset` MUST be the canonical-order key set both prover and verifier
 /// use; the signer's index is its position there. Returns the assembled manifest
 /// field. (For the out-of-set test, the signer is NOT in `keyset` and we must
@@ -6095,16 +6190,31 @@ fn prove_hidden_issuer(
     commitment: &Fr,
     salt: &Fr,
     challenge: &Fr,
+    method_bound: bool,
     tag: &str,
 ) -> HiddenIssuerAttestation {
-    let m = hi_message(commitment, salt);
-    let sig = sparq_zk::sig::signature_from_hex(&signer_sk.sign_commitment_with_status(
-        commitment, salt,
-        &sparq_zk::sig::status_ref_digest(
-            &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
-            FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
-        ),
-    )).unwrap();
+    let status_ref = sparq_zk::sig::status_ref_digest(
+        &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
+        FIXTURE_STATUS_INDEX,
+        FIXTURE_STATUS_VERSION,
+    );
+    let (m, sig_hex) = if method_bound {
+        (
+            hi_message(commitment, salt),
+            signer_sk.sign_presentation_with_status_and_scheme(
+                commitment,
+                salt,
+                &status_ref,
+                &string_canonical_scheme(),
+            ),
+        )
+    } else {
+        (
+            hi_message_unbound(commitment, salt),
+            signer_sk.sign_commitment_with_status(commitment, salt, &status_ref),
+        )
+    };
+    let sig = sparq_zk::sig::signature_from_hex(&sig_hex).unwrap();
     let schnorr = sparq_zk::sig::in_circuit_witness(&signer_sk.public_key(), &m, &sig).unwrap();
     let pks: Vec<_> = keys_in_order.iter().map(|s| s.public_key()).collect();
     let root = key_set_root(&pks, HI_DEPTH).expect("root");
@@ -6166,7 +6276,7 @@ fn hidden_issuer_in_set_verifies_and_key_is_private() {
     let signer_index = keyset.member_index(&signer_hex).expect("signer in K") as u64;
 
     let hidden = prove_hidden_issuer(
-        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, "hi_ok",
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, true, "hi_ok",
     );
 
     // --- KEY-NOT-DISCLOSED assertion (the privacy goal). ---
@@ -6277,7 +6387,7 @@ fn hidden_issuer_only_verifies_with_clear_key_absent() {
     assert!(manifest.key_set.is_empty(), "no declared key_set");
 
     let hidden = prove_hidden_issuer(
-        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, "hi_only",
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, true, "hi_only",
     );
     // The hidden entry MUST carry the salt so the verifier can recompute m for a
     // hidden-only commitment (no clear attestation to read it from).
@@ -6331,10 +6441,12 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
         .member_index(&public_key_to_hex(&signer.public_key()))
         .expect("signer in K") as u64;
     let hidden = prove_hidden_issuer(
-        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, "hi_policy",
+        &prover, &keyset, &signers, &signer, signer_index, &c, &salt, &challenge, false, "hi_policy",
     );
     manifest.hidden_issuer_attestations = vec![hidden];
-    let strict = hi_keyset().with_method_policy(MethodPolicy::current().require_method_bound());
+    // The hidden entry declares the LEGACY method-UNBOUND message, so the
+    // default policy must refuse it and only the written-down downgrade accepts.
+    let permissive = hi_keyset().with_method_policy(MethodPolicy::current().admit_unbound());
 
     let run = |m: &ProofManifest, ks: &KeySet, tag: &str| {
         verify_manifest(
@@ -6345,12 +6457,12 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
         )
     };
 
-    run(&manifest, &keyset, "hi_policy_default")
-        .expect("the honest hidden-only presentation still verifies by default");
-    match run(&manifest, &strict, "hi_policy_strict") {
+    match run(&manifest, &keyset, "hi_policy_default") {
         Err(CheckError::MethodNotAuthenticated { .. }) => {}
-        other => panic!("expected MethodNotAuthenticated under require_method_bound, got {other:?}"),
+        other => panic!("expected MethodNotAuthenticated under the default policy, got {other:?}"),
     }
+    run(&manifest, &permissive, "hi_policy_permissive")
+        .expect("admit_unbound accepts the honest method-unbound hidden-only presentation");
 
     // The SAME proof, with the declared message replaced by a non-candidate value.
     let mut mutated = manifest.clone();
@@ -6362,7 +6474,7 @@ fn hidden_issuer_only_message_is_held_to_the_method_policy() {
         round_tripped.hidden_issuer_attestations[0].message,
         mutated.hidden_issuer_attestations[0].message
     );
-    for (label, ks) in [("default", keyset.clone()), ("require_method_bound", strict.clone())] {
+    for (label, ks) in [("default", keyset.clone()), ("admit_unbound", permissive.clone())] {
         match run(&round_tripped, &ks, "hi_policy_mutated") {
             Err(CheckError::HiddenIssuerMessageMismatch { .. }) => {}
             other => panic!("[{label}] expected HiddenIssuerMessageMismatch, got {other:?}"),
@@ -6392,7 +6504,7 @@ fn hidden_issuer_out_of_set_key_is_unprovable() {
         &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
-    let sig = sparq_zk::sig::signature_from_hex(&outsider.sign_commitment_with_status(&c, &salt, &sref)).unwrap();
+    let sig = sparq_zk::sig::signature_from_hex(&outsider.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
     // The outsider's signature is itself VALID (control: verify it).
     assert!(sparq_zk::sig::verify(&outsider.public_key(), &m, &sig), "outsider's sig is valid");
     let schnorr = sparq_zk::sig::in_circuit_witness(&outsider.public_key(), &m, &sig).unwrap();
@@ -6432,7 +6544,7 @@ fn hidden_issuer_forged_signature_is_unprovable() {
         &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
-    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_commitment_with_status(&c, &salt, &sref)).unwrap();
+    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
     let mut schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
     // Tamper s: now s*G != R + e*pk, the in-circuit equation is unsatisfiable.
     schnorr.s += Fr::from(1u64);
@@ -6478,7 +6590,7 @@ fn hidden_issuer_forged_root_rejected() {
         &sparq_zk::sig::status_list_id_to_field(FIXTURE_STATUS_LIST),
         FIXTURE_STATUS_INDEX, FIXTURE_STATUS_VERSION,
     );
-    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_commitment_with_status(&c, &salt, &sref)).unwrap();
+    let sig = sparq_zk::sig::signature_from_hex(&signer.sign_presentation_with_status_and_scheme(&c, &salt, &sref, &string_canonical_scheme())).unwrap();
     let schnorr = sparq_zk::sig::in_circuit_witness(&signer.public_key(), &m, &sig).unwrap();
     let siblings = key_membership_witness(&forged_pks, HI_DEPTH, 0).unwrap();
     let witness = HiddenIssuerWitness { schnorr, index: 0, siblings };

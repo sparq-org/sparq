@@ -44,6 +44,14 @@ pub fn in_service_pool(iri: &str) -> bool {
         .is_some_and(|path| path.starts_with(SERVICE_POOL_PATH))
 }
 
+/// Whether the record named by `iri` is a hold's ([`crate::store::Store::hold`]): kept apart from
+/// every ceiling, so how many a change holds (a fixed number per resource it changes, whatever
+/// their content) never takes room from content or refuses a write. Holds are bounded by what
+/// each change may stage and by how many changes run at once.
+pub fn is_hold_record(iri: &str) -> bool {
+    iri.starts_with(crate::store::HELD_CONTAINER)
+}
+
 /// The mark [`crate::store::CompositeStore`] puts at the front of the blob key it mints for a
 /// service-pool record, so the blob store can tell one without being told what an IRI means. A
 /// key minted from an absolute IRI never begins with it.

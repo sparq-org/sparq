@@ -3729,15 +3729,13 @@ async fn delete<S: Store + 'static>(
             // A subtree too large to remove atomically is refused before anything is removed,
             // and before anyone's notifications are prepared: an oversized delete does none of
             // that work.
-            // One resource's delete (a data resource, or an empty container) is staged whatever
-            // its size, so whether it may go never follows what is stored.
-            let mut journal = if doomed.len() == 1 {
-                state.journal_for_one()
-            } else {
-                state.journal()
-            };
+            // What staging costs follows the resources' count and their metadata, never their
+            // content: the store holds their bytes (see `Journal::stage`).
+            let mut journal = state.journal();
             if let Err(e) = stage_removal(&mut journal, &doomed).await {
-                return ((Vec::new(), Err(e)), None);
+                // Its holds are released here, while the locks are held.
+                let left = journal.rollback().await;
+                return ((Vec::new(), Err(e)), left);
             }
             // Who hears of each removal is decided before the resources go, while who may read
             // each can still be decided; the notifications go out only once the whole removal
@@ -9536,8 +9534,10 @@ mod tests {
         let undo_b = Undo::Recreate {
             iri: b.clone(),
             parent: Some(root.clone()),
-            body: Bytes::from("x"),
-            meta: b_meta,
+            kept: super::super::Kept::Copied {
+                body: Bytes::from("x"),
+                meta: b_meta,
+            },
         };
         st.set_aside(Unsettled::new(vec![undo_a]), ());
         st.set_aside(Unsettled::new(vec![undo_b]), ());
@@ -10056,7 +10056,8 @@ mod tests {
     /// Codex review of #6841: a recursive delete prepared every descendant's notifications (an
     /// authorization check per subscription for each) before it found out the subtree was too
     /// large to remove atomically. The size is settled first: an oversized delete prepares
-    /// nothing.
+    /// nothing. What makes it too large is how many resources it removes and their metadata
+    /// (which the journal reads), never their content: the store holds their bytes.
     #[tokio::test]
     async fn a_delete_too_large_to_undo_prepares_no_notification() {
         use super::super::test_store::{request as req, FlakyStore};
@@ -10064,32 +10065,29 @@ mod tests {
         let mut cfg = super::super::LwsConfig::new("http://localhost:3000");
         cfg.open = true;
         // A store with room for more than the delete's journal may hold.
-        let roomy = crate::store::InMemoryStoreLimits::new(256 << 20, 4096);
+        let roomy = crate::store::InMemoryStoreLimits::new(512 << 20, 4096);
         let st = LwsState::new(FlakyStore::with_limits(roomy), cfg)
             .await
             .unwrap();
         let root = st.cfg.storage();
-        let r = handle(
-            &st,
-            &req(
-                Method::POST,
-                "/",
-                &[("slug", "d"), ("link", CONTAINER_LINK)],
-                "",
-            ),
-            &Agent::anonymous(),
-        )
-        .await;
-        assert_eq!(r.status(), StatusCode::CREATED);
-        let d = format!("{root}d/");
-        // Three members, together past what the delete's journal may hold to put back.
-        let big = Bytes::from(vec![b'x'; 24 << 20]);
-        for slug in ["a", "b", "c"] {
-            st.store
-                .create_in_container(&d, &format!("{d}{slug}"), big.clone(), "text/plain")
-                .await
-                .unwrap();
-        }
+        let mkdir = |slug: &'static str| {
+            let st = st.clone();
+            async move {
+                let r = handle(
+                    &st,
+                    &req(
+                        Method::POST,
+                        "/",
+                        &[("slug", slug), ("link", CONTAINER_LINK)],
+                        "",
+                    ),
+                    &Agent::anonymous(),
+                )
+                .await;
+                assert_eq!(r.status(), StatusCode::CREATED);
+                format!("{}{slug}/", st.cfg.storage())
+            }
+        };
         st.notify
             .subscribe_root_for_test(&root, "http://127.0.0.1:9/inbox");
         let delete = |path: &str, h: &[(&str, &str)]| {
@@ -10097,18 +10095,17 @@ mod tests {
             let st = st.clone();
             async move { handle(&st, &r, &Agent::anonymous()).await }
         };
-        let r = delete("/d/", &[("depth", "infinity")]).await;
-        assert_eq!(r.status(), StatusCode::CONFLICT);
-        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 0);
-        for slug in ["a", "b", "c"] {
-            assert!(st.store.exists(&format!("{d}{slug}")).await.unwrap());
+        // Content, however large, costs the journal nothing: a subtree of members larger than
+        // the journal's bound together, and one member larger than it alone, go.
+        let d = mkdir("d").await;
+        let big = Bytes::from(vec![b'x'; 40 << 20]);
+        for slug in ["a", "b"] {
+            st.store
+                .create_in_container(&d, &format!("{d}{slug}"), big.clone(), "text/plain")
+                .await
+                .unwrap();
         }
-        // One member alone fits, and its delete is prepared.
-        let r = delete("/d/a", &[]).await;
-        assert_eq!(r.status(), StatusCode::NO_CONTENT);
-        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), 1);
-        // One resource's delete goes whatever its size, even past the bound a journal holds.
-        let huge = Bytes::from(vec![b'x'; 66 << 20]);
+        let huge = Bytes::from(vec![b'x'; super::super::JOURNAL_LIMIT + (2 << 20)]);
         st.store
             .create_in_container(&d, &format!("{d}huge"), huge, "text/plain")
             .await
@@ -10116,6 +10113,39 @@ mod tests {
         let r = delete("/d/huge", &[]).await;
         assert_eq!(r.status(), StatusCode::NO_CONTENT);
         assert!(!st.store.exists(&format!("{d}huge")).await.unwrap());
+        let r = delete("/d/", &[("depth", "infinity")]).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert!(!st.store.exists(&d).await.unwrap());
+        // Metadata the journal reads to stage it is what it is charged: members whose metadata
+        // together pass the bound are refused before anything is prepared.
+        let e = mkdir("e").await;
+        let meta = super::super::ResourceMeta {
+            linkset: Some(serde_json::Value::String("l".repeat(240 << 10))),
+            ..Default::default()
+        };
+        let count = super::super::JOURNAL_LIMIT / (240 << 10) + 2;
+        for i in 0..count {
+            let iri = format!("{e}m{i}");
+            st.store
+                .create_in_container(&e, &iri, Bytes::from("x"), "text/plain")
+                .await
+                .unwrap();
+            st.put_resource_meta(&iri, &meta).await.unwrap();
+        }
+        let prepared = st.notify.prepared_for.load(Ordering::SeqCst);
+        let r = delete("/e/", &[("depth", "infinity")]).await;
+        assert_eq!(r.status(), StatusCode::CONFLICT);
+        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), prepared);
+        // What it held while staging is released before its locks go.
+        assert!(
+            st.store.holds().await.unwrap().is_empty(),
+            "holds left behind"
+        );
+        assert!(st.store.exists(&format!("{e}m0")).await.unwrap());
+        // One member alone fits, and its delete is prepared.
+        let r = delete("/e/m0", &[]).await;
+        assert_eq!(r.status(), StatusCode::NO_CONTENT);
+        assert_eq!(st.notify.prepared_for.load(Ordering::SeqCst), prepared + 1);
     }
 
     /// Review finding: a DELETE ignored a failure to remove the metadata, which then described
@@ -11836,11 +11866,17 @@ mod tests {
             Unsettled::new(vec![
                 Undo::Restore {
                     key: a.clone(),
-                    prior: Some((old_content.body, old_content.meta)),
+                    prior: Some(super::super::Kept::Copied {
+                        body: old_content.body,
+                        meta: old_content.meta,
+                    }),
                 },
                 Undo::Restore {
                     key,
-                    prior: Some((old_meta.body, old_meta.meta)),
+                    prior: Some(super::super::Kept::Copied {
+                        body: old_meta.body,
+                        meta: old_meta.meta,
+                    }),
                 },
             ]),
             (),
@@ -11875,8 +11911,10 @@ mod tests {
             Unsettled::new(vec![Undo::Recreate {
                 iri: b.clone(),
                 parent: Some(st.cfg.storage()),
-                body: old_b.body,
-                meta: old_b.meta,
+                kept: super::super::Kept::Copied {
+                    body: old_b.body,
+                    meta: old_b.meta,
+                },
             }]),
             (),
         );

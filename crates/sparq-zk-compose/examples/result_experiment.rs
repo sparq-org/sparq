@@ -169,6 +169,10 @@ fn authenticate(inputs: Vec<Vec<Triple>>) -> Fallible<Fixture> {
             i as u64,
             7,
         );
+        // sq-j506: this harness sweeps the WHOLE legacy capacity matrix, and only
+        // two of its buckets have a method-bound member, so it issues through the
+        // retained legacy members under the written-down downgrade below and signs
+        // the method-unbound message those members' relation folds.
         let msg = sig::commitment_message_with_status(&graph.commitment, &graph.salt, &status);
         credentials.push(ResultCredential {
             graph,
@@ -190,6 +194,7 @@ fn authenticate(inputs: Vec<Vec<Triple>>) -> Fallible<Fixture> {
             }],
             min_version: 7,
             max_version: 7,
+            admit_unbound_legacy: true,
         },
         rows: vec![BTreeMap::from([(
             "name".into(),

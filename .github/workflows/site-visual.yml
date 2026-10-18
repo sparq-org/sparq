@@ -49,6 +49,8 @@ concurrency:
 
 jobs:
   site-visual:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: visual key layouts (container-pinned, advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 35
