@@ -13550,6 +13550,56 @@ mod fragment_dispatch_tests {
         );
     }
 
+    /// A presentation whose query carries a solution SLICE is refused END TO END,
+    /// not only by the query-side extractor.
+    ///
+    /// The counterexample is a positive OFFSET over a one-solution answer:
+    /// `SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1` has the EMPTY answer,
+    /// yet the fixture below — a witness for branch 0, row 0, disclosing
+    /// `?x = <urn:a>`, with NO sub-proofs at all — was accepted while the slice
+    /// was peeled off and the query re-derived without it. The verifier must now
+    /// refuse it at the routing gate, before the nonce is burnt.
+    #[test]
+    fn a_sliced_query_is_refused_end_to_end() {
+        const SLICED: &str = "SELECT ?x WHERE { VALUES ?x { <urn:a> } } OFFSET 1";
+        const UNSLICED: &str = "SELECT ?x WHERE { VALUES ?x { <urn:a> } }";
+        let witness = || {
+            vec![bw_scan(0, vec![], vec![], vec![0], sol(&[("x", "urn:a")]))]
+        };
+
+        let m = fm(SLICED, vec![], witness());
+        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        match err {
+            CheckError::FragmentDispatch(FragmentDispatchError::OutsideFragment(ref msg)) => {
+                assert!(msg.contains("LIMIT / OFFSET"), "got `{}`", msg);
+            }
+            other => panic!("a sliced query must be refused at the routing gate, got {:?}", other),
+        }
+        // The routing gate on its own refuses it too.
+        assert!(matches!(
+            dispatch_fragment(&m),
+            Err(FragmentDispatchError::OutsideFragment(_))
+        ));
+
+        // CONTROL: the SAME presentation WITHOUT the slice is ACCEPTED — and
+        // soundly so, which is exactly what made the sliced case a false accept.
+        // A `VALUES`-only query's answer is fixed by the query TEXT: `?x = <urn:a>`
+        // is its answer whatever the data, so there is nothing for a sub-proof to
+        // establish and a presentation with none is correct. Add `OFFSET 1` and the
+        // answer becomes EMPTY, so the identical presentation is no longer an
+        // answer to anything — hence the refusal above rather than a peel.
+        let ok = fm(UNSLICED, vec![], witness());
+        assert_eq!(dispatch_fragment(&ok), Ok(()));
+        let got = verify_fragment_manifest(&ok, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen);
+        assert!(
+            got.is_ok(),
+            "a VALUES-only query's own answer needs no sub-proof, got {:?}",
+            got.err()
+        );
+    }
+
     /// Dropping only the `JoinEdge` is NOT a way to make stage 2g′ silent: the
     /// `JoinEq` sub-proof it named is then covered by nothing, and the gate's
     /// coverage rule refuses it BY NAME.
