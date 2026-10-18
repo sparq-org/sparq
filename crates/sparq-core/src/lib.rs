@@ -5075,8 +5075,10 @@ impl TxnJournal {
         }
         let meta = self.dir.join("dict-meta.bin");
         let Ok(mut bytes) = std::fs::read(&meta) else {
-            // No mmap dictionary header (a legacy single-file or in-memory-built store): there is
-            // nothing an older build would consult, and nothing this build can mark.
+            // No mmap dictionary header (a legacy single-file `dict.bin` store): there is no
+            // versioned field for an older build to refuse, so nothing can be marked. Stated as
+            // a known gap rather than silently assumed safe — such a store must be re-saved with
+            // this build (`Graph::open(old)?.save(new)?`) to gain the marker.
             self.format_marked = true;
             return Ok(());
         };

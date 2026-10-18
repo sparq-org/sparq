@@ -168,7 +168,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version is the only field such a build hard-errors on instead of truncating. A store written by
   an older build is marked the first time this version appends a journal frame to it, so opening
   a store read-only does not mark it, and a store this version has committed to is a one-way
-  upgrade. In the other direction, a journal frame whose format version is NEWER than this build
+  upgrade. One gap stays open and is stated rather than papered over: a store still on the
+  pre-`dict-meta.bin` layout (the legacy single-file `dict.bin`) has no such field, so there is
+  nothing to mark and an older build opening it can still truncate a frame it cannot read —
+  re-save such a store with this version (`Graph::open(old)?.save(new)?`) to get the marker. In the other direction, a journal frame whose format version is NEWER than this build
   knows is an error that changes nothing, instead of a torn tail that gets truncated.
 
 - **sparq-core (`sq-ycle`):** `Graph::save`, `Graph::save_compressed` and
