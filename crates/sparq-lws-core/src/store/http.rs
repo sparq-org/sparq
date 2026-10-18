@@ -75,7 +75,7 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Default per-request timeout. The whole request/response cycle (connect + send + read) must finish
 /// inside this, else the request is abandoned with a retryable [`SparqHttpError::Timeout`].
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_TIMEOUT: Duration = super::limits::STORE_CALL_TIMEOUT;
 
 const CT_SPARQL_QUERY: &str = "application/sparql-query";
 const CT_SPARQL_UPDATE: &str = "application/sparql-update";

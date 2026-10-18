@@ -232,10 +232,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start once with `SOLID_SERVER_LWS_RESET_SUBSCRIPTION_CLOCK=1` (`LwsConfig::reset_subscription_clock`),
   which, while the state is built, removes every subscription with an `expires` and then stores
   the clock.
-  An `LwsState` now holds its backend's lease (shared by every clone of its store) while it
-  lives: a second `LwsState` built over a running one's store is refused, so a state that
-  replaces another must be built after the old one is dropped. `Store::reset_marker` takes that
-  lease's guard.
+  An `LwsState` now holds a lease per store handle (shared by every clone of its store and by
+  any `Tracked` wrapper of one) while it lives: a second `LwsState` built over a clone or a
+  wrapper of a running one's store is refused, so a state that replaces another must be built
+  after the old one is dropped. A store opened again separately over the same backend has a lease
+  of its own. `Store::reset_marker` takes that lease's guard. `Tracked::new` takes its inner
+  store's lease and no longer accepts one from the caller, and the store's generic mutators refuse
+  an IRI shaped like the stored time, which changes only through `raise_marker` and
+  `reset_marker`.
 
 - **sparq-reason (N3 backward chaining):** a variable substitution is cheaper to COPY, with no
   change to any name or answer. The `name -> term` map a premise evaluation and a backward proof
@@ -656,6 +660,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   serde_json's `raw_value` feature (#6911); sparq-engine-service drops `rustc-hash` (#6917).
 
 ### Fixed
+
+- **sparq-lws-core (LWS notifications, type index, records):** notifications follow the
+  subscriber's current access. A WebSocket notification the subscriber may no longer read is
+  not sent and decides no close; an access timer (every 30 seconds, `ACCESS_RECHECK`) closes the
+  socket (1008) once read access is gone; a check that cannot be made closes it `1011` (on the
+  timer) or holds the notification back and asks a subscriber that may read to reconcile
+  (`1011`) at the next tick. The receive token gates connecting only: an open socket is not
+  closed when it expires, and an expired token never connects again in the process. A webhook
+  subscription decides access before asking whether its topic exists, and a topic being created
+  is decided with nothing read of it. The type index decides read access before anything else is
+  asked of a resource, passes over one the caller may not read as one not there (failing only
+  when a grant names the caller itself), and charges linkset-record names nothing against its
+  budget. A record removal waits for its fence at most as long as for a lock in the request, and
+  in the background for longer each attempt up to the store's call timeout
+  (`STORE_CALL_TIMEOUT`); it keeps the container held until a removal left to settle in the
+  background is settled, and answers `507` when the store refuses it for want of room; a
+  subscription being cancelled hears nothing until it is back in force; a subscription create
+  decides its subscriber's due subscriptions before counting. An LDP write refuses a dot segment
+  a URL normaliser could resolve away (%-decoded, or between backslashes) with `400`; what is
+  stored under one can still be read and deleted.
 
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
   / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to
