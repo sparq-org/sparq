@@ -73,14 +73,22 @@ pub(crate) fn names_lws_service_record(key: &str, base: &str) -> bool {
         .is_some_and(names_lws_service)
 }
 
+/// Whether the path segment `seg` is a dot segment (`.` or `..`), as sent or %-decoded (`%2E`,
+/// `%2e%2E`, `.%2E`): a name that a client or intermediary normalising the URL would resolve away
+/// is never a resource name.
+fn is_dot_segment(seg: &str) -> bool {
+    let is_dots = |s: &str| s == "." || s == "..";
+    is_dots(seg) || (seg.contains('%') && is_dots(&crate::identity::percent_decode_lossy(seg)))
+}
+
 /// Parse a request path against the public base URL into an [`LdpTarget`].
 ///
 /// `base` is the server's public origin (e.g. `https://pod.example`), WITHOUT a trailing slash.
 /// `path` is the request path (e.g. `/alice/data`), which MUST start with `/`.
 ///
 /// The query string and fragment are stripped (the DPoP `htu` is path-only per RFC 9449 §4.3, and
-/// LDP targets are query-independent). Path traversal (`..`, `.`) is rejected (a 400), as are
-/// non-absolute paths.
+/// LDP targets are query-independent). Path traversal (`..`, `.`, as sent or %-decoded) is
+/// rejected (a 400), as are non-absolute paths.
 pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
     let base = base.trim_end_matches('/');
     if base.is_empty() {
@@ -133,7 +141,7 @@ pub fn parse_target(base: &str, path: &str) -> Result<LdpTarget, ServerError> {
                     "empty path segment rejected".into(),
                 ));
             }
-            if seg == ".." || seg == "." {
+            if is_dot_segment(seg) {
                 return Err(ServerError::BadRequest("path traversal rejected".into()));
             }
         }
@@ -158,6 +166,33 @@ mod tests {
             crate::lws::SUBSCRIPTIONS_PATH,
         ] {
             assert!(path.starts_with(&format!("/{}/", super::LWS_SERVICE_SEGMENT)));
+        }
+    }
+
+    /// A dot segment is refused as sent and %-decoded, in any case; a name merely containing
+    /// dots or an encoded dot is not one.
+    #[test]
+    fn an_encoded_dot_segment_is_refused() {
+        let base = "https://pod.example";
+        for path in [
+            "/a/%2E/b",
+            "/a/%2e%2E/b",
+            "/a/.%2E/b",
+            "/a/%2E.",
+            "/%2E%2E/",
+            "/a/..",
+            "/a/./b",
+        ] {
+            assert!(
+                matches!(
+                    super::parse_target(base, path),
+                    Err(crate::error::ServerError::BadRequest(_))
+                ),
+                "{path}"
+            );
+        }
+        for path in ["/a/%2E%2E%2E", "/a/x%2E", "/a/...", "/a/%2Ex"] {
+            assert!(super::parse_target(base, path).is_ok(), "{path}");
         }
     }
 

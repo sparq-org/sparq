@@ -2897,9 +2897,15 @@ pub(crate) mod test_store {
         pub fail_list: Arc<AtomicBool>,
         /// `write` of this IRI is refused before anything is written, as by a full store.
         pub refuse_write_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// A removal (`delete`, `delete_container_if_empty`) of this IRI is refused before
+        /// anything is removed, as by a store that has no room for the change.
+        pub refuse_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `delete` of this IRI detaches it from its parent, then fails with the record still
         /// there, as a two-step delete does when its second step fails.
         pub partial_delete_of: Arc<std::sync::Mutex<Option<String>>>,
+        /// When set, every read the store answers (`read`, `meta`, `exists`, a listing, `hold`)
+        /// is recorded here as `"{call} {iri}"`, in order.
+        pub trace: Arc<std::sync::Mutex<Option<Vec<String>>>>,
         /// How many `delete`s named a parent: removals of a member that are not one step.
         pub two_step_deletes: Arc<std::sync::atomic::AtomicUsize>,
         /// Fail every [`Store::restore`] of this resource until cleared.
@@ -2986,9 +2992,11 @@ pub(crate) mod test_store {
                 timeless: Default::default(),
                 exists_answers: Default::default(),
                 refuse_write_of: Default::default(),
+                refuse_delete_of: Default::default(),
                 fail_after_create: Default::default(),
                 partial_delete_of: Default::default(),
                 two_step_deletes: Default::default(),
+                trace: Default::default(),
                 fail_restore_of: Default::default(),
                 restores: Default::default(),
                 unsettle_next_create: Default::default(),
@@ -3026,6 +3034,13 @@ pub(crate) mod test_store {
                     .unwrap()
                     .iter()
                     .any(|of| of == iri)
+        }
+
+        /// Record a read in [`FlakyStore::trace`], when it is kept.
+        fn traced(&self, call: &str, iri: &str) {
+            if let Some(trace) = self.trace.lock().unwrap().as_mut() {
+                trace.push(format!("{call} {iri}"));
+            }
         }
 
         /// Count a store step against [`FlakyStore::fail_step`].
@@ -3106,6 +3121,7 @@ pub(crate) mod test_store {
     #[async_trait]
     impl Store for FlakyStore {
         async fn read(&self, iri: &str) -> ServerResult<Resource> {
+            self.traced("read", iri);
             if self.read_fails(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
@@ -3116,6 +3132,7 @@ pub(crate) mod test_store {
             read
         }
         async fn meta(&self, iri: &str) -> ServerResult<Option<ResourceMeta>> {
+            self.traced("meta", iri);
             if self.fail_meta.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
@@ -3128,6 +3145,7 @@ pub(crate) mod test_store {
             Ok(meta)
         }
         async fn exists(&self, iri: &str) -> ServerResult<bool> {
+            self.traced("exists", iri);
             if self.fail_exists.load(Ordering::SeqCst)
                 && self
                     .exists_answers
@@ -3281,6 +3299,7 @@ pub(crate) mod test_store {
             self.inner.restore(iri, container, body, meta).await
         }
         async fn hold(&self, iri: &str, holder: &str) -> ServerResult<Option<ResourceMeta>> {
+            self.traced("hold", iri);
             // What a journal stages is held, not read: the read hooks apply to it alike.
             if self.read_fails(iri) {
                 return Err(ServerError::Storage("disk on fire".into()));
@@ -3322,6 +3341,9 @@ pub(crate) mod test_store {
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
             self.step()?;
+            if self.refuse_delete_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::InsufficientStorage);
+            }
             if parent.is_some() {
                 self.two_step_deletes.fetch_add(1, Ordering::SeqCst);
             }
@@ -3362,6 +3384,9 @@ pub(crate) mod test_store {
         ) -> ServerResult<DeleteOutcome> {
             // The same failures as `delete`: a resource is removed by either.
             self.step()?;
+            if self.refuse_delete_of.lock().unwrap().as_deref() == Some(iri) {
+                return Err(ServerError::InsufficientStorage);
+            }
             if let Some(gate) = held(&self.unsettle_next_delete_of, iri) {
                 let (inner, iri, parent) = (
                     self.inner.clone(),
@@ -3443,6 +3468,7 @@ pub(crate) mod test_store {
             self.inner.reset_marker(iri, value, lease).await
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
+            self.traced("list", container);
             if self.fail_list.load(Ordering::SeqCst)
                 || self.fail_list_of.lock().unwrap().as_deref() == Some(container)
             {
@@ -3455,6 +3481,7 @@ pub(crate) mod test_store {
             container: &str,
             max_bytes: usize,
         ) -> ServerResult<Option<Vec<ValidatedChildIri>>> {
+            self.traced("list", container);
             if self.fail_list.load(Ordering::SeqCst)
                 || self.fail_list_of.lock().unwrap().as_deref() == Some(container)
             {

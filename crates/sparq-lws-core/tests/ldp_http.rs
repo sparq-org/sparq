@@ -686,18 +686,16 @@ async fn a_repeated_slash_name_left_over_can_be_deleted() {
     );
 }
 
-/// An encoded separator or dot segment is part of a name, never decoded into a path: the write
-/// lands at the name as sent, which reads back, and nothing appears at the decoded path. A raw
-/// dot segment is refused.
+/// An encoded separator is part of a name, never decoded into a path: the write lands at the
+/// name as sent, which reads back, and nothing appears at the decoded path. A dot segment is
+/// refused, as sent or %-decoded (a client normalising the URL would resolve it away).
 #[tokio::test]
-async fn encoded_separators_and_dots_are_literal_names() {
+async fn encoded_separators_are_literal_names_and_dot_segments_are_refused() {
     let h = Harness::new().await;
     for (sent, decoded) in [
         ("/alice/a%2Fb", "/alice/a/b"),
         ("/alice/c%2fd", "/alice/c/d"),
         ("/alice/e%2F/f", "/alice/e//f"),
-        ("/alice/%2E%2E/g", "/g"),
-        ("/alice/%2e/h", "/alice/h"),
     ] {
         let r = h
             .request("PUT", sent, Some("text/turtle"), Body::from(TURTLE))
@@ -708,11 +706,19 @@ async fn encoded_separators_and_dots_are_literal_names() {
         let r = h.request("GET", decoded, None, Body::empty()).await;
         assert_ne!(r.status(), StatusCode::OK, "GET {decoded}");
     }
-    for raw in ["/alice/../x", "/alice/./x"] {
-        let r = h
-            .request("PUT", raw, Some("text/turtle"), Body::from(TURTLE))
-            .await;
-        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "PUT {raw}");
+    for raw in [
+        "/alice/../x",
+        "/alice/./x",
+        "/alice/%2E%2E/g",
+        "/alice/%2e/h",
+        "/alice/.%2E/i",
+    ] {
+        for method in ["PUT", "GET", "DELETE"] {
+            let r = h
+                .request(method, raw, Some("text/turtle"), Body::from(TURTLE))
+                .await;
+            assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{method} {raw}");
+        }
     }
 }
 

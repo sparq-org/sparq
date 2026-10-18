@@ -217,9 +217,15 @@ fn all_groups(groups: &Groups, have: impl Fn(&str) -> bool) -> bool {
 /// collects. What is past it fails the request, explicitly, rather than growing with the storage.
 pub const MAX_INDEX_WORKING_SET: usize = 16 << 20;
 
+/// What one listing may hold of linkset records (what legacy edges leave) on top of what the
+/// walk's budget has left: record edges are not followed and not charged to the budget, so the
+/// names the store reads for one listing are bounded by what is left plus this.
+const RECORD_EDGE_ALLOWANCE: usize = 64 << 10;
+
 /// Why the index could not be built.
 enum Failed {
-    /// A listing, a permission check or the metadata of a resource could not be read.
+    /// A listing, or whether a resource the agent may read is there, or its metadata, could not
+    /// be read.
     Store,
     /// What it would keep is past [`MAX_INDEX_WORKING_SET`].
     TooLarge,
@@ -263,8 +269,9 @@ impl Kept {
 }
 
 /// Visit every resource the agent may read now, with its types (full IRIs) and its metadata;
-/// an error when a listing, a permission check or the metadata of one cannot be read, or when
-/// `visit` refuses. Each resource's shared lock is held from its permission check through the
+/// an error when a listing, or whether a resource the agent may read is there, or its metadata,
+/// cannot be read, or when `visit` refuses. Read is decided first for each resource: one whose
+/// access cannot be decided is one the agent may not read, passed over as one not there is. Each resource's shared lock is held from its permission check through the
 /// read of its metadata and its visit, so the types and relations seen are those of the state
 /// the check allowed (a delete and a re-create by someone else cannot slip in between); the lock
 /// is released, and the metadata dropped, before the next resource.
@@ -299,26 +306,58 @@ async fn readable<S: Store + 'static>(
         if state.locks.set_asides() != set_asides {
             return Err(Failed::SetAside);
         }
+        let is_container = uri.ends_with('/');
+        // Whether the agent may read it is decided first, before anything else is asked of it:
+        // one it may not read (or whose access cannot be decided, which fails closed) is passed
+        // over as one that is not there, with nothing more asked of it but, for a container,
+        // its listing (what is under it may be readable). So no answer turns on whether a
+        // resource the agent may not read is there, or on its state.
+        let may_read = match state.check(Action::Read, &uri, agent).await {
+            Ok(may) => may,
+            Err(crate::error::ServerError::NotFound) => false,
+            // Its access cannot be decided (its metadata cannot be read). When a grant names
+            // the agent for it, the agent may be one that reads it, and the walk fails rather
+            // than leave it out; otherwise only its creator could, and the agent is told as it
+            // would be were it not there.
+            Err(_) if super::access::granted(state, Action::Read, &uri, agent) => {
+                return Err(Failed::Store)
+            }
+            Err(_) => false,
+        };
+        if !may_read && !is_container {
+            continue;
+        }
         // A resource removed since it was listed is not in the index: its existence is checked
         // under its lock (its metadata alone does not say, being read as a default when absent).
-        match state.store.exists(&uri).await {
-            Ok(true) => {}
-            Ok(false) => continue,
-            Err(_) => return Err(Failed::Store),
+        // A container the agent may not read is only listed, a removed one listing nothing.
+        if may_read {
+            match state.store.exists(&uri).await {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(_) => return Err(Failed::Store),
+            }
         }
-        let is_container = uri.ends_with('/');
         // A listing that cannot be read fails the index rather than leaving out what is under
         // it.
         if is_container {
-            // The listing is read only while it fits what the budget has left, so one too large
-            // to keep is refused before it is held whole.
-            let children = match state.store.list_children_within(&uri, kept.left()).await {
+            // The listing is read only while it fits what the budget has left (and the
+            // allowance for record edges, which are not charged), so one too large to keep is
+            // refused before it is held whole.
+            let within = kept.left().saturating_add(RECORD_EDGE_ALLOWANCE);
+            let children = match state.store.list_children_within(&uri, within).await {
                 Ok(Some(c)) => c,
                 Ok(None) => return Err(Failed::TooLarge),
                 Err(crate::error::ServerError::NotFound) => Vec::new(),
                 Err(_) => return Err(Failed::Store),
             };
-            let listed: usize = children.iter().map(|c| c.as_str().len()).sum();
+            // A linkset record a legacy edge lists is not followed, and not charged for: it is
+            // no resource. (The store reads its name, within RECORD_EDGE_ALLOWANCE.)
+            let listed: usize = children
+                .iter()
+                .map(|c| c.as_str())
+                .filter(|c| !super::names_record(c))
+                .map(str::len)
+                .sum();
             kept.charge(listed)?;
             // A listing that names a member twice is followed once.
             let mut once = std::collections::HashSet::new();
@@ -337,10 +376,8 @@ async fn readable<S: Store + 'static>(
             drop(children);
             kept.refund(listed);
         }
-        match state.check(Action::Read, &uri, agent).await {
-            Ok(true) => {}
-            Ok(false) | Err(crate::error::ServerError::NotFound) => continue,
-            Err(_) => return Err(Failed::Store),
+        if !may_read {
+            continue;
         }
         let meta = match state.resource_meta(&uri).await {
             Ok(m) => m,
@@ -943,6 +980,82 @@ mod tests {
         );
     }
 
+    /// A storage holding the children of the root `names` names.
+    async fn storage_of(names: &[&str]) -> LwsState<super::super::test_store::FlakyStore> {
+        use super::super::test_store;
+        let (state, _store) = test_store::state(100).await;
+        let root = state.cfg.storage();
+        for name in names {
+            state
+                .store
+                .create_in_container(&root, &format!("{root}{name}"), "x".into(), "text/plain")
+                .await
+                .unwrap();
+        }
+        state
+    }
+
+    /// A record edge a listing names costs the walk nothing: the search of everything is
+    /// answered within the same budget as over a storage without it.
+    #[tokio::test]
+    async fn a_record_edge_is_charged_nothing() {
+        let records: Vec<String> = (0..40).map(|i| format!("doc-{i:02}.meta")).collect();
+        let mut names = vec!["a"];
+        names.extend(records.iter().map(String::as_str));
+        let with = storage_of(&names).await;
+        let without = storage_of(&["a"]).await;
+        assert_eq!(found(&with).await, found(&without).await);
+        assert_eq!(least_budget(&with).await, least_budget(&without).await);
+    }
+
+    /// The search of everything, as `agent`: its status, body and the reads it made.
+    async fn searched_as(
+        state: &LwsState<super::super::test_store::FlakyStore>,
+        store: &super::super::test_store::FlakyStore,
+        agent: &Agent,
+    ) -> (StatusCode, Bytes, Vec<String>) {
+        let path = format!("{TYPE_SEARCH_PATH}?q={}", jose::b64url(b"{}"));
+        let get = super::super::test_store::request(Method::GET, &path, &[], "");
+        *store.trace.lock().unwrap() = Some(Vec::new());
+        let r = handle(state, &get, agent).await;
+        let trace = store.trace.lock().unwrap().take().unwrap();
+        let status = r.status();
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, body, trace)
+    }
+
+    /// Read is decided before anything else is asked of a resource the walk reaches: of one the
+    /// agent may not read, nothing is asked whether it is there; and one whose access cannot be
+    /// decided is passed over as one that is not there is, the answer the same as over a
+    /// storage without it (not a `500` that says something is there).
+    #[tokio::test]
+    async fn a_resource_the_agent_may_not_read_is_answered_as_one_not_there() {
+        use super::super::test_store::{agent, closed_state, data};
+        let stranger = agent("https://stranger.example/#me");
+        let (with, with_store) = closed_state(100).await;
+        let x = data(&with, "x").await;
+        let (without, without_store) = closed_state(100).await;
+        let seen = searched_as(&with, &with_store, &stranger).await;
+        assert_eq!(seen.0, StatusCode::OK);
+        assert!(
+            !seen.2.iter().any(|t| t == &format!("exists {x}")),
+            "asked whether a resource it may not read is there: {:?}",
+            seen.2
+        );
+        // Its access cannot be decided: its metadata cannot be read.
+        *with_store.fail_read_of.lock().unwrap() = Some(super::super::meta_key(&x));
+        let unreadable = searched_as(&with, &with_store, &stranger).await;
+        let absent = searched_as(&without, &without_store, &stranger).await;
+        assert_eq!((unreadable.0, &unreadable.1), (absent.0, &absent.1));
+        // One a grant names for it may be a reader: for it, the walk fails whole.
+        super::super::test_store::grant_read(&with, "https://reader.example/#me", &[&x]).await;
+        let reader = agent("https://reader.example/#me");
+        let failed = searched_as(&with, &with_store, &reader).await;
+        assert_eq!(failed.0, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
     /// Review findings: the walk waited on the lock of a resource whose change was set aside
     /// (its locks held until it is put back), holding the request; then it skipped it, giving a
     /// `200` that left out what the walk could not see. The walk fails with `503` as soon as
@@ -1386,6 +1499,8 @@ mod tests {
             StatusCode::OK
         );
         let get = test_store::request(Method::GET, TYPE_INDEX_PATH, &[], "");
+        // Bob is granted Read on the secret: a failure to decide it fails the index for him.
+        test_store::grant_read(&state, "https://bob.example/#me", &[&secret]).await;
         let failures = [
             (&state.store.fail_read_of, super::super::meta_key(&secret)),
             (&state.store.fail_list_of, dir.clone()),

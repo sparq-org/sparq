@@ -597,6 +597,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-lws-core (LWS notifications, type index, records):** notifications follow the
+  subscriber's current access. A WebSocket notification the subscriber may no longer read is
+  not sent and decides no close; an access timer (every 30 seconds, `ACCESS_RECHECK`) closes the
+  socket (1008) once read access is gone; a channel closes (1008) when its receive token expires,
+  advertised as `endAt` in the subscribe response, and an expired channel never delivers again in
+  the process. A webhook subscription decides access before asking whether its topic exists. The
+  type index decides read access before anything else is asked of a resource, passes over one the
+  caller may not read as one not there, and charges linkset-record names nothing against its
+  budget. A record removal waits for its fence at most as long as for a lock, keeps the container
+  held until a removal left to settle in the background is settled, and answers `507` when the
+  store refuses it for want of room; a subscription being cancelled hears nothing until it is back
+  in force; a subscription create decides its subscriber's due subscriptions before counting. The
+  LDP surface refuses a %-decoded dot segment (`%2E`, `%2E%2E`) with `400`, as it does `.` and
+  `..`.
+
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
   / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to
   a stored formula that holds no variable at any depth is matched as that formula, as

@@ -3434,7 +3434,16 @@ mod tests {
     /// Seed a root `.acl` granting `OWNER` full control over the root + all descendants, written
     /// through the store as an auxiliary resource. Returns the store ready for handler use.
     async fn store_with_owner_root_acl() -> CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
-        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        with_owner_root_acl(CompositeStore::new(
+            InMemorySparqClient::new(),
+            InMemoryBlobStore::new(),
+        ))
+        .await
+    }
+
+    async fn with_owner_root_acl(
+        store: CompositeStore<InMemorySparqClient, InMemoryBlobStore>,
+    ) -> CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
         let root_acl = format!(
             r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
 <#owner> a acl:Authorization;
@@ -7751,5 +7760,136 @@ mod tests {
             .await
             .expect_err("an unacceptable Accept must be a 406, not a 304");
         assert_eq!(err.status(), StatusCode::NOT_ACCEPTABLE);
+    }
+
+    /// No LDP write, however its path is spelled (%-encoded, in another case, under a repeated
+    /// slash, with an encoded `#`), or whatever a `POST`'s `Slug` says, stores anything in the
+    /// notification service's namespace, so none stores a key of its marker's shape: the first
+    /// marker a store holds is the service's own. Over a store whose service pool has no room, the
+    /// service's marker still takes the slot kept for it, which a marker-shaped key stored before
+    /// would have taken.
+    #[tokio::test]
+    async fn no_ldp_write_stores_a_key_of_the_markers_shape() {
+        use crate::store::{is_service_marker, Store as _};
+        let store = with_owner_root_acl(CompositeStore::in_memory_with_limits(
+            crate::store::InMemoryStoreLimits::default().with_pool(0, 0),
+        ))
+        .await;
+        let state = Arc::new(LdpState::new(store, "https://pod.example"));
+        let marker = "https://pod.example/.lws/subscriptions/#high-water";
+        let named = [
+            "/.lws/subscriptions/#high-water",
+            "/.lws/subscriptions/%23high-water",
+            "/.lws/subscriptions/%23HIGH-WATER",
+            "/.LWS/subscriptions/%23high-water",
+            "/.Lws/Subscriptions/%23high-water",
+            "/%2Elws/subscriptions/%23high-water",
+            "/%2elws/subscriptions/%23high-water",
+            "/%2E%6C%77%73/subscriptions/%23high-water",
+            "/.lws%2Fsubscriptions%2F%23high-water",
+            "/%2Elws%2Fsubscriptions%2F%23high-water",
+            "//.lws/subscriptions/%23high-water",
+            "///.LWS/subscriptions/%23high-water",
+            "//%2Elws/subscriptions/%23high-water",
+            "/.lws/subscriptions/",
+            "/.lws/",
+            "/a/../.lws/subscriptions/%23high-water",
+            "/a/%2E%2E/.lws/subscriptions/%23high-water",
+        ];
+        for path in named {
+            let uri: axum::http::Uri = path.parse().unwrap();
+            let _ = put_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                uri.clone(),
+                turtle_write_headers(),
+                request_body_bytes(),
+            )
+            .await;
+            let _ = patch_handler(
+                State(state.clone()),
+                Extension(owner_token()),
+                uri,
+                n3_patch_headers(),
+                insert_only_patch("https://pod.example/x#me"),
+            )
+            .await;
+        }
+        // A `POST` names its child by its container and a `Slug`.
+        put_handler(
+            State(state.clone()),
+            Extension(owner_token()),
+            "/c/".parse().unwrap(),
+            turtle_write_headers(),
+            AxBytes::new(),
+        )
+        .await
+        .expect("a container to post into");
+        let containers = [
+            "/",
+            "/c/",
+            "/.lws/",
+            "/.lws/subscriptions/",
+            "//.lws/subscriptions/",
+        ];
+        let slugs = [
+            ".lws",
+            ".LWS",
+            "%2Elws",
+            ".lws/subscriptions/#high-water",
+            ".lws%2Fsubscriptions%2F%23high-water",
+            "#high-water",
+            "%23high-water",
+            "subscriptions",
+        ];
+        for container in containers {
+            for slug in slugs {
+                let mut headers = turtle_write_headers();
+                headers.insert(
+                    HeaderName::from_static("slug"),
+                    HeaderValue::from_str(slug).unwrap(),
+                );
+                let _ = post_handler(
+                    State(state.clone()),
+                    Extension(owner_token()),
+                    container.parse().unwrap(),
+                    headers,
+                    request_body_bytes(),
+                )
+                .await;
+            }
+        }
+        // Every key the writes left: none is the marker's, or in the service's namespace.
+        let mut keys = Vec::new();
+        let mut stack = vec!["https://pod.example/".to_string()];
+        while let Some(container) = stack.pop() {
+            for child in state
+                .store
+                .list_children(&container)
+                .await
+                .unwrap_or_default()
+            {
+                let child = child.as_str().to_string();
+                if child.ends_with('/') {
+                    stack.push(child.clone());
+                }
+                keys.push(child);
+            }
+        }
+        assert!(keys.len() > 1, "{keys:?}");
+        for key in &keys {
+            assert!(!is_service_marker(key), "{key}");
+            assert!(
+                !crate::ldp::target::names_lws_service_record(key, "https://pod.example"),
+                "{key}"
+            );
+        }
+        assert!(!state.store.exists(marker).await.unwrap());
+        assert!(!state
+            .store
+            .exists("https://pod.example/.lws/subscriptions/")
+            .await
+            .unwrap());
+        assert_eq!(state.store.raise_marker(marker, 7).await.unwrap(), 7);
     }
 }

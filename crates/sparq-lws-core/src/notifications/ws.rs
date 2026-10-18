@@ -126,7 +126,17 @@ pub struct NotifyState<S: Store> {
     pub base_url: String,
     /// The LDP state — the store + ACL cache the [`WacAuthorizer`] reads `.acl` resources through.
     ldp: Arc<LdpState<S>>,
+    /// How often an open socket's subscriber is checked for read access apart from any event
+    /// ([`ACCESS_RECHECK`]): what closes the socket once access is gone.
+    access_recheck: std::time::Duration,
 }
+
+/// How often an open receive socket checks, on a timer of its own, that its subscriber may still
+/// read the topic, closing it (1008) once it may not. Every event is checked as well, and one the
+/// subscriber may not read is dropped, but only this timer closes the socket for it, so when the
+/// socket closes, and why, follows the subscriber's access and the clock alone, never an event it
+/// may not read.
+pub const ACCESS_RECHECK: std::time::Duration = std::time::Duration::from_secs(30);
 
 impl<S: Store> NotifyState<S> {
     /// Derive the notification state from the LDP state: the hub and base URL are TAKEN from it
@@ -137,7 +147,15 @@ impl<S: Store> NotifyState<S> {
             hub: ldp.notifications.clone(),
             base_url: ldp.base_url().to_string(),
             ldp,
+            access_recheck: ACCESS_RECHECK,
         }
+    }
+
+    /// The same state, with an open socket's access checked every `every` apart from events.
+    #[cfg(test)]
+    fn rechecking_every(mut self, every: std::time::Duration) -> Self {
+        self.access_recheck = every;
+        self
     }
 
     /// The per-resource WAC gate for a notification topic, shared by BOTH the subscribe seam and the
@@ -216,8 +234,8 @@ impl<S: Store> NotifyState<S> {
     /// its query and fragment are dropped exactly as for an LDP request, and a topic that names no
     /// LDP resource has none. That is a topic `parse_target` refuses — a linkset record
     /// (`X.meta`, in any case, as sent or %-decoded), anything in the `/.lws/` service namespace
-    /// or the reserved identity namespace, an empty interior segment or a dot segment — and a
-    /// topic with a segment that is `.` or `..` once %-decoded. A topic off this storage
+    /// or the reserved identity namespace, an empty interior segment, or a dot segment (`.` or
+    /// `..`, as sent or %-decoded). A topic off this storage
     /// ([`NotifyState::is_on_this_storage`]) has none either.
     fn canonical_topic(&self, topic: &str) -> Result<String, TopicRefusal> {
         if !self.is_on_this_storage(topic) {
@@ -227,15 +245,6 @@ impl<S: Store> NotifyState<S> {
         let path = &topic[base.len()..];
         let target =
             crate::ldp::target::parse_target(base, path).map_err(|_| TopicRefusal::NotAResource)?;
-        let dot_segment = target.iri[base.len()..].split('/').any(|seg| {
-            matches!(
-                crate::identity::percent_decode_lossy(seg).as_str(),
-                "." | ".."
-            )
-        });
-        if dot_segment {
-            return Err(TopicRefusal::NotAResource);
-        }
         Ok(target.iri)
     }
 
@@ -377,6 +386,14 @@ pub async fn subscribe_handler<S: Store>(
     // this topic can connect. The token (never logged) is embedded in `receiveFrom`.
     let receive_token = state.hub.mint_receive_token(&web_id, topic).await;
     let receive_from = state.receive_from_url(topic, &receive_token);
+    // When the channel ends: the token's expiry, after which an open socket is closed and the
+    // `receiveFrom` URL no longer connects. Rounded down to the second, so never later than it.
+    let end_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        .saturating_add(super::RECEIVE_TOKEN_TTL.as_secs().saturating_sub(1));
+    let end_at = crate::notifications::activity::rfc3339_utc(end_at);
 
     // The channel description: per WebSocketChannel2023, `receiveFrom` is the ws(s):// URL the client
     // opens. We do NOT pre-register the topic here — registration happens when the WebSocket connects
@@ -387,6 +404,7 @@ pub async fn subscribe_handler<S: Store>(
         "type": WEBSOCKET_CHANNEL_2023_TYPE,
         "topic": topic,
         "receiveFrom": receive_from,
+        "endAt": end_at,
     });
     (
         StatusCode::OK,
@@ -459,11 +477,11 @@ pub async fn receive_handler<S: Store + 'static>(
     // the socket is then registered under. A topic with no canonical form had no token minted for
     // it, and is answered as an invalid token is.
     let topic = state.canonical_topic(&topic).ok();
-    let web_id = match &topic {
-        Some(topic) => state.hub.authorize_receive_token(&token, topic).await,
+    let channel = match &topic {
+        Some(topic) => state.hub.receive_channel(&token, topic).await,
         None => None,
     };
-    let (Some(topic), Some(web_id)) = (topic, web_id) else {
+    let (Some(topic), Some((web_id, channel))) = (topic, channel) else {
         return (
             StatusCode::UNAUTHORIZED,
             "a valid receive token is required",
@@ -486,74 +504,128 @@ pub async fn receive_handler<S: Store + 'static>(
     };
     // Only AFTER the token validates do we upgrade + register a subscriber.
     let origin = request_origin(&headers).map(str::to_string);
-    ws.on_upgrade(move |socket| stream_notifications(socket, state, topic, web_id, origin))
+    ws.on_upgrade(move |socket| stream_notifications(socket, state, topic, web_id, origin, channel))
 }
+
+/// Send a close frame (best effort: the client may be gone already).
+async fn close(socket: &mut WebSocket, code: u16, reason: &'static str) {
+    let _ = socket
+        .send(Message::Close(Some(axum::extract::ws::CloseFrame {
+            code,
+            reason: reason.into(),
+        })))
+        .await;
+}
+
+/// The close reason once the subscriber may no longer read the topic.
+const REVOKED: &str = "access to the topic was revoked";
+/// The close reason once the channel has expired.
+const EXPIRED: &str = "the channel expired; subscribe again";
 
 /// The per-connection task: register a subscriber, forward every notification to the socket, and
 /// clean up (drop the receiver ⇒ the hub prunes the topic on its next emit) when the socket closes.
 ///
-/// Concurrency: a `tokio::select!` over (a) the next broadcast notification and (b) the next inbound
-/// socket message. Inbound frames from the client are drained (a WebSocketChannel2023 receive socket
-/// is server→client only; we read solely to observe a Close / a transport error so we can tear down
-/// promptly and not leak the subscription).
+/// Concurrency: a `tokio::select!` over the channel's expiry, the access timer, the next broadcast
+/// notification and the next inbound socket message. Inbound frames from the client are drained (a
+/// WebSocketChannel2023 receive socket is server→client only; we read solely to observe a Close / a
+/// transport error so we can tear down promptly and not hold the subscription open).
 ///
-/// Revocation: the WAC (and ODRL) gate is re-run before every frame, so a subscriber whose read
-/// access is revoked while the socket is open is disconnected (close code 1008, policy violation)
-/// before the next notification reaches it. The ACL cache keeps this check cheap.
+/// What the subscriber learns follows its current access and the clock alone:
+/// - Every notification is checked (the WAC and ODRL gate, and the channel's expiry) before
+///   anything is sent; one the subscriber may not read is dropped. A backlog overflow is checked
+///   the same way before it closes the socket (1011): while the subscriber may not read the topic,
+///   the overflow is dropped as the events it stands for are.
+/// - The socket is closed for lost access (1008) only by the access timer ([`ACCESS_RECHECK`],
+///   the state's `access_recheck`), and for expiry (1008) at the channel's expiry instant
+///   ([`Channel`](crate::notifications::Channel)), so neither the close nor its timing depends on
+///   an event the subscriber may not read. An expired channel is latched: it never delivers again.
 async fn stream_notifications<S: Store + 'static>(
     mut socket: WebSocket,
     state: Arc<NotifyState<S>>,
     topic: String,
     web_id: String,
     origin: Option<String>,
+    channel: crate::notifications::Channel,
 ) {
     let mut rx = state.hub.subscribe(&topic).await;
+    let expiry = tokio::time::sleep_until(channel.expires_at().into());
+    tokio::pin!(expiry);
+    let every = state.access_recheck;
+    let mut recheck = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
+    recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let may_read = || async {
+        state
+            .deny_unless_may_read(&topic, &web_id, origin.as_deref())
+            .await
+            .is_none()
+    };
 
     loop {
         tokio::select! {
-            // (a) A notification for this topic — forward it as a text frame.
+            // The channel's expiry: closed at its instant, whatever has happened on the topic.
+            () = &mut expiry => {
+                channel.lapse();
+                close(&mut socket, 1008, EXPIRED).await;
+                break;
+            }
+            // The access timer: closed once the subscriber may no longer read the topic.
+            _ = recheck.tick() => {
+                if channel.expired() {
+                    close(&mut socket, 1008, EXPIRED).await;
+                    break;
+                }
+                if !may_read().await {
+                    close(&mut socket, 1008, REVOKED).await;
+                    break;
+                }
+            }
+            // A notification for this topic: forwarded only while the channel stands and the
+            // subscriber may read the topic; dropped otherwise.
             received = rx.recv() => {
                 match received {
                     Ok(body) => {
-                        if state
-                            .deny_unless_may_read(&topic, &web_id, origin.as_deref())
-                            .await
-                            .is_some()
-                        {
-                            let _ = socket
-                                .send(Message::Close(Some(axum::extract::ws::CloseFrame {
-                                    code: 1008, // policy violation: read access was revoked
-                                    reason: "access to the topic was revoked".into(),
-                                })))
-                                .await;
+                        if channel.expired() {
+                            close(&mut socket, 1008, EXPIRED).await;
                             break;
+                        }
+                        if !may_read().await {
+                            continue;
                         }
                         if socket.send(Message::text(body.to_string())).await.is_err() {
                             break; // the client went away mid-send
                         }
                     }
-                    // The buffer overran for this slow client: a frame was dropped. Tell the client to
-                    // reconcile by closing — it should re-subscribe + re-read (missed-update safety).
+                    // The buffer overran for this slow client: frames were dropped. Tell the client
+                    // to reconcile by closing — it should re-subscribe + re-read (missed-update
+                    // safety) — once it is known that it may read what it missed.
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        if channel.expired() {
+                            close(&mut socket, 1008, EXPIRED).await;
+                            break;
+                        }
+                        if !may_read().await {
+                            continue;
+                        }
                         NOTIFICATION_METRICS
                             .dropped_subscribers_total
                             .fetch_add(1, Ordering::Relaxed);
                         NOTIFICATION_METRICS
                             .lagged_events_total
                             .fetch_add(skipped, Ordering::Relaxed);
-                        let _ = socket
-                            .send(Message::Close(Some(axum::extract::ws::CloseFrame {
-                                code: 1011, // "internal error" / server overload — client reconnects
-                                reason: "notification backlog overflow; reconnect and reconcile".into(),
-                            })))
-                            .await;
+                        // "internal error" / server overload — client reconnects
+                        close(
+                            &mut socket,
+                            1011,
+                            "notification backlog overflow; reconnect and reconcile",
+                        )
+                        .await;
                         break;
                     }
                     // The sender was dropped (the topic channel went away) — nothing more will arrive.
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
-            // (b) An inbound socket message — only meaningful as a Close / error signal.
+            // An inbound socket message — only meaningful as a Close / error signal.
             inbound = socket.recv() => {
                 match inbound {
                     Some(Ok(Message::Close(_))) | None => break, // clean close or stream end
@@ -1214,6 +1286,249 @@ mod tests {
             body.contains("https://pod.example/.notifications/WebSocketChannel2023/"),
             "{body}"
         );
+    }
+
+    /// A root ACL granting `owner` every mode and `reader` Read alone, over the whole pod.
+    fn acl_with_reader(owner: &str, reader: Option<&str>) -> String {
+        let mut acl = format!(
+            r#"@prefix acl: <http://www.w3.org/ns/auth/acl#>.
+<#owner> a acl:Authorization;
+         acl:agent <{owner}>;
+         acl:accessTo <{BASE}/>;
+         acl:default <{BASE}/>;
+         acl:mode acl:Read, acl:Write, acl:Control."#
+        );
+        if let Some(reader) = reader {
+            acl.push_str(&format!(
+                r#"
+<#reader> a acl:Authorization;
+         acl:agent <{reader}>;
+         acl:accessTo <{BASE}/>;
+         acl:default <{BASE}/>;
+         acl:mode acl:Read."#
+            ));
+        }
+        acl
+    }
+
+    /// State whose root ACL is [`acl_with_reader`]`(ALICE, Some(BOB))`, checking an open socket's
+    /// access every `every`.
+    async fn state_with_reader(every: std::time::Duration) -> Arc<NotifyState<TestStore>> {
+        use crate::store::Store;
+        let store = CompositeStore::new(InMemorySparqClient::new(), InMemoryBlobStore::new());
+        store
+            .write(
+                &format!("{BASE}/.acl"),
+                Bytes::from(acl_with_reader(ALICE, Some(BOB))),
+                "text/turtle",
+            )
+            .await
+            .expect("seed root acl");
+        let ldp = Arc::new(LdpState::new(store, BASE));
+        Arc::new(NotifyState::new(ldp).rechecking_every(every))
+    }
+
+    /// Take Bob's Read away.
+    async fn revoke_bob(s: &NotifyState<TestStore>) {
+        use crate::store::Store;
+        s.ldp
+            .store
+            .write(
+                &format!("{BASE}/.acl"),
+                Bytes::from(acl_with_reader(ALICE, None)),
+                "text/turtle",
+            )
+            .await
+            .expect("rewrite root acl");
+    }
+
+    /// Serve the receive endpoint over `s` on a local port.
+    async fn serve_receive(s: Arc<NotifyState<TestStore>>) -> std::net::SocketAddr {
+        let app = axum::Router::new()
+            .route(RECEIVE_PATH, axum::routing::get(receive_handler))
+            .with_state(s);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.ok() });
+        addr
+    }
+
+    type Socket = tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >;
+
+    /// Connect to the receive endpoint at `addr` for `topic` with `token`; the handshake's
+    /// status when it is refused.
+    async fn connect(addr: std::net::SocketAddr, topic: &str, token: &str) -> Result<Socket, u16> {
+        let url = format!(
+            "ws://{addr}{RECEIVE_PATH}?topic={}&token={}",
+            encode_query_value(topic),
+            encode_query_value(token)
+        );
+        match tokio_tungstenite::connect_async(url).await {
+            Ok((ws, _)) => Ok(ws),
+            Err(tokio_tungstenite::tungstenite::Error::Http(r)) => Err(r.status().as_u16()),
+            Err(e) => panic!("connect: {e}"),
+        }
+    }
+
+    /// Wait until `topic` has `n` sockets registered.
+    async fn registered(s: &NotifyState<TestStore>, topic: &str, n: usize) {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while s.hub.subscriber_count(topic).await != n {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("socket registered");
+    }
+
+    /// The next frame within `within`, if any: `Some(Ok(text))` or `Some(Err((code, reason)))`
+    /// for a close.
+    async fn next_frame(
+        ws: &mut Socket,
+        within: std::time::Duration,
+    ) -> Option<Result<String, (u16, String)>> {
+        use futures_util::StreamExt;
+        use tokio_tungstenite::tungstenite::Message as M;
+        let frame = tokio::time::timeout(within, ws.next()).await.ok()??.ok()?;
+        Some(match frame {
+            M::Text(t) => Ok(t.to_string()),
+            M::Close(Some(c)) => Err((u16::from(c.code), c.reason.to_string())),
+            M::Close(None) => Err((0, String::new())),
+            other => panic!("unexpected frame {other:?}"),
+        })
+    }
+
+    /// A socket whose subscriber loses Read hears nothing more, and is closed by its access
+    /// timer, not by the next event: an event on the topic it may no longer read neither reaches
+    /// it nor moves when, or why, it is closed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_revoked_socket_is_closed_by_its_timer_not_by_an_event() {
+        let every = std::time::Duration::from_millis(1500);
+        let s = state_with_reader(every).await;
+        let topic = format!("{BASE}/doc");
+        let token = s.hub.mint_receive_token(BOB, &topic).await;
+        let addr = serve_receive(s.clone()).await;
+        let mut ws = connect(addr, &topic, &token).await.expect("connects");
+        registered(&s, &topic, 1).await;
+        // Read held: an event is delivered.
+        s.hub
+            .notify(&topic, crate::notifications::ActivityType::Update, None)
+            .await;
+        let frame = next_frame(&mut ws, std::time::Duration::from_secs(2)).await;
+        assert!(matches!(frame, Some(Ok(_))), "{frame:?}");
+        revoke_bob(&s).await;
+        s.hub
+            .notify(&topic, crate::notifications::ActivityType::Update, None)
+            .await;
+        // Nothing follows the event: neither the notification nor a close.
+        assert_eq!(
+            next_frame(&mut ws, std::time::Duration::from_millis(400)).await,
+            None,
+            "an event the subscriber may not read moved what it was sent"
+        );
+        // The timer closes it.
+        assert_eq!(
+            next_frame(&mut ws, every * 2).await,
+            Some(Err((1008, REVOKED.to_string())))
+        );
+    }
+
+    /// A backlog overflow is a signal of events: while the subscriber may not read the topic,
+    /// it is not told of one (no `1011`), and the socket is closed by the access timer as for
+    /// any event it may not read.
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_overflow_the_subscriber_may_not_read_is_not_told() {
+        let every = std::time::Duration::from_millis(1500);
+        let s = state_with_reader(every).await;
+        let topic = format!("{BASE}/doc");
+        let token = s.hub.mint_receive_token(BOB, &topic).await;
+        let addr = serve_receive(s.clone()).await;
+        let mut ws = connect(addr, &topic, &token).await.expect("connects");
+        registered(&s, &topic, 1).await;
+        revoke_bob(&s).await;
+        // Past the topic's buffer before the socket's task can drain it.
+        for _ in 0..(super::super::TOPIC_BUFFER + 1) {
+            s.hub
+                .notify(&topic, crate::notifications::ActivityType::Update, None)
+                .await;
+        }
+        assert_eq!(
+            next_frame(&mut ws, every * 2).await,
+            Some(Err((1008, REVOKED.to_string()))),
+            "told of an overflow it may not read"
+        );
+    }
+
+    /// A channel expires at its instant: the socket is closed then, with no event needed, and
+    /// the channel is latched expired, so it is not connected to again even with its binding
+    /// put back with a later expiry.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_expired_channel_never_delivers_again() {
+        let s = state_with_reader(std::time::Duration::from_secs(60)).await;
+        let topic = format!("{BASE}/doc");
+        let ttl = std::time::Duration::from_millis(800);
+        let token = s.hub.mint_receive_token_for(BOB, &topic, ttl).await;
+        let addr = serve_receive(s.clone()).await;
+        let mut ws = connect(addr, &topic, &token).await.expect("connects");
+        registered(&s, &topic, 1).await;
+        assert_eq!(
+            next_frame(&mut ws, std::time::Duration::from_secs(3)).await,
+            Some(Err((1008, EXPIRED.to_string()))),
+            "the socket outlived its channel"
+        );
+        // The binding put back with a later expiry: the channel stays expired.
+        s.hub
+            .receive_tokens
+            .lock()
+            .await
+            .get_mut(&token)
+            .expect("binding kept")
+            .channel
+            .expires_at = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        assert_eq!(connect(addr, &topic, &token).await.err(), Some(401));
+        registered(&s, &topic, 0).await;
+    }
+
+    /// Review of #7135: the canonical topic is the one the subscribe WAC check runs on, so a
+    /// topic naming an ACL with a query is checked as the ACL (Control), not as an ordinary
+    /// resource; and it is the one a socket is registered under.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_canonical_topic_is_checked_and_registered() {
+        let s = state_with_reader(ACCESS_RECHECK).await;
+        let subscribe = |who: &str, topic: String| {
+            let s = s.clone();
+            let who = who.to_string();
+            async move {
+                let resp = subscribe_handler(
+                    State(s),
+                    Extension(web_id_token(&who)),
+                    HeaderMap::new(),
+                    Json(subscribe_to(&topic)),
+                )
+                .await;
+                (resp.status(), body_to_string(resp).await)
+            }
+        };
+        let denial = subscribe("https://carol.example/#me", format!("{BASE}/doc")).await;
+        assert_eq!(denial.0, StatusCode::FORBIDDEN);
+        // Bob may read `doc` but not control it: its ACL, however named, is refused alike.
+        assert_eq!(
+            subscribe(BOB, format!("{BASE}/doc")).await.0,
+            StatusCode::OK
+        );
+        assert_eq!(subscribe(BOB, format!("{BASE}/doc.acl")).await, denial);
+        assert_eq!(subscribe(BOB, format!("{BASE}/doc.acl?x")).await, denial);
+        // A socket connected with the topic as sent is registered under its canonical form.
+        let canonical = format!("{BASE}/doc");
+        let token = s.hub.mint_receive_token(BOB, &canonical).await;
+        let addr = serve_receive(s.clone()).await;
+        let _ws = connect(addr, &format!("{BASE}/doc?x"), &token)
+            .await
+            .expect("connects");
+        registered(&s, &canonical, 1).await;
+        assert_eq!(s.hub.subscriber_count(&format!("{BASE}/doc?x")).await, 0);
     }
 
     /// Drain a Response body to a String (test helper).

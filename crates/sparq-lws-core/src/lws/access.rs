@@ -703,6 +703,39 @@ pub async fn aside<S: Store + 'static>(
     )
 }
 
+/// [`aside`], with the access decided before whether the resource was there is looked at: an
+/// agent that may not take `action` gets [`Aside::Denied`] from the same reads whether it was
+/// there or not; only one that may is told [`Aside::Missing`]. For a decision whose outcome must
+/// not show whether the resource exists (a subscription's topic, say).
+pub async fn aside_read_first<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> Result<Aside, ServerError> {
+    if state.cfg.open || is_owner(state, agent) {
+        return Ok(Aside::Allowed);
+    }
+    let prior = state.locks.prior(uri);
+    // Read as it is stored when the change kept none (a default when absent).
+    let meta = match prior.meta {
+        Some(meta) => meta,
+        None => state.resource_meta(uri).await?,
+    };
+    if !decide(state, action, uri, agent, &meta, prior.format).await? {
+        return Ok(Aside::Denied);
+    }
+    let existed = match prior.existed {
+        Some(existed) => existed,
+        None => state.store.exists(uri).await?,
+    };
+    Ok(if existed {
+        Aside::Allowed
+    } else {
+        Aside::Missing
+    })
+}
+
 /// [`allowed`] as for a URI where nothing is (no metadata, and only a container's format, which is
 /// its listing's): what a caller other than the owner is told about a resource that was not there
 /// before a change in flight began.
@@ -787,6 +820,22 @@ pub async fn allowed_as<S: Store + 'static>(
     )
     .await
     .unwrap_or(false)
+}
+
+/// Whether some grant in force names `agent` (or everyone) for `action` on `uri`: whether a
+/// grant could let it, whatever the resource's metadata says. Read from the grants alone.
+pub(crate) fn granted<S: Store + 'static>(
+    state: &LwsState<S>,
+    action: Action,
+    uri: &str,
+    agent: &Agent,
+) -> bool {
+    let subject = agent.subject.as_deref();
+    state
+        .access
+        .policies_covering(action, uri)
+        .iter()
+        .any(|p| p.assignee == FOAF_AGENT || Some(p.assignee.as_str()) == subject)
 }
 
 pub(crate) fn is_owner<S: Store + 'static>(state: &LwsState<S>, agent: &Agent) -> bool {

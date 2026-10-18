@@ -86,8 +86,53 @@ struct ReceiveTokenBinding {
     /// [`NotificationHub::authorize_receive_token`] so the receive endpoint can re-run the
     /// per-resource WAC check against the SUBSCRIBER's identity, not merely against the token.
     web_id: String,
-    /// Absolute expiry instant; a token is invalid at/after this point.
+    /// The channel the token opens, and when it expires.
+    channel: Channel,
+}
+
+/// A WebSocket channel's expiry, shared by the token that opens it and every socket connected
+/// through it: the token's expiry instant, and a latch set once the channel is seen expired. Once
+/// set it stays set, so an expired channel never delivers again and is never connected to again,
+/// whatever its binding says later (a binding put back with a later instant, say). Held in
+/// memory, on the process's monotonic clock: no channel outlives the process.
+#[derive(Clone, Debug)]
+pub struct Channel {
     expires_at: Instant,
+    lapsed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Channel {
+    fn new(expires_at: Instant) -> Self {
+        Self {
+            expires_at,
+            lapsed: Default::default(),
+        }
+    }
+
+    /// When the channel expires.
+    pub fn expires_at(&self) -> Instant {
+        self.expires_at
+    }
+
+    /// Whether the channel has expired, by its instant or by having been seen expired before;
+    /// seen expired now, it is latched so.
+    pub fn expired(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        if self.lapsed.load(Ordering::Acquire) {
+            return true;
+        }
+        let expired = self.expires_at <= Instant::now();
+        if expired {
+            self.lapsed.store(true, Ordering::Release);
+        }
+        expired
+    }
+
+    /// Latch the channel expired (its expiry instant has been reached).
+    pub fn lapse(&self) {
+        self.lapsed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// How many notifications a per-topic broadcast channel buffers before a slow receiver starts
@@ -143,21 +188,42 @@ impl NotificationHub {
         let binding = ReceiveTokenBinding {
             topic: topic.to_string(),
             web_id: web_id.to_string(),
-            expires_at: Instant::now() + RECEIVE_TOKEN_TTL,
+            channel: Channel::new(Instant::now() + RECEIVE_TOKEN_TTL),
         };
         let mut tokens = self.receive_tokens.lock().await;
-        let now = Instant::now();
         // Opportunistic sweep: drop any expired token so a stream of subscribes-without-connect
         // cannot leak the map unboundedly.
-        tokens.retain(|_, b| b.expires_at > now);
+        tokens.retain(|_, b| !b.channel.expired());
         tokens.insert(token.clone(), binding);
+        token
+    }
+
+    /// [`mint_receive_token`](Self::mint_receive_token), for a channel that expires `ttl` from
+    /// now.
+    #[cfg(test)]
+    pub(crate) async fn mint_receive_token_for(
+        &self,
+        web_id: &str,
+        topic: &str,
+        ttl: Duration,
+    ) -> String {
+        let token = generate_receive_token();
+        let binding = ReceiveTokenBinding {
+            topic: topic.to_string(),
+            web_id: web_id.to_string(),
+            channel: Channel::new(Instant::now() + ttl),
+        };
+        self.receive_tokens
+            .lock()
+            .await
+            .insert(token.clone(), binding);
         token
     }
 
     /// Validate a receive token presented on the WS upgrade against the requested `topic`. Returns
     /// `true` ONLY when the token exists, is unexpired, AND its bound topic equals `topic`. An
-    /// absent / unknown / expired / topic-mismatched token returns `false` (fail-closed). An expired
-    /// entry found during lookup is pruned (lazy expiry).
+    /// absent / unknown / expired / topic-mismatched token returns `false` (fail-closed). An
+    /// expired entry is dropped by the next mint's sweep.
     ///
     /// The token is REUSABLE until expiry (it is NOT consumed here) so a client can reconnect within
     /// the TTL window — see `RECEIVE_TOKEN_TTL`. Never logs the token.
@@ -168,22 +234,29 @@ impl NotificationHub {
     /// The identity half of the token gate: validate exactly as
     /// [`validate_receive_token`](Self::validate_receive_token) does AND return the authenticated
     /// WebID the token was minted for. `None` on any failure (absent / unknown / expired /
-    /// topic-mismatched) — fail-closed, and an expired entry found during lookup is pruned.
+    /// topic-mismatched) — fail-closed; an expired entry stays refused (its channel's latch is
+    /// set) until the next mint's sweep drops it.
     ///
     /// The receive endpoint needs the SUBSCRIBER's WebID, not just a yes/no, so it can re-run the
     /// per-resource WAC check at connect time (see [`ws::receive_handler`]): the token proves *who*
     /// subscribed, and WAC then decides whether that WebID may STILL read the topic. Never logs the
     /// token.
     pub async fn authorize_receive_token(&self, token: &str, topic: &str) -> Option<String> {
-        let mut tokens = self.receive_tokens.lock().await;
-        let now = Instant::now();
+        self.receive_channel(token, topic)
+            .await
+            .map(|(web_id, _)| web_id)
+    }
+
+    /// [`authorize_receive_token`](Self::authorize_receive_token), with the channel the token
+    /// opens: a socket connected through it delivers nothing once the channel has expired
+    /// ([`Channel::expired`]). A channel seen expired is refused from then on.
+    pub async fn receive_channel(&self, token: &str, topic: &str) -> Option<(String, Channel)> {
+        let tokens = self.receive_tokens.lock().await;
         match tokens.get(token) {
-            Some(b) if b.expires_at <= now => {
-                // Expired: prune it and reject.
-                tokens.remove(token);
-                None
-            }
-            Some(b) if b.topic == topic => Some(b.web_id.clone()),
+            // Expired (latched, so it is refused from now on): not pruned here, so the binding
+            // a socket shares keeps its latch; the next mint's sweep drops it.
+            Some(b) if b.channel.expired() => None,
+            Some(b) if b.topic == topic => Some((b.web_id.clone(), b.channel.clone())),
             // Present but bound to a DIFFERENT topic, or absent entirely.
             _ => None,
         }
@@ -474,18 +547,34 @@ mod tests {
         {
             let mut tokens = hub.receive_tokens.lock().await;
             let b = tokens.get_mut(&tok).expect("token present");
-            b.expires_at = Instant::now() - Duration::from_secs(1);
+            b.channel.expires_at = Instant::now() - Duration::from_secs(1);
         }
         assert!(
             !hub.validate_receive_token(&tok, "https://pod.example/a")
                 .await,
             "an expired token must be rejected"
         );
-        // And it is pruned on the failed lookup (lazy expiry).
+        // Put back with a later expiry, it stays refused: its channel was seen expired.
+        hub.receive_tokens
+            .lock()
+            .await
+            .get_mut(&tok)
+            .expect("token present")
+            .channel
+            .expires_at = Instant::now() + Duration::from_secs(60);
+        assert!(
+            !hub.validate_receive_token(&tok, "https://pod.example/a")
+                .await,
+            "a channel seen expired stays expired"
+        );
+        // And the next mint's sweep drops it.
+        let _ = hub
+            .mint_receive_token("https://alice.example/#me", "https://pod.example/b")
+            .await;
         let tokens = hub.receive_tokens.lock().await;
         assert!(
             !tokens.contains_key(&tok),
-            "an expired token must be pruned on lookup"
+            "an expired token must be pruned by the next mint"
         );
     }
 
