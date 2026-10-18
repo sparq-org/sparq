@@ -360,7 +360,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   erase data is the only honest answer. A whole-store write — `save`, or the base swap a
   compaction publishes — writes a FRESH image whose slots are numbered from zero again and whose
   counter starts past them, which is sound precisely because nothing of the old image survives
-  there for an id to collide with.
+  there for an id to collide with. Format 2 is a ONE-WAY upgrade, like the dictionary's: an
+  earlier build refuses any `named.bin` version but 1, and this version writes format 2 from
+  every save, create and drop that touches a named set — including the manifest naming nothing
+  that a drop of every named graph leaves, where an earlier build left no manifest at all.
+
+- **sparq-core (`sq-ycle`): a republish of the named manifest records EVERY slot it stops
+  naming.** The named set is public and detaching a child graph to write through it is a
+  supported pattern, but every republish rebuilds the manifest from the ATTACHED children — so a
+  create, or a drop of a sibling, performed while a child is detached published a set that no
+  longer named that child. Only the dropped slot was recorded as replaced, so the detached
+  handle's next write was ACKNOWLEDGED into a directory the store no longer named and was gone on
+  the next open; when the drop had emptied the set, `named/` itself was removed and the write was
+  acknowledged into an unlinked log. The invalidated set is now derived from the manifest diff
+  (declared before, not declared after), so such a write is refused with the reason instead.
+
+- **sparq-core (`sq-ycle`): a drop removes the store's OWN slot directory, and a slot id is
+  the store's own.** The directory a drop removed used to be the dropped handle's own `wal.dir()`
+  — whatever directory that handle was opened from. Since the named set is public, a graph opened
+  from ANOTHER store could be pushed onto it and dropped, and the removal then deleted that other
+  store's directory. Every removal on these paths is now built from this store's `named/` plus a
+  slot id, and refuses a name under it that is not a real directory, so no drop or recovery sweep
+  can follow a link out of the store. For the same reason a child's slot id is accepted only when
+  its directory is exactly `named/<slot>` of THIS store: a foreign child's basename used to be
+  recorded as a local slot, which left the manifest naming a directory that was not there or —
+  when the id collided with a local child's — opened two graph names onto one directory, sharing
+  one base and one WAL. A manifest may not name one slot twice, where it is written or where it
+  is read, and a slot name is its plain decimal spelling only, so a stray `named/05` is not a
+  second name for slot 5. The residue and slot probes on these paths are fallible: an unreadable
+  path is an error, not an "absent".
+
+- **sparq-core (`sq-ycle`): the layout record is a per-directory map, not a scanned log.**
+  Staleness is a question about a handle's directory and its ancestors, so it is asked of those —
+  a bounded number of lookups — instead of scanning every directory the tree has ever replaced,
+  and recording a directory now drops the entries beneath it, which a replacement of that
+  directory already answers for. Because slot ids are monotonic, each create/drop cycle added a
+  distinct entry that nothing ever removed, and every durable write to every handle in the tree
+  then paid for each drop since the last whole-tree swap.
+
+- **sparq-core (`sq-ycle`): an undeclared named-graph slot is swept on the next open.** The
+  manifest is the commit point for the whole named set, so a `named/<slot>` directory it does not
+  name is garbage by construction: a create whose manifest write never landed, or a drop
+  interrupted between its manifest rewrite and the removal. Nothing opened such a directory, but
+  nothing removed it either until the next whole-store rewrite, and a retried drop reported
+  success with the dropped graph's bytes still on disk — which for a DROP performed to erase them
+  is the answer that may not be given. The open removes them before anything is opened, when no
+  handle can point at them, and reports a failure to do so.
 
 - **sparq-core (`sq-ycle`): one bottom-up durability barrier for every named-graph
   manifest publish.** Each level is made durable before the level that names it — the sub-trees'

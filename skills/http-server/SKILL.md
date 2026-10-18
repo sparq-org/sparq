@@ -1979,14 +1979,29 @@ identities and resource IRIs by design (see the privacy-boundary note above).
   elsewhere in the tree (a sibling graph, or a child beneath a root that is still there) does not
   make a handle stale, so a sequential writer can compact a store with named graphs and carry on
   writing. A compaction of a store that HAS named graphs stages the whole tree once and publishes
-  it once.
+  it once. Every republish of the manifest is built from the ATTACHED named graphs, so a create
+  or a drop performed while a handle is detached records that handle's directory as replaced
+  too: its next write is refused rather than acknowledged into a directory the store no longer
+  names.
 - **A named graph's directory is handed out once.** `named.bin` (format 2; format 1 is still
-  read) records each named graph's `named/<slot>` id and the next id to hand out, so the id is
-  monotonic rather than the graph's position. A `DROP GRAPH` rewrites the manifest — the commit
-  point — and then removes that graph's own directory, leaving every other graph's slot and
-  handle alone; a drop of every named graph leaves a manifest naming none, which is what keeps
-  the counter. A graph created after a drop therefore cannot land in a dropped graph's directory,
-  even if the removal of that directory failed or a crash interrupted it.
+  read, and a store this build has written is NOT readable by a build before it) records each
+  named graph's `named/<slot>` id and the next id to hand out, so the id is monotonic rather than
+  the graph's position — between whole-store rewrites: a `save`, a compaction or a vacuum writes
+  a fresh image and numbers it from zero, which is safe because that image contains no residue. A
+  `DROP GRAPH` rewrites the manifest — the commit point — and then removes that graph's own
+  directory, leaving every other graph's slot and handle alone; a drop of every named graph
+  leaves a manifest naming none, which is what keeps the counter. A graph created after a drop
+  therefore cannot land in a dropped graph's directory, even if the removal of that directory
+  failed or a crash interrupted it. A slot id is its plain decimal spelling and nothing else, the
+  manifest may not name one twice, and the only directories a drop or a recovery ever removes are
+  the store's own `named/` container, its interrupted-drop siblings and its `named/<slot>` paths —
+  a graph opened from somewhere else and pushed onto the public named set is refused, not
+  dropped, and a name under any of those that is not a real directory is refused too.
+- **An undeclared slot directory is swept on the next open.** The manifest is the commit point
+  for the whole named set, so a `named/<slot>` it does not name is garbage: the directory of a
+  create whose manifest write never landed, or of a drop interrupted between its manifest rewrite
+  and the removal. The open removes it before anything is opened, so a `DROP` that reported
+  success does not leave the dropped graph's bytes on disk until the next whole-store rewrite.
 - **A drop that cannot remove its directories is an error.** The removals are reported, not
   discarded, and the failure freezes the store until it is reopened: for a `DROP` performed to
   ERASE data (the retention/erasure runbook), reporting success while the data is still on disk
