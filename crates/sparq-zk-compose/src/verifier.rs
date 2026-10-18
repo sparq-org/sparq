@@ -13492,14 +13492,17 @@ mod fragment_dispatch_tests {
             );
         }
 
-        // CONTROL: the honest edge passes stage 2g′ and is refused later (its
-        // `join_eq` sub-proof carries no proof bytes), so the two refusals above
-        // are not an artefact of the fixture.
+        // CONTROL: the honest edge passes stage 2g′ AND every later structural
+        // stage, and the refusal that does arrive is the CRYPTO stage's — the
+        // fixture's sub-proofs carry no proof bytes, so `bb` has nothing to
+        // verify. Asserted by name rather than as "not the endpoint error", so a
+        // fixture that started failing some earlier stage could not pass as a
+        // control.
         let (m, k) = union_with_hidden_join((endpoint_commitment(), endpoint_commitment()));
         let err = run_fragment(&m, &k).unwrap_err();
         assert!(
-            !matches!(err, CheckError::JoinCommitmentMismatch { .. }),
-            "the honest edge must pass the endpoint gate, got {:?}",
+            matches!(err, CheckError::MissingProof { proof: 0 }),
+            "the honest edge must reach the crypto stage, got {:?}",
             err
         );
     }
@@ -13507,13 +13510,18 @@ mod fragment_dispatch_tests {
     /// The ENDPOINT half runs ahead of the regime switch, so the extended regime
     /// reaches it on a query the FLAT regime refuses at stage 1a.
     ///
-    /// Pinned from the other side too: with the `JoinEdge` REMOVED, the same
-    /// fixture's `JoinEq` sub-proof is covered by no edge, so it does NOT get past
-    /// stage 2g′ — it is refused by that gate's OTHER rule, the coverage one
-    /// (`JoinProofNotBoundToAnEdge`, naming the join sub-proof). Dropping the edge
-    /// is not a way to make the gate silent.
+    /// The fixture here drops the hidden join ENTIRELY — the `JoinEdge` and the
+    /// `JoinEq` sub-proof it named — so the manifest really does get PAST stage
+    /// 2g′ (nothing for either of that gate's rules to refuse) and the extended
+    /// regime's refusal is the crypto stage's. That is what makes this the
+    /// positive half: the gate the flat regime never reaches is reached, passed,
+    /// and the query carries on.
     ///
-    /// The flat counterpart of the two refusals above lives in
+    /// Dropping only the EDGE is a different case (the `JoinEq` is then covered by
+    /// nothing and 2g′'s coverage rule refuses it by name); that one is
+    /// `dropping_only_the_edge_leaves_the_join_uncovered` below.
+    ///
+    /// The flat counterpart of the endpoint refusals above lives in
     /// `tests/join_gates.rs`, where the fixture is a flat-fragment join query.
     #[test]
     fn the_endpoint_gate_is_reached_on_a_query_only_the_extended_regime_accepts() {
@@ -13526,12 +13534,33 @@ mod fragment_dispatch_tests {
             matches!(flat, CheckError::Sparqzk(VerifyError::UnsupportedFragment(_))),
             "the flat regime refuses this UNION query at stage 1a, got {flat:?}"
         );
-        // Extended, same fixture with the declared edge dropped: the join
-        // sub-proof (index 3) is then covered by nothing and stage 2g′ refuses it
-        // by name, rather than falling silent.
+        // Extended, same fixture with the hidden join dropped ENTIRELY (the edge
+        // AND the `JoinEq` sub-proof it named, index 3): stage 2g′ has nothing to
+        // refuse, so the manifest passes it and every later structural stage, and
+        // the refusal is the crypto stage's missing proof bytes.
         let (mut ok, k2) = union_with_hidden_join((fh("0xdead"), fh("0xbeef")));
         ok.manifest.join_edges.clear();
+        ok.manifest.sub_proofs.remove(3);
         let err = run_fragment(&ok, &k2).unwrap_err();
+        assert!(
+            matches!(err, CheckError::MissingProof { proof: 0 }),
+            "with no hidden join at all the extended regime must get past stage 2g′ \
+             into the crypto stage, got {:?}",
+            err
+        );
+    }
+
+    /// Dropping only the `JoinEdge` is NOT a way to make stage 2g′ silent: the
+    /// `JoinEq` sub-proof it named is then covered by nothing, and the gate's
+    /// coverage rule refuses it BY NAME.
+    ///
+    /// Separated from the positive case above so each assertion has one fixture:
+    /// this one keeps the join sub-proof, that one removes it.
+    #[test]
+    fn dropping_only_the_edge_leaves_the_join_uncovered() {
+        let (mut m, k) = union_with_hidden_join((fh("0xdead"), fh("0xbeef")));
+        m.manifest.join_edges.clear();
+        let err = run_fragment(&m, &k).unwrap_err();
         assert!(
             matches!(err, CheckError::JoinProofNotBoundToAnEdge { proof: 3 }),
             "dropping the edge must leave the join uncovered and refused, got {:?}",
@@ -14969,6 +14998,23 @@ mod fragment_dispatch_tests {
         assert_eq!(
             dispatch_fragment(&m),
             Err(FragmentDispatchError::FilterNotDischarged { branch: 0, filters: 1 })
+        );
+        // ... and END-TO-END the sweep is reached BEFORE the no-witness refusal,
+        // so the reported reason is the query's, not the presentation's. (Both
+        // refuse, so only the ORDER distinguishes them: a sweep moved after the
+        // early return would report `FragmentNoBranchWitness` here.)
+        let (p, w, ks, rp, hr, hbp, ep, n, seen) = empty_verify_env();
+        let err = verify_fragment_manifest(&m, &p, &w, &ks, &rp, &hr, &hbp, &ep, &n, &seen)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CheckError::FragmentDispatch(FragmentDispatchError::FilterNotDischarged {
+                    branch: 0,
+                    filters: 1
+                })
+            ),
+            "the query-text FILTER sweep must run before the no-witness refusal, got {err:?}"
         );
     }
 
@@ -16449,6 +16495,46 @@ mod member_from_authenticated_method_tests {
         // admits it.
         let empty = manifest_of(vec![scan_over(vec![])]);
         assert!(resolve(&empty, 0, &methods).is_ok());
+    }
+
+    /// The ORPHAN guard (`method_independent_member`) ON ITS OWN, with no bound
+    /// sub-proof anywhere in the fixture.
+    ///
+    /// The test above exercises the orphan rule and, in the same body, a BOUND
+    /// control that goes through the matrix. That makes it red for a mutation of
+    /// EITHER site, so it does not witness the orphan guard by itself. This one
+    /// has no bound arm and no binding edge, so only the orphan guard can move it:
+    /// a value-lane member whose legality varies is refused BY THE ORPHAN REASON,
+    /// and a string-lane member is selected unchanged.
+    #[test]
+    fn the_orphan_guard_alone_decides_an_edge_less_sub_proofs_member() {
+        // No commitment is attested at all, and no manifest below binds one, so
+        // the matrix arm (`SubProofMethod::One`) is unreachable in this test.
+        let methods = AuthenticatedMethods::new();
+
+        let varies = manifest_of(vec![filter_value_dl()]);
+        match resolve(&varies, 0, &methods) {
+            Err(CheckError::SubProofMethodUnresolved { proof, reason }) => {
+                assert_eq!(proof, "sub_proofs[0]");
+                assert!(
+                    reason.contains("bound to no committed graph")
+                        && reason.contains("not legal under every admissible method"),
+                    "the orphan guard's own reason must be the one reported, got {:?}",
+                    reason
+                );
+            }
+            other => panic!(
+                "an edge-less value-lane member must be refused by the orphan guard, got {:?}",
+                other
+            ),
+        }
+
+        let independent = manifest_of(vec![filter_int()]);
+        assert_eq!(
+            resolve(&independent, 0, &methods)
+                .expect("a method-independent member resolves for an orphan"),
+            Some(CircuitId::FilterInt { d: 1 })
+        );
     }
 
     /// A sub-proof bound to a HIDDEN-ONLY commitment DEFERS before the

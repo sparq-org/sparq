@@ -522,10 +522,16 @@ jobs:
       # CHECKED: a libtest name filter that matches nothing exits 0, so a renamed
       # or `cfg`-ed-out case would otherwise report PASS having run nothing.
       #
-      # The log is ALSO checked for a `SKIP ` line: the shared toolchain gate
+      # The log is ALSO checked for a declared SKIP: the shared toolchain gate
       # (`tests/support/mod.rs`) prints `SKIP <test>: ...` and RETURNS when a tool
       # is missing and skipping is allowed, so the case still reports `1 passed`
-      # having proved nothing. In THIS lane a skip is a failure.
+      # having proved nothing. In THIS lane a skip is a failure. The gate writes
+      # that line straight to the terminal to escape libtest's output capture, so
+      # it lands INTERLEAVED after libtest's `test <name> ... ` prefix rather than
+      # at the start of a line — hence the alternation. (The job also errors out
+      # earlier if `SPARQ_ZK_ALLOW_MISSING_TOOLCHAIN` is set at all, which is what
+      # makes the gate panic instead of skip here; this check is the backstop for
+      # a skip arriving by any other route.)
       - name: Run the ignored dual-leaf e2e cases (real bb, default-off feature)
         if: steps.changes.outputs.zk == 'true'
         run: |
@@ -543,7 +549,7 @@ jobs:
               echo "FAIL: $t did not run as exactly one passing test under --features dual-leaf" >&2
               exit 1
             fi
-            if grep -qE '^SKIP ' "/tmp/dl-e2e-$t.log"; then
+            if grep -qE '(^|\.\.\. )SKIP [A-Za-z0-9_]+: ' "/tmp/dl-e2e-$t.log"; then
               echo "FAIL: $t declared a SKIP in the toolchain lane — it reported a pass without proving anything" >&2
               exit 1
             fi
