@@ -108,15 +108,21 @@ Materialize the authorization view from the access-control documents, then enfor
   `default_auth_limits() -> ClosureLimits` — the **reasoning allowance** every authorization
   materialization of that store runs under (see
   [Reasoning allowance](#reasoning-allowance)). `default_auth_limits()` is the default:
-  `max_rounds` 100,000, `max_facts` 20,000,000, `max_term_bytes` 1 MiB, `max_join_rows`
-  20,000,000 — the last being the one the reasoner's own `ClosureLimits::default()` leaves
-  unbounded. `set_auth_limits` applies from the NEXT materialization (the view in force is
+  `max_rounds` 128, `max_facts` 256,000, `max_term_bytes` 64 KiB, `max_join_rows` 1,000,000
+  per round and `max_total_join_rows` 4,000,000 over all rounds of one stratum — the two
+  join-row fields being the ones the reasoner's own `ClosureLimits::default()` leaves
+  unbounded, and the cumulative one being what bounds a whole materialization (the per-round
+  allowance is refilled every round). `set_auth_limits` applies from the NEXT materialization (the view in force is
   not rebuilt), to WAC and ACP alike and to every rebuild the store makes on its own after an
   access-control write or an update. Raise it for a pod the default refuses; lower it to cap
   the work one materialization may do. The free `materialize_*` functions always use
   `default_auth_limits()`.
-- `is_auth_allowance_refusal(&err) -> bool` / `AUTH_ALLOWANCE_REFUSAL` — whether a
-  materialization error is a refusal by that allowance rather than any other failure.
+- `auth_allowance_refusal(&err) -> Option<AuthAllowance>` / `is_auth_allowance_refusal(&err)
+  -> bool` — whether a materialization error is a refusal by that allowance rather than any
+  other failure, and which allowance it reached (`AuthAllowance::{TotalJoinRows, JoinRows,
+  RoundsOrFacts, TermBytes, Unspecified}`, `limit_name()` for a message). The refusal carries
+  that kind as a tag read from ANYWHERE in the message, so it still matches when a write path
+  wraps the failed rebuild's error in its own sentence.
 - `store.materialize_acp_with(&AccessProvenance) -> Result<MaterializeStats, _>` —
   (sq-3jtd.5) ACP materialization that ALSO resolves `acp:CreatorAgent` /
   `acp:OwnerAgent` matchers against per-resource creator/owner WebIDs supplied by the
@@ -684,12 +690,8 @@ describe is a **known-empty** access control, policy or matcher and decides as A
 says (an attribute-free matcher never matches, so an empty `noneOf` blocks nothing). An
 absent document is not known-empty — it is unknown.
 
-**What delegating to another document's editors covers.** A policy that references a
-matcher or policy in another document delegates to that document's editors. Anyone who can
-edit that document can change what the referenced matcher accepts, including stripping its
-attributes, which leaves it resolved but unsatisfied (ACP §6.5). That disables an `allOf`
-deny that references it and removes an `anyOf` alternative. A deny that must survive such
-edits has to live in a document the resource owner controls.
+Referencing another document delegates policy semantics to its editors. Keep mandatory
+denies and all their dependencies under owner control.
 
 `put_acl*`/`update_as*` refuse a write that would add such a reference to a control
 document the active view reads, because the written document would be withheld with it,
@@ -842,11 +844,17 @@ binding** are the relying application's job.)
 ### Reasoning allowance
 
 Each authorization closure — the WAC stratum, each of the three ACP strata, and the ODRL-bridge
-strata under `odrl-bridge` — runs under an explicit `ClosureLimits` whose `max_join_rows` is
-FINITE, so one round's premise joins and rule firings are bounded however large a pod's
-policies are. (The reasoner's own `ClosureLimits::default()` leaves that field unbounded; the
-authorization path does not inherit that.) The default values are listed under
-[Public API](#public-api) and sized well above every fixture this crate materializes.
+strata under `odrl-bridge` — runs under an explicit `ClosureLimits` whose join-row allowances
+are FINITE: `max_join_rows` bounds one round's premise joins and rule firings, and
+`max_total_join_rows` bounds them over ALL rounds of that closure, so the work one
+materialization can be made to do is capped however large a pod's policies are. (The
+reasoner's own `ClosureLimits::default()` leaves both unbounded; the authorization path does
+not inherit that. `max_total_join_rows` is a `sparq-reason` addition: it is charged once and
+never refilled, is unbounded by default, and so changes nothing for any other caller.) The
+default values are listed under [Public API](#public-api), each about ten times the largest
+value the fixtures this crate materializes need. An untrusted writer of a control document
+chooses how far its policies multiply, so these ceilings are what such a writer can spend on
+one materialization; raise them with `set_auth_limits` for a pod that genuinely needs more.
 
 A pod whose policies would need more is **refused**, and the refusal is a materialization
 error like any other: it happens before the dataset is touched, so no partial view is ever
@@ -855,8 +863,9 @@ in force (the dataset is unchanged, so that view still describes it), an update 
 is refused is refused itself with nothing changed, and a rebuild that fails after a commit
 drops the view, denying every request until a materialization succeeds. The refusal reads
 `authorization reasoning allowance exceeded: …` and names the limit it reached and its value;
-`is_auth_allowance_refusal` tells it from any other materialization error, so an operator can
-act on "raise the allowance" rather than reading it as a policy decision. Raise it with
+`auth_allowance_refusal` tells it from any other materialization error and names which
+allowance was reached, so an operator can act on "raise the allowance" rather than reading it
+as a policy decision. Raise it with
 `PodStore::set_auth_limits`.
 
 ## Trust-graph authorisation PoC — sq-pfae (issue #940, opt-in `trust-graph`)
