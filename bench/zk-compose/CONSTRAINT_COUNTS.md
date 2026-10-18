@@ -158,6 +158,22 @@ Scaling — pairs differing in exactly one parameter:
 
 ## Query-layer circuits (SPARQL algebra fragment)
 
+### `scan_v2dl`
+
+BGP row membership over V2 dual-leaf graphs whose per-slot term encodings are RECOMPUTED in-circuit from witnessed leaf components, with the reserved-sentinel band check and the reserved language-tag check applied at those component sites, before the unchanged scan body runs. Compiled only for k=1, n=16, r=4.
+
+| member | parameters | `circuit_size` |
+| --- | --- | --- |
+| `scan_v2dl_k1_n16_r4` | k=1, n=16, r=4 | 25,095 |
+
+### `join_eq_v2dl`
+
+Hidden equality join between two V2 dual-leaf committed sides whose per-slot term encodings are RECOMPUTED in-circuit from witnessed leaf components, under the same component-site checks as the V2 scan member, before the unchanged join body runs. Compiled only for na=nb=16.
+
+| member | parameters | `circuit_size` |
+| --- | --- | --- |
+| `join_eq_v2dl_na16_nb16` | na=16, nb=16 | 45,233 |
+
 ### `scan`
 
 BGP row membership + per-scan completeness over k committed graphs, n slot bucket, r disclosed-row bucket.
@@ -411,4 +427,4 @@ bench/zk-compose/scripts/constraint_pack.py --write
 bench/zk-compose/scripts/constraint_pack.py --check
 ```
 
-Coverage: 72 of 72 snapshot members across 19 families, 78 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.
+Coverage: 74 of 74 snapshot members across 21 families, 78 single-parameter scaling pairs, 3 invariance facts. The generator **fails** on a snapshot member it cannot classify, so a new circuit family cannot silently drop out of this evaluation.

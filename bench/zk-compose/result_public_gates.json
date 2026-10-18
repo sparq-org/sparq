@@ -7,17 +7,17 @@
     "bb": "5.0.0-nightly.20260324"
   },
   "measured_source": {
-    "source_commit": "57c7a576d9dbb481c377657c569118cf37c893ce",
-    "source_tree": "bf7ca019e87b9574c97de50a4d198c0fdd526f34",
-    "observed_at_utc": "2026-10-17T20:30:43Z",
+    "source_commit": "12766576d08dfabf886dae8a6e44061b647c4fbe",
+    "source_tree": "50c80badd1db1ee6d5aeffa81bcab375bd218bca",
+    "observed_at_utc": "2026-10-17T22:07:43Z",
     "platform": "linux x86_64 shared work box",
     "canonical": false,
     "tool_executable_sha256": {
       "nargo": "0852cd5631ac5ca25f744f25c931e3cff16351d9bcdbfb03cebb48a4494a0fe3",
       "bb": "d7621dfb151f55c23fb04bf274f366a6a1e0516b85a3cf0ae9165a9952509793"
     },
-    "job_sha256": "66f552bb9c3b9265ed14fe81b59e6e35059e7856f032d72df0de613b4f72146c",
-    "independent_handoff_sha256": "333b040c33d7c15f5d94554eecbc4e0151f398d3debd243f34092fb0e9e4d970"
+    "job_sha256": "1c19280abdb2dafcc115f17e6d154e4512cbbe104df07fd4c2800dc541486522",
+    "independent_handoff_sha256": "68b0567a674c12003478cb9ff8ab03e02c0fa2b4547e974c2d8bf567369d069c"
   },
   "measurement_method": "At measured_source, two independent runs from clean git archives of source_commit compiled every listed member with the pinned nargo, hashed the ACIR bytecode, ABI and artifact, measured `bb gates -s ultra_honk` and, for the v1 members, regenerated the noir-recursive verification key (bench/zk-compose/scripts/remeasure_result_evidence.py). The two runs agreed on every circuit size, ACIR, ABI, key and gate log hash; every v1 ACIR, ABI and key equalled its baseline record. The compiled artifact embeds its checkout path, so artifact_sha256 is kept as recorded. The two-run agreement was checked outside the repository and cannot be reproduced from it alone: job_sha256 and independent_handoff_sha256 identify the job manifest and the second run's output, which are retained outside the repository, and that output includes path-dependent artifact hashes, so a rerun will not reproduce its digest.",
   "scope": "Static circuit size, ACIR and ABI identities for the two version-4 members only. Not a runtime, proving-time, soundness or external-audit claim; no saving over earlier result versions is claimed.",
@@ -25,6 +25,7 @@
   "source_files": {
     "zk/compose/compose_core/src/blake3_literal.nr": "42a83191069ed5848fd0a3ec4ee4c22698d76fc5098d9d3590bd132742946e03",
     "zk/compose/compose_core/src/derivation.nr": "cd6e9ebd2b77265d8535e26108558dc3e87eb5d7d674f4f9ce0849df3c0cba5d",
+    "zk/compose/compose_core/src/dual_leaf_v2_leaf.nr": "b462ac2bfab6f3ea72c46c8a7dd78ac90ac0847a05ec17bcbaa640d53bb6338c",
     "zk/compose/compose_core/src/entail.nr": "a6793433075b49bc50d535c400e5141d62b74e1ceaf68aa67608dea63c56f25c",
     "zk/compose/compose_core/src/filter_float.nr": "de9ae1c384c760a4a74f5c74e42bd9f403eca72db12f7716ab899e7d0d747ea8",
     "zk/compose/compose_core/src/filter_int.nr": "ade1b907c849bf95d55bc73262275ae80083b4085ff9e6d2e4730746540f5145",
@@ -35,7 +36,7 @@
     "zk/compose/compose_core/src/holder.nr": "188547970112d6ddd02ebbb36a7745a66ef69e5ee3130c39b28ab9ab285f31e5",
     "zk/compose/compose_core/src/issuer.nr": "526117da030c2be5b69d34aff7aa04d51081d7200cc35fb853d86ae961980e36",
     "zk/compose/compose_core/src/join.nr": "584777b6c74b0c1986dddb95ecf2c0a501993e9baf4f813ac9a04929a293d0b3",
-    "zk/compose/compose_core/src/lib.nr": "402fd56c3c788038b11d77b2e07941f7e1a82d399c80de676f7eb5b465ebe6dd",
+    "zk/compose/compose_core/src/lib.nr": "8fd99b10af99749cd12ba9d315dcf8d8fc532d66f12ab4db31e381ec2b30c372",
     "zk/compose/compose_core/src/n3.nr": "6af6c777a5ac26d53c722cbc6f93f4b89e64efa3e03a02c2cf15815a2acb491a",
     "zk/compose/compose_core/src/path.nr": "9c3d3bbf417e169e7b236eae9e40505200b832af4a59980577e3b8ab5f2e807d",
     "zk/compose/compose_core/src/result.nr": "573287c58a8981a9add36c98c0cbab3fb8d53b1d4bed5bc916d3d8659176acf3",
@@ -47,6 +48,7 @@
     "zk/compose/compose_core/src/sameas.nr": "3efdb7675101ac68fd42a94b4943a111bc41f8e79d8403f5866dd623503033cf",
     "zk/compose/compose_core/src/scan.nr": "98aa1352d6391b7a66093b5207ee2dfe20e2e63ecf399f5ca3cd5b57b3d84738",
     "zk/compose/compose_core/src/tests.nr": "5f32c88bdaadab1438d8457c015dbfecf880db5cce8de8009070e674ab1fa2c6",
+    "zk/compose/compose_core/src/v2_dual_leaf_relations.nr": "34fa2a6b098fbcd3e7eeef130ca085421d7424ddb0d3814ae8423c5b27eed9f4",
     "zk/compose/filter_decimal_i3_f2/src/main.nr": "d48edf93196ae4665d6b24eff2a8bb93c51cd6c7abcd6fa544dd7fa2a0a480a6",
     "zk/compose/filter_f64/src/main.nr": "937d62fc4063063adbb28d1a74041172d6abb34cc65d5287b4d342f88145a470",
     "zk/compose/filter_f64_d1/src/main.nr": "2241211ffa9de2341eb58a4a5d663dea0d2d1fc0b7d66498131e182eba3c776d",
@@ -71,6 +73,7 @@
     "zk/compose/join_eq_na16_nb64/src/main.nr": "a8c74bd713a7bed51557a8e6133019de699bca5e8d2ba5730cc1ceb8206e2cea",
     "zk/compose/join_eq_na64_nb16/src/main.nr": "d442d69e52d991d177b78584a15739ee78e99ae6dccc76b45b60e99527248c30",
     "zk/compose/join_eq_na64_nb64/src/main.nr": "fefe4bad79a273679e29d0459f4816f15535dbf402796e4f226d8f829d1a8e72",
+    "zk/compose/join_eq_v2dl_na16_nb16/src/main.nr": "8ecf71991946c2b702aa20c4112f2e67cc68a2d5ab06954aa213b82164cb9176",
     "zk/compose/path_reach_d2_k1_n16/src/main.nr": "9c3ee9067922b3bda087b7c16dfe8558c6c4be6e25fa6615de79eb8f03db6ec6",
     "zk/compose/path_reach_d4_k1_n16/src/main.nr": "7d4ee47c79a2dfd97e1a23b0192d94ff5ad65a77b1981fe6ef2f314693bad5dc",
     "zk/compose/path_reach_d4_k2_n16/src/main.nr": "248b22018630687e409ad23e3c49634f413a9c71077c2d736f466c62d375dc65",
@@ -118,7 +121,8 @@
     "zk/compose/scan_k2_n16_r4/src/main.nr": "50abf69d446eed9514a7ad52fef4f949f65daff523a56ef7c9db2f33db3a43ce",
     "zk/compose/scan_k2_n16_r8/src/main.nr": "7a64dc1f2af4056c2677cc52855f32bdac19d02715591439698afbc54a928bfd",
     "zk/compose/scan_k2_n64_r4/src/main.nr": "473667b4edee0139ea8c055beeb8fa7f1a4b35d1dabb016368c21e90943209e8",
-    "zk/compose/scan_k2_n64_r8/src/main.nr": "1b29967beca6e1a7643b0fc95a1a74479d18711a8072966a662c0ad579a63a85"
+    "zk/compose/scan_k2_n64_r8/src/main.nr": "1b29967beca6e1a7643b0fc95a1a74479d18711a8072966a662c0ad579a63a85",
+    "zk/compose/scan_v2dl_k1_n16_r4/src/main.nr": "070673393b6a58d056b04b93115aa59efe49243e1707e2f6f4c1e4aea3b4b703"
   },
   "members": {
     "result_v4_k1_n16_p3_r4_f0_d10": {

@@ -759,11 +759,11 @@ fn withdrawn_permission_loses_access_after_refresh() {
     // The raw auth view holds no residual bridged grant for alice…
     let leftover = "SELECT ?p ?o WHERE { GRAPH <urn:sparq:auth> { \
         <https://alice.ex/card#me> ?p ?o } }";
-    assert_eq!(sparq_engine::query(&store.graph, leftover).unwrap().rows.len(), 0,
+    assert_eq!(sparq_engine::query(store.graph(), leftover).unwrap().rows.len(), 0,
         "no residual alice triple in the enforcement view");
     // …and the provenance graph was cleared of it.
     let prov = "SELECT ?s ?p ?o WHERE { GRAPH <urn:sparq:auth-bridged> { ?s ?p ?o } }";
-    assert_eq!(sparq_engine::query(&store.graph, prov).unwrap().rows.len(), 0,
+    assert_eq!(sparq_engine::query(store.graph(), prov).unwrap().rows.len(), 0,
         "no residual provenance after retraction");
     // Re-refreshing cannot resurrect a dropped grant (the ledger is empty now).
     assert_eq!(store.refresh_odrl_grants(), 0, "nothing left to retract");
@@ -917,7 +917,7 @@ fn provenance_distinguishes_bridged_from_static() {
     store.materialize_wac().expect("wac materializes");
     // After a pure static materialize, the provenance graph is empty.
     let prov_all = "SELECT ?s ?p ?o WHERE { GRAPH <urn:sparq:auth-bridged> { ?s ?p ?o } }";
-    assert_eq!(sparq_engine::query(&store.graph, prov_all).unwrap().rows.len(), 0,
+    assert_eq!(sparq_engine::query(store.graph(), prov_all).unwrap().rows.len(), 0,
         "no provenance for static grants");
 
     // Bridge alice → exactly her grant triple appears in provenance, bob's does not.
@@ -925,11 +925,11 @@ fn provenance_distinguishes_bridged_from_static() {
     assert!(store.materialize_odrl_permission(&read_policy(), &req).granted);
     let alice_prov = "SELECT ?p WHERE { GRAPH <urn:sparq:auth-bridged> { \
         <https://alice.ex/card#me> <https://sparq.dev/ns/auth#read> <https://pod.ex/notes/n1> } }";
-    assert_eq!(sparq_engine::query(&store.graph, alice_prov).unwrap().rows.len(), 1,
+    assert_eq!(sparq_engine::query(store.graph(), alice_prov).unwrap().rows.len(), 1,
         "alice's bridged grant is marked in provenance");
     let bob_prov = "SELECT ?p ?o WHERE { GRAPH <urn:sparq:auth-bridged> { \
         <https://bob.ex/card#me> ?p ?o } }";
-    assert_eq!(sparq_engine::query(&store.graph, bob_prov).unwrap().rows.len(), 0,
+    assert_eq!(sparq_engine::query(store.graph(), bob_prov).unwrap().rows.len(), 0,
         "bob's STATIC grant is NOT in provenance");
 }
 
@@ -1070,7 +1070,7 @@ fn withdrawn_prohibition_restores_access_after_refresh() {
     // No residual deny triple in the auth view.
     let leftover = "SELECT ?o WHERE { GRAPH <urn:sparq:auth> { \
         <https://alice.ex/card#me> <https://sparq.dev/ns/auth#denyWrite> ?o } }";
-    assert_eq!(sparq_engine::query(&store.graph, leftover).unwrap().rows.len(), 0,
+    assert_eq!(sparq_engine::query(store.graph(), leftover).unwrap().rows.len(), 0,
         "no residual denyWrite after retraction");
 }
 
@@ -1154,7 +1154,7 @@ fn ambiguous_prohibition_reeval_keeps_deny_fail_closed() {
     // The denyWrite triple is still present in the auth view (re-emitted on refresh).
     let still = "SELECT ?o WHERE { GRAPH <urn:sparq:auth> { \
         <https://alice.ex/card#me> <https://sparq.dev/ns/auth#denyWrite> ?o } }";
-    assert_eq!(sparq_engine::query(&store.graph, still).unwrap().rows.len(), 1,
+    assert_eq!(sparq_engine::query(store.graph(), still).unwrap().rows.len(), 1,
         "ambiguous deny re-emitted (kept) in the enforcement view");
 }
 
@@ -1751,7 +1751,7 @@ fn assignee_constrained_prohibition_denies_everyone_decide_denies() {
 
     let out = store.materialize_odrl_prohibition_conditional(&prohib, &req);
     assert!(out.prohibited, "{out:?}");
-    assert_eq!(cond_denies_for(&store.graph, Some(ALICE)), 0, "no alice-only head");
+    assert_eq!(cond_denies_for(store.graph(), Some(ALICE)), 0, "no alice-only head");
     assert!(!reads(&mut store, BOB), "bob is denied, as decide denies him");
     store.refresh_odrl_grants();
     assert!(!reads(&mut store, BOB), "the deny survives a ledger refresh");
@@ -1800,7 +1800,7 @@ fn conditional_deny_retracts_when_prohibition_withdrawn() {
     assert_eq!(retracted, 1, "the withdrawn deny condition was retracted");
     assert!(reads(&mut store, CAROL), "deny withdrawn → carol regains access");
     assert!(reads(&mut store, BOB), "and so does bob");
-    assert_eq!(cond_denies_for(&store.graph, None), 0, "no residual deny condition");
+    assert_eq!(cond_denies_for(store.graph(), None), 0, "no residual deny condition");
 }
 
 // 27. A constraint a session cannot carry (here a dateTime bound; ACP has no clock)
@@ -2883,7 +2883,7 @@ fn an_assignee_and_a_recipient_are_both_required() {
         let mut store = PodStore::new(pod());
         store.materialize_odrl_permission_conditional(&pol, &req);
         assert!(!reads(&mut store, BOB), "bob is not the assignee (decided for {by})");
-        assert_eq!(cond_grants_for(&store.graph, None), 0, "no conditional head");
+        assert_eq!(cond_grants_for(store.graph(), None), 0, "no conditional head");
     }
 }
 

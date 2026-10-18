@@ -166,7 +166,9 @@ use serde_json::{json, Value};
 use sparq_core::Graph;
 use sparq_engine::QueryBudget;
 use sparq_introspect::Introspection;
-use sparq_solid::{Mode, PodStore, Session, StoredGraphs};
+use sparq_solid::{
+    AccessProvenance, Mode, PodStore, Session, StoredGraphs, VerifiedCredentials,
+};
 
 use crate::jsonrpc::{Request, RpcError, INVALID_PARAMS, METHOD_NOT_FOUND, RESOURCE_NOT_FOUND};
 use crate::notifications::{classify, ActivityType, Subscriptions, TopicDigest};
@@ -787,11 +789,63 @@ impl SolidMcpServer {
 
     /// Rebuild the authorization view after this call changed the store's graphs since
     /// `before`: the store's provenance follows the change (see
-    /// [`PodStore::rematerialize_after_edit`]), recording no creator for what it creates. On
-    /// error nothing of the view or provenance changed, and the caller restores the graphs.
-    fn rematerialize_after(&mut self, before: &StoredGraphs) -> Result<(), String> {
+    /// [`PodStore::rematerialize_after_edit`]), with the session agent recorded as the creator
+    /// of each resource in `created` — the document this call wrote, or the container it was
+    /// asked to create — that has no `.acr` of its own stored already. A container the call
+    /// brings into being only by linking containment above what it created is not one of them,
+    /// so no write makes its writer the creator of a container above it. On error nothing of
+    /// the view or provenance changed, and the caller restores the graphs.
+    fn rematerialize_after(
+        &mut self,
+        before: &StoredGraphs,
+        created: &[&str],
+    ) -> Result<(), String> {
+        let agent = self.config.agent.clone();
         self.store
-            .rematerialize_after_edit(before, None, self.config.acp)
+            .rematerialize_after_edit(before, agent.as_deref(), created, self.config.acp)
+            .map(|_| ())
+    }
+
+    /// Supply the store's trusted ACP context again and rebuild the ACP view from it.
+    ///
+    /// The creator/owner facts and the verified-credential holdings an ACP view is built from
+    /// are asserted by the embedder, never read from pod content. The store refuses to rebuild
+    /// from facts that may no longer describe the stored graphs — after a change that failed
+    /// part way — and an ACP pod then denies everything until the context is supplied again;
+    /// this is how an embedder supplies it. Passing a default [`AccessProvenance`] and
+    /// [`VerifiedCredentials`] rebuilds the view with no creator, owner or credential facts at
+    /// all, which is the conservative choice when the embedder cannot restate them.
+    ///
+    /// The configured model must be ACP ([`SolidServerConfig::acp`]); under WAC the view holds
+    /// no such context and there is nothing to supply.
+    ///
+    /// # Trusted embedder only
+    ///
+    /// This takes the facts at their word, as the store's own `materialize_acp_*` entry points
+    /// do: what it is given becomes the creator, owner and credential facts the view grants by.
+    /// It is for the embedder that owns this server, and it is the CALLER'S responsibility to
+    /// pass the context of THIS server's pod — nothing here ties a context to a store, so a
+    /// context restated for one pod and handed to another is installed as given. Do not reach
+    /// it from a request, a tool argument or pod content.
+    ///
+    /// # Errors
+    ///
+    /// As [`PodStore::materialize_acp_with_credentials`], or when the server is configured for
+    /// WAC. On error the view in force is unchanged.
+    pub fn supply_acp_context(
+        &mut self,
+        provenance: &AccessProvenance,
+        credentials: &VerifiedCredentials,
+    ) -> Result<(), String> {
+        if !self.config.acp {
+            return Err(
+                "supply_acp_context needs an ACP server (`acp: true`): a WAC view holds no \
+                 trusted ACP context"
+                    .to_string(),
+            );
+        }
+        self.store
+            .materialize_acp_with_credentials(provenance, credentials)
             .map(|_| ())
     }
 
@@ -944,7 +998,7 @@ impl SolidMcpServer {
         let name = NamedNode::new(url).ok()?;
         let term = Term::NamedNode(name);
         self.store
-            .graph
+            .graph()
             .named
             .iter()
             .find(|(n, _)| *n == term)
@@ -953,7 +1007,7 @@ impl SolidMcpServer {
 
     /// The index of the named-graph slot for `term`, if present.
     fn slot_index(&self, term: &Term) -> Option<usize> {
-        self.store.graph.named.iter().position(|(n, _)| n == term)
+        self.store.graph().named.iter().position(|(n, _)| n == term)
     }
 
     /// `resource_get`: serve one document from the shared dataset (draft §6.4), with
@@ -1062,7 +1116,7 @@ impl SolidMcpServer {
         // Pass 2: keep only those that are stored documents (one scan of the graph names).
         let mut members: Vec<Value> = Vec::with_capacity(candidates.len());
         if !candidates.is_empty() {
-            for (name, _) in &self.store.graph.named {
+            for (name, _) in &self.store.graph().named {
                 if let Term::NamedNode(m) = name {
                     if candidates.contains(m.as_str()) {
                         members.push(json!({
@@ -1090,7 +1144,7 @@ impl SolidMcpServer {
     /// ([`PodStore::view_for`]), so the set of documents it can possibly contain is
     /// exactly the set `query` can read: a document this session may not read is not
     /// enumerated by `GRAPH ?g` at all, and therefore contributes to no count. That
-    /// shared view is the whole point — an aggregate derived from `store.graph` directly
+    /// shared view is the whole point — an aggregate derived from `store.graph()` directly
     /// would be a whole-pod summary handed to one principal, which in a multi-principal
     /// deployment leaks the shape (and the size) of documents it cannot open.
     ///
@@ -1285,7 +1339,7 @@ impl SolidMcpServer {
     /// the listing never errors and never hints that something was filtered.
     fn resources_list(&self) -> Value {
         let mut resources: Vec<Value> = Vec::new();
-        for (name, _) in &self.store.graph.named {
+        for (name, _) in &self.store.graph().named {
             let Term::NamedNode(node) = name else {
                 continue;
             };
@@ -1389,19 +1443,28 @@ impl SolidMcpServer {
         Ok("ok".to_string())
     }
 
-    /// The authorization anchor for `url`: `url` itself when the store knows it (a
-    /// stored graph, or a structural container prefix of one — those carry
-    /// materialized grants), else the NEAREST ancestor container the store knows —
+    /// The authorization anchor for `url`: `url` itself when it is a resource of the store's
+    /// authorization view (a stored document, or a container with something stored below it —
+    /// those carry materialized grants), else the NEAREST ancestor container that is one —
     /// the Solid creation rule: a `PUT` to a nonexistent resource is authorized by
     /// the closest existing parent container's policy. When no ancestor is known the
     /// url itself is returned and the decision fails closed (`NoAcl`).
+    ///
+    /// "Known" is the store's own resource enumeration ([`PodStore::holds_resource`]) — which
+    /// uses the one container traversal the view uses — plus a name whose OWN access-control
+    /// document is stored, since that document governs it and is what a decision about it
+    /// rests on. Neither takes a container to exist because some graph merely shares its name
+    /// as a textual prefix: a container known only by the access-control document of a
+    /// resource BELOW it that does not exist is not an anchor, and the write is judged at the
+    /// nearest name that is.
     fn auth_anchor(&self, url: &str) -> String {
         let known = |iri: &str| {
-            self.store.graph.named.iter().any(|(n, _)| match n {
-                Term::NamedNode(nn) => {
-                    nn.as_str() == iri || (iri.ends_with('/') && nn.as_str().starts_with(iri))
-                }
-                _ => false,
+            if self.store.holds_resource(iri) {
+                return true;
+            }
+            let (acl, acr) = (format!("{iri}.acl"), format!("{iri}.acr"));
+            self.store.graph().named.iter().any(|(n, _)| {
+                matches!(n, Term::NamedNode(nn) if nn.as_str() == acl || nn.as_str() == acr)
             })
         };
         if known(url) {
@@ -1499,7 +1562,7 @@ impl SolidMcpServer {
         let before = self.store.stored_graphs();
         let prior = self.take_slot(&term);
         let existed = prior.is_some();
-        self.store.graph.named.push((term.clone(), new_graph));
+        self.store.graph_unchecked_mut().named.push((term.clone(), new_graph));
 
         // A CREATED document becomes a member of its parent containers (draft §7.3).
         let links = if existed {
@@ -1517,7 +1580,8 @@ impl SolidMcpServer {
 
         // Re-materialize so the write is visible (a created doc enters the authorized
         // sets; a replaced group document takes effect) — rollback on error.
-        if let Err(e) = self.rematerialize_after(&before) {
+        let created: &[&str] = if existed { &[] } else { &[url.as_str()] };
+        if let Err(e) = self.rematerialize_after(&before, created) {
             self.unlink_containment(&created_graphs, &added_links);
             self.restore_slot(&term, prior);
             let _ = self.rematerialize(); // restore the prior (already-valid) view
@@ -1564,7 +1628,7 @@ impl SolidMcpServer {
             // A container: reject when any resource is stored below it (whatever its
             // containment listing says), or when that listing still names a member.
             let (acl, acr) = (format!("{url}.acl"), format!("{url}.acr"));
-            let has_member = self.store.graph.named.iter().any(|(n, _)| {
+            let has_member = self.store.graph().named.iter().any(|(n, _)| {
                 matches!(n, Term::NamedNode(n)
                     if n.as_str().len() > url.len()
                         && n.as_str().starts_with(url.as_str())
@@ -1584,10 +1648,10 @@ impl SolidMcpServer {
         let before = self.store.stored_graphs();
         let prior = self.take_slot(&term).expect("slot checked above");
         let removed_link = self.unlink_parent(&url);
-        if let Err(e) = self.rematerialize_after(&before) {
+        if let Err(e) = self.rematerialize_after(&before, &[]) {
             if let Some((pterm, t)) = &removed_link {
                 if let Some(i) = self.slot_index(pterm) {
-                    let _ = self.store.graph.named[i].1.insert_triple(
+                    let _ = self.store.graph_unchecked_mut().named[i].1.insert_triple(
                         t[0].clone(),
                         t[1].clone(),
                         t[2].clone(),
@@ -1617,7 +1681,7 @@ impl SolidMcpServer {
 
         let before = self.store.stored_graphs();
         let container = container_graph(&url)?;
-        self.store.graph.named.push((term.clone(), container));
+        self.store.graph_unchecked_mut().named.push((term.clone(), container));
         let (created_graphs, added_links) = match self.link_containment(&url) {
             Ok(x) => x,
             Err(e) => {
@@ -1625,7 +1689,7 @@ impl SolidMcpServer {
                 return Err(e);
             }
         };
-        if let Err(e) = self.rematerialize_after(&before) {
+        if let Err(e) = self.rematerialize_after(&before, &[url.as_str()]) {
             self.unlink_containment(&created_graphs, &added_links);
             self.restore_slot(&term, None);
             let _ = self.rematerialize();
@@ -1637,14 +1701,14 @@ impl SolidMcpServer {
     /// Remove and return the named-graph slot for `term`, if present.
     fn take_slot(&mut self, term: &Term) -> Option<Graph> {
         let pos = self.slot_index(term)?;
-        Some(self.store.graph.named.swap_remove(pos).1)
+        Some(self.store.graph_unchecked_mut().named.swap_remove(pos).1)
     }
 
     /// Put `prior` back into the slot for `term` (dropping whatever is there now).
     fn restore_slot(&mut self, term: &Term, prior: Option<Graph>) {
         let _ = self.take_slot(term);
         if let Some(g) = prior {
-            self.store.graph.named.push((term.clone(), g));
+            self.store.graph_unchecked_mut().named.push((term.clone(), g));
         }
     }
 
@@ -1653,9 +1717,30 @@ impl SolidMcpServer {
     /// stored graph (creating a typed container graph for a missing parent). Returns
     /// what was added — `(created container-graph names, inserted links)` — so a
     /// failed re-materialization can roll every addition back precisely.
+    ///
+    /// On its own error it rolls back what it had already added, so a caller that only
+    /// restores the document slot is left with no half-linked containment: either every link
+    /// and container graph of the chain is added, or none is.
     fn link_containment(&mut self, url: &str) -> Result<(Vec<Term>, Vec<AddedLink>), String> {
         let mut created: Vec<Term> = Vec::new();
         let mut added: Vec<AddedLink> = Vec::new();
+        match self.link_chain(url, &mut created, &mut added) {
+            Ok(()) => Ok((created, added)),
+            Err(e) => {
+                self.unlink_containment(&created, &added);
+                Err(e)
+            }
+        }
+    }
+
+    /// One pass of [`SolidMcpServer::link_containment`], recording what it adds into `created`
+    /// and `added` as it goes so its caller can undo a partial pass.
+    fn link_chain(
+        &mut self,
+        url: &str,
+        created: &mut Vec<Term>,
+        added: &mut Vec<AddedLink>,
+    ) -> Result<(), String> {
         let contains = NamedNode::new(LDP_CONTAINS).expect("valid constant IRI");
         let mut child = url.to_string();
         while let Some(parent) = parent_iri(&child) {
@@ -1666,15 +1751,15 @@ impl SolidMcpServer {
                 Some(i) => i,
                 None => {
                     self.store
-                        .graph
+                        .graph_unchecked_mut()
                         .named
                         .push((pterm.clone(), container_graph(&parent)?));
                     created.push(pterm.clone());
-                    self.store.graph.named.len() - 1
+                    self.store.graph().named.len() - 1
                 }
             };
             let q = format!("ASK {{ <{parent}> <{LDP_CONTAINS}> <{child}> }}");
-            let present = sparq_engine::ask(&self.store.graph.named[pos].1, &q)?;
+            let present = sparq_engine::ask(&self.store.graph().named[pos].1, &q)?;
             if !present {
                 let cnode = NamedNode::new(child.as_str())
                     .map_err(|e| format!("invalid member IRI <{child}>: {e}"))?;
@@ -1683,7 +1768,7 @@ impl SolidMcpServer {
                     Term::NamedNode(contains.clone()),
                     Term::NamedNode(cnode),
                 ];
-                self.store.graph.named[pos].1.insert_triple(
+                self.store.graph_unchecked_mut().named[pos].1.insert_triple(
                     triple[0].clone(),
                     triple[1].clone(),
                     triple[2].clone(),
@@ -1692,14 +1777,14 @@ impl SolidMcpServer {
             }
             child = parent;
         }
-        Ok((created, added))
+        Ok(())
     }
 
     /// Roll back exactly what [`SolidMcpServer::link_containment`] added.
     fn unlink_containment(&mut self, created: &[Term], added: &[AddedLink]) {
         for (pterm, t) in added.iter().rev() {
             if let Some(i) = self.slot_index(pterm) {
-                let _ = self.store.graph.named[i].1.remove_triple(
+                let _ = self.store.graph_unchecked_mut().named[i].1.remove_triple(
                     t[0].clone(),
                     t[1].clone(),
                     t[2].clone(),
@@ -1718,7 +1803,7 @@ impl SolidMcpServer {
         let pterm = Term::NamedNode(NamedNode::new(parent.as_str()).ok()?);
         let pos = self.slot_index(&pterm)?;
         let q = format!("ASK {{ <{parent}> <{LDP_CONTAINS}> <{url}> }}");
-        if !sparq_engine::ask(&self.store.graph.named[pos].1, &q).unwrap_or(false) {
+        if !sparq_engine::ask(&self.store.graph().named[pos].1, &q).unwrap_or(false) {
             return None;
         }
         let triple = [
@@ -1726,7 +1811,7 @@ impl SolidMcpServer {
             Term::NamedNode(NamedNode::new(LDP_CONTAINS).expect("valid constant IRI")),
             Term::NamedNode(NamedNode::new(url).ok()?),
         ];
-        let _ = self.store.graph.named[pos].1.remove_triple(
+        let _ = self.store.graph_unchecked_mut().named[pos].1.remove_triple(
             triple[0].clone(),
             triple[1].clone(),
             triple[2].clone(),
@@ -1909,7 +1994,7 @@ mod unit {
         );
         let graph = server
             .store()
-            .graph
+            .graph()
             .named
             .iter()
             .find(|(name, _)| name.to_string() == "<https://pod.ex/profile>")
@@ -1980,11 +2065,32 @@ mod unit {
         SolidMcpServer::with_config(split_pod(), config).expect("materializes")
     }
 
+    /// Linking containment is all-or-nothing: when a step of the parent chain cannot be
+    /// completed, the container graphs and links the earlier steps added are gone again, so a
+    /// caller that only restores the document slot is left with no half-linked containment.
+    /// (The write tools filter the IRIs that reach this, so the helper is tested directly.)
+    #[test]
+    fn a_containment_chain_that_cannot_be_completed_adds_nothing() {
+        let mut s = split_server(Some("https://alice.ex/card#me"));
+        let fresh = Term::NamedNode(NamedNode::new("https://pod.ex/fresh/").expect("valid IRI"));
+        assert!(s.slot_index(&fresh).is_none(), "nothing stored at /fresh/ yet");
+        // The member IRI of the last step cannot be named, so the chain fails after its first
+        // step has already created the container graph for /fresh/.
+        let err = s
+            .link_containment("https://pod.ex/fresh/doc\u{7f}")
+            .expect_err("the chain cannot be completed");
+        assert!(!err.is_empty(), "the refusal says what went wrong");
+        assert!(
+            s.slot_index(&fresh).is_none(),
+            "the container graph the failed chain created is gone again"
+        );
+    }
+
     #[test]
     fn authorized_projection_holds_exactly_the_readable_documents() {
         // sq-8n6iv — THE aggregate boundary: the projection every schema
         // and statistics tool is mined from must contain alice's document and nothing
-        // of bob's. Widening it to `store.graph` flips this red.
+        // of bob's. Widening it to `store.graph()` flips this red.
         let alice = split_server(Some("https://alice.ex/card#me"));
         let projection = alice.authorized_projection().expect("projection builds");
         assert_eq!(projection.len(), 2, "exactly the two triples of pub/d");

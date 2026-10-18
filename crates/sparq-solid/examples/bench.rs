@@ -90,7 +90,7 @@ fn main() {
     println!("alice readable graphs: {}", allowed.len());
     let direct = timed("engine::query, FULL dataset (GRAPH ?g over all graphs)", || {
         sparq_engine::query(
-            &store.graph,
+            store.graph(),
             "SELECT ?title WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?title } }",
         )
         .unwrap()
@@ -140,7 +140,7 @@ fn main() {
     println!("\nfat fixture: {fat_quads} quads");
     let fat_direct = timed("FULL dataset query, fat fixture", || {
         sparq_engine::query(
-            &fat_store.graph,
+            fat_store.graph(),
             "SELECT ?title WHERE { GRAPH ?g { ?s <https://ex.dev/ns#title> ?title } }",
         )
         .unwrap()
