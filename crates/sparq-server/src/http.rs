@@ -6193,8 +6193,13 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
             "compaction complete\n".to_string(),
             false,
         ),
-        // A compaction failure (e.g. durable-write I/O error) is retryable: the writer thread
-        // stays alive and reads keep flowing from the last published snapshot.
+        // A compaction failure leaves the writer thread alive and reads flowing from the last
+        // published snapshot. It is NOT always retryable, so the response does not promise that:
+        // (sq-ycle) a durable swap that fails after it has staged its new base FREEZES
+        // the store — core refuses every later durable write until the store is reopened — so a
+        // retry returns the same 503 and the operator has to restart this server against the
+        // same `--persist` dir (which replays what is on disk; nothing acknowledged is lost).
+        // A failure before that point leaves the store writable and a retry can succeed.
         // (sq-kfel, ASVS-G3) `e` is the durable-rewrite error string, which carries
         // the server's `--persist` filesystem path (an I/O error embeds the absolute path).
         // Although this route is write/admin-gated, withhold the path from the response body —
@@ -6202,7 +6207,7 @@ async fn admin_compact(State(state): State<AppState>, headers: HeaderMap) -> Res
         Ok(Err(e)) => sanitized_error(
             StatusCode::SERVICE_UNAVAILABLE,
             "compaction",
-            "compaction failed (retryable)",
+            "compaction failed; reads are unaffected, and if the durable swap had already staged its new base the store stays frozen until this server is restarted against the same --persist dir",
             &e,
         ),
         Err(_) => json_error(

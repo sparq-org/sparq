@@ -736,7 +736,8 @@ curl http://127.0.0.1:3030/metrics                              # Prometheus tex
 # Admin WAL compaction / vacuum for ERASURE-COMPLETENESS (sq-x32t). POST-only; gated by the
 # WRITE token. Physically purges data removed by DELETE / DROP (incl. orphaned literal VALUES) from the
 # on-disk store so a logical erasure is followed by real erasure. 200 ok; 409 if in-memory
-# (no --persist, nothing to purge); 503 on a transient durable-write error (retryable):
+# (no --persist, nothing to purge); 503 on a durable-write error (retryable only if the swap had
+# not yet staged its new base — past that the store is frozen until a restart, sq-ycle):
 curl -X POST -H 'Authorization: Bearer <TOKEN>' http://127.0.0.1:3030/admin/compact
 
 # Online consistent-snapshot backup + restore (feature `backup`, default OFF). POST-only, WRITE-gated.
@@ -779,7 +780,11 @@ batches** (no race with a concurrent write), preserves the live triple set **exa
 generation published; reads keep flowing throughout). **POST-only**, gated by the **write** token
 (`--auth-token`), like an UPDATE. Responses: `200` ok; `409` if the server is in-memory (no
 `--persist` — there is no on-disk history to purge, so a no-op success would mislead); `503` on a
-transient durable-write error (retryable, writer stays alive). **Offline equivalent:** stop the
+durable-write error (the writer stays alive and reads keep flowing either way). That `503` is
+retryable only when the failure came BEFORE the swap staged its new base: past that point core
+freezes the store — every later durable write is refused — until the server is restarted against
+the same `--persist` dir, which replays what is on disk, so nothing acknowledged is lost
+(`sq-ycle`). **Offline equivalent:** stop the
 server and run `sparq-cli compact <persist-dir>` (see the `cli` skill). **Honest scope:** this
 scrubs the engine's own on-disk segments + dictionary; it cannot reach bytes already copied off-box
 (filesystem snapshots, COW history, external backups) — those are the operator's responsibility
