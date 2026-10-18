@@ -41,8 +41,8 @@ pub struct AuthBudget {
     /// input: its terms' lexical bytes plus a fixed cost per term.
     pub max_document_bytes: usize,
     /// The same bytes summed over EVERY document the input is assembled from, plus the
-    /// bytes of the resource enumeration (see [`AuthBudget::max_resource_iri_bytes`]):
-    /// everything the input assembly owns that grows with what the pod holds.
+    /// prefix strings of the resource enumeration (see
+    /// [`AuthBudget::max_resource_iri_bytes`]).
     pub max_input_bytes: usize,
     /// Facts the assembled reasoning input may carry, document content and the
     /// structural/provenance/credential facts together.

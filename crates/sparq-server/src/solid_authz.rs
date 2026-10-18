@@ -699,9 +699,10 @@ async fn server_store(
 ///
 /// This lane parses and materialises the REQUEST's own dataset, so its cost is set by the
 /// body: the N-Quads parse, the resource enumeration and the N3 materialisation are all
-/// CPU-bound, all bounded by `sparq_solid::AuthBudget` rather than instant, and so must no
-/// more occupy an async worker than the stateful lane's whole-store run does. A join failure
-/// is the same fail-closed 503 a materialisation failure is: no decision is produced.
+/// CPU-bound, bounded by the body-size limit and `sparq_solid::AuthBudget` rather than
+/// instant, and so must no more occupy an async worker than the stateful lane's whole-store
+/// run does. A join failure is the same fail-closed 503 a materialisation failure is: no
+/// decision is produced.
 // `Response` is large; same `result_large_err` allow as the rest of this module.
 #[allow(clippy::result_large_err)]
 async fn body_store(req: &AuthzRequest) -> Result<PodStore, Response> {
