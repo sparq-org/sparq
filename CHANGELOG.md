@@ -156,6 +156,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-zk-compose:** the verifier now selects each sub-proof's circuit member — and therefore
+  its canonical verification key — from the AUTHENTICATED commitment method of the commitments
+  that sub-proof is bound to, instead of from the manifest's declared `CircuitId` alone. The
+  method is derived per sub-proof: a `Scan` (and an `extended-fragment` `PathReach`) resolves
+  every commitment in its own `commitments` vector, a `JoinEq` resolves the ENDPOINT commitments
+  of every declared `JoinEdge` that covers it (`sub_proofs[edge.scan_a].commitments[edge.graph_a]`
+  and `sub_proofs[edge.scan_b].commitments[edge.graph_b]`) rather than its own prover-declared
+  `commit_a`/`commit_b`, and a `Filter*` member inherits the method of the source scan of every
+  validated binding edge that binds it; all of them must agree. The declared id is resolved through the
+  `(commitment-method x circuit)` dispatch matrix (`dispatch::resolve_circuit`, opt-in behind
+  `dual-leaf`) and only the resolved member is used. Three new fail-closed refusals:
+  `CheckError::MemberNotLegalForMethod` (the member is not legal for that method),
+  `CheckError::SubProofMethodUnresolved` (no single method could be derived — differing methods
+  across bound commitments, a mixture of attested and unattested ones, an unparseable bound
+  commitment, or a sub-proof with no derivable method whose member is not legal under every
+  admissible method), `CheckError::SubProofCommitmentNotAuthenticated` (a bound commitment is
+  ABSENT from the authenticated map, so nothing was authenticated for it at all),
+  `CheckError::AuxiliaryMemberIdInSubProof` (a manifest sub-proof declares an id that belongs to
+  one of the auxiliary bb roles below) and `CheckError::MemberNotForFixedRole`. Absence from the
+  authenticated map is NOT read as `Unbound`: it is refused by name. A sub-proof all of whose
+  bound commitments authenticated no method has no method to resolve against, so its declared
+  member is NOT echoed back either — it is held to the same method-independence rule as a
+  sub-proof bound to no commitment at all (legal under every admissible method, where
+  `MethodPolicy::widest_admissible()` names that set), which refuses a value-lane member and
+  admits a string-lane one. Under the default `MethodPolicy` an unbound attestation is refused
+  upstream, so that case is reachable only under the written-down `admit_unbound()` downgrade. A
+  sub-proof bound to a commitment covered only by a hidden-issuer
+  proof defers its resolution until after `bind_hidden_issuer_attestations`, so a candidate
+  method is never read as authenticated. The five auxiliary bb gates (hidden and fully-hidden
+  revocation, hidden issuer, holder PoK, holder set) are method-independent by construction —
+  their member is fixed by the relying party's own policy or registry and declared nowhere in the
+  manifest — and each now selects it through a named per-role fixed-member path that refuses any
+  id outside its own role. This adds refusals and no acceptance. **Behaviour change:** a manifest
+  whose sub-proof binds commitments that authenticated different methods, or a mixture of
+  attested and unattested ones, used to be accepted and is now refused. For a `Scan` that is
+  narrower than it sounds: `CheckError::ScanPatternMethodsMixed` already refused commitments
+  whose methods disagree on the pattern-constant ENCODER, so what is newly refused there is the
+  pairing of a method-UNBOUND commitment with a `StringCanonicalV1` one, which share one encoder.
+  A `Filter*` and a `JoinEq` had no such check. An edge-less FILTER over a member legal under
+  every admissible method still verifies. **Scope:** the member resolution and all of its
+  refusals compile only with the `dual-leaf` feature, which is OFF by default, because they are
+  decided by the `dual-leaf` dispatch matrix; the stage 2g′ endpoint gate and
+  `CheckError::JoinProofNotBoundToAnEdge` below are unconditional and apply in every feature
+  state. Not externally audited (sq-qhy4); no soundness or privacy property is claimed as
+  achieved.
+
+- **sparq-zk-compose:** the hidden-join gate's ENDPOINT half now runs in BOTH stage-1 regimes.
+  `bind_joins` enforces two separable things — the endpoint resolution plus commitment-matching
+  (each declared `JoinEdge`'s join proof must carry public `commit_a`/`commit_b` byte-equal to the
+  two referenced scans' `commitments[graph_*]`), which reads only the manifest, and the slot
+  binding, which re-derives the query's patterns. The first is now its own gate
+  (`bind_join_endpoints`, stage 2g′) and is no longer deferred with the second in the
+  `extended-fragment` regime; only the slot binding and the N-way chain check remain deferred
+  there (sq-1zf94). It is also what the `JoinEq` member resolution above reads its endpoints from.
+  **Behaviour change (`extended-fragment` only):** a declared hidden `JoinEdge` whose join proof
+  names commitments other than its endpoint scans' is now refused
+  (`CheckError::JoinCommitmentMismatch`) instead of standing as a prover-declared linkage, and a
+  hidden join one of whose endpoints is a bounded-path (`PathReach`) sub-proof rather than a
+  `Scan` is refused fail-closed (`CheckError::JoinEdgeKindMismatch`). The flat regime's verdicts
+  are unchanged — it already ran the whole gate. In BOTH regimes and in EVERY feature state, a
+  `JoinEq` sub-proof that no `JoinEdge` names is now refused
+  (`CheckError::JoinProofNotBoundToAnEdge`): its `commit_a`/`commit_b` were free of the manifest's
+  declared linkage, and no later gate read them. Adds refusals and no acceptance.
+
 - **sparq-lws-core (notifications):** subscription expiry is decided against a durable
   high-water time stored in the index, so a restart with the clock stepped back does not revive
   an expired subscription. On the first start after upgrading, and after a restore that drops
