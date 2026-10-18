@@ -170,6 +170,31 @@ FAMILIES: list[dict] = [
         "p patterns, r released rows, f private FILTERs per row. Does not establish "
         "result completeness or holder identity.",
     },
+    # sq-j506: the V2 DUAL-LEAF component-witnessed members. Separate families from
+    # the shipped scan / join_eq ones, because they prove the same body over leaf
+    # components recomputed IN-CIRCUIT and so are not comparable as a parameter
+    # point of those families. The regexes pin the exact measured profiles.
+    {
+        "key": "scan_v2dl",
+        "pattern": r"scan_v2dl_k(?P<k>1)_n(?P<n>16)_r(?P<r>4)",
+        "params": ["k", "n", "r"],
+        "layer": "query",
+        "role": "BGP row membership over V2 dual-leaf graphs whose per-slot term "
+        "encodings are RECOMPUTED in-circuit from witnessed leaf components, with the "
+        "reserved-sentinel band check and the reserved language-tag check applied at "
+        "those component sites, before the unchanged scan body runs. Compiled only for "
+        "k=1, n=16, r=4.",
+    },
+    {
+        "key": "join_eq_v2dl",
+        "pattern": r"join_eq_v2dl_na(?P<na>16)_nb(?P<nb>16)",
+        "params": ["na", "nb"],
+        "layer": "query",
+        "role": "Hidden equality join between two V2 dual-leaf committed sides whose "
+        "per-slot term encodings are RECOMPUTED in-circuit from witnessed leaf "
+        "components, under the same component-site checks as the V2 scan member, "
+        "before the unchanged join body runs. Compiled only for na=nb=16.",
+    },
     {
         "key": "scan",
         "pattern": r"scan_k(?P<k>\d+)_n(?P<n>\d+)_r(?P<r>\d+)",

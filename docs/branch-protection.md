@@ -30,7 +30,7 @@ not on pull requests:
 
 | Workflow | When it runs |
 |---|---|
-| `ci.yml` (full workspace build/test, wasm, MSRV, all conformance ratchets, coverage, mutants, geiger, container smoke) | nightly + `workflow_dispatch` |
+| `ci.yml` (full workspace build/test, wasm, MSRV, all conformance ratchets, coverage, mutants, geiger, container smoke) | nightly + `workflow_dispatch`; the mutants sweep runs on the Saturday tick, or on dispatch with `-f mutation_sweep=true` |
 | `feature-matrix.yml` (opt-in feature legs) | nightly + `workflow_dispatch` |
 | `fuzz.yml` (cargo-fuzz + differential smoke) | nightly + `workflow_dispatch` |
 | `formal-verification.yml` (Kani `pr_gate` suites) | nightly + `workflow_dispatch` |
@@ -45,6 +45,9 @@ Benchmarks against `main`.**
 
 Lightweight path-filtered PR workflows (docs-quality, js, python, gui, actionlint, …)
 still run on pull requests where their paths change; they report but do not block.
+The heavier ones (js, python, gui, the zk lanes, site e2e/visual, lws, notation3tests,
+xpath-differential, vectors-aarch64) skip draft PR heads and run when the PR is marked
+ready for review; `ci-fast` runs on drafts as before.
 Jobs whose name carries an `advisory`/`informational` token must be declared in
 [`.github/advisory-registry.json`](../.github/advisory-registry.json)
 (`scripts/check-advisory-registry.py` keeps names and declarations in sync).

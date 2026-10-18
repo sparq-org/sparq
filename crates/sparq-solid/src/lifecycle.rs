@@ -11,13 +11,22 @@
 //! a resource that goes are kept with its `.acr` and come back with the resource only while
 //! that `.acr` stays stored, and a container left with no graph below it ends like a
 //! document. A resource that exists after the change and did not before gets the acting
-//! agent, when there is one (a SPARQL update and the MCP server record none), as its creator
+//! agent, when there is one (a SPARQL update records none), as its creator
 //! unless its own `.acr` was stored before the change. The view states creator and owner
 //! facts for existing resources only, so a change that brings back or ends a resource with
 //! known facts asks for a rebuild. The result is staged with the change and installed only
 //! once the change commits; every rebuild also drops the facts of a resource that does not
 //! exist unless its `.acr` is stored and was at the previous install. So an `.acr` stored by
 //! an edit the store was not told of keeps nothing.
+//!
+//! Which resources the acting agent is recorded for is the caller's to say (`created`): only
+//! those it names, among the ones the change brings into being. A resource stored below
+//! containers that do not exist yet brings each of those containers into being with it, so a
+//! caller that names the resource alone leaves them with no creator, and a writer never
+//! becomes the creator of a container above what it wrote. Naming no resource records nobody.
+//! A caller passing no list at all has every resource the change brings into being recorded,
+//! which is what the whole-store rebuild after an update needs; the update path records no
+//! creator, so only a direct edit reaches the recording at all.
 
 use crate::loader::{validate_principal_iri, ResourceGraphs, ACR_SUFFIX};
 use crate::AccessProvenance;
@@ -137,17 +146,21 @@ pub(crate) fn provenance_after(
         events,
         provenance,
         creator,
+        None,
         stored,
         installed_acrs,
     )
 }
 
-/// [`provenance_after`] from the names of the graphs stored before the events.
+/// [`provenance_after`] from the names of the graphs stored before the events, recording
+/// `creator` for the resources `created` names among those the events bring into being
+/// (`None` for every one of them).
 pub(crate) fn provenance_after_names(
     before: &FxHashSet<String>,
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
+    created: Option<&[&str]>,
     installed_acrs: &FxHashSet<String>,
 ) -> Option<AccessProvenance> {
     if events.is_empty() {
@@ -159,6 +172,7 @@ pub(crate) fn provenance_after_names(
         events,
         provenance,
         creator,
+        created,
         stored,
         installed_acrs,
     )
@@ -169,6 +183,7 @@ fn replay(
     events: &[GraphEvent<'_>],
     provenance: &AccessProvenance,
     creator: Option<&str>,
+    created: Option<&[&str]>,
     stored_before: impl Fn(&str) -> bool,
     installed_acrs: &FxHashSet<String>,
 ) -> Option<AccessProvenance> {
@@ -233,11 +248,16 @@ fn replay(
         }
     }
     // Whoever brings a resource into being is its creator, unless its own `.acr` was stored
-    // before the change.
+    // before the change. A caller that names the resources it creates (`created`) limits the
+    // recording to them, so the containers a write brings into being alongside the resource it
+    // names keep no creator.
+    let named = |r: &str| created.is_none_or(|only| only.contains(&r));
     let began: Vec<&str> = match creator {
         Some(_) => touched
             .iter()
-            .filter(|(r, was)| !**was && graphs.holds(r) && !stored_before(&acr_of(r)))
+            .filter(|(r, was)| {
+                !**was && graphs.holds(r) && !stored_before(&acr_of(r)) && named(r)
+            })
             .map(|(r, _)| r.as_str())
             .collect(),
         None => Vec::new(),

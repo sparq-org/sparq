@@ -95,13 +95,34 @@ use crate::rng::{MpcRng, SecureRng};
 /// itself implement `Drop`; the zeroize-on-drop lives on the owning secret type
 /// (e.g. `MacKey`). Hygiene only — `Zeroize` adds a scrub method, it changes no
 /// sharing/reconstruction arithmetic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, zeroize::Zeroize)]
+/// `Debug` is hand-written, not derived: `y` is the share value, and a derived
+/// `Debug` would print it from EVERY container that holds a `Share` — a message
+/// frame, a candidate's match bit, an authenticated sharing, a keyed-row set — so
+/// one stray `{:?}` in a log line or a panic message would carry share values with
+/// it. The rendering keeps the evaluation point `x`, which is the party index and
+/// public by construction, and redacts `y`.
+///
+/// Note for anyone changing this: `Debug` here must stay independent of `y`, and
+/// must NOT become the basis of a map key. The two places in this crate that do
+/// build keys from a `Debug` rendering — `bounded_path::dedup_endpoint_pairs` and
+/// `hidden_path::endpoint_key` — format `Term` values, never a `Share`, so they
+/// are unaffected by this impl.
+#[derive(Clone, Copy, PartialEq, Eq, zeroize::Zeroize)]
 pub struct Share {
     /// The evaluation point (party index, always `>= 1`). `x = 0` is reserved
     /// for the secret and is never handed to a party.
     pub x: u64,
     /// The share value `f(x)` in `F_p`.
     pub y: Fp,
+}
+
+impl std::fmt::Debug for Share {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Share")
+            .field("x", &self.x)
+            .field("y", &"<redacted>")
+            .finish()
+    }
 }
 
 /// How a [`ShamirBackend`] seeds the masking RNG for each dealing session.
