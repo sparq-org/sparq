@@ -399,6 +399,17 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.fence(fence).await
     }
 
+    fn raises_markers(&self) -> bool {
+        self.inner.raises_markers()
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        // One update: the read and the write are one step.
+        let _g = self.counters.op_guard();
+        self.counters.count_update();
+        self.inner.raise_marker(iri, value).await
+    }
+
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
         let _g = self.counters.op_guard();
         self.counters.count_queries(1);

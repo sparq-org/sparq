@@ -1135,7 +1135,7 @@ pub async fn handle<S: Store + 'static>(
                     req,
                     &container,
                     None,
-                    |get| listing(state, get, grants),
+                    |get| std::future::ready(listing(state, &get, grants)),
                 )
                 .await
                 {
@@ -1243,7 +1243,7 @@ pub async fn handle<S: Store + 'static>(
                 super::records::Listed::InContainer,
                 super::records::Remover::Request,
                 req.admission.clone(),
-                set_aside,
+                super::records::at_once(set_aside),
                 settle,
             );
             match removed.await {
@@ -1415,6 +1415,7 @@ async fn create<S: Store + 'static>(
         held,
         agent.subject.clone(),
         register,
+        std::future::ready(Ok(None::<()>)),
     );
     if let Err(refused) = created.await {
         return refused;

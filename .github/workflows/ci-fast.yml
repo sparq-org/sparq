@@ -3,10 +3,11 @@ name: ci-fast
 # ci-fast — the ONE required check (docs/branch-protection.md). Fast and self-contained.
 #
 # WHAT: one workflow whose jobs are ordinary `needs:` edges — no cross-workflow polling.
-# Three parallel work jobs cover the core crates, and one aggregating job named `ci-fast`
-# is the check the ruleset requires:
+# Four parallel work jobs cover the core crates and sparq-reason, and one aggregating job
+# named `ci-fast` is the check the ruleset requires:
 #   * lint        — clippy -D warnings on the core crates (fmt is informational: see below)
 #   * test        — nextest + doctests on the core crates, default features
+#   * test-reason — nextest + doctests on sparq-reason, default features
 #   * conformance — the W3C SPARQL conformance ratchet, the same command + floor as ci.yml
 #   * ci-fast     — `if: always()`; green iff every job above concluded `success`
 #
@@ -14,7 +15,8 @@ name: ci-fast
 # conformance, fuzz, …) run nightly and on dispatch in their own workflows (ci.yml,
 # feature-matrix.yml, fuzz.yml, …); they do not block merges.
 #
-# CORE CRATES: kept in ONE env var below so the three jobs cannot drift apart.
+# CORE CRATES: kept in ONE env var below so the core-crate steps cannot drift apart.
+# sparq-reason is named on its own (lint and `test-reason`): it is not a core crate.
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -69,9 +71,8 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: clippy (deny warnings, core crates)
         run: cargo clippy $CORE_CRATES --all-targets -- -D warnings
-      # sparq-reason is not a core crate (its tests do not run here), but its test targets
-      # must still compile: a signature change elsewhere once broke them on main with this
-      # check green (#6914). Type-checks and lints them; runs nothing.
+      # sparq-reason is not a core crate; its tests run in `test-reason`. Lint them here
+      # too, with -D warnings, as the core crates' are (#6914).
       - name: clippy (deny warnings, sparq-reason incl. test targets)
         run: cargo clippy -p sparq-reason --all-targets -- -D warnings
       # The LWS server's opt-in SAML suite: its integration code is behind `authn-saml`.
@@ -112,6 +113,31 @@ jobs:
         run: cargo nextest run -p sparq-lws-core --features authn-saml --profile ci --no-fail-fast
       - name: Doctests (nextest does not run these)
         run: cargo test $CORE_CRATES --doc
+
+  # sparq-reason is not a core crate, but its tests load other crates' rule files (for
+  # example sparq-solid's .n3 rules), so a change elsewhere can break them (#6914). Its
+  # own job runs in parallel with `test`, so ci-fast's wall time does not grow.
+  test-reason:
+    name: test (sparq-reason, default features)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Free runner disk
+        run: ./scripts/ci-free-disk.sh
+      - name: Rust (pinned by rust-toolchain.toml)
+        run: cargo --version
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
+        with:
+          tool: nextest
+      - name: Tests (nextest)
+        run: cargo nextest run -p sparq-reason --profile ci --no-fail-fast
+      - name: Doctests (nextest does not run these)
+        run: cargo test -p sparq-reason --doc
 
   conformance:
     name: W3C SPARQL conformance (ratchet >= 1229 pass+divergence)
@@ -171,7 +197,7 @@ jobs:
     # need failed or was cancelled (a skipped required check would otherwise read as
     # "pending" forever, or worse, as satisfied).
     name: ci-fast
-    needs: [lint, test, conformance]
+    needs: [lint, test, test-reason, conformance]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
