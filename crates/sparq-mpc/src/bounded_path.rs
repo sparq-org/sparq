@@ -55,6 +55,16 @@
 //! `eval_path` over the *union* store evaluating the **same bounded form**
 //! (`p{m,k}`), so the equality is exact, not an approximation (design §1.2).
 //!
+//! ## What the budgets in this module bound
+//!
+//! [`MAX_PATH_FORM_DEPTH`] and [`MAX_PATH_FORM_WORK`] bound a form's PUBLIC SHAPE
+//! before it is evaluated, and [`MAX_PATH_FORM_ROWS`] bounds the rows one whole
+//! form materialises, charged from a closed form before each join is built. That
+//! is the scope: WHOLE-OPERATOR resource planning — the `PartialResult` clones a
+//! caller makes around this call, a federation's own buffers, dealer batches,
+//! aggregate sharing, shuffle networks, party count, session traffic and
+//! deadlines — is follow-up work and is NOT bounded here.
+//!
 //! ## Supported path forms (the acceptance matrix)
 //!
 //! - **sequence** `p1/p2/.../pk` — one fixed BGP chain ([`PathForm::Sequence`]).
@@ -364,19 +374,6 @@ pub const MAX_PATH_FORM_DEPTH: usize = 32;
 /// domain.
 pub const MAX_PATH_FORM_WORK: u64 = 1 << 20; // 1_048_576 static unroll steps
 
-/// Validate a whole [`PathForm`]'s SHAPE before anything evaluates it: the nesting
-/// depth against [`MAX_PATH_FORM_DEPTH`] and the summed static unroll work against
-/// [`MAX_PATH_FORM_WORK`]. Returns the charged work.
-///
-/// Walks the form with an explicit worklist — never recursively. That is the whole
-/// point of the depth half: a recursive walk would overflow the stack on exactly
-/// the deeply-nested forms this is here to refuse, so the check cannot share the
-/// evaluator's shape. Depth is checked as each level is pushed, so an over-deep
-/// form refuses at depth `MAX_PATH_FORM_DEPTH + 1` without descending further.
-///
-/// Both halves read PUBLIC plan parameters only — alternation width, `min`, `max`,
-/// part counts — so no edge is touched and the refusals name those numbers and the
-/// caps, nothing else.
 // The longest the shape walk's worklist ever got, and a reset for it. Charging a
 // `Sequence`'s declared part count BEFORE its parts are pushed is only observable
 // here: either order ends in the same refusal, and what differs is whether the
@@ -396,6 +393,19 @@ pub(crate) fn worklist_peak() -> usize {
     WORKLIST_PEAK.with(|c| c.get())
 }
 
+/// Validate a whole [`PathForm`]'s SHAPE before anything evaluates it: the nesting
+/// depth against [`MAX_PATH_FORM_DEPTH`] and the summed static unroll work against
+/// [`MAX_PATH_FORM_WORK`]. Returns the charged work.
+///
+/// Walks the form with an explicit worklist — never recursively. That is the whole
+/// point of the depth half: a recursive walk would overflow the stack on exactly
+/// the deeply-nested forms this is here to refuse, so the check cannot share the
+/// evaluator's shape. Depth is checked as each level is pushed, so an over-deep
+/// form refuses at depth `MAX_PATH_FORM_DEPTH + 1` without descending further.
+///
+/// Both halves read PUBLIC plan parameters only — alternation width, `min`, `max`,
+/// part counts — so no edge is touched and the refusals name those numbers and the
+/// caps, nothing else.
 pub(crate) fn check_form_shape(form: &PathForm) -> Result<u64, MpcError> {
     check_form_shape_from(form, 0)
 }

@@ -1666,7 +1666,6 @@ fn encode_payload_row_checked(
     Ok(bytes)
 }
 
-/// The one refusal for a term that does not fit the declared width. Public values
 /// The output stage's PUBLIC-SHAPE checks, in the order they must run: the
 /// declaration's own shape (arity cap, per-term declaration cap, uniform limb
 /// cap), the party cap, then the aggregate work budget.
@@ -1676,6 +1675,11 @@ fn encode_payload_row_checked(
 /// output stage would give. `SlotPlan::decide` runs them again at the stage entry;
 /// they are closed forms on public numbers, so running them twice costs nothing
 /// and the stage stays correct for a caller that did not preflight.
+///
+/// What these bound is this STAGE: the declaration, the party count and the
+/// aggregate per-slot work. Whole-operator resource planning — dealer batches,
+/// aggregate sharing, shuffle networks beyond this bound, session traffic and
+/// deadlines — is follow-up work and is not bounded here.
 pub(crate) fn check_output_public_shape(
     widths: &PayloadWidths,
     bound: usize,
@@ -1693,7 +1697,8 @@ pub(crate) fn check_output_public_shape(
     check_slot_work_budget(bound, limb_capacity, parties, threshold)
 }
 
-/// only; see [`encode_payload_row_checked`].
+/// The one refusal for a term that does not fit the declared width. Public values
+/// only; see `encode_payload_row_checked`.
 fn over_declared_width(widths: &PayloadWidths) -> MpcError {
     MpcError::Protocol(format!(
         "oblivious output stage: a payload term does not fit the declared per-term width \
@@ -4293,6 +4298,62 @@ mod tests {
             .collect();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0][0], at_width);
+    }
+
+    /// `PayloadWidths::check_shape` DIRECTLY: each of the three caps it applies,
+    /// and the overflowing row width, on their own.
+    ///
+    /// The stage-level tests reach this through `SlotPlan::decide`, which makes
+    /// them cover the ordering rather than the predicate. This one pins the
+    /// predicate: each cap admits its own ceiling and refuses one past it, naming
+    /// that cap, and a declaration whose row width leaves `usize` is a refusal
+    /// rather than a wrap.
+    #[test]
+    fn the_declaration_shape_check_applies_all_three_caps() {
+        let shape = |arity: usize, term_bytes: usize| {
+            PayloadWidths { arity, term_bytes }.check_shape()
+        };
+        let names = |r: Result<(), MpcError>, cap: &str| {
+            let err = r.expect_err("must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains(cap)),
+                "the refusal must name {}, got {:?}",
+                cap,
+                err
+            );
+        };
+
+        // Arity: at the cap the declaration is legal only if its limb width also
+        // fits, so pair the ceiling arity with a narrow term; one past it is
+        // refused on the arity, whatever the term width.
+        assert!(shape(MAX_PAYLOAD_ARITY, 16).is_ok());
+        names(shape(MAX_PAYLOAD_ARITY + 1, 16), "MAX_PAYLOAD_ARITY");
+        names(shape(usize::MAX, 1), "MAX_PAYLOAD_ARITY");
+
+        // Per-term declaration ceiling, checked before the limb width.
+        assert!(shape(1, MAX_PAYLOAD_TERM_BYTES).is_ok());
+        names(shape(1, MAX_PAYLOAD_TERM_BYTES + 1), "MAX_PAYLOAD_TERM_BYTES");
+
+        // Uniform limb width: both factors inside their own caps, their row past
+        // MAX_SLOT_LIMBS.
+        let widest_fitting = PayloadWidths {
+            arity: 4,
+            term_bytes: MAX_PAYLOAD_TERM_BYTES,
+        };
+        assert!(
+            widest_fitting.limb_capacity().expect("fits a usize") > MAX_SLOT_LIMBS,
+            "the fixture must really exceed the limb cap"
+        );
+        names(shape(4, MAX_PAYLOAD_TERM_BYTES), "MAX_SLOT_LIMBS");
+
+        // And an overflowing row width refuses rather than wrapping under a cap.
+        names(shape(usize::MAX, MAX_PAYLOAD_TERM_BYTES), "MAX_PAYLOAD_ARITY");
+        let over = PayloadWidths {
+            arity: MAX_PAYLOAD_ARITY,
+            term_bytes: usize::MAX,
+        };
+        assert!(over.row_bytes().is_none(), "the row width must overflow");
+        names(over.check_shape(), "MAX_PAYLOAD_TERM_BYTES");
     }
 
     /// The declaration's own per-term ceiling: a width past

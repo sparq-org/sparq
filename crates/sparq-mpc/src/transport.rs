@@ -339,7 +339,7 @@ impl Message {
     /// the cap has passed — 64 MiB fits a `u32` — so it is the belt the cap is the
     /// braces for, and only the cap's own refusal is reachable from a caller.
     ///
-    /// The cap is charged from [`Self::encoded_len`], a closed form of the message's
+    /// The cap is charged from `encoded_len`, a closed form of the message's
     /// element count, BEFORE anything is serialised, so an over-cap `Shares` or
     /// `Open` refuses without building its body. It was charged on `body.len()`
     /// after the loop, which is a refusal that has already done the work.

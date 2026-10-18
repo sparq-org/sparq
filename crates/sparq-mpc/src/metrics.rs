@@ -84,7 +84,8 @@
 //! part-updated behind an `Err` — some fields advanced, some not — which is a
 //! state no sequence of successful calls can produce, so a caller that reported
 //! the error and carried on would read a total that never existed.
-//! `a_refused_recorder_leaves_every_counter_untouched` asserts this per recorder.
+//! `a_refused_recorder_leaves_every_counter_untouched` asserts it for each of the
+//! five recorders that touch more than one counter.
 //!
 //! ## Closed form, so the instrument does not cost what it measures
 //!
