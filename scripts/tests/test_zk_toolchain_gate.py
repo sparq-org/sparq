@@ -15,6 +15,25 @@ below pin both ends:
     wiring (job-level ledger env, the verify step's shape, the default-run step with
     no `if:`).
 
+Which test reds when a checker function is deleted or inverted (the functions are
+exercised through the CLI, so this maps them to their covering test):
+
+  * `lint_file`        -> AcquisitionLint.test_each_evasion_class_turns_the_check_red
+  * `check_helpers`    -> GateSource.test_the_two_copies_of_the_gate_are_byte_identical
+                          plus the helper-drift fixture in `--self-test`
+  * `check_ratchet`    -> AcquisitionLint
+                          .test_an_annotation_outside_the_recorded_ratchet_is_an_error
+  * `check_workflow`   -> LaneWiring.test_deleting_the_verify_step_turns_the_check_red
+                          and .test_each_weakening_of_the_verify_step_turns_the_check_red
+  * `inventory`        -> LedgerVerification
+                          .test_a_duplicate_inventory_name_blocks_verification
+  * `collect`          -> AcquisitionLint.test_a_missing_scan_directory_is_an_error and
+                          .test_a_cargo_test_entry_pointing_nowhere_is_an_error
+  * `verify_ledger`    -> every test in LedgerVerification
+  * `report_check`     -> RealTree.test_the_real_tree_is_clean (exit code) and
+                          .test_every_ledger_exclusion_states_a_reason (its output)
+  * `static_findings`  -> all of the above; it is the aggregator they share
+
 Mutations that turn this file red: dropping the ledger append from the gate
 (`GateSource`); removing the token parameter from `live_tool` (`GateSource`);
 deleting or weakening the verify step (`LaneWiring`); letting the two copies of the
