@@ -1883,6 +1883,10 @@ impl<'c> Tableau<'c> {
                 return None;
             }
             let cl = &self.c.clauses[*ci as usize];
+            // A clause of the other attempt is sound to apply but costs branches here.
+            if cl.scoped.is_some_and(|scoped| scoped != self.scoped) {
+                continue;
+            }
             let ys = &self.index.ys[*ci as usize];
             let (roles, atoms, _) = &ys[shape.group[0] as usize];
             if !roles.iter().all(|r| rs.contains(r))

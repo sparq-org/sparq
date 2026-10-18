@@ -50,7 +50,7 @@ use super::model::{Axiom, ClassExpression, DataRange, Individual, Literal, Ontol
 use super::vocab::{iri_of, OWL};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
-use std::cell::{Cell, OnceCell};
+use std::cell::{Cell, OnceCell, RefCell};
 
 pub use super::hypertableau::Budget;
 
@@ -328,15 +328,15 @@ impl Reasoner {
             t.assert_concept(root, a);
         }
         let r = t.run();
-        settle(pool, &t);
+        settle(pool, &t, &r);
         r.map_err(|s| self.reason(s))
     }
 
     /// A tableau with the whole budget, or with what is left of a shared `pool`.
     fn tableau(&self, pool: Pool) -> Tableau<'_> {
         let mut budget = self.budget;
-        if let Some(left) = pool {
-            budget.max_steps = left.get();
+        if let Some(shared) = pool {
+            budget.max_steps = shared.left.get();
         }
         let mut t = Tableau::new(&self.clauses, &self.index, budget);
         if !self.clauses.nominals.is_empty() {
@@ -417,18 +417,25 @@ impl Reasoner {
         let mut out = Classification::default();
         let mut subs: FxHashSet<(Id, Id)> = FxHashSet::default();
         // One budget for the whole classification, not one per class.
-        let left = Cell::new(self.budget.max_steps);
-        let pool = Some(&left);
-        let witnesses = self.witnesses.get().map_or(&[][..], Vec::as_slice);
+        let shared = Shared {
+            left: Cell::new(self.budget.max_steps),
+            seen: RefCell::new(FxHashSet::default()),
+        };
+        let pool = Some(&shared);
+        shared
+            .seen
+            .borrow_mut()
+            .extend(self.witnesses.get().into_iter().flatten().cloned());
         for &(id, a) in classes {
             if known.unsatisfiable.contains(&id) {
                 out.unsatisfiable.push(id);
                 continue;
             }
-            // An element of the ontology's model in `a` shows `a` satisfiable, and each class
-            // it is not in no subsumer of `a`: only the classes every such element is in
-            // remain candidates.
-            let mut found = witnesses.iter().filter(|l| l.binary_search(&a).is_ok());
+            // An element of a model of the ontology (the consistency check's, or a test's) in
+            // `a` shows `a` satisfiable, and each class it is not in no subsumer of `a`: only
+            // the classes every such element is in remain candidates.
+            let seen = shared.seen.borrow();
+            let mut found = seen.iter().filter(|l| l.binary_search(&a).is_ok());
             let candidates: Option<Vec<Atom>> = found.next().map(|first| {
                 let mut c: Vec<Atom> = first
                     .iter()
@@ -440,6 +447,7 @@ impl Reasoner {
                 }
                 c
             });
+            drop(seen);
             let label: Vec<(Atom, bool)> = match &candidates {
                 // A test of `a` would cost as much as testing the one candidate left.
                 Some(c) if c.len() <= 1 => c.iter().map(|&b| (b, false)).collect(),
@@ -448,7 +456,7 @@ impl Reasoner {
                     let root = t.add_root();
                     t.assert_concept(root, a);
                     let r = t.run();
-                    settle(pool, &t);
+                    settle(pool, &t, &r);
                     if !r.map_err(|s| self.reason(s))? {
                         out.unsatisfiable.push(id);
                         continue;
@@ -526,14 +534,22 @@ fn has_ill_typed_literal(onto: &Ontology) -> bool {
     found
 }
 
-/// What is left of a budget shared by several tests (`None`: each test has the whole
-/// budget).
-type Pool<'a> = Option<&'a Cell<u64>>;
+/// What the tests of a classification share (`None`: each test has the whole budget).
+type Pool<'a> = Option<&'a Shared>;
 
-/// Charges the work of `t` to `pool`.
-fn settle(pool: Pool, t: &Tableau) {
-    if let Some(left) = pool {
-        left.set(left.get().saturating_sub(t.work()));
+/// What is left of the budget, and the labels of the model elements found so far.
+struct Shared {
+    left: Cell<u64>,
+    seen: RefCell<FxHashSet<Vec<Atom>>>,
+}
+
+/// Charges the work of `t` to `pool`, and keeps the elements of the model it found.
+fn settle(pool: Pool, t: &Tableau, r: &Result<bool, Stop>) {
+    if let Some(shared) = pool {
+        if matches!(r, Ok(true)) {
+            shared.seen.borrow_mut().extend(t.element_labels());
+        }
+        shared.left.set(shared.left.get().saturating_sub(t.work()));
     }
 }
 
