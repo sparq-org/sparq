@@ -1816,10 +1816,39 @@ pub(crate) mod count {
 /// evaluator's N3 subset (a build-time property of the `const` `rules/odrl-*.n3`, so in
 /// practice that last one cannot fire at runtime — but it is reported as an error rather
 /// than a panic, and nothing is materialized).
+///
+/// Runs under [`crate::default_auth_budget`]; [`materialize_odrl_n3_with_budget`] is the
+/// twin that takes the budget its closures are charged against.
 pub fn materialize_odrl_n3(
     graph: &mut Graph,
     policy_ttl: &str,
     request: &Request,
+) -> Result<BridgeOutcome, String> {
+    materialize_odrl_n3_with_budget(graph, policy_ttl, request, crate::default_auth_budget())
+}
+
+/// [`materialize_odrl_n3`] under the whole-decision budget `budget` rather than
+/// [`crate::default_auth_budget`].
+///
+/// This lane runs FIVE closures, and `ClosureLimits` bounds one; the aggregate of the five
+/// is bounded by `budget`'s `max_decision_join_rows` / `max_decision_facts`
+/// ([`crate::AuthBudget`]). Pass what the store this policy is bridged for was configured
+/// with ([`crate::PodStore::auth_budget`]), so a lowered budget is honoured on this lane as
+/// it is on the WAC and ACP ones; `materialize_odrl_n3` uses the default.
+///
+/// The input-byte and resource-enumeration fields of `budget` do not apply here: this lane
+/// assembles its facts from `policy_ttl` and `request` rather than from a pod's control
+/// documents, so it runs no resource enumeration and reads no documents.
+///
+/// # Errors
+///
+/// As [`materialize_odrl_n3`], plus a refusal when the five closures' aggregate work is
+/// past `budget` (fail-closed: nothing is written to `graph`).
+pub fn materialize_odrl_n3_with_budget(
+    graph: &mut Graph,
+    policy_ttl: &str,
+    request: &Request,
+    budget: crate::AuthBudget,
 ) -> Result<BridgeOutcome, String> {
     // 0. STRICT Turtle parse + ground-term re-serialization (injection guard), then
     //    the canonical-dateTime / prohibition-scope validation (fail-closed).
@@ -1882,7 +1911,7 @@ pub fn materialize_odrl_n3(
     // charges go into one whole-decision ledger that bounds their aggregate
     // (`crate::AuthBudget`); otherwise this lane could spend five times the allowance a
     // single-stratum WAC view can.
-    let mut work = crate::budget::DecisionWork::new(crate::default_auth_budget());
+    let mut work = crate::budget::DecisionWork::new(budget);
     for stratum in rules {
         closure = crate::materialize::auth_eval(
             &mut dict,

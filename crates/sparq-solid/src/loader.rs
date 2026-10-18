@@ -542,7 +542,11 @@ pub(crate) fn assemble_facts(
     let is_webid = named(&format!("{SOLIDX_NS}isWebId"));
 
     // 1) resources (see [`enumerate`]).
-    let (resources, control_graphs) = enumerate(graph, suffix);
+    // The resources are enumerated under the SAME input meter as the documents, and
+    // charged before their container chains are built: the enumeration's cost grows with
+    // the pod's resource IRIs rather than with its documents' bytes or its fact count, so
+    // neither of the budgets checked after this one bounds it.
+    let (resources, control_graphs) = enumerate(graph, suffix, Some(&mut meter))?;
     // Under the input budget: each document's terms are charged as they are read, so the
     // whole set is never materialized past it (sq-7159 follow-up, `crate::AuthBudget`).
     let control_graphs: Vec<(&str, Vec<[Term; 3]>)> = control_graphs
@@ -887,13 +891,27 @@ pub(crate) fn iri_origin(iri: &str) -> &str {
     }
 }
 
+/// What [`enumerate`] yields: the view's resources, and its control documents with the
+/// stored graph of each.
+type Enumerated<'g> = (FxHashSet<String>, Vec<(&'g str, &'g Graph)>);
+
 /// The auth view's resources in `graph`, and its control documents ending in `suffix`.
 /// The resources are every graph outside the reserved and skolem spaces that is not an
 /// `.acl`/`.acr` and has an authority, plus every structural container above one (a container is an inheritance
 /// anchor even without a graph of its own, but not when only control documents sit below
 /// it). The materializer and the store's provenance pruning both use this, so trusted
 /// creator/owner facts are stated for exactly the resources the view holds.
-fn enumerate<'g>(graph: &'g Graph, suffix: &str) -> (FxHashSet<String>, Vec<(&'g str, &'g Graph)>) {
+///
+/// `meter`, when given, is the input budget of the materialization this enumeration feeds:
+/// the resources it walks are charged against it ([`crate::AuthBudget`]) BEFORE their
+/// container chains are built, so a pod cannot be made to spend unbounded memory here on
+/// the way to a budget that only bounds what comes after. A caller with no budget to charge
+/// (the store's own provenance pruning, over names it already holds) passes `None`.
+fn enumerate<'g>(
+    graph: &'g Graph,
+    suffix: &str,
+    mut meter: Option<&mut InputMeter>,
+) -> Result<Enumerated<'g>, String> {
     let mut resources: FxHashSet<String> = FxHashSet::default();
     let mut control_graphs: Vec<(&str, &Graph)> = Vec::new(); // (name, sub)
     for (name, sub) in &graph.named {
@@ -914,10 +932,10 @@ fn enumerate<'g>(graph: &'g Graph, suffix: &str) -> (FxHashSet<String>, Vec<(&'g
             continue;
         }
         if is_resource_graph(iri) {
-            insert_with_containers(&mut resources, iri);
+            insert_with_containers(&mut resources, iri, meter.as_deref_mut())?;
         }
     }
-    (resources, control_graphs)
+    Ok((resources, control_graphs))
 }
 
 /// Whether the stored graph `iri` is an access-control document.
@@ -964,15 +982,44 @@ fn is_container_name(iri: &str) -> bool {
 }
 
 /// Add `iri` and its structural container chain (https://host/a/b/doc -> /a/b/ -> /a/ -> /).
-fn insert_with_containers(resources: &mut FxHashSet<String>, iri: &str) {
+///
+/// The chain is the whole cost of this: one owned prefix string per container, so an IRI of
+/// length L under D containers owns up to L x D bytes here. `meter`, when given, is charged
+/// for each of those strings BEFORE it is made, and refuses the IRI's length and depth
+/// before the walk starts at all ([`InputMeter::resource`]) — the one point where a single
+/// name can cost more than its own length, and the reason the length and depth are bounded
+/// rather than only the facts the names become.
+///
+/// A container already in `resources` ends the walk, as its own chain is there already;
+/// nothing is allocated for it (nor charged), so the enumeration of a whole pod costs the
+/// bytes of its DISTINCT resources, not of every chain.
+fn insert_with_containers(
+    resources: &mut FxHashSet<String>,
+    iri: &str,
+    mut meter: Option<&mut InputMeter>,
+) -> Result<(), String> {
+    if let Some(m) = meter.as_deref_mut() {
+        m.resource(iri)?;
+    }
+    if resources.contains(iri) {
+        return Ok(());
+    }
+    if let Some(m) = meter.as_deref_mut() {
+        m.resource_bytes(iri.len())?;
+    }
     resources.insert(iri.to_owned());
     let mut cur = iri;
     while let Some(parent) = parent_iri(cur) {
-        if !resources.insert(parent.to_owned()) {
+        if resources.contains(parent) {
             break;
         }
+        if let Some(m) = meter.as_deref_mut() {
+            m.resource_bytes(parent.len())?;
+        }
+        resources.insert(parent.to_owned());
         cur = parent;
     }
+    Ok(())
 }
 
 /// The stored graphs that are resources by themselves (see [`is_resource_graph`]), kept in
@@ -1040,7 +1087,9 @@ impl ResourceGraphs {
     pub(crate) fn all(&self) -> FxHashSet<String> {
         let mut out = FxHashSet::default();
         for name in &self.0 {
-            insert_with_containers(&mut out, name);
+            // Over names this store already holds, with no materialization budget to charge
+            // them against: unmetered, and infallible as a result.
+            let _ = insert_with_containers(&mut out, name, None);
         }
         out
     }
@@ -1100,8 +1149,13 @@ pub(crate) fn control_documents_name_provenance(graph: &Graph) -> bool {
 }
 
 /// The auth view's resources in `graph` (see [`enumerate`]).
+///
+/// Unmetered: this is the store's own provenance pruning over names it already holds, not
+/// the reasoning input of a materialization, so there is no input budget to charge. The
+/// materialization path passes its [`InputMeter`] instead.
 pub(crate) fn resources(graph: &Graph) -> FxHashSet<String> {
-    enumerate(graph, ACR_SUFFIX).0
+    // With no meter there is nothing to charge and so no refusal to propagate.
+    enumerate(graph, ACR_SUFFIX, None).unwrap_or_default().0
 }
 
 /// Whether `iri` is exactly a bare `scheme://` with no authority — above every authority
