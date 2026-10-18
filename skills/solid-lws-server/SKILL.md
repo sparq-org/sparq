@@ -395,8 +395,9 @@ subscriber's `DELETE` of a subscription that expires while it waits answers `404
 already expired does. **Residual (accepted):** the halt and the time it owes are held in the
 process alone, and a halt shows no expiry, so a subscription never durably expired (a stop
 between the clock passing its expiry and the mark being stored, or a stop while halted after a
-failed raise) may be delivered to again after a restart whose clock was stepped back before its
-expiry; nothing outside saw it expire. WebSocket subscriptions have no expiry latch: their receive tokens are held in
+failed raise, or a create whose store outcome was unknown, answered `500`, and committed late)
+may be delivered to again after a restart whose clock was stepped back before its expiry; nothing
+outside saw it expire. WebSocket subscriptions have no expiry latch: their receive tokens are held in
 memory and expire by the process's monotonic clock, and none survives a restart. A
 subscriber's conditional subscription create compares its own listing, and holds only that
 listing (and the container, shared) while it is evaluated and until the new subscription is
