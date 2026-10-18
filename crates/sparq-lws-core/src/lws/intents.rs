@@ -279,6 +279,12 @@ pub(crate) async fn recover<S: Store + 'static>(
             .ok_or_else(|| unreadable("a body is not base64, or is missing".into()))?;
         read.push((record, undo, stored.touch));
     }
+    // Every hold a change took, whether or not its intent names the bytes (a change that
+    // staged one resource twice holds its own bytes from between, which nothing puts back): all
+    // of them go once the change is put back.
+    let left_held = retried(|| store.holds())
+        .await
+        .map_err(|e| format!("the holds a stop left cannot be listed: {e}"))?;
     // Changes cut short are put back first: one may restore a container's metadata from
     // before a kept change's touch, which must then come after it.
     let mut set_aside = Vec::new();
@@ -289,9 +295,15 @@ pub(crate) async fn recover<S: Store + 'static>(
             continue;
         }
         let iris = super::iris_of(&undo);
+        let mut held = super::holds_of(&undo);
+        for (_, meta) in left_held.iter().filter(|(holder, _)| *holder == record) {
+            if !held.iter().any(|(_, m)| m.blob_key == meta.blob_key) {
+                held.push((record.clone(), meta.clone()));
+            }
+        }
         let holds = super::Holding {
             holder: record.clone(),
-            held: super::holds_of(&undo),
+            held,
         };
         let forget = Undo::Forget {
             record: record.clone(),
@@ -318,7 +330,6 @@ pub(crate) async fn recover<S: Store + 'static>(
     // back, before its holds were released; a journal cut short before its intent was stored).
     // Another storage's holds over the same backends are its own start's to sweep. Each is
     // withdrawn alone: its bytes, once no record names them, are the reconciler's to collect.
-<<<<<<< HEAD
     // This sweep is the only one that finds holds a stop left (the maintenance sweeper only
     // retries releases it is given), so the start fails unless the holds can be listed and
     // each holder's intent looked up. A release that fails is tried again by the sweeper,
@@ -341,22 +352,6 @@ pub(crate) async fn recover<S: Store + 'static>(
             "more than {} holds a stop left cannot be released",
             super::UNRELEASED_LIMIT
         ));
-=======
-    // Best effort: a release that fails is tried again by the maintenance sweeper, and a hold
-    // left behind only keeps bytes, so a failure here does not stop the start.
-    match store.holds().await {
-        Ok(held) => {
-            for (holder, meta) in held.iter().filter(|(h, _)| h.starts_with(&container)) {
-                let kept = touches.iter().any(|(record, _)| record == holder);
-                if (kept || matches!(store.exists(holder).await, Ok(false)))
-                    && store.release(meta, holder).await.is_err()
-                {
-                    state.release_later(holder, meta);
-                }
-            }
-        }
-        Err(e) => eprintln!("lws: the holds a stop left could not be listed: {e}"),
->>>>>>> origin/main
     }
     // Reclaims a stop cut short, finished (best effort too: their bytes are named by no record).
     if let Err(e) = store.finish_reclaims().await {
@@ -546,7 +541,6 @@ mod tests {
         }
     }
 
-<<<<<<< HEAD
     /// A journal cut short, leaving its hold: the store's holds then.
     async fn a_left_hold() -> (FlakyStore, String, String) {
         let (st, store, d, _) = typed_doc().await;
@@ -645,8 +639,6 @@ mod tests {
         assert!(refused.contains("cannot be released"), "{refused}");
     }
 
-=======
->>>>>>> origin/main
     /// A start sweeps only its own storage's holds: another storage over the same backends
     /// keeps its own, live or left, for its own start.
     #[tokio::test]
@@ -699,6 +691,39 @@ mod tests {
         let after = snapshot(&st, &store, std::slice::from_ref(&d), &[]).await;
         assert_eq!(after, before);
         assert_eq!(intents_left(&st).await, 0);
+    }
+
+    /// Review finding: a change that staged one resource twice holds its own bytes from between
+    /// (its intent names none of them), and a start that set the change aside released only the
+    /// holds its intent names, leaving that one until the next start. Every hold of the change
+    /// goes once it is put back.
+    #[tokio::test]
+    async fn a_change_set_aside_at_start_releases_every_hold_it_took() {
+        let (st, store, d, before) = typed_doc().await;
+        let mut journal = st.journal();
+        journal.stage(&meta_key(&d)).await.unwrap();
+        let mut meta = st.resource_meta(&d).await.unwrap();
+        meta.pending = true;
+        journal.write_meta(&d, &meta).await.unwrap();
+        // Staged again: the bytes written just now are held too.
+        journal.stage(&meta_key(&d)).await.unwrap();
+        meta.pending = false;
+        journal.write_meta(&d, &meta).await.unwrap();
+        std::mem::forget(journal);
+        assert_eq!(st.store.holds().await.unwrap().len(), 2);
+        // Putting it back fails at start: it is set aside, and put back in the background.
+        *store.fail_restore_of.lock().unwrap() = Some(meta_key(&d));
+        let st = restart(&store).await;
+        *store.fail_restore_of.lock().unwrap() = None;
+        until(&st, "put back", |st| st.visible(&d)).await;
+        for _ in 0..200 {
+            if st.store.holds().await.unwrap().is_empty() && !st.has_unreleased() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(st.store.holds().await.unwrap().is_empty(), "a hold was left");
+        assert_eq!(snapshot(&st, &store, std::slice::from_ref(&d), &[]).await, before);
     }
 
     /// A change whose rollback kept failing (set aside, put back in the background) when the

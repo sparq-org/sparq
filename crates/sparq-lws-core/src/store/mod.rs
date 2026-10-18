@@ -955,10 +955,11 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
             // misses it.
             self.count_hold(&meta.blob_key, true);
             if let Err(e) = self.publish_hold(&meta.blob_key, holder).await {
-                // It may have landed (a lost reply): withdrawn, best effort, as the holder is
-                // told nothing is held (else the next start's sweep withdraws it).
-                let _ = self.withdraw_hold(&meta.blob_key, holder).await;
-                self.count_hold(&meta.blob_key, false);
+                // It may have landed (a lost reply): released, best effort, as the holder is
+                // told nothing is held (else the next start's sweep releases it). Released, not
+                // only withdrawn: a reclaim through this instance meanwhile skipped these bytes
+                // for the count, and they are reclaimed here unless a record names them.
+                let _ = self.release(&meta, holder).await;
                 return Err(e);
             }
             match self.sparq.get_meta(iri).await {

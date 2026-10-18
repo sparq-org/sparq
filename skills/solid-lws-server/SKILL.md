@@ -588,8 +588,8 @@ What the server exposes, all discoverable from the storage description
   metadata records it would put back), so in a storage at its ceiling a change that needs one is
   refused with `507`; a store that fails may fail the change (`5xx`, below) whatever was asked;
   and a hold whose release fails keeps its bytes until the maintenance sweeper releases it again
-  (or, the process stopping first or the sweeper's bounded wait list being full, which is counted
-  and reported, the next start); a start fails, rather than leave a hold to nobody, when the
+  (or, the process stopping first, the sweeper's bounded wait list being full, which is counted
+  and reported, or the hold being one whose taking failed part way, the next start); a start fails, rather than leave a hold to nobody, when the
   holds cannot be listed, a holder's intent cannot be looked up, or a release that fails cannot
   wait for the sweeper (each asked a few times first); and a response's status, timing and quota
   outcome are independent of the content of the resources a change touches, not of their
