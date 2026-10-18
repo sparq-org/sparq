@@ -498,8 +498,8 @@ fn crypto_free_no_mpc_round_artifacts() {
     let mut witness = CommCounter::new(3);
     assert_eq!(witness.mult_rounds, 0, "control: fresh counter starts at 0");
     assert_eq!(witness.open_rounds, 0, "control: fresh counter starts at 0");
-    witness.record_mult();
-    witness.record_open();
+    witness.record_mult().unwrap();
+    witness.record_open().unwrap();
     assert!(
         witness.mult_rounds > 0 && witness.open_rounds > 0,
         "negative control FAILED: the counter does not move under MPC ops, so a \

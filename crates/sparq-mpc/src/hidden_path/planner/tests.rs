@@ -183,11 +183,11 @@ fn comm_counter_counts_equalities_reductions_and_output() {
         "mults must include equalities + reductions + B select mults"
     );
     assert!(
-        c.bytes_per_party() > 0,
+        c.bytes_per_party().unwrap() > 0,
         "a wired operator pays non-zero modelled bytes"
     );
     assert!(
-        c.total_rounds() > 0,
+        c.total_rounds().unwrap() > 0,
         "a wired operator has communication rounds"
     );
 }
@@ -199,7 +199,7 @@ fn comm_counter_is_deterministic() {
     let a = plan.comm_counter(5, 4).unwrap();
     let b = plan.comm_counter(5, 4).unwrap();
     assert_eq!(a.multiplications, b.multiplications);
-    assert_eq!(a.total_bytes(), b.total_bytes());
+    assert_eq!(a.total_bytes().unwrap(), b.total_bytes().unwrap());
 }
 
 #[test]

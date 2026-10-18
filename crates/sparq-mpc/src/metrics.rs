@@ -54,6 +54,50 @@
 //! "each `F_p` opened = 8 bytes/party" (§5.2). So `bytes_per_party` for an open is
 //! `field_elements_opened × 8` (each party broadcasts its one share to recombine);
 //! for a deal it is `8` per secret per recipient party. See [`CommCounter::bytes_per_party`].
+//!
+//! ## Checked arithmetic: every recorder and total is fallible
+//!
+//! Each counter is a `u64` accumulating a product of caller-supplied sizes, so a
+//! total can leave `u64`. A wrapped counter reports a SMALLER cost than the real
+//! one, which is the one direction a cost model must never round, and in a release
+//! build a `+=` would have wrapped silently. So every recorder
+//! ([`CommCounter::record_deal`], [`CommCounter::record_mult`],
+//! [`CommCounter::record_open`], their closed-form batch twins,
+//! [`CommCounter::record_shuffle`], [`CommCounter::record_sort`]) and every derived
+//! total ([`CommCounter::total_rounds`], [`CommCounter::batched_rounds`],
+//! [`CommCounter::bytes_per_party`], [`CommCounter::total_bytes`]) uses checked
+//! arithmetic and returns a `Result`.
+//!
+//! The one exception is [`CommCounter::record_independent_equalities`], whose
+//! SATURATION the existing API documents and whose test asserts: it pins at the
+//! maximum instead of refusing. Saturation errs in the safe direction there — it
+//! over-states, never under-states — so it is kept rather than changed under a
+//! name callers already rely on.
+//!
+//! ## Closed form, so the instrument does not cost what it measures
+//!
+//! Every counter a single-step recorder touches is LINEAR in its multiplicity, so
+//! each has a closed-form batch twin — [`CommCounter::record_deals`],
+//! [`CommCounter::record_mults`], [`CommCounter::record_opens`] — that folds `k`
+//! applications in arithmetically. The harness ([`crate::bench`]) and the
+//! bounded-path planner use those instead of looping, which otherwise made the
+//! cost MODEL `O(k)` in the very quantity it was modelling.
+//! `the_closed_form_batches_equal_k_single_steps` pins the two against the
+//! documented per-op increments, not only against each other.
+
+use crate::partial::MpcError;
+
+/// The one refusal shape every counter in this module uses when a count would
+/// leave `u64`. The message names the operation and the quantities, all of them
+/// public modelling numbers — a counter holds no secret-shared data.
+fn overflowed(what: &str) -> MpcError {
+    MpcError::Protocol(format!(
+        "CommCounter: {} would overflow u64 — refusing (a cost model that wrapped \
+         would report a SMALLER cost than the real one, which is the one direction \
+         it must never round)",
+        what
+    ))
+}
 
 /// Serialised width of one canonical [`crate::field::Fp`] element, in bytes. `Fp`
 /// is over the Mersenne prime `p = 2^61 − 1`, whose canonical representative fits one `u64`
@@ -114,8 +158,23 @@ impl CommCounter {
     /// the dealer (one share per party). No round cost is attributed here — the
     /// dealing latency is folded into the operation (mult/open) that consumes the
     /// sharing, matching how the metric triple is defined per-operation in §5.2.
-    pub fn record_deal(&mut self) {
-        self.field_elements_shared += self.parties as u64;
+    pub fn record_deal(&mut self) -> Result<(), MpcError> {
+        self.record_deals(1)
+    }
+
+    /// Record dealing `k` secrets across all `n` parties — [`Self::record_deal`]
+    /// `k` times, in CLOSED FORM. Every counter it touches is linear in `k`, so a
+    /// loop would make the *instrument* `O(k)` and let it dominate a harness at the
+    /// larger scales; the totals are identical.
+    pub fn record_deals(&mut self, k: u64) -> Result<(), MpcError> {
+        let dealt = k
+            .checked_mul(self.parties as u64)
+            .ok_or_else(|| overflowed("k deals x parties shares"))?;
+        self.field_elements_shared = self
+            .field_elements_shared
+            .checked_add(dealt)
+            .ok_or_else(|| overflowed("the dealt-element total"))?;
+        Ok(())
     }
 
     /// Record ONE secure multiplication of two sharings: 1 multiplication, in 1
@@ -124,18 +183,47 @@ impl CommCounter {
     /// directly, so the open is recorded by the caller's [`Self::record_open`].
     /// Here we count only the multiplication and its round; the operation is
     /// independently batchable.
-    pub fn record_mult(&mut self) {
-        self.multiplications += 1;
-        self.mult_rounds += 1;
-        self.batchable_ops += 1;
+    pub fn record_mult(&mut self) -> Result<(), MpcError> {
+        self.record_mults(1)
+    }
+
+    /// Record `k` INDEPENDENT secure multiplications — [`Self::record_mult`] `k`
+    /// times, in CLOSED FORM (every counter it touches is linear in `k`).
+    pub fn record_mults(&mut self, k: u64) -> Result<(), MpcError> {
+        self.multiplications = self
+            .multiplications
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the multiplication total"))?;
+        self.mult_rounds = self
+            .mult_rounds
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the mult-round total"))?;
+        self.batchable_ops = self
+            .batchable_ops
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the batchable-op total"))?;
+        Ok(())
     }
 
     /// Record opening (reconstructing) ONE field element across the parties: each
     /// party broadcasts its share, so `n` field elements cross the boundary; it is
     /// one logical open round.
-    pub fn record_open(&mut self) {
-        self.field_elements_opened += 1;
-        self.open_rounds += 1;
+    pub fn record_open(&mut self) -> Result<(), MpcError> {
+        self.record_opens(1)
+    }
+
+    /// Record `k` opens — [`Self::record_open`] `k` times, in CLOSED FORM (every
+    /// counter it touches is linear in `k`).
+    pub fn record_opens(&mut self, k: u64) -> Result<(), MpcError> {
+        self.field_elements_opened = self
+            .field_elements_opened
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the opened-element total"))?;
+        self.open_rounds = self
+            .open_rounds
+            .checked_add(k)
+            .ok_or_else(|| overflowed("the open-round total"))?;
+        Ok(())
     }
 
     /// Record a batch of `k` MUTUALLY-INDEPENDENT secure equality tests (the
@@ -151,7 +239,14 @@ impl CommCounter {
     /// not by looping `record_deal`/`record_mult`/`record_open` `k` times — the
     /// loop would make the *instrument* `O(k)` and let it dominate the harness at
     /// the larger `|L|·|R|` join scales. The totals are identical to `k`
-    /// applications of those primitives.
+    /// applications of those primitives, EXCEPT at the `u64` ceiling: this is the
+    /// ONE recorder on the type whose documented behaviour is SATURATION rather
+    /// than a refusal, so it pins at the maximum where the checked recorders
+    /// return an error. That is deliberate and unchanged — the saturation is what
+    /// `an_enormous_equality_batch_saturates_instead_of_wrapping` asserts — and it
+    /// is safe in the same direction: it over-states, never under-states, the
+    /// cost. Every other recorder and every total on this type is checked and
+    /// fallible.
     pub fn record_independent_equalities(&mut self, k: u64) {
         // Per equality: 3 deals (key_L, key_R, mask r) + 1 mult + 1 open. Each
         // deal sends `parties` shares; opens/mults are 1 logical op each. Fold the
@@ -176,25 +271,41 @@ impl CommCounter {
     /// multiplication per switch and `depth_rounds` communication rounds. The
     /// switches are NOT mutually independent (network depth), so the sequential
     /// rounds grow by `depth_rounds`, not by the switch count.
-    pub fn record_shuffle(&mut self, cost: crate::oblivious::ShuffleCost) {
-        self.multiplications += cost.switches as u64;
-        self.mult_rounds += cost.depth_rounds as u64;
+    pub fn record_shuffle(&mut self, cost: crate::oblivious::ShuffleCost) -> Result<(), MpcError> {
+        self.multiplications = self
+            .multiplications
+            .checked_add(cost.switches as u64)
+            .ok_or_else(|| overflowed("the multiplication total"))?;
+        self.mult_rounds = self
+            .mult_rounds
+            .checked_add(cost.depth_rounds as u64)
+            .ok_or_else(|| overflowed("the mult-round total"))?;
         // Each switch's conditional swap opens nothing on its own (it stays
         // secret-shared); the cost is the multiplications + the depth rounds.
+        Ok(())
     }
 
     /// Fold in the modelled cost of one oblivious **sort** (from the crate's own
     /// [`crate::oblivious::SortCost`]): each compare-exchange is a secure
     /// comparison + conditional swap, and the network has `depth_rounds` layers.
-    pub fn record_sort(&mut self, cost: crate::oblivious::SortCost) {
-        self.multiplications += cost.compare_exchanges as u64;
-        self.mult_rounds += cost.depth_rounds as u64;
+    pub fn record_sort(&mut self, cost: crate::oblivious::SortCost) -> Result<(), MpcError> {
+        self.multiplications = self
+            .multiplications
+            .checked_add(cost.compare_exchanges as u64)
+            .ok_or_else(|| overflowed("the multiplication total"))?;
+        self.mult_rounds = self
+            .mult_rounds
+            .checked_add(cost.depth_rounds as u64)
+            .ok_or_else(|| overflowed("the mult-round total"))?;
+        Ok(())
     }
 
     /// Total logical communication rounds, SEQUENTIAL (upper bound): every
     /// dependent mult/open step counted separately.
-    pub fn total_rounds(&self) -> u64 {
-        self.mult_rounds + self.open_rounds
+    pub fn total_rounds(&self) -> Result<u64, MpcError> {
+        self.mult_rounds
+            .checked_add(self.open_rounds)
+            .ok_or_else(|| overflowed("the sequential round total"))
     }
 
     /// Lower-bound round count assuming all mutually-independent operations batch
@@ -203,17 +314,22 @@ impl CommCounter {
     /// ops are dependency-chained (a sort network's layers), it equals the
     /// sequential count. Reported alongside [`Self::total_rounds`] so neither bound
     /// is mistaken for the other.
-    pub fn batched_rounds(&self) -> u64 {
-        let sequential = self.total_rounds();
+    pub fn batched_rounds(&self) -> Result<u64, MpcError> {
+        let sequential = self.total_rounds()?;
         if self.batchable_ops == 0 {
-            return sequential;
+            return Ok(sequential);
         }
         // Each batchable op contributed 1 mult round + 1 open round to the
         // sequential count; those collapse into 2 rounds (one mult, one open) when
         // batched. Any rounds NOT attributable to batchable ops remain.
-        let batchable_rounds = 2 * self.batchable_ops;
+        let batchable_rounds = self
+            .batchable_ops
+            .checked_mul(2)
+            .ok_or_else(|| overflowed("the batchable-round total"))?;
         let non_batchable = sequential.saturating_sub(batchable_rounds);
-        non_batchable + 2
+        non_batchable
+            .checked_add(2)
+            .ok_or_else(|| overflowed("the batched round total"))
     }
 
     /// Total field elements that cross the abstract party boundary on the wire.
@@ -227,8 +343,11 @@ impl CommCounter {
     /// fan-out only here keeps the on-wire model symmetric with deals and makes
     /// `total_bytes` scale with `N` (design record §5.2: "8 bytes/party per open"
     /// over `n` broadcasters ⇒ `8·n` total bytes per open).
-    fn wire_field_elements(&self) -> u64 {
-        self.field_elements_opened * self.parties as u64 + self.field_elements_shared
+    fn wire_field_elements(&self) -> Result<u64, MpcError> {
+        self.field_elements_opened
+            .checked_mul(self.parties as u64)
+            .and_then(|opened| opened.checked_add(self.field_elements_shared))
+            .ok_or_else(|| overflowed("the on-wire field-element total"))
     }
 
     /// **Modelled bytes per party.** Each party broadcasts its one share (8 bytes)
@@ -242,20 +361,21 @@ impl CommCounter {
     /// `(1·n)·8 / n = 8` — the per-open-per-party figure the design record fixes
     /// (§5.2), no longer undercounted. Returns `0` when no party count is set
     /// (nothing recorded).
-    pub fn bytes_per_party(&self) -> u64 {
+    pub fn bytes_per_party(&self) -> Result<u64, MpcError> {
         if self.parties == 0 {
-            return 0;
+            return Ok(0);
         }
-        let total_bytes = self.wire_field_elements() * FIELD_BYTES as u64;
-        total_bytes / self.parties as u64
+        Ok(self.total_bytes()? / self.parties as u64)
     }
 
     /// Total modelled bytes across ALL parties (the aggregate on-wire volume),
     /// before the per-party division — useful for an O(N) vs O(N²) scaling check.
     /// Both opens (`n` broadcast shares each) and deals (`n` shares each) scale
     /// with `N`, so this aggregate grows with the party count as intended.
-    pub fn total_bytes(&self) -> u64 {
-        self.wire_field_elements() * FIELD_BYTES as u64
+    pub fn total_bytes(&self) -> Result<u64, MpcError> {
+        self.wire_field_elements()?
+            .checked_mul(FIELD_BYTES as u64)
+            .ok_or_else(|| overflowed("the total-bytes figure"))
     }
 }
 
@@ -304,9 +424,9 @@ mod tests {
         let n = 5;
         let mut c = CommCounter::new(n);
         for _ in 0..n {
-            c.record_deal();
+            c.record_deal().unwrap();
         }
-        c.record_open();
+        c.record_open().unwrap();
         assert_eq!(
             c.multiplications, 0,
             "linear aggregate pays no multiplications"
@@ -325,7 +445,7 @@ mod tests {
         assert_eq!(c.field_elements_opened, 1);
         // 3 deals (key_L, key_R, mask) × 3 parties = 9 field elements shared.
         assert_eq!(c.field_elements_shared, 9);
-        assert_eq!(c.total_rounds(), 2); // 1 mult + 1 open
+        assert_eq!(c.total_rounds().unwrap(), 2); // 1 mult + 1 open
     }
 
     #[test]
@@ -348,20 +468,20 @@ mod tests {
         let mut c = CommCounter::new(3);
         let k = 16;
         c.record_independent_equalities(k);
-        assert_eq!(c.total_rounds(), 2 * k); // sequential upper bound
-        assert_eq!(c.batched_rounds(), 2); // batched lower bound
-        assert!(c.batched_rounds() < c.total_rounds());
+        assert_eq!(c.total_rounds().unwrap(), 2 * k); // sequential upper bound
+        assert_eq!(c.batched_rounds().unwrap(), 2); // batched lower bound
+        assert!(c.batched_rounds().unwrap() < c.total_rounds().unwrap());
     }
 
     #[test]
     fn bytes_per_party_scales_with_opens() {
         let mut c = CommCounter::new(3);
-        c.record_open();
+        c.record_open().unwrap();
         // 1 open broadcasts n=3 shares (each party sends its 8-byte share to
         // recombine) ⇒ 3 wire field elements = 24 total bytes; per party = 8 bytes,
         // the "8 bytes/party per open" figure the design record fixes (§5.2).
-        assert_eq!(c.total_bytes(), 3 * 8);
-        assert_eq!(c.bytes_per_party(), 8);
+        assert_eq!(c.total_bytes().unwrap(), 3 * 8);
+        assert_eq!(c.bytes_per_party().unwrap(), 8);
     }
 
     #[test]
@@ -371,9 +491,9 @@ mod tests {
         // the symmetry with deals the byte model must preserve.
         for n in [2usize, 3, 5, 7] {
             let mut c = CommCounter::new(n);
-            c.record_open();
-            assert_eq!(c.total_bytes(), (n as u64) * FIELD_BYTES as u64);
-            assert_eq!(c.bytes_per_party(), FIELD_BYTES as u64);
+            c.record_open().unwrap();
+            assert_eq!(c.total_bytes().unwrap(), (n as u64) * FIELD_BYTES as u64);
+            assert_eq!(c.bytes_per_party().unwrap(), FIELD_BYTES as u64);
         }
     }
 
@@ -381,7 +501,7 @@ mod tests {
     fn shuffle_cost_folds_in_switches_and_depth() {
         let cost = crate::oblivious::ShuffleCost::model(8, 17);
         let mut c = CommCounter::new(3);
-        c.record_shuffle(cost);
+        c.record_shuffle(cost).unwrap();
         assert_eq!(c.multiplications, 17);
         assert_eq!(c.mult_rounds, cost.depth_rounds as u64);
     }
@@ -391,9 +511,9 @@ mod tests {
         let run = || {
             let mut c = CommCounter::new(5);
             for _ in 0..5 {
-                c.record_deal();
+                c.record_deal().unwrap();
             }
-            c.record_open();
+            c.record_open().unwrap();
             c.record_independent_equalities(9);
             c
         };
@@ -402,5 +522,151 @@ mod tests {
             run(),
             "same protocol → identical counts (load-robust)"
         );
+    }
+
+    /// Every CHECKED recorder and every total refuses at the `u64` ceiling instead
+    /// of wrapping. A wrapped counter reports a SMALLER cost than the real one,
+    /// which is the one direction a cost model must never round, and a silent wrap
+    /// is exactly what a release build would have done here.
+    #[test]
+    fn every_checked_recorder_and_total_refuses_at_the_ceiling() {
+        // Deals: `k x parties` and then the running total.
+        let mut c = CommCounter::new(5);
+        assert!(
+            c.record_deals(u64::MAX).is_err(),
+            "k x parties must refuse, not wrap"
+        );
+        let mut c = CommCounter {
+            parties: 2,
+            field_elements_shared: u64::MAX,
+            ..Default::default()
+        };
+        assert!(c.record_deal().is_err(), "the dealt total must refuse");
+
+        // Multiplications / rounds / batchable ops.
+        let mut c = CommCounter {
+            parties: 3,
+            multiplications: u64::MAX,
+            ..Default::default()
+        };
+        assert!(c.record_mult().is_err());
+        let mut c = CommCounter {
+            parties: 3,
+            mult_rounds: u64::MAX,
+            ..Default::default()
+        };
+        assert!(c.record_mult().is_err());
+        let mut c = CommCounter {
+            parties: 3,
+            batchable_ops: u64::MAX,
+            ..Default::default()
+        };
+        assert!(c.record_mult().is_err());
+
+        // Opens.
+        let mut c = CommCounter {
+            parties: 3,
+            field_elements_opened: u64::MAX,
+            ..Default::default()
+        };
+        assert!(c.record_open().is_err());
+        let mut c = CommCounter {
+            parties: 3,
+            open_rounds: u64::MAX,
+            ..Default::default()
+        };
+        assert!(c.record_open().is_err());
+
+        // The network cost folds.
+        let mut c = CommCounter {
+            parties: 3,
+            multiplications: u64::MAX,
+            ..Default::default()
+        };
+        assert!(c
+            .record_shuffle(crate::oblivious::ShuffleCost::model(8, 17))
+            .is_err());
+        let mut c = CommCounter {
+            parties: 3,
+            multiplications: u64::MAX,
+            ..Default::default()
+        };
+        assert!(c
+            .record_sort(crate::oblivious::SortCost {
+                items: 8,
+                compare_exchanges: 1,
+                depth_rounds: 1,
+            })
+            .is_err());
+
+        // The totals.
+        let full = CommCounter {
+            parties: 3,
+            mult_rounds: u64::MAX,
+            open_rounds: 1,
+            ..Default::default()
+        };
+        assert!(full.total_rounds().is_err());
+        assert!(full.batched_rounds().is_err());
+        let wide = CommCounter {
+            parties: 3,
+            field_elements_opened: u64::MAX,
+            ..Default::default()
+        };
+        assert!(wide.total_bytes().is_err(), "opened x parties must refuse");
+        assert!(wide.bytes_per_party().is_err());
+        let bytes = CommCounter {
+            parties: 1,
+            field_elements_shared: u64::MAX,
+            ..Default::default()
+        };
+        assert!(
+            bytes.total_bytes().is_err(),
+            "elements x FIELD_BYTES must refuse"
+        );
+
+        // And the refusals name the module, so an overflow is diagnosable.
+        match CommCounter::new(5).record_deals(u64::MAX) {
+            Err(MpcError::Protocol(m)) => {
+                assert!(m.contains("CommCounter") && m.contains("overflow"), "{m}")
+            }
+            other => panic!("expected a Protocol refusal, got {other:?}"),
+        }
+    }
+
+    /// The CLOSED-FORM batch recorders are exactly `k` applications of their
+    /// single-step twin — that is what makes replacing a harness loop with one call
+    /// a refactor and not a change to the model.
+    #[test]
+    fn the_closed_form_batches_equal_k_single_steps() {
+        for k in [0u64, 1, 2, 7, 33] {
+            for parties in [1usize, 3, 5] {
+                let mut looped = CommCounter::new(parties);
+                for _ in 0..k {
+                    looped.record_deal().unwrap();
+                    looped.record_mult().unwrap();
+                    looped.record_open().unwrap();
+                }
+                let mut closed = CommCounter::new(parties);
+                closed.record_deals(k).unwrap();
+                closed.record_mults(k).unwrap();
+                closed.record_opens(k).unwrap();
+                assert_eq!(
+                    closed, looped,
+                    "k={}, parties={}: the closed form must equal k single steps",
+                    k, parties
+                );
+                // Asserted against the DOCUMENTED per-op increments too, not only
+                // against the loop: `record_mult` delegates to `record_mults`, so a
+                // dropped counter would move both sides of that comparison
+                // together and the comparison alone would pass.
+                assert_eq!(closed.field_elements_shared, k * parties as u64);
+                assert_eq!(closed.multiplications, k);
+                assert_eq!(closed.mult_rounds, k);
+                assert_eq!(closed.batchable_ops, k);
+                assert_eq!(closed.field_elements_opened, k);
+                assert_eq!(closed.open_rounds, k);
+            }
+        }
     }
 }

@@ -207,15 +207,19 @@ pub struct MatrixCell {
 
 impl MatrixCell {
     /// Modelled bytes per party (the cross-`N`-comparable on-wire cost).
-    pub fn bytes_per_party(self) -> u64 {
+    ///
+    /// Fallible for the same reason the counter's own totals are: the figure is a
+    /// product of counts, and a cost model that wrapped would report a SMALLER
+    /// cost than the real one.
+    pub fn bytes_per_party(self) -> Result<u64, MpcError> {
         self.comm.bytes_per_party()
     }
     /// Sequential round count (upper bound).
-    pub fn rounds_sequential(self) -> u64 {
+    pub fn rounds_sequential(self) -> Result<u64, MpcError> {
         self.comm.total_rounds()
     }
     /// Batched round count (lower bound, independent ops collapsed).
-    pub fn rounds_batched(self) -> u64 {
+    pub fn rounds_batched(self) -> Result<u64, MpcError> {
         self.comm.batched_rounds()
     }
     /// Secure multiplications.
@@ -271,7 +275,7 @@ impl MatrixResults {
     /// costs or overflowing estimates give JSON `null`. `offline_bytes` is the
     /// legacy total-byte projection (declared bytes per party times parties),
     /// also `null` when unknown or overflowing.
-    pub fn to_json(&self) -> String {
+    pub fn to_json(&self) -> Result<String, MpcError> {
         let mut s = String::new();
         s.push_str("{\n");
         s.push_str("  \"tier\": \"in-process-counting\",\n");
@@ -316,10 +320,10 @@ impl MatrixResults {
                 c.security.label(),
                 trust_id(c.security.trust_model),
                 mal_id(c.security.malicious_security),
-                c.bytes_per_party(),
-                c.comm.total_bytes(),
-                c.rounds_sequential(),
-                c.rounds_batched(),
+                c.bytes_per_party()?,
+                c.comm.total_bytes()?,
+                c.rounds_sequential()?,
+                c.rounds_batched()?,
                 c.multiplications(),
                 c.comm.field_elements_opened,
                 c.comm.field_elements_shared,
@@ -330,11 +334,11 @@ impl MatrixResults {
             ));
         }
         s.push_str("  ]\n}\n");
-        s
+        Ok(s)
     }
 
     /// A compact human-readable table for the example binary's stdout.
-    pub fn to_table(&self) -> String {
+    pub fn to_table(&self) -> Result<String, MpcError> {
         let mut s = String::new();
         s.push_str(
             "TIER 1 (in-process counting) — single-process simulation; \
@@ -361,14 +365,14 @@ impl MatrixResults {
                 c.parties,
                 c.threshold,
                 c.scale,
-                c.bytes_per_party(),
-                c.rounds_sequential(),
-                c.rounds_batched(),
+                c.bytes_per_party()?,
+                c.rounds_sequential()?,
+                c.rounds_batched()?,
                 c.multiplications(),
                 c.security.label(),
             ));
         }
-        s
+        Ok(s)
     }
 }
 
@@ -399,13 +403,12 @@ fn mal_id(m: MaliciousSecurity) -> &'static str {
 /// private integer (`n` deals); the secure sum is a free LOCAL share-addition
 /// (zero multiplications, zero rounds); then ONE open of the result. This is the
 /// zero-round linear baseline — `O(n)` shared field elements, `0` mults, `1` open.
-fn model_aggregate(n: usize) -> CommCounter {
+fn model_aggregate(n: usize) -> Result<CommCounter, MpcError> {
     let mut c = CommCounter::new(n);
-    for _ in 0..n {
-        c.record_deal();
-    }
-    c.record_open();
-    c
+    // Closed form: `n` deals in one call, not a loop over the instrument.
+    c.record_deals(n as u64)?;
+    c.record_open()?;
+    Ok(c)
 }
 
 /// Model the hidden-value all-pairs equi-join over `|L| = |R| = scale` rows/holder:
@@ -429,14 +432,15 @@ fn model_hidden_join(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
 /// secret-shared).
 fn model_shuffle(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
     let mut c = CommCounter::new(n);
-    for _ in 0..scale {
-        c.record_deal();
-    }
+    // The deals are CLOSED FORM, so nothing proportional to `scale` happens ahead
+    // of the width cap `try_new` applies — the old loop recorded `scale` deals one
+    // at a time before the cap had a chance to refuse.
+    c.record_deals(scale as u64)?;
     let net = crate::oblivious::WaksmanNetwork::try_new(scale)?;
     c.record_shuffle(crate::oblivious::ShuffleCost::model(
         scale,
         net.switch_count(),
-    ));
+    ))?;
     Ok(c)
 }
 
@@ -445,15 +449,14 @@ fn model_shuffle(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
 /// compare-exchange, `O(log² n)` depth).
 fn model_sort(n: usize, scale: usize) -> Result<CommCounter, MpcError> {
     let mut c = CommCounter::new(n);
-    for _ in 0..scale {
-        c.record_deal();
-    }
+    // Closed form ahead of the width cap, as in `model_shuffle`.
+    c.record_deals(scale as u64)?;
     let net = crate::oblivious::SortingNetwork::try_new(scale)?;
     c.record_sort(crate::oblivious::SortCost {
         items: scale,
         compare_exchanges: net.gate_count(),
         depth_rounds: net.depth(),
-    });
+    })?;
     Ok(c)
 }
 
@@ -684,7 +687,7 @@ pub fn cell(query_class: QueryClass, n: usize, scale: usize) -> Result<MatrixCel
     let backend = ShamirBackend::new(n)?;
     let security = CellSecurity::read(&backend, query_class.operator_class());
     let comm = match query_class {
-        QueryClass::CumulativeSumAggregate => model_aggregate(n),
+        QueryClass::CumulativeSumAggregate => model_aggregate(n)?,
         QueryClass::HiddenValueEquiJoin => model_hidden_join(n, scale)?,
         QueryClass::ObliviousShuffle => model_shuffle(n, scale)?,
         QueryClass::ObliviousSort => model_sort(n, scale)?,
@@ -837,7 +840,7 @@ mod tests {
         let a = run_matrix(DEFAULT_PARTIES, 4, 8).unwrap();
         let b = run_matrix(DEFAULT_PARTIES, 4, 8).unwrap();
         assert_eq!(a.cells, b.cells, "same matrix inputs → identical cells");
-        assert_eq!(a.to_json(), b.to_json());
+        assert_eq!(a.to_json().unwrap(), b.to_json().unwrap());
     }
 
     // --- AXIS-1 honesty: the security guarantee is the ACTUAL per-operator one. ---
@@ -906,7 +909,7 @@ mod tests {
         let mut prev = 0u64;
         for &n in DEFAULT_PARTIES {
             let c = cell(QueryClass::CumulativeSumAggregate, n, 1).unwrap();
-            let bpp = c.bytes_per_party();
+            let bpp = c.bytes_per_party().unwrap();
             assert!(
                 bpp > prev,
                 "n={n}: bytes/party must grow with N (got {bpp}, prev {prev})"
@@ -923,7 +926,7 @@ mod tests {
         // below the sequential upper bound (the design record's round-batching point).
         let c = cell(QueryClass::HiddenValueEquiJoin, 5, 4).unwrap();
         assert!(
-            c.rounds_batched() < c.rounds_sequential(),
+            c.rounds_batched().unwrap() < c.rounds_sequential().unwrap(),
             "independent equality tests must batch below the sequential round count"
         );
     }
@@ -945,7 +948,7 @@ mod tests {
     #[test]
     fn json_carries_honest_tier_label_and_cells() {
         let r = run_matrix(&[3], 2, 4).unwrap();
-        let json = r.to_json();
+        let json = r.to_json().unwrap();
         assert!(json.contains("in-process-counting"));
         assert!(json.contains("network cost MODELLED not measured"));
         assert!(json.contains("\"offline_bytes\": 0"));
@@ -960,7 +963,7 @@ mod tests {
         for c in &r.cells {
             assert_eq!(c.declared_preprocessing, PreprocessingCost::None);
         }
-        let json = r.to_json();
+        let json = r.to_json().unwrap();
         let rows: Vec<_> = json
             .lines()
             .filter(|line| line.contains("\"query_class\""))
@@ -992,7 +995,8 @@ mod tests {
                 party_counts: vec![3],
                 cells: vec![c],
             }
-            .to_json();
+            .to_json()
+            .unwrap();
             assert!(json.contains(&format!(
                 "\"declared_preprocessing\": {{\"basis\": \"declared-model\", \"items\": {}, \"bytes_per_party\": {}}}",
                 expected.0, expected.1,
@@ -1017,7 +1021,8 @@ mod tests {
                 party_counts: vec![3],
                 cells: vec![c],
             }
-            .to_json();
+            .to_json()
+            .unwrap();
             assert!(json.contains(&format!(
                 "\"declared_preprocessing\": {{\"basis\": \"declared-model\", \"items\": {items}, \"bytes_per_party\": null}}",
             )), "{json}");
