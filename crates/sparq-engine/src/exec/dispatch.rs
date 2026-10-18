@@ -2238,7 +2238,7 @@ pub(super) fn eval_graph_named_pref(
             // branch below: non-visible must be INDISTINGUISHABLE from absent
             // (the L1 view's security property).
             let sub = if view::allows(&target) {
-                dataset.named.iter().find(|(t, _)| *t == target).map(|(_, sub)| sub)
+                dataset.named().iter().find(|(t, _)| *t == target).map(|(_, sub)| sub)
             } else {
                 None
             };
@@ -2363,7 +2363,7 @@ pub(super) fn eval_graph_named_pref(
                 }
                 // Full enumeration (no prefix restriction).
                 None => {
-                    for (gname, sub) in &dataset.named {
+                    for (gname, sub) in dataset.named() {
                         if !view::allows(gname) {
                             continue; // not visible under the installed dataset view (L1)
                         }

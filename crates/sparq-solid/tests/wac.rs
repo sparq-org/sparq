@@ -82,10 +82,12 @@ fn wac_rematerialization_revokes() {
     assert!(can(&mut s, Some(CAROL), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
     // remove carol from the team group document
     let name = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("https://pod.ex/groups/team"));
-    let pos = s.graph().named.iter().position(|(n, _)| *n == name).expect("group graph");
+    assert!(s.graph().named_graph(&name).is_some(), "group graph");
     let without_carol = "<https://pod.ex/groups/team#g> \
          <http://www.w3.org/2006/vcard/ns#hasMember> <https://bob.ex/card#me> .";
-    s.graph_unchecked_mut().named[pos].1 = Graph::load_str(without_carol, "ntriples").unwrap();
+    s.graph_unchecked_mut()
+        .set_named(name, Graph::load_str(without_carol, "ntriples").unwrap())
+        .unwrap();
     s.materialize_wac().expect("re-materialize");
     assert!(!can(&mut s, Some(CAROL), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
     assert!(can(&mut s, Some(BOB), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));

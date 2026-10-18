@@ -126,7 +126,17 @@ pub struct Graph {
     /// IRIs is therefore a SEPARATE sorted side structure
     /// ([`for_named_graphs_with_prefix`](Self::for_named_graphs_with_prefix)), never a reordering
     /// of this Vec.
-    pub named: Vec<(Term, Graph)>,
+    ///
+    /// Private: read it with [`named`](Self::named) / [`named_graph`](Self::named_graph). A
+    /// directory-backed graph's named graphs are its store's (positional, logged, under its
+    /// lock), so they change only through the durable methods
+    /// ([`ensure_named`](Self::ensure_named), [`apply_delta_to_named`](Self::apply_delta_to_named),
+    /// [`clear_named_durable`](Self::clear_named_durable),
+    /// [`drop_named_durable`](Self::drop_named_durable)) and are never taken out; an in-memory
+    /// graph's are added, replaced and removed with [`add_named`](Self::add_named),
+    /// [`set_named`](Self::set_named), [`remove_named`](Self::remove_named) and the like, which
+    /// refuse a directory-backed graph on either side.
+    named: Vec<(Term, Graph)>,
     /// (sq-zz8z, gh-51) Lazily-built sorted permutation of `named` indices, ordered by
     /// the UTF-8 bytes of each graph's IRI string, enabling a binary-search RANGE SCAN for a
     /// prefix-scoped `GRAPH ?g … FILTER(STRSTARTS(STR(?g), prefix))` instead of an O(graphs) full
@@ -1654,6 +1664,208 @@ impl Graph {
     #[inline]
     pub fn named_graph(&self, name: &Term) -> Option<&Graph> {
         self.named.iter().find(|(n, _)| n == name).map(|(_, g)| g)
+    }
+
+    /// The named graphs, in their (positional) order: each a self-contained `Graph`, keyed by
+    /// its name term.
+    #[inline]
+    pub fn named(&self) -> &[(Term, Graph)] {
+        &self.named
+    }
+
+    /// `Err` unless the named graphs from position `from` on may be removed or moved: none of
+    /// them is directory-backed. A store's named graphs are positional (`named/<i>`, the
+    /// manifest) and logged: they change only through the durable methods, such as
+    /// [`ensure_named`](Self::ensure_named) and [`drop_named_durable`](Self::drop_named_durable),
+    /// and are never taken out or shifted. In-memory named graphs (a view a caller added) may
+    /// be removed as long as no store's named graph comes after them.
+    fn check_named_movable_from(&self, from: usize) -> Result<(), String> {
+        match self.named.iter().skip(from).find(|(_, g)| g.is_directory_backed()) {
+            Some((name, _)) => Err(format!(
+                "{name} is a named graph of this graph's store: it changes only through the \
+                 durable methods (apply_delta_to_named, clear_named_durable, drop_named_durable), \
+                 and is never taken out or moved"
+            )),
+            None => Ok(()),
+        }
+    }
+
+    /// `Err` unless `g` may become a named graph of this graph: this graph accepts writes, and
+    /// `g` is in memory (no directory, no log) and accepts writes too. A store's named graph
+    /// never moves to another graph, or back into its own: it is logged in, and locked with,
+    /// the store it came from. (An in-memory named graph of a directory-backed graph is not
+    /// logged: it lives as long as the graph.)
+    fn check_named_insertable(&self, g: &Graph) -> Result<(), String> {
+        self.refuse_if_detached()?;
+        if g.is_directory_backed() {
+            return Err("a directory-backed graph cannot become a named graph of another graph \
+                 (its updates are logged in its own store): fork it for an in-memory copy"
+                .to_owned());
+        }
+        #[cfg(feature = "mmap")]
+        if let Some(d) = &g.detached {
+            return Err(format!(
+                "a graph that refuses writes cannot become a named graph ({}): fork it for a \
+                 writable in-memory copy",
+                d.why
+            ));
+        }
+        Ok(())
+    }
+
+    /// The named graphs changed: the prefix index is rebuilt on its next use.
+    fn named_changed(&self) {
+        *self.graph_prefix_index.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    /// Adds the in-memory graph `g` as a named graph called `name`, after the others (a second
+    /// graph of the same name is not merged). Refused when this graph refuses writes, and for a
+    /// `g` that is directory-backed or refuses writes ([`set_named`](Self::set_named) says
+    /// why).
+    pub fn add_named(&mut self, name: Term, g: Graph) -> Result<(), String> {
+        self.check_named_insertable(&g)?;
+        self.named.push((name, g));
+        self.named_changed();
+        Ok(())
+    }
+
+    /// Adds every `(name, graph)` of `graphs` as with [`add_named`](Self::add_named), all or
+    /// none: refused, changing nothing, when any could not be added.
+    pub fn extend_named(
+        &mut self,
+        graphs: impl IntoIterator<Item = (Term, Graph)>,
+    ) -> Result<(), String> {
+        let graphs: Vec<_> = graphs.into_iter().collect();
+        for (_, g) in &graphs {
+            self.check_named_insertable(g)?;
+        }
+        self.named.extend(graphs);
+        self.named_changed();
+        Ok(())
+    }
+
+    /// Makes the in-memory graph `g` the named graph called `name`: in place of the first one
+    /// of that name, returned, or after the others. Refused, changing nothing, when this graph
+    /// refuses writes, when the one it would replace is a named graph of this graph's store
+    /// (those change only through the durable methods), and when `g` is directory-backed (a
+    /// store's named graph stays in its store: [`fork`](Self::fork) it for an in-memory copy)
+    /// or refuses writes.
+    pub fn set_named(&mut self, name: Term, g: Graph) -> Result<Option<Graph>, String> {
+        self.check_named_insertable(&g)?;
+        let old = match self.named.iter().position(|(n, _)| *n == name) {
+            Some(i) => {
+                if self.named[i].1.is_directory_backed() {
+                    return Err(format!(
+                        "{name} is a named graph of this graph's store: it changes only through \
+                         the durable methods"
+                    ));
+                }
+                Some(std::mem::replace(&mut self.named[i].1, g))
+            }
+            None => {
+                self.named.push((name, g));
+                None
+            }
+        };
+        self.named_changed();
+        Ok(old)
+    }
+
+    /// Removes the first named graph called `name` and returns it (`None` when there is none),
+    /// keeping the others in order. Refused, changing nothing, when it, or any named graph
+    /// after it, is a named graph of this graph's store (use
+    /// [`drop_named_durable`](Self::drop_named_durable)). A graph that refuses writes (opened
+    /// read-only, or frozen) may drop named graphs from its in-memory view, writing nothing;
+    /// what it drops refuses writes too and joins no other graph.
+    pub fn remove_named(&mut self, name: &Term) -> Result<Option<Graph>, String> {
+        let Some(i) = self.named.iter().position(|(n, _)| n == name) else {
+            return Ok(None);
+        };
+        self.check_named_movable_from(i)?;
+        let removed = self.named.remove(i).1;
+        self.named_changed();
+        Ok(Some(removed))
+    }
+
+    /// Keeps only the named graphs for which `keep(name, graph)` is true, in order. Refused,
+    /// changing nothing, as [`remove_named`](Self::remove_named): when a graph it would drop,
+    /// or one after it, is a named graph of this graph's store.
+    pub fn retain_named(&mut self, mut keep: impl FnMut(&Term, &Graph) -> bool) -> Result<(), String> {
+        let keeps: Vec<bool> = self.named.iter().map(|(n, g)| keep(n, g)).collect();
+        if let Some(first) = keeps.iter().position(|k| !k) {
+            self.check_named_movable_from(first)?;
+            let mut keeps = keeps.into_iter();
+            self.named.retain(|_| keeps.next().unwrap_or(true));
+            self.named_changed();
+        }
+        Ok(())
+    }
+
+    /// Takes every named graph out, in order, leaving none. Refused, changing nothing, when
+    /// any is a named graph of this graph's store, as [`remove_named`](Self::remove_named).
+    pub fn take_named(&mut self) -> Result<Vec<(Term, Graph)>, String> {
+        self.check_named_movable_from(0)?;
+        let taken = std::mem::take(&mut self.named);
+        self.named_changed();
+        Ok(taken)
+    }
+
+    /// Applies a delta to the named graph at position `i` (in [`named`](Self::named)): logged
+    /// first when it is a store's ([`apply_delta`](Self::apply_delta)). `Err` when there is no
+    /// named graph at `i`, or when this graph, or that named graph, refuses writes.
+    pub fn apply_delta_to_named(
+        &mut self,
+        i: usize,
+        inserts: &[[Term; 3]],
+        deletes: &[[Term; 3]],
+    ) -> Result<(), String> {
+        self.refuse_if_detached()?;
+        let n = self.named.len();
+        let (_, g) = self
+            .named
+            .get_mut(i)
+            .ok_or_else(|| format!("no named graph at position {i} (there are {n})"))?;
+        g.apply_delta(inserts, deletes)
+    }
+
+    /// Replaces this graph's default graph with the one `rebuild` makes from its dictionary and
+    /// triples (in place: `rebuild` may add terms and triples, as a reasoner does), keeping its
+    /// named graphs, and the lock of its directory while anything it maps lives. The rebuilt
+    /// default graph is in memory: later updates to it are not logged. `Err`, changing
+    /// nothing, when this graph refuses writes.
+    pub fn rebuild_default<R>(
+        &mut self,
+        rebuild: impl FnOnce(&mut Dict, &mut Vec<[Id; 3]>) -> R,
+    ) -> Result<R, String> {
+        self.refuse_if_detached()?;
+        let mut triples: Vec<[Id; 3]> = self.iter_ids().collect();
+        let mut dict = std::mem::take(&mut self.dict);
+        let out = rebuild(&mut dict, &mut triples);
+        self.replace_default_unchecked(Graph::from_parts(dict, triples));
+        Ok(out)
+    }
+
+    /// Replaces this graph's default graph with `default`, an in-memory graph with no named
+    /// graphs of its own, keeping this graph's named graphs and the lock of its directory. The
+    /// new default graph is in memory: later updates to it are not logged. `Err`, changing
+    /// nothing, when this graph refuses writes, or `default` has named graphs, is
+    /// directory-backed or refuses writes.
+    pub fn replace_default(&mut self, default: Graph) -> Result<(), String> {
+        self.check_named_insertable(&default)?;
+        if !default.named.is_empty() {
+            return Err("the new default graph has named graphs of its own".to_owned());
+        }
+        self.replace_default_unchecked(default);
+        Ok(())
+    }
+
+    fn replace_default_unchecked(&mut self, mut default: Graph) {
+        default.named = std::mem::take(&mut self.named);
+        #[cfg(feature = "mmap")]
+        if default.lock.is_none() {
+            default.lock = self.lock.take();
+        }
+        *self = default;
     }
 
     /// Streaming loader: parses an RDF document incrementally from a reader (so a

@@ -38,7 +38,7 @@ fn all_quads(store: &PodStore) -> Vec<String> {
     for (name, g) in std::iter::once((String::from("<default>"), store.graph())).chain(
         store
             .graph()
-            .named
+            .named()
             .iter()
             .map(|(n, g)| (format!("{}", n), g)),
     ) {
@@ -468,7 +468,7 @@ fn a_policy_past_the_constraint_budget_is_fail_closed_in_the_bridge() {
         .on("https://ex.dev/asset")
         .by("https://ex.dev/alice");
     let mut graph = Graph::default();
-    let before = graph.named.len();
+    let before = graph.named().len();
     let err = materialize_odrl_n3(&mut graph, &ttl, &req)
         .expect_err("a policy the reference parse refuses must not be materialised");
     assert!(
@@ -483,13 +483,13 @@ fn a_policy_past_the_constraint_budget_is_fail_closed_in_the_bridge() {
         err
     );
     assert_eq!(
-        graph.named.len(),
+        graph.named().len(),
         before,
         "a refusal installed a named graph"
     );
     assert!(
         !graph
-            .named
+            .named()
             .iter()
             .any(|(n, _)| format!("{}", n).contains("urn:sparq:auth")),
         "a refusal installed an auth view"
@@ -669,7 +669,7 @@ fn the_odrl_n3_lane_honours_a_configured_decision_budget() {
     let mut budget = default_auth_budget();
     budget.max_decision_facts = 1;
     let mut graph = Graph::default();
-    let before = graph.named.len();
+    let before = graph.named().len();
     let err = materialize_odrl_n3_with_budget(&mut graph, ttl, &req, budget)
         .expect_err("past the configured whole-decision budget");
     assert_eq!(
@@ -678,5 +678,5 @@ fn the_odrl_n3_lane_honours_a_configured_decision_budget() {
         "{}",
         err
     );
-    assert_eq!(graph.named.len(), before, "a refusal wrote to the graph");
+    assert_eq!(graph.named().len(), before, "a refusal wrote to the graph");
 }

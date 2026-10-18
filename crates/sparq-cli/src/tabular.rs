@@ -1786,7 +1786,7 @@ pub(crate) fn cmd_tabular(args: &[String]) {
     }
     .unwrap_or_else(|e| die(e));
     let secs = t.elapsed().as_secs_f64();
-    let n = g.len() + g.named.iter().map(|(_, ng)| ng.len()).sum::<usize>();
+    let n = g.len() + g.named().iter().map(|(_, ng)| ng.len()).sum::<usize>();
     eprintln!(
         "loaded {n} {kind} in {secs:.3}s ({:.2} M/s) from tabular import",
         n as f64 / secs / 1e6

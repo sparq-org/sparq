@@ -208,10 +208,10 @@ impl<'graph> GraphScope<'graph> {
         let index = dataset
             .ensure_named(&self.write_graph)
             .map_err(GraphScopeError::Graph)?;
-        let write_graph = &mut dataset.named[index].1;
+        let triple = [subject, Term::NamedNode(predicate), object];
         match change {
-            Change::Insert => write_graph.insert_triple(subject, predicate, object),
-            Change::Remove => write_graph.remove_triple(subject, predicate, object),
+            Change::Insert => dataset.apply_delta_to_named(index, &[triple], &[]),
+            Change::Remove => dataset.apply_delta_to_named(index, &[], &[triple]),
         }
         .map_err(GraphScopeError::Graph)
     }

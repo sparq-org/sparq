@@ -133,7 +133,7 @@ fn tmp(tag: &str) -> std::path::PathBuf {
 fn graph_len(store: &PodStore, name: &str) -> usize {
     store
         .graph()
-        .named
+        .named()
         .iter()
         .find(|(n, _)| matches!(n, oxrdf::Term::NamedNode(n) if n.as_str() == name))
         .map_or(0, |(_, g)| g.len())

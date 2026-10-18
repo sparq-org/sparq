@@ -111,11 +111,11 @@ fn load_dataset_with_graphs(
             continue;
         };
         let t = Term::NamedNode(nn);
-        if !graph.named.iter().any(|(g, _)| *g == t) {
-            graph.named.push((
+        if !graph.named().iter().any(|(g, _)| *g == t) {
+            graph.add_named(
                 t,
                 sparq_core::Graph::from_parts(sparq_core::dict::Dict::new(), Vec::new()),
-            ));
+            )?;
         }
     }
     Ok(graph)
@@ -701,7 +701,7 @@ pub fn run_update_test(entry: &TestEntry) -> Status {
                 }
             };
             dump(&updated, None);
-            for (name, g) in &updated.named {
+            for (name, g) in updated.named() {
                 dump(g, Some(name));
             }
             Ok::<_, String>(rows)

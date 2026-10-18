@@ -606,6 +606,9 @@ impl RegistryEntry {
 pub enum RegistryError {
     /// A document IRI may not live in the reserved `urn:sparq:` space.
     ReservedDocumentIri(String),
+    /// The store refused the registry graph: it is directory-backed (its named graphs change
+    /// only through its durable methods) or refuses writes.
+    Store(String),
 }
 
 impl std::fmt::Display for RegistryError {
@@ -614,6 +617,7 @@ impl std::fmt::Display for RegistryError {
             RegistryError::ReservedDocumentIri(iri) => {
                 write!(f, "registry entry document IRI is in the reserved space: {iri}")
             }
+            RegistryError::Store(why) => write!(f, "the store refused the registry graph: {why}"),
         }
     }
 }
@@ -641,11 +645,7 @@ pub fn install_registry(graph: &mut Graph, entries: &[RegistryEntry]) -> Result<
     let n = ids.len();
     let reg = Graph::from_parts(dict, ids);
     let name = Term::NamedNode(NamedNode::new_unchecked(ZK_GRAPH));
-    if let Some(slot) = graph.named.iter_mut().find(|(gname, _)| *gname == name) {
-        slot.1 = reg;
-    } else {
-        graph.named.push((name, reg));
-    }
+    graph.set_named(name, reg).map_err(RegistryError::Store)?;
     Ok(n)
 }
 
@@ -654,7 +654,7 @@ pub fn install_registry(graph: &mut Graph, entries: &[RegistryEntry]) -> Result<
 /// are dropped.
 pub fn read_registry(graph: &Graph) -> Vec<RegistryEntry> {
     let name = Term::NamedNode(NamedNode::new_unchecked(ZK_GRAPH));
-    let Some((_, reg)) = graph.named.iter().find(|(gname, _)| *gname == name) else {
+    let Some((_, reg)) = graph.named().iter().find(|(gname, _)| *gname == name) else {
         return Vec::new();
     };
 
@@ -973,7 +973,7 @@ mod tests {
         let o = Term::NamedNode(NamedNode::new_unchecked(ZK_STATUS_ACTIVE));
         let ids = vec![[dict.intern(&s), dict.intern(&p), dict.intern(&o)]];
         let reg = Graph::from_parts(dict, ids);
-        g.named.push((Term::NamedNode(NamedNode::new_unchecked(ZK_GRAPH)), reg));
+        g.add_named(Term::NamedNode(NamedNode::new_unchecked(ZK_GRAPH)), reg).unwrap();
         assert!(read_registry(&g).is_empty());
     }
 
@@ -1099,10 +1099,11 @@ mod tests {
             ids.push([dict.intern(&s), dict.intern(&p), dict.intern(&o)]);
         }
         let mut g = Graph::load_str("", "turtle").unwrap();
-        g.named.push((
+        g.add_named(
             Term::NamedNode(NamedNode::new_unchecked(ZK_GRAPH)),
             Graph::from_parts(dict, ids),
-        ));
+        )
+        .unwrap();
         let mut back = read_registry(&g);
         assert_eq!(back.len(), 1);
         let back = back.remove(0);

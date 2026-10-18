@@ -126,7 +126,7 @@ fn dataset_rows(graph: &Graph, blank_map: &HashMap<String, String>) -> BTreeSet<
         }
     };
     collect(None, graph);
-    for (name, part) in &graph.named {
+    for (name, part) in graph.named() {
         collect(Some(name.clone()), part);
     }
     rows
@@ -199,7 +199,7 @@ fn dataset_parts(graph: &Graph) -> Vec<(Option<Term>, Vec<Triple>)> {
     std::iter::once((None, graph_triples(graph)))
         .chain(
             graph
-                .named
+                .named()
                 .iter()
                 .map(|(name, part)| (Some(name.clone()), graph_triples(part))),
         )

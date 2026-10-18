@@ -32,7 +32,7 @@ fn graph_len(store: &PodStore, name: &str) -> usize {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(name));
     store
         .graph()
-        .named
+        .named()
         .iter()
         .find(|(n, _)| *n == term)
         .map(|(_, g)| {
@@ -447,7 +447,7 @@ fn store_snapshot(store: &PodStore) -> StoreSnapshot {
         v
     }
     let mut out: StoreSnapshot = vec![(String::new(), dump_graph(store.graph()))];
-    for (name, sub) in &store.graph().named {
+    for (name, sub) in store.graph().named() {
         out.push((name.to_string(), dump_graph(sub)));
     }
     // Snapshot is only compared for equality; an unstable sort is faster.

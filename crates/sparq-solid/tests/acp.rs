@@ -75,7 +75,7 @@ fn acp_rematerialization_picks_up_policy_change() {
     assert!(!can(&mut s, Some(DAVE), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
     // extend team2's anyOf with dave: swap the .acr graph, re-materialize
     let name = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked("https://pod.ex/team2/.acr"));
-    let pos = s.graph().named.iter().position(|(n, _)| *n == name).expect("acr graph");
+    let pos = s.graph().named().iter().position(|(n, _)| *n == name).expect("acr graph");
     let acr = "https://pod.ex/team2/.acr";
     let team = format!(
         "<{acr}> <http://www.w3.org/ns/solid/acp#memberAccessControl> <{acr}#ctl-team> .\n\
@@ -84,7 +84,10 @@ fn acp_rematerialization_picks_up_policy_change() {
          <{acr}#pol-team> <http://www.w3.org/ns/solid/acp#anyOf> <{acr}#m-dave> .\n\
          <{acr}#m-dave> <http://www.w3.org/ns/solid/acp#agent> <https://dave.ex/card#me> .\n"
     );
-    s.graph_unchecked_mut().named[pos].1 = Graph::load_str(&team, "ntriples").unwrap();
+    let name = s.graph().named()[pos].0.clone();
+    s.graph_unchecked_mut()
+        .set_named(name, Graph::load_str(&team, "ntriples").unwrap())
+        .unwrap();
     s.materialize_acp().expect("re-materialize");
     assert!(can(&mut s, Some(DAVE), None, Mode::Read, "https://pod.ex/team2/c3/g0/d0.ttl"));
     // …and bob lost the write grant the old policy carried
@@ -129,7 +132,7 @@ fn graph_len(store: &PodStore, name: &str) -> usize {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(name));
     store
         .graph()
-        .named
+        .named()
         .iter()
         .find(|(n, _)| *n == term)
         .map(|(_, g)| {

@@ -135,7 +135,7 @@ fn a_store_with_no_view_in_force_refuses_neither_entry_point_for_its_model() {
 fn snapshot(store: &PodStore) -> (Vec<(String, usize)>, AccessProvenance, Vec<bool>) {
     let mut graphs: Vec<(String, usize)> = store
         .graph()
-        .named
+        .named()
         .iter()
         .map(|(n, g)| (format!("{}", n), g.len()))
         .collect();
@@ -344,7 +344,7 @@ fn all_quads(store: &PodStore) -> Vec<String> {
     }
     let mut out = Vec::new();
     dump(store.graph(), "<default>", &mut out);
-    for (name, g) in &store.graph().named {
+    for (name, g) in store.graph().named() {
         dump(g, &format!("{}", name), &mut out);
     }
     out.sort();

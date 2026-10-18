@@ -26,7 +26,7 @@ fn rows(g: &Graph) -> usize {
 
 /// The sub-graph whose name contains `frag`, if present.
 fn named<'a>(g: &'a Graph, frag: &str) -> Option<&'a Graph> {
-    g.named
+    g.named()
         .iter()
         .find(|(n, _)| n.to_string().contains(frag))
         .map(|(_, sub)| sub)
@@ -146,9 +146,9 @@ fn drop_middle_named_graph_renumbers_and_survives_restart() {
 
     {
         let mut g = Graph::open(&dir).unwrap();
-        assert_eq!(g.named.len(), 3);
+        assert_eq!(g.named().len(), 3);
         update_in_place(&mut g, "PREFIX : <http://ex/> DROP GRAPH :g2").unwrap();
-        assert_eq!(g.named.len(), 2);
+        assert_eq!(g.named().len(), 2);
         assert!(named(&g, "g2").is_none());
         // Mutate a survivor AFTER the renumber to prove its WAL is correctly re-indexed.
         update_in_place(
@@ -160,7 +160,7 @@ fn drop_middle_named_graph_renumbers_and_survives_restart() {
     }
 
     let g2 = Graph::open(&dir).unwrap();
-    assert_eq!(g2.named.len(), 2, "exactly the two survivors after restart");
+    assert_eq!(g2.named().len(), 2, "exactly the two survivors after restart");
     assert!(
         named(&g2, "g2").is_none(),
         "dropped middle graph stays gone"
@@ -208,7 +208,7 @@ fn clear_drop_missing_named_graph_is_noop_success_with_and_without_silent() {
         1,
         "no-op clear/drop of an absent graph leaves the store intact"
     );
-    assert_eq!(g2.named.len(), 1);
+    assert_eq!(g2.named().len(), 1);
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -222,10 +222,10 @@ fn in_memory_parent_clear_keeps_slot_drop_removes_entry() {
         "nquads",
     )
     .unwrap();
-    assert_eq!(g.named.len(), 2);
+    assert_eq!(g.named().len(), 2);
 
     update_in_place(&mut g, "PREFIX : <http://ex/> CLEAR GRAPH :g1").unwrap();
-    assert_eq!(g.named.len(), 2, "in-memory CLEAR keeps the slot");
+    assert_eq!(g.named().len(), 2, "in-memory CLEAR keeps the slot");
     assert_eq!(
         rows(named(&g, "g1").expect("g1 slot kept")),
         0,
@@ -237,12 +237,12 @@ fn in_memory_parent_clear_keeps_slot_drop_removes_entry() {
         named(&g, "g2").is_none(),
         "in-memory DROP removes the entry"
     );
-    assert_eq!(g.named.len(), 1);
+    assert_eq!(g.named().len(), 1);
 
     // CLEAR/DROP of a missing graph is a no-op success in memory too.
     update_in_place(&mut g, "PREFIX : <http://ex/> CLEAR GRAPH :nope").unwrap();
     update_in_place(&mut g, "PREFIX : <http://ex/> DROP GRAPH :nope").unwrap();
-    assert_eq!(g.named.len(), 1);
+    assert_eq!(g.named().len(), 1);
 }
 
 /// CLEAR ALL / DROP ALL on a directory-backed store: every named graph is durably emptied
@@ -266,27 +266,27 @@ fn clear_all_then_drop_all_named_are_durable() {
         update_in_place(&mut g, "CLEAR ALL").unwrap();
         assert_eq!(rows(&g), 0);
         assert_eq!(
-            g.named.len(),
+            g.named().len(),
             2,
             "CLEAR ALL keeps the (now empty) named slots"
         );
-        assert!(g.named.iter().all(|(_, s)| rows(s) == 0));
+        assert!(g.named().iter().all(|(_, s)| rows(s) == 0));
     }
     {
         // Reopen: the cleared state is durable.
         let mut g = Graph::open(&dir).unwrap();
-        assert_eq!(g.named.len(), 2);
+        assert_eq!(g.named().len(), 2);
         assert!(
-            g.named.iter().all(|(_, s)| rows(s) == 0),
+            g.named().iter().all(|(_, s)| rows(s) == 0),
             "CLEAR ALL durable across restart"
         );
         // Now DROP ALL: removes the default-graph content AND every named graph entry.
         update_in_place(&mut g, "DROP ALL").unwrap();
-        assert_eq!(g.named.len(), 0);
+        assert_eq!(g.named().len(), 0);
     }
     let g3 = Graph::open(&dir).unwrap();
     assert_eq!(
-        g3.named.len(),
+        g3.named().len(),
         0,
         "DROP ALL removes every named graph durably"
     );

@@ -532,7 +532,9 @@ fn run_rules(
         // Each pass runs over data ∪ inferred-so-far. Build the augmented graph
         // once per pass (cheap relative to the rule SPARQL/conformance work).
         let mut augmented = expand_graph(data, &inferred);
-        augmented.named = named.iter().map(|(n, g)| (n.clone(), g.fork())).collect();
+        augmented
+            .extend_named(named.iter().map(|(n, g)| (n.clone(), g.fork())))
+            .expect("fresh in-memory graphs take in-memory named graphs");
         let view = GraphView::new(&augmented);
         let mut pass_new = false;
 
@@ -662,7 +664,7 @@ pub fn expand_dataset(
 ) -> DatasetExpansion {
     let inference = apply_rules_in_scope(data, shapes, scope);
     let copy_named = |skip: Option<&Term>| -> Vec<(Term, Graph)> {
-        data.named
+        data.named()
             .iter()
             .filter(|(n, _)| Some(n) != skip)
             .map(|(n, g)| (n.clone(), g.fork()))
@@ -671,7 +673,7 @@ pub fn expand_dataset(
     let dataset = match destination {
         Destination::Default => {
             let mut out = merge_into(data, &inference.triples);
-            out.named = copy_named(None);
+            out.extend_named(copy_named(None)).expect("fresh in-memory graphs take in-memory named graphs");
             out
         }
         Destination::Named(name) => {
@@ -682,10 +684,7 @@ pub fn expand_dataset(
                 None => merge_into(&Graph::default(), &inference.triples),
             };
             // Keep the positional order of the existing graphs; replace in place.
-            match out.named.iter().position(|(n, _)| n == name) {
-                Some(i) => out.named[i].1 = merged,
-                None => out.named.push((name.clone(), merged)),
-            }
+            out.set_named(name.clone(), merged).expect("fresh in-memory graphs take in-memory named graphs");
             out
         }
     };

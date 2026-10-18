@@ -848,12 +848,12 @@ fn grants_need_a_current_covered_graph() {
     let fresh = "https://pod.ex/notes/n9";
     assert!(!s.decide(&bob, fresh, Mode::Read).allow, "does not exist");
     // A graph added to the dataset without re-materializing.
-    let added = Graph::load_dataset(
+    let mut added = Graph::load_dataset(
         &format!("<urn:x> <urn:y> \"1\" <{fresh}> ."),
         "nquads",
     )
     .expect("loads");
-    s.graph_unchecked_mut().named.extend(added.named);
+    s.graph_unchecked_mut().extend_named(added.take_named().unwrap()).unwrap();
     assert!(!s.decide(&bob, fresh, Mode::Read).allow, "created since the materialization");
     assert!(!reads(&s, &bob, fresh));
     s.materialize_wac().expect("wac");

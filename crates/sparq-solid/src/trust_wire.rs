@@ -226,7 +226,7 @@ fn abac_rule_n3_for(_store: &PodStore) -> &'static str {
 /// touching the ODRL path.
 fn install_auth_grants(graph: &mut Graph, grants: &[Triple]) {
     let g_name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-    let mut terms: Vec<[Term; 3]> = match graph.named.iter().find(|(n, _)| *n == g_name) {
+    let mut terms: Vec<[Term; 3]> = match graph.named().iter().find(|(n, _)| *n == g_name) {
         Some((_, sub)) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
@@ -266,7 +266,7 @@ fn install_conditional_grant(graph: &mut Graph, target: &NamedNode, cg: &Conditi
         return; // not an auth:read|write|append|control grant → nothing to install
     };
     let g_name = Term::NamedNode(NamedNode::new_unchecked(AUTH_GRAPH));
-    let mut terms: Vec<[Term; 3]> = match graph.named.iter().find(|(n, _)| *n == g_name) {
+    let mut terms: Vec<[Term; 3]> = match graph.named().iter().find(|(n, _)| *n == g_name) {
         Some((_, sub)) => crate::loader::graph_triples(sub),
         None => Vec::new(),
     };
@@ -347,11 +347,7 @@ fn write_back_auth_terms(graph: &mut Graph, g_name: &Term, terms: Vec<[Term; 3]>
         .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
         .collect();
     let sub = Graph::from_parts(dict, ids);
-    if let Some(slot) = graph.named.iter_mut().find(|(n, _)| n == g_name) {
-        slot.1 = sub;
-    } else {
-        graph.named.push((g_name.clone(), sub));
-    }
+    graph.set_named(g_name.clone(), sub).expect(crate::WRITABLE);
 }
 
 /// Map a derived `auth:read|write|append|control` predicate IRI to its `acl:` mode IRI

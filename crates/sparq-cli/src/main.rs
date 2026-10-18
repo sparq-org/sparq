@@ -876,7 +876,7 @@ fn diff_triples(graph: &sparq_core::Graph) -> std::collections::BTreeSet<String>
                 graph.dict().term(o)
             ));
         }
-        for (_, named) in &graph.named {
+        for (_, named) in graph.named() {
             extend(named, triples);
         }
     }

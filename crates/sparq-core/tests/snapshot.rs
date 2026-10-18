@@ -197,14 +197,12 @@ fn snapshot_covers_named_graphs() {
                <http://ex/x> <http://ex/q> <http://ex/y> <http://ex/g1> .";
     let mut g = Graph::load_dataset(src, "nquads").unwrap();
     let snap = g.snapshot();
-    assert_eq!(snap.named.len(), 1);
-    assert_eq!(snap.named[0].1.len(), 1);
+    assert_eq!(snap.named().len(), 1);
+    assert_eq!(snap.named()[0].1.len(), 1);
 
     // Mutate the base's named graph after the snapshot.
-    g.named[0]
-        .1
-        .apply_delta(&[[iri("http://ex/n"), iri("http://ex/q"), iri("http://ex/m")]], &[])
+    g.apply_delta_to_named(0, &[[iri("http://ex/n"), iri("http://ex/q"), iri("http://ex/m")]], &[])
         .unwrap();
-    assert_eq!(g.named[0].1.len(), 2, "base named graph saw its insert");
-    assert_eq!(snap.named[0].1.len(), 1, "snapshot named graph leaked a base mutation");
+    assert_eq!(g.named()[0].1.len(), 2, "base named graph saw its insert");
+    assert_eq!(snap.named()[0].1.len(), 1, "snapshot named graph leaked a base mutation");
 }

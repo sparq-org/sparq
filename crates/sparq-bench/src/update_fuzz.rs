@@ -728,7 +728,7 @@ fn sparq_nquads(g: &Graph) -> Vec<String> {
     }
     let mut out = Vec::new();
     triples_of(g, None, &mut out);
-    for (name, sub) in &g.named {
+    for (name, sub) in g.named() {
         triples_of(sub, Some(&name.to_string()), &mut out);
     }
     out.sort();

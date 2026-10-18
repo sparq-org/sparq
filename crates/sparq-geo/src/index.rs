@@ -255,7 +255,7 @@ impl GeoIndex {
     /// usable) index.
     pub fn build(graph: &Graph) -> GeoIndex {
         let (mut entries, mut skipped) = extract_graph(graph, None);
-        for (name, g) in &graph.named {
+        for (name, g) in graph.named() {
             let (more, more_skipped) = extract_graph(g, Some(name));
             entries.extend(more);
             skipped += more_skipped;

@@ -213,6 +213,12 @@ fn wrap_read(sparql: &str) -> Result<String, String> {
 pub struct StoredGraphs(FxHashSet<String>);
 
 
+/// Why a change to an in-memory named graph of a [`PodStore`]'s dataset (its auth view, an
+/// access-control document it replaces) cannot be refused: the dataset accepts writes
+/// ([`PodStore::new`] forks one that does not), and those named graphs are in memory.
+pub(crate) const WRITABLE: &str =
+    "a PodStore's dataset accepts writes (PodStore::new forks one that does not)";
+
 /// A pod dataset + its materialized auth view + the per-session graph-set cache.
 ///
 /// The central type of this crate: wrap a loaded dataset with [`PodStore::new`],
@@ -511,8 +517,19 @@ impl PodStore {
     /// assert!(store.accessible(&mallory, Mode::Read).is_empty());
     /// # Ok::<(), String>(())
     /// ```
+    ///
+    /// A graph that refuses writes (opened read-only, or frozen) is replaced by an in-memory
+    /// [`fork`](Graph::fork) of it, and so is a directory-backed one whose reserved graphs
+    /// cannot be dropped (a named graph of its store is in the reserved space, or follows
+    /// one): the store never serves a reserved graph it did not make.
     pub fn new(mut graph: Graph) -> PodStore {
-        loader::strip_reserved_graphs(&mut graph);
+        if graph.check_writable().is_err() {
+            graph = graph.fork();
+        }
+        if loader::strip_reserved_graphs(&mut graph).is_err() {
+            graph = graph.fork();
+            loader::strip_reserved_graphs(&mut graph).expect("a fork is in memory");
+        }
         PodStore {
             graph,
             auth: Arc::new(AuthIndex::default()),
@@ -772,7 +789,7 @@ impl PodStore {
     pub fn stored_graphs(&self) -> StoredGraphs {
         StoredGraphs(
             self.graph
-                .named
+                .named()
                 .iter()
                 .filter_map(|(n, _)| match n {
                     Term::NamedNode(n) => Some(n.as_str().to_owned()),
@@ -1418,7 +1435,7 @@ impl PodStore {
     #[cfg(feature = "odrl-bridge")]
     fn odrl_grants(&self, session: &Session, mode: Mode, target: &str) -> bool {
         self.odrl_grants_present(session, mode, target)
-            && self.graph.named.iter().any(|(n, _)| matches!(n, Term::NamedNode(g) if g.as_str() == target))
+            && self.graph.named().iter().any(|(n, _)| matches!(n, Term::NamedNode(g) if g.as_str() == target))
     }
 
     /// [`PodStore::odrl_grants`] for a `target` the caller knows exists now.
@@ -1591,7 +1608,7 @@ impl PodStore {
     fn record_static_coverage(&mut self) {
         let covered = self
             .graph
-            .named
+            .named()
             .iter()
             .filter_map(|(n, _)| match n {
                 Term::NamedNode(g) if !g.as_str().starts_with(loader::RESERVED_PREFIX) => {
@@ -1820,7 +1837,7 @@ impl PodStore {
             if mode != Mode::Control && self.odrl.has_permissions() {
                 let have: FxHashSet<&str> = sets.sorted.iter().map(NamedNode::as_str).collect();
                 // Each graph here exists, so the existence half of `odrl_grants` holds.
-                for (name, _) in self.graph.named.iter() {
+                for (name, _) in self.graph.named().iter() {
                     let Term::NamedNode(g) = name else { continue };
                     let g_str = g.as_str();
                     if !have.contains(g_str)
@@ -2307,7 +2324,12 @@ impl PodStore {
     /// to rules that changed without a view rebuilt from them: the previous view would keep
     /// granting what the change revoked.
     pub(crate) fn drop_auth_view(&mut self) {
-        loader::strip_reserved_graphs(&mut self.graph);
+        // Dropping fails only when a named graph of a directory-backed dataset follows the
+        // view (named graphs of a store are never moved): the view is then emptied in place,
+        // so it grants nothing.
+        if loader::strip_reserved_graphs(&mut self.graph).is_err() {
+            loader::empty_reserved_graphs(&mut self.graph);
+        }
         // No other grant source (the ODRL bridge, the trust graph) rebuilds it either, until a
         // static materialization succeeds (see [`PodStore::may_install_grants`]).
         self.view_dropped = true;

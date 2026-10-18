@@ -46,7 +46,7 @@ fn tiny_total() -> ClosureLimits {
 fn all_quads(store: &PodStore) -> Vec<String> {
     let mut out = Vec::new();
     for (name, g) in std::iter::once((String::from("<default>"), store.graph()))
-        .chain(store.graph().named.iter().map(|(n, g)| (format!("{}", n), g)))
+        .chain(store.graph().named().iter().map(|(n, g)| (format!("{}", n), g)))
     {
         let scan = g.store().scan(&[None, None, None]);
         for r in scan.rows.iter() {

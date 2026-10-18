@@ -132,11 +132,12 @@ pub fn masked_graph(base: &Graph, scope: &GraphScope) -> Graph {
 /// deny-overrides across all rules and owns the final per-graph outcome.
 pub fn masked_dataset(base: &Graph, decisions: &FxHashMap<Term, GraphScope>) -> Graph {
     let mut out = Graph::from_parts(Dict::new(), Vec::new());
-    for (name, sub) in &base.named {
+    for (name, sub) in base.named() {
         if let Some(scope) = decisions.get(name) {
             let masked = masked_graph(sub, scope);
             if !masked.is_empty() {
-                out.named.push((name.clone(), masked));
+                out.add_named(name.clone(), masked)
+                    .expect("a fresh in-memory graph takes in-memory named graphs");
             }
         }
     }
@@ -206,14 +207,14 @@ impl PodStore {
         let accessible = self.accessible_set(s, mode);
         let full = GraphScope::deny_within(Vec::new());
         let mut decisions: FxHashMap<Term, GraphScope> = FxHashMap::default();
-        for (name, _) in &self.graph.named {
+        for (name, _) in self.graph.named() {
             if !accessible.contains(name) {
                 continue; // graph-level denial/absence wins — a scope never widens
             }
             decisions.insert(name.clone(), scopes.get(name).unwrap_or(&full).clone());
         }
         let graph = masked_dataset(&self.graph, &decisions);
-        let named: FxHashSet<Term> = graph.named.iter().map(|(n, _)| n.clone()).collect();
+        let named: FxHashSet<Term> = graph.named().iter().map(|(n, _)| n.clone()).collect();
         ScopedDataset { graph, named: Arc::new(named) }
     }
 }
@@ -299,11 +300,11 @@ mod tests {
         // g2 has NO decision entry -> absent (absence = deny). Default graph empty.
         let out = masked_dataset(&base, &decisions);
         assert_eq!(out.len(), 0, "default graph must be empty");
-        assert_eq!(out.named.len(), 1);
-        assert_eq!(out.named[0].0, iri("http://ex/g1"));
+        assert_eq!(out.named().len(), 1);
+        assert_eq!(out.named()[0].0, iri("http://ex/g1"));
         // A decision masking EVERYTHING omits the graph entirely.
         decisions.insert(iri("http://ex/g1"), GraphScope::allow_only(Vec::new()));
-        assert!(masked_dataset(&base, &decisions).named.is_empty());
+        assert!(masked_dataset(&base, &decisions).named().is_empty());
     }
 
     /// Tiny WAC pod: alice may Read the subtree; one data graph with two triples.
@@ -336,11 +337,11 @@ mod tests {
     fn scoped_dataset_refines_the_accessible_set() {
         let store = pod();
         let scoped = store.scoped_dataset(&alice(), Mode::Read, &hide_scope());
-        assert_eq!(scoped.graph.named.len(), 1, "only the accessible data graph");
-        assert_eq!(scoped.graph.named[0].1.len(), 1, "hide-triple masked out");
+        assert_eq!(scoped.graph.named().len(), 1, "only the accessible data graph");
+        assert_eq!(scoped.graph.named()[0].1.len(), 1, "hide-triple masked out");
         // Grant-less session: nothing, no matter the scopes.
         let none = store.scoped_dataset(&Session::default(), Mode::Read, &hide_scope());
-        assert!(none.graph.named.is_empty());
+        assert!(none.graph.named().is_empty());
     }
 
     #[test]

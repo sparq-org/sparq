@@ -191,7 +191,7 @@ impl ZkDataset {
         let mut graphs = Vec::with_capacity(names.len());
         for (name, salt) in names.iter().zip(salts) {
             let gname = Term::NamedNode(name.clone());
-            let Some((_, g)) = store.named.iter().find(|(n, _)| *n == gname) else {
+            let Some((_, g)) = store.named().iter().find(|(n, _)| *n == gname) else {
                 return Err(TraceError::MissingGraph(name.as_str().to_string()));
             };
             let triples = crate::canon::graph_triples(g)

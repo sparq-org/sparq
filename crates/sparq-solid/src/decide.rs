@@ -275,7 +275,7 @@ impl AclIndex {
     pub(crate) fn build(graph: &Graph) -> AclIndex {
         let mut control = rustc_hash::FxHashSet::default();
         let mut materialized = false;
-        for (name, _) in &graph.named {
+        for (name, _) in graph.named() {
             let Term::NamedNode(n) = name else { continue };
             let iri = n.as_str();
             if iri == AUTH_GRAPH {

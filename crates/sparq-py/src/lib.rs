@@ -529,25 +529,15 @@ impl Graph {
         let prof = sparq_reason::Profile::parse(profile).ok_or_else(|| {
             PyValueError::new_err(format!("unknown reasoning profile {profile:?} (known: \"rdfs\", \"owl\")"))
         })?;
-        // Take the graph apart (no Clone on Dict/Graph): re-derive the canonical triples,
-        // take the named graphs and the dictionary out (a mapped dictionary keeps its
-        // store's lock), materialize, rebuild (re-attaching the named graphs, which
-        // reasoning does not touch). A placeholder empty graph holds the slot during the
-        // closure.
-        let mut g = std::mem::replace(
-            &mut self.inner,
-            CoreGraph::from_parts(Dict::new(), Vec::new()),
-        );
-        let (inner, added) = py.detach(move || {
-            let mut triples = all_triples(&g);
-            let named = std::mem::take(&mut g.named);
-            let mut dict = g.into_dict();
-            let added = sparq_reason::materialize(prof, &mut dict, &mut triples);
-            let mut rebuilt = CoreGraph::from_parts(dict, triples);
-            rebuilt.named = named;
-            (rebuilt, added)
-        });
-        self.inner = inner;
+        // Rebuild the default graph around its dictionary (a mapped dictionary keeps its
+        // store's lock), materialized; the named graphs, which reasoning does not touch,
+        // stay where they are.
+        let inner = &mut self.inner;
+        let added = py
+            .detach(move || {
+                inner.rebuild_default(|dict, triples| sparq_reason::materialize(prof, dict, triples))
+            })
+            .map_err(engine_err)?;
         self.text = None; // rebuilt graph: the cached text index is stale
         Ok(added)
     }
@@ -571,7 +561,7 @@ impl Graph {
         // Render the default graph as N-Triples (a syntactic subset of N3) under
         // the rules document and run the same chainer as `load_n3` — exactly the
         // composition sparq-reason's own MaterializedN3Graph uses in fallback mode.
-        let mut new = py
+        let new = py
             .detach(|| {
                 let rows = all_triples(inner);
                 let mut src = String::with_capacity(rules.len() + 1 + 64 * rows.len());
@@ -609,9 +599,8 @@ impl Graph {
                 Ok::<_, String>(CoreGraph::from_parts(dict, triples))
             })
             .map_err(engine_err)?;
-        new.named = std::mem::take(&mut self.inner.named);
         let added = new.len().saturating_sub(before);
-        self.inner = new;
+        self.inner.replace_default(new).map_err(engine_err)?;
         self.text = None; // rebuilt graph (fresh dictionary): the cached text index is stale
         Ok(added)
     }

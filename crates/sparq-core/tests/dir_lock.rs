@@ -79,50 +79,58 @@ fn a_named_graph_directory_cannot_be_opened_on_its_own() {
     assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
     assert!(Graph::build_external("".as_bytes(), "ntriples", &child, 1024).is_err());
     // The root itself opens, with its named graphs.
-    assert_eq!(Graph::open(&dir).unwrap().named.len(), 2);
+    assert_eq!(Graph::open(&dir).unwrap().named().len(), 2);
     std::fs::remove_dir_all(&root).ok();
 }
 
-/// Every named graph holds its root's lock: one taken out of the root keeps the directory
-/// locked after the root is gone, including named graphs created, compacted or renumbered
+/// A store's named graphs stay in the store: none can be taken out of a directory-backed
+/// graph (so no handle outlives its root's lock, swaps and freezes), and a directory-backed
+/// graph never becomes a named graph of another; a frozen or read-only graph takes none. The
+/// root holds the lock for its named graphs, including ones created, compacted or renumbered
 /// since the open.
 #[test]
-fn a_named_graph_keeps_its_roots_lock() {
+fn a_named_graph_cannot_leave_its_store_or_join_another() {
     let root = scratch("child-lock");
     let dir = root.join("g");
     save_dataset(&dir);
-    // As opened.
+    let other = root.join("other");
+    save_dataset(&other);
     let mut g = Graph::open(&dir).unwrap();
-    let child = g.named.pop().unwrap();
-    drop(g);
+    let before = g.named().len();
+    assert!(before > 0);
+    let name = g.named()[0].0.clone();
+    assert!(g.take_named().is_err(), "took a store's named graphs out");
+    assert!(g.remove_named(&name).is_err(), "removed a store's named graph in memory only");
+    assert!(g.retain_named(|_, _| false).is_err());
+    assert!(g.set_named(name.clone(), Graph::new()).is_err(), "replaced a store's named graph");
     assert!(
-        would_block(Graph::open(&dir)),
-        "an opened named graph lost the root's lock"
+        g.add_named(iri("g9"), Graph::open(&other).unwrap()).is_err(),
+        "another store's graph joined this store"
     );
-    drop(child);
-    // Created, compacted and renumbered since the open.
-    let mut g = Graph::open(&dir).unwrap();
+    assert_eq!(g.named().len(), before, "a refused change changed the graph");
+    // Another store's graph joins no graph, in memory or not; its lock stays with it.
+    let mut mem = Graph::new();
+    let held = Graph::open(&other).unwrap();
+    assert!(mem.add_named(iri("x"), held).is_err(), "a store's graph joined another graph");
+    drop(Graph::open(&other).expect("the refused graph was dropped with its lock"));
+    // A fork is an in-memory copy, and may join an in-memory graph.
+    mem.add_named(name.clone(), g.named()[0].1.fork()).unwrap();
+    assert!(mem.take_named().is_ok());
+    // A frozen graph takes no named graph either.
+    let mut frozen = Graph::new();
+    frozen.freeze_for_test("injected");
+    assert!(frozen.add_named(iri("x"), Graph::new()).is_err());
+    assert!(frozen.extend_named([(iri("x"), Graph::new())]).is_err());
+    // Created, compacted and renumbered since the open: the root holds the lock for them.
     let fresh = g.ensure_named(&iri("g2")).unwrap();
-    g.named[fresh].1.apply_delta(&[triple("d")], &[]).unwrap();
+    g.apply_delta_to_named(fresh, &[triple("d")], &[]).unwrap();
     g.compact().unwrap();
     g.drop_named_durable(&iri("g0")).unwrap();
-    let mut named = std::mem::take(&mut g.named);
+    assert!(g.named().iter().all(|(_, child)| child.is_directory_backed()));
+    assert!(would_block(Graph::open(&dir)), "the root lost its lock");
     drop(g);
-    for (_, child) in &named {
-        assert!(child.is_directory_backed());
-    }
-    assert!(
-        would_block(Graph::open(&dir)),
-        "the root's lock went with the root"
-    );
-    named.truncate(1);
-    assert!(
-        would_block(Graph::open(&dir)),
-        "the lock went before its last holder"
-    );
-    drop(named);
-    let g = Graph::open(&dir).expect("released with the last named graph");
-    assert_eq!(g.named.len(), 2, "g1 and g2 survive the drop of g0");
+    let g = Graph::open(&dir).expect("released with the root");
+    assert_eq!(g.named().len(), 2, "g1 and g2 survive the drop of g0");
     std::fs::remove_dir_all(&root).ok();
 }
 
@@ -162,7 +170,7 @@ fn a_graph_does_not_save_into_its_own_directory() {
         }
     }
     // A named graph cannot save over its root either.
-    let err = g.named[0].1.save(&dir).unwrap_err();
+    let err = g.named()[0].1.save(&dir).unwrap_err();
     assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
     // Elsewhere is fine, and the graph's own directory still holds its state.
     let copy = root.join("copy");
@@ -172,7 +180,7 @@ fn a_graph_does_not_save_into_its_own_directory() {
     for d in [&dir, &copy] {
         let g = Graph::open(d).unwrap();
         assert!(has(&g, "a") && has(&g, "logged"), "{}", d.display());
-        assert_eq!(g.named.len(), 2, "{}", d.display());
+        assert_eq!(g.named().len(), 2, "{}", d.display());
     }
     std::fs::remove_dir_all(&root).ok();
 }
@@ -241,7 +249,7 @@ fn open_or_create_recovers_a_swap_before_seeding() {
     let g = Graph::open_or_create(&dir, &seed).unwrap();
     assert!(has(&g, "a"), "the swapped-in store survives");
     assert!(!has(&g, "seed"), "a store mid-swap is not re-seeded");
-    assert_eq!(g.named.len(), 2);
+    assert_eq!(g.named().len(), 2);
     std::fs::remove_dir_all(&root).ok();
 }
 
@@ -287,7 +295,7 @@ fn read_only_opens_share_the_directory_and_exclude_a_writer() {
     let first = Graph::open_read_only(&dir).unwrap();
     let mut second = Graph::open_read_only(&root.join("g").join("..").join("g")).unwrap();
     assert!(has(&first, "a") && has(&second, "a"));
-    assert_eq!(second.named.len(), 2);
+    assert_eq!(second.named().len(), 2);
     assert!(!first.is_directory_backed());
     assert!(
         would_block(Graph::open(&dir)),
@@ -302,7 +310,7 @@ fn read_only_opens_share_the_directory_and_exclude_a_writer() {
         "a read-only open wrote"
     );
     assert!(second.apply_delta(&[triple("x")], &[]).is_err());
-    assert!(second.named[0].1.apply_delta(&[triple("x")], &[]).is_err());
+    assert!(second.apply_delta_to_named(0, &[triple("x")], &[]).is_err());
     assert!(second.ensure_named(&iri("g9")).is_err());
     assert!(second.compact().is_err() && second.vacuum().is_err());
     assert_eq!(
@@ -437,7 +445,7 @@ fn a_legacy_store_without_markers_is_still_a_store() {
         "a read-only open wrote a marker"
     );
     let g = Graph::open(&dir).unwrap();
-    assert_eq!(g.named.len(), 2);
+    assert_eq!(g.named().len(), 2);
     let marker = std::fs::read_to_string(dir.join("sparq-store")).unwrap();
     assert!(marker.starts_with("root "), "{marker}");
     let marker = std::fs::read_to_string(dir.join("named/0/sparq-store")).unwrap();
@@ -522,13 +530,12 @@ fn a_rebuilt_graph_keeps_its_dictionarys_lock() {
     let dir = root.join("g");
     save_dataset(&dir);
     for read_only in [false, true] {
-        let mut g = if read_only {
+        let g = if read_only {
             Graph::open_read_only(&dir).unwrap()
         } else {
             Graph::open(&dir).unwrap()
         };
         let triples: Vec<_> = g.iter_ids().collect();
-        g.named.clear();
         let rebuilt = Graph::from_parts(g.into_dict(), triples);
         assert!(
             would_block(Graph::open(&dir)),

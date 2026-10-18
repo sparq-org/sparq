@@ -304,14 +304,14 @@ fn named_graphs_fork_isolated() {
                <http://ex/x> <http://ex/q> <http://ex/y> <http://ex/g1> .";
     let base = Graph::load_dataset(src, "nquads").unwrap();
     let mut f = base.fork();
-    assert_eq!(f.named.len(), 1);
-    f.named[0].1.apply_delta(&[[iri("http://ex/n"), iri("http://ex/q"), iri("http://ex/m")]], &[]).unwrap();
-    assert_eq!(f.named[0].1.len(), 2);
-    assert_eq!(base.named[0].1.len(), 1, "base named graph mutated through fork");
+    assert_eq!(f.named().len(), 1);
+    f.apply_delta_to_named(0, &[[iri("http://ex/n"), iri("http://ex/q"), iri("http://ex/m")]], &[]).unwrap();
+    assert_eq!(f.named()[0].1.len(), 2);
+    assert_eq!(base.named()[0].1.len(), 1, "base named graph mutated through fork");
     let del = [[iri("http://ex/x"), iri("http://ex/q"), iri("http://ex/y")]];
     let mut f2 = f.fork();
-    f2.named[0].1.apply_delta(&[], &del).unwrap();
-    assert_eq!(f2.named[0].1.len(), 1);
-    assert_eq!(f.named[0].1.len(), 2, "intermediate generation mutated");
-    assert_eq!(base.named[0].1.len(), 1);
+    f2.apply_delta_to_named(0, &[], &del).unwrap();
+    assert_eq!(f2.named()[0].1.len(), 1);
+    assert_eq!(f.named()[0].1.len(), 2, "intermediate generation mutated");
+    assert_eq!(base.named()[0].1.len(), 1);
 }

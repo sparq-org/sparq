@@ -260,14 +260,19 @@ impl PodStore {
 
         // Capture the prior slot (for rollback) and swap the new content in.
         let term = Term::NamedNode(name.clone());
-        let prior = self.take_named_slot(&term);
+        self.graph
+            .check_writable()
+            .map_err(|e| format!("put_acl denied: {e}"))?;
+        let prior = self
+            .take_named_slot(&term)
+            .map_err(|e| format!("put_acl denied: {e}"))?;
         let existed = prior.is_some();
         if let (false, Some(governed)) = (existed, acl_iri.strip_suffix(crate::loader::ACR_SUFFIX)) {
             // A new `.acr` keeps no facts of a resource that does not exist, whatever an
             // earlier install saw (a rebuild after a failure resets this from the graph).
             self.acr_controlled.remove(governed);
         }
-        self.graph.named.push((term.clone(), new_graph));
+        self.graph.add_named(term.clone(), new_graph).expect(crate::WRITABLE);
 
         // Re-materialize; roll back to the prior content on any error. sq-b7k7u
         // (issue #1571): the whole WAC/ACP view is still re-derived, but the session cache
@@ -302,7 +307,9 @@ impl PodStore {
         let name = NamedNode::new(acl_iri)
             .map_err(|e| format!("delete_acl denied: malformed ACL IRI <{}>: {}", acl_iri, e))?;
         let term = Term::NamedNode(name.clone());
-        let prior = self.take_named_slot(&term);
+        let prior = self
+            .take_named_slot(&term)
+            .map_err(|e| format!("delete_acl denied: {e}"))?;
         let existed = prior.is_some();
 
         // sq-b7k7u: use diff-based invalidation — reindex_with diffs old vs new
@@ -321,9 +328,10 @@ impl PodStore {
     /// Remove and return the sub-graph currently stored under `name`, if any (so it can be
     /// swapped or restored). The reserved auth view is never a target here — these methods
     /// reject non-control IRIs up front.
-    fn take_named_slot(&mut self, name: &Term) -> Option<Graph> {
-        let pos = self.graph.named.iter().position(|(n, _)| n == name)?;
-        Some(self.graph.named.swap_remove(pos).1)
+    /// `Err`, changing nothing, when the document is a named graph of a directory-backed
+    /// dataset's store, or one follows it (those are never taken out or moved).
+    fn take_named_slot(&mut self, name: &Term) -> Result<Option<Graph>, String> {
+        self.graph.remove_named(name)
     }
 
     /// Restore a captured prior slot after a failed re-materialization (`failed`), then
@@ -343,7 +351,13 @@ impl PodStore {
         // prior content back.
         let _ = self.take_named_slot(name);
         if let Some(g) = prior {
-            self.graph.named.push((name.clone(), g));
+            if let Err(e) = self.graph.add_named(name.clone(), g) {
+                self.drop_auth_view();
+                return format!(
+                    "{failed}; putting the prior document back failed too ({e}); every request \
+                     is denied until it is re-materialized"
+                );
+            }
         }
         match self.rematerialize(acp) {
             Ok(()) => failed,

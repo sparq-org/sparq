@@ -341,12 +341,12 @@ fn fresh<'a>(label: &'a str, row_bnodes: &mut TemplateNodes<'a>) -> BlankNode {
 #[cfg(feature = "deterministic-blank-nodes")]
 fn template_namespace(graph: &Graph, solutions: &QueryResult) -> String {
     let mut labels = FxHashSet::default();
-    for (name, _) in &graph.named {
+    for (name, _) in graph.named() {
         if let Term::BlankNode(node) = name {
             labels.insert(node.as_str().to_owned());
         }
     }
-    for graph in std::iter::once(graph).chain(graph.named.iter().map(|(_, graph)| graph)) {
+    for graph in std::iter::once(graph).chain(graph.named().iter().map(|(_, graph)| graph)) {
         let scan = graph.store().scan(&[None, None, None]);
         for row in scan.rows.iter() {
             let [subject, _, object] = scan.to_spo(row);

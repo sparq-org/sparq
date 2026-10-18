@@ -388,7 +388,7 @@ fn e9_use_umbrella_prohibition_refused() {
     let req = Request::new(format!("{}read", ODRL)).on(TARGET).by("urn:alice");
     let mut graph = Graph::new();
     assert!(materialize_odrl_n3(&mut graph, pol, &req).is_err(), "E9: use-umbrella prohibition must refuse");
-    assert!(graph.named.is_empty(), "E9: nothing may be materialized");
+    assert!(graph.named().is_empty(), "E9: nothing may be materialized");
 }
 
 #[test]
@@ -402,7 +402,7 @@ fn e10_duty_carrying_permission_refused() {
     let req = Request::new(format!("{}read", ODRL)).on(TARGET).by("urn:alice");
     let mut graph = Graph::new();
     assert!(materialize_odrl_n3(&mut graph, pol, &req).is_err(), "E10: duty-carrying policy must refuse");
-    assert!(graph.named.is_empty(), "E10: nothing may be materialized");
+    assert!(graph.named().is_empty(), "E10: nothing may be materialized");
 }
 
 #[test]
@@ -417,7 +417,7 @@ fn e8_out_of_scope_prohibition_constraint_refused() {
     let req = Request::new(format!("{}read", ODRL)).on(TARGET).by("urn:alice");
     let mut graph = Graph::new();
     assert!(materialize_odrl_n3(&mut graph, pol, &req).is_err(), "E8: out-of-scope prohibition constraint must refuse");
-    assert!(graph.named.is_empty(), "E8: nothing may be materialized");
+    assert!(graph.named().is_empty(), "E8: nothing may be materialized");
 }
 
 // ── Canonical dateTime subset (lexical comparison soundness) ─────────────────
@@ -429,7 +429,7 @@ fn assert_n3_rejects(label: &str, policy: &str, at: Option<&str>) {
     }
     let mut graph = Graph::new();
     assert!(materialize_odrl_n3(&mut graph, policy, &req).is_err(), "{}: must be rejected fail-closed", label);
-    assert!(graph.named.is_empty(), "{}: nothing may be materialized", label);
+    assert!(graph.named().is_empty(), "{}: nothing may be materialized", label);
 }
 
 #[test]
@@ -471,7 +471,7 @@ fn inj1_n3_implication_rule_in_policy_rejected() {
     let req = Request::new(format!("{}read", ODRL)).on(TARGET).by("urn:mallory");
     let mut graph = Graph::new();
     assert!(materialize_odrl_n3(&mut graph, evil, &req).is_err(), "INJ1: N3 rule must be rejected");
-    assert!(graph.named.is_empty(), "INJ1: nothing may be materialized");
+    assert!(graph.named().is_empty(), "INJ1: nothing may be materialized");
 }
 
 #[test]
@@ -489,7 +489,7 @@ fn inj2_hostile_literal_is_inert_after_reserialization() {
     let mut graph = Graph::new();
     let out = materialize_odrl_n3(&mut graph, pol, &req).expect("INJ2: hostile literal still parses");
     assert!(!out.granted && !out.prohibited, "INJ2: payload must be inert");
-    assert!(graph.named.is_empty(), "INJ2: nothing may be materialized");
+    assert!(graph.named().is_empty(), "INJ2: nothing may be materialized");
     // the legitimate permission in the same policy still works
     let req_alice = Request::new(format!("{}read", ODRL)).on(TARGET).by("urn:alice");
     let mut graph_alice = Graph::new();
@@ -511,7 +511,7 @@ fn inj3_malicious_request_party_rejected() {
         .by("urn:eve> <https://sparq.dev/ns/auth#read> <urn:t/1> . <urn:x");
     let mut graph = Graph::new();
     assert!(materialize_odrl_n3(&mut graph, POL_B1, &req).is_err(), "INJ3: malformed party IRI must be rejected");
-    assert!(graph.named.is_empty(), "INJ3: nothing may be materialized");
+    assert!(graph.named().is_empty(), "INJ3: nothing may be materialized");
 }
 
 #[test]
@@ -521,7 +521,7 @@ fn inj4_malicious_request_action_rejected() {
         .by("urn:alice");
     let mut graph = Graph::new();
     assert!(materialize_odrl_n3(&mut graph, POL_B1, &req).is_err(), "INJ4: malformed action IRI must be rejected");
-    assert!(graph.named.is_empty(), "INJ4: nothing may be materialized");
+    assert!(graph.named().is_empty(), "INJ4: nothing may be materialized");
 }
 
 // ── inj5–inj8: STRICT-Turtle assertion of engine-owned facts. Parsing/escaping
@@ -543,7 +543,7 @@ fn inj5_direct_auth_triple_in_valid_turtle_rejected() {
     let mut graph = Graph::new();
     let out = materialize_odrl_n3(&mut graph, evil, &req);
     assert!(out.is_err(), "INJ5: asserted auth:* fact must be rejected");
-    assert!(graph.named.is_empty(), "INJ5: nothing may be materialized");
+    assert!(graph.named().is_empty(), "INJ5: nothing may be materialized");
 }
 
 #[test]
@@ -565,7 +565,7 @@ _:c odrlx:atomicSat <urn:odrl-req> ."#;
         materialize_odrl_n3(&mut graph, fake_sat, &req).is_err(),
         "INJ6: asserted odrlx:atomicSat must be rejected"
     );
-    assert!(graph.named.is_empty(), "INJ6: nothing may be materialized");
+    assert!(graph.named().is_empty(), "INJ6: nothing may be materialized");
 
     // asserting odrlx:prohibMatches (the deny-side internal fact) is just as
     // reserved — no caller fact may live in the odrlx: namespace at all
@@ -580,7 +580,7 @@ _:c odrlx:atomicSat <urn:odrl-req> ."#;
         materialize_odrl_n3(&mut graph_b, fake_prohib, &req_alice).is_err(),
         "INJ6: asserted odrlx:prohibMatches must be rejected"
     );
-    assert!(graph_b.named.is_empty(), "INJ6: nothing may be materialized");
+    assert!(graph_b.named().is_empty(), "INJ6: nothing may be materialized");
 }
 
 #[test]
@@ -597,7 +597,7 @@ fn inj7_reserved_request_subject_facts_rejected() {
         materialize_odrl_n3(&mut graph, evil, &req).is_err(),
         "INJ7: facts about the reserved request IRI must be rejected"
     );
-    assert!(graph.named.is_empty(), "INJ7: nothing may be materialized");
+    assert!(graph.named().is_empty(), "INJ7: nothing may be materialized");
 }
 
 #[test]
@@ -615,7 +615,7 @@ fn inj8_caller_minted_request_typed_subject_rejected() {
         materialize_odrl_n3(&mut graph, evil, &req).is_err(),
         "INJ8: a caller-minted odrl:Request-typed subject must be rejected"
     );
-    assert!(graph.named.is_empty(), "INJ8: nothing may be materialized");
+    assert!(graph.named().is_empty(), "INJ8: nothing may be materialized");
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -916,7 +916,7 @@ fn assert_not_more_permissive(
         // Refused outright: nothing is materialized and the caller fails closed. That is
         // never more permissive than any Rust outcome.
         cov.n3_refused += 1;
-        assert!(n3_graph.named.is_empty(), "{}: a refusal must materialize nothing", label);
+        assert!(n3_graph.named().is_empty(), "{}: a refusal must materialize nothing", label);
         return;
     };
     if out.grant_triple.is_some() {

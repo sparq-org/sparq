@@ -51,7 +51,7 @@ fn graph_len(store: &PodStore, name: &str) -> usize {
     let term = oxrdf::Term::NamedNode(oxrdf::NamedNode::new_unchecked(name));
     store
         .graph()
-        .named
+        .named()
         .iter()
         .find(|(n, _)| *n == term)
         .map(|(_, g)| {

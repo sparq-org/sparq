@@ -116,7 +116,7 @@ impl Dataset {
     fn decode(graph: &Graph) -> Dataset {
         Dataset {
             default: decode_triples(graph),
-            named: graph.named.iter().map(|(name, g)| (name.clone(), decode_triples(g))).collect(),
+            named: graph.named().iter().map(|(name, g)| (name.clone(), decode_triples(g))).collect(),
         }
     }
 
@@ -130,7 +130,7 @@ impl Dataset {
                 decode_triples(graph)
             },
             named: graph
-                .named
+                .named()
                 .iter()
                 .filter(|(name, _)| crate::exec::view::allows(name))
                 .map(|(name, g)| (name.clone(), decode_triples(g)))
@@ -180,7 +180,8 @@ impl Dataset {
     /// ones — `GRAPH <g> {}` over a CREATEd-but-empty graph must yield the unit row).
     fn build(&self) -> Graph {
         let mut g = build(&self.default);
-        g.named = self.named.iter().map(|(name, set)| (name.clone(), build(set))).collect();
+        g.extend_named(self.named.iter().map(|(name, set)| (name.clone(), build(set))))
+            .expect("fresh in-memory graphs always take in-memory named graphs");
         g
     }
 
@@ -202,11 +203,14 @@ impl Dataset {
                 for n in named {
                     let name = Term::NamedNode(n.clone());
                     if let Some(s) = self.graph(&name) {
-                        g.named.push((name, build(s)));
+                        g.add_named(name, build(s))
+                            .expect("fresh in-memory graphs always take in-memory named graphs");
                     }
                 }
             }
-            None => g.named = self.named.iter().map(|(name, set)| (name.clone(), build(set))).collect(),
+            None => g
+                .extend_named(self.named.iter().map(|(name, set)| (name.clone(), build(set))))
+                .expect("fresh in-memory graphs always take in-memory named graphs"),
         }
         g
     }
@@ -655,8 +659,8 @@ fn apply_slot_delta(
     match slot {
         None => graph.apply_delta(inserts, deletes),
         Some(name) => {
-            if let Some(i) = graph.named.iter().position(|(n, _)| n == name) {
-                return graph.named[i].1.apply_delta(inserts, deletes);
+            if let Some(i) = graph.named().iter().position(|(n, _)| n == name) {
+                return graph.apply_delta_to_named(i, inserts, deletes);
             }
             if inserts.is_empty() {
                 return Ok(()); // deleting from an absent graph is a no-op
@@ -667,7 +671,7 @@ fn apply_slot_delta(
             // across a restart like any other write. For an in-memory parent this is the
             // unchanged `empty_graph()` path.
             let i = graph.ensure_named(name)?;
-            graph.named[i].1.apply_delta(inserts, &[])
+            graph.apply_delta_to_named(i, inserts, &[])
         }
     }
 }
@@ -1218,7 +1222,7 @@ fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool,
                 let seed = match slot {
                     None => decode_triples(graph),
                     Some(name) => graph
-                        .named
+                        .named()
                         .iter()
                         .find(|(n, _)| n == name)
                         .map(|(_, sub)| decode_triples(sub))
@@ -1251,7 +1255,7 @@ fn resolve_effect_records(graph: &Graph, effects: &[UpdateEffect]) -> Vec<(bool,
     // this only collects the slot NAMES; `clear_slot` decodes each as it visits it.
     fn named_slots(graph: &Graph, running: &[(GraphSlot, TripleSet)]) -> Vec<GraphSlot> {
         let mut names: Vec<GraphSlot> =
-            graph.named.iter().map(|(n, _)| Some(n.clone())).collect();
+            graph.named().iter().map(|(n, _)| Some(n.clone())).collect();
         for (slot, _) in running {
             if slot.is_some() && !names.contains(slot) {
                 names.push(slot.clone());
@@ -1317,7 +1321,7 @@ fn replace_default(graph: &mut Graph) -> Result<(), String> {
 /// CLEAR ALL), preserving each slot — mirrors a per-graph CLEAR GRAPH across the whole set. On a
 /// directory-backed parent each sub-graph's contents are WAL-logged + fsync'd before the ack.
 fn clear_all_named_durable(graph: &mut Graph) -> Result<(), String> {
-    let names: Vec<Term> = graph.named.iter().map(|(n, _)| n.clone()).collect();
+    let names: Vec<Term> = graph.named().iter().map(|(n, _)| n.clone()).collect();
     for name in &names {
         graph.clear_named_durable(name)?;
     }
@@ -1502,7 +1506,7 @@ mod tests {
         // Match the EXACT graph IRI (not a brittle `contains("/x")`, which would also match `/xyz`
         // and depends on `Term` string formatting).
         let x_name = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/x"));
-        let x = g.named.iter().find(|(n, _)| *n == x_name);
+        let x = g.named().iter().find(|(n, _)| *n == x_name);
         let x_rows = x.map(|(_, sub)| sub.store().scan(&[None, None, None]).rows.len()).unwrap_or(0);
         assert_eq!(
             x_rows, 0,
@@ -1556,13 +1560,13 @@ mod tests {
         let x_name = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/x"));
         let y_name = Term::NamedNode(oxrdf::NamedNode::new_unchecked("http://ex/y"));
         let x_rows = g
-            .named
+            .named()
             .iter()
             .find(|(n, _)| *n == x_name)
             .map(|(_, s)| s.store().scan(&[None, None, None]).rows.len())
             .unwrap_or(0);
         let y_rows = g
-            .named
+            .named()
             .iter()
             .find(|(n, _)| *n == y_name)
             .map(|(_, s)| s.store().scan(&[None, None, None]).rows.len())
@@ -1571,8 +1575,8 @@ mod tests {
 
         // In-memory parity: `update` (rebuild path) must reach the identical final state.
         let mem = update(&Graph::load_str("", "ntriples").unwrap(), sparql).unwrap();
-        let mx = mem.named.iter().find(|(n, _)| *n == x_name).map(|(_, s)| count(s)).unwrap_or(0);
-        let my = mem.named.iter().find(|(n, _)| *n == y_name).map(|(_, s)| count(s)).unwrap_or(0);
+        let mx = mem.named().iter().find(|(n, _)| *n == x_name).map(|(_, s)| count(s)).unwrap_or(0);
+        let my = mem.named().iter().find(|(n, _)| *n == y_name).map(|(_, s)| count(s)).unwrap_or(0);
         assert_eq!((mx, my), (0, 1), "in-memory final state matches the reloaded durable state");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1622,21 +1626,21 @@ mod tests {
         let src = "<http://ex/a> <http://ex/p> <http://ex/b> .\n\
                    <http://ex/x> <http://ex/q> <http://ex/y> <http://ex/g1> .";
         let g = Graph::load_dataset(src, "nquads").unwrap();
-        assert_eq!((count(&g), g.named.len()), (1, 1));
+        assert_eq!((count(&g), g.named().len()), (1, 1));
 
         // A default-graph INSERT DATA must keep :g1 intact.
         let g = update(&g, "PREFIX : <http://ex/> INSERT DATA { :a :p :c }").unwrap();
-        assert_eq!((count(&g), g.named.len()), (2, 1));
-        assert_eq!(count(&g.named[0].1), 1);
+        assert_eq!((count(&g), g.named().len()), (2, 1));
+        assert_eq!(count(&g.named()[0].1), 1);
 
         // GRAPH-scoped INSERT DATA goes to the right graph (auto-creating :g2).
         let g = update(&g, "PREFIX : <http://ex/> INSERT DATA { GRAPH :g1 { :x :q :z } GRAPH :g2 { :n :m :o } }").unwrap();
-        assert_eq!(g.named.len(), 2);
-        assert_eq!(count(&g.named[0].1), 2);
+        assert_eq!(g.named().len(), 2);
+        assert_eq!(count(&g.named()[0].1), 2);
 
         // GRAPH-scoped DELETE DATA.
         let g = update(&g, "PREFIX : <http://ex/> DELETE DATA { GRAPH :g1 { :x :q :y } }").unwrap();
-        assert_eq!(count(&g.named[0].1), 1);
+        assert_eq!(count(&g.named()[0].1), 1);
 
         // DELETE/INSERT WHERE with GRAPH templates + GRAPH WHERE (the ADD desugaring shape).
         let g = update(
@@ -1644,30 +1648,30 @@ mod tests {
             "PREFIX : <http://ex/> INSERT { GRAPH :g3 { ?s ?p ?o } } WHERE { GRAPH :g2 { ?s ?p ?o } }",
         )
         .unwrap();
-        let g3 = g.named.iter().find(|(n, _)| n.to_string().contains("g3")).unwrap();
+        let g3 = g.named().iter().find(|(n, _)| n.to_string().contains("g3")).unwrap();
         assert_eq!(count(&g3.1), 1);
 
         // CLEAR GRAPH empties only that graph; DROP removes it.
         let g = update(&g, "PREFIX : <http://ex/> CLEAR GRAPH :g2").unwrap();
-        assert_eq!(g.named.len(), 3); // entry kept, empty
-        let g2 = g.named.iter().find(|(n, _)| n.to_string().contains("g2")).unwrap();
+        assert_eq!(g.named().len(), 3); // entry kept, empty
+        let g2 = g.named().iter().find(|(n, _)| n.to_string().contains("g2")).unwrap();
         assert_eq!(count(&g2.1), 0);
         let g = update(&g, "PREFIX : <http://ex/> DROP GRAPH :g3").unwrap();
-        assert_eq!(g.named.len(), 2);
+        assert_eq!(g.named().len(), 2);
 
         // CLEAR DEFAULT keeps named graphs.
         let g = update(&g, "CLEAR DEFAULT").unwrap();
         assert_eq!(count(&g), 0);
-        assert_eq!(g.named.len(), 2);
-        assert_eq!(count(&g.named[0].1), 1);
+        assert_eq!(g.named().len(), 2);
+        assert_eq!(count(&g.named()[0].1), 1);
 
         // CREATE makes an (empty) graph that GRAPH <g> {} can see.
         let g = update(&g, "PREFIX : <http://ex/> CREATE GRAPH :fresh").unwrap();
-        assert!(g.named.iter().any(|(n, _)| n.to_string().contains("fresh")));
+        assert!(g.named().iter().any(|(n, _)| n.to_string().contains("fresh")));
 
         // DROP ALL empties everything.
         let g = update(&g, "DROP ALL").unwrap();
-        assert_eq!((count(&g), g.named.len()), (0, 0));
+        assert_eq!((count(&g), g.named().len()), (0, 0));
     }
 
     /// ADD / COPY / MOVE arrive desugared from the parser; end-to-end they must move the
@@ -1680,14 +1684,14 @@ mod tests {
         // ADD the default graph into :g1 (union).
         let g = update(&g, "ADD DEFAULT TO GRAPH <http://ex/g1>").unwrap();
         assert_eq!(count(&g), 1); // source kept
-        assert_eq!(count(&g.named[0].1), 2);
+        assert_eq!(count(&g.named()[0].1), 2);
         // COPY replaces the destination.
         let g = update(&g, "COPY DEFAULT TO GRAPH <http://ex/g1>").unwrap();
-        assert_eq!(count(&g.named.iter().find(|(n, _)| n.to_string().contains("g1")).unwrap().1), 1);
+        assert_eq!(count(&g.named().iter().find(|(n, _)| n.to_string().contains("g1")).unwrap().1), 1);
         // MOVE drops the source.
         let g = update(&g, "MOVE GRAPH <http://ex/g1> TO GRAPH <http://ex/g2>").unwrap();
-        assert!(!g.named.iter().any(|(n, _)| n.to_string().contains("g1")));
-        assert_eq!(count(&g.named.iter().find(|(n, _)| n.to_string().contains("g2")).unwrap().1), 1);
+        assert!(!g.named().iter().any(|(n, _)| n.to_string().contains("g1")));
+        assert_eq!(count(&g.named().iter().find(|(n, _)| n.to_string().contains("g2")).unwrap().1), 1);
     }
 
     /// USING re-scopes the WHERE dataset: the named graph becomes the active default graph.
@@ -1757,7 +1761,7 @@ mod tests {
                 }
             };
             one(g, "");
-            for (name, sub) in &g.named {
+            for (name, sub) in g.named() {
                 one(sub, &name.to_string());
             }
             v.sort();
@@ -2023,7 +2027,7 @@ mod update_contract {
     /// "did anything change" probe used by the atomicity assertions.
     fn dataset_count(g: &Graph) -> usize {
         let pat: IdPattern = [None, None, None];
-        g.store().scan(&pat).rows.len() + g.named.iter().map(|(_, sub)| sub.store().scan(&pat).rows.len()).sum::<usize>()
+        g.store().scan(&pat).rows.len() + g.named().iter().map(|(_, sub)| sub.store().scan(&pat).rows.len()).sum::<usize>()
     }
 
     /// A canonical dataset dump (sorted (s,p,o,graph) strings) for exact PRE/POST-request
@@ -2044,7 +2048,7 @@ mod update_contract {
             }
         };
         one(g, "");
-        for (name, sub) in &g.named {
+        for (name, sub) in g.named() {
             one(sub, &name.to_string());
         }
         v.sort();
@@ -2072,7 +2076,7 @@ mod update_contract {
         assert!(update(&store(), "CLEAR SILENT GRAPH <http://ex/absent>").is_ok(), "CLEAR SILENT absent is a no-op success");
         // Anchor (valid): CLEAR of the existing :g1 succeeds and empties it.
         let g = update(&store(), "CLEAR GRAPH <http://ex/g1>").unwrap();
-        let g1 = g.named.iter().find(|(n, _)| n.to_string().contains("g1")).expect("entry kept");
+        let g1 = g.named().iter().find(|(n, _)| n.to_string().contains("g1")).expect("entry kept");
         assert_eq!(g1.1.store().scan(&[None, None, None]).rows.len(), 0, "CLEAR empties the existing graph");
     }
 
@@ -2084,7 +2088,7 @@ mod update_contract {
         assert!(update(&store(), "DROP SILENT GRAPH <http://ex/absent>").is_ok(), "DROP SILENT absent is a no-op success");
         // Anchor (valid): DROP of the existing :g1 removes its entry.
         let g = update(&store(), "DROP GRAPH <http://ex/g1>").unwrap();
-        assert!(!g.named.iter().any(|(n, _)| n.to_string().contains("g1")), "DROP removes the existing graph entry");
+        assert!(!g.named().iter().any(|(n, _)| n.to_string().contains("g1")), "DROP removes the existing graph entry");
     }
 
     /// CREATE (§3.1.5). Existing target: spec SHOULD-error, again conditioned on recording empty
@@ -2096,7 +2100,7 @@ mod update_contract {
         assert!(update(&store(), "CREATE SILENT GRAPH <http://ex/g1>").is_ok(), "CREATE SILENT existing is a no-op success");
         // Anchor (valid): CREATE of a fresh graph materialises an (empty) entry.
         let g = update(&store(), "CREATE GRAPH <http://ex/fresh>").unwrap();
-        assert!(g.named.iter().any(|(n, _)| n.to_string().contains("fresh")), "CREATE adds the new graph");
+        assert!(g.named().iter().any(|(n, _)| n.to_string().contains("fresh")), "CREATE adds the new graph");
     }
 
     /// LOAD (§3.1.2) — the ONE operation where SILENT actually flips the outcome. A failing LOAD
@@ -2126,7 +2130,7 @@ mod update_contract {
             let req = format!("{verb} GRAPH <http://ex/g1> TO GRAPH <http://ex/g1>");
             let g = update(&store(), &req).unwrap_or_else(|e| panic!("{verb} self must be a no-op success, got: {e}"));
             // The source/destination graph is untouched (its one triple survives).
-            let g1 = g.named.iter().find(|(n, _)| n.to_string().contains("g1")).expect("g1 preserved");
+            let g1 = g.named().iter().find(|(n, _)| n.to_string().contains("g1")).expect("g1 preserved");
             assert_eq!(g1.1.store().scan(&[None, None, None]).rows.len(), 1, "{verb} self leaves the graph unchanged");
             // SILENT identity is also a success no-op.
             let req_s = format!("{verb} SILENT GRAPH <http://ex/g1> TO GRAPH <http://ex/g1>");
@@ -2134,8 +2138,8 @@ mod update_contract {
         }
         // Anchor (valid): MOVE between DISTINCT graphs relocates the triple and drops the source.
         let g = update(&store(), "MOVE GRAPH <http://ex/g1> TO GRAPH <http://ex/g2>").unwrap();
-        assert!(!g.named.iter().any(|(n, _)| n.to_string().contains("g1")), "MOVE drops the source");
-        let g2 = g.named.iter().find(|(n, _)| n.to_string().contains("g2")).expect("destination created");
+        assert!(!g.named().iter().any(|(n, _)| n.to_string().contains("g1")), "MOVE drops the source");
+        let g2 = g.named().iter().find(|(n, _)| n.to_string().contains("g2")).expect("destination created");
         assert_eq!(g2.1.store().scan(&[None, None, None]).rows.len(), 1, "MOVE delivered the triple");
     }
 
@@ -2299,7 +2303,7 @@ mod capture_replay {
             }
         };
         one(g, "");
-        for (name, sub) in &g.named {
+        for (name, sub) in g.named() {
             one(sub, &name.to_string());
         }
         v.sort();
@@ -2331,7 +2335,7 @@ mod capture_replay {
 
     fn assert_equiv(a: &Graph, b: &Graph, ctx: &str) {
         assert_eq!(dump(a), dump(b), "captured and replayed datasets diverged: {ctx}");
-        assert_eq!(a.named.len(), b.named.len(), "named-graph slot count diverged: {ctx}");
+        assert_eq!(a.named().len(), b.named().len(), "named-graph slot count diverged: {ctx}");
     }
 
     /// THE CORE GUARANTEE. An UPDATE containing `NOW()`, `RAND()`, `UUID()`, `STRUUID()` and a
@@ -2391,7 +2395,7 @@ mod capture_replay {
             .collect();
         slots.sort();
         assert_eq!(slots, vec![(false, 2), (true, 2)], "default(2) + named(2) insert deltas");
-        assert_eq!(a.named.len(), 1, ":g1 created once");
+        assert_eq!(a.named().len(), 1, ":g1 created once");
     }
 
     /// `UpdateEffect::Delta` for DELETE DATA (default graph and a named graph).
@@ -2404,7 +2408,7 @@ mod capture_replay {
         let (a, b, effects) = capture_and_replay(src, "nquads", sparql);
         assert_equiv(&a, &b, "delete-data default+named");
         assert_eq!(count(&a), 0, "default triple deleted");
-        assert_eq!(count(&a.named[0].1), 0, "named triple deleted");
+        assert_eq!(count(&a.named()[0].1), 0, "named triple deleted");
         // Two delete-only Delta effects.
         let deletes_only = effects.iter().all(|e| matches!(e, UpdateEffect::Delta { inserts, .. } if inserts.is_empty()));
         assert!(deletes_only, "DELETE DATA produces delete-only deltas");
@@ -2438,7 +2442,7 @@ mod capture_replay {
         let sparql2 = "PREFIX : <http://ex/> INSERT { GRAPH :g2 { ?s ?p ?o } } WHERE { GRAPH :g1 { ?s ?p ?o } }";
         let (a2, b2, _) = capture_and_replay(src2, "nquads", sparql2);
         assert_equiv(&a2, &b2, "delete/insert-where named");
-        let g2 = a2.named.iter().find(|(n, _)| n.to_string().contains("g2")).expect(":g2 created");
+        let g2 = a2.named().iter().find(|(n, _)| n.to_string().contains("g2")).expect(":g2 created");
         assert_eq!(count(&g2.1), 1, "named-graph insert delta replayed");
     }
 
@@ -2484,8 +2488,8 @@ mod capture_replay {
         }
         // DROP GRAPH removes the entry; replay must remove it on B too.
         let (a, b, _) = capture_and_replay(src, "nquads", "DROP GRAPH <http://ex/g1>");
-        assert!(!a.named.iter().any(|(n, _)| n.to_string().contains("g1")));
-        assert_eq!(a.named.len(), b.named.len());
+        assert!(!a.named().iter().any(|(n, _)| n.to_string().contains("g1")));
+        assert_eq!(a.named().len(), b.named().len());
     }
 
     /// `UpdateEffect::Create` — CREATE GRAPH captured and replayed; the empty named slot must
@@ -2494,14 +2498,14 @@ mod capture_replay {
     fn create_effect_replays_empty_named_graph() {
         let (a, b, effects) = capture_and_replay("", "turtle", "CREATE GRAPH <http://ex/fresh>");
         assert!(matches!(effects.as_slice(), [UpdateEffect::Create(_)]), "one Create effect");
-        assert!(a.named.iter().any(|(n, _)| n.to_string().contains("fresh")), "slot created on A");
+        assert!(a.named().iter().any(|(n, _)| n.to_string().contains("fresh")), "slot created on A");
         assert_equiv(&a, &b, "create graph");
         // Idempotent: CREATE of an existing graph is still a captured Create that replays cleanly.
         let mut a2 = a;
         let mut b2 = b;
         let e2 = update_in_place_capturing(&mut a2, "CREATE GRAPH <http://ex/fresh>", &budget()).unwrap();
         apply_effects(&mut b2, &e2).unwrap();
-        assert_eq!(a2.named.len(), 1, "no duplicate slot from a re-CREATE");
+        assert_eq!(a2.named().len(), 1, "no duplicate slot from a re-CREATE");
         assert_equiv(&a2, &b2, "idempotent create");
     }
 
@@ -2542,8 +2546,8 @@ mod capture_replay {
         )
         .unwrap();
         apply_effects(&mut b, &e1).unwrap();
-        assert_eq!(a.named.len(), 1, "one named slot after first insert");
-        assert_eq!(b.named.len(), 1, "replay created the same single slot");
+        assert_eq!(a.named().len(), 1, "one named slot after first insert");
+        assert_eq!(b.named().len(), 1, "replay created the same single slot");
 
         // Second INSERT into the SAME named graph must reuse the slot (no duplicate).
         let e2 = update_in_place_capturing(
@@ -2553,8 +2557,8 @@ mod capture_replay {
         )
         .unwrap();
         apply_effects(&mut b, &e2).unwrap();
-        assert_eq!(a.named.len(), 1, "no duplicate slot on a second insert into the same graph");
-        assert_eq!(count(&a.named[0].1), 2, "both triples landed in the one slot");
+        assert_eq!(a.named().len(), 1, "no duplicate slot on a second insert into the same graph");
+        assert_eq!(count(&a.named()[0].1), 2, "both triples landed in the one slot");
         assert_equiv(&a, &b, "ensure_named single slot");
 
         // A DELETE into an ABSENT named graph is a no-op (apply_slot_delta's inserts-empty
@@ -2568,7 +2572,7 @@ mod capture_replay {
         // The delete batch is non-empty so it IS recorded, but applies to an absent graph as a
         // no-op; replaying it on B must likewise be a no-op (no slot created).
         apply_effects(&mut b, &e3).unwrap();
-        assert_eq!(a.named.len(), 1, "delete into an absent graph creates no slot");
+        assert_eq!(a.named().len(), 1, "delete into an absent graph creates no slot");
         assert_equiv(&a, &b, "delete absent named graph");
     }
 
@@ -2618,8 +2622,8 @@ mod capture_replay {
         apply_effects(&mut mirror, &effects).unwrap();
         assert_eq!(dump(&captured), dump(&mirror), "full multi-op request replayed identically");
         // CLEARed g1 is empty-but-present; dropped g2 is gone.
-        assert!(captured.named.iter().any(|(n, _)| n.to_string().contains("g1")));
-        assert!(!captured.named.iter().any(|(n, _)| n.to_string().contains("g2")));
+        assert!(captured.named().iter().any(|(n, _)| n.to_string().contains("g1")));
+        assert!(!captured.named().iter().any(|(n, _)| n.to_string().contains("g2")));
         // Replaying the SAME log a SECOND time onto the same mirror is idempotent for the
         // structural ops and set-semantic for the data ops (no divergence).
         apply_effects(&mut mirror, &effects).unwrap();
