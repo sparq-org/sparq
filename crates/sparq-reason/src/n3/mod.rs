@@ -3015,8 +3015,47 @@ fn match_premise_admitted(
         // subject (wrong arity, non-formula clause) FAILS the premise for
         // that binding (fail-closed).
         if let Some(op) = collect_op(&pat[1]) {
+            // A subject, a subject MEMBER (the template, a clause, the result pattern) or
+            // a scope given THROUGH A VARIABLE arrives with the variable names the
+            // document wrote, while the rule's own atoms around it were standardized apart
+            // when this application started ([`rename_vars`]). The two are then different
+            // variables, so they share no binding: a `log:collectAllIn` template is never
+            // bound by the clause's solutions and the aggregation collects nothing, and a
+            // `log:forAllIn` second clause is free of the first's solutions so it holds
+            // vacuously — firing a rule that must not fire. The same formula written in
+            // the rule shares them, and so does either form in a FORWARD rule, whose
+            // atoms are never renamed. Each arriving value is resolved into this
+            // application ([`into_application`]) so both forms agree again (GH #6943).
+            //
+            // Nothing is resolved outside an application (`BwPath::app`), nothing is
+            // resolved for a value that carries no name the document wrote, and the
+            // resolution is this ATOM's: what it binds onward is the application's own
+            // names, which is what the rule's atoms read.
+            let mut pfx = BwPrefix::EMPTY;
+            let arrival: Option<(&str, Vec<&str>)> = path.app.map(|fold| {
+                let mut vars = Vec::new();
+                mentioned_vars(&pat[0], &mut vars);
+                mentioned_vars(&pat[2], &mut vars);
+                (pfx.render(fold), vars)
+            });
             let mut next = Vec::new();
             for b in bindings {
+                let resolved: Option<Binding> = arrival.as_ref().and_then(|(prefix, vars)| {
+                    let mut over: Option<Binding> = None;
+                    for v in vars {
+                        match b.get(*v) {
+                            Some(val) if holds_document_var(val) => {
+                                let into = into_application(val, prefix);
+                                over.get_or_insert_with(|| b.clone()).insert((*v).to_string(), into);
+                            }
+                            _ => {}
+                        }
+                    }
+                    over
+                });
+                // The atom's own view of the bindings: `b` with each arriving value
+                // resolved, or `b` itself when nothing arrived needing it.
+                let bb: &Binding = resolved.as_ref().unwrap_or(&b);
                 // Solutions of a `{ clause }` value under `seed`, against the
                 // applied scope (`None` ⇒ the clause is not a formula).
                 let solve = |clause: &Term, seed: &Binding, ci: u64| -> Option<Vec<Binding>> {
@@ -3052,7 +3091,7 @@ fn match_premise_admitted(
                         },
                     })
                 };
-                let Some(subj) = bounded::substitute(&pat[0], &b, &bw.truncated) else { continue };
+                let Some(subj) = bounded::substitute(&pat[0], bb, &bw.truncated) else { continue };
                 let Term::List(members) = &subj else { continue };
                 // A clause reached through a variable (the subject, or a list member) was
                 // not visible to [`validate_rule_quantifiers`]; its bound value is checked
@@ -3069,7 +3108,7 @@ fn match_premise_admitted(
                 match op {
                     CollectOp::CollectAll => {
                         let [template, clause, list_pat] = &members[..] else { continue };
-                        let Some(sols) = solve(clause, &b, 1) else { continue };
+                        let Some(sols) = solve(clause, bb, 1) else { continue };
                         if !negation_gate(bw) {
                             continue;
                         }
@@ -3096,7 +3135,7 @@ fn match_premise_admitted(
                     }
                     CollectOp::ForAll => {
                         let [ca, cb] = &members[..] else { continue };
-                        let Some(sols_a) = solve(ca, &b, 0) else { continue };
+                        let Some(sols_a) = solve(ca, bb, 0) else { continue };
                         let holds = sols_a
                             .iter()
                             .all(|s| matches!(solve(cb, s, 1), Some(ss) if !ss.is_empty()));
@@ -3509,7 +3548,9 @@ fn backward_prove(
                 .iter()
                 .map(|t| [rename_vars(&t[0], n), rename_vars(&t[1], n), rename_vars(&t[2], n)])
                 .collect();
-            for sol in match_premise_seeded(&prem, facts, &subst, JoinMode::All, bw, depth, BwPath::at(fold)) {
+            for sol in
+                match_premise_seeded(&prem, facts, &subst, JoinMode::All, bw, depth, BwPath::application(fold))
+            {
                 // Project the proof onto the goal's variables (walk chains like
                 // outer-var → renamed-var → ground value).
                 let mut nb = b.clone();
@@ -3569,6 +3610,77 @@ fn rename_vars(t: &Term, prefix: &str) -> Term {
             rename_vars(&tr[2], prefix),
         ])),
         _ => t.clone(),
+    }
+}
+
+/// `t`, a term that arrived THROUGH A VARIABLE, resolved into the backward-rule
+/// application whose standardize-apart space `prefix` names ([`BwPath::app`]): every
+/// variable the document wrote is renamed exactly as [`rename_vars`] renamed the
+/// application's own atoms, so the two are one namespace and share one set of bindings.
+///
+/// Two kinds of name are left alone, and between them they are why this is not simply
+/// [`rename_vars`]:
+/// - a quoted formula's own universal (`__ua.<iri>`), which is bound inside its formula
+///   and keeps its own scope, exactly as [`rename_vars`] leaves it (GH #6754);
+/// - a name the chainer already MINTED ([`serialize::backward_renamed`]). A value built by
+///   an application — this one's, or an enclosing one's — already carries that
+///   application's names, and those names are what its bindings are held under: renaming
+///   them again would point them at a variable nothing has bound and lose the value.
+///
+/// So a formula the document stored shares the rule's variables, as the same formula
+/// written in the rule does, while a formula the proof itself built keeps what it carries.
+/// The limit it inherits is the one [`serialize::backward_renamed`] names: a variable a
+/// document spells `__bw<digits>_…` is read as a minted name, as everything else in the
+/// engine already reads it.
+fn into_application(t: &Term, prefix: &str) -> Term {
+    match t {
+        Term::Var(v) if quoted_universal(v) || serialize::backward_renamed(v) => t.clone(),
+        Term::Var(v) => Term::Var(format!("{}{}", prefix, v)),
+        Term::Formula(ts) => Term::Formula(
+            ts.iter()
+                .map(|tr| {
+                    [
+                        into_application(&tr[0], prefix),
+                        into_application(&tr[1], prefix),
+                        into_application(&tr[2], prefix),
+                    ]
+                })
+                .collect(),
+        ),
+        Term::List(ms) => Term::List(ms.iter().map(|m| into_application(m, prefix)).collect()),
+        Term::Triple(tr) => Term::Triple(Box::new([
+            into_application(&tr[0], prefix),
+            into_application(&tr[1], prefix),
+            into_application(&tr[2], prefix),
+        ])),
+        _ => t.clone(),
+    }
+}
+
+/// Every variable `t` names, at any depth, in the order it names them (duplicates kept —
+/// a premise atom names a handful of variables, so a set would cost more than it saves).
+/// It is what an atom's terms could take a value THROUGH, so it is the names whose values
+/// an arrival resolution has to look at.
+fn mentioned_vars<'t>(t: &'t Term, out: &mut Vec<&'t str>) {
+    match t {
+        Term::Var(v) => out.push(v),
+        Term::Formula(ts) => ts.iter().flatten().for_each(|m| mentioned_vars(m, out)),
+        Term::List(ms) => ms.iter().for_each(|m| mentioned_vars(m, out)),
+        Term::Triple(tr) => tr.iter().for_each(|m| mentioned_vars(m, out)),
+        _ => {}
+    }
+}
+
+/// Would [`into_application`] rename anything in `t` — does it hold a variable the
+/// document wrote? Read from the borrowed term, so a value that needs no resolving (every
+/// ground one, and every one the proof itself built) costs no copy and no allocation.
+fn holds_document_var(t: &Term) -> bool {
+    match t {
+        Term::Var(v) => !(quoted_universal(v) || serialize::backward_renamed(v)),
+        Term::Formula(ts) => ts.iter().flatten().any(holds_document_var),
+        Term::List(ms) => ms.iter().any(holds_document_var),
+        Term::Triple(tr) => tr.iter().any(holds_document_var),
+        _ => false,
     }
 }
 
@@ -3639,6 +3751,16 @@ fn rename_vars(t: &Term, prefix: &str) -> Term {
 struct BwPath {
     /// The fingerprint of the proof-tree node this path names.
     fold: u64,
+    /// The fingerprint of the innermost RULE APPLICATION this path is inside, when it is
+    /// inside one: the standardize-apart space [`rename_vars`] renamed that application's
+    /// atoms into ([`backward_prove`]). `None` at the root of an evaluation, whose rules
+    /// are matched with the variable names the document wrote.
+    ///
+    /// It is the provenance a term that arrives THROUGH A VARIABLE is resolved by
+    /// ([`into_application`]): the rule's own atoms are in the application's namespace,
+    /// a bound value is in the document's, and an aggregation whose clause arrives bound
+    /// shares the rule's bindings only once the two are one namespace (GH #6943).
+    app: Option<u64>,
 }
 
 /// What a proof-tree node's fingerprint is folded from ([`BwPath`]). Each shape carries the
@@ -3708,21 +3830,35 @@ impl BwPrefix {
 }
 
 impl BwPath {
-    /// The path that is just the node `fold` names.
+    /// The path that is just the node `fold` names, inside no rule application: the root
+    /// of an evaluation ([`BwCtx::root_path`]), whose rules keep the names the document
+    /// wrote.
     fn at(fold: u64) -> BwPath {
-        BwPath { fold }
+        BwPath { fold, app: None }
+    }
+
+    /// The path that is the RULE APPLICATION the node `fold` names: its atoms were
+    /// standardized apart into `fold`'s space, so that is the namespace a term arriving
+    /// through a variable is resolved into ([`BwPath::app`]).
+    fn application(fold: u64) -> BwPath {
+        BwPath { fold, app: Some(fold) }
     }
 
     /// The path one `step` further down, as its own registered node
     /// ([`NodeKey::Step`]). `None` when that registration fails the run, exactly as
     /// [`BwCtx::node`] describes — a step is a node like any other, so a step whose fold
     /// is already another key's is a capture too.
+    ///
+    /// A step stays inside the application it descends from: a clause of a scoped operator
+    /// written in a rule carries that rule's renamed variables, so the names a term
+    /// arriving there must be resolved into are the same ones ([`BwPath::app`]).
     fn child(&self, bw: &BwCtx, step: u64) -> Option<BwPath> {
         let key = NodeKey::Step { parent: self.fold, step };
+        let descend = |fold| BwPath { fold, app: self.app };
         if bw.unnamed() {
-            return Some(BwPath::at(key.fold()));
+            return Some(descend(key.fold()));
         }
-        bw.node(key).map(BwPath::at)
+        bw.node(key).map(descend)
     }
 }
 
