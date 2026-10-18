@@ -637,6 +637,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   standardized apart. Because the test is groundness and not whose a variable is, two callers
   that differ only in what they name their variables now reach the same verdict.
 
+  Once a pattern passes that gate it is MATCHED through the same resolver, substituted deep
+  before the builtin runs, so the gate and the matcher share one notion of ground. They did
+  not before: the gate followed chains while the matcher accepted only a formula ground AS
+  STORED and read anything else as the EMPTY pattern, so a pattern ground only through an
+  alias passed the gate and then matched as empty — `log:includes` holding of a scope that
+  does not contain it, and `log:forAllIn` holding vacuously and firing.
+
+- **sparq-reason (N3):** the projection of a backward proof onto its goal now resolves INSIDE
+  the value each variable lands on, not just up to it. A term a proof bound can itself hold
+  variables the same substitution binds, and stopping at the first value left them in the
+  derived fact: `{ ?s :pat { ?l :p :b } } <= { ( { ?y :q :r } ) list:member ?l . ?s :val ?y }`
+  returned `{ { ?__bw<n>_y :q :r } :p :b }` with `?y` bound all along, and now returns
+  `{ { :v :q :r } :p :b }`. The descent is bounded and carries an occurs check and a cycle
+  guard, so a self-referential binding terminates as it did before. Ordinary substitution is
+  unchanged — a quoted formula is a value, and a formula a caller passes in still comes back
+  as the caller wrote it.
+
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
   / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to
   a stored formula that holds no variable at any depth is matched as that formula, as

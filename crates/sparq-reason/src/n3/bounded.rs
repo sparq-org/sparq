@@ -873,6 +873,21 @@ pub(crate) fn substitute_deep<B: Subst + ?Sized>(
     }
 }
 
+/// [`substitute_deep`] that also resolves inside the values it lands on
+/// ([`apply_resolved`]), charged and refused for size and depth exactly as that one is.
+pub(crate) fn substitute_resolved<B: Subst + ?Sized>(
+    t: &Term,
+    b: &B,
+    run: &Truncation,
+) -> Option<Term> {
+    match t {
+        Term::List(_) | Term::Triple(_) | Term::Formula(_) if compound_refused(t, b, run, true) => {
+            None
+        }
+        _ => Some(apply_resolved(t, b, backward_depth(), &mut Vec::new())),
+    }
+}
+
 /// Backward goal `g` with every variable resolved to the END of its binding chain in `b`
 /// ([`super::walk`]), through list members, quoted triples AND quoted formulas. A
 /// formula's OWN variables are not bound in `b`, so they are left as they are; what this
@@ -1126,6 +1141,94 @@ fn apply_deep<B: Subst + ?Sized>(t: &Term, b: &B) -> Term {
             apply_deep(&tr[0], b),
             apply_deep(&tr[1], b),
             apply_deep(&tr[2], b),
+        ])),
+        _ => t.clone(),
+    }
+}
+
+/// [`apply_deep`], and then INTO whatever each variable landed on.
+///
+/// A term a substitution binds a variable to can itself hold variables the same substitution
+/// binds. [`apply_deep`] clones such a value and stops, which left them behind:
+/// `{ ?s :pat { ?l :p :b } } <= { ( { ?y :q :r } ) list:member ?l . ?s :val ?y }` returned
+/// `{ { ?__bw<n>_y :q :r } :p :b }` with `?y` bound to its value all along (GH #6943).
+///
+/// This is NOT what ordinary substitution should do — a quoted formula is a value, and a
+/// formula a caller passes in has to come back as the caller wrote it, which is why
+/// [`apply_deep`] stops where it does. Only two callers want the resolving form: the
+/// projection of a backward proof onto its goal, which is instantiating what the proof itself
+/// produced, and the builtins that must match an arriving pattern through the same resolver
+/// their groundness gate used. Both go through [`substitute_resolved`].
+///
+/// `fuel` bounds the descent, and `open` is the cycle guard: it holds the values currently
+/// being resolved into, by ADDRESS in the substitution, and a value already open is cloned
+/// instead of re-entered. Without it a self-referential binding does terminate on `fuel`,
+/// but it UNROLLS first — a variable bound to a formula mentioning itself came back as that
+/// formula nested as deep as the fuel allowed, where [`apply_deep`] returned it once. The
+/// guard restores that: on a cycle the variable is left unresolved, which is the term
+/// [`apply_deep`] produces for the same binding.
+/// Does `t` mention a variable named `v`, at any depth?
+fn names_var(t: &Term, v: &str) -> bool {
+    match t {
+        Term::Var(n) => n.as_str() == v,
+        Term::List(ms) => ms.iter().any(|m| names_var(m, v)),
+        Term::Formula(ts) => ts.iter().flatten().any(|m| names_var(m, v)),
+        Term::Triple(tr) => tr.iter().any(|m| names_var(m, v)),
+        _ => false,
+    }
+}
+
+fn apply_resolved<B: Subst + ?Sized>(
+    t: &Term,
+    b: &B,
+    fuel: usize,
+    open: &mut Vec<*const Term>,
+) -> Term {
+    if fuel == 0 {
+        return t.clone();
+    }
+    match t {
+        Term::Var(v) => match b.bound(v) {
+            Some(val) => {
+                // Occurs check: a value that mentions the very variable it is bound to is an
+                // infinite term, and expanding it once more only renders one more level of
+                // it. Take it as it stands, which is the term [`apply_deep`] produces.
+                if names_var(val, v) {
+                    return val.clone();
+                }
+                let at: *const Term = val;
+                if open.iter().any(|o| std::ptr::eq(*o, at)) {
+                    // Already being resolved further up: this is a cycle through the
+                    // substitution. Leave the VARIABLE as it stands rather than expanding
+                    // the value once more, which is what [`apply_deep`] does and so keeps a
+                    // cyclic binding rendering exactly as it did before.
+                    return t.clone();
+                }
+                open.push(at);
+                let out = apply_resolved(val, b, fuel - 1, open);
+                open.pop();
+                out
+            }
+            None => t.clone(),
+        },
+        Term::List(ms) => {
+            Term::List(ms.iter().map(|m| apply_resolved(m, b, fuel - 1, open)).collect())
+        }
+        Term::Formula(ts) => Term::Formula(
+            ts.iter()
+                .map(|r| {
+                    [
+                        apply_resolved(&r[0], b, fuel - 1, open),
+                        apply_resolved(&r[1], b, fuel - 1, open),
+                        apply_resolved(&r[2], b, fuel - 1, open),
+                    ]
+                })
+                .collect(),
+        ),
+        Term::Triple(tr) => Term::Triple(Box::new([
+            apply_resolved(&tr[0], b, fuel - 1, open),
+            apply_resolved(&tr[1], b, fuel - 1, open),
+            apply_resolved(&tr[2], b, fuel - 1, open),
         ])),
         _ => t.clone(),
     }

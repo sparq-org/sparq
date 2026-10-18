@@ -3052,11 +3052,31 @@ fn match_premise_admitted(
                     Term::Lit(v, _, _) => v == "true",
                     _ => false,
                 };
-                let bound = match &pat[2] {
-                    Term::Var(v) if formula_scope => b.get(v).and_then(|val| match val {
-                        Term::Formula(ts) => stored_ground_statements(ts).map(|n| (ts, n)),
-                        _ => None,
-                    }),
+                // Inside a backward proof the gate above has already refused a pattern that
+                // is not ground once its chains are followed, so what reaches here is ground
+                // — but possibly only THROUGH those chains, which `stored_ground_statements`
+                // reads as a variable and turns into the empty pattern. Instantiate it with
+                // the same resolver the gate used, so the two agree. Forward evaluation is
+                // left exactly as it was: its own as-stored rule is what
+                // `tests/n3_bound_containment.rs` pins.
+                let chased = match &pat[2] {
+                    Term::Var(_) if formula_scope && path.in_backward => {
+                        bounded::substitute_resolved(&pat[2], &Chased(&b), &bw.truncated)
+                    }
+                    _ => None,
+                };
+                let bound = match (&chased, &pat[2]) {
+                    (Some(Term::Formula(ts)), _) => {
+                        stored_ground_statements(ts).map(|n| (&ts[..], n))
+                    }
+                    (_, Term::Var(v)) if formula_scope => {
+                        b.get(v).and_then(|val| match val {
+                            Term::Formula(ts) => {
+                                stored_ground_statements(ts).map(|n| (&ts[..], n))
+                            }
+                            _ => None,
+                        })
+                    }
                     _ => None,
                 };
                 let inner: &[[Term; 3]] = match bound {
@@ -3143,7 +3163,19 @@ fn match_premise_admitted(
                 // Solutions of a `{ clause }` value under `seed`, against the
                 // applied scope (`None` ⇒ the clause is not a formula).
                 let solve = |clause: &Term, seed: &Binding, ci: u64| -> Option<Vec<Binding>> {
-                    let atoms: &[[Term; 3]] = match clause {
+                    // Inside a backward proof the gate above has already refused a clause
+                    // that is not ground once its chains are followed, so instantiate it
+                    // with the SAME resolver before matching: a clause ground only through
+                    // an alias would otherwise be matched with that variable still in it,
+                    // constraining nothing, and `forAllIn` would hold vacuously and FIRE
+                    // (GH #6943). Forward evaluation keeps the clause exactly as it arrived.
+                    let chased = match clause {
+                        Term::Formula(_) if path.in_backward => {
+                            bounded::substitute_resolved(clause, &Chased(seed), &bw.truncated)
+                        }
+                        _ => None,
+                    };
+                    let atoms: &[[Term; 3]] = match chased.as_ref().unwrap_or(clause) {
                         Term::Formula(ts) => ts,
                         // `{}` parses as the literal true: no constraint —
                         // exactly one (empty) solution.
@@ -3803,7 +3835,7 @@ impl<'a> Produced<'a> {
         if !self.in_formula(&val, false) {
             return Some(val);
         }
-        bounded::substitute_deep(&val, self, run)
+        bounded::substitute_resolved(&val, self, run)
     }
 
     /// Does `t` name a variable this view binds, INSIDE a quoted formula? Only such a name
@@ -4366,6 +4398,30 @@ fn holds_free_var(t: &Term, b: &Binding) -> bool {
     go(t, b, bounded::backward_depth())
 }
 
+/// A binding read as a substitution that follows every variable to the END of its chain.
+///
+/// [`holds_free_var`] decides groundness through chains, so the builtin that then matches the
+/// pattern must instantiate it the same way or the two disagree: a pattern ground only
+/// through an alias passed the gate and was still matched as stored, where its variable made
+/// it fall back to the EMPTY pattern and `log:includes` held of everything (GH #6943). Driving
+/// `bounded::substitute_deep` with this makes the gate and the matcher share one notion of
+/// ground, and keeps the existing size and depth charging on the instantiation.
+struct Chased<'a>(&'a Binding);
+
+impl bounded::Subst for Chased<'_> {
+    fn bound(&self, v: &str) -> Option<&Term> {
+        let mut name = v;
+        // Bounded by the binding's own length, so a cycle ends the walk.
+        for _ in 0..self.0.len() + 1 {
+            match self.0.get(name) {
+                Some(Term::Var(next)) => name = next,
+                landed => return landed,
+            }
+        }
+        None
+    }
+}
+
 /// Whether a builtin's executable slot ARRIVED through a variable and is not ground
 /// ([`holds_free_var`]) — the shape [`BOUND_PATTERN_NOT_GROUND`] refuses.
 ///
@@ -4376,8 +4432,17 @@ fn holds_free_var(t: &Term, b: &Binding) -> bool {
 ///   it, so it shares correctly. Never refused.
 /// * written as a variable that is still UNBOUND at the end of its chain — nothing arrived.
 ///   This is the ordinary spelling of a `collectAllIn` TEMPLATE (`( ?t { ?t :type :T } ?l )`)
-///   and of a clause the rule means its own matching to bind, so refusing it would refuse
-///   documents the engine answers correctly. Never refused.
+///   and of a `collectAllIn` / `forAllIn` clause the rule means its own matching to bind, so
+///   refusing it would refuse documents the engine answers correctly. Never refused.
+///
+///   That rationale is about the AGGREGATION operators only. `log:includes` and its siblings
+///   do NOT bind their object pattern when it arrives through a variable — an unbound one
+///   matches as the empty pattern, so `log:includes` holds of anything — and an unbound
+///   pattern there is a pre-existing wrong answer that this exemption passes through
+///   unchanged. It is not fixed here because the FORWARD path answers it the same way, so it
+///   is not a backward-specific divergence; refusing it was measured against 111 documents
+///   and turned a correct answer into an error (a pattern bound by a LATER atom in the same
+///   premise), so it needs the containment half of GH #6943, not a refusal.
 /// * written as a variable whose chain LANDS on a term — a value arrived from elsewhere, and
 ///   it is refused if that value still holds a free variable.
 ///

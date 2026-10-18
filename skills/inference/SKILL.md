@@ -141,7 +141,9 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // Not refused: a slot the rule writes inline (its own text, renamed with it); a slot whose
 // variable is still unbound (the rule's own variable, which its matching binds — the
 // ordinary spelling of a collectAllIn template); a GROUND pattern, including one ground
-// only through an alias chain, which is matched as stored as before; a quoted formula's own
+// only through an alias chain — which is then MATCHED through that same resolver, deep
+// substituted before the builtin runs, so the gate and the matcher agree on what ground
+// means; a quoted formula's own
 // @forAll binder, which is bound inside its formula and is not free; and the SCOPE of
 // collectAllIn/forAllIn, which is searched data rather than a pattern that must match and is
 // never required to be ground. Forward rules are unaffected — their atoms are never renamed,

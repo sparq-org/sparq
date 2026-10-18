@@ -349,18 +349,79 @@ fn a_formula_local_binder_is_not_a_free_variable() {
     assert_eq!(got, none(), "accepted, and answered as on main");
 }
 
-/// Groundness is decided after following each variable to the END of its chain. Here the
-/// arriving clause's `?y` is ground only through an alias: head unification binds it to the
-/// callee's `?w`, and the premise then binds that to `:b`. A one-hop test reads the alias as
-/// a free variable and REFUSES a clause the proof did in fact ground, so the walk is
-/// transitive. The answer is `origin/main`'s.
+/// Groundness is decided after following each variable to the END of its chain, and the
+/// clause is then MATCHED through the same resolver. Here the arriving clause's `?y` is
+/// ground only through an alias: head unification binds it to the callee's `?w`, and the
+/// premise then binds that to `:b`. So the clause is `{ :a :p :b }`, the scope holds it, and
+/// one item is collected.
+///
+/// Two ways to get this wrong, and both are mutation-tested. A one-hop groundness test reads
+/// the alias as free and REFUSES a clause the proof did in fact ground. And matching the
+/// clause AS STORED, with `?y` still in it, constrains nothing — `origin/main` collects
+/// nothing here, and an earlier revision of this PR pinned that empty answer.
 #[test]
-fn a_clause_ground_only_through_an_alias_is_accepted() {
+fn a_clause_ground_only_through_an_alias_is_matched_instantiated() {
     let got = out(":cfg :cl { :a :p ?y }. :pick :one :b.\n\
                    { ?w :coll ?l } <= { :pick :one ?w . :cfg :cl ?cl . \
                    ( :hit ?cl ?l ) log:collectAllIn { :a :p :b } }.\n\
                    { ?y :coll ?l } => { :out :list ?l }.");
-    assert_eq!(got, list(&[]), "accepted, and answered as on main");
+    assert_eq!(got, list(&["hit"]), "the clause is matched as `{{ :a :p :b }}`");
+}
+
+/// The gate and the MATCHER must share one notion of ground. A pattern ground only through an
+/// alias passed the gate and was then matched as stored, where its variable made it fall back
+/// to the EMPTY pattern — so `log:includes` held of a scope that does not contain the
+/// pattern. `origin/main` and the first revisions of this PR both FIRE here.
+///
+/// The second half is the positive control: the identical rule over a scope that DOES hold
+/// the instantiated pattern fires. Without it, "does not fire" would also pass if the pattern
+/// had become unmatchable instead of correctly matched.
+#[test]
+fn a_containment_pattern_ground_through_an_alias_is_matched_instantiated() {
+    let doc = |scope: &str| {
+        format!(
+            ":pick :one :b.\n\
+             {{ ?w :inc :yes }} <= {{ :pick :one ?w . ( {{ :a :p ?w }} ) list:member ?cl . \
+             {{ {scope} }} log:includes ?cl }}.\n\
+             {{ ?y :inc ?r }} => {{ :out :fired ?r }}."
+        )
+    };
+    assert_eq!(out(&doc(":a :p :zz")), none(), "the scope does not hold `:a :p :b`");
+    assert_eq!(out(&doc(":a :p :b")), fired(), "the scope does hold it");
+}
+
+/// The `log:forAllIn` twin of the same root cause: the arriving clause is ground only through
+/// an alias, so matched as stored it constrains nothing, every solution extends trivially and
+/// the premise holds VACUOUSLY. It FIRES on `origin/main` and on the first revisions of this
+/// PR. Instantiated, the clause is `{ :a :p :b }`, the scope holds it, and the consequent
+/// `{ :a :ok true }` does not — so the rule must not fire.
+///
+/// The second half is the positive control: add `:a :ok true` to the scope and it fires.
+#[test]
+fn a_forall_clause_ground_through_an_alias_is_matched_instantiated() {
+    let doc = |scope: &str| {
+        format!(
+            ":cfg :cl {{ :a :p ?y }}. :pick :one :b.\n\
+             {{ ?w :all :yes }} <= {{ :pick :one ?w . :cfg :cl ?cl . \
+             ( ?cl {{ :a :ok true }} ) log:forAllIn {{ {scope} }} }}.\n\
+             {{ ?y :all ?r }} => {{ :out :fired ?r }}."
+        )
+    };
+    assert_eq!(out(&doc(":a :p :b")), none(), "`:a :ok true` is not in the scope");
+    assert_eq!(out(&doc(":a :p :b. :a :ok true")), fired(), "now it is");
+}
+
+/// A value a proof bound can itself hold a variable the same substitution binds, so the
+/// projection resolves INTO what each chain lands on rather than cloning it. `origin/main`
+/// returns `{ { ?__bw<n>_y :q :r } :p :b }` here, with `?y` bound to `:v` all along.
+#[test]
+fn the_projection_resolves_inside_a_value_it_landed_on() {
+    let got = out(":s :val :v.\n\
+                   { ?s :pat { ?l :p :b } } <= { ( { ?y :q :r } ) list:member ?l . ?s :val ?y }.\n\
+                   { :s :pat ?f } => { :out :seen ?f }.");
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].contains("Iri(\"http://ex/v\")"), "resolved inside: {}", got[0]);
+    assert!(!got[0].contains("Var("), "no variable survives: {}", got[0]);
 }
 
 /// A GROUND clause that arrived through a variable has no free variable to leave unbound, so
