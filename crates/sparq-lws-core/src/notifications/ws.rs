@@ -137,8 +137,9 @@ pub struct NotifyState<S: Store> {
 }
 
 /// How often an open receive socket checks, on a timer of its own, that its subscriber may still
-/// read the topic, closing it (1008) once it may not: at most one period, plus the time a check
-/// already in progress takes, after the loss. Every event is checked as well, and one the
+/// read the topic, closing it (1008) once it may not: within two periods of the loss, since a
+/// check (for an event or a tick) is given one period at most and then counts as undecided
+/// (closing it 1011 on the timer). Every event is checked as well, and one the
 /// subscriber may not read is dropped, but only this timer closes the socket for it, so when the
 /// socket closes, and why, follows the subscriber's access and the clock alone, never an event it
 /// may not read.
@@ -621,7 +622,9 @@ fn no_check<F>(_start: &impl Fn() -> F) -> Option<(F, Due)> {
 ///   dropped as the events it stands for are.
 /// - The socket is closed for lost access (1008) only by the access timer ([`ACCESS_RECHECK`],
 ///   the state's `access_recheck`), so neither the close nor its timing depends on an event the
-///   subscriber may not read.
+///   subscriber may not read. A due tick is taken before a queued notification, and each check
+///   is given one timer period at most (then it is undecided), so the close comes within two
+///   periods of the loss.
 /// - A check that cannot be made is neither a grant nor a denial. On the timer it closes the
 ///   socket (1011).
 /// - A notification (or an overflow) that is dropped, because the subscriber may not read it or
@@ -643,15 +646,32 @@ async fn stream_notifications<S: Store + 'static>(
     let every = state.access_recheck;
     let mut recheck = tokio::time::interval_at(tokio::time::Instant::now() + every, every);
     recheck.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let access = || Box::pin(state.read_access(&topic, &web_id, origin.as_deref()));
-    // The access check in progress, and what it is for. While one runs, neither the timer nor
-    // the next notification is taken, so they are decided in the order they came.
+    // Each check is given one timer period at most, and one that has not answered by then is
+    // undecided: a store that never answers cannot hold the socket past the next tick.
+    let access =
+        || Box::pin(tokio::time::timeout(every, state.read_access(&topic, &web_id, origin.as_deref())));
+    // The access check in progress, and what it is for. One runs at a time: while it does,
+    // neither the timer nor the next notification is taken (the socket is still read). Between
+    // checks a due tick is taken before a queued notification, so a revocation close never
+    // waits behind notifications.
     let mut check = no_check(&access);
     // Whether a notification (or an overflow) was dropped since the socket opened.
     let mut missed = false;
 
     loop {
         tokio::select! {
+            // In this order: the socket first (a pong never waits on anything else), then the
+            // timer, then the notifications.
+            biased;
+            // An inbound socket message — only meaningful as a Close / error signal. Read while
+            // a check is in progress too, so pings are answered meanwhile.
+            inbound = socket.recv() => {
+                match inbound {
+                    Some(Ok(Message::Close(_))) | None => break, // clean close or stream end
+                    Some(Ok(_)) => { /* ignore any client frame; receive socket is server→client */ }
+                    Some(Err(_)) => break, // transport error — tear down
+                }
+            }
             // The access timer: closed once the subscriber may no longer read the topic (or its
             // access cannot be decided), or, when it may, once it may have missed something.
             () = state.next_tick(&mut recheck), if check.is_none() => {
@@ -681,6 +701,7 @@ async fn stream_notifications<S: Store + 'static>(
                 let Some((_, due)) = check.take() else {
                     continue;
                 };
+                let decided = decided.unwrap_or(ReadAccess::Undecided);
                 match (due, decided) {
                     (Due::Tick, ReadAccess::Allowed) if missed => {
                         close(&mut socket, 1011, RECONCILE).await;
@@ -720,15 +741,6 @@ async fn stream_notifications<S: Store + 'static>(
                     (Due::Event(_) | Due::Lag(_), ReadAccess::Denied | ReadAccess::Undecided) => {
                         missed = true;
                     }
-                }
-            }
-            // An inbound socket message — only meaningful as a Close / error signal. Read while
-            // a check is in progress too, so pings are answered meanwhile.
-            inbound = socket.recv() => {
-                match inbound {
-                    Some(Ok(Message::Close(_))) | None => break, // clean close or stream end
-                    Some(Ok(_)) => { /* ignore any client frame; receive socket is server→client */ }
-                    Some(Err(_)) => break, // transport error — tear down
                 }
             }
         }
@@ -1832,6 +1844,23 @@ mod tests {
         gate.add_permits(1);
         let frame = next_frame(&mut ws, std::time::Duration::from_secs(2)).await;
         assert!(matches!(frame, Some(Ok(_))), "{frame:?}");
+    }
+
+    /// Review of #7183: an access check that never answered held the socket's task for good,
+    /// so its timer never ticked again and a revocation was never acted on. A check is given
+    /// one timer period, and one that has not answered by then is undecided (`1011`).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_check_that_never_answers_is_undecided_after_a_period() {
+        let store = crate::lws::test_store::FlakyStore::new();
+        let s = reader_state_over(store.clone(), std::time::Duration::from_millis(300)).await;
+        let topic = format!("{BASE}/doc");
+        let mut ws = open_for_bob(&s, &topic).await;
+        // The next check's store read never answers.
+        *store.hold_next_meta.lock().unwrap() = Some(Arc::new(tokio::sync::Semaphore::new(0)));
+        assert_eq!(
+            next_frame(&mut ws, std::time::Duration::from_secs(3)).await,
+            Some(Err((1011, UNDECIDED.to_string())))
+        );
     }
 
     /// Review of #7135: the canonical topic is the one the subscribe WAC check runs on, so a

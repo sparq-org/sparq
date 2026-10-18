@@ -136,9 +136,11 @@ before every notification it sends — so a revoked grant is not replayable thro
 an already-issued `receiveFrom` URL. Notifications follow the subscriber's current
 access: one it may no longer read is dropped (not sent, and it neither closes the
 socket nor decides a lag close, `1011`), and an access timer (every 30 seconds)
-closes the socket (code 1008) once its subscriber loses read access, at most one
-timer period plus the time a check already in progress takes after the loss, so
-when a socket closes never turns on changes it may not read. A check that cannot
+closes the socket (code 1008) once its subscriber loses read access, within two
+timer periods of the loss (a check in progress, for a notification or a tick, is
+given one period at most and then counts as one that cannot be made, `1011`; a
+due tick is taken before queued notifications), so when a socket closes never
+turns on changes it may not read. A check that cannot
 be made (a backend fault) is no denial: on the timer it closes the socket
 (`1011`); a notification whose check cannot be made is dropped. A dropped
 notification (whichever check dropped it) is noted, and from then on the next
@@ -146,7 +148,10 @@ point where the subscriber may read the topic, a notification or a tick, closes
 the socket (`1011`, "reconnect and reconcile") instead of delivering, so nothing
 is delivered after a gap without saying so, also when read access came back
 before the timer ticked; a subscriber that may not read the topic at that point
-gets the revocation close and is never told. A socket closes when the client
+gets the revocation close and is never told. Residual: a subscriber whose read
+access is revoked and restored between two ticks learns, from that reconcile
+close, that the topic changed while it could not read it (not what changed). A
+socket closes when the client
 closes it, on the revocation close (`1008`), or on a `1011`: a backlog overflow,
 a timer check that cannot be made, or a reconcile after a dropped notification.
 Pings are answered while a check is in progress. The receive token gates
@@ -635,9 +640,16 @@ What the server exposes, all discoverable from the storage description
   `HttpSparqClient::with_timeout` uses that timeout), so a slow store's fence still lands. A
   removal whose fence lands with the record still stored is answered at once from the listing.
   Putting a change back while a request waits on it (its own rollback or commit, with its locks
-  held) waits for each fence two seconds at most, then sets the rest aside; the background
-  put-back of a set-aside change, and the settling of intents at start-up, wait for a fence as
-  the store's call allows. A removal the store refuses for
+  held) tries each step up to three times with short growing waits between, each attempt
+  waiting for a fence two seconds at most (counted from the store's answer to the write it
+  fences); a step whose write failed unsettled and whose fence has not succeeded is never tried
+  again in the request: it is set aside with the rest, its fence first, and the set-aside (which
+  holds the locks) fences it before putting the step back, so a write that arrives late can no
+  longer undo what was put back since. The background put-back of a set-aside change, and the
+  settling of intents at start-up, wait for a fence as the store's call allows, and likewise
+  fence a step's unsettled write before trying the step again. A removal whose fence lands but
+  whose outcome cannot then be read stays out of force and is settled in the background once the
+  listing can be read. A removal the store refuses for
   want of room answers `507`, the record still stored and back in force. A subscription
   being cancelled hears of no change from the moment its removal begins until it is back in
   force. A record holds its place in the request
@@ -879,10 +891,11 @@ the server pins:
   DPoP proof is verified locally on every request — proof signature, `htm`/`htu`/`iat`,
   `ath`, the `jti` replay mark against the same shared replay store, and the `cnf.jkt`
   binding — orchestrated from the verifier's own public primitives
-  (`crates/sparq-lws-core/src/auth_cache.rs`). Residual: `htu` is compared after the
-  RFC 3986 syntax-based normalisation RFC 9449 calls for (the request URL is parsed and
-  serialised), which resolves `%2E%2E` and backslashes, so a proof made for `GET /x` also
-  verifies for `GET /alice/%2E%2E/x`, a request the server answers for that literal stored key
+  (`crates/sparq-lws-core/src/auth_cache.rs`). Residual: `htu` is compared after
+  normalising both URLs, as RFC 9449 calls for, by parsing and serialising them with
+  `url::Url::parse` (WHATWG URL parsing): that resolves `%2E%2E` as a dot segment (the RFC 3986
+  §6.2.2 syntax-based normalisation) and also takes a backslash as a slash (from the WHATWG
+  parser, not RFC 3986), so a proof made for `GET /x` also verifies for `GET /alice/%2E%2E/x`, a request the server answers for that literal stored key
   (readable when a key was stored under it before writes refused one). This is the spec's
   comparison; the proof's single-use `jti` limits it to one request. Separately, the
   server layers **opt-in** proof-of-possession tiers on top of an already-verified token:

@@ -50,8 +50,8 @@
 //! dropped and the client is to reconnect and reconcile). The same check runs again before every
 //! frame on an open socket (a frame the subscriber may not read is dropped), and on a timer of the
 //! socket's own ([`ws::ACCESS_RECHECK`]), which closes it (1008) once the subscriber has lost read
-//! access: up to one timer period after the loss, plus the time a check already in progress
-//! takes, never on an event.
+//! access: within two timer periods of the loss (a check in progress is given one period at most,
+//! then counts as undecided and closes it 1011), never on an event.
 //!
 //! **Existence non-disclosure** (`research/lws-design-records.md` §6): neither gate probes the topic
 //! resource itself — the decision comes ONLY from the ACL-resolution chain — so a denial is the same

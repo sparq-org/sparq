@@ -664,9 +664,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **sparq-lws-core (LWS records and notifications, follow-up to #7174):** putting a change back
-  while a request waits on it waits for each fence two seconds at most (the background put-back
-  and the start-up settling still wait as long as the store takes), and a removal whose fence
-  lands with the record still stored is answered at once from the listing. A service-container
+  while a request waits on it tries each step up to three times, each attempt waiting for a
+  fence two seconds at most (counted from the store's answer); a step whose write failed
+  unsettled and whose fence has not succeeded is set aside, its fence first, and never tried
+  again before that fence succeeds, in the request or in the background (the background
+  put-back and the start-up settling still wait as long as the store takes). A removal whose
+  fence lands with the record still stored is answered at once from the listing; one whose
+  outcome cannot be read after its fence stays out of force and is settled in the background.
+  A journal's commit fences an unsettled clearing of its intent before reading the intent. A service-container
   create whose precondition compares no state (a bare `If-Match: *`) takes the container shared,
   as an unconditional create does, so it no longer waits on a removal being settled or holds up
   other creates. A background fence's attempts are capped at the store's own call timeout
@@ -675,8 +680,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next point where the subscriber may read the topic after any notification was dropped
   (whether it could not be read or its check could not be made), instead of delivering later
   ones; a receive token has at most one socket open at a time (a second connect gets `401`); pings
-  are answered while an access check runs. An LDP write also refuses a dot segment around a
-  %-decoded slash (`..%2Fx`). A topic being created is decided as a URI where nothing is
+  are answered while an access check runs, a due tick is taken before queued notifications, and
+  an access check that has not answered within one timer period counts as undecided (`1011`). An LDP write also refuses a dot segment around a
+  %-decoded slash (`..%2Fx`). A topic being created is decided as a URI where nothing is,
   whatever metadata the change kept.
 
 - **sparq-lws-core (LWS notifications, type index, records):** notifications follow the

@@ -3451,6 +3451,43 @@ mod tests {
         assert!(state.access.grants.read().unwrap().is_empty());
     }
 
+    /// Review of #7183: a revocation whose delete's fence succeeded, but whose outcome could
+    /// not then be read, was answered "left as it was" and the grant put back in force, though
+    /// the delete may have committed. The grant stays out of force until the listing can be
+    /// read, and is then settled from it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_fenced_revocation_that_cannot_be_read_stays_out_of_force() {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        let (state, store) = test_store::state(100).await;
+        let iri = granted(&state).await;
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), gate));
+        store.fail_reads_after_fence.store(true, Ordering::SeqCst);
+        let delete = test_store::request(
+            Method::DELETE,
+            iri.strip_prefix(&state.cfg.base_url).unwrap(),
+            &[],
+            "",
+        );
+        let r = handle(&state, &delete, &Agent::anonymous()).await;
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(body.contains("not known yet"), "{body}");
+        assert!(state.access.grant_policies().is_empty(), "put back in force");
+        store.fail_reads_after_fence.store(false, Ordering::SeqCst);
+        store.fail_exists.store(false, Ordering::SeqCst);
+        store.fail_list.store(false, Ordering::SeqCst);
+        // The delete was fenced before it landed: the grant is still stored, and back in force.
+        eventually("the grant is back in force", || {
+            state.access.grant_policies().len() == 1
+        })
+        .await;
+    }
+
     /// Issue #6836, the mirror: a revocation fenced before its delete lands is settled as not
     /// removed: the grant is put back in force, and the delete, when it arrives, changes nothing.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
