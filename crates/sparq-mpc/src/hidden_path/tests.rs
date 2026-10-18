@@ -1039,3 +1039,108 @@ fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
     // One edge fewer still fits, so 87_382 is where the reach is actually lost.
     assert!(public_bounded_candidate_pair_bound(87_381, &one).unwrap() <= MAX_OUTPUT_BOUND);
 }
+
+/// The whole-call SCHEDULE — the sequence of randomness draws, with each draw's
+/// width — is what the randomness transcript of a run shows, and this pins how much
+/// of the edge data it carries, in both directions.
+///
+/// Two edge sets with the same public sizes, the same distinct endpoint-pair count
+/// `D`, the same payload width and the same (empty) result produce IDENTICAL
+/// transcripts, whatever their nodes are. An edge set with the same sizes, width
+/// and result but a different `D` produces a DIFFERENT transcript, because every
+/// repeated pair costs one extra secure OR: the transcript carries `T − D` and
+/// therefore `D`.
+///
+/// It does NOT separate the fold POSITIONS: the third fixture here repeats its
+/// pairs at other tuple positions with the same `D`, and its transcript is
+/// identical to the first's — every draw is the same seam method at the same width,
+/// so only their number is visible. The positions are visible elsewhere, to
+/// whoever performs the grouping: the key is the DISCLOSED endpoint pair of each
+/// enumerated tuple, matched or not, so that party sees the whole candidate pair
+/// multiset directly. The module docs state it that way; this test is the evidence
+/// for which instrument sees which part.
+#[test]
+fn the_draw_transcript_reveals_the_fold_count_but_not_its_positions() {
+    use crate::randomness::test_sources::RecordingSource;
+
+    // The randomness transcript of one whole call: each draw's seam method and its
+    // width. The drawn VALUES are deliberately excluded — they are sharings of the
+    // secrets, so they differ between any two distinct inputs and would say nothing
+    // about what the operation sequence carries.
+    fn transcript(pairs: &[(&str, &str)]) -> Vec<(&'static str, usize)> {
+        let backend = ShamirBackend::new_seeded(5, 0x5C4E).unwrap();
+        let (edges, _interner) = hidden_edges(pairs);
+        let mut recorder = RecordingSource::new(backend.dealer());
+        // |E| = 3, k = 2: T = 9 tuples, and B = 9 is the public bound, so the bound
+        // decision takes the public branch and no exact count is computed.
+        let (slots, _cost) =
+            eval_exact_k_chain_hidden_slots_through(&mut recorder, &backend, &edges, 2, 9)
+                .expect("the fixtures are legal");
+        // Every fixture below has an empty result, so the transcripts being compared
+        // belong to calls that disclose the same answer.
+        assert!(
+            partial_result_from_slots(slots, chain_out_vars())
+                .rows
+                .is_empty(),
+            "fixture {:?} must have an empty result for the comparison to be about the \
+             transcript",
+            pairs
+        );
+        recorder.log.iter().map(|(m, v)| (*m, v.len())).collect()
+    }
+
+    // Subjects (a, a, d) x objects (b, c, b): D = 4 distinct pairs, so 5 of the 9
+    // tuples fold — at positions 3, 4, 5, 6 and 9.
+    let folds_early = [
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/a", "http://ex/c"),
+        ("http://ex/d", "http://ex/b"),
+    ];
+    // The same shape over four different nodes, every IRI the same length so the
+    // payload width is unchanged.
+    let folds_early_relabelled = [
+        ("http://ex/p", "http://ex/q"),
+        ("http://ex/p", "http://ex/r"),
+        ("http://ex/s", "http://ex/q"),
+    ];
+    // Same |E|, same D = 4, same width, same empty result — but the repeats fall at
+    // positions 3, 6, 7, 8 and 9 instead.
+    let folds_late = [
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/d", "http://ex/c"),
+        ("http://ex/a", "http://ex/b"),
+    ];
+    // Same |E|, same width, same empty result, but objects (b, b, b) leave only
+    // D = 2 distinct pairs, so 7 tuples fold instead of 5.
+    let fewer_pairs = [
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/a", "http://ex/b"),
+        ("http://ex/d", "http://ex/b"),
+    ];
+
+    let early = transcript(&folds_early);
+    let relabelled = transcript(&folds_early_relabelled);
+    let late = transcript(&folds_late);
+    let fewer = transcript(&fewer_pairs);
+
+    assert_eq!(
+        early, relabelled,
+        "fixtures agreeing on the public sizes, D, the width and the result must have the same \
+         transcript"
+    );
+    assert_eq!(
+        early, late,
+        "the transcript does not separate the fold positions — if this ever differs, the \
+         module docs understate what it carries and must be widened"
+    );
+    assert_ne!(
+        early, fewer,
+        "a different D must change the transcript: that is the disclosure the module docs state"
+    );
+    assert!(
+        fewer.len() > early.len(),
+        "fewer distinct pairs means more folds, so more draws: {} vs {}",
+        fewer.len(),
+        early.len()
+    );
+}

@@ -115,13 +115,14 @@
 //!   never a truncation that would corrupt the result); choosing it loose costs `B`
 //!   opens. `B` leaks an upper bound on the result size by construction.
 //! - **What a REFUSAL discloses.** The refusals on this module's open/decode path
-//!   name public constants and positions only — the two permitted tag constants,
-//!   the column index of a payload limb that would not decode, the index of a
-//!   data limb outside the 7-byte range, the block's uniform byte width — so a
-//!   refusal says that a slot's selector or a column's encoding was malformed, and
-//!   where, and not what any opened tag, byte, limb value or byte count was. Where
-//!   even the count of offending bytes is a function of the opened block, the
-//!   refusal carries no number at all.
+//!   carry no opened VALUE — not the opened tag, not a presence byte, a decoded
+//!   term, a length prefix, a limb value or a byte count. What they do carry is
+//!   WHERE decoding stopped: the failing column index, the failing data limb's
+//!   index, the two permitted tag constants, and the block's uniform byte width.
+//!   That position is itself a function of the opened block — it says the earlier
+//!   columns or limbs decoded and this one did not — so a refusal localises the
+//!   malformation without describing it. Where even the count of offending bytes
+//!   is a function of the block, the refusal carries no number at all.
 //! - **L3 (input cardinalities `|L|`, `|R|`) and the candidate count** are public
 //!   (standard MPC assumption; research record §4.1). We do not claim to hide them.
 //!   The padding step is where the candidate count shows: it allocates `B − C`
@@ -335,17 +336,20 @@ pub(crate) fn check_output_bound_cap(bound: usize) -> Result<(), MpcError> {
 ///   computed here, before any draw, and a `B` that cannot cover it is refused.
 ///   Success-or-refusal therefore discloses whether the candidate count is at most
 ///   `B`; and since a refusal draws nothing, repeated calls with different `B`
-///   recover the count exactly by binary search. That is the caller's own trade
-///   for the tighter bound.
+///   recover the count exactly by binary search — up to [`MAX_OUTPUT_BOUND`], past
+///   which every probe is refused by the cap and the caller learns only that the
+///   count is larger. That is the caller's own trade for the tighter bound.
 ///
 /// Either way the message names `B` and `public_bound`, both already public, and
 /// never the candidate count. **This is a check contract, not a hiding mechanism:**
 /// it keeps the candidate count out of the decision and the error text, and says
-/// nothing about what the producer's own schedule reveals. The hidden-path producers
-/// allocate and multiply per distinct endpoint pair, so for them that count is
-/// visible in the schedule on BOTH branches — see [`crate::hidden_path`]. A count above [`MAX_OUTPUT_BOUND`] needs no branch
-/// of its own: `B` is capped first, so a count that large cannot be covered and
-/// falls out of the same refusal.
+/// nothing about what the producer's own schedule reveals. The hidden-path
+/// producers group on the disclosed endpoint pair of every enumerated tuple and
+/// multiply once more per repeat, so for them the fold POSITIONS — and hence that
+/// count — are visible on BOTH branches of this contract; see
+/// [`crate::hidden_path`]. A count above [`MAX_OUTPUT_BOUND`] needs no branch of
+/// its own: `B` is capped first, so a count that large cannot be covered and falls
+/// out of the same refusal.
 pub(crate) fn check_bound_public_first(
     what: &str,
     bound: usize,
