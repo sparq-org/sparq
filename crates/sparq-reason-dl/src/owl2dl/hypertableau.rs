@@ -77,7 +77,7 @@ use super::clausify::{Atom, AtomKind, Clause, Clauses, Head, Key, Role, Var};
 use super::data_ranges::{self, DataRangeExpr, Tri};
 use super::datatypes::Value;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 pub(crate) type Node = u32;
@@ -362,6 +362,9 @@ struct BlockKey {
     root: Option<Node>,
 }
 
+/// How many equal label pairs [`Tableau::same_label`] remembers before starting afresh.
+const SAME_LABELS_KEPT: usize = 1 << 16;
+
 /// A well-mixed hash of an atom (SplitMix64's finaliser), summed into a label's hash.
 fn atom_hash(a: Atom) -> u64 {
     let mut z = u64::from(a).wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -380,8 +383,12 @@ struct NodeData {
     label: FxHashMap<Atom, Dep>,
     /// The sum of [`atom_hash`] over the label's atoms, so equal labels have equal sums.
     label_hash: u64,
+    /// A number no other label state (of any node) has had: renewed on every change.
+    label_gen: u64,
     /// `adj[n]` = the role expressions `r` with `r(self, n)`.
     adj: FxHashMap<Node, Vec<Role>>,
+    /// The nodes created with this one as their parent, oldest first.
+    children: Vec<Node>,
 }
 
 #[derive(Clone, Debug)]
@@ -460,6 +467,10 @@ pub(crate) struct Tableau<'c> {
     clash: Option<Dep>,
     forbidden: Option<(Node, Atom)>,
     steps: u64,
+    /// The last label generation handed out ([`NodeData::label_gen`]).
+    gens: u64,
+    /// Pairs of label generations found equal, so blocking compares each pair once.
+    same_labels: RefCell<FxHashSet<(u64, u64)>>,
     /// Work inside a single rule application (clause matching, clique search), counted
     /// against the same step budget so one application cannot run unbounded.
     probes: Cell<u64>,
@@ -558,6 +569,8 @@ impl<'c> Tableau<'c> {
             clash: None,
             forbidden: None,
             steps: 0,
+            gens: 0,
+            same_labels: RefCell::default(),
             probes: Cell::new(0),
             budget,
             cineq: FxHashMap::default(),
@@ -1154,6 +1167,7 @@ impl<'c> Tableau<'c> {
 
     fn new_node_of(&mut self, parent: Option<Node>, concrete: bool) -> Node {
         let n = self.nodes.len() as Node;
+        self.gens += 1;
         self.nodes.push(NodeData {
             parent,
             root: parent.is_none(),
@@ -1161,8 +1175,13 @@ impl<'c> Tableau<'c> {
             active: true,
             label: FxHashMap::default(),
             label_hash: 0,
+            label_gen: self.gens,
             adj: FxHashMap::default(),
+            children: Vec::new(),
         });
+        if let Some(p) = parent {
+            self.nodes[p as usize].children.push(n);
+        }
         self.in_dirty.push(false);
         self.only.push(None);
         self.trail.push(Undo::NewNode);
@@ -1206,6 +1225,8 @@ impl<'c> Tableau<'c> {
         }
         node.label.insert(a, d.clone());
         node.label_hash = node.label_hash.wrapping_add(atom_hash(a));
+        self.gens += 1;
+        node.label_gen = self.gens;
         if node.concrete {
             self.touched.push(n);
         }
@@ -1402,20 +1423,16 @@ impl<'c> Tableau<'c> {
         // gained, each queued as it was added: losing `t` matches nothing new.
     }
 
-    /// Deactivates `t`'s descendants. A child is always adjacent to its parent (the edge
-    /// that created it), so the walk follows edges: work proportional to the subtree.
+    /// Deactivates `t`'s descendants: work proportional to the subtree.
     fn prune_descendants(&mut self, t: Node) {
         let mut stack = vec![t];
         while let Some(u) = stack.pop() {
-            let adj = &self.nodes[u as usize].adj;
-            self.charge(adj.len());
-            let children: Vec<Node> = adj
-                .keys()
+            let children = &self.nodes[u as usize].children;
+            self.charge(children.len());
+            let children: Vec<Node> = children
+                .iter()
                 .copied()
-                .filter(|&n| {
-                    let node = &self.nodes[n as usize];
-                    node.active && !node.root && node.parent == Some(u)
-                })
+                .filter(|&n| self.nodes[n as usize].active)
                 .collect();
             for n in children {
                 self.nodes[n as usize].active = false;
@@ -1844,9 +1861,11 @@ impl<'c> Tableau<'c> {
         while self.trail.len() > mark {
             match self.trail.pop().expect("len > mark") {
                 Undo::Concept(n, a) => {
+                    self.gens += 1;
                     let node = &mut self.nodes[n as usize];
                     node.label.remove(&a);
                     node.label_hash = node.label_hash.wrapping_sub(atom_hash(a));
+                    node.label_gen = self.gens;
                 }
                 Undo::Role(idx, from, to) => {
                     self.roles.remove(&(idx, from, to));
@@ -1880,7 +1899,11 @@ impl<'c> Tableau<'c> {
                     }
                 }
                 Undo::NewNode => {
-                    self.nodes.pop();
+                    let node = self.nodes.pop().expect("a node per NewNode");
+                    if let Some(p) = node.parent {
+                        let child = self.nodes[p as usize].children.pop();
+                        debug_assert_eq!(child, Some(self.nodes.len() as Node));
+                    }
                     self.in_dirty.pop();
                     self.only.pop();
                 }
@@ -2276,9 +2299,26 @@ impl<'c> Tableau<'c> {
         if a == b {
             return true;
         }
-        let (la, lb) = (&self.nodes[a as usize].label, &self.nodes[b as usize].label);
+        let (na, nb) = (&self.nodes[a as usize], &self.nodes[b as usize]);
+        let gens = (
+            na.label_gen.min(nb.label_gen),
+            na.label_gen.max(nb.label_gen),
+        );
+        self.charge(1);
+        if self.same_labels.borrow().contains(&gens) {
+            return true;
+        }
+        let (la, lb) = (&na.label, &nb.label);
         self.charge(la.len());
-        la.len() == lb.len() && la.keys().all(|k| lb.contains_key(k))
+        let same = la.len() == lb.len() && la.keys().all(|k| lb.contains_key(k));
+        if same {
+            let mut known = self.same_labels.borrow_mut();
+            if known.len() >= SAME_LABELS_KEPT {
+                known.clear();
+            }
+            known.insert(gens);
+        }
+        same
     }
 
     fn expand(&mut self) -> bool {
@@ -3096,5 +3136,60 @@ mod tests {
         t.set_clash(Dep::single(level));
         assert_eq!(t.run(), Ok(true));
         assert!(t.nodes[x as usize].label.contains_key(&f), "E ⊑ F at x");
+    }
+
+    /// Label comparisons are remembered per label state: a label that changes after a
+    /// comparison is compared afresh.
+    #[test]
+    fn a_remembered_label_comparison_ends_when_a_label_changes() {
+        let (d, c) = setup(
+            r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :A a owl:Class . :C a owl:Class .
+        "#,
+        );
+        let (a, cc) = (class(&d, &c, "A"), class(&d, &c, "C"));
+        let index = ClauseIndex::new(&c);
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        let (v, w) = (t.add_root(), t.add_root());
+        t.add_concept(v, a, &Dep::default());
+        t.add_concept(w, a, &Dep::default());
+        assert!(t.same_label(v, w));
+        let mark = t.trail.len();
+        t.add_concept(w, cc, &Dep::default());
+        assert!(!t.same_label(v, w), "w gained C");
+        t.undo_to(mark);
+        assert!(t.same_label(v, w), "the undo");
+        t.add_concept(v, cc, &Dep::default());
+        assert!(!t.same_label(v, w), "v gained C");
+    }
+
+    /// Pruning deactivates a node's whole subtree, found through the children lists, and
+    /// undoing it and the nodes' creation leaves the lists as they were.
+    #[test]
+    fn pruning_reaches_every_descendant() {
+        let (_, c) = setup(
+            r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :A a owl:Class .
+        "#,
+        );
+        let index = ClauseIndex::new(&c);
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        let r = t.add_root();
+        let start = t.trail.len();
+        let u = t.new_node(Some(r));
+        let (v, w) = (t.new_node(Some(u)), t.new_node(Some(u)));
+        let g = t.new_node(Some(v));
+        let mark = t.trail.len();
+        t.prune_descendants(u);
+        assert!(t.nodes[u as usize].active, "the root of the prune stays");
+        for n in [v, w, g] {
+            assert!(!t.nodes[n as usize].active, "{n} is a descendant");
+        }
+        t.undo_to(mark);
+        assert!([u, v, w, g].iter().all(|&n| t.nodes[n as usize].active));
+        t.undo_to(start);
+        assert!(t.nodes[r as usize].children.is_empty());
     }
 }
