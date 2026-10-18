@@ -166,11 +166,18 @@ async fn concurrent_queries_proceed_while_updates_commit() {
     let probe = "SELECT ?s WHERE { ?s <http://ex/cp> ?o }";
     let updates = 5usize;
 
+    // The update stream is paced by the sampler, not by the clock: update `i` is posted
+    // only once the sampler has completed `i` reads, so however loaded the machine is,
+    // the sampler runs at least once between consecutive updates (#7158). It keeps
+    // reading throughout, so reads still overlap the commits.
+    let (sampled_tx, mut sampled_rx) = tokio::sync::watch::channel(0u32);
     let upd_base = base.clone();
     let updater = tokio::spawn(async move {
         let cl = reqwest::Client::new();
         let t = Instant::now();
         for i in 0..updates {
+            let need = i as u32;
+            sampled_rx.wait_for(|&done| done >= need).await.expect("sampler alive");
             let ins = format!("INSERT DATA {{ <http://ex/c{i}> <http://ex/cp> <http://ex/cv> }}");
             assert_eq!(post_update(&cl, &upd_base, &ins).await, 204);
         }
@@ -188,10 +195,13 @@ async fn concurrent_queries_proceed_while_updates_commit() {
         max_read = max_read.max(dt);
         total_read += dt;
         samples += 1;
+        sampled_tx.send_replace(samples);
         assert!(rows <= updates, "reader saw an uncommitted state: {rows} rows");
     }
     let updates_took = updater.await.unwrap();
     assert_eq!(count_rows(&cl, &base, probe).await, updates, "an acked update is not visible");
+    // Guaranteed by the pacing above, not by machine speed: update `updates - 1` waited
+    // for `updates - 1` completed reads.
     assert!(samples > 3, "sampler barely ran ({samples} samples) — cannot judge stalling");
     eprintln!(
         "reads during {updates} committing updates ({updates_took:?} total): \

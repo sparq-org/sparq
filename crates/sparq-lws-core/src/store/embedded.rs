@@ -429,6 +429,40 @@ impl SparqClient for EmbeddedSparqClient {
         .await
     }
 
+    fn raises_markers(&self) -> bool {
+        true
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        // Read and written in ONE actor job, so no other index operation lands in between.
+        let q = sparql::select_meta(iri)?;
+        let iri = iri.to_string();
+        self.dispatch(move |graph| {
+            let result =
+                sparq_engine::query(graph, &q).map_err(|e| engine_err("select_meta", e))?;
+            let stored = match meta_from_result(&result) {
+                Ok(m) => super::sparq::marker_time(&m),
+                Err(SparqError::NotFound) => None,
+                Err(e) => return Err(e),
+            };
+            let raised = stored.map_or(value, |t| t.max(value));
+            if stored != Some(raised) {
+                let meta = super::sparq::marker_meta(&raised.to_string());
+                let u = sparql::update_put_meta(
+                    &iri,
+                    &meta.content_type,
+                    &meta.blob_key,
+                    &meta.etag,
+                    None,
+                )?;
+                sparq_engine::update_in_place_atomic(graph, &u)
+                    .map_err(|e| engine_err("raise_marker", e))?;
+            }
+            Ok(raised)
+        })
+        .await
+    }
+
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {
         let q = sparql::ask_exists(iri)?;
         self.dispatch(move |graph| {
