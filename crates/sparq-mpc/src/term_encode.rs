@@ -201,10 +201,26 @@ impl std::error::Error for EncodeError {}
 /// soundness break) instead of a key, so the caller stops BEFORE the bad key
 /// crosses the wire. With no collision the recorded map is also a proof obligation
 /// the M4 in-circuit encoding-correctness check will later discharge.
-#[derive(Debug, Default, Clone)]
+/// `Debug` is hand-written: the derive printed the whole `key -> term` map, which
+/// is every join key this holder has encoded together with the term that produced
+/// it — the entire key domain in one log line.
+///
+/// The rendering carries no entry count either. The map is keyed by the ENCODED
+/// key, so duplicate terms collapse into one entry: the count is the number of
+/// DISTINCT keys, a statistic over the holder's data rather than the row count the
+/// hidden-value join already discloses.
+#[derive(Default, Clone)]
 pub struct KeyEncoder {
     /// `key -> the (first) term that produced it`, for collision detection.
     seen: HashMap<u64, Term>,
+}
+
+impl std::fmt::Debug for KeyEncoder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KeyEncoder")
+            .field("seen", &"<redacted>")
+            .finish()
+    }
 }
 
 impl KeyEncoder {

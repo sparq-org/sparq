@@ -916,9 +916,10 @@ fn the_public_candidate_pair_bound_is_a_function_of_the_public_sizes() {
 ///
 /// A `B` at or above the public bound is accepted whatever the edges are; a `B`
 /// below it is accepted when the real count fits and refused — before any draw —
-/// when it does not. The second branch is the one that discloses the single bit,
-/// and it exists so that a caller choosing a tight `B` is not refused work the
-/// data allows.
+/// when it does not. The second branch is the one whose outcome discloses whether
+/// the distinct endpoint-pair count is at most `B`, and it exists so that a caller
+/// choosing a tight `B` is not refused work the data allows. Neither branch hides
+/// that count from an observer of the run's schedule; see the module docs.
 #[test]
 fn both_branches_of_the_exact_k_bound_contract() {
     use crate::randomness::test_sources::DrawCountingSource;
@@ -975,4 +976,66 @@ fn both_branches_of_the_exact_k_bound_contract() {
         }
         other => panic!("expected a Protocol refusal, got {:?}", other),
     }
+}
+
+/// Build `n` predicated edges `(s_i -> o_i)`, all under one predicate.
+fn predicated_chain(n: usize, predicate: &str) -> PredicatedEdges {
+    let mut interner = Interner::new();
+    let mut edges = Vec::with_capacity(n);
+    for i in 0..n {
+        let s = format!("http://ex/s{}", i);
+        let o = format!("http://ex/o{}", i);
+        edges.push(PredicatedEdge {
+            predicate: predicate.to_string(),
+            subject: HiddenNode {
+                key: interner.key(&s),
+                term: iri_term(&s),
+            },
+            object: HiddenNode {
+                key: interner.key(&o),
+                term: iri_term(&o),
+            },
+        });
+    }
+    PredicatedEdges::new(edges)
+}
+
+/// The bounded entry's PUBLIC bound can exceed `MAX_OUTPUT_BOUND` for inputs
+/// `check_bounded_params` ACCEPTS — the public bound sums the arms, while `B` is
+/// capped. For those shapes no admissible `B` reaches the public bound, so the
+/// caller has only the data-dependent branch. This pins the two cases the entry
+/// doc and `skills/mpc/SKILL.md` quote.
+#[test]
+fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
+    use crate::oblivious_join::MAX_OUTPUT_BOUND;
+
+    let backend = ShamirBackend::new_seeded(5, 0x51A3).unwrap();
+
+    // `{0,2}` over 511 edges: 2|E| diagonal + |E| at length 1 + |E|^2 at length 2.
+    let two = HiddenBoundedPath::range("http://ex/p", 0, 2);
+    let edges = predicated_chain(511, "http://ex/p");
+    check_bounded_params(&backend, &edges, &two).expect("{0,2} over 511 edges is accepted");
+    let public = public_bounded_candidate_pair_bound(edges.len(), &two).unwrap();
+    assert_eq!(public, 2 * 511 + 511 + 511 * 511);
+    assert!(
+        public > MAX_OUTPUT_BOUND,
+        "the public bound {} must be out of B's range {}",
+        public,
+        MAX_OUTPUT_BOUND
+    );
+
+    // `{0,1}` over 87_382 edges: the diagonal plus length 1 is already `3·|E|`.
+    let one = HiddenBoundedPath::range("http://ex/p", 0, 1);
+    let wide = predicated_chain(87_382, "http://ex/p");
+    check_bounded_params(&backend, &wide, &one).expect("{0,1} over 87_382 edges is accepted");
+    let public_one = public_bounded_candidate_pair_bound(wide.len(), &one).unwrap();
+    assert_eq!(public_one, 3 * 87_382);
+    assert!(
+        public_one > MAX_OUTPUT_BOUND,
+        "the public bound {} must be out of B's range {}",
+        public_one,
+        MAX_OUTPUT_BOUND
+    );
+    // One edge fewer still fits, so 87_382 is where the reach is actually lost.
+    assert!(public_bounded_candidate_pair_bound(87_381, &one).unwrap() <= MAX_OUTPUT_BOUND);
 }

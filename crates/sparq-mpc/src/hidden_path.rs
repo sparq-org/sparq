@@ -67,16 +67,29 @@
 //! ## What stays hidden / what is disclosed (state it precisely)
 //!
 //! - **Hidden:** every intermediate node key `z_i` (never reconstructed); every
-//!   per-hop and per-pair match bit (secret-shared, never opened); the realized
-//!   chain that connected a pair (the OR-fold collapses multiplicity).
+//!   per-hop and per-pair match bit (secret-shared, never opened); WHICH tuples
+//!   connected a pair and the realized chain length (the OR-fold collapses
+//!   multiplicity). The NUMBER of distinct endpoint pairs is NOT in this list —
+//!   see the schedule bullet below.
+//! - **Disclosed by the SCHEDULE (every branch):** the distinct endpoint-pair
+//!   count `D`. `build_candidates` allocates one candidate per distinct pair and
+//!   runs `T − D` secure ORs over the `T` edge-tuples, and the output stage pads
+//!   from `D` up to `B` — so the number of multiplications, the allocation sizes
+//!   and the timing of any run reveal `D` to anyone who observes them. This has
+//!   always been so. The bound decision below is taken on public sizes and its
+//!   error text carries public sizes only, but neither of those hides `D`, and
+//!   this module does not claim they do. Hiding `D` would need oblivious grouping
+//!   with a schedule uniform in the edge count, which is NOT built.
 //! - **Disclosed by a REFUSAL:** that a parameter or bound was rejected, and which
 //!   one. The output-bound check is taken on [`public_candidate_pair_bound`] /
 //!   [`public_bounded_candidate_pair_bound`] — functions of `|E|` and the public
 //!   hop counts — whenever `B` reaches them, and the real candidate count is not
 //!   computed at all on that branch. A caller that chooses a `B` BELOW the public
-//!   bound additionally discloses one bit: whether the distinct endpoint-pair
-//!   count is at most `B`. Range refusals name the operand POSITION, never its
-//!   value.
+//!   bound puts `D` in the RESULT of the call as well: that branch accepts exactly
+//!   when `D <= B`, and a refusal draws nothing, so repeated calls with different
+//!   `B` recover `D` exactly by binary search. Given the schedule above that is no
+//!   new disclosure, but the public-only error text must not be read as hiding it.
+//!   Range refusals name the operand POSITION, never its value.
 //! - **Disclosed:** the public bound `k`; the public candidate-tuple count `|E|^k`
 //!   (standard MPC assumption); the endpoint TERMS of the matched pairs (the result
 //!   the recipient asked for); the public padded bound `B`. The true result
@@ -201,13 +214,28 @@ pub const MAX_HOP_COUNT: usize = MAX_CHAIN_TUPLES.ilog2() as usize; // 18
 /// holder's injective encoding of the node, exactly the contract
 /// [`crate::join::HiddenValueJoin`] documents) plus its DISCLOSED term (used ONLY
 /// when the node is an ENDPOINT of a matched chain — never for an intermediate).
-#[derive(Debug, Clone)]
+/// `Debug` is hand-written: `key` is the private join key, and `term` is disclosed
+/// only when this node is the ENDPOINT of a matched chain — a `Debug` rendering is
+/// neither of those conditions, and a derived one printed both from every container
+/// that holds a node. Both fields are redacted in `Debug`; both stay `pub` for the
+/// callers that legitimately read them, including the `Term`-keyed groupings in
+/// this module.
+#[derive(Clone)]
 pub struct HiddenNode {
     /// The private join key. Compared via secure equality; never reconstructed
     /// for an intermediate node.
     pub key: Fp,
     /// The disclosed term, emitted only if this node is a matched chain endpoint.
     pub term: Term,
+}
+
+impl std::fmt::Debug for HiddenNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HiddenNode")
+            .field("key", &"<redacted>")
+            .field("term", &"<redacted>")
+            .finish()
+    }
 }
 
 /// One directed edge of the secret graph for the path predicate: `(subject,
@@ -226,10 +254,13 @@ pub struct HiddenEdge {
 ///
 /// **Exactly what is disclosed.** The keys are private. Disclosed: the edge count
 /// `|E|` and the candidate-tuple count `|E|^k` (public input sizes), the matched
-/// endpoint TERMS (the result), and the public bound `B`. NOT disclosed: any
-/// intermediate key, any per-hop or per-pair match bit, the realized chain length,
-/// and — for a `B` at or above [`public_candidate_pair_bound`] — anything about
-/// the distinct endpoint-pair count, which on that branch is never computed.
+/// endpoint TERMS (the result), the public bound `B`, and — through the run's
+/// SCHEDULE, on every branch (one candidate plus `T − D` secure ORs for `D`
+/// distinct pairs, then padding up to `B`) — the distinct endpoint-pair count `D`.
+/// NOT disclosed: any intermediate key, any per-hop or per-pair match bit, which
+/// tuples connected a pair, or the realized chain length. A `B` at or above
+/// [`public_candidate_pair_bound`] is decided without computing `D`, which keeps
+/// `D` out of the DECISION and out of the error text — not out of the schedule.
 #[derive(Debug, Clone)]
 pub struct HiddenEdges {
     edges: Vec<HiddenEdge>,
@@ -402,10 +433,11 @@ fn build_candidates(
 /// which this module already discloses. Nothing here looks at an endpoint term.
 ///
 /// This is the value to provision the public padded bound `B` against. A `B` at or
-/// above it is accepted on public sizes alone, so neither the acceptance nor a
-/// refusal says anything about the edge data; a tighter `B` is still accepted when
-/// the real candidate count fits, at the cost of disclosing that one bit (see
-/// `eval_exact_k_chain_hidden`).
+/// above it is decided on public sizes alone, so the decision and its error text
+/// never consult the edge data; a tighter `B` is still accepted when the distinct
+/// endpoint-pair count `D` fits, at the cost of disclosing that comparison (see
+/// `eval_exact_k_chain_hidden`). Neither choice hides `D` itself — the run's
+/// schedule reveals it either way.
 ///
 /// `build_candidates` groups the `|E|^k` edge-tuples by their first subject and
 /// last object, so:
@@ -455,7 +487,12 @@ pub fn public_candidate_pair_bound(edge_count: usize, k: usize) -> Result<usize,
 ///
 /// The answer is their SUM, which over-counts the pairs the arms share. That is
 /// deliberate: the bound must not depend on the edge data, and over-counting only
-/// raises the `B` at which the decision becomes data-independent.
+/// raises the `B` at which the decision becomes data-independent. For inputs
+/// [`check_bounded_params`] accepts, that sum can exceed
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`, or
+/// `{0,2}` with `|E| = 511` — and then no admissible `B` reaches it, so the caller
+/// has only the data-dependent branch. Neither branch hides the distinct
+/// endpoint-pair count from an observer of the run's schedule.
 ///
 /// Returns `MpcError::Protocol` if the sum overflows `usize`.
 pub fn public_bounded_candidate_pair_bound(
@@ -661,13 +698,16 @@ fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Resul
 ///
 /// **How `B` is decided, and what the decision discloses.** `B` is first compared
 /// against [`public_candidate_pair_bound`], an upper bound from the PUBLIC
-/// input sizes. A `B` at or above it is accepted on those sizes alone: the real
-/// candidate count is not even computed, and neither the acceptance nor a refusal
-/// can say anything about the edge data. A `B` below it is accepted only when the
-/// distinct endpoint-pair count fits, so success or refusal then discloses ONE BIT
-/// — whether that count is at most `B` — which is the caller's own trade for a
-/// tighter bound than the public worst case. Either way the refusal message names
-/// only `B` and the public bound.
+/// input sizes. A `B` at or above it is accepted on those sizes alone: the distinct
+/// endpoint-pair count `D` is not even computed, so the DECISION and its error text
+/// rest on public sizes only. A `B` below it is accepted exactly when `D <= B`, so
+/// success-or-refusal discloses that comparison; and because a refusal draws
+/// nothing, repeated calls with different `B` recover `D` exactly by binary search.
+/// Either way the refusal message names
+/// only `B` and the public bound — and NEITHER branch hides `D` from an observer of
+/// the run: the schedule (one candidate plus `T − D` secure ORs, then padding up to
+/// `B`) reveals `D`, as it always has. Hiding `D` would need oblivious grouping with
+/// a uniform schedule, which is not built.
 ///
 /// One fresh dealer covers the chain stage AND the output
 /// stage: this is `eval_exact_k_chain_hidden_slots_through` on that one dealer,
@@ -726,7 +766,10 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
     // half is tried first: a `B` at or above `public_candidate_pair_bound` is
     // accepted on the edge count and `k` alone, and the data-dependent projection
     // below is never run. Only a tighter `B` needs the real count, which is then
-    // computed from the disclosed endpoint terms in O(|E| log |E|). Leaving the
+    // computed from the disclosed endpoint terms in O(|E| log |E|). This keeps the
+    // count out of the DECISION and the error text; the build below still allocates
+    // and multiplies per distinct pair, so the count remains visible in the
+    // schedule. Leaving the
     // coverage half to the output stage meant `build_candidates` had already drawn
     // one equality per hop of every one of the `|E|^k` tuples before a `B` too small
     // to hold the answer was refused — up to billions of draws for a refusal that
@@ -1163,13 +1206,25 @@ fn build_bounded_candidates(
 ///
 /// **How `B` is decided, and what the decision discloses.** `B` is first compared
 /// against [`public_bounded_candidate_pair_bound`], an upper bound from the PUBLIC
-/// input sizes. A `B` at or above it is accepted on those sizes alone: the real
-/// candidate count is not even computed, and neither the acceptance nor a refusal
-/// can say anything about the edge data. A `B` below it is accepted only when the
-/// distinct endpoint-pair count fits, so success or refusal then discloses ONE BIT
-/// — whether that count is at most `B` — which is the caller's own trade for a
-/// tighter bound than the public worst case. Either way the refusal message names
-/// only `B` and the public bound.
+/// input sizes. A `B` at or above it is accepted on those sizes alone: the distinct
+/// endpoint-pair count `D` is not even computed, so the DECISION and its error text
+/// rest on public sizes only. A `B` below it is accepted exactly when `D <= B`, so
+/// success-or-refusal discloses that comparison; and because a refusal draws
+/// nothing, repeated calls with different `B` recover `D` exactly by binary search.
+/// Either way the refusal message names
+/// only `B` and the public bound — and NEITHER branch hides `D` from an observer of
+/// the run: the schedule (one candidate plus `T − D` secure ORs, then padding up to
+/// `B`) reveals `D`, as it always has. Hiding `D` would need oblivious grouping with
+/// a uniform schedule, which is not built.
+///
+/// **The public bound can be out of reach here.**
+/// [`public_bounded_candidate_pair_bound`] sums the arms the form admits, and for
+/// inputs [`check_bounded_params`] accepts that sum can exceed
+/// [`crate::oblivious_join::MAX_OUTPUT_BOUND`] — `{0,1}` with `|E| >= 87_382`
+/// (`3·|E|`), or `{0,2}` with `|E| = 511` (`3·|E| + |E|^2`), for instance. No `B` is
+/// then both at or above the public bound and within `MAX_OUTPUT_BOUND`, so such a
+/// call can only run on the data-dependent branch, with the comparison that branch
+/// discloses.
 ///
 /// One fresh dealer covers the union stage AND the output
 /// stage: this is `eval_bounded_path_hidden_slots_through` on that one dealer,
@@ -1220,6 +1275,8 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
     // union projection below is never run; a tighter `B` is checked against the
     // exact union, which is the materialised key set rather than a sum of the arms,
     // so no `B` the data allows is refused. The stage re-checks after the build.
+    // As above, the public-first order moves the count out of the decision, not out
+    // of the schedule.
     crate::oblivious_join::check_bound_public_first(
         "hidden bounded path",
         bound,

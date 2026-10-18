@@ -116,11 +116,17 @@
 //!   opens. `B` leaks an upper bound on the result size by construction.
 //! - **What a REFUSAL discloses.** The refusals on this module's open/decode path
 //!   name public constants and positions only — the two permitted tag constants,
-//!   the column index of a payload limb that would not decode — so a refusal says
-//!   that a slot's selector or a column's encoding was malformed, and where, and
-//!   not what any opened tag or decoded term was.
+//!   the column index of a payload limb that would not decode, the index of a
+//!   data limb outside the 7-byte range, the block's uniform byte width — so a
+//!   refusal says that a slot's selector or a column's encoding was malformed, and
+//!   where, and not what any opened tag, byte, limb value or byte count was. Where
+//!   even the count of offending bytes is a function of the opened block, the
+//!   refusal carries no number at all.
 //! - **L3 (input cardinalities `|L|`, `|R|`) and the candidate count** are public
 //!   (standard MPC assumption; research record §4.1). We do not claim to hide them.
+//!   The padding step is where the candidate count shows: it allocates `B − C`
+//!   dummy slots for `C` candidates, so the schedule and allocation reveal `C` to
+//!   anyone observing the run, whatever a producer's bound check consulted.
 //! - **The packed payload WIDTH is public.** Every slot is packed to one uniform
 //!   width, and that width is the longest candidate encoding, rounded up to whole
 //!   limbs, so it is visible to the parties: it is the per-slot limb count in the
@@ -228,13 +234,28 @@ type ShuffledColumn = (
 /// match). Whether this candidate matched is carried as a [`MatchBit`], which is
 /// either a public bit (disclosed-key regime, sound today) or a secret-shared bit
 /// (hidden-key regime, gated on secure-compare — see module docs).
-#[derive(Debug, Clone)]
+/// `Debug` is hand-written: the payload terms are the row content, and they are
+/// carried for EVERY candidate — the rejected ones included — so a derived `Debug`
+/// would print rows that no match ever disclosed. The rendering keeps the column
+/// count, which is the payload arity the output stage already treats as public,
+/// and redacts the terms.
+#[derive(Clone)]
 pub struct Candidate {
     /// The payload terms emitted if this candidate matches (the join's disclosed
     /// output columns for this `(i, j)` pair).
     pub payload: Vec<Option<Term>>,
     /// Whether this candidate is a match — see [`MatchBit`].
     pub matched: MatchBit,
+}
+
+impl std::fmt::Debug for Candidate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Candidate")
+            .field("payload", &"<redacted>")
+            .field("columns", &self.payload.len())
+            .field("matched", &self.matched)
+            .finish()
+    }
 }
 
 /// The match decision for a [`Candidate`].
@@ -307,16 +328,22 @@ pub(crate) fn check_output_bound_cap(bound: usize) -> Result<(), MpcError> {
 /// where it is needed.
 ///
 /// - `B >= public_bound`: accepted on public sizes alone. `exact_count` is not
-///   called, so nothing about the data is computed, let alone disclosed, and no
-///   `B` the data would have allowed is ever refused.
+///   called, so the DECISION consults no statistic over the data, and no `B` the
+///   data would have allowed is ever refused.
 /// - `B < public_bound`: the caller has chosen a tighter `B` than the public
 ///   worst case, so coverage can only be settled against the real count. It is
 ///   computed here, before any draw, and a `B` that cannot cover it is refused.
-///   Success or refusal therefore discloses ONE BIT — whether the candidate count
-///   is at most `B` — which is the caller's own trade for the tighter bound.
+///   Success-or-refusal therefore discloses whether the candidate count is at most
+///   `B`; and since a refusal draws nothing, repeated calls with different `B`
+///   recover the count exactly by binary search. That is the caller's own trade
+///   for the tighter bound.
 ///
 /// Either way the message names `B` and `public_bound`, both already public, and
-/// never the candidate count. A count above [`MAX_OUTPUT_BOUND`] needs no branch
+/// never the candidate count. **This is a check contract, not a hiding mechanism:**
+/// it keeps the candidate count out of the decision and the error text, and says
+/// nothing about what the producer's own schedule reveals. The hidden-path producers
+/// allocate and multiply per distinct endpoint pair, so for them that count is
+/// visible in the schedule on BOTH branches — see [`crate::hidden_path`]. A count above [`MAX_OUTPUT_BOUND`] needs no branch
 /// of its own: `B` is capped first, so a count that large cannot be covered and
 /// falls out of the same refusal.
 pub(crate) fn check_bound_public_first(
@@ -1303,10 +1330,13 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
                 out.push(Some(term));
                 pos = end + 1; // skip the NUL
             }
-            other => {
+            _ => {
+                // The flag byte came out of an opened limb block, so it is an
+                // opened value: name the column and the error class, not the byte.
                 return Err(MpcError::Protocol(format!(
-                    "decode_payload_row: column {col} has invalid presence flag {other} (corrupt entry)"
-                )))
+                    "decode_payload_row: column {} has an invalid presence flag (corrupt entry)",
+                    col
+                )));
             }
         }
     }
@@ -1314,9 +1344,11 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
     // Trailing bytes mean the stream is not one `encode_payload_row` produced, so two
     // different streams could decode to the same row; refuse instead.
     if pos != bytes.len() {
+        // How MANY bytes trail is a function of the opened block; the fact that
+        // any do, after the PUBLIC column arity, is the whole diagnosis.
         return Err(MpcError::Protocol(format!(
-            "decode_payload_row: {} trailing byte(s) after {arity} column(s) (corrupt entry)",
-            bytes.len() - pos
+            "decode_payload_row: trailing byte(s) after {} column(s) (corrupt entry)",
+            arity
         )));
     }
     Ok(out)
@@ -1360,17 +1392,25 @@ fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
     let byte_len = len_limb.value() as usize;
     let available = (limbs.len() - 1) * BYTES_PER_LIMB;
     if byte_len > available {
+        // The prefix itself is an opened limb. The capacity it overran is the
+        // block's uniform width, which is public, so that is what the message
+        // names.
         return Err(MpcError::Protocol(format!(
-            "limbs_to_bytes: length prefix {byte_len} exceeds available {available} bytes \
-             (corrupt shuffle entry)"
+            "limbs_to_bytes: the length prefix exceeds the block's {} available byte(s) \
+             (corrupt shuffle entry)",
+            available
         )));
     }
     let mut bytes = Vec::with_capacity(byte_len);
-    for limb in &limbs[1..] {
+    for (index, limb) in limbs[1..].iter().enumerate() {
         let v = limb.value();
         if v >= (1u64 << (8 * BYTES_PER_LIMB)) {
+            // `v` is an opened limb: name its POSITION in the block, which is
+            // public, and the range it broke, which is a constant.
             return Err(MpcError::Protocol(format!(
-                "limbs_to_bytes: data limb {v} exceeds the 7-byte range (corrupt shuffle entry)"
+                "limbs_to_bytes: data limb at index {} exceeds the {}-byte range (corrupt \
+                 shuffle entry)",
+                index, BYTES_PER_LIMB
             )));
         }
         for k in 0..BYTES_PER_LIMB {
@@ -1383,11 +1423,13 @@ fn limbs_to_bytes(limbs: &[Fp]) -> Result<Vec<u8>, MpcError> {
     // account for — a limb block that is not one this encoder could have produced.
     // Accepting it would let two different limb blocks decode to the same row.
     if bytes[byte_len..].iter().any(|&b| b != PAD_BYTE) {
-        return Err(MpcError::Protocol(format!(
-            "limbs_to_bytes: {} byte(s) past the length prefix {byte_len} are not the pad byte \
-             (corrupt shuffle entry)",
-            bytes[byte_len..].iter().filter(|&&b| b != PAD_BYTE).count()
-        )));
+        // Both the count of offending bytes and the prefix they sit past are
+        // functions of the opened block; neither is named.
+        return Err(MpcError::Protocol(
+            "limbs_to_bytes: byte(s) past the length prefix are not the pad byte (corrupt \
+             shuffle entry)"
+                .to_string(),
+        ));
     }
     bytes.truncate(byte_len);
     Ok(bytes)
@@ -3431,6 +3473,107 @@ mod tests {
             matches!(&err, MpcError::Protocol(m) if m.contains("trailing byte")),
             "got {err:?}"
         );
+    }
+
+    // ---- Decode refusals name no opened value -----------------------------------
+
+    /// Check one decode refusal in BOTH renderings: `Display` and `Debug` (the
+    /// variant's payload is the same string, and a caller may log either).
+    fn assert_decode_refusal(what: &str, err: &MpcError, forbidden: &[&str], expected: &[&str]) {
+        for (how, rendered) in [
+            ("Display", err.to_string()),
+            ("Debug", format!("{:?}", err)),
+        ] {
+            for bad in forbidden {
+                assert!(
+                    !rendered.contains(bad),
+                    "{} ({}) renders the opened value {}: {}",
+                    what,
+                    how,
+                    bad,
+                    rendered
+                );
+            }
+            for good in expected {
+                assert!(
+                    rendered.contains(good),
+                    "{} ({}) dropped the public detail {}: {}",
+                    what,
+                    how,
+                    good,
+                    rendered
+                );
+            }
+        }
+    }
+
+    /// The bytes and limbs these two decoders inspect come out of an OPENED limb
+    /// block, so every refusal must describe the error class and the position it
+    /// occurred at — the public column index, limb index or block width — and never
+    /// the opened byte, limb value or byte count itself.
+    #[test]
+    fn the_decode_refusals_name_the_position_but_no_opened_value() {
+        // 1. An out-of-set presence flag: the flag byte is opened, the column is public.
+        let err = decode_payload_row(&[91u8], 1).unwrap_err();
+        assert_decode_refusal(
+            "an invalid presence flag",
+            &err,
+            &["91"],
+            &["presence flag", "column 0"],
+        );
+
+        // 2. Trailing bytes: HOW MANY trail is opened, the column arity is public.
+        let mut bytes = encode_payload_row(&[lit("v")]);
+        bytes.extend(std::iter::repeat_n(0u8, 37));
+        let err = decode_payload_row(&bytes, 1).unwrap_err();
+        assert_decode_refusal(
+            "a trailing-byte stream",
+            &err,
+            &["37"],
+            &["trailing byte", "1 column"],
+        );
+
+        // 3. An over-long length prefix: the prefix is opened, the block's uniform
+        //    width (one data limb here, so 7 bytes) is public.
+        let err = limbs_to_bytes(&[Fp::new(93), Fp::new(0)]).unwrap_err();
+        assert_decode_refusal(
+            "an over-long length prefix",
+            &err,
+            &["93"],
+            &["length prefix", "7 available"],
+        );
+
+        // 4. An out-of-range data limb: the limb VALUE is opened, its index is public.
+        let wide = (1u64 << (8 * BYTES_PER_LIMB)) | 0x1234;
+        let err = limbs_to_bytes(&[Fp::new(1), Fp::new(0), Fp::new(wide)]).unwrap_err();
+        assert_decode_refusal(
+            "an out-of-range data limb",
+            &err,
+            &[&format!("{}", wide)],
+            &["data limb at index 1", "7-byte range"],
+        );
+
+        // 5. Content past the length prefix: both the count of offending bytes and
+        //    the prefix they sit past are opened, so this refusal carries no number
+        //    at all.
+        let err = limbs_to_bytes(&[Fp::new(1), Fp::new(0xAB_CD_EF_00)]).unwrap_err();
+        assert_decode_refusal(
+            "content past the length prefix",
+            &err,
+            &[],
+            &["past the length prefix", "not the pad byte"],
+        );
+        for (how, rendered) in [
+            ("Display", err.to_string()),
+            ("Debug", format!("{:?}", err)),
+        ] {
+            assert!(
+                !rendered.chars().any(|c| c.is_ascii_digit()),
+                "content past the length prefix ({}) renders a number: {}",
+                how,
+                rendered
+            );
+        }
     }
 
     // ---- Fail-closed on an out-of-set opened tag (Copilot #93, thread 3) ---------
