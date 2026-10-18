@@ -125,9 +125,22 @@ EVASIONS: dict[str, str] = {
         "#[test]\nfn case() {\n"
         '    std::env::set_var("SPARQ_ZK_LIVE_LEDGER", "/dev/null");\n}\n'
     ),
-    "an ungated driver route": (
+    "an ungated driver route that accepts an unnamed error": (
         "use sparq_zk_compose::driver::CircuitProver;\n#[test]\nfn case() {\n"
-        "    let p = CircuitProver::from_crate_root();\n    let _ = p;\n}\n"
+        "    let p = CircuitProver::from_crate_root();\n"
+        "    match verify(&p) {\n        Err(_) => {}\n"
+        '        Ok(()) => panic!("must be rejected"),\n    }\n}\n'
+    ),
+    "an ungated driver route that discards the error": (
+        "use sparq_zk_compose::driver::CircuitProver;\n#[test]\nfn case() {\n"
+        "    let p = CircuitProver::from_crate_root();\n"
+        "    assert!(verify(&p).is_err());\n}\n"
+    ),
+    "an ungated driver route with an accepting wildcard arm": (
+        "use sparq_zk_compose::driver::CircuitProver;\n#[test]\nfn case() {\n"
+        "    let p = CircuitProver::from_crate_root();\n"
+        "    match verify(&p) {\n        Ok(()) => panic!(\"no\"),\n"
+        "        _ => {}\n    }\n}\n"
     ),
     "a branch on a spawn failure": (
         "mod support;\n#[test]\nfn case() {\n"
@@ -395,6 +408,55 @@ class GateIsTheOnlyPath(unittest.TestCase):
     def test_the_not_found_soft_pass_is_gone(self):
         self.assertNotIn("NotFound", self.text)
         self.assertNotIn("Command::new(", self.text)
+
+
+class DriverRouteSuites(unittest.TestCase):
+    """The structural driver-route suites must fail on a spawn failure by themselves.
+
+    `holder_pop_forge.rs` builds a `CircuitProver` and calls `verify_manifest`, but it
+    is STRUCTURAL: every arm it accepts names a specific `CheckError` variant and its
+    wildcard arms panic, so a missing tool produces a different variant and the test
+    FAILS. That is why it is not gated — gating it would move 12 trusted-holder-gap
+    tests out of ci.yml's per-PR run, where they pass today in about a second without
+    any toolchain, into the nightly lane only. CHECK C1 enforces the property that
+    makes that safe, instead of an annotation asserting it.
+    """
+
+    HOLDER = "crates/sparq-zk-compose/tests/holder_pop_forge.rs"
+
+    def setUp(self):
+        self.text = (REPO / self.HOLDER).read_text(encoding="utf-8")
+
+    def test_it_carries_no_allow_annotation(self):
+        self.assertNotIn("zk-toolchain-gate: allow", self.text)
+
+    def test_every_accepting_arm_names_a_specific_variant(self):
+        import re
+
+        accepting = re.findall(r"^\s*(?:\|\s*)?(.+?)\s*=>\s*\{\}\s*$", self.text, re.M)
+        self.assertGreater(len(accepting), 10, "the forge arms moved")
+        for arm in accepting:
+            self.assertRegex(
+                arm,
+                r"Err\(CheckError::[A-Z]",
+                f"an accepting arm that does not name a variant would let a spawn "
+                f"failure pass: {arm!r}",
+            )
+
+    def test_an_unnamed_error_arm_in_it_turns_the_check_red(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = copy_tree(tmp)
+            p = root / self.HOLDER
+            p.write_text(
+                p.read_text(encoding="utf-8").replace(
+                    "Err(CheckError::HolderKeyMismatch) => {}", "Err(_) => {}", 1
+                ),
+                encoding="utf-8",
+            )
+            proc = run_script("--check", "--root", str(root))
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("[C1]", proc.stderr)
+            self.assertIn("holder_pop_forge.rs", proc.stderr)
 
 
 class LaneWiring(unittest.TestCase):

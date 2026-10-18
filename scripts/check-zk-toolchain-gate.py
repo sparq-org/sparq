@@ -78,8 +78,14 @@ CHECK C - the driver route
     so a test can soft-pass without ever naming a tool:
 
       C1  a file referencing `CircuitProver`, `driver::`, `live_tool(` or
-          `DriverError::Spawn` must call the gate, unless the FILE carries an allow
-          annotation with a reason.
+          `DriverError::Spawn` either calls the gate, or accepts no unnamed error. A
+          file that is purely STRUCTURAL - every arm it accepts names a specific
+          error variant, and its wildcard arms panic - cannot read a missing tool's
+          spawn failure as the rejection it wanted, because the variant differs and
+          the test fails. An arm matching `Err(_)`, `Err(..)`, `.is_err()`, or a
+          wildcard that accepts rather than panics, in such a file, IS the soft pass
+          and is reported. A FILE-level allow annotation with a reason also exempts
+          it. Over-matching is intended.
       C2  `DriverError::Spawn` in a `match` arm or an `if let` pattern is an error
           unless annotated: branching on a spawn failure is a soft pass.
       C3  a `live_tool(` call must have `.expect(` or `.unwrap(` within the following
@@ -194,13 +200,11 @@ LEDGER_EXCLUSIONS: dict[str, str] = {
 # Exact allow-annotation ratchet: file -> number of annotations.
 ALLOW_RATCHET: dict[str, int] = {
     "crates/sparq-zk-compose/tests/coverage_direct.rs": 2,
-    "crates/sparq-zk-compose/tests/holder_pop_forge.rs": 1,
     "crates/sparq-zk-compose/tests/host_helpers.rs": 2,
     "crates/sparq-zk-compose/tests/toolchain_gate.rs": 1,
     "crates/sparq-zk/tests/toolchain_gate.rs": 1,
 }
 
-GATE_CALL_RE = re.compile(r"\b(?:gate|require_toolchain)\s*\(")
 GATE_SITE_RE = re.compile(r"\b(?:support\s*::\s*gate|require_toolchain)\s*\(")
 NEW_RE = re.compile(
     r"\b([A-Za-z_][A-Za-z0-9_]*(?:\s*::\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*::\s*new\s*\("
@@ -210,6 +214,17 @@ WHICH_RE = re.compile(r"\bwhich\s*(?:::|\()|^\s*use\s+[^;]*\bwhich\b")
 COMMAND_ALIAS_RE = re.compile(r"^\s*use\s+[^;]*\bCommand\s+as\s+\w+")
 CMD_MACRO_RE = re.compile(r"\bcmd!\s*\(")
 DRIVER_REF_RE = re.compile(r"CircuitProver|driver::|live_tool\s*\(|DriverError::Spawn")
+# A result arm that ACCEPTS an unnamed error. In a file that reaches the driver
+# without the gate, such an arm is what lets a missing-tool spawn failure be read as
+# the rejection the test was looking for. An arm that names a specific variant
+# (`Err(CheckError::HolderKeyMismatch) => {}`) is not one of these, and neither is a
+# wildcard arm that panics.
+PERMISSIVE_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"Err\s*\(\s*(?:_|\.\.)\s*\)"),
+    re.compile(r"Err\s*\(\s*[a-z_]\w*\s*\)\s*=>\s*(?:\{\s*\}|\(\s*\))"),
+    re.compile(r"\.is_err\s*\(\s*\)"),
+    re.compile(r"(?:^|\W)(?:_|other|err|e)\s*=>\s*(?:\{\s*\}|\(\s*\))"),
+)
 SPAWN_PATTERN_RE = re.compile(r"DriverError::Spawn")
 EXEMPT_RE = re.compile(r"//\s*zk-toolchain-gate:\s*allow\s+(\S.*)")
 
@@ -446,14 +461,29 @@ def lint_file(rel: str, text: str) -> list[Finding]:
                             "spawn result must not be discarded")
                 )
 
-    if DRIVER_REF_RE.search(text) and not GATE_CALL_RE.search(text) and not file_annotated:
-        findings.append(
-            Finding(rel, "C1",
-                    "reaches the prover/driver route (CircuitProver, driver::, "
-                    "live_tool or DriverError::Spawn) but never calls the gate, so a "
-                    "missing tool becomes a verification error the test may read as a "
-                    "rejection")
-        )
+    code_only = "\n".join(code_of(line) for line in lines)
+    if (
+        DRIVER_REF_RE.search(text)
+        and not GATE_SITE_RE.search(code_only)
+        and not file_annotated
+    ):
+        # An ungated driver-route file is safe only while every arm it accepts names a
+        # SPECIFIC error variant: a missing tool then produces a different variant and
+        # the test fails. An arm that accepts an unnamed error is the soft pass.
+        for i, line in enumerate(lines):
+            if exempt(lines, i):
+                continue
+            code = code_of(line)
+            if any(rx.search(code) for rx in PERMISSIVE_RES):
+                findings.append(
+                    Finding(f"{rel}:{i + 1}", "C1",
+                            "this file reaches the prover/driver route (CircuitProver, "
+                            "driver::, live_tool or DriverError::Spawn) without calling "
+                            "the gate, and this arm ACCEPTS an unnamed error — a "
+                            "missing tool's spawn failure would be read as the "
+                            "rejection the test wanted. Either call the gate, or assert "
+                            "the specific rejection variant")
+                )
     return findings
 
 
@@ -911,10 +941,25 @@ EVASIONS: dict[str, tuple[str, str]] = {
         "#[test]\nfn case() {\n"
         '    std::env::set_var("SPARQ_ZK_LIVE_LEDGER", "/dev/null");\n}\n',
     ),
-    "an ungated driver route": (
+    "an ungated driver route that accepts an unnamed error": (
         "evade_driver.rs",
         "use sparq_zk_compose::driver::CircuitProver;\n#[test]\nfn case() {\n"
-        "    let p = CircuitProver::from_crate_root();\n    let _ = p;\n}\n",
+        "    let p = CircuitProver::from_crate_root();\n"
+        "    match verify(&p) {\n        Err(_) => {}\n"
+        '        Ok(()) => panic!("must be rejected"),\n    }\n}\n',
+    ),
+    "an ungated driver route that discards the error": (
+        "evade_driver_iserr.rs",
+        "use sparq_zk_compose::driver::CircuitProver;\n#[test]\nfn case() {\n"
+        "    let p = CircuitProver::from_crate_root();\n"
+        "    assert!(verify(&p).is_err());\n}\n",
+    ),
+    "an ungated driver route with an accepting wildcard arm": (
+        "evade_driver_wild.rs",
+        "use sparq_zk_compose::driver::CircuitProver;\n#[test]\nfn case() {\n"
+        "    let p = CircuitProver::from_crate_root();\n"
+        "    match verify(&p) {\n        Ok(()) => panic!(\"no\"),\n"
+        "        _ => {}\n    }\n}\n",
     ),
     "a branch on a spawn failure": (
         "evade_spawn_arm.rs",
@@ -965,6 +1010,18 @@ def _write_fixture(root: Path) -> None:
         (root / helper).write_text(_SUPPORT, encoding="utf-8")
     (root / "crates/sparq-zk-compose/tests/live.rs").write_text(_GOOD_LIVE, encoding="utf-8")
     (root / "crates/sparq-zk/tests/plain.rs").write_text(_GOOD_PLAIN, encoding="utf-8")
+    # A STRUCTURAL driver-route suite: it builds a CircuitProver but every arm it
+    # accepts names a specific variant and its wildcard arm panics, so a missing
+    # tool's spawn failure fails the test. This must stay CLEAN without an
+    # annotation — the shape crates/sparq-zk-compose/tests/holder_pop_forge.rs has.
+    (root / "crates/sparq-zk-compose/tests/structural_driver.rs").write_text(
+        "use sparq_zk_compose::driver::CircuitProver;\n#[test]\nfn case() {\n"
+        "    let p = CircuitProver::from_crate_root();\n"
+        "    match verify(&p) {\n"
+        "        Err(CheckError::HolderKeyMismatch) => {}\n"
+        '        other => panic!("wrong rejection: {other:?}"),\n    }\n}\n',
+        encoding="utf-8",
+    )
 
 
 def self_test() -> int:

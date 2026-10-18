@@ -311,11 +311,6 @@ fn holder_manifest(
 /// Run a manifest through the sound entry point with the honest fixtures
 /// (trusted K = issuer 1, fresh non-revoked policy, nonce = the issued challenge,
 /// a fresh single-use store) under the supplied `registry` + `holder_policy`.
-// zk-toolchain-gate: allow this file calls verify_manifest through CircuitProver without the
-// gate, so without bb a spawn failure becomes a CheckError that its rejection cases accept.
-// Reported as a separate finding rather than changed here: adding the gate would make every
-// test in the file hard-fail off a toolchain lane, which is a behaviour change to review on
-// its own. The ledger does not cover it, because it never reaches the gate.
 fn verify_under(
     m: &ProofManifest,
     name: &str,
