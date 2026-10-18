@@ -661,6 +661,84 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **sparq-reason (N3):** a quoted formula a backward (`<=`) rule RETURNS now carries the
+  bindings its proof made for it. A formula is opaque to substitution, so a variable the
+  proof produced survived the projection onto the goal — and the substitution that bound it
+  was dropped the moment the projection ended, so the value named a variable nothing would
+  ever bind, and that name — not the term the proof found — became part of the derived
+  fact's term identity, its `why()` string and its `sparq-prov` IRI:
+  `{ ?x :pattern ?f } <= { ( { ?x :p :b } ) list:member ?f }` proved for `:c` returned
+  `{ ?__bw<n>_x :p :b }` where the proof had bound that variable to `:c`, and now returns
+  `{ :c :p :b }`. Only what the PROOF produced is instantiated: a name the caller already
+  binds, and a name the goal itself writes, are the caller's to resolve and are left exactly
+  as they are, so a formula a caller supplies and a formula read from the store come back as
+  they went in. A variable no premise binds keeps its name, which is still the one
+  `__bw<fold>_` fingerprint of the derivation that makes the value its own. A quoted
+  formula's own `@forAll` binder is never bound by a proof, so it is untouched. Three pinned
+  expectations in the backward-naming tests move with this, all of the same shape and all
+  from a leaked name to the term the proof bound; forward rules, the containment operators
+  and every name the chainer mints are unchanged.
+
+- **sparq-reason (N3):** inside a backward (`<=`) proof, a clause, template or pattern that
+  arrives through a VARIABLE — `log:collectAllIn`, `log:forAllIn`, `log:includes`,
+  `log:notIncludes`, `log:supports` — is now resolved and MATCHED as the formula the document
+  configured, instead of being matched with variables in it that nothing could bind. Before
+  this, a containment pattern reached through a variable fell back to the EMPTY pattern unless
+  it was ground AS STORED, which made `log:includes` hold of everything and `log:notIncludes`
+  of nothing; and an aggregation clause was matched with its own variables still free, so it
+  constrained nothing, `log:forAllIn` held VACUOUSLY and fired a rule that must not fire, and
+  `log:collectAllIn` collected against a constraint that was not there. The common
+  "configured pattern" idiom — `:cfg :cl { ?x :type :T }` read through `?cl` and used as a
+  clause — is answered, with the answer a forward rule over the same premise gives.
+
+  Resolution follows a variable's chain until it reaches the VALUE, and then stops. The
+  variables written inside that value belong to it: they are renamed apart under a fresh
+  `__bp.<fold>.` prefix, one prefix per atom evaluation, so names shared between the arriving
+  values of one atom stay shared — `( ?template ?clause ?list )` whose template and clause
+  come from one configured list, and `( ?clause-a ?clause-b )` whose two clauses do. They are
+  never looked up in the live binding: a binding is one flat domain in which a stored
+  formula's own variable and a caller's can be spelled the same, so looking one up would read
+  whichever the document happened to spell, and the answer would turn on a caller's arbitrary
+  choice of variable name. Only the names the ENGINE minted are resolved — a backward
+  application's `__bw<fold>_` renaming, and the `__bp.` names of an outer atom — which is what
+  keeps a clause the rule built out of its own text sharing with the rule that wrote it.
+
+  Stopping at the value is also what keeps a quoted formula OPAQUE. A clause written inline is
+  never spliced with the formula a variable beside it is bound to: a stored formula put into
+  an inline clause position stops being a term compared by identity and becomes a structural
+  PATTERN, so `( { :d :has ?f } { :k0 :ok ?f } ) log:forAllIn` would hold of two formulas that
+  are not the same formula. Slots nothing arrived through are untouched — a `{ … }` the rule
+  wrote, a variable with no binding entry (the ordinary spelling of a `collectAllIn`
+  template), anything that is not a variable — as is the SCOPE of an aggregation, which is the
+  data a clause is searched against rather than a pattern that has to match. A quoted
+  formula's own `@forAll` binder is never renamed, and an arriving `@forAll` formula is still
+  refused as an antecedent, because arrival is classified before anything is substituted.
+  Forward rules are unaffected: their atoms are never standardized apart, so nothing arrives
+  through an engine name there, and the as-stored rule below still governs them.
+
+- **sparq-reason (N3):** the projection of a backward proof onto its goal now resolves INSIDE
+  the value each variable lands on, not just up to it. A term a proof bound can itself hold
+  variables the same substitution binds, and stopping at the first value left them in the
+  derived fact: `{ ?s :pat { ?l :p :b } } <= { ( { ?y :q :r } ) list:member ?l . ?s :val ?y }`
+  returned `{ { ?__bw<n>_y :q :r } :p :b }` with `?y` bound all along, and now returns
+  `{ { :v :q :r } :p :b }`. Only names the engine minted are resolved, so a variable written
+  in data or by a caller is left as it is. The descent carries an occurs check and a cycle
+  guard, so a self-referential binding terminates as it did before. It also follows an ALIAS
+  CHAIN wherever it sits, not only inside a quoted formula: one hop of `?a → ?b → :c` leaves
+  `?b` behind, and in a list or a triple term nothing else resolved it, so
+  `{ ( ?x ?y ) :cl ( ?x ) } <= { :seed :value ?y }` asked as `( ?t ?t ) :cl ?cl` derived
+  NOTHING — the projection declined to bind `?cl` and the fact was dropped — where the same
+  position written `{ :a :q ?x }` derived `{ :a :q :c }`. Both now derive the value.
+
+  A binding whose values share subterms is a DAG, and resolving into it builds that DAG's
+  UNFOLDING, which is exponential in its depth — thirteen links of
+  `( { ?v<n> ?v<n> ?v<n> } ) list:member ?v<n-1>` reach tens of megabytes from a few hundred
+  bytes of N3. The size is therefore computed from the borrowed terms BEFORE the term is
+  built, in time linear in the DAG, and the run is refused past its term-size limit; a descent
+  that runs out of depth is refused rather than returning a quietly truncated term. Ordinary
+  substitution is unchanged — a quoted formula is a value, and a formula a caller passes in
+  still comes back as the caller wrote it.
+
 - **sparq-lws-core (LWS notifications, type index, records):** notifications follow the
   subscriber's current access. A WebSocket notification the subscriber may no longer read is
   not sent and decides no close; an access timer (every 30 seconds, `ACCESS_RECHECK`) closes the

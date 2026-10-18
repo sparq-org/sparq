@@ -116,6 +116,28 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // holds, notIncludes fails), as before; full matching is
 // https://github.com/sparq-org/sparq/issues/6943; write such a pattern in the rule. Each
 // containment matches its blanks afresh (no witness carries over to the next one).
+// Inside a BACKWARD (<=) proof, GH #6943: a clause, template or pattern given through a
+// variable is resolved to the VALUE its chain reaches and then matched as that formula,
+// with the value's own variables renamed apart (__bp.<fold>., one prefix per atom, so
+// slots of one atom still share). So `:cfg :cl { ?x :type :T }` read through ?cl works as
+// a clause, and a containment pattern no longer falls back to the EMPTY pattern (which
+// made includes hold of everything and notIncludes of nothing). Only names the ENGINE
+// minted (__bw<fold>_, __bp.) are substituted: a variable written in data or by a caller
+// belongs to the formula it is written in, so the answer does not turn on what some other
+// rule happens to name a variable — except for a document that itself spells the engine's
+// __bw<digits>_ shape, which is read as the engine's (#6943 case 4). Resolution STOPS at
+// the value — an inline clause is
+// never spliced with a formula bound beside it, which would turn that formula from a term
+// compared by identity into a structural pattern. Untouched: a `{ … }` the rule wrote, a
+// variable with no binding (a collectAllIn template), an aggregation SCOPE (searched data,
+// never required to be ground), a formula's own @forAll binder; an arriving @forAll
+// antecedent is still refused. The projection of a backward answer resolves inside a
+// landed value too, and follows an alias chain wherever it sits — in a list or a triple
+// term as well as in a formula — for engine names only; a DAG-shaped binding unfolds
+// exponentially, so the built size is checked first and the run is refused past its
+// term-size limit. Forward
+// rules are unaffected (their atoms are never renamed), and whether a backward rule should
+// SHARE the way a forward rule does is the open half of GH #6943.
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a
 // value past i64 it would drop is a cut), and string:format's %f renders exact numbers
 // from their digits. Every builtin and virtual relation declares
