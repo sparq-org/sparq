@@ -21,7 +21,7 @@ use crate::field::Fp;
 use crate::partial::HolderId;
 use crate::shamir::ShamirBackend;
 use oxrdf::{NamedNode, Term};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 fn iri_term(iri: &str) -> Term {
     Term::NamedNode(NamedNode::new(iri).unwrap())
@@ -1316,4 +1316,163 @@ fn hidden_an_empty_declared_domain_runs_while_an_undeclared_one_is_refused() {
         eval_bounded_path_hidden(&backend, &undeclared, &form, 8).is_err(),
         "an undeclared domain must be refused, not answered as empty"
     );
+}
+
+// =====================================================================
+// ENGINE-BACKED differential for the declared node domain
+// =====================================================================
+
+/// Build the hidden relation and its DECLARED domain from one turtle document,
+/// the way a federation member would: the edges are the document's triples for
+/// `edge_preds` only, and the domain is every distinct subject/object term of the
+/// WHOLE document — read back out of the real engine, so it is literally the term
+/// set the clear-text oracle's zero-length match ranges over.
+///
+/// This gives the hidden regime the same engine-backed oracle the disclosed-key
+/// suite uses, instead of only the in-file plaintext one: the declared domain is
+/// not this test's guess at `graph_nodes`, it IS `graph_nodes`.
+fn hidden_edges_and_engine_domain(doc: &str, edge_preds: &[&str]) -> PredicatedEdges {
+    use sparq_core::Graph;
+    use sparq_engine::query;
+
+    let full = format!("@prefix ex: <http://ex/> .\n{doc}");
+    let graph = Graph::load_str(&full, "turtle").expect("the fixture parses");
+
+    let mut interner = Interner::new();
+    let mut edges: Vec<PredicatedEdge> = Vec::new();
+    for p in edge_preds {
+        let rows = query(&graph, &format!("SELECT ?s ?o WHERE {{ ?s <{p}> ?o }}"))
+            .unwrap()
+            .rows;
+        for row in rows {
+            // The EDGE regime is IRI-only, so a fixture must not hand a literal
+            // edge endpoint to `edge_preds`.
+            let iri = |slot: &Option<Term>| match slot {
+                Some(Term::NamedNode(n)) => n.as_str().to_string(),
+                other => panic!("edge endpoints must be IRIs, got {other:?}"),
+            };
+            edges.push(PredicatedEdge {
+                predicate: (*p).to_string(),
+                subject: interner.node(&iri(&row[0])),
+                object: interner.node(&iri(&row[1])),
+            });
+        }
+    }
+
+    let mut domain: BTreeMap<String, Term> = BTreeMap::new();
+    for row in query(&graph, "SELECT ?s ?o WHERE { ?s ?p ?o }")
+        .unwrap()
+        .rows
+    {
+        for slot in row.iter().flatten() {
+            domain
+                .entry(format!("{:?}", slot))
+                .or_insert_with(|| slot.clone());
+        }
+    }
+    PredicatedEdges::new(edges)
+        .with_node_domain(domain.into_values())
+        .expect("graph_nodes covers every edge endpoint")
+}
+
+/// The engine's answer for `?a <path> ?b` over the same document, keyed exactly as
+/// [`secure_bounded`] keys its rows (an IRI as its bare string, anything else
+/// through `Display`).
+fn engine_pairs(doc: &str, path: &str) -> BTreeSet<(String, String)> {
+    use sparq_core::Graph;
+    use sparq_engine::query;
+
+    let full = format!("@prefix ex: <http://ex/> .\n{doc}");
+    let graph = Graph::load_str(&full, "turtle").expect("the fixture parses");
+    let q = format!("PREFIX ex: <http://ex/> SELECT ?a ?b WHERE {{ ?a {path} ?b }}");
+    let render = |slot: &Option<Term>| match slot {
+        Some(Term::NamedNode(n)) => n.as_str().to_string(),
+        Some(other) => other.to_string(),
+        None => panic!("an endpoint column must be BOUND"),
+    };
+    query(&graph, &q)
+        .unwrap()
+        .rows
+        .iter()
+        .map(|r| (render(&r[0]), render(&r[1])))
+        .collect()
+}
+
+/// The hidden `p?` against the REAL ENGINE, on a graph whose domain carries two
+/// literals under a predicate the path does not traverse. Same shape as the
+/// disclosed-key reproducer, now through the secure operator.
+#[test]
+fn differential_hidden_optional_equals_the_engine_with_a_literal_domain() {
+    let doc = "ex:a ex:p ex:b . ex:c ex:q \"L\" . ex:d ex:q \"L\"@en .";
+    let edges = hidden_edges_and_engine_domain(doc, &[P]);
+    let backend = ShamirBackend::new_seeded(5, 0x2D07).unwrap();
+
+    let got = secure_bounded(&backend, &edges, &HiddenBoundedPath::optional(P), 16);
+    assert_eq!(
+        got,
+        engine_pairs(doc, "ex:p?"),
+        "the hidden p? must equal the engine's over the same active graph"
+    );
+    for lit in [
+        Term::Literal(oxrdf::Literal::new_simple_literal("L")),
+        Term::Literal(oxrdf::Literal::new_language_tagged_literal("L", "en").unwrap()),
+    ] {
+        let key = lit.to_string();
+        assert!(
+            got.contains(&(key.clone(), key.clone())),
+            "the literal identity pair {key} must be present: {got:?}"
+        );
+    }
+    // 4 IRIs (a,b,c,d) + 2 distinct literals = 6 diagonal pairs, + (a,b) = 7.
+    assert_eq!(got.len(), 7, "{got:?}");
+}
+
+/// The hidden `{0,2}` against the REAL ENGINE, over a two-hop chain plus an
+/// undisclosed predicate contributing further domain terms.
+#[test]
+fn differential_hidden_zero_to_two_equals_the_engine() {
+    let doc = "ex:a ex:p ex:b . ex:b ex:p ex:c . ex:x ex:q ex:y . ex:z ex:q 7 .";
+    let edges = hidden_edges_and_engine_domain(doc, &[P]);
+    let backend = ShamirBackend::new_seeded(5, 0x2D08).unwrap();
+
+    let form = HiddenBoundedPath::range(P, 0, 2);
+    let public =
+        public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), &form)
+            .unwrap();
+    let got = secure_bounded(&backend, &edges, &form, public);
+    assert_eq!(got, engine_pairs(doc, "(ex:p)? | ex:p/ex:p"));
+    // 7 domain terms (a,b,c,x,y,z,7) diagonal + (a,b),(b,c) + (a,c) = 10.
+    assert_eq!(got.len(), 10, "{got:?}");
+}
+
+/// A BLANK NODE in the declared domain yields its identity pair in the hidden
+/// regime too. The blank node is a DOMAIN term only — the edges keep their own
+/// `HiddenNode` keys — and its diagonal entry gets the same constant shared `1`
+/// chain bit as any other, so nothing is compared on a document-scoped label.
+#[test]
+fn hidden_a_blank_node_in_the_declared_domain_yields_its_identity_pair() {
+    let mut interner = Interner::new();
+    let edges = vec![PredicatedEdge {
+        predicate: P.to_string(),
+        subject: interner.node("http://ex/a"),
+        object: interner.node("http://ex/b"),
+    }];
+    let blank = Term::BlankNode(oxrdf::BlankNode::new("b0").unwrap());
+    let edges = PredicatedEdges::new(edges)
+        .with_node_domain(vec![
+            iri_term("http://ex/a"),
+            iri_term("http://ex/b"),
+            blank.clone(),
+        ])
+        .expect("a blank node is a legal DOMAIN term");
+
+    let backend = ShamirBackend::new_seeded(5, 0x2D09).unwrap();
+    let got = secure_bounded(&backend, &edges, &HiddenBoundedPath::optional(P), 16);
+    let key = blank.to_string();
+    assert!(
+        got.contains(&(key.clone(), key)),
+        "the blank node's identity pair must be present: {got:?}"
+    );
+    // (a,a), (b,b), (_:b0,_:b0) and the (a,b) edge.
+    assert_eq!(got.len(), 4, "{got:?}");
 }

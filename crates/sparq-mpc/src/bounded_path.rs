@@ -13,7 +13,7 @@
 //! existing [`crate::join::DisclosedKeyJoin`], then UNION-ing and DEDUP-ing the
 //! endpoint pairs.
 //!
-//! Because the join key on every hop is a disclosed global IRI, the whole
+//! Because the EDGE join key on every hop is a disclosed global IRI, the whole
 //! computation runs **OUTSIDE the cryptographic core** (architecture convention
 //! #4; design §2.1 DISCLOSED regime): it is a plaintext fold of equi-joins, the
 //! *exact* construction the `differential_three_holder_chain_equals_union` test
@@ -24,8 +24,15 @@
 //!
 //! ### Regime boundary (stated, not hidden) — disclosed-key ONLY
 //!
-//! This is the **DISCLOSED-KEY** regime: every endpoint and every intermediate
-//! node `?z_i` on the chain is a disclosed global IRI, so nothing enters an MPC.
+//! This is the **DISCLOSED-KEY** regime: every key the unroller joins EDGES on is
+//! a disclosed global IRI, so nothing enters an MPC. That is a statement about the
+//! edge relations ([`DisclosedEdges::from_holder_edges`] enforces it): a chain
+//! hop's intermediate `?z_i` is an edge endpoint, hence an IRI. It is NOT a claim
+//! about the terms that can REACH a result endpoint or a Sequence midpoint — a
+//! zero-length arm contributes `(x, x)` for every term of the DECLARED node
+//! domain, which may be a literal or a blank node, and those rows then compose
+//! through a Sequence like any other (see
+//! [`DisclosedEdges::with_node_domain`]).
 //! It does **NOT** support the HIDDEN-intermediate regime (where the `?z_i` are
 //! secret and the per-hop match must stay secret-shared via `secure_equal` /
 //! `degree_reduce` / `oblivious_set_output`). That is the separate, cryptographic
@@ -290,7 +297,7 @@ const INTERMEDIATE_PREFIX: &str = "__pp_z";
 /// PUBLIC node domain, which these per-predicate edge sets do NOT carry — see
 /// [`DisclosedEdges::with_node_domain`]. That domain is a set of `Term`s and may
 /// contain literals; only the EDGE endpoints are restricted to global IRIs.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DisclosedEdges {
     /// `(predicate IRI string, disclosed (?__pp_edge_s, ?__pp_edge_o) edge partial)`.
     by_predicate: Vec<(String, PartialResult)>,
@@ -298,6 +305,36 @@ pub struct DisclosedEdges {
     /// if any. Deduped and canonically ordered; any `Term`, literals included.
     /// `None` = not declared, and a form with `min == 0` is then refused.
     node_domain: Option<Vec<Term>>,
+}
+
+/// `Debug` prints SIZES only — the per-predicate row counts and the declared
+/// domain's size — not the terms.
+///
+/// Nothing here is secret: this is the disclosed-key regime, every edge endpoint
+/// and every declared node is a term the federation published, and the sibling
+/// [`crate::hidden_path::PredicatedEdges`] redacts for a reason this type does
+/// not share. It is hygiene: a derived `Debug` on an edge set spills the whole
+/// federated relation into any log line, panic message or `assert_eq!` failure
+/// that happens to render one, which is noise at best. The sizes are what a
+/// `Debug` is actually wanted for here.
+impl std::fmt::Debug for DisclosedEdges {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let by_predicate: Vec<String> = self
+            .by_predicate
+            .iter()
+            .map(|(pred, part)| format!("{}: {} edge(s)", pred, part.rows.len()))
+            .collect();
+        f.debug_struct("DisclosedEdges")
+            .field("by_predicate", &by_predicate)
+            .field(
+                "declared_node_domain",
+                &match &self.node_domain {
+                    Some(d) => format!("{} term(s)", d.len()),
+                    None => "<none declared>".to_string(),
+                },
+            )
+            .finish()
+    }
 }
 
 impl DisclosedEdges {
@@ -410,17 +447,25 @@ impl DisclosedEdges {
     ///
     /// ## The term type: `Term`, not `NamedNode`
     ///
-    /// The domain is a set of [`Term`]s, **independent of the IRI-only edge
-    /// regime**. The disclosed-key *join* requires global-IRI endpoints — blank
-    /// node labels are document-scoped, so joining on them across holders would be
-    /// unsound, and that check stays on
-    /// [`DisclosedEdges::from_holder_edges`]. But a zero-length arm performs NO
-    /// join: it emits `(x, x)`, which is sound for any term. The engine's domain
-    /// contains literals (every object of a triple whose object is a literal), so
+    /// The domain is a set of [`Term`]s, **independent of the IRI-only EDGE
+    /// regime**. The disclosed-key *edge* join requires global-IRI endpoints —
+    /// blank node labels are document-scoped, so joining EDGES on them across
+    /// holders would be unsound, and that check stays on
+    /// [`DisclosedEdges::from_holder_edges`]. The engine's domain contains
+    /// literals (every object of a triple whose object is a literal), so
     /// restricting the declaration to `NamedNode` made the true domain
     /// inexpressible and silently lost those `(x, x)` rows. A [`PartialResult`]
     /// row is `Vec<Option<Term>>`, so a literal endpoint needs nothing special to
     /// carry.
+    ///
+    /// A diagonal row is not join-free, though: inside a [`PathForm::Sequence`]
+    /// the `(x, x)` rows ARE joined, by [`DisclosedKeyJoin`] on the term itself.
+    /// That is sound for a non-IRI term precisely BECAUSE the edges are IRI-only:
+    /// a literal or blank-node `(x, x)` row can only ever meet another diagonal
+    /// row built from the same declared term, never an edge endpoint, so no
+    /// cross-holder identification is made on a document-scoped or
+    /// non-global key. The declared term is the caller's own, single,
+    /// federation-wide name for that node.
     ///
     /// ## The precondition — what the caller is trusted for
     ///
@@ -434,10 +479,31 @@ impl DisclosedEdges {
     /// and an extra node invents an `(x, x)` answer the engine does not. Both are
     /// wrong answers this method cannot detect.
     ///
-    /// One consequence worth stating: the engine matches a **bound** endpoint
-    /// against itself even when that constant does not occur in the graph. To
-    /// reproduce that, the caller includes the constant in the declared domain.
-    /// No API change is needed for it.
+    /// ### Reproducing the engine's self-match for an ABSENT bound endpoint
+    ///
+    /// The engine matches a **bound** endpoint against itself even when that
+    /// constant occurs in no triple (`sparq-engine`'s `exec/bgp.rs` skips the
+    /// node-membership check for a concrete term). A caller can reproduce that by
+    /// including the constant in the declared domain — no API change is needed.
+    ///
+    /// **This is correct only for a SINGLE repetition whose bound endpoint is that
+    /// constant, declared per query.** It is a deliberate per-query WIDENING of the
+    /// domain, taken with its consequence stated, not an exception to the
+    /// "exactly the domain" precondition above — the widened set is no longer the
+    /// active graph's domain, and every arm of the form sees it.
+    ///
+    /// So it OVER-answers as soon as two or more NULLABLE arms are chained in a
+    /// [`PathForm::Sequence`], because the Sequence's midpoint ranges over the
+    /// declared domain. Concretely, on `ex:a ex:p ex:b . ex:b ex:q ex:c` with the
+    /// active nodes plus `ex:absent` declared, `Sequence[p{0,1}, q{0,1}]` yields
+    /// `(absent, absent)` — it composes the two diagonals through the midpoint
+    /// `absent` — while the engine's `ex:absent ex:p?/ex:q? ?b` returns NOTHING:
+    /// its inner `q?` arm sees a VARIABLE midpoint, so that arm ranges over the
+    /// graph's own nodes, which do not include `ex:absent`. Pinned by
+    /// `an_absent_constant_over_answers_a_nested_nullable_sequence`.
+    ///
+    /// The whole HIDDEN regime is unaffected: [`crate::hidden_path`] evaluates a
+    /// single repetition and has no Sequence form at all.
     ///
     /// Duplicates are collapsed, and the stored order is canonical, so the
     /// identity pairs do not depend on the order the caller listed its nodes in.
@@ -518,8 +584,9 @@ impl DisclosedEdges {
             MpcError::Protocol(
                 "bounded path with min == 0 (the zero-length arm of {0,k} / p? / a bounded p*) \
                  needs the federation's PUBLIC node domain, which the disclosed per-predicate \
-                 edge sets do not carry: SPARQL 1.1 §18.4 binds the zero-length match to every \
-                 term in the active graph, including terms occurring only in triples of \
+                 edge sets do not carry: SPARQL 1.1 §18.4 binds the zero-length match to \
+                 every distinct SUBJECT or OBJECT term of the active graph, including terms \
+                 occurring only in triples of \
                  predicates this path does not traverse or that no holder disclosed. Refusing \
                  rather than drawing the identity pairs from the disclosed endpoints alone, \
                  which would silently under-answer. Declare the domain with \
@@ -536,13 +603,16 @@ impl DisclosedEdges {
 ///
 /// This is the increment-#1 deliverable: a CRYPTO-FREE unroll-and-fold. No MPC
 /// primitive runs (no secret sharing, no `secure_equal`, no `CommCounter` is
-/// touched) — every hop is a [`DisclosedKeyJoin`] over disclosed global IRIs,
+/// touched) — every EDGE hop is a [`DisclosedKeyJoin`] over disclosed global IRIs,
 /// exactly as the `differential_three_holder_chain_equals_union` test does for a
 /// single chain. The realized hop length is not separately opened or encoded in
 /// the result (design §1.2).
 ///
-/// Regime: DISCLOSED-KEY ONLY (endpoints + intermediates are disclosed global
-/// IRIs). The HIDDEN-intermediate regime is sq-py8h.2 and is NOT handled here.
+/// Regime: DISCLOSED-KEY ONLY — every key EDGES are joined on, and so every
+/// chain intermediate, is a disclosed global IRI. A result endpoint or a Sequence
+/// midpoint may additionally be a literal or blank node contributed by a
+/// zero-length arm over the declared node domain. The HIDDEN-intermediate regime
+/// is sq-py8h.2 and is NOT handled here.
 pub fn eval_bounded_path_disclosed(
     edges: &DisclosedEdges,
     form: &PathForm,

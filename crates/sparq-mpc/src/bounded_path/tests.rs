@@ -43,7 +43,7 @@
 
 use super::*;
 use crate::holder::Holder;
-use oxrdf::{Literal, Term};
+use oxrdf::{BlankNode, Literal, Term};
 use sparq_core::Graph;
 use sparq_engine::query;
 use std::collections::BTreeMap;
@@ -1597,10 +1597,16 @@ fn an_absent_bound_endpoint_self_matches_when_declared() {
     let u = union_graph(&[h1]);
     let q = "PREFIX ex: <http://ex/> SELECT ?b WHERE { ex:absent ex:p? ?b }";
     let res = query(&u, q).unwrap();
+    // Compare the TERM, not just the row count: a single row binding something
+    // else would be a different behaviour entirely, and the count alone would not
+    // notice.
     assert_eq!(
-        res.rows.len(),
-        1,
-        "the engine self-matches the bound endpoint"
+        res.rows
+            .iter()
+            .map(|r| r[0].as_ref().map(|t| format!("{t:?}")))
+            .collect::<Vec<_>>(),
+        vec![Some(absent.clone())],
+        "the engine binds ?b to ex:absent itself, nothing else"
     );
 
     let with_absent = base
@@ -1621,5 +1627,206 @@ fn an_absent_bound_endpoint_self_matches_when_declared() {
     assert!(
         !federated_pairs(&without, &form).contains(&(absent.clone(), absent)),
         "and leaving it out does not invent it"
+    );
+}
+
+/// THE scope limit on the advice above: a per-query widening of the domain with
+/// an absent constant OVER-answers as soon as two or more NULLABLE arms are
+/// chained in a [`PathForm::Sequence`].
+///
+/// `Sequence[p{0,1}, q{0,1}]` composes the two diagonals through a midpoint that
+/// ranges over the DECLARED domain, so the widened `ex:absent` reaches itself via
+/// itself and `(absent, absent)` appears. The engine's `ex:absent ex:p?/ex:q? ?b`
+/// returns NOTHING: its inner `q?` arm sees a VARIABLE midpoint, so that arm
+/// ranges over the graph's own nodes (`graph_nodes`), which do not contain
+/// `ex:absent`. This test pins both halves, so the doc's caveat is backed rather
+/// than asserted.
+#[test]
+fn an_absent_constant_over_answers_a_nested_nullable_sequence() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:q ex:c .";
+    let preds: &[&str] = &["http://ex/p", "http://ex/q"];
+    let absent = format!("{:?}", Term::from(nn("http://ex/absent")));
+
+    // The ENGINE side, both shapes: the bound-endpoint query binds nothing, and
+    // the variable-endpoint path never names ex:absent either.
+    let u = union_graph(&[h1]);
+    let bound = query(
+        &u,
+        "PREFIX ex: <http://ex/> SELECT ?b WHERE { ex:absent ex:p?/ex:q? ?b }",
+    )
+    .unwrap();
+    assert!(
+        bound.rows.is_empty(),
+        "the engine's inner q? sees a VARIABLE midpoint, so an absent constant \
+         cannot traverse it: {:?}",
+        bound.rows
+    );
+    let engine = clear_text_pairs(&[h1], "ex:p?/ex:q?");
+    assert!(!engine.contains(&(absent.clone(), absent.clone())));
+
+    // The MPC side with the widened domain: (absent, absent) appears.
+    let widened = disclosed_edges_only(&[(h1, preds)])
+        .with_node_domain(
+            active_graph_nodes(&[h1])
+                .into_iter()
+                .chain([t(nn("http://ex/absent"))]),
+        )
+        .unwrap();
+    let form = PathForm::Sequence(vec![
+        PathForm::range(nn("http://ex/p"), 0, 1),
+        PathForm::range(nn("http://ex/q"), 0, 1),
+    ]);
+    let over = federated_pairs(&widened, &form);
+    assert!(
+        over.contains(&(absent.clone(), absent.clone())),
+        "the widened constant reaches itself through the Sequence midpoint: {over:?}"
+    );
+    assert_eq!(
+        &over - &engine,
+        BTreeSet::from([(absent.clone(), absent)]),
+        "and (absent, absent) is the ONLY over-answer — the widening adds nothing else"
+    );
+
+    // Without the widening the two sides agree exactly, so the over-answer is
+    // caused by the widening and by nothing else in the nested form.
+    let exact = disclosed_edges_only(&[(h1, preds)])
+        .with_node_domain(active_graph_nodes(&[h1]))
+        .unwrap();
+    assert_eq!(
+        federated_pairs(&exact, &form),
+        engine,
+        "an exactly-declared domain matches the engine on the same nested form"
+    );
+}
+
+/// A BLANK NODE in the active graph is a subject/object term, so it is in the
+/// zero-length domain and a `{0,k}` arm must bind its `(x,x)` pair. The EDGE
+/// relations stay IRI-only — `from_holder_edges` still refuses a blank-node
+/// endpoint — so the blank node reaches the answer only through the declaration,
+/// and its `(x,x)` row can only ever meet another diagonal row for the same
+/// declared term.
+#[test]
+fn a_blank_node_in_the_declared_domain_yields_its_identity_pair() {
+    let h1 = "ex:a ex:p ex:b .";
+    let b = Term::BlankNode(BlankNode::new("b0").unwrap());
+    let edges = disclosed_edges_only(&[(h1, &["http://ex/p"])])
+        .with_node_domain(active_graph_nodes(&[h1]).into_iter().chain([b.clone()]))
+        .expect("a blank node is a legal DOMAIN term");
+
+    let form = PathForm::range(nn("http://ex/p"), 0, 1);
+    let got = federated_pairs(&edges, &form);
+    let key = format!("{b:?}");
+    assert!(
+        got.contains(&(key.clone(), key)),
+        "the blank node's identity pair must be present: {got:?}"
+    );
+    // (a,a), (b,b), (_:b0,_:b0) and the (a,b) edge.
+    assert_eq!(got.len(), 4, "{got:?}");
+
+    // The EDGE regime is untouched: a blank-node edge endpoint is still refused.
+    let bad = PartialResult {
+        holder: HolderId::new("h0"),
+        vars: vec![Variable::new_unchecked("s"), Variable::new_unchecked("o")],
+        rows: vec![vec![Some(b.clone()), Some(Term::from(nn("http://ex/x")))]],
+    };
+    let err = DisclosedEdges::from_holder_edges([(nn("http://ex/p"), bad)]).unwrap_err();
+    assert!(matches!(err, MpcError::Protocol(_)));
+}
+
+/// A LITERAL through a nested nullable sequence `p?/p?`, against the engine. The
+/// literal enters only via the declared domain, and the two diagonals compose
+/// through it — so this exercises a non-IRI term as a Sequence MIDPOINT, which the
+/// `DisclosedKeyJoin` keys on.
+#[test]
+fn differential_literal_through_a_nested_nullable_sequence() {
+    let h1 = "ex:a ex:p ex:b .";
+    let h2 = "ex:c ex:q \"L\" .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"]), (h2, &[])]);
+
+    let form = PathForm::Sequence(vec![
+        PathForm::range(nn("http://ex/p"), 0, 1),
+        PathForm::range(nn("http://ex/p"), 0, 1),
+    ]);
+    let got = federated_pairs(&edges, &form);
+    assert_eq!(got, clear_text_pairs(&[h1, h2], "ex:p?/ex:p?"));
+
+    let lit = format!("{:?}", Term::from(Literal::new_simple_literal("L")));
+    assert!(
+        got.contains(&(lit.clone(), lit)),
+        "the literal must survive BOTH nullable arms, i.e. the join on it: {got:?}"
+    );
+    // 4 identity pairs (a, b, c, "L") + (a,b) reached by either arm = 5.
+    assert_eq!(got.len(), 5, "{got:?}");
+}
+
+/// Two literals with the SAME lexical form but different datatypes are distinct
+/// RDF terms, as are a canonical and a non-canonical lexical form of the same
+/// numeric value. The declared domain and the diagonal must keep them apart
+/// exactly as the engine does — the dedup key is the term, not the lexical form
+/// and not the value.
+#[test]
+fn differential_literal_domain_keeps_equal_lexical_and_non_canonical_forms_apart() {
+    let h1 = "ex:a ex:p ex:b .";
+    // Same lexical form "1", three datatypes; plus 1 / 01 / 1.0, which are
+    // distinct TERMS although xsd:integer 1 == xsd:decimal 1.0 by VALUE.
+    let h2 = "ex:c ex:q \"1\" . \
+              ex:c ex:q \"1\"^^<http://www.w3.org/2001/XMLSchema#integer> . \
+              ex:c ex:q \"1\"^^<http://www.w3.org/2001/XMLSchema#string> . \
+              ex:c ex:q \"01\"^^<http://www.w3.org/2001/XMLSchema#integer> . \
+              ex:c ex:q \"1.0\"^^<http://www.w3.org/2001/XMLSchema#decimal> .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"]), (h2, &[])]);
+
+    let form = PathForm::range(nn("http://ex/p"), 0, 1);
+    let got = federated_pairs(&edges, &form);
+    assert_eq!(
+        got,
+        clear_text_pairs(&[h1, h2], "ex:p?"),
+        "the engine and the unroll must agree on which literals are distinct terms"
+    );
+
+    // How many distinct terms the engine itself sees, so the count below is the
+    // engine's verdict rather than this test's guess.
+    let distinct = active_graph_nodes(&[h1, h2]).len();
+    assert_eq!(
+        got.len(),
+        distinct + 1,
+        "one identity pair per distinct domain term, plus the (a,b) edge: {got:?}"
+    );
+    // "1" and "1"^^xsd:string are the same term in RDF 1.1; the others are not,
+    // so the five object literals above collapse to four distinct terms.
+    assert_eq!(distinct, 3 + 4, "a, b, c plus four distinct literals");
+}
+
+/// `DisclosedEdges`' `Debug` prints SIZES, not terms. Nothing here is secret —
+/// this is the disclosed-key regime — so this is hygiene, not redaction: a derived
+/// `Debug` spilled the whole federated edge relation and the declared domain into
+/// any log line or `assert_eq!` failure that rendered one.
+#[test]
+fn disclosed_edges_debug_prints_sizes_not_terms() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c .";
+    let declared = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let shown = format!("{declared:?}");
+    assert!(
+        shown.contains("http://ex/p: 2 edge(s)") && shown.contains("3 term(s)"),
+        "the sizes must print: {shown}"
+    );
+    // The PREDICATE is public and part of the plan, so it stays; the endpoint and
+    // domain TERMS do not appear.
+    for term in ["ex/a", "ex/b", "ex/c"] {
+        assert!(
+            !shown.contains(term),
+            "a term reached the rendering: {shown}"
+        );
+    }
+    // `{:#?}` is a different path through `Formatter`, so check it too.
+    let pretty = format!("{declared:#?}");
+    for term in ["ex/a", "ex/b", "ex/c"] {
+        assert!(!pretty.contains(term), "a term reached {{:#?}}: {pretty}");
+    }
+
+    let undeclared = disclosed_edges_only(&[(h1, &["http://ex/p"])]);
+    assert!(
+        format!("{undeclared:?}").contains("none declared"),
+        "an undeclared domain must say so rather than print a size"
     );
 }

@@ -137,8 +137,9 @@
 //!   [`public_bounded_candidate_pair_bound`] — functions of `|E|` and the public
 //!   hop counts — whenever `B` reaches them, and the exact-count projection is not
 //!   run on that branch, so `D` stays out of the DECISION (the run itself still
-//!   materialises `D` candidates, as the schedule above says). A caller that chooses a `B` BELOW the public
-//!   bound puts `D` in the RESULT of the call as well: that branch accepts exactly
+//!   materialises `D` candidates, as the schedule above says). A caller that
+//!   chooses a `B` BELOW the public bound puts `D` in the RESULT of the call as
+//!   well: that branch accepts exactly
 //!   when `D <= B`, and a refusal draws nothing, so repeated calls with different
 //!   `B` recover `D` exactly by binary search. Given the schedule above that is no
 //!   new disclosure, but the public-only error text must not be read as hiding it.
@@ -437,7 +438,8 @@ fn endpoint_key(a: &Term, b: &Term) -> String {
 
 /// Build one [`Candidate`] per DISTINCT disclosed endpoint pair, OR-folding the
 /// chain bits of every edge-tuple that reaches that pair into one secret-shared
-/// connected-bit (design §2.5 — set semantics, realized length not separately opened or encoded in the result).
+/// connected-bit (design §2.5 — set semantics; the realized length is not
+/// separately opened or encoded in the result).
 ///
 /// Iterates the `|E|^k` edge-tuples lexicographically, computes each tuple's chain
 /// bit ([`tuple_chain_bit`]), and accumulates it into the connected-bit for the
@@ -1013,8 +1015,9 @@ impl PredicatedEdges {
     /// and **literals** included, predicate-only terms excluded, exactly as the
     /// clear-text engine's `graph_nodes` computes it. The domain is accordingly a
     /// set of [`Term`]s, independent of the regime applied to the edges
-    /// themselves: a zero-length arm performs no join, it emits `(x, x)`, which is
-    /// sound for any term, and a [`crate::partial::PartialResult`] row is
+    /// themselves: the diagonal is built from the DISCLOSED term, with a constant
+    /// shared `1` chain bit and no secure equality, so a non-IRI term is never a
+    /// key anything is compared on. A [`crate::partial::PartialResult`] row is
     /// `Vec<Option<Term>>`, so a literal endpoint needs nothing special to carry.
     /// The edges in this relation are only those the
     /// holders contributed for the path's own alternation predicates, so their
@@ -1048,10 +1051,26 @@ impl PredicatedEdges {
     /// returns, and an extra node invents an `(x, x)` answer the engine does not.
     /// Both are wrong answers this method cannot detect.
     ///
-    /// One consequence worth stating: the engine matches a **bound** endpoint
-    /// against itself even when that constant does not occur in the graph. To
-    /// reproduce that, the caller includes the constant in the declared domain.
-    /// No API change is needed for it.
+    /// ### Reproducing the engine's self-match for an ABSENT bound endpoint
+    ///
+    /// The engine matches a **bound** endpoint against itself even when that
+    /// constant occurs in no triple (`sparq-engine`'s `exec/bgp.rs` skips the
+    /// node-membership check for a concrete term). A caller can reproduce that by
+    /// including the constant in the declared domain — no API change is needed.
+    ///
+    /// It is a deliberate per-query WIDENING of the domain, not an exception to
+    /// the "exactly the domain" precondition above: the widened set is no longer
+    /// the active graph's domain, so it is declared for THAT query and the
+    /// consequence is accepted knowingly. The scope in which it is correct is a
+    /// SINGLE repetition whose bound endpoint is that constant — which is the
+    /// whole of THIS regime, since [`HiddenBoundedPath`] is one repetition and
+    /// this module has no sequence form at all.
+    ///
+    /// The caveat therefore belongs to the disclosed-key module, whose
+    /// [`crate::bounded_path::PathForm::Sequence`] can chain two or more nullable
+    /// arms: the Sequence's midpoint then ranges over the declared domain and the
+    /// widened constant over-answers. See
+    /// [`crate::bounded_path::DisclosedEdges::with_node_domain`].
     ///
     /// Duplicates are collapsed and the stored order is canonical, so the
     /// diagonal does not depend on the order the caller listed its nodes in.
@@ -1140,8 +1159,9 @@ fn zero_length_domain_err() -> MpcError {
     MpcError::Protocol(
         "hidden bounded path with min == 0 (the zero-length arm of {0,k} / p?) needs the \
          active graph's PUBLIC node domain, which the edge relation does not carry: SPARQL \
-         1.1 §18.4 binds the zero-length match to every term in the active graph, including \
-         terms occurring only in triples of predicates this path does not traverse. Refusing \
+         1.1 §18.4 binds the zero-length match to every distinct SUBJECT or OBJECT term of \
+         the active graph, including terms occurring only in triples of predicates this path \
+         does not traverse. Refusing \
          rather than drawing the reflexive diagonal from the edge endpoints alone, which \
          would silently under-answer. Declare the domain with \
          PredicatedEdges::with_node_domain, or use a form with min >= 1."
@@ -1239,8 +1259,9 @@ fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> 
 /// [`tuple_chain_bit`]) and (b) a PUBLIC predicate-match gate per hop
 /// (`e_i.predicate == chain[i]`). The predicate gate is a fully public decision: a
 /// tuple whose predicates do not match the alternation branch contributes a
-/// constant shared `0` (no secure multiplication at all) and is OR-folded away. The intermediate node KEYS are fed to the secure
-/// equality but never reconstructed.
+/// constant shared `0` (no secure multiplication at all) and is OR-folded away.
+/// The intermediate node KEYS are fed to the secure equality but never
+/// reconstructed by the arithmetic.
 fn predicated_tuple_chain_bit(
     backend: &ShamirBackend,
     source: &mut dyn DistributedRandomness,
@@ -1466,7 +1487,8 @@ fn build_bounded_candidates(
 /// `vars == [?__pp_a, ?__pp_b]`. Covers `{1,k}`, `{0,k}` (reflexive), `p?` (`{0,1}`),
 /// and per-hop alternation `(p_1 | … | p_a)`, built as a union of fixed-length
 /// predicate chains over the SAME secret edge set, OR-folded to one connected-bit per
-/// distinct endpoint pair (set semantics; realized length not separately opened or encoded in the result, design
+/// distinct endpoint pair (set semantics; the realized length is not separately
+/// opened or encoded in the result, design
 /// §1.2/§2.2–§2.5). Reuses the exactly-`k` chain's secret-shared equality + AND/OR
 /// chaining and the landed oblivious output path verbatim.
 ///
