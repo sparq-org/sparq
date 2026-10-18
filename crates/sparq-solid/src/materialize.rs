@@ -16,13 +16,14 @@
 //! reference, and the tests below assert the two produce the SAME `<urn:sparq:auth>`
 //! triple set on the WAC/ACP fixtures.
 
+use crate::budget::{default_auth_budget, AuthBudget, DecisionWork};
 use crate::loader::{assemble_input_ids, strip_reserved_graphs, System};
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_GRAPH, AUTH_NS};
 use oxrdf::{NamedNode, Term};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
-use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval_with_limits, CompiledRuleSet};
+use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval_charged, CompiledRuleSet};
 use sparq_reason::{ClosureLimits, NegationCycles};
 use std::sync::OnceLock;
 // `std::time::Instant` is unusable on `wasm32-unknown-unknown` — `Instant::now()`
@@ -56,18 +57,40 @@ pub enum AuthAllowance {
     RoundsOrFacts,
     /// `max_term_bytes`: a term the rules would derive.
     TermBytes,
+    /// `max_document_bytes` or `max_input_bytes`: the bytes one control document, or all
+    /// of them together, contribute to the reasoning INPUT ([`crate::AuthBudget`]).
+    InputBytes,
+    /// `max_input_facts`: the facts of the assembled reasoning input.
+    InputFacts,
+    /// `max_input_term_bytes`: a term of the reasoning INPUT, as opposed to
+    /// [`AuthAllowance::TermBytes`], which is one the rules derive.
+    InputTermBytes,
+    /// `max_resource_iri_bytes` or `max_resource_path_depth`: the length or the container
+    /// depth of one resource IRI the input's resource enumeration would walk
+    /// ([`crate::AuthBudget`]).
+    ResourceIri,
+    /// `max_decision_join_rows` or `max_decision_facts`: the work of ALL the closures of
+    /// one authorization materialization added up, which the per-closure [`ClosureLimits`]
+    /// cannot bound.
+    DecisionWork,
     /// An allowance this crate does not name individually (a newer reasoner cut).
     Unspecified,
 }
 
 impl AuthAllowance {
-    /// The [`ClosureLimits`] field(s) this kind stands for, for a message.
+    /// The [`ClosureLimits`] or [`crate::AuthBudget`] field(s) this kind stands for, for a
+    /// message.
     pub fn limit_name(self) -> &'static str {
         match self {
             AuthAllowance::TotalJoinRows => "max_total_join_rows",
             AuthAllowance::JoinRows => "max_join_rows",
             AuthAllowance::RoundsOrFacts => "max_rounds/max_facts",
             AuthAllowance::TermBytes => "max_term_bytes",
+            AuthAllowance::InputBytes => "max_document_bytes/max_input_bytes",
+            AuthAllowance::InputFacts => "max_input_facts",
+            AuthAllowance::InputTermBytes => "max_input_term_bytes",
+            AuthAllowance::ResourceIri => "max_resource_iri_bytes/max_resource_path_depth",
+            AuthAllowance::DecisionWork => "max_decision_join_rows/max_decision_facts",
             AuthAllowance::Unspecified => "an unnamed limit",
         }
     }
@@ -79,6 +102,11 @@ impl AuthAllowance {
             AuthAllowance::JoinRows => "join-rows",
             AuthAllowance::RoundsOrFacts => "rounds-or-facts",
             AuthAllowance::TermBytes => "term-bytes",
+            AuthAllowance::InputBytes => "input-bytes",
+            AuthAllowance::InputFacts => "input-facts",
+            AuthAllowance::InputTermBytes => "input-term-bytes",
+            AuthAllowance::ResourceIri => "resource-iri",
+            AuthAllowance::DecisionWork => "decision-work",
             AuthAllowance::Unspecified => "unspecified",
         }
     }
@@ -91,6 +119,11 @@ impl AuthAllowance {
             AuthAllowance::JoinRows,
             AuthAllowance::RoundsOrFacts,
             AuthAllowance::TermBytes,
+            AuthAllowance::InputBytes,
+            AuthAllowance::InputFacts,
+            AuthAllowance::InputTermBytes,
+            AuthAllowance::ResourceIri,
+            AuthAllowance::DecisionWork,
         ] {
             if kind.tag() == tag {
                 return kind;
@@ -110,7 +143,8 @@ impl AuthAllowance {
 /// allowance has to be raised ([`crate::PodStore::set_auth_limits`]) before they will be.
 ///
 /// Read it with [`auth_allowance_refusal`] rather than by matching this text: every refusal
-/// also carries a machine-readable kind tag, which that function finds ANYWHERE in the
+/// also carries a machine-readable kind tag directly after this wording, and that function
+/// finds the pair ANYWHERE in the
 /// message. This crate's materialization errors are `String`s with no error chain to walk,
 /// and the write paths wrap a failed rebuild's error in their own sentence, so a refusal
 /// must be recognizable from the middle of a longer message — not only as a prefix.
@@ -125,7 +159,10 @@ const AUTH_ALLOWANCE_TAG: &str = "[allowance=";
 /// `err` is an error from any `materialize_*` entry point, free function or
 /// [`crate::PodStore`] method, INCLUDING one a write path wrapped in its own sentence (an
 /// update whose rebuild was refused, a rollback that could not rebuild): the kind tag is
-/// read wherever it appears, so wrapping does not hide it.
+/// read wherever it appears, so wrapping does not hide it — but only where the refusal
+/// WORDING immediately precedes it, which is the shape every refusal is written in, so a
+/// message that merely quotes the tag literal (inside a pod's own IRI, say) is not read as
+/// a refusal.
 ///
 /// # Examples
 ///
@@ -133,10 +170,22 @@ const AUTH_ALLOWANCE_TAG: &str = "[allowance=";
 /// assert_eq!(sparq_solid::auth_allowance_refusal("some other error"), None);
 /// ```
 pub fn auth_allowance_refusal(err: &str) -> Option<AuthAllowance> {
-    let at = err.find(AUTH_ALLOWANCE_TAG)? + AUTH_ALLOWANCE_TAG.len();
-    let rest = &err[at..];
-    let end = rest.find(']')?;
-    Some(AuthAllowance::from_tag(&rest[..end]))
+    // Anchored to the shape `allowance_refusal` writes — the refusal wording, one space,
+    // then the tag — rather than to the tag alone. A wrapping sentence keeps that pair
+    // adjacent wherever it puts it, so a wrapped refusal is still found.
+    for (at, _) in err.match_indices(AUTH_ALLOWANCE_TAG) {
+        if !err[..at]
+            .strip_suffix(' ')
+            .is_some_and(|before| before.ends_with(AUTH_ALLOWANCE_REFUSAL))
+        {
+            continue;
+        }
+        let rest = &err[at + AUTH_ALLOWANCE_TAG.len()..];
+        if let Some(end) = rest.find(']') {
+            return Some(AuthAllowance::from_tag(&rest[..end]));
+        }
+    }
+    None
 }
 
 /// Whether `err` is a refusal by the reasoning allowance rather than any other
@@ -224,13 +273,37 @@ const AUTH_MAX_TOTAL_JOIN_ROWS: usize = 4_000_000;
 ///
 /// The tag is added here, at the one seam every authorization closure in this crate goes
 /// through, so no stratum can return an untagged allowance refusal.
+///
+/// `work` is the materialization's whole-decision ledger: what this closure charged is
+/// added to it and the aggregate re-checked, because `limits` applies per CLOSURE and a
+/// materialization runs several (three ACP strata, five ODRL ones) — see
+/// [`crate::AuthBudget`].
 pub(crate) fn auth_eval(
     dict: &mut Dict,
     facts: &[[sparq_core::dict::Id; 3]],
     rules: &CompiledRuleSet,
     limits: ClosureLimits,
+    work: &mut DecisionWork,
 ) -> Result<Vec<[sparq_core::dict::Id; 3]>, String> {
-    eval_with_limits(dict, facts, rules, limits).map_err(tag_allowance_refusal)
+    let (closure, charge) =
+        eval_charged(dict, facts, rules, limits).map_err(tag_allowance_refusal)?;
+    work.charge(charge)?;
+    Ok(closure)
+}
+
+/// An authorization refusal of kind `kind` carrying `detail`: the same
+/// [`AUTH_ALLOWANCE_REFUSAL`] wording and machine-readable kind tag
+/// [`auth_allowance_refusal`] reads off a reasoning-allowance cut, so the input and
+/// whole-decision budgets ([`crate::AuthBudget`]) join ONE refusal family rather than
+/// adding a second one a caller has to learn.
+pub(crate) fn allowance_refusal(kind: AuthAllowance, detail: &str) -> String {
+    format!(
+        "{} {}{}]: {}",
+        AUTH_ALLOWANCE_REFUSAL,
+        AUTH_ALLOWANCE_TAG,
+        kind.tag(),
+        detail
+    )
 }
 
 /// `e` tagged as an allowance refusal ([`AUTH_ALLOWANCE_REFUSAL`] plus the kind
@@ -382,14 +455,16 @@ pub struct MaterializeStats {
 /// # Ok::<(), String>(())
 /// ```
 pub fn materialize_wac(graph: &mut Graph) -> Result<MaterializeStats, String> {
-    materialize_wac_limited(graph, default_auth_limits())
+    materialize_wac_limited(graph, default_auth_limits(), default_auth_budget())
 }
 
-/// [`materialize_wac`] under `limits` instead of [`default_auth_limits`] — the seam
-/// [`crate::PodStore`] uses to apply the allowance it was configured with.
+/// [`materialize_wac`] under `limits` and `budget` instead of [`default_auth_limits`] and
+/// [`default_auth_budget`] — the seam [`crate::PodStore`] uses to apply the allowance and
+/// budget it was configured with.
 pub(crate) fn materialize_wac_limited(
     graph: &mut Graph,
     limits: ClosureLimits,
+    budget: AuthBudget,
 ) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
@@ -400,8 +475,16 @@ pub(crate) fn materialize_wac_limited(
     let rules = wac_rules()?;
     let mut dict = Dict::new();
     // WAC has no creator/owner vocabulary; provenance is ignored (the loader skips it).
-    let facts = assemble_input_ids(&mut dict, graph, System::Wac, &AccessProvenance::new(), &VerifiedCredentials::new())?;
-    let closure = auth_eval(&mut dict, &facts, rules, limits)?;
+    let facts = assemble_input_ids(
+        &mut dict,
+        graph,
+        System::Wac,
+        &AccessProvenance::new(),
+        &VerifiedCredentials::new(),
+        budget,
+    )?;
+    let mut work = DecisionWork::new(budget);
+    let closure = auth_eval(&mut dict, &facts, rules, limits, &mut work)?;
     strip_reserved_graphs(graph);
     let mut stats = install_auth_view(graph, &dict, &closure);
     stats.strata_facts = vec![closure.len()];
@@ -502,32 +585,52 @@ pub fn materialize_acp_with_credentials(
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
 ) -> Result<MaterializeStats, String> {
-    materialize_acp_limited(graph, provenance, credentials, default_auth_limits())
+    materialize_acp_limited(
+        graph,
+        provenance,
+        credentials,
+        default_auth_limits(),
+        default_auth_budget(),
+    )
 }
 
-/// [`materialize_acp_with_credentials`] under `limits` instead of [`default_auth_limits`] —
-/// the seam [`crate::PodStore`] uses to apply the allowance it was configured with. Every
-/// stratum runs under the same allowance, and each gets it afresh (it bounds one round's
-/// join work, so a later stratum is not charged for an earlier one).
+/// [`materialize_acp_with_credentials`] under `limits` and `budget` instead of
+/// [`default_auth_limits`] and [`default_auth_budget`] — the seam [`crate::PodStore`] uses
+/// to apply the allowance and budget it was configured with.
+///
+/// Every stratum runs under the same `limits`, and each gets them afresh (they bound one
+/// closure, so a later stratum is not charged for an earlier one). `budget` is what bounds
+/// the three strata TOGETHER: each closure's charge goes into one [`DecisionWork`] ledger,
+/// which refuses once their aggregate is past
+/// [`AuthBudget::max_decision_join_rows`] / [`AuthBudget::max_decision_facts`].
 pub(crate) fn materialize_acp_limited(
     graph: &mut Graph,
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
     limits: ClosureLimits,
+    budget: AuthBudget,
 ) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Fallible work first, mutation last — see [`materialize_wac`].
     let rules = acp_rules()?;
     let mut dict = Dict::new();
-    let facts = assemble_input_ids(&mut dict, graph, System::Acp, provenance, credentials)?;
+    let facts = assemble_input_ids(
+        &mut dict,
+        graph,
+        System::Acp,
+        provenance,
+        credentials,
+        budget,
+    )?;
+    let mut work = DecisionWork::new(budget);
     // Chain the three strata entirely at the id level, in ONE dictionary: each stratum's
     // closure is the next one's fact set, so a negated predicate is complete before the
     // stratum that negates it runs (design doc §3.5) and nothing round-trips through text.
     let mut closure = facts;
     let mut strata_facts = Vec::with_capacity(rules.len());
     for stratum in rules {
-        closure = auth_eval(&mut dict, &closure, stratum, limits)?;
+        closure = auth_eval(&mut dict, &closure, stratum, limits, &mut work)?;
         strata_facts.push(closure.len());
     }
 
@@ -615,7 +718,13 @@ mod tests {
     /// The WAC auth view as the TEXT engine derives it (the pre-sq-zgbso.4 pipeline).
     fn wac_text(graph: &mut Graph) -> Result<MaterializeStats, String> {
         strip_reserved_graphs(graph);
-        let input = assemble_input(graph, System::Wac, &AccessProvenance::new(), &VerifiedCredentials::new())?;
+        let input = assemble_input(
+            graph,
+            System::Wac,
+            &AccessProvenance::new(),
+            &VerifiedCredentials::new(),
+            default_auth_budget(),
+        )?;
         let src = format!("{}\n{}\n{}", input, COMMON_RULES, WAC_RULES);
         let mut dict = Dict::new();
         let closure = reason_n3(&mut dict, &src)?;
@@ -629,7 +738,13 @@ mod tests {
         credentials: &VerifiedCredentials,
     ) -> Result<MaterializeStats, String> {
         strip_reserved_graphs(graph);
-        let input = assemble_input(graph, System::Acp, provenance, credentials)?;
+        let input = assemble_input(
+            graph,
+            System::Acp,
+            provenance,
+            credentials,
+            default_auth_budget(),
+        )?;
         let accepts = format!("{}\n{}\n{}", input, COMMON_RULES, ACP_A);
         let mut dict = Dict::new();
         // acp-c.n3 keeps single-pass semantics by explicit opt-in, as in `acp_rules`.
@@ -725,15 +840,28 @@ mod tests {
             let prov = AccessProvenance::new();
 
             let mut dict = Dict::new();
-            let ids = assemble_input_ids(&mut dict, &graph, system, &prov, &VerifiedCredentials::new())
-                .expect("id facts");
+            let ids = assemble_input_ids(
+                &mut dict,
+                &graph,
+                system,
+                &prov,
+                &VerifiedCredentials::new(),
+                default_auth_budget(),
+            )
+            .expect("id facts");
             let direct: BTreeSet<String> = ids
                 .iter()
                 .map(|t| format!("{} {} {}", dict.term(t[0]), dict.term(t[1]), dict.term(t[2])))
                 .collect();
 
-            let text = assemble_input(&graph, system, &prov, &VerifiedCredentials::new())
-                .expect("text facts");
+            let text = assemble_input(
+                &graph,
+                system,
+                &prov,
+                &VerifiedCredentials::new(),
+                default_auth_budget(),
+            )
+            .expect("text facts");
             let mut tdict = Dict::new();
             let parsed = sparq_reason::n3::compiled::intern_facts(&mut tdict, &text)
                 .expect("the text entry re-parses");

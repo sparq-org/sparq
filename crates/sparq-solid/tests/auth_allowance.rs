@@ -286,6 +286,28 @@ fn only_the_kind_tag_makes_a_refusal() {
     );
 }
 
+/// The tag is read only where the refusal WORDING precedes it, so an error that is not a
+/// refusal but quotes the tag literal — inside a pod's own IRI, say — is not read as one.
+#[test]
+fn a_quoted_tag_literal_is_not_a_refusal() {
+    assert_eq!(
+        auth_allowance_refusal(
+            "update denied: <https://pod.ex/x%20[allowance=join-rows]%20y> is not a resource"
+        ),
+        None,
+        "a tag quoted inside an IRI is not a refusal"
+    );
+    assert!(!is_auth_allowance_refusal("n3: [allowance=input-bytes]: no wording"));
+    // The real shape, wrapped in a sentence, still reads.
+    assert_eq!(
+        auth_allowance_refusal(&format!(
+            "update denied: … ({} [allowance=input-bytes]: …); nothing was changed",
+            AUTH_ALLOWANCE_REFUSAL
+        )),
+        Some(AuthAllowance::InputBytes)
+    );
+}
+
 /// The CUMULATIVE allowance binds on its own: with the per-round bound left at its default,
 /// a total far below what a fixture spends over its rounds refuses it, naming that limit.
 #[test]

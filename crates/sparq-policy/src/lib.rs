@@ -54,7 +54,8 @@ pub use model::{
     Operator, Policy, Rule, Value, ODRL_NS,
 };
 pub use parse::{
-    parse_policy, parse_policy_str, parse_policy_str_with_memberships, target_memberships,
+    constraint_budget_refusal, parse_policy, parse_policy_str, parse_policy_str_with_memberships,
+    target_memberships, ConstraintBudget, CONSTRAINT_BUDGET_REFUSAL,
 };
 pub use validate::ValidatedPolicy;
 

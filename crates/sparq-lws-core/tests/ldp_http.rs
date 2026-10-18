@@ -686,18 +686,47 @@ async fn a_repeated_slash_name_left_over_can_be_deleted() {
     );
 }
 
-/// An encoded separator or dot segment is part of a name, never decoded into a path: the write
-/// lands at the name as sent, which reads back, and nothing appears at the decoded path. A raw
-/// dot segment is refused.
+/// An encoded separator is part of a name, never decoded into a path: the write lands at the
+/// name as sent, which reads back, and nothing appears at the decoded path. A raw dot segment is
+/// refused for every method; an encoded one is refused for a write (a client normalising the URL
+/// would resolve it away), while what is stored under one, from before such writes were refused,
+/// can still be read and deleted.
 #[tokio::test]
-async fn encoded_separators_and_dots_are_literal_names() {
-    let h = Harness::new().await;
+async fn encoded_separators_are_literal_names_and_dot_segments_are_not_written() {
+    use sparq_lws_core::store::Store;
+    let store = CompositeStore::new(backend_sparq_client(), InMemoryBlobStore::new());
+    let alice = "https://pod.example/alice/";
+    store
+        .write(
+            "https://pod.example/",
+            axum::body::Bytes::new(),
+            "text/turtle",
+        )
+        .await
+        .expect("seed the root");
+    store
+        .create_in_container(
+            "https://pod.example/",
+            alice,
+            axum::body::Bytes::new(),
+            "text/turtle",
+        )
+        .await
+        .expect("seed a container");
+    for left in [
+        "https://pod.example/alice/%2E%2E",
+        "https://pod.example/alice/%2e",
+    ] {
+        store
+            .create_in_container(alice, left, axum::body::Bytes::from(TURTLE), "text/turtle")
+            .await
+            .expect("seed a name left over");
+    }
+    let h = Harness::with_store(store).await;
     for (sent, decoded) in [
         ("/alice/a%2Fb", "/alice/a/b"),
         ("/alice/c%2fd", "/alice/c/d"),
         ("/alice/e%2F/f", "/alice/e//f"),
-        ("/alice/%2E%2E/g", "/g"),
-        ("/alice/%2e/h", "/alice/h"),
     ] {
         let r = h
             .request("PUT", sent, Some("text/turtle"), Body::from(TURTLE))
@@ -709,10 +738,51 @@ async fn encoded_separators_and_dots_are_literal_names() {
         assert_ne!(r.status(), StatusCode::OK, "GET {decoded}");
     }
     for raw in ["/alice/../x", "/alice/./x"] {
+        for method in ["PUT", "GET", "DELETE"] {
+            let r = h
+                .request(method, raw, Some("text/turtle"), Body::from(TURTLE))
+                .await;
+            assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{method} {raw}");
+        }
+    }
+    let patch = "@prefix solid: <http://www.w3.org/ns/solid/terms#> .\n\
+_:p solid:inserts { <urn:a> <urn:b> <urn:c> . }.\n";
+    for encoded in [
+        "/alice/%2E%2E",
+        "/alice/%2e",
+        "/alice/%2E%2E/g",
+        "/alice/%2e/h",
+        "/alice/.%2E/i",
+        "/alice/%2E%2E%5Cg",
+    ] {
         let r = h
-            .request("PUT", raw, Some("text/turtle"), Body::from(TURTLE))
+            .request("PUT", encoded, Some("text/turtle"), Body::from(TURTLE))
             .await;
-        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "PUT {raw}");
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "PUT {encoded}");
+        let r = h
+            .request("PATCH", encoded, Some("text/n3"), Body::from(patch))
+            .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "PATCH {encoded}");
+        let r = h
+            .request(
+                "POST",
+                &format!("{encoded}/"),
+                Some("text/turtle"),
+                Body::from(TURTLE),
+            )
+            .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "POST {encoded}/");
+    }
+    // What is stored under such a name is still reached.
+    for left in ["/alice/%2E%2E", "/alice/%2e"] {
+        let r = h.request("GET", left, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::OK, "GET {left}");
+        let r = h.request("HEAD", left, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::OK, "HEAD {left}");
+        let r = h.request("DELETE", left, None, Body::empty()).await;
+        assert!(r.status().is_success(), "DELETE {left}: {}", r.status());
+        let r = h.request("GET", left, None, Body::empty()).await;
+        assert_eq!(r.status(), StatusCode::NOT_FOUND, "GET {left} after DELETE");
     }
 }
 

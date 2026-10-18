@@ -271,6 +271,7 @@ fn nonexistent_dir(tag: &str) -> std::path::PathBuf {
 /// Whether `nargo` can be spawned here. These tests run in lanes with and without
 /// the toolchain, and the typed error a missing workspace produces depends on it.
 fn nargo_on_path() -> bool {
+    // zk-toolchain-gate: allow presence probe that selects the expected typed error; asserts in both branches and never skips
     std::process::Command::new("nargo")
         .arg("--version")
         .output()
@@ -284,6 +285,7 @@ fn nargo_on_path() -> bool {
 /// the io arm.
 fn assert_missing_workspace_error(err: DriverError) {
     match (nargo_on_path(), err) {
+        // zk-toolchain-gate: allow this suite is prover-free by design and asserts BOTH arms, so neither branch is a skip
         (false, DriverError::Spawn { tool, .. }) => assert_eq!(tool, "nargo", "Spawn names the tool"),
         (true, DriverError::Tool { tool, .. }) => assert_eq!(tool, "nargo", "Tool names the tool"),
         (present, other) => panic!(

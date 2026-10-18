@@ -1,6 +1,9 @@
 #![doc = include_str!("../README.md")] // README is the docs.rs front page
 #![forbid(unsafe_code)] // sq-emay: crate has zero `unsafe`
 
+/// The input and whole-decision budget of an authorization materialization — the
+/// counterpart of the per-closure reasoning allowance. See [`AuthBudget`].
+mod budget;
 mod authindex;
 // sq-3jtd.9: library-level ACP conformance harness — a table-driven scenario
 // corpus over the ACP engine (materialize_acp + AuthIndex::accessible), asserting
@@ -76,6 +79,7 @@ pub use decide::{is_control_document_name, AclScope, AclStatus, EffectiveAcl, Wa
 // /report vocabulary is the shared `conformance::{Decision, Expect, ScenarioReport}`).
 pub use wac_conformance::{AclBuilder, AuthBuilder, WacScenario};
 pub use fixture::{acp_fixture, wac_fixture};
+pub use budget::{default_auth_budget, AuthBudget};
 pub use materialize::{
     auth_allowance_refusal, default_auth_limits, is_auth_allowance_refusal, materialize_acp,
     materialize_acp_with, materialize_acp_with_credentials, materialize_wac, AuthAllowance,
@@ -344,6 +348,10 @@ pub struct PodStore {
     /// The reasoning allowance every authorization materialization this store runs applies
     /// ([`PodStore::set_auth_limits`]); [`default_auth_limits`] until it is set.
     auth_limits: ClosureLimits,
+    /// The input and whole-decision budget every authorization materialization this store
+    /// runs applies ([`PodStore::set_auth_budget`]); [`default_auth_budget`] until it is
+    /// set.
+    auth_budget: AuthBudget,
 }
 
 /// The owned session-cache key: the request dimensions ([`Session`] is borrowed, so the
@@ -525,6 +533,7 @@ impl PodStore {
             installed_acp: None,
             acr_controlled: FxHashSet::default(),
             auth_limits: default_auth_limits(),
+            auth_budget: default_auth_budget(),
         }
     }
 
@@ -557,6 +566,41 @@ impl PodStore {
         self.auth_limits
     }
 
+    /// Set the input and whole-decision budget every later authorization materialization
+    /// of this store runs under, in place of [`default_auth_budget`].
+    ///
+    /// [`PodStore::set_auth_limits`] bounds what the RULES may do inside ONE closure. This
+    /// bounds the two things that sit outside that: the reasoning INPUT the pod's control
+    /// documents become (per-document and aggregate bytes, the length of one term, the
+    /// number of facts), and the AGGREGATE work of all the closures one materialization
+    /// runs — three for an ACP view, five for a bridged ODRL policy — which a per-closure
+    /// allowance cannot bound.
+    ///
+    /// It applies to the WAC and ACP views alike, and to every rebuild the store makes on
+    /// its own after an access-control write or an update. The view in force is not
+    /// rebuilt, so a lowered budget takes effect at the next materialization, not
+    /// retroactively. A refusal carries the same typed [`AuthAllowance`] kind a reasoning
+    /// allowance refusal does, and [`auth_allowance_refusal`] reads it the same way.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut budget = sparq_solid::default_auth_budget();
+    /// budget.max_input_facts = 1 << 20;
+    /// let mut store = sparq_solid::PodStore::new(sparq_core::Graph::default());
+    /// store.set_auth_budget(budget);
+    /// assert_eq!(store.auth_budget().max_input_facts, 1 << 20);
+    /// ```
+    pub fn set_auth_budget(&mut self, budget: AuthBudget) {
+        self.auth_budget = budget;
+    }
+
+    /// The input and whole-decision budget this store materializes under
+    /// ([`PodStore::set_auth_budget`]).
+    pub fn auth_budget(&self) -> AuthBudget {
+        self.auth_budget
+    }
+
     /// (Re-)materialize the WAC auth view from the `.acl` graphs. Call again after any
     /// ACL/group-document change (v1 maintenance = full re-run; measured ~1 s on the
     /// ~1.1k-graph fixture in release — see the design doc's baseline section).
@@ -581,7 +625,11 @@ impl PodStore {
     /// other pod's cached view (issue #1571). The public method keeps the full-clear default.
     /// sq-b7k7u.
     fn materialize_wac_scoped(&mut self, scope: ReindexScope) -> Result<MaterializeStats, String> {
-        let stats = materialize::materialize_wac_limited(&mut self.graph, self.auth_limits)?;
+        let stats = materialize::materialize_wac_limited(
+            &mut self.graph,
+            self.auth_limits,
+            self.auth_budget,
+        )?;
         // Stored creator and owner facts of resources gone with their access control resource
         // go at any rebuild, so an ACP view built later never revives them.
         let provenance = std::mem::take(&mut self.acp_context.0);
@@ -1025,6 +1073,7 @@ impl PodStore {
             provenance,
             credentials,
             self.auth_limits,
+            self.auth_budget,
         )?;
         // Kept for exactly the resources the view was built over (see [`loader::resources`]).
         self.acp_context = (self.existing_provenance(provenance, supplied), credentials.clone());
@@ -2228,10 +2277,15 @@ impl PodStore {
                         provenance,
                         &self.acp_context.1,
                         self.auth_limits,
+                        self.auth_budget,
                     )
                 })
             } else {
-                materialize::materialize_wac_limited(&mut candidate, self.auth_limits)
+                materialize::materialize_wac_limited(
+                    &mut candidate,
+                    self.auth_limits,
+                    self.auth_budget,
+                )
             };
             if let Err(e) = rebuilt {
                 return Err(format!(

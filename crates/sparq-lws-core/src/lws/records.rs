@@ -18,17 +18,31 @@ use super::*;
 /// what the store says of the record is not yet final: its fence ([`Store::fence`]) is made to
 /// succeed first, and only then is the record read. A fence that does not succeed leaves the
 /// removal where it was, and the original error is returned rather than the record being
-/// reported gone.
+/// reported gone. The fence is waited for as long as the store's own call takes (bounded by the
+/// store, as every call is): this runs outside any request (putting a change back, clearing an
+/// intent), which a short cap would leave unable to finish over a slow store.
 pub(crate) async fn delete_record<S: Store>(
     store: &S,
     iri: &str,
     container: &str,
 ) -> Result<(), crate::error::ServerError> {
+    delete_record_by(store, iri, container, None).await
+}
+
+/// [`delete_record`], waiting for an unsettled removal's fence until `deadline` at most, when
+/// one is given (a request's): one that has not succeeded by then leaves the removal unsettled,
+/// as one that fails does.
+async fn delete_record_by<S: Store>(
+    store: &S,
+    iri: &str,
+    container: &str,
+    deadline: Option<tokio::time::Instant>,
+) -> Result<(), crate::error::ServerError> {
     match remove_member(store, iri, Some(container)).await {
         Ok(_) | Err(crate::error::ServerError::NotFound) => Ok(()),
         Err(e) => {
             if let crate::error::ServerError::Unsettled { fence, .. } = &e {
-                if store.fence(fence).await.is_err() {
+                if !fenced_by(store, fence, deadline).await {
                     return Err(e);
                 }
             }
@@ -69,8 +83,46 @@ pub(crate) async fn still_listed<S: Store>(
 
 /// How long a request to a service container (a create, a revocation) waits for a lock before
 /// answering `503`: a request never queues behind a lock held by a change that is being put
-/// back, or by a store call that stalls.
+/// back, or by a store call that stalls. A removal's fence is waited for in the request for as
+/// long at most ([`fenced_by`]).
 const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether `fence` succeeded by `deadline` (when one is given): one that fails, or does not
+/// answer by then, leaves the write it fences unsettled, to be fenced again (by the background
+/// settlement, for a removal a request made), so no request waits on a store that stalls.
+async fn fenced_by<S: Store>(
+    store: &S,
+    fence: &crate::store::Fence,
+    deadline: Option<tokio::time::Instant>,
+) -> bool {
+    match deadline {
+        Some(deadline) => matches!(
+            tokio::time::timeout_at(deadline, store.fence(fence)).await,
+            Ok(Ok(()))
+        ),
+        None => store.fence(fence).await.is_ok(),
+    }
+}
+
+/// Fence `fence` in the background until it succeeds: each attempt is given up after a time
+/// that starts at [`LOCK_WAIT`] and doubles up to the store's own call timeout
+/// ([`crate::store::STORE_CALL_TIMEOUT`]), then tried again (`until_done`), so a fence that
+/// never answers does not hold the settlement on one call, and one that answers slowly (within
+/// the store's timeout) is still waited for long enough to succeed.
+async fn fence_in_background<S: Store>(store: &S, fence: &crate::store::Fence) {
+    let mut within = LOCK_WAIT;
+    until_done(|| {
+        let deadline = tokio::time::Instant::now() + within;
+        within = (within * 2).min(crate::store::STORE_CALL_TIMEOUT);
+        async move {
+            fenced_by(store, fence, Some(deadline))
+                .await
+                .then_some(())
+                .ok_or(())
+        }
+    })
+    .await
+}
 
 /// Take a lock (`lock`, from [`resources::IriLocks`]) in the request path, waiting at most
 /// [`LOCK_WAIT`]: `503` when it is busy, or set aside. Only once it is held may the request
@@ -429,17 +481,21 @@ pub(crate) enum Removed {
 ///   timed out) can still land, so no listing read is final until its fence ([`Store::fence`])
 ///   has succeeded, whatever the listing shows. The fence is tried in the steps, and once it
 ///   succeeds the listing read after it settles the removal, every lock still held. One that
-///   does not succeed (or a listing that cannot be read after it) is settled in the background:
-///   the record stays out of force, and its own lock and its own listing's held, until the
-///   delete is fenced and the listing read again; `settle` is then told the outcome under the
-///   container's lock, shared (unless it is listed nowhere), and a record gone is announced.
-///   The answer is `500`, saying this is not known yet.
+///   does not succeed within [`LOCK_WAIT`] (or a listing that cannot be read after it) is
+///   settled in the background (each attempt at the fence allowed longer, up to the store's own
+///   call timeout, [`fence_in_background`]): the record stays out of force, and its own lock, its
+///   own listing's and the container's (shared, unless it is listed nowhere) stay held, never
+///   given up and taken again, until the delete is fenced and the listing read again; `settle` is then
+///   told the outcome, and a record gone is announced. The answer is `500`, saying this is not
+///   known yet, and it does not wait on a fence that stalls.
 /// - As for a create, the removal holds a place among those being made or settled
 ///   ([`Settlements`]) until it is settled (`503` when there is none), and the task that settles
 ///   it is the state's.
 /// - Only a record confirmed gone is announced (`Delete`, [`announce_record`]), once its locks
 ///   are released. Otherwise the answer is `500`, saying whether it is still stored or that this
-///   is not known (it is left as it was, and the request may be retried).
+///   is not known (it is left as it was, and the request may be retried); a delete the store
+///   refused for want of room ([`crate::error::ServerError::InsufficientStorage`]), the record
+///   still stored, is `507`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn remove_record<S, H, A, F, Z>(
     state: &LwsState<S>,
@@ -477,14 +533,19 @@ where
             Some(within_wait(state.locks.read(container)).await?)
         }
     };
-    let in_container = listing.is_some();
     let (state, container, iri) = (state.detached(), container.to_string(), iri.to_string());
     let task = async move {
         let _admission = admission;
         let Some(held) = set_aside().await else {
             return Ok(Removed::Absent);
         };
-        let gone = match delete_record(&state.store, &iri, &container).await {
+        // A delete the store refused for want of room is told as such (`507`), as a create's
+        // refusal is, once the record is known to be still stored.
+        let mut refused = false;
+        // The request waits for the delete's fence (in `delete_record_by` and again below) for
+        // LOCK_WAIT in all.
+        let deadline = Some(tokio::time::Instant::now() + LOCK_WAIT);
+        let gone = match delete_record_by(&state.store, &iri, &container, deadline).await {
             Ok(()) => Some(true),
             // A delete that failed unsettled can still commit until its fence succeeds, so no
             // listing read before then is final, whatever it shows: the fence is tried first
@@ -492,9 +553,9 @@ where
             // after it settles the removal. Until then every lock this removal took stays held,
             // so no create of the record can run while the delete may still land.
             Err(crate::error::ServerError::Unsettled { fence, .. }) => {
-                let settled = match state.store.fence(&fence).await {
-                    Ok(()) => still_listed(&state.store, &iri, &container).await.ok(),
-                    Err(_) => None,
+                let settled = match fenced_by(&state.store, &fence, deadline).await {
+                    true => still_listed(&state.store, &iri, &container).await.ok(),
+                    false => None,
                 };
                 match settled {
                     Some(listed) => Some(!listed),
@@ -509,25 +570,18 @@ where
                     }
                     None => {
                         // Settled by a task the state owns, holding the record's own lock, its
-                        // own listing's and this change's place among those being settled,
-                        // with the record out of force until then; the container's lock is
-                        // taken again only to settle it.
-                        drop(listing);
-                        let (weak, store, locks) =
-                            (state.downgrade(), state.store.clone(), state.locks.clone());
+                        // own listing's, the container's (shared) and this change's place among
+                        // those being settled, with the record out of force until then: the
+                        // container's lock is held through the fence and the settling, never
+                        // given up and taken again, so no conditional create evaluated on the
+                        // whole listing is decided while the removal may still land.
+                        let (weak, store) = (state.downgrade(), state.store.clone());
                         let (iri, container) = (iri.clone(), container.clone());
                         state.settlements.spawn(async move {
                             let _held = (place, own_listing);
-                            until_done(|| store.fence(&fence)).await;
+                            fence_in_background(&store, &fence).await;
                             let listed =
                                 until_done(|| still_listed(&store, &iri, &container)).await;
-                            let listing = match in_container {
-                                true => Some(
-                                    until_done(|| async { locks.read(&container).await.ok_or(()) })
-                                        .await,
-                                ),
-                                false => None,
-                            };
                             let Some(state) = weak.upgrade() else {
                                 return;
                             };
@@ -537,17 +591,23 @@ where
                                 announce_record(&state, "Delete", &iri, &container, author);
                             }
                         });
-                        return Err(format!(
-                            "whether the {what} was removed is not known yet; it is out of \
-                             force until that is settled, and the request may be retried"
+                        return Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!(
+                                "whether the {what} was removed is not known yet; it is out of \
+                                 force until that is settled, and the request may be retried"
+                            ),
                         ));
                     }
                 }
             }
-            Err(_) => still_listed(&state.store, &iri, &container)
-                .await
-                .ok()
-                .map(|listed| !listed),
+            Err(e) => {
+                refused = matches!(e, crate::error::ServerError::InsufficientStorage);
+                still_listed(&state.store, &iri, &container)
+                    .await
+                    .ok()
+                    .map(|listed| !listed)
+            }
         };
         let author = settle(&state, gone == Some(true), held);
         drop((own, listing, place, own_listing));
@@ -556,22 +616,32 @@ where
                 announce_record(&state, "Delete", &iri, &container, author);
                 Ok(Removed::Gone)
             }
-            Some(false) => Err(format!(
-                "the {what} could not be removed; it is still stored"
+            Some(false) if refused => Err((
+                StatusCode::INSUFFICIENT_STORAGE,
+                format!("the store had no room to remove the {what}; it is still stored"),
             )),
-            None => Err(format!(
-                "whether the {what} was removed is not known; it is left as it was, and the \
-                 request may be retried"
+            Some(false) => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("the {what} could not be removed; it is still stored"),
+            )),
+            None => Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "whether the {what} was removed is not known; it is left as it was, and \
+                     the request may be retried"
+                ),
             )),
         }
     };
     let done = match by {
-        Remover::Request => tokio::spawn(task).await.map_err(|e| e.to_string()),
+        Remover::Request => tokio::spawn(task)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
         Remover::Sweeper => Ok(task.await),
     };
     match done {
         Ok(Ok(removed)) => Ok(removed),
-        Ok(Err(why)) | Err(why) => Err(problem(StatusCode::INTERNAL_SERVER_ERROR, Some(&why))),
+        Ok(Err((status, why))) | Err((status, why)) => Err(problem(status, Some(&why))),
     }
 }
 
@@ -804,5 +874,197 @@ mod tests {
             state.locks.try_lock(&iri).is_some(),
             "the record's lock is released"
         );
+    }
+
+    /// A record stored in `container`, listed there, for a removal to act on.
+    async fn listed_record(
+        state: &LwsState<super::super::test_store::FlakyStore>,
+        name: &str,
+    ) -> (String, String) {
+        let container = format!("{}records/", state.cfg.storage());
+        let iri = format!("{container}{name}");
+        if !state.store.exists(&container).await.unwrap() {
+            state
+                .store
+                .create_in_container(&state.cfg.storage(), &container, Bytes::new(), LWS_JSON)
+                .await
+                .unwrap();
+        }
+        state
+            .store
+            .create_in_container(&container, &iri, Bytes::from_static(b"{}"), LWS_JSON)
+            .await
+            .unwrap();
+        (container, iri)
+    }
+
+    /// Remove `iri` as a request does, reporting to `told` what it is settled as.
+    async fn remove_as_request(
+        state: &LwsState<super::super::test_store::FlakyStore>,
+        container: &str,
+        iri: &str,
+        told: Arc<std::sync::Mutex<Option<bool>>>,
+    ) -> Result<Removed, Response> {
+        remove_record(
+            state,
+            container,
+            iri,
+            "record",
+            Listed::InContainer,
+            Remover::Request,
+            None,
+            at_once(|| Some(())),
+            move |_: &LwsState<_>, gone: bool, ()| {
+                *told.lock().unwrap() = Some(gone);
+                None
+            },
+        )
+        .await
+    }
+
+    /// Review of #7135: a removal whose outcome was not known gave up the container's lock
+    /// before its fence and took it again to settle, so a conditional create evaluated on the
+    /// whole listing could be decided in between, while the removal could still land. The
+    /// container's lock is held, shared, from the request until the removal is settled.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_unsettled_removal_keeps_its_container_until_settled() {
+        let (state, store) = super::super::test_store::state(100).await;
+        let (container, iri) = listed_record(&state, "r1").await;
+        let gate = shut();
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), gate.clone()));
+        store.fail_fence.store(true, Ordering::SeqCst);
+        let settled = Arc::new(std::sync::Mutex::new(None));
+        let r = remove_as_request(&state, &container, &iri, settled.clone()).await;
+        assert_eq!(r.err().unwrap().status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // Fenced again in the background meanwhile: the listing is held throughout.
+        for _ in 0..5 {
+            assert!(
+                state.locks.try_lock(&container).is_none(),
+                "the container's lock was given up before the removal was settled"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+        }
+        assert_eq!(*settled.lock().unwrap(), None);
+        store.fail_fence.store(false, Ordering::SeqCst);
+        for _ in 0..250 {
+            if settled.lock().unwrap().is_some() && state.locks.try_lock(&container).is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(
+            *settled.lock().unwrap(),
+            Some(false),
+            "fenced before it landed"
+        );
+        assert!(state.locks.try_lock(&container).is_some());
+    }
+
+    /// Review of #7135: the request waited on the fence of a removal whose outcome was not
+    /// known for as long as the store took, so a store whose fence stalls held the request. It
+    /// is waited for at most `LOCK_WAIT`: the request answers that the outcome is not known, and
+    /// the removal is settled in the background once the fence answers.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_stalled_fence_does_not_hold_the_request() {
+        let (state, store) = super::super::test_store::state(100).await;
+        let (container, iri) = listed_record(&state, "r1").await;
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        store.hang_fence.store(true, Ordering::SeqCst);
+        let settled = Arc::new(std::sync::Mutex::new(None));
+        let began = tokio::time::Instant::now();
+        let r = tokio::time::timeout(
+            LOCK_WAIT * 2,
+            remove_as_request(&state, &container, &iri, settled.clone()),
+        )
+        .await
+        .expect("the request answered while the fence stalled");
+        assert!(began.elapsed() < LOCK_WAIT + std::time::Duration::from_millis(500));
+        let r = r.err().expect("not reported done");
+        assert_eq!(r.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let body = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("not known yet"));
+        assert_eq!(*settled.lock().unwrap(), None);
+        assert!(
+            state.locks.try_lock(&iri).is_none(),
+            "settled in the background"
+        );
+        // The fence answers again: the background settles it.
+        store.hang_fence.store(false, Ordering::SeqCst);
+        for _ in 0..400 {
+            if settled.lock().unwrap().is_some() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        assert_eq!(*settled.lock().unwrap(), Some(false));
+    }
+
+    /// A fence slower than `LOCK_WAIT` but within the store's own call timeout: the request
+    /// answers that the outcome is not known, and the background settlement, whose attempts
+    /// are allowed longer each time, settles the removal and releases its locks.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_fence_slower_than_the_lock_wait_still_settles() {
+        let (state, store) = super::super::test_store::state(100).await;
+        let (container, iri) = listed_record(&state, "r1").await;
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        let slow = LOCK_WAIT + std::time::Duration::from_millis(500);
+        store
+            .slow_fence_ms
+            .store(slow.as_millis() as u64, Ordering::SeqCst);
+        let settled = Arc::new(std::sync::Mutex::new(None));
+        let r = remove_as_request(&state, &container, &iri, settled.clone()).await;
+        assert_eq!(r.err().unwrap().status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let began = tokio::time::Instant::now();
+        while began.elapsed() < LOCK_WAIT * 6 {
+            if settled.lock().unwrap().is_some()
+                && state.locks.try_lock(&container).is_some()
+                && state.locks.try_lock(&iri).is_some()
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(settled.lock().unwrap().is_some(), "never settled");
+        assert!(state.locks.try_lock(&container).is_some());
+        assert!(state.locks.try_lock(&iri).is_some());
+    }
+
+    /// Removing a record outside a request (putting a change back, clearing an intent) waits
+    /// for an unsettled removal's fence as long as the store takes, not `LOCK_WAIT`.
+    #[tokio::test]
+    async fn a_removal_outside_a_request_waits_for_a_slow_fence() {
+        let store = super::super::test_store::FlakyStore::new();
+        let container = "http://localhost:3000/.lws/grants/";
+        let iri = format!("{container}g1");
+        *store.unsettle_next_delete_of.lock().unwrap() = Some((iri.clone(), shut()));
+        let slow = LOCK_WAIT + std::time::Duration::from_millis(500);
+        store
+            .slow_fence_ms
+            .store(slow.as_millis() as u64, Ordering::SeqCst);
+        delete_record(&store, &iri, container)
+            .await
+            .expect("settled once the slow fence answered");
+    }
+
+    /// Review of #7135: a removal the store refused for want of room was answered `500`, the
+    /// refusal flattened into a backend fault. The record still stored, it is `507`, as a
+    /// create the store has no room for is.
+    #[tokio::test]
+    async fn a_removal_the_store_has_no_room_for_is_a_507() {
+        let (state, store) = super::super::test_store::state(100).await;
+        let (container, iri) = listed_record(&state, "r1").await;
+        *store.refuse_delete_of.lock().unwrap() = Some(iri.clone());
+        let settled = Arc::new(std::sync::Mutex::new(None));
+        let r = remove_as_request(&state, &container, &iri, settled.clone()).await;
+        assert_eq!(r.err().unwrap().status(), StatusCode::INSUFFICIENT_STORAGE);
+        assert_eq!(*settled.lock().unwrap(), Some(false));
+        assert!(still_listed(&state.store, &iri, &container).await.unwrap());
+        // Any other failure, the record still stored, stays `500`.
+        *store.refuse_delete_of.lock().unwrap() = None;
+        *store.fail_delete_of.lock().unwrap() = Some(iri.clone());
+        let r = remove_as_request(&state, &container, &iri, settled).await;
+        assert_eq!(r.err().unwrap().status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }

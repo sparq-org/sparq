@@ -36,7 +36,6 @@
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// The checked-in baseline snapshot (compiled into the test binary).
 const SNAPSHOT_JSON: &str = include_str!("gate_count_snapshot.json");
@@ -171,8 +170,8 @@ fn top_level_bin_circuits(zk: &Path) -> Vec<(String, PathBuf)> {
 
 /// Compile the whole workspace once (idempotent), producing `target/<pkg>.json`
 /// ACIR for every member.
-fn compile_workspace(dir: &Path) {
-    let out = Command::new("nargo")
+fn compile_workspace(gate: &support::LiveToolchain, dir: &Path) {
+    let out = support::live_tool(gate, "nargo")
         .arg("compile")
         .arg("--workspace")
         .current_dir(dir)
@@ -186,9 +185,9 @@ fn compile_workspace(dir: &Path) {
 }
 
 /// `bb gates -s ultra_honk` → the member's `circuit_size`.
-fn gate_count(dir: &Path, member: &str) -> u64 {
+fn gate_count(gate: &support::LiveToolchain, dir: &Path, member: &str) -> u64 {
     let acir = dir.join("target").join(format!("{member}.json"));
-    let out = Command::new("bb")
+    let out = support::live_tool(gate, "bb")
         .arg("gates")
         .arg("-s")
         .arg("ultra_honk")
@@ -214,17 +213,18 @@ fn gate_count(dir: &Path, member: &str) -> u64 {
 /// assert the live gate count has not regressed beyond the tolerance.
 #[test]
 fn gate_count_regression() {
-    if !support::require_toolchain("gate_count_regression", &["nargo", "bb"]) {
-        return;
-    }
+    let gate = match support::gate("gate_count_regression", &["nargo", "bb"]) {
+        Some(g) => g,
+        None => return,
+    };
     let snapshot: Snapshot =
         serde_json::from_str(SNAPSHOT_JSON).expect("gate_count_snapshot.json parses");
     let dir = compose_dir();
-    compile_workspace(&dir);
+    compile_workspace(&gate, &dir);
 
     let mut regressions = Vec::new();
     for (member, &baseline) in &snapshot.members {
-        let live = gate_count(&dir, member);
+        let live = gate_count(&gate, &dir, member);
         let ceiling = (baseline as f64 * (1.0 + snapshot.tolerance_pct / 100.0)).floor() as u64;
         let delta_pct = (live as f64 - baseline as f64) / baseline as f64 * 100.0;
         eprintln!(
