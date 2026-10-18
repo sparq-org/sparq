@@ -18,19 +18,24 @@ mod tabular;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-/// `Err` when the output file `out` would land in a graph store directory (or inside one): a
-/// store's files belong to the graph that holds its lock, and writing over one (a live store's
-/// `perm0.bin`, say) would corrupt it. Also `Err` when the path cannot be resolved (a dangling
-/// symbolic link, say): it is never checked as spelled. A device or pipe (`/dev/stdout`) is
-/// fine: it is written as it is ([`OutFile`]), and no store's file is one.
+/// `Err` when the output file `out` would replace a graph store's file or a name a store
+/// reserves ([`sparq_core::dir_lock::is_reserved_store_path`]): the path or where it leads is
+/// in a store (a live store's `perm0.bin`, a symbolic link inside a store), or is a store's
+/// `<dir>.lock` lock file, a swap's staging sibling, a marker or `.sparq-*` scratch. Replacing
+/// one would corrupt the store or take its lock away. Also `Err` when the path cannot be
+/// resolved (a dangling symbolic link, say): it is never checked as spelled. A device or pipe
+/// (`/dev/stdout`) is fine: it is written as it is ([`OutFile`]), and no store's file is one.
 fn check_output_path(out: &str) -> std::io::Result<()> {
     #[cfg(feature = "mmap")]
     if !is_device_or_pipe(std::path::Path::new(out))
-        && sparq_core::dir_lock::is_inside_store(std::path::Path::new(out))?
+        && sparq_core::dir_lock::is_reserved_store_path(std::path::Path::new(out))?
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("{out} is inside a graph store: write the output somewhere else"),
+            format!(
+                "{out} is inside a graph store or a name a store reserves (its lock file, \
+                 staging or scratch): write the output somewhere else"
+            ),
         ));
     }
     #[cfg(not(feature = "mmap"))]
@@ -48,9 +53,10 @@ fn is_device_or_pipe(path: &std::path::Path) -> bool {
 /// fresh sibling (`.<name>.sparq-tmp-…`, created new, never an existing file or link), which
 /// [`finish`](Self::finish) syncs and renames over the path: what was at the path (a file, a hard
 /// link to someone else's file, a symbolic link) is replaced, never written through, and a
-/// failed command leaves it as it was. A regular file replaced this way keeps its permissions
-/// (read from the path itself, never through a link). A device or pipe (`/dev/stdout`) is
-/// written directly.
+/// failed command leaves it as it was. The fresh file is created owner-only (`0600` on Unix)
+/// and gets its final permissions just before the rename: those of the regular file it
+/// replaces (read from the path itself, never through a link), or else a new file's default
+/// under the umask. A device or pipe (`/dev/stdout`) is written directly.
 pub(crate) struct OutFile {
     file: Option<std::fs::File>,
     /// The fresh sibling and the path it replaces; `None` for a device or pipe.
@@ -80,28 +86,11 @@ impl OutFile {
         tmp_name.push(name);
         tmp_name.push(format!(".sparq-tmp-{}-{n}", std::process::id()));
         let tmp = path.with_file_name(tmp_name);
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        let out = OutFile {
+        let file = new_file(&tmp, 0o600)?;
+        Ok(OutFile {
             file: Some(file),
             staged: Some((tmp, path.to_path_buf())),
-        };
-        // A regular file being replaced keeps its permissions. Read without following a link:
-        // a symbolic link (or nothing) at the path leaves the new file's default mode.
-        match std::fs::symlink_metadata(path) {
-            Ok(meta) if meta.file_type().is_file() => {
-                out.file
-                    .as_ref()
-                    .expect("just opened")
-                    .set_permissions(meta.permissions())?;
-            }
-            Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e),
-        }
-        Ok(out)
+        })
     }
 
     /// Flushes the output and, for a file, syncs it and renames it over the path.
@@ -111,10 +100,16 @@ impl OutFile {
         let Some((tmp, path)) = self.staged.take() else {
             return Ok(());
         };
-        let published = file.sync_all().and_then(|()| {
-            drop(file);
-            std::fs::rename(&tmp, &path)
-        });
+        let published = final_permissions(&path)
+            .and_then(|perms| match perms {
+                Some(perms) => file.set_permissions(perms),
+                None => Ok(()),
+            })
+            .and_then(|()| file.sync_all())
+            .and_then(|()| {
+                drop(file);
+                std::fs::rename(&tmp, &path)
+            });
         if published.is_err() {
             std::fs::remove_file(&tmp).ok();
         }
@@ -140,6 +135,45 @@ impl Drop for OutFile {
             std::fs::remove_file(tmp).ok();
         }
     }
+}
+
+/// Creates a new file at `path` (never an existing file or link), with `mode` on Unix.
+fn new_file(path: &std::path::Path, mode: u32) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, mode);
+    #[cfg(not(unix))]
+    let _ = mode;
+    options.open(path)
+}
+
+/// The permissions an output replacing `path` gets: those of the regular file there (read from
+/// the path itself, never through a link); else, on Unix, a new file's default under the umask,
+/// read from a probe file created beside it with `0666` (the umask cannot be read without
+/// changing it); `None` (keep what the file has) elsewhere.
+fn final_permissions(path: &std::path::Path) -> std::io::Result<Option<std::fs::Permissions>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_file() => return Ok(Some(meta.permissions())),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+    #[cfg(unix)]
+    {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut name = std::ffi::OsString::from(".");
+        name.push(path.file_name().unwrap_or_default());
+        name.push(format!(".sparq-mode-{}-{n}", std::process::id()));
+        let probe = path.with_file_name(name);
+        // Created new, so what is removed below is only ever this probe.
+        let meta = new_file(&probe, 0o666)?.metadata();
+        std::fs::remove_file(&probe).ok();
+        Ok(Some(meta?.permissions()))
+    }
+    #[cfg(not(unix))]
+    Ok(None)
 }
 
 /// Finishes a buffered [`OutFile`]: flush, then [`OutFile::finish`].
@@ -2560,4 +2594,67 @@ fn json_str(raw: &str) -> String {
     sparq_core::json::escape_into(&mut out, raw);
     out.push('"');
     out
+}
+
+#[cfg(all(test, unix))]
+mod out_file_tests {
+    use super::OutFile;
+    use std::io::Write;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("sparq-cli-outfile-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn mode(path: &std::path::Path) -> u32 {
+        std::fs::symlink_metadata(path)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o7777
+    }
+
+    /// The file being written is owner-only while in progress; once published it has a new
+    /// file's default mode (here read from a file made the ordinary way).
+    #[test]
+    fn an_output_is_owner_only_until_published() {
+        let dir = scratch("fresh");
+        let out = dir.join("out.json");
+        let mut f = OutFile::create(out.to_str().unwrap()).unwrap();
+        f.write_all(b"{}").unwrap();
+        let (tmp, _) = f.staged.clone().unwrap();
+        assert_eq!(mode(&tmp) & !0o600, 0, "in progress at {:o}", mode(&tmp));
+        f.finish().unwrap();
+        let reference = dir.join("reference");
+        std::fs::write(&reference, b"").unwrap();
+        assert_eq!(mode(&out), mode(&reference));
+        assert_eq!(std::fs::read(&out).unwrap(), b"{}");
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left.len(), 2, "no temporary or probe file left: {left:?}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A 0600 file stays 0600 when an output replaces it, and is never wider meanwhile.
+    #[test]
+    fn a_private_output_stays_private() {
+        let dir = scratch("private");
+        let out = dir.join("out.json");
+        std::fs::write(&out, b"old").unwrap();
+        std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let mut f = OutFile::create(out.to_str().unwrap()).unwrap();
+        f.write_all(b"new").unwrap();
+        let (tmp, _) = f.staged.clone().unwrap();
+        assert_eq!(mode(&tmp) & !0o600, 0);
+        f.finish().unwrap();
+        assert_eq!(mode(&out), 0o600);
+        assert_eq!(std::fs::read(&out).unwrap(), b"new");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

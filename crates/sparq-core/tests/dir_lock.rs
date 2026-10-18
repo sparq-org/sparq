@@ -806,3 +806,161 @@ fn a_build_never_writes_through_a_link_in_its_directory() {
     assert_eq!(Graph::open(&dir).unwrap().len(), rows);
     std::fs::remove_dir_all(&root).ok();
 }
+
+/// A store with only a marker (identity `id`) and the content of a saved dataset: the old or
+/// new half of a swap caught between a rename and its staging record.
+fn half(at: &Path, id: &str, tag: &str) {
+    let nt = format!("<http://ex/{tag}> <http://ex/p> <http://ex/o> .");
+    Graph::load_str(&nt, "ntriples").unwrap().save(at).unwrap();
+    std::fs::write(at.join("sparq-store"), format!("root {id}\n")).unwrap();
+}
+
+/// Staging is per store and never a store of its own: `g.a` and `g.b` stage at
+/// `g.a.compact-*` and `g.b.compact-*` (never a shared `g.compact-*`); a directory carrying a
+/// staging record is refused by every claim and left as it is; staging at the names an
+/// earlier version shared is removed only when it records this store.
+#[test]
+fn staging_is_per_store_and_never_claimed_on_its_own() {
+    let root = scratch("staging-names");
+    let (a, b) = (root.join("g.a"), root.join("g.b"));
+    save_dataset(&a);
+    save_dataset(&b);
+    let mut g = Graph::open(&a).unwrap();
+    g.compact().unwrap();
+    drop(g);
+    let names: Vec<String> = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        names.iter().all(|n| !n.contains("compact")),
+        "staging left after a swap: {names:?}"
+    );
+    assert!(has(&Graph::open(&b).unwrap(), "a"), "g.b was touched");
+
+    // Legacy shared names: this store's staging goes, another store's stays.
+    let (mine, theirs) = (root.join("g.compact-old"), root.join("g.compact-new"));
+    save_dataset(&mine);
+    stage(&mine, "compact-old", &store_id(&a));
+    save_dataset(&theirs);
+    stage(&theirs, "compact-new", &store_id(&b));
+    drop(Graph::open(&a).unwrap());
+    assert!(!mine.exists(), "this store's legacy staging was kept");
+    assert!(
+        theirs.join("sparq-staging").exists(),
+        "another store's staging was touched"
+    );
+
+    // A staging directory is never claimed on its own, and nothing is removed for trying.
+    let refused = |what: &str, r: std::io::Result<()>| {
+        let err = r
+            .err()
+            .unwrap_or_else(|| panic!("{what} claimed a staging directory"));
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{what}: {err}");
+    };
+    refused("open", Graph::open(&theirs).map(drop));
+    refused("read-only open", Graph::open_read_only(&theirs).map(drop));
+    refused(
+        "save",
+        Graph::load_str("<http://ex/n> <http://ex/p> <http://ex/o> .", "ntriples")
+            .unwrap()
+            .save(&theirs),
+    );
+    assert!(theirs.join("sparq-staging").exists());
+    assert!(has(&Graph::open(&a).unwrap(), "a") && has(&Graph::open(&b).unwrap(), "a"));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A crash can leave one half of a swap without its staging record (the old base renamed
+/// aside but not yet marked, or the new base unmarked just before its rename): recovery takes
+/// that half only when its own marker carries the identity the other half's record names.
+#[test]
+fn recovery_takes_an_unmarked_half_only_of_the_same_store() {
+    let root = scratch("unmarked-half");
+    let id = "00112233445566778899aabbccddeeff";
+    let other = "ffeeddccbbaa99887766554433221100";
+    let swap = |name: &str, old_marked: bool, new_marked: bool, new_id: &str| {
+        let (old, new) = (
+            root.join(format!("{name}.compact-old")),
+            root.join(format!("{name}.compact-new")),
+        );
+        half(&old, id, "old");
+        half(&new, new_id, "new");
+        if old_marked {
+            std::fs::write(old.join("sparq-staging"), format!("compact-old {id}\n")).unwrap();
+        }
+        if new_marked {
+            std::fs::write(new.join("sparq-staging"), format!("compact-new {new_id}\n")).unwrap();
+        }
+        (root.join(name), old, new)
+    };
+    // Old base aside, not yet marked: the new base is promoted.
+    let (dir, old, new) = swap("p", false, true, id);
+    let g = Graph::open(&dir).unwrap();
+    assert!(has(&g, "new") && !old.exists() && !new.exists());
+    assert!(
+        !dir.join("sparq-staging").exists(),
+        "the live store carries a staging record"
+    );
+    drop(g);
+    // New base unmarked just before its rename: promoted.
+    let (dir, old, new) = swap("q", true, false, id);
+    let g = Graph::open(&dir).unwrap();
+    assert!(has(&g, "new") && !old.exists() && !new.exists());
+    assert!(
+        !dir.join("sparq-staging").exists(),
+        "the live store carries a staging record"
+    );
+    drop(g);
+    // An unmarked "new base" of another store: refused, both left alone.
+    let (dir, old, new) = swap("r", true, false, other);
+    let err = Graph::open(&dir)
+        .err()
+        .expect("took another store's directory");
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    assert!(!dir.exists() && old.join("sparq-staging").exists() && new.exists());
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A writable open checks a store's internals before recovery touches anything: with
+/// `named/` a link to a directory outside the store (here one carrying a staging record) and
+/// drop staging beside it, the open is refused and the outside directory keeps its record.
+#[cfg(unix)]
+#[test]
+fn recovery_never_follows_a_link_out_of_the_store() {
+    let root = scratch("recover-link");
+    let outside = root.join("A");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(
+        outside.join("sparq-staging"),
+        b"drop-old 00112233445566778899aabbccddeeff\n",
+    )
+    .unwrap();
+    let dir = root.join("B");
+    save_dataset(&dir);
+    let id = store_id(&dir);
+    std::fs::rename(dir.join("named"), root.join("named-real")).unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("named")).unwrap();
+    let staged = dir.join("named.drop-new");
+    std::fs::create_dir(&staged).unwrap();
+    std::fs::write(staged.join("sparq-staging"), format!("drop-new {id}\n")).unwrap();
+    let seed = Graph::load_str("<http://ex/n> <http://ex/p> <http://ex/o> .", "ntriples").unwrap();
+    for (what, r) in [
+        ("open", Graph::open(&dir).map(drop)),
+        (
+            "open_or_create",
+            Graph::open_or_create(&dir, &seed).map(drop),
+        ),
+    ] {
+        assert!(r.is_err(), "{what} went through a linked named/");
+        assert!(
+            outside.join("sparq-staging").exists(),
+            "{what} cleared a record outside the store"
+        );
+        assert!(
+            staged.exists(),
+            "{what} removed staging past a linked named/"
+        );
+    }
+    std::fs::remove_dir_all(&root).ok();
+}

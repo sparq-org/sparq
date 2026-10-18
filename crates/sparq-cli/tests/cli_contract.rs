@@ -958,6 +958,95 @@ fn reason_output_through_a_link_never_writes_into_a_store() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An output never replaces a store's lock file or a name a store reserves beside itself (a
+/// swap's staging sibling, a marker, scratch), and never a symbolic link inside a store, even
+/// one pointing outside it: replacing a live store's `<dir>.lock` would hand its lock to the
+/// next opener while the holder still writes.
+#[cfg(feature = "mmap")]
+#[test]
+fn an_output_never_replaces_a_stores_lock_or_reserved_names() {
+    let dir = scratch("err-reason-reserved");
+    let store = dir.join("g");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let lock = dir.join("g.lock");
+    assert!(
+        lock.is_file(),
+        "the save left no lock file beside the store"
+    );
+    let lock_before = std::fs::read(&lock).unwrap();
+    for name in [
+        "g.lock",
+        "g.compact-new",
+        "g.compact-old",
+        "named.drop-new",
+        "sparq-store",
+        "sparq-staging",
+        ".sparq-build-0",
+    ] {
+        let out = dir.join(name);
+        let existed = out.exists();
+        let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&out)]);
+        assert_eq!(code, 2, "{name}: stderr: {stderr}");
+        assert_eq!(out.exists(), existed, "{name} was created");
+    }
+    assert_eq!(
+        std::fs::read(&lock).unwrap(),
+        lock_before,
+        "the lock file changed"
+    );
+    // The lock file of any directory (a store may be created there).
+    std::fs::create_dir(dir.join("plain")).unwrap();
+    let (code, _stdout, stderr) = run3(&[
+        "reason",
+        s(&ttl),
+        "turtle",
+        "rdfs",
+        s(&dir.join("plain.lock")),
+    ]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(!dir.join("plain.lock").exists());
+    // A `.lock` name with nothing beside it is an ordinary output.
+    let (code, _stdout, stderr) = run3(&[
+        "reason",
+        s(&ttl),
+        "turtle",
+        "rdfs",
+        s(&dir.join("out.lock")),
+    ]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let lock_ino = std::fs::metadata(&lock).unwrap().ino();
+        // A link inside the store pointing out of it, and a link outside pointing at the lock.
+        let outside = dir.join("outside.nt");
+        std::fs::write(&outside, b"outside").unwrap();
+        let inner = store.join("link.nt");
+        std::os::unix::fs::symlink(&outside, &inner).unwrap();
+        let to_lock = dir.join("to-lock.nt");
+        std::os::unix::fs::symlink(&lock, &to_lock).unwrap();
+        for out in [&inner, &to_lock] {
+            let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(out)]);
+            assert_eq!(code, 2, "{}: stderr: {stderr}", out.display());
+            assert!(out.symlink_metadata().unwrap().file_type().is_symlink());
+        }
+        assert_eq!(
+            std::fs::read(&outside).unwrap(),
+            b"outside",
+            "written through a link inside the store"
+        );
+        assert_eq!(
+            std::fs::metadata(&lock).unwrap().ino(),
+            lock_ino,
+            "the lock file was replaced"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An output that replaces an existing regular file keeps that file's permissions.
 #[cfg(unix)]
 #[test]

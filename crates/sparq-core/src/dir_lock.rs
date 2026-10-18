@@ -129,6 +129,74 @@ pub fn store_root(path: &Path) -> io::Result<Option<PathBuf>> {
         .map(Path::to_path_buf))
 }
 
+/// The names a store reserves beside or inside itself: its marker and staging record, its
+/// scratch (`.sparq-*`), and the staging siblings of a swap (`<dir>.compact-new`, `.compact-old`,
+/// `.drop-new`, `.drop-old`).
+fn is_reserved_name(name: &str) -> bool {
+    name == crate::STORE_MARKER
+        || name == crate::STAGING_MARKER
+        || name.starts_with(".sparq-")
+        || [".compact-new", ".compact-old", ".drop-new", ".drop-old"]
+            .iter()
+            .any(|suffix| name.ends_with(suffix))
+}
+
+/// Whether the entry at `entry` (resolved parent, then its own name) is a store's, inside one,
+/// or a name a store reserves: a store, or anything in one; a reserved name; or a lock file
+/// (`<name>.lock`) of something at `<name>`, of a reserved name, or held now.
+fn is_reserved_entry(entry: &Path) -> io::Result<bool> {
+    if entry.ancestors().any(crate::is_store) {
+        return Ok(true);
+    }
+    let Some(name) = entry.file_name() else {
+        return Ok(false);
+    };
+    let name = name.to_string_lossy();
+    if is_reserved_name(&name) {
+        return Ok(true);
+    }
+    if let Some(stem) = name.strip_suffix(".lock").filter(|s| !s.is_empty()) {
+        let locked = entry.with_file_name(stem);
+        if locked.symlink_metadata().is_ok()
+            || is_reserved_entry(&locked)?
+            || (entry.is_file() && DirLock::is_held(entry)?)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether a tool must refuse to replace the file at `path` with its output: the path, or
+/// where it leads, is a store, inside one, or a name a store reserves beside itself (its
+/// `<dir>.lock` lock file, the staging siblings of a swap, its marker, staging record or
+/// `.sparq-*` scratch; a `<name>.lock` of anything that exists at `<name>`, or that some holder
+/// has locked now). Checked twice: the entry itself (its parent resolved, its own name as
+/// given), so a symbolic link inside a store is refused even when it points outside, and, when
+/// the entry exists, the file it resolves to.
+///
+/// Fails closed: a path whose parent or target cannot be resolved (a dangling symbolic link
+/// included) is an error. Checked when called, like [`is_inside_store`]; a hard link elsewhere
+/// to a store's file is not detected, which is why a tool replaces its output by renaming a
+/// fresh file over the path rather than writing through it.
+pub fn is_reserved_store_path(path: &Path) -> io::Result<bool> {
+    let name = path.file_name().ok_or_else(|| unnamed(path))?;
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    let entry = resolve_dir(parent)?.join(name);
+    if is_reserved_entry(&entry)? {
+        return Ok(true);
+    }
+    match entry.symlink_metadata() {
+        Ok(meta) if meta.file_type().is_symlink() => is_reserved_entry(&resolve_dir(&entry)?),
+        Ok(_) => Ok(false),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// Where a directory's lock file is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockLocation(PathBuf);
