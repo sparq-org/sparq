@@ -113,7 +113,10 @@ pub fn target_memberships(
 /// member-less cell asserting `rdf:rest` with no `rdf:first`) collection
 /// (`fold_rights` — honouring its valid prefix, or reading a member-less head as
 /// an ordinary unmatchable value, would drop authored members from the set
-/// encoding, likewise widening). The result is validated ([`Policy::validate`]).
+/// encoding, likewise widening), or a rule's compound constraint is past the
+/// constraint-assembly budget (nesting depth or total operand expansion;
+/// [`constraint_budget_refusal`] tells that refusal from any other parse error).
+/// The result is validated ([`Policy::validate`]).
 pub fn parse_policy(graph: &Graph) -> Result<ValidatedPolicy, String> {
     let iri = policy_iri(graph)?;
     // Bulk-load the graph's RDF collection shapes ONCE (cons cells + the member-less
@@ -953,7 +956,10 @@ fn logical_constraints_for(
         // constraints_for); a node is compound iff it has a combinator edge.
         if lc_defs.contains_key(&ckey) {
             let mut stack = BTreeMap::new();
-            let lc = assemble_logical(&ckey, &lc_defs, &atoms, &mut stack);
+            // Each rule's compound gets a fresh depth + expansion budget; exceeding either
+            // refuses the whole policy (`?`), never degrades one operand.
+            let mut budget = AssembleBudget::new();
+            let lc = assemble_logical(&ckey, &lc_defs, &atoms, &mut stack, &mut budget)?;
             out.entry(rkey).or_default().push(lc);
         }
     }
@@ -1065,27 +1071,40 @@ fn fold_list_operands(
 }
 
 /// Recursively assemble a [`LogicalConstraint`] from the pre-built node tables, with
-/// cycle protection (`active` tracks the ancestor chain). A malformed node — not in the
-/// combinator table and not a known atomic, or part of a cycle — becomes the
-/// unsatisfiable-guard atomic constraint (fail-closed). sq-a0zef.
+/// cycle protection (`active` tracks the ancestor chain) and under `budget`. A malformed
+/// node — not in the combinator table and not a known atomic, or part of a cycle —
+/// becomes the unsatisfiable-guard atomic constraint (fail-closed). sq-a0zef.
+///
+/// # Errors
+///
+/// Returns `Err` when `budget` is exhausted — see [`AssembleBudget`]. The whole policy is
+/// then refused rather than any one operand degraded, because a budget says nothing about
+/// what the authored constraint meant: degrading an operand to the unsatisfiable guard
+/// widens a prohibition's compound (the carve-out stops firing), and dropping it widens a
+/// permission's `odrl:and`.
 fn assemble_logical(
     lc_key: &str,
     lc_defs: &BTreeMap<String, LcDef>,
     atoms: &BTreeMap<String, Constraint>,
     active: &mut BTreeMap<String, ()>,
-) -> LogicalConstraint {
+    budget: &mut AssembleBudget,
+) -> Result<LogicalConstraint, String> {
     let def = lc_defs
         .get(lc_key)
         .expect("assemble_logical called on a non-LC node");
     active.insert(lc_key.to_owned(), ());
     let mut operands = Vec::with_capacity(def.operands.len());
     for okey in &def.operands {
+        budget.node()?;
         let node = if lc_defs.contains_key(okey) {
             if active.contains_key(okey) {
                 // A cycle in the LogicalConstraint graph — fail closed rather than loop.
                 ConstraintNode::Atomic(unsatisfiable_constraint())
             } else {
-                ConstraintNode::Compound(assemble_logical(okey, lc_defs, atoms, active))
+                budget.enter()?;
+                let sub = assemble_logical(okey, lc_defs, atoms, active, budget)?;
+                budget.leave();
+                ConstraintNode::Compound(sub)
             }
         } else if let Some(c) = atoms.get(okey) {
             ConstraintNode::Atomic(c.clone())
@@ -1097,11 +1116,154 @@ fn assemble_logical(
         operands.push(node);
     }
     active.remove(lc_key);
-    LogicalConstraint {
+    Ok(LogicalConstraint {
         id: lc_key.to_owned(),
         operator: def.operator,
         operands,
+    })
+}
+
+/// Nested `odrl:LogicalConstraint` levels [`assemble_logical`] may descend.
+///
+/// Assembly is recursive, and the combinator graph comes from the policy document, so
+/// without a depth bound a chain of n nested compounds costs n stack frames.
+///
+/// Measured, not guessed: bisected down against every policy the `sparq-policy` and
+/// `sparq-solid` test corpora parse, the smallest value that still parses all of them is
+/// **1** descent below a rule's outermost compound — an `odrl:or` of `odrl:and`s, the ODRL
+/// test suite's 062 shape. The value here is far above that (ODRL policies do not nest
+/// combinators deeply) and far below any depth that could exhaust a stack.
+const MAX_CONSTRAINT_DEPTH: usize = 32;
+
+/// Operand nodes [`assemble_logical`] may expand for ONE rule's compound constraint.
+///
+/// `active` tracks only the ancestor chain, so a node reachable by several paths through
+/// an ACYCLIC combinator graph is assembled once per path: a "diamond" document whose
+/// every level has two operands pointing at the same next level describes 2^n operand
+/// nodes in O(n) triples, and the assembled tree is that size. Bounding the total number
+/// of nodes expanded caps that at a size independent of how the document is shaped.
+///
+/// Measured, not guessed: bisected the same way as [`MAX_CONSTRAINT_DEPTH`], the smallest
+/// value that still parses every policy in the `sparq-policy` and `sparq-solid` test
+/// corpora is **6** nodes. The value here is far above that so no plausibly-authored
+/// policy meets it, while the tree one rule's compound can cost stays small (a
+/// `ConstraintNode` per node).
+const MAX_CONSTRAINT_NODES: usize = 1_024;
+
+/// The depth and total-expansion budget of one rule's [`assemble_logical`] run
+/// ([`MAX_CONSTRAINT_DEPTH`], [`MAX_CONSTRAINT_NODES`]). Each rule's compound constraint
+/// gets a fresh one; exceeding either refuses the WHOLE policy.
+struct AssembleBudget {
+    depth_left: usize,
+    nodes_left: usize,
+}
+
+impl AssembleBudget {
+    fn new() -> AssembleBudget {
+        AssembleBudget {
+            depth_left: MAX_CONSTRAINT_DEPTH,
+            nodes_left: MAX_CONSTRAINT_NODES,
+        }
     }
+
+    /// Descend one nesting level, or refuse.
+    fn enter(&mut self) -> Result<(), String> {
+        self.depth_left = self.depth_left.checked_sub(1).ok_or_else(|| {
+            format!(
+                "{} {}{}]: a rule's odrl:LogicalConstraint nests more than \
+                 {MAX_CONSTRAINT_DEPTH} levels of compound operands; the policy is refused \
+                 whole (fail-closed) rather than read to a depth it was not authored at",
+                CONSTRAINT_BUDGET_REFUSAL,
+                CONSTRAINT_BUDGET_TAG,
+                ConstraintBudget::Depth.tag(),
+            )
+        })?;
+        Ok(())
+    }
+
+    /// Return from one nesting level.
+    fn leave(&mut self) {
+        self.depth_left += 1;
+    }
+
+    /// Account one operand node about to be assembled, or refuse.
+    fn node(&mut self) -> Result<(), String> {
+        self.nodes_left = self.nodes_left.checked_sub(1).ok_or_else(|| {
+            format!(
+                "{} {}{}]: a rule's odrl:LogicalConstraint expands to more than \
+                 {MAX_CONSTRAINT_NODES} operand nodes (a compact combinator graph whose \
+                 shared operands multiply along each path through it); the policy is \
+                 refused whole (fail-closed)",
+                CONSTRAINT_BUDGET_REFUSAL,
+                CONSTRAINT_BUDGET_TAG,
+                ConstraintBudget::Expansion.tag(),
+            )
+        })?;
+        Ok(())
+    }
+}
+
+/// Which assembly budget a policy parse was refused by ([`constraint_budget_refusal`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConstraintBudget {
+    /// Nested compound-operand levels (`MAX_CONSTRAINT_DEPTH`).
+    Depth,
+    /// Operand nodes expanded for one rule's compound (`MAX_CONSTRAINT_NODES`).
+    Expansion,
+    /// A budget this build does not name individually.
+    Unspecified,
+}
+
+impl ConstraintBudget {
+    /// The tag this kind is carried as.
+    fn tag(self) -> &'static str {
+        match self {
+            ConstraintBudget::Depth => "constraint-depth",
+            ConstraintBudget::Expansion => "constraint-expansion",
+            ConstraintBudget::Unspecified => "unspecified",
+        }
+    }
+
+    /// The kind a tag stands for.
+    fn from_tag(tag: &str) -> ConstraintBudget {
+        for kind in [ConstraintBudget::Depth, ConstraintBudget::Expansion] {
+            if kind.tag() == tag {
+                return kind;
+            }
+        }
+        ConstraintBudget::Unspecified
+    }
+}
+
+/// The text a policy refused by its constraint-assembly budget puts in its error — the one
+/// refusal that says "this document's compound constraints are too big to assemble", not
+/// "this document is not an ODRL policy".
+///
+/// Read it with [`constraint_budget_refusal`] rather than by matching this text.
+pub const CONSTRAINT_BUDGET_REFUSAL: &str = "ODRL constraint-assembly budget exceeded";
+
+/// The opening of the kind tag every such refusal carries; the kind's own tag and a `]`
+/// follow.
+const CONSTRAINT_BUDGET_TAG: &str = "[budget=";
+
+/// Which constraint-assembly budget `err` was refused by, or `None` when `err` is any
+/// other parse error.
+///
+/// `err` is an error from [`parse_policy`], [`parse_policy_str`] or
+/// [`parse_policy_str_with_memberships`], including one a caller wrapped in its own
+/// sentence: the kind tag is read wherever it appears in the message.
+///
+/// # Examples
+///
+/// ```
+/// assert_eq!(sparq_policy::constraint_budget_refusal("some other parse error"), None);
+/// ```
+pub fn constraint_budget_refusal(err: &str) -> Option<ConstraintBudget> {
+    let at = err.find(CONSTRAINT_BUDGET_TAG)? + CONSTRAINT_BUDGET_TAG.len();
+    let rest = &err[at..];
+    let end = rest.find(']')?;
+    Some(ConstraintBudget::from_tag(&rest[..end]))
 }
 
 /// A literal set member that is not a plain, `xsd:string` or language-tagged string.

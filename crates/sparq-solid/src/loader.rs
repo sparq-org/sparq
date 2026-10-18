@@ -22,6 +22,7 @@
 //! (see [`assemble_facts`]). Principal values in the view's reserved spaces are refused
 //! ([`validate_principal_iri`]).
 
+use crate::budget::{AuthBudget, InputMeter};
 use crate::{AccessProvenance, VerifiedCredentials, AUTH_NS, SOLIDX_NS};
 use oxrdf::{Literal, NamedNode, Term};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -433,6 +434,33 @@ pub(crate) enum System {
     Acp,
 }
 
+/// [`graph_triples`] under the input budget `meter`, charging each term's bytes as it is
+/// materialized.
+///
+/// This is the seam the per-document and aggregate byte budgets act at: the terms of a
+/// control or group document are charged WHILE the owned triples are built, so a document
+/// set past the budget stops being read at the limit instead of being materialized whole
+/// and checked afterwards. `iri` names the document in a refusal.
+pub(crate) fn graph_triples_metered(
+    g: &Graph,
+    iri: &str,
+    meter: &mut InputMeter,
+) -> Result<Vec<[Term; 3]>, String> {
+    let pat: sparq_core::store::Pattern = [None, None, None];
+    let scan = g.store.scan(&pat);
+    meter.open();
+    let mut out = Vec::with_capacity(scan.rows.len());
+    for r in scan.rows.iter() {
+        let t = scan.to_spo(r);
+        let triple = [g.dict.term(t[0]), g.dict.term(t[1]), g.dict.term(t[2])];
+        for term in &triple {
+            meter.term(iri, term)?;
+        }
+        out.push(triple);
+    }
+    Ok(out)
+}
+
 /// The triples of one named graph as ground term triples.
 pub(crate) fn graph_triples(g: &Graph) -> Vec<[Term; 3]> {
     let pat: sparq_core::store::Pattern = [None, None, None];
@@ -502,7 +530,9 @@ pub(crate) fn assemble_facts(
     system: System,
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
+    budget: AuthBudget,
 ) -> Result<Vec<[Term; 3]>, String> {
+    let mut meter = InputMeter::new(budget);
     let mut out: Vec<[Term; 3]> = Vec::new();
     let suffix = if system == System::Wac { ACL_SUFFIX } else { ACR_SUFFIX };
     let own_pred = if system == System::Wac { "ownAcl" } else { "ownAcr" };
@@ -513,10 +543,12 @@ pub(crate) fn assemble_facts(
 
     // 1) resources (see [`enumerate`]).
     let (resources, control_graphs) = enumerate(graph, suffix);
+    // Under the input budget: each document's terms are charged as they are read, so the
+    // whole set is never materialized past it (sq-7159 follow-up, `crate::AuthBudget`).
     let control_graphs: Vec<(&str, Vec<[Term; 3]>)> = control_graphs
         .into_iter()
-        .map(|(iri, sub)| (iri, graph_triples(sub)))
-        .collect();
+        .map(|(iri, sub)| graph_triples_metered(sub, iri, &mut meter).map(|ts| (iri, ts)))
+        .collect::<Result<_, String>>()?;
     // A control document with a triple it may not state contributes nothing. For ACP,
     // whose policies also deny, so does every ACR that references a node of a rejected
     // document or a node no loaded document defines (transitively — see [`document_view`]),
@@ -612,7 +644,10 @@ pub(crate) fn assemble_facts(
             }
             // A group document only grants (it lists members), so a triple it may not
             // state is dropped on its own; the rest of the document still counts.
-            for t in graph_triples(sub).into_iter().filter(|t| admits(t, iri)) {
+            for t in graph_triples_metered(sub, iri, &mut meter)?
+                .into_iter()
+                .filter(|t| admits(t, iri))
+            {
                 out.push([
                     skolemize(&t[0], iri),
                     skolemize(&t[1], iri),
@@ -675,7 +710,28 @@ pub(crate) fn assemble_facts(
     for a in &webids {
         out.push([named(a), is_webid.clone(), xsd_true()]);
     }
+    // The assembled total — document content plus the structural, provenance and
+    // credential facts — before any caller interns it.
+    meter.facts(out.len())?;
     Ok(out)
+}
+
+/// [`assemble_facts`] under [`crate::default_auth_budget`] — the shorthand the in-crate
+/// tests that are not about the budget itself use.
+#[cfg(test)]
+pub(crate) fn assemble_facts_default(
+    graph: &Graph,
+    system: System,
+    provenance: &AccessProvenance,
+    credentials: &VerifiedCredentials,
+) -> Result<Vec<[Term; 3]>, String> {
+    assemble_facts(
+        graph,
+        system,
+        provenance,
+        credentials,
+        crate::default_auth_budget(),
+    )
 }
 
 /// The reasoning input as `[Id; 3]` facts interned DIRECTLY into `dict` — the id-level
@@ -690,8 +746,13 @@ pub(crate) fn assemble_input_ids(
     system: System,
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
+    budget: AuthBudget,
 ) -> Result<Vec<[Id; 3]>, String> {
-    let facts = assemble_facts(graph, system, provenance, credentials)?;
+    let facts = assemble_facts(graph, system, provenance, credentials, budget)?;
+    // The fact count is re-checked HERE, immediately before interning: this is the point
+    // the input is copied into the closure's dictionary, and `assemble_facts` is also
+    // reached by the text differential path, so the guard sits on both sides of the seam.
+    InputMeter::new(budget).facts(facts.len())?;
     Ok(facts
         .iter()
         .map(|t| [dict.intern(&t[0]), dict.intern(&t[1]), dict.intern(&t[2])])
@@ -712,9 +773,10 @@ pub(crate) fn assemble_input(
     system: System,
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
+    budget: AuthBudget,
 ) -> Result<String, String> {
     use std::fmt::Write;
-    let facts = assemble_facts(graph, system, provenance, credentials)?;
+    let facts = assemble_facts(graph, system, provenance, credentials, budget)?;
     let mut out = String::new();
     for t in &facts {
         let _ = writeln!(out, "{} {} {} .", t[0], t[1], t[2]);
@@ -1072,7 +1134,7 @@ pub fn parent_iri(iri: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{assemble_facts, graph_triples, named, skolemize, System};
+    use super::{assemble_facts_default, graph_triples, named, skolemize, System};
     use super::{iri_origin, parent_iri};
     use crate::{
         AccessProvenance, Mode, PodStore, Session, VerifiedCredentials, AUTH_GRAPH, AUTH_NS,
@@ -1141,7 +1203,7 @@ mod tests {
             graph.named.push((named(iri), sub));
         }
         let facts = |g: &Graph| -> FxHashSet<_> {
-            assemble_facts(
+            assemble_facts_default(
                 g,
                 System::Wac,
                 &AccessProvenance::new(),
@@ -1216,7 +1278,7 @@ mod tests {
     }
 
     fn skolem_iris(store: &PodStore) -> FxHashSet<Term> {
-        assemble_facts(
+        assemble_facts_default(
             store.graph(),
             System::Acp,
             &AccessProvenance::new(),
@@ -1346,7 +1408,7 @@ mod tests {
                 );
                 let graph = Graph::load_dataset(&nq, "nquads").unwrap();
                 let (prov, creds) = (AccessProvenance::new(), VerifiedCredentials::new());
-                let facts = assemble_facts(&graph, system, &prov, &creds).unwrap();
+                let facts = assemble_facts_default(&graph, system, &prov, &creds).unwrap();
                 let own = |x: &Term| matches!(x, Term::NamedNode(n) if n.as_str().starts_with(doc));
                 let leaked: Vec<_> = facts.iter().filter(|t| own(&t[0])).collect();
                 assert!(leaked.is_empty(), "{statement}: {leaked:?}");
