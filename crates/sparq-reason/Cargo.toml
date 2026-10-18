@@ -283,3 +283,20 @@ required-features = ["compiled-rules"]
 [[example]]
 name = "rif_conformance"
 required-features = ["rif-xml"]
+
+# The input half of the forward-closure fact allowance: `max_facts` is charged
+# while the GIVEN facts are read, so a caller cannot hand over an unbounded fact set that
+# is inserted and copied into the round-0 delta before the first round checks it. Compiled
+# only with the feature it exercises; run in CI by the `sparq-reason (compiled-rules)`
+# feature-matrix leg.
+[[test]]
+name = "n3_input_fact_budget"
+required-features = ["compiled-rules"]
+
+# The MEMORY half of the same property: a closure refused by `max_facts` must not
+# have held its whole input first. Measured with a counting global allocator, so it lives in
+# its own test binary (no other test's allocations may land in the measurement). Compiled
+# only with the feature it exercises; run in CI by the `sparq-reason (compiled-rules)` leg.
+[[test]]
+name = "n3_input_fact_memory"
+required-features = ["compiled-rules"]

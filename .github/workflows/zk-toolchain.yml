@@ -147,6 +147,17 @@ jobs:
     runs-on: ubuntu-latest
     # Toolchain install + real bb proving is the long pole; generous headroom.
     timeout-minutes: 60
+    env:
+      # The RUNTIME LEDGER. The shared gate in crates/sparq-zk*/tests/support/mod.rs
+      # appends one line, the CALL SITE as `<file>:<line>`, each time it lets a live
+      # body run; a skip or a panic appends nothing. The job's final step compares the
+      # file against every gate call site in the ZK test sources, so a live test that no
+      # step runs — or that returned before reaching the gate — is a RED check rather
+      # than a silent pass. Set here, at JOB level, and read by that step as a literal
+      # path. Evidence against the ACCIDENT, not a boundary against hostile test code:
+      # the variable is in this environment and the path is right here, so a test that
+      # set out to forge an entry could.
+      SPARQ_ZK_LIVE_LEDGER: ${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -216,6 +227,31 @@ jobs:
             echo "No ZK-relevant paths in this merge_group batch — fast-passing (forge suite skipped, check stays green)." \
               | tee -a "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Install PyYAML (hash-pinned)
+        if: steps.changes.outputs.zk == 'true'
+        # Needed only to read this workflow's own steps in the gate check below.
+        # HASH-pinned (Scorecard PinnedDependenciesID) against the same requirements
+        # file the docs-quality / feature-matrix YAML jobs use — one pin to bump.
+        run: python3 -m pip install --require-hashes -r .github/requirements/docs-quality.txt
+
+      # Fail-closed checks on the live-toolchain gate, static and toolchain-free so a
+      # violation is a fast RED rather than a 60-minute one. The gate in
+      # crates/sparq-zk*/tests/support/mod.rs is the only way a ZK test may obtain
+      # nargo/bb: `gate()` mints the token `live_tool()` needs, and the checker lints
+      # the test trees for every other acquisition path (a Command::new on a tool
+      # literal, a path or alias spelling of one, a shell, a non-literal executable, a
+      # not-found arm, a `which` probe, a `cmd!`, a branch on a driver spawn error, a
+      # prover route that never calls the gate). It also keeps the two per-crate copies
+      # of the gate byte-identical, ratchets the reviewed allow annotations, and checks
+      # that the ledger verify step at the end of this job cannot be skipped.
+      #
+      # Coverage is NOT checked statically: a step's command grammar cannot prove the
+      # tests ran. That is the ledger's job — see the job-level env above and the final
+      # step of this job.
+      - name: Check the ZK live-toolchain gate (acquisition + lane coverage)
+        if: steps.changes.outputs.zk == 'true'
+        run: python3 scripts/check-zk-toolchain-gate.py --check
 
       - name: Rust (preinstalled stable)
         if: steps.changes.outputs.zk == 'true'
@@ -470,10 +506,21 @@ jobs:
       # filter bindings, the family members, the differential fuzz, the car-hire capture)
       # run in the default lanes only as declared skips, because those lanes have no
       # toolchain. This is the lane that has it, so run them here too.
+      #
+      # PACKAGE-WIDE, and `-p sparq-zk` was added:
+      # `crates/sparq-zk/tests/poseidon2_noir_cross.rs` was the ONE gap this change
+      # found — it gated itself with a private not-found arm that returned, so it passed
+      # quietly, and no step ran sparq-zk's non-ignored tests here. It now goes through
+      # the shared gate, and this step runs its package. The other live compose binaries
+      # were already covered by this step before the change.
+      #
+      # DELIBERATELY no `if:`. The toolchain installs above share the `changes`
+      # condition, so if it were ever false this step would fail for want of nargo/bb
+      # rather than skip — which is the fail-closed direction. The ledger verify step at
+      # the end of the job is what proves these tests ran.
       - name: Run the default-run live ZK tests (real nargo/bb)
-        if: steps.changes.outputs.zk == 'true'
         run: |
-          cargo test -p sparq-zk-compose -- --test-threads=1
+          cargo test -p sparq-zk-compose -p sparq-zk -- --test-threads=1
 
       # Rebuild the immutable foundation separately from the PR candidate.
       # This independently checks the provenance of all four legacy key goldens.
@@ -519,3 +566,22 @@ jobs:
           path: ${{ runner.temp }}/public-pattern-evidence-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: ${{ steps.selected-result.outcome == 'success' && 'error' || 'warn' }}
           retention-days: 30
+
+      # The ledger check: the proof that the live tests above RAN.
+      #
+      # Every `gate()`/`require_toolchain()` call site in crates/sparq-zk*/tests/ AND in
+      # those crates' `src/` test code is expected to have appended its key to
+      # SPARQ_ZK_LIVE_LEDGER. A missing entry means the live body did not run — no step
+      # covers it, or it returned before the gate — and this step fails naming each one.
+      # A missing or empty ledger fails too, and so does an entry matching NO
+      # inventoried call site, because that means the inventory missed a site. The path
+      # is a LITERAL here, not `$SPARQ_ZK_LIVE_LEDGER`, so a step reordering or an
+      # overridden variable cannot point this step at another file.
+      #
+      # It may carry ONLY `name:` and `run:`, and must stay the LAST step of this job;
+      # the checker's own CHECK D reds on any other key, on a `defaults:` block at job
+      # or workflow level, and on a non-bash `shell:` anywhere in this job. The ledger
+      # proves the gate was REACHED for each call site; it does not prove what the
+      # bodies asserted.
+      - name: Verify every live ZK test ran
+        run: python3 scripts/check-zk-toolchain-gate.py --verify-ledger "${{ github.workspace }}/.zk-live-ledger-${{ github.run_id }}-${{ github.run_attempt }}.txt"

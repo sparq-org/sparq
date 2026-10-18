@@ -184,7 +184,7 @@ jobs:
         # sha256 against .github/requirements/docs-quality.txt before use. PyYAML has no
         # runtime deps, so that file is the full closure. See its header to bump/regenerate.
         # Consumers here: skill-frontmatter + the ci-scripts selection-wiring inspection.
-        run: pip install --require-hashes -r .github/requirements/docs-quality.txt
+        run: python3 -m pip install --require-hashes -r .github/requirements/docs-quality.txt
       - name: Install typos
         uses: taiki-e/install-action@183e4297cca2404691e9380e1307288dced5c82a # v2.87.25
         with:
@@ -396,6 +396,22 @@ jobs:
         run: python3 scripts/preflight.py --self-test
       - name: preflight — checker tests + worker-brief block consistency — GATING
         run: python3 scripts/tests/test_preflight.py
+
+      # ---- zk-toolchain live-gate checks ----
+      # scripts/check-zk-toolchain-gate.py keeps two properties true by construction:
+      # `crates/sparq-zk*/tests/support/mod.rs` is the only way a ZK test obtains
+      # nargo/bb, and the zk-toolchain lane runs every package whose tests use that
+      # gate. Those checks are invoked in the zk-toolchain lane, which only triggers on
+      # zk paths — so an edit to the CHECKER itself would not revalidate them. Both
+      # legs run here, where a scripts/ edit does trigger: `--self-test` drives one
+      # negative fixture per evasion class, and the unittest suite plants each class
+      # into a COPY of the real tree and asserts the check goes red. Both must stay
+      # BARE COMMANDS on their own line — appending `|| true` leaves the step green
+      # while the check can no longer fail.
+      - name: Self-test the zk-toolchain live-gate checks (pure logic)
+        run: python3 scripts/check-zk-toolchain-gate.py --self-test
+      - name: zk-toolchain live-gate — checker tests — GATING
+        run: python3 scripts/tests/test_zk_toolchain_gate.py
 
       # ---- inference-conformance report drift (sq-t099c + sq-1d528 / issue #3171) ----
       # Two beads landed this gate independently; the script unifies them and

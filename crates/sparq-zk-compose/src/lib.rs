@@ -169,3 +169,12 @@ pub mod result;
 // beadzkp-13.5: private exact pinned-toolchain version matcher.
 #[cfg(feature = "successful-results")]
 mod toolchain;
+
+// The LIVE-toolchain gate for the `#[cfg(test)]` tests that live in `src/` (the
+// prover-backed ones in `driver.rs` and `result.rs`). A `src` test module cannot
+// reach `tests/support`, so the SAME FILE is compiled in here with `#[path]` rather
+// than copied: there is one gate source for this crate and it cannot drift.
+// `scripts/check-zk-toolchain-gate.py` enforces this exact declaration.
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod support;
