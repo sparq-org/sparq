@@ -1877,12 +1877,19 @@ pub fn materialize_odrl_n3(
     // Under the authorization reasoning allowance, as the WAC/ACP strata are: these strata
     // derive `auth:*` grants and denies too, and nothing is written to `graph` until every
     // one of them has returned, so a refusal leaves the view in force untouched.
+    //
+    // The allowance applies per CLOSURE, and this path runs FIVE of them, so the five
+    // charges go into one whole-decision ledger that bounds their aggregate
+    // (`crate::AuthBudget`); otherwise this lane could spend five times the allowance a
+    // single-stratum WAC view can.
+    let mut work = crate::budget::DecisionWork::new(crate::default_auth_budget());
     for stratum in rules {
         closure = crate::materialize::auth_eval(
             &mut dict,
             &closure,
             stratum,
             crate::materialize::default_auth_limits(),
+            &mut work,
         )?;
     }
 

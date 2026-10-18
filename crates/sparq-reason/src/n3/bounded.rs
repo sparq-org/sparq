@@ -622,6 +622,19 @@ impl JoinWork {
         })
     }
 
+    /// The rows and firings this closure has charged so far, or `None` when
+    /// [`ClosureLimits::max_total_join_rows`] is the unbounded sentinel and nothing is
+    /// counted at all. Read after a closure has run, to report what it spent; it is
+    /// meaningless once the allowance has been [exceeded](JoinWork::exceeded), which
+    /// zeroes what is left.
+    #[cfg(feature = "compiled-rules")]
+    pub(crate) fn charged(&self) -> Option<usize> {
+        if self.total_limit == usize::MAX {
+            return None;
+        }
+        Some(self.total_limit - self.total_left.get())
+    }
+
     /// Charge `n` rows or firings about to be stored: `true` when the round's allowance
     /// covers them. Otherwise the run is refused (recorded on `run`) and nothing may be
     /// stored. Under the unbounded default it always succeeds and counts nothing.
