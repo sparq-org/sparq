@@ -114,7 +114,9 @@ Materialize the authorization view from the access-control documents, then enfor
   `urn:skolem:`/`urn:sparq:` IRI anywhere, name no reserved principal (`auth:`/`solidx:`, or
   an IRI containing `&client=`) as agent, member, origin, client or issuer, and use no
   `auth:`/`solidx:` predicate or class. Under ACP, an `.acr` that uses (as an access
-  control, policy or matcher) a node of a rejected `.acr` is rejected with it. `put_acl*` and
+  control, policy or matcher) a node of a rejected `.acr`, **or a node no loaded document
+  defines**, is withheld with it, to a fixpoint (see
+  [Unresolved references](#unresolved-references-and-cross-pod-policy-links)). `put_acl*` and
   `update_as*` refuse a write that would add such a triple to a control document the active
   view reads (`.acr` under ACP, `.acl` under WAC, neither reserved nor authority-less),
   judged in the state the write leaves (a statement an update adds and removes again is not
@@ -643,6 +645,36 @@ discovery; neither is itself a conformance-tested HTTP layer.
   `AnyClient` as the client component when no client was supplied), for ≤12 grant lookups.
   Only an issuer-CONSTRAINED grant mints a triple principal; an issuer-unconstrained grant
   (`AnyIssuer`) reuses the agent / pair term, so issuer-blind pods are unaffected.
+
+### Unresolved references and cross-pod policy links
+
+An `.acr` may name an access control, a policy or a matcher that another document defines.
+What happens then turns on whether that document is in the **loaded set** — the `.acr`
+graphs the ACP loader reads (outside the reserved and skolem spaces, below an authority):
+
+- **Target loaded** (this pod or another) — the reference applies, and the resource is
+  decided by statements the target document's editor controls. This is **intended**: an
+  explicit cross-pod policy link **delegates trust to the linked document's editor**, the
+  same delegation WAC's `acl:agentGroup` makes. Pointing at a document is the referring
+  document's own choice; what the loader removes (via the admissibility check above) is a
+  document *describing* nodes it does not define.
+- **Target not loaded** — another pod's document, or one a partial load left out. Nothing
+  is known about what the named node says, and an unknown statement may be an `acp:deny`,
+  an `acp:noneOf` exception or a condition on an allow. So the **referring document
+  contributes nothing**, exactly like one the loader rejects: its resource and everything
+  below it get **no grant from any source** (static, attached, bridged or trust), and no
+  ancestor's member policy takes over. This propagates to a fixpoint, so a shared policy
+  document with one unresolved reference withholds every `.acr` that applies it.
+
+The two cases differ because a loaded document is known in full: a node it simply does not
+describe is a **known-empty** access control, policy or matcher and decides as ACP §6.5
+says (an attribute-free matcher never matches, so an empty `noneOf` blocks nothing). An
+absent document is not known-empty — it is unknown.
+
+`put_acl*`/`update_as*` refuse a write that would add such a reference to a control
+document the active view reads, because the written document would be withheld with it,
+Control included, leaving the writer unable to repair it. Order writes so a document is
+stored before one that uses its nodes.
 
 ## ACP conformance harness — sq-3jtd.9
 
