@@ -99,6 +99,14 @@ impl<T: SparqClient> SparqClient for SharedStore<T> {
         self.0.fence(fence).await
     }
 
+    fn raises_markers(&self) -> bool {
+        self.0.raises_markers()
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        self.0.raise_marker(iri, value).await
+    }
+
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError> {
         self.0.list_children(container).await
     }
