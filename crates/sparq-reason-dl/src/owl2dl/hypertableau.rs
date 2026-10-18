@@ -210,6 +210,12 @@ pub(crate) struct ClauseIndex {
     by_role: FxHashMap<Role, Vec<u32>>,
     /// Clauses with an empty body.
     unconditional: Vec<u32>,
+    /// Clauses with the atom among their `A(x)` body atoms.
+    by_x_body: Vec<Vec<u32>>,
+    /// Clauses with the atom among their `A(yᵢ)` body atoms.
+    by_y_body: Vec<Vec<u32>>,
+    /// Clauses with the role among their `R(x, yᵢ)` body atoms.
+    by_body_role: FxHashMap<Role, Vec<u32>>,
     /// Per clause, per neighbour variable: its role atoms, its concept atoms, and whether it
     /// binds only nodes after the previous variable's.
     ys: Vec<Vec<YVar>>,
@@ -217,6 +223,25 @@ pub(crate) struct ClauseIndex {
     multi_y: Vec<u32>,
     /// The clauses the NI-rule applies to, in clause order, with their shape.
     ni: Vec<(u32, NiShape)>,
+}
+
+/// Pushes clause `i` unless it was the last one pushed (clauses are indexed in order).
+fn push_once(v: &mut Vec<u32>, i: u32) {
+    if v.last() != Some(&i) {
+        v.push(i);
+    }
+}
+
+/// What a queued node gained since it was last matched, which only the clauses with a
+/// matching body atom can use.
+#[derive(Clone, Copy, Debug)]
+enum Gain {
+    /// The node gained the atom.
+    Atom(Atom),
+    /// A neighbour gained the atom.
+    NeighbourAtom(Atom),
+    /// An edge to another node with the role (as seen from the node).
+    Edge(Role),
 }
 
 /// An at-most restriction `≤n R.A` inside a clause: `body → ≤n R.A ∨ D₁(x) ∨ …`, where the
@@ -278,6 +303,8 @@ impl ClauseIndex {
     pub(crate) fn new(c: &Clauses) -> ClauseIndex {
         let mut idx = ClauseIndex {
             by_x_atom: vec![Vec::new(); c.atoms.len()],
+            by_x_body: vec![Vec::new(); c.atoms.len()],
+            by_y_body: vec![Vec::new(); c.atoms.len()],
             ..ClauseIndex::default()
         };
         for (i, cl) in c.clauses.iter().enumerate() {
@@ -290,6 +317,15 @@ impl ClauseIndex {
                 idx.by_role.entry(r).or_default().push(i);
             } else {
                 idx.unconditional.push(i);
+            }
+            for &a in &cl.body_x {
+                push_once(&mut idx.by_x_body[a as usize], i);
+            }
+            for &(a, _) in &cl.body_y {
+                push_once(&mut idx.by_y_body[a as usize], i);
+            }
+            for &(r, _) in &cl.body_roles {
+                push_once(idx.by_body_role.entry(r).or_default(), i);
             }
             let mut ys = vec![(Vec::new(), Vec::new(), false); cl.n_y as usize];
             for &y in &cl.ordered {
@@ -313,6 +349,27 @@ impl ClauseIndex {
     }
 }
 
+/// A blockable node's key in [`Tableau::blocking`]: equal keys are necessary for blocking.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct BlockKey {
+    /// The node's label as (hash sum, size).
+    label: (u64, usize),
+    /// The parent's label as (hash sum, size).
+    parent_label: (u64, usize),
+    /// The roles of the edge from the parent, sorted.
+    edge: Vec<u32>,
+    /// The parent, when it is a root.
+    root: Option<Node>,
+}
+
+/// A well-mixed hash of an atom (SplitMix64's finaliser), summed into a label's hash.
+fn atom_hash(a: Atom) -> u64 {
+    let mut z = u64::from(a).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
 #[derive(Clone, Debug)]
 struct NodeData {
     parent: Option<Node>,
@@ -321,6 +378,8 @@ struct NodeData {
     concrete: bool,
     active: bool,
     label: FxHashMap<Atom, Dep>,
+    /// The sum of [`atom_hash`] over the label's atoms, so equal labels have equal sums.
+    label_hash: u64,
     /// `adj[n]` = the role expressions `r` with `r(self, n)`.
     adj: FxHashMap<Node, Vec<Role>>,
 }
@@ -378,6 +437,8 @@ pub(crate) struct Tableau<'c> {
     nodes: Vec<NodeData>,
     roles: FxHashMap<(u32, Node, Node), Dep>,
     ineq: FxHashMap<(Node, Node), Dep>,
+    /// Per node, the nodes `ineq` keeps it apart from.
+    ineq_of: FxHashMap<Node, Vec<Node>>,
     /// `t → s` for every merged node `t`, with what the merge depends on.
     merges: FxHashMap<Node, (Node, Dep)>,
     trail: Vec<Undo>,
@@ -385,6 +446,9 @@ pub(crate) struct Tableau<'c> {
     branches: Vec<Branch>,
     dirty: Vec<Node>,
     in_dirty: Vec<bool>,
+    /// Per queued node: `None` to match every clause again, or what it gained since it was
+    /// last matched (only clauses that use one of the gains can have new matches).
+    only: Vec<Option<Vec<Gain>>>,
     clash: Option<Dep>,
     forbidden: Option<(Node, Atom)>,
     steps: u64,
@@ -474,12 +538,14 @@ impl<'c> Tableau<'c> {
             nodes: Vec::new(),
             roles: FxHashMap::default(),
             ineq: FxHashMap::default(),
+            ineq_of: FxHashMap::default(),
             merges: FxHashMap::default(),
             trail: Vec::new(),
             pending: Vec::new(),
             branches: Vec::new(),
             dirty: Vec::new(),
             in_dirty: Vec::new(),
+            only: Vec::new(),
             clash: None,
             forbidden: None,
             steps: 0,
@@ -689,8 +755,9 @@ impl<'c> Tableau<'c> {
             }
             if let Some(x) = self.dirty.pop() {
                 self.in_dirty[x as usize] = false;
+                let only = self.only[x as usize].take();
                 if self.nodes[x as usize].active {
-                    self.match_node(x);
+                    self.match_node(x, only.as_deref());
                 }
                 continue;
             }
@@ -1080,9 +1147,11 @@ impl<'c> Tableau<'c> {
             concrete,
             active: true,
             label: FxHashMap::default(),
+            label_hash: 0,
             adj: FxHashMap::default(),
         });
         self.in_dirty.push(false);
+        self.only.push(None);
         self.trail.push(Undo::NewNode);
         self.steps += 1;
         self.mark(n);
@@ -1093,19 +1162,21 @@ impl<'c> Tableau<'c> {
     }
 
     fn mark(&mut self, n: Node) {
+        self.only[n as usize] = None;
         if !self.in_dirty[n as usize] {
             self.in_dirty[n as usize] = true;
             self.dirty.push(n);
         }
     }
 
-    fn mark_with_neighbours(&mut self, n: Node) {
-        self.mark(n);
-        let nbs: Vec<Node> = self.nodes[n as usize].adj.keys().copied().collect();
-        for m in nbs {
-            if self.nodes[m as usize].active {
-                self.mark(m);
-            }
+    /// Queues `n` for the clauses that can use `g`.
+    fn mark_for(&mut self, n: Node, g: Gain) {
+        if !self.in_dirty[n as usize] {
+            self.in_dirty[n as usize] = true;
+            self.only[n as usize] = Some(vec![g]);
+            self.dirty.push(n);
+        } else if let Some(gains) = &mut self.only[n as usize] {
+            gains.push(g);
         }
     }
 
@@ -1121,6 +1192,7 @@ impl<'c> Tableau<'c> {
             return;
         }
         node.label.insert(a, d.clone());
+        node.label_hash = node.label_hash.wrapping_add(atom_hash(a));
         if node.concrete {
             self.touched.push(n);
         }
@@ -1135,7 +1207,18 @@ impl<'c> Tableau<'c> {
         if matches!(self.c.atoms[a as usize], AtomKind::Nominal(_)) {
             self.nominal_todo.push(n);
         }
-        self.mark_with_neighbours(n);
+        if !self.index.by_x_body[a as usize].is_empty() {
+            self.mark_for(n, Gain::Atom(a));
+        }
+        if self.index.by_y_body[a as usize].is_empty() {
+            return;
+        }
+        let nbs: Vec<Node> = self.nodes[n as usize].adj.keys().copied().collect();
+        for m in nbs {
+            if self.nodes[m as usize].active {
+                self.mark_for(m, Gain::NeighbourAtom(a));
+            }
+        }
     }
 
     /// The nominal rule: a node labelled `{a}` is `a`'s node, so it is merged into it.
@@ -1206,8 +1289,13 @@ impl<'c> Tableau<'c> {
             .push(fwd.inverse());
         self.trail.push(Undo::Role(r.idx, from, to));
         self.steps += 1;
-        self.mark(from);
-        self.mark(to);
+        if from == to {
+            // A self-loop also matches `R(x, x)` body atoms.
+            self.mark(from);
+        } else {
+            self.mark_for(from, Gain::Edge(fwd));
+            self.mark_for(to, Gain::Edge(fwd.inverse()));
+        }
     }
 
     fn add_ineq(&mut self, a: Node, b: Node, d: &Dep) {
@@ -1220,6 +1308,8 @@ impl<'c> Tableau<'c> {
             return;
         }
         self.ineq.insert(key, d.clone());
+        self.ineq_of.entry(a).or_default().push(b);
+        self.ineq_of.entry(b).or_default().push(a);
         if self.nodes[a as usize].concrete {
             self.cineq.entry(a).or_default().push(b);
             self.cineq.entry(b).or_default().push(a);
@@ -1267,19 +1357,11 @@ impl<'c> Tableau<'c> {
             .iter()
             .map(|(&n, rs)| (n, rs.clone()))
             .collect();
-        self.charge(self.ineq.len());
-        let ineqs: Vec<(Node, Dep)> = self
-            .ineq
+        let apart = self.ineq_of.get(&t).map(Vec::as_slice).unwrap_or(&[]);
+        self.charge(apart.len());
+        let ineqs: Vec<(Node, Dep)> = apart
             .iter()
-            .filter_map(|(&(x, y), dd)| {
-                if x == t {
-                    Some((y, dd.union(d)))
-                } else if y == t {
-                    Some((x, dd.union(d)))
-                } else {
-                    None
-                }
-            })
+            .map(|&n| (n, self.ineq[&(n.min(t), n.max(t))].union(d)))
             .collect();
         self.nodes[t as usize].active = false;
         self.trail.push(Undo::Deactivate(t));
@@ -1303,7 +1385,8 @@ impl<'c> Tableau<'c> {
                 self.add_ineq(s, n, &dd);
             }
         }
-        self.mark_with_neighbours(s);
+        // What `s` and its neighbours can match anew comes from the atoms and edges `s`
+        // gained, each queued as it was added: losing `t` matches nothing new.
     }
 
     /// Deactivates `t`'s descendants. A child is always adjacent to its parent (the edge
@@ -1355,13 +1438,30 @@ impl<'c> Tableau<'c> {
         out
     }
 
-    fn match_node(&mut self, x: Node) {
+    fn match_node(&mut self, x: Node, only: Option<&[Gain]>) {
         // Every clause is about an abstract central node (data facts are read from it).
         if self.nodes[x as usize].concrete {
             return;
         }
+        let cands = match only {
+            None => self.candidates(x),
+            Some(gains) => {
+                let mut out: Vec<u32> = Vec::new();
+                for g in gains {
+                    out.extend_from_slice(match *g {
+                        Gain::Atom(a) => &self.index.by_x_body[a as usize],
+                        Gain::NeighbourAtom(a) => &self.index.by_y_body[a as usize],
+                        Gain::Edge(r) => self.index.by_body_role.get(&r).map_or(&[], |v| v),
+                    });
+                }
+                out.sort_unstable();
+                out.dedup();
+                self.charge(gains.len() + out.len());
+                out
+            }
+        };
         let mut found = Vec::new();
-        for ci in self.candidates(x) {
+        for ci in cands {
             self.match_clause(ci, x, &mut found);
         }
         for inst in found {
@@ -1678,7 +1778,9 @@ impl<'c> Tableau<'c> {
         while self.trail.len() > mark {
             match self.trail.pop().expect("len > mark") {
                 Undo::Concept(n, a) => {
-                    self.nodes[n as usize].label.remove(&a);
+                    let node = &mut self.nodes[n as usize];
+                    node.label.remove(&a);
+                    node.label_hash = node.label_hash.wrapping_sub(atom_hash(a));
                 }
                 Undo::Role(idx, from, to) => {
                     self.roles.remove(&(idx, from, to));
@@ -1688,6 +1790,16 @@ impl<'c> Tableau<'c> {
                 }
                 Undo::Ineq(a, b) => {
                     self.ineq.remove(&(a, b));
+                    for (x, y) in [(a, b), (b, a)] {
+                        if let Some(ns) = self.ineq_of.get_mut(&x) {
+                            if let Some(p) = ns.iter().rposition(|&n| n == y) {
+                                ns.remove(p);
+                            }
+                            if ns.is_empty() {
+                                self.ineq_of.remove(&x);
+                            }
+                        }
+                    }
                     if self.nodes[a as usize].concrete {
                         for (x, y) in [(a, b), (b, a)] {
                             if let Some(ns) = self.cineq.get_mut(&x) {
@@ -1704,6 +1816,7 @@ impl<'c> Tableau<'c> {
                 Undo::NewNode => {
                     self.nodes.pop();
                     self.in_dirty.pop();
+                    self.only.pop();
                 }
                 Undo::Deactivate(n) => self.nodes[n as usize].active = true,
                 Undo::Merge(t) => {
@@ -1721,6 +1834,7 @@ impl<'c> Tableau<'c> {
         for n in self.dirty.drain(..) {
             if let Some(f) = self.in_dirty.get_mut(n as usize) {
                 *f = false;
+                self.only[n as usize] = None;
             }
         }
         self.touched.clear();
@@ -1743,7 +1857,8 @@ impl<'c> Tableau<'c> {
         let mut blocked = vec![false; len];
         let mut blocker = vec![false; len];
         let mut blocked_by = vec![None; len];
-        let mut seen: FxHashMap<Vec<u32>, Node> = FxHashMap::default();
+        // Candidate blockers by key; a key match is confirmed on the labels themselves.
+        let mut seen: FxHashMap<BlockKey, Vec<Node>> = FxHashMap::default();
         for n in 0..len {
             let node = &self.nodes[n];
             // Concrete nodes are never blocked and never block.
@@ -1755,18 +1870,23 @@ impl<'c> Tableau<'c> {
                 blocked[n] = true;
                 continue;
             }
-            let sig = self.signature(n as Node, p as Node);
-            // Building and hashing the signature is work proportional to its length.
-            self.charge(sig.len());
-            match seen.entry(sig) {
-                std::collections::hash_map::Entry::Vacant(e) => {
-                    e.insert(n as Node);
-                }
-                std::collections::hash_map::Entry::Occupied(e) => {
+            let key = self.block_key(n as Node, p as Node);
+            // Building and hashing the key is work proportional to its edge.
+            self.charge(1 + key.edge.len());
+            let cands = seen.entry(key).or_default();
+            let found = cands.iter().copied().find(|&m| {
+                let q = self.nodes[m as usize]
+                    .parent
+                    .expect("blockers have a parent");
+                self.same_label(n as Node, m) && self.same_label(p as Node, q)
+            });
+            match found {
+                Some(m) => {
                     blocked[n] = true;
-                    blocker[*e.get() as usize] = true;
-                    blocked_by[n] = Some(*e.get());
+                    blocker[m as usize] = true;
+                    blocked_by[n] = Some(m);
                 }
+                None => cands.push(n as Node),
             }
         }
         (blocked, blocker, blocked_by)
@@ -1779,7 +1899,7 @@ impl<'c> Tableau<'c> {
     /// blocker's subtree. A nominal merges a blockable node into a root, which leaves an edge
     /// between a root and a blockable node that is not its child. Such an edge is copied with
     /// the subtree it hangs from. A child of a root is blocked only by a child of the same
-    /// root ([`signature`](Self::signature)), so the copy hung from the root in its place
+    /// root ([`block_key`](Self::block_key)), so the copy hung from the root in its place
     /// has the blocker's edges to roots and no more. The model is still one as long as
     ///
     /// - a blocked node's edge is kept when its direct blocker has the same edge to the same
@@ -2065,31 +2185,35 @@ impl<'c> Tableau<'c> {
         false
     }
 
-    fn signature(&self, n: Node, p: Node) -> Vec<u32> {
-        let mut sig: Vec<u32> = Vec::new();
-        let push_label = |sig: &mut Vec<u32>, m: Node| {
-            let mut l: Vec<u32> = self.nodes[m as usize].label.keys().copied().collect();
-            l.sort_unstable();
-            sig.extend(l);
-            sig.push(u32::MAX);
-        };
-        push_label(&mut sig, n);
-        push_label(&mut sig, p);
-        let mut rs: Vec<u32> = self.nodes[p as usize]
+    /// What a blockable node `n` with parent `p` must share with its blocker, the labels
+    /// summed up by their hashes ([`same_label`](Self::same_label) confirms them).
+    fn block_key(&self, n: Node, p: Node) -> BlockKey {
+        let (nd, pd) = (&self.nodes[n as usize], &self.nodes[p as usize]);
+        let mut edge: Vec<u32> = pd
             .adj
             .get(&n)
             .map(|rs| rs.iter().map(|r| 2 * r.idx + u32::from(r.inv)).collect())
             .unwrap_or_default();
-        rs.sort_unstable();
-        sig.extend(rs);
-        // A root parent itself: the copy of a blocker hangs from the blocked node's parent,
-        // so a blocker under another root, or joined to this one off the tree, would gain or
-        // merge an edge to a root.
-        if self.nodes[p as usize].root {
-            sig.push(u32::MAX);
-            sig.push(p);
+        edge.sort_unstable();
+        BlockKey {
+            label: (nd.label_hash, nd.label.len()),
+            parent_label: (pd.label_hash, pd.label.len()),
+            edge,
+            // A root parent itself: the copy of a blocker hangs from the blocked node's
+            // parent, so a blocker under another root, or joined to this one off the tree,
+            // would gain or merge an edge to a root.
+            root: pd.root.then_some(p),
         }
-        sig
+    }
+
+    /// Whether `a` and `b` have the same label, counting the comparison as work.
+    fn same_label(&self, a: Node, b: Node) -> bool {
+        if a == b {
+            return true;
+        }
+        let (la, lb) = (&self.nodes[a as usize].label, &self.nodes[b as usize].label);
+        self.charge(la.len());
+        la.len() == lb.len() && la.keys().all(|k| lb.contains_key(k))
     }
 
     fn expand(&mut self) -> bool {
@@ -2699,5 +2823,84 @@ mod tests {
         let v = t.new_node(Some(p));
         t.add_role(s, p, v, &Dep::default());
         assert!(t.blocked()[v as usize], "a sibling still blocks");
+    }
+
+    /// The dictionary and clauses of the ontology `body`.
+    fn setup(body: &str) -> (sparq_core::dict::Dict, Clauses) {
+        let (d, triples) = Graph::parse_to_triples(body, "turtle").unwrap();
+        let onto = extract(&d, &triples).unwrap();
+        let c = clausify(&d, &onto, Budget::default().max_steps).unwrap();
+        (d, c)
+    }
+
+    fn class(d: &sparq_core::dict::Dict, c: &Clauses, frag: &str) -> Atom {
+        let id = d.lookup(&Term::NamedNode(NamedNode::new_unchecked(format!(
+            "http://ex/{frag}"
+        ))));
+        c.classes.iter().find(|&&(i, _)| i == id).unwrap().1
+    }
+
+    /// Blocking compares labels by hash: the hash of a label does not depend on the order
+    /// its atoms came in, and undoing an atom restores it.
+    #[test]
+    fn labels_gained_in_any_order_block_alike() {
+        let (d, c) = setup(
+            r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            :A a owl:Class . :B a owl:Class . :C a owl:Class . :s a owl:ObjectProperty .
+            :A owl:equivalentClass [ a owl:Restriction ; owl:onProperty :s ; owl:someValuesFrom :B ] .
+        "#,
+        );
+        let (a, b, cc) = (class(&d, &c, "A"), class(&d, &c, "B"), class(&d, &c, "C"));
+        let index = ClauseIndex::new(&c);
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        let s = Role { idx: 0, inv: false };
+        let p = t.add_root();
+        let (v, w) = (t.new_node(Some(p)), t.new_node(Some(p)));
+        for (n, atoms) in [(v, [a, b]), (w, [b, a])] {
+            t.add_role(s, p, n, &Dep::default());
+            for x in atoms {
+                t.add_concept(n, x, &Dep::default());
+            }
+        }
+        assert!(t.blocked()[w as usize], "the same label in another order");
+        let mark = t.trail.len();
+        t.add_concept(w, cc, &Dep::default());
+        assert!(!t.blocked()[w as usize], "a larger label");
+        t.undo_to(mark);
+        assert!(t.blocked()[w as usize], "the label as it was");
+    }
+
+    /// A merge queues only what the surviving node gains: an atom it takes over still
+    /// reaches the clauses of its old neighbours (`∃s.A ⊑ B` at its parent).
+    #[test]
+    fn a_merged_atom_reaches_the_neighbours_clauses() {
+        let (d, c) = setup(
+            r#"
+            @prefix : <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> .
+            @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+            :A a owl:Class . :B a owl:Class . :s a owl:ObjectProperty .
+            [ a owl:Restriction ; owl:onProperty :s ; owl:someValuesFrom :A ] rdfs:subClassOf :B .
+        "#,
+        );
+        let (a, b) = (class(&d, &c, "A"), class(&d, &c, "B"));
+        let index = ClauseIndex::new(&c);
+        let mut t = Tableau::new(&c, &index, Budget::default());
+        let s = Role { idx: 0, inv: false };
+        let (p, q) = (t.add_root(), t.add_root());
+        let u = t.new_node(Some(p));
+        t.add_role(s, p, u, &Dep::default());
+        let w = t.new_node(Some(q));
+        t.add_role(s, q, w, &Dep::default());
+        t.add_concept(w, a, &Dep::default());
+        assert_eq!(t.run(), Ok(true));
+        assert!(!t.nodes[p as usize].label.contains_key(&b));
+        // `u` survives and gains `A`; its edge from `p` is not new.
+        t.merge(u, w, &Dep::default());
+        assert_eq!(t.run(), Ok(true));
+        assert!(
+            t.nodes[p as usize].label.contains_key(&b),
+            "p has an s-neighbour in A"
+        );
     }
 }
