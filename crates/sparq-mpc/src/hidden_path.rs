@@ -11,11 +11,14 @@
 //! step 2) — the **cryptographic core** the disclosed-key module
 //! ([`crate::bounded_path`]) explicitly deferred. There the join keys are disclosed
 //! global IRIs and the whole chain is a crypto-free fold of equi-joins. HERE the
-//! intermediate node *values* are PRIVATE (secret-shared `F_p` keys): a chain
-//! `a → z_1 → … → z_{k−1} → b` exists iff there is a sequence of `k` edges whose
-//! join points line up, and each "lines up" test is decided as a **secret-shared
-//! match bit that is never opened** — so no intermediate node `z_i`, and no per-hop
-//! / per-pair match pattern, is ever reconstructed.
+//! intermediate comparisons run on secret-shared `F_p` key sharings whose values are
+//! not explicitly opened: a chain `a → z_1 → … → z_{k−1} → b` exists iff there is a
+//! sequence of `k` edges whose join points line up, and each "lines up" test is
+//! decided as a **secret-shared match bit the protocol never opens** — so no
+//! intermediate node `z_i`, and no per-hop / per-pair match pattern, is ever
+//! reconstructed by the arithmetic. That is not a confidentiality claim against the
+//! simulator host or an observer given the clear edge relation; see the disclosure
+//! list below for what the construction does make readable.
 //!
 //! ## The construction (design §2.1 / §2.6, realised against landed primitives)
 //!
@@ -52,8 +55,10 @@
 //! `degree_reduce_through`). Grouping is over the DISCLOSED endpoint terms — never
 //! over any secret intermediate key. It is not free of disclosure, though: the
 //! grouping key is the endpoint pair of EVERY enumerated tuple, matched or not, so
-//! every evaluating party knows the ordered candidate pair sequence and where each
-//! tuple folds — see the disclosure list below.
+//! anything supplied with those ordered plaintext terms — the simulator host here,
+//! and every evaluating party in a distributed implementation that hands them out —
+//! can determine the ordered candidate pair sequence and where each tuple folds.
+//! See the disclosure list below.
 //!
 //! The one connected-bit per distinct endpoint pair becomes a
 //! [`crate::oblivious_join::Candidate`] with a
@@ -68,11 +73,16 @@
 //!
 //! ## What stays hidden / what is disclosed (state it precisely)
 //!
-//! - **Hidden:** every intermediate node key `z_i` (never reconstructed); every
-//!   per-hop and per-pair match bit (secret-shared, never opened); WHICH tuples
-//!   connected a pair and the realized chain length (the OR-fold collapses
-//!   multiplicity). The NUMBER of distinct endpoint pairs is NOT in this list —
-//!   see the schedule bullet below.
+//! - **Not explicitly opened:** every intermediate node key `z_i` (never
+//!   reconstructed); every per-hop and per-pair match bit (secret-shared); which
+//!   tuples connected a pair and the realized chain length (the OR-fold collapses
+//!   multiplicity). "Not opened" is a statement about the arithmetic protocol, not
+//!   a confidentiality claim: it does not hide node identities or connectivity from
+//!   the simulator host, or from an observer supplied the clear edge terms and their
+//!   associations — under the documented consistent encoding
+//!   ([`crate::term_encode::encode_term`]) those terms determine hop equality and
+//!   chain connectivity. The NUMBER of distinct endpoint pairs is NOT in this list
+//!   either — see the schedule bullet below.
 //! - **Disclosed by the SCHEDULE (every successful run):** the OR-fold POSITIONS —
 //!   which tuple positions repeat an endpoint pair — and therefore the distinct
 //!   endpoint-pair count `D`. Who learns them:
@@ -80,23 +90,25 @@
 //!     evaluator that groups does so on plaintext `Term`s, so it sees the ORDERED
 //!     candidate pair sequence, unmatched pairs included — strictly more than the
 //!     result, which names the MATCHED pairs only.
-//!   - **In a real multi-party run**, every party evaluates the same circuit
-//!     wiring, including which accumulator each tuple's bit folds into. Every
-//!     evaluating party therefore knows the fold positions. This is not an
-//!     artefact of the simulation.
+//!   - **In a distributed implementation** that supplies every evaluating party
+//!     with the ordered plaintext endpoint terms, or with this construction's
+//!     data-dependent accumulator wiring, every such party can determine the fold
+//!     positions. This crate implements a single-process simulation and does not
+//!     establish a per-party input or wiring-distribution boundary.
 //!   - **Over a transport**, the ORs are not batched — each is one
 //!     `mul_shares_raw` followed by one `degree_reduce_through`, inline in the
-//!     enumeration — so a sequential transport would expose the positions through
-//!     the gate boundaries themselves. The hidden paths have no live transport
-//!     yet, so that is a property of the construction, not a measured
-//!     observation.
+//!     enumeration. A sequential transport that exposes identifiable tuple and
+//!     OR-gate boundaries would expose the fold positions; there is no
+//!     hidden-path transport establishing which boundaries a network observer
+//!     receives.
 //!   - Independently of any of that, each repeat costs one extra multiplication,
 //!     so the multiplication COUNT carries `D`, the public tuple total `T` being
 //!     known: `T − D` ORs over the `T` tuples, or `T + N₀ − D` when a bounded form
-//!     has `min == 0` and folds in one entry per node of the `N₀`-node disclosed
-//!     domain, plus the output stage's padding from `D` up to `B`. `T` is `|E|^k`
-//!     for the exactly-`k` chain and `Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths
-//!     `ℓ >= 1` for a bounded form, `a` being the alternation width.
+//!     has `min == 0` and folds in one entry per node of the `N₀`-node DECLARED
+//!     public node domain, plus the output stage's padding from `D` up to `B`. `T`
+//!     is `|E|^k` for the exactly-`k` chain, and for a bounded form
+//!     `T = Σ_{ℓ=max(min,1)}^{max} a^ℓ·|E|^ℓ` (empty sum = 0) with `a` the
+//!     alternation width; length-zero entries are counted separately by `N₀`.
 //!
 //!   These are the views this module can account for; it does NOT claim a complete
 //!   enumeration of what an arbitrary party or an arbitrary transport learns.
@@ -304,9 +316,13 @@ pub struct HiddenEdge {
 /// the distinct endpoint-pair count `D`: the grouping key is the disclosed endpoint
 /// pair of every enumerated tuple, and each repeat costs one extra secure OR.
 /// **Unmatched endpoint terms are visible to the grouping evaluator**, which reads
-/// every tuple's endpoint pair in the clear, although they appear in no answer. NOT
-/// disclosed: any intermediate key, any per-hop or per-pair match bit, which tuples
-/// connected a pair, or the realized chain length. A `B` at or above
+/// every tuple's endpoint pair in the clear, although they appear in no answer. The
+/// arithmetic protocol does not explicitly open intermediate keys, hop bits, tuple
+/// bits or connected bits. This does not hide node identities or connectivity from
+/// the simulator host, or from an observer supplied the clear edge terms and their
+/// associations; under the documented consistent encoding
+/// ([`crate::term_encode::encode_term`]), those terms determine hop equality and
+/// chain connectivity. A `B` at or above
 /// [`public_candidate_pair_bound`] is decided without computing `D`, which keeps
 /// `D` out of the DECISION and out of the error text — not out of the schedule.
 #[derive(Debug, Clone)]
@@ -396,9 +412,12 @@ fn tuple_chain_bit(
     // k = 1: trivially connected (no internal hop) → constant shared 1.
     let mut bit = const_sharing(n, Fp::one());
     for w in tuple.windows(2) {
-        // The internal hop join: e_i.object must equal e_{i+1}.subject. Both keys
-        // are PRIVATE intermediate node values — the equality verdict stays a
-        // secret-shared bit, never opened (closes the per-hop L2 leak at source).
+        // The internal hop join: e_i.object must equal e_{i+1}.subject. Both are
+        // intermediate node key sharings the protocol never opens, and the equality
+        // verdict stays a secret-shared bit — the arithmetic reconstructs neither.
+        // The clear edge terms the caller supplies still determine this verdict
+        // under the consistent encoding (`crate::term_encode::encode_term`); see the
+        // module's disclosure list.
         let hop = secure_equal_to_bit_through(source, w[0].object.key, w[1].subject.key)?;
         bit = secret_and(source, &bit, &hop)?;
     }
@@ -770,9 +789,12 @@ fn check_params(backend: &ShamirBackend, edges: &HiddenEdges, k: usize) -> Resul
 /// branch hides `D` from a successful run. The grouping keys every enumerated tuple
 /// by its endpoint pair, read in the clear: in the model as built one process
 /// simulates every party, so the grouping evaluator sees the ordered candidate pair
-/// sequence; in a real multi-party run every party evaluates the same wiring,
-/// including which accumulator each tuple folds into, so every evaluating party
-/// knows the fold positions. The `T = |E|^k` tuples cost `T − D` ORs, and the output
+/// sequence. In a distributed implementation that supplies every evaluating party
+/// with the ordered plaintext endpoint terms, or with this construction's
+/// data-dependent accumulator wiring, every such party can determine the fold
+/// positions. This crate implements a single-process simulation and does not
+/// establish a per-party input or wiring-distribution boundary.
+/// The `T = |E|^k` tuples cost `T − D` ORs, and the output
 /// pads from `D` to `B`, so the multiplication count carries `D` regardless. Hiding
 /// `D` would need oblivious grouping with a uniform schedule, which is not built;
 /// see the module docs for the transport note and the limits of this account. A
@@ -1398,12 +1420,16 @@ fn build_bounded_candidates(
 /// branch hides `D` from a successful run. The grouping keys every enumerated tuple
 /// by its endpoint pair, read in the clear: in the model as built one process
 /// simulates every party, so the grouping evaluator sees the ordered candidate pair
-/// sequence; in a real multi-party run every party evaluates the same wiring,
-/// including which accumulator each tuple folds into, so every evaluating party
-/// knows the fold positions. For a bounded form the tuple total is
-/// `T = Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths `ℓ >= 1`, with `a` the
-/// alternation width; the OR count is `T + N₀ − D` when `min == 0`, the reflexive
-/// diagonal folding in one entry per node of the `N₀`-node disclosed domain, and
+/// sequence. In a distributed implementation that supplies every evaluating party
+/// with the ordered plaintext endpoint terms, or with this construction's
+/// data-dependent accumulator wiring, every such party can determine the fold
+/// positions. This crate implements a single-process simulation and does not
+/// establish a per-party input or wiring-distribution boundary.
+/// For a bounded form the tuple total is
+/// `T = Σ_{ℓ=max(min,1)}^{max} a^ℓ·|E|^ℓ` (empty sum = 0), with `a` the alternation
+/// width; length-zero entries are counted separately by `N₀`. The OR count is
+/// `T + N₀ − D` when `min == 0`, the reflexive diagonal folding in one entry per
+/// node of the `N₀`-node DECLARED public node domain, and
 /// `T − D` otherwise. The output then pads from `D` to `B`, so the multiplication
 /// count carries `D` regardless. Hiding `D` would need oblivious grouping with a
 /// uniform schedule, which is not built; see the module docs for the transport note

@@ -1079,8 +1079,11 @@ fn the_public_bounded_bound_can_exceed_every_admissible_bound() {
 /// It does not separate the fold POSITIONS, and the equality on `folds_late` below
 /// says so. That is a statement about this projection only: the positions are
 /// disclosed elsewhere — the grouping reads every tuple's endpoint pair in the
-/// clear, and every party in a real run evaluates the same wiring — as the module
-/// docs set out.
+/// clear, and a distributed implementation that supplies every evaluating party with
+/// those ordered plaintext terms, or with this construction's data-dependent
+/// accumulator wiring, lets every such party determine the positions. This crate
+/// implements a single-process simulation and does not establish a per-party input
+/// or wiring-distribution boundary, as the module docs set out.
 #[test]
 fn the_draw_method_count_projection_tracks_the_fold_count() {
     use crate::randomness::test_sources::RecordingSource;
