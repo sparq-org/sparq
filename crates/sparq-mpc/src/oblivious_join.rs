@@ -193,9 +193,10 @@
 //! longest candidate rather than agreed in advance, so a caller cannot pin the
 //! width its plan will pay before it assembles its candidates; and every slot is
 //! still padded to that width, so a single long candidate still widens the whole
-//! column (bounding the width does not make it adaptive). The number of candidates
-//! is bounded only through `B` and the producers' own ceilings, not by a cap of
-//! its own on this surface.
+//! column (bounding the width does not make it adaptive). And the aggregate budget
+//! is charged from the uniform width the candidates HAPPEN to produce, so a caller
+//! cannot be told in advance whether its plan will fit it — only refused once the
+//! candidates are in hand.
 //!
 //! ## Communication / round cost (MODELLED — counted, not measured)
 //!
