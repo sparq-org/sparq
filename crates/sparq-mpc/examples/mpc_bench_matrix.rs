@@ -32,11 +32,21 @@ fn main() {
 
     let json_only = std::env::args().any(|a| a == "--json");
     if json_only {
-        print!("{}", results.to_json());
+        print!(
+            "{}",
+            results
+                .to_json()
+                .expect("the modelled counts fit u64 at these scales")
+        );
         return;
     }
 
-    print!("{}", results.to_table());
+    print!(
+        "{}",
+        results
+            .to_table()
+            .expect("the modelled counts fit u64 at these scales")
+    );
     println!();
 
     // The correctness gates RUN THE REAL PRIMITIVES so a fast-but-wrong cost cell
@@ -51,7 +61,12 @@ fn main() {
 
     println!();
     println!("--- JSON schema (structured results; consume this, not the table) ---");
-    print!("{}", results.to_json());
+    print!(
+        "{}",
+        results
+            .to_json()
+            .expect("the modelled counts fit u64 at these scales")
+    );
 }
 
 #[cfg(feature = "insecure-test-rng")]

@@ -183,11 +183,11 @@ fn comm_counter_counts_equalities_reductions_and_output() {
         "mults must include equalities + reductions + B select mults"
     );
     assert!(
-        c.bytes_per_party() > 0,
+        c.bytes_per_party().unwrap() > 0,
         "a wired operator pays non-zero modelled bytes"
     );
     assert!(
-        c.total_rounds() > 0,
+        c.total_rounds().unwrap() > 0,
         "a wired operator has communication rounds"
     );
 }
@@ -199,7 +199,7 @@ fn comm_counter_is_deterministic() {
     let a = plan.comm_counter(5, 4).unwrap();
     let b = plan.comm_counter(5, 4).unwrap();
     assert_eq!(a.multiplications, b.multiplications);
-    assert_eq!(a.total_bytes(), b.total_bytes());
+    assert_eq!(a.total_bytes().unwrap(), b.total_bytes().unwrap());
 }
 
 #[test]
@@ -275,4 +275,52 @@ fn comm_counter_refuses_an_over_cap_bound() {
     }
     // A bound inside the cap is still modelled.
     assert!(plan.comm_counter(5, 4).is_ok());
+}
+
+/// The cost model applies the output stage's PARTY cap, so it does not cost a
+/// plan the stage would refuse.
+///
+/// A cost model for a run that cannot happen is not a cost model: the bound cap
+/// alone let `comm_counter` report a figure for a party count the stage refuses
+/// outright. The aggregate slot-work budget is deliberately not applied here —
+/// see `comm_counter`'s own docs for why it cannot fire at the tag-only width.
+#[test]
+fn comm_counter_applies_the_output_party_cap() {
+    use crate::oblivious_join::{MAX_OUTPUT_BOUND, MAX_OUTPUT_PARTIES, MAX_SLOT_WORK};
+    let req = HiddenPathRequest::range("p", 1, 3);
+    let plan = plan_hidden_bounded_path(&req, 3).unwrap();
+
+    let err = plan
+        .comm_counter(MAX_OUTPUT_PARTIES + 1, 4)
+        .expect_err("a party count past the cap must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+        "{:?}",
+        err
+    );
+    assert!(
+        plan.comm_counter(MAX_OUTPUT_PARTIES, 4).is_ok(),
+        "the cap itself is still modelled"
+    );
+
+    // And the aggregate slot-work budget, at the tag-only width this counter
+    // models: the WIDEST legal combination of `B` and `n` multiplies past
+    // `MAX_SLOT_WORK`, so the budget really does decide something here, and the
+    // counter refuses that combination instead of costing a run that cannot happen.
+    let worst_t = (MAX_OUTPUT_PARTIES - 1) / 2;
+    let widest = (MAX_OUTPUT_BOUND as u64) * (MAX_OUTPUT_PARTIES as u64) * (2 * worst_t as u64 + 1);
+    assert!(
+        widest > MAX_SLOT_WORK,
+        "the fixture must really exceed the slot-work budget: {} vs {}",
+        widest,
+        MAX_SLOT_WORK
+    );
+    let err = plan
+        .comm_counter(MAX_OUTPUT_PARTIES, MAX_OUTPUT_BOUND)
+        .expect_err("the widest legal B and n must be refused on the product");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_WORK")),
+        "{:?}",
+        err
+    );
 }

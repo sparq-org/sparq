@@ -130,15 +130,23 @@
 //!   The padding step is where the candidate count shows: it allocates `B − C`
 //!   dummy slots for `C` candidates, so the schedule and allocation reveal `C` to
 //!   anyone observing the run, whatever a producer's bound check consulted.
-//! - **The packed payload WIDTH is public.** Every slot is packed to one uniform
-//!   width, and that width is the longest candidate encoding, rounded up to whole
-//!   limbs, so it is visible to the parties: it is the per-slot limb count in the
-//!   opens, in [`ObliviousOutputCost::payload_select_mults`] and in the shuffle's
-//!   switch count. The maximum is taken over ALL candidates, the rejected ones
-//!   included, so the width is an upper bound on the length of a candidate
-//!   encoding and does not say which candidate reached it. A caller-agreed public
-//!   width bound, failing closed above it, is a follow-up; this stage does not
-//!   have one.
+//! - **The packed payload WIDTH is public, and by default it is DERIVED from the
+//!   data.** Every slot is packed to one uniform width, so the width is visible to
+//!   the parties: it is the per-slot limb count in the opens, in
+//!   [`ObliviousOutputCost::payload_select_mults`] and in the shuffle's switch
+//!   count. By default — [`PayloadWidths::derived`], which a bare arity gives —
+//!   that width is the longest serialized ROW in the run — the sum over its
+//!   columns — floored at the all-unbound row every padding slot carries, and
+//!   rounded up to whole limbs. The maximum is taken over ALL the run's rows, the
+//!   rejected candidates' included, so it is an upper bound on one row's length and
+//!   does not say which row reached it; but the longest row's LENGTH is observable
+//!   in it, and in every cost that scales with it. That is the residual of the
+//!   default mode, and it is the rule this stage has always packed by. A caller that declares the
+//!   width instead ([`PayloadWidths::declare`]) removes that residual: the width is
+//!   then a public number independent of the data. What a declaration exposes in
+//!   its place is one bit — whether a term exceeded it, which is a refusal. The
+//!   width is BOUNDED in both modes, failing closed above its caps, but bounding it
+//!   does not hide it: a public width is still public.
 //! - Malicious security is unchanged from the Shamir layer. The opens themselves
 //!   carry the degree-`t` sharing's own RS redundancy: `n` points on a degree-`t`
 //!   polynomial leave `n - t - 1` redundant shares, which at `n = 2t + 1` is `t`,
@@ -164,6 +172,48 @@
 //!   well-formed degree-`t` sharing of a different value that no open can flag, so
 //!   the protocol stays **semi-honest only** (research record §4.1 D×A; bead
 //!   sq-6d6g IT-MAC is the named fix).
+//!
+//! ## The output-stage WIDTH caps — what is bounded, and what is not
+//!
+//! The padded bound `B` has been capped ([`MAX_OUTPUT_BOUND`]) since this stage
+//! landed. The per-slot WIDTHS were not, so the following are capped too. Each is
+//! decided once the run's width is RESOLVED — which happens at the operator's own
+//! entry, from the operator's inputs, and again at the stage entry from its
+//! candidates — and therefore **before any sharing is drawn and before any slot is
+//! allocated**:
+//!
+//! - **Payload arity** — [`MAX_PAYLOAD_ARITY`]. Closed form on a public number,
+//!   ahead of everything, including the all-unbound dummy row of that arity.
+//! - **Per-term serialized byte length** — [`MAX_PAYLOAD_TERM_BYTES`], on the
+//!   width the run resolves to, whether the caller declared it or it was derived
+//!   from the run's own terms.
+//! - **Uniform packed limb width** — [`MAX_SLOT_LIMBS`], on the width that every
+//!   slot pays a sharing, a select, a degree reduction and an open per limb for.
+//! - **Aggregate slot work `B × (1 + limbs) × n × (2t + 1)`** —
+//!   [`MAX_SLOT_WORK`], in checked `u64` arithmetic. Individually-legal factors
+//!   still multiply past what the stage is built to run, so the PRODUCT is bounded
+//!   in its own right and an overflowing product is a refusal, not a wrapped
+//!   number under the budget. This is the check that binds on an oversized
+//!   COMBINATION, which is why each individual cap above is generous.
+//! - **Compute-party count** — [`MAX_OUTPUT_PARTIES`], because the party count
+//!   multiplies the per-limb work twice over (one sharing is `n` elements, and the
+//!   degree reduction behind each select re-shares `2t + 1` times).
+//!
+//! Each refusal names PUBLIC quantities only: the cap and the public factors (`B`,
+//! the arity, the width, `n`, `t`). No term text, no term length, no column index
+//! and no candidate index appears in any of them.
+//!
+//! **What is still NOT bounded here.** Whole-operator resource planning — the
+//! `PartialResult` clones a caller makes, dealer batches, aggregate sharing,
+//! shuffle networks beyond this bound, session traffic and deadlines — is
+//! follow-up work and is not bounded by anything in this module. And in the
+//! DEFAULT (derived) mode the width is still decided by the run's longest ROW
+//! rather than agreed in advance, so a caller cannot pin the width its plan will
+//! pay before it has its inputs, and a single long term still widens the whole
+//! column. Declaring the width is what fixes that, and it is opt-in. Nothing in
+//! this module narrows the default's residual: the default is this stage's
+//! existing behaviour, bounded and refused above its caps, and unchanged below
+//! them.
 //!
 //! ## Communication / round cost (MODELLED — counted, not measured)
 //!
@@ -306,6 +356,478 @@ pub enum MatchBit {
 /// `check_output_bound`, never a producer's assumed maximum. A protocol guard,
 /// not a tuning knob: `B` beyond it is not a workload this stage is built to run.
 pub const MAX_OUTPUT_BOUND: usize = 1 << 18; // 262_144
+
+/// Maximum payload ARITY (number of payload columns per slot) the oblivious output
+/// stage accepts before refusing with an [`MpcError::Protocol`] error.
+///
+/// The arity is a PUBLIC schema width: every slot carries exactly this many
+/// nullable terms, the all-unbound dummy row of this arity is materialised once as
+/// the public pad every slot is selected against, and the decode walks exactly this
+/// many columns. So the guard is a closed-form check on a public number and it runs
+/// before the dummy row is built — which is what keeps a `payload_arity` of
+/// `usize::MAX` a controlled refusal instead of a `vec![None; usize::MAX]` the
+/// allocator cannot satisfy.
+///
+/// A protocol guard, not a tuning knob: the in-tree producers of candidates for
+/// this stage emit two payload columns (the endpoint pair), and a result row
+/// dozens of columns wide is already past what this stage is built to run.
+pub const MAX_PAYLOAD_ARITY: usize = 1 << 10; // 1_024
+
+/// Largest per-term byte width one run may be padded to, whether a caller
+/// DECLARED it or it was DERIVED from the run's own terms.
+///
+/// A payload term is carried through the shuffle as its canonical N-Triples form
+/// (see `encode_payload_row`), and every slot is padded to the run's uniform
+/// width, so the per-term width is what fixes the packed limb width of every slot.
+/// Each limb of each slot pays a sharing, a select multiplication, a degree
+/// reduction and an open, so the width is a cost commitment and is bounded here.
+///
+/// The value is a megabyte per term: far above every term the in-tree producers
+/// emit — an IRI or a short literal — and above any payload term this crate has
+/// been exercised with, so it refuses nothing that was carried before it existed.
+/// What it rules out is a single payload term large enough that the packed width it
+/// implies is a workload of its own; [`MAX_SLOT_LIMBS`] and [`MAX_SLOT_WORK`] are
+/// what bind on the realistic combinations.
+pub const MAX_PAYLOAD_TERM_BYTES: usize = 1 << 24; // 16 MiB per term
+
+/// Maximum uniform packed limb width (limbs per slot) the oblivious output stage
+/// accepts before refusing with an [`MpcError::Protocol`] error.
+///
+/// The width is `1 + ⌈row_bytes / 7⌉` over the run's resolved row width (see
+/// `SlotWidths::limb_capacity`) and is applied to every slot, real or dummy.
+/// Each limb of each slot costs one sharing, one select multiplication, one degree
+/// reduction (itself `2t + 1` re-sharings through the randomness seam), one
+/// position in the shuffle network's entry width and one degree-`t` open — so the
+/// width is the per-slot work multiplier and is bounded on its own, not only
+/// through the arity and per-term widths it follows from.
+pub const MAX_SLOT_LIMBS: usize = 1 << 24; // 16_777_216
+
+/// Maximum compute-party count the output stage's work budget accepts.
+///
+/// Every sharing the stage draws is `parties` field elements, and the degree
+/// reduction behind each select re-shares `2t + 1 <= parties` times, so the party
+/// count multiplies the work twice over. It is a public plan parameter of the
+/// backend, checked in closed form. This bounds THIS stage's budget; it is not a
+/// crate-wide limit on how many parties a `ShamirBackend` may have.
+pub const MAX_OUTPUT_PARTIES: usize = 1 << 10; // 1_024
+
+/// Maximum aggregate slot work the oblivious output stage accepts before refusing
+/// with an [`MpcError::Protocol`] error, counted in MODELLED FIELD ELEMENTS.
+///
+/// The figure is `B × (1 + limbs) × parties × (2t + 1)`:
+///
+/// - `B` slots, each a tag element plus `limbs` packed limbs of the run's
+///   resolved width — the `1 +` is why a zero-width run is still charged for its
+///   per-slot tag sharing, select, degree reduction and open;
+/// - `parties`, because one sharing is one field element per party; and
+/// - `2t + 1`, the re-sharings of the degree reduction behind every select.
+///
+/// The payload ARITY is deliberately NOT a factor: the arity is already inside
+/// `limbs` (`SlotWidths::limb_capacity` packs every column into the row), so
+/// multiplying by it again would count each column twice and leave the budget
+/// binding only at arities no caller uses.
+///
+/// Capping the FACTORS does not cap their PRODUCT: a `B`, a width and a party
+/// count that are each individually legal multiply to an amount of sharing,
+/// selecting, reducing and opening work no combination of the individual caps
+/// alone would exclude. The product is what the stage performs, so it is bounded
+/// in its own right, with checked arithmetic in `u64` (so the budget means the
+/// same on every target width) — an overflowing product is a refusal, never a
+/// wrapped number that would slip under the budget.
+///
+/// Every factor is a quantity every party computes alike: `B` and the arity are the
+/// caller's, `(n, t)` are the backend's, and the width is either the caller's
+/// DECLARATION — a public number, known before any row is read — or, by default,
+/// the width DERIVED from the run's own rows, which is public to the parties but is
+/// a function of the data. So this check is a closed form once the width is
+/// resolved, and its refusal names only those numbers; in the default mode it is
+/// resolved at the stage, which is where the rows are.
+///
+/// This is the budget that binds on an oversized COMBINATION, which is why each
+/// individual cap above is set generously: a bound, a width and a party count that
+/// are each separately plausible can still multiply to an amount of sharing,
+/// selecting, reducing and opening that no caller could be served. `B` at
+/// [`MAX_OUTPUT_BOUND`] with a slot at [`MAX_SLOT_LIMBS`] is such a corner, and it
+/// is refused here rather than by lowering either cap below the values this crate
+/// has always accepted.
+///
+/// The unit matters when comparing this to the path-form budget:
+/// [`crate::bounded_path::MAX_PATH_FORM_WORK`] counts STATIC UNROLL STEPS of a
+/// property-path plan, while this counts field elements the output stage shares,
+/// selects, reduces and opens. They are different quantities and their values are
+/// not comparable.
+pub const MAX_SLOT_WORK: u64 = 1 << 32; // 4_294_967_296 modelled field elements
+
+/// How one output-stage run's PUBLIC payload widths are fixed: the column count,
+/// and either a per-term byte width the caller DECLARES or the instruction to
+/// DERIVE one from the run's own terms.
+///
+/// ## The two modes, and which one a caller gets
+///
+/// Every slot the stage emits is padded to ONE uniform width, so that width is a
+/// property of the whole run and must be the same number on every party.
+///
+/// - **Derived** ([`PayloadWidths::derived`], and `from(arity)`): the width is the
+///   longest serialized ROW in the run — the sum over that row's columns, floored
+///   at the all-unbound row every padding slot carries — measured by a streaming
+///   pass over the candidates that retains nothing. This is the DEFAULT, and it is
+///   the rule this crate has always packed by, so every row the stage could carry
+///   before it can still be carried. The width is a public number that every party
+///   computes from the same candidates, and it is a function of the data: the
+///   length of the longest row in the run is observable in the padded width and in
+///   every cost that scales with it. That residual is the pre-existing, documented
+///   property of this regime, not something added here.
+///
+///   Because the width is data-derived, it is resolved at the STAGE, over the rows
+///   the stage packs — not at the upstream operator's entry, which has no rows yet.
+///   So in the default mode the width's own caps (the per-term ceiling, the uniform
+///   limb count and the aggregate slot work) fire at the stage, AFTER the upstream
+///   operator has drawn its own randomness. That is the draw schedule this crate
+///   has always had. An operator entry runs the PUBLIC caps only
+///   (`check_output_entry_caps`); guessing a data-dependent width from the inputs'
+///   widest term refused runs the stage itself accepts.
+/// - **Declared** ([`PayloadWidths::declare`]): the width is a public number the
+///   caller states up front. It is independent of the data, so the longest term's
+///   length is no longer observable in it, and no pass over the terms is needed to
+///   decide it. A term that does not fit the declaration is refused — a refusal
+///   that is itself one bit about the data (see the type's `declare` docs).
+///
+/// So the default keeps this crate's behaviour and its residual; the declared path
+/// is the stronger option and is opt-in.
+///
+/// Both modes are checked against the same caps ([`MAX_PAYLOAD_ARITY`],
+/// [`MAX_PAYLOAD_TERM_BYTES`], [`MAX_SLOT_LIMBS`]) and the same aggregate work
+/// budget ([`MAX_SLOT_WORK`]) once the width is known, which for the derived mode
+/// is at the operator's entry and before any draw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PayloadWidths {
+    arity: usize,
+    /// `Some(w)`: the caller declared `w`. `None`: derive the width from the run's
+    /// own terms, which is the default and this crate's long-standing behaviour.
+    term_bytes: Option<usize>,
+}
+
+impl PayloadWidths {
+    /// Declare `arity` payload columns of up to `term_bytes` serialized bytes each
+    /// — the disclosure-free mode. Checks the arity cap, the per-term declaration
+    /// cap and the uniform limb width that follows from them, all closed form on
+    /// public numbers, so an impossible declaration refuses here.
+    ///
+    /// A declared width is independent of the data, so the longest term's length
+    /// is not observable in it. What a declaration does expose instead is ONE BIT
+    /// per run: a term that does not fit the declared width is refused, and the
+    /// refusal is observable. That bit is the whole residual of this mode, it is
+    /// the same bit on every party, and the refusal itself names only the declared
+    /// width and arity — never a term, a length, a column or a candidate position.
+    /// A caller that declares a width its schema cannot exceed exposes nothing.
+    pub fn declare(arity: usize, term_bytes: usize) -> Result<Self, MpcError> {
+        let widths = PayloadWidths {
+            arity,
+            term_bytes: Some(term_bytes),
+        };
+        // Resolving over no terms checks the declaration's own shape and nothing
+        // else: the empty maximum cannot exceed any declared width.
+        widths.resolve_rows(std::iter::empty())?;
+        Ok(widths)
+    }
+
+    /// Derive the per-term width from the run's own terms — the DEFAULT mode, and
+    /// this crate's long-standing behaviour. See the type docs for what the
+    /// derived width exposes.
+    pub fn derived(arity: usize) -> Self {
+        PayloadWidths {
+            arity,
+            term_bytes: None,
+        }
+    }
+
+    /// The column count, which is public in both modes.
+    pub fn arity(&self) -> usize {
+        self.arity
+    }
+
+    /// The per-term byte width the caller DECLARED, or `None` when the width is
+    /// derived from the run's terms.
+    pub fn declared_term_bytes(&self) -> Option<usize> {
+        self.term_bytes
+    }
+
+    /// Fix this run's uniform widths from the ROWS it will carry, in ONE streaming
+    /// pass that retains nothing — the exact rule the stage packs by.
+    ///
+    /// - Derived mode: the uniform row width is the LONGEST row's serialized byte
+    ///   length, floored at the all-unbound row every padding slot carries. That
+    ///   is exactly how this stage has always sized its slots, and is narrower
+    ///   than `arity × widest term` whenever the columns differ in length.
+    /// - Declared mode: the row width is `arity × (term_bytes + 2)`, independent
+    ///   of the rows, and a term that does not fit the declaration refuses HERE.
+    ///
+    /// Then the resolved widths' own caps.
+    pub(crate) fn resolve_rows<'r>(
+        &self,
+        rows: impl Iterator<Item = &'r [Option<Term>]>,
+    ) -> Result<SlotWidths, MpcError> {
+        let mut longest_term = 0usize;
+        let mut longest_row = Some(0usize);
+        for row in rows {
+            let mut row_bytes = Some(0usize);
+            for cell in row {
+                let cell_bytes = match cell {
+                    // One presence flag.
+                    None => Some(1usize),
+                    // Flag, term, NUL.
+                    Some(term) => {
+                        let len = term.to_string().len();
+                        longest_term = longest_term.max(len);
+                        len.checked_add(2)
+                    }
+                };
+                row_bytes = row_bytes.zip(cell_bytes).and_then(|(a, b)| a.checked_add(b));
+            }
+            longest_row = match (longest_row, row_bytes) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                _ => None,
+            };
+        }
+        // Floor at the ALL-UNBOUND row of this arity — one presence flag per
+        // column. That row is what every padding slot carries, so the uniform
+        // width has always had to cover it, and it is the width a run with no
+        // candidate at all is sized to.
+        let longest_row = longest_row.map(|row| row.max(self.arity));
+        self.finish(longest_term, longest_row)
+    }
+
+    /// The tail of [`Self::resolve_rows`]: apply the declaration if there is one,
+    /// then the resolved widths' caps.
+    fn finish(
+        &self,
+        longest_term: usize,
+        longest_row: Option<usize>,
+    ) -> Result<SlotWidths, MpcError> {
+        let resolved = match self.term_bytes {
+            Some(declared) => {
+                if longest_term > declared {
+                    return Err(over_declared_width(self.arity, declared));
+                }
+                SlotWidths {
+                    arity: self.arity,
+                    term_bytes: declared,
+                    // The declared row width, independent of the rows: that is
+                    // what makes a declared width say nothing about the data.
+                    row_bytes: declared
+                        .checked_add(2)
+                        .and_then(|per_term| self.arity.checked_mul(per_term)),
+                    declared: true,
+                }
+            }
+            None => SlotWidths {
+                arity: self.arity,
+                term_bytes: longest_term,
+                row_bytes: longest_row,
+                declared: false,
+            },
+        };
+        resolved.check_shape()?;
+        Ok(resolved)
+    }
+}
+
+/// A bare arity derives the per-term width from the run's terms — the default
+/// mode. [`PayloadWidths::declare`] is the opt-in that fixes a width instead.
+impl From<usize> for PayloadWidths {
+    fn from(arity: usize) -> Self {
+        PayloadWidths::derived(arity)
+    }
+}
+
+/// One run's RESOLVED uniform widths: the column count, the concrete row byte
+/// width every slot is padded to, and the widest term it carries, plus which mode
+/// fixed them.
+///
+/// Only a [`PayloadWidths`] resolver produces one, so a width that reaches the
+/// packing loop has been through the caps, and the stage cannot accidentally pack
+/// against a width nothing decided.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SlotWidths {
+    arity: usize,
+    /// The widest term: the caller's declaration, or the run's longest.
+    term_bytes: usize,
+    /// The uniform ROW byte width every slot is padded to, or `None` when it left
+    /// `usize` — a refusal, never a wrap.
+    row_bytes: Option<usize>,
+    /// Whether a caller declared these widths (`true`) or they were derived from
+    /// the run's rows (`false`). Only the per-term check and the refusal texts read
+    /// it, so each says what is actually true of the run.
+    declared: bool,
+}
+
+impl SlotWidths {
+    /// The column count.
+    pub(crate) fn arity(&self) -> usize {
+        self.arity
+    }
+
+    /// The per-term byte width a DECLARED run measures its terms against. `None`
+    /// for a derived run, whose width IS its longest term, so no term can exceed
+    /// it and there is nothing to measure.
+    pub(crate) fn declared_term_bytes(&self) -> Option<usize> {
+        self.declared.then_some(self.term_bytes)
+    }
+
+    /// The uniform packed limb width every slot is padded to — the length prefix
+    /// plus the data limbs the row needs — or `None` when the row width left
+    /// `usize`. A run with no SLOT at all packs nothing; that is the caller's
+    /// `bound == 0` case, not a property of the widths.
+    pub(crate) fn limb_capacity(&self) -> Option<usize> {
+        self.row_bytes.map(limb_count_for)
+    }
+
+    /// Check the resolved widths against [`MAX_PAYLOAD_ARITY`],
+    /// [`MAX_PAYLOAD_TERM_BYTES`] and [`MAX_SLOT_LIMBS`].
+    pub(crate) fn check_shape(&self) -> Result<(), MpcError> {
+        check_payload_arity_cap(self.arity)?;
+        if self.term_bytes > MAX_PAYLOAD_TERM_BYTES {
+            return Err(MpcError::Protocol(format!(
+                "oblivious output stage: per-term payload width {} bytes exceeds the \
+                 MAX_PAYLOAD_TERM_BYTES cap of {} — refusing before any sharing (the \
+                 width is uniform over every slot, so it is this stage's per-slot cost \
+                 multiplier)",
+                self.term_bytes, MAX_PAYLOAD_TERM_BYTES
+            )));
+        }
+        match self.limb_capacity() {
+            Some(limbs) => check_slot_limbs_cap(limbs),
+            None => Err(MpcError::Protocol(format!(
+                "oblivious output stage: a uniform row of {} columns at {} bytes per term \
+                 leaves the addressable range — refusing before any sharing",
+                self.arity, self.term_bytes
+            ))),
+        }
+    }
+}
+
+/// The payload-arity cap, callable before a candidate set or a dummy row exists.
+/// See [`MAX_PAYLOAD_ARITY`].
+pub(crate) fn check_payload_arity_cap(payload_arity: usize) -> Result<(), MpcError> {
+    if payload_arity > MAX_PAYLOAD_ARITY {
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: payload arity {} exceeds the MAX_PAYLOAD_ARITY cap of {} \
+             — refusing (the arity is the public per-slot column count and the all-unbound \
+             dummy row of that arity is materialised, so it is bounded before anything is \
+             allocated or drawn)",
+            payload_arity, MAX_PAYLOAD_ARITY
+        )));
+    }
+    Ok(())
+}
+
+/// The uniform packed-limb-width cap. See [`MAX_SLOT_LIMBS`].
+pub(crate) fn check_slot_limbs_cap(limb_capacity: usize) -> Result<(), MpcError> {
+    if limb_capacity > MAX_SLOT_LIMBS {
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: packed payload width {} limbs exceeds the MAX_SLOT_LIMBS \
+             cap of {} — refusing before any sharing or draw (the width is uniform over the \
+             column, so every slot pays a sharing, a select, a degree reduction and an open \
+             per limb)",
+            limb_capacity, MAX_SLOT_LIMBS
+        )));
+    }
+    Ok(())
+}
+
+/// The aggregate slot-work budget, computed with checked arithmetic.
+/// See [`MAX_SLOT_WORK`] for the figure, its unit and why each factor is in it.
+pub(crate) fn check_slot_work_budget(
+    bound: usize,
+    limb_capacity: usize,
+    parties: usize,
+    threshold: usize,
+) -> Result<(), MpcError> {
+    // The tag element is charged alongside the limbs, so a zero-width run is still
+    // charged for the per-slot tag sharing, select, reduction and open.
+    let per_slot = (limb_capacity as u64).checked_add(1);
+    // `2t + 1` re-sharings per degree reduction, which honest majority keeps <= n.
+    let reshares = (threshold as u64)
+        .checked_mul(2)
+        .and_then(|v| v.checked_add(1));
+    let work = per_slot
+        .and_then(|w| w.checked_mul(bound as u64))
+        .and_then(|v| v.checked_mul(parties as u64))
+        .and_then(|v| reshares.and_then(|r| v.checked_mul(r)));
+    match work {
+        Some(w) if w <= MAX_SLOT_WORK => Ok(()),
+        other => Err(MpcError::Protocol(format!(
+            "oblivious output stage: aggregate slot work B={} x (1 + limbs={}) x parties={} \
+             x (2t+1={}) is {} modelled field element(s), exceeding the MAX_SLOT_WORK budget \
+             of {} — refusing before any candidate is read (each factor is within its own \
+             cap; their product is the work the stage performs and is bounded in its own \
+             right)",
+            bound,
+            limb_capacity,
+            parties,
+            reshares
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| "overflow".to_string()),
+            other
+                .map(|w| w.to_string())
+                .unwrap_or_else(|| "an amount that overflows u64".to_string()),
+            MAX_SLOT_WORK
+        ))),
+    }
+}
+
+/// The output stage's PUBLIC-ONLY caps, for an OPERATOR ENTRY that has not built a
+/// candidate yet: the padded bound, the payload arity, the compute-party count,
+/// and — only when the caller DECLARED the widths — the declared per-term width,
+/// the uniform limb count it implies and the aggregate slot work.
+///
+/// In the DEFAULT (derived) mode there is nothing data-independent left to check
+/// here, and nothing is checked: the width is a function of the rows the stage
+/// packs, so the width's caps and the aggregate work are decided at the stage,
+/// exactly where this crate has always decided them. An entry check that guessed
+/// an upper bound from the inputs' widest term refused runs that both the stage and
+/// the pre-cap behaviour accept — a 900k-character literal at `B = 1`, or ten
+/// columns a side at a legal federation size.
+///
+/// In the DECLARED mode every one of those numbers IS public, so the entry decides
+/// all of them and an over-wide run is refused before the operator draws anything.
+/// That is the difference the declaration buys, on top of the width itself saying
+/// nothing about the data.
+pub(crate) fn check_output_entry_caps(
+    widths: &PayloadWidths,
+    bound: usize,
+    parties: usize,
+    threshold: usize,
+) -> Result<(), MpcError> {
+    check_output_bound_cap(bound)?;
+    check_payload_arity_cap(widths.arity())?;
+    if widths.declared_term_bytes().is_some() {
+        // A declared width ignores the rows, so resolving over none of them gives
+        // the run's real width and `resolve_rows` applies its caps.
+        let resolved = widths.resolve_rows(std::iter::empty())?;
+        check_slot_work_budget(
+            bound,
+            resolved.limb_capacity().unwrap_or(0),
+            parties,
+            threshold,
+        )?;
+    }
+    Ok(())
+}
+
+/// The compute-party cap for this stage's work budget. See [`MAX_OUTPUT_PARTIES`].
+pub(crate) fn check_output_parties_cap(parties: usize) -> Result<(), MpcError> {
+    if parties > MAX_OUTPUT_PARTIES {
+        return Err(MpcError::Protocol(format!(
+            "oblivious output stage: {} compute parties exceeds the MAX_OUTPUT_PARTIES cap \
+             of {} — refusing before any candidate is read (every sharing spans one field \
+             element per party and every select's degree reduction re-shares up to that \
+             many times, so the party count multiplies the per-limb work twice over)",
+            parties, MAX_OUTPUT_PARTIES
+        )));
+    }
+    Ok(())
+}
 
 /// The cap half of the fail-closed bound contract, callable before a candidate set
 /// exists — so a public entry that BUILDS its candidates (and draws while doing so)
@@ -580,7 +1102,7 @@ pub type ObliviousOutput = (Vec<OutputSlot>, ObliviousOutputCost);
 pub fn oblivious_set_output(
     backend: &ShamirBackend,
     candidates: &[Candidate],
-    payload_arity: usize,
+    widths: impl Into<PayloadWidths>,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
     // Preflight the bound BEFORE a dealer exists: `output_stage_shuffled_through`
@@ -593,7 +1115,7 @@ pub fn oblivious_set_output(
         &mut backend.dealer(),
         backend,
         candidates,
-        payload_arity,
+        widths.into(),
         bound,
     )
 }
@@ -645,12 +1167,13 @@ pub(crate) fn oblivious_set_output_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
     candidates: &[Candidate],
-    payload_arity: usize,
+    widths: impl Into<PayloadWidths>,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
+    let widths: PayloadWidths = widths.into();
     let (decoded, cost) =
-        oblivious_set_output_decoded_through(source, backend, candidates, payload_arity, bound)?;
-    Ok((narrow_decoded_slots(decoded, payload_arity)?, cost))
+        oblivious_set_output_decoded_through(source, backend, candidates, widths, bound)?;
+    Ok((narrow_decoded_slots(decoded, widths.arity())?, cost))
 }
 
 /// The output stage's result as the compute parties leave it: the `B` slots'
@@ -798,7 +1321,7 @@ impl RecipientOutputShares {
 pub fn oblivious_set_output_to_recipient(
     backend: &ShamirBackend,
     candidates: &[Candidate],
-    payload_arity: usize,
+    widths: impl Into<PayloadWidths>,
     bound: usize,
     recipient: HolderId,
 ) -> Result<(RecipientOutputShares, ObliviousOutputCost), MpcError> {
@@ -810,7 +1333,7 @@ pub fn oblivious_set_output_to_recipient(
         &mut backend.dealer(),
         backend,
         candidates,
-        payload_arity,
+        widths.into(),
         bound,
         recipient,
     )
@@ -823,19 +1346,20 @@ pub(crate) fn oblivious_set_output_to_recipient_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
     candidates: &[Candidate],
-    payload_arity: usize,
+    widths: impl Into<PayloadWidths>,
     bound: usize,
     recipient: HolderId,
 ) -> Result<(RecipientOutputShares, ObliviousOutputCost), MpcError> {
+    let widths: PayloadWidths = widths.into();
     let (tags, limb_blocks, dummy_block, mut cost) =
-        output_stage_shuffled_through(source, backend, candidates, payload_arity, bound)?;
+        output_stage_shuffled_through(source, backend, candidates, widths, bound)?;
     // The compute parties opened nothing: the `B` tag opens belong to the recipient.
     cost.opens = 0;
     Ok((
         RecipientOutputShares {
             recipient,
             bound,
-            payload_arity,
+            payload_arity: widths.arity(),
             threshold: backend.threshold(),
             slots: tags.into_iter().zip(limb_blocks).collect(),
             dummy_block,
@@ -905,16 +1429,17 @@ fn oblivious_set_output_decoded_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
     candidates: &[Candidate],
-    payload_arity: usize,
+    widths: impl Into<PayloadWidths>,
     bound: usize,
 ) -> Result<(Vec<DecodedSlot>, ObliviousOutputCost), MpcError> {
+    let widths: PayloadWidths = widths.into();
     let (tags, limb_blocks, dummy_block, cost) =
-        output_stage_shuffled_through(source, backend, candidates, payload_arity, bound)?;
+        output_stage_shuffled_through(source, backend, candidates, widths, bound)?;
     let decoded = open_and_decode_slots(
         &tags,
         &limb_blocks,
         &dummy_block,
-        payload_arity,
+        widths.arity(),
         backend.threshold(),
     )?;
     Ok((decoded, cost))
@@ -1091,13 +1616,29 @@ fn output_stage_shuffled_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
     candidates: &[Candidate],
-    payload_arity: usize,
+    widths: PayloadWidths,
     bound: usize,
 ) -> Result<ShuffledStage, MpcError> {
+    let payload_arity = widths.arity();
     // FIRST, before anything is drawn or allocated: the bound is validated. Every
     // `Vec::with_capacity(bound)` below and the shuffle network are sized from it,
     // so the cap check precedes even the source check (see the contract above).
     check_output_bound(bound, candidates.len())?;
+    // Then RESOLVE the widths over this run's own candidate terms — one streaming
+    // pass that retains nothing — and check the resolved shape: the arity cap, the
+    // per-term cap and the uniform limb width that follows from them. Also ahead
+    // of the source check, because the all-unbound dummy row of this arity is
+    // materialised below, so an `usize::MAX` arity must refuse before anything
+    // tries to allocate it.
+    //
+    // In the DERIVED (default) mode this pass is what fixes the width, exactly as
+    // the stage has always fixed it: the longest serialized ROW in the run. In the
+    // DECLARED mode the pass measures the candidates against the declaration, so an
+    // over-width term refuses here even for a caller that did not preflight at its
+    // own operator entry. Either way it happens before the first sharing is drawn.
+    let widths = widths.resolve_rows(candidates.iter().map(|c| c.payload.as_slice()))?;
+    // And the party count, which multiplies the per-limb work twice over.
+    check_output_parties_cap(backend.parties())?;
     // A source whose (n, t) disagrees with the backend would deal sharings that do
     // not compose with the backend's products and opens.
     require_source_matches(source, backend)?;
@@ -1110,6 +1651,20 @@ fn output_stage_shuffled_through(
             )));
         }
     }
+
+    // Decide the packing plan — the uniform limb width, the public dummy block and
+    // the aggregate work budget — BEFORE the first sharing is drawn below. The
+    // width used to be settled inside `shuffle_with_payloads`, AFTER the
+    // per-candidate selector, real-tag and degree-reduction draws; it is settled
+    // here now, so an over-budget run refuses with zero draws.
+    //
+    // The width is a closed form of PUBLIC NUMBERS only in the DECLARED mode. In
+    // the default DERIVED mode it is a function of the candidates' own rows — the
+    // longest serialized row — which is why it is resolved here, over the rows this
+    // stage packs, and not at the upstream operator's entry: the entry has no rows,
+    // and an upper bound guessed from the inputs' widest term refused runs this
+    // stage accepts.
+    let plan = SlotPlan::decide(candidates, widths, bound, backend.parties(), backend.threshold())?;
 
     let (n, t) = (backend.parties(), backend.threshold());
     // The select multiplication AND the degree reduction that re-randomises it both
@@ -1132,10 +1687,8 @@ fn output_stage_shuffled_through(
     // DEGREE-REDUCED to a fresh degree-`t` sharing of the same value before it goes
     // anywhere. The selector is kept alongside so the SAME bit can select the
     // payload limbs against the dummy encoding in step 3's payload half
-    // (`shuffle_with_payloads`); the payload itself travels co-indexed in cleartext
-    // only until it is encoded there.
+    // (`shuffle_with_payloads`); the payload's own bytes are already in `plan`.
     let mut tag_col: SecretColumn = Vec::with_capacity(bound);
-    let mut payloads: Vec<Vec<Option<Term>>> = Vec::with_capacity(bound);
     let mut selectors: Vec<Vec<Share>> = Vec::with_capacity(bound);
     let mut degree_reductions = 0usize;
 
@@ -1146,19 +1699,16 @@ fn output_stage_shuffled_through(
         let tag_out = shamir::mul_shares_raw(&sel, &real_tag_share)?;
         tag_col.push(shamir::degree_reduce_through(source, &tag_out)?);
         degree_reductions += 1;
-        payloads.push(c.payload.clone());
         selectors.push(sel);
     }
     // Pure-dummy padding slots: selector = shared 0 → tag opens to 0 → Dummy, and
     // the same shared 0 selects the payload limbs to the dummy encoding.
-    let dummy_payload: Vec<Option<Term>> = vec![None; payload_arity];
     for _ in candidates.len()..bound {
         let zero_sel = checked_vss_own_input(source, n, Fp::zero())?;
         let real_tag_share = checked_vss_own_input(source, n, real_tag)?;
         let tag_out = shamir::mul_shares_raw(&zero_sel, &real_tag_share)?;
         tag_col.push(shamir::degree_reduce_through(source, &tag_out)?);
         degree_reductions += 1;
-        payloads.push(dummy_payload.clone());
         selectors.push(zero_sel);
     }
 
@@ -1174,7 +1724,7 @@ fn output_stage_shuffled_through(
         shuffle_cost,
         payload_select_mults,
         limb_reductions,
-    ) = shuffle_with_payloads(source, n, tag_col, payloads, &selectors, payload_arity)?;
+    ) = shuffle_with_payloads(source, n, tag_col, &plan, &selectors)?;
     degree_reductions += limb_reductions;
 
     let cost = ObliviousOutputCost {
@@ -1206,11 +1756,12 @@ pub(crate) fn opened_slot_shares_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
     candidates: &[Candidate],
-    payload_arity: usize,
+    widths: impl Into<PayloadWidths>,
     bound: usize,
 ) -> Result<(Vec<SlotShares>, Vec<Fp>), MpcError> {
+    let widths: PayloadWidths = widths.into();
     let (tags, limbs, dummy_block, _cost) =
-        output_stage_shuffled_through(source, backend, candidates, payload_arity, bound)?;
+        output_stage_shuffled_through(source, backend, candidates, widths, bound)?;
     Ok((tags.into_iter().zip(limbs).collect(), dummy_block))
 }
 
@@ -1231,18 +1782,19 @@ pub(crate) fn opened_slot_rows_through(
     source: &mut dyn DistributedRandomness,
     backend: &ShamirBackend,
     candidates: &[Candidate],
-    payload_arity: usize,
+    widths: impl Into<PayloadWidths>,
     bound: usize,
 ) -> Result<Vec<DecodedSlot>, MpcError> {
+    let widths: PayloadWidths = widths.into();
     let t = backend.threshold();
     let (slots, _dummy_block) =
-        opened_slot_shares_through(source, backend, candidates, payload_arity, bound)?;
+        opened_slot_shares_through(source, backend, candidates, widths, bound)?;
     let mut out = Vec::with_capacity(slots.len());
     for (tag_share, limbs) in slots {
         let tag = shamir::reconstruct_degree(&tag_share, t)?;
         let values = open_limb_block(&limbs, t)?;
         let bytes = limbs_to_bytes(&values)?;
-        out.push((tag == Fp::one(), decode_payload_row(&bytes, payload_arity)?));
+        out.push((tag == Fp::one(), decode_payload_row(&bytes, widths.arity())?));
     }
     Ok(out)
 }
@@ -1295,6 +1847,181 @@ fn encode_payload_row(row: &[Option<Term>]) -> Vec<u8> {
         }
     }
     bytes
+}
+
+/// [`encode_payload_row`] with every bound term measured against a DECLARED
+/// per-term width, when the run has one.
+///
+/// A DERIVED width IS this run's longest term, so no term can exceed it and this
+/// is the plain encoder; only a declaration can be exceeded.
+///
+/// A term's serialized length is only knowable by serializing it, so each bound
+/// column is serialized once and measured immediately: an over-width row refuses
+/// having serialized exactly one over-width term and nothing else. The resolved
+/// width is the same public number on every party, so every party refuses the same
+/// row at the same point.
+///
+/// The refusal carries PUBLIC values only — the resolved width and the declared
+/// arity. It names no column, no candidate position, no term text and no length:
+/// which column of which row was too wide is a property of the data, and a
+/// refusal is exactly where it would otherwise be reported.
+fn encode_payload_row_checked(
+    row: &[Option<Term>],
+    widths: &SlotWidths,
+) -> Result<Vec<u8>, MpcError> {
+    let mut bytes = Vec::new();
+    for cell in row {
+        match cell {
+            None => bytes.push(0u8),
+            Some(term) => {
+                let text = term.to_string();
+                if let Some(declared) = widths.declared_term_bytes() {
+                    if text.len() > declared {
+                        return Err(over_declared_width(widths.arity(), declared));
+                    }
+                }
+                bytes.push(1u8);
+                bytes.extend_from_slice(text.as_bytes());
+                bytes.push(0u8); // NUL terminator (never occurs inside the term)
+            }
+        }
+    }
+    Ok(bytes)
+}
+
+/// The output stage's PUBLIC-SHAPE checks, in the order they must run: the
+/// resolved widths' own shape (arity cap, per-term cap, uniform limb cap), the
+/// party cap, then the aggregate work budget.
+///
+/// None of them reads a candidate, so an operator can run them at its OWN entry,
+/// before it builds candidates and draws randomness, and get the same answer the
+/// output stage would give. `SlotPlan::decide` runs them again at the stage entry;
+/// they are closed forms on public numbers, so running them twice costs nothing
+/// and the stage stays correct for a caller that did not preflight.
+///
+/// What these bound is this STAGE: the resolved widths, the party count and the
+/// aggregate per-slot work. Whole-operator resource planning — dealer batches,
+/// aggregate sharing, shuffle networks beyond this bound, session traffic and
+/// deadlines — is follow-up work and is not bounded here.
+pub(crate) fn check_output_public_shape(
+    widths: &SlotWidths,
+    bound: usize,
+    parties: usize,
+    threshold: usize,
+) -> Result<(), MpcError> {
+    // PUBLIC caps first, so a refusal that does not depend on the data is never
+    // preceded by one that does: the arity and the party count are the caller's
+    // own numbers, while in the DERIVED mode the per-term and limb widths are
+    // functions of the run's rows.
+    check_payload_arity_cap(widths.arity())?;
+    check_output_parties_cap(parties)?;
+    widths.check_shape()?;
+    // With no slot at all nothing is packed and the width is 0.
+    let limb_capacity = if bound == 0 {
+        0
+    } else {
+        widths.limb_capacity().unwrap_or(0)
+    };
+    check_slot_work_budget(bound, limb_capacity, parties, threshold)
+}
+
+/// The one refusal for a term that does not fit a DECLARED width. Public values
+/// only: the declared width and the declared arity. Raised by
+/// `PayloadWidths::resolve` at an operator's entry, before any candidate is built
+/// or any share drawn, and again by `encode_payload_row_checked` on the row it
+/// encodes, so no over-width term can reach a sharing by either route.
+///
+/// A derived width cannot produce this refusal: it IS the longest term in the run.
+fn over_declared_width(arity: usize, term_bytes: usize) -> MpcError {
+    MpcError::Protocol(format!(
+        "oblivious output stage: a payload term does not fit the declared per-term \
+         width of {} bytes at arity {} — refusing. The declared width is a public \
+         number, so every party refuses the same run at the same point; this refusal \
+         names the declaration and nothing else",
+        term_bytes, arity
+    ))
+}
+
+
+/// The PUBLIC packing plan for one output-stage run: the resolved widths, the
+/// public dummy limb block and the slot count. Every number in it comes from the
+/// run's resolved widths and the backend's party count, so it is decided before
+/// any sharing is drawn and is identical on every party.
+///
+/// It holds no candidate encoding. Each slot's bytes are produced on demand in the
+/// packing loop ([`Self::slot_limbs`]), so the stage's peak is one slot's encoding
+/// and not one per candidate.
+struct SlotPlan<'a> {
+    /// The candidates, borrowed — slot `i` below the candidate count is this
+    /// candidate's row, and any slot above it is a pure-dummy padding slot.
+    candidates: &'a [Candidate],
+    /// This run's resolved widths.
+    widths: SlotWidths,
+    /// The all-unbound row of that arity, encoded once — the byte stream
+    /// every pure-dummy padding slot carries, and the row the public pad block is
+    /// built from.
+    dummy_encoded: Vec<u8>,
+    /// The public dummy limb block, padded out to [`Self::limb_capacity`], that
+    /// every slot's limbs are selected against.
+    dummy_block: Vec<Fp>,
+}
+
+impl<'a> SlotPlan<'a> {
+    /// The uniform packed limb width — the resolved width, or `0` when there is no
+    /// slot at all.
+    fn limb_capacity(&self) -> usize {
+        self.dummy_block.len()
+    }
+
+    /// Slot `i`'s limbs, encoded on demand: its candidate's row, or the all-unbound
+    /// dummy row for a pure-dummy padding slot. Shorter than the uniform width; the
+    /// packing loop pads it.
+    fn slot_limbs(&self, i: usize) -> Result<Vec<Fp>, MpcError> {
+        match self.candidates.get(i) {
+            Some(c) => Ok(bytes_to_limbs(&encode_payload_row_checked(
+                &c.payload,
+                &self.widths,
+            )?)),
+            None => Ok(bytes_to_limbs(&self.dummy_encoded)),
+        }
+    }
+
+    /// Decide the plan from PUBLIC numbers only, in this order: the resolved
+    /// widths' own shape (arity cap, per-term cap, uniform limb cap), the party
+    /// cap, and the aggregate work budget — none of which reads a candidate. The
+    /// run's terms were already measured when the widths were resolved, which is
+    /// what fixed them (derived mode) or enforced them (declared mode), and that
+    /// happens before any sharing or draw.
+    ///
+    /// `bound` and the per-candidate arity agreement are the caller's checks and
+    /// have already run.
+    fn decide(
+        candidates: &'a [Candidate],
+        widths: SlotWidths,
+        bound: usize,
+        parties: usize,
+        threshold: usize,
+    ) -> Result<Self, MpcError> {
+        check_output_public_shape(&widths, bound, parties, threshold)?;
+        // With no slot at all nothing is packed and the width is 0.
+        let limb_capacity = if bound == 0 {
+            0
+        } else {
+            // `check_shape` has already refused an overflowing row width.
+            widths.limb_capacity().unwrap_or(0)
+        };
+
+        // The all-unbound row of that arity: the public dummy encoding.
+        let dummy_encoded = encode_payload_row(&vec![None; widths.arity()]);
+        let mut dummy_block = bytes_to_limbs(&dummy_encoded);
+        dummy_block.resize(limb_capacity, Fp::new(PAD_LIMB));
+        Ok(SlotPlan {
+            candidates,
+            widths,
+            dummy_encoded,
+            dummy_block,
+        })
+    }
 }
 
 /// Inverse of [`encode_payload_row`]: parse a byte stream back into `arity`
@@ -1359,7 +2086,7 @@ fn decode_payload_row(bytes: &[u8], arity: usize) -> Result<Vec<Option<Term>>, M
     // different streams could decode to the same row; refuse instead.
     if pos != bytes.len() {
         // How MANY bytes trail is a function of the opened block, so it is not
-        // named. The column arity IS public — it is the payload's declared width,
+        // named. The column arity IS public — it is the payload's column count,
         // the same for every slot — and the fact that anything trails it is the
         // whole diagnosis.
         return Err(MpcError::Protocol(format!(
@@ -1514,39 +2241,20 @@ fn shuffle_with_payloads(
     source: &mut dyn DistributedRandomness,
     nparties: usize,
     tag_col: SecretColumn,
-    payloads: Vec<PayloadRow>,
+    plan: &SlotPlan<'_>,
     selectors: &[Vec<Share>],
-    payload_arity: usize,
 ) -> Result<ShuffledColumn, MpcError> {
     let n = tag_col.len();
-    debug_assert_eq!(payloads.len(), n);
     debug_assert_eq!(selectors.len(), n);
 
-    // Serialize every payload row and size a UNIFORM limb capacity = the max limb
-    // count (length prefix + data limbs) over all rows, rejected candidates
-    // included. Uniform width is required by the shuffle network. The width is
-    // public to the parties and is documented as residual leakage in the module
-    // docs; it is an upper bound over all candidates, so it does not identify
-    // which candidate is the longest.
-    let encoded: Vec<Vec<u8>> = payloads.iter().map(|p| encode_payload_row(p)).collect();
-    // The dummy limb block every slot is selected against: the encoding of the
-    // all-unbound row of this arity. It depends only on the PUBLIC arity.
-    let dummy_limbs = bytes_to_limbs(&encode_payload_row(&vec![None; payload_arity]));
-    let mut limb_capacity = encoded
-        .iter()
-        .map(|b| limb_count_for(b.len()))
-        .max()
-        .unwrap_or(0);
-    if !encoded.is_empty() {
-        // Every real encoding is at least `payload_arity` bytes (one presence flag
-        // per column), so this is already the max; take it explicitly so the dummy
-        // block always fits the uniform width.
-        limb_capacity = limb_capacity.max(dummy_limbs.len());
-    }
-    // The dummy block padded out to the uniform width, so limb `i` has a public
-    // pad value for every `i < limb_capacity`.
-    let mut dummy_block = dummy_limbs;
-    dummy_block.resize(limb_capacity, Fp::new(PAD_LIMB));
+    // The UNIFORM limb capacity and the public dummy block come from the plan the
+    // caller decided and capped before any sharing was drawn (`SlotPlan::decide`).
+    // The width is this run's resolved per-slot width — derived from the run's own
+    // terms by default, or the caller's declaration — so it is the same number on
+    // every party. It is public to the parties and visible in the cost model, which
+    // the module docs state.
+    let limb_capacity = plan.limb_capacity();
+    let dummy_block = plan.dummy_block.clone();
 
     // Pack each entry: [tag shares | limb shares...]. Each limb is shared at
     // degree `t`, then selected against its dummy value — a single multiplication
@@ -1559,9 +2267,11 @@ fn shuffle_with_payloads(
     let mut packed: SecretColumn = Vec::with_capacity(n);
     let mut payload_select_mults = 0usize;
     let mut limb_reductions = 0usize;
-    for ((tag, enc), sel) in tag_col.into_iter().zip(&encoded).zip(selectors) {
+    for ((slot, tag), sel) in tag_col.into_iter().enumerate().zip(selectors) {
         let mut entry = tag; // tag shares first (already degree-reduced)
-        let limbs = bytes_to_limbs(enc);
+        // Encoded on demand, one slot at a time: the plan holds no per-candidate
+        // encoding, so the peak is one slot's bytes.
+        let limbs = plan.slot_limbs(slot)?;
         // `dummy_block` is exactly `limb_capacity` long, so iterating it walks the
         // uniform width and supplies each limb's public pad value.
         for (i, &pad) in dummy_block.iter().enumerate() {
@@ -1679,7 +2389,7 @@ pub(crate) fn oblivious_join_output_through(
 ) -> Result<(PartialResult, ObliviousOutputCost), MpcError> {
     let payload_arity = out_vars.len();
     let (slots, cost) =
-        oblivious_set_output_through(source, backend, candidates, payload_arity, bound)?;
+        oblivious_set_output_through(source, backend, candidates, PayloadWidths::derived(payload_arity), bound)?;
     Ok((partial_result_from_slots(slots, out_vars), cost))
 }
 
@@ -1800,6 +2510,16 @@ pub(crate) fn oblivious_set_output_hidden_keys_through(
     // sized from the product, so neither may be reached on an over-cap or
     // overflowing input.
     let pairs = check_candidate_pairs_within_bound(bound, left_keys.len(), right_keys.len())?;
+    // Then the output stage's PUBLIC caps — the bound, the arity (1: the index tag)
+    // and the compute-party count — before the equality chain below draws once per
+    // pair. The width itself is resolved at the stage, over the rows it packs, as
+    // in every other default-mode operator.
+    check_output_entry_caps(
+        &PayloadWidths::derived(1),
+        bound,
+        backend.parties(),
+        backend.threshold(),
+    )?;
     require_source_matches(source, backend)?;
     // All-pairs candidates: each (i, j) becomes one slot whose match bit is the
     // SECRET-SHARED equality of the two private keys — never opened.
@@ -1810,16 +2530,28 @@ pub(crate) fn oblivious_set_output_hidden_keys_through(
             // A single disclosed payload column tagging the matched right index, so
             // the test surface can identify which pair survived (the key stays
             // hidden; this is a disclosed payload column, convention #4).
-            let payload = vec![Some(Term::Literal(oxrdf::Literal::new_simple_literal(
-                format!("{i}-{j}"),
-            )))];
+            let payload = vec![Some(index_tag_term(i, j))];
             candidates.push(Candidate {
                 payload,
                 matched: MatchBit::SecretShared(match_bit),
             });
         }
     }
-    oblivious_set_output_through(source, backend, &candidates, 1, bound)
+    oblivious_set_output_through(source, backend, &candidates, PayloadWidths::derived(1), bound)
+}
+
+/// The one disclosed payload term `oblivious_set_output_hidden_keys_through`
+/// carries: the `"{left}-{right}"` index tag of the pair this slot came from.
+///
+/// Shared with the entry's width pass, which builds the tag of the LARGEST pair of
+/// indices to learn the widest term the run can carry. That is the widest because
+/// a decimal index's length is monotone in the index, so the pair of largest
+/// indices gives the longest tag, and both lengths are public.
+fn index_tag_term(left: usize, right: usize) -> Term {
+    Term::Literal(oxrdf::Literal::new_simple_literal(format!(
+        "{}-{}",
+        left, right
+    )))
 }
 
 #[cfg(test)]
@@ -2544,10 +3276,11 @@ mod tests {
             "overflow: {:?}",
             err
         );
-        assert!(
-            checked_candidate_pairs(512, 512).is_ok(),
-            "the cap is a cap"
-        );
+        // The cap is a cap, not a refusal of everything: the largest product it
+        // admits is exactly `MAX_OUTPUT_BOUND` pairs.
+        assert!(checked_candidate_pairs(512, 512).is_ok(), "the cap is a cap");
+        assert_eq!(checked_candidate_pairs(512, 512).unwrap(), MAX_OUTPUT_BOUND);
+        assert!(checked_candidate_pairs(512, 513).is_err(), "one pair past it");
 
         // The combined preflight the builders call: it refuses the overflow, the
         // over-cap product and a `B` that cannot cover the product, and hands back
@@ -2831,18 +3564,21 @@ mod tests {
     #[test]
     fn shuffle_cost_scales_with_payload_width() {
         let backend = ShamirBackend::new_seeded(3, 5).unwrap();
-        // Narrow: one short literal. Wide: one long literal (many limbs).
-        let narrow = public_candidates(&[(true, vec![lit("x")])]);
-        let wide = public_candidates(&[(true, vec![lit(&"y".repeat(200))])]);
-        let (_, c_narrow) = oblivious_set_output(&backend, &narrow, 1, 4).unwrap();
-        let (_, c_wide) = oblivious_set_output(&backend, &wide, 1, 4).unwrap();
+        // The width is the DECLARED one, so the two runs differ in their
+        // declaration and not in their data: the same candidate is carried at a
+        // narrow and at a wide declared schema.
+        let cands = public_candidates(&[(true, vec![lit("x")])]);
+        let narrow_w = PayloadWidths::declare(1, 32).expect("a narrow declaration");
+        let wide_w = PayloadWidths::declare(1, 512).expect("a wide declaration");
+        let (_, c_narrow) = oblivious_set_output(&backend, &cands, narrow_w, 4).unwrap();
+        let (_, c_wide) = oblivious_set_output(&backend, &cands, wide_w, 4).unwrap();
         assert_eq!(
             c_narrow.shuffle.items, c_wide.shuffle.items,
             "same slot count"
         );
         assert!(
             c_wide.shuffle.switches > c_narrow.shuffle.switches,
-            "wider payload must cost more switches (width-scaled): wide={}, narrow={}",
+            "a wider declared payload must cost more switches (width-scaled): wide={}, narrow={}",
             c_wide.shuffle.switches,
             c_narrow.shuffle.switches
         );
@@ -2974,8 +3710,11 @@ mod tests {
             (false, vec![lit("rejected-a")]),
             (false, vec![lit(&"rejected-b".repeat(20))]),
         ]);
-        // B = 5: two rejected candidates and three pure padding slots.
-        let slots = opened_slot_rows_through(&mut b.dealer(), &b, &cands, 1, 5).unwrap();
+        // B = 5: two rejected candidates and three pure padding slots. The wider
+        // of the two rejected terms is 200 bytes, so the run declares a schema that
+        // carries it.
+        let widths = PayloadWidths::declare(1, 256).expect("one 256-byte column");
+        let slots = opened_slot_rows_through(&mut b.dealer(), &b, &cands, widths, 5).unwrap();
         assert_eq!(slots.len(), 5);
         assert!(slots.iter().all(|(is_real, _)| !*is_real));
         let distinct: std::collections::BTreeSet<String> =
@@ -2994,10 +3733,14 @@ mod tests {
     #[test]
     fn payload_select_mults_are_counted_per_limb_per_slot() {
         let b = ShamirBackend::new_seeded(3, 0xD3).unwrap();
-        let narrow = public_candidates(&[(true, vec![lit("x")])]);
-        let wide = public_candidates(&[(true, vec![lit(&"y".repeat(200))])]);
-        let (_, c_narrow) = oblivious_set_output(&b, &narrow, 1, 4).unwrap();
-        let (_, c_wide) = oblivious_set_output(&b, &wide, 1, 4).unwrap();
+        // Narrow and wide DECLARATIONS over the same candidate: the limb count is
+        // a function of the declared width, not of the term that happens to be in
+        // the row.
+        let cands = public_candidates(&[(true, vec![lit("x")])]);
+        let narrow_w = PayloadWidths::declare(1, 32).expect("a narrow declaration");
+        let wide_w = PayloadWidths::declare(1, 512).expect("a wide declaration");
+        let (_, c_narrow) = oblivious_set_output(&b, &cands, narrow_w, 4).unwrap();
+        let (_, c_wide) = oblivious_set_output(&b, &cands, wide_w, 4).unwrap();
         // The tag select is still one per slot.
         assert_eq!((c_narrow.select_mults, c_wide.select_mults), (4, 4));
         // The entry width the shuffle cost already scales by is `1 + limbs`, so the
@@ -3010,7 +3753,7 @@ mod tests {
         }
         assert!(
             c_wide.payload_select_mults > c_narrow.payload_select_mults,
-            "a wider payload must cost more limb selects: wide={}, narrow={}",
+            "a wider declared payload must cost more limb selects: wide={}, narrow={}",
             c_wide.payload_select_mults,
             c_narrow.payload_select_mults
         );
@@ -3620,6 +4363,589 @@ mod tests {
             }
             other => panic!("expected Tampered on an out-of-set tag, got {other:?}"),
         }
+    }
+    // ---- Output-stage WIDTH caps (arity / term width / limbs / parties / work) ----
+
+    /// Every cap is pinned BY VALUE, so a change to one is a change to this test
+    /// and not a silent relaxation of a protocol guard.
+    #[test]
+    fn the_width_caps_are_pinned_by_value() {
+        assert_eq!(MAX_OUTPUT_BOUND, 1 << 18);
+        assert_eq!(MAX_PAYLOAD_ARITY, 1 << 10);
+        assert_eq!(MAX_PAYLOAD_TERM_BYTES, 1 << 24);
+        assert_eq!(MAX_SLOT_LIMBS, 1 << 24);
+        assert_eq!(MAX_OUTPUT_PARTIES, 1 << 10);
+        assert_eq!(MAX_SLOT_WORK, 1 << 32);
+    }
+
+    /// The padded width is a closed form of the DECLARATION — it does not depend
+    /// on the candidates' own term lengths.
+    ///
+    /// Two runs of the same declaration over candidate sets whose terms differ by
+    /// orders of magnitude pay the same per-slot width, and that width is the one
+    /// `SlotWidths::limb_capacity` states from public numbers alone. This is the
+    /// property the DERIVED (default) width does not have: there, the longest
+    /// candidate sets the stage to a wider schedule.
+    #[test]
+    fn the_padded_width_is_a_closed_form_of_the_declaration_not_of_the_data() {
+        let backend = ShamirBackend::new_seeded(5, 0x7A10).unwrap();
+        let widths = PayloadWidths::declare(1, 64).expect("a legal declaration");
+        let declared = widths
+            .resolve_rows(std::iter::empty())
+            .expect("a legal declaration")
+            .limb_capacity()
+            .expect("a legal declaration has a width");
+
+        // One short term, one term 50x longer; both inside the declared width.
+        let short = public_candidates(&[(true, vec![lit("x")])]);
+        let long = public_candidates(&[(true, vec![lit(&"x".repeat(50))])]);
+        let bound = 4;
+        let mut observed = Vec::new();
+        for cands in [&short, &long] {
+            let (slots, cost) =
+                oblivious_set_output(&backend, cands, widths, bound).expect("both runs are legal");
+            assert_eq!(slots.len(), bound);
+            // One select multiplication per limb per slot, so the per-slot width is
+            // the quotient.
+            assert_eq!(cost.payload_select_mults % bound, 0);
+            observed.push(cost.payload_select_mults / bound);
+        }
+        assert_eq!(
+            observed[0], observed[1],
+            "the width must not follow the data: {:?}",
+            observed
+        );
+        assert_eq!(
+            observed[0], declared,
+            "and it must be the width the declaration states"
+        );
+    }
+
+    /// A row whose payload arity is one past [`MAX_PAYLOAD_ARITY`] is refused with
+    /// ZERO draws, and an arity exactly AT the cap runs. The over-cap side also
+    /// covers `usize::MAX`, which used to reach `vec![None; usize::MAX]`.
+    #[test]
+    fn the_payload_arity_cap_refuses_just_over_and_runs_at_the_cap() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x7A11).unwrap();
+
+        // The closed-form guard itself, exactly at and past the cap.
+        assert!(check_payload_arity_cap(MAX_PAYLOAD_ARITY).is_ok());
+        let err = check_payload_arity_cap(MAX_PAYLOAD_ARITY + 1)
+            .expect_err("one column past the cap is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PAYLOAD_ARITY")),
+            "{:?}",
+            err
+        );
+
+        for arity in [MAX_PAYLOAD_ARITY + 1, usize::MAX] {
+            let mut dealer = backend.dealer();
+            let mut counted = DrawCountingSource::new(&mut dealer);
+            // No candidate, so nothing but the declaration itself can be refused on.
+            let err = oblivious_set_output_through(&mut counted, &backend, &[], arity, 1)
+                .expect_err("an over-cap payload arity must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PAYLOAD_ARITY")),
+                "arity={}: {:?}",
+                arity,
+                err
+            );
+            assert_eq!(
+                counted.draws(),
+                0,
+                "arity={}: refused before any draw",
+                arity
+            );
+            assert!(oblivious_set_output(&backend, &[], arity, 1).is_err());
+        }
+
+        // AT the cap the stage still runs: one all-unbound row of the widest legal
+        // arity, revealed at B = 1.
+        let cands = public_candidates(&[(true, vec![None; MAX_PAYLOAD_ARITY])]);
+        let (slots, cost) = oblivious_set_output(&backend, &cands, MAX_PAYLOAD_ARITY, 1)
+            .expect("the widest legal arity runs");
+        assert_eq!(slots.len(), 1);
+        assert!(cost.payload_select_mults > 0);
+    }
+
+    /// `oblivious_set_output_hidden_keys_through` runs the output stage's
+    /// PUBLIC-SHAPE checks before it draws anything — so a run the stage would
+    /// refuse draws no equality bits first.
+    ///
+    /// The shape that refuses is a party count past [`MAX_OUTPUT_PARTIES`], a
+    /// public number, so no candidate is needed to decide it. The two batched join
+    /// entries are covered by the same property in
+    /// `join::randomness_seam_tests::both_batched_entries_refuse_the_output_party_cap_before_any_draw`.
+    #[test]
+    fn the_hidden_keys_entry_refuses_the_party_cap_before_any_draw() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        // A backend past the stage's party cap. Honest majority still holds, so it
+        // is the OUTPUT stage's cap and nothing else that refuses.
+        let parties = MAX_OUTPUT_PARTIES + 2;
+        let backend = ShamirBackend::new_seeded(parties, 0x7A23).unwrap();
+        let left = [Fp::new(1), Fp::new(2)];
+        let right = [Fp::new(2), Fp::new(3)];
+
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err =
+            oblivious_set_output_hidden_keys_through(&mut counted, &backend, &left, &right, 4)
+                .expect_err("a party count past the cap must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            "{:?}",
+            err
+        );
+        assert_eq!(
+            counted.draws(),
+            0,
+            "refused before the first equality bit was drawn"
+        );
+    }
+
+    /// The DEFAULT width mode derives the width from the run's own terms, so a run
+    /// whose terms are longer than any fixed default still RUNS and round-trips.
+    ///
+    /// This is the behaviour this crate has always had, and it is the regression a
+    /// fixed default per-term width caused: at a 128-byte default a two-column row
+    /// of ~200-character IRIs or literals — ordinary RDF — was refused outright.
+    /// So the test carries terms far past any plausible fixed default and asserts
+    /// the row comes back intact.
+    #[test]
+    fn the_default_width_carries_a_term_longer_than_any_fixed_default() {
+        let backend = ShamirBackend::new_seeded(5, 0x7A21).unwrap();
+        let long = lit(&"x".repeat(600));
+        let longer = lit(&"y".repeat(900));
+        let cands = public_candidates(&[(true, vec![long.clone(), longer.clone()])]);
+        // A bare arity: the DEFAULT, derived mode.
+        let (slots, cost) = oblivious_set_output(&backend, &cands, 2, 2)
+            .expect("the derived width carries the run's own terms");
+        assert!(cost.payload_select_mults > 0);
+        let rows: Vec<&Vec<Option<Term>>> = slots
+            .iter()
+            .filter_map(|s| match s {
+                OutputSlot::Row(r) => Some(r),
+                OutputSlot::Dummy => None,
+            })
+            .collect();
+        assert_eq!(rows.len(), 1, "the one real row must survive");
+        assert_eq!(rows[0], &vec![long, longer]);
+    }
+
+    /// The DEFAULT (derived) width is the longest ROW the run carries — the sum
+    /// over that row's columns — and NOT `arity × widest term`. The two differ
+    /// whenever the columns differ in length, and the row rule is the narrower
+    /// one, so this is the assertion that the default costs what this stage has
+    /// always cost rather than a per-column upper bound on it.
+    ///
+    /// With no candidate at all the width is the all-unbound row every padding
+    /// slot carries, which is what the uniform width has always had to cover.
+    #[test]
+    fn the_derived_width_is_the_longest_row_not_the_arity_times_the_widest_term() {
+        let backend = ShamirBackend::new_seeded(5, 0x7A23).unwrap();
+        let bound = 4;
+        // Three columns of very different lengths, one of them unbound.
+        let row = vec![lit("a"), lit(&"b".repeat(200)), None];
+        // Flag + text + NUL per bound column, one flag per unbound column.
+        let row_bytes: usize = row
+            .iter()
+            .map(|c| c.as_ref().map_or(1, |t| t.to_string().len() + 2))
+            .sum();
+        let widest_term = row
+            .iter()
+            .flatten()
+            .map(|t| t.to_string().len())
+            .max()
+            .unwrap();
+
+        let resolved = PayloadWidths::derived(row.len())
+            .resolve_rows(std::iter::once(row.as_slice()))
+            .expect("a legal row");
+        assert_eq!(resolved.limb_capacity(), Some(limb_count_for(row_bytes)));
+        // The per-column rule is strictly wider on this row, so the two rules are
+        // distinguishable here and the assertion above is not vacuous.
+        assert!(
+            limb_count_for(row_bytes) < limb_count_for(row.len() * (widest_term + 2)),
+            "the fixture's columns must differ enough to tell the rules apart"
+        );
+        // And the STAGE pays exactly the row rule: one select per limb per slot.
+        let cands = public_candidates(&[(true, row.clone())]);
+        let (_slots, cost) =
+            oblivious_set_output(&backend, &cands, PayloadWidths::derived(row.len()), bound)
+                .expect("a legal run");
+        assert_eq!(
+            cost.payload_select_mults / bound,
+            limb_count_for(row_bytes),
+            "the stage must pack the longest row, not the per-column bound"
+        );
+
+        // With NO candidate, the width is the all-unbound row of this arity.
+        let empty = PayloadWidths::derived(row.len())
+            .resolve_rows(std::iter::empty())
+            .expect("an empty run is legal");
+        assert_eq!(empty.limb_capacity(), Some(limb_count_for(row.len())));
+    }
+
+    /// The DERIVED width really is a function of the data, and the DECLARED width
+    /// really is not — the two modes are distinguishable at the cost model.
+    ///
+    /// Same plan, same arity, two candidate sets whose terms differ by orders of
+    /// magnitude: derived pays different per-slot widths, declared pays one width.
+    /// That difference IS the residual the declared mode removes, so a test that
+    /// could not tell the modes apart would not be testing anything.
+    #[test]
+    fn the_derived_width_follows_the_data_and_the_declared_width_does_not() {
+        let backend = ShamirBackend::new_seeded(5, 0x7A22).unwrap();
+        let bound = 4;
+        let short = public_candidates(&[(true, vec![lit("x")])]);
+        let long = public_candidates(&[(true, vec![lit(&"x".repeat(400))])]);
+
+        let per_slot = |cands: &[Candidate], w: PayloadWidths| {
+            let (_slots, cost) =
+                oblivious_set_output(&backend, cands, w, bound).expect("a legal run");
+            assert_eq!(cost.payload_select_mults % bound, 0);
+            cost.payload_select_mults / bound
+        };
+
+        // DERIVED: the widths differ, and the wider data costs more.
+        let derived_short = per_slot(&short, PayloadWidths::derived(1));
+        let derived_long = per_slot(&long, PayloadWidths::derived(1));
+        assert!(
+            derived_long > derived_short,
+            "the derived width must follow the data: {} vs {}",
+            derived_long,
+            derived_short
+        );
+
+        // DECLARED: one width, whatever the data.
+        let declared = PayloadWidths::declare(1, 512).expect("a legal declaration");
+        assert_eq!(
+            per_slot(&short, declared),
+            per_slot(&long, declared),
+            "a declared width must not follow the data"
+        );
+    }
+
+    /// A term wider than the DECLARED per-term width is refused with ZERO draws,
+    /// and the refusal carries public values only — no column, no candidate
+    /// position, no text, no length. A term exactly at the declared width runs and
+    /// round-trips.
+    #[test]
+    fn a_term_wider_than_the_declaration_is_refused_with_public_values_only() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x7A12).unwrap();
+        let declared = 64usize;
+        let widths = PayloadWidths::declare(2, declared).expect("a legal declaration");
+
+        // A simple literal serialises as `"<text>"`, so the N-Triples form is two
+        // bytes longer than its text.
+        let at_width = lit(&"x".repeat(declared - 2));
+        let over_width = lit(&"x".repeat(declared - 1));
+        assert_eq!(at_width.as_ref().unwrap().to_string().len(), declared);
+
+        // The over-width term sits in the SECOND column of the second candidate, so
+        // a position-naming refusal would say so.
+        let cands = public_candidates(&[
+            (true, vec![at_width.clone(), at_width.clone()]),
+            (true, vec![at_width.clone(), over_width]),
+        ]);
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_through(&mut counted, &backend, &cands, widths, 4)
+            .expect_err("a term wider than the declaration must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("declared per-term width")),
+            "{:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+        let text = format!("{}", err);
+        for forbidden in ["column", "candidate 1", "xxxx"] {
+            assert!(
+                !text.contains(forbidden),
+                "the refusal must not carry {}: {}",
+                forbidden,
+                text
+            );
+        }
+        assert!(text.contains(&declared.to_string()), "{}", text);
+
+        // AT the declared width it runs, and the row survives the round-trip.
+        let cands = public_candidates(&[(true, vec![at_width.clone(), at_width.clone()])]);
+        let (slots, _cost) = oblivious_set_output(&backend, &cands, widths, 2)
+            .expect("the widest declared term runs");
+        let rows: Vec<&Vec<Option<Term>>> = slots
+            .iter()
+            .filter_map(|s| match s {
+                OutputSlot::Row(r) => Some(r),
+                OutputSlot::Dummy => None,
+            })
+            .collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0][0], at_width);
+    }
+
+    /// `PayloadWidths::check_shape` DIRECTLY: each of the three caps it applies,
+    /// and the overflowing row width, on their own.
+    ///
+    /// The stage-level tests reach this through `SlotPlan::decide`, which makes
+    /// them cover the ordering rather than the predicate. This one pins the
+    /// predicate: each cap admits its own ceiling and refuses one past it, naming
+    /// that cap, and a declaration whose row width leaves `usize` is a refusal
+    /// rather than a wrap.
+    #[test]
+    fn the_declaration_shape_check_applies_all_three_caps() {
+        let shape = |arity: usize, term_bytes: usize| {
+            PayloadWidths { arity, term_bytes: Some(term_bytes) }
+                .resolve_rows(std::iter::empty())
+                .map(|_| ())
+        };
+        let names = |r: Result<(), MpcError>, cap: &str| {
+            let err = r.expect_err("must be refused");
+            assert!(
+                matches!(&err, MpcError::Protocol(m) if m.contains(cap)),
+                "the refusal must name {}, got {:?}",
+                cap,
+                err
+            );
+        };
+
+        // Arity: at the cap the declaration is legal only if its limb width also
+        // fits, so pair the ceiling arity with a narrow term; one past it is
+        // refused on the arity, whatever the term width.
+        assert!(shape(MAX_PAYLOAD_ARITY, 16).is_ok());
+        names(shape(MAX_PAYLOAD_ARITY + 1, 16), "MAX_PAYLOAD_ARITY");
+        names(shape(usize::MAX, 1), "MAX_PAYLOAD_ARITY");
+
+        // Per-term declaration ceiling, checked before the limb width.
+        assert!(shape(1, MAX_PAYLOAD_TERM_BYTES).is_ok());
+        names(shape(1, MAX_PAYLOAD_TERM_BYTES + 1), "MAX_PAYLOAD_TERM_BYTES");
+
+        // Uniform limb width: both factors inside their own caps, their row past
+        // MAX_SLOT_LIMBS.
+        let widest_fitting = PayloadWidths {
+            arity: 8,
+            term_bytes: Some(MAX_PAYLOAD_TERM_BYTES),
+        };
+        assert!(
+            SlotWidths {
+                arity: widest_fitting.arity(),
+                term_bytes: MAX_PAYLOAD_TERM_BYTES,
+                row_bytes: Some(widest_fitting.arity() * (MAX_PAYLOAD_TERM_BYTES + 2)),
+                declared: true,
+            }
+            .limb_capacity()
+            .expect("fits a usize")
+                > MAX_SLOT_LIMBS,
+            "the fixture must really exceed the limb cap"
+        );
+        names(shape(8, MAX_PAYLOAD_TERM_BYTES), "MAX_SLOT_LIMBS");
+
+        // And an overflowing row width refuses rather than wrapping under a cap.
+        names(shape(usize::MAX, MAX_PAYLOAD_TERM_BYTES), "MAX_PAYLOAD_ARITY");
+        let over = SlotWidths {
+            arity: MAX_PAYLOAD_ARITY,
+            term_bytes: usize::MAX,
+            row_bytes: None,
+            declared: true,
+        };
+        assert!(
+            over.limb_capacity().is_none(),
+            "the row width must overflow rather than wrap"
+        );
+        names(over.check_shape(), "MAX_PAYLOAD_TERM_BYTES");
+    }
+
+    /// The declaration's own per-term ceiling: a width past
+    /// [`MAX_PAYLOAD_TERM_BYTES`] is refused on the declaration alone, with no
+    /// candidate read and no draw.
+    #[test]
+    fn a_declaration_past_the_per_term_ceiling_is_refused() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x7A15).unwrap();
+        let err = PayloadWidths::declare(1, MAX_PAYLOAD_TERM_BYTES + 1)
+            .expect_err("a declaration past the ceiling is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PAYLOAD_TERM_BYTES")),
+            "{:?}",
+            err
+        );
+
+        // And through the stage, with no candidate at all.
+        let widths = PayloadWidths {
+            arity: 1,
+            term_bytes: Some(MAX_PAYLOAD_TERM_BYTES + 1),
+        };
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_through(&mut counted, &backend, &[], widths, 1)
+            .expect_err("the stage refuses the declaration too");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PAYLOAD_TERM_BYTES")),
+            "{:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+    }
+
+    /// The uniform packed limb width is capped in its own right: a declaration
+    /// whose arity and per-term width are each legal but whose ROW does not fit
+    /// [`MAX_SLOT_LIMBS`] is refused, on the declaration alone.
+    #[test]
+    fn the_slot_limb_cap_refuses_a_declaration_that_is_too_wide() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        let backend = ShamirBackend::new_seeded(5, 0x7A13).unwrap();
+
+        assert!(check_slot_limbs_cap(MAX_SLOT_LIMBS).is_ok());
+        let err =
+            check_slot_limbs_cap(MAX_SLOT_LIMBS + 1).expect_err("one limb past the cap is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_LIMBS")),
+            "{:?}",
+            err
+        );
+
+        // The widest legal arity at the widest legal per-term width: both factors
+        // are inside their own caps, the row they describe is not.
+        let err = PayloadWidths::declare(MAX_PAYLOAD_ARITY, MAX_PAYLOAD_TERM_BYTES)
+            .expect_err("an over-width row is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_LIMBS")),
+            "{:?}",
+            err
+        );
+        // An overflowing declaration is a refusal, not a wrapped width.
+        let err = PayloadWidths::declare(usize::MAX, usize::MAX)
+            .expect_err("an overflowing declaration is refused");
+        assert!(matches!(&err, MpcError::Protocol(_)), "{:?}", err);
+
+        // And through the stage, with no candidate at all.
+        let widths = PayloadWidths {
+            arity: MAX_PAYLOAD_ARITY,
+            term_bytes: Some(MAX_PAYLOAD_TERM_BYTES),
+        };
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_through(&mut counted, &backend, &[], widths, 1)
+            .expect_err("an over-width declaration must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_LIMBS")),
+            "{:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+    }
+
+    /// The party count is a factor of the work and is capped in its own right: a
+    /// backend with more compute parties than [`MAX_OUTPUT_PARTIES`] is refused
+    /// before any candidate is read.
+    #[test]
+    fn the_output_parties_cap_refuses_a_wider_federation() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        assert!(check_output_parties_cap(MAX_OUTPUT_PARTIES).is_ok());
+        let err = check_output_parties_cap(MAX_OUTPUT_PARTIES + 1)
+            .expect_err("one party past the cap is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            "{:?}",
+            err
+        );
+
+        let wide = ShamirBackend::new_seeded(MAX_OUTPUT_PARTIES + 2, 0x7A16).unwrap();
+        let cands = public_candidates(&[(true, vec![lit("x")])]);
+        let mut dealer = wide.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err = oblivious_set_output_through(&mut counted, &wide, &cands, 1, 2)
+            .expect_err("a federation wider than the budget models must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+            "{:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "refused before any draw");
+
+        // The cap is a cap, not a refusal of every wide federation: the check
+        // admits exactly `MAX_OUTPUT_PARTIES` (asserted above), and a federation an
+        // order of magnitude past anything this crate's suites run really does
+        // evaluate. A run AT the cap is not exercised here on purpose — every
+        // degree reduction re-shares `2t + 1` times over `n` points, so the stage's
+        // own cost at `n = MAX_OUTPUT_PARTIES` is what `MAX_SLOT_WORK` is there to
+        // bound, not something to pay inside a unit test.
+        let wide_but_real = ShamirBackend::new_seeded(33, 0x7A17).unwrap();
+        assert!(oblivious_set_output(&wide_but_real, &cands, 1, 2).is_ok());
+    }
+
+    /// The aggregate work budget bounds the PRODUCT, not just the factors: a `B`,
+    /// a declared width, a party count and a threshold that are each individually
+    /// legal are refused when they multiply past [`MAX_SLOT_WORK`]. The per-slot
+    /// tag element is charged alongside the limbs, so a zero-width run is not
+    /// waved through, and an overflowing product is a refusal rather than a
+    /// wrapped number.
+    ///
+    /// The product is `B × (1 + limbs) × n × (2t+1)`: one tag element plus the
+    /// slot's limbs, at every party, through the degree reduction's `2t+1`
+    /// re-sharings. Arity is NOT a factor — `limbs` is derived from the declared
+    /// row, which already spans every column — so multiplying it in again charged
+    /// the columns twice.
+    #[test]
+    fn the_slot_work_budget_bounds_the_product_not_just_the_factors() {
+        use crate::randomness::test_sources::DrawCountingSource;
+        // (n=7, t=3): B x (1 + limbs) x 7 x 7. At a 2047-limb slot, B = 42_799 is
+        // just inside the budget and one slot more is not.
+        assert!(check_slot_work_budget(42_799, 2047, 7, 3).is_ok());
+        assert!(check_slot_work_budget(42_800, 2047, 7, 3).is_err());
+        let err = check_slot_work_budget(42_800, 2047, 7, 3).expect_err("just past the budget");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_WORK")),
+            "{:?}",
+            err
+        );
+        // The PARTY count alone moves the same plan across the budget, and so does
+        // the THRESHOLD through the degree reduction's 2t+1 re-sharings — both are
+        // factors of the product, not bystanders.
+        assert!(check_slot_work_budget(42_799, 2047, 3, 3).is_ok());
+        assert!(check_slot_work_budget(42_799, 2047, 7, 3).is_ok());
+        assert!(check_slot_work_budget(42_799, 2047, 7, 4).is_err());
+        // Each cap on its own is legal, and their CORNER is not: the widest `B` at
+        // the widest uniform slot is past the budget at a legal federation size.
+        assert!(check_slot_work_budget(MAX_OUTPUT_BOUND, MAX_SLOT_LIMBS, 7, 3).is_err());
+        // A ZERO-width run is still charged for its per-slot tag work, so the
+        // product is not zeroed by a width of 0.
+        assert!(check_slot_work_budget(usize::MAX, 0, 7, 3).is_err());
+        // An overflowing product refuses rather than wrapping under the budget.
+        let err = check_slot_work_budget(usize::MAX, usize::MAX, usize::MAX, usize::MAX)
+            .expect_err("an overflowing product is refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("overflows u64")),
+            "{:?}",
+            err
+        );
+
+        // And on the real stage: the widest legal `B` with a declared width whose
+        // limb count is inside `MAX_SLOT_LIMBS`. Every factor is inside its own
+        // cap, so only their product can refuse this.
+        let backend = ShamirBackend::new_seeded(7, 0x7A14).unwrap();
+        let widths = PayloadWidths::declare(1, 2800).expect("a legal declaration");
+        let resolved = widths
+            .resolve_rows(std::iter::empty())
+            .expect("a legal declaration resolves");
+        assert!(
+            resolved.limb_capacity().expect("the declared row fits") <= MAX_SLOT_LIMBS,
+            "the fixture's own shape must be legal, so the product is what refuses"
+        );
+        let cands = public_candidates(&[(true, vec![None; 1])]);
+        let mut dealer = backend.dealer();
+        let mut counted = DrawCountingSource::new(&mut dealer);
+        let err =
+            oblivious_set_output_through(&mut counted, &backend, &cands, widths, MAX_OUTPUT_BOUND)
+                .expect_err("the product of legal factors must be refused");
+        assert!(
+            matches!(&err, MpcError::Protocol(m) if m.contains("MAX_SLOT_WORK")),
+            "{:?}",
+            err
+        );
+        assert_eq!(counted.draws(), 0, "refused before any draw");
     }
 }
 

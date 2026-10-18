@@ -193,10 +193,12 @@
 //! nothing (`k = 1` over distinct endpoint pairs, `p?` over a single predicate
 //! with no self-loop and no repeated endpoint pair) now fail closed under PRSS.
 
+use crate::chain_odometer::ChainOdometer;
 use crate::compare::secure_equal_to_bit_through;
 use crate::field::Fp;
 use crate::oblivious_join::{
     oblivious_set_output_through, partial_result_from_slots, Candidate, MatchBit, ObliviousOutput,
+    PayloadWidths,
 };
 use crate::partial::{MpcError, PartialResult};
 use crate::randomness::{require_source_matches, DistributedRandomness};
@@ -227,13 +229,20 @@ fn chain_out_vars() -> Vec<Variable> {
 ///
 /// ## What this module's caps do and do not bound
 ///
-/// Every cap here bounds a COUNT: the hop count, the enumerated tuple count, the
-/// candidate count and the output bound `B`. None of them bounds a WIDTH. The
-/// payload arity, the byte length of an endpoint term's IRI or literal, and the
-/// per-slot limb count the output stage derives from the longest candidate
-/// encoding are all unbounded, as is the cost of building a network of a given
-/// width. So a caller can still present a small count of very large things. Width
-/// caps are follow-up work; no claim is made here that they exist.
+/// Every cap HERE bounds a COUNT: the hop count, the enumerated tuple count, the
+/// candidate count and the output bound `B`. The WIDTHS are bounded by the output
+/// stage's own caps, which this operator applies at its ENTRY: the payload arity
+/// ([`crate::oblivious_join::MAX_PAYLOAD_ARITY`]), the per-term serialized byte
+/// width ([`crate::oblivious_join::MAX_PAYLOAD_TERM_BYTES`]), the uniform per-slot
+/// limb count ([`crate::oblivious_join::MAX_SLOT_LIMBS`]), the compute-party count
+/// ([`crate::oblivious_join::MAX_OUTPUT_PARTIES`]) and their aggregate product
+/// ([`crate::oblivious_join::MAX_SLOT_WORK`]) — see
+/// `crate::oblivious_join::check_output_public_shape`, called before this
+/// operator builds a candidate or draws a share.
+///
+/// What is NOT bounded: whole-operator resource planning — dealer batches,
+/// aggregate sharing, session traffic and deadlines — is follow-up work, and no
+/// claim is made here that it exists.
 pub const MAX_CHAIN_TUPLES: u64 = 1 << 18; // 262_144
 
 /// Maximum hop count the operator will consider — the exactly-`k` chain's `k`, and
@@ -821,8 +830,42 @@ pub fn eval_exact_k_chain_hidden(
     k: usize,
     bound: usize,
 ) -> Result<PartialResult, MpcError> {
-    let (slots, _cost) =
-        eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), backend, edges, k, bound)?;
+    let (slots, _cost) = eval_exact_k_chain_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        k,
+        PayloadWidths::derived(2),
+        bound,
+    )?;
+    Ok(partial_result_from_slots(slots, chain_out_vars()))
+}
+
+/// [`eval_exact_k_chain_hidden`] with the payload widths DECLARED rather than
+/// derived from the edges' own endpoint terms.
+///
+/// A declaration makes the padded per-slot width a public number independent of the
+/// data, so the longest endpoint term's length is no longer observable in it or in
+/// any cost that scales with it, and the width's caps are decided at this entry
+/// before anything is drawn. What a declaration exposes in its place is one bit per
+/// run — whether some term did not fit, which is a refusal. The payload arity is
+/// fixed at 2 (the endpoint pair), so only the per-term width is the caller's to
+/// state.
+pub fn eval_exact_k_chain_hidden_with_widths(
+    backend: &ShamirBackend,
+    edges: &HiddenEdges,
+    k: usize,
+    term_bytes: usize,
+    bound: usize,
+) -> Result<PartialResult, MpcError> {
+    let (slots, _cost) = eval_exact_k_chain_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        k,
+        PayloadWidths::declare(2, term_bytes)?,
+        bound,
+    )?;
     Ok(partial_result_from_slots(slots, chain_out_vars()))
 }
 
@@ -837,7 +880,14 @@ pub fn eval_exact_k_chain_hidden_slots(
     k: usize,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    eval_exact_k_chain_hidden_slots_through(&mut backend.dealer(), backend, edges, k, bound)
+    eval_exact_k_chain_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        k,
+        PayloadWidths::derived(2),
+        bound,
+    )
 }
 
 /// [`eval_exact_k_chain_hidden_slots`] with the chain stage's randomness drawn
@@ -860,6 +910,7 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
     backend: &ShamirBackend,
     edges: &HiddenEdges,
     k: usize,
+    widths: PayloadWidths,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
     require_source_matches(source, backend)?;
@@ -883,11 +934,24 @@ pub(crate) fn eval_exact_k_chain_hidden_slots_through(
         public_candidate_pair_bound(edges.len(), k)?,
         || projected_candidate_count(edges, k),
     )?;
+    // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
+    // candidate is built or a share drawn: the padded bound, the payload arity (2 —
+    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
+    // the widths, the declared width, its limb count and the aggregate slot work.
+    // In the default derived mode the width is a function of the candidates' own
+    // rows, so it and its caps are decided at the stage, which is where this crate
+    // has always decided them.
+    crate::oblivious_join::check_output_entry_caps(
+        &widths,
+        bound,
+        backend.parties(),
+        backend.threshold(),
+    )?;
     let candidates = build_candidates(backend, source, edges, k)?;
-    // Payload arity is 2 (the endpoint pair). Route through the slot-returning path.
-    // The stage re-checks the bound against the EXACT candidate count, which is what
-    // catches the degenerate case where the projection above could only bound it.
-    oblivious_set_output_through(source, backend, &candidates, 2, bound)
+    // Route through the slot-returning path. The stage re-checks the bound against
+    // the EXACT candidate count, which is what catches the degenerate case where the
+    // projection above could only bound it.
+    oblivious_set_output_through(source, backend, &candidates, widths, bound)
 }
 
 /// Test-only instrumentation: the candidates
@@ -1067,9 +1131,13 @@ impl PredicatedEdges {
     /// this module has no sequence form at all.
     ///
     /// The caveat therefore belongs to the disclosed-key module, whose
-    /// [`crate::bounded_path::PathForm::Sequence`] can chain two or more nullable
-    /// arms: the Sequence's midpoint then ranges over the declared domain and the
-    /// widened constant over-answers. See
+    /// [`crate::bounded_path::PathForm::Sequence`] can chain nullable arms: when
+    /// such a sequence is nullable THROUGHOUT and the bound endpoint is the
+    /// widened constant, its midpoints range over the declared domain and the
+    /// operator answers `(absent, absent)` where the engine answers nothing — at
+    /// most that one extra pair, and not at all once any arm has `min >= 1`. A
+    /// `{0,k}` range is one repetition, not a chain of `p?` arms, so it is not a
+    /// case of it. See
     /// [`crate::bounded_path::DisclosedEdges::with_node_domain`].
     ///
     /// Duplicates are collapsed and the stored order is canonical, so the
@@ -1225,32 +1293,6 @@ impl HiddenBoundedPath {
             max,
         }
     }
-}
-
-/// Every fixed predicate sequence of `length` hops obtained by choosing one of the
-/// `alternatives` at each position (design §2.4). For a single-predicate step this is
-/// the one `length`-long sequence. Grows the chain set amortised (no
-/// `len * alts`-sized `with_capacity`, which could overflow on a large public unroll).
-///
-/// `check_bounded_params` runs first and caps the chain COUNT — `Σ_ℓ a^ℓ·|E|^ℓ`
-/// against [`MAX_CHAIN_TUPLES`] — so the number of sequences this returns is
-/// bounded. It does NOT bound their WIDTHS: a predicate IRI's length is unbounded,
-/// as are the payload arity and the endpoint terms' lengths downstream. Width caps
-/// are follow-up work and are not claimed here.
-fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> {
-    let mut chains: Vec<Vec<String>> = vec![Vec::new()];
-    for _ in 0..length {
-        let mut next: Vec<Vec<String>> = Vec::new();
-        for prefix in &chains {
-            for alt in alternatives {
-                let mut extended = prefix.clone();
-                extended.push(alt.clone());
-                next.push(extended);
-            }
-        }
-        chains = next;
-    }
-    chains
 }
 
 /// The chain bit of ONE edge-tuple against a FIXED predicate sequence `chain`: it is
@@ -1442,12 +1484,18 @@ fn build_bounded_candidates(
     let m = edges.len();
     if m > 0 {
         for length in form.min.max(1)..=form.max {
-            for chain in predicate_chains(&form.alternatives, length) {
+            // The `a^length` fixed predicate sequences, enumerated LAZILY: one
+            // chain at a time from a single reusable buffer, so the peak memory
+            // is one chain's worth of IRIs rather than every chain's
+            // (`ChainOdometer`). The order is the materialized build's order, so
+            // the per-chain draw order below is unchanged.
+            let mut chains = ChainOdometer::new(&form.alternatives, length);
+            while let Some(chain) = chains.next_chain() {
                 let mut idx = vec![0usize; length];
                 loop {
                     let tuple: Vec<&PredicatedEdge> =
                         idx.iter().map(|&i| &edges.edges[i]).collect();
-                    let bit = predicated_tuple_chain_bit(backend, source, &tuple, &chain)?;
+                    let bit = predicated_tuple_chain_bit(backend, source, &tuple, chain)?;
                     let a_term = tuple[0].subject.term.clone();
                     let b_term = tuple[length - 1].object.term.clone();
                     fold(source, &mut by_pair, a_term, b_term, bit)?;
@@ -1547,8 +1595,36 @@ pub fn eval_bounded_path_hidden(
     form: &HiddenBoundedPath,
     bound: usize,
 ) -> Result<PartialResult, MpcError> {
-    let (slots, _cost) =
-        eval_bounded_path_hidden_slots_through(&mut backend.dealer(), backend, edges, form, bound)?;
+    let (slots, _cost) = eval_bounded_path_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        form,
+        PayloadWidths::derived(2),
+        bound,
+    )?;
+    Ok(partial_result_from_slots(slots, chain_out_vars()))
+}
+
+/// [`eval_bounded_path_hidden`] with the payload widths DECLARED rather than
+/// derived from the edges' and the declared node domain's own terms. Same trade as
+/// [`eval_exact_k_chain_hidden_with_widths`]: the width stops being a function of
+/// the data, and an over-width term becomes a refusal raised at this entry.
+pub fn eval_bounded_path_hidden_with_widths(
+    backend: &ShamirBackend,
+    edges: &PredicatedEdges,
+    form: &HiddenBoundedPath,
+    term_bytes: usize,
+    bound: usize,
+) -> Result<PartialResult, MpcError> {
+    let (slots, _cost) = eval_bounded_path_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        form,
+        PayloadWidths::declare(2, term_bytes)?,
+        bound,
+    )?;
     Ok(partial_result_from_slots(slots, chain_out_vars()))
 }
 
@@ -1561,7 +1637,14 @@ pub fn eval_bounded_path_hidden_slots(
     form: &HiddenBoundedPath,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
-    eval_bounded_path_hidden_slots_through(&mut backend.dealer(), backend, edges, form, bound)
+    eval_bounded_path_hidden_slots_through(
+        &mut backend.dealer(),
+        backend,
+        edges,
+        form,
+        PayloadWidths::derived(2),
+        bound,
+    )
 }
 
 /// [`eval_bounded_path_hidden_slots`] with the union stage's randomness drawn
@@ -1575,6 +1658,7 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
     backend: &ShamirBackend,
     edges: &PredicatedEdges,
     form: &HiddenBoundedPath,
+    widths: PayloadWidths,
     bound: usize,
 ) -> Result<ObliviousOutput, MpcError> {
     require_source_matches(source, backend)?;
@@ -1593,8 +1677,21 @@ pub(crate) fn eval_bounded_path_hidden_slots_through(
         public_bounded_candidate_pair_bound(edges.len(), edges.declared_domain_len(), form)?,
         || projected_bounded_candidate_count(edges, form),
     )?;
+    // The output stage's PUBLIC-ONLY caps at THIS operator's entry, before a
+    // candidate is built or a share drawn: the padded bound, the payload arity (2 —
+    // the endpoint pair), the compute-party count, and, only if the caller DECLARED
+    // the widths, the declared width, its limb count and the aggregate slot work.
+    // In the default derived mode the width is a function of the candidates' own
+    // rows, so it and its caps are decided at the stage, which is where this crate
+    // has always decided them.
+    crate::oblivious_join::check_output_entry_caps(
+        &widths,
+        bound,
+        backend.parties(),
+        backend.threshold(),
+    )?;
     let candidates = build_bounded_candidates(backend, source, edges, form)?;
-    oblivious_set_output_through(source, backend, &candidates, 2, bound)
+    oblivious_set_output_through(source, backend, &candidates, widths, bound)
 }
 
 /// Planner guard + cost-model wiring for the hidden bounded property-path operator

@@ -495,7 +495,7 @@ fn huge_upper_bound_is_refused_before_any_draw() {
         let form = HiddenBoundedPath::range(P, 1, max);
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 8)
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 8)
             .expect_err("an upper bound past the cap must be refused");
         assert!(
             matches!(&err, MpcError::Protocol(m) if m.contains("MAX_HOP_COUNT")),
@@ -579,7 +579,7 @@ fn bounded_through_refuses_a_source_that_does_not_match_the_backend() {
     // Wrong `n`: a dealer from a 5-party backend, recorded so the test can see
     // whether anything was drawn before the refusal.
     let mut rec = RecordingSource::new(ShamirBackend::new_seeded(5, 0xB0C).unwrap().dealer());
-    match eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 8) {
+    match eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, PayloadWidths::derived(2), 8) {
         Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "{m}"),
         other => panic!("a wrong-n source must be refused, got {other:?}"),
     }
@@ -598,7 +598,7 @@ fn bounded_through_refuses_a_source_that_does_not_match_the_backend() {
             t,
         };
         let mut counted = DrawCountingSource::new(&mut lying);
-        match eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 8) {
+        match eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 8) {
             Err(MpcError::Protocol(m)) => assert!(m.contains("but the backend is"), "t={t}: {m}"),
             other => panic!("t={t}: a misreported threshold must be refused, got {other:?}"),
         }
@@ -618,7 +618,7 @@ fn malformed_draws_in_the_or_fold_are_refused() {
     let form = HiddenBoundedPath::optional(P);
     for how in ALL_MALFORMATIONS {
         let mut src = MalformedSource::new(backend.dealer(), SeamMethod::VssOwnInput, 0, how);
-        match eval_bounded_path_hidden_slots_through(&mut src, &backend, &edges, &form, 2) {
+        match eval_bounded_path_hidden_slots_through(&mut src, &backend, &edges, &form, PayloadWidths::derived(2), 2) {
             Err(MpcError::Protocol(m)) => {
                 assert!(
                     m.contains("re-sharing that is not the canonical"),
@@ -656,6 +656,7 @@ fn prss_fails_closed_on_every_bounded_shape() {
         &backend,
         &edges,
         &optional,
+        PayloadWidths::derived(2),
         6,
     )
     .unwrap();
@@ -667,7 +668,7 @@ fn prss_fails_closed_on_every_bounded_shape() {
 
     for (form, bound) in [(optional, 6), (HiddenBoundedPath::range(P, 1, 2), 8)] {
         let outcome =
-            eval_bounded_path_hidden_slots_through(&mut prss, &backend, &edges, &form, bound);
+            eval_bounded_path_hidden_slots_through(&mut prss, &backend, &edges, &form, PayloadWidths::derived(2), bound);
         assert!(
             matches!(outcome, Err(MpcError::NotYetImplemented { .. })),
             "{form:?}: PRSS must fail closed, got {outcome:?}"
@@ -824,7 +825,7 @@ fn seeded_bounded_stage_transcript_is_pinned() {
     let edges = pin_edges();
     let form = HiddenBoundedPath::range("p", 0, 2);
     let mut rec = RecordingSource::new(backend.dealer());
-    eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, 5).unwrap();
+    eval_bounded_path_hidden_slots_through(&mut rec, &backend, &edges, &form, PayloadWidths::derived(2), 5).unwrap();
     assert_eq!(rec.log.len(), 2074);
     // Prefix unchanged from the pre-routing pin; the whole move is in the output
     // suffix, which grew by the per-element degree reductions.
@@ -862,7 +863,7 @@ fn an_over_cap_output_bound_is_refused_before_any_draw() {
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
         let err =
-            eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, bound)
+            eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), bound)
                 .expect_err("an over-cap bound must be refused");
         match &err {
             MpcError::Protocol(m) => assert!(m.contains("MAX_OUTPUT_BOUND"), "B={}: {}", bound, m),
@@ -918,7 +919,7 @@ fn a_bound_below_the_bounded_candidate_count_is_refused_before_any_draw() {
 
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 1)
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 1)
             .expect_err("a bound below the candidate count must be refused");
         match &err {
             MpcError::Protocol(m) => {
@@ -1050,7 +1051,7 @@ fn both_branches_of_the_bounded_bound_contract() {
     let mut dealer = backend.dealer();
     let mut counted = DrawCountingSource::new(&mut dealer);
     let err =
-        eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, exact - 1)
+        eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), exact - 1)
             .expect_err("B below the exact union must be refused");
     assert_eq!(counted.draws(), 0, "refused before any draw");
     match &err {
@@ -1176,7 +1177,7 @@ fn hidden_zero_length_arm_without_a_declared_domain_is_refused_pre_crypto() {
     ] {
         let mut dealer = backend.dealer();
         let mut counted = DrawCountingSource::new(&mut dealer);
-        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, 64)
+        let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 64)
             .expect_err("a min == 0 form without a declared domain must be refused");
         assert_eq!(counted.draws(), 0, "refused before any draw");
         match &err {
@@ -1332,16 +1333,29 @@ fn hidden_an_empty_declared_domain_runs_while_an_undeclared_one_is_refused() {
 /// suite uses, instead of only the in-file plaintext one: the declared domain is
 /// not this test's guess at `graph_nodes`, it IS `graph_nodes`.
 fn hidden_edges_and_engine_domain(doc: &str, edge_preds: &[&str]) -> PredicatedEdges {
-    use sparq_core::Graph;
-    use sparq_engine::query;
+    hidden_edges_and_engine_domain_from(&load_fixture(doc), edge_preds)
+}
 
+/// Parse one fixture document into a graph. Separate from the helpers below so a
+/// test can share ONE load between the edges, the declared domain and the engine
+/// oracle — which a fixture carrying a BLANK NODE must do, since a blank node's
+/// identity is per-load and two loads of the same document do not agree on it.
+fn load_fixture(doc: &str) -> sparq_core::Graph {
     let full = format!("@prefix ex: <http://ex/> .\n{doc}");
-    let graph = Graph::load_str(&full, "turtle").expect("the fixture parses");
+    sparq_core::Graph::load_str(&full, "turtle").expect("the fixture parses")
+}
+
+/// [`hidden_edges_and_engine_domain`] over an already-loaded graph.
+fn hidden_edges_and_engine_domain_from(
+    graph: &sparq_core::Graph,
+    edge_preds: &[&str],
+) -> PredicatedEdges {
+    use sparq_engine::query;
 
     let mut interner = Interner::new();
     let mut edges: Vec<PredicatedEdge> = Vec::new();
     for p in edge_preds {
-        let rows = query(&graph, &format!("SELECT ?s ?o WHERE {{ ?s <{p}> ?o }}"))
+        let rows = query(graph, &format!("SELECT ?s ?o WHERE {{ ?s <{p}> ?o }}"))
             .unwrap()
             .rows;
         for row in rows {
@@ -1360,7 +1374,7 @@ fn hidden_edges_and_engine_domain(doc: &str, edge_preds: &[&str]) -> PredicatedE
     }
 
     let mut domain: BTreeMap<String, Term> = BTreeMap::new();
-    for row in query(&graph, "SELECT ?s ?o WHERE { ?s ?p ?o }")
+    for row in query(graph, "SELECT ?s ?o WHERE { ?s ?p ?o }")
         .unwrap()
         .rows
     {
@@ -1379,18 +1393,20 @@ fn hidden_edges_and_engine_domain(doc: &str, edge_preds: &[&str]) -> PredicatedE
 /// [`secure_bounded`] keys its rows (an IRI as its bare string, anything else
 /// through `Display`).
 fn engine_pairs(doc: &str, path: &str) -> BTreeSet<(String, String)> {
-    use sparq_core::Graph;
+    engine_pairs_from(&load_fixture(doc), path)
+}
+
+/// [`engine_pairs`] over an already-loaded graph.
+fn engine_pairs_from(graph: &sparq_core::Graph, path: &str) -> BTreeSet<(String, String)> {
     use sparq_engine::query;
 
-    let full = format!("@prefix ex: <http://ex/> .\n{doc}");
-    let graph = Graph::load_str(&full, "turtle").expect("the fixture parses");
     let q = format!("PREFIX ex: <http://ex/> SELECT ?a ?b WHERE {{ ?a {path} ?b }}");
     let render = |slot: &Option<Term>| match slot {
         Some(Term::NamedNode(n)) => n.as_str().to_string(),
         Some(other) => other.to_string(),
         None => panic!("an endpoint column must be BOUND"),
     };
-    query(&graph, &q)
+    query(graph, &q)
         .unwrap()
         .rows
         .iter()
@@ -1445,34 +1461,83 @@ fn differential_hidden_zero_to_two_equals_the_engine() {
     assert_eq!(got.len(), 10, "{got:?}");
 }
 
-/// A BLANK NODE in the declared domain yields its identity pair in the hidden
-/// regime too. The blank node is a DOMAIN term only — the edges keep their own
+/// A BLANK NODE of the LOADED graph yields its identity pair in the hidden
+/// regime too, against the real engine. The blank node sits under a predicate the
+/// path does not traverse, so it is a DOMAIN term only — the edges keep their own
 /// `HiddenNode` keys — and its diagonal entry gets the same constant shared `1`
 /// chain bit as any other, so nothing is compared on a document-scoped label.
+///
+/// One load feeds the edges, the declared domain and the oracle: a blank node's
+/// identity is per-load, so two loads would differ on the label and the
+/// comparison would be about parsing rather than about the operator.
 #[test]
-fn hidden_a_blank_node_in_the_declared_domain_yields_its_identity_pair() {
-    let mut interner = Interner::new();
-    let edges = vec![PredicatedEdge {
-        predicate: P.to_string(),
-        subject: interner.node("http://ex/a"),
-        object: interner.node("http://ex/b"),
-    }];
-    let blank = Term::BlankNode(oxrdf::BlankNode::new("b0").unwrap());
-    let edges = PredicatedEdges::new(edges)
-        .with_node_domain(vec![
-            iri_term("http://ex/a"),
-            iri_term("http://ex/b"),
-            blank.clone(),
-        ])
-        .expect("a blank node is a legal DOMAIN term");
+fn differential_hidden_blank_node_of_the_loaded_graph_yields_its_identity_pair() {
+    let doc = "ex:a ex:p ex:b . ex:c ex:q [ ] .";
+    let graph = load_fixture(doc);
+    let edges = hidden_edges_and_engine_domain_from(&graph, &[P]);
 
     let backend = ShamirBackend::new_seeded(5, 0x2D09).unwrap();
     let got = secure_bounded(&backend, &edges, &HiddenBoundedPath::optional(P), 16);
-    let key = blank.to_string();
-    assert!(
-        got.contains(&(key.clone(), key)),
-        "the blank node's identity pair must be present: {got:?}"
+    assert_eq!(
+        got,
+        engine_pairs_from(&graph, "ex:p?"),
+        "the hidden p? must equal the engine's over the same loaded graph"
     );
-    // (a,a), (b,b), (_:b0,_:b0) and the (a,b) edge.
-    assert_eq!(got.len(), 4, "{got:?}");
+    let blanks = got
+        .iter()
+        .filter(|(a, b)| a.starts_with("_:") && a == b)
+        .count();
+    assert_eq!(
+        blanks, 1,
+        "the loaded graph's blank node must contribute its identity pair: {got:?}"
+    );
+    // (a,a), (b,b), (c,c), the blank node's diagonal, and the (a,b) edge.
+    assert_eq!(got.len(), 5, "{got:?}");
+}
+
+/// The output stage's PUBLIC-SHAPE caps are decided at the OPERATOR's entry, so
+/// nothing is drawn when one of them refuses.
+///
+/// The term and limb caps used to be charged inside the output stage, which the
+/// bounded operator reaches only after `build_bounded_candidates` has already dealt
+/// the per-hop match bits — so "refused before any draw" was true of the stage and
+/// not of the operator. `check_output_public_shape` runs the same closed forms at
+/// the operator's entry; the compute-party cap is the one a caller can trip with a
+/// legal form and a legal bound, so it is the one tested here. The counter is the
+/// witness: a refusal that still dealt would show a nonzero draw count.
+#[test]
+fn an_over_cap_public_shape_refuses_the_operator_before_any_draw() {
+    use crate::oblivious_join::MAX_OUTPUT_PARTIES;
+    use crate::randomness::test_sources::DrawCountingSource;
+
+    let triples = [
+        (P, "http://ex/a", "http://ex/b"),
+        (P, "http://ex/b", "http://ex/c"),
+    ];
+    let edges = predicated_edges(&triples);
+    let form = HiddenBoundedPath::range(P, 1, 2);
+
+    // More compute parties than the output stage's work model admits.
+    let backend = ShamirBackend::new_seeded(MAX_OUTPUT_PARTIES + 2, 0x91).unwrap();
+    let mut dealer = backend.dealer();
+    let mut counted = DrawCountingSource::new(&mut dealer);
+    let err = eval_bounded_path_hidden_slots_through(&mut counted, &backend, &edges, &form, PayloadWidths::derived(2), 8)
+        .expect_err("a party count past the output cap must be refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_OUTPUT_PARTIES")),
+        "the refusal must name the cap, got {:?}",
+        err
+    );
+    assert_eq!(
+        counted.draws(),
+        0,
+        "the operator must refuse on public numbers alone, having drawn nothing"
+    );
+
+    // And the same form at an admissible party count still runs, so the test is
+    // pinning the cap and not a broken fixture.
+    let ok_backend = ShamirBackend::new_seeded(3, 0x92).unwrap();
+    let mut ok_dealer = ok_backend.dealer();
+    eval_bounded_path_hidden_slots_through(&mut ok_dealer, &ok_backend, &edges, &form, PayloadWidths::derived(2), 8)
+        .expect("an admissible party count still evaluates");
 }

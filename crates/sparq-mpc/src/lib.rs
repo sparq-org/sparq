@@ -179,6 +179,10 @@ pub mod auth_disclose;
 // sq-hoaj. See the module docs for the critical-honesty constraint (no
 // single-process wall-clock masquerading as an MPC latency).
 pub mod bench;
+// Lazy enumeration of a bounded property-path unroll's fixed predicate sequences,
+// shared by the disclosed (`bounded_path`) and hidden (`hidden_path`) unrolls.
+// Crate-internal: it is a memory shape, not a public surface.
+mod chain_odometer;
 // sq-py8h.1: bounded property-path over DISCLOSED global-IRI keys —
 // the crypto-free "headline federation" regime. Unrolls a bounded path
 // `?a (p){m,k} ?b` (sequence / exact {k} / range {m,k} / reflexive {0,k} /
@@ -352,20 +356,23 @@ pub use bench::{
 // sq-py8h.1: the disclosed-key bounded property-path surface.
 pub use bounded_path::{
     eval_bounded_path_disclosed, BoundedRepetition, DisclosedEdges, PathForm, PathStep,
+    MAX_PATH_FORM_DEPTH, MAX_PATH_FORM_ROWS, MAX_PATH_FORM_WORK,
 };
 // sq-py8h.2: the HIDDEN-intermediate exactly-`k` chain surface (the
 // cryptographic regime — intermediate node-sets never opened).
 pub use hidden_path::{
-    eval_bounded_path_hidden, eval_bounded_path_hidden_slots, eval_exact_k_chain_hidden,
-    eval_exact_k_chain_hidden_slots, HiddenBoundedPath, HiddenEdge, HiddenEdges, HiddenNode,
+    eval_bounded_path_hidden, eval_bounded_path_hidden_slots, eval_bounded_path_hidden_with_widths,
+    eval_exact_k_chain_hidden, eval_exact_k_chain_hidden_slots,
+    eval_exact_k_chain_hidden_with_widths, HiddenBoundedPath, HiddenEdge, HiddenEdges, HiddenNode,
     PredicatedEdge, PredicatedEdges, MAX_CHAIN_TUPLES, MAX_HOP_COUNT,
 };
 // sq-py8h.4: the hidden-key endpoint DISTINCT surface — collapse
 // duplicate SECRET endpoint pairs (oblivious sort by a never-opened secure
 // comparator + adjacent-equality keep-bit + oblivious compaction).
 pub use hidden_distinct::{
-    distinct_hidden_pairs, distinct_hidden_pairs_oblivious, distinct_hidden_pairs_slots,
-    DistinctCost, SecretEndpointPair, MAX_DISTINCT_ROWS,
+    distinct_hidden_pairs, distinct_hidden_pairs_oblivious,
+    distinct_hidden_pairs_oblivious_with_widths, distinct_hidden_pairs_slots, DistinctCost,
+    SecretEndpointPair, MAX_DISTINCT_ROWS,
 };
 // sq-py8h.5: the planner guard + cost-model surface for the hidden
 // bounded property-path operator (reject statically-large unrolls, refuse a hidden
@@ -436,7 +443,9 @@ pub use federated_binding::{
 pub use oblivious_join::{
     oblivious_join_output, oblivious_set_output, oblivious_set_output_hidden_keys,
     oblivious_set_output_to_recipient, Candidate, MatchBit, ObliviousOutput, ObliviousOutputCost,
-    OutputSlot, RecipientOutputShares, MAX_OUTPUT_BOUND,
+    OutputSlot, PayloadWidths, RecipientOutputShares,
+    MAX_OUTPUT_BOUND, MAX_OUTPUT_PARTIES, MAX_PAYLOAD_ARITY, MAX_PAYLOAD_TERM_BYTES,
+    MAX_SLOT_LIMBS, MAX_SLOT_WORK,
 };
 pub use rng::{MpcRng, SecureRng};
 // sq-yyro: the dealer-less correlated-randomness seam surface.
