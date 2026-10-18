@@ -22,8 +22,8 @@ use oxrdf::{NamedNode, Term};
 use rustc_hash::FxHashSet;
 use sparq_core::dict::Dict;
 use sparq_core::Graph;
-use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval, CompiledRuleSet};
-use sparq_reason::NegationCycles;
+use sparq_reason::n3::compiled::{compile, compile_with_cycles, eval_with_limits, CompiledRuleSet};
+use sparq_reason::{ClosureLimits, NegationCycles};
 use std::sync::OnceLock;
 // `std::time::Instant` is unusable on `wasm32-unknown-unknown` — `Instant::now()`
 // panics there (no monotonic clock). The wall-clock plumbing for `stats.millis` is
@@ -37,6 +37,115 @@ const WAC_RULES: &str = include_str!("../rules/wac.n3");
 const ACP_A: &str = include_str!("../rules/acp-a.n3");
 const ACP_B: &str = include_str!("../rules/acp-b.n3");
 const ACP_C: &str = include_str!("../rules/acp-c.n3");
+
+/// The leading text of the error a materialization refused by its reasoning allowance
+/// returns — the one refusal an operator must read as "this pod's policies are too big for
+/// the allowance in force", not as "these policies deny access".
+///
+/// A refusal of either kind leaves no grant behind (the view in force is kept or dropped,
+/// never widened), so the distinction is operational rather than one of access: a deny is
+/// the policies' decision, while this says the policies were never decided at all and the
+/// allowance has to be raised ([`crate::PodStore::set_auth_limits`]) before they will be.
+/// The rest of the message is the reasoner's own, which names the limit that was reached
+/// and its value.
+pub const AUTH_ALLOWANCE_REFUSAL: &str = "authorization reasoning allowance exceeded";
+
+/// Whether `err` — an error from any `materialize_*` entry point, free function or
+/// [`crate::PodStore`] method — is a refusal by the reasoning allowance
+/// ([`AUTH_ALLOWANCE_REFUSAL`]) rather than any other materialization error.
+///
+/// # Examples
+///
+/// ```
+/// assert!(!sparq_solid::is_auth_allowance_refusal("some other materialization error"));
+/// ```
+pub fn is_auth_allowance_refusal(err: &str) -> bool {
+    err.starts_with(AUTH_ALLOWANCE_REFUSAL)
+}
+
+/// The reasoning allowance every authorization closure runs under unless the store is given
+/// another one ([`crate::PodStore::set_auth_limits`]).
+///
+/// The reasoner's own [`ClosureLimits::default`] leaves `max_join_rows` unbounded, so one
+/// round's premise joins may produce rows without bound — and the authorization rules join
+/// patterns whose matches multiply (a policy's matchers against its resources, agents,
+/// clients and issuers). The authorization path therefore sets its own finite allowance:
+/// the limits below, which a pod far larger than anything this crate materializes today
+/// stays well inside.
+///
+/// # How the values were chosen
+///
+/// Measured, not guessed. For the largest fixtures this crate has — `fixture::wac_fixture`
+/// (~1.1k named graphs, the one `examples/bench.rs` materializes), the same fixture with
+/// filler content (`fixture::wac_fixture_sized(50)`, which reasons over the same control
+/// documents) and `fixture::acp_fixture` across all three strata — the SMALLEST allowance
+/// each field could take while the view still materialized was found by bisection:
+///
+/// | field            | largest minimum over those fixtures | the value here | margin |
+/// |------------------|------------------------------------:|---------------:|-------:|
+/// | `max_join_rows`  |                             ~82,400 |     20,000,000 |  ~240× |
+/// | `max_facts`      |                             ~15,900 |     20,000,000 | ~1200× |
+/// | `max_rounds`     |                                  11 |        100,000 | ~9000× |
+///
+/// (A fixture-and-box-specific measurement, so it is recorded here rather than in any
+/// markdown.) `max_join_rows` is the one that matters: it is what the reasoner's own
+/// default leaves unbounded. Every margin is deliberately far wider than any pod this
+/// crate is asked about — the allowance exists to stop unbounded join work, not to size a
+/// pod — and a pod that still needs more raises it
+/// ([`crate::PodStore::set_auth_limits`]).
+pub fn default_auth_limits() -> ClosureLimits {
+    let mut limits = ClosureLimits::default();
+    limits.max_rounds = AUTH_MAX_ROUNDS;
+    limits.max_facts = AUTH_MAX_FACTS;
+    limits.max_term_bytes = AUTH_MAX_TERM_BYTES;
+    limits.max_join_rows = AUTH_MAX_JOIN_ROWS;
+    limits
+}
+
+/// Rounds one authorization stratum may run. The rules are not recursive over a growing
+/// term, so a stratum reaches its fixpoint in a handful of rounds on any pod; this is a
+/// runaway guard, not a working bound.
+const AUTH_MAX_ROUNDS: usize = 100_000;
+/// Facts one authorization stratum may hold, asserted and derived together.
+const AUTH_MAX_FACTS: usize = 20_000_000;
+/// Bytes of one term the rules may derive. The rules derive compound terms only as minted
+/// candidate/matcher-instance IRIs (a few hundred bytes of percent-encoded components), so
+/// 1 MiB is already far above anything they build.
+const AUTH_MAX_TERM_BYTES: usize = 1 << 20;
+/// Binding rows and rule firings one round of one authorization stratum may produce — the
+/// limit the reasoner's defaults leave unbounded. See [`default_auth_limits`] for how it
+/// was measured.
+const AUTH_MAX_JOIN_ROWS: usize = 20_000_000;
+
+/// One authorization stratum, under `limits`: [`eval_with_limits`] with the allowance
+/// refusal tagged ([`AUTH_ALLOWANCE_REFUSAL`]) so the caller can tell a pod too big for the
+/// allowance from any other materialization failure. Every other error is passed through
+/// unchanged.
+///
+/// The tag is added here, at the one seam every authorization closure in this crate goes
+/// through, so no stratum can return an untagged allowance refusal.
+pub(crate) fn auth_eval(
+    dict: &mut Dict,
+    facts: &[[sparq_core::dict::Id; 3]],
+    rules: &CompiledRuleSet,
+    limits: ClosureLimits,
+) -> Result<Vec<[sparq_core::dict::Id; 3]>, String> {
+    eval_with_limits(dict, facts, rules, limits).map_err(tag_allowance_refusal)
+}
+
+/// `e` prefixed with [`AUTH_ALLOWANCE_REFUSAL`] when it is the reasoner's forward-closure
+/// cut, unchanged otherwise.
+pub(crate) fn tag_allowance_refusal(e: String) -> String {
+    if e.contains(CLOSURE_CUT) {
+        format!("{}: {}", AUTH_ALLOWANCE_REFUSAL, e)
+    } else {
+        e
+    }
+}
+
+/// The reasoner's own text for a forward closure stopped by its [`ClosureLimits`] (every
+/// cut message contains it, and each names the limit it reached).
+const CLOSURE_CUT: &str = "forward closure limit exceeded";
 
 /// The WAC rule set (`common.n3` + `wac.n3`) compiled to the id-level IR, once per
 /// process. Compilation is deterministic over a `const` input, so the result is cached
@@ -154,6 +263,15 @@ pub struct MaterializeStats {
 /// # Ok::<(), String>(())
 /// ```
 pub fn materialize_wac(graph: &mut Graph) -> Result<MaterializeStats, String> {
+    materialize_wac_limited(graph, default_auth_limits())
+}
+
+/// [`materialize_wac`] under `limits` instead of [`default_auth_limits`] — the seam
+/// [`crate::PodStore`] uses to apply the allowance it was configured with.
+pub(crate) fn materialize_wac_limited(
+    graph: &mut Graph,
+    limits: ClosureLimits,
+) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Every fallible step runs BEFORE the first mutation of `graph`, so an `Err` leaves
@@ -164,7 +282,7 @@ pub fn materialize_wac(graph: &mut Graph) -> Result<MaterializeStats, String> {
     let mut dict = Dict::new();
     // WAC has no creator/owner vocabulary; provenance is ignored (the loader skips it).
     let facts = assemble_input_ids(&mut dict, graph, System::Wac, &AccessProvenance::new(), &VerifiedCredentials::new())?;
-    let closure = eval(&mut dict, &facts, rules)?;
+    let closure = auth_eval(&mut dict, &facts, rules, limits)?;
     strip_reserved_graphs(graph);
     let mut stats = install_auth_view(graph, &dict, &closure);
     stats.strata_facts = vec![closure.len()];
@@ -265,6 +383,19 @@ pub fn materialize_acp_with_credentials(
     provenance: &AccessProvenance,
     credentials: &VerifiedCredentials,
 ) -> Result<MaterializeStats, String> {
+    materialize_acp_limited(graph, provenance, credentials, default_auth_limits())
+}
+
+/// [`materialize_acp_with_credentials`] under `limits` instead of [`default_auth_limits`] —
+/// the seam [`crate::PodStore`] uses to apply the allowance it was configured with. Every
+/// stratum runs under the same allowance, and each gets it afresh (it bounds one round's
+/// join work, so a later stratum is not charged for an earlier one).
+pub(crate) fn materialize_acp_limited(
+    graph: &mut Graph,
+    provenance: &AccessProvenance,
+    credentials: &VerifiedCredentials,
+    limits: ClosureLimits,
+) -> Result<MaterializeStats, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let t0 = Instant::now();
     // Fallible work first, mutation last — see [`materialize_wac`].
@@ -277,7 +408,7 @@ pub fn materialize_acp_with_credentials(
     let mut closure = facts;
     let mut strata_facts = Vec::with_capacity(rules.len());
     for stratum in rules {
-        closure = eval(&mut dict, &closure, stratum)?;
+        closure = auth_eval(&mut dict, &closure, stratum, limits)?;
         strata_facts.push(closure.len());
     }
 

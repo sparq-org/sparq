@@ -277,7 +277,7 @@ impl PodStore {
         // The rollback path stays a full clear (conservative).
         let scope = crate::ReindexScope::Origin;
         if let Err(e) = self.rematerialize_scoped(acp, scope, checked) {
-            return Err(self.restore_named_slot(&term, prior, acp, checked, e));
+            return Err(self.restore_named_slot(&term, prior, acp, e));
         }
         Ok(AclWriteOutcome {
             acl: name,
@@ -309,7 +309,7 @@ impl PodStore {
         // AuthIndex per-origin and invalidates exactly the origins whose buckets changed.
         let scope = crate::ReindexScope::Origin;
         if let Err(e) = self.rematerialize_scoped(acp, scope, checked) {
-            return Err(self.restore_named_slot(&term, prior, acp, checked, e));
+            return Err(self.restore_named_slot(&term, prior, acp, e));
         }
         Ok(AclWriteOutcome {
             acl: name,
@@ -337,7 +337,6 @@ impl PodStore {
         name: &Term,
         prior: Option<Graph>,
         acp: bool,
-        checked: crate::ModelChecked,
         failed: String,
     ) -> String {
         // Drop whatever is currently in the slot (the new content that failed) and put the
@@ -346,7 +345,7 @@ impl PodStore {
         if let Some(g) = prior {
             self.graph.named.push((name.clone(), g));
         }
-        match self.rematerialize(acp, checked) {
+        match self.rematerialize(acp) {
             Ok(()) => failed,
             Err(e) => {
                 self.drop_auth_view();
@@ -360,7 +359,12 @@ impl PodStore {
 
     /// Re-materialize the WAC or ACP view with a FULL session-cache clear (the rollback
     /// path uses this — conservative is correct when restoring prior rules).
-    fn rematerialize(&mut self, acp: bool, checked: crate::ModelChecked) -> Result<(), String> {
+    /// The rollback path takes its own token: the restore put the prior rules back, and the
+    /// view in force was built under the model this entry point names, so the check passes —
+    /// but it is taken here rather than carried in, so no token outlives the one install it
+    /// was taken for.
+    fn rematerialize(&mut self, acp: bool) -> Result<(), String> {
+        let checked = self.matching_model(acp)?;
         self.install_model(acp, checked).map(|_| ())
     }
 
@@ -378,6 +382,10 @@ impl PodStore {
         scope: crate::ReindexScope,
         _checked: crate::ModelChecked,
     ) -> Result<(), String> {
+        // As in `PodStore::install_model`: the token says a check ran, not which model it ran
+        // for, and this is the last step before the view is replaced — so the check is re-run
+        // against the `acp` being installed, and a mismatch replaces nothing.
+        self.matching_model(acp)?;
         if acp {
             self.rematerialize_acp_scoped(scope).map(|_| ())
         } else {
