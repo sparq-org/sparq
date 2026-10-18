@@ -312,3 +312,162 @@ fn read_only_opens_share_the_directory_and_exclude_a_writer() {
     assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
     std::fs::remove_dir_all(&root).ok();
 }
+
+/// A fork (and a snapshot) shares the base's memory-mapped files, so it holds the directory's
+/// lock after the graph it came from is gone, and cannot be saved over that directory.
+#[test]
+fn a_fork_keeps_the_lock_and_cannot_save_over_its_source() {
+    let root = scratch("fork");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    for read_only in [false, true] {
+        let reader = if read_only {
+            Graph::open_read_only(&dir).unwrap()
+        } else {
+            Graph::open(&dir).unwrap()
+        };
+        let fork = reader.fork();
+        let snapshot = reader.snapshot();
+        drop(reader);
+        assert!(
+            would_block(Graph::open(&dir)),
+            "the lock went with the reader"
+        );
+        let err = fork.save(&dir).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+        assert!(has(&fork, "a") && has(&snapshot, "a"));
+        drop(fork);
+        assert!(would_block(Graph::open(&dir)), "the snapshot keeps it too");
+        drop(snapshot);
+        drop(Graph::open(&dir).expect("released with the last fork"));
+    }
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// Ownership is marked, not inferred from names: nothing can be opened, saved or built inside a
+/// store, a save into a directory refuses another store inside it, and a refused claim creates
+/// no directory.
+#[test]
+fn a_store_owns_everything_under_it() {
+    let root = scratch("ownership");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    assert!(dir.join("sparq-store").exists() && dir.join("named/0/sparq-store").exists());
+    for inside in [
+        dir.join("other"),
+        dir.join("named").join("7"),
+        dir.join("a").join("b"),
+    ] {
+        let err = Graph::open(&inside).err().expect("opened inside a store");
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+        let err = Graph::new().save(&inside).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+        assert!(Graph::open_read_only(&inside).is_err());
+    }
+    assert!(
+        !dir.join("a").exists(),
+        "a refused claim created a directory"
+    );
+
+    // A store made where a root will later be saved: the save refuses to delete it.
+    let later = root.join("later");
+    let squatter = later.join("named").join("0");
+    save_dataset(&squatter);
+    let held = Graph::open(&squatter).unwrap();
+    let err = Graph::load_dataset(
+        "<http://ex/x> <http://ex/p> <http://ex/o> <http://ex/g> .",
+        "nquads",
+    )
+    .unwrap()
+    .save(&later)
+    .unwrap_err();
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    assert!(has(&held, "a"));
+    drop(held);
+    assert!(
+        Graph::open(&squatter).is_ok(),
+        "the store inside was left alone"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A store saved before markers is a store all the same: refused as an ancestor, opened as
+/// before, and marked on its next writable open (a read-only open writes nothing).
+#[test]
+fn a_legacy_store_without_markers_is_still_a_store() {
+    let root = scratch("legacy");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    for d in [dir.clone(), dir.join("named/0"), dir.join("named/1")] {
+        std::fs::remove_file(d.join("sparq-store")).unwrap();
+    }
+    assert!(Graph::open(&dir.join("named").join("0")).is_err());
+    drop(Graph::open_read_only(&dir).unwrap());
+    assert!(
+        !dir.join("sparq-store").exists(),
+        "a read-only open wrote a marker"
+    );
+    let g = Graph::open(&dir).unwrap();
+    assert_eq!(g.named.len(), 2);
+    assert_eq!(std::fs::read(dir.join("sparq-store")).unwrap(), b"root\n");
+    assert_eq!(
+        std::fs::read(dir.join("named/0/sparq-store")).unwrap(),
+        b"child\n"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A store's internals are its own: a named graph that is a symbolic link to another store, or
+/// a file hard-linked with another store's, is refused (writable and read-only).
+#[cfg(unix)]
+#[test]
+fn linked_internals_are_refused() {
+    let root = scratch("links");
+    let a = root.join("a");
+    let b = root.join("b");
+    save_dataset(&a);
+    save_dataset(&b);
+    // b's first named graph is a link to a's.
+    std::fs::remove_dir_all(b.join("named/0")).unwrap();
+    std::os::unix::fs::symlink(a.join("named/0"), b.join("named/0")).unwrap();
+    for err in [Graph::open(&b).err(), Graph::open_read_only(&b).err()] {
+        let err = err.expect("opened over a linked named graph");
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    }
+    // c shares a's permutation file through a hard link.
+    let c = root.join("c");
+    save_dataset(&c);
+    std::fs::remove_file(c.join("perm0.bin")).unwrap();
+    std::fs::hard_link(a.join("perm0.bin"), c.join("perm0.bin")).unwrap();
+    for d in [&a, &c] {
+        let err = Graph::open(d)
+            .err()
+            .expect("opened over a hard-linked file");
+        assert_eq!(
+            err.kind(),
+            ErrorKind::InvalidInput,
+            "{}: {err}",
+            d.display()
+        );
+    }
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A read-only graph refuses the durable clear and the rebuilding update alike.
+#[test]
+fn a_read_only_graph_refuses_every_mutator() {
+    let root = scratch("ro-mutators");
+    let dir = root.join("g");
+    save_dataset(&dir);
+    let mut g = Graph::open_read_only(&dir).unwrap();
+    assert!(g.check_writable().is_err());
+    assert!(g.clear_default_durable().is_err());
+    assert!(g.clear_named_durable(&iri("g0")).is_err());
+    assert!(g.drop_all_named_durable().is_err());
+    assert!(has(&g, "a"), "a refused clear changed the graph");
+    assert!(
+        g.fork().check_writable().is_ok(),
+        "a fork is an in-memory copy"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}

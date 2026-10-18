@@ -475,6 +475,7 @@ impl Graph {
     /// dataset is modelled: `GRAPH`-scoped data and templates, `USING (NAMED)`,
     /// and the graph-management operations all work on named graphs.
     fn update(&mut self, py: Python<'_>, sparql: &str) -> PyResult<()> {
+        self.inner.check_writable().map_err(engine_err)?;
         let inner = &self.inner;
         let new = py.detach(|| sparq_engine::update(inner, sparql)).map_err(engine_err)?;
         self.inner = new;
@@ -491,6 +492,7 @@ impl Graph {
     /// `Graph.load_n3(text)` (rules + facts in one document) or
     /// `Graph.reason_n3_with(rules)` (rules applied to this graph) instead.
     fn reason(&mut self, py: Python<'_>, profile: &str) -> PyResult<usize> {
+        self.inner.check_writable().map_err(engine_err)?;
         if profile.eq_ignore_ascii_case("n3") {
             return Err(PyValueError::new_err(
                 "N3 rules live in an N3 document; use Graph.load_n3(text) or Graph.reason_n3_with(rules) instead of reason(\"n3\")",
@@ -530,6 +532,7 @@ impl Graph {
     /// local blanks stay rule-local; review 1961). RDF 1.2 triple terms have no
     /// N3 form and are rejected.
     fn reason_n3_with(&mut self, py: Python<'_>, rules: &str) -> PyResult<usize> {
+        self.inner.check_writable().map_err(engine_err)?;
         use std::fmt::Write as _;
         let inner = &self.inner;
         let before = inner.len();

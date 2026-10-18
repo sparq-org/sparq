@@ -555,6 +555,8 @@ fn require_update_budget(budget: &crate::QueryBudget) -> Result<(), String> {
 /// prepared-update path so the bound algebra is applied DIRECTLY (no re-serialise /
 /// re-parse — a hostile bound value can never re-enter the parser). (sq-rp3um)
 fn apply_update_rebuild(graph: &Graph, upd: &Update) -> Result<Graph, String> {
+    // A graph that refuses writes (opened read-only) is not updated, not even into a copy.
+    graph.check_writable()?;
     crate::exec::budget::with_query_budget(&crate::QueryBudget::unlimited(), crate::EbvSemantics::Rec2013, || {
         let mut ds = Dataset::decode(graph);
         for op in &upd.operations {
@@ -1507,6 +1509,27 @@ mod tests {
             "after crash-recovery redo, X must be empty (pre-body AND intra-body quads retracted)"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A graph opened read-only is not updated: neither in place nor into a rebuilt copy.
+    #[cfg(feature = "parallel")] // mmap comes from the sparq-core dev-dep
+    #[test]
+    fn a_read_only_graph_is_not_updated() {
+        let root =
+            std::env::temp_dir().join(format!("sparq_update_read_only_{}", std::process::id()));
+        std::fs::remove_dir_all(&root).ok();
+        let dir = root.join("g");
+        Graph::load_str("<http://ex/a> <http://ex/p> <http://ex/o> .", "ntriples")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let mut g = Graph::open_read_only(&dir).unwrap();
+        let sparql = "INSERT DATA { <http://ex/b> <http://ex/p> <http://ex/o> }";
+        assert!(update(&g, sparql).is_err(), "rebuilt");
+        assert!(update_in_place(&mut g, sparql).is_err(), "updated in place");
+        assert_eq!(g.len(), 1);
+        drop(g);
+        std::fs::remove_dir_all(&root).ok();
     }
 
     /// FULL-PATH parity: the realistic `apply_effects` call on a durable store, then RELOAD, leaves

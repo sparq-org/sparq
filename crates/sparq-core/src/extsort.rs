@@ -43,7 +43,11 @@ fn drop_behind(map: &memmap2::Mmap, offset: usize, len: usize) {
 /// Sorts a chunk (by its stored column order) and spills it to a fresh run file under
 /// `tmp`, clearing the buffer. The caller pushes triples already in the desired key
 /// order, so a plain lexicographic sort suffices.
-pub fn spill_run(buf: &mut Vec<[Id; 3]>, runs: &mut Vec<PathBuf>, tmp: &Path) -> io::Result<()> {
+pub(crate) fn spill_run(
+    buf: &mut Vec<[Id; 3]>,
+    runs: &mut Vec<PathBuf>,
+    tmp: &Path,
+) -> io::Result<()> {
     if buf.is_empty() {
         return Ok(());
     }
@@ -144,7 +148,7 @@ fn kway_merge_to<S: FnMut([Id; 3]) -> io::Result<()>>(runs: &[PathBuf], mut sink
 /// K-way merges sorted run files into a RAW little-endian `[u32;3]` permutation at `out`
 /// (deduplicating consecutive equal triples). See `kway_merge_to` for the shared merge
 /// machinery.
-pub fn kway_merge(runs: &[PathBuf], out: &Path) -> io::Result<()> {
+pub(crate) fn kway_merge(runs: &[PathBuf], out: &Path) -> io::Result<()> {
     let mut w = BufWriter::new(std::fs::File::create(out)?);
     kway_merge_to(runs, |t| {
         for &id in &t {
@@ -161,7 +165,7 @@ pub fn kway_merge(runs: &[PathBuf], out: &Path) -> io::Result<()> {
 /// no raw write followed by a separate `open` + `decode_all` + re-encode recompress pass
 /// over the (84+ GB at 1B-scale) index. The file is byte-identical to running the raw
 /// `kway_merge` then `recompress` on its output.
-pub fn kway_merge_compressed(runs: &[PathBuf], out: &Path) -> io::Result<()> {
+pub(crate) fn kway_merge_compressed(runs: &[PathBuf], out: &Path) -> io::Result<()> {
     let mut w = crate::compress::CompressedPermWriter::create(out)?;
     kway_merge_to(runs, |t| w.push(t))?;
     w.finish(out)
@@ -170,7 +174,7 @@ pub fn kway_merge_compressed(runs: &[PathBuf], out: &Path) -> io::Result<()> {
 /// External-sorts the triples produced by `iter` into key order `order` (a column
 /// permutation), writing the sorted result to `out` using at most `chunk` triples of
 /// RAM at a time. The runs are written under `tmp`.
-pub fn external_sort(
+pub(crate) fn external_sort(
     iter: impl Iterator<Item = [Id; 3]>,
     order: [usize; 3],
     out: &Path,
@@ -198,7 +202,7 @@ pub fn external_sort(
 /// (`SPQCPRM1`) via [`kway_merge_compressed`], so a sibling permutation is produced in its
 /// compressed on-disk form directly from the sort tail (no recompress second pass). The
 /// run-spill phase is identical; only the merge tail differs.
-pub fn external_sort_compressed(
+pub(crate) fn external_sort_compressed(
     iter: impl Iterator<Item = [Id; 3]>,
     order: [usize; 3],
     out: &Path,

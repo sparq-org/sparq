@@ -649,8 +649,9 @@ cargo build -p sparq-cli --features serialize-rdf
 **One holder per directory:** `Graph::open`, `open_or_create`, `save`, `save_compressed`,
 `restore_into_durable`, `restore_in_place` and the `build_external*` builders take an
 exclusive advisory lock (`dir_lock`: `flock` on Unix, `LockFileEx` on Windows) before touching
-a directory. An open keeps it while the graph lives, and so does every named graph of it (a
-named graph taken out of `g.named` keeps its root locked), as do the graphs `compact`,
+a directory, all through one ownership check. An open keeps it while the graph lives, and so
+does every named graph of it (a named graph taken out of `g.named` keeps its root locked), every
+`fork()`/`snapshot()` of it (they share its memory-mapped files), and the graphs `compact`,
 `vacuum` and `restore_in_place` swap in. A second holder, in another process or this one,
 gets `WouldBlock` at once. Rules that follow:
 
@@ -659,9 +660,19 @@ gets `WouldBlock` at once. Rules that follow:
   with `InvalidInput`: `g` still maps and logs into the files a save would truncate. That
   directory already holds `g`'s state: `g.restore_in_place(other)` replaces it with another
   image (the supported in-place rewrite), `g.compact()` folds the log into its base, and
-  `g.is_backed_by(dir)` tells the case apart.
-- **A named graph's directory (`<root>/named/<i>`) belongs to its root:** opening, saving or
-  building into it directly is refused (`InvalidInput`).
+  `g.is_backed_by(dir)` tells the case apart. A fork of `g` cannot save over `g`'s directory
+  either.
+- **A store owns everything under it.** Every store directory carries a marker file,
+  `sparq-store` (`root` or `child`), written before anything else. Opening, saving or building
+  at a path is refused (`InvalidInput`) when any ancestor of it is a store, so a named graph's
+  directory (`<root>/named/<i>`) belongs to its root; saving or building into a directory is
+  refused when another root store inside it, or a held lock file inside it, would be replaced.
+  Parent directories are created only after these checks. A store saved before markers counts
+  as a root by its dictionary or manifest file and is marked on its next writable open (a
+  legacy store found inside a directory being saved is taken for one of its named graphs).
+- **A store's internals are not links.** An open is refused when a file or named graph inside
+  the store is a symbolic link, or (on Unix) a file has another hard link. A save writes each
+  file fresh (unlink, then create) rather than truncating it in place.
 - **One path per directory.** The directory is resolved once (symbolic links and `.`/`..`;
   a dangling symbolic link is an error) and that path is used for the lock, the log, crash
   recovery and compaction swaps, so compacting through a link rewrites the real directory and
@@ -669,7 +680,8 @@ gets `WouldBlock` at once. Rules that follow:
   seed. Two bind mounts of one directory are two paths: not excluded.
 - **Read-only opens:** `Graph::open_read_only(dir)` takes the lock SHARED. Read-only opens
   coexist with each other, never with a writable holder (`WouldBlock` either way), write
-  nothing into the directory, and refuse every write. One is refused while the directory has
+  nothing into the directory, and refuse every write (also the durable clears, and a rebuilding
+  `sparq_engine::update`; `Graph::check_writable` says so). One is refused while the directory has
   updates still to fold in (a non-empty WAL or txn journal, or the residue of an interrupted
   swap): open it writable and `compact` first. It can be saved to another directory.
 - **A failed `restore_in_place`** leaves the directory old-or-new, never lost. When it is still

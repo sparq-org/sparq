@@ -2133,7 +2133,7 @@ impl Dict {
 
         // meta: (review 1409) version header (magic + version + id partition), then
         // prefixes, datatypes, term count.
-        let mut meta = std::io::BufWriter::new(std::fs::File::create(dir.join("dict-meta.bin"))?);
+        let mut meta = std::io::BufWriter::new(crate::create_fresh(&dir.join("dict-meta.bin"))?);
         meta.write_all(&DICT_META_MAGIC.to_le_bytes())?;
         meta.write_all(&DICT_META_VERSION.to_le_bytes())?;
         meta.write_all(&INLINE_BASE.to_le_bytes())?; // the id-space partition this file encodes
@@ -2149,7 +2149,7 @@ impl Dict {
         meta.flush()?;
 
         // term blob + per-term byte offsets; collect (hash, id) for the lookup index.
-        let mut blob = std::io::BufWriter::new(std::fs::File::create(dir.join("dict-terms.bin"))?);
+        let mut blob = std::io::BufWriter::new(crate::create_fresh(&dir.join("dict-terms.bin"))?);
         let mut offsets: Vec<u64> = Vec::with_capacity(n);
         let mut pairs: Vec<(u64, u32)> = Vec::with_capacity(n);
         let mut pos: u64 = 0;
@@ -2550,7 +2550,7 @@ fn write_pod_slice<T: Copy>(path: &std::path::Path, data: &[T]) -> std::io::Resu
     let () = DICT_ON_DISK_LE_GUARD;
     // SAFETY: T is u32/u64 (POD); we only read its bytes.
     let bytes = unsafe { std::slice::from_raw_parts(data.as_ptr().cast::<u8>(), std::mem::size_of_val(data)) };
-    std::fs::write(path, bytes)
+    std::io::Write::write_all(&mut crate::create_fresh(path)?, bytes)
 }
 
 fn read_u32(r: &mut impl std::io::Read) -> std::io::Result<u32> {

@@ -28,30 +28,47 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 /// `dir` resolved: its canonical path (symbolic links and `.`/`..` resolved, any trailing slash
-/// dropped). A directory that does not exist yet resolves through its parent, which must; a
-/// dangling symbolic link is an error, not a directory to create.
+/// dropped). A directory that does not exist yet resolves through its nearest existing
+/// ancestor, creating nothing; a dangling symbolic link is an error, not a directory to create.
 pub(crate) fn resolve_dir(dir: &Path) -> io::Result<PathBuf> {
-    match dir.canonicalize() {
-        Ok(c) => Ok(c),
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            if dir.symlink_metadata().is_ok() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "{} is a dangling symbolic link: open the directory by its real path",
-                        dir.display()
-                    ),
-                ));
+    // The nearest ancestor that exists (as anything, a link included), and the names below it.
+    let mut missing = Vec::new();
+    let mut existing = dir.to_path_buf();
+    loop {
+        match existing.symlink_metadata() {
+            Ok(_) => break,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                missing.push(
+                    existing
+                        .file_name()
+                        .ok_or_else(|| unnamed(dir))?
+                        .to_os_string(),
+                );
+                existing = match existing.parent() {
+                    Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+                    _ => std::env::current_dir()?,
+                };
             }
-            let name = dir.file_name().ok_or_else(|| unnamed(dir))?;
-            let parent = match dir.parent() {
-                Some(p) if !p.as_os_str().is_empty() => p.canonicalize()?,
-                _ => std::env::current_dir()?.canonicalize()?,
-            };
-            Ok(parent.join(name))
+            Err(e) => return Err(e),
         }
-        Err(e) => Err(e),
     }
+    let mut resolved = existing.canonicalize().map_err(|e| {
+        if e.kind() == io::ErrorKind::NotFound {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{} is a dangling symbolic link: open the directory by its real path",
+                    existing.display()
+                ),
+            )
+        } else {
+            e
+        }
+    })?;
+    for name in missing.iter().rev() {
+        resolved.push(name);
+    }
+    Ok(resolved)
 }
 
 /// Whether `a` and `b` name one existing file or directory (device and inode on Unix, volume
@@ -86,6 +103,17 @@ impl LockLocation {
             ));
         }
         Ok(Self(path))
+    }
+
+    /// The flat layout's lock for the already resolved directory `resolved`: `<resolved>.lock`
+    /// beside it. Touches nothing on disk.
+    pub(crate) fn beside(resolved: &Path) -> io::Result<Self> {
+        let mut name = resolved
+            .file_name()
+            .ok_or_else(|| unnamed(resolved))?
+            .to_os_string();
+        name.push(".lock");
+        Ok(Self(resolved.with_file_name(name)))
     }
 
     /// The flat layout's lock for the directory `dir`: `<dir>.lock` beside it, named for its
@@ -173,6 +201,17 @@ impl DirLock {
                     location.path().display()
                 ),
             )),
+            Err(fs4::TryLockError::Error(e)) => Err(e),
+        }
+    }
+
+    /// Whether some holder (exclusive or shared) has the lock file at `path` now: tried
+    /// exclusively, and released at once if that succeeds.
+    pub(crate) fn is_held(path: &Path) -> io::Result<bool> {
+        let file = File::open(path)?;
+        match fs4::FileExt::try_lock(&file) {
+            Ok(()) => Ok(false),
+            Err(fs4::TryLockError::WouldBlock) => Ok(true),
             Err(fs4::TryLockError::Error(e)) => Err(e),
         }
     }

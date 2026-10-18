@@ -968,7 +968,7 @@ impl CompressedPerm {
 /// once the last block is sealed) must physically precede the block stream. We therefore
 /// buffer the SPARSE directory in RAM (one 16-byte entry per [`BLOCK`] rows ≈ 0.13 B/triple
 /// — the same directory the open path already holds resident) and stream the block bytes to
-/// a side file; [`finish`](Self::finish) writes `header | directory` then appends the block
+/// a side file; `finish` (crate-internal: builds write under the directory's lock) writes `header | directory` then appends the block
 /// side file. The block COPY is over the already-compressed stream (~2.5× smaller than raw),
 /// and there is no decode / re-sort — the saving the bead targets.
 #[cfg(feature = "mmap")]
@@ -1076,7 +1076,7 @@ impl CompressedPermWriter {
     /// (NOT a bare 32-byte header), matching `TripleStore::save_compressed` which leaves an
     /// unbuilt permutation raw-empty so `open` skips it by size. This keeps the streaming
     /// build byte-identical to a raw build followed by `recompress`.
-    pub fn finish(mut self, out: &std::path::Path) -> std::io::Result<()> {
+    pub(crate) fn finish(mut self, out: &std::path::Path) -> std::io::Result<()> {
         self.seal_block()?;
         // Flush and CLOSE the block write handle before re-opening it for reading (portable;
         // avoids a concurrent write+read handle to the same file). `take()` drops the inner

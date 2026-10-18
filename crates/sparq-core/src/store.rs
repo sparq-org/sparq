@@ -730,13 +730,13 @@ impl TripleStore {
                 // Unbuilt (empty) permutations stay raw-empty so `open` skips them by size.
                 // sq-7d3dj.32.2.7: `encode_emit` honours the emit-format config gate —
                 // `SPQCPRM1` by default, `SPQCPRM2` only when a `spqcprm2` build has opted in.
-                let mut w = std::io::BufWriter::new(std::fs::File::create(path)?);
+                let mut w = std::io::BufWriter::new(crate::create_fresh(&path)?);
                 crate::compress::CompressedPerm::encode_emit(&rows).write_to(&mut w)?;
                 std::io::Write::flush(&mut w)?;
             } else {
                 // SAFETY: reinterpret the contiguous [u32;3] rows as bytes for writing.
                 let bytes = unsafe { std::slice::from_raw_parts(rows.as_ptr().cast::<u8>(), std::mem::size_of_val(rows.as_ref())) };
-                std::fs::write(path, bytes)?;
+                std::io::Write::write_all(&mut crate::create_fresh(&path)?, bytes)?;
             }
         }
         self.save_pred_stats(dir)
@@ -753,7 +753,7 @@ impl TripleStore {
     #[cfg(feature = "mmap")]
     pub(crate) fn save_pred_stats(&self, dir: &std::path::Path) -> std::io::Result<()> {
         use std::io::Write;
-        let mut w = std::io::BufWriter::new(std::fs::File::create(dir.join("predstats.bin"))?);
+        let mut w = std::io::BufWriter::new(crate::create_fresh(&dir.join("predstats.bin"))?);
         w.write_all(&(self.pred_stats.len() as u64).to_le_bytes())?;
         // Hash-map iteration can change after loading/reserving identical stats.
         // Canonicalize the shared writer so external builds and re-saves agree bytewise.
