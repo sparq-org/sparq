@@ -18,6 +18,7 @@
 //!
 //! This test lives in its own test binary so no other test's allocations land in the
 //! measurement.
+#![warn(clippy::undocumented_unsafe_blocks)]
 
 use sparq_core::dict::Id;
 use sparq_reason::n3::compiled::{compile, eval_with_limits};
@@ -32,6 +33,10 @@ static PEAK: AtomicUsize = AtomicUsize::new(0);
 
 struct Counting;
 
+// SAFETY: every method forwards to `System` with the caller's arguments unchanged, so
+// `System` upholds the `GlobalAlloc` contract; the wrapper only reads `Layout::size()` /
+// `new_size` and updates the `LIVE` / `PEAK` byte counters. No pointer `System` returns is
+// dereferenced, retained or aliased.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // SAFETY: the layout is the caller's, forwarded unchanged to the system allocator.

@@ -49,7 +49,7 @@ register distinguishes two trust classes of `unsafe`:
 
 ## Register
 
-**104 `unsafe` sites** across 10 crates (the other crates contain no first-party `unsafe`).
+**118 `unsafe` sites** across 11 crates (the other crates contain no first-party `unsafe`).
 Counts and the file:line list are produced by `scripts/unsafe-gate.py --list` and
 must equal `bench/unsafe-snapshot.json`. Two crates are special allocator cases:
 **`sparq-lws-core`** (sq-gg0qq.2) ships a `forbid(unsafe_code)` lib + bin
@@ -245,11 +245,21 @@ Miri does not cover it (Miri supplies its own allocator and does not model a
 | `tests/service_stream_bounded.rs:98` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | `System.dealloc(ptr, layout)` unchanged; holds because every `alloc`/`realloc` also forwarded to `System`. |
 | `tests/service_stream_bounded.rs:106` | `unsafe fn realloc` | caller's `ptr`/`layout`/`new_size` contract forwarded | `System.realloc(ptr, layout, new_size)` unchanged; only the returned pointer's nullness is inspected before recording the delta. |
 
-### `sparq-reason` — 7 sites (test-only byte-counting allocator)
+### `sparq-reason` — 14 sites (test-only byte-counting allocators)
 
-The library is `#![forbid(unsafe_code)]` and ships **zero** `unsafe`. All 7 sites are in
-one **integration test**, `tests/n3_builtin_alloc.rs` (GH #6771 / #6833), which installs a
-counting `#[global_allocator]` to check that the N3 text engine sizes a derived term before
+The library is `#![forbid(unsafe_code)]` and ships **zero** `unsafe`. All 14 sites are in
+**integration tests** — 7 in `tests/n3_builtin_alloc.rs` and 7 in
+`tests/n3_input_fact_memory.rs` — each of which installs its own counting
+`#[global_allocator]`. Each is a separate test binary, so each needs its own
+`#[global_allocator]`: a counting allocator cannot be shared between them at run time.
+There is no safe equivalent — `GlobalAlloc` is an `unsafe trait`, so the `unsafe impl` and
+its 3 `unsafe fn` methods are unavoidable. The 3 remaining sites per file are the explicit
+inner `unsafe` blocks each body writes around its single forward to `System`: house style
+here (the same shape the `tests/n3_builtin_alloc.rs` rows above already count), and what
+`unsafe_op_in_unsafe_fn` will require when the workspace moves off edition 2021.
+
+`tests/n3_builtin_alloc.rs` (GH #6771 / #6833) checks that the N3 text engine sizes a
+derived term before
 it builds it: a refused term must not show in the run's peak live bytes. A
 `#[global_allocator]` unavoidably requires `unsafe` (the `GlobalAlloc` trait is `unsafe` by
 definition). **Not** a B5 (untrusted-input) surface: every method is a verbatim forward to
@@ -269,6 +279,58 @@ forward-to-`System` argument, enforced by the file-local
 | `tests/n3_builtin_alloc.rs:48` | `System.dealloc(ptr, layout)` | `ptr` came from this allocator with this `layout` | unchanged arguments; holds because every `alloc` / `realloc` also forwarded to `System`. |
 | `tests/n3_builtin_alloc.rs:52` | `unsafe fn realloc` | caller's `ptr` / `layout` / `new_size` contract forwarded | the method body is the inner call at :54. |
 | `tests/n3_builtin_alloc.rs:54` | `System.realloc(ptr, layout, new_size)` | caller's `ptr` / `layout` / `new_size` contract forwarded | unchanged arguments; the returned pointer is only null-checked before the counters move. |
+
+`tests/n3_input_fact_memory.rs` (GH #7173) pins the companion property for
+`ClosureLimits::max_facts`: the allowance is charged while the caller's input is read, so a
+REFUSED closure's peak live bytes are set by the allowance and not by the caller's input
+length. Same allocator class as above — a verbatim forward to `System` with `Relaxed`
+`LIVE` / `PEAK` byte counters, no `TOTAL` counter — and the same argument: **not** a B5
+(untrusted-input) surface, no pointer `System` returns is dereferenced, retained or
+aliased. This change added the file-local `#![warn(clippy::undocumented_unsafe_blocks)]`
+and the `// SAFETY:` comment on the `unsafe impl` (the three inner blocks already carried
+theirs), so these 7 sites are now under the same mechanical `// SAFETY:` enforcement as the
+rest of the register.
+
+| File:line | Kind | Invariant relied on | Why sound / how bounded |
+|---|---|---|---|
+| `tests/n3_input_fact_memory.rs:40` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only `Relaxed` `LIVE`/`PEAK` byte counters. TEST-only; the lib stays `forbid(unsafe_code)`. |
+| `tests/n3_input_fact_memory.rs:41` | `unsafe fn alloc` | caller's `layout` contract forwarded | the method body is the inner call at :43. |
+| `tests/n3_input_fact_memory.rs:43` | `System.alloc(layout)` | caller's `layout` contract forwarded | `layout` unchanged; the returned pointer is only null-checked before `layout.size()` is counted. |
+| `tests/n3_input_fact_memory.rs:51` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | the method body is the inner call at :54. |
+| `tests/n3_input_fact_memory.rs:54` | `System.dealloc(ptr, layout)` | `ptr` came from this allocator with this `layout` | unchanged arguments; holds because every `alloc` / `realloc` also forwarded to `System`. |
+| `tests/n3_input_fact_memory.rs:57` | `unsafe fn realloc` | caller's `ptr` / `layout` / `new_size` contract forwarded | the method body is the inner call at :59. |
+| `tests/n3_input_fact_memory.rs:59` | `System.realloc(ptr, layout, new_size)` | caller's `ptr` / `layout` / `new_size` contract forwarded | unchanged arguments; the returned pointer is only null-checked before the counters move. |
+
+### `sparq-solid` — 7 sites (test-only byte-counting allocator)
+
+The library is `#![forbid(unsafe_code)]` and ships **zero** `unsafe`. All 7 sites are in one
+**integration test**, `tests/auth_resource_enumeration_memory.rs` (GH #7175), which installs
+a counting `#[global_allocator]` to measure that the resource ENUMERATION of a refused
+authorization materialization is bounded by `AuthBudget::max_resource_iri_bytes` /
+`max_resource_path_depth` rather than by the caller's resource IRI — a memory property, so
+it is measured rather than asserted on the verdict. Same allocator class and the same
+7-site shape as the `sparq-reason` tests above (1 `unsafe impl` + 3 `unsafe fn` trait
+methods + 3 explicit inner `unsafe` blocks around the forwards); `GlobalAlloc` is an
+`unsafe trait`, so there is no safe equivalent. **Not** a B5 (untrusted-input) surface: every method is a verbatim forward to
+the process `System` allocator with the identical arguments, so `System` discharges all of
+`GlobalAlloc`'s obligations; the wrapper only reads `Layout::size()` / `new_size`, checks the
+returned pointer for null, and updates `Relaxed` `LIVE` / `PEAK` byte counters. No pointer
+`System` returns is dereferenced, retained or aliased. Miri does not model a
+`#[global_allocator]` that calls `System`; the test runs on the standard
+`cargo test -p sparq-solid` lane. Bounded by review and the forward-to-`System` argument,
+enforced by the file-local `#![warn(clippy::undocumented_unsafe_blocks)]` added by this
+change together with the `// SAFETY:` comment on the `unsafe impl` (the three inner blocks
+already carried theirs).
+
+| File:line | Kind | Invariant relied on | Why sound / how bounded |
+|---|---|---|---|
+| `tests/auth_resource_enumeration_memory.rs:45` | `unsafe impl GlobalAlloc for Counting` | forward-to-`System` | every method delegates verbatim to `System` with the same args; the wrapper adds only `Relaxed` `LIVE`/`PEAK` byte counters. TEST-only; the lib stays `forbid(unsafe_code)`. |
+| `tests/auth_resource_enumeration_memory.rs:46` | `unsafe fn alloc` | caller's `layout` contract forwarded | the method body is the inner call at :48. |
+| `tests/auth_resource_enumeration_memory.rs:48` | `System.alloc(layout)` | caller's `layout` contract forwarded | `layout` unchanged; the returned pointer is only null-checked before `layout.size()` is counted. |
+| `tests/auth_resource_enumeration_memory.rs:56` | `unsafe fn dealloc` | `ptr` came from this allocator with this `layout` | the method body is the inner call at :59. |
+| `tests/auth_resource_enumeration_memory.rs:59` | `System.dealloc(ptr, layout)` | `ptr` came from this allocator with this `layout` | unchanged arguments; holds because every `alloc` / `realloc` also forwarded to `System`. |
+| `tests/auth_resource_enumeration_memory.rs:62` | `unsafe fn realloc` | caller's `ptr` / `layout` / `new_size` contract forwarded | the method body is the inner call at :64. |
+| `tests/auth_resource_enumeration_memory.rs:64` | `System.realloc(ptr, layout, new_size)` | caller's `ptr` / `layout` / `new_size` contract forwarded | unchanged arguments; the returned pointer is only null-checked before the counters move. |
 
 ### `sparq-lws-core` — 12 sites (example- and test-only counting global allocators) [FABLE-5]
 
@@ -344,7 +406,7 @@ standard toolchain. Miri does not model a `#[global_allocator]` that calls `Syst
 
 ## NEEDS-REVIEW
 
-**None.** Every one of the 104 sites now carries a literal `// SAFETY:` comment
+**None.** Every one of the 118 sites now carries a literal `// SAFETY:` comment
 immediately preceding the `unsafe` block/impl, mechanically enforced by
 `clippy::undocumented_unsafe_blocks` (MS-G2 closed, sq-8wbn, [OPUS-4.8]) — set
 at crate root on unsafe-bearing libraries (including `sparq-lws-wasm`, sq-wubkf)
