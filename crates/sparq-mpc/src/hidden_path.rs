@@ -49,10 +49,11 @@
 //! realized chain *never* revealed. We therefore GROUP tuples by their disclosed
 //! endpoint pair and **OR-fold** their chain bits into one connected-bit per
 //! distinct `(a, b)` (`OR(x,y) = 1 − (1−x)(1−y)`, one more `mul_shares_raw` +
-//! `degree_reduce`). Grouping is over the DISCLOSED endpoint terms — never over any
-//! secret intermediate key. It is not free of disclosure, though: the grouping key
-//! is the endpoint pair of EVERY enumerated tuple, matched or not, so the party that
-//! performs it sees that whole multiset — see the disclosure list below.
+//! `degree_reduce_through`). Grouping is over the DISCLOSED endpoint terms — never
+//! over any secret intermediate key. It is not free of disclosure, though: the
+//! grouping key is the endpoint pair of EVERY enumerated tuple, matched or not, so
+//! every evaluating party knows the ordered candidate pair sequence and where each
+//! tuple folds — see the disclosure list below.
 //!
 //! The one connected-bit per distinct endpoint pair becomes a
 //! [`crate::oblivious_join::Candidate`] with a
@@ -94,8 +95,8 @@
 //!     known: `T − D` ORs over the `T` tuples, or `T + N₀ − D` when a bounded form
 //!     has `min == 0` and folds in one entry per node of the `N₀`-node disclosed
 //!     domain, plus the output stage's padding from `D` up to `B`. `T` is `|E|^k`
-//!     for the exactly-`k` chain and `Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths for
-//!     a bounded form, `a` being the alternation width.
+//!     for the exactly-`k` chain and `Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths
+//!     `ℓ >= 1` for a bounded form, `a` being the alternation width.
 //!
 //!   These are the views this module can account for; it does NOT claim a complete
 //!   enumeration of what an arbitrary party or an arbitrary transport learns.
@@ -117,8 +118,9 @@
 //! - **Disclosed by a REFUSAL:** that a parameter or bound was rejected, and which
 //!   one. The output-bound check is taken on [`public_candidate_pair_bound`] /
 //!   [`public_bounded_candidate_pair_bound`] — functions of `|E|` and the public
-//!   hop counts — whenever `B` reaches them, and the real candidate count is not
-//!   computed at all on that branch. A caller that chooses a `B` BELOW the public
+//!   hop counts — whenever `B` reaches them, and the exact-count projection is not
+//!   run on that branch, so `D` stays out of the DECISION (the run itself still
+//!   materialises `D` candidates, as the schedule above says). A caller that chooses a `B` BELOW the public
 //!   bound puts `D` in the RESULT of the call as well: that branch accepts exactly
 //!   when `D <= B`, and a refusal draws nothing, so repeated calls with different
 //!   `B` recover `D` exactly by binary search. Given the schedule above that is no
@@ -1280,7 +1282,7 @@ fn build_bounded_candidates(
 /// sequence; in a real multi-party run every party evaluates the same wiring,
 /// including which accumulator each tuple folds into, so every evaluating party
 /// knows the fold positions. For a bounded form the tuple total is
-/// `T = Σ_ℓ a^ℓ·|E|^ℓ` over the lengths `ℓ` the form admits, with `a` the
+/// `T = Σ_ℓ a^ℓ·|E|^ℓ` over the admitted lengths `ℓ >= 1`, with `a` the
 /// alternation width; the OR count is `T + N₀ − D` when `min == 0`, the reflexive
 /// diagonal folding in one entry per node of the `N₀`-node disclosed domain, and
 /// `T − D` otherwise. The output then pads from `D` to `B`, so the multiplication
