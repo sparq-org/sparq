@@ -762,6 +762,10 @@ fn public_pattern_native_rejections_separate_empty_graph_from_support() -> Falli
     assert_eq!(outcome["rejection_scope"], "empty_graph");
     let mut unknown = empty.clone();
     unknown["backend"] = json!("noir_public_pattern_v1");
+    // zk-toolchain-gate: allow the NATIVE tier never proves: `run` reaches the driver and
+    //   `pinned_toolchain()` only for a tier other than `native`, and `native()` pins the tier,
+    //   so no missing tool can produce this error; traced with a recording nargo/bb shim on PATH,
+    //   this test spawns nothing
     assert!(native(&unknown).is_err());
     Ok(())
 }
