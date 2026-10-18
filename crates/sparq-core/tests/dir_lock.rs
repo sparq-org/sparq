@@ -40,6 +40,20 @@ fn save_dataset(dir: &Path) {
         .unwrap();
 }
 
+/// The identity the marker of the store at `d` records (`root <id>` or `child <id>`).
+fn store_id(d: &Path) -> String {
+    let marker = std::fs::read_to_string(d.join("sparq-store")).unwrap();
+    marker.trim_end().split_once(' ').unwrap().1.to_string()
+}
+
+/// Records in the store at `d` that it is `kind` staging of the store whose identity is `id`
+/// (its marker then carries that identity too), as a swap does before its renames: the
+/// on-disk state a crash mid-swap leaves.
+fn stage(d: &Path, kind: &str, id: &str) {
+    std::fs::write(d.join("sparq-store"), format!("root {id}\n")).unwrap();
+    std::fs::write(d.join("sparq-staging"), format!("{kind} {id}\n")).unwrap();
+}
+
 fn would_block(r: std::io::Result<Graph>) -> bool {
     matches!(r, Err(e) if e.kind() == ErrorKind::WouldBlock)
 }
@@ -194,6 +208,7 @@ fn a_graph_opened_through_a_link_swaps_the_real_directory() {
     // A swap interrupted after its first rename leaves the real directory missing: the link
     // dangles and is refused rather than taken for a directory to create, while the real path
     // recovers the store.
+    stage(&dir, "compact-old", &store_id(&dir));
     std::fs::rename(&dir, root.join("real.compact-old")).unwrap();
     let err = Graph::open(&link).err().expect("a dangling link opened");
     assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
@@ -213,8 +228,13 @@ fn a_graph_opened_through_a_link_swaps_the_real_directory() {
 fn open_or_create_recovers_a_swap_before_seeding() {
     let root = scratch("seed-recover");
     let dir = root.join("g");
-    save_dataset(&root.join("g.compact-new"));
-    save_dataset(&root.join("g.compact-old"));
+    let id = "00112233445566778899aabbccddeeff";
+    for kind in ["compact-new", "compact-old"] {
+        let staged = root.join(format!("g.{kind}"));
+        save_dataset(&root.join("staging"));
+        std::fs::rename(root.join("staging"), &staged).unwrap();
+        stage(&staged, kind, id);
+    }
     assert!(!dir.exists());
     let seed =
         Graph::load_str("<http://ex/seed> <http://ex/p> <http://ex/o> .", "ntriples").unwrap();
@@ -240,6 +260,14 @@ fn a_failed_restore_in_place_keeps_logging() {
     g.apply_delta(&[triple("after")], &[]).unwrap();
     assert!(would_block(Graph::open(&dir)), "the graph keeps its lock");
     drop(g);
+    // What is in the way is not this store's staging: opening refuses it and leaves it alone
+    // until it is removed by hand.
+    let err = Graph::open(&dir)
+        .err()
+        .expect("opened past foreign staging");
+    assert_eq!(err.kind(), ErrorKind::InvalidInput, "{err}");
+    assert!(root.join("g.compact-new").is_file());
+    std::fs::remove_file(root.join("g.compact-new")).unwrap();
     let g = Graph::open(&dir).unwrap();
     assert!(
         has(&g, "a") && has(&g, "after"),
@@ -410,11 +438,10 @@ fn a_legacy_store_without_markers_is_still_a_store() {
     );
     let g = Graph::open(&dir).unwrap();
     assert_eq!(g.named.len(), 2);
-    assert_eq!(std::fs::read(dir.join("sparq-store")).unwrap(), b"root\n");
-    assert_eq!(
-        std::fs::read(dir.join("named/0/sparq-store")).unwrap(),
-        b"child\n"
-    );
+    let marker = std::fs::read_to_string(dir.join("sparq-store")).unwrap();
+    assert!(marker.starts_with("root "), "{marker}");
+    let marker = std::fs::read_to_string(dir.join("named/0/sparq-store")).unwrap();
+    assert!(marker.starts_with("child "), "{marker}");
     std::fs::remove_dir_all(&root).ok();
 }
 
@@ -566,6 +593,7 @@ fn a_whole_store_write_refuses_what_it_cannot_tell_is_its_own() {
     // A restore over a directory a crash left mid-swap recovers it first.
     let swapped = root.join("swapped");
     save_dataset(&swapped);
+    stage(&swapped, "compact-old", &store_id(&swapped));
     std::fs::rename(&swapped, swapped.with_extension("compact-old")).unwrap();
     let g = Graph::restore_into_durable(&swapped, fresh()).unwrap();
     assert!(has(&g, "n") && !has(&g, "a"));
@@ -650,5 +678,131 @@ fn a_read_only_open_does_not_walk_a_link_loop() {
         .recv_timeout(std::time::Duration::from_secs(30))
         .expect("the read-only open did not return");
     assert_eq!(kind, Some(ErrorKind::InvalidInput));
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// Recovery removes or promotes only staging that records this store as its owner: another
+/// store (or staging left by an older version, which records no owner) at a staging name is
+/// refused by every save, build, restore and open, and left exactly as it was.
+#[test]
+fn recovery_never_removes_what_this_store_did_not_stage() {
+    let root = scratch("foreign-staging");
+    let fresh =
+        || Graph::load_str("<http://ex/n> <http://ex/p> <http://ex/o> .", "ntriples").unwrap();
+    let foreign = |at: &Path| {
+        save_dataset(&root.join("elsewhere"));
+        std::fs::rename(root.join("elsewhere"), at).unwrap();
+    };
+    // Checked under a neutral name (a store at a staging name reads as mid-swap), then put back.
+    let intact = |at: &Path| {
+        let check = root.join("check");
+        std::fs::rename(at, &check).unwrap();
+        assert!(
+            has(&Graph::open_read_only(&check).unwrap(), "a"),
+            "{} was touched",
+            at.display()
+        );
+        std::fs::rename(&check, at).unwrap();
+    };
+    let refused = |what: &str, r: std::io::Result<()>| {
+        let err = r
+            .err()
+            .unwrap_or_else(|| panic!("{what} went past foreign staging"));
+        assert_eq!(err.kind(), ErrorKind::InvalidInput, "{what}: {err}");
+    };
+
+    // Beside a store with `named/`, an independent store at `named.drop-old`.
+    let target = root.join("target");
+    save_dataset(&target);
+    let drop_old = target.join("named.drop-old");
+    foreign(&drop_old);
+    refused("save", fresh().save(&target));
+    refused("build", {
+        let nt = "<http://ex/s> <http://ex/p> <http://ex/o> .\n";
+        Graph::build_external(nt.as_bytes(), "ntriples", &target, 1 << 16)
+            .map_err(|e| std::io::Error::new(ErrorKind::InvalidInput, e))
+    });
+    refused(
+        "restore",
+        Graph::restore_into_durable(&target, fresh()).map(drop),
+    );
+    refused("open", Graph::open(&target).map(drop));
+    std::fs::rename(&drop_old, root.join("moved")).unwrap();
+    intact(&root.join("moved"));
+    std::fs::remove_dir_all(root.join("moved")).unwrap();
+
+    // An independent store at `<target>.compact-new`, with the target present ...
+    let compact_new = target.with_extension("compact-new");
+    foreign(&compact_new);
+    refused("save", fresh().save(&target));
+    refused("open", Graph::open(&target).map(drop));
+    intact(&compact_new);
+    // ... and staging that names another store as its owner.
+    stage(
+        &compact_new,
+        "compact-new",
+        "ffffffffffffffffffffffffffffffff",
+    );
+    refused("save", fresh().save(&target));
+    assert!(compact_new.join("sparq-staging").exists());
+    std::fs::remove_dir_all(&compact_new).unwrap();
+
+    // With the target missing, an independent store at `<target>.compact-old` is not taken
+    // for the target's old base.
+    let gone = root.join("gone");
+    let compact_old = gone.with_extension("compact-old");
+    foreign(&compact_old);
+    refused("save", fresh().save(&gone));
+    refused("open", Graph::open(&gone).map(drop));
+    assert!(!gone.exists());
+    intact(&compact_old);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+/// A build keeps its side files in a private scratch directory it makes afresh: links already
+/// in the store directory (here `tmp/p<n>`, where builds used to sort, each pointing into
+/// another directory holding a `run0.bin`, the name a sort's first run takes) are never
+/// followed, and no scratch directory is left behind.
+#[cfg(unix)]
+#[test]
+fn a_build_never_writes_through_a_link_in_its_directory() {
+    let root = scratch("build-scratch");
+    let other = root.join("other");
+    let dir = root.join("g");
+    std::fs::create_dir_all(dir.join("tmp")).unwrap();
+    for p in 1..6 {
+        let target = other.join(format!("p{p}"));
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("run0.bin"), b"keep").unwrap();
+        std::os::unix::fs::symlink(&target, dir.join("tmp").join(format!("p{p}"))).unwrap();
+    }
+    // More rows than a sibling sort holds in memory, so each one spills runs.
+    let rows = 70_000;
+    let nt: String = (0..rows)
+        .map(|i| format!("<http://ex/s{i}> <http://ex/p{}> <http://ex/o> .\n", i % 7))
+        .collect();
+    Graph::build_external(nt.as_bytes(), "ntriples", &dir, 1 << 12).unwrap();
+    for p in 1..6 {
+        let target = other.join(format!("p{p}"));
+        let names: Vec<_> = std::fs::read_dir(&target)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            names,
+            ["run0.bin"],
+            "the build wrote through {}",
+            target.display()
+        );
+        assert_eq!(std::fs::read(target.join("run0.bin")).unwrap(), b"keep");
+    }
+    let left = std::fs::read_dir(&dir).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".sparq-")
+    });
+    assert!(!left, "a scratch directory was left behind");
+    assert_eq!(Graph::open(&dir).unwrap().len(), rows);
     std::fs::remove_dir_all(&root).ok();
 }

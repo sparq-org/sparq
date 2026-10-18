@@ -46,7 +46,7 @@ wrong-sized current files also trigger rebuilds.
 Legacy opens cost a dictionary scan and cache allocation until migrated with
 `Graph::open(old)?.save(new)?`. Current compatible caches remain memory-mapped.
 Versions mark semantic compatibility, not integrity; the trusted-storage contract
-still applies. A directory has one writable holder at a time (`dir_lock`; `Graph::open_read_only` shares it among readers); a second holder gets `WouldBlock`. A store's files are reached only through its `Graph`, whose mapped parts carry the lock. Ownership is per root and checked when a directory is claimed; concurrently creating nested stores is unsupported. Details: [data-formats guide](../../skills/data-formats/SKILL.md).
+still applies. A directory has one writable holder at a time (`dir_lock`; `Graph::open_read_only` shares it among readers); a second holder gets `WouldBlock`. A store's files are reached only through its `Graph`, whose mapped parts carry the lock. Ownership is per root and checked when a directory is claimed; concurrently creating nested stores is unsupported, and the checks are advisory (no defence against racing the filesystem). Details: [data-formats guide](../../skills/data-formats/SKILL.md).
 
 ## ✨ Features
 

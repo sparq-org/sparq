@@ -1699,16 +1699,16 @@ fn build_sources(f: &Flags) -> Result<(Vec<ChunkIter>, bool), String> {
 
 /// Sink for `--out`: plain, `.gz`, or `.zst` N-Triples — finished EXPLICITLY so a failed
 /// trailer write is an error, not a silently-truncated archive.
+/// The file is a [`crate::OutFile`]: published over the path only once finished.
 enum OutSink {
-    Plain(std::io::BufWriter<std::fs::File>),
-    Gz(flate2::write::GzEncoder<std::io::BufWriter<std::fs::File>>),
-    Zst(Box<zstd::stream::write::Encoder<'static, std::io::BufWriter<std::fs::File>>>),
+    Plain(std::io::BufWriter<crate::OutFile>),
+    Gz(flate2::write::GzEncoder<std::io::BufWriter<crate::OutFile>>),
+    Zst(Box<zstd::stream::write::Encoder<'static, std::io::BufWriter<crate::OutFile>>>),
 }
 
 impl OutSink {
     fn create(path: &str) -> std::io::Result<OutSink> {
-        crate::check_output_path(path)?;
-        let w = std::io::BufWriter::new(std::fs::File::create(path)?);
+        let w = std::io::BufWriter::new(crate::OutFile::create(path)?);
         Ok(if path.ends_with(".gz") {
             OutSink::Gz(flate2::write::GzEncoder::new(w, flate2::Compression::default()))
         } else if path.ends_with(".zst") || path.ends_with(".zstd") {
@@ -1726,9 +1726,9 @@ impl OutSink {
     }
     fn finish(self) -> std::io::Result<()> {
         match self {
-            OutSink::Plain(mut w) => w.flush(),
-            OutSink::Gz(w) => w.finish().and_then(|mut w| w.flush()),
-            OutSink::Zst(w) => w.finish().and_then(|mut w| w.flush()),
+            OutSink::Plain(w) => crate::finish_out(w),
+            OutSink::Gz(w) => w.finish().and_then(crate::finish_out),
+            OutSink::Zst(w) => w.finish().and_then(crate::finish_out),
         }
     }
 }

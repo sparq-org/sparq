@@ -33,6 +33,12 @@
 //! directory holding another store, or one it cannot tell is its own. These checks see the disk
 //! as it is when they run and reserve nothing; separate processes creating nested stores (one
 //! inside the other's directory) at the same time are not supported.
+//!
+//! The whole design is advisory, over a namespace the processes using it trust: it keeps
+//! well-behaved holders apart and catches mistakes, not someone racing the filesystem. Paths
+//! are checked, then opened by name (no `O_NOFOLLOW` or `openat`), so a change between the
+//! check and the open is not caught; and each of a store's files is published on its own, so a
+//! save or build is not atomic across files (the directory swaps replace a store as a whole).
 
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -99,14 +105,28 @@ pub(crate) type Pin = Option<std::sync::Arc<DirLock>>;
 /// files. A tool writing an output file refuses such a path, since a store's files belong to the
 /// graph that holds its lock. Checked when called: nothing stops a store being created there
 /// afterwards.
+///
+/// Fails closed: a path that cannot be resolved (a dangling symbolic link, a magic link such as
+/// `/dev/stdout` on a pipe, a component that cannot be read) is an error, never checked as
+/// spelled. A path that does not exist yet is resolved through its nearest existing ancestor.
+/// This checks where the path leads, not which file it names: a hard link elsewhere to a store's
+/// file is not detected, so a tool replaces its output by renaming a fresh file over the path
+/// (which replaces the link) rather than writing through it.
 pub fn is_inside_store(path: &Path) -> io::Result<bool> {
-    // A path that does not resolve (`/dev/stdout` on a pipe, say) is checked as spelled.
-    let resolved = match resolve_dir(path) {
-        Ok(resolved) => resolved,
-        Err(_) if path.is_absolute() => path.to_path_buf(),
-        Err(_) => std::env::current_dir()?.join(path),
-    };
-    Ok(resolved.ancestors().any(crate::is_store))
+    Ok(store_root(path)?.is_some())
+}
+
+/// The outermost graph store directory that `path` (a file or a directory, existing or not) is,
+/// or is inside, after resolving it as [`is_inside_store`] does (an error when it cannot be
+/// resolved); `None` when it is in no store. For a store's own file that is the store's root:
+/// the directory to open (or open read-only) to hold its lock.
+pub fn store_root(path: &Path) -> io::Result<Option<PathBuf>> {
+    let resolved = resolve_dir(path)?;
+    Ok(resolved
+        .ancestors()
+        .filter(|a| crate::is_store(a))
+        .last()
+        .map(Path::to_path_buf))
 }
 
 /// Where a directory's lock file is.

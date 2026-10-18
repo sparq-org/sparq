@@ -918,6 +918,70 @@ fn reason_output_inside_a_store_exits_2() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An output path that leads into a store by a link never writes into it. A hard link to a
+/// store's file (which no check of the path can tell from any other file) is replaced by the
+/// output, never written through; a symbolic link that does not resolve is refused, never
+/// checked as spelled.
+#[cfg(all(unix, feature = "mmap"))]
+#[test]
+fn reason_output_through_a_link_never_writes_into_a_store() {
+    let dir = scratch("err-reason-link-into-store");
+    let store = dir.join("store");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let perm = store.join("perm0.bin");
+    let before = std::fs::read(&perm).unwrap();
+
+    let hard = dir.join("hard.nt");
+    std::fs::hard_link(&perm, &hard).unwrap();
+    let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&hard)]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(
+        std::fs::read(&perm).unwrap(),
+        before,
+        "the store's file was written through"
+    );
+    assert!(std::fs::read_to_string(&hard)
+        .unwrap()
+        .contains("<http://ex/s>"));
+
+    let dangling = dir.join("dangling.nt");
+    std::os::unix::fs::symlink(store.join("new.nt"), &dangling).unwrap();
+    let (code, _stdout, stderr) = run3(&["reason", s(&ttl), "turtle", "rdfs", s(&dangling)]);
+    assert_eq!(code, 2, "stderr: {stderr}");
+    assert!(
+        !store.join("new.nt").exists(),
+        "a file was created inside the store"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `probe-compress` maps a store's permutation file only under the store's lock: refused while
+/// the store is open for writing, fine once it is not.
+#[cfg(feature = "mmap")]
+#[test]
+fn probe_compress_maps_a_store_file_under_its_lock() {
+    let dir = scratch("probe-compress-lock");
+    let store = dir.join("store");
+    let ttl = dir.join("d.ttl");
+    std::fs::write(&ttl, "<http://ex/s> <http://ex/p> <http://ex/o> .\n").unwrap();
+    let (rc, _o, e) = run3(&["save", s(&ttl), "turtle", s(&store)]);
+    assert_eq!(rc, 0, "save stderr: {e}");
+    let perm = store.join("perm0.bin");
+    let held = sparq_core::Graph::open(&store).unwrap();
+    let (code, _stdout, stderr) = run3(&["probe-compress", s(&perm)]);
+    assert_ne!(
+        code, 0,
+        "mapped a store's file while its store was open: {stderr}"
+    );
+    drop(held);
+    let (code, _stdout, stderr) = run3(&["probe-compress", s(&perm)]);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---------------------------------------------------------------------------
 // Algebra-rewrite pass is LIT in this binary (sq-7d3dj.30.13)
 // ---------------------------------------------------------------------------

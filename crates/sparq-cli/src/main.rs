@@ -20,10 +20,14 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 /// `Err` when the output file `out` would land in a graph store directory (or inside one): a
 /// store's files belong to the graph that holds its lock, and writing over one (a live store's
-/// `perm0.bin`, say) would corrupt it.
+/// `perm0.bin`, say) would corrupt it. Also `Err` when the path cannot be resolved (a dangling
+/// symbolic link, say): it is never checked as spelled. A device or pipe (`/dev/stdout`) is
+/// fine: it is written as it is ([`OutFile`]), and no store's file is one.
 fn check_output_path(out: &str) -> std::io::Result<()> {
     #[cfg(feature = "mmap")]
-    if sparq_core::dir_lock::is_inside_store(std::path::Path::new(out))? {
+    if !is_device_or_pipe(std::path::Path::new(out))
+        && sparq_core::dir_lock::is_inside_store(std::path::Path::new(out))?
+    {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             format!("{out} is inside a graph store: write the output somewhere else"),
@@ -32,6 +36,108 @@ fn check_output_path(out: &str) -> std::io::Result<()> {
     #[cfg(not(feature = "mmap"))]
     let _ = out;
     Ok(())
+}
+
+/// Whether `path` leads to something that is neither a regular file nor a directory (a device, a
+/// pipe, a socket: `/dev/stdout`, say), which an output is written to as it is.
+fn is_device_or_pipe(path: &std::path::Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| !m.is_file() && !m.is_dir())
+}
+
+/// An output file a command writes. Checked first ([`check_output_path`]). The bytes go to a
+/// fresh sibling (`.<name>.sparq-tmp-…`, created new, never an existing file or link), which
+/// [`finish`](Self::finish) syncs and renames over the path: what was at the path (a file, a hard
+/// link to someone else's file, a symbolic link) is replaced, never written through, and a
+/// failed command leaves it as it was. A device or pipe (`/dev/stdout`) is written directly.
+pub(crate) struct OutFile {
+    file: Option<std::fs::File>,
+    /// The fresh sibling and the path it replaces; `None` for a device or pipe.
+    staged: Option<(std::path::PathBuf, std::path::PathBuf)>,
+}
+
+impl OutFile {
+    pub(crate) fn create(out: &str) -> std::io::Result<OutFile> {
+        check_output_path(out)?;
+        let path = std::path::Path::new(out);
+        if is_device_or_pipe(path) {
+            let file = std::fs::OpenOptions::new().write(true).open(path)?;
+            return Ok(OutFile {
+                file: Some(file),
+                staged: None,
+            });
+        }
+        let name = path.file_name().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("{out} names no file"),
+            )
+        })?;
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut tmp_name = std::ffi::OsString::from(".");
+        tmp_name.push(name);
+        tmp_name.push(format!(".sparq-tmp-{}-{n}", std::process::id()));
+        let tmp = path.with_file_name(tmp_name);
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        Ok(OutFile {
+            file: Some(file),
+            staged: Some((tmp, path.to_path_buf())),
+        })
+    }
+
+    /// Flushes the output and, for a file, syncs it and renames it over the path.
+    pub(crate) fn finish(mut self) -> std::io::Result<()> {
+        let mut file = self.file.take().expect("an output is finished once");
+        std::io::Write::flush(&mut file)?;
+        let Some((tmp, path)) = self.staged.take() else {
+            return Ok(());
+        };
+        let published = file.sync_all().and_then(|()| {
+            drop(file);
+            std::fs::rename(&tmp, &path)
+        });
+        if published.is_err() {
+            std::fs::remove_file(&tmp).ok();
+        }
+        published
+    }
+}
+
+impl std::io::Write for OutFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file
+            .as_mut()
+            .expect("written before finish")
+            .write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.as_mut().expect("written before finish").flush()
+    }
+}
+
+impl Drop for OutFile {
+    fn drop(&mut self) {
+        if let Some((tmp, _)) = self.staged.take() {
+            std::fs::remove_file(tmp).ok();
+        }
+    }
+}
+
+/// Finishes a buffered [`OutFile`]: flush, then [`OutFile::finish`].
+pub(crate) fn finish_out(w: std::io::BufWriter<OutFile>) -> std::io::Result<()> {
+    w.into_inner()
+        .map_err(std::io::IntoInnerError::into_error)?
+        .finish()
+}
+
+/// Writes `bytes` to the output `out` as an [`OutFile`].
+fn write_out(out: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let mut f = OutFile::create(out)?;
+    std::io::Write::write_all(&mut f, bytes)?;
+    f.finish()
 }
 
 /// [`check_output_path`], exiting 2 (a usage error) when it refuses.
@@ -755,11 +861,28 @@ fn cmd_probe_compress(args: &[String]) {
             std::process::exit(2);
         }
     };
+    // A store's file is mapped only under its store's lock (shared, by opening the store
+    // read-only for the call), so no writer replaces or compacts it underneath the mapping.
+    #[cfg(feature = "mmap")]
+    let _store = match sparq_core::dir_lock::store_root(std::path::Path::new(path)) {
+        Ok(Some(root)) => Some(
+            sparq_core::Graph::open_read_only(&root).unwrap_or_else(|e| {
+                eprintln!("open the store {} holding {path}: {e}", root.display());
+                std::process::exit(1);
+            }),
+        ),
+        Ok(None) => None,
+        Err(e) => {
+            eprintln!("{path}: {e}");
+            std::process::exit(1);
+        }
+    };
     let file = std::fs::File::open(path).unwrap_or_else(|e| {
         eprintln!("open {path}: {e}");
         std::process::exit(1);
     });
-    // SAFETY: read-only mmap of a file held open for the call.
+    // SAFETY: read-only mmap of a file held open for the call (under its store's shared lock
+    // when it is a store's file).
     let map = unsafe { memmap2::Mmap::map(&file) }.unwrap();
     let n = map.len() / 12;
     // SAFETY: a permutation file is a whole number of [u32;3] rows.
@@ -1223,14 +1346,17 @@ fn cmd_classify(args: &[String]) {
     println!("rbox_non_regular\t{}", report.rbox_non_regular);
     if let Some(out) = args.get(4) {
         use std::io::Write;
-        let mut w = std::io::BufWriter::new(std::fs::File::create(out).unwrap_or_else(|e| {
+        let mut w = std::io::BufWriter::new(OutFile::create(out).unwrap_or_else(|e| {
             eprintln!("create {out}: {e}");
             std::process::exit(1);
         }));
         for t in &triples {
             writeln!(w, "{} {} {} .", dict.term(t[0]), dict.term(t[1]), dict.term(t[2])).unwrap();
         }
-        w.flush().unwrap();
+        finish_out(w).unwrap_or_else(|e| {
+            eprintln!("write {out}: {e}");
+            std::process::exit(1);
+        });
         eprintln!("wrote classified graph to {out}");
     }
 }
@@ -1285,7 +1411,7 @@ fn cmd_reason(args: &[String]) {
     }
     if let Some(out) = out {
         use std::io::Write;
-        let mut w = std::io::BufWriter::new(std::fs::File::create(out).unwrap_or_else(|e| {
+        let mut w = std::io::BufWriter::new(OutFile::create(out).unwrap_or_else(|e| {
             eprintln!("create {out}: {e}");
             std::process::exit(1);
         }));
@@ -1294,7 +1420,10 @@ fn cmd_reason(args: &[String]) {
             let spo = scan.to_spo(r);
             writeln!(w, "{} {} {} .", g.dict().term(spo[0]), g.dict().term(spo[1]), g.dict().term(spo[2])).unwrap();
         }
-        w.flush().unwrap();
+        finish_out(w).unwrap_or_else(|e| {
+            eprintln!("write {out}: {e}");
+            std::process::exit(1);
+        });
         eprintln!("wrote closure to {out}");
     }
 }
@@ -2357,7 +2486,7 @@ fn run_query_suite(g: &sparq_core::Graph, dir: &str, iters: usize, mode: &str, j
 
     if let Some(p) = json_path {
         let doc = suite_results_json(mode, iters, &results);
-        if let Err(e) = std::fs::write(p, doc) {
+        if let Err(e) = write_out(p, doc.as_bytes()) {
             eprintln!("error writing --json results to {p}: {e}");
             std::process::exit(1);
         }

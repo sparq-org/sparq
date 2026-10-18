@@ -35,12 +35,15 @@ fn synthetic_nt(n: u32) -> String {
     s
 }
 
+/// The data files of the store at `dir`: every file but its marker (`sparq-store`), which
+/// records the store's own random identity and so differs between any two stores.
 fn dir_files(dir: &std::path::Path) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_file())
         .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|name| name != "sparq-store")
         .collect();
     v.sort();
     v

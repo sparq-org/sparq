@@ -1,0 +1,85 @@
+# windows-store: RUN sparq-core's store tests (locking, save, build, compaction and restore
+# swaps) on a real Windows host.
+#
+# Why: the store's durable-write path differs per platform (sparq-core/src/lib.rs:
+# `publish_rename` uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` on
+# Windows, and `fsync_dir` does nothing there), and so do the lock and the hard-link check. A
+# Windows type-check (`cargo check --target x86_64-pc-windows-msvc`) cannot catch a call that
+# compiles and then fails at run time, such as opening a directory without
+# `FILE_FLAG_BACKUP_SEMANTICS`. Every other lane that runs these tests is Linux.
+#
+# Not a required check (the only required PR check is ci-fast, docs/branch-protection.md).
+# It runs on pull requests and pushes to main that touch sparq-core or this file, and on
+# dispatch.
+#
+# Third-party actions are pinned by full commit SHA; the trailing `# vX.Y.Z` comment is what
+# Dependabot follows to bump the pin.
+name: windows-store
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    # Duplicated under `push` below (Actions has no YAML anchors): keep the two identical.
+    paths:
+      - "crates/sparq-core/**"
+      - ".github/workflows/windows-store.yml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/sparq-core/**"
+      - ".github/workflows/windows-store.yml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-store-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  store-tests:
+    name: sparq-core store tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      # rust-toolchain.toml selects the pinned compiler; this only shows which one ran.
+      - name: Rust (pinned by rust-toolchain.toml)
+        shell: bash
+        run: rustup show active-toolchain
+
+      - name: Cache cargo (Windows)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: windows-store-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            windows-store-
+
+      # The integration tests of the directory lock and of claiming, saving, building and
+      # restoring a store.
+      - name: dir_lock integration tests
+        shell: bash
+        run: cargo test --locked -p sparq-core --features mmap --test dir_lock
+
+      # The library's own tests of saving, building, compacting, restoring and dropping named
+      # graphs (libtest runs every test whose name contains any of these words), and of the
+      # fresh-file publish step.
+      - name: library save / build / swap tests
+        shell: bash
+        run: >-
+          cargo test --locked -p sparq-core --features mmap --lib --
+          save build compact restore named fresh lock
