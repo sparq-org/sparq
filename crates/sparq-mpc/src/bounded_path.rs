@@ -73,6 +73,7 @@
 //! realized length is NEVER part of the output (design §1.2 length-revealing
 //! prohibition), so a pair reached by two different lengths appears once.
 
+use crate::chain_odometer::ChainOdometer;
 use crate::join::{DisclosedKeyJoin, GlobalJoin, JoinPlan};
 use crate::partial::{HolderId, MpcError, PartialResult};
 use oxrdf::{NamedNode, Term, Variable};
@@ -235,6 +236,83 @@ pub const MAX_UNROLL_CHAINS: u64 = 1 << 20; // 1_048_576
 /// and is a heavy run, not a quick one. What the caps rule out is the UNBOUNDED
 /// case, not an expensive one.
 pub const MAX_UNROLL_HOPS: usize = 64;
+
+/// Largest CUMULATIVE number of endpoint rows one whole [`PathForm`] evaluation
+/// may materialise before [`eval_bounded_path_disclosed`] refuses with an
+/// [`MpcError::Protocol`] error.
+///
+/// ## Why a budget over the form and not over each part
+///
+/// [`MAX_UNROLL_CHAINS`] and [`MAX_UNROLL_HOPS`] bound the SHAPE of ONE
+/// repetition: how many fixed chains it unrolls to and how long each is. Neither
+/// bounds what the chains PRODUCE, and neither is a budget over the whole form —
+/// a [`PathForm::Sequence`] composes arbitrarily many repetitions, each
+/// individually inside both shape caps, and the rows they produce accumulate
+/// across the sequence and through the joins that compose it. So the two shape
+/// caps are caps on factors; this is a cap on the product they multiply out to.
+///
+/// Every row the unroll materialises is charged against it — each fixed chain's
+/// result rows, each reflexive identity pair, and each join accumulator in a
+/// sequence — and the charge is checked BEFORE the rows are retained, so an
+/// over-budget form refuses rather than filling memory first.
+///
+/// ## What it bounds, honestly
+///
+/// It bounds the CUMULATIVE row count, not the peak memory: the deduped union
+/// holds far fewer rows than the budget counts, because a row charged by one chain
+/// and already seen is dropped. And it sits deliberately ABOVE the heaviest run
+/// the two shape caps already accept (a near-cap alternation is ~`2^20` chains of
+/// up to 19 hops), so it refuses the unbounded composition rather than making an
+/// expensive-but-legal path illegal.
+pub const MAX_PATH_FORM_ROWS: usize = 1 << 28; // 268_435_456
+
+/// The [`MAX_PATH_FORM_ROWS`] budget for ONE whole-form evaluation, threaded
+/// through the unroll alongside the intermediate-variable scope counter.
+struct PathFormBudget {
+    /// Rows charged so far across the whole form.
+    charged: usize,
+}
+
+impl PathFormBudget {
+    fn new() -> Self {
+        PathFormBudget { charged: 0 }
+    }
+
+    /// A budget that has already had `charged` rows charged against it — the way
+    /// the tests reach the cap without materialising `MAX_PATH_FORM_ROWS` rows.
+    /// It bypasses nothing: [`Self::charge`] is still the only thing that decides,
+    /// against the same constant, from the same call sites.
+    #[cfg(test)]
+    fn with_charged(charged: usize) -> Self {
+        PathFormBudget { charged }
+    }
+
+    /// Rows charged so far.
+    #[cfg(test)]
+    fn charged(&self) -> usize {
+        self.charged
+    }
+
+    /// Charge `rows` against the budget, refusing if the running total would pass
+    /// [`MAX_PATH_FORM_ROWS`]. Checked arithmetic: an overflowing total is a
+    /// refusal, never a wrapped count that would slip under the budget.
+    fn charge(&mut self, rows: usize) -> Result<(), MpcError> {
+        let total = self.charged.checked_add(rows).filter(|t| *t <= MAX_PATH_FORM_ROWS);
+        match total {
+            Some(t) => {
+                self.charged = t;
+                Ok(())
+            }
+            None => Err(MpcError::Protocol(format!(
+                "bounded path form: materialising {} more endpoint row(s) on top of {} \
+                 already materialised would pass the MAX_PATH_FORM_ROWS budget of {} — \
+                 refusing (the per-repetition chain and hop caps bound the shape of one \
+                 part, not what a whole form's parts produce between them)",
+                rows, self.charged, MAX_PATH_FORM_ROWS
+            ))),
+        }
+    }
+}
 
 /// Closed-form count of fixed-length chains a single `(step){m,k}` repetition
 /// unrolls to: `Σ_{ℓ=m..=k} a^ℓ` where `a = alternatives.len()` (length-0 adds the
@@ -424,15 +502,28 @@ pub fn eval_bounded_path_disclosed(
     edges: &DisclosedEdges,
     form: &PathForm,
 ) -> Result<PartialResult, MpcError> {
+    // ONE budget for the whole form, so what its parts materialise between them is
+    // bounded and not only what each part's own shape caps allow.
+    eval_with_budget(edges, form, &mut PathFormBudget::new())
+}
+
+/// [`eval_bounded_path_disclosed`] with the whole-form row budget supplied by the
+/// caller — the single code path the public entry delegates to, so the tests can
+/// reach the [`MAX_PATH_FORM_ROWS`] cap by handing in a budget that is already
+/// nearly spent instead of materialising a quarter of a billion rows.
+fn eval_with_budget(
+    edges: &DisclosedEdges,
+    form: &PathForm,
+    budget: &mut PathFormBudget,
+) -> Result<PartialResult, MpcError> {
     let subject = Variable::new_unchecked(SUBJECT_VAR);
     let object = Variable::new_unchecked(OBJECT_VAR);
-
     // The pair RELATION over the canonical endpoint vars (?__pp_a, ?__pp_b),
-    // computed by the unroll; then deduped to a set of endpoint pairs.
-    // One counter for the whole evaluation, so every nested sequence gets its own
+    // computed by the unroll; then deduped to a set of endpoint pairs. One scope
+    // counter for the whole evaluation, so every nested sequence gets its own
     // intermediate-variable namespace (see `eval_sequence`).
     let mut scope = 0usize;
-    let relation = eval_form_relation(edges, form, &subject, &object, &mut scope)?;
+    let relation = eval_form_relation(edges, form, &subject, &object, &mut scope, budget)?;
     Ok(dedup_endpoint_pairs(relation, &subject, &object))
 }
 
@@ -445,14 +536,15 @@ fn eval_form_relation(
     subject: &Variable,
     object: &Variable,
     scope: &mut usize,
+    budget: &mut PathFormBudget,
 ) -> Result<PartialResult, MpcError> {
     match form {
         // A repetition's own hop variables are `__pp_z{i}`, a different namespace
         // from a sequence's `__pp_zs{scope}_{i}`, and repetitions do not nest (a
         // step carries predicates, not sub-forms), so they need no scope of their
         // own.
-        PathForm::Repetition(rep) => eval_repetition(edges, rep, subject, object),
-        PathForm::Sequence(parts) => eval_sequence(edges, parts, subject, object, scope),
+        PathForm::Repetition(rep) => eval_repetition(edges, rep, subject, object, budget),
+        PathForm::Sequence(parts) => eval_sequence(edges, parts, subject, object, scope, budget),
     }
 }
 
@@ -466,6 +558,7 @@ fn eval_repetition(
     rep: &BoundedRepetition,
     subject: &Variable,
     object: &Variable,
+    budget: &mut PathFormBudget,
 ) -> Result<PartialResult, MpcError> {
     if rep.min > rep.max {
         return Err(MpcError::Protocol(format!(
@@ -520,24 +613,50 @@ fn eval_repetition(
         }
     }
 
-    // Accumulate the union of all chain lengths as raw (a,b) rows; dedup happens
-    // once at the top.
+    // Accumulate the union of all chain lengths, DEDUPED AS IT GROWS. The top-level
+    // `dedup_endpoint_pairs` dedups too, so this does not change the answer — but it
+    // changes what the union HOLDS: the same `(a,b)` pair is reached by every chain
+    // length and every alternation branch that connects it, so an undeduped union
+    // held one row per (pair, chain) and grew with the unroll shape rather than with
+    // the answer, which has at most `|V|²` distinct rows.
+    let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut union_rows: Vec<Vec<Option<Term>>> = Vec::new();
+    let keep = |rows: Vec<Vec<Option<Term>>>,
+                    budget: &mut PathFormBudget,
+                    seen: &mut BTreeSet<String>,
+                    union_rows: &mut Vec<Vec<Option<Term>>>|
+     -> Result<(), MpcError> {
+        // Charge every row the chain produced, deduped or not: producing it is the
+        // work, and dropping a duplicate afterwards does not un-do it.
+        budget.charge(rows.len())?;
+        for row in rows {
+            if seen.insert(format!("{row:?}")) {
+                union_rows.push(row);
+            }
+        }
+        Ok(())
+    };
 
     for length in rep.min..=rep.max {
         if length == 0 {
             // Length-0: the reflexive identity pairs (x,x) over the node domain
             // (design §2.3). Data-independent given the node set.
-            for node in edges.node_domain() {
-                union_rows.push(vec![Some(node.clone()), Some(node)]);
-            }
+            let diagonal: Vec<Vec<Option<Term>>> = edges
+                .node_domain()
+                .into_iter()
+                .map(|node| vec![Some(node.clone()), Some(node)])
+                .collect();
+            keep(diagonal, budget, &mut seen, &mut union_rows)?;
             continue;
         }
-        // exactly-`length` chains: expand the alternation across the `length`
-        // hop positions → `alternatives^length` fixed BGP chains.
-        for chain in alternation_chains(&rep.step, length) {
-            let chain_rel = eval_fixed_chain(edges, &chain, subject, object)?;
-            union_rows.extend(chain_rel.rows);
+        // exactly-`length` chains: expand the alternation across the `length` hop
+        // positions → `alternatives^length` fixed BGP chains, enumerated LAZILY one
+        // chain at a time (`ChainOdometer`) instead of materialising all of them
+        // with a clone of every predicate IRI in each.
+        let mut chains = ChainOdometer::new(&rep.step.alternatives, length);
+        while let Some(chain) = chains.next_chain() {
+            let chain_rel = eval_fixed_chain(edges, chain, subject, object)?;
+            keep(chain_rel.rows, budget, &mut seen, &mut union_rows)?;
         }
     }
 
@@ -546,38 +665,6 @@ fn eval_repetition(
         vars: vec![subject.clone(), object.clone()],
         rows: union_rows,
     })
-}
-
-/// Every fixed predicate sequence of `length` hops obtained by choosing, at each
-/// position, one of the step's alternatives (the §2.4 distribution). For a
-/// single-predicate step this is just the one `length`-long sequence.
-///
-/// The caller caps the chain COUNT before reaching here ([`MAX_UNROLL_HOPS`] on the
-/// length, then [`MAX_UNROLL_CHAINS`] on `Σ_ℓ a^ℓ`), so the number of sequences is
-/// bounded. Nothing bounds their WIDTHS — a predicate IRI's length is unbounded —
-/// and width caps are follow-up work, not a property this path provides.
-fn alternation_chains(step: &PathStep, length: usize) -> Vec<Vec<NamedNode>> {
-    let mut chains: Vec<Vec<NamedNode>> = vec![Vec::new()];
-    for _ in 0..length {
-        // Grow the chain set WITHOUT a `chains.len() * alternatives.len()`
-        // `with_capacity`: that product is `alternatives^length`, which can
-        // overflow `usize` or request an enormous allocation for large unrolls,
-        // turning a should-be-controlled protocol error into a panic/abort on a
-        // public API surface. Let the `Vec` grow amortised instead. The genuine
-        // unroll-size limit is enforced upstream by `eval_repetition`'s
-        // `MAX_UNROLL_CHAINS` guard (which runs BEFORE this function is reached),
-        // so by the time we get here the total chain count is provably bounded.
-        let mut next: Vec<Vec<NamedNode>> = Vec::new();
-        for prefix in &chains {
-            for alt in &step.alternatives {
-                let mut extended = prefix.clone();
-                extended.push(alt.clone());
-                next.push(extended);
-            }
-        }
-        chains = next;
-    }
-    chains
 }
 
 /// A fixed predicate chain `p_1 / p_2 / ... / p_n` (n = chain.len()) →
@@ -657,12 +744,13 @@ fn eval_sequence(
     subject: &Variable,
     object: &Variable,
     scope: &mut usize,
+    budget: &mut PathFormBudget,
 ) -> Result<PartialResult, MpcError> {
     if parts.is_empty() {
         return Err(MpcError::Protocol("empty path sequence".into()));
     }
     if parts.len() == 1 {
-        return eval_form_relation(edges, &parts[0], subject, object, scope);
+        return eval_form_relation(edges, &parts[0], subject, object, scope, budget);
     }
 
     // Claim a scope id for THIS call before recursing, so no two sequence calls in
@@ -682,7 +770,7 @@ fn eval_sequence(
 
     // First sub-form onto (?__pp_a, mid1).
     let first_end = mid_var(1);
-    let mut acc = eval_form_relation(edges, &parts[0], subject, &first_end, scope)?;
+    let mut acc = eval_form_relation(edges, &parts[0], subject, &first_end, scope, budget)?;
     let mut prev_end = first_end;
 
     let join = DisclosedKeyJoin::new();
@@ -693,7 +781,7 @@ fn eval_sequence(
         } else {
             mid_var(idx + 1)
         };
-        let part_rel = eval_form_relation(edges, part, &prev_end, &this_end, scope)?;
+        let part_rel = eval_form_relation(edges, part, &prev_end, &this_end, scope, budget)?;
         // Dedup each sub-form's relation before joining so a sub-form's internal
         // multiplicity (e.g. two lengths reaching the same mid pair) does not
         // inflate the composition — endpoint relations are sets.
@@ -705,6 +793,9 @@ fn eval_sequence(
         };
         acc = join.join(&[acc_dedup, part_rel], &plan)?;
         acc = project_endpoints(&acc, subject, &this_end)?;
+        // The join accumulator is the sequence's own product: its row count is what
+        // composing two in-budget parts multiplied out to, so it is charged too.
+        budget.charge(acc.rows.len())?;
         prev_end = this_end;
     }
 

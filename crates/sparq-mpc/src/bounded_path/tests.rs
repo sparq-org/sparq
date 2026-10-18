@@ -1115,3 +1115,118 @@ fn seeded_fuzz_nested_forms_match_the_composition_oracle() {
     );
     assert!(flat > 0, "and flat forms too, saw {} of 200", flat);
 }
+
+// =====================================================================
+// The whole-form ROW BUDGET and the deduped union
+// =====================================================================
+
+/// The budget constant is pinned BY VALUE, so changing it is changing this test
+/// and not quietly relaxing a guard.
+#[test]
+fn the_path_form_row_budget_is_pinned_by_value() {
+    assert_eq!(MAX_PATH_FORM_ROWS, 1 << 28);
+}
+
+/// The budget's own arithmetic: exactly at [`MAX_PATH_FORM_ROWS`] is accepted, one
+/// row past it is refused, and a total that would overflow `usize` is refused
+/// rather than wrapping to a small number under the budget.
+#[test]
+fn the_row_budget_accepts_the_cap_and_refuses_one_past_it() {
+    let mut b = PathFormBudget::new();
+    b.charge(MAX_PATH_FORM_ROWS).expect("exactly at the cap");
+    assert_eq!(b.charged(), MAX_PATH_FORM_ROWS);
+    let err = b.charge(1).expect_err("one row past the cap is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+
+    let mut over = PathFormBudget::with_charged(usize::MAX);
+    assert!(
+        over.charge(1).is_err(),
+        "an overflowing total must refuse, not wrap under the budget"
+    );
+}
+
+/// The budget is WIRED into the real unroll and binds there: a form that runs on a
+/// fresh budget is refused by exactly the same code path when the budget has
+/// already been spent, and runs again when just enough is left for it.
+///
+/// There is no "zero draws" half to this one: the disclosed unroll is crypto-free,
+/// so there is no randomness source to draw from at all (see
+/// `crypto_free_no_mpc_round_artifacts`). What the refusal precedes is the rows.
+#[test]
+fn the_row_budget_binds_on_a_real_form_at_the_cap() {
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:c . ex:c ex:p ex:d .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 1, 3);
+
+    // What this form actually charges, measured on the real path.
+    let mut measured = PathFormBudget::new();
+    let baseline = eval_with_budget(&edges, &form, &mut measured).unwrap();
+    let spend = measured.charged();
+    assert!(spend > 0, "the unroll must charge the budget it is given");
+
+    // A budget with one row less than it needs: refused, naming the budget.
+    let mut tight = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - (spend - 1));
+    let err = eval_with_budget(&edges, &form, &mut tight)
+        .expect_err("a form that would pass the budget is refused");
+    assert!(
+        matches!(&err, MpcError::Protocol(m) if m.contains("MAX_PATH_FORM_ROWS")),
+        "{:?}",
+        err
+    );
+
+    // With exactly enough left it runs, and returns the same answer.
+    let mut exact = PathFormBudget::with_charged(MAX_PATH_FORM_ROWS - spend);
+    let got = eval_with_budget(&edges, &form, &mut exact).expect("exactly enough budget runs");
+    assert_eq!(got.rows, baseline.rows);
+}
+
+/// The repetition union is deduped AS IT GROWS, not only at the top. A pair that
+/// several chain lengths reach contributes ONE row to the relation the repetition
+/// RETURNS, so the union holds the answer's rows rather than one row per
+/// (pair, chain).
+///
+/// Asserted on `eval_form_relation`'s own output — BEFORE the top-level
+/// `dedup_endpoint_pairs` — because that top-level dedup collapses duplicates
+/// either way and would hide whether the union ever held them. The budget, which
+/// charges every row PRODUCED, is read alongside to show duplicates really were
+/// produced and really were dropped.
+#[test]
+fn the_repetition_union_is_deduped_as_it_grows() {
+    // A complete little cycle, so every length reaches the same pairs repeatedly.
+    let h1 = "ex:a ex:p ex:b . ex:b ex:p ex:a . ex:a ex:p ex:a . ex:b ex:p ex:b .";
+    let edges = disclosed_edges(&[(h1, &["http://ex/p"])]);
+    let form = PathForm::range(nn("http://ex/p"), 1, 4);
+    let subject = Variable::new_unchecked(SUBJECT_VAR);
+    let object = Variable::new_unchecked(OBJECT_VAR);
+
+    let mut budget = PathFormBudget::new();
+    let mut scope = 0usize;
+    let raw = eval_form_relation(&edges, &form, &subject, &object, &mut scope, &mut budget).unwrap();
+
+    // The relation the repetition hands back carries NO duplicate row.
+    let distinct: BTreeSet<String> = raw.rows.iter().map(|r| format!("{r:?}")).collect();
+    assert_eq!(
+        raw.rows.len(),
+        distinct.len(),
+        "the repetition's own union must already be a set, not {} rows over {} distinct",
+        raw.rows.len(),
+        distinct.len()
+    );
+    // And duplicates really were produced: four chain lengths re-reach the same
+    // pairs, so the rows charged exceed the rows retained.
+    assert!(
+        budget.charged() > raw.rows.len(),
+        "charged {} must exceed the {} retained rows — otherwise nothing was collapsed",
+        budget.charged(),
+        raw.rows.len()
+    );
+
+    // And the answer is still right once the top-level dedup has run too.
+    let got = eval_bounded_path_disclosed(&edges, &form).unwrap();
+    let want = clear_text_pairs(&[h1], "ex:p | ex:p/ex:p | ex:p/ex:p/ex:p | ex:p/ex:p/ex:p/ex:p");
+    assert_eq!(pair_set(&got.vars, &got.rows), want);
+}

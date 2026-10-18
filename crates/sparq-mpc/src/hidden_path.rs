@@ -126,6 +126,7 @@
 //! nothing (`k = 1` over distinct endpoint pairs, `p?` over a single predicate
 //! with no self-loop and no repeated endpoint pair) now fail closed under PRSS.
 
+use crate::chain_odometer::ChainOdometer;
 use crate::compare::secure_equal_to_bit_through;
 use crate::field::Fp;
 use crate::oblivious_join::{
@@ -897,32 +898,6 @@ impl HiddenBoundedPath {
     }
 }
 
-/// Every fixed predicate sequence of `length` hops obtained by choosing one of the
-/// `alternatives` at each position (design §2.4). For a single-predicate step this is
-/// the one `length`-long sequence. Grows the chain set amortised (no
-/// `len * alts`-sized `with_capacity`, which could overflow on a large public unroll).
-///
-/// [`check_bounded_params`] runs first and caps the chain COUNT — `Σ_ℓ a^ℓ·|E|^ℓ`
-/// against [`MAX_CHAIN_TUPLES`] — so the number of sequences this returns is
-/// bounded. It does NOT bound their WIDTHS: a predicate IRI's length is unbounded,
-/// as are the payload arity and the endpoint terms' lengths downstream. Width caps
-/// are follow-up work and are not claimed here.
-fn predicate_chains(alternatives: &[String], length: usize) -> Vec<Vec<String>> {
-    let mut chains: Vec<Vec<String>> = vec![Vec::new()];
-    for _ in 0..length {
-        let mut next: Vec<Vec<String>> = Vec::new();
-        for prefix in &chains {
-            for alt in alternatives {
-                let mut extended = prefix.clone();
-                extended.push(alt.clone());
-                next.push(extended);
-            }
-        }
-        chains = next;
-    }
-    chains
-}
-
 /// The chain bit of ONE edge-tuple against a FIXED predicate sequence `chain`: it is
 /// the secret-shared AND of (a) every internal hop equality `[e_i.object == e_{i+1}.
 /// subject]` ([`crate::compare::secure_equal_to_bit`], never opened — exactly
@@ -1109,12 +1084,18 @@ fn build_bounded_candidates(
     let m = edges.len();
     if m > 0 {
         for length in form.min.max(1)..=form.max {
-            for chain in predicate_chains(&form.alternatives, length) {
+            // The `a^length` fixed predicate sequences, enumerated LAZILY: one
+            // chain at a time from a single reusable buffer, so the peak memory
+            // is one chain's worth of IRIs rather than every chain's
+            // (`ChainOdometer`). The order is the materialized build's order, so
+            // the per-chain draw order below is unchanged.
+            let mut chains = ChainOdometer::new(&form.alternatives, length);
+            while let Some(chain) = chains.next_chain() {
                 let mut idx = vec![0usize; length];
                 loop {
                     let tuple: Vec<&PredicatedEdge> =
                         idx.iter().map(|&i| &edges.edges[i]).collect();
-                    let bit = predicated_tuple_chain_bit(backend, source, &tuple, &chain)?;
+                    let bit = predicated_tuple_chain_bit(backend, source, &tuple, chain)?;
                     let a_term = tuple[0].subject.term.clone();
                     let b_term = tuple[length - 1].object.term.clone();
                     fold(source, &mut by_pair, a_term, b_term, bit)?;

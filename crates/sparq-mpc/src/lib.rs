@@ -179,6 +179,10 @@ pub mod auth_disclose;
 // sq-hoaj. See the module docs for the critical-honesty constraint (no
 // single-process wall-clock masquerading as an MPC latency).
 pub mod bench;
+// Lazy enumeration of a bounded property-path unroll's fixed predicate sequences,
+// shared by the disclosed (`bounded_path`) and hidden (`hidden_path`) unrolls.
+// Crate-internal: it is a memory shape, not a public surface.
+mod chain_odometer;
 // sq-py8h.1: bounded property-path over DISCLOSED global-IRI keys —
 // the crypto-free "headline federation" regime. Unrolls a bounded path
 // `?a (p){m,k} ?b` (sequence / exact {k} / range {m,k} / reflexive {0,k} /
@@ -352,6 +356,7 @@ pub use bench::{
 // sq-py8h.1: the disclosed-key bounded property-path surface.
 pub use bounded_path::{
     eval_bounded_path_disclosed, BoundedRepetition, DisclosedEdges, PathForm, PathStep,
+    MAX_PATH_FORM_ROWS,
 };
 // sq-py8h.2: the HIDDEN-intermediate exactly-`k` chain surface (the
 // cryptographic regime — intermediate node-sets never opened).
