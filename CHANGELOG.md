@@ -146,7 +146,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decides the cases it can decide — the two sides already equal, or either one an unbound variable
   — on BORROWED terms, where it used to resolve and deep-copy both sides every time; only the
   member-wise unification of two compounds still owns its two sides, and only the term actually
-  bound is copied.
+  bound is copied. On the FORWARD side, a premise atom's variable names are now minted at most once
+  for the whole atom rather than once per candidate fact, so matching a join atom against its
+  candidates no longer allocates and frees a name per bound variable per row; a name is minted on
+  the first row that actually binds its position, so a position no candidate ever binds costs
+  nothing at all.
 
   **The hasher is unchanged and the amount of hashing is unchanged.** A key is still hashed as the
   variable name's bytes under SipHash, which is what keeps a crafted document from degrading the

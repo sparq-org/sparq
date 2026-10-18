@@ -109,6 +109,7 @@ pub use model::{Rule, Term};
 pub use serialize::{RuleKind, RuleVars};
 use rustc_hash::{FxHashMap, FxHashSet};
 use sparq_core::dict::{Dict, Id};
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -2950,8 +2951,9 @@ fn match_premise_admitted(
     // instead of letting a non-delta atom do a full predicate-index scan.
     if let JoinMode::Delta(delta, k) = join {
         let mut seeds = Vec::new();
+        let keys = atom_keys(&premise[k]);
         for fact in delta {
-            if let Some(nb) = unify(&premise[k], fact, seed, &bw.truncated) {
+            if let Some(nb) = unify(&premise[k], &keys, fact, seed, &bw.truncated) {
                 if !bw.work.charge(1, &bw.truncated) {
                     return Vec::new();
                 }
@@ -3287,6 +3289,7 @@ fn match_premise_admitted(
             // Join atom: selective FactIndex lookup (no full scan) for each current binding,
             // PLUS goal-directed resolution against the backward (`<=`) rules.
             let mut next = Vec::new();
+            let keys = atom_keys(pat);
             for b in &bindings {
                 let run = &bw.truncated;
                 let (Some(s_a), Some(p_a), Some(o_a)) = (
@@ -3321,7 +3324,7 @@ fn match_premise_admitted(
                 }
                 let cands = facts.candidates(&s_a, &p_a, &o_a);
                 for fact in &cands {
-                    if let Some(nb) = unify(pat, fact, b, &bw.truncated) {
+                    if let Some(nb) = unify(pat, &keys, fact, b, &bw.truncated) {
                         // Each row is charged before it is kept ([`bounded::JoinWork`]).
                         if !bw.work.charge(1, run) {
                             return Vec::new();
@@ -3987,19 +3990,71 @@ fn rename_blanks(t: &[Term; 3], map: &FxHashMap<String, String>) -> [Term; 3] {
     [go(&t[0], map), go(&t[1], map), go(&t[2], map)]
 }
 
+/// The substitution key for each top-level variable of a premise atom, made at most ONCE
+/// per atom however many candidate facts that atom is matched against.
+///
+/// Binding a variable puts its name in the substitution, and a [`Binding`] holds that name
+/// reference-counted. Minting the name per candidate fact allocates and frees it once per
+/// bound variable per join row, and that per-row allocation is what a bare forward closure —
+/// rules over many facts, no backward rule at all — was paying for the reference-counted key:
+/// with the name made once per atom instead, that shape's allocation count, L1 data-read
+/// misses and wall clock all fall below what they were before the key was reference-counted.
+/// An atom's variable names do not change while its candidates are matched, so each row binds
+/// a CLONE of the one key — a reference-count bump, no allocation, and nothing to free while
+/// the atom is matched.
+///
+/// The key is minted on the first row that BINDS its position rather than when the atom is
+/// entered: minting all three up front measured as a cost on the recursive backward shape,
+/// which enters an atom far more often than the forward shapes do relative to how many rows
+/// it binds, and minting lazily per position costs that shape nothing.
+///
+/// This is only a cache of the name's bytes. A position with no slot — anything that is not a
+/// bindable top-level variable, including a variable nested inside a list, a quoted formula
+/// or a triple term — is bound from its own name, exactly as it was.
+type AtomKeys<'a> = [Option<(&'a str, OnceCell<Rc<str>>)>; 3];
+
+/// [`AtomKeys`] for `pat`: an empty slot for each position holding a bindable top-level
+/// variable, which the first row to bind that position fills. Allocates nothing.
+fn atom_keys(pat: &[Term; 3]) -> AtomKeys<'_> {
+    std::array::from_fn(|i| match &pat[i] {
+        Term::Var(v) if !unbindable_var(v) => Some((v.as_str(), OnceCell::new())),
+        _ => None,
+    })
+}
+
 /// Try to unify pattern triple `pat` with ground fact `f`, extending binding `b`. When the
 /// unification runs out of steps it fails, and the cut is recorded on `run`.
-fn unify(pat: &[Term; 3], f: &[Term; 3], b: &Binding, run: &Truncation) -> Option<Binding> {
+///
+/// `keys` must be [`atom_keys`] of `pat`: a position it has a slot for is a bindable top-level
+/// variable, and binds under that slot's shared key instead of a freshly made one. The
+/// positions are tried in order and the first failure stops the rest, as matching the three as
+/// a whole does.
+fn unify(
+    pat: &[Term; 3],
+    keys: &AtomKeys<'_>,
+    f: &[Term; 3],
+    b: &Binding,
+    run: &Truncation,
+) -> Option<Binding> {
     let mut nb = b.clone();
     let mut steps = bounded::StepBudget::unification();
-    match unify_all(pat, f, &mut nb, &mut steps) {
-        Some(true) => Some(nb),
-        Some(false) => None,
-        None => {
-            bounded::unification_exhausted(run);
-            None
+    for i in 0..3 {
+        let decided = match (&pat[i], &keys[i]) {
+            (Term::Var(v), Some((name, cell))) => Some(unify_var_in(v, &f[i], &mut nb, || {
+                Rc::clone(cell.get_or_init(|| Rc::from(*name)))
+            })),
+            _ => unify_term_in(&pat[i], &f[i], &mut nb, &mut steps),
+        };
+        match decided {
+            Some(true) => {}
+            Some(false) => return None,
+            None => {
+                bounded::unification_exhausted(run);
+                return None;
+            }
         }
     }
+    Some(nb)
 }
 
 /// Is `v` a quoted formula's own `@forAll` universal (GH #6754)? Such a variable is bound
@@ -4301,6 +4356,23 @@ fn unify_term(pat: &Term, val: &Term, b: &mut Binding, run: &Truncation) -> bool
     })
 }
 
+/// Unify the BINDABLE variable `v` with `val`, extending `b`: the one place a match binds a
+/// variable. `key` makes the substitution key, and is called only when the variable is not
+/// bound already and the binding is admitted — so a caller holding a ready key spends
+/// nothing on the names it does not bind.
+fn unify_var_in(v: &str, val: &Term, b: &mut Binding, key: impl FnOnce() -> Rc<str>) -> bool {
+    match b.get(v) {
+        Some(existing) => existing == val,
+        None => {
+            if !v.starts_with(PATTERN_WILDCARD) && frees_quoted_universal(val) {
+                return false;
+            }
+            b.insert(key(), val.clone());
+            true
+        }
+    }
+}
+
 /// Unify `pat` with `val`, extending `b`. Matching two quoted formulae takes steps from
 /// `steps` ([`formula_unify`]); `None` when they run out.
 fn unify_term_in(
@@ -4311,20 +4383,11 @@ fn unify_term_in(
 ) -> Option<bool> {
     Some(match (pat, val) {
         (Term::Var(v), _) if unbindable_var(v) => pat == val,
-        (Term::Var(v), _) => match b.get(v) {
-            Some(existing) => existing == val,
-            None => {
-                if !v.starts_with(PATTERN_WILDCARD) && frees_quoted_universal(val) {
-                    return Some(false);
-                }
-                // `v.as_str()`, not `v.clone()`: the key is made ONCE, straight from the
-                // name's bytes. Handing over an owned `String` made the allocation twice,
-                // because the key it becomes is a separate allocation it has to be copied
-                // into.
-                b.insert(v.as_str(), val.clone());
-                true
-            }
-        },
+        // `v.as_str()`, not `v.clone()`: the key is made straight from the name's bytes.
+        // Handing over an owned `String` made the allocation twice, because the key it
+        // becomes is a separate allocation it has to be copied into. A premise atom's
+        // candidates come through [`unify`] instead, which makes the key once per atom.
+        (Term::Var(v), _) => unify_var_in(v, val, b, || Rc::from(v.as_str())),
         // First-class lists unify STRUCTURALLY: same length, members pairwise
         // (so `(?x)` matches `(17)` binding ?x=17 — cwm/EYE list unification).
         (Term::List(ps), Term::List(vs)) => {
@@ -11171,6 +11234,174 @@ mod tests {
             ],
             "the proof steps, byte for byte"
         );
+    }
+
+    /// A premise atom's candidates unify to the SAME binding whether each top-level variable
+    /// binds under its [`atom_keys`] key or under a name made per candidate. Randomized over
+    /// atoms that exercise both of `unify`'s branches at every position: a key the table has
+    /// (a bindable top-level variable, bound and still unbound, the same variable twice so
+    /// the second occurrence must compare instead of bind, and a `?_` wildcard) and a
+    /// position it declines a key for (a constant, a quoted formula's own universal, a list,
+    /// a triple term, and a variable nested inside each of those). The reference is the
+    /// implementation this replaced, spelled out: one walk of all three positions through
+    /// `unify_all` under one budget, on a copy of the inherited binding.
+    #[test]
+    fn a_keyed_atom_unifies_what_the_unkeyed_atom_unified() {
+        fn reference(pat: &[Term; 3], f: &[Term; 3], b: &Binding, run: &Truncation) -> Option<Binding> {
+            let mut nb = b.clone();
+            let mut steps = bounded::StepBudget::unification();
+            match unify_all(pat, f, &mut nb, &mut steps) {
+                Some(true) => Some(nb),
+                Some(false) => None,
+                None => {
+                    bounded::unification_exhausted(run);
+                    None
+                }
+            }
+        }
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let var = |s: &str| Term::Var(s.to_string());
+        let names = ["x", "y", "shared"];
+        let ground: Vec<Term> = vec![
+            iri("a"),
+            iri("b"),
+            Term::Lit("7".into(), parser::XSD_INTEGER.into(), None),
+            Term::List(vec![iri("a")]),
+        ];
+        let pool: Vec<Term> = vec![
+            var("x"),
+            var("y"),
+            var("shared"),
+            Term::Var(format!("{}u", serialize::FORMULA_UNIVERSAL)),
+            Term::Var(format!("{PATTERN_WILDCARD}w")),
+            iri("a"),
+            iri("b"),
+            Term::Lit("7".into(), parser::XSD_INTEGER.into(), None),
+            Term::List(vec![var("x"), iri("a")]),
+            Term::List(vec![iri("a")]),
+            Term::Triple(Box::new([var("y"), iri("a"), iri("b")])),
+            Term::Formula(vec![[var("x"), iri("a"), iri("b")]]),
+        ];
+        // A small deterministic generator: equivalence must not depend on a seed.
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state as usize
+        };
+        let (mut same, mut bound, mut declined, mut matched, mut refused) = (0, 0, 0, 0, 0);
+        for _ in 0..6_000 {
+            let pat: [Term; 3] = std::array::from_fn(|_| pool[next() % pool.len()].clone());
+            // Half the facts are drawn from the pool, which mostly refuse — that is where a
+            // key must NOT be spent. Half are built from the pattern by grounding each
+            // top-level variable, which reaches the binding branch as often.
+            let f: [Term; 3] = if next() % 2 == 0 {
+                std::array::from_fn(|_| pool[next() % pool.len()].clone())
+            } else {
+                std::array::from_fn(|i| match &pat[i] {
+                    Term::Var(_) => ground[next() % ground.len()].clone(),
+                    t => t.clone(),
+                })
+            };
+            // Inherit a binding sometimes, so the "already bound" compare is reached.
+            let mut seed = Binding::new();
+            for n in names {
+                if next() % 3 == 0 {
+                    seed.insert(n, pool[next() % pool.len()].clone());
+                }
+            }
+            let keys = atom_keys(&pat);
+            declined += keys.iter().filter(|k| k.is_none()).count();
+            bound += keys.iter().filter(|k| k.is_some()).count();
+            let run = Truncation::top_level();
+            let got = unify(&pat, &keys, &f, &seed, &run);
+            let want = reference(&pat, &f, &seed, &Truncation::top_level());
+            assert_eq!(got, want, "pat {pat:?} fact {f:?} seed {seed:?}");
+            if got.is_some() {
+                matched += 1;
+            } else {
+                refused += 1;
+            }
+            same += 1;
+        }
+        assert_eq!(same, 6_000);
+        // Both of `unify`'s branches, and both outcomes, reached often.
+        assert!(bound > 1_000, "keyed positions reached {bound} times");
+        assert!(declined > 1_000, "unkeyed positions reached {declined} times");
+        assert!(matched > 100, "unified {matched} times");
+        assert!(refused > 100, "refused {refused} times");
+    }
+
+    /// An atom's candidates share ONE substitution key per bound position, and that key is
+    /// minted only once a row actually binds it. Both halves of what [`AtomKeys`] claims:
+    ///
+    /// - every row of a 500-candidate atom binds a key POINTER-IDENTICAL to the slot's, so
+    ///   the name is allocated once for the whole atom rather than once per row;
+    /// - an atom whose candidates all refuse leaves its slots EMPTY, so entering an atom that
+    ///   binds nothing allocates no name at all;
+    /// - a position that is not a bindable top-level variable gets no slot.
+    #[test]
+    fn an_atoms_candidates_share_one_key_minted_on_the_first_row_that_binds() {
+        let iri = |s: &str| Term::Iri(format!("http://ex/{s}"));
+        let run = Truncation::top_level();
+        let pat = [Term::Var("a".into()), iri("p"), Term::Var("b".into())];
+        let keys = atom_keys(&pat);
+
+        // The constant position is declined a slot; the two variables get an EMPTY one.
+        assert!(keys[1].is_none(), "a constant position must not take a key slot");
+        for i in [0, 2] {
+            let (name, cell) = keys[i].as_ref().expect("a bindable variable takes a slot");
+            assert_eq!(*name, if i == 0 { "a" } else { "b" });
+            assert!(cell.get().is_none(), "position {i} minted a key before any row bound it");
+        }
+
+        // 500 candidates that all match, so both positions bind on every row.
+        for i in 0..500 {
+            let fact = [iri(&format!("s{i}")), iri("p"), iri(&format!("o{i}"))];
+            let got = unify(&pat, &keys, &fact, &Binding::new(), &run).expect("must unify");
+            for (i, v) in [(0usize, "a"), (2, "b")] {
+                let (_, cell) = keys[i].as_ref().unwrap();
+                let minted = cell.get().expect("a bound position must have minted its key");
+                let (held, _) = got.map.get_key_value(v).expect("the variable must be bound");
+                assert!(
+                    Rc::ptr_eq(held, minted),
+                    "row for {v} allocated its own key instead of sharing the atom's",
+                );
+            }
+        }
+
+        // Laziness is PER POSITION, and the positions are tried in order. On candidates whose
+        // predicate does not match, `?a` at position 0 binds and then position 1 refuses, so
+        // the object's key is never needed — and is never minted.
+        let partial = atom_keys(&pat);
+        for i in 0..100 {
+            let fact = [iri(&format!("s{i}")), iri("other"), iri(&format!("o{i}"))];
+            assert!(unify(&pat, &partial, &fact, &Binding::new(), &run).is_none());
+        }
+        assert!(
+            partial[0].as_ref().unwrap().1.get().is_some(),
+            "the subject bound on every candidate, so its key must have been minted",
+        );
+        assert!(
+            partial[2].as_ref().unwrap().1.get().is_none(),
+            "the object never bound, so minting its key is work the atom did not need",
+        );
+
+        // An atom that refuses at its FIRST position mints nothing at all, so entering it
+        // for a candidate that cannot match allocates no name.
+        let lead = [iri("s"), Term::Var("a".into()), Term::Var("b".into())];
+        let none = atom_keys(&lead);
+        for i in 0..100 {
+            let fact = [iri(&format!("other{i}")), iri("p"), iri("o")];
+            assert!(unify(&lead, &none, &fact, &Binding::new(), &run).is_none());
+        }
+        for i in [1, 2] {
+            assert!(
+                none[i].as_ref().unwrap().1.get().is_none(),
+                "position {i} minted a key although no candidate ever bound it",
+            );
+        }
     }
 
     /// `BwPrefix::render` writes the bytes `format!("__bw{fold}_")` wrote. That rendering is
