@@ -368,6 +368,12 @@ fn meta_from_result(result: &sparq_engine::QueryResult) -> Result<ResourceMeta, 
 
 #[async_trait]
 impl SparqClient for EmbeddedSparqClient {
+    /// The graph is this process's: held in its memory, or opened from a directory it holds
+    /// locked for as long as the graph lives ([`Graph::open`]).
+    fn exclusive(&self) -> Result<(), SparqError> {
+        Ok(())
+    }
+
     async fn get_meta(&self, iri: &str) -> Result<ResourceMeta, SparqError> {
         // SAME query as the HTTP/in-mem paths — the injection-safe `select_meta` builder VERBATIM.
         let q = sparql::select_meta(iri)?;
@@ -1060,6 +1066,36 @@ mod tests {
                 meta("text/turtle", "blob-1", "\"e1\""),
                 "the snapshot round-trips the record"
             );
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
+    /// A directory is opened by one client at a time, whichever process: a second open (or a
+    /// save into it from another graph) fails while the first client's graph lives, and the lock
+    /// goes with the graph, on its actor's thread, not with the last handle to it.
+    #[test]
+    fn a_directory_is_opened_by_one_client_at_a_time() {
+        block_on(async {
+            let dir = std::env::temp_dir().join(format!("sparq-lws-embedded-{}", next_nonce()));
+            client().save(&dir).await.expect("snapshot written");
+            let first = EmbeddedSparqClient::open(&dir).expect("opened");
+            assert!(first.exclusive().is_ok());
+            assert!(EmbeddedSparqClient::open(&dir).is_err(), "opened twice");
+            assert!(client().save(&dir).await.is_err(), "written while open");
+            // Its own directory it may save into.
+            first.save(&dir).await.expect("saved over its own directory");
+            drop(first);
+            // The actor drops the graph, and with it the lock, once its last handle goes.
+            let mut reopened = None;
+            for _ in 0..200 {
+                if let Ok(c) = EmbeddedSparqClient::open(&dir) {
+                    reopened = Some(c);
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(reopened.is_some(), "the lock outlived the graph");
+            drop(reopened);
             let _ = std::fs::remove_dir_all(&dir);
         });
     }

@@ -690,7 +690,15 @@ impl<S: Store + 'static> LwsState<S> {
     /// Build the state: ensure the storage root and the service containers exist, put back any
     /// change a process stop cut short (see the `intents` module), and load the stored access
     /// grants, requests and subscriptions.
+    ///
+    /// Only over a store whose index is this process's alone ([`Store::exclusive`]): what the
+    /// state keeps in memory (grants, subscriptions, what it has set aside or holds) and what a
+    /// start puts back are true only while no other process writes the index. Over any other
+    /// store nothing is read or written, and the start fails.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
+        store
+            .exclusive()
+            .map_err(|e| format!("the storage cannot be served over this store: {e}"))?;
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
         if !store
@@ -2769,6 +2777,8 @@ pub(crate) mod test_store {
         pub fail_delete: Arc<AtomicBool>,
         /// Every `release` fails with a backend error, releasing nothing.
         pub fail_release: Arc<AtomicBool>,
+        /// The index is not this process's alone ([`Store::exclusive`]).
+        pub shared: Arc<AtomicBool>,
         /// `delete` of this IRI alone fails with a backend error.
         pub fail_delete_of: Arc<std::sync::Mutex<Option<String>>>,
         /// `read` of this IRI alone (or, one ending in `/`, of the members of that container)
@@ -2917,6 +2927,7 @@ pub(crate) mod test_store {
                 fences_tried: Default::default(),
                 hang_fence: Default::default(),
                 fail_release: Default::default(),
+                shared: Default::default(),
                 last_unsettled: Default::default(),
                 unsettled: Default::default(),
                 fail_step: Default::default(),
@@ -3227,6 +3238,12 @@ pub(crate) mod test_store {
         }
         async fn finish_reclaims(&self) -> ServerResult<()> {
             self.inner.finish_reclaims().await
+        }
+        fn exclusive(&self) -> ServerResult<()> {
+            if self.shared.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("shared".into()));
+            }
+            self.inner.exclusive()
         }
         async fn delete(&self, iri: &str, parent: Option<&str>) -> ServerResult<()> {
             self.step()?;

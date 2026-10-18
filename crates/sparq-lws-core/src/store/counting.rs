@@ -327,6 +327,10 @@ impl<S: SparqClient> SparqClient for CountingSparqClient<S> {
         self.inner.exists(iri).await
     }
 
+    fn exclusive(&self) -> Result<(), SparqError> {
+        self.inner.exclusive()
+    }
+
     async fn begin_reclaim(&self, blob_key: &str) -> Result<bool, SparqError> {
         let _g = self.counters.op_guard();
         // The live client: the guarded update, then the ASK that reads it back.

@@ -19,6 +19,8 @@ pub mod dictspill;
 #[cfg(feature = "elias-fano")]
 pub mod eliasfano;
 #[cfg(feature = "mmap")]
+pub mod dir_lock;
+#[cfg(feature = "mmap")]
 pub mod extsort;
 // (sq-7d3dj.18) Prefix-memoized IRI-validation fast path in FRONT of the full
 // `oxiri` RFC-3987 automaton. OPT-IN behind `iri-fast` (OFF by default) so the lean default /
@@ -145,6 +147,11 @@ pub struct Graph {
     /// in-memory graphs (the per-`apply_effects` commit/clear are then no-ops). See [`TxnJournal`].
     #[cfg(feature = "mmap")]
     txn: Option<TxnJournal>,
+    /// The exclusive lock on the directory this graph was opened from ([`dir_lock`]), held
+    /// while the graph lives: `None` for an in-memory graph, and for a named sub-graph, whose
+    /// directory is under its parent's.
+    #[cfg(feature = "mmap")]
+    lock: Option<std::sync::Arc<dir_lock::DirLock>>,
 }
 
 /// (sq-5lf) An IMMUTABLE, logically-independent point-in-time view of a
@@ -1772,6 +1779,8 @@ impl Graph {
             // (sq-ycle) In-memory graph: no parent-level redo journal.
             #[cfg(feature = "mmap")]
             txn: None,
+            #[cfg(feature = "mmap")]
+            lock: None,
         }
     }
 
@@ -1812,6 +1821,8 @@ impl Graph {
             // journal handle with the WAL, so a compressed graph stays atomically durable.
             #[cfg(feature = "mmap")]
             txn: self.txn,
+            #[cfg(feature = "mmap")]
+            lock: self.lock,
         }
     }
 
@@ -1825,8 +1836,18 @@ impl Graph {
     /// manifest so a save→open round-trip is LOSSLESS for the whole dataset (every named
     /// graph's triples + its IRI). A default-graph-only graph writes NO `named/` subtree
     /// and NO `named.bin`, so its on-disk layout is byte-identical to before this change.
+    ///
+    /// The directory is locked ([`dir_lock`]) while it is written: `WouldBlock` when another
+    /// holder has it, unless that holder is this graph, opened from it.
     #[cfg(feature = "mmap")]
     pub fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        let _held = self.lock_to_write(dir)?;
+        self.save_unlocked(dir)
+    }
+
+    /// [`save`](Self::save), the directory's lock already held (by this graph or its parent).
+    #[cfg(feature = "mmap")]
+    fn save_unlocked(&self, dir: &std::path::Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
         self.store.save(dir)?; // folds any delta-overlay into the persisted permutations
         self.dict.save_mmap(dir)?; // includes appended (delta-overlay) terms
@@ -1847,6 +1868,27 @@ impl Graph {
     /// after open to trade RAM for exactly-raw query speed instead.
     #[cfg(feature = "mmap")]
     pub fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        let _held = self.lock_to_write(dir)?;
+        self.save_compressed_unlocked(dir)
+    }
+
+    /// The lock to hold while writing into `dir`: none when this graph holds it already (it was
+    /// opened from `dir`), else `dir`'s own, taken now.
+    #[cfg(feature = "mmap")]
+    fn lock_to_write(&self, dir: &std::path::Path) -> std::io::Result<Option<dir_lock::DirLock>> {
+        if let Some(parent) = dir.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
+        let location = dir_lock::LockLocation::sibling_of(dir)?;
+        if self.lock.as_ref().is_some_and(|held| held.location() == &location) {
+            return Ok(None);
+        }
+        dir_lock::DirLock::acquire(location).map(Some)
+    }
+
+    /// [`save_compressed`](Self::save_compressed), the directory's lock already held.
+    #[cfg(feature = "mmap")]
+    fn save_compressed_unlocked(&self, dir: &std::path::Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
         self.store.save_compressed(dir)?; // folds any delta-overlay, like `save`
         self.dict.save_mmap(dir)?;
@@ -1885,9 +1927,9 @@ impl Graph {
         for (i, (_, sub)) in self.named.iter().enumerate() {
             let sub_dir = named_dir.join(i.to_string());
             if compressed {
-                sub.save_compressed(&sub_dir)?;
+                sub.save_compressed_unlocked(&sub_dir)?;
             } else {
-                sub.save(&sub_dir)?;
+                sub.save_unlocked(&sub_dir)?;
             }
         }
         // Write the manifest LAST (after every sub-graph is durable) so a crash mid-save
@@ -1945,7 +1987,7 @@ impl Graph {
         for i in 0..count {
             let (name, next) = decode_graph_name(&bytes, pos).map_err(|m| bad(&m))?;
             pos = next;
-            let sub = Graph::open(&named_dir.join(i.to_string()))?;
+            let sub = Graph::open_unlocked(&named_dir.join(i.to_string()))?;
             out.push((name, sub));
         }
         Ok(out)
@@ -1965,8 +2007,51 @@ impl Graph {
     /// A missing or wrong-sized current cache is recomputed in memory. Legacy
     /// unversioned caches are ignored because they used older validation rules.
     /// Saving to a new directory persists current cache files without changing RDF.
+    ///
+    /// The directory is locked first ([`dir_lock`], at [`LockLocation::sibling_of`]
+    /// (dir_lock::LockLocation::sibling_of) `dir`), before anything in it is recovered, read or
+    /// replayed, and stays locked while the graph lives: `WouldBlock` when another holder (another
+    /// process, or another open in this one) has it. Every open is a writable one (it replays
+    /// and truncates the logs), so there is no unlocked open.
     #[cfg(feature = "mmap")]
     pub fn open(dir: &std::path::Path) -> std::io::Result<Graph> {
+        Self::open_locked_at(dir, dir_lock::LockLocation::sibling_of(dir)?)
+    }
+
+    /// [`open`](Self::open) the store in `dir`, first saving `seed` there when `dir` holds none
+    /// (no dictionary file): the check, the save and the open under one hold of the lock, so
+    /// two processes starting at once cannot both create it.
+    #[cfg(feature = "mmap")]
+    pub fn open_or_create(dir: &std::path::Path, seed: &Graph) -> std::io::Result<Graph> {
+        if let Some(parent) = dir.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)?;
+        }
+        let location = dir_lock::LockLocation::sibling_of(dir)?;
+        let lock = std::sync::Arc::new(dir_lock::DirLock::acquire(location)?);
+        if !(dir.join("dict-meta.bin").exists() || dir.join("dict.bin").exists()) {
+            seed.save_unlocked(dir)?;
+        }
+        let mut g = Self::open_unlocked(dir)?;
+        g.lock = Some(lock);
+        Ok(g)
+    }
+
+    /// [`open`](Self::open), with the directory's lock at `location`.
+    #[cfg(feature = "mmap")]
+    pub fn open_locked_at(
+        dir: &std::path::Path,
+        location: dir_lock::LockLocation,
+    ) -> std::io::Result<Graph> {
+        let lock = std::sync::Arc::new(dir_lock::DirLock::acquire(location)?);
+        let mut g = Self::open_unlocked(dir)?;
+        g.lock = Some(lock);
+        Ok(g)
+    }
+
+    /// [`open`](Self::open), the directory's lock already held (by the caller, or the parent of
+    /// a named sub-graph).
+    #[cfg(feature = "mmap")]
+    fn open_unlocked(dir: &std::path::Path) -> std::io::Result<Graph> {
         // (review 1593) Finish or roll back any compaction directory swap that a
         // crash interrupted, so `dir` is always present (never lost in the rename window).
         recover_compaction(dir)?;
@@ -2036,6 +2121,7 @@ impl Graph {
             graph_prefix_index: std::sync::Mutex::new(None),
             wal: None,
             txn: None,
+            lock: None,
         };
         // Replay any write-ahead log into the delta-overlay (recovery after a crash or a
         // plain not-yet-compacted close), stopping cleanly at the first torn record and
@@ -2132,8 +2218,21 @@ impl Graph {
     /// Open it with [`open`](Self::open).
     ///
     /// `chunk` is the number of triples per in-memory run (e.g. 8_000_000 ≈ 96 MB of ids).
+    ///
+    /// `dir` is locked ([`dir_lock`]) while it is built, as for [`save`](Self::save).
     #[cfg(feature = "mmap")]
     pub fn build_external<R: std::io::Read + Send>(
+        reader: R,
+        format: &str,
+        dir: &std::path::Path,
+        chunk: usize,
+    ) -> Result<(), String> {
+        let _held = lock_to_build(dir)?;
+        Self::build_external_in(reader, format, dir, chunk)
+    }
+
+    #[cfg(feature = "mmap")]
+    fn build_external_in<R: std::io::Read + Send>(
         reader: R,
         format: &str,
         dir: &std::path::Path,
@@ -2145,7 +2244,7 @@ impl Graph {
         #[cfg(feature = "dict-spill")]
         if matches!(format, "ntriples" | "n-triples") {
             if let Some(cfg) = dictspill::SpillConfig::from_env() {
-                return Self::build_external_spill(reader, format, dir, chunk, &cfg);
+                return Self::build_external_spill_in(reader, format, dir, chunk, &cfg);
             }
         }
         // The SHARDED-dict N-Triples ingest (parallel dict consolidation) is the DEFAULT
@@ -2163,13 +2262,25 @@ impl Graph {
         };
         #[cfg(not(feature = "parallel"))]
         let sharded = false;
-        Self::build_external_opts(reader, format, dir, chunk, sharded)
+        Self::build_external_opts_in(reader, format, dir, chunk, sharded)
     }
 
     /// [`build_external`](Self::build_external) with the sharded-dict choice EXPLICIT
     /// (no env lookup) — for tests and embedders that need a specific path.
     #[cfg(feature = "mmap")]
     pub fn build_external_opts<R: std::io::Read + Send>(
+        reader: R,
+        format: &str,
+        dir: &std::path::Path,
+        chunk: usize,
+        sharded: bool,
+    ) -> Result<(), String> {
+        let _held = lock_to_build(dir)?;
+        Self::build_external_opts_in(reader, format, dir, chunk, sharded)
+    }
+
+    #[cfg(feature = "mmap")]
+    fn build_external_opts_in<R: std::io::Read + Send>(
         reader: R,
         format: &str,
         dir: &std::path::Path,
@@ -2428,6 +2539,17 @@ impl Graph {
         dir: &std::path::Path,
         chunk: usize,
     ) -> Result<(), String> {
+        let _held = lock_to_build(dir)?;
+        Self::build_external_quads_in(reader, format, dir, chunk)
+    }
+
+    #[cfg(feature = "mmap")]
+    fn build_external_quads_in<R: std::io::Read>(
+        reader: R,
+        format: &str,
+        dir: &std::path::Path,
+        chunk: usize,
+    ) -> Result<(), String> {
         use oxrdf::{GraphName, TripleRef};
         use std::io::Write;
 
@@ -2636,7 +2758,7 @@ impl Graph {
             std::fs::File::create(&default_path).map_err(|e| e.to_string())?;
         }
         let default_file = std::fs::File::open(&default_path).map_err(|e| e.to_string())?;
-        Self::build_external(default_file, "ntriples", dir, chunk)?;
+        Self::build_external_in(default_file, "ntriples", dir, chunk)?;
 
         // Build each NAMED graph into `dir/named/<i>/` (first-occurrence order = manifest
         // order), then commit the manifest LAST — the same ordering + commit point as
@@ -2646,7 +2768,7 @@ impl Graph {
             std::fs::create_dir_all(&named_dir).map_err(|e| e.to_string())?;
             for i in 0..names.len() {
                 let f = std::fs::File::open(spill_dir.join(format!("g{i}.nt"))).map_err(|e| e.to_string())?;
-                Self::build_external(f, "ntriples", &named_dir.join(i.to_string()), chunk)?;
+                Self::build_external_in(f, "ntriples", &named_dir.join(i.to_string()), chunk)?;
             }
             write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
         }
@@ -2666,6 +2788,18 @@ impl Graph {
     /// restriction as the sharded path). Design: research/external-dictionary.md.
     #[cfg(feature = "dict-spill")]
     pub fn build_external_spill<R: std::io::Read + Send>(
+        reader: R,
+        format: &str,
+        dir: &std::path::Path,
+        chunk: usize,
+        cfg: &dictspill::SpillConfig,
+    ) -> Result<(), String> {
+        let _held = lock_to_build(dir)?;
+        Self::build_external_spill_in(reader, format, dir, chunk, cfg)
+    }
+
+    #[cfg(feature = "dict-spill")]
+    fn build_external_spill_in<R: std::io::Read + Send>(
         reader: R,
         format: &str,
         dir: &std::path::Path,
@@ -3055,6 +3189,8 @@ impl Graph {
             // NO directory association — no WAL and no redo journal (like `wal: None`).
             #[cfg(feature = "mmap")]
             txn: None,
+            #[cfg(feature = "mmap")]
+            lock: None,
         }
     }
 
@@ -3395,7 +3531,7 @@ impl Graph {
         let mut names: Vec<Term> = Vec::with_capacity(self.named.len());
         for (i, (name, sub)) in self.named.iter_mut().enumerate() {
             sub.wal = None;
-            sub.save(&new_dir.join(i.to_string())).map_err(|e| e.to_string())?;
+            sub.save_unlocked(&new_dir.join(i.to_string())).map_err(|e| e.to_string())?;
             names.push(name.clone());
         }
         fsync_dir(&new_dir).map_err(|e| e.to_string())?;
@@ -3418,7 +3554,8 @@ impl Graph {
         // Re-open survivors from their NEW directories so each carries a correctly-indexed WAL
         // (and a fresh, correctly-targeted mmap into the swapped-in `named/`).
         for (i, name) in names.into_iter().enumerate() {
-            let sub = Graph::open(&named_dir.join(i.to_string())).map_err(|e| e.to_string())?;
+            let sub =
+                Graph::open_unlocked(&named_dir.join(i.to_string())).map_err(|e| e.to_string())?;
             self.named.push((name, sub));
         }
         Ok(())
@@ -3517,7 +3654,7 @@ impl Graph {
         std::fs::create_dir_all(&named_dir).map_err(|e| e.to_string())?;
         // Persist an empty sub-graph, then open it so it carries its own WAL.
         let empty = Graph::from_parts(Dict::new(), Vec::new());
-        empty.save(&sub_dir).map_err(|e| e.to_string())?;
+        empty.save_unlocked(&sub_dir).map_err(|e| e.to_string())?;
         // fsync `dir/named/` so the new sub-graph DIRECTORY's existence is durable before the
         // manifest names it (otherwise a crash could leave the manifest pointing at a dir whose
         // creation never reached disk).
@@ -3531,7 +3668,7 @@ impl Graph {
         let mut names: Vec<Term> = self.named.iter().map(|(n, _)| n.clone()).collect();
         names.push(name.clone());
         write_named_manifest(dir, &names).map_err(|e| e.to_string())?;
-        Graph::open(&sub_dir).map_err(|e| e.to_string())
+        Graph::open_unlocked(&sub_dir).map_err(|e| e.to_string())
     }
 
     /// (sq-7cxr, gh-44) Returns the index of the named sub-graph called `name`,
@@ -3680,7 +3817,8 @@ impl Graph {
         // away with `dir`), then run the shared crash-safe swap, writing `self`'s CURRENT image as
         // the new base. Adopt the re-opened directory-backed graph in place. (sq-ft7u)
         self.wal = None;
-        let reopened = swap_dir_to_new_base(dir, |new_dir| self.save(new_dir))
+        let lock = self.lock.clone();
+        let reopened = swap_dir_to_new_base(dir, lock, |new_dir| self.save_unlocked(new_dir))
             .map_err(|e| e.to_string())?;
         *self = reopened;
         Ok(())
@@ -3710,12 +3848,34 @@ impl Graph {
     /// PRECONDITION (caller's responsibility): NO other handle may be mutating `dir` (WAL-appending)
     /// concurrently — the caller must quiesce the durable writer that owns `dir` before invoking
     /// this, exactly as the in-process compaction swap runs only on the single writer thread.
+    ///
+    /// `dir` is locked ([`dir_lock`]) for the swap and the returned graph holds the lock: so no
+    /// graph may be open from `dir` meanwhile (`WouldBlock`). To restore the directory of a
+    /// graph that is open, use [`restore_in_place`](Self::restore_in_place).
     #[cfg(feature = "mmap")]
     pub fn restore_into_durable(
         dir: &std::path::Path,
         fresh: Graph,
     ) -> std::io::Result<Graph> {
-        swap_dir_to_new_base(dir, |new_dir| fresh.save(new_dir))
+        let lock = dir_lock::DirLock::acquire(dir_lock::LockLocation::sibling_of(dir)?)?;
+        swap_dir_to_new_base(dir, Some(std::sync::Arc::new(lock)), |new_dir| {
+            fresh.save_unlocked(new_dir)
+        })
+    }
+
+    /// [`restore_into_durable`](Self::restore_into_durable) for the directory this graph was
+    /// opened from, under the lock it holds: this graph becomes the restored one. Its log is
+    /// closed first; an error before the swap's first rename leaves this graph's directory as
+    /// it was, but this graph without its log (re-open it to write again).
+    #[cfg(feature = "mmap")]
+    pub fn restore_in_place(&mut self, fresh: Graph) -> std::io::Result<()> {
+        let dir = self.persist_dir().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "the graph is not directory-backed")
+        })?;
+        self.close_wal();
+        let lock = self.lock.clone();
+        *self = swap_dir_to_new_base(&dir, lock, |new_dir| fresh.save_unlocked(new_dir))?;
+        Ok(())
     }
 
     /// Whether this graph, or any named graph under it, is backed by a directory (opened with
@@ -3850,6 +4010,17 @@ fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
     }
 }
 
+/// The lock on `dir` to hold while a build writes it ([`dir_lock`]).
+#[cfg(feature = "mmap")]
+fn lock_to_build(dir: &std::path::Path) -> Result<dir_lock::DirLock, String> {
+    if let Some(parent) = dir.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    dir_lock::LockLocation::sibling_of(dir)
+        .and_then(dir_lock::DirLock::acquire)
+        .map_err(|e| format!("{}: {e}", dir.display()))
+}
+
 /// (sq-ft7u) The ONE crash-safe directory-base swap, factored out of
 /// [`persist_swap`](Graph::persist_swap) so the public [`restore_into_durable`](Graph::restore_into_durable)
 /// reuses the IDENTICAL rollback-safe protocol rather than copy-pasting it. `write_new_base` is
@@ -3870,7 +4041,11 @@ fn fsync_dir(dir: &std::path::Path) -> std::io::Result<()> {
 /// renames is healed by [`recover_compaction`] on the next [`open`](Graph::open), which promotes
 /// `compact-new` or rolls back to `compact-old` — `dir` is never lost.
 #[cfg(feature = "mmap")]
-fn swap_dir_to_new_base<F>(dir: &std::path::Path, write_new_base: F) -> std::io::Result<Graph>
+fn swap_dir_to_new_base<F>(
+    dir: &std::path::Path,
+    lock: Option<std::sync::Arc<dir_lock::DirLock>>,
+    write_new_base: F,
+) -> std::io::Result<Graph>
 where
     F: FnOnce(&std::path::Path) -> std::io::Result<()>,
 {
@@ -3888,7 +4063,9 @@ where
     std::fs::rename(&new_dir, dir)?;
     fsync_dir(parent)?;
     // Re-open memory-mapped from the new base (fresh, empty WAL); only then drop the old files.
-    let reopened = Graph::open(dir)?;
+    // The lock the caller holds goes with the re-opened graph.
+    let mut reopened = Graph::open_unlocked(dir)?;
+    reopened.lock = lock;
     std::fs::remove_dir_all(&old_dir).ok();
     Ok(reopened)
 }
@@ -10449,6 +10626,7 @@ mod tests {
         assert!(got.iter().any(|(s, _, _)| s.contains("s1")));
         assert!(!got.iter().any(|(s, _, _)| s.contains("s2")));
         assert_eq!(std::fs::read(&wal_path).unwrap().len(), first_batch_len, "torn tail truncated to the batch boundary");
+        drop(g);
 
         // (b) Corrupt the FIRST batch's body (flip a byte inside it): the checksum fails, so
         //     the whole batch is rejected and replay stops at the base — never a partial apply.
@@ -10909,6 +11087,7 @@ mod tests {
         assert!(dump_terms(&g).iter().any(|(s, _, _)| s.contains("/new")), "must promote compact-new");
         assert!(!dir.with_extension("compact-new").exists());
         assert!(!dir.with_extension("compact-old").exists());
+        drop(g);
 
         // (b) Crash BEFORE the new base was ready: dir missing, only compact-old present.
         //     Recovery must ROLL BACK by restoring compact-old.
@@ -11280,6 +11459,7 @@ mod tests {
         let vals: Vec<f64> =
             g2.dict.iter().filter_map(|(id, _)| g2.numeric_value(id)).collect();
         assert!(vals.contains(&1.5) && vals.contains(&2.5), "numerics must survive: {vals:?}");
+        drop(g2);
         // And save_compressed takes the same path.
         std::fs::remove_dir_all(&dir).ok();
         g.save_compressed(&dir).unwrap();
@@ -11758,6 +11938,7 @@ mod tests {
         let g = Graph::open(&dir).unwrap();
         assert!(dump_terms(&g).iter().any(|(s, _, _)| s.contains("/new")), "must promote the new base");
         assert!(!dir.with_extension("compact-new").exists() && !dir.with_extension("compact-old").exists());
+        drop(g);
         // (b) Crash BEFORE the new base was ready (dir missing, only old present): roll back.
         std::fs::remove_dir_all(&dir).ok();
         build(&dir.with_extension("compact-old"), "old");

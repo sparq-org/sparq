@@ -593,7 +593,13 @@ What the server exposes, all discoverable from the storage description
   metadata, of the room others leave in the shared quota, or of the backends' and the index's
   own work. A start
   settles every intent of its storage and releases holds as if no other process served it: one
-  storage is served by one process at a time. When putting back fails too, it is tried a few more times with the
+  storage is served by one process at a time. The LWS service starts only over a store whose
+  index is this process's alone (`Store::exclusive`): the in-memory index, or the embedded one,
+  whose directory is locked to its graph from open to drop (sparq-core's directory lock, held
+  on the graph's own thread, so it is never lost while the process runs). Over any other index
+  (a remote SPARQL endpoint, or a store that does not say) the start fails before anything is
+  read or written. A running server cannot lose the lock, so no request (health probes and CORS
+  preflight included) is ever refused for want of it. When putting back fails too, it is tried a few more times with the
   resource's locks held; if it still fails the request ends with `5xx` and the resources
   (with the containers whose listings they change) are **set aside**: answered `503` (`Retry-After`) at once, to a caller that may act on them, while a background task, holding their
   locks and no request's admission slot, keeps putting the change back, so no other request sees
