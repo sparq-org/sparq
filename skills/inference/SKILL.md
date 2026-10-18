@@ -123,8 +123,10 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // a clause, and a containment pattern no longer falls back to the EMPTY pattern (which
 // made includes hold of everything and notIncludes of nothing). Only names the ENGINE
 // minted (__bw<fold>_, __bp.) are substituted: a variable written in data or by a caller
-// belongs to the formula it is written in, so the answer never turns on what some other
-// rule happens to name a variable. Resolution STOPS at the value — an inline clause is
+// belongs to the formula it is written in, so the answer does not turn on what some other
+// rule happens to name a variable — except for a document that itself spells the engine's
+// __bw<digits>_ shape, which is read as the engine's (#6943 case 4). Resolution STOPS at
+// the value — an inline clause is
 // never spliced with a formula bound beside it, which would turn that formula from a term
 // compared by identity into a structural pattern. Untouched: a `{ … }` the rule wrote, a
 // variable with no binding (a collectAllIn template), an aggregation SCOPE (searched data,
@@ -132,8 +134,8 @@ pub fn reason_n3_terms(src: &str, base: Option<&str>) -> Result<N3Closure, Strin
 // antecedent is still refused. The projection of a backward answer resolves inside a
 // landed value too, and follows an alias chain wherever it sits — in a list or a triple
 // term as well as in a formula — for engine names only; a DAG-shaped binding unfolds
-// exponentially, so
-// the built size is checked first and the run is refused past its term-size limit. Forward
+// exponentially, so the built size is checked first and the run is refused past its
+// term-size limit. Forward
 // rules are unaffected (their atoms are never renamed), and whether a backward rule should
 // SHARE the way a forward rule does is the open half of GH #6943.
 // time: builtins return exact integers (time:inSeconds both ways; a fraction or a

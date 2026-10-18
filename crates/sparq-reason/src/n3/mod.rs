@@ -3028,8 +3028,10 @@ fn match_premise_admitted(
                 // `log:notIncludes` of nothing, a wrong answer either way. It is now
                 // prepared by [`arrived`]: the names the proof minted are resolved, the
                 // formula's own free variables are renamed apart, and the result is matched
-                // as the pattern the document configured. A value still holding an unbound
-                // minted name has no sound reading and is refused.
+                // as the pattern the document configured. A minted name left unresolved is
+                // the surrounding proof's own variable, which the match is entitled to bind;
+                // it is kept rather than renamed, which is what lets a pattern the rule built
+                // out of its own text go on sharing with the rule.
                 //
                 // Only a chain that LANDS on a formula is prepared. Any other arriving value
                 // is no pattern at all and keeps the handling it had before, as does the
@@ -4389,11 +4391,13 @@ const QUANTIFIED_ANTECEDENT: &str = "N3: universally quantified antecedents are 
 /// through another variable is a name an enclosing application OWNS, so the proof itself can
 /// still bind it.
 ///
-/// This is a name-SHAPE test, not a proof of provenance: a document may legally spell a
-/// variable `?__bw1_x`, and such a document can be refused where the same document spelling
-/// `?x` is accepted. That remaining spelling dependence is recorded in
-/// `skills/inference/SKILL.md`; closing it needs the renaming itself to carry an identity a
-/// source spelling cannot forge, which is larger than GH #6943.
+/// This is a name-SHAPE test, not a proof of provenance. A document may legally spell a
+/// variable `?__bw1_x`, and this test reads it as the engine's: [`Owned`] resolves it out of
+/// the proof's binding where it would rename `?x` apart, so the two spellings are not
+/// guaranteed to be read the same way. `a_document_that_spells_a_generated_name_is_answered_the_same`
+/// pins that they agree for the aggregation shape, and no document is known that separates
+/// them; closing the general case needs the renaming to carry an identity a source spelling
+/// cannot forge, which is GH #6943's case 4 and larger than this change.
 const MINTED_VAR: &str = "__bw";
 
 /// Is `v` a name a backward application minted ([`MINTED_VAR`], the head
@@ -4467,7 +4471,7 @@ enum Arrived {
     Local(Term),
 }
 
-/// Prepare an arriving slot: resolve, rename apart, or refuse (GH #6943).
+/// Prepare an arriving slot: resolve, then rename apart (GH #6943).
 ///
 /// `written` is the slot as the document spells it, `None` when the whole subject list
 /// arrived through one variable and `slot` is therefore itself the value that arrived. Three
