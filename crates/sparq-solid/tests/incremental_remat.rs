@@ -7,7 +7,7 @@
 //!
 //! - **equivalence**: `store.accessible(s, m)` (the diff-based session cache) and
 //!   `store.decide(s, r, m)` (the per-origin decision) equal a fresh
-//!   `AuthIndex::from_graph(&store.graph)` after EVERY step, for every session/mode/resource;
+//!   `AuthIndex::from_graph(store.graph())` after EVERY step, for every session/mode/resource;
 //! - **revoke / fail-open-critical**: a `delete_acl` (or an emptying `put_acl`) that removes a
 //!   grant is reflected on the next decision — no stale grant survives the diff invalidation;
 //! - **cross-pod isolation / soundness**: a write to pod A correctly invalidates pod B when
@@ -84,7 +84,7 @@ fn root_acl(pod_origin: &str, agents: &[&str]) -> String {
 /// Assert the store's scoped-cache view (`accessible` + `decide`) equals a from-scratch
 /// `AuthIndex::from_graph` rebuild for every probe session, mode, and resource.
 fn assert_equals_fresh_rebuild(store: &mut PodStore, step: &str) {
-    let fresh = AuthIndex::from_graph(&store.graph);
+    let fresh = AuthIndex::from_graph(store.graph());
     let resources = all_resources();
     for s in probe_sessions() {
         for mode in MODES {
@@ -376,7 +376,7 @@ fn cross_origin_foreign_subject_grant_revoke() {
     // mallory must have no more access anywhere.
     let after: Vec<String> =
         store.accessible(&mallory, Mode::Read).iter().map(|n| n.as_str().to_owned()).collect();
-    let fresh = AuthIndex::from_graph(&store.graph);
+    let fresh = AuthIndex::from_graph(store.graph());
     let want: Vec<String> =
         fresh.accessible(&mallory, Mode::Read).iter().map(|n| n.as_str().to_owned()).collect();
     assert_eq!(after, want, "cached path == fresh rebuild after foreign-subject revoke");

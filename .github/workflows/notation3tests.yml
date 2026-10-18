@@ -40,6 +40,7 @@ on:
     # Weekly, Mondays 05:11 UTC — offset from the nightly heavy-tier stagger.
     - cron: "11 5 * * 1"
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "crates/sparq-reason/src/n3/**"
       - "crates/sparq-conformance/src/notation3tests.rs"
@@ -60,6 +61,8 @@ env:
 
 jobs:
   notation3tests:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: notation3tests (advisory)
     runs-on: ubuntu-24.04
     timeout-minutes: 60

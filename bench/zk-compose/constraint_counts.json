@@ -35,6 +35,8 @@
     },
     "query": {
       "families": [
+        "scan_v2dl",
+        "join_eq_v2dl",
         "scan",
         "join_eq",
         "path_reach",
@@ -45,7 +47,7 @@
         "filter_f64_raw",
         "filter_value_dl"
       ],
-      "members": 33
+      "members": 35
     },
     "credential": {
       "families": [
@@ -1430,6 +1432,52 @@
       ],
       "invariances": []
     },
+    "scan_v2dl": {
+      "layer": "query",
+      "role": "BGP row membership over V2 dual-leaf graphs whose per-slot term encodings are RECOMPUTED in-circuit from witnessed leaf components, with the reserved-sentinel band check and the reserved language-tag check applied at those component sites, before the unchanged scan body runs. Compiled only for k=1, n=16, r=4.",
+      "parameters": [
+        "k",
+        "n",
+        "r"
+      ],
+      "members": [
+        {
+          "member": "scan_v2dl_k1_n16_r4",
+          "params": {
+            "k": 1,
+            "n": 16,
+            "r": 4
+          },
+          "circuit_size": 25095
+        }
+      ],
+      "min_circuit_size": 25095,
+      "max_circuit_size": 25095,
+      "scaling": [],
+      "invariances": []
+    },
+    "join_eq_v2dl": {
+      "layer": "query",
+      "role": "Hidden equality join between two V2 dual-leaf committed sides whose per-slot term encodings are RECOMPUTED in-circuit from witnessed leaf components, under the same component-site checks as the V2 scan member, before the unchanged join body runs. Compiled only for na=nb=16.",
+      "parameters": [
+        "na",
+        "nb"
+      ],
+      "members": [
+        {
+          "member": "join_eq_v2dl_na16_nb16",
+          "params": {
+            "na": 16,
+            "nb": 16
+          },
+          "circuit_size": 45233
+        }
+      ],
+      "min_circuit_size": 45233,
+      "max_circuit_size": 45233,
+      "scaling": [],
+      "invariances": []
+    },
     "scan": {
       "layer": "query",
       "role": "BGP row membership + per-scan completeness over k committed graphs, n slot bucket, r disclosed-row bucket.",
@@ -2488,9 +2536,9 @@
     ]
   },
   "summary": {
-    "families": 19,
-    "members": 72,
-    "snapshot_members": 72,
+    "families": 21,
+    "members": 74,
+    "snapshot_members": 74,
     "scaling_pairs": 78,
     "invariance_facts": 3
   }

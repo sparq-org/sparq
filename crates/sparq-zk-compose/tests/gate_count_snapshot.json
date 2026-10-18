@@ -23,6 +23,7 @@
     "scan_k2_n16_r8": 11261,
     "scan_k2_n64_r4": 27054,
     "scan_k2_n64_r8": 34821,
+    "scan_v2dl_k1_n16_r4": 25095,
     "filter_int_d1": 17416,
     "filter_int_d2": 17416,
     "filter_int_d3": 17416,
@@ -49,6 +50,7 @@
     "join_eq_na16_nb64": 12885,
     "join_eq_na64_nb16": 12885,
     "join_eq_na64_nb64": 18681,
+    "join_eq_v2dl_na16_nb16": 45233,
     "path_reach_d2_k1_n16": 5156,
     "path_reach_d4_k1_n16": 5497,
     "path_reach_d4_k2_n16": 8322,
@@ -89,6 +91,7 @@
     "result_v4_k2_n16_p3_r4_f0_d10": 58022
   },
   "_comment_sq_j506_result_v5": "sq-j506 (#7103): the METHOD-BOUND successful-result members. Same statement as the result_v1 f0 member of the same shape, with the credential message h5(ZKSIG_M5, root, salt, reference, SCHEME_STRING_CANONICAL_V1) in place of h4(ZKSIG_C3, root, salt, reference) -- one extra Poseidon2 input per credential, which is the whole delta against the v1 counterpart (k1 32288 -> 32290, k2 59101 -> 59104). Measured with bb gates -s ultra_honk at the baselined toolchain, on the same run in which both v1 counterparts reproduced their committed values exactly. Circuit measurements only; no audited security or end-to-end claim.",
+  "_comment_sq_j506_v2_dual_leaf": "sq-j506 (#7103): the V2 DUAL-LEAF component-witnessed members. scan_v2dl_k1_n16_r4 and join_eq_v2dl_na16_nb16 recompute each slot term encoding from witnessed V2 leaf components -- applying the reserved-sentinel band check and the reserved language-tag check at the witnessed component sites -- and then run the UNCHANGED scan_check / join_eq_check bodies, so the delta against their shipped counterparts (scan_k1_n16_r4 5991, join_eq_na16_nb16 7025) is the component recompute and its asserts. Measured with bb gates -s ultra_honk at the pinned toolchain (nargo 1.0.0-beta.21 / bb 5.0.0-nightly.20260324) on linux x86_64, in two runs -- this tree and a clean git-archive export compiled in a cold target dir -- that agreed on both numbers, and in which both shipped counterparts reproduced their committed baselines exactly. Insertions only: no existing baseline moves, because no shipped member source changed. Static circuit size only: not a runtime, soundness or external-audit claim; the verifier remains NOT-yet-sound pending external audit (sq-qhy4).",
   "_comment_gpt6_result": "[GPT-6] Additive successful-result members measured on darwin arm64 with pinned nargo beta.21 and bb 5.0.0-nightly.20260324, 2026-09-09. F=0 excludes all private integer predicate circuitry; F=2 retains lexical-to-value binding. These are circuit measurements, not externally audited security or end-to-end performance evidence.",
   "_comment_opus55_result_public": "[OPUS-5.5] beadzkp-15.1: the two version-4 public-pattern members result_v4_k{1,2}_n16_p3_r4_f0_d10 were MEASURED with `bb gates -s ultra_honk` at source 14d426bde6557ffc3621f50fd34133f8d278aea9 on a Linux x86_64 EC2 work box (NON-canonical) with the pinned nargo 1.0.0-beta.21 / bb 5.0.0-nightly.20260324, observed 2026-09-26. Exact ACIR, ABI, artifact and gate-log hashes, tool executable hashes and Noir source hashes are in bench/zk-compose/result_public_gates.json and cross-checked by bench/zk-compose/scripts/verify_result_evidence.py. The same run re-measured every result_v1/v2/v3 and filter_int_d1..d4 member equal to its existing baseline, so no existing value changed. Static circuit size only: not a runtime, soundness or external-audit claim; the verifier remains NOT-yet-sound pending external audit (sq-qhy4)."
 }

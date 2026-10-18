@@ -1,0 +1,8 @@
+[package]
+name = "scan_v2dl_k1_n16_r4"
+type = "bin"
+authors = ["sparq"]
+
+[dependencies]
+sparq_zk_compose_core = { path = "../compose_core" }
+sparq_dual_leaf_v2 = { path = "../../dual-leaf-v2" }

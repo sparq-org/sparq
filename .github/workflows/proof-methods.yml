@@ -31,6 +31,8 @@ env:
 
 jobs:
   test:
+    # Off draft PR heads: ready_for_review runs this lane on the head that will merge.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     name: proof-methods tests
     runs-on: ubuntu-latest
     timeout-minutes: 45

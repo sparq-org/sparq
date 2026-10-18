@@ -281,7 +281,7 @@ pub struct LiveValues<'store> {
 impl LiveValues<'_> {
     /// Returns the collection's current RDF object terms.
     pub fn values(&self) -> Vec<Term> {
-        let graph = &self.store.graph;
+        let graph = self.store.graph();
         let Some(pattern) = graph.pattern(Some(&self.subject), Some(&self.predicate), None) else {
             return Vec::new();
         };
