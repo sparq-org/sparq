@@ -154,6 +154,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **sparq-lws-core (notifications):** subscription expiry is decided against a durable
+  high-water time stored in the index, so a restart with the clock stepped back does not revive
+  an expired subscription. On the first start after upgrading, and after a restore that drops
+  index-only records, every subscription with an `expires` is removed and its subscriber must
+  subscribe again; subscriptions without one are kept. Notifications now start only over a store
+  that can raise that time atomically (the in-memory and embedded indexes); `LwsState::new`
+  fails over any other. While the time cannot be stored, notification endpoints answer `503`
+  and nothing is delivered.
+
 - **sparq-zk-compose / zk (sq-j506, #7103):** the `DualLeafV2` **component-witnessed** scan and
   hidden-join circuit members, and a **method-aware** pattern-constant encoder. Two NEW Noir
   members, `scan_v2dl_k1_n16_r4` and `join_eq_v2dl_na16_nb16`, recompute each graph's per-slot

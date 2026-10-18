@@ -262,9 +262,17 @@ impl<S: Store> Store for Tracked<S> {
         self.inner.read_marker(iri).await
     }
 
+    fn raises_markers(&self) -> bool {
+        self.inner.raises_markers()
+    }
+
     /// A marker shows in no listing, so it moves no snapshot.
-    async fn write_marker(&self, iri: &str, value: &str) -> ServerResult<()> {
-        self.inner.write_marker(iri, value).await
+    async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+        self.inner.raise_marker(iri, value).await
+    }
+
+    async fn reset_marker(&self, iri: &str, value: i64) -> ServerResult<()> {
+        self.inner.reset_marker(iri, value).await
     }
 
     async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {

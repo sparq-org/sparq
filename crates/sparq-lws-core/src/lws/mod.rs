@@ -691,6 +691,9 @@ impl<S: Store + 'static> LwsState<S> {
     /// change a process stop cut short (see the `intents` module), and load the stored access
     /// grants, requests and subscriptions.
     pub async fn new(store: S, cfg: LwsConfig) -> Result<Self, String> {
+        // Refused before anything is read or written: notifications keep a time the store must
+        // raise atomically.
+        notify::refuse_without_atomic_markers(&store)?;
         let http = fetch_client(&cfg)?;
         let root = cfg.storage();
         if !store
@@ -2866,14 +2869,21 @@ pub(crate) mod test_store {
         /// Once [`FlakyStore::fail_step`] has failed a step, every later step fails too: the
         /// store is gone from then on, as for a process that stops there.
         pub dead_after: Arc<AtomicBool>,
-        /// `write_marker` fails with a backend error.
+        /// `raise_marker` and `reset_marker` fail with a backend error.
         pub fail_marker_write: Arc<AtomicBool>,
-        /// How many `write_marker` calls went through.
+        /// How many `raise_marker` and `reset_marker` calls were made, failed ones too.
         pub marker_writes: Arc<std::sync::atomic::AtomicUsize>,
+        /// The store says it cannot raise a marker atomically.
+        pub no_atomic_markers: Arc<AtomicBool>,
         fired: Arc<AtomicBool>,
     }
 
     impl FlakyStore {
+        /// See `CompositeStore::plant_marker`.
+        pub async fn plant_marker(&self, iri: &str, value: &str) {
+            self.inner.plant_marker(iri, value).await
+        }
+
         pub fn new() -> Self {
             Self::with_limits(crate::store::InMemoryStoreLimits::default())
         }
@@ -2928,6 +2938,7 @@ pub(crate) mod test_store {
                 dead_after: Default::default(),
                 fail_marker_write: Default::default(),
                 marker_writes: Default::default(),
+                no_atomic_markers: Default::default(),
                 fired: Default::default(),
             }
         }
@@ -3332,13 +3343,24 @@ pub(crate) mod test_store {
         async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
             self.inner.read_marker(iri).await
         }
-        async fn write_marker(&self, iri: &str, value: &str) -> ServerResult<()> {
+        fn raises_markers(&self) -> bool {
+            !self.no_atomic_markers.load(Ordering::SeqCst) && self.inner.raises_markers()
+        }
+        async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+            self.marker_writes.fetch_add(1, Ordering::SeqCst);
+            self.step()?;
             if self.fail_marker_write.load(Ordering::SeqCst) {
                 return Err(ServerError::Storage("disk on fire".into()));
             }
-            self.inner.write_marker(iri, value).await?;
+            self.inner.raise_marker(iri, value).await
+        }
+        async fn reset_marker(&self, iri: &str, value: i64) -> ServerResult<()> {
             self.marker_writes.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+            self.step()?;
+            if self.fail_marker_write.load(Ordering::SeqCst) {
+                return Err(ServerError::Storage("disk on fire".into()));
+            }
+            self.inner.reset_marker(iri, value).await
         }
         async fn list_children(&self, container: &str) -> ServerResult<Vec<ValidatedChildIri>> {
             if self.fail_list.load(Ordering::SeqCst)

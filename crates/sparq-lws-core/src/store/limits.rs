@@ -15,6 +15,21 @@ pub const DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT: usize = 4_096;
 /// both are built.
 pub const SERVICE_POOL_PATH: &str = "/.lws/subscriptions/";
 
+/// The fragment, on the service pool's container ([`SERVICE_POOL_PATH`]), of the one marker the
+/// notification service keeps there ([`is_service_marker`]).
+pub const SERVICE_MARKER_FRAGMENT: &str = "#high-water";
+
+/// Whether `iri` names the notification service's marker: the service pool's container with
+/// [`SERVICE_MARKER_FRAGMENT`]. A storage has one, and its index entry has a slot of its own,
+/// admitted apart from every ceiling, so storing it never waits on room (no request can name it:
+/// it is a fragment).
+pub fn is_service_marker(iri: &str) -> bool {
+    iri.split_once("://")
+        .and_then(|(_, rest)| rest.find('/').map(|at| &rest[at..]))
+        .and_then(|path| path.strip_prefix(SERVICE_POOL_PATH))
+        .is_some_and(|rest| rest == SERVICE_MARKER_FRAGMENT)
+}
+
 /// Default stored-entry ceiling for the service pool ([`in_service_pool`]).
 ///
 /// The pool is capacity of its own, apart from the content ceilings: records in it are admitted

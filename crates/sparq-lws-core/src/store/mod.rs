@@ -49,10 +49,10 @@ pub use embedded::EmbeddedSparqClient;
 #[cfg(all(feature = "http-sparq", not(target_arch = "wasm32")))]
 pub use http::{HttpSparqClient, SparqHttpError};
 pub use limits::{
-    in_service_pool, is_hold_record, is_pooled_blob_key, InMemoryStoreLimits, StoreUsage,
-    DEFAULT_IN_MEMORY_MAX_POOL_BYTES, DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT,
+    in_service_pool, is_hold_record, is_pooled_blob_key, is_service_marker, InMemoryStoreLimits,
+    StoreUsage, DEFAULT_IN_MEMORY_MAX_POOL_BYTES, DEFAULT_IN_MEMORY_MAX_POOL_RESOURCE_COUNT,
     DEFAULT_IN_MEMORY_MAX_RESOURCE_COUNT, DEFAULT_IN_MEMORY_MAX_TOTAL_BYTES, POOLED_BLOB_KEY_MARK,
-    SERVICE_POOL_PATH,
+    SERVICE_MARKER_FRAGMENT, SERVICE_POOL_PATH,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use reconcile::spawn_periodic;
@@ -66,8 +66,14 @@ pub use sparql::{BodyObject, BuildError};
 
 use crate::error::{ServerError, ServerResult};
 
-/// The content type of an index record [`Store::write_marker`] keeps: a marker, with no bytes.
-const MARKER_TYPE: &str = "application/x-sparq-marker";
+/// A failed marker write, as the store reports it.
+fn marker_error(e: SparqError) -> ServerError {
+    match e {
+        SparqError::QuotaExceeded => ServerError::InsufficientStorage,
+        SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
+        other => ServerError::Storage(format!("{other}")),
+    }
+}
 
 /// A resource as the LDP handler sees it: bytes + the authoritative metadata.
 #[derive(Debug, Clone)]
@@ -325,24 +331,46 @@ pub trait Store: Send + Sync {
         ))
     }
 
-    /// The small value [`write_marker`](Store::write_marker) last stored under `iri`, or `None`
-    /// when none is. A record under `iri` that is not a marker reads as an empty value.
+    /// The value last stored under `iri` by [`raise_marker`](Store::raise_marker), as written,
+    /// or `None` when none is. A record under `iri` that is not a marker reads as an empty value.
     ///
-    /// The default refuses, as [`write_marker`](Store::write_marker) does.
+    /// The default refuses, as [`raise_marker`](Store::raise_marker) does.
     async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
         let _ = iri;
         Err(ServerError::Storage("this store keeps no markers".into()))
     }
 
-    /// Store a small value under `iri`, replacing what it held in one step: kept in the index
-    /// alone, with no bytes, so it takes no blob capacity, and once one is stored a replacement
-    /// needs no capacity at all. An `iri` no request can name (a fragment) keeps it out of every
-    /// listing and every request's reach. A write that fails may still have landed.
+    /// Whether [`raise_marker`](Store::raise_marker) is atomic here. The default is `false`.
+    fn raises_markers(&self) -> bool {
+        false
+    }
+
+    /// Raise the time stored under `iri` to `value`, unless a later one is stored, in one
+    /// indivisible step under the index's own write lock, and return the time stored once it is
+    /// done. A raise never lowers what is stored, whatever order raises land in: one that fails
+    /// and lands late is a no-op once a later time is stored. With nothing stored under `iri`,
+    /// or nothing that reads as a time, `value` is stored. The value is kept in the index alone,
+    /// with no bytes, so it takes no blob capacity.
     ///
-    /// The default refuses: a store that cannot keep one apart from its bytes says so.
-    async fn write_marker(&self, iri: &str, value: &str) -> ServerResult<()> {
+    /// The default refuses: a store that cannot raise atomically says so.
+    async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
         let _ = (iri, value);
-        Err(ServerError::Storage("this store keeps no markers".into()))
+        Err(ServerError::Storage(
+            "this store cannot raise a marker atomically".into(),
+        ))
+    }
+
+    /// Store `value` under `iri` as a marker in one step, whatever is stored there, earlier or
+    /// later: the one write that may lower a marker, for a start that finds the stored one
+    /// unusable and has removed what it decided ([`raise_marker`](Store::raise_marker) keeps
+    /// every other write from lowering it).
+    ///
+    /// The default refuses, as [`raise_marker`](Store::raise_marker) does.
+    async fn reset_marker(&self, iri: &str, value: i64) -> ServerResult<()> {
+        let _ = (iri, value);
+        Err(ServerError::Storage(
+            "this store cannot raise a marker atomically".into(),
+        ))
     }
 
     /// [`list_children`](Store::list_children) while it fits (see
@@ -738,6 +766,16 @@ impl<S: SparqClient, B: BlobStore> CompositeStore<S, B> {
 // The concrete wasm/dev-store pair exposes one combined limits and usage view without
 // widening the production backend traits, whose remote stores have backend-specific quota models.
 impl CompositeStore<InMemorySparqClient, InMemoryBlobStore> {
+    /// Store `value` under `iri` as a marker as it is, whatever is stored there: what a test
+    /// plants to stand for an earlier, or a damaged, one.
+    #[cfg(test)]
+    pub(crate) async fn plant_marker(&self, iri: &str, value: &str) {
+        self.sparq
+            .put_meta(iri, sparq::marker_meta(value))
+            .await
+            .expect("planted");
+    }
+
     /// Build a bounded in-memory store with the same limits enforced at both storage seams.
     pub fn in_memory_with_limits(limits: InMemoryStoreLimits) -> Self {
         Self::new(
@@ -1163,34 +1201,35 @@ impl<S: SparqClient, B: BlobStore> Store for CompositeStore<S, B> {
 
     async fn read_marker(&self, iri: &str) -> ServerResult<Option<String>> {
         match self.sparq.get_meta(iri).await {
-            Ok(m) if m.content_type == MARKER_TYPE && m.blob_key.is_empty() => Ok(Some(m.etag)),
+            Ok(m) if sparq::is_marker(&m) => Ok(Some(m.etag)),
             Ok(_) => Ok(Some(String::new())),
             Err(SparqError::NotFound) => Ok(None),
             Err(e) => Err(ServerError::Storage(format!("{e}"))),
         }
     }
 
-    async fn write_marker(&self, iri: &str, value: &str) -> ServerResult<()> {
-        // The index record alone, pointing at no bytes: the value rides in its tag.
-        let meta = ResourceMeta {
-            content_type: MARKER_TYPE.to_string(),
-            blob_key: String::new(),
-            etag: value.to_string(),
-            last_modified: None,
-        };
-        let previous = self
-            .sparq
-            .replace_meta(iri, meta)
+    fn raises_markers(&self) -> bool {
+        self.sparq.raises_markers()
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> ServerResult<i64> {
+        self.sparq
+            .raise_marker(iri, value)
             .await
-            .map_err(|e| match e {
-                SparqError::QuotaExceeded => ServerError::InsufficientStorage,
-                SparqError::Unsettled { detail, fence } => ServerError::Unsettled { detail, fence },
-                other => ServerError::Storage(format!("{other}")),
-            })?;
-        if let Some(old) = previous.filter(|old| !old.blob_key.is_empty()) {
-            self.reclaim_blob(&old.blob_key).await;
+            .map_err(marker_error)
+    }
+
+    async fn reset_marker(&self, iri: &str, value: i64) -> ServerResult<()> {
+        if !self.sparq.raises_markers() {
+            return Err(ServerError::Storage(
+                "this store cannot raise a marker atomically".into(),
+            ));
         }
-        Ok(())
+        // One record put: the index admits a marker's record apart from every ceiling.
+        self.sparq
+            .put_meta(iri, sparq::marker_meta(&value.to_string()))
+            .await
+            .map_err(marker_error)
     }
 
     async fn read_plan(&self, target: &str, acl_candidates: &[String]) -> ServerResult<ReadPlan> {

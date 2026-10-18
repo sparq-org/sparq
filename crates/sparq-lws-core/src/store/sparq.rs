@@ -271,6 +271,26 @@ pub trait SparqClient: Send + Sync {
         ))
     }
 
+    /// Whether [`raise_marker`](SparqClient::raise_marker) is atomic here. The default is
+    /// `false`.
+    fn raises_markers(&self) -> bool {
+        false
+    }
+
+    /// Raise the time stored as a marker under `iri` to `value`, unless a later one is stored,
+    /// reading and writing in one step under this index's own write lock, and return the time
+    /// stored once it is done (see `Store::raise_marker`). The marker is an index record with no
+    /// blob, its value in its tag.
+    ///
+    /// The default refuses: a client whose read and write are separate requests (the HTTP one)
+    /// cannot keep a late, lower raise from landing over a later one.
+    async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        let _ = (iri, value);
+        Err(SparqError::Backend(
+            "this index cannot raise a marker atomically".into(),
+        ))
+    }
+
     async fn list_children(&self, container: &str) -> Result<Vec<String>, SparqError>;
 
     /// [`list_children`](SparqClient::list_children) while it fits: at most
@@ -358,6 +378,30 @@ impl Default for InMemorySparqClient {
     }
 }
 
+/// The content type of a marker ([`SparqClient::raise_marker`]): an index record with no bytes,
+/// its value in its tag.
+pub(crate) const MARKER_TYPE: &str = "application/x-sparq-marker";
+
+/// The index record of a marker holding `value`.
+pub(crate) fn marker_meta(value: &str) -> ResourceMeta {
+    ResourceMeta {
+        content_type: MARKER_TYPE.to_string(),
+        blob_key: String::new(),
+        etag: value.to_string(),
+        last_modified: None,
+    }
+}
+
+/// Whether `meta` is a marker's record.
+pub(crate) fn is_marker(meta: &ResourceMeta) -> bool {
+    meta.content_type == MARKER_TYPE && meta.blob_key.is_empty()
+}
+
+/// The time a marker's record holds, when it is one and holds one.
+pub(crate) fn marker_time(meta: &ResourceMeta) -> Option<i64> {
+    is_marker(meta).then(|| meta.etag.parse().ok()).flatten()
+}
+
 /// The metadata records, with how many of them are in the service pool
 /// ([`super::in_service_pool`]) kept as they change, so admission can hold the pool to its own
 /// ceiling without walking the map.
@@ -367,6 +411,9 @@ struct Meta {
     pooled: usize,
     /// Records of holds ([`super::is_hold_record`]), admitted apart from every ceiling.
     holds: usize,
+    /// Notification markers ([`super::is_service_marker`]), each in a slot of its own, admitted
+    /// apart from every ceiling and counted in none.
+    markers: usize,
 }
 
 impl Meta {
@@ -392,24 +439,33 @@ impl Meta {
         self.holds
     }
 
+    /// Notification markers.
+    fn markers(&self) -> usize {
+        self.markers
+    }
+
     fn values(&self) -> std::collections::hash_map::Values<'_, String, ResourceMeta> {
         self.map.values()
     }
 
     fn insert(&mut self, iri: String, meta: ResourceMeta) -> Option<ResourceMeta> {
-        let pooled = super::in_service_pool(&iri);
+        let marker = super::is_service_marker(&iri);
+        let pooled = super::in_service_pool(&iri) && !marker;
         let hold = super::is_hold_record(&iri);
         let replaced = self.map.insert(iri, meta);
         if replaced.is_none() {
             self.pooled += usize::from(pooled);
             self.holds += usize::from(hold);
+            self.markers += usize::from(marker);
         }
         replaced
     }
 
     fn remove(&mut self, iri: &str) -> Option<ResourceMeta> {
         let gone = self.map.remove(iri)?;
-        if super::in_service_pool(iri) {
+        if super::is_service_marker(iri) {
+            self.markers -= 1;
+        } else if super::in_service_pool(iri) {
             self.pooled -= 1;
         }
         if super::is_hold_record(iri) {
@@ -461,9 +517,13 @@ impl InMemorySparqClient {
     ///
     /// A record in the service pool ([`super::in_service_pool`]) is admitted against the pool's
     /// own ceiling and counts towards nothing else, so no number of them makes a write of
-    /// content fail.
+    /// content fail. The notification marker ([`super::is_service_marker`]) has a slot of its
+    /// own, as holds do: however full the pool, it is admitted.
     fn admit_resource(&self, index: &Index, iri: &str) -> Result<(), SparqError> {
-        if index.meta.contains_key(iri) || super::is_hold_record(iri) {
+        if index.meta.contains_key(iri)
+            || super::is_hold_record(iri)
+            || super::is_service_marker(iri)
+        {
             return Ok(());
         }
         let pooled = index.meta.pooled();
@@ -471,7 +531,7 @@ impl InMemorySparqClient {
             (pooled, self.limits.max_pool_resource_count)
         } else {
             (
-                index.meta.len() - pooled - index.meta.holds(),
+                index.meta.len() - pooled - index.meta.holds() - index.meta.markers(),
                 self.limits.max_resource_count,
             )
         };
@@ -521,6 +581,27 @@ impl SparqClient for InMemorySparqClient {
             .map_err(|_| SparqError::Backend("poisoned".into()))?;
         self.admit_resource(&guard, iri)?;
         Ok(guard.meta.insert(iri.to_string(), meta))
+    }
+
+    fn raises_markers(&self) -> bool {
+        true
+    }
+
+    async fn raise_marker(&self, iri: &str, value: i64) -> Result<i64, SparqError> {
+        // Read and written under the one index lock: no other write lands in between.
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|_| SparqError::Backend("poisoned".into()))?;
+        let stored = guard.meta.get(iri).and_then(marker_time);
+        let raised = stored.map_or(value, |t| t.max(value));
+        if stored != Some(raised) {
+            self.admit_resource(&guard, iri)?;
+            guard
+                .meta
+                .insert(iri.to_string(), marker_meta(&raised.to_string()));
+        }
+        Ok(raised)
     }
 
     async fn exists(&self, iri: &str) -> Result<bool, SparqError> {

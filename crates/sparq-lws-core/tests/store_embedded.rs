@@ -721,3 +721,20 @@ async fn concurrent_delete_if_empty_vs_create_child_never_leaves_a_torn_state() 
         }
     }
 }
+
+/// A marker raise is one step on the engine: a later raise to an earlier time is a no-op, and
+/// the raise needs no blob.
+#[tokio::test]
+async fn a_marker_raise_never_lowers_what_is_stored() {
+    let store = store();
+    let iri = "https://pod.example/.lws/subscriptions/#high-water";
+    assert!(store.raises_markers());
+    assert_eq!(store.read_marker(iri).await.unwrap(), None);
+    assert_eq!(store.raise_marker(iri, 300).await.unwrap(), 300);
+    assert_eq!(store.raise_marker(iri, 200).await.unwrap(), 300);
+    assert_eq!(
+        store.read_marker(iri).await.unwrap().as_deref(),
+        Some("300")
+    );
+    assert_eq!(store.raise_marker(iri, 400).await.unwrap(), 400);
+}

@@ -335,25 +335,43 @@ progress: removals contend with requests for the store and its index, and a stor
 answers delays them indefinitely. A start removes every expired subscription it loads.
 **Expiry is decided by a stored time.** The notification service keeps a wall-clock high-water
 mark (seconds since the epoch), and a subscription is expired once its `expires` is at or before
-the later of the clock and that mark. Before anything outside sees a subscription expire (a read
-of it answered `404`, a listing that leaves it out, its removal, a delivery stopped), a time at
-or past its expiry is stored as the mark, so a start whose clock was stepped back still finds it
-expired. The mark is one small record, replaced in one step and only ever raised, kept in the
-store's index alone (`Store::write_marker`, under a fragment of the subscriptions container that
-no request can name), so storing it needs no blob capacity even with the subscription pool full;
-it is written at most once for each second in which a subscription is seen to expire. A request
-whose answer would show an expiry the store will not take answers `503`. While the mark cannot be
-stored, no subscription with an expiry has a delivery made (those without one go on), and the
-expiry sweeper tries the write again. A start that finds no mark, or one that is not a time,
-while subscriptions with an expiry are stored expires every one of them (their subscribers may
-subscribe again), and stores a mark only once they are all removed; a fresh storage simply has
-one stored. Removal of an expired subscription is plain, retryable cleanup with nothing written
-first: a removal that fails, is cut short or whose outcome is unknown leaves it expired, and it
-is tried again. Expiry is decided again under the removal's locks, so a subscriber's `DELETE` of
-a subscription that expires while it waits answers `404`, as one already expired does.
-**Residual:** a stop between the clock passing an expiry and the mark being stored, followed by
-a start with the clock stepped back before it, serves that subscription again; nothing outside
-saw it expire. WebSocket subscriptions have no expiry latch: their receive tokens are held in
+the later of the clock and that mark. Every expiry decision goes through one function that reads
+the clock once: before anything outside sees a subscription expire (a read of it answered `404`,
+a listing that leaves it out, its removal, a delivery stopped), a time at or past its expiry is
+stored as the mark, so a start whose clock was stepped back still finds it expired. The mark is
+one small record in the store's index alone (`Store::raise_marker`, under a fragment of the
+subscriptions container that no request can name), raised in one step under the index's own
+write lock, so a raise that lands late never lowers it; it needs no blob capacity, and its index
+entry has a slot of its own, admitted however full the subscription pool is. It is written only
+when a delivery, a request or the expiry sweeper finds a subscription past its expiry by the clock
+and not yet by the mark (at most once for each such second, as concurrent raises wait on one
+another); the choice of which subscriptions an event goes to reads only the stored mark and
+writes nothing. Notifications start only
+over a store whose raise is atomic (the in-memory and embedded indexes); over any other,
+`LwsState::new` fails before reading or writing anything. **When a raise fails, the service
+halts:** no delivery to any subscription, every request to `/.lws/subscriptions/` answers `503`,
+and no subscription is removed, until the expiry sweeper's retry stores the latest time any
+decision needed (never an earlier clock). While halted, requests attempt no write of their own:
+the sweeper alone retries, waiting longer after each failure (up to ten minutes), and logs at
+the first failure and at each doubling of their count (`Notifier::high_water_failures` and
+`Notifier::paused` report it). A start that finds no mark, or one that is not a time, while
+subscriptions with an expiry are stored expires every one of them (their subscribers may
+subscribe again), and stores a mark only once they are all removed (what the start could not
+remove, the sweeper removes first); no subscription is created until a mark is stored. **On the
+first start after upgrading to a release with this mark, and after a restore that drops
+index-only records, every subscription with an expiry is removed this way and its subscriber
+must subscribe again.** A mark more than 24 hours ahead of the clock (one stored while the
+clock had jumped forward) is taken as unreadable, with a warning in the log: subscriptions with
+an expiry are removed and the clock is stored over it. To recover from a clock that jumped
+forward, correct the clock and restart; nothing else is needed, and the subscribers of
+time-limited subscriptions resubscribe. Removal of an expired subscription is plain, retryable cleanup with
+nothing written first: a removal that fails, is cut short or whose outcome is unknown leaves it
+expired, and it is tried again. Expiry is decided again under the removal's locks, so a
+subscriber's `DELETE` of a subscription that expires while it waits answers `404`, as one
+already expired does. **Residual:** a halt shows no expiry, so a subscription never durably
+expired (a stop between the clock passing its expiry and the mark being stored, or a halt) may
+be delivered to again after a restart whose clock was stepped back before its expiry; nothing
+outside saw it expire. WebSocket subscriptions have no expiry latch: their receive tokens are held in
 memory and expire by the process's monotonic clock, and none survives a restart. A
 subscriber's conditional subscription create compares its own listing, and holds only that
 listing (and the container, shared) while it is evaluated and until the new subscription is
