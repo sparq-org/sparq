@@ -590,7 +590,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clause the proof built from the rule's own terms still shares them. A bound clause
   carrying a formula-level `@forAll` is still refused, as the inline one is. Forward rules,
   containment patterns (`log:includes` / `log:notIncludes` / `log:supports`) and every name
-  the chainer mints are unchanged.
+  the chainer mints are all unchanged.
 
 - **sparq-reason (N3):** with a `{ … }` formula (or `{}`) as the scope, a `log:includes`
   / `log:notIncludes` / `log:supports` pattern given through a variable DIRECTLY bound to

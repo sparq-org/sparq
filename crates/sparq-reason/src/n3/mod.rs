@@ -3728,11 +3728,15 @@ fn rename_vars(t: &Term, prefix: &str) -> Term {
 /// variable the document wrote is renamed exactly as [`rename_vars`] renamed the
 /// application's own atoms, so the two are one namespace and share one set of bindings.
 ///
-/// Two kinds of name are left alone, and between them they are why this is not simply
-/// [`rename_vars`]:
-/// - a quoted formula's own universal (`__ua.<iri>`), which is bound inside its formula
-///   and keeps its own scope, exactly as [`rename_vars`] leaves it (GH #6754);
-/// - a name the chainer already MINTED ([`serialize::backward_renamed`]). A value built by
+/// Two kinds of name are left alone:
+/// - a quoted formula's own FORMULA-level universal ([`quoted_universal`],
+///   `__uf.<n>.<iri>`), which is bound inside its formula and keeps its own scope —
+///   exactly as [`rename_vars`] leaves it (GH #6754). A DOCUMENT-level universal
+///   (`__ua.<iri>`) is renamed, again exactly as [`rename_vars`] renames it, so a clause
+///   carrying one is treated as the inline one is (both are refused as a quantified
+///   antecedent, [`quantified_clause`]);
+/// - a name the chainer already MINTED ([`serialize::backward_renamed`]) — the one thing
+///   this does that [`rename_vars`] does not. A value built by
 ///   an application — this one's, or an enclosing one's — already carries that
 ///   application's names, and those names are what its bindings are held under: renaming
 ///   them again would point them at a variable nothing has bound and lose the value.
