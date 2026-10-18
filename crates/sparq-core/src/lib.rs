@@ -1848,6 +1848,7 @@ impl Graph {
     /// and NO `named.bin`, so its on-disk layout is byte-identical to before this change.
     #[cfg(feature = "mmap")]
     pub fn save(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        self.refuse_unsafe_save_destination(dir)?;
         std::fs::create_dir_all(dir)?;
         self.store.save(dir)?; // folds any delta-overlay into the persisted permutations
         self.dict.save_mmap(dir)?; // includes appended (delta-overlay) terms
@@ -1868,6 +1869,7 @@ impl Graph {
     /// after open to trade RAM for exactly-raw query speed instead.
     #[cfg(feature = "mmap")]
     pub fn save_compressed(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        self.refuse_unsafe_save_destination(dir)?;
         std::fs::create_dir_all(dir)?;
         self.store.save_compressed(dir)?; // folds any delta-overlay, like `save`
         self.dict.save_mmap(dir)?;
@@ -1890,6 +1892,61 @@ impl Graph {
     /// `named/` subtree so a re-save into the same directory cannot leave orphaned old
     /// sub-graphs behind; when there are none we remove both the subtree and the manifest
     /// so a graph that lost all its named graphs persists as a clean default-only directory.
+    /// (sq-ycle) Refuse a save destination that a save would DESTROY state in. Two
+    /// cases, both of which silently lost acknowledged data before:
+    ///
+    /// * the destination is a directory some graph in THIS tree is itself backed by — a save
+    ///   over its own live backing files rewrites the base its mappings are reading, and
+    ///   [`save_named`](Self::save_named) additionally removes the `named/` sub-tree it is in the
+    ///   middle of walking;
+    /// * the destination holds a RETAINED journal frame (a non-empty `txn.log`, in the store root
+    ///   or in any child under it) — a committed frame that the next `open` of that store has to
+    ///   replay. A save removes the sub-tree and overwrites the base, so the frame would be
+    ///   dropped on the floor, with the commit already acknowledged to its caller.
+    ///
+    /// This is a check on the DESTINATION only: saving a durable graph to a FRESH directory, and
+    /// re-saving over a store with an empty journal, both behave exactly as before. The wider
+    /// question of which destinations a durable writer may route a save to belongs with the
+    /// writer lock (PR #7136) and the versioned layout.
+    #[cfg(feature = "mmap")]
+    fn refuse_unsafe_save_destination(&self, dir: &std::path::Path) -> std::io::Result<()> {
+        let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let target = canon(dir);
+        let mut mine = Vec::new();
+        self.backing_dirs(&mut mine);
+        if mine.iter().any(|d| canon(d) == target) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "save refused: {} is the live backing directory of this graph (or of one of its named graphs); save to a fresh directory",
+                    dir.display()
+                ),
+            ));
+        }
+        if let Some(held) = retained_journal_under(dir) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "save refused: {} keeps a committed journal frame that has not been replayed; reopen that store first",
+                    held.display()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Every directory a graph in this tree is itself backed by (the root's and each named
+    /// graph's, recursively). Used by [`refuse_unsafe_save_destination`](Self::refuse_unsafe_save_destination).
+    #[cfg(feature = "mmap")]
+    fn backing_dirs(&self, out: &mut Vec<std::path::PathBuf>) {
+        if let Some(w) = &self.wal {
+            out.push(w.dir.clone());
+        }
+        for (_, sub) in &self.named {
+            sub.backing_dirs(out);
+        }
+    }
+
     #[cfg(feature = "mmap")]
     fn save_named(&self, dir: &std::path::Path, compressed: bool) -> std::io::Result<()> {
         let named_dir = dir.join(NAMED_SUBDIR);
@@ -3151,12 +3208,13 @@ impl Graph {
         if inserts.is_empty() && deletes.is_empty() {
             return Ok(());
         }
+        // The durable-write gate, BEFORE a byte reaches the log: a kept journal frame makes the
+        // whole tree unwritable until the reopen replays it. It runs whether or not this graph
+        // still HOLDS a WAL: a failed durable swap closes the WAL handle (`persist_swap`), and a
+        // graph that kept writing after one would acknowledge updates that reach no log at all.
+        // The check is one atomic load, so an in-memory graph (never poisoned) pays nothing.
         #[cfg(feature = "mmap")]
-        if self.wal.is_some() {
-            // The durable-write gate, BEFORE a byte reaches the log: a kept journal frame makes
-            // the whole tree unwritable until the reopen replays it.
-            self.begin_durable_write()?;
-        }
+        self.begin_durable_write()?;
         #[cfg(feature = "mmap")]
         if let Some(w) = &mut self.wal {
             w.append_batch(inserts, deletes).map_err(|e| format!("WAL append failed: {e}"))?;
@@ -3284,12 +3342,10 @@ impl Graph {
         if self.txn.is_some() {
             // Refused UNWRITTEN (`applied: false`) once anything in this tree is poisoned: the
             // kept frame is the one the reopen will replay, so nothing may be appended after it.
-            if self.txn_poisoned() {
-                return Err((
-                    false,
-                    "txn journal commit failed: an earlier commit failed; reopen the graph"
-                        .to_owned(),
-                ));
+            // The condition is taken from the ONE gate every durable mutator passes, rather than
+            // re-deciding it here: an equivalent predicate is one that can drift.
+            if let Err(e) = self.begin_durable_write() {
+                return Err((false, format!("txn journal commit failed: {}", e)));
             }
             // An EMPTY body commits nothing: there is no frame to redo and nothing will be
             // materialised. Return after the poison check above, so a poisoned tree still
@@ -3535,6 +3591,14 @@ impl Graph {
         if self.named.is_empty() {
             return Ok(());
         }
+        // Removing every sub-graph rewrites the manifest and tears down the named sub-tree: the
+        // gate FIRST, and before `self.named` is cleared, so a refusal leaves the in-memory set
+        // exactly as it was (a gate that fired after the clear would lose the set in memory while
+        // leaving it on disk).
+        #[cfg(feature = "mmap")]
+        if self.wal.is_some() {
+            self.begin_durable_write()?;
+        }
         // Release every sub-graph's mmap/WAL handles before any directory is touched (Issue 1/2:
         // no live map may point into `named/<i>/` across the removal — correct on every platform,
         // required on Windows where a mapped file blocks `remove_dir_all`/`rename`).
@@ -3612,6 +3676,10 @@ impl Graph {
             let sub = Graph::open(&named_dir.join(i.to_string())).map_err(|e| e.to_string())?;
             self.named.push((name, sub));
         }
+        // Each survivor was RE-OPENED, and a freshly-opened graph carries a poison flag of its
+        // own: hand them this tree's shared one back, or a later failed commit in a survivor
+        // would be invisible to the root (and to its siblings).
+        self.share_tree();
         Ok(())
     }
 
@@ -3667,8 +3735,12 @@ impl Graph {
         // its very first mutation is WAL-logged + fsync'd (durable before this call
         // returns) and the manifest is kept in sync — not deferred to the next save. An
         // in-memory parent keeps the overlay-only path (no directory, no WAL).
-        #[cfg(feature = "mmap")]
-        let parent_dir = self.wal.as_ref().map(|w| w.dir.clone());
+        //
+        // The creation goes through `ensure_named`, NOT through `create_durable_named`
+        // directly: that is where the durable-write gate is taken and where the new child is
+        // handed this tree's shared poison flag. Creating one here by hand skipped both, so a
+        // brand-new graph could be created on a frozen store, and the child it attached read a
+        // poison flag of its own that nothing else in the tree could see.
         for (slot, ins, del) in slots {
             match slot {
                 None => self.apply_delta(&ins, &del)?,
@@ -3676,16 +3748,8 @@ impl Graph {
                     if let Some(i) = self.named.iter().position(|(n, _)| *n == name) {
                         self.named[i].1.apply_delta(&ins, &del)?;
                     } else if !ins.is_empty() {
-                        #[cfg(feature = "mmap")]
-                        if let Some(dir) = &parent_dir {
-                            let mut g = self.create_durable_named(dir, &name)?;
-                            g.apply_delta(&ins, &[])?;
-                            self.named.push((name, g));
-                            continue;
-                        }
-                        let mut g = Graph::from_parts(Dict::new(), Vec::new());
-                        g.apply_delta(&ins, &[])?;
-                        self.named.push((name, g));
+                        let i = self.ensure_named(&name)?;
+                        self.named[i].1.apply_delta(&ins, &[])?;
                     } // deletes against an absent graph: no-op
                 }
             }
@@ -3872,14 +3936,35 @@ impl Graph {
     /// re-opened memory-mapped from the new base with a fresh, empty WAL.
     #[cfg(feature = "mmap")]
     fn persist_swap(&mut self, dir: &std::path::Path) -> Result<(), String> {
-        // Close THIS graph's WAL before the directory swap (its `wal.log` is about to be renamed
-        // away with `dir`), then run the shared crash-safe swap, writing `self`'s CURRENT image as
-        // the new base. Adopt the re-opened directory-backed graph in place. (sq-ft7u)
+        // STAGE the new base while this graph still HOLDS its WAL. The staging step is the
+        // fallible one (it writes the whole image), and closing the WAL before it meant a
+        // failure left a graph with `wal == None` that still accepted — and acknowledged —
+        // updates that reached no log, so they were lost on the next open.
+        stage_new_base(dir, |new_dir| self.save(new_dir)).map_err(|e| e.to_string())?;
+        // Only now: `dir` (and the `wal.log` inside it) is about to be renamed away.
         self.wal = None;
-        let reopened = swap_dir_to_new_base(dir, |new_dir| self.save(new_dir))
-            .map_err(|e| e.to_string())?;
-        *self = reopened;
-        Ok(())
+        // Carry the ONE shared tree state across the re-open, so every handle in this tree keeps
+        // reading the same poison flag after a compaction (a freshly-opened graph starts with a
+        // detached flag of its own, which would split the tree in half).
+        let tree = std::sync::Arc::clone(&self.tree);
+        match promote_staged_base(dir) {
+            Ok(mut reopened) => {
+                reopened.tree = tree;
+                reopened.share_tree();
+                *self = reopened;
+                Ok(())
+            }
+            Err(e) => {
+                // Past this point the WAL is closed and the directory may be mid-swap, so no
+                // further durable write may be acknowledged: freeze the tree until the reopen,
+                // which heals the swap (`recover_compaction`) and replays what is on disk.
+                self.tree.poison();
+                Err(format!(
+                    "durable base swap failed after the new base was staged; the store is frozen until it is reopened: {}",
+                    e
+                ))
+            }
+        }
     }
 
     /// (sq-ft7u) PUBLIC crash-safe RESTORE-INTO-DURABLE seam. Atomically REPLACE the
@@ -3911,6 +3996,21 @@ impl Graph {
         dir: &std::path::Path,
         fresh: Graph,
     ) -> std::io::Result<Graph> {
+        // (sq-ycle) The same gate every other durable mutation passes. A restore
+        // REPLACES the store wholesale, so it must not run over a store that keeps a committed
+        // frame for its next open (the frame would be discarded with the old base), and the
+        // image being restored must not itself come from a frozen tree.
+        if fresh.txn_poisoned() {
+            return Err(std::io::Error::other(
+                "restore refused: the image to restore keeps a failed commit; reopen its graph first",
+            ));
+        }
+        if let Some(held) = retained_journal_under(dir) {
+            return Err(std::io::Error::other(format!(
+                "restore refused: {} keeps a committed journal frame that has not been replayed; reopen that store first",
+                held.display()
+            )));
+        }
         swap_dir_to_new_base(dir, |new_dir| fresh.save(new_dir))
     }
 
@@ -3977,12 +4077,27 @@ impl Graph {
         let mut fresh = self.reintern_live()?;
         #[cfg(feature = "mmap")]
         if let Some(dir) = dir {
-            // Close THIS graph's WAL before the directory swap (its `wal.log` is about to be
-            // renamed away). `persist_swap` writes `fresh`'s image to `dir` and re-opens
-            // `fresh` memory-mapped from the new base with a fresh WAL; adopt that re-opened,
-            // directory-backed graph back into `self` so subsequent updates WAL-append to it.
+            // Stage `fresh`'s image while THIS graph still holds its WAL, exactly as
+            // `persist_swap` does: a staging failure must leave a writable store behind, not a
+            // handle that acknowledges writes into a closed log.
+            stage_new_base(&dir, |new_dir| fresh.save(new_dir)).map_err(|e| e.to_string())?;
+            // Only now close this graph's WAL: `dir` (and its `wal.log`) is about to be renamed.
             self.wal = None;
-            fresh.persist_swap(&dir)?;
+            let tree = std::sync::Arc::clone(&self.tree);
+            match promote_staged_base(&dir) {
+                Ok(reopened) => {
+                    fresh = reopened;
+                    fresh.tree = tree;
+                    fresh.share_tree();
+                }
+                Err(e) => {
+                    self.tree.poison();
+                    return Err(format!(
+                        "durable vacuum swap failed after the new base was staged; the store is frozen until it is reopened: {}",
+                        e
+                    ));
+                }
+            }
         }
         // Adopt the freshly re-interned (and, when persisted, re-opened) image in place.
         std::mem::swap(self, &mut fresh);
@@ -4070,14 +4185,40 @@ fn swap_dir_to_new_base<F>(dir: &std::path::Path, write_new_base: F) -> std::io:
 where
     F: FnOnce(&std::path::Path) -> std::io::Result<()>,
 {
+    stage_new_base(dir, write_new_base)?;
+    promote_staged_base(dir)
+}
+
+/// (sq-ycle) The FIRST half of [`swap_dir_to_new_base`]: write the new base into
+/// `<dir>.compact-new` and make its CONTENTS durable — every file fsynced, then the directory
+/// itself — so the swap can only publish a base that is already on disk.
+///
+/// Split out so a caller can run this step while it still holds the WAL it is about to give up:
+/// this is the step that writes the whole image and therefore the step that fails, and `dir` is
+/// untouched by a failure here (fail-closed — the renames have not started).
+#[cfg(feature = "mmap")]
+fn stage_new_base<F>(dir: &std::path::Path, write_new_base: F) -> std::io::Result<()>
+where
+    F: FnOnce(&std::path::Path) -> std::io::Result<()>,
+{
     let new_dir = dir.with_extension("compact-new");
     let old_dir = dir.with_extension("compact-old");
     std::fs::remove_dir_all(&new_dir).ok();
     std::fs::remove_dir_all(&old_dir).ok();
-    // Build + sync the new base FIRST. A failure here leaves `dir` untouched (fail-closed) —
-    // the two renames below have not started, so the old durable store is intact.
     write_new_base(&new_dir)?;
-    fsync_dir(&new_dir)?;
+    // Contents before directories: a durable rename must not be able to publish a base whose
+    // index, dictionary or manifest bytes are still only in the page cache.
+    fsync_tree(&new_dir)
+}
+
+/// (sq-ycle) The SECOND half of [`swap_dir_to_new_base`]: publish the staged base with
+/// the two renames, re-open memory-mapped from it, and only then drop the old base. A failure
+/// anywhere here may leave the swap half-done, which [`recover_compaction`] heals on the next
+/// open — the caller must refuse further durable writes rather than carry on.
+#[cfg(feature = "mmap")]
+fn promote_staged_base(dir: &std::path::Path) -> std::io::Result<Graph> {
+    let new_dir = dir.with_extension("compact-new");
+    let old_dir = dir.with_extension("compact-old");
     let parent = dir.parent().unwrap_or_else(|| std::path::Path::new("."));
     std::fs::rename(dir, &old_dir)?;
     fsync_dir(parent)?;
@@ -4087,6 +4228,51 @@ where
     let reopened = Graph::open(dir)?;
     std::fs::remove_dir_all(&old_dir).ok();
     Ok(reopened)
+}
+
+/// (sq-ycle) The path of a store directory at or under `dir` whose `txn.log` holds a
+/// COMMITTED frame that has not been replayed yet (a non-empty journal), or `None` when every
+/// journal in the tree is empty or absent. Walks `dir` and its `named/<i>/` children
+/// recursively, so a frame retained by a CHILD is found too.
+///
+/// Used to refuse an operation that would destroy such a frame (a save over the store, a
+/// restore into it). An unreadable directory or file is treated as "nothing retained": the
+/// operation that follows will fail on it anyway, and this check must not invent a refusal.
+#[cfg(feature = "mmap")]
+fn retained_journal_under(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let journal = TxnJournal::path(dir);
+    if std::fs::metadata(&journal).map(|m| m.len() > 0).unwrap_or(false) {
+        return Some(journal);
+    }
+    let named_dir = dir.join(NAMED_SUBDIR);
+    let entries = std::fs::read_dir(&named_dir).ok()?;
+    for entry in entries.flatten() {
+        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            if let Some(found) = retained_journal_under(&entry.path()) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// (sq-ycle) fsync every FILE under `dir`, deepest first, then the directories from the
+/// deepest up to `dir` itself. The staged base is written through buffered writers and
+/// `std::fs::write`, neither of which syncs: without this a crash just after the swap's renames
+/// could leave the canonical directory naming indexes, dictionary blobs or a manifest whose bytes
+/// never reached disk. Errors are propagated — a base that cannot be synced is not published.
+#[cfg(feature = "mmap")]
+fn fsync_tree(dir: &std::path::Path) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if entry.file_type()?.is_dir() {
+            fsync_tree(&path)?;
+        } else if entry.file_type()?.is_file() {
+            std::fs::File::open(&path)?.sync_all()?;
+        }
+    }
+    fsync_dir(dir)
 }
 
 /// (review 1593) Recover an INTERRUPTED [`compact`](Graph::compact) directory swap
@@ -11145,6 +11331,300 @@ mod tests {
             "the child's frame is still on disk for the reopen"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) The batch DROP (DROP NAMED / the named half of DROP ALL) is a durable
+    /// mutation — it rewrites the manifest and tears down the `named/` sub-tree — so it passes the
+    /// same gate. It must also leave the in-memory set untouched when refused: the gate runs
+    /// before `self.named` is cleared.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn drop_all_named_durable_is_refused_while_a_frame_is_retained() {
+        let dir = txn_tmp_dir("gate-dropall");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        g.commit_txn_ops(&[TxnOp::Insert {
+            slot: None,
+            triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+        }])
+        .unwrap();
+        g.poison_txn();
+        assert!(
+            g.drop_all_named_durable().is_err(),
+            "the batch drop is refused while a frame is retained"
+        );
+        assert_eq!(g.named.len(), 1, "a refused drop leaves the in-memory named set intact");
+        assert!(dir.join(NAMED_MANIFEST).exists(), "and the manifest on disk");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) An N-Quads insert that CREATES a named graph goes through
+    /// `ensure_named`, so it takes the durable-write gate and the new child joins this tree's
+    /// one poison flag. Before that it called `create_durable_named` directly: the create ran on
+    /// a frozen store, and the child it attached carried a flag of its own that nothing else in
+    /// the tree could see.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_named_graph_created_from_nquads_is_gated_and_joins_the_tree() {
+        let dir = txn_tmp_dir("nquads-create");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        // (a) The creating insert SUCCEEDS on a clean store, and the new child shares the flag:
+        //     poisoning the CHILD refuses the ROOT's durable writes.
+        let mut g = Graph::open(&dir).unwrap();
+        g.apply_delta_nquads(
+            "<http://ex/s1> <http://ex/p> <http://ex/o1> <http://ex/fresh> .",
+            "",
+        )
+        .unwrap();
+        assert_eq!(g.named.len(), 1, "the named graph was created");
+        g.named[0].1.poison_txn();
+        let t = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+        assert!(
+            g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+            "the child created from N-Quads shares the tree's poison flag"
+        );
+        drop(g);
+        // (b) On an ALREADY-frozen store the creating insert is refused, and no graph appears.
+        let mut g2 = Graph::open(&dir).unwrap();
+        g2.commit_txn_ops(&[TxnOp::Insert {
+            slot: None,
+            triple: t.clone(),
+        }])
+        .unwrap();
+        g2.poison_txn();
+        let before = g2.named.len();
+        assert!(
+            g2.apply_delta_nquads(
+                "<http://ex/s3> <http://ex/p> <http://ex/o3> <http://ex/frozen> .",
+                "",
+            )
+            .is_err(),
+            "creating a named graph on a frozen store is refused"
+        );
+        assert_eq!(g2.named.len(), before, "and no graph is attached");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) A named-graph DROP re-opens every SURVIVOR from its new slot, so the
+    /// survivors must be handed the tree's shared poison flag back. Without that a survivor's
+    /// retained frame stopped refusing the root's writes after any drop.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn drop_survivors_keep_the_trees_shared_poison_flag() {
+        let dir = txn_tmp_dir("drop-survivors");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g0> .\n\
+             <http://ex/n1> <http://ex/p> <http://ex/o1> <http://ex/g1> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        assert_eq!(g.named.len(), 2, "two named graphs to start");
+        g.drop_named_durable(&named("g0")).unwrap();
+        assert_eq!(g.named.len(), 1, "one survivor, re-opened from its new slot");
+        g.named[0].1.poison_txn();
+        let t = [term_iri(9, "s"), term_iri(9, "p"), term_iri(9, "o")];
+        assert!(
+            g.apply_delta(std::slice::from_ref(&t), &[]).is_err(),
+            "a surviving child's retained frame still refuses the root's writes after a drop"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) A compaction RE-OPENS the store (and every named graph under it), and a
+    /// freshly-opened graph starts with a poison flag of its own. The shared flag must be carried
+    /// across the swap, or the tree silently splits in two and a child's retained frame stops
+    /// refusing the root's writes.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_compaction_keeps_the_tree_sharing_one_poison_flag() {
+        let dir = txn_tmp_dir("compact-tree");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        // Compact the CHILD on its own: it re-opens itself from its new base, which is where the
+        // tree splits — the root is not re-opened, so nothing else re-shares the flag for it.
+        let t = [term_iri(7, "s"), term_iri(7, "p"), term_iri(7, "o")];
+        g.named[0].1.apply_delta(std::slice::from_ref(&t), &[]).unwrap();
+        g.named[0].1.compact().unwrap();
+        assert_eq!(g.named.len(), 1, "the named graph survived the compaction");
+        // The post-compaction tree must still be ONE tree.
+        g.named[0].1.poison_txn();
+        let t2 = [term_iri(8, "s"), term_iri(8, "p"), term_iri(8, "o")];
+        assert!(
+            g.apply_delta(std::slice::from_ref(&t2), &[]).is_err(),
+            "after a compaction a child's retained frame still refuses the root's writes"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) A base swap that fails AFTER the WAL handle is given up must freeze the
+    /// store, not keep acknowledging writes into a log that no longer exists. The failure is
+    /// injected by leaving a FILE where the swap wants to rename the old base, so the first
+    /// rename fails (`ENOTDIR`) with the WAL already closed.
+    ///
+    /// Both halves are asserted: the next write is REFUSED, and everything acknowledged before
+    /// the failure is still there after the reopen.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_failed_base_swap_refuses_further_writes_and_loses_nothing() {
+        let dir = txn_tmp_dir("swap-fail");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let blocker = dir.with_extension("compact-old");
+        std::fs::remove_dir_all(&blocker).ok();
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        let acked = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            g.apply_delta(std::slice::from_ref(&acked), &[]).unwrap();
+            assert!(g.compact().is_err(), "the swap cannot rename the old base aside");
+            let after = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+            assert!(
+                g.apply_delta(std::slice::from_ref(&after), &[]).is_err(),
+                "a write after a failed swap must be refused, not acknowledged into a closed log"
+            );
+        }
+        std::fs::remove_file(&blocker).ok();
+        let reopened = Graph::open(&dir).unwrap();
+        let got = dump_terms(&reopened);
+        assert!(
+            got.iter().any(|(s, _, _)| s.contains("s1")),
+            "the write acknowledged before the failed swap survives the reopen: {:?}",
+            got
+        );
+        assert!(
+            !got.iter().any(|(s, _, _)| s.contains("s2")),
+            "and the refused one is absent: {:?}",
+            got
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) The other half: a swap that fails while STAGING the new base has given
+    /// nothing up, so the store stays writable and the writes that follow are durable. The WAL
+    /// handle must therefore be released only after staging succeeds — releasing it first left a
+    /// graph that acknowledged writes no log ever received.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_failed_base_staging_keeps_the_store_writable_and_durable() {
+        let dir = txn_tmp_dir("stage-fail");
+        std::fs::remove_dir_all(&dir).ok();
+        Graph::load_dataset("<http://ex/base> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&dir)
+            .unwrap();
+        let blocker = dir.with_extension("compact-new");
+        std::fs::remove_dir_all(&blocker).ok();
+        std::fs::write(&blocker, b"not a directory").unwrap();
+        {
+            let mut g = Graph::open(&dir).unwrap();
+            let first = [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")];
+            g.apply_delta(std::slice::from_ref(&first), &[]).unwrap();
+            assert!(g.compact().is_err(), "the new base cannot be staged over a file");
+            let after = [term_iri(2, "s"), term_iri(2, "p"), term_iri(2, "o")];
+            g.apply_delta(std::slice::from_ref(&after), &[])
+                .expect("staging failed before anything was given up, so the store is still writable");
+        }
+        std::fs::remove_file(&blocker).ok();
+        let got = dump_terms(&Graph::open(&dir).unwrap());
+        for tag in ["s1", "s2"] {
+            assert!(
+                got.iter().any(|(s, _, _)| s.contains(tag)),
+                "{} must survive a staging failure: {:?}",
+                tag,
+                got
+            );
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// (sq-ycle) A save (and a durable restore) must refuse a destination that would
+    /// destroy state: the live backing directory of the graph being saved, or a store keeping a
+    /// committed journal frame its next open has to replay.
+    #[cfg(feature = "mmap")]
+    #[test]
+    fn a_save_destination_that_would_destroy_durable_state_is_refused() {
+        let dir = txn_tmp_dir("save-dest");
+        let other = txn_tmp_dir("save-dest-other");
+        for d in [&dir, &other] {
+            std::fs::remove_dir_all(d).ok();
+        }
+        Graph::load_dataset(
+            "<http://ex/base> <http://ex/p> <http://ex/o> .\n\
+             <http://ex/n0> <http://ex/p> <http://ex/o0> <http://ex/g> .",
+            "nquads",
+        )
+        .unwrap()
+        .save(&dir)
+        .unwrap();
+        let mut g = Graph::open(&dir).unwrap();
+        // (a) Saving over its own live backing directory is refused.
+        let e = g.save(&dir).expect_err("a save over the live backing directory is refused");
+        assert!(
+            e.to_string().contains("live backing directory"),
+            "unexpected error: {}",
+            e
+        );
+        // (b) A store that keeps a committed frame is not a destination either — for a save
+        //     from another graph, or for a durable restore.
+        g.named[0].1.commit_txn_ops(&[TxnOp::Insert {
+            slot: None,
+            triple: [term_iri(1, "s"), term_iri(1, "p"), term_iri(1, "o")],
+        }])
+        .unwrap();
+        drop(g);
+        let fresh = Graph::load_dataset("<http://ex/new> <http://ex/p> <http://ex/o> .", "nquads").unwrap();
+        let e = fresh
+            .save(&dir)
+            .expect_err("a save over a store keeping a frame is refused");
+        assert!(e.to_string().contains("committed journal frame"), "unexpected error: {}", e);
+        let e = match Graph::restore_into_durable(&dir, fresh) {
+            Ok(_) => panic!("a restore over a store keeping a frame must be refused"),
+            Err(e) => e,
+        };
+        assert!(e.to_string().contains("committed journal frame"), "unexpected error: {}", e);
+        // The frame is still on disk for the reopen to replay.
+        assert!(
+            !std::fs::read(TxnJournal::path(&dir.join(NAMED_SUBDIR).join("0")))
+                .unwrap()
+                .is_empty(),
+            "the retained frame was not destroyed"
+        );
+        // A fresh destination is unaffected.
+        Graph::load_dataset("<http://ex/new> <http://ex/p> <http://ex/o> .", "nquads")
+            .unwrap()
+            .save(&other)
+            .expect("a fresh destination still saves");
+        for d in [&dir, &other] {
+            std::fs::remove_dir_all(d).ok();
+        }
     }
 
     /// (sq-ycle) The gate's DURABILITY point: a write that was NOT refused must survive
